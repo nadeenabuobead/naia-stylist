@@ -1,4 +1,26 @@
 (function () {
+  // Don't run on the stylist page
+  if (window.location.pathname.includes('/pages/stylist')) return;
+
+  const root = document.getElementById("naia-stylist-root");
+  if (!root) return;
+
+  const image = encodeURIComponent(root.getAttribute("data-product-image") || "");
+  const title = encodeURIComponent(root.getAttribute("data-product-title") || "");
+  const id = root.getAttribute("data-product-id") || "";
+  const type = encodeURIComponent(root.getAttribute("data-product-type") || "");
+
+  const iframe = document.createElement("iframe");
+  iframe.src = `https://naia-stylist.vercel.app/stylist?product_image=${image}&product_title=${title}&product_id=${id}&product_type=${type}`;
+
+  iframe.style.width = "100%";
+  iframe.style.height = "900px";
+  iframe.style.border = "none";
+  iframe.style.borderRadius = "16px";
+
+  root.appendChild(iframe);
+})();
+(function () {
   const root = document.getElementById("naia-stylist-root");
   if (!root) return;
 
