@@ -2,9 +2,6 @@
   // Don't run on the stylist page
   if (window.location.pathname.includes('/pages/stylist')) return;
 
-  // Only show on product pages
-  if (!window.location.pathname.includes('/products/')) return;
-
   const root = document.getElementById("naia-stylist-root");
   if (!root) return;
 
