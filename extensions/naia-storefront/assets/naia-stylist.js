@@ -1,19 +1,21 @@
 (function () {
-  // Don't run on the stylist page
   if (window.location.pathname.includes('/pages/stylist')) return;
 
   const root = document.getElementById("naia-stylist-root");
   if (!root) return;
 
-  const image = encodeURIComponent(root.getAttribute("data-product-image") || "");
+  const rawImage = root.getAttribute("data-product-image") || "";
   const title = encodeURIComponent(root.getAttribute("data-product-title") || "");
   const id = root.getAttribute("data-product-id") || "";
   const type = encodeURIComponent(root.getAttribute("data-product-type") || "");
 
-  // If on a product page, go to stylist with product data
-  // If on any other page, go to stylist directly
   const baseUrl = "https://naia-stylist.vercel.app/stylist";
-  const stylistUrl = image 
+  
+  // Only pass product data if we have a real image URL
+  const isValidImage = rawImage.startsWith("http") || rawImage.startsWith("//");
+  const image = encodeURIComponent(rawImage);
+  
+  const stylistUrl = isValidImage
     ? `${baseUrl}?product_image=${image}&product_title=${title}&product_id=${id}&product_type=${type}`
     : baseUrl;
 
