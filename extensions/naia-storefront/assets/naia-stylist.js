@@ -10,9 +10,12 @@
   const id = root.getAttribute("data-product-id") || "";
   const type = encodeURIComponent(root.getAttribute("data-product-type") || "");
 
-  const stylistUrl = `https://naia-stylist.vercel.app/stylist?product_image=${image}&product_title=${title}&product_id=${id}&product_type=${type}`;
+  // If on a product page, pass product data. Otherwise just open stylist.
+  const baseUrl = "https://naia-stylist.vercel.app/stylist";
+  const stylistUrl = image 
+    ? `${baseUrl}?product_image=${image}&product_title=${title}&product_id=${id}&product_type=${type}`
+    : baseUrl;
 
-  // Create floating button
   const button = document.createElement("a");
   button.href = stylistUrl;
   button.innerText = "Ask nAia";
