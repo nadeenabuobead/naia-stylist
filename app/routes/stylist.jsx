@@ -84,9 +84,9 @@ function getStorefrontPiece() {
     image = "https:" + image;
   }
 
-  // fallback safety
-  if (!image.startsWith("http")) {
-    image = "https://" + image.replace(/^\/+/, "");
+  // if no valid image, return null
+  if (!image || !image.startsWith("http")) {
+    return null;
   }
 
   return {
