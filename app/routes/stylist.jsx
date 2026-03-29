@@ -552,8 +552,7 @@ export default function Stylist() {
             {currentNaiaPiece && (
   <div style={{ ...cardStyle, marginTop: "24px" }}>
     <h2 style={sectionTitleStyle}>Selected nAia Piece</h2>
-    <p style={sectionSubtitleStyle}>This is the piece currently opened from the storefront.</p>
-
+    <p style={sectionSubtitleStyle}>The nAia piece you selected to style.</p>
     <div style={{ maxWidth: "380px" }}>
       <div style={productCardStyle}>
         {currentNaiaPiece?.image ? (
