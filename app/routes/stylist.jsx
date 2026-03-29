@@ -548,36 +548,39 @@ export default function Stylist() {
           </div>
         </div>
 
-        <div style={{ ...cardStyle, marginTop: "24px" }}>
-          <h2 style={sectionTitleStyle}>Selected nAia Piece</h2>
-          <p style={sectionSubtitleStyle}>This is the piece currently opened from the storefront.</p>
+        
+            {currentNaiaPiece && (
+  <div style={{ ...cardStyle, marginTop: "24px" }}>
+    <h2 style={sectionTitleStyle}>Selected nAia Piece</h2>
+    <p style={sectionSubtitleStyle}>This is the piece currently opened from the storefront.</p>
 
-          <div style={{ maxWidth: "380px" }}>
-            <div style={productCardStyle}>
-              {currentNaiaPiece?.image ? (
-                <img
-                  src={currentNaiaPiece.image}
-                  alt={currentNaiaPiece.altText || "Selected nAia Piece"}
-                  style={productImageStyle}
-                />
-              ) : (
-                <div style={productImageStyle} />
-              )}
+    <div style={{ maxWidth: "380px" }}>
+      <div style={productCardStyle}>
+        {currentNaiaPiece?.image ? (
+          <img
+            src={currentNaiaPiece.image}
+            alt={currentNaiaPiece.altText || "Selected nAia Piece"}
+            style={productImageStyle}
+          />
+        ) : (
+          <div style={productImageStyle} />
+        )}
 
-              <div style={productBodyStyle}>
-                <div style={{ fontWeight: 600, marginBottom: "6px", fontSize: "18px" }}>
-                  {currentNaiaPiece?.name || "Selected nAia Piece"}
-                </div>
-                <div style={{ color: "#74695f", fontSize: "14px", marginBottom: "12px" }}>
-                  {currentNaiaPiece?.category || ""}
-                </div>
-                <button onClick={styleWithCurrentNaiaPiece} style={primaryButtonStyle}>
-                  Style this piece
-                </button>
-              </div>
-            </div>
+        <div style={productBodyStyle}>
+          <div style={{ fontWeight: 600, marginBottom: "6px", fontSize: "18px" }}>
+            {currentNaiaPiece?.name || "Selected nAia Piece"}
           </div>
+          <div style={{ color: "#74695f", fontSize: "14px", marginBottom: "12px" }}>
+            {currentNaiaPiece?.category || ""}
+          </div>
+          <button onClick={styleWithCurrentNaiaPiece} style={primaryButtonStyle}>
+            Style this piece
+          </button>
         </div>
+      </div>
+    </div>
+  </div>
+)}
 
         <div style={resultWrapStyle}>
           <div style={miniCardStyle}>
