@@ -1,0 +1,17 @@
+<div
+  id="naia-stylist-root"
+  data-product-image="{{ product.featured_image | img_url: 'master' }}"
+  data-product-title="{{ product.title | escape }}"
+  data-product-id="{{ product.id }}"
+  data-product-type="{{ product.type | escape }}"
+></div>
+
+{% schema %}
+{
+  "name": "nAia Stylist Button",
+  "target": "body",
+  "stylesheet": "naia-stylist.css",
+  "javascript": "naia-stylist.js",
+  "settings": []
+}
+{% endschema %}
