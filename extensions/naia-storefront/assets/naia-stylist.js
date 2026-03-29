@@ -10,7 +10,8 @@
   const id = root.getAttribute("data-product-id") || "";
   const type = encodeURIComponent(root.getAttribute("data-product-type") || "");
 
-  // If on a product page, pass product data. Otherwise just open stylist.
+  // If on a product page, go to stylist with product data
+  // If on any other page, go to stylist directly
   const baseUrl = "https://naia-stylist.vercel.app/stylist";
   const stylistUrl = image 
     ? `${baseUrl}?product_image=${image}&product_title=${title}&product_id=${id}&product_type=${type}`
