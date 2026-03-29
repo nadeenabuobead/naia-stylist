@@ -1,3 +1,4 @@
+{% unless request.path contains '/pages/stylist' %}
 <div
   id="naia-stylist-root"
   data-product-image="{{ product.featured_image | image_url: width: 1200 }}"
@@ -5,6 +6,7 @@
   data-product-id="{{ product.id }}"
   data-product-type="{{ product.type | escape }}"
 ></div>
+{% endunless %}
 
 {% schema %}
 {
