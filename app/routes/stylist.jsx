@@ -68,36 +68,37 @@ function parseStylingResult(text) {
 
   return sections;
 }
-
 function getStorefrontPiece() {
   if (typeof window === "undefined") return null;
 
   const params = new URLSearchParams(window.location.search);
 
   let image = params.get("product_image") || "";
+  let title = params.get("product_title") || "";
+  let id = params.get("product_id") || "";
+  let type = params.get("product_type") || "";
+  let tags = params.get("product_tags") || "";
 
-  // decode URL (CRITICAL)
-  image = decodeURIComponent(image);
+  try { image = decodeURIComponent(image); } catch {}
+  try { title = decodeURIComponent(title); } catch {}
+  try { type = decodeURIComponent(type); } catch {}
+  try { tags = decodeURIComponent(tags); } catch {}
 
-  // fix Shopify // URL
-  if (image.startsWith("//")) {
-    image = "https:" + image;
-  }
+  if (image.startsWith("//")) image = "https:" + image;
+  if (image && !image.startsWith("http")) image = "https://" + image;
 
-  // if no valid image, return null
-  if (!image || !image.startsWith("http")) {
-    return null;
-  }
+  if (!image || !image.startsWith("http")) return null;
 
   return {
-    id: params.get("product_id") || "storefront-piece",
-    name: params.get("product_title") || "Selected nAia Piece",
+    id: id || "storefront-piece",
+    name: title || "Selected nAia Piece",
     image,
-    altText: params.get("product_title") || "Selected nAia Piece",
-    category: params.get("product_type") || "",
-    tags: [],
+    altText: title || "Selected nAia Piece",
+    category: type || "",
+    tags: tags ? tags.split(",").map(t => t.trim()) : [],
   };
 }
+
 
 export default function Stylist() {
   const [itemName, setItemName] = useState("");

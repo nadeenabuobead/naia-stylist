@@ -169,7 +169,7 @@ Selected closet item:
 ${closetItem ? `- ${closetItem.name} (${closetItem.category})` : "None selected"}
 
 Selected nAia piece:
-${naiaPiece ? `- ${naiaPiece.name} (${naiaPiece.category || "category unknown"})` : "None selected"}
+${naiaPiece ? `- ${naiaPiece.name} (${naiaPiece.category || "category unknown"})${naiaPiece.tags?.length > 0 ? ` [${naiaPiece.tags.join(", ")}]` : ""}` : "None selected"}
 
 Top recommended nAia pieces:
 ${recommendationSummary}
