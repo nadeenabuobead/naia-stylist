@@ -77,12 +77,22 @@ function getStorefrontPiece() {
   let title = params.get("product_title") || "";
   let id = params.get("product_id") || "";
   let type = params.get("product_type") || "";
-  let tags = params.get("product_tags") || "";
+  let stylingNotes = params.get("styling_notes") || "";
+  let moodMatch = params.get("mood_match") || "";
+  let stylingRole = params.get("styling_role") || "";
+  let statementLevel = params.get("statement_level") || "";
+  let occasion = params.get("occasion") || "";
+  let sihouette = params.get("sihouette") || "";
 
   try { image = decodeURIComponent(image); } catch {}
   try { title = decodeURIComponent(title); } catch {}
   try { type = decodeURIComponent(type); } catch {}
-  try { tags = decodeURIComponent(tags); } catch {}
+  try { stylingNotes = decodeURIComponent(stylingNotes); } catch {}
+  try { moodMatch = decodeURIComponent(moodMatch); } catch {}
+  try { stylingRole = decodeURIComponent(stylingRole); } catch {}
+  try { statementLevel = decodeURIComponent(statementLevel); } catch {}
+  try { occasion = decodeURIComponent(occasion); } catch {}
+  try { sihouette = decodeURIComponent(sihouette); } catch {}
 
   if (image.startsWith("//")) image = "https:" + image;
   if (image && !image.startsWith("http")) image = "https://" + image;
@@ -95,7 +105,12 @@ function getStorefrontPiece() {
     image,
     altText: title || "Selected nAia Piece",
     category: type || "",
-    tags: tags ? tags.split(",").map(t => t.trim()) : [],
+    stylingNotes,
+    moodMatch,
+    stylingRole,
+    statementLevel,
+    occasion,
+    sihouette,
   };
 }
 

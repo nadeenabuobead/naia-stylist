@@ -169,7 +169,14 @@ Selected closet item:
 ${closetItem ? `- ${closetItem.name} (${closetItem.category})` : "None selected"}
 
 Selected nAia piece:
-${naiaPiece ? `- ${naiaPiece.name} (${naiaPiece.category || "category unknown"})${naiaPiece.tags?.length > 0 ? ` [${naiaPiece.tags.join(", ")}]` : ""}` : "None selected"}
+Selected nAia piece:
+${naiaPiece ? `- ${naiaPiece.name} (${naiaPiece.category || "category unknown"})
+  Mood Match: ${naiaPiece.moodMatch || "not specified"}
+  Styling Role: ${naiaPiece.stylingRole || "not specified"}
+  Statement Level: ${naiaPiece.statementLevel || "not specified"}
+  Occasion: ${naiaPiece.occasion || "not specified"}
+  Sihouette: ${naiaPiece.sihouette || "not specified"}
+  Styling Notes: ${naiaPiece.stylingNotes || "not specified"}` : "None selected"}
 
 Top recommended nAia pieces:
 ${recommendationSummary}
