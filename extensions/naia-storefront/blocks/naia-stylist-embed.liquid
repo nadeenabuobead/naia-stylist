@@ -5,7 +5,12 @@
   data-product-title="{{ product.title | escape }}"
   data-product-id="{{ product.id }}"
   data-product-type="{{ product.type | escape }}"
-  data-product-tags="{{ product.tags | join: ',' | escape }}"
+  data-styling-notes="{{ product.metafields.custom.styling_notes | escape }}"
+  data-mood-match="{{ product.metafields.custom.mood_match | escape }}"
+  data-styling-role="{{ product.metafields.custom.styling_role | escape }}"
+  data-statement-level="{{ product.metafields.custom.statement_level | escape }}"
+  data-occasion="{{ product.metafields.custom.occasion | escape }}"
+  data-sihouette="{{ product.metafields.custom.sihouette | escape }}"
 ></div>
 {% else %}
 <div id="naia-stylist-root"></div>

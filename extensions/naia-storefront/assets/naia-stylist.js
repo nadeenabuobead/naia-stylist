@@ -8,7 +8,12 @@
   const title = encodeURIComponent(root.getAttribute("data-product-title") || "");
   const id = root.getAttribute("data-product-id") || "";
   const type = encodeURIComponent(root.getAttribute("data-product-type") || "");
-  const tags = encodeURIComponent(root.getAttribute("data-product-tags") || "");
+  const stylingNotes = encodeURIComponent(root.getAttribute("data-styling-notes") || "");
+  const moodMatch = encodeURIComponent(root.getAttribute("data-mood-match") || "");
+  const stylingRole = encodeURIComponent(root.getAttribute("data-styling-role") || "");
+  const statementLevel = encodeURIComponent(root.getAttribute("data-statement-level") || "");
+  const occasion = encodeURIComponent(root.getAttribute("data-occasion") || "");
+  const sihouette = encodeURIComponent(root.getAttribute("data-sihouette") || "");
 
   const baseUrl = "https://naia-stylist.vercel.app/stylist";
   
@@ -16,7 +21,7 @@
   const image = encodeURIComponent(rawImage);
   
   const stylistUrl = isValidImage
-    ? `${baseUrl}?product_image=${image}&product_title=${title}&product_id=${id}&product_type=${type}&product_tags=${tags}`
+    ? `${baseUrl}?product_image=${image}&product_title=${title}&product_id=${id}&product_type=${type}&styling_notes=${stylingNotes}&mood_match=${moodMatch}&styling_role=${stylingRole}&statement_level=${statementLevel}&occasion=${occasion}&sihouette=${sihouette}`
     : baseUrl;
 
   const button = document.createElement("a");
