@@ -1,9 +1,3 @@
-export function headers() {
-  return {
-    "Content-Type": "text/html",
-  };
-}
-
 export function loader() {
   const html = `<!DOCTYPE html>
 <html>
@@ -18,17 +12,14 @@ export function loader() {
     window.addEventListener('load', async function() {
       var params = new URLSearchParams(window.location.search);
       var productId = params.get('product_id');
-      
       var res = await fetch('/api/aiuta-jwt');
       var data = await res.json();
-      
       var aiuta = new Aiuta({
         auth: {
           subscriptionId: 'dgF37u7BoZAx0qmXhEIyKUyToqOfRnnA',
           getJwt: async function() { return data.token; }
         }
       });
-      
       aiuta.tryOn(productId);
     });
   </script>
@@ -38,8 +29,4 @@ export function loader() {
   return new Response(html, {
     headers: { "Content-Type": "text/html" },
   });
-}
-
-export default function TryOn() {
-  return null;
 }
