@@ -43,7 +43,7 @@ export async function action({ request }) {
       });
     }
 
-    // 🔥 CREATE SKU (THIS IS THE FIX)
+    // 🔥 CREATE SKU
     if (intent === "create_sku") {
       const response = await fetch(
         "https://api.aiuta.com/digital-try-on/v1/sku_images",
@@ -58,6 +58,22 @@ export async function action({ request }) {
             image_url:
               "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3b14fe8b-2c19-492e-82b1-44baaf3a3cc9.png",
           }),
+        }
+      );
+
+      return new Response(await response.text(), {
+        status: response.status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // ✅ LIST SKUs
+    if (intent === "list_skus") {
+      const response = await fetch(
+        "https://api.aiuta.com/digital-try-on/v1/sku_images",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${token}` },
         }
       );
 
