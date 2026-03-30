@@ -8,15 +8,15 @@
   const title = encodeURIComponent(root.getAttribute("data-product-title") || "");
   const id = root.getAttribute("data-product-id") || "";
   const type = encodeURIComponent(root.getAttribute("data-product-type") || "");
+  const tags = encodeURIComponent(root.getAttribute("data-product-tags") || "");
 
   const baseUrl = "https://naia-stylist.vercel.app/stylist";
   
-  // Only pass product data if we have a real image URL
   const isValidImage = rawImage.startsWith("http") || rawImage.startsWith("//");
   const image = encodeURIComponent(rawImage);
   
   const stylistUrl = isValidImage
-    ? `${baseUrl}?product_image=${image}&product_title=${title}&product_id=${id}&product_type=${type}`
+    ? `${baseUrl}?product_image=${image}&product_title=${title}&product_id=${id}&product_type=${type}&product_tags=${tags}`
     : baseUrl;
 
   const button = document.createElement("a");
