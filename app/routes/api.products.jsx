@@ -1,6 +1,6 @@
 export async function loader() {
   const response = await fetch(
-    "https://naia-9417.myshopify.com/products.json?limit=20"
+    "https://naia-test-store.myshopify.com/products.json?limit=20"
   );
   const data = await response.json();
 
