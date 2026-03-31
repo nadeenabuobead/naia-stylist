@@ -170,13 +170,15 @@ ${closetItem ? `- ${closetItem.name} (${closetItem.category})` : "None selected"
 
 Selected nAia piece:
 Selected nAia piece:
-${naiaPiece ? `- ${naiaPiece.name} (${naiaPiece.category || "category unknown"})
-  Mood Match: ${naiaPiece.moodMatch || "not specified"}
-  Styling Role: ${naiaPiece.stylingRole || "not specified"}
-  Statement Level: ${naiaPiece.statementLevel || "not specified"}
-  Occasion: ${naiaPiece.occasion || "not specified"}
-  Sihouette: ${naiaPiece.sihouette || "not specified"}
-  Styling Notes: ${naiaPiece.stylingNotes || "not specified"}` : "None selected"}
+${naiaPiece ? `
+- Name: ${naiaPiece.name}
+- Category: ${naiaPiece.category || "not specified"}
+- Mood Match: ${naiaPiece.moodMatch || "not specified"}
+- Styling Role: ${naiaPiece.stylingRole || "not specified"}
+- Statement Level: ${naiaPiece.statementLevel || "not specified"}
+- Occasion: ${naiaPiece.occasion || "not specified"}
+- Sihouette: ${naiaPiece.sihouette || "not specified"}
+- Styling Notes: ${naiaPiece.stylingNotes || "not specified"}` : "None selected"}
 
 Top recommended nAia pieces:
 ${recommendationSummary}
@@ -211,6 +213,11 @@ Shift
 - If the event is wedding, formal, dinner, or party, make the styling more elevated and intentional.
 - If a nAia piece is selected, center the advice around that piece.
 - If recommended nAia pieces are provided, naturally favor the strongest matching piece.
+- Use the nAia piece's Styling Notes as direct guidance for how to style it.
+- Use the Mood Match to validate the emotional direction of the outfit.
+- Use the Occasion field to confirm event alignment.
+- Use the Styling Role to understand how the piece functions in the outfit.
+- Use the Statement Level to calibrate how bold or subtle the overall look should be.
 - Do not mention that you are an AI.
 - Do not add any extra headings beyond the required format.
 `.trim();
