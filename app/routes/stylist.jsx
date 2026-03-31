@@ -45,10 +45,23 @@ function parseStylingResult(text) {
     outfitDirection: [], whyThisWorks: [],
     shift: "", naiaRecommendations: [],
     accessories: "", perfume: "", song: "",
-    fallback: ""
   };
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+
+  const accessMatch = text.match(/Accessories:\s*([^\n]+)/i);
+  const perfumeMatch = text.match(/Perfume:\s*([^\n]+)/i);
+  const songMatch = text.match(/Song:\s*([^\n]+)/i);
+  if (accessMatch) sections.accessories = accessMatch[1].trim();
+  if (perfumeMatch) sections.perfume = perfumeMatch[1].trim();
+  if (songMatch) sections.song = songMatch[1].trim();
+
+  let cleaned = text
+    .replace(/Accessories:.*$/im, "")
+    .replace(/Perfume:.*$/im, "")
+    .replace(/Song:.*$/im, "");
+
+  const lines = cleaned.split("\n").map(l => l.trim()).filter(Boolean);
   let currentSection = "";
+
   for (const line of lines) {
     const lower = line.toLowerCase();
     if (lower.startsWith("you're feeling:") || lower.startsWith("you\u2019re feeling:")) {
@@ -70,37 +83,21 @@ function parseStylingResult(text) {
       continue;
     }
     if (lower.includes("naia recommendation")) { currentSection = "naiaRecommendations"; continue; }
-    if (lower.startsWith("accessories:") || lower === "accessories") {
-      currentSection = "accessories";
-      const a = line.split(":").slice(1).join(":").trim();
-      if (a) sections.accessories = a;
-      continue;
-    }
-    if (lower.startsWith("perfume:") || lower === "perfume") {
-      currentSection = "perfume";
-      const a = line.split(":").slice(1).join(":").trim();
-      if (a) sections.perfume = a;
-      continue;
-    }
-    if (lower.startsWith("song:") || lower === "song") {
-      currentSection = "song";
-      const a = line.split(":").slice(1).join(":").trim();
-      if (a) sections.song = a;
-      continue;
-    }
-    if (line.startsWith("-")) {
-      const c = line.replace(/^-+\s*/, "").trim();
+
+    if (line.match(/^[-•*]/) || line.match(/^\d+[\.\)]/)) {
+      const c = line.replace(/^[-•*\d]+[\.\)]*\s*/, "").replace(/\*\*/g, "").trim();
       if (currentSection === "outfitDirection") sections.outfitDirection.push(c);
       else if (currentSection === "whyThisWorks") sections.whyThisWorks.push(c);
       else if (currentSection === "naiaRecommendations") sections.naiaRecommendations.push(c);
       continue;
     }
-    if (currentSection === "shift") { sections.shift = sections.shift ? `${sections.shift} ${line}` : line; continue; }
-    if (currentSection === "accessories") { sections.accessories = sections.accessories ? `${sections.accessories} ${line}` : line; continue; }
-    if (currentSection === "perfume") { sections.perfume = sections.perfume ? `${sections.perfume} ${line}` : line; continue; }
-    if (currentSection === "song") { sections.song = sections.song ? `${sections.song} ${line}` : line; continue; }
-    sections.fallback += `${sections.fallback ? "\n" : ""}${line}`;
+    if (currentSection === "shift") {
+      sections.shift = sections.shift ? `${sections.shift} ${line}` : line;
+      continue;
+    }
   }
+
+  sections.shift = sections.shift.split(/nAia|Accessories|Perfume|Song/i)[0].trim();
   return sections;
 }
 
@@ -227,7 +224,7 @@ export default function Stylist() {
     dot: (active, done) => ({ width: active ? "24px" : "8px", height: "8px", borderRadius: "4px", background: (done || active) ? "#1a1816" : "#d4cfc9", transition: "all 0.3s" }),
     title: { fontSize: "13px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "12px" },
     bigQ: { fontSize: "32px", lineHeight: 1.2, fontWeight: 400, margin: "0 0 32px", fontStyle: "italic" },
-    input: { width: "100%", padding: "16px 0", borderBottom: "1px solid #c8c2bb", background: "transparent", border: "none", fontSize: "18px", color: "#1a1816", outline: "none", fontFamily: '"Cormorant Garamond", Georgia, serif', boxSizing: "border-box" },
+    input: { width: "100%", padding: "16px 0", background: "transparent", border: "none", borderBottom: "1px solid #c8c2bb", fontSize: "18px", color: "#1a1816", outline: "none", fontFamily: '"Cormorant Garamond", Georgia, serif', boxSizing: "border-box" },
     btn: { padding: "14px 32px", background: "#1a1816", color: "#f5f2ee", border: "none", borderRadius: "2px", fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase", cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif' },
     outlineBtn: { padding: "14px 32px", background: "transparent", color: "#1a1816", border: "1px solid #1a1816", borderRadius: "2px", fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase", cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif' },
     chip: (active) => ({ padding: "10px 18px", background: active ? "#1a1816" : "transparent", color: active ? "#f5f2ee" : "#1a1816", border: "1px solid #1a1816", borderRadius: "2px", fontSize: "13px", letterSpacing: "0.1em", cursor: "pointer", transition: "all 0.2s", fontFamily: '"Cormorant Garamond", Georgia, serif' }),
@@ -237,7 +234,7 @@ export default function Stylist() {
     resultLabel: { fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "8px" },
     resultValue: { fontSize: "22px", fontStyle: "italic", lineHeight: 1.4 },
     divider: { borderTop: "1px solid #d4cfc9", margin: "24px 0" },
-    vibeCard: { padding: "16px 20px", background: "#f0ebe4", borderRadius: "2px", marginBottom: "12px" },
+    vibeCard: { padding: "16px 20px", background: "#eee9e2", borderRadius: "2px" },
   };
 
   return (
@@ -355,7 +352,9 @@ export default function Stylist() {
 
             <div style={{ marginBottom: "32px" }}>
               <div style={{ ...s.resultLabel, marginBottom: "12px" }}>Your Closet</div>
-              {closet.length === 0 && <p style={{ color: "#8a7f75", fontSize: "15px", marginBottom: "16px" }}>Your closet is empty. Add a piece below.</p>}
+              {closet.length === 0 && (
+                <p style={{ color: "#8a7f75", fontSize: "15px", marginBottom: "16px" }}>Your closet is empty. Add a piece below.</p>
+              )}
               <div style={s.closetGrid}>
                 {closet.map(piece => (
                   <div key={piece.id}
@@ -376,6 +375,7 @@ export default function Stylist() {
                   </div>
                 ))}
               </div>
+
               {!showAddItem ? (
                 <button style={{ ...s.outlineBtn, marginTop: "16px", fontSize: "12px", padding: "10px 20px" }} onClick={() => setShowAddItem(true)}>+ Add piece</button>
               ) : (
@@ -471,16 +471,6 @@ export default function Stylist() {
                   ))}
                 </div>
 
-                {parsedResult.shift && (
-                  <>
-                    <div style={s.divider} />
-                    <div style={{ marginBottom: "24px" }}>
-                      <div style={s.resultLabel}>The shift</div>
-                      <p style={{ fontSize: "19px", fontStyle: "italic", lineHeight: 1.6, margin: 0 }}>{parsedResult.shift}</p>
-                    </div>
-                  </>
-                )}
-
                 {parsedResult.naiaRecommendations?.length > 0 && (
                   <>
                     <div style={s.divider} />
@@ -493,41 +483,58 @@ export default function Stylist() {
                   </>
                 )}
 
-                <div style={s.divider} />
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px", marginBottom: "24px" }}>
-                  {parsedResult.accessories && (
-                    <div style={s.vibeCard}>
-                      <div style={s.resultLabel}>Accessories</div>
-                      <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.accessories}</p>
-                    </div>
-                  )}
-                  {parsedResult.perfume && (
-                    <div style={s.vibeCard}>
-                      <div style={s.resultLabel}>Perfume</div>
-                      <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.perfume}</p>
-                    </div>
-                  )}
-                  {parsedResult.song && (
-                    <div style={s.vibeCard}>
-                      <div style={s.resultLabel}>Song</div>
-                      <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.song}</p>
-                    </div>
-                  )}
-                </div>
-
-                {mode === "recommend_naia" && naiaProducts.length > 0 && (
+                {(parsedResult.accessories || parsedResult.perfume || parsedResult.song) && (
                   <>
                     <div style={s.divider} />
-                    <div style={s.resultLabel}>Shop nAia pieces</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "24px" }}>
+                      {parsedResult.accessories && (
+                        <div style={s.vibeCard}>
+                          <div style={s.resultLabel}>Accessories</div>
+                          <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.accessories}</p>
+                        </div>
+                      )}
+                      {parsedResult.perfume && (
+                        <div style={s.vibeCard}>
+                          <div style={s.resultLabel}>Perfume</div>
+                          <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.perfume}</p>
+                        </div>
+                      )}
+                      {parsedResult.song && (
+                        <div style={s.vibeCard}>
+                          <div style={s.resultLabel}>Song</div>
+                          <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.song}</p>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {parsedResult.shift && (
+                  <>
+                    <div style={s.divider} />
+                    <div style={{ marginBottom: "24px" }}>
+                      <div style={s.resultLabel}>The shift</div>
+                      <p style={{ fontSize: "19px", fontStyle: "italic", lineHeight: 1.6, margin: 0 }}>{parsedResult.shift}</p>
+                    </div>
+                  </>
+                )}
+
+                {mode === "recommend_naia" && naiaProducts.length > 0 && parsedResult.naiaRecommendations?.length > 0 && (
+                  <>
+                    <div style={s.divider} />
+                    <div style={s.resultLabel}>Shop recommended pieces</div>
                     <div style={s.productGrid}>
-                      {naiaProducts.slice(0, 6).map(p => (
-                        <a key={p.id} href={p.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit" }}>
-                          <div style={{ border: "1px solid #d4cfc9", borderRadius: "2px", overflow: "hidden" }}>
-                            <img src={p.image} alt={p.title} style={{ width: "100%", height: "140px", objectFit: "cover", display: "block" }} />
-                            <div style={{ padding: "8px", fontSize: "12px" }}>{p.title}</div>
-                          </div>
-                        </a>
-                      ))}
+                      {naiaProducts
+                        .filter(p => parsedResult.naiaRecommendations.some(r => r.toLowerCase().includes(p.title.toLowerCase())))
+                        .map(p => (
+                          <a key={p.id} href={p.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit" }}>
+                            <div style={{ border: "1px solid #d4cfc9", borderRadius: "2px", overflow: "hidden" }}>
+                              <img src={p.image} alt={p.title} style={{ width: "100%", height: "140px", objectFit: "cover", display: "block" }} />
+                              <div style={{ padding: "8px", fontSize: "12px" }}>{p.title}</div>
+                            </div>
+                          </a>
+                        ))
+                      }
                     </div>
                   </>
                 )}
@@ -548,4 +555,3 @@ export default function Stylist() {
     </div>
   );
 }
-```
