@@ -135,55 +135,57 @@ export default function Stylist() {
   };
 
   const callAI = async () => {
-    if (selectedClosetItems.length === 0 && !currentNaiaPiece && !selectedNaiaPiece) {
-      setStylingResult("Please select at least one piece to style.");
-      return;
-    }
-    setLoading(true);
-    setStylingResult("");
-    setStep(8);
+  setLoading(true);
+  setStylingResult("");
+  setStep(8);
 
-    const naiaPiece = selectedNaiaPiece || currentNaiaPiece;
-    const outfitParts = [
-      ...selectedClosetItems.map(i => i.name),
-      naiaPiece ? naiaPiece.name || naiaPiece.title : null
-    ].filter(Boolean);
-    const outfit = outfitParts.join(" + ");
+  const naiaPiece = selectedNaiaPiece || currentNaiaPiece;
+  
+  // For closet_only mode, pass all closet items and let AI pick
+  const itemsToStyle = mode === "closet_only" 
+    ? closet 
+    : selectedClosetItems;
 
-    try {
-      const res = await fetch("/api/style", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode,
-          outfit,
-          mood,
-          feeling,
-          event,
-          styleWords,
-          bodyPref,
-          closetItem: selectedClosetItems[0] || null,
-          closetItems: selectedClosetItems,
-          naiaPiece: naiaPiece ? {
-            name: naiaPiece.name || naiaPiece.title,
-            category: naiaPiece.category || naiaPiece.type || "",
-            stylingNotes: naiaPiece.stylingNotes || "",
-            moodMatch: naiaPiece.moodMatch || "",
-            stylingRole: naiaPiece.stylingRole || "",
-            statementLevel: naiaPiece.statementLevel || "",
-            occasion: naiaPiece.occasion || "",
-            sihouette: naiaPiece.sihouette || "",
-          } : null,
-          closet: closet.map(i => ({ name: i.name, category: i.category })),
-        }),
-      });
-      const data = await res.json();
-      setStylingResult(data.result || data.error || "Something went wrong.");
-    } catch {
-      setStylingResult("Something went wrong.");
-    }
-    setLoading(false);
-  };
+  const outfitParts = [
+    ...itemsToStyle.map(i => i.name),
+    naiaPiece ? naiaPiece.name || naiaPiece.title : null
+  ].filter(Boolean);
+  const outfit = outfitParts.join(" + ");
+
+  try {
+    const res = await fetch("/api/style", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode,
+        outfit,
+        mood,
+        feeling,
+        event,
+        styleWords,
+        bodyPref,
+        closetItem: itemsToStyle[0] || null,
+        closetItems: itemsToStyle,
+        naiaPiece: naiaPiece ? {
+          name: naiaPiece.name || naiaPiece.title,
+          category: naiaPiece.category || naiaPiece.type || "",
+          stylingNotes: naiaPiece.stylingNotes || "",
+          moodMatch: naiaPiece.moodMatch || "",
+          stylingRole: naiaPiece.stylingRole || "",
+          statementLevel: naiaPiece.statementLevel || "",
+          occasion: naiaPiece.occasion || "",
+          sihouette: naiaPiece.sihouette || "",
+        } : null,
+        closet: closet.map(i => ({ name: i.name, category: i.category })),
+      }),
+    });
+    const data = await res.json();
+    setStylingResult(data.result || data.error || "Something went wrong.");
+  } catch {
+    setStylingResult("Something went wrong.");
+  }
+  setLoading(false);
+};
 
   const s = {
     page: { minHeight: "100vh", background: "#f5f2ee", color: "#1a1816", fontFamily: '"Cormorant Garamond", Georgia, serif' },

@@ -21,17 +21,25 @@ export async function action({ request }) {
     const safeFeeling = String(feeling || "").trim();
     const safeEvent = String(event || "").trim();
     const safeOutfit = String(outfit || "").trim();
+    const safeMood = String(mood || "").trim();
+    const safeFeeling = String(feeling || "").trim();
+    const safeEvent = String(event || "").trim();
+    const safeOutfit = String(outfit || "").trim();
+    const finalOutfit = safeOutfit || 
+      (Array.isArray(closetItems) && closetItems.length > 0 
+       ? closetItems.map(i => i.name).join(" + ") 
+       : closetItem?.name || "");
 
-    if (!safeOutfit && !closetItem && !naiaPiece) {
-      return Response.json(
-        { error: "Missing outfit information." },
-        { status: 400 },
-      );
-    }
+    if (!safeOutfit && !closetItem && !naiaPiece && (!closetItems || closetItems.length === 0)) {
+  return Response.json(
+    { error: "Missing outfit information." },
+    { status: 400 },
+  );
+}
 
     const stylistPrompt = buildStylistPrompt({
       mode,
-      outfit: safeOutfit,
+      outfit: finalOutfit,
       mood: safeMood,
       feeling: safeFeeling,
       event: safeEvent,
@@ -226,8 +234,8 @@ Shift
 - Use the Styling Role to understand how the piece functions in the outfit.
 - Use the Statement Level to calibrate how bold or subtle the overall look should be.
 - If mode is recommend_naia, suggest which type of nAia piece would complete the look.
-- If mode is closet_only, style the closet pieces together without requiring a nAia piece.
-- If mode is recommend_naia, you MUST end your response with a specific section recommending 2-3 nAia pieces by name that would work best with the closet item, based on the mood, event and style words.
+- If mode is closet_only, YOU choose the best 2-3 pieces from the closet list that work together based on the mood, event, and style words. Tell the customer exactly which pieces to wear and why.
+- If mode is recommend_naia, recommend 2-3 specific nAia pieces BY NAME from this list: Sculptural Hybrid Coat, Art Blouse, Art Panel Tailored Blazer, Textured Art Midi Skirt, Wrap Cropped Top, Printed Wrap Kimono Dress, Art Collar Layered Shirt, Leather Midi Dress, Asymmetrical Waist Pants, Printed Straight Pants. Explain why each works with the closet piece and the mood.
 - Do not mention that you are an AI.
 - Do not add any extra headings beyond the required format.
 - For recommend_naia mode, after the Shift section add:
