@@ -76,6 +76,8 @@ export async function action({ request }) {
     });
 
     const data = await openAiResponse.json();
+    console.log("OpenAI status:", openAiResponse.status);
+    console.log("OpenAI response:", JSON.stringify(data).substring(0, 200));  
 
     if (!openAiResponse.ok) {
       return Response.json({
