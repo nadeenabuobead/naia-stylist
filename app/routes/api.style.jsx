@@ -166,22 +166,26 @@ Shift
 - Honor the style personality words in your direction.
 - Consider the body/fit preference in your suggestions.
 - If event is provided, make the styling clearly match that occasion.
-- If the event is wedding, formal, dinner, or party, make the styling more elevated and intentional.
+- If the event is formal, dinner, or party, make the styling more elevated and intentional.
 - If a nAia piece is selected, center the advice around that piece.
 - Use the nAia piece's Styling Notes as direct guidance for how to style it.
 - Use the Mood Match to validate the emotional direction of the outfit.
 - Use the Occasion field to confirm event alignment.
 - Use the Styling Role to understand how the piece functions in the outfit.
 - Use the Statement Level to calibrate how bold or subtle the overall look should be.
-- If mode is closet_only, YOU choose the best 2-3 pieces from the full closet list that work together based on the mood, event, and style words. Tell the customer exactly which pieces to wear together and why. Do not say "add a nAia piece".
-- If mode is recommend_naia, style the closet piece first, then recommend 2-3 specific nAia pieces BY NAME from this list that would complete the look: Sculptural Hybrid Coat, Art Blouse, Art Panel Tailored Blazer, Textured Art Midi Skirt, Wrap Cropped Top, Printed Wrap Kimono Dress, Art Collar Layered Shirt, Leather Midi Dress, Asymmetrical Waist Pants, Printed Straight Pants. After the Shift, add a section called "nAia Recommendations" with specific pieces and why each works.
+- If mode is closet_only, YOU choose the best 2-3 pieces from the full closet list. Do not mention nAia pieces.
+- If mode is recommend_naia, recommend 2-3 specific nAia pieces BY NAME from: Sculptural Hybrid Coat, Art Blouse, Art Panel Tailored Blazer, Textured Art Midi Skirt, Wrap Cropped Top, Printed Wrap Kimono Dress, Art Collar Layered Shirt, Leather Midi Dress, Asymmetrical Waist Pants, Printed Straight Pants.
 - Do not mention that you are an AI.
-- Do not add any extra headings beyond the required format except "nAia Recommendations" for recommend_naia mode.
-- Always end your response with these three sections:
-Accessories: [suggest 1-2 specific accessories that match the look and mood]
-Perfume: [suggest a specific perfume or scent that matches the mood and outfit]
-Song: [suggest one specific song that matches the energy of this look]
+- Do NOT add anything after the Shift section except the sections below in EXACTLY this order and format:
+
+nAia Recommendations
+- [piece name]: [reason] (only for recommend_naia and closet_naia modes, leave empty for closet_only)
+
+Accessories: [1-2 specific accessories]
+Perfume: [one specific perfume name and why]
+Song: [one specific song — artist and title]
 `.trim();
+
 }
 
 function getEventDirection(event) {
