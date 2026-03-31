@@ -1,3 +1,6 @@
+export async function loader() {
+  return null;
+}
 import { useEffect, useMemo, useState } from "react";
 
 const STYLE_WORDS = [
@@ -104,9 +107,12 @@ export default function Stylist() {
   const parsedResult = useMemo(() => parseStylingResult(stylingResult), [stylingResult]);
 
   const handleImageUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setItemImage(URL.createObjectURL(file));
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => setItemImage(ev.target.result);
+  reader.readAsDataURL(file);
+};
   };
 
   const addItem = () => {
