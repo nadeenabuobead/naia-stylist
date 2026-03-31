@@ -15,27 +15,20 @@ export async function action({ request }) {
       naiaPiece = null,
       recommendedPieces = [],
       closet = [],
-     } = body || {};
+    } = body || {};
 
     const safeMood = String(mood || "").trim();
     const safeFeeling = String(feeling || "").trim();
     const safeEvent = String(event || "").trim();
     const safeOutfit = String(outfit || "").trim();
-    const safeMood = String(mood || "").trim();
-    const safeFeeling = String(feeling || "").trim();
-    const safeEvent = String(event || "").trim();
-    const safeOutfit = String(outfit || "").trim();
-    const finalOutfit = safeOutfit || 
-      (Array.isArray(closetItems) && closetItems.length > 0 
-       ? closetItems.map(i => i.name).join(" + ") 
-       : closetItem?.name || "");
+    const finalOutfit = safeOutfit ||
+      (Array.isArray(closetItems) && closetItems.length > 0
+        ? closetItems.map(i => i.name).join(" + ")
+        : closetItem?.name || "");
 
-    if (!safeOutfit && !closetItem && !naiaPiece && (!closetItems || closetItems.length === 0)) {
-  return Response.json(
-    { error: "Missing outfit information." },
-    { status: 400 },
-  );
-}
+    if (!finalOutfit && !closetItem && !naiaPiece && (!closetItems || closetItems.length === 0)) {
+      return Response.json({ error: "Missing outfit information." }, { status: 400 });
+    }
 
     const stylistPrompt = buildStylistPrompt({
       mode,
@@ -55,17 +48,7 @@ export async function action({ request }) {
     const apiKey = process.env.OPENAI_API_KEY;
 
     if (!apiKey) {
-      const fallback = buildFallbackStyling({
-        mood: safeMood,
-        feeling: safeFeeling,
-        event: safeEvent,
-        closetItem,
-        naiaPiece,
-        recommendedPieces,
-        outfit: safeOutfit,
-      });
-
-      return Response.json({ result: fallback });
+      return Response.json({ result: buildFallbackStyling({ mood: safeMood, feeling: safeFeeling, event: safeEvent, closetItem, naiaPiece, recommendedPieces, outfit: finalOutfit }) });
     }
 
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -82,8 +65,7 @@ export async function action({ request }) {
         messages: [
           {
             role: "system",
-            content:
-              "You are the AI stylist for nAia, a fashion brand focused on emotionally intelligent styling, modern elegance, sculptural silhouettes, and refined statement dressing. Recommend only nAia pieces when referencing brand items. Keep the tone polished, warm, and editorial. Be specific, not generic.",
+            content: "You are the AI stylist for nAia, a fashion brand focused on emotionally intelligent styling, modern elegance, sculptural silhouettes, and refined statement dressing. Recommend only nAia pieces when referencing brand items. Keep the tone polished, warm, and editorial. Be specific, not generic.",
           },
           {
             role: "user",
@@ -96,74 +78,29 @@ export async function action({ request }) {
     const data = await openAiResponse.json();
 
     if (!openAiResponse.ok) {
-      const fallback = buildFallbackStyling({
-        mood: safeMood,
-        feeling: safeFeeling,
-        event: safeEvent,
-        closetItem,
-        naiaPiece,
-        recommendedPieces,
-        outfit: safeOutfit,
-      });
-
       return Response.json({
-        result: fallback,
+        result: buildFallbackStyling({ mood: safeMood, feeling: safeFeeling, event: safeEvent, closetItem, naiaPiece, recommendedPieces, outfit: finalOutfit }),
         error: data?.error?.message || "OpenAI request failed.",
       });
     }
 
-    const result =
-      data?.choices?.[0]?.message?.content?.trim() ||
-      buildFallbackStyling({
-        mood: safeMood,
-        feeling: safeFeeling,
-        event: safeEvent,
-        closetItem,
-        naiaPiece,
-        recommendedPieces,
-        outfit: safeOutfit,
-      });
+    const result = data?.choices?.[0]?.message?.content?.trim() ||
+      buildFallbackStyling({ mood: safeMood, feeling: safeFeeling, event: safeEvent, closetItem, naiaPiece, recommendedPieces, outfit: finalOutfit });
 
     return Response.json({ result });
-  } catch (error) {
-    const fallback = buildFallbackStyling({
-      mood: "",
-      feeling: "",
-      event: "",
-      closetItem: null,
-      naiaPiece: null,
-      recommendedPieces: [],
-      outfit: "",
-    });
 
-    return Response.json(
-      {
-        result: fallback,
-        error: error?.message || "Something went wrong in /api/style.",
-      },
-      { status: 200 },
-    );
+  } catch (error) {
+    return Response.json({
+      result: buildFallbackStyling({ mood: "", feeling: "", event: "", closetItem: null, naiaPiece: null, recommendedPieces: [], outfit: "" }),
+      error: error?.message || "Something went wrong in /api/style.",
+    }, { status: 200 });
   }
 }
 
-function buildStylistPrompt({
-  mode,
-  outfit,
-  mood,
-  feeling,
-  event,
-  styleWords,
-  bodyPref,
-  closetItem,
-  closetItems,
-  naiaPiece,
-  recommendedPieces,
-  closet,
-}) {
-  const closetSummary =
-    Array.isArray(closet) && closet.length > 0
-      ? closet.map((item) => `- ${item.name} (${item.category})`).join("\n")
-      : "No full closet list provided.";
+function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bodyPref, closetItem, closetItems, naiaPiece, recommendedPieces, closet }) {
+  const closetSummary = Array.isArray(closet) && closet.length > 0
+    ? closet.map(item => `- ${item.name} (${item.category})`).join("\n")
+    : "No full closet list provided.";
 
   const selectedItems = Array.isArray(closetItems) && closetItems.length > 0
     ? closetItems.map(i => `- ${i.name} (${i.category})`).join("\n")
@@ -176,7 +113,6 @@ Create a styling response for nAia.
 
 Styling mode: ${mode || "not specified"}
 Outfit: ${outfit || "not specified"}
-
 Current mood: ${mood || "not specified"}
 Desired feeling: ${feeling || "not specified"}
 Event: ${event || "not specified"}
@@ -185,6 +121,9 @@ Body/fit preference: ${bodyPref || "not specified"}
 
 Selected closet pieces:
 ${selectedItems}
+
+Full closet available:
+${closetSummary}
 
 Selected nAia piece:
 ${naiaPiece ? `
@@ -197,11 +136,7 @@ ${naiaPiece ? `
 - Sihouette: ${naiaPiece.sihouette || "not specified"}
 - Styling Notes: ${naiaPiece.stylingNotes || "not specified"}` : "None selected"}
 
-Closet summary:
-${closetSummary}
-
-Event direction:
-${eventDirection}
+Event direction: ${eventDirection}
 
 Rules:
 - Respond in EXACTLY this structure:
@@ -233,65 +168,31 @@ Shift
 - Use the Occasion field to confirm event alignment.
 - Use the Styling Role to understand how the piece functions in the outfit.
 - Use the Statement Level to calibrate how bold or subtle the overall look should be.
-- If mode is recommend_naia, suggest which type of nAia piece would complete the look.
-- If mode is closet_only, YOU choose the best 2-3 pieces from the closet list that work together based on the mood, event, and style words. Tell the customer exactly which pieces to wear and why.
-- If mode is recommend_naia, recommend 2-3 specific nAia pieces BY NAME from this list: Sculptural Hybrid Coat, Art Blouse, Art Panel Tailored Blazer, Textured Art Midi Skirt, Wrap Cropped Top, Printed Wrap Kimono Dress, Art Collar Layered Shirt, Leather Midi Dress, Asymmetrical Waist Pants, Printed Straight Pants. Explain why each works with the closet piece and the mood.
+- If mode is closet_only, YOU choose the best 2-3 pieces from the full closet list that work together based on the mood, event, and style words. Tell the customer exactly which pieces to wear together and why. Do not say "add a nAia piece".
+- If mode is recommend_naia, style the closet piece first, then recommend 2-3 specific nAia pieces BY NAME from this list that would complete the look: Sculptural Hybrid Coat, Art Blouse, Art Panel Tailored Blazer, Textured Art Midi Skirt, Wrap Cropped Top, Printed Wrap Kimono Dress, Art Collar Layered Shirt, Leather Midi Dress, Asymmetrical Waist Pants, Printed Straight Pants. After the Shift, add a section called "nAia Recommendations" with specific pieces and why each works.
 - Do not mention that you are an AI.
-- Do not add any extra headings beyond the required format.
-- For recommend_naia mode, after the Shift section add:
-nAia Recommendations
-- [specific piece name]: reason why it works
-- [specific piece name]: reason why it works
+- Do not add any extra headings beyond the required format except "nAia Recommendations" for recommend_naia mode.
 `.trim();
 }
 
 function getEventDirection(event) {
   const key = String(event || "").toLowerCase();
-
-  if (key === "casual") {
-    return "Keep the look relaxed, effortless, refined, and easy to wear.";
-  }
-
-  if (key === "dinner") {
-    return "Make the look polished, sleek, softly elevated, and evening-appropriate.";
-  }
-
-  if (key === "party") {
-    return "Make the look bolder, more statement-driven, confident, and high-impact.";
-  }
-
-  if (key === "formal") {
-    return "Make the look elegant, structured, intentional, and more sophisticated.";
-  }
-
-  if (key === "wedding") {
-    return "Make the look graceful, elevated, romantic, and occasion-worthy without feeling costume-like.";
-  }
-
+  if (key === "casual") return "Keep the look relaxed, effortless, refined, and easy to wear.";
+  if (key === "dinner") return "Make the look polished, sleek, softly elevated, and evening-appropriate.";
+  if (key === "party") return "Make the look bolder, more statement-driven, confident, and high-impact.";
+  if (key === "formal") return "Make the look elegant, structured, intentional, and more sophisticated.";
+  if (key === "wedding") return "Make the look graceful, elevated, romantic, and occasion-worthy without feeling costume-like.";
   return "No specific event direction provided. Focus mainly on emotional shift and silhouette balance.";
 }
 
-function buildFallbackStyling({
-  mood,
-  feeling,
-  event,
-  closetItem,
-  naiaPiece,
-  recommendedPieces,
-  outfit,
-}) {
+function buildFallbackStyling({ mood, feeling, event, closetItem, naiaPiece, recommendedPieces, outfit }) {
   const currentMood = mood || "uncertain";
   const desiredFeeling = feeling || "more like yourself";
   const eventLine = getFallbackEventLine(event);
-
-  const chosenNaia =
-    naiaPiece?.name ||
-    (Array.isArray(recommendedPieces) && recommendedPieces[0]) ||
-    "a refined nAia piece";
-
+  const chosenNaia = naiaPiece?.name || (Array.isArray(recommendedPieces) && recommendedPieces[0]) || "a refined nAia piece";
   const chosenCloset = closetItem?.name || "your selected closet piece";
 
-  return `You’re feeling: ${currentMood}
+  return `You're feeling: ${currentMood}
 You want to feel: ${desiredFeeling}
 
 Your outfit direction
@@ -302,7 +203,7 @@ Your outfit direction
 Why this works
 - It shifts the look with more clarity and direction instead of adding random pieces.
 - It balances emotion and structure so the outfit feels considered, not overdone.
-- It keeps the styling aligned with nAia’s polished, elevated aesthetic.
+- It keeps the styling aligned with nAia's polished, elevated aesthetic.
 
 Shift
 This look moves you from ${currentMood} toward ${desiredFeeling} by making the outfit feel more grounded, expressive, and purposeful${outfit ? ` around ${outfit}` : ""}.`;
@@ -310,26 +211,10 @@ This look moves you from ${currentMood} toward ${desiredFeeling} by making the o
 
 function getFallbackEventLine(event) {
   const key = String(event || "").toLowerCase();
-
-  if (key === "casual") {
-    return "Keep the finish relaxed and minimal so it still feels effortless.";
-  }
-
-  if (key === "dinner") {
-    return "Lean into a sleeker, more elevated finish that feels right for evening.";
-  }
-
-  if (key === "party") {
-    return "Push it slightly bolder so the outfit has presence and statement energy.";
-  }
-
-  if (key === "formal") {
-    return "Keep the overall silhouette clean, structured, and more sophisticated.";
-  }
-
-  if (key === "wedding") {
-    return "Keep it elegant, softened, and special enough for the occasion.";
-  }
-
+  if (key === "casual") return "Keep the finish relaxed and minimal so it still feels effortless.";
+  if (key === "dinner") return "Lean into a sleeker, more elevated finish that feels right for evening.";
+  if (key === "party") return "Push it slightly bolder so the outfit has presence and statement energy.";
+  if (key === "formal") return "Keep the overall silhouette clean, structured, and more sophisticated.";
+  if (key === "wedding") return "Keep it elegant, softened, and special enough for the occasion.";
   return "Keep the overall styling balanced and emotionally aligned with how you want to feel.";
 }
