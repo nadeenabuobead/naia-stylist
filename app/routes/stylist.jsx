@@ -442,7 +442,7 @@ export default function Stylist() {
               </div>
             ) : parsedResult && (parsedResult.feelingNow || parsedResult.outfitDirection.length > 0) ? (
               <div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "24px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "20px", marginBottom: "24px" }}>
                   <div>
                     <div style={s.resultLabel}>You're feeling</div>
                     <div style={s.resultValue}>{parsedResult.feelingNow}</div>
@@ -450,6 +450,10 @@ export default function Stylist() {
                   <div>
                     <div style={s.resultLabel}>You want to feel</div>
                     <div style={s.resultValue}>{parsedResult.feelingNext}</div>
+                  </div>
+                  <div>
+                    <div style={s.resultLabel}>Dressing for</div>
+                    <div style={s.resultValue}>{event}</div>
                   </div>
                 </div>
 
@@ -519,7 +523,7 @@ export default function Stylist() {
                   </>
                 )}
 
-                {mode === "recommend_naia" && naiaProducts.length > 0 && parsedResult.naiaRecommendations?.length > 0 && (
+                {(mode === "recommend_naia" || mode === "closet_naia") && naiaProducts.length > 0 && parsedResult.naiaRecommendations?.length > 0 && (
                   <>
                     <div style={s.divider} />
                     <div style={s.resultLabel}>Shop recommended pieces</div>
