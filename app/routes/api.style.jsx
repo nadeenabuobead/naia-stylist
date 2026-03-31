@@ -177,6 +177,10 @@ Shift
 - If mode is recommend_naia, style the closet piece first, then recommend 2-3 specific nAia pieces BY NAME from this list that would complete the look: Sculptural Hybrid Coat, Art Blouse, Art Panel Tailored Blazer, Textured Art Midi Skirt, Wrap Cropped Top, Printed Wrap Kimono Dress, Art Collar Layered Shirt, Leather Midi Dress, Asymmetrical Waist Pants, Printed Straight Pants. After the Shift, add a section called "nAia Recommendations" with specific pieces and why each works.
 - Do not mention that you are an AI.
 - Do not add any extra headings beyond the required format except "nAia Recommendations" for recommend_naia mode.
+- Always end your response with these three sections:
+Accessories: [suggest 1-2 specific accessories that match the look and mood]
+Perfume: [suggest a specific perfume or scent that matches the mood and outfit]
+Song: [suggest one specific song that matches the energy of this look]
 `.trim();
 }
 

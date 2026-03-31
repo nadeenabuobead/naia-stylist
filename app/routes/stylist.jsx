@@ -40,7 +40,13 @@ function getStorefrontPiece() {
 
 function parseStylingResult(text) {
   if (!text) return null;
-  const sections = { feelingNow: "", feelingNext: "", outfitDirection: [], whyThisWorks: [], shift: "", fallback: "" };
+  const sections = {
+    feelingNow: "", feelingNext: "",
+    outfitDirection: [], whyThisWorks: [],
+    shift: "", naiaRecommendations: [],
+    accessories: "", perfume: "", song: "",
+    fallback: ""
+  };
   const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
   let currentSection = "";
   for (const line of lines) {
@@ -63,16 +69,36 @@ function parseStylingResult(text) {
       if (a) sections.shift = a;
       continue;
     }
+    if (lower.includes("naia recommendation")) { currentSection = "naiaRecommendations"; continue; }
+    if (lower.startsWith("accessories:") || lower === "accessories") {
+      currentSection = "accessories";
+      const a = line.split(":").slice(1).join(":").trim();
+      if (a) sections.accessories = a;
+      continue;
+    }
+    if (lower.startsWith("perfume:") || lower === "perfume") {
+      currentSection = "perfume";
+      const a = line.split(":").slice(1).join(":").trim();
+      if (a) sections.perfume = a;
+      continue;
+    }
+    if (lower.startsWith("song:") || lower === "song") {
+      currentSection = "song";
+      const a = line.split(":").slice(1).join(":").trim();
+      if (a) sections.song = a;
+      continue;
+    }
     if (line.startsWith("-")) {
       const c = line.replace(/^-+\s*/, "").trim();
       if (currentSection === "outfitDirection") sections.outfitDirection.push(c);
-      if (currentSection === "whyThisWorks") sections.whyThisWorks.push(c);
+      else if (currentSection === "whyThisWorks") sections.whyThisWorks.push(c);
+      else if (currentSection === "naiaRecommendations") sections.naiaRecommendations.push(c);
       continue;
     }
-    if (currentSection === "shift") {
-      sections.shift = sections.shift ? `${sections.shift} ${line}` : line;
-      continue;
-    }
+    if (currentSection === "shift") { sections.shift = sections.shift ? `${sections.shift} ${line}` : line; continue; }
+    if (currentSection === "accessories") { sections.accessories = sections.accessories ? `${sections.accessories} ${line}` : line; continue; }
+    if (currentSection === "perfume") { sections.perfume = sections.perfume ? `${sections.perfume} ${line}` : line; continue; }
+    if (currentSection === "song") { sections.song = sections.song ? `${sections.song} ${line}` : line; continue; }
     sections.fallback += `${sections.fallback ? "\n" : ""}${line}`;
   }
   return sections;
@@ -139,49 +165,32 @@ export default function Stylist() {
   const addItem = () => {
     if (!itemName.trim()) return;
     setCloset(prev => [...prev, { id: Date.now(), name: itemName, category: itemCategory, image: itemImage }]);
-    setItemName("");
-    setItemCategory("top");
-    setItemImage("");
+    setItemName(""); setItemCategory("top"); setItemImage("");
     setShowAddItem(false);
   };
 
   const toggleClosetItem = (id) => {
-    setSelectedClosetIds(prev =>
-      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
-    );
+    setSelectedClosetIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
   const toggleStyleWord = (word) => {
-    setStyleWords(prev =>
-      prev.includes(word) ? prev.filter(w => w !== word) : prev.length < 3 ? [...prev, word] : prev
-    );
+    setStyleWords(prev => prev.includes(word) ? prev.filter(w => w !== word) : prev.length < 3 ? [...prev, word] : prev);
   };
 
   const callAI = async () => {
     setLoading(true);
     setStylingResult("");
     setStep(8);
-
     const naiaPiece = selectedNaiaPiece || currentNaiaPiece;
     const itemsToStyle = mode === "closet_only" ? closet : selectedClosetItems;
-    const outfitParts = [
-      ...itemsToStyle.map(i => i.name),
-      naiaPiece ? (naiaPiece.name || naiaPiece.title) : null
-    ].filter(Boolean);
+    const outfitParts = [...itemsToStyle.map(i => i.name), naiaPiece ? (naiaPiece.name || naiaPiece.title) : null].filter(Boolean);
     const outfit = outfitParts.join(" + ");
-
     try {
       const res = await fetch("/api/style", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode,
-          outfit,
-          mood,
-          feeling,
-          event,
-          styleWords,
-          bodyPref,
+          mode, outfit, mood, feeling, event, styleWords, bodyPref,
           closetItem: itemsToStyle[0] || null,
           closetItems: itemsToStyle,
           naiaPiece: naiaPiece ? {
@@ -206,16 +215,9 @@ export default function Stylist() {
   };
 
   const resetAll = () => {
-    setStep(1);
-    setStylingResult("");
-    setSelectedClosetIds([]);
-    setSelectedNaiaPiece(null);
-    setMood("");
-    setFeeling("");
-    setEvent("");
-    setStyleWords([]);
-    setBodyPref("");
-    setMode("");
+    setStep(1); setStylingResult(""); setSelectedClosetIds([]);
+    setSelectedNaiaPiece(null); setMood(""); setFeeling("");
+    setEvent(""); setStyleWords([]); setBodyPref(""); setMode("");
   };
 
   const s = {
@@ -225,7 +227,7 @@ export default function Stylist() {
     dot: (active, done) => ({ width: active ? "24px" : "8px", height: "8px", borderRadius: "4px", background: (done || active) ? "#1a1816" : "#d4cfc9", transition: "all 0.3s" }),
     title: { fontSize: "13px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "12px" },
     bigQ: { fontSize: "32px", lineHeight: 1.2, fontWeight: 400, margin: "0 0 32px", fontStyle: "italic" },
-    input: { width: "100%", padding: "16px 0", borderBottom: "1px solid #c8c2bb", background: "transparent", border: "none", borderBottom: "1px solid #c8c2bb", fontSize: "18px", color: "#1a1816", outline: "none", fontFamily: '"Cormorant Garamond", Georgia, serif', boxSizing: "border-box" },
+    input: { width: "100%", padding: "16px 0", borderBottom: "1px solid #c8c2bb", background: "transparent", border: "none", fontSize: "18px", color: "#1a1816", outline: "none", fontFamily: '"Cormorant Garamond", Georgia, serif', boxSizing: "border-box" },
     btn: { padding: "14px 32px", background: "#1a1816", color: "#f5f2ee", border: "none", borderRadius: "2px", fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase", cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif' },
     outlineBtn: { padding: "14px 32px", background: "transparent", color: "#1a1816", border: "1px solid #1a1816", borderRadius: "2px", fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase", cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif' },
     chip: (active) => ({ padding: "10px 18px", background: active ? "#1a1816" : "transparent", color: active ? "#f5f2ee" : "#1a1816", border: "1px solid #1a1816", borderRadius: "2px", fontSize: "13px", letterSpacing: "0.1em", cursor: "pointer", transition: "all 0.2s", fontFamily: '"Cormorant Garamond", Georgia, serif' }),
@@ -235,16 +237,15 @@ export default function Stylist() {
     resultLabel: { fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "8px" },
     resultValue: { fontSize: "22px", fontStyle: "italic", lineHeight: 1.4 },
     divider: { borderTop: "1px solid #d4cfc9", margin: "24px 0" },
+    vibeCard: { padding: "16px 20px", background: "#f0ebe4", borderRadius: "2px", marginBottom: "12px" },
   };
-
-  const totalSteps = 8;
 
   return (
     <div style={s.page}>
       <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap" rel="stylesheet" />
       <div style={s.container}>
         <div style={s.stepIndicator}>
-          {Array.from({ length: totalSteps }).map((_, i) => (
+          {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} style={s.dot(step === i + 1, step > i + 1)} />
           ))}
         </div>
@@ -277,7 +278,7 @@ export default function Stylist() {
             <div style={s.title}>Step 3 of 7</div>
             <p style={s.bigQ}>What are you dressing for?</p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-              {["Casual", "Dinner", "Party", "Formal", "Wedding", "Work", "Date", "Travel"].map(e => (
+              {["Casual", "Dinner", "Party", "Formal", "Work", "Date", "Travel"].map(e => (
                 <button key={e} style={s.chip(event === e.toLowerCase())} onClick={() => setEvent(e.toLowerCase())}>{e}</button>
               ))}
             </div>
@@ -347,18 +348,14 @@ export default function Stylist() {
           <div>
             <div style={s.title}>Step 7 of 7</div>
             <p style={s.bigQ}>
-              {mode === "closet_only"
-                ? "Add your pieces and we'll choose the best combination"
-                : mode === "recommend_naia"
-                ? "Pick a piece from your closet"
-                : "Pick your closet piece + a nAia piece"}
+              {mode === "closet_only" ? "Add your pieces and we'll choose the best combination" :
+               mode === "recommend_naia" ? "Pick a piece from your closet" :
+               "Pick your closet piece + a nAia piece"}
             </p>
 
             <div style={{ marginBottom: "32px" }}>
               <div style={{ ...s.resultLabel, marginBottom: "12px" }}>Your Closet</div>
-              {closet.length === 0 && (
-                <p style={{ color: "#8a7f75", fontSize: "15px", marginBottom: "16px" }}>Your closet is empty. Add a piece below.</p>
-              )}
+              {closet.length === 0 && <p style={{ color: "#8a7f75", fontSize: "15px", marginBottom: "16px" }}>Your closet is empty. Add a piece below.</p>}
               <div style={s.closetGrid}>
                 {closet.map(piece => (
                   <div key={piece.id}
@@ -379,7 +376,6 @@ export default function Stylist() {
                   </div>
                 ))}
               </div>
-
               {!showAddItem ? (
                 <button style={{ ...s.outlineBtn, marginTop: "16px", fontSize: "12px", padding: "10px 20px" }} onClick={() => setShowAddItem(true)}>+ Add piece</button>
               ) : (
@@ -402,7 +398,7 @@ export default function Stylist() {
               )}
             </div>
 
-            {(mode === "closet_naia") && (
+            {mode === "closet_naia" && (
               <div style={{ marginBottom: "32px" }}>
                 <div style={{ ...s.resultLabel, marginBottom: "12px" }}>Choose a nAia Piece</div>
                 {currentNaiaPiece && (
@@ -456,20 +452,25 @@ export default function Stylist() {
                     <div style={s.resultValue}>{parsedResult.feelingNext}</div>
                   </div>
                 </div>
+
                 <div style={s.divider} />
+
                 <div style={{ marginBottom: "24px" }}>
                   <div style={s.resultLabel}>Your outfit direction</div>
                   {parsedResult.outfitDirection.map((item, i) => (
                     <p key={i} style={{ fontSize: "17px", lineHeight: 1.7, margin: "0 0 8px", paddingLeft: "16px", borderLeft: "2px solid #d4cfc9" }}>{item}</p>
                   ))}
                 </div>
+
                 <div style={s.divider} />
+
                 <div style={{ marginBottom: "24px" }}>
                   <div style={s.resultLabel}>Why this works</div>
                   {parsedResult.whyThisWorks.map((item, i) => (
                     <p key={i} style={{ fontSize: "15px", lineHeight: 1.7, margin: "0 0 6px", color: "#4a4540" }}>{item}</p>
                   ))}
                 </div>
+
                 {parsedResult.shift && (
                   <>
                     <div style={s.divider} />
@@ -479,6 +480,41 @@ export default function Stylist() {
                     </div>
                   </>
                 )}
+
+                {parsedResult.naiaRecommendations?.length > 0 && (
+                  <>
+                    <div style={s.divider} />
+                    <div style={{ marginBottom: "24px" }}>
+                      <div style={s.resultLabel}>nAia Recommendations</div>
+                      {parsedResult.naiaRecommendations.map((item, i) => (
+                        <p key={i} style={{ fontSize: "15px", lineHeight: 1.7, margin: "0 0 10px", paddingLeft: "16px", borderLeft: "2px solid #1a1816" }}>{item}</p>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                <div style={s.divider} />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px", marginBottom: "24px" }}>
+                  {parsedResult.accessories && (
+                    <div style={s.vibeCard}>
+                      <div style={s.resultLabel}>Accessories</div>
+                      <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.accessories}</p>
+                    </div>
+                  )}
+                  {parsedResult.perfume && (
+                    <div style={s.vibeCard}>
+                      <div style={s.resultLabel}>Perfume</div>
+                      <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.perfume}</p>
+                    </div>
+                  )}
+                  {parsedResult.song && (
+                    <div style={s.vibeCard}>
+                      <div style={s.resultLabel}>Song</div>
+                      <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.song}</p>
+                    </div>
+                  )}
+                </div>
+
                 {mode === "recommend_naia" && naiaProducts.length > 0 && (
                   <>
                     <div style={s.divider} />
@@ -495,6 +531,7 @@ export default function Stylist() {
                     </div>
                   </>
                 )}
+
                 <div style={{ marginTop: "32px" }}>
                   <button style={s.outlineBtn} onClick={resetAll}>Start over</button>
                 </div>
@@ -511,3 +548,4 @@ export default function Stylist() {
     </div>
   );
 }
+```
