@@ -221,8 +221,13 @@ Shift
 - Use the Statement Level to calibrate how bold or subtle the overall look should be.
 - If mode is recommend_naia, suggest which type of nAia piece would complete the look.
 - If mode is closet_only, style the closet pieces together without requiring a nAia piece.
+- If mode is recommend_naia, you MUST end your response with a specific section recommending 2-3 nAia pieces by name that would work best with the closet item, based on the mood, event and style words.
 - Do not mention that you are an AI.
 - Do not add any extra headings beyond the required format.
+- For recommend_naia mode, after the Shift section add:
+nAia Recommendations
+- [specific piece name]: reason why it works
+- [specific piece name]: reason why it works
 `.trim();
 }
 

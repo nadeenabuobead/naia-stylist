@@ -354,10 +354,14 @@ export default function Stylist() {
                       ? <img src={piece.image} alt={piece.name} style={{ width: "100%", height: "160px", objectFit: "cover", display: "block" }} />
                       : <div style={{ width: "100%", height: "160px", background: "#e8e4df", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", color: "#8a7f75" }}>{piece.category}</div>
                     }
-                    <div style={{ padding: "10px 12px" }}>
-                      <div style={{ fontSize: "14px", fontWeight: 500 }}>{piece.name}</div>
-                      <div style={{ fontSize: "12px", color: "#8a7f75" }}>{piece.category}</div>
-                    </div>
+                    <div style={{ padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+  <div>
+    <div style={{ fontSize: "14px", fontWeight: 500 }}>{piece.name}</div>
+    <div style={{ fontSize: "12px", color: "#8a7f75" }}>{piece.category}</div>
+  </div>
+  <button onClick={(e) => { e.stopPropagation(); setCloset(prev => prev.filter(i => i.id !== piece.id)); setSelectedClosetIds(prev => prev.filter(i => i !== piece.id)); }}
+    style={{ background: "none", border: "none", cursor: "pointer", fontSize: "16px", color: "#8a7f75", padding: "4px" }}>×</button>
+</div>
                   </div>
                 ))}
               </div>
@@ -386,7 +390,7 @@ export default function Stylist() {
             </div>
 
             {/* nAia piece selection */}
-            {(mode === "closet_naia") && (
+            {(mode === "closet_naia" || mode === "recommend_naia") && (
               <div style={{ marginBottom: "32px" }}>
                 <div style={{ ...s.resultLabel, marginBottom: "12px" }}>
                   {currentNaiaPiece ? "nAia Piece from Store" : "Choose a nAia Piece"}
