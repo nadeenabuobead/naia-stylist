@@ -40,7 +40,12 @@ export async function action({ request }) {
         messages: [
           {
             role: "system",
-            content: "You are nAia, an emotionally intelligent AI stylist. You style outfits based on mood, body preferences, and occasion. You know fashion deeply — silhouettes, color theory, proportion, and how clothes make people feel. Be specific, warm, and editorial. Never generic. Always follow the exact response format given to you.",
+            content: `You are nAia, an emotionally intelligent AI stylist. You MUST follow the EXACT response format given to you. Rules:
+1. The Shift section contains ONE sentence only — nothing else.
+2. Accessories, Perfume, and Song MUST always appear at the very end as their own labeled lines.
+3. Never add anything inside or after Shift except the labeled sections.
+4. Never pair a top with another top or a bottom with another bottom.
+5. Refer to customer's closet pieces as "your [piece name]" and nAia pieces by their exact name.`,
           },
           { role: "user", content: stylistPrompt },
         ],
@@ -71,15 +76,14 @@ export async function action({ request }) {
 
 function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bodyPref, closetItem, closetItems, naiaPiece, closet }) {
   const closetList = Array.isArray(closet) && closet.length > 0
-    ? closet.map(i => `- ${i.name} (${i.category}) [customer's closet]`).join("\n")
+    ? closet.map(i => `- ${i.name} (${i.category}) [customer closet]`).join("\n")
     : "No closet items.";
 
   const selectedList = Array.isArray(closetItems) && closetItems.length > 0
-    ? closetItems.map(i => `- ${i.name} (${i.category}) [customer's closet]`).join("\n")
-    : closetItem ? `- ${closetItem.name} (${closetItem.category}) [customer's closet]` : "None";
+    ? closetItems.map(i => `- ${i.name} (${i.category}) [customer closet]`).join("\n")
+    : closetItem ? `- ${closetItem.name} (${closetItem.category}) [customer closet]` : "None";
 
-  const naiaList = `
-- Sculptural Hybrid Coat (outerwear)
+  const naiaList = `- Sculptural Hybrid Coat (outerwear)
 - Art Blouse (top)
 - Art Panel Tailored Blazer (outerwear)
 - Textured Art Midi Skirt (bottom)
@@ -88,59 +92,54 @@ function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bo
 - Art Collar Layered Shirt (top)
 - Leather Midi Dress (dress)
 - Asymmetrical Waist Pants (bottom)
-- Printed Straight Pants (bottom)`.trim();
+- Printed Straight Pants (bottom)`;
 
   const eventNote = getEventDirection(event);
+  const styleNote = Array.isArray(styleWords) && styleWords.length > 0 ? styleWords.join(", ") : "not specified";
 
-  return `
-You are styling an outfit for a customer of nAia fashion brand.
+  return `Style an outfit for a nAia customer.
 
-CUSTOMER INFO:
-- Current mood: ${mood || "not specified"}
-- Desired feeling: ${feeling || "not specified"}
-- Event: ${event || "not specified"}
-- Style personality: ${Array.isArray(styleWords) && styleWords.length > 0 ? styleWords.join(", ") : "not specified"}
-- Body preference: ${bodyPref || "not specified"}
+CUSTOMER:
+- Mood: ${mood}
+- Wants to feel: ${feeling}
+- Event: ${event} — ${eventNote}
+- Style personality: ${styleNote}
+- Body preference: ${bodyPref || "none"}
 - Mode: ${mode}
 
-SELECTED PIECES FROM CUSTOMER'S CLOSET:
+CUSTOMER'S SELECTED PIECES:
 ${selectedList}
 
 CUSTOMER'S FULL CLOSET:
 ${closetList}
 
 ${naiaPiece ? `SELECTED NAIA PIECE:
-- Name: ${naiaPiece.name} (nAia brand piece)
-- Category: ${naiaPiece.category}
-- Styling Notes: ${naiaPiece.stylingNotes || "not specified"}
-- Mood Match: ${naiaPiece.moodMatch || "not specified"}
-- Statement Level: ${naiaPiece.statementLevel || "not specified"}
-- Occasion: ${naiaPiece.occasion || "not specified"}` : ""}
+- ${naiaPiece.name} (${naiaPiece.category})
+- Styling Notes: ${naiaPiece.stylingNotes || "none"}
+- Mood Match: ${naiaPiece.moodMatch || "none"}
+- Occasion: ${naiaPiece.occasion || "none"}
+- Statement Level: ${naiaPiece.statementLevel || "none"}` : ""}
 
-AVAILABLE NAIA PIECES:
+NAIA PIECES AVAILABLE (with categories):
 ${naiaList}
 
-EVENT DIRECTION: ${eventNote}
+MODE RULES:
+${mode === "closet_only" ? "- Style ONLY the customer's closet pieces. Do NOT mention any nAia pieces." : ""}
+${mode === "recommend_naia" ? `- Recommend 2-3 nAia pieces that complement the customer's closet piece.
+- If closet piece is a TOP → only recommend BOTTOMS, OUTERWEAR, or DRESSES.
+- If closet piece is a BOTTOM → only recommend TOPS, OUTERWEAR, or DRESSES.
+- NEVER recommend a top to go with another top.` : ""}
+${mode === "closet_naia" ? "- Style the customer's closet piece WITH the selected nAia piece." : ""}
 
-STRICT RULES:
-1. NEVER pair a top with another top. NEVER pair a bottom with another bottom.
-2. Always refer to closet pieces as "your [piece name]" to distinguish from nAia pieces.
-3. Always refer to nAia pieces by their exact name.
-4. The Shift section must be ONE sentence only. Nothing else goes in Shift.
-5. Accessories, Perfume, and Song go AFTER the Shift as separate labeled lines.
-6. ${mode === "closet_only" ? "Style ONLY the customer's closet pieces together. Do NOT mention any nAia pieces at all." : ""}
-7. ${mode === "recommend_naia" ? "Recommend 2-3 nAia pieces that complement the customer's closet piece. If closet piece is a TOP, only recommend BOTTOMS, OUTERWEAR, or DRESSES from nAia. NEVER recommend a top to go with a top." : ""}
-8. ${mode === "closet_naia" ? "Style the customer's closet piece together with the selected nAia piece." : ""}
-
-RESPOND IN EXACTLY THIS FORMAT:
+RESPOND IN THIS EXACT FORMAT — copy the section headers exactly:
 
 You're feeling: ${mood}
 You want to feel: ${feeling}
 
 Your outfit direction
-- [specific direction using "your [piece]" for closet pieces and exact names for nAia pieces]
-- [specific direction]
-- [specific direction]
+- [direction using "your [piece]" for closet pieces, exact name for nAia pieces]
+- [direction]
+- [direction]
 
 Why this works
 - [reason]
@@ -148,16 +147,15 @@ Why this works
 - [reason]
 
 Shift
-[ONE sentence about the emotional transformation this outfit creates. Nothing else here.]
+[ONE sentence only about the emotional transformation. Nothing else here.]
 
-${mode !== "closet_only" ? `nAia Recommendations
+${mode === "recommend_naia" || mode === "closet_naia" ? `nAia Recommendations
 - [exact nAia piece name]: [why it works — must be different category from closet piece]
 - [exact nAia piece name]: [why it works]` : ""}
 
-Accessories: [1-2 specific accessories that match the look]
-Perfume: [one specific perfume name and scent family]
-Song: [Artist - Song Title that matches the energy]
-`.trim();
+Accessories: [1-2 specific accessories that match the look and mood]
+Perfume: [one specific perfume name and why it matches]
+Song: [Artist - Song Title that matches the energy of this look]`;
 }
 
 function getEventDirection(event) {
@@ -195,6 +193,6 @@ Shift
 This look moves you from ${currentMood} toward ${desiredFeeling}.
 
 Accessories: Simple gold jewelry and a structured bag.
-Perfume: Le Labo Santal 33.
+Perfume: Le Labo Santal 33 — warm, grounding, and refined.
 Song: FKA Twigs - Two Weeks`;
 }
