@@ -53,6 +53,9 @@ export async function action({ request }) {
 
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
+    console.log("=== CALLING OPENAI ===");
+    console.log("API KEY EXISTS:", !!apiKey);
+    console.log("API KEY PREFIX:", apiKey?.substring(0, 10));
     const openAiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
