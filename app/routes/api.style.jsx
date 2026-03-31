@@ -8,11 +8,14 @@ export async function action({ request }) {
       mood = "",
       feeling = "",
       event = "",
+      styleWords = [],
+      bodyPref = "",
       closetItem = null,
+      closetItems = [],
       naiaPiece = null,
       recommendedPieces = [],
       closet = [],
-    } = body || {};
+     } = body || {};
 
     const safeMood = String(mood || "").trim();
     const safeFeeling = String(feeling || "").trim();
@@ -32,7 +35,10 @@ export async function action({ request }) {
       mood: safeMood,
       feeling: safeFeeling,
       event: safeEvent,
+      styleWords,
+      bodyPref,
       closetItem,
+      closetItems,
       naiaPiece,
       recommendedPieces,
       closet,
