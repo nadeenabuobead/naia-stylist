@@ -138,7 +138,10 @@ function buildStylistPrompt({
   mood,
   feeling,
   event,
+  styleWords,
+  bodyPref,
   closetItem,
+  closetItems,
   naiaPiece,
   recommendedPieces,
   closet,
@@ -148,10 +151,9 @@ function buildStylistPrompt({
       ? closet.map((item) => `- ${item.name} (${item.category})`).join("\n")
       : "No full closet list provided.";
 
-  const recommendationSummary =
-    Array.isArray(recommendedPieces) && recommendedPieces.length > 0
-      ? recommendedPieces.map((item) => `- ${item}`).join("\n")
-      : "No additional recommendations provided.";
+  const selectedItems = Array.isArray(closetItems) && closetItems.length > 0
+    ? closetItems.map(i => `- ${i.name} (${i.category})`).join("\n")
+    : closetItem ? `- ${closetItem.name} (${closetItem.category})` : "None selected";
 
   const eventDirection = getEventDirection(event);
 
@@ -164,11 +166,12 @@ Outfit: ${outfit || "not specified"}
 Current mood: ${mood || "not specified"}
 Desired feeling: ${feeling || "not specified"}
 Event: ${event || "not specified"}
+Style personality words: ${Array.isArray(styleWords) && styleWords.length > 0 ? styleWords.join(", ") : "not specified"}
+Body/fit preference: ${bodyPref || "not specified"}
 
-Selected closet item:
-${closetItem ? `- ${closetItem.name} (${closetItem.category})` : "None selected"}
+Selected closet pieces:
+${selectedItems}
 
-Selected nAia piece:
 Selected nAia piece:
 ${naiaPiece ? `
 - Name: ${naiaPiece.name}
@@ -180,9 +183,6 @@ ${naiaPiece ? `
 - Sihouette: ${naiaPiece.sihouette || "not specified"}
 - Styling Notes: ${naiaPiece.stylingNotes || "not specified"}` : "None selected"}
 
-Top recommended nAia pieces:
-${recommendationSummary}
-
 Closet summary:
 ${closetSummary}
 
@@ -191,7 +191,7 @@ ${eventDirection}
 
 Rules:
 - Respond in EXACTLY this structure:
-You’re feeling: ...
+You're feeling: ...
 You want to feel: ...
 
 Your outfit direction
@@ -209,15 +209,18 @@ Shift
 
 - Keep it concise but beautiful.
 - Make the advice feel emotionally intelligent and fashion-aware.
+- Honor the style personality words in your direction.
+- Consider the body/fit preference in your suggestions.
 - If event is provided, make the styling clearly match that occasion.
 - If the event is wedding, formal, dinner, or party, make the styling more elevated and intentional.
 - If a nAia piece is selected, center the advice around that piece.
-- If recommended nAia pieces are provided, naturally favor the strongest matching piece.
 - Use the nAia piece's Styling Notes as direct guidance for how to style it.
 - Use the Mood Match to validate the emotional direction of the outfit.
 - Use the Occasion field to confirm event alignment.
 - Use the Styling Role to understand how the piece functions in the outfit.
 - Use the Statement Level to calibrate how bold or subtle the overall look should be.
+- If mode is recommend_naia, suggest which type of nAia piece would complete the look.
+- If mode is closet_only, style the closet pieces together without requiring a nAia piece.
 - Do not mention that you are an AI.
 - Do not add any extra headings beyond the required format.
 `.trim();
