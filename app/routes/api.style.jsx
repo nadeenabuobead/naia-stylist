@@ -46,9 +46,11 @@ export async function action({ request }) {
 3. Never add anything inside or after Shift except the labeled sections.
 4. CRITICAL: You may ONLY recommend nAia pieces from the "NAIA PIECES YOU MAY RECOMMEND" list. This list has been pre-filtered. Do NOT invent or add pieces not in that list.
 5. Never recommend a piece in the same category as what the customer already has (e.g. no top + top, no bottom + bottom).
-6. Refer to customer's closet pieces as "your [piece name]" and nAia pieces by their exact product name.
-7. Be specific and creative with Perfume and Song — never default to the same picks. Draw from a wide range.
-8. Connect every styling choice back to the customer's emotional shift (from current mood → desired feeling).`,
+6. CRITICAL: Never recommend TWO pieces from the same category. Each recommendation must be a DIFFERENT category. For example, do NOT recommend two outerwear pieces, or two bottoms. One outerwear + one bottom = good. Two outerwear = bad.
+7. Refer to customer's closet pieces as "your [piece name]" and nAia pieces by their exact product name.
+8. Song MUST be a well-known, popular song that most people would recognize — think top hits, Spotify top charts, popular artists like Dua Lipa, SZA, Billie Eilish, The Weeknd, Taylor Swift, Rihanna, Frank Ocean, Adele, Harry Styles, Beyoncé, Arctic Monkeys, Lana Del Rey, etc. Match the energy and mood. Never pick obscure songs.
+9. Perfume MUST be a mainstream, widely available fragrance people would recognize — like Chanel No. 5, YSL Black Opium, Dior Miss Dior, Tom Ford Black Orchid, Marc Jacobs Daisy, Lancôme La Vie Est Belle, Versace Bright Crystal, etc. Match the mood of the outfit.
+10. Connect every styling choice back to the customer's emotional shift (from current mood → desired feeling).`,
           },
           { role: "user", content: stylistPrompt },
         ],
@@ -127,8 +129,6 @@ function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bo
     filteredNaia = ALL_NAIA.filter(p => {
       const pCat = normalize(p.category);
       // If customer has a top, don't show tops. If customer has a bottom, don't show bottoms.
-      // Dresses and outerwear are always allowed since they layer or replace.
-      if (pCat === "dress" || pCat === "outerwear") return true;
       return !customerNormalized.includes(pCat);
     });
     // Safety: if filtering removed everything, show outerwear + dresses at minimum
@@ -138,6 +138,13 @@ function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bo
         return pCat === "dress" || pCat === "outerwear";
       });
     }
+    // Limit to max 2 pieces per category so the AI has balanced options
+    const catCount = {};
+    filteredNaia = filteredNaia.filter(p => {
+      const pCat = normalize(p.category);
+      catCount[pCat] = (catCount[pCat] || 0) + 1;
+      return catCount[pCat] <= 2;
+    });
   }
 
   const naiaList = filteredNaia.map(p => `- ${p.name} (${p.category})`).join("\n");
@@ -178,9 +185,10 @@ MODE RULES:
 ${mode === "closet_only" ? `- Style ONLY the customer's closet pieces together.
 - Do NOT mention or recommend any nAia pieces.
 - Focus on how to combine what they already own.` : ""}
-${mode === "recommend_naia" ? `- Recommend 2-3 nAia pieces from the FILTERED list above.
+${mode === "recommend_naia" ? `- Recommend exactly 2 nAia pieces from the FILTERED list above.
 - You may ONLY recommend pieces from the list above — no others.
 - The list has already been filtered to exclude the customer's existing categories.
+- CRITICAL: Each recommendation MUST be a DIFFERENT category. Never recommend two pieces of the same type (e.g. never two outerwear pieces, never two bottoms). Pick from different categories.
 - Each recommendation must complement (not duplicate) what the customer already owns.` : ""}
 ${mode === "closet_naia" ? `- Style the customer's closet piece WITH the selected nAia piece together as one outfit.
 - Explain how to wear them together.` : ""}
@@ -205,11 +213,11 @@ Shift
 
 ${mode === "recommend_naia" || mode === "closet_naia" ? `nAia Recommendations
 - [exact nAia piece name from the filtered list]: [specific reason it works with their pieces and mood]
-- [exact nAia piece name from the filtered list]: [specific reason]` : ""}
+- [exact nAia piece name from a DIFFERENT category than the first]: [specific reason]` : ""}
 
-Accessories: [1-2 specific, unique accessories that match the look and mood]
-Perfume: [one specific perfume name — be creative, vary your picks, avoid repeating Santal 33 or Jo Malone Peony]
-Song: [Artist - Song Title — be diverse, match the energy, avoid repeating previous suggestions]`;
+Accessories: [1-2 specific, recognizable accessories — like a gold cuff bracelet, silk scarf, structured tote, etc.]
+Perfume: [one well-known, mainstream perfume — e.g. Chanel No. 5, YSL Black Opium, Dior Miss Dior, Tom Ford Black Orchid, Marc Jacobs Daisy, Lancôme La Vie Est Belle. Match the mood.]
+Song: [Artist - Song Title — must be a popular, well-known song people would recognize. Think Spotify top hits, chart artists. Match the outfit's energy.]`;
 }
 
 function getEventDirection(event) {
