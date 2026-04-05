@@ -1,3 +1,8 @@
+{% comment %} Inject logged-in customer info for nAia auth {% endcomment %}
+{% if customer %}
+<meta name="naia-customer" content='{"id":"{{ customer.id }}","email":"{{ customer.email | escape }}","firstName":"{{ customer.first_name | escape }}","lastName":"{{ customer.last_name | escape }}"}'>
+{% endif %}
+
 {% if product.featured_image %}
 <div
   id="naia-stylist-root"
