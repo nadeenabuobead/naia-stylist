@@ -524,23 +524,39 @@ export default function Stylist() {
     if (!tryOnPhoto) return;
     setTryOnState(prev => ({ ...prev, [productTitle]: { loading: true, result: null, error: null } }));
     try {
-      const res = await fetch(TRYON_WORKER_URL, {
+      let garmentUrl = productImage;
+      if (garmentUrl && garmentUrl.startsWith("//")) garmentUrl = "https:" + garmentUrl;
+      const res = await fetch(TRYON_WORKER_URL + "/try-on", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           person_image: tryOnPhoto,
-          garment_image: productImage,
-          category: "auto", // default; the worker handles it
+          garment_image: garmentUrl,
+          category: "auto",
         }),
       });
       const data = await res.json();
-      if (data.output || data.result) {
-        setTryOnState(prev => ({ ...prev, [productTitle]: { loading: false, result: data.output || data.result, error: null } }));
-      } else {
-        setTryOnState(prev => ({ ...prev, [productTitle]: { loading: false, result: null, error: data.error || "Try-on failed" } }));
-      }
+      if (data.error) throw new Error(data.error);
+      if (!data.id) throw new Error("No prediction ID returned");
+      const poll = async (id, attempts) => {
+        if (attempts > 60) {
+          setTryOnState(prev => ({ ...prev, [productTitle]: { loading: false, result: null, error: "Timed out" } }));
+          return;
+        }
+        const statusRes = await fetch(TRYON_WORKER_URL + "/status/" + id);
+        const statusData = await statusRes.json();
+        if (statusData.status === "completed" && statusData.output && statusData.output.length > 0) {
+          setTryOnState(prev => ({ ...prev, [productTitle]: { loading: false, result: statusData.output[0], error: null } }));
+        } else if (statusData.status === "failed") {
+          const errMsg = statusData.error?.message || "Generation failed";
+          setTryOnState(prev => ({ ...prev, [productTitle]: { loading: false, result: null, error: errMsg } }));
+        } else {
+          setTimeout(() => poll(id, attempts + 1), 2000);
+        }
+      };
+      poll(data.id, 0);
     } catch (err) {
-      setTryOnState(prev => ({ ...prev, [productTitle]: { loading: false, result: null, error: "Network error" } }));
+      setTryOnState(prev => ({ ...prev, [productTitle]: { loading: false, result: null, error: err.message || "Network error" } }));
     }
   };
 
