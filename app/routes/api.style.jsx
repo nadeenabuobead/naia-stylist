@@ -88,18 +88,118 @@ function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bo
     ? closetItems.map(i => `- ${i.name} (${i.category}) [customer closet]`).join("\n")
     : closetItem ? `- ${closetItem.name} (${closetItem.category}) [customer closet]` : "None";
 
-  // All nAia pieces with their categories
+  // All nAia pieces with full styling metadata
   const ALL_NAIA = [
-    { name: "Sculptural Hybrid Coat", category: "outerwear" },
-    { name: "Art Blouse", category: "top" },
-    { name: "Art Panel Tailored Blazer", category: "outerwear" },
-    { name: "Textured Art Midi Skirt", category: "bottom" },
-    { name: "Wrap Cropped Top", category: "top" },
-    { name: "Printed Wrap Kimono Dress", category: "dress" },
-    { name: "Art Collar Layered Shirt", category: "top" },
-    { name: "Leather Midi Dress", category: "dress" },
-    { name: "Asymmetrical Waist Pants", category: "bottom" },
-    { name: "Printed Straight Pants", category: "bottom" },
+    {
+      name: "Sculptural Hybrid Coat", category: "outerwear",
+      color: "soft beige + deep brown + art print panel", stylingRole: "statement",
+      silhouette: "structured, longline, asymmetric", fit: "tailored", length: "full",
+      visualWeight: "heavy", statementLevel: "high",
+      styleSignal: "dramatic, sculptural, refined, editorial",
+      occasion: "event, dinner, evening, work",
+      emotionalEffect: "empowering, elevating, commanding",
+      pairingBehavior: "Best with minimal, clean base layers. Avoid competing statement outerwear or heavily detailed tops underneath. Works best over fitted or straight silhouettes. Can finish the whole look on its own.",
+      outfitCompleteness: "near-complete"
+    },
+    {
+      name: "Printed Wrap Kimono Jacket", category: "outerwear",
+      color: "cream, rust, espresso brown", stylingRole: "statement",
+      silhouette: "wrap, soft-structured, defined waist", fit: "adjustable", length: "hip",
+      visualWeight: "medium", statementLevel: "medium",
+      styleSignal: "artistic, textured, layered",
+      occasion: "day, evening",
+      emotionalEffect: "comforting, enveloping",
+      pairingBehavior: "Pair with slim/straight bottoms. Avoid excess volume underneath. Can replace top + jacket.",
+      outfitCompleteness: "builder"
+    },
+    {
+      name: "Art Panel Tailored Blazer", category: "outerwear",
+      color: "espresso brown + beige/brown print accent", stylingRole: "statement",
+      silhouette: "structured, tailored", fit: "tailored", length: "hip",
+      visualWeight: "medium-heavy", statementLevel: "medium-high",
+      styleSignal: "sculptural, editorial, refined",
+      occasion: "work, dinner, event",
+      emotionalEffect: "empowering, elevated",
+      pairingBehavior: "Pair with clean minimal tops, straight or fluid bottoms. Avoid competing prints, heavy detailing underneath, overlayering.",
+      outfitCompleteness: "builder"
+    },
+    {
+      name: "Art Blouse", category: "top",
+      color: "deep chocolate brown + burnt bronze", stylingRole: "statement",
+      silhouette: "structured, waist defined", fit: "fitted", length: "hip",
+      visualWeight: "medium-high", statementLevel: "high",
+      styleSignal: "sculptural, editorial, dramatic",
+      occasion: "dinner, event, evening",
+      emotionalEffect: "powerful, protective",
+      pairingBehavior: "Pair with minimal bottoms. Avoid additional statement pieces. No heavy layering.",
+      outfitCompleteness: "builder"
+    },
+    {
+      name: "Textured Art Maxi Skirt", category: "bottom",
+      color: "warm beige, rust, deep brown mix", stylingRole: "statement",
+      silhouette: "long, straight, slightly fluid", fit: "skimming", length: "maxi",
+      visualWeight: "medium-high", statementLevel: "high",
+      styleSignal: "editorial, sculptural, artistic",
+      occasion: "dinner, event",
+      emotionalEffect: "grounding, expressive",
+      pairingBehavior: "Pair with clean, structured, or minimal tops. Avoid competing textures. Keep upper half refined.",
+      outfitCompleteness: "builder"
+    },
+    {
+      name: "Wrap Cropped Top", category: "top",
+      color: "warm beige, rust, deep brown blend", stylingRole: "statement",
+      silhouette: "fitted, sculpting", fit: "fitted", length: "hip",
+      visualWeight: "medium", statementLevel: "medium-high",
+      styleSignal: "artistic, sculptural",
+      occasion: "dinner, casual event",
+      emotionalEffect: "expressive, elevated",
+      pairingBehavior: "Pair with clean bottoms. Avoid busy combinations.",
+      outfitCompleteness: "builder"
+    },
+    {
+      name: "Art Collar Layered Shirt", category: "top",
+      color: "crisp white + warm brown accent in collar", stylingRole: "anchor",
+      silhouette: "structured, waist defined", fit: "tailored", length: "hip",
+      visualWeight: "medium", statementLevel: "medium",
+      styleSignal: "structured, sharp, refined, slightly editorial",
+      occasion: "work, dinner, event",
+      emotionalEffect: "empowering, polished, composed",
+      pairingBehavior: "Pair with fluid or statement bottoms. Works well under clean outerwear. Avoid overly busy necklines or heavy accessories (collar is already a feature). Can elevate otherwise minimal outfits.",
+      outfitCompleteness: "builder"
+    },
+    {
+      name: "Leather Midi Dress", category: "dress",
+      color: "deep burgundy brown + muted beige print", stylingRole: "statement",
+      silhouette: "fitted top + straight skirt", fit: "fitted (top), relaxed (skirt)", length: "midi",
+      visualWeight: "high", statementLevel: "high",
+      styleSignal: "sculptural, editorial, refined",
+      occasion: "dinner, evening, event",
+      emotionalEffect: "grounded, powerful",
+      pairingBehavior: "Minimal layering, keep everything else simple, avoid competing textures.",
+      outfitCompleteness: "near-complete"
+    },
+    {
+      name: "Asymmetrical Waist Pants", category: "bottom",
+      color: "dark brown + neutral underlayer accent", stylingRole: "anchor",
+      silhouette: "structured, elongated", fit: "tailored", length: "full",
+      visualWeight: "medium", statementLevel: "medium",
+      styleSignal: "structured, refined, slightly editorial",
+      occasion: "work, dinner, day",
+      emotionalEffect: "grounding, polished",
+      pairingBehavior: "Pair with clean or minimal tops, structured or fluid tops. Avoid too much detail at the waist, and overly complex layering at midsection.",
+      outfitCompleteness: "builder"
+    },
+    {
+      name: "Printed Straight Pants", category: "bottom",
+      color: "rust, brown, charcoal blend", stylingRole: "statement",
+      silhouette: "wide-leg, flowing", fit: "relaxed", length: "full",
+      visualWeight: "medium-high", statementLevel: "high",
+      styleSignal: "fluid, artistic, expressive",
+      occasion: "dinner, event, evening",
+      emotionalEffect: "expressive, expansive, slightly dramatic",
+      pairingBehavior: "Pair with structured tops, clean silhouettes, minimal layers. Avoid other strong prints, overly voluminous tops and competing textures.",
+      outfitCompleteness: "anchor+statement in one"
+    },
   ];
 
   // Determine which categories the customer already has covered
@@ -147,7 +247,11 @@ function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bo
     });
   }
 
-  const naiaList = filteredNaia.map(p => `- ${p.name} (${p.category})`).join("\n");
+  const naiaList = filteredNaia.map(p => `- ${p.name} (${p.category})
+    Color: ${p.color} | Style: ${p.styleSignal} | Mood: ${p.emotionalEffect}
+    Occasion: ${p.occasion} | Statement: ${p.statementLevel} | Weight: ${p.visualWeight}
+    Pairing: ${p.pairingBehavior}
+    Completeness: ${p.outfitCompleteness}`).join("\n");
   const removedCategories = mode === "recommend_naia" && customerNormalized.length > 0
     ? `\nIMPORTANT: The customer already has: ${customerNormalized.join(", ")}. The list below has been pre-filtered to EXCLUDE those categories. Only recommend from this list.`
     : "";
