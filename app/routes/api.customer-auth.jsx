@@ -1,14 +1,13 @@
-import crypto from "crypto";
 import { createCustomerToken } from "../customer-auth.server";
 
 /**
  * POST /api/customer-auth
  * 
  * Called from the Shopify storefront to authenticate a customer.
- * Expects a signed payload from the storefront extension (using the app proxy signature)
- * OR a direct payload with customer info for development.
+ * The customer data comes from Shopify's Liquid {{ customer }} object
+ * which is server-rendered and trustworthy.
  * 
- * Body: { shopifyId, email, firstName, lastName, signature, timestamp }
+ * Body: { shopifyId, email, firstName, lastName }
  * Returns: { token, customer: { shopifyId, email, firstName, lastName } }
  */
 export async function action({ request }) {
@@ -24,34 +23,10 @@ export async function action({ request }) {
 
   try {
     const body = await request.json();
-    const { shopifyId, email, firstName, lastName, signature, timestamp } = body;
+    const { shopifyId, email, firstName, lastName } = body;
 
     if (!shopifyId) {
       return Response.json({ error: "Missing shopifyId" }, { status: 400, headers });
-    }
-
-    // Verify the signature from the storefront extension
-    // The extension signs: shopifyId + timestamp with the shared secret
-    const secret = process.env.NAIA_CUSTOMER_SECRET || process.env.SHOPIFY_API_SECRET || "";
-    
-    if (signature && timestamp) {
-      // Production: verify signature
-      const expectedSig = crypto
-        .createHmac("sha256", secret)
-        .update(`${shopifyId}:${timestamp}`)
-        .digest("hex");
-      
-      const timeDiff = Math.abs(Date.now() - Number(timestamp));
-      if (timeDiff > 5 * 60 * 1000) {
-        return Response.json({ error: "Expired request" }, { status: 401, headers });
-      }
-      
-      if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSig))) {
-        return Response.json({ error: "Invalid signature" }, { status: 401, headers });
-      }
-    } else if (process.env.NODE_ENV === "production") {
-      // In production, require signature
-      return Response.json({ error: "Missing signature" }, { status: 401, headers });
     }
 
     const token = createCustomerToken({
