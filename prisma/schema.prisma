@@ -1,18 +1,13 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
 
-// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
-// enough when changing adapters.
-// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
-  provider = "sqlite"
-  url      = "file:dev.sqlite"
+  provider = "postgresql"
+  url      = env("POSTGRES_URL")
 }
 
+// ─── Shopify admin session (existing — for the embedded app dashboard) ───
 model Session {
   id            String    @id
   shop          String
@@ -31,4 +26,75 @@ model Session {
   emailVerified Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
+}
+
+// ─── Customer (storefront shopper) ───
+model Customer {
+  id              String          @id @default(cuid())
+  shopifyId       String          @unique
+  email           String?
+  firstName       String?
+  lastName        String?
+  lastMood        String?
+  lastFeeling     String?
+  lastEvent       String?
+  lastStyleWords  String?
+  lastBodyPref    String?
+  lastMode        String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  closetItems     ClosetItem[]
+  wishlistItems   WishlistItem[]
+  outfitHistories OutfitHistory[]
+}
+
+// ─── Closet pieces (what the customer owns) ───
+model ClosetItem {
+  id         String   @id @default(cuid())
+  customerId String
+  name       String
+  category   String
+  image      String?  @db.Text
+  createdAt  DateTime @default(now())
+
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+}
+
+// ─── Wishlist (nAia pieces the customer wants) ───
+model WishlistItem {
+  id             String   @id @default(cuid())
+  customerId     String
+  naiaProductId  String
+  title          String
+  handle         String
+  image          String?
+  createdAt      DateTime @default(now())
+
+  customer       Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, naiaProductId])
+  @@index([customerId])
+}
+
+// ─── Outfit history (past styling results) ───
+model OutfitHistory {
+  id            String   @id @default(cuid())
+  customerId    String
+  mood          String?
+  feeling       String?
+  event         String?
+  styleWords    String?
+  bodyPref      String?
+  mode          String?
+  closetItemIds String?
+  result        String   @db.Text
+  createdAt     DateTime @default(now())
+
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([customerId, createdAt(sort: Desc)])
 }
