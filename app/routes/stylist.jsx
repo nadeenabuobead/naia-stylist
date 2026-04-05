@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 
 const STYLE_WORDS = [
   "Minimal", "Bold", "Structured", "Fluid", "Editorial",
@@ -10,6 +10,8 @@ const BODY_PREFS = [
   "Highlight waist", "Elongate legs", "Balance shoulders",
   "Minimize volume", "Maximize volume", "No preference"
 ];
+
+const TRYON_WORKER_URL = "https://virtual-tryon-api.naia-tryon.workers.dev";
 
 function getStorefrontPiece() {
   if (typeof window === "undefined") return null;
@@ -46,44 +48,36 @@ function parseStylingResult(text) {
     shift: "", naiaRecommendations: [],
     accessories: "", perfume: "", song: "",
   };
-
   const accessMatch = text.match(/Accessories:\s*([^\n]+)/i);
   const perfumeMatch = text.match(/Perfume:\s*([^\n]+)/i);
   const songMatch = text.match(/Song:\s*([^\n]+)/i);
   if (accessMatch) sections.accessories = accessMatch[1].trim();
   if (perfumeMatch) sections.perfume = perfumeMatch[1].trim();
   if (songMatch) sections.song = songMatch[1].trim();
-
   let cleaned = text
     .replace(/Accessories:.*$/im, "")
     .replace(/Perfume:.*$/im, "")
     .replace(/Song:.*$/im, "");
-
   const lines = cleaned.split("\n").map(l => l.trim()).filter(Boolean);
   let currentSection = "";
-
   for (const line of lines) {
     const lower = line.toLowerCase();
     if (lower.startsWith("you're feeling:") || lower.startsWith("you\u2019re feeling:")) {
       sections.feelingNow = line.split(":").slice(1).join(":").trim();
-      currentSection = "";
-      continue;
+      currentSection = ""; continue;
     }
     if (lower.startsWith("you want to feel:")) {
       sections.feelingNext = line.split(":").slice(1).join(":").trim();
-      currentSection = "";
-      continue;
+      currentSection = ""; continue;
     }
     if (lower === "your outfit direction") { currentSection = "outfitDirection"; continue; }
     if (lower === "why this works") { currentSection = "whyThisWorks"; continue; }
     if (lower === "shift" || lower.startsWith("shift:")) {
       currentSection = "shift";
       const a = line.split(":").slice(1).join(":").trim();
-      if (a) sections.shift = a;
-      continue;
+      if (a) sections.shift = a; continue;
     }
     if (lower.includes("naia recommendation")) { currentSection = "naiaRecommendations"; continue; }
-
     if (line.match(/^[-•*]/) || line.match(/^\d+[\.\)]/)) {
       const c = line.replace(/^[-•*\d]+[\.\)]*\s*/, "").replace(/\*\*/g, "").trim();
       if (currentSection === "outfitDirection") sections.outfitDirection.push(c);
@@ -96,17 +90,52 @@ function parseStylingResult(text) {
       continue;
     }
   }
-
   sections.shift = sections.shift.split(/nAia|Accessories|Perfume|Song/i)[0].trim();
   return sections;
 }
 
+// ─── Auth helpers ───
+function getTokenFromUrl() {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  return params.get("naia_token") || null;
+}
+
+function getSavedToken() {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("naia_customer_token") || null;
+}
+
+function saveToken(token) {
+  if (typeof window !== "undefined" && token) {
+    localStorage.setItem("naia_customer_token", token);
+  }
+}
+
+function clearToken() {
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("naia_customer_token");
+  }
+}
+
+function authHeaders(token) {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+// ─── Loader ───
 export async function loader() {
   return null;
 }
 
+// ─── Main Component ───
 export default function Stylist() {
-  const [step, setStep] = useState(1);
+  // ─── Auth state ───
+  const [customerToken, setCustomerToken] = useState(null);
+  const [customer, setCustomer] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  // ─── Flow state ───
+  const [step, setStep] = useState(0); // 0 = welcome/loading, 1-8 = steps
   const [mood, setMood] = useState("");
   const [feeling, setFeeling] = useState("");
   const [event, setEvent] = useState("");
@@ -126,17 +155,130 @@ export default function Stylist() {
   const [showAddItem, setShowAddItem] = useState(false);
   const [loadingPhrase, setLoadingPhrase] = useState(0);
 
+  // ─── New feature state ───
+  const [wishlist, setWishlist] = useState([]);
+  const [outfitHistory, setOutfitHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showWishlist, setShowWishlist] = useState(false);
+  const [tryOnState, setTryOnState] = useState({}); // { [productTitle]: { loading, result, error } }
+  const [tryOnPhoto, setTryOnPhoto] = useState(null); // customer's photo for virtual try-on
+  const [showAccount, setShowAccount] = useState(false);
+  const [closetSynced, setClosetSynced] = useState(false);
+
   const LOADING_PHRASES = [
-    "Reading your mood...",
-    "Exploring your closet...",
-    "Matching textures and tones...",
-    "Finding the perfect pairing...",
-    "Considering your silhouette...",
-    "Curating your look...",
-    "Balancing structure and flow...",
-    "Adding the finishing touches...",
+    "Reading your mood...", "Exploring your closet...",
+    "Matching textures and tones...", "Finding the perfect pairing...",
+    "Considering your silhouette...", "Curating your look...",
+    "Balancing structure and flow...", "Adding the finishing touches...",
     "Almost there...",
   ];
+
+  // ─── Init: check auth ───
+  useEffect(() => {
+    async function init() {
+      let token = getTokenFromUrl() || getSavedToken();
+      
+      // Clean URL if token was in params
+      if (getTokenFromUrl() && typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("naia_token");
+        window.history.replaceState({}, "", url.toString());
+      }
+
+      if (token) {
+        saveToken(token);
+        setCustomerToken(token);
+        // Fetch profile
+        try {
+          const res = await fetch("/api/customer-profile", {
+            headers: authHeaders(token),
+          });
+          const data = await res.json();
+          if (data.authenticated && data.customer) {
+            setCustomer(data.customer);
+          } else {
+            clearToken();
+            token = null;
+          }
+        } catch {
+          clearToken();
+          token = null;
+        }
+      }
+
+      setAuthLoading(false);
+      setStep(1);
+    }
+    init();
+  }, []);
+
+  // ─── Load closet: from DB if authenticated, otherwise localStorage ───
+  useEffect(() => {
+    if (authLoading) return;
+
+    async function loadCloset() {
+      if (customerToken) {
+        try {
+          const res = await fetch("/api/closet", { headers: authHeaders(customerToken) });
+          const data = await res.json();
+          if (data.authenticated && data.items) {
+            setCloset(data.items);
+            setClosetSynced(true);
+
+            // If there are localStorage items that aren't in DB yet, sync them
+            const localRaw = localStorage.getItem("naia-closet-v2");
+            if (localRaw) {
+              try {
+                const localItems = JSON.parse(localRaw);
+                if (localItems.length > 0 && data.items.length === 0) {
+                  // First login — bulk sync localStorage to DB
+                  const syncRes = await fetch("/api/closet", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
+                    body: JSON.stringify({ action: "sync", items: localItems }),
+                  });
+                  const syncData = await syncRes.json();
+                  if (syncData.items) setCloset(syncData.items);
+                }
+                // Clear localStorage after sync
+                localStorage.removeItem("naia-closet-v2");
+              } catch {}
+            }
+            return;
+          }
+        } catch {}
+      }
+      // Fallback: localStorage
+      const saved = localStorage.getItem("naia-closet-v2");
+      if (saved) { try { setCloset(JSON.parse(saved)); } catch {} }
+    }
+    loadCloset();
+  }, [authLoading, customerToken]);
+
+  // ─── Load wishlist ───
+  useEffect(() => {
+    if (!customerToken) return;
+    fetch("/api/wishlist", { headers: authHeaders(customerToken) })
+      .then(r => r.json())
+      .then(d => { if (d.items) setWishlist(d.items); })
+      .catch(() => {});
+  }, [customerToken]);
+
+  // ─── Load outfit history ───
+  useEffect(() => {
+    if (!customerToken) return;
+    fetch("/api/outfit-history", { headers: authHeaders(customerToken) })
+      .then(r => r.json())
+      .then(d => { if (d.history) setOutfitHistory(d.history); })
+      .catch(() => {});
+  }, [customerToken]);
+
+  // Save closet to localStorage when NOT authenticated (guest mode)
+  useEffect(() => {
+    if (!customerToken && !authLoading) {
+      localStorage.setItem("naia-closet-v2", JSON.stringify(closet));
+    }
+  }, [closet, customerToken, authLoading]);
 
   useEffect(() => {
     if (!loading) { setLoadingPhrase(0); return; }
@@ -152,15 +294,6 @@ export default function Stylist() {
   }, []);
 
   useEffect(() => {
-    const saved = localStorage.getItem("naia-closet-v2");
-    if (saved) { try { setCloset(JSON.parse(saved)); } catch {} }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("naia-closet-v2", JSON.stringify(closet));
-  }, [closet]);
-
-  useEffect(() => {
     fetch("/api/naia-products")
       .then(r => r.json())
       .then(d => setNaiaProducts(d.products || []))
@@ -172,23 +305,83 @@ export default function Stylist() {
 
   const parsedResult = useMemo(() => parseStylingResult(stylingResult), [stylingResult]);
 
-  const fileInputRef = useState(null);
+  const wishlistIds = useMemo(() => new Set(wishlist.map(w => String(w.naiaProductId))), [wishlist]);
+
+  // ─── Closet operations (DB-aware) ───
+  const addItem = useCallback(async () => {
+    if (!itemName.trim()) return;
+    if (customerToken) {
+      try {
+        const res = await fetch("/api/closet", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
+          body: JSON.stringify({ action: "add", name: itemName, category: itemCategory, image: itemImage }),
+        });
+        const data = await res.json();
+        if (data.item) {
+          setCloset(prev => [data.item, ...prev]);
+        }
+      } catch {}
+    } else {
+      setCloset(prev => [...prev, { id: String(Date.now()), name: itemName, category: itemCategory, image: itemImage }]);
+    }
+    setItemName(""); setItemCategory("top"); setItemImage("");
+    setShowAddItem(false);
+  }, [itemName, itemCategory, itemImage, customerToken]);
+
+  const removeClosetItem = useCallback(async (itemId) => {
+    setCloset(prev => prev.filter(i => i.id !== itemId));
+    setSelectedClosetIds(prev => prev.filter(i => i !== itemId));
+    if (customerToken) {
+      try {
+        await fetch("/api/closet", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
+          body: JSON.stringify({ action: "delete", itemId }),
+        });
+      } catch {}
+    }
+  }, [customerToken]);
+
+  // ─── Wishlist operations ───
+  const toggleWishlist = useCallback(async (product) => {
+    if (!customerToken) return;
+    const pid = String(product.id);
+    if (wishlistIds.has(pid)) {
+      setWishlist(prev => prev.filter(w => String(w.naiaProductId) !== pid));
+      try {
+        await fetch("/api/wishlist", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
+          body: JSON.stringify({ action: "remove", naiaProductId: pid }),
+        });
+      } catch {}
+    } else {
+      const newItem = { naiaProductId: pid, title: product.title, handle: product.handle, image: product.image, createdAt: new Date().toISOString() };
+      setWishlist(prev => [newItem, ...prev]);
+      try {
+        await fetch("/api/wishlist", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
+          body: JSON.stringify({ action: "add", ...newItem }),
+        });
+      } catch {}
+    }
+  }, [customerToken, wishlistIds]);
 
   const handleImageUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      // Compress image to a small thumbnail to avoid localStorage overflow
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement("canvas");
-        const MAX = 300; // max dimension in px
+        const MAX = 300;
         let w = img.width, h = img.height;
         if (w > h) { h = (h / w) * MAX; w = MAX; }
         else { w = (w / h) * MAX; h = MAX; }
-        canvas.width = w;
-        canvas.height = h;
+        canvas.width = w; canvas.height = h;
         canvas.getContext("2d").drawImage(img, 0, 0, w, h);
         setItemImage(canvas.toDataURL("image/jpeg", 0.6));
       };
@@ -197,11 +390,15 @@ export default function Stylist() {
     reader.readAsDataURL(file);
   };
 
-  const addItem = () => {
-    if (!itemName.trim()) return;
-    setCloset(prev => [...prev, { id: Date.now(), name: itemName, category: itemCategory, image: itemImage }]);
-    setItemName(""); setItemCategory("top"); setItemImage("");
-    setShowAddItem(false);
+  // ─── Try-on photo upload ───
+  const handleTryOnPhotoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setTryOnPhoto(ev.target.result);
+    };
+    reader.readAsDataURL(file);
   };
 
   const toggleClosetItem = (id) => {
@@ -212,6 +409,7 @@ export default function Stylist() {
     setStyleWords(prev => prev.includes(word) ? prev.filter(w => w !== word) : prev.length < 3 ? [...prev, word] : prev);
   };
 
+  // ─── Call AI (with history save) ───
   const callAI = async () => {
     setLoading(true);
     setStylingResult("");
@@ -242,19 +440,132 @@ export default function Stylist() {
         }),
       });
       const data = await res.json();
-      setStylingResult(data.result || data.error || "Something went wrong.");
+      const result = data.result || data.error || "Something went wrong.";
+      setStylingResult(result);
+
+      // Save to outfit history if authenticated
+      if (customerToken && result && !result.startsWith("Something went wrong")) {
+        try {
+          await fetch("/api/outfit-history", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
+            body: JSON.stringify({
+              mood, feeling, event, styleWords, bodyPref, mode,
+              closetItemIds: selectedClosetIds,
+              result,
+            }),
+          });
+          // Refresh history
+          const hRes = await fetch("/api/outfit-history", { headers: authHeaders(customerToken) });
+          const hData = await hRes.json();
+          if (hData.history) setOutfitHistory(hData.history);
+        } catch {}
+      }
     } catch {
       setStylingResult("Something went wrong. Please try again.");
     }
     setLoading(false);
   };
 
+  // ─── Quick re-style ───
+  const quickRestyle = async () => {
+    if (!customer) return;
+    setMood(customer.lastMood || "");
+    setFeeling(customer.lastFeeling || "");
+    setEvent(customer.lastEvent || "");
+    setStyleWords(customer.lastStyleWords || []);
+    setBodyPref(customer.lastBodyPref || "");
+    setMode(customer.lastMode || "closet_only");
+    // Skip to step 8 and immediately call AI
+    setLoading(true);
+    setStylingResult("");
+    setStep(8);
+    try {
+      const res = await fetch("/api/style", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: customer.lastMode || "closet_only",
+          outfit: closet.map(i => i.name).join(" + "),
+          mood: customer.lastMood || "",
+          feeling: customer.lastFeeling || "",
+          event: customer.lastEvent || "",
+          styleWords: customer.lastStyleWords || [],
+          bodyPref: customer.lastBodyPref || "",
+          closetItems: closet,
+          closet: closet.map(i => ({ name: i.name, category: i.category })),
+        }),
+      });
+      const data = await res.json();
+      const result = data.result || data.error || "Something went wrong.";
+      setStylingResult(result);
+      if (customerToken && result) {
+        try {
+          await fetch("/api/outfit-history", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
+            body: JSON.stringify({
+              mood: customer.lastMood, feeling: customer.lastFeeling,
+              event: customer.lastEvent, styleWords: customer.lastStyleWords,
+              bodyPref: customer.lastBodyPref, mode: customer.lastMode,
+              result,
+            }),
+          });
+        } catch {}
+      }
+    } catch {
+      setStylingResult("Something went wrong. Please try again.");
+    }
+    setLoading(false);
+  };
+
+  // ─── Virtual try-on ───
+  const startTryOn = async (productTitle, productImage) => {
+    if (!tryOnPhoto) return;
+    setTryOnState(prev => ({ ...prev, [productTitle]: { loading: true, result: null, error: null } }));
+    try {
+      const res = await fetch(TRYON_WORKER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model_image: tryOnPhoto,
+          garment_image: productImage,
+          category: "tops", // default; the worker handles it
+        }),
+      });
+      const data = await res.json();
+      if (data.output || data.result) {
+        setTryOnState(prev => ({ ...prev, [productTitle]: { loading: false, result: data.output || data.result, error: null } }));
+      } else {
+        setTryOnState(prev => ({ ...prev, [productTitle]: { loading: false, result: null, error: data.error || "Try-on failed" } }));
+      }
+    } catch (err) {
+      setTryOnState(prev => ({ ...prev, [productTitle]: { loading: false, result: null, error: "Network error" } }));
+    }
+  };
+
   const resetAll = () => {
     setStep(1); setStylingResult(""); setSelectedClosetIds([]);
     setSelectedNaiaPiece(null); setMood(""); setFeeling("");
     setEvent(""); setStyleWords([]); setBodyPref(""); setMode("");
+    setShowHistory(false); setShowWishlist(false); setShowAccount(false);
+    setTryOnState({}); setTryOnPhoto(null);
   };
 
+  const logout = () => {
+    clearToken();
+    setCustomerToken(null);
+    setCustomer(null);
+    setWishlist([]);
+    setOutfitHistory([]);
+    setClosetSynced(false);
+    // Reload closet from localStorage
+    const saved = localStorage.getItem("naia-closet-v2");
+    if (saved) { try { setCloset(JSON.parse(saved)); } catch { setCloset([]); } }
+    else { setCloset([]); }
+  };
+
+  // ─── Styles ───
   const s = {
     page: { minHeight: "100vh", background: "#f5f2ee", color: "#1a1816", fontFamily: '"Cormorant Garamond", Georgia, serif' },
     container: { maxWidth: "680px", margin: "0 auto", padding: "40px 24px 80px" },
@@ -273,20 +584,159 @@ export default function Stylist() {
     resultValue: { fontSize: "22px", fontStyle: "italic", lineHeight: 1.4 },
     divider: { borderTop: "1px solid #d4cfc9", margin: "24px 0" },
     vibeCard: { padding: "16px 20px", background: "#eee9e2", borderRadius: "2px" },
+    // New styles
+    topBar: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px", paddingBottom: "16px", borderBottom: "1px solid #e8e4df" },
+    avatar: { width: "36px", height: "36px", borderRadius: "50%", background: "#1a1816", color: "#f5f2ee", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px", fontWeight: 500, cursor: "pointer" },
+    iconBtn: { background: "none", border: "none", cursor: "pointer", padding: "8px", color: "#1a1816", position: "relative" },
+    badge: { position: "absolute", top: "2px", right: "2px", width: "8px", height: "8px", borderRadius: "50%", background: "#c5553a" },
+    heartBtn: (active) => ({ background: "none", border: "none", cursor: "pointer", padding: "4px", color: active ? "#c5553a" : "#8a7f75", fontSize: "18px", transition: "color 0.2s" }),
+    panel: { background: "#fff", borderRadius: "2px", border: "1px solid #d4cfc9", padding: "24px", marginBottom: "24px" },
+    tryOnBtn: { padding: "8px 16px", background: "transparent", color: "#1a1816", border: "1px solid #1a1816", borderRadius: "2px", fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif', marginTop: "8px" },
+    quickBtn: { padding: "16px 32px", background: "transparent", border: "2px solid #1a1816", borderRadius: "2px", fontSize: "15px", letterSpacing: "0.1em", cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif', fontStyle: "italic", transition: "all 0.2s" },
   };
 
+  // ─── RENDER ───
   return (
     <div style={s.page}>
       <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap" rel="stylesheet" />
       <div style={s.container}>
-        <div style={s.stepIndicator}>
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} style={s.dot(step === i + 1, step > i + 1)} />
-          ))}
+
+        {/* ─── Top Bar ─── */}
+        <div style={s.topBar}>
+          <div style={{ fontSize: "22px", fontStyle: "italic", fontWeight: 300 }}>nAia</div>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            {customer && (
+              <>
+                {/* History button */}
+                <button style={s.iconBtn} onClick={() => { setShowHistory(!showHistory); setShowWishlist(false); setShowAccount(false); }} title="Past looks">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  {outfitHistory.length > 0 && <div style={s.badge} />}
+                </button>
+                {/* Wishlist button */}
+                <button style={s.iconBtn} onClick={() => { setShowWishlist(!showWishlist); setShowHistory(false); setShowAccount(false); }} title="Wishlist">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill={wishlist.length > 0 ? "#c5553a" : "none"} stroke={wishlist.length > 0 ? "#c5553a" : "currentColor"} strokeWidth="1.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                </button>
+                {/* Account avatar */}
+                <div style={s.avatar} onClick={() => { setShowAccount(!showAccount); setShowHistory(false); setShowWishlist(false); }}>
+                  {(customer.firstName || customer.email || "?")[0].toUpperCase()}
+                </div>
+              </>
+            )}
+            {!customer && !authLoading && (
+              <div style={{ fontSize: "12px", color: "#8a7f75" }}>
+                <a href="https://naia-9417.myshopify.com/account/login" target="_blank" rel="noreferrer"
+                  style={{ color: "#1a1816", textDecoration: "underline", textUnderlineOffset: "3px" }}>
+                  Sign in
+                </a>
+                {" "}to save your closet
+              </div>
+            )}
+          </div>
         </div>
 
-        {step === 1 && (
+        {/* ─── Account Panel ─── */}
+        {showAccount && customer && (
+          <div style={s.panel}>
+            <div style={s.title}>Your Account</div>
+            <p style={{ fontSize: "18px", margin: "0 0 8px" }}>{customer.firstName} {customer.lastName}</p>
+            <p style={{ fontSize: "14px", color: "#8a7f75", margin: "0 0 16px" }}>{customer.email}</p>
+            <p style={{ fontSize: "13px", color: "#8a7f75", margin: "0 0 16px" }}>
+              {closet.length} closet piece{closet.length !== 1 ? "s" : ""} · {wishlist.length} wishlisted · {outfitHistory.length} past look{outfitHistory.length !== 1 ? "s" : ""}
+            </p>
+            <button style={{ ...s.outlineBtn, fontSize: "11px", padding: "10px 20px" }} onClick={logout}>Sign out</button>
+          </div>
+        )}
+
+        {/* ─── Wishlist Panel ─── */}
+        {showWishlist && customer && (
+          <div style={s.panel}>
+            <div style={s.title}>Your Wishlist</div>
+            {wishlist.length === 0 ? (
+              <p style={{ fontSize: "15px", color: "#8a7f75", fontStyle: "italic" }}>No wishlisted pieces yet. Tap the heart on any nAia piece to save it.</p>
+            ) : (
+              <div style={s.productGrid}>
+                {wishlist.map(w => (
+                  <div key={w.naiaProductId} style={{ border: "1px solid #d4cfc9", borderRadius: "2px", overflow: "hidden", position: "relative" }}>
+                    <a href={`https://naia-9417.myshopify.com/products/${w.handle}`} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit" }}>
+                      {w.image && <img src={w.image} alt={w.title} style={{ width: "100%", height: "140px", objectFit: "cover", display: "block" }} />}
+                      <div style={{ padding: "8px", fontSize: "12px" }}>{w.title}</div>
+                    </a>
+                    <button style={{ ...s.heartBtn(true), position: "absolute", top: "6px", right: "6px" }}
+                      onClick={() => toggleWishlist({ id: w.naiaProductId, title: w.title, handle: w.handle, image: w.image })}>♥</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─── History Panel ─── */}
+        {showHistory && customer && (
+          <div style={s.panel}>
+            <div style={s.title}>Past Looks</div>
+            {outfitHistory.length === 0 ? (
+              <p style={{ fontSize: "15px", color: "#8a7f75", fontStyle: "italic" }}>No past styling sessions yet.</p>
+            ) : (
+              <div>
+                {outfitHistory.slice(0, 10).map((h, idx) => {
+                  const parsed = parseStylingResult(h.result);
+                  return (
+                    <div key={h.id || idx} style={{ padding: "16px 0", borderBottom: idx < 9 ? "1px solid #e8e4df" : "none" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div>
+                          <div style={{ fontSize: "15px", fontStyle: "italic", marginBottom: "4px" }}>
+                            {h.mood || "—"} → {h.feeling || "—"}
+                          </div>
+                          <div style={{ fontSize: "12px", color: "#8a7f75" }}>
+                            {h.event || ""} · {new Date(h.createdAt).toLocaleDateString()}
+                          </div>
+                        </div>
+                        <button style={{ ...s.outlineBtn, fontSize: "10px", padding: "6px 12px" }}
+                          onClick={() => {
+                            setStylingResult(h.result);
+                            setMood(h.mood || ""); setFeeling(h.feeling || "");
+                            setEvent(h.event || "");
+                            setShowHistory(false);
+                            setStep(8);
+                          }}>View</button>
+                      </div>
+                      {parsed?.shift && (
+                        <p style={{ fontSize: "13px", fontStyle: "italic", color: "#4a4540", margin: "8px 0 0" }}>{parsed.shift}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─── Step dots ─── */}
+        {step >= 1 && step <= 8 && !showHistory && !showWishlist && !showAccount && (
+          <div style={s.stepIndicator}>
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} style={s.dot(step === i + 1, step > i + 1)} />
+            ))}
+          </div>
+        )}
+
+        {/* ─── Step 1: Welcome + Quick Re-style ─── */}
+        {step === 1 && !showHistory && !showWishlist && !showAccount && (
           <div>
+            {/* Quick re-style for returning users */}
+            {customer && customer.lastMood && closet.length > 0 && (
+              <div style={{ marginBottom: "40px", padding: "28px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" }}>
+                <p style={{ fontSize: "14px", color: "#8a7f75", margin: "0 0 8px", letterSpacing: "0.15em", textTransform: "uppercase" }}>Welcome back, {customer.firstName || "love"}</p>
+                <p style={{ fontSize: "22px", fontStyle: "italic", margin: "0 0 20px" }}>
+                  Last time you were feeling {customer.lastMood} and wanted to feel {customer.lastFeeling}
+                </p>
+                <button style={s.quickBtn} onClick={quickRestyle}>
+                  ✦ Style me again
+                </button>
+                <p style={{ fontSize: "12px", color: "#8a7f75", margin: "12px 0 0" }}>or start fresh below</p>
+              </div>
+            )}
+
             <div style={s.title}>Step 1 of 7</div>
             <p style={s.bigQ}>How are you feeling right now?</p>
             <input style={s.input} placeholder="overwhelmed, tired, excited..." value={mood} onChange={e => setMood(e.target.value)} autoFocus />
@@ -384,7 +834,10 @@ export default function Stylist() {
             </p>
 
             <div style={{ marginBottom: "32px" }}>
-              <div style={{ ...s.resultLabel, marginBottom: "12px" }}>Your Closet</div>
+              <div style={{ ...s.resultLabel, marginBottom: "12px" }}>
+                Your Closet
+                {customer && closetSynced && <span style={{ color: "#7da563", marginLeft: "8px" }}>✓ Synced</span>}
+              </div>
               {closet.length === 0 && (
                 <p style={{ color: "#8a7f75", fontSize: "15px", marginBottom: "16px" }}>Your closet is empty. Add a piece below.</p>
               )}
@@ -402,7 +855,7 @@ export default function Stylist() {
                         <div style={{ fontSize: "14px", fontWeight: 500 }}>{piece.name}</div>
                         <div style={{ fontSize: "12px", color: "#8a7f75" }}>{piece.category}</div>
                       </div>
-                      <button onClick={(e) => { e.stopPropagation(); setCloset(prev => prev.filter(i => i.id !== piece.id)); setSelectedClosetIds(prev => prev.filter(i => i !== piece.id)); }}
+                      <button onClick={(e) => { e.stopPropagation(); removeClosetItem(piece.id); }}
                         style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "#8a7f75", padding: "4px" }}>×</button>
                     </div>
                   </div>
@@ -450,6 +903,7 @@ export default function Stylist() {
           </div>
         )}
 
+        {/* ─── Step 8: Results (with try-on + wishlist) ─── */}
         {step === 8 && (
           <div>
             <div style={s.title}>Your Styling</div>
@@ -561,28 +1015,89 @@ export default function Stylist() {
                   </>
                 )}
 
+                {/* ─── Shop recommended pieces WITH wishlist hearts + try-on ─── */}
                 {(mode === "recommend_naia" || mode === "closet_naia") && naiaProducts.length > 0 && parsedResult.naiaRecommendations?.length > 0 && (
                   <>
                     <div style={s.divider} />
                     <div style={s.resultLabel}>Shop recommended pieces</div>
+
+                    {/* Try-on photo upload */}
+                    <div style={{ margin: "12px 0 16px", padding: "16px", background: "#eee9e2", borderRadius: "2px" }}>
+                      <div style={{ fontSize: "12px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "8px" }}>Virtual Try-On</div>
+                      {tryOnPhoto ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                          <img src={tryOnPhoto} alt="Your photo" style={{ width: "60px", height: "60px", objectFit: "cover", borderRadius: "2px" }} />
+                          <div>
+                            <div style={{ fontSize: "13px", marginBottom: "4px" }}>Photo ready</div>
+                            <button style={{ fontSize: "12px", color: "#8a7f75", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0 }}
+                              onClick={() => setTryOnPhoto(null)}>Change photo</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <p style={{ fontSize: "13px", color: "#4a4540", margin: "0 0 8px" }}>Upload a photo of yourself to try on recommended pieces</p>
+                          <input id="tryon-photo-input" type="file" accept="image/*" onChange={handleTryOnPhotoUpload} style={{ display: "none" }} />
+                          <button style={{ ...s.outlineBtn, fontSize: "11px", padding: "8px 16px" }}
+                            onClick={() => document.getElementById("tryon-photo-input").click()}>
+                            Upload photo
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
                     <div style={s.productGrid}>
                       {naiaProducts
                         .filter(p => parsedResult.naiaRecommendations.some(r => r.toLowerCase().includes(p.title.toLowerCase())))
-                        .map(p => (
-                          <a key={p.id} href={p.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit" }}>
-                            <div style={{ border: "1px solid #d4cfc9", borderRadius: "2px", overflow: "hidden" }}>
-                              <img src={p.image} alt={p.title} style={{ width: "100%", height: "140px", objectFit: "cover", display: "block" }} />
-                              <div style={{ padding: "8px", fontSize: "12px" }}>{p.title}</div>
+                        .map(p => {
+                          const tryOn = tryOnState[p.title];
+                          return (
+                            <div key={p.id} style={{ border: "1px solid #d4cfc9", borderRadius: "2px", overflow: "hidden", position: "relative" }}>
+                              <a href={p.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit" }}>
+                                <img src={p.image} alt={p.title} style={{ width: "100%", height: "140px", objectFit: "cover", display: "block" }} />
+                                <div style={{ padding: "8px", fontSize: "12px" }}>{p.title}</div>
+                              </a>
+
+                              {/* Wishlist heart */}
+                              {customer && (
+                                <button
+                                  style={{ ...s.heartBtn(wishlistIds.has(String(p.id))), position: "absolute", top: "6px", right: "6px", background: "rgba(255,255,255,0.8)", borderRadius: "50%", width: "28px", height: "28px", display: "flex", alignItems: "center", justifyContent: "center" }}
+                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleWishlist(p); }}>
+                                  {wishlistIds.has(String(p.id)) ? "♥" : "♡"}
+                                </button>
+                              )}
+
+                              {/* Try-on button */}
+                              {tryOnPhoto && (
+                                <div style={{ padding: "0 8px 8px" }}>
+                                  {tryOn?.loading ? (
+                                    <div style={{ fontSize: "11px", color: "#8a7f75", textAlign: "center", padding: "8px" }}>Trying on...</div>
+                                  ) : tryOn?.result ? (
+                                    <img src={tryOn.result} alt="Try-on result" style={{ width: "100%", borderRadius: "2px", marginTop: "4px" }} />
+                                  ) : (
+                                    <button style={s.tryOnBtn} onClick={() => startTryOn(p.title, p.image)}>
+                                      Try this on
+                                    </button>
+                                  )}
+                                  {tryOn?.error && (
+                                    <div style={{ fontSize: "11px", color: "#c5553a", marginTop: "4px" }}>{tryOn.error}</div>
+                                  )}
+                                </div>
+                              )}
                             </div>
-                          </a>
-                        ))
+                          );
+                        })
                       }
                     </div>
                   </>
                 )}
 
-                <div style={{ marginTop: "32px" }}>
+                <div style={{ marginTop: "32px", display: "flex", gap: "12px" }}>
                   <button style={s.outlineBtn} onClick={resetAll}>Start over</button>
+                  {customer && (
+                    <button style={{ ...s.outlineBtn, opacity: 0.6 }} disabled>
+                      ✓ Saved to history
+                    </button>
+                  )}
                 </div>
               </div>
             ) : (
