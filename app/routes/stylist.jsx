@@ -151,11 +151,28 @@ export default function Stylist() {
 
   const parsedResult = useMemo(() => parseStylingResult(stylingResult), [stylingResult]);
 
+  const fileInputRef = useState(null);
+
   const handleImageUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => setItemImage(ev.target.result);
+    reader.onload = (ev) => {
+      // Compress image to a small thumbnail to avoid localStorage overflow
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX = 300; // max dimension in px
+        let w = img.width, h = img.height;
+        if (w > h) { h = (h / w) * MAX; w = MAX; }
+        else { w = (w / h) * MAX; h = MAX; }
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        setItemImage(canvas.toDataURL("image/jpeg", 0.6));
+      };
+      img.src = ev.target.result;
+    };
     reader.readAsDataURL(file);
   };
 
@@ -322,13 +339,9 @@ export default function Stylist() {
           <div>
             <div style={s.title}>Step 6 of 7</div>
             <p style={s.bigQ}>What would you like to do?</p>
-            <div onClick={() => setMode("closet_naia")} style={s.modeCard(mode === "closet_naia")}>
-              <div style={{ fontSize: "17px", fontWeight: 500, marginBottom: "4px" }}>Style my closet piece with a nAia piece</div>
-              <div style={{ fontSize: "14px", opacity: 0.7 }}>Pick something you own + a nAia piece and we'll style them together</div>
-            </div>
             <div onClick={() => setMode("recommend_naia")} style={s.modeCard(mode === "recommend_naia")}>
-              <div style={{ fontSize: "17px", fontWeight: 500, marginBottom: "4px" }}>Recommend a nAia piece for what I own</div>
-              <div style={{ fontSize: "14px", opacity: 0.7 }}>Pick something from your closet and we'll find the perfect nAia match</div>
+              <div style={{ fontSize: "17px", fontWeight: 500, marginBottom: "4px" }}>Find nAia pieces for what I own</div>
+              <div style={{ fontSize: "14px", opacity: 0.7 }}>Upload pieces from your closet and we'll recommend the perfect nAia match</div>
             </div>
             <div onClick={() => setMode("closet_only")} style={s.modeCard(mode === "closet_only")}>
               <div style={{ fontSize: "17px", fontWeight: 500, marginBottom: "4px" }}>Style my closet pieces together</div>
@@ -346,8 +359,7 @@ export default function Stylist() {
             <div style={s.title}>Step 7 of 7</div>
             <p style={s.bigQ}>
               {mode === "closet_only" ? "Add your pieces and we'll choose the best combination" :
-               mode === "recommend_naia" ? "Pick a piece from your closet" :
-               "Pick your closet piece + a nAia piece"}
+               "Pick pieces from your closet"}
             </p>
 
             <div style={{ marginBottom: "32px" }}>
@@ -389,42 +401,26 @@ export default function Stylist() {
                     <option value="shoes">Shoes</option>
                     <option value="accessory">Accessory</option>
                   </select>
-                  <input type="file" accept="image/*" onChange={handleImageUpload} style={{ marginBottom: "12px", fontSize: "13px" }} />
+                  <input id="closet-file-input" type="file" accept="image/*" onChange={handleImageUpload} style={{ display: "none" }} />
+                  {itemImage ? (
+                    <div style={{ marginBottom: "12px", position: "relative", display: "inline-block" }}>
+                      <img src={itemImage} alt="Preview" style={{ width: "100px", height: "100px", objectFit: "cover", borderRadius: "4px", display: "block" }} />
+                      <button onClick={() => setItemImage("")} style={{ position: "absolute", top: "-6px", right: "-6px", width: "20px", height: "20px", borderRadius: "50%", background: "#1a1816", color: "#fff", border: "none", fontSize: "12px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => document.getElementById("closet-file-input").click()}
+                      style={{ ...s.outlineBtn, fontSize: "12px", padding: "10px 20px", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2.5"/><path d="M3 17l5-5 3 2.5 4-5 6 7.5"/></svg>
+                      Add photo (optional)
+                    </button>
+                  )}
                   <div style={{ display: "flex", gap: "10px" }}>
                     <button style={s.btn} onClick={addItem}>Add</button>
-                    <button style={s.outlineBtn} onClick={() => setShowAddItem(false)}>Cancel</button>
+                    <button style={s.outlineBtn} onClick={() => { setShowAddItem(false); setItemImage(""); }}>Cancel</button>
                   </div>
                 </div>
               )}
             </div>
-
-            {mode === "closet_naia" && (
-              <div style={{ marginBottom: "32px" }}>
-                <div style={{ ...s.resultLabel, marginBottom: "12px" }}>Choose a nAia Piece</div>
-                {currentNaiaPiece && (
-                  <div onClick={() => setSelectedNaiaPiece(selectedNaiaPiece?.id === currentNaiaPiece.id ? null : currentNaiaPiece)}
-                    style={{ display: "flex", gap: "12px", padding: "12px", border: `2px solid ${selectedNaiaPiece?.id === currentNaiaPiece.id ? "#1a1816" : "#d4cfc9"}`, marginBottom: "16px", cursor: "pointer" }}>
-                    <img src={currentNaiaPiece.image} alt={currentNaiaPiece.name} style={{ width: "60px", height: "80px", objectFit: "cover", borderRadius: "2px" }} />
-                    <div>
-                      <div style={{ fontSize: "15px", fontWeight: 500 }}>{currentNaiaPiece.name}</div>
-                      <div style={{ fontSize: "12px", color: "#8a7f75" }}>Currently viewing</div>
-                    </div>
-                  </div>
-                )}
-                <div style={s.productGrid}>
-                  {naiaProducts.map(p => (
-                    <div key={p.id} onClick={() => setSelectedNaiaPiece(selectedNaiaPiece?.id === p.id ? null : p)}
-                      style={{ border: `2px solid ${selectedNaiaPiece?.id === p.id ? "#1a1816" : "transparent"}`, borderRadius: "2px", cursor: "pointer", overflow: "hidden", position: "relative" }}>
-                      <img src={p.image} alt={p.title} style={{ width: "100%", height: "140px", objectFit: "cover", display: "block" }} />
-                      <div style={{ padding: "8px", fontSize: "12px", fontWeight: 500 }}>{p.title}</div>
-                      {selectedNaiaPiece?.id === p.id && (
-                        <div style={{ position: "absolute", top: "8px", right: "8px", background: "#1a1816", color: "#fff", borderRadius: "50%", width: "20px", height: "20px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px" }}>✓</div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             <div style={{ display: "flex", gap: "12px" }}>
               <button style={s.outlineBtn} onClick={() => setStep(6)}>Back</button>
