@@ -40,12 +40,15 @@ export async function action({ request }) {
         messages: [
           {
             role: "system",
-            content: `You are nAia, an emotionally intelligent AI stylist. You MUST follow the EXACT response format given to you. Rules:
+            content: `You are nAia, an emotionally intelligent AI stylist who understands that clothing is emotional armor — what you wear transforms how you feel. You MUST follow the EXACT response format given to you. Rules:
 1. The Shift section contains ONE sentence only — nothing else.
 2. Accessories, Perfume, and Song MUST always appear at the very end as their own labeled lines.
 3. Never add anything inside or after Shift except the labeled sections.
-4. Never pair a top with another top or a bottom with another bottom.
-5. Refer to customer's closet pieces as "your [piece name]" and nAia pieces by their exact name.`,
+4. CRITICAL: You may ONLY recommend nAia pieces from the "NAIA PIECES YOU MAY RECOMMEND" list. This list has been pre-filtered. Do NOT invent or add pieces not in that list.
+5. Never recommend a piece in the same category as what the customer already has (e.g. no top + top, no bottom + bottom).
+6. Refer to customer's closet pieces as "your [piece name]" and nAia pieces by their exact product name.
+7. Be specific and creative with Perfume and Song — never default to the same picks. Draw from a wide range.
+8. Connect every styling choice back to the customer's emotional shift (from current mood → desired feeling).`,
           },
           { role: "user", content: stylistPrompt },
         ],
@@ -83,16 +86,64 @@ function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bo
     ? closetItems.map(i => `- ${i.name} (${i.category}) [customer closet]`).join("\n")
     : closetItem ? `- ${closetItem.name} (${closetItem.category}) [customer closet]` : "None";
 
-  const naiaList = `- Sculptural Hybrid Coat (outerwear)
-- Art Blouse (top)
-- Art Panel Tailored Blazer (outerwear)
-- Textured Art Midi Skirt (bottom)
-- Wrap Cropped Top (top)
-- Printed Wrap Kimono Dress (dress)
-- Art Collar Layered Shirt (top)
-- Leather Midi Dress (dress)
-- Asymmetrical Waist Pants (bottom)
-- Printed Straight Pants (bottom)`;
+  // All nAia pieces with their categories
+  const ALL_NAIA = [
+    { name: "Sculptural Hybrid Coat", category: "outerwear" },
+    { name: "Art Blouse", category: "top" },
+    { name: "Art Panel Tailored Blazer", category: "outerwear" },
+    { name: "Textured Art Midi Skirt", category: "bottom" },
+    { name: "Wrap Cropped Top", category: "top" },
+    { name: "Printed Wrap Kimono Dress", category: "dress" },
+    { name: "Art Collar Layered Shirt", category: "top" },
+    { name: "Leather Midi Dress", category: "dress" },
+    { name: "Asymmetrical Waist Pants", category: "bottom" },
+    { name: "Printed Straight Pants", category: "bottom" },
+  ];
+
+  // Determine which categories the customer already has covered
+  const allSelectedItems = [
+    ...(Array.isArray(closetItems) && closetItems.length > 0 ? closetItems : []),
+    ...(closetItem ? [closetItem] : []),
+  ];
+  const customerCategories = allSelectedItems
+    .map(i => (i.category || "").toLowerCase().trim())
+    .filter(Boolean);
+
+  // Category grouping: "top" and "shirt" are both upper body, etc.
+  const normalize = (cat) => {
+    const c = (cat || "").toLowerCase().trim();
+    if (["top", "shirt", "blouse", "tshirt", "t-shirt", "sweater", "knit"].includes(c)) return "top";
+    if (["bottom", "pants", "trousers", "skirt", "shorts", "jeans"].includes(c)) return "bottom";
+    if (["outerwear", "jacket", "coat", "blazer", "cardigan"].includes(c)) return "outerwear";
+    if (["dress", "jumpsuit", "romper", "one-piece"].includes(c)) return "dress";
+    return c;
+  };
+
+  const customerNormalized = customerCategories.map(normalize);
+
+  // For recommend_naia mode: FILTER OUT nAia pieces that conflict with what the customer already has
+  let filteredNaia = ALL_NAIA;
+  if (mode === "recommend_naia") {
+    filteredNaia = ALL_NAIA.filter(p => {
+      const pCat = normalize(p.category);
+      // If customer has a top, don't show tops. If customer has a bottom, don't show bottoms.
+      // Dresses and outerwear are always allowed since they layer or replace.
+      if (pCat === "dress" || pCat === "outerwear") return true;
+      return !customerNormalized.includes(pCat);
+    });
+    // Safety: if filtering removed everything, show outerwear + dresses at minimum
+    if (filteredNaia.length === 0) {
+      filteredNaia = ALL_NAIA.filter(p => {
+        const pCat = normalize(p.category);
+        return pCat === "dress" || pCat === "outerwear";
+      });
+    }
+  }
+
+  const naiaList = filteredNaia.map(p => `- ${p.name} (${p.category})`).join("\n");
+  const removedCategories = mode === "recommend_naia" && customerNormalized.length > 0
+    ? `\nIMPORTANT: The customer already has: ${customerNormalized.join(", ")}. The list below has been pre-filtered to EXCLUDE those categories. Only recommend from this list.`
+    : "";
 
   const eventNote = getEventDirection(event);
   const styleNote = Array.isArray(styleWords) && styleWords.length > 0 ? styleWords.join(", ") : "not specified";
@@ -120,16 +171,19 @@ ${naiaPiece ? `SELECTED NAIA PIECE:
 - Occasion: ${naiaPiece.occasion || "none"}
 - Statement Level: ${naiaPiece.statementLevel || "none"}` : ""}
 
-NAIA PIECES AVAILABLE (with categories):
+NAIA PIECES YOU MAY RECOMMEND (pre-filtered, only complementary categories):${removedCategories}
 ${naiaList}
 
 MODE RULES:
-${mode === "closet_only" ? "- Style ONLY the customer's closet pieces. Do NOT mention any nAia pieces." : ""}
-${mode === "recommend_naia" ? `- Recommend 2-3 nAia pieces that complement the customer's closet piece.
-- If closet piece is a TOP → only recommend BOTTOMS, OUTERWEAR, or DRESSES.
-- If closet piece is a BOTTOM → only recommend TOPS, OUTERWEAR, or DRESSES.
-- NEVER recommend a top to go with another top.` : ""}
-${mode === "closet_naia" ? "- Style the customer's closet piece WITH the selected nAia piece." : ""}
+${mode === "closet_only" ? `- Style ONLY the customer's closet pieces together.
+- Do NOT mention or recommend any nAia pieces.
+- Focus on how to combine what they already own.` : ""}
+${mode === "recommend_naia" ? `- Recommend 2-3 nAia pieces from the FILTERED list above.
+- You may ONLY recommend pieces from the list above — no others.
+- The list has already been filtered to exclude the customer's existing categories.
+- Each recommendation must complement (not duplicate) what the customer already owns.` : ""}
+${mode === "closet_naia" ? `- Style the customer's closet piece WITH the selected nAia piece together as one outfit.
+- Explain how to wear them together.` : ""}
 
 RESPOND IN THIS EXACT FORMAT — copy the section headers exactly:
 
@@ -142,20 +196,20 @@ Your outfit direction
 - [direction]
 
 Why this works
-- [reason]
-- [reason]
-- [reason]
+- [reason tying the outfit to their emotional shift and body preference]
+- [reason about the silhouette and occasion]
+- [reason about style personality alignment]
 
 Shift
-[ONE sentence only about the emotional transformation. Nothing else here.]
+[ONE sentence only about the emotional transformation this outfit creates. Nothing else here.]
 
 ${mode === "recommend_naia" || mode === "closet_naia" ? `nAia Recommendations
-- [exact nAia piece name]: [why it works — must be different category from closet piece]
-- [exact nAia piece name]: [why it works]` : ""}
+- [exact nAia piece name from the filtered list]: [specific reason it works with their pieces and mood]
+- [exact nAia piece name from the filtered list]: [specific reason]` : ""}
 
-Accessories: [1-2 specific accessories that match the look and mood]
-Perfume: [one specific perfume name and why it matches]
-Song: [Artist - Song Title that matches the energy of this look]`;
+Accessories: [1-2 specific, unique accessories that match the look and mood]
+Perfume: [one specific perfume name — be creative, vary your picks, avoid repeating Santal 33 or Jo Malone Peony]
+Song: [Artist - Song Title — be diverse, match the energy, avoid repeating previous suggestions]`;
 }
 
 function getEventDirection(event) {
