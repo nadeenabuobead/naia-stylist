@@ -124,6 +124,27 @@ export default function Stylist() {
   const [stylingResult, setStylingResult] = useState("");
   const [currentNaiaPiece, setCurrentNaiaPiece] = useState(null);
   const [showAddItem, setShowAddItem] = useState(false);
+  const [loadingPhrase, setLoadingPhrase] = useState(0);
+
+  const LOADING_PHRASES = [
+    "Reading your mood...",
+    "Exploring your closet...",
+    "Matching textures and tones...",
+    "Finding the perfect pairing...",
+    "Considering your silhouette...",
+    "Curating your look...",
+    "Balancing structure and flow...",
+    "Adding the finishing touches...",
+    "Almost there...",
+  ];
+
+  useEffect(() => {
+    if (!loading) { setLoadingPhrase(0); return; }
+    const interval = setInterval(() => {
+      setLoadingPhrase(prev => (prev + 1) % LOADING_PHRASES.length);
+    }, 2800);
+    return () => clearInterval(interval);
+  }, [loading]);
 
   useEffect(() => {
     const piece = getStorefrontPiece();
@@ -434,7 +455,28 @@ export default function Stylist() {
             <div style={s.title}>Your Styling</div>
             {loading ? (
               <div style={{ textAlign: "center", padding: "60px 0" }}>
-                <p style={{ fontSize: "20px", fontStyle: "italic", color: "#8a7f75" }}>Styling your look...</p>
+                <div style={{ display: "flex", justifyContent: "center", gap: "6px", marginBottom: "24px" }}>
+                  {[0, 1, 2].map(i => (
+                    <div key={i} style={{
+                      width: "8px", height: "8px", borderRadius: "50%", background: "#1a1816",
+                      animation: `naiaPulse 1.4s ease-in-out ${i * 0.2}s infinite`,
+                    }} />
+                  ))}
+                </div>
+                <p key={loadingPhrase} style={{
+                  fontSize: "20px", fontStyle: "italic", color: "#8a7f75",
+                  animation: "naiaFadeIn 0.5s ease",
+                }}>{LOADING_PHRASES[loadingPhrase]}</p>
+                <style>{`
+                  @keyframes naiaPulse {
+                    0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+                    40% { opacity: 1; transform: scale(1.2); }
+                  }
+                  @keyframes naiaFadeIn {
+                    from { opacity: 0; transform: translateY(6px); }
+                    to { opacity: 1; transform: translateY(0); }
+                  }
+                `}</style>
               </div>
             ) : parsedResult && (parsedResult.feelingNow || parsedResult.outfitDirection.length > 0) ? (
               <div>
