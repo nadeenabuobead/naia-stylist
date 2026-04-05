@@ -528,9 +528,9 @@ export default function Stylist() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model_image: tryOnPhoto,
+          person_image: tryOnPhoto,
           garment_image: productImage,
-          category: "tops", // default; the worker handles it
+          category: "auto", // default; the worker handles it
         }),
       });
       const data = await res.json();
