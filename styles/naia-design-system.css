@@ -1,0 +1,578 @@
+/* app/styles/naia-design-system.css */
+/* nAia Style Intelligence Platform - Design System */
+
+/* ============================================
+   FONTS - Import in root.tsx or app/root.tsx
+   Add to <head>:
+   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap" rel="stylesheet">
+   ============================================ */
+
+:root {
+  /* ========== COLORS ========== */
+  
+  /* Primary - Deep Rose */
+  --naia-rose: #B76E79;
+  --naia-rose-light: #D4A5AC;
+  --naia-rose-dark: #8B4F58;
+  --naia-rose-muted: #C9989F;
+  
+  /* Secondary - Warm Cream */
+  --naia-cream: #FDF6F0;
+  --naia-cream-dark: #F5EBE0;
+  --naia-cream-deeper: #EDE0D4;
+  
+  /* Accent - Soft Gold */
+  --naia-gold: #D4AF37;
+  --naia-gold-light: #E8D5A3;
+  --naia-gold-dark: #B8960C;
+  
+  /* Text Colors */
+  --naia-charcoal: #2D2926;
+  --naia-charcoal-light: #4A4543;
+  --naia-text-muted: #6B6560;
+  --naia-text-light: #9A938D;
+  
+  /* Neutrals */
+  --naia-white: #FFFFFF;
+  --naia-off-white: #FAFAFA;
+  --naia-gray-100: #F7F5F3;
+  --naia-gray-200: #EDE9E5;
+  --naia-gray-300: #D9D4CF;
+  --naia-gray-400: #B5ADA5;
+  --naia-gray-500: #8A827A;
+  
+  /* Feedback Colors */
+  --naia-success: #7D9B76;
+  --naia-success-light: #E8F0E6;
+  --naia-warning: #D4A574;
+  --naia-warning-light: #FDF3E8;
+  --naia-error: #C17B7B;
+  --naia-error-light: #F9EDED;
+  --naia-info: #7B9EC1;
+  --naia-info-light: #EDF3F9;
+  
+  /* Confidence Mood Colors */
+  --naia-confident: #B76E79;
+  --naia-calm: #9BB7A7;
+  --naia-bold: #8B4F58;
+  --naia-playful: #E8B4BC;
+  --naia-elegant: #2D2926;
+  --naia-cozy: #D4A574;
+  
+  /* ========== TYPOGRAPHY ========== */
+  
+  --font-display: 'Playfair Display', Georgia, serif;
+  --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  
+  /* Font Sizes - Fluid Typography */
+  --text-xs: clamp(0.7rem, 0.65rem + 0.25vw, 0.75rem);
+  --text-sm: clamp(0.8rem, 0.75rem + 0.25vw, 0.875rem);
+  --text-base: clamp(0.9rem, 0.85rem + 0.25vw, 1rem);
+  --text-lg: clamp(1rem, 0.95rem + 0.25vw, 1.125rem);
+  --text-xl: clamp(1.15rem, 1.05rem + 0.5vw, 1.25rem);
+  --text-2xl: clamp(1.4rem, 1.2rem + 1vw, 1.5rem);
+  --text-3xl: clamp(1.7rem, 1.4rem + 1.5vw, 1.875rem);
+  --text-4xl: clamp(2rem, 1.6rem + 2vw, 2.25rem);
+  --text-5xl: clamp(2.5rem, 2rem + 2.5vw, 3rem);
+  --text-6xl: clamp(3rem, 2.5rem + 2.5vw, 3.75rem);
+  
+  /* Line Heights */
+  --leading-none: 1;
+  --leading-tight: 1.25;
+  --leading-snug: 1.375;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+  --leading-loose: 2;
+  
+  /* Letter Spacing */
+  --tracking-tighter: -0.05em;
+  --tracking-tight: -0.025em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.025em;
+  --tracking-wider: 0.05em;
+  --tracking-widest: 0.1em;
+  
+  /* ========== SPACING ========== */
+  
+  --space-1: 0.25rem;   /* 4px */
+  --space-2: 0.5rem;    /* 8px */
+  --space-3: 0.75rem;   /* 12px */
+  --space-4: 1rem;      /* 16px */
+  --space-5: 1.25rem;   /* 20px */
+  --space-6: 1.5rem;    /* 24px */
+  --space-8: 2rem;      /* 32px */
+  --space-10: 2.5rem;   /* 40px */
+  --space-12: 3rem;     /* 48px */
+  --space-16: 4rem;     /* 64px */
+  --space-20: 5rem;     /* 80px */
+  --space-24: 6rem;     /* 96px */
+  
+  /* ========== BORDERS & RADIUS ========== */
+  
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+  --radius-full: 9999px;
+  
+  --border-width: 1px;
+  --border-color: var(--naia-gray-200);
+  
+  /* ========== SHADOWS ========== */
+  
+  --shadow-sm: 0 1px 2px 0 rgba(45, 41, 38, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(45, 41, 38, 0.07), 0 2px 4px -1px rgba(45, 41, 38, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(45, 41, 38, 0.08), 0 4px 6px -2px rgba(45, 41, 38, 0.04);
+  --shadow-xl: 0 20px 25px -5px rgba(45, 41, 38, 0.1), 0 10px 10px -5px rgba(45, 41, 38, 0.04);
+  --shadow-soft: 0 8px 30px rgba(183, 110, 121, 0.12);
+  --shadow-glow: 0 0 20px rgba(183, 110, 121, 0.15);
+  
+  /* ========== TRANSITIONS ========== */
+  
+  --transition-fast: 150ms ease;
+  --transition-base: 200ms ease;
+  --transition-slow: 300ms ease;
+  --transition-slower: 500ms ease;
+  
+  /* ========== Z-INDEX ========== */
+  
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-modal-backdrop: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+}
+
+/* ============================================
+   BASE STYLES
+   ============================================ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--naia-charcoal);
+  background-color: var(--naia-cream);
+  margin: 0;
+  padding: 0;
+}
+
+/* ============================================
+   TYPOGRAPHY UTILITIES
+   ============================================ */
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-body {
+  font-family: var(--font-body);
+}
+
+/* Headings */
+h1, .h1 {
+  font-family: var(--font-display);
+  font-size: var(--text-5xl);
+  font-weight: 500;
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  color: var(--naia-charcoal);
+}
+
+h2, .h2 {
+  font-family: var(--font-display);
+  font-size: var(--text-4xl);
+  font-weight: 500;
+  line-height: var(--leading-tight);
+  color: var(--naia-charcoal);
+}
+
+h3, .h3 {
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  font-weight: 500;
+  line-height: var(--leading-snug);
+  color: var(--naia-charcoal);
+}
+
+h4, .h4 {
+  font-family: var(--font-body);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: var(--leading-snug);
+  color: var(--naia-charcoal);
+}
+
+h5, .h5 {
+  font-family: var(--font-body);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  line-height: var(--leading-normal);
+  color: var(--naia-charcoal);
+}
+
+/* Body Text */
+.text-large {
+  font-size: var(--text-lg);
+  line-height: var(--leading-relaxed);
+}
+
+.text-small {
+  font-size: var(--text-sm);
+}
+
+.text-muted {
+  color: var(--naia-text-muted);
+}
+
+.text-rose {
+  color: var(--naia-rose);
+}
+
+/* Italics for emphasis */
+.italic-display {
+  font-family: var(--font-display);
+  font-style: italic;
+}
+
+/* ============================================
+   BUTTON STYLES
+   ============================================ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-6);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+  border-radius: var(--radius-full);
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background-color: var(--naia-rose);
+  color: var(--naia-white);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--naia-rose-dark);
+  box-shadow: var(--shadow-soft);
+}
+
+.btn-secondary {
+  background-color: transparent;
+  color: var(--naia-charcoal);
+  border: 1px solid var(--naia-gray-300);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: var(--naia-gray-100);
+  border-color: var(--naia-gray-400);
+}
+
+.btn-ghost {
+  background-color: transparent;
+  color: var(--naia-charcoal);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background-color: var(--naia-gray-100);
+}
+
+.btn-gold {
+  background-color: var(--naia-gold);
+  color: var(--naia-charcoal);
+}
+
+.btn-gold:hover:not(:disabled) {
+  background-color: var(--naia-gold-dark);
+}
+
+.btn-lg {
+  padding: var(--space-4) var(--space-8);
+  font-size: var(--text-base);
+}
+
+.btn-sm {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-xs);
+}
+
+/* ============================================
+   CARD STYLES
+   ============================================ */
+
+.card {
+  background-color: var(--naia-white);
+  border-radius: var(--radius-xl);
+  padding: var(--space-6);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--naia-gray-100);
+}
+
+.card-elevated {
+  box-shadow: var(--shadow-md);
+  border: none;
+}
+
+.card-interactive {
+  transition: all var(--transition-base);
+  cursor: pointer;
+}
+
+.card-interactive:hover {
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
+}
+
+/* ============================================
+   INPUT STYLES
+   ============================================ */
+
+.input {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  color: var(--naia-charcoal);
+  background-color: var(--naia-white);
+  border: 1px solid var(--naia-gray-300);
+  border-radius: var(--radius-lg);
+  transition: all var(--transition-fast);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--naia-rose);
+  box-shadow: 0 0 0 3px rgba(183, 110, 121, 0.1);
+}
+
+.input::placeholder {
+  color: var(--naia-text-light);
+}
+
+.input-label {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--naia-charcoal);
+  margin-bottom: var(--space-2);
+}
+
+/* ============================================
+   BADGE STYLES
+   ============================================ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  border-radius: var(--radius-full);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.badge-rose {
+  background-color: rgba(183, 110, 121, 0.1);
+  color: var(--naia-rose);
+}
+
+.badge-gold {
+  background-color: rgba(212, 175, 55, 0.15);
+  color: var(--naia-gold-dark);
+}
+
+.badge-success {
+  background-color: var(--naia-success-light);
+  color: var(--naia-success);
+}
+
+.badge-neutral {
+  background-color: var(--naia-gray-100);
+  color: var(--naia-text-muted);
+}
+
+/* ============================================
+   LAYOUT UTILITIES
+   ============================================ */
+
+.container {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 var(--space-4);
+}
+
+@media (min-width: 768px) {
+  .container {
+    padding: 0 var(--space-6);
+  }
+}
+
+.page-padding {
+  padding-top: var(--space-8);
+  padding-bottom: var(--space-16);
+}
+
+@media (min-width: 768px) {
+  .page-padding {
+    padding-top: var(--space-12);
+    padding-bottom: var(--space-20);
+  }
+}
+
+/* ============================================
+   ANIMATION UTILITIES
+   ============================================ */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-fade-in {
+  animation: fadeIn var(--transition-slow) ease forwards;
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp var(--transition-slow) ease forwards;
+}
+
+.animate-scale-in {
+  animation: scaleIn var(--transition-base) ease forwards;
+}
+
+/* Staggered animation delays */
+.delay-1 { animation-delay: 50ms; }
+.delay-2 { animation-delay: 100ms; }
+.delay-3 { animation-delay: 150ms; }
+.delay-4 { animation-delay: 200ms; }
+.delay-5 { animation-delay: 250ms; }
+
+/* ============================================
+   SPECIAL COMPONENTS
+   ============================================ */
+
+/* Mood Gradient Backgrounds */
+.mood-confident {
+  background: linear-gradient(135deg, var(--naia-rose) 0%, var(--naia-rose-dark) 100%);
+}
+
+.mood-calm {
+  background: linear-gradient(135deg, #9BB7A7 0%, #7A9A8B 100%);
+}
+
+.mood-bold {
+  background: linear-gradient(135deg, var(--naia-charcoal) 0%, #4A4543 100%);
+}
+
+.mood-playful {
+  background: linear-gradient(135deg, #E8B4BC 0%, var(--naia-rose-light) 100%);
+}
+
+.mood-elegant {
+  background: linear-gradient(135deg, #2D2926 0%, var(--naia-gold) 100%);
+}
+
+/* Glass Effect */
+.glass {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+/* Skeleton Loading */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--naia-gray-100) 25%,
+    var(--naia-gray-200) 50%,
+    var(--naia-gray-100) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-md);
+}
+
+/* Divider */
+.divider {
+  height: 1px;
+  background-color: var(--naia-gray-200);
+  margin: var(--space-6) 0;
+}
+
+/* Visual Separator with rose accent */
+.divider-accent {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin: var(--space-8) 0;
+}
+
+.divider-accent::before,
+.divider-accent::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background-color: var(--naia-gray-200);
+}
+
+.divider-accent-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--naia-rose);
+}
