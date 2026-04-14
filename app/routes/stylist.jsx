@@ -127,6 +127,245 @@ export async function loader() {
   return null;
 }
 
+// ─── Confidence Rating Component ───
+function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styleWords, onRated }) {
+  const [confidence, setConfidence] = useState(0);
+  const [feltLikeMe, setFeltLikeMe] = useState(null);
+  const [wouldWearAgain, setWouldWearAgain] = useState(null);
+  const [physicallyComfortable, setPhysicallyComfortable] = useState(null);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const boolBtn = (val, current, setter, label) => ({
+    padding: "8px 16px",
+    background: current === val ? "#1a1816" : "transparent",
+    color: current === val ? "#f5f2ee" : "#1a1816",
+    border: "1px solid #1a1816",
+    borderRadius: "2px",
+    fontSize: "12px",
+    cursor: "pointer",
+    fontFamily: '"Cormorant Garamond", Georgia, serif',
+    letterSpacing: "0.1em",
+    transition: "all 0.2s",
+  });
+
+  const submit = async () => {
+    if (!confidence || !historyId) return;
+    setSubmitting(true);
+    try {
+      await fetch("/api/outfit-rating", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
+        body: JSON.stringify({
+          historyId, confidence, feltLikeMe, wouldWearAgain, physicallyComfortable,
+          mood, feeling, event,
+          styleWords: Array.isArray(styleWords) ? JSON.stringify(styleWords) : styleWords,
+        }),
+      });
+      setSubmitted(true);
+      if (onRated) onRated({ confidence, feltLikeMe, wouldWearAgain, physicallyComfortable });
+    } catch {}
+    setSubmitting(false);
+  };
+
+  if (submitted) {
+    return (
+      <div style={{ padding: "24px", background: "#eee9e2", borderRadius: "2px", textAlign: "center", margin: "24px 0" }}>
+        <p style={{ fontSize: "18px", fontStyle: "italic", margin: "0 0 4px" }}>Thank you for rating this look</p>
+        <p style={{ fontSize: "13px", color: "#8a7f75", margin: 0 }}>nAia is learning your confidence patterns</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: "24px", background: "#eee9e2", borderRadius: "2px", margin: "24px 0" }}>
+      <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "16px" }}>
+        How does this look make you feel?
+      </div>
+
+      {/* Confidence 1-5 */}
+      <div style={{ marginBottom: "20px" }}>
+        <div style={{ fontSize: "14px", marginBottom: "10px", fontStyle: "italic" }}>Confidence level</div>
+        <div style={{ display: "flex", gap: "8px" }}>
+          {[1, 2, 3, 4, 5].map(n => (
+            <button key={n} onClick={() => setConfidence(n)} style={{
+              width: "44px", height: "44px", borderRadius: "50%",
+              background: confidence >= n ? "#1a1816" : "transparent",
+              color: confidence >= n ? "#f5f2ee" : "#1a1816",
+              border: "1.5px solid #1a1816",
+              fontSize: "16px", cursor: "pointer",
+              fontFamily: '"Cormorant Garamond", Georgia, serif',
+              transition: "all 0.2s",
+            }}>{n}</button>
+          ))}
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#8a7f75", marginTop: "6px", maxWidth: "228px" }}>
+          <span>Not confident</span><span>Very confident</span>
+        </div>
+      </div>
+
+      {/* Felt like me */}
+      <div style={{ marginBottom: "16px" }}>
+        <div style={{ fontSize: "14px", marginBottom: "8px", fontStyle: "italic" }}>Does this feel like you?</div>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button onClick={() => setFeltLikeMe(true)} style={boolBtn(true, feltLikeMe)}>Yes, this is me</button>
+          <button onClick={() => setFeltLikeMe(false)} style={boolBtn(false, feltLikeMe)}>Not quite</button>
+        </div>
+      </div>
+
+      {/* Would wear again */}
+      <div style={{ marginBottom: "16px" }}>
+        <div style={{ fontSize: "14px", marginBottom: "8px", fontStyle: "italic" }}>Would you wear this again?</div>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button onClick={() => setWouldWearAgain(true)} style={boolBtn(true, wouldWearAgain)}>Definitely</button>
+          <button onClick={() => setWouldWearAgain(false)} style={boolBtn(false, wouldWearAgain)}>Probably not</button>
+        </div>
+      </div>
+
+      {/* Physically comfortable */}
+      <div style={{ marginBottom: "20px" }}>
+        <div style={{ fontSize: "14px", marginBottom: "8px", fontStyle: "italic" }}>Would this feel physically comfortable?</div>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button onClick={() => setPhysicallyComfortable(true)} style={boolBtn(true, physicallyComfortable)}>Yes</button>
+          <button onClick={() => setPhysicallyComfortable(false)} style={boolBtn(false, physicallyComfortable)}>No</button>
+        </div>
+      </div>
+
+      <button onClick={submit} disabled={!confidence || submitting} style={{
+        padding: "12px 28px", background: confidence ? "#1a1816" : "#d4cfc9",
+        color: "#f5f2ee", border: "none", borderRadius: "2px",
+        fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase",
+        cursor: confidence ? "pointer" : "default",
+        fontFamily: '"Cormorant Garamond", Georgia, serif',
+        opacity: submitting ? 0.6 : 1,
+      }}>
+        {submitting ? "Saving..." : "Save rating"}
+      </button>
+    </div>
+  );
+}
+
+// ─── Confidence Dashboard Component ───
+function ConfidenceDashboard({ customerToken }) {
+  const [dashboard, setDashboard] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!customerToken) return;
+    fetch("/api/confidence-dashboard", { headers: authHeaders(customerToken) })
+      .then(r => r.json())
+      .then(d => { if (d.dashboard) setDashboard(d.dashboard); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [customerToken]);
+
+  if (loading) return <p style={{ fontSize: "14px", color: "#8a7f75", fontStyle: "italic" }}>Loading your confidence profile...</p>;
+  if (!dashboard || dashboard.totalRatings === 0) {
+    return <p style={{ fontSize: "15px", color: "#8a7f75", fontStyle: "italic" }}>No ratings yet. Rate your styled looks to build your confidence profile.</p>;
+  }
+
+  const statBox = { padding: "16px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" };
+  const statNum = { fontSize: "28px", fontWeight: 400, fontStyle: "italic", margin: "0 0 4px", color: "#1a1816" };
+  const statLabel = { fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", margin: 0 };
+
+  return (
+    <div>
+      {/* Overview stats */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "10px", marginBottom: "24px" }}>
+        <div style={statBox}>
+          <p style={statNum}>{dashboard.averageConfidence}<span style={{ fontSize: "16px" }}>/5</span></p>
+          <p style={statLabel}>Avg Confidence</p>
+        </div>
+        <div style={statBox}>
+          <p style={statNum}>{dashboard.feltLikeMePercent}%</p>
+          <p style={statLabel}>Felt like me</p>
+        </div>
+        <div style={statBox}>
+          <p style={statNum}>{dashboard.wouldWearAgainPercent}%</p>
+          <p style={statLabel}>Would rewear</p>
+        </div>
+        <div style={statBox}>
+          <p style={statNum}>{dashboard.totalRatings}</p>
+          <p style={statLabel}>Looks rated</p>
+        </div>
+      </div>
+
+      {/* Best moods */}
+      {dashboard.bestMoods.length > 0 && (
+        <div style={{ marginBottom: "20px" }}>
+          <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "10px" }}>
+            You feel most confident when
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+            {dashboard.bestMoods.map(m => (
+              <div key={m.name} style={{ padding: "8px 14px", background: "#eee9e2", borderRadius: "2px", fontSize: "14px", fontStyle: "italic" }}>
+                {m.name} <span style={{ fontSize: "12px", color: "#8a7f75" }}>({m.avg}/5)</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Best events */}
+      {dashboard.bestEvents.length > 0 && (
+        <div style={{ marginBottom: "20px" }}>
+          <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "10px" }}>
+            Best occasions for you
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+            {dashboard.bestEvents.map(e => (
+              <div key={e.name} style={{ padding: "8px 14px", background: "#eee9e2", borderRadius: "2px", fontSize: "14px", fontStyle: "italic" }}>
+                {e.name} <span style={{ fontSize: "12px", color: "#8a7f75" }}>({e.avg}/5)</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Best style words */}
+      {dashboard.bestStyleWords.length > 0 && (
+        <div style={{ marginBottom: "20px" }}>
+          <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "10px" }}>
+            Styles that boost your confidence
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+            {dashboard.bestStyleWords.map(w => (
+              <div key={w.name} style={{ padding: "8px 14px", background: "#1a1816", color: "#f5f2ee", borderRadius: "2px", fontSize: "13px", letterSpacing: "0.1em" }}>
+                {w.name} <span style={{ opacity: 0.7 }}>({w.avg}/5)</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Confidence over time */}
+      {dashboard.confidenceOverTime.length > 2 && (
+        <div style={{ marginBottom: "20px" }}>
+          <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "10px" }}>
+            Your confidence journey
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: "4px", height: "80px" }}>
+            {dashboard.confidenceOverTime.map((c, i) => (
+              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}>
+                <div style={{
+                  width: "100%", maxWidth: "28px",
+                  height: `${(c.confidence / 5) * 60}px`,
+                  background: c.confidence >= 4 ? "#1a1816" : c.confidence >= 3 ? "#8a7f75" : "#d4cfc9",
+                  borderRadius: "2px 2px 0 0",
+                  transition: "height 0.3s",
+                }} />
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#8a7f75", marginTop: "4px" }}>
+            <span>Older</span><span>Recent</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Component ───
 export default function Stylist() {
   // ─── Auth state ───
@@ -135,7 +374,7 @@ export default function Stylist() {
   const [authLoading, setAuthLoading] = useState(true);
 
   // ─── Flow state ───
-  const [step, setStep] = useState(0); // 0 = welcome/loading, 1-8 = steps
+  const [step, setStep] = useState(0);
   const [mood, setMood] = useState("");
   const [feeling, setFeeling] = useState("");
   const [event, setEvent] = useState("");
@@ -155,15 +394,17 @@ export default function Stylist() {
   const [showAddItem, setShowAddItem] = useState(false);
   const [loadingPhrase, setLoadingPhrase] = useState(0);
 
-  // ─── New feature state ───
+  // ─── Feature state ───
   const [wishlist, setWishlist] = useState([]);
   const [outfitHistory, setOutfitHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
   const [showWishlist, setShowWishlist] = useState(false);
-  const [tryOnState, setTryOnState] = useState({}); // { [productTitle]: { loading, result, error } }
-  const [tryOnPhoto, setTryOnPhoto] = useState(null); // customer's photo for virtual try-on
+  const [tryOnState, setTryOnState] = useState({});
+  const [tryOnPhoto, setTryOnPhoto] = useState(null);
   const [showAccount, setShowAccount] = useState(false);
   const [closetSynced, setClosetSynced] = useState(false);
+  const [showConfidence, setShowConfidence] = useState(false);
+  const [lastHistoryId, setLastHistoryId] = useState(null);
 
   const LOADING_PHRASES = [
     "Reading your mood...", "Exploring your closet...",
@@ -177,45 +418,31 @@ export default function Stylist() {
   useEffect(() => {
     async function init() {
       let token = getTokenFromUrl() || getSavedToken();
-      
-      // Clean URL if token was in params
       if (getTokenFromUrl() && typeof window !== "undefined") {
         const url = new URL(window.location.href);
         url.searchParams.delete("naia_token");
         window.history.replaceState({}, "", url.toString());
       }
-
       if (token) {
         saveToken(token);
         setCustomerToken(token);
-        // Fetch profile
         try {
-          const res = await fetch("/api/customer-profile", {
-            headers: authHeaders(token),
-          });
+          const res = await fetch("/api/customer-profile", { headers: authHeaders(token) });
           const data = await res.json();
           if (data.authenticated && data.customer) {
             setCustomer(data.customer);
-          } else {
-            clearToken();
-            token = null;
-          }
-        } catch {
-          clearToken();
-          token = null;
-        }
+          } else { clearToken(); token = null; }
+        } catch { clearToken(); token = null; }
       }
-
       setAuthLoading(false);
       setStep(1);
     }
     init();
   }, []);
 
-  // ─── Load closet: from DB if authenticated, otherwise localStorage ───
+  // ─── Load closet ───
   useEffect(() => {
     if (authLoading) return;
-
     async function loadCloset() {
       if (customerToken) {
         try {
@@ -224,14 +451,11 @@ export default function Stylist() {
           if (data.authenticated && data.items) {
             setCloset(data.items);
             setClosetSynced(true);
-
-            // If there are localStorage items that aren't in DB yet, sync them
             const localRaw = localStorage.getItem("naia-closet-v2");
             if (localRaw) {
               try {
                 const localItems = JSON.parse(localRaw);
                 if (localItems.length > 0 && data.items.length === 0) {
-                  // First login — bulk sync localStorage to DB
                   const syncRes = await fetch("/api/closet", {
                     method: "POST",
                     headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
@@ -240,7 +464,6 @@ export default function Stylist() {
                   const syncData = await syncRes.json();
                   if (syncData.items) setCloset(syncData.items);
                 }
-                // Clear localStorage after sync
                 localStorage.removeItem("naia-closet-v2");
               } catch {}
             }
@@ -248,274 +471,132 @@ export default function Stylist() {
           }
         } catch {}
       }
-      // Fallback: localStorage
       const saved = localStorage.getItem("naia-closet-v2");
       if (saved) { try { setCloset(JSON.parse(saved)); } catch {} }
     }
     loadCloset();
   }, [authLoading, customerToken]);
 
-  // ─── Load wishlist ───
-  useEffect(() => {
-    if (!customerToken) return;
-    fetch("/api/wishlist", { headers: authHeaders(customerToken) })
-      .then(r => r.json())
-      .then(d => { if (d.items) setWishlist(d.items); })
-      .catch(() => {});
-  }, [customerToken]);
-
-  // ─── Load outfit history ───
-  useEffect(() => {
-    if (!customerToken) return;
-    fetch("/api/outfit-history", { headers: authHeaders(customerToken) })
-      .then(r => r.json())
-      .then(d => { if (d.history) setOutfitHistory(d.history); })
-      .catch(() => {});
-  }, [customerToken]);
-
-  // Save closet to localStorage when NOT authenticated (guest mode)
-  useEffect(() => {
-    if (!customerToken && !authLoading) {
-      localStorage.setItem("naia-closet-v2", JSON.stringify(closet));
-    }
-  }, [closet, customerToken, authLoading]);
+  useEffect(() => { if (!customerToken) return; fetch("/api/wishlist", { headers: authHeaders(customerToken) }).then(r => r.json()).then(d => { if (d.items) setWishlist(d.items); }).catch(() => {}); }, [customerToken]);
+  useEffect(() => { if (!customerToken) return; fetch("/api/outfit-history", { headers: authHeaders(customerToken) }).then(r => r.json()).then(d => { if (d.history) setOutfitHistory(d.history); }).catch(() => {}); }, [customerToken]);
+  useEffect(() => { if (!customerToken && !authLoading) { localStorage.setItem("naia-closet-v2", JSON.stringify(closet)); } }, [closet, customerToken, authLoading]);
 
   useEffect(() => {
     if (!loading) { setLoadingPhrase(0); return; }
-    const interval = setInterval(() => {
-      setLoadingPhrase(prev => (prev + 1) % LOADING_PHRASES.length);
-    }, 2800);
+    const interval = setInterval(() => { setLoadingPhrase(prev => (prev + 1) % LOADING_PHRASES.length); }, 2800);
     return () => clearInterval(interval);
   }, [loading]);
 
-  useEffect(() => {
-    const piece = getStorefrontPiece();
-    if (piece) setCurrentNaiaPiece(piece);
-  }, []);
+  useEffect(() => { const piece = getStorefrontPiece(); if (piece) setCurrentNaiaPiece(piece); }, []);
+  useEffect(() => { fetch("/api/naia-products").then(r => r.json()).then(d => setNaiaProducts(d.products || [])).catch(() => {}); }, []);
 
-  useEffect(() => {
-    fetch("/api/naia-products")
-      .then(r => r.json())
-      .then(d => setNaiaProducts(d.products || []))
-      .catch(() => {});
-  }, []);
-
-  const selectedClosetItems = useMemo(() =>
-    closet.filter(i => selectedClosetIds.includes(i.id)), [closet, selectedClosetIds]);
-
+  const selectedClosetItems = useMemo(() => closet.filter(i => selectedClosetIds.includes(i.id)), [closet, selectedClosetIds]);
   const parsedResult = useMemo(() => parseStylingResult(stylingResult), [stylingResult]);
-
   const wishlistIds = useMemo(() => new Set(wishlist.map(w => String(w.naiaProductId))), [wishlist]);
 
-  // ─── Closet operations (DB-aware) ───
+  // ─── Closet operations ───
   const addItem = useCallback(async () => {
     if (!itemName.trim()) return;
     if (customerToken) {
       try {
-        const res = await fetch("/api/closet", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
-          body: JSON.stringify({ action: "add", name: itemName, category: itemCategory, image: itemImage }),
-        });
+        const res = await fetch("/api/closet", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) }, body: JSON.stringify({ action: "add", name: itemName, category: itemCategory, image: itemImage }) });
         const data = await res.json();
-        if (data.item) {
-          setCloset(prev => [data.item, ...prev]);
-        }
+        if (data.item) setCloset(prev => [data.item, ...prev]);
       } catch {}
     } else {
       setCloset(prev => [...prev, { id: String(Date.now()), name: itemName, category: itemCategory, image: itemImage }]);
     }
-    setItemName(""); setItemCategory("top"); setItemImage("");
-    setShowAddItem(false);
+    setItemName(""); setItemCategory("top"); setItemImage(""); setShowAddItem(false);
   }, [itemName, itemCategory, itemImage, customerToken]);
 
   const removeClosetItem = useCallback(async (itemId) => {
     setCloset(prev => prev.filter(i => i.id !== itemId));
     setSelectedClosetIds(prev => prev.filter(i => i !== itemId));
-    if (customerToken) {
-      try {
-        await fetch("/api/closet", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
-          body: JSON.stringify({ action: "delete", itemId }),
-        });
-      } catch {}
-    }
+    if (customerToken) { try { await fetch("/api/closet", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) }, body: JSON.stringify({ action: "delete", itemId }) }); } catch {} }
   }, [customerToken]);
 
-  // ─── Wishlist operations ───
+  // ─── Wishlist ───
   const toggleWishlist = useCallback(async (product) => {
     if (!customerToken) return;
     const pid = String(product.id);
     if (wishlistIds.has(pid)) {
       setWishlist(prev => prev.filter(w => String(w.naiaProductId) !== pid));
-      try {
-        await fetch("/api/wishlist", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
-          body: JSON.stringify({ action: "remove", naiaProductId: pid }),
-        });
-      } catch {}
+      try { await fetch("/api/wishlist", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) }, body: JSON.stringify({ action: "remove", naiaProductId: pid }) }); } catch {}
     } else {
       const newItem = { naiaProductId: pid, title: product.title, handle: product.handle, image: product.image, createdAt: new Date().toISOString() };
       setWishlist(prev => [newItem, ...prev]);
-      try {
-        await fetch("/api/wishlist", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
-          body: JSON.stringify({ action: "add", ...newItem }),
-        });
-      } catch {}
+      try { await fetch("/api/wishlist", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) }, body: JSON.stringify({ action: "add", ...newItem }) }); } catch {}
     }
   }, [customerToken, wishlistIds]);
 
   const handleImageUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const file = e.target.files?.[0]; if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
       const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const MAX = 300;
-        let w = img.width, h = img.height;
-        if (w > h) { h = (h / w) * MAX; w = MAX; }
-        else { w = (w / h) * MAX; h = MAX; }
-        canvas.width = w; canvas.height = h;
-        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-        setItemImage(canvas.toDataURL("image/jpeg", 0.6));
-      };
+      img.onload = () => { const canvas = document.createElement("canvas"); const MAX = 300; let w = img.width, h = img.height; if (w > h) { h = (h / w) * MAX; w = MAX; } else { w = (w / h) * MAX; h = MAX; } canvas.width = w; canvas.height = h; canvas.getContext("2d").drawImage(img, 0, 0, w, h); setItemImage(canvas.toDataURL("image/jpeg", 0.6)); };
       img.src = ev.target.result;
     };
     reader.readAsDataURL(file);
   };
 
-  // ─── Try-on photo upload ───
-  const handleTryOnPhotoUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setTryOnPhoto(ev.target.result);
-    };
-    reader.readAsDataURL(file);
-  };
+  const handleTryOnPhotoUpload = (e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = (ev) => { setTryOnPhoto(ev.target.result); }; reader.readAsDataURL(file); };
+  const toggleClosetItem = (id) => { setSelectedClosetIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]); };
+  const toggleStyleWord = (word) => { setStyleWords(prev => prev.includes(word) ? prev.filter(w => w !== word) : prev.length < 3 ? [...prev, word] : prev); };
 
-  const toggleClosetItem = (id) => {
-    setSelectedClosetIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
-  };
-
-  const toggleStyleWord = (word) => {
-    setStyleWords(prev => prev.includes(word) ? prev.filter(w => w !== word) : prev.length < 3 ? [...prev, word] : prev);
-  };
-
-  // ─── Call AI (with history save) ───
+  // ─── Call AI ───
   const callAI = async () => {
-    setLoading(true);
-    setStylingResult("");
-    setStep(8);
+    setLoading(true); setStylingResult(""); setStep(8); setLastHistoryId(null);
     const naiaPiece = selectedNaiaPiece || currentNaiaPiece;
     const itemsToStyle = mode === "closet_only" ? closet : selectedClosetItems;
     const outfitParts = [...itemsToStyle.map(i => i.name), naiaPiece ? (naiaPiece.name || naiaPiece.title) : null].filter(Boolean);
     const outfit = outfitParts.join(" + ");
     try {
-      const res = await fetch("/api/style", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode, outfit, mood, feeling, event, styleWords, bodyPref,
-          closetItem: itemsToStyle[0] || null,
-          closetItems: itemsToStyle,
-          naiaPiece: naiaPiece ? {
-            name: naiaPiece.name || naiaPiece.title,
-            category: naiaPiece.category || naiaPiece.type || "",
-            stylingNotes: naiaPiece.stylingNotes || "",
-            moodMatch: naiaPiece.moodMatch || "",
-            stylingRole: naiaPiece.stylingRole || "",
-            statementLevel: naiaPiece.statementLevel || "",
-            occasion: naiaPiece.occasion || "",
-            sihouette: naiaPiece.sihouette || "",
-          } : null,
-          closet: closet.map(i => ({ name: i.name, category: i.category })),
-        }),
+      const res = await fetch("/api/style", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode, outfit, mood, feeling, event, styleWords, bodyPref, closetItem: itemsToStyle[0] || null, closetItems: itemsToStyle, naiaPiece: naiaPiece ? { name: naiaPiece.name || naiaPiece.title, category: naiaPiece.category || naiaPiece.type || "", stylingNotes: naiaPiece.stylingNotes || "", moodMatch: naiaPiece.moodMatch || "", stylingRole: naiaPiece.stylingRole || "", statementLevel: naiaPiece.statementLevel || "", occasion: naiaPiece.occasion || "", sihouette: naiaPiece.sihouette || "" } : null, closet: closet.map(i => ({ name: i.name, category: i.category })) }),
       });
       const data = await res.json();
       const result = data.result || data.error || "Something went wrong.";
       setStylingResult(result);
-
-      // Save to outfit history if authenticated
       if (customerToken && result && !result.startsWith("Something went wrong")) {
         try {
-          await fetch("/api/outfit-history", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
-            body: JSON.stringify({
-              mood, feeling, event, styleWords, bodyPref, mode,
-              closetItemIds: selectedClosetIds,
-              result,
-            }),
+          const hRes = await fetch("/api/outfit-history", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
+            body: JSON.stringify({ mood, feeling, event, styleWords, bodyPref, mode, closetItemIds: selectedClosetIds, result }),
           });
-          // Refresh history
-          const hRes = await fetch("/api/outfit-history", { headers: authHeaders(customerToken) });
           const hData = await hRes.json();
-          if (hData.history) setOutfitHistory(hData.history);
+          if (hData.entry?.id) setLastHistoryId(hData.entry.id);
+          const hListRes = await fetch("/api/outfit-history", { headers: authHeaders(customerToken) });
+          const hListData = await hListRes.json();
+          if (hListData.history) setOutfitHistory(hListData.history);
         } catch {}
       }
-    } catch {
-      setStylingResult("Something went wrong. Please try again.");
-    }
+    } catch { setStylingResult("Something went wrong. Please try again."); }
     setLoading(false);
   };
 
   // ─── Quick re-style ───
   const quickRestyle = async () => {
     if (!customer) return;
-    setMood(customer.lastMood || "");
-    setFeeling(customer.lastFeeling || "");
-    setEvent(customer.lastEvent || "");
-    setStyleWords(customer.lastStyleWords || []);
-    setBodyPref(customer.lastBodyPref || "");
-    setMode(customer.lastMode || "closet_only");
-    // Skip to step 8 and immediately call AI
-    setLoading(true);
-    setStylingResult("");
-    setStep(8);
+    setMood(customer.lastMood || ""); setFeeling(customer.lastFeeling || ""); setEvent(customer.lastEvent || "");
+    setStyleWords(customer.lastStyleWords || []); setBodyPref(customer.lastBodyPref || ""); setMode(customer.lastMode || "closet_only");
+    setLoading(true); setStylingResult(""); setStep(8); setLastHistoryId(null);
     try {
-      const res = await fetch("/api/style", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: customer.lastMode || "closet_only",
-          outfit: closet.map(i => i.name).join(" + "),
-          mood: customer.lastMood || "",
-          feeling: customer.lastFeeling || "",
-          event: customer.lastEvent || "",
-          styleWords: customer.lastStyleWords || [],
-          bodyPref: customer.lastBodyPref || "",
-          closetItems: closet,
-          closet: closet.map(i => ({ name: i.name, category: i.category })),
-        }),
+      const res = await fetch("/api/style", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: customer.lastMode || "closet_only", outfit: closet.map(i => i.name).join(" + "), mood: customer.lastMood || "", feeling: customer.lastFeeling || "", event: customer.lastEvent || "", styleWords: customer.lastStyleWords || [], bodyPref: customer.lastBodyPref || "", closetItems: closet, closet: closet.map(i => ({ name: i.name, category: i.category })) }),
       });
       const data = await res.json();
       const result = data.result || data.error || "Something went wrong.";
       setStylingResult(result);
       if (customerToken && result) {
         try {
-          await fetch("/api/outfit-history", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
-            body: JSON.stringify({
-              mood: customer.lastMood, feeling: customer.lastFeeling,
-              event: customer.lastEvent, styleWords: customer.lastStyleWords,
-              bodyPref: customer.lastBodyPref, mode: customer.lastMode,
-              result,
-            }),
+          const hRes = await fetch("/api/outfit-history", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
+            body: JSON.stringify({ mood: customer.lastMood, feeling: customer.lastFeeling, event: customer.lastEvent, styleWords: customer.lastStyleWords, bodyPref: customer.lastBodyPref, mode: customer.lastMode, result }),
           });
+          const hData = await hRes.json();
+          if (hData.entry?.id) setLastHistoryId(hData.entry.id);
         } catch {}
       }
-    } catch {
-      setStylingResult("Something went wrong. Please try again.");
-    }
+    } catch { setStylingResult("Something went wrong. Please try again."); }
     setLoading(false);
   };
 
@@ -526,23 +607,14 @@ export default function Stylist() {
     try {
       let garmentUrl = productImage;
       if (garmentUrl && garmentUrl.startsWith("//")) garmentUrl = "https:" + garmentUrl;
-      const res = await fetch(TRYON_WORKER_URL + "/try-on", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          person_image: tryOnPhoto,
-          garment_image: garmentUrl,
-          category: "auto",
-        }),
+      const res = await fetch(TRYON_WORKER_URL + "/try-on", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ person_image: tryOnPhoto, garment_image: garmentUrl, category: "auto" }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       if (!data.id) throw new Error("No prediction ID returned");
       const poll = async (id, attempts) => {
-        if (attempts > 60) {
-          setTryOnState(prev => ({ ...prev, [productTitle]: { loading: false, result: null, error: "Timed out" } }));
-          return;
-        }
+        if (attempts > 60) { setTryOnState(prev => ({ ...prev, [productTitle]: { loading: false, result: null, error: "Timed out" } })); return; }
         const statusRes = await fetch(TRYON_WORKER_URL + "/status/" + id);
         const statusData = await statusRes.json();
         if (statusData.status === "completed" && statusData.output && statusData.output.length > 0) {
@@ -550,35 +622,23 @@ export default function Stylist() {
         } else if (statusData.status === "failed") {
           const errMsg = statusData.error?.message || "Generation failed";
           setTryOnState(prev => ({ ...prev, [productTitle]: { loading: false, result: null, error: errMsg } }));
-        } else {
-          setTimeout(() => poll(id, attempts + 1), 2000);
-        }
+        } else { setTimeout(() => poll(id, attempts + 1), 2000); }
       };
       poll(data.id, 0);
-    } catch (err) {
-      setTryOnState(prev => ({ ...prev, [productTitle]: { loading: false, result: null, error: err.message || "Network error" } }));
-    }
+    } catch (err) { setTryOnState(prev => ({ ...prev, [productTitle]: { loading: false, result: null, error: err.message || "Network error" } })); }
   };
 
   const resetAll = () => {
-    setStep(1); setStylingResult(""); setSelectedClosetIds([]);
-    setSelectedNaiaPiece(null); setMood(""); setFeeling("");
-    setEvent(""); setStyleWords([]); setBodyPref(""); setMode("");
-    setShowHistory(false); setShowWishlist(false); setShowAccount(false);
-    setTryOnState({}); setTryOnPhoto(null);
+    setStep(1); setStylingResult(""); setSelectedClosetIds([]); setSelectedNaiaPiece(null);
+    setMood(""); setFeeling(""); setEvent(""); setStyleWords([]); setBodyPref(""); setMode("");
+    setShowHistory(false); setShowWishlist(false); setShowAccount(false); setShowConfidence(false);
+    setTryOnState({}); setTryOnPhoto(null); setLastHistoryId(null);
   };
 
   const logout = () => {
-    clearToken();
-    setCustomerToken(null);
-    setCustomer(null);
-    setWishlist([]);
-    setOutfitHistory([]);
-    setClosetSynced(false);
-    // Reload closet from localStorage
+    clearToken(); setCustomerToken(null); setCustomer(null); setWishlist([]); setOutfitHistory([]); setClosetSynced(false);
     const saved = localStorage.getItem("naia-closet-v2");
-    if (saved) { try { setCloset(JSON.parse(saved)); } catch { setCloset([]); } }
-    else { setCloset([]); }
+    if (saved) { try { setCloset(JSON.parse(saved)); } catch { setCloset([]); } } else { setCloset([]); }
   };
 
   // ─── Styles ───
@@ -600,7 +660,6 @@ export default function Stylist() {
     resultValue: { fontSize: "22px", fontStyle: "italic", lineHeight: 1.4 },
     divider: { borderTop: "1px solid #d4cfc9", margin: "24px 0" },
     vibeCard: { padding: "16px 20px", background: "#eee9e2", borderRadius: "2px" },
-    // New styles
     topBar: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px", paddingBottom: "16px", borderBottom: "1px solid #e8e4df" },
     avatar: { width: "36px", height: "36px", borderRadius: "50%", background: "#1a1816", color: "#f5f2ee", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px", fontWeight: 500, cursor: "pointer" },
     iconBtn: { background: "none", border: "none", cursor: "pointer", padding: "8px", color: "#1a1816", position: "relative" },
@@ -611,7 +670,6 @@ export default function Stylist() {
     quickBtn: { padding: "16px 32px", background: "transparent", border: "2px solid #1a1816", borderRadius: "2px", fontSize: "15px", letterSpacing: "0.1em", cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif', fontStyle: "italic", transition: "all 0.2s" },
   };
 
-  // ─── RENDER ───
   return (
     <div style={s.page}>
       <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap" rel="stylesheet" />
@@ -623,28 +681,25 @@ export default function Stylist() {
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             {customer && (
               <>
-                {/* History button */}
-                <button style={s.iconBtn} onClick={() => { setShowHistory(!showHistory); setShowWishlist(false); setShowAccount(false); }} title="Past looks">
+                {/* Confidence dashboard button */}
+                <button style={s.iconBtn} onClick={() => { setShowConfidence(!showConfidence); setShowHistory(false); setShowWishlist(false); setShowAccount(false); }} title="Confidence profile">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                </button>
+                <button style={s.iconBtn} onClick={() => { setShowHistory(!showHistory); setShowWishlist(false); setShowAccount(false); setShowConfidence(false); }} title="Past looks">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                   {outfitHistory.length > 0 && <div style={s.badge} />}
                 </button>
-                {/* Wishlist button */}
-                <button style={s.iconBtn} onClick={() => { setShowWishlist(!showWishlist); setShowHistory(false); setShowAccount(false); }} title="Wishlist">
+                <button style={s.iconBtn} onClick={() => { setShowWishlist(!showWishlist); setShowHistory(false); setShowAccount(false); setShowConfidence(false); }} title="Wishlist">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill={wishlist.length > 0 ? "#c5553a" : "none"} stroke={wishlist.length > 0 ? "#c5553a" : "currentColor"} strokeWidth="1.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
                 </button>
-                {/* Account avatar */}
-                <div style={s.avatar} onClick={() => { setShowAccount(!showAccount); setShowHistory(false); setShowWishlist(false); }}>
+                <div style={s.avatar} onClick={() => { setShowAccount(!showAccount); setShowHistory(false); setShowWishlist(false); setShowConfidence(false); }}>
                   {(customer.firstName || customer.email || "?")[0].toUpperCase()}
                 </div>
               </>
             )}
             {!customer && !authLoading && (
               <div style={{ fontSize: "12px", color: "#8a7f75" }}>
-                <a href="https://naia-9417.myshopify.com/account/login" target="_blank" rel="noreferrer"
-                  style={{ color: "#1a1816", textDecoration: "underline", textUnderlineOffset: "3px" }}>
-                  Sign in
-                </a>
-                {" "}to save your closet
+                <a href="https://naia-9417.myshopify.com/account/login" target="_blank" rel="noreferrer" style={{ color: "#1a1816", textDecoration: "underline", textUnderlineOffset: "3px" }}>Sign in</a>{" "}to save your closet
               </div>
             )}
           </div>
@@ -663,6 +718,14 @@ export default function Stylist() {
           </div>
         )}
 
+        {/* ─── Confidence Dashboard Panel ─── */}
+        {showConfidence && customer && (
+          <div style={s.panel}>
+            <div style={s.title}>Your Confidence Profile</div>
+            <ConfidenceDashboard customerToken={customerToken} />
+          </div>
+        )}
+
         {/* ─── Wishlist Panel ─── */}
         {showWishlist && customer && (
           <div style={s.panel}>
@@ -677,8 +740,7 @@ export default function Stylist() {
                       {w.image && <img src={w.image} alt={w.title} style={{ width: "100%", height: "140px", objectFit: "cover", display: "block" }} />}
                       <div style={{ padding: "8px", fontSize: "12px" }}>{w.title}</div>
                     </a>
-                    <button style={{ ...s.heartBtn(true), position: "absolute", top: "6px", right: "6px" }}
-                      onClick={() => toggleWishlist({ id: w.naiaProductId, title: w.title, handle: w.handle, image: w.image })}>♥</button>
+                    <button style={{ ...s.heartBtn(true), position: "absolute", top: "6px", right: "6px" }} onClick={() => toggleWishlist({ id: w.naiaProductId, title: w.title, handle: w.handle, image: w.image })}>♥</button>
                   </div>
                 ))}
               </div>
@@ -700,25 +762,12 @@ export default function Stylist() {
                     <div key={h.id || idx} style={{ padding: "16px 0", borderBottom: idx < 9 ? "1px solid #e8e4df" : "none" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                         <div>
-                          <div style={{ fontSize: "15px", fontStyle: "italic", marginBottom: "4px" }}>
-                            {h.mood || "—"} → {h.feeling || "—"}
-                          </div>
-                          <div style={{ fontSize: "12px", color: "#8a7f75" }}>
-                            {h.event || ""} · {new Date(h.createdAt).toLocaleDateString()}
-                          </div>
+                          <div style={{ fontSize: "15px", fontStyle: "italic", marginBottom: "4px" }}>{h.mood || "—"} → {h.feeling || "—"}</div>
+                          <div style={{ fontSize: "12px", color: "#8a7f75" }}>{h.event || ""} · {new Date(h.createdAt).toLocaleDateString()}</div>
                         </div>
-                        <button style={{ ...s.outlineBtn, fontSize: "10px", padding: "6px 12px" }}
-                          onClick={() => {
-                            setStylingResult(h.result);
-                            setMood(h.mood || ""); setFeeling(h.feeling || "");
-                            setEvent(h.event || "");
-                            setShowHistory(false);
-                            setStep(8);
-                          }}>View</button>
+                        <button style={{ ...s.outlineBtn, fontSize: "10px", padding: "6px 12px" }} onClick={() => { setStylingResult(h.result); setMood(h.mood || ""); setFeeling(h.feeling || ""); setEvent(h.event || ""); setShowHistory(false); setStep(8); }}>View</button>
                       </div>
-                      {parsed?.shift && (
-                        <p style={{ fontSize: "13px", fontStyle: "italic", color: "#4a4540", margin: "8px 0 0" }}>{parsed.shift}</p>
-                      )}
+                      {parsed?.shift && <p style={{ fontSize: "13px", fontStyle: "italic", color: "#4a4540", margin: "8px 0 0" }}>{parsed.shift}</p>}
                     </div>
                   );
                 })}
@@ -728,392 +777,154 @@ export default function Stylist() {
         )}
 
         {/* ─── Step dots ─── */}
-        {step >= 1 && step <= 8 && !showHistory && !showWishlist && !showAccount && (
-          <div style={s.stepIndicator}>
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} style={s.dot(step === i + 1, step > i + 1)} />
-            ))}
-          </div>
+        {step >= 1 && step <= 8 && !showHistory && !showWishlist && !showAccount && !showConfidence && (
+          <div style={s.stepIndicator}>{Array.from({ length: 8 }).map((_, i) => (<div key={i} style={s.dot(step === i + 1, step > i + 1)} />))}</div>
         )}
 
-        {/* ─── Step 1: Welcome + Quick Re-style ─── */}
-        {step === 1 && !showHistory && !showWishlist && !showAccount && (
+        {/* ─── Step 1 ─── */}
+        {step === 1 && !showHistory && !showWishlist && !showAccount && !showConfidence && (
           <div>
-            {/* Quick re-style for returning users */}
             {customer && customer.lastMood && closet.length > 0 && (
               <div style={{ marginBottom: "40px", padding: "28px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" }}>
                 <p style={{ fontSize: "14px", color: "#8a7f75", margin: "0 0 8px", letterSpacing: "0.15em", textTransform: "uppercase" }}>Welcome back, {customer.firstName || "love"}</p>
-                <p style={{ fontSize: "22px", fontStyle: "italic", margin: "0 0 20px" }}>
-                  Last time you were feeling {customer.lastMood} and wanted to feel {customer.lastFeeling}
-                </p>
-                <button style={s.quickBtn} onClick={quickRestyle}>
-                  ✦ Style me again
-                </button>
+                <p style={{ fontSize: "22px", fontStyle: "italic", margin: "0 0 20px" }}>Last time you were feeling {customer.lastMood} and wanted to feel {customer.lastFeeling}</p>
+                <button style={s.quickBtn} onClick={quickRestyle}>✦ Style me again</button>
                 <p style={{ fontSize: "12px", color: "#8a7f75", margin: "12px 0 0" }}>or start fresh below</p>
               </div>
             )}
-
             <div style={s.title}>Step 1 of 7</div>
             <p style={s.bigQ}>How are you feeling right now?</p>
             <input style={s.input} placeholder="overwhelmed, tired, excited..." value={mood} onChange={e => setMood(e.target.value)} autoFocus />
-            <div style={{ marginTop: "32px" }}>
-              <button style={s.btn} onClick={() => mood.trim() && setStep(2)}>Continue</button>
-            </div>
+            <div style={{ marginTop: "32px" }}><button style={s.btn} onClick={() => mood.trim() && setStep(2)}>Continue</button></div>
           </div>
         )}
 
-        {step === 2 && (
-          <div>
-            <div style={s.title}>Step 2 of 7</div>
-            <p style={s.bigQ}>How do you want to feel?</p>
-            <input style={s.input} placeholder="powerful, calm, seen, soft..." value={feeling} onChange={e => setFeeling(e.target.value)} autoFocus />
-            <div style={{ marginTop: "32px", display: "flex", gap: "12px" }}>
-              <button style={s.outlineBtn} onClick={() => setStep(1)}>Back</button>
-              <button style={s.btn} onClick={() => feeling.trim() && setStep(3)}>Continue</button>
-            </div>
-          </div>
-        )}
+        {step === 2 && (<div><div style={s.title}>Step 2 of 7</div><p style={s.bigQ}>How do you want to feel?</p><input style={s.input} placeholder="powerful, calm, seen, soft..." value={feeling} onChange={e => setFeeling(e.target.value)} autoFocus /><div style={{ marginTop: "32px", display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(1)}>Back</button><button style={s.btn} onClick={() => feeling.trim() && setStep(3)}>Continue</button></div></div>)}
 
-        {step === 3 && (
-          <div>
-            <div style={s.title}>Step 3 of 7</div>
-            <p style={s.bigQ}>What are you dressing for?</p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-              {["Casual", "Dinner", "Party", "Formal", "Work", "Date", "Travel"].map(e => (
-                <button key={e} style={s.chip(event === e.toLowerCase())} onClick={() => setEvent(e.toLowerCase())}>{e}</button>
-              ))}
-            </div>
-            <div style={{ marginTop: "32px", display: "flex", gap: "12px" }}>
-              <button style={s.outlineBtn} onClick={() => setStep(2)}>Back</button>
-              <button style={s.btn} onClick={() => event && setStep(4)}>Continue</button>
-            </div>
-          </div>
-        )}
+        {step === 3 && (<div><div style={s.title}>Step 3 of 7</div><p style={s.bigQ}>What are you dressing for?</p><div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>{["Casual", "Dinner", "Party", "Formal", "Work", "Date", "Travel"].map(e => (<button key={e} style={s.chip(event === e.toLowerCase())} onClick={() => setEvent(e.toLowerCase())}>{e}</button>))}</div><div style={{ marginTop: "32px", display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(2)}>Back</button><button style={s.btn} onClick={() => event && setStep(4)}>Continue</button></div></div>)}
 
-        {step === 4 && (
-          <div>
-            <div style={s.title}>Step 4 of 7</div>
-            <p style={s.bigQ}>Pick up to 3 words that describe your style.</p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-              {STYLE_WORDS.map(w => (
-                <button key={w} style={s.chip(styleWords.includes(w))} onClick={() => toggleStyleWord(w)}>{w}</button>
-              ))}
-            </div>
-            <div style={{ marginTop: "32px", display: "flex", gap: "12px" }}>
-              <button style={s.outlineBtn} onClick={() => setStep(3)}>Back</button>
-              <button style={s.btn} onClick={() => setStep(5)}>Continue</button>
-            </div>
-          </div>
-        )}
+        {step === 4 && (<div><div style={s.title}>Step 4 of 7</div><p style={s.bigQ}>Pick up to 3 words that describe your style.</p><div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>{STYLE_WORDS.map(w => (<button key={w} style={s.chip(styleWords.includes(w))} onClick={() => toggleStyleWord(w)}>{w}</button>))}</div><div style={{ marginTop: "32px", display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(3)}>Back</button><button style={s.btn} onClick={() => setStep(5)}>Continue</button></div></div>)}
 
-        {step === 5 && (
-          <div>
-            <div style={s.title}>Step 5 of 7</div>
-            <p style={s.bigQ}>Any fit or body preferences?</p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-              {BODY_PREFS.map(b => (
-                <button key={b} style={s.chip(bodyPref === b)} onClick={() => setBodyPref(b)}>{b}</button>
-              ))}
-            </div>
-            <div style={{ marginTop: "32px", display: "flex", gap: "12px" }}>
-              <button style={s.outlineBtn} onClick={() => setStep(4)}>Back</button>
-              <button style={s.btn} onClick={() => setStep(6)}>Continue</button>
-            </div>
-          </div>
-        )}
+        {step === 5 && (<div><div style={s.title}>Step 5 of 7</div><p style={s.bigQ}>Any fit or body preferences?</p><div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>{BODY_PREFS.map(b => (<button key={b} style={s.chip(bodyPref === b)} onClick={() => setBodyPref(b)}>{b}</button>))}</div><div style={{ marginTop: "32px", display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(4)}>Back</button><button style={s.btn} onClick={() => setStep(6)}>Continue</button></div></div>)}
 
-        {step === 6 && (
-          <div>
-            <div style={s.title}>Step 6 of 7</div>
-            <p style={s.bigQ}>What would you like to do?</p>
-            <div onClick={() => setMode("recommend_naia")} style={s.modeCard(mode === "recommend_naia")}>
-              <div style={{ fontSize: "17px", fontWeight: 500, marginBottom: "4px" }}>Find nAia pieces for what I own</div>
-              <div style={{ fontSize: "14px", opacity: 0.7 }}>Upload pieces from your closet and we'll recommend the perfect nAia match</div>
-            </div>
-            <div onClick={() => setMode("closet_only")} style={s.modeCard(mode === "closet_only")}>
-              <div style={{ fontSize: "17px", fontWeight: 500, marginBottom: "4px" }}>Style my closet pieces together</div>
-              <div style={{ fontSize: "14px", opacity: 0.7 }}>We'll pick the best combination from your closet based on your mood</div>
-            </div>
-            <div style={{ marginTop: "24px", display: "flex", gap: "12px" }}>
-              <button style={s.outlineBtn} onClick={() => setStep(5)}>Back</button>
-              <button style={s.btn} onClick={() => mode && setStep(7)}>Continue</button>
-            </div>
-          </div>
-        )}
+        {step === 6 && (<div><div style={s.title}>Step 6 of 7</div><p style={s.bigQ}>What would you like to do?</p><div onClick={() => setMode("recommend_naia")} style={s.modeCard(mode === "recommend_naia")}><div style={{ fontSize: "17px", fontWeight: 500, marginBottom: "4px" }}>Find nAia pieces for what I own</div><div style={{ fontSize: "14px", opacity: 0.7 }}>Upload pieces from your closet and we'll recommend the perfect nAia match</div></div><div onClick={() => setMode("closet_only")} style={s.modeCard(mode === "closet_only")}><div style={{ fontSize: "17px", fontWeight: 500, marginBottom: "4px" }}>Style my closet pieces together</div><div style={{ fontSize: "14px", opacity: 0.7 }}>We'll pick the best combination from your closet based on your mood</div></div><div style={{ marginTop: "24px", display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(5)}>Back</button><button style={s.btn} onClick={() => mode && setStep(7)}>Continue</button></div></div>)}
 
         {step === 7 && (
           <div>
             <div style={s.title}>Step 7 of 7</div>
-            <p style={s.bigQ}>
-              {mode === "closet_only" ? "Add your pieces and we'll choose the best combination" :
-               "Pick pieces from your closet"}
-            </p>
-
+            <p style={s.bigQ}>{mode === "closet_only" ? "Add your pieces and we'll choose the best combination" : "Pick pieces from your closet"}</p>
             <div style={{ marginBottom: "32px" }}>
-              <div style={{ ...s.resultLabel, marginBottom: "12px" }}>
-                Your Closet
-                {customer && closetSynced && <span style={{ color: "#7da563", marginLeft: "8px" }}>✓ Synced</span>}
-              </div>
-              {closet.length === 0 && (
-                <p style={{ color: "#8a7f75", fontSize: "15px", marginBottom: "16px" }}>Your closet is empty. Add a piece below.</p>
-              )}
+              <div style={{ ...s.resultLabel, marginBottom: "12px" }}>Your Closet{customer && closetSynced && <span style={{ color: "#7da563", marginLeft: "8px" }}>✓ Synced</span>}</div>
+              {closet.length === 0 && <p style={{ color: "#8a7f75", fontSize: "15px", marginBottom: "16px" }}>Your closet is empty. Add a piece below.</p>}
               <div style={s.closetGrid}>
                 {closet.map(piece => (
-                  <div key={piece.id}
-                    onClick={() => mode !== "closet_only" && toggleClosetItem(piece.id)}
-                    style={{ border: `2px solid ${selectedClosetIds.includes(piece.id) ? "#1a1816" : "#d4cfc9"}`, borderRadius: "2px", overflow: "hidden", cursor: mode !== "closet_only" ? "pointer" : "default" }}>
-                    {piece.image
-                      ? <img src={piece.image} alt={piece.name} style={{ width: "100%", height: "160px", objectFit: "cover", display: "block" }} />
-                      : <div style={{ width: "100%", height: "160px", background: "#e8e4df", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", color: "#8a7f75" }}>{piece.category}</div>
-                    }
+                  <div key={piece.id} onClick={() => mode !== "closet_only" && toggleClosetItem(piece.id)} style={{ border: `2px solid ${selectedClosetIds.includes(piece.id) ? "#1a1816" : "#d4cfc9"}`, borderRadius: "2px", overflow: "hidden", cursor: mode !== "closet_only" ? "pointer" : "default" }}>
+                    {piece.image ? <img src={piece.image} alt={piece.name} style={{ width: "100%", height: "160px", objectFit: "cover", display: "block" }} /> : <div style={{ width: "100%", height: "160px", background: "#e8e4df", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", color: "#8a7f75" }}>{piece.category}</div>}
                     <div style={{ padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div>
-                        <div style={{ fontSize: "14px", fontWeight: 500 }}>{piece.name}</div>
-                        <div style={{ fontSize: "12px", color: "#8a7f75" }}>{piece.category}</div>
-                      </div>
-                      <button onClick={(e) => { e.stopPropagation(); removeClosetItem(piece.id); }}
-                        style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "#8a7f75", padding: "4px" }}>×</button>
+                      <div><div style={{ fontSize: "14px", fontWeight: 500 }}>{piece.name}</div><div style={{ fontSize: "12px", color: "#8a7f75" }}>{piece.category}</div></div>
+                      <button onClick={(e) => { e.stopPropagation(); removeClosetItem(piece.id); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "#8a7f75", padding: "4px" }}>×</button>
                     </div>
                   </div>
                 ))}
               </div>
-
               {!showAddItem ? (
                 <button style={{ ...s.outlineBtn, marginTop: "16px", fontSize: "12px", padding: "10px 20px" }} onClick={() => setShowAddItem(true)}>+ Add piece</button>
               ) : (
                 <div style={{ marginTop: "16px", padding: "20px", border: "1px solid #d4cfc9", borderRadius: "2px" }}>
                   <input style={{ ...s.input, marginBottom: "12px" }} placeholder="Piece name (e.g. black blazer)" value={itemName} onChange={e => setItemName(e.target.value)} />
-                  <select style={{ ...s.input, marginBottom: "12px" }} value={itemCategory} onChange={e => setItemCategory(e.target.value)}>
-                    <option value="top">Top</option>
-                    <option value="bottom">Bottom</option>
-                    <option value="outerwear">Outerwear</option>
-                    <option value="dress">Dress</option>
-                    <option value="shoes">Shoes</option>
-                    <option value="accessory">Accessory</option>
-                  </select>
+                  <select style={{ ...s.input, marginBottom: "12px" }} value={itemCategory} onChange={e => setItemCategory(e.target.value)}><option value="top">Top</option><option value="bottom">Bottom</option><option value="outerwear">Outerwear</option><option value="dress">Dress</option><option value="shoes">Shoes</option><option value="accessory">Accessory</option></select>
                   <input id="closet-file-input" type="file" accept="image/*" onChange={handleImageUpload} style={{ display: "none" }} />
                   {itemImage ? (
-                    <div style={{ marginBottom: "12px", position: "relative", display: "inline-block" }}>
-                      <img src={itemImage} alt="Preview" style={{ width: "100px", height: "100px", objectFit: "cover", borderRadius: "4px", display: "block" }} />
-                      <button onClick={() => setItemImage("")} style={{ position: "absolute", top: "-6px", right: "-6px", width: "20px", height: "20px", borderRadius: "50%", background: "#1a1816", color: "#fff", border: "none", fontSize: "12px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
-                    </div>
+                    <div style={{ marginBottom: "12px", position: "relative", display: "inline-block" }}><img src={itemImage} alt="Preview" style={{ width: "100px", height: "100px", objectFit: "cover", borderRadius: "4px", display: "block" }} /><button onClick={() => setItemImage("")} style={{ position: "absolute", top: "-6px", right: "-6px", width: "20px", height: "20px", borderRadius: "50%", background: "#1a1816", color: "#fff", border: "none", fontSize: "12px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button></div>
                   ) : (
-                    <button type="button" onClick={() => document.getElementById("closet-file-input").click()}
-                      style={{ ...s.outlineBtn, fontSize: "12px", padding: "10px 20px", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2.5"/><path d="M3 17l5-5 3 2.5 4-5 6 7.5"/></svg>
-                      Add photo (optional)
-                    </button>
+                    <button type="button" onClick={() => document.getElementById("closet-file-input").click()} style={{ ...s.outlineBtn, fontSize: "12px", padding: "10px 20px", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2.5"/><path d="M3 17l5-5 3 2.5 4-5 6 7.5"/></svg>Add photo (optional)</button>
                   )}
-                  <div style={{ display: "flex", gap: "10px" }}>
-                    <button style={s.btn} onClick={addItem}>Add</button>
-                    <button style={s.outlineBtn} onClick={() => { setShowAddItem(false); setItemImage(""); }}>Cancel</button>
-                  </div>
+                  <div style={{ display: "flex", gap: "10px" }}><button style={s.btn} onClick={addItem}>Add</button><button style={s.outlineBtn} onClick={() => { setShowAddItem(false); setItemImage(""); }}>Cancel</button></div>
                 </div>
               )}
             </div>
-
-            <div style={{ display: "flex", gap: "12px" }}>
-              <button style={s.outlineBtn} onClick={() => setStep(6)}>Back</button>
-              <button style={s.btn} onClick={callAI}>Style this look</button>
-            </div>
+            <div style={{ display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(6)}>Back</button><button style={s.btn} onClick={callAI}>Style this look</button></div>
           </div>
         )}
 
-        {/* ─── Step 8: Results (with try-on + wishlist) ─── */}
+        {/* ─── Step 8: Results ─── */}
         {step === 8 && (
           <div>
             <div style={s.title}>Your Styling</div>
             {loading ? (
               <div style={{ textAlign: "center", padding: "60px 0" }}>
-                <div style={{ display: "flex", justifyContent: "center", gap: "6px", marginBottom: "24px" }}>
-                  {[0, 1, 2].map(i => (
-                    <div key={i} style={{
-                      width: "8px", height: "8px", borderRadius: "50%", background: "#1a1816",
-                      animation: `naiaPulse 1.4s ease-in-out ${i * 0.2}s infinite`,
-                    }} />
-                  ))}
-                </div>
-                <p key={loadingPhrase} style={{
-                  fontSize: "20px", fontStyle: "italic", color: "#8a7f75",
-                  animation: "naiaFadeIn 0.5s ease",
-                }}>{LOADING_PHRASES[loadingPhrase]}</p>
-                <style>{`
-                  @keyframes naiaPulse {
-                    0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
-                    40% { opacity: 1; transform: scale(1.2); }
-                  }
-                  @keyframes naiaFadeIn {
-                    from { opacity: 0; transform: translateY(6px); }
-                    to { opacity: 1; transform: translateY(0); }
-                  }
-                `}</style>
+                <div style={{ display: "flex", justifyContent: "center", gap: "6px", marginBottom: "24px" }}>{[0, 1, 2].map(i => (<div key={i} style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#1a1816", animation: `naiaPulse 1.4s ease-in-out ${i * 0.2}s infinite` }} />))}</div>
+                <p key={loadingPhrase} style={{ fontSize: "20px", fontStyle: "italic", color: "#8a7f75", animation: "naiaFadeIn 0.5s ease" }}>{LOADING_PHRASES[loadingPhrase]}</p>
+                <style>{`@keyframes naiaPulse{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1.2)}}@keyframes naiaFadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}`}</style>
               </div>
             ) : parsedResult && (parsedResult.feelingNow || parsedResult.outfitDirection.length > 0) ? (
               <div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "20px", marginBottom: "24px" }}>
-                  <div>
-                    <div style={s.resultLabel}>You're feeling</div>
-                    <div style={s.resultValue}>{parsedResult.feelingNow}</div>
-                  </div>
-                  <div>
-                    <div style={s.resultLabel}>You want to feel</div>
-                    <div style={s.resultValue}>{parsedResult.feelingNext}</div>
-                  </div>
-                  <div>
-                    <div style={s.resultLabel}>Dressing for</div>
-                    <div style={s.resultValue}>{event}</div>
-                  </div>
+                  <div><div style={s.resultLabel}>You're feeling</div><div style={s.resultValue}>{parsedResult.feelingNow}</div></div>
+                  <div><div style={s.resultLabel}>You want to feel</div><div style={s.resultValue}>{parsedResult.feelingNext}</div></div>
+                  <div><div style={s.resultLabel}>Dressing for</div><div style={s.resultValue}>{event}</div></div>
                 </div>
-
                 <div style={s.divider} />
-
-                <div style={{ marginBottom: "24px" }}>
-                  <div style={s.resultLabel}>Your outfit direction</div>
-                  {parsedResult.outfitDirection.map((item, i) => (
-                    <p key={i} style={{ fontSize: "17px", lineHeight: 1.7, margin: "0 0 8px", paddingLeft: "16px", borderLeft: "2px solid #d4cfc9" }}>{item}</p>
-                  ))}
-                </div>
-
+                <div style={{ marginBottom: "24px" }}><div style={s.resultLabel}>Your outfit direction</div>{parsedResult.outfitDirection.map((item, i) => (<p key={i} style={{ fontSize: "17px", lineHeight: 1.7, margin: "0 0 8px", paddingLeft: "16px", borderLeft: "2px solid #d4cfc9" }}>{item}</p>))}</div>
                 <div style={s.divider} />
+                <div style={{ marginBottom: "24px" }}><div style={s.resultLabel}>Why this works</div>{parsedResult.whyThisWorks.map((item, i) => (<p key={i} style={{ fontSize: "15px", lineHeight: 1.7, margin: "0 0 6px", color: "#4a4540" }}>{item}</p>))}</div>
 
-                <div style={{ marginBottom: "24px" }}>
-                  <div style={s.resultLabel}>Why this works</div>
-                  {parsedResult.whyThisWorks.map((item, i) => (
-                    <p key={i} style={{ fontSize: "15px", lineHeight: 1.7, margin: "0 0 6px", color: "#4a4540" }}>{item}</p>
-                  ))}
-                </div>
+                {parsedResult.naiaRecommendations?.length > 0 && (<><div style={s.divider} /><div style={{ marginBottom: "24px" }}><div style={s.resultLabel}>nAia Recommendations</div>{parsedResult.naiaRecommendations.map((item, i) => (<p key={i} style={{ fontSize: "15px", lineHeight: 1.7, margin: "0 0 10px", paddingLeft: "16px", borderLeft: "2px solid #1a1816" }}>{item}</p>))}</div></>)}
 
-                {parsedResult.naiaRecommendations?.length > 0 && (
-                  <>
-                    <div style={s.divider} />
-                    <div style={{ marginBottom: "24px" }}>
-                      <div style={s.resultLabel}>nAia Recommendations</div>
-                      {parsedResult.naiaRecommendations.map((item, i) => (
-                        <p key={i} style={{ fontSize: "15px", lineHeight: 1.7, margin: "0 0 10px", paddingLeft: "16px", borderLeft: "2px solid #1a1816" }}>{item}</p>
-                      ))}
-                    </div>
-                  </>
-                )}
+                {(parsedResult.accessories || parsedResult.perfume || parsedResult.song) && (<><div style={s.divider} /><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "24px" }}>{parsedResult.accessories && <div style={s.vibeCard}><div style={s.resultLabel}>Accessories</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.accessories}</p></div>}{parsedResult.perfume && <div style={s.vibeCard}><div style={s.resultLabel}>Perfume</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.perfume}</p></div>}{parsedResult.song && <div style={s.vibeCard}><div style={s.resultLabel}>Song</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.song}</p></div>}</div></>)}
 
-                {(parsedResult.accessories || parsedResult.perfume || parsedResult.song) && (
-                  <>
-                    <div style={s.divider} />
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "24px" }}>
-                      {parsedResult.accessories && (
-                        <div style={s.vibeCard}>
-                          <div style={s.resultLabel}>Accessories</div>
-                          <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.accessories}</p>
-                        </div>
-                      )}
-                      {parsedResult.perfume && (
-                        <div style={s.vibeCard}>
-                          <div style={s.resultLabel}>Perfume</div>
-                          <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.perfume}</p>
-                        </div>
-                      )}
-                      {parsedResult.song && (
-                        <div style={s.vibeCard}>
-                          <div style={s.resultLabel}>Song</div>
-                          <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.song}</p>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
+                {parsedResult.shift && (<><div style={s.divider} /><div style={{ marginBottom: "24px" }}><div style={s.resultLabel}>The shift</div><p style={{ fontSize: "19px", fontStyle: "italic", lineHeight: 1.6, margin: 0 }}>{parsedResult.shift}</p></div></>)}
 
-                {parsedResult.shift && (
-                  <>
-                    <div style={s.divider} />
-                    <div style={{ marginBottom: "24px" }}>
-                      <div style={s.resultLabel}>The shift</div>
-                      <p style={{ fontSize: "19px", fontStyle: "italic", lineHeight: 1.6, margin: 0 }}>{parsedResult.shift}</p>
-                    </div>
-                  </>
-                )}
-
-                {/* ─── Shop recommended pieces WITH wishlist hearts + try-on ─── */}
+                {/* ─── Shop recommended pieces ─── */}
                 {(mode === "recommend_naia" || mode === "closet_naia") && naiaProducts.length > 0 && parsedResult.naiaRecommendations?.length > 0 && (
                   <>
                     <div style={s.divider} />
                     <div style={s.resultLabel}>Shop recommended pieces</div>
-
-                    {/* Try-on photo upload */}
                     <div style={{ margin: "12px 0 16px", padding: "16px", background: "#eee9e2", borderRadius: "2px" }}>
                       <div style={{ fontSize: "12px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "8px" }}>Virtual Try-On</div>
                       {tryOnPhoto ? (
                         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                           <img src={tryOnPhoto} alt="Your photo" style={{ width: "60px", height: "60px", objectFit: "cover", borderRadius: "2px" }} />
-                          <div>
-                            <div style={{ fontSize: "13px", marginBottom: "4px" }}>Photo ready</div>
-                            <button style={{ fontSize: "12px", color: "#8a7f75", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0 }}
-                              onClick={() => setTryOnPhoto(null)}>Change photo</button>
-                          </div>
+                          <div><div style={{ fontSize: "13px", marginBottom: "4px" }}>Photo ready</div><button style={{ fontSize: "12px", color: "#8a7f75", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0 }} onClick={() => setTryOnPhoto(null)}>Change photo</button></div>
                         </div>
                       ) : (
                         <div>
                           <p style={{ fontSize: "13px", color: "#4a4540", margin: "0 0 8px" }}>Upload a photo of yourself to try on recommended pieces</p>
                           <input id="tryon-photo-input" type="file" accept="image/*" onChange={handleTryOnPhotoUpload} style={{ display: "none" }} />
-                          <button style={{ ...s.outlineBtn, fontSize: "11px", padding: "8px 16px" }}
-                            onClick={() => document.getElementById("tryon-photo-input").click()}>
-                            Upload photo
-                          </button>
+                          <button style={{ ...s.outlineBtn, fontSize: "11px", padding: "8px 16px" }} onClick={() => document.getElementById("tryon-photo-input").click()}>Upload photo</button>
                         </div>
                       )}
                     </div>
-
                     <div style={s.productGrid}>
-                      {naiaProducts
-                        .filter(p => parsedResult.naiaRecommendations.some(r => r.toLowerCase().includes(p.title.toLowerCase())))
-                        .map(p => {
-                          const tryOn = tryOnState[p.title];
-                          return (
-                            <div key={p.id} style={{ border: "1px solid #d4cfc9", borderRadius: "2px", overflow: "hidden", position: "relative" }}>
-                              <a href={p.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit" }}>
-                                <img src={p.image} alt={p.title} style={{ width: "100%", height: "140px", objectFit: "cover", display: "block" }} />
-                                <div style={{ padding: "8px", fontSize: "12px" }}>{p.title}</div>
-                              </a>
-
-                              {/* Wishlist heart */}
-                              {customer && (
-                                <button
-                                  style={{ ...s.heartBtn(wishlistIds.has(String(p.id))), position: "absolute", top: "6px", right: "6px", background: "rgba(255,255,255,0.8)", borderRadius: "50%", width: "28px", height: "28px", display: "flex", alignItems: "center", justifyContent: "center" }}
-                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleWishlist(p); }}>
-                                  {wishlistIds.has(String(p.id)) ? "♥" : "♡"}
-                                </button>
-                              )}
-
-                              {/* Try-on button */}
-                              {tryOnPhoto && (
-                                <div style={{ padding: "0 8px 8px" }}>
-                                  {tryOn?.loading ? (
-                                    <div style={{ fontSize: "11px", color: "#8a7f75", textAlign: "center", padding: "8px" }}>Trying on...</div>
-                                  ) : tryOn?.result ? (
-                                    <img src={tryOn.result} alt="Try-on result" style={{ width: "100%", borderRadius: "2px", marginTop: "4px" }} />
-                                  ) : (
-                                    <button style={s.tryOnBtn} onClick={() => startTryOn(p.title, p.image)}>
-                                      Try this on
-                                    </button>
-                                  )}
-                                  {tryOn?.error && (
-                                    <div style={{ fontSize: "11px", color: "#c5553a", marginTop: "4px" }}>{tryOn.error}</div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })
-                      }
+                      {naiaProducts.filter(p => parsedResult.naiaRecommendations.some(r => r.toLowerCase().includes(p.title.toLowerCase()))).map(p => {
+                        const tryOn = tryOnState[p.title];
+                        return (
+                          <div key={p.id} style={{ border: "1px solid #d4cfc9", borderRadius: "2px", overflow: "hidden", position: "relative" }}>
+                            <a href={p.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit" }}><img src={p.image} alt={p.title} style={{ width: "100%", height: "140px", objectFit: "cover", display: "block" }} /><div style={{ padding: "8px", fontSize: "12px" }}>{p.title}</div></a>
+                            {customer && (<button style={{ ...s.heartBtn(wishlistIds.has(String(p.id))), position: "absolute", top: "6px", right: "6px", background: "rgba(255,255,255,0.8)", borderRadius: "50%", width: "28px", height: "28px", display: "flex", alignItems: "center", justifyContent: "center" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleWishlist(p); }}>{wishlistIds.has(String(p.id)) ? "♥" : "♡"}</button>)}
+                            {tryOnPhoto && (<div style={{ padding: "0 8px 8px" }}>{tryOn?.loading ? (<div style={{ fontSize: "11px", color: "#8a7f75", textAlign: "center", padding: "8px" }}>Trying on...</div>) : tryOn?.result ? (<img src={tryOn.result} alt="Try-on result" style={{ width: "100%", borderRadius: "2px", marginTop: "4px" }} />) : (<button style={s.tryOnBtn} onClick={() => startTryOn(p.title, p.image)}>Try this on</button>)}{tryOn?.error && (<div style={{ fontSize: "11px", color: "#c5553a", marginTop: "4px" }}>{tryOn.error}</div>)}</div>)}
+                          </div>
+                        );
+                      })}
                     </div>
+                  </>
+                )}
+
+                {/* ─── Confidence Rating ─── */}
+                {customer && lastHistoryId && (
+                  <>
+                    <div style={s.divider} />
+                    <ConfidenceRating
+                      historyId={lastHistoryId}
+                      customerToken={customerToken}
+                      mood={mood} feeling={feeling} event={event} styleWords={styleWords}
+                    />
                   </>
                 )}
 
                 <div style={{ marginTop: "32px", display: "flex", gap: "12px" }}>
                   <button style={s.outlineBtn} onClick={resetAll}>Start over</button>
-                  {customer && (
-                    <button style={{ ...s.outlineBtn, opacity: 0.6 }} disabled>
-                      ✓ Saved to history
-                    </button>
-                  )}
+                  {customer && (<button style={{ ...s.outlineBtn, opacity: 0.6 }} disabled>✓ Saved to history</button>)}
                 </div>
               </div>
             ) : (
@@ -1128,3 +939,4 @@ export default function Stylist() {
     </div>
   );
 }
+
