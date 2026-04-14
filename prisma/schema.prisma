@@ -7,7 +7,6 @@ datasource db {
   url      = env("POSTGRES_URL")
 }
 
-// ─── Shopify admin session (existing — for the embedded app dashboard) ───
 model Session {
   id            String    @id
   shop          String
@@ -28,7 +27,6 @@ model Session {
   refreshTokenExpires DateTime?
 }
 
-// ─── Customer (storefront shopper) ───
 model Customer {
   id              String          @id @default(cuid())
   shopifyId       String          @unique
@@ -50,7 +48,6 @@ model Customer {
   outfitRatings   OutfitRating[]
 }
 
-// ─── Closet pieces (what the customer owns) ───
 model ClosetItem {
   id         String   @id @default(cuid())
   customerId String
@@ -64,7 +61,6 @@ model ClosetItem {
   @@index([customerId])
 }
 
-// ─── Wishlist (nAia pieces the customer wants) ───
 model WishlistItem {
   id             String   @id @default(cuid())
   customerId     String
@@ -80,7 +76,6 @@ model WishlistItem {
   @@index([customerId])
 }
 
-// ─── Outfit history (past styling results) ───
 model OutfitHistory {
   id            String   @id @default(cuid())
   customerId    String
@@ -101,16 +96,15 @@ model OutfitHistory {
   @@index([customerId, createdAt(sort: Desc)])
 }
 
-// ─── Outfit confidence rating ───
 model OutfitRating {
   id                    String   @id @default(cuid())
   customerId            String
-  historyId             String
-  confidence            Int                          // 1-5 scale
+  historyId             String   @unique
+  confidence            Int
   feltLikeMe            Boolean?
   wouldWearAgain        Boolean?
   physicallyComfortable Boolean?
-  mood                  String?                      // copied from outfit for easier aggregation
+  mood                  String?
   feeling               String?
   event                 String?
   styleWords            String?
@@ -123,4 +117,3 @@ model OutfitRating {
   @@index([customerId])
   @@index([customerId, confidence])
 }
-
