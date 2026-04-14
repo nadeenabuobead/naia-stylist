@@ -681,6 +681,9 @@ export default function Stylist() {
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             {customer && (
               <>
+                <button style={s.iconBtn} onClick={() => { setShowConfidence(false); setShowHistory(false); setShowWishlist(false); setShowAccount(false); setStep(1); }} title="Style me">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                </button>
                 {/* Confidence dashboard button */}
                 <button style={s.iconBtn} onClick={() => { setShowConfidence(!showConfidence); setShowHistory(false); setShowWishlist(false); setShowAccount(false); }} title="Confidence profile">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
