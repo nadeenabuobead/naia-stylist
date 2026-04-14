@@ -488,12 +488,3 @@ model TrendReportView {
   relevanceScore  Int?    // How relevant to her style (1-100)
   matchingStyles  String[] // Which of her styles this matches
 }
-
-// ============================================
-// INDEXES FOR PERFORMANCE
-// ============================================
-
-// Add indexes for common queries
-@@index([customerId], map: "idx_closet_customer")
-@@index([category], map: "idx_closet_category")
-@@index([customerId, createdAt], map: "idx_sessions_customer_date")
