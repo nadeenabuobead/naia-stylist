@@ -1,0 +1,589 @@
+// app/lib/onboarding/quiz-data.ts
+// Complete quiz data structure for nAia onboarding
+
+export type QuestionType =
+  | "single-select"
+  | "multi-select"
+  | "image-grid"
+  | "open-text"
+  | "color-picker"
+  | "scale";
+
+export interface QuizOption {
+  value: string;
+  label: string;
+  description?: string;
+  icon?: string;
+  imageUrl?: string;
+  hex?: string;
+}
+
+export interface QuizQuestion {
+  id: string;
+  type: QuestionType;
+  question: string;
+  description?: string;
+  options?: QuizOption[];
+  placeholder?: string;
+  minSelect?: number;
+  maxSelect?: number;
+  min?: number;
+  max?: number;
+  lowLabel?: string;
+  highLabel?: string;
+  required?: boolean;
+}
+
+export interface QuizStep {
+  id: string;
+  title: string;
+  subtitle?: string;
+  questions: QuizQuestion[];
+}
+
+// The complete nAia onboarding quiz
+export const onboardingQuiz: QuizStep[] = [
+  {
+    id: "welcome",
+    title: "Let's get to know you",
+    subtitle: "This helps nAia understand your unique style personality",
+    questions: [
+      {
+        id: "name",
+        type: "open-text",
+        question: "What should nAia call you?",
+        description: "Your first name or nickname",
+        placeholder: "Enter your name...",
+        required: true,
+      },
+    ],
+  },
+  {
+    id: "style-personality",
+    title: "Your style personality",
+    subtitle: "Select the aesthetics that resonate with you",
+    questions: [
+      {
+        id: "style_personalities",
+        type: "image-grid",
+        question: "Which style vibes feel like you?",
+        description: "These help nAia understand your aesthetic preferences",
+        maxSelect: 3,
+        options: [
+          {
+            value: "minimalist",
+            label: "Minimalist",
+            description: "Clean lines, neutral palette",
+            imageUrl: "/images/styles/minimalist.jpg",
+          },
+          {
+            value: "romantic",
+            label: "Romantic",
+            description: "Soft, feminine, flowing",
+            imageUrl: "/images/styles/romantic.jpg",
+          },
+          {
+            value: "edgy",
+            label: "Edgy",
+            description: "Bold, architectural, unexpected",
+            imageUrl: "/images/styles/edgy.jpg",
+          },
+          {
+            value: "classic",
+            label: "Classic",
+            description: "Timeless, polished, elegant",
+            imageUrl: "/images/styles/classic.jpg",
+          },
+          {
+            value: "bohemian",
+            label: "Bohemian",
+            description: "Free-spirited, artistic, layered",
+            imageUrl: "/images/styles/bohemian.jpg",
+          },
+          {
+            value: "glamorous",
+            label: "Glamorous",
+            description: "Luxe, statement-making, bold",
+            imageUrl: "/images/styles/glamorous.jpg",
+          },
+          {
+            value: "sporty",
+            label: "Sporty Chic",
+            description: "Active, comfortable, modern",
+            imageUrl: "/images/styles/sporty.jpg",
+          },
+          {
+            value: "artsy",
+            label: "Artsy",
+            description: "Creative, unique, expressive",
+            imageUrl: "/images/styles/artsy.jpg",
+          },
+          {
+            value: "preppy",
+            label: "Preppy",
+            description: "Polished, collegiate, refined",
+            imageUrl: "/images/styles/preppy.jpg",
+          },
+        ],
+        required: true,
+      },
+    ],
+  },
+  {
+    id: "lifestyle",
+    title: "Your lifestyle",
+    subtitle: "Help nAia understand how you spend your days",
+    questions: [
+      {
+        id: "lifestyle_contexts",
+        type: "multi-select",
+        question: "What does a typical week look like for you?",
+        description: "Select all that apply",
+        minSelect: 1,
+        maxSelect: 5,
+        options: [
+          { value: "office", label: "Office work", icon: "💼" },
+          { value: "wfh", label: "Work from home", icon: "🏠" },
+          { value: "meetings", label: "Client meetings", icon: "🤝" },
+          { value: "creative", label: "Creative work", icon: "🎨" },
+          { value: "mom", label: "Mom life", icon: "👶" },
+          { value: "social", label: "Social events", icon: "🥂" },
+          { value: "fitness", label: "Fitness & wellness", icon: "🧘" },
+          { value: "travel", label: "Travel", icon: "✈️" },
+          { value: "dates", label: "Date nights", icon: "💕" },
+          { value: "casual", label: "Casual errands", icon: "☕" },
+        ],
+        required: true,
+      },
+      {
+        id: "dress_code",
+        type: "single-select",
+        question: "How formal is your typical day?",
+        options: [
+          {
+            value: "very_casual",
+            label: "Very casual",
+            description: "Athleisure, jeans, basics",
+          },
+          {
+            value: "smart_casual",
+            label: "Smart casual",
+            description: "Polished but comfortable",
+          },
+          {
+            value: "business_casual",
+            label: "Business casual",
+            description: "Professional but not strict",
+          },
+          {
+            value: "formal",
+            label: "Formal",
+            description: "Suits, dresses, professional",
+          },
+          {
+            value: "varies",
+            label: "It varies a lot",
+            description: "Different days, different needs",
+          },
+        ],
+        required: true,
+      },
+    ],
+  },
+  {
+    id: "mood-feelings",
+    title: "How you want to feel",
+    subtitle: "Style is about emotion, not just clothes",
+    questions: [
+      {
+        id: "desired_feelings",
+        type: "multi-select",
+        question: "How do you want to feel when you get dressed?",
+        description: "Choose your top feelings",
+        minSelect: 2,
+        maxSelect: 4,
+        options: [
+          { value: "confident", label: "Confident", icon: "💪" },
+          { value: "elegant", label: "Elegant", icon: "✨" },
+          { value: "powerful", label: "Powerful", icon: "👑" },
+          { value: "comfortable", label: "Comfortable", icon: "☁️" },
+          { value: "creative", label: "Creative", icon: "🎨" },
+          { value: "sexy", label: "Sexy", icon: "🔥" },
+          { value: "professional", label: "Professional", icon: "📊" },
+          { value: "relaxed", label: "Relaxed", icon: "🌿" },
+          { value: "playful", label: "Playful", icon: "💫" },
+          { value: "sophisticated", label: "Sophisticated", icon: "🖤" },
+        ],
+        required: true,
+      },
+      {
+        id: "current_confidence",
+        type: "scale",
+        question: "How confident do you currently feel in your style?",
+        min: 1,
+        max: 10,
+        lowLabel: "Not confident",
+        highLabel: "Very confident",
+        required: true,
+      },
+    ],
+  },
+  {
+    id: "struggles",
+    title: "Your style challenges",
+    subtitle: "Everyone has them — let's address yours",
+    questions: [
+      {
+        id: "style_struggles",
+        type: "multi-select",
+        question: "What do you struggle with most?",
+        description: "Select all that apply to you",
+        minSelect: 1,
+        maxSelect: 5,
+        options: [
+          {
+            value: "outfit_ideas",
+            label: "Coming up with outfit ideas",
+            icon: "🤔",
+          },
+          {
+            value: "mixing_pieces",
+            label: "Mixing and matching pieces",
+            icon: "🧩",
+          },
+          {
+            value: "finding_fit",
+            label: "Finding clothes that fit well",
+            icon: "📏",
+          },
+          {
+            value: "body_confidence",
+            label: "Feeling confident in my body",
+            icon: "💭",
+          },
+          {
+            value: "color_matching",
+            label: "Knowing which colors work",
+            icon: "🎨",
+          },
+          {
+            value: "accessorizing",
+            label: "Accessorizing outfits",
+            icon: "👜",
+          },
+          {
+            value: "occasions",
+            label: "Dressing for specific occasions",
+            icon: "📅",
+          },
+          {
+            value: "shopping",
+            label: "Shopping wisely",
+            icon: "🛍️",
+          },
+          {
+            value: "closet_chaos",
+            label: "Closet is overwhelming",
+            icon: "🌀",
+          },
+          {
+            value: "repeating",
+            label: "Wearing the same things",
+            icon: "🔄",
+          },
+        ],
+        required: true,
+      },
+    ],
+  },
+  {
+    id: "colors",
+    title: "Your color story",
+    subtitle: "Colors affect how we feel and look",
+    questions: [
+      {
+        id: "favorite_colors",
+        type: "color-picker",
+        question: "What colors do you love wearing?",
+        description: "Select up to 5 colors you're drawn to",
+        maxSelect: 5,
+        options: [
+          { value: "black", label: "Black", hex: "#1a1a1a" },
+          { value: "white", label: "White", hex: "#ffffff" },
+          { value: "navy", label: "Navy", hex: "#1e3a5f" },
+          { value: "camel", label: "Camel", hex: "#c4a77d" },
+          { value: "cream", label: "Cream", hex: "#f5f5dc" },
+          { value: "gray", label: "Gray", hex: "#808080" },
+          { value: "burgundy", label: "Burgundy", hex: "#722f37" },
+          { value: "blush", label: "Blush", hex: "#de9e9e" },
+          { value: "forest", label: "Forest", hex: "#228b22" },
+          { value: "red", label: "Red", hex: "#c41e3a" },
+          { value: "blue", label: "Blue", hex: "#4169e1" },
+          { value: "olive", label: "Olive", hex: "#808000" },
+          { value: "lavender", label: "Lavender", hex: "#b57edc" },
+          { value: "coral", label: "Coral", hex: "#ff7f50" },
+          { value: "mustard", label: "Mustard", hex: "#ffdb58" },
+        ],
+        required: true,
+      },
+      {
+        id: "avoid_colors",
+        type: "color-picker",
+        question: "Any colors you avoid?",
+        description: "Optional — select colors that don't feel like you",
+        maxSelect: 5,
+        options: [
+          { value: "black", label: "Black", hex: "#1a1a1a" },
+          { value: "white", label: "White", hex: "#ffffff" },
+          { value: "navy", label: "Navy", hex: "#1e3a5f" },
+          { value: "camel", label: "Camel", hex: "#c4a77d" },
+          { value: "cream", label: "Cream", hex: "#f5f5dc" },
+          { value: "gray", label: "Gray", hex: "#808080" },
+          { value: "burgundy", label: "Burgundy", hex: "#722f37" },
+          { value: "blush", label: "Blush", hex: "#de9e9e" },
+          { value: "forest", label: "Forest", hex: "#228b22" },
+          { value: "red", label: "Red", hex: "#c41e3a" },
+          { value: "blue", label: "Blue", hex: "#4169e1" },
+          { value: "olive", label: "Olive", hex: "#808000" },
+          { value: "lavender", label: "Lavender", hex: "#b57edc" },
+          { value: "coral", label: "Coral", hex: "#ff7f50" },
+          { value: "mustard", label: "Mustard", hex: "#ffdb58" },
+          { value: "neon", label: "Neons", hex: "#39ff14" },
+          { value: "orange", label: "Orange", hex: "#ff8c00" },
+          { value: "pink", label: "Bright Pink", hex: "#ff69b4" },
+        ],
+        required: false,
+      },
+    ],
+  },
+  {
+    id: "sizing",
+    title: "Your sizing",
+    subtitle: "For better recommendations",
+    questions: [
+      {
+        id: "top_size",
+        type: "single-select",
+        question: "What's your typical top size?",
+        options: [
+          { value: "xs", label: "XS" },
+          { value: "s", label: "S" },
+          { value: "m", label: "M" },
+          { value: "l", label: "L" },
+          { value: "xl", label: "XL" },
+          { value: "xxl", label: "XXL" },
+          { value: "varies", label: "It varies" },
+        ],
+        required: true,
+      },
+      {
+        id: "bottom_size",
+        type: "single-select",
+        question: "What's your typical bottom size?",
+        options: [
+          { value: "xs", label: "XS / 24-25" },
+          { value: "s", label: "S / 26-27" },
+          { value: "m", label: "M / 28-29" },
+          { value: "l", label: "L / 30-31" },
+          { value: "xl", label: "XL / 32-33" },
+          { value: "xxl", label: "XXL / 34+" },
+          { value: "varies", label: "It varies" },
+        ],
+        required: true,
+      },
+      {
+        id: "shoe_size",
+        type: "single-select",
+        question: "What's your shoe size?",
+        options: [
+          { value: "35", label: "35 / US 5" },
+          { value: "36", label: "36 / US 6" },
+          { value: "37", label: "37 / US 7" },
+          { value: "38", label: "38 / US 8" },
+          { value: "39", label: "39 / US 9" },
+          { value: "40", label: "40 / US 10" },
+          { value: "41", label: "41 / US 11" },
+          { value: "42+", label: "42+ / US 12+" },
+        ],
+        required: true,
+      },
+    ],
+  },
+  {
+    id: "fit-preferences",
+    title: "How you like things to fit",
+    subtitle: "Fit affects confidence more than anything",
+    questions: [
+      {
+        id: "fit_preference",
+        type: "single-select",
+        question: "What's your general fit preference?",
+        options: [
+          {
+            value: "fitted",
+            label: "Fitted",
+            description: "Shows my shape",
+            icon: "📐",
+          },
+          {
+            value: "relaxed",
+            label: "Relaxed",
+            description: "Some room to move",
+            icon: "🌊",
+          },
+          {
+            value: "oversized",
+            label: "Oversized",
+            description: "Cozy and loose",
+            icon: "☁️",
+          },
+          {
+            value: "balanced",
+            label: "Balanced",
+            description: "Fitted top + loose bottom or vice versa",
+            icon: "⚖️",
+          },
+        ],
+        required: true,
+      },
+      {
+        id: "body_areas_highlight",
+        type: "multi-select",
+        question: "What areas do you like to highlight?",
+        description: "Select areas you feel confident about",
+        minSelect: 0,
+        maxSelect: 4,
+        options: [
+          { value: "shoulders", label: "Shoulders", icon: "💪" },
+          { value: "arms", label: "Arms", icon: "✨" },
+          { value: "waist", label: "Waist", icon: "⌛" },
+          { value: "hips", label: "Hips", icon: "🍑" },
+          { value: "legs", label: "Legs", icon: "🦵" },
+          { value: "décolletage", label: "Décolletage", icon: "💎" },
+          { value: "back", label: "Back", icon: "🔙" },
+        ],
+        required: false,
+      },
+      {
+        id: "body_areas_minimize",
+        type: "multi-select",
+        question: "What areas do you prefer to minimize?",
+        description: "Select areas you'd rather not emphasize",
+        minSelect: 0,
+        maxSelect: 4,
+        options: [
+          { value: "upper_arms", label: "Upper arms", icon: "💪" },
+          { value: "tummy", label: "Tummy", icon: "🌀" },
+          { value: "hips", label: "Hips", icon: "🍑" },
+          { value: "thighs", label: "Thighs", icon: "🦵" },
+          { value: "bust", label: "Bust", icon: "💎" },
+          { value: "back", label: "Back", icon: "🔙" },
+        ],
+        required: false,
+      },
+    ],
+  },
+  {
+    id: "help-wanted",
+    title: "How nAia can help you most",
+    subtitle: "Let's prioritize what matters to you",
+    questions: [
+      {
+        id: "help_priorities",
+        type: "multi-select",
+        question: "What do you want nAia to help you with most?",
+        description: "Select your top priorities",
+        minSelect: 1,
+        maxSelect: 3,
+        options: [
+          {
+            value: "daily_outfits",
+            label: "Daily outfit ideas",
+            description: "What to wear every day",
+            icon: "👗",
+          },
+          {
+            value: "special_occasions",
+            label: "Special occasion styling",
+            description: "Events, dates, celebrations",
+            icon: "✨",
+          },
+          {
+            value: "closet_organization",
+            label: "Organize my closet",
+            description: "Make sense of what I have",
+            icon: "🗂️",
+          },
+          {
+            value: "shopping_guidance",
+            label: "Shopping guidance",
+            description: "Know what to buy (and skip)",
+            icon: "🛍️",
+          },
+          {
+            value: "style_discovery",
+            label: "Discover my style",
+            description: "Find what truly suits me",
+            icon: "🔍",
+          },
+          {
+            value: "confidence_building",
+            label: "Build confidence",
+            description: "Feel better in my clothes",
+            icon: "💪",
+          },
+        ],
+        required: true,
+      },
+    ],
+  },
+  {
+    id: "final-thoughts",
+    title: "Anything else?",
+    subtitle: "Share anything that helps nAia understand you better",
+    questions: [
+      {
+        id: "additional_info",
+        type: "open-text",
+        question: "Is there anything else nAia should know about your style journey?",
+        description: "Body changes, lifestyle shifts, style dreams, frustrations — anything goes",
+        placeholder: "For example: I recently had a baby and my body has changed, I'm transitioning careers, I want to look more put-together without trying too hard...",
+        required: false,
+      },
+    ],
+  },
+];
+
+// Helper to get total step count
+export const totalSteps = onboardingQuiz.length;
+
+// Helper to get step by index
+export function getStep(stepIndex: number): QuizStep | undefined {
+  return onboardingQuiz[stepIndex];
+}
+
+// Helper to get step by ID
+export function getStepById(stepId: string): QuizStep | undefined {
+  return onboardingQuiz.find((step) => step.id === stepId);
+}
+
+// Type for collected answers
+export interface OnboardingAnswers {
+  name?: string;
+  style_personalities?: string[];
+  lifestyle_contexts?: string[];
+  dress_code?: string;
+  desired_feelings?: string[];
+  current_confidence?: number;
+  style_struggles?: string[];
+  favorite_colors?: string[];
+  avoid_colors?: string[];
+  top_size?: string;
+  bottom_size?: string;
+  shoe_size?: string;
+  fit_preference?: string;
+  body_areas_highlight?: string[];
+  body_areas_minimize?: string[];
+  help_priorities?: string[];
+  additional_info?: string;
+}
