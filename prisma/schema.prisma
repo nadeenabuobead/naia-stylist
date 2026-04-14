@@ -485,6 +485,6 @@ model TrendReportView {
   viewedAt    DateTime    @default(now())
   
   // Personalization
-  relevanceScore  Int?    // How relevant to her style (1-100)
-matchingStyles  String[] // Which of her styles this matches
+  relevanceScore  Int?
+  matchingStyles  String[]
 }
