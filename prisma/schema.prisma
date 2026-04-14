@@ -486,5 +486,5 @@ model TrendReportView {
   
   // Personalization
   relevanceScore  Int?    // How relevant to her style (1-100)
-  matchingStyles  String[] // Which of her styles this matches
+matchingStyles  String[] // Which of her styles this matches
 }
