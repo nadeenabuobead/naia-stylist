@@ -47,6 +47,7 @@ model Customer {
   closetItems     ClosetItem[]
   wishlistItems   WishlistItem[]
   outfitHistories OutfitHistory[]
+  outfitRatings   OutfitRating[]
 }
 
 // ─── Closet pieces (what the customer owns) ───
@@ -93,8 +94,33 @@ model OutfitHistory {
   result        String   @db.Text
   createdAt     DateTime @default(now())
 
-  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer      Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  rating        OutfitRating?
 
   @@index([customerId])
   @@index([customerId, createdAt(sort: Desc)])
 }
+
+// ─── Outfit confidence rating ───
+model OutfitRating {
+  id                    String   @id @default(cuid())
+  customerId            String
+  historyId             String
+  confidence            Int                          // 1-5 scale
+  feltLikeMe            Boolean?
+  wouldWearAgain        Boolean?
+  physicallyComfortable Boolean?
+  mood                  String?                      // copied from outfit for easier aggregation
+  feeling               String?
+  event                 String?
+  styleWords            String?
+  createdAt             DateTime @default(now())
+
+  customer              Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  history               OutfitHistory @relation(fields: [historyId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, historyId])
+  @@index([customerId])
+  @@index([customerId, confidence])
+}
+
