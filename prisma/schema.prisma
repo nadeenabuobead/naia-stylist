@@ -1,119 +1,499 @@
+// prisma/schema.prisma
+// nAia Style Intelligence Platform - Complete Database Schema
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("POSTGRES_URL")
+  url      = env("DATABASE_URL")
 }
 
-model Session {
-  id            String    @id
-  shop          String
-  state         String
-  isOnline      Boolean   @default(false)
-  scope         String?
-  expires       DateTime?
-  accessToken   String
-  userId        BigInt?
-  firstName     String?
-  lastName      String?
-  email         String?
-  accountOwner  Boolean   @default(false)
-  locale        String?
-  collaborator  Boolean?  @default(false)
-  emailVerified Boolean?  @default(false)
-  refreshToken        String?
-  refreshTokenExpires DateTime?
-}
+// ============================================
+// USER & AUTHENTICATION
+// ============================================
 
 model Customer {
-  id              String          @id @default(cuid())
-  shopifyId       String          @unique
-  email           String?
-  firstName       String?
-  lastName        String?
-  lastMood        String?
-  lastFeeling     String?
-  lastEvent       String?
-  lastStyleWords  String?
-  lastBodyPref    String?
-  lastMode        String?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  id                String   @id @default(cuid())
+  shopifyCustomerId String   @unique
+  email             String   @unique
+  firstName         String?
+  lastName          String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  closetItems     ClosetItem[]
-  wishlistItems   WishlistItem[]
-  outfitHistories OutfitHistory[]
-  outfitRatings   OutfitRating[]
+  // Relationships
+  onboardingProfile   OnboardingProfile?
+  closetItems         ClosetItem[]
+  stylingSessions     StylingSession[]
+  buyOrSkipAnalyses   BuyOrSkipAnalysis[]
+  wardrobeInsights    WardrobeInsight[]
+  savedLooks          SavedLook[]
+  postOutfitReviews   PostOutfitReview[]
+  confidenceScores    ConfidenceScore[]
+  trendReportViews    TrendReportView[]
 }
+
+// ============================================
+// ONBOARDING QUIZ
+// ============================================
+
+model OnboardingProfile {
+  id         String   @id @default(cuid())
+  customerId String   @unique
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  completed  Boolean  @default(false)
+
+  // Style Identity
+  stylePersonalities  String[]  // e.g., ["classic", "romantic", "edgy"]
+  styleIcons          String[]  // People whose style she admires
+  favoriteColors      String[]
+  avoidColors         String[]
+
+  // Lifestyle & Context
+  lifestyle           String?   // e.g., "corporate", "creative", "mom life", "student"
+  dressesFor          String[]  // e.g., ["work meetings", "date nights", "school runs"]
+  typicalDay          String?   // Description of her typical day
+
+  // Emotional & Aspirational
+  currentMood         String?   // How she feels about her style now
+  desiredFeeling      String?   // How she wants to feel when dressed
+  confidenceBlockers  String[]  // What holds her back
+  styleStruggles      String[]  // e.g., ["finding right fit", "mixing patterns", "accessorizing"]
+
+  // Preferences
+  comfortLevel        Int?      // 1-10 scale for fashion risk
+  budgetRange         String?   // e.g., "moderate", "investment pieces", "mix"
+  shoppingHabits      String?   // How she currently shops
+  helpWantedMost      String?   // Primary thing she wants help with
+
+  // Body & Fit (optional, sensitive)
+  bodyFocusAreas      String[]  // Areas she wants to highlight
+  bodyAvoidAreas      String[]  // Areas she prefers to minimize
+  fitPreferences      String[]  // e.g., ["loose tops", "high-waisted", "midi length"]
+
+  // Size Information
+  topSize             String?
+  bottomSize          String?
+  dressSize           String?
+  shoeSize            String?
+}
+
+// ============================================
+// DIGITAL CLOSET
+// ============================================
 
 model ClosetItem {
-  id         String   @id @default(cuid())
-  customerId String
-  name       String
-  category   String
-  image      String?  @db.Text
-  createdAt  DateTime @default(now())
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  // Basic Info
+  name        String?
+  imageUrl    String
+  thumbnailUrl String?
 
-  @@index([customerId])
+  // Categorization
+  category    ClosetCategory
+  subcategory String?        // e.g., "blouse", "t-shirt", "blazer"
+  
+  // Attributes
+  colors      String[]       // Detected/entered colors
+  primaryColor String?       // Main color
+  pattern     String?        // e.g., "solid", "floral", "stripes", "plaid"
+  material    String?        // e.g., "cotton", "silk", "denim", "wool"
+  
+  // Style Tags
+  styleTags   String[]       // e.g., ["casual", "formal", "date night"]
+  seasons     String[]       // e.g., ["spring", "summer", "fall", "winter"]
+  occasions   String[]       // e.g., ["work", "weekend", "evening"]
+  
+  // Metadata
+  brand       String?
+  purchaseDate DateTime?
+  purchasePrice Float?
+  
+  // Usage Tracking
+  timesWorn   Int      @default(0)
+  lastWorn    DateTime?
+  favorite    Boolean  @default(false)
+  
+  // AI Analysis
+  aiDescription String?      // AI-generated description
+  aiStyleNotes  String?      // AI notes about styling this piece
+
+  // Relationships
+  outfitItems   OutfitItem[]
+  savedLookItems SavedLookItem[]
 }
 
-model WishlistItem {
-  id             String   @id @default(cuid())
-  customerId     String
-  naiaProductId  String
-  title          String
-  handle         String
-  image          String?
-  createdAt      DateTime @default(now())
-
-  customer       Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-
-  @@unique([customerId, naiaProductId])
-  @@index([customerId])
+enum ClosetCategory {
+  TOPS
+  BOTTOMS
+  DRESSES
+  OUTERWEAR
+  SHOES
+  BAGS
+  ACCESSORIES
+  JEWELRY
+  ACTIVEWEAR
+  SWIMWEAR
+  LOUNGEWEAR
+  OTHER
 }
 
-model OutfitHistory {
-  id            String   @id @default(cuid())
-  customerId    String
-  mood          String?
-  feeling       String?
-  event         String?
-  styleWords    String?
-  bodyPref      String?
-  mode          String?
-  closetItemIds String?
-  result        String   @db.Text
-  createdAt     DateTime @default(now())
+// ============================================
+// STYLE ME (Main Styling Feature)
+// ============================================
 
-  customer      Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  rating        OutfitRating?
+model StylingSession {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
 
-  @@index([customerId])
-  @@index([customerId, createdAt(sort: Desc)])
+  // Input Context
+  currentMood     String?   // How she's feeling now
+  desiredFeeling  String?   // How she wants to feel
+  occasion        String?   // Where she's going
+  specificNeeds   String?   // Any specific requirements
+  
+  // Source Selection
+  styleFrom       StyleSource @default(BOTH)
+  
+  // Weather/Context
+  weather         String?
+  timeOfDay       String?   // morning, afternoon, evening
+  
+  // Output
+  suggestions     OutfitSuggestion[]
+  
+  // Selected Suggestion
+  selectedSuggestionId String?
+  
+  // Follow-up
+  review          PostOutfitReview?
 }
 
-model OutfitRating {
-  id                    String   @id @default(cuid())
-  customerId            String
-  historyId             String   @unique
-  confidence            Int
-  feltLikeMe            Boolean?
-  wouldWearAgain        Boolean?
-  physicallyComfortable Boolean?
-  mood                  String?
-  feeling               String?
-  event                 String?
-  styleWords            String?
-  createdAt             DateTime @default(now())
-
-  customer              Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  history               OutfitHistory @relation(fields: [historyId], references: [id], onDelete: Cascade)
-
-  @@unique([customerId, historyId])
-  @@index([customerId])
-  @@index([customerId, confidence])
+enum StyleSource {
+  CLOSET      // Only from her wardrobe
+  NAIA        // Only from nAia store
+  BOTH        // Mix of both
 }
+
+model OutfitSuggestion {
+  id                String         @id @default(cuid())
+  sessionId         String
+  session           StylingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  createdAt         DateTime       @default(now())
+  
+  // Outfit Components
+  items             OutfitItem[]
+  
+  // Complete Look Recommendations
+  perfumeRec        String?        // Perfume recommendation
+  perfumeNotes      String?        // Why this perfume
+  hairstyleRec      String?        // Hairstyle suggestion
+  hairstyleNotes    String?        // Styling tips
+  makeupVibeRec     String?        // Makeup vibe
+  makeupNotes       String?        // Application tips
+  
+  // Mood Enhancement
+  songRec           String?        // Song/playlist recommendation
+  songArtist        String?
+  moodDescription   String?        // Overall mood/vibe description
+  
+  // AI Explanation
+  whyThisWorks      String?        // AI explanation of the outfit
+  confidenceBoost   String?        // How this will make her feel
+  
+  // User Interaction
+  selected          Boolean        @default(false)
+  savedAsLook       Boolean        @default(false)
+}
+
+model OutfitItem {
+  id              String           @id @default(cuid())
+  suggestionId    String
+  suggestion      OutfitSuggestion @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
+  
+  // Item Type
+  itemType        OutfitItemType
+  
+  // Source (either closet item OR nAia product)
+  closetItemId    String?
+  closetItem      ClosetItem?      @relation(fields: [closetItemId], references: [id])
+  
+  // If from nAia store
+  shopifyProductId  String?
+  productTitle      String?
+  productImageUrl   String?
+  productPrice      Float?
+  productUrl        String?
+  
+  // Styling Notes
+  stylingNotes    String?          // How to wear this piece
+}
+
+enum OutfitItemType {
+  TOP
+  BOTTOM
+  DRESS
+  OUTERWEAR
+  SHOES
+  BAG
+  ACCESSORY
+  JEWELRY
+}
+
+// ============================================
+// BUY OR SKIP
+// ============================================
+
+model BuyOrSkipAnalysis {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  // Input
+  imageUrl    String?          // Uploaded image
+  productUrl  String?          // Link to product
+  productName String?
+  productPrice Float?
+  
+  // AI Analysis Result
+  verdict     BuySkipVerdict
+  reasoning   String           // Detailed explanation
+  
+  // Compatibility Analysis
+  worksWithWardrobe   Boolean?
+  wardrobeMatches     String[] // Items it would go with
+  hasSimilar          Boolean?
+  similarItems        String[] // Similar items she already owns
+  
+  // Style Fit
+  fitsHerStyle        Boolean?
+  styleNotes          String?
+  
+  // Recommendations
+  alternatives        String?  // Alternative suggestions
+  stylingIdeas        String?  // How she could wear it
+  
+  // User Action
+  userDecision        String?  // What she ended up doing
+}
+
+enum BuySkipVerdict {
+  BUY
+  SKIP
+  MAYBE
+}
+
+// ============================================
+// WARDROBE INSIGHTS
+// ============================================
+
+model WardrobeInsight {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  generatedAt DateTime @default(now())
+  
+  // Overview Stats
+  totalItems      Int
+  itemsByCategory Json     // { "TOPS": 15, "BOTTOMS": 8, ... }
+  
+  // Color Analysis
+  colorDistribution   Json     // { "black": 25, "white": 15, "navy": 10, ... }
+  dominantColors      String[]
+  missingColors       String[]
+  colorPaletteType    String?  // e.g., "neutral-heavy", "colorful", "monochromatic"
+  
+  // Style Analysis
+  styleDistribution   Json     // { "casual": 40, "formal": 20, ... }
+  dominantStyles      String[]
+  
+  // Gap Analysis
+  missingEssentials   String[] // Key pieces she's missing
+  overrepresented     String[] // Categories with too many items
+  underrepresented    String[] // Categories needing more
+  
+  // Usage Insights
+  mostWorn            String[] // Item IDs most worn
+  neverWorn           String[] // Items never worn
+  underutilized       String[] // Items worn less than expected
+  
+  // Recommendations
+  nextPurchases       Json     // Prioritized shopping list
+  outfitPotential     Int?     // Number of potential outfits
+  versatilityScore    Int?     // 1-100 wardrobe versatility
+  
+  // Personalized Notes
+  aiSummary           String?  // Overall wardrobe assessment
+  seasonalReadiness   Json?    // Readiness by season
+}
+
+// ============================================
+// SAVED LOOKS
+// ============================================
+
+model SavedLook {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  
+  // Look Info
+  name        String?
+  occasion    String?
+  notes       String?
+  
+  // Source
+  fromSuggestionId String?    // If saved from a styling session
+  
+  // Items
+  items       SavedLookItem[]
+  
+  // Complete Look Details
+  perfumeRec      String?
+  hairstyleRec    String?
+  makeupVibeRec   String?
+  songRec         String?
+  
+  // Usage
+  timesWorn   Int      @default(0)
+  lastWorn    DateTime?
+}
+
+model SavedLookItem {
+  id          String    @id @default(cuid())
+  savedLookId String
+  savedLook   SavedLook @relation(fields: [savedLookId], references: [id], onDelete: Cascade)
+  
+  itemType    OutfitItemType
+  
+  // Either closet item or nAia product
+  closetItemId      String?
+  closetItem        ClosetItem? @relation(fields: [closetItemId], references: [id])
+  shopifyProductId  String?
+  productImageUrl   String?
+}
+
+// ============================================
+// POST-OUTFIT REVIEW
+// ============================================
+
+model PostOutfitReview {
+  id          String   @id @default(cuid())
+  customerId  String
+  sessionId   String   @unique
+  session     StylingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  
+  // Core Feedback
+  overallFeeling      Int?     // 1-5 scale
+  feltLikeHer         Boolean?
+  wouldWearAgain      Boolean?
+  
+  // Detailed Feedback
+  whatWorked          String?
+  whatDidntWork       String?
+  
+  // Specific Item Feedback
+  itemFeedback        Json?    // { itemId: { liked: true, notes: "..." } }
+  
+  // Confidence Impact
+  confidenceBefore    Int?     // 1-10
+  confidenceAfter     Int?     // 1-10
+  
+  // Open Feedback
+  additionalNotes     String?
+  
+  // Photo (optional)
+  woreItPhotoUrl      String?
+}
+
+// ============================================
+// CONFIDENCE TRACKING
+// ============================================
+
+model ConfidenceScore {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  recordedAt  DateTime @default(now())
+  
+  score       Int      // 1-10
+  context     String?  // What triggered this score
+  sessionId   String?  // If related to a styling session
+}
+
+// ============================================
+// AI TREND REPORTS
+// ============================================
+
+model TrendReport {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  publishedAt DateTime?
+  
+  // Report Info
+  title       String
+  slug        String   @unique
+  coverImage  String?
+  summary     String
+  
+  // Content
+  content     Json     // Rich content structure
+  
+  // Categorization
+  reportType  TrendReportType
+  season      String?  // e.g., "Spring 2025"
+  tags        String[]
+  
+  // Trend Data
+  trendingColors    Json?    // Color trends with images
+  trendingStyles    Json?    // Style trends
+  keyPieces         Json?    // Must-have items
+  
+  // Engagement
+  views       TrendReportView[]
+}
+
+enum TrendReportType {
+  SEASONAL_FORECAST
+  COLOR_REPORT
+  STYLE_REPORT
+  COLLECTION_REVIEW
+  FASHION_WEEK
+  TREND_ALERT
+}
+
+model TrendReportView {
+  id          String      @id @default(cuid())
+  reportId    String
+  report      TrendReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  viewedAt    DateTime    @default(now())
+  
+  // Personalization
+  relevanceScore  Int?    // How relevant to her style (1-100)
+  matchingStyles  String[] // Which of her styles this matches
+}
+
+// ============================================
+// INDEXES FOR PERFORMANCE
+// ============================================
+
+// Add indexes for common queries
+@@index([customerId], map: "idx_closet_customer")
+@@index([category], map: "idx_closet_category")
+@@index([customerId, createdAt], map: "idx_sessions_customer_date")
