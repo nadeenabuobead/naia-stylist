@@ -1,16 +1,17 @@
 // app/lib/ai/claude.server.ts
-import Anthropic from "@anthropic-ai/sdk";
+// Using OpenAI instead of Claude
+import OpenAI from "openai";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY!
 });
 
 interface Message {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
 }
 
-interface CallClaudeParams {
+interface CallAIParams {
   messages: Message[];
   system?: string;
   maxTokens?: number;
@@ -18,48 +19,46 @@ interface CallClaudeParams {
 }
 
 /**
- * Call Claude API with messages
+ * Call OpenAI API with messages
  */
 export async function callClaude({
   messages,
   system,
   maxTokens = 4096,
   temperature = 0.7
-}: CallClaudeParams): Promise<string> {
+}: CallAIParams): Promise<string> {
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+    const allMessages: Message[] = [];
+    
+    if (system) {
+      allMessages.push({ role: "system", content: system });
+    }
+    
+    allMessages.push(...messages);
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
       max_tokens: maxTokens,
       temperature,
-      system,
-      messages: messages.map(m => ({
-        role: m.role,
-        content: m.content
-      }))
+      messages: allMessages
     });
 
-    // Extract text content from response
-    const textContent = response.content.find(block => block.type === "text");
-    if (!textContent || textContent.type !== "text") {
-      throw new Error("No text content in response");
-    }
-
-    return textContent.text;
+    return response.choices[0]?.message?.content || "";
   } catch (error) {
-    console.error("Claude API error:", error);
+    console.error("OpenAI API error:", error);
     throw error;
   }
 }
 
 /**
- * Call Claude with JSON output parsing
+ * Call OpenAI with JSON output parsing
  */
 export async function callClaudeJSON<T>({
   messages,
   system,
   maxTokens = 4096,
   temperature = 0.5
-}: CallClaudeParams): Promise<T> {
+}: CallAIParams): Promise<T> {
   const enhancedSystem = system 
     ? `${system}\n\nIMPORTANT: Respond ONLY with valid JSON. No markdown formatting, no code blocks, no explanatory text.`
     : "Respond ONLY with valid JSON. No markdown formatting, no code blocks, no explanatory text.";
@@ -74,7 +73,6 @@ export async function callClaudeJSON<T>({
   // Clean and parse JSON
   let cleanResponse = response.trim();
   
-  // Remove markdown code blocks if present
   if (cleanResponse.startsWith("```json")) {
     cleanResponse = cleanResponse.slice(7);
   }
@@ -92,12 +90,12 @@ export async function callClaudeJSON<T>({
   } catch (error) {
     console.error("JSON parse error:", error);
     console.error("Raw response:", response);
-    throw new Error("Failed to parse Claude response as JSON");
+    throw new Error("Failed to parse response as JSON");
   }
 }
 
 /**
- * Analyze an image with Claude's vision capabilities
+ * Analyze an image with OpenAI Vision
  */
 export async function analyzeImage({
   imageUrl,
@@ -108,7 +106,7 @@ export async function analyzeImage({
 }: {
   imageUrl?: string;
   imageBase64?: string;
-  mediaType?: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+  mediaType?: string;
   prompt: string;
   system?: string;
 }): Promise<string> {
@@ -117,30 +115,30 @@ export async function analyzeImage({
   }
 
   const imageContent = imageUrl
-    ? { type: "image" as const, source: { type: "url" as const, url: imageUrl } }
-    : { type: "image" as const, source: { type: "base64" as const, media_type: mediaType, data: imageBase64! } };
+    ? { type: "image_url" as const, image_url: { url: imageUrl } }
+    : { type: "image_url" as const, image_url: { url: `data:${mediaType};base64,${imageBase64}` } };
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 2048,
-    system,
-    messages: [
-      {
-        role: "user",
-        content: [
-          imageContent,
-          { type: "text", text: prompt }
-        ]
-      }
+  const messages: any[] = [];
+  
+  if (system) {
+    messages.push({ role: "system", content: system });
+  }
+  
+  messages.push({
+    role: "user",
+    content: [
+      imageContent,
+      { type: "text", text: prompt }
     ]
   });
 
-  const textContent = response.content.find(block => block.type === "text");
-  if (!textContent || textContent.type !== "text") {
-    throw new Error("No text content in response");
-  }
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o",
+    max_tokens: 2048,
+    messages
+  });
 
-  return textContent.text;
+  return response.choices[0]?.message?.content || "";
 }
 
 /**
