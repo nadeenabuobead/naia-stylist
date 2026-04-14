@@ -9,7 +9,20 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+// ============================================
+// SHOPIFY SESSION (Required for Shopify App)
+// ============================================
 
+model Session {
+  id          String    @id
+  shop        String
+  state       String
+  isOnline    Boolean   @default(false)
+  scope       String?
+  expires     DateTime?
+  accessToken String?
+  userId      BigInt?
+}
 // ============================================
 // USER & AUTHENTICATION
 // ============================================
