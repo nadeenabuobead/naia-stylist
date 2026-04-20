@@ -1,3 +1,4 @@
 {
-  "framework": "react-router"
+  "framework": "react-router",
+  "buildCommand": "npx prisma generate && npm run build"
 }
