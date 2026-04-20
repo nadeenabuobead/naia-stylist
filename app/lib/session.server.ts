@@ -1,5 +1,5 @@
 // app/lib/session.server.ts
-import { createCookieSessionStorage } from "@remix-run/node";
+import { createCookieSessionStorage } from "react-router";
 
 // Make sure to set SESSION_SECRET in your environment variables
 const sessionSecret = process.env.SESSION_SECRET || "default-secret-change-me";
