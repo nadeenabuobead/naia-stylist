@@ -1,5 +1,5 @@
 import { reactRouter } from "@react-router/dev/vite";
-import { preset as vercelPreset } from "@vercel/react-router";
+plugins: [reactRouter(), tsconfigPaths()],
 import tsconfigPaths from "vite-tsconfig-paths";
 
 // Related: https://github.com/remix-run/remix/issues/2835#issuecomment-1144102176
