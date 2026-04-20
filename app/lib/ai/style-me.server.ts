@@ -64,9 +64,9 @@ export async function generateOutfit(params: GenerateOutfitParams): Promise<Gene
     customerProfile = await prisma.onboardingProfile.findUnique({
       where: { customerId },
       select: {
-        stylePersonality: true,
+        stylePersonalities: true,
         lifestyle: true,
-        colorPreferences: true,
+        favoritePreferences: true,
         avoidColors: true,
         styleStruggles: true,
         fitPreferences: true
@@ -77,7 +77,7 @@ export async function generateOutfit(params: GenerateOutfitParams): Promise<Gene
     if (source === "CLOSET" || source === "BOTH") {
       closetItems = await prisma.closetItem.findMany({
         where: { customerId },
-        orderBy: { wearCount: "desc" }
+        orderBy: { timesWorn: "desc" }
       });
     }
   }
@@ -132,9 +132,9 @@ function buildStyleMePrompt(context: PromptContext): string {
   // Add customer profile context if available
   if (customerProfile) {
     prompt += `ABOUT THIS PERSON:
-- Style personality: ${customerProfile.stylePersonality || "Not specified"}
+- Style personality: ${customerProfile.stylePersonalities?.join(", ") || "Not specified"
 - Lifestyle: ${customerProfile.lifestyle || "Not specified"}
-- Favorite colors: ${customerProfile.colorPreferences?.join(", ") || "Not specified"}
+- Favorite colors: ${customerProfile.favoriteColors?.join(", ") || "Not specified"}
 - Colors to avoid: ${customerProfile.avoidColors?.join(", ") || "None"}
 - Style struggles: ${customerProfile.styleStruggles?.join(", ") || "None mentioned"}
 - Preferred fit: ${customerProfile.fitPreferences?.join(", ") || "Not specified"}
