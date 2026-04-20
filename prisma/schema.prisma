@@ -204,6 +204,9 @@ model OutfitSuggestion {
   sessionId         String
   session           StylingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   createdAt         DateTime       @default(now())
+  status            String?        @default("PENDING")
+
+  // Input Context
   
   // Outfit Components
   items             OutfitItem[]
@@ -222,6 +225,8 @@ model OutfitSuggestion {
   moodDescription   String?        // Overall mood/vibe description
   
   // AI Explanation
+  outfitName        String?
+  heroImageUrl      String?
   whyThisWorks      String?        // AI explanation of the outfit
   confidenceBoost   String?        // How this will make her feel
   
