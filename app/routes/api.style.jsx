@@ -50,7 +50,8 @@ export async function action({ request }) {
 7. Refer to customer's closet pieces as "your [piece name]" and nAia pieces by their exact product name.
 8. Song MUST be a well-known, popular song that most people would recognize — think top hits, Spotify top charts, popular artists like Dua Lipa, SZA, Billie Eilish, The Weeknd, Taylor Swift, Rihanna, Frank Ocean, Adele, Harry Styles, Beyoncé, Arctic Monkeys, Lana Del Rey, etc. Match the energy and mood. Never pick obscure songs.
 9. Perfume MUST be a mainstream, widely available fragrance people would recognize — like Chanel No. 5, YSL Black Opium, Dior Miss Dior, Tom Ford Black Orchid, Marc Jacobs Daisy, Lancôme La Vie Est Belle, Versace Bright Crystal, etc. Match the mood of the outfit.
-10. Connect every styling choice back to the customer's emotional shift (from current mood → desired feeling).`,
+10. Connect every styling choice back to the customer's emotional shift (from current mood → desired feeling).
+11. VARIETY RULE: Never recommend the same combination twice. Rotate through ALL available pieces. Consider the specific mood "${mood}" and occasion "${event}" to pick the most fitting pieces — not just the most "safe" ones.`,
           },
           { role: "user", content: stylistPrompt },
         ],
