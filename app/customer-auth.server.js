@@ -55,14 +55,14 @@ export async function authenticateCustomer(request) {
 
   try {
     const customer = await prisma.customer.upsert({
-      where: { shopifyId: String(payload.shopifyId) },
+      where: { shopifyCustomerId: String(payload.shopifyId) },
       update: {
         email: payload.email || undefined,
         firstName: payload.firstName || undefined,
         lastName: payload.lastName || undefined,
       },
       create: {
-        shopifyId: String(payload.shopifyId),
+        shopifyCustomerId: String(payload.shopifyId),
         email: payload.email || null,
         firstName: payload.firstName || null,
         lastName: payload.lastName || null,
