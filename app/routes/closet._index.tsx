@@ -95,7 +95,7 @@ export default function ClosetPage() {
     <div style={{ minHeight: "100vh", background: "#faf9f7" }}>
       <header style={{ padding: "1rem", background: "white", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ maxWidth: "32rem", margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <a href="https://naiabynadine.com/pages/ask-naia" style={{ color: "#888", textDecoration: "none", fontSize: "0.875rem" }}>← Back</a>
+          <a href="https://naia-stylist.vercel.app/stylist" style={{ color: "#888", textDecoration: "none", fontSize: "0.875rem" }}>← Back</a>
           <h1 style={{ fontSize: "1.125rem", fontWeight: 500 }}>My Closet</h1>
           <button onClick={() => setShowAddForm(!showAddForm)} style={{ fontSize: "0.875rem", fontWeight: 500, color: "#c4a0a0", background: "none", border: "none", cursor: "pointer" }}>+ Add</button>
         </div>
@@ -153,9 +153,9 @@ export default function ClosetPage() {
         </div>
 
         <div style={{ marginTop: "2rem", textAlign: "center" }}>
-          <a href="https://naiabynadine.com/pages/ask-naia" style={{ padding: "0.75rem 1.5rem", background: "#2d2d2d", color: "white", borderRadius: "9999px", textDecoration: "none", fontWeight: 500, fontSize: "0.875rem" }}>
+          <a href="https://naia-stylist.vercel.app/stylist" style={{ padding: "0.75rem 1.5rem", background: "#2d2d2d", color: "white", borderRadius: "9999px", textDecoration: "none", fontWeight: 500, fontSize: "0.875rem" }}>
             ✨ Style Me
-          </a>
+         </a>
         </div>
       </main>
     </div>
