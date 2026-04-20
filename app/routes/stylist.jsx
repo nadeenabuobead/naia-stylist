@@ -46,18 +46,24 @@ function parseStylingResult(text) {
     feelingNow: "", feelingNext: "",
     outfitDirection: [], whyThisWorks: [],
     shift: "", naiaRecommendations: [],
-    accessories: "", perfume: "", song: "",
+    accessories: "", perfume: "", song: "", hair: "", makeup: "",
   };
   const accessMatch = text.match(/Accessories:\s*([^\n]+)/i);
   const perfumeMatch = text.match(/Perfume:\s*([^\n]+)/i);
   const songMatch = text.match(/Song:\s*([^\n]+)/i);
+  const hairMatch = text.match(/Hair:\s*([^\n]+)/i);
+  const makeupMatch = text.match(/Makeup:\s*([^\n]+)/i);
   if (accessMatch) sections.accessories = accessMatch[1].trim();
   if (perfumeMatch) sections.perfume = perfumeMatch[1].trim();
+  if (hairMatch) sections.hair = hairMatch[1].trim();
+  if (makeupMatch) sections.makeup = makeupMatch[1].trim();
   if (songMatch) sections.song = songMatch[1].trim();
   let cleaned = text
     .replace(/Accessories:.*$/im, "")
     .replace(/Perfume:.*$/im, "")
     .replace(/Song:.*$/im, "");
+    .replace(/Hair:.*$/im, "")
+    .replace(/Makeup:.*$/im, "")
   const lines = cleaned.split("\n").map(l => l.trim()).filter(Boolean);
   let currentSection = "";
   for (const line of lines) {
@@ -884,7 +890,8 @@ export default function Stylist() {
                 {parsedResult.naiaRecommendations?.length > 0 && (<><div style={s.divider} /><div style={{ marginBottom: "24px" }}><div style={s.resultLabel}>nAia Recommendations</div>{parsedResult.naiaRecommendations.map((item, i) => (<p key={i} style={{ fontSize: "15px", lineHeight: 1.7, margin: "0 0 10px", paddingLeft: "16px", borderLeft: "2px solid #1a1816" }}>{item}</p>))}</div></>)}
 
                 {(parsedResult.accessories || parsedResult.perfume || parsedResult.song) && (<><div style={s.divider} /><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "24px" }}>{parsedResult.accessories && <div style={s.vibeCard}><div style={s.resultLabel}>Accessories</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.accessories}</p></div>}{parsedResult.perfume && <div style={s.vibeCard}><div style={s.resultLabel}>Perfume</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.perfume}</p></div>}{parsedResult.song && <div style={s.vibeCard}><div style={s.resultLabel}>Song</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.song}</p></div>}</div></>)}
-
+                {parsedResult.hair && <div style={s.vibeCard}><div style={s.resultLabel}>Hair</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.hair}</p></div>}
+                {parsedResult.makeup && <div style={s.vibeCard}><div style={s.resultLabel}>Makeup</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.makeup}</p></div>}.    
                 {parsedResult.shift && (<><div style={s.divider} /><div style={{ marginBottom: "24px" }}><div style={s.resultLabel}>The shift</div><p style={{ fontSize: "19px", fontStyle: "italic", lineHeight: 1.6, margin: 0 }}>{parsedResult.shift}</p></div></>)}
 
                 {/* ─── Shop recommended pieces ─── */}
