@@ -80,7 +80,7 @@ export async function action({ request }) {
   }
 }
 
-function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bodyPref, closetItem, closetItems, naiaPiece, closet }) {
+function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bodyPref, closetItem, closetItems, naiaPiece, closet, previousPieces }) {
   const closetList = Array.isArray(closet) && closet.length > 0
     ? closet.map(i => `- ${i.name} (${i.category}) [customer closet]`).join("\n")
     : "No closet items.";
@@ -260,7 +260,8 @@ function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bo
   const eventNote = getEventDirection(event);
   const styleNote = Array.isArray(styleWords) && styleWords.length > 0 ? styleWords.join(", ") : "not specified";
 
-  return `Style an outfit for a nAia customer. Variety seed: ${Math.floor(Math.random() * 10000)}. IMPORTANT: Pick DIFFERENT pieces than you normally default to. Avoid repeating the same combinations.
+  return `Style an outfit for a nAia customer.
+${previousPieces?.length > 0 ? `AVOID these pieces already recommended: ${previousPieces.join(", ")}. You MUST pick different pieces.` : ""} Variety seed: ${Math.floor(Math.random() * 10000)}. IMPORTANT: Pick DIFFERENT pieces than you normally default to. Avoid repeating the same combinations.
 
 CUSTOMER:
 - Mood: ${mood}
