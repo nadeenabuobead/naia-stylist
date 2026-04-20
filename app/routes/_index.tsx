@@ -1,1 +1,5 @@
-export { default, loader } from "./app._index";
+import { redirect } from "react-router";
+
+export function loader() {
+  return redirect("/stylist");
+}

@@ -1,7 +1,7 @@
 import { route, index } from "@react-router/dev/routes";
 
 export default [
-  index("routes/stylist.jsx"),
+  index("routes/_index.tsx"),
   route("onboarding/step/:step", "routes/onboarding/step.$step.tsx"),
   route("onboarding/complete", "routes/onboarding/complete.tsx"),
   route("closet", "routes/closet._index.tsx"),
