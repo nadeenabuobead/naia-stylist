@@ -85,7 +85,7 @@ export default function ClosetPage() {
     if (!newName) return;
     fetcher.submit(
       { intent: "add", name: newName, category: newCategory, imageUrl: newImageUrl },
-      { method: "post", action: `/closet?naia_token=${token}` }
+      { method: "post", action: `/apps/naia-stylist/closet?naia_token=${token}` }
     );
     setNewName("");
     setNewImageUrl("");
