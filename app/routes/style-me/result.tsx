@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { getCustomerId } from "~/lib/auth.server";
 import { prisma } from "~/lib/prisma.server";
 import { getSession, commitSession } from "~/lib/session.server";
+import { callClaude } from "~/lib/ai/claude.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
@@ -108,59 +109,48 @@ export async function action({ request }: ActionFunctionArgs) {
       });
       
       // Create mock suggestion
+     // Call the AI for real outfit suggestions
+      let aiResult: any = null;
+      try {
+        const aiResponse = await callClaude({
+          system: "You are nAia, a warm and confident AI personal stylist. Respond ONLY with valid JSON, no extra text.",
+          messages: [{
+            role: "user",
+            content: `Create a complete outfit for someone feeling "${session.currentMood}" who wants to feel "${session.desiredFeeling}" for "${session.occasion}". Return JSON with: outfitName, styleNotes, confidenceBoost, perfumeSuggestion, hairSuggestion, makeupSuggestion, songSuggestion, and items array where each item has: type (TOP/BOTTOM/DRESS/SHOES/BAG/ACCESSORY), name, description, stylingTip.`
+          }],
+          maxTokens: 1500
+        });
+        const clean = aiResponse.replace(/```json|```/g, "").trim();
+        aiResult = JSON.parse(clean);
+      } catch (e) {
+        console.error("AI generation failed:", e);
+      }
+
       const suggestion = await prisma.outfitSuggestion.create({
         data: {
           sessionId,
-          outfitName: `${session.mood.charAt(0).toUpperCase() + session.mood.slice(1)} ${session.occasion} Look`,
-          styleNotes: "This outfit perfectly captures your mood and is ideal for the occasion. The pieces work together to create a cohesive, stylish look.",
-          confidenceBoost: "You're going to turn heads and feel amazing!",
-          perfumeSuggestion: "Something warm with notes of vanilla and sandalwood",
-          hairSuggestion: "Soft waves or a sleek low bun",
-          makeupSuggestion: "Dewy skin, subtle bronzer, and a nude lip",
-          songSuggestion: "Golden Hour - JVKE",
+          outfitName: aiResult?.outfitName || `${session.occasion} Look`,
+          styleNotes: aiResult?.styleNotes || "A beautiful outfit curated just for you.",
+          confidenceBoost: aiResult?.confidenceBoost || "You're going to look amazing!",
+          perfumeSuggestion: aiResult?.perfumeSuggestion || null,
+          hairSuggestion: aiResult?.hairSuggestion || null,
+          makeupSuggestion: aiResult?.makeupSuggestion || null,
+          songSuggestion: aiResult?.songSuggestion || null,
           items: {
-            create: [
-              {
-                type: "TOP",
-                name: "Silk Blouse",
-                description: "Elegant and versatile",
-                stylingTip: "Tuck the front for a polished look",
-                order: 0
-              },
-              {
-                type: "BOTTOM",
-                name: "High-Waisted Trousers",
-                description: "Flattering and comfortable",
-                stylingTip: "Pair with heels to elongate your legs",
-                order: 1
-              },
-              {
-                type: "SHOES",
-                name: "Pointed Toe Heels",
-                description: "Classic and chic",
-                stylingTip: "Nude tones work with everything",
-                order: 2
-              },
-              {
-                type: "BAG",
-                name: "Structured Handbag",
-                description: "Polished finishing touch",
-                stylingTip: "Keep it minimal inside for a sleeker silhouette",
-                order: 3
-              },
-              {
-                type: "ACCESSORY",
-                name: "Gold Hoop Earrings",
-                description: "Timeless elegance",
-                stylingTip: "Medium size works for day to night",
-                order: 4
-              }
-            ]
+            create: (aiResult?.items || [
+              { type: "TOP", name: "Silk Blouse", description: "Elegant and versatile", stylingTip: "Tuck the front for a polished look", order: 0 },
+              { type: "BOTTOM", name: "High-Waisted Trousers", description: "Flattering and comfortable", stylingTip: "Pair with heels to elongate", order: 1 },
+              { type: "SHOES", name: "Pointed Toe Heels", description: "Classic and chic", stylingTip: "Nude tones work with everything", order: 2 },
+            ]).map((item: any, i: number) => ({
+              type: item.type,
+              name: item.name,
+              description: item.description,
+              stylingTip: item.stylingTip,
+              order: i
+            }))
           }
         },
-        include: {
-          items: true
-        }
+        include: { items: true }
       });
       
       return json({ suggestion });
