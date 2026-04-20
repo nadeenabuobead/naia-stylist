@@ -1,5 +1,5 @@
 // app/routes/onboarding/complete.tsx
-import { Link, useLoaderData, redirect } from "react-router";
+import { Link, useLoaderData, redirect, data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { getSession, commitSession } from "~/lib/session.server";
 import { getCustomerId } from "~/lib/auth.server";
@@ -53,14 +53,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Generate style summary
   const styleSummary = generateStyleSummary(answers);
 
-  return json(
-    { answers, styleSummary },
-    {
-      headers: {
-        "Set-Cookie": await commitSession(session),
-      },
-    }
-  );
+return data(
+  { answers, styleSummary },
+  {
+    headers: {
+      "Set-Cookie": await commitSession(session),
+    },
+  }
+);
 }
 
 function generateStyleSummary(answers: OnboardingAnswers): {
