@@ -1,6 +1,6 @@
 // app/routes/onboarding/step.$step.tsx
 import { useState, useEffect } from "react";
-import { Form, Link, useLoaderData, useNavigate, useParams } from "react-router";
+import { Form, Link, useLoaderData, useNavigate, useParams, data } from "react-router";
 import { redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
 import { getSession, commitSession } from "~/lib/session.server";
 import {
@@ -34,7 +34,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   const session = await getSession(request.headers.get("Cookie"));
   const answers = (session.get("onboardingAnswers") || {}) as OnboardingAnswers;
 
-  return json({
+  return data({
     step,
     totalSteps,
     question,
