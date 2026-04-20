@@ -943,6 +943,8 @@ export default function Stylist() {
 
                 <div style={{ marginTop: "32px", display: "flex", gap: "12px" }}>
                   <button style={s.outlineBtn} onClick={resetAll}>Start over</button>
+                  <button style={s.outlineBtn} onClick={resetAll}>Start over</button>
+<button style={s.btn} onClick={callAI}>✦ New look, same vibe</button>
                   {customer && (<button style={{ ...s.outlineBtn, opacity: 0.6 }} disabled>✓ Saved to history</button>)}
                 </div>
               </div>
