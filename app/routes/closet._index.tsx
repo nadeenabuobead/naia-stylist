@@ -85,7 +85,7 @@ export default function ClosetPage() {
     if (!newName) return;
     fetcher.submit(
       { intent: "add", name: newName, category: newCategory, imageUrl: newImageUrl },
-      { method: "post", action: `/apps/naia-stylist/closet?naia_token=${token}` }
+      { method: "post", action: `/closet'
     );
     setNewName("");
     setNewImageUrl("");
@@ -162,7 +162,7 @@ export default function ClosetPage() {
                 <p style={{ fontSize: "0.75rem", color: "#888" }}>{item.category.charAt(0) + item.category.slice(1).toLowerCase()}</p>
               </div>
               <button
-                onClick={() => fetcher.submit({ intent: "delete", itemId: item.id }, { method: "post", action: `/closet?naia_token=${token}` })}
+                onClick={() => fetcher.submit({ intent: "delete", itemId: item.id }, { method: "post", action: `/closet`
                 style={{ position: "absolute", top: "0.5rem", right: "0.5rem", background: "rgba(0,0,0,0.5)", color: "white", border: "none", borderRadius: "9999px", width: "1.5rem", height: "1.5rem", cursor: "pointer", fontSize: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center" }}
               >×</button>
             </div>
