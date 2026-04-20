@@ -90,7 +90,21 @@ export async function action({ request }: ActionFunctionArgs) {
           system: "You are nAia, a warm and confident AI personal stylist. Respond ONLY with valid JSON, no extra text.",
           messages: [{
             role: "user",
-            content: `Create a complete outfit for someone feeling "${session.currentMood}" who wants to feel "${session.desiredFeeling}" for "${session.occasion}". Return JSON with: outfitName, whyThisWorks, confidenceBoost, perfumeRec, hairstyleRec, makeupVibeRec, songRec, and items array where each item has: itemType (one of: TOP, BOTTOM, DRESS, OUTERWEAR, SHOES, BAG, ACCESSORY, JEWELRY), productTitle, stylingNotes.`,
+            content: `You are styling for nAia, a womenswear brand. The customer is feeling "${session.currentMood}" and wants to feel "${session.desiredFeeling}" for "${session.occasion}".
+
+Here are the available nAia pieces to choose from:
+1. Sculptural Hybrid Coat - outerwear
+2. Art Blouse - top
+3. Art Panel Tailored Blazer - outerwear
+4. Textured Art Maxi Skirt - bottom
+5. Wrap Cropped Top - top
+6. Printed Wrap Kimono Jacket - outerwear
+7. Art Collar Shirt - top
+8. Leather Midi Dress - dress
+9. Asymmetrical Waist Pants - bottom
+10. Printed Straight Pants - bottom
+
+Create a complete outfit using 2-3 of these pieces. Return JSON with: outfitName, whyThisWorks, confidenceBoost, perfumeRec, hairstyleRec, makeupVibeRec, songRec, and items array where each item has: itemType (one of: TOP, BOTTOM, DRESS, OUTERWEAR, SHOES, BAG, ACCESSORY, JEWELRY), productTitle (must be exact name from the list above), stylingNotes, shopifyProductId (the numeric ID from this mapping: Sculptural Hybrid Coat=7822708867114, Art Blouse=7822708310058, Art Panel Tailored Blazer=7822708113450, Textured Art Maxi Skirt=7822708047914, Wrap Cropped Top=7822707949610, Printed Wrap Kimono Jacket=7822707589162, Art Collar Shirt=7822707392554, Leather Midi Dress=7822707130410, Asymmetrical Waist Pants=7822706475050, Printed Straight Pants=7822706016298), productImageUrl (from this mapping: Sculptural Hybrid Coat=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/b7af3725-7048-4ead-8d04-d6fb42556eac.png, Art Blouse=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32674461-cac7-4699-aff1-74c435289333.png, Art Panel Tailored Blazer=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/a7b908bb-3079-4f39-93b8-e1a89435249a.png, Textured Art Maxi Skirt=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/6992350d-5695-4f28-8674-7747dfd1e680.png, Wrap Cropped Top=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3614927b-4685-4df3-aeff-b3d5a950cbd2.png, Printed Wrap Kimono Jacket=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/77d61b97-37da-4e57-8297-aa5207b35d07.png, Art Collar Shirt=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32fe2afb-b8ef-46d2-ae2c-b1adc81a1b0f.png, Leather Midi Dress=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/8a855f15-e5e9-4ef5-a7db-a7253e83a542.png, Asymmetrical Waist Pants=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/7d5d1e05-796a-45d9-b74a-4ddb0c9da3cf.png, Printed Straight Pants=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3b14fe8b-2c19-492e-82b1-44baaf3a3cc9.png).`,
           }],
           maxTokens: 1500,
         });
