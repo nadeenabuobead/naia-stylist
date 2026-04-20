@@ -49,10 +49,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const stylingSession = await prisma.stylingSession.create({
     data: {
       customerId: customerId || undefined,
-      mood,
-      feelings,
+      currentMood: mood,
+      desiredFeeling: feelings?.[0] || null,
       occasion,
-      source,
+      styleFrom: source === "CLOSET" ? "CLOSET" : source === "NAIA" ? "NAIA" : "BOTH",
       status: "PENDING"
     }
   });
