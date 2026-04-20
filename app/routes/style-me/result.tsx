@@ -10,70 +10,66 @@ import { callClaude } from "~/lib/ai/claude.server";
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const sessionId = url.searchParams.get("sessionId");
-  
-  // If sessionId provided, load existing session
+
   if (sessionId) {
     const session = await prisma.stylingSession.findUnique({
       where: { id: sessionId },
       include: {
         suggestions: {
-          include: {
-            items: true
-          }
-        }
-      }
+          include: { items: true },
+        },
+      },
     });
-    
     if (session) {
       return data({
         isLoading: false,
-        session,
-        suggestion: session.suggestions[0] || null
+        sessionId: session.id,
+        mood: session.currentMood,
+        feelings: [session.desiredFeeling],
+        occasion: session.occasion,
+        source: session.styleFrom,
+        suggestion: session.suggestions[0] || null,
       });
     }
   }
-  
-  // Otherwise, get from session cookie
+
   const cookieSession = await getSession(request.headers.get("Cookie"));
   const mood = cookieSession.get("styleMeMood");
   const feelings = cookieSession.get("styleMeFeelings") as string[] | undefined;
   const occasion = cookieSession.get("styleMeOccasion");
   const source = cookieSession.get("styleMeSource");
-  
+
   if (!mood || !feelings || !occasion || !source) {
     return redirect("/style-me/mood");
   }
-  
-  const customerId = await getCustomerId(request);
-  
-  // Create the styling session
-  let resolvedCustomerId = customerId;
-if (!resolvedCustomerId) {
-  const guestCustomer = await prisma.customer.upsert({
-    where: { shopifyCustomerId: "guest" },
-    create: { shopifyCustomerId: "guest", email: "guest@naia.app" },
-    update: {},
-  });
-  resolvedCustomerId = guestCustomer.id;
-}
 
-const stylingSession = await prisma.stylingSession.create({
+  const customerId = await getCustomerId(request);
+
+  let resolvedCustomerId = customerId;
+  if (!resolvedCustomerId) {
+    const guest = await prisma.customer.upsert({
+      where: { shopifyCustomerId: "guest" },
+      create: { shopifyCustomerId: "guest", email: "guest@naia.app" },
+      update: {},
+    });
+    resolvedCustomerId = guest.id;
+  }
+
+  const stylingSession = await prisma.stylingSession.create({
     data: {
       customerId: resolvedCustomerId,
       currentMood: mood,
       desiredFeeling: feelings?.[0] || null,
       occasion,
       styleFrom: source === "CLOSET" ? "CLOSET" : source === "NAIA" ? "NAIA" : "BOTH",
-      
-    }
+    },
   });
-  
-  // Clear the session data
+
   cookieSession.unset("styleMeMood");
   cookieSession.unset("styleMeFeelings");
   cookieSession.unset("styleMeOccasion");
   cookieSession.unset("styleMeSource");
-  
+
   return data(
     {
       isLoading: true,
@@ -82,12 +78,10 @@ const stylingSession = await prisma.stylingSession.create({
       feelings,
       occasion,
       source,
-      suggestion: null
+      suggestion: null,
     },
     {
-      headers: {
-        "Set-Cookie": await commitSession(cookieSession)
-      }
+      headers: { "Set-Cookie": await commitSession(cookieSession) },
     }
   );
 }
@@ -97,122 +91,107 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = formData.get("intent") as string;
   const sessionId = formData.get("sessionId") as string;
   const suggestionId = formData.get("suggestionId") as string;
-  
-  const customerId = await getCustomerId(request);
-  
-  switch (intent) {
-    case "generate": {
-      // In real app, this would call the AI service
-      // For now, create a mock suggestion
-      const session = await prisma.stylingSession.findUnique({
-        where: { id: sessionId }
-      });
-      
-      if (!session) {
-        return data({ error: "Session not found" }, { status: 404 });
-      }
-      
-      // Update session status
-      await prisma.stylingSession.update({
-        where: { id: sessionId },
-        data: {  }
-      });
-      
-      // Create mock suggestion
-     // Call the AI for real outfit suggestions
-      let aiResult: any = null;
-      try {
-        const aiResponse = await callClaude({
-          system: "You are nAia, a warm and confident AI personal stylist. Respond ONLY with valid JSON, no extra text.",
-          messages: [{
-            role: "user",
-            content: `Create a complete outfit for someone feeling "${session.currentMood}" who wants to feel "${session.desiredFeeling}" for "${session.occasion}". Return JSON with: outfitName, whyThisWorks, confidenceBoost, perfumeRec, hairstyleRec, makeupVibeRec, songRec, and items array where each item has: type (TOP/BOTTOM/DRESS/SHOES/BAG/ACCESSORY), name, description, stylingTip.`
-          }],
-          maxTokens: 1500
-        });
-        const clean = aiResponse.replace(/```json|```/g, "").trim();
-        aiResult = JSON.parse(clean);
-      } catch (e) {
-        console.error("AI generation failed:", e);
-      }
 
-      const suggestion = await prisma.outfitSuggestion.create({
-        data: {
-          sessionId,
-          outfitName: aiResult?.outfitName || `${session.occasion} Look`,
-          whyThisWorks: aiResult?.whyThisWorks || "A beautiful outfit curated just for you.",
-          confidenceBoost: aiResult?.confidenceBoost || "You're going to look amazing!",
-          perfumeRec: aiResult?.perfumeRec || null,
-          hairstyleRec: aiResult?.hairstyleRec || null,
-          makeupVibeRec: aiResult?.makeupVibeRec || null,
-          songRec: aiResult?.songRec || null,
-          items: {
-            create: (aiResult?.items || [
-              { type: "TOP", name: "Silk Blouse", description: "Elegant and versatile", stylingTip: "Tuck the front for a polished look", order: 0 },
-              { type: "BOTTOM", name: "High-Waisted Trousers", description: "Flattering and comfortable", stylingTip: "Pair with heels to elongate", order: 1 },
-              { type: "SHOES", name: "Pointed Toe Heels", description: "Classic and chic", stylingTip: "Nude tones work with everything", order: 2 },
-            ]).map((item: any, i: number) => ({
-              type: item.type,
-              name: item.name,
-              description: item.description,
-              stylingTip: item.stylingTip,
-              order: i
-            }))
-          }
+  const customerId = await getCustomerId(request);
+
+  if (intent === "generate") {
+    const session = await prisma.stylingSession.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!session) {
+      return data({ error: "Session not found" }, { status: 404 });
+    }
+
+    let aiResult: any = null;
+    try {
+      const aiResponse = await callClaude({
+        system:
+          "You are nAia, a warm and confident AI personal stylist. Respond ONLY with valid JSON, no extra text.",
+        messages: [
+          {
+            role: "user",
+            content: `Create a complete outfit for someone feeling "${session.currentMood}" who wants to feel "${session.desiredFeeling}" for "${session.occasion}". Return JSON with: outfitName, whyThisWorks, confidenceBoost, perfumeRec, hairstyleRec, makeupVibeRec, songRec, and items array where each item has: itemType (one of: TOP, BOTTOM, DRESS, OUTERWEAR, SHOES, BAG, ACCESSORY, JEWELRY), productTitle, stylingNotes.`,
+          },
+        ],
+        maxTokens: 1500,
+      });
+      const clean = aiResponse.replace(/```json|```/g, "").trim();
+      aiResult = JSON.parse(clean);
+    } catch (e) {
+      console.error("AI generation failed:", e);
+    }
+
+    const defaultItems = [
+      { itemType: "TOP", productTitle: "Silk Blouse", stylingNotes: "Tuck the front for a polished look" },
+      { itemType: "BOTTOM", productTitle: "High-Waisted Trousers", stylingNotes: "Pair with heels to elongate" },
+      { itemType: "SHOES", productTitle: "Pointed Toe Heels", stylingNotes: "Nude tones work with everything" },
+    ];
+
+    const suggestion = await prisma.outfitSuggestion.create({
+      data: {
+        sessionId,
+        outfitName: aiResult?.outfitName || `${session.occasion} Look`,
+        whyThisWorks: aiResult?.whyThisWorks || "A beautiful outfit curated just for you.",
+        confidenceBoost: aiResult?.confidenceBoost || "You're going to look amazing!",
+        perfumeRec: aiResult?.perfumeRec || null,
+        hairstyleRec: aiResult?.hairstyleRec || null,
+        makeupVibeRec: aiResult?.makeupVibeRec || null,
+        songRec: aiResult?.songRec || null,
+        items: {
+          create: (aiResult?.items || defaultItems).map((item: any) => ({
+            itemType: item.itemType,
+            productTitle: item.productTitle || null,
+            stylingNotes: item.stylingNotes || null,
+          })),
         },
-        include: { items: true }
-      });
-      
-      return data({ suggestion });
-    }
-    
-    case "save": {
-      if (!customerId) {
-        return data({ error: "Must be logged in to save looks" }, { status: 401 });
-      }
-      
-      const suggestion = await prisma.outfitSuggestion.findUnique({
-        where: { id: suggestionId },
-        include: { items: true }
-      });
-      
-      if (!suggestion) {
-        return data({ error: "Suggestion not found" }, { status: 404 });
-      }
-      
-      await prisma.savedLook.create({
-        data: {
-          customerId,
-          suggestionId,
-          name: suggestion.outfitName,
-          items: {
-            create: suggestion.items.map((item) => ({
-              type: item.type,
-              name: item.name,
-              imageUrl: item.imageUrl,
-              closetItemId: item.closetItemId,
-              shopifyProductId: item.shopifyProductId
-            }))
-          }
-        }
-      });
-      
-      return data({ saved: true });
-    }
-    
-    default:
-      return data({ error: "Invalid intent" }, { status: 400 });
+      },
+      include: { items: true },
+    });
+
+    return data({ suggestion });
   }
+
+  if (intent === "save") {
+    if (!customerId) {
+      return data({ error: "Must be logged in to save looks" }, { status: 401 });
+    }
+
+    const suggestion = await prisma.outfitSuggestion.findUnique({
+      where: { id: suggestionId },
+      include: { items: true },
+    });
+
+    if (!suggestion) {
+      return data({ error: "Suggestion not found" }, { status: 404 });
+    }
+
+    await prisma.savedLook.create({
+      data: {
+        customerId,
+        name: suggestion.outfitName,
+        items: {
+          create: suggestion.items.map((item) => ({
+            itemType: item.itemType,
+            closetItemId: item.closetItemId || null,
+            shopifyProductId: item.shopifyProductId || null,
+          })),
+        },
+      },
+    });
+
+    return data({ saved: true });
+  }
+
+  return data({ error: "Invalid intent" }, { status: 400 });
 }
 
-// Loading animation messages
 const loadingMessages = [
   "Reading your vibe... ✨",
-  "Browsing your closet... 👗",
   "Finding the perfect pieces... 💎",
   "Adding the finishing touches... 🎀",
   "Picking your confidence song... 🎵",
-  "Almost ready... 💫"
+  "Almost ready... 💫",
 ];
 
 export default function StyleMeResult() {
@@ -221,11 +200,10 @@ export default function StyleMeResult() {
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [isSaved, setIsSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<"outfit" | "vibe">("outfit");
-  
+
   const isLoading = loaderData.isLoading && !fetcher.data?.suggestion;
   const suggestion = fetcher.data?.suggestion || loaderData.suggestion;
-  
-  // Trigger generation on mount if loading
+
   useEffect(() => {
     if (loaderData.isLoading && !fetcher.data && fetcher.state === "idle") {
       fetcher.submit(
@@ -234,8 +212,7 @@ export default function StyleMeResult() {
       );
     }
   }, [loaderData.isLoading]);
-  
-  // Rotate loading messages
+
   useEffect(() => {
     if (isLoading) {
       const interval = setInterval(() => {
@@ -244,49 +221,27 @@ export default function StyleMeResult() {
       return () => clearInterval(interval);
     }
   }, [isLoading]);
-  
-  // Handle save response
+
   useEffect(() => {
-    if (fetcher.data?.saved) {
-      setIsSaved(true);
-    }
+    if (fetcher.data?.saved) setIsSaved(true);
   }, [fetcher.data?.saved]);
-  
+
   const handleSave = () => {
     if (suggestion) {
-      fetcher.submit(
-        { intent: "save", suggestionId: suggestion.id },
-        { method: "post" }
-      );
+      fetcher.submit({ intent: "save", suggestionId: suggestion.id }, { method: "post" });
     }
   };
 
-  // Loading State
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[var(--naia-cream)] flex flex-col items-center justify-center p-4">
-        <div className="text-center max-w-sm">
-          <div className="relative w-32 h-32 mx-auto mb-8">
-            <div className="absolute inset-0 rounded-full bg-gradient-to-br from-[var(--naia-rose)] to-[var(--naia-rose-dark)] animate-pulse" />
-            <div className="absolute inset-4 rounded-full bg-[var(--naia-cream)] flex items-center justify-center">
-              <span className="text-5xl animate-bounce">✨</span>
-            </div>
-          </div>
-          
-          <p className="font-display text-xl text-[var(--naia-charcoal)] mb-2">
-            Creating your look
-          </p>
-          <p className="text-[var(--naia-text-muted)] animate-pulse">
-            {loadingMessages[loadingMessageIndex]}
-          </p>
-          
-          <div className="flex justify-center gap-2 mt-8">
+      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "1rem", background: "#faf9f7" }}>
+        <div style={{ textAlign: "center", maxWidth: "24rem" }}>
+          <div style={{ fontSize: "4rem", marginBottom: "1.5rem" }}>✨</div>
+          <p style={{ fontSize: "1.25rem", fontWeight: 500, marginBottom: "0.5rem" }}>Creating your look</p>
+          <p style={{ color: "#888", marginBottom: "2rem" }}>{loadingMessages[loadingMessageIndex]}</p>
+          <div style={{ display: "flex", justifyContent: "center", gap: "0.5rem" }}>
             {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                className="w-2 h-2 rounded-full bg-[var(--naia-rose)] animate-pulse"
-                style={{ animationDelay: `${i * 0.2}s` }}
-              />
+              <div key={i} style={{ width: "0.5rem", height: "0.5rem", borderRadius: "50%", background: "#c4a0a0" }} />
             ))}
           </div>
         </div>
@@ -294,24 +249,14 @@ export default function StyleMeResult() {
     );
   }
 
-  // Error State
   if (fetcher.data?.error || !suggestion) {
     return (
-      <div className="min-h-screen bg-[var(--naia-cream)] flex flex-col items-center justify-center p-4">
-        <div className="text-center max-w-sm">
-          <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-red-100 flex items-center justify-center">
-            <span className="text-4xl">😔</span>
-          </div>
-          <h1 className="font-display text-2xl text-[var(--naia-charcoal)] mb-2">
-            Oops, something went wrong
-          </h1>
-          <p className="text-[var(--naia-text-muted)] mb-6">
-            {fetcher.data?.error || "Couldn't create your outfit. Let's try again!"}
-          </p>
-          <Link
-            to="/style-me/mood"
-            className="inline-block px-6 py-3 bg-[var(--naia-rose)] text-white rounded-full font-medium"
-          >
+      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+        <div style={{ textAlign: "center", maxWidth: "24rem" }}>
+          <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>😔</div>
+          <h1 style={{ fontSize: "1.5rem", fontWeight: 600, marginBottom: "0.5rem" }}>Something went wrong</h1>
+          <p style={{ color: "#888", marginBottom: "1.5rem" }}>{fetcher.data?.error || "Couldn't create your outfit. Let's try again!"}</p>
+          <Link to="/style-me/mood" style={{ padding: "0.75rem 1.5rem", background: "#c4a0a0", color: "white", borderRadius: "9999px", textDecoration: "none", fontWeight: 500 }}>
             Start Over
           </Link>
         </div>
@@ -319,225 +264,98 @@ export default function StyleMeResult() {
     );
   }
 
-  // Success State
   return (
-    <div className="min-h-screen bg-[var(--naia-cream)]">
-      {/* Header */}
-      <header className="px-4 py-6 bg-white/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-lg mx-auto flex items-center justify-between">
-          <Link to="/style-me" className="text-[var(--naia-text-muted)] text-sm">
-            ← Back
-          </Link>
-          <h1 className="font-display text-lg font-medium text-[var(--naia-charcoal)]">
-            Your Look
-          </h1>
-          <button
-            onClick={handleSave}
-            disabled={isSaved}
-            className={`text-sm font-medium ${
-              isSaved ? "text-green-600" : "text-[var(--naia-rose)]"
-            }`}
-          >
-            {isSaved ? "✓ Saved" : "Save"}
-          </button>
-        </div>
+    <div style={{ minHeight: "100vh", background: "#faf9f7" }}>
+      <header style={{ padding: "1.5rem 1rem", background: "white", position: "sticky", top: 0, zIndex: 10, display: "flex", alignItems: "center", justifyContent: "space-between", maxWidth: "32rem", margin: "0 auto" }}>
+        <Link to="/style-me" style={{ color: "#888", textDecoration: "none", fontSize: "0.875rem" }}>← Back</Link>
+        <h1 style={{ fontSize: "1.125rem", fontWeight: 500 }}>Your Look</h1>
+        <button onClick={handleSave} disabled={isSaved} style={{ fontSize: "0.875rem", fontWeight: 500, color: isSaved ? "green" : "#c4a0a0", background: "none", border: "none", cursor: "pointer" }}>
+          {isSaved ? "✓ Saved" : "Save"}
+        </button>
       </header>
 
-      <main className="px-4 py-6 max-w-lg mx-auto">
-        {/* Outfit Name & Confidence Boost */}
-        <div className="text-center mb-6">
-          <h2 className="font-display text-2xl font-medium text-[var(--naia-charcoal)] mb-2">
-            {suggestion.outfitName}
-          </h2>
+      <main style={{ padding: "1.5rem 1rem", maxWidth: "32rem", margin: "0 auto" }}>
+        <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
+          <h2 style={{ fontSize: "1.5rem", fontWeight: 600, marginBottom: "0.5rem" }}>{suggestion.outfitName}</h2>
           {suggestion.confidenceBoost && (
-            <p className="text-[var(--naia-rose)] italic">
-              "{suggestion.confidenceBoost}"
-            </p>
+            <p style={{ color: "#c4a0a0", fontStyle: "italic" }}>"{suggestion.confidenceBoost}"</p>
           )}
         </div>
 
-        {/* Tab Switcher */}
-        <div className="flex bg-white rounded-full p-1 mb-6">
-          <button
-            onClick={() => setActiveTab("outfit")}
-            className={`flex-1 py-2 px-4 rounded-full text-sm font-medium transition-colors ${
-              activeTab === "outfit"
-                ? "bg-[var(--naia-charcoal)] text-white"
-                : "text-[var(--naia-text-muted)]"
-            }`}
-          >
-            👗 Outfit
-          </button>
-          <button
-            onClick={() => setActiveTab("vibe")}
-            className={`flex-1 py-2 px-4 rounded-full text-sm font-medium transition-colors ${
-              activeTab === "vibe"
-                ? "bg-[var(--naia-charcoal)] text-white"
-                : "text-[var(--naia-text-muted)]"
-            }`}
-          >
-            ✨ Complete Vibe
-          </button>
+        <div style={{ display: "flex", background: "white", borderRadius: "9999px", padding: "0.25rem", marginBottom: "1.5rem" }}>
+          {(["outfit", "vibe"] as const).map((tab) => (
+            <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, padding: "0.5rem 1rem", borderRadius: "9999px", fontSize: "0.875rem", fontWeight: 500, border: "none", cursor: "pointer", background: activeTab === tab ? "#2d2d2d" : "transparent", color: activeTab === tab ? "white" : "#888" }}>
+              {tab === "outfit" ? "👗 Outfit" : "✨ Complete Vibe"}
+            </button>
+          ))}
         </div>
 
         {activeTab === "outfit" ? (
           <>
-            {/* Outfit Items */}
-            <div className="space-y-4 mb-8">
-              <h3 className="font-medium text-[var(--naia-charcoal)]">
-                The Pieces
-              </h3>
-              {suggestion.items?.map((item: any) => (
-                <div
-                  key={item.id}
-                  className="flex gap-4 p-4 bg-white rounded-xl"
-                >
-                  <div className="w-20 h-20 rounded-lg overflow-hidden bg-[var(--naia-gray-100)] flex-shrink-0">
-                    {item.imageUrl ? (
-                      <img
-                        src={item.imageUrl}
-                        alt={item.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-2xl">
-                        👗
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <span className="text-xs text-[var(--naia-text-muted)] uppercase">
-                          {item.type}
-                        </span>
-                        <p className="font-medium text-[var(--naia-charcoal)]">
-                          {item.name}
-                        </p>
-                      </div>
-                      {item.price && (
-                        <span className="text-sm font-medium text-[var(--naia-charcoal)]">
-                          ${item.price}
-                        </span>
-                      )}
+            <div style={{ marginBottom: "2rem" }}>
+              <h3 style={{ fontWeight: 500, marginBottom: "1rem" }}>The Pieces</h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                {suggestion.items?.map((item: any) => (
+                  <div key={item.id} style={{ display: "flex", gap: "1rem", padding: "1rem", background: "white", borderRadius: "0.75rem" }}>
+                    <div style={{ width: "5rem", height: "5rem", borderRadius: "0.5rem", background: "#f5f5f5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "2rem", flexShrink: 0 }}>
+                      {item.productImageUrl ? <img src={item.productImageUrl} alt={item.productTitle} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "0.5rem" }} /> : "👗"}
                     </div>
-                    
-                    {item.stylingTip && (
-                      <p className="text-sm text-[var(--naia-text-muted)] mt-1">
-                        💡 {item.stylingTip}
-                      </p>
-                    )}
-                    
-                    <div className="flex gap-2 mt-2">
-                      {item.closetItemId && (
-                        <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-full">
-                          From your closet
-                        </span>
-                      )}
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontSize: "0.75rem", color: "#888", textTransform: "uppercase" }}>{item.itemType}</span>
+                      <p style={{ fontWeight: 500, margin: "0.25rem 0" }}>{item.productTitle || item.itemType}</p>
+                      {item.stylingNotes && <p style={{ fontSize: "0.875rem", color: "#888" }}>💡 {item.stylingNotes}</p>}
                       {item.shopifyProductId && (
-                        <Link
-                          to={`/products/${item.shopifyProductId}`}
-                          className="text-xs px-2 py-1 bg-[var(--naia-rose)]/10 text-[var(--naia-rose)] rounded-full"
-                        >
-                          View in store →
-                        </Link>
+                        <a href={`https://naiabynadine.com/products/${item.shopifyProductId}`} style={{ fontSize: "0.75rem", color: "#c4a0a0", textDecoration: "none" }}>View in store →</a>
                       )}
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
 
-            {/* Style Notes */}
             {suggestion.whyThisWorks && (
-              <div className="p-4 bg-[var(--naia-rose)]/5 rounded-xl mb-6">
-                <h3 className="font-medium text-[var(--naia-charcoal)] mb-2">
-                  ✨ Styling Notes
-                </h3>
-                <p className="text-[var(--naia-text-muted)] text-sm">
-                  {suggestion.whyThisWorks}
-                </p>
+              <div style={{ padding: "1rem", background: "rgba(196,160,160,0.08)", borderRadius: "0.75rem", marginBottom: "1.5rem" }}>
+                <h3 style={{ fontWeight: 500, marginBottom: "0.5rem" }}>✨ Why This Works</h3>
+                <p style={{ color: "#888", fontSize: "0.875rem" }}>{suggestion.whyThisWorks}</p>
               </div>
             )}
           </>
         ) : (
-          /* Vibe Tab */
-          <div className="space-y-4">
+          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
             {suggestion.perfumeRec && (
-              <div className="p-4 bg-white rounded-xl">
-                <div className="flex items-center gap-3 mb-2">
-                  <span className="text-2xl">🌸</span>
-                  <h3 className="font-medium text-[var(--naia-charcoal)]">
-                    Scent
-                  </h3>
-                </div>
-                <p className="text-[var(--naia-text-muted)]">
-                  {suggestion.perfumeRec}
-                </p>
+              <div style={{ padding: "1rem", background: "white", borderRadius: "0.75rem" }}>
+                <p style={{ fontWeight: 500, marginBottom: "0.5rem" }}>🌸 Scent</p>
+                <p style={{ color: "#888" }}>{suggestion.perfumeRec}</p>
               </div>
             )}
-            
             {suggestion.hairstyleRec && (
-              <div className="p-4 bg-white rounded-xl">
-                <div className="flex items-center gap-3 mb-2">
-                  <span className="text-2xl">💇‍♀️</span>
-                  <h3 className="font-medium text-[var(--naia-charcoal)]">
-                    Hair
-                  </h3>
-                </div>
-                <p className="text-[var(--naia-text-muted)]">
-                  {suggestion.hairstyleRec}
-                </p>
+              <div style={{ padding: "1rem", background: "white", borderRadius: "0.75rem" }}>
+                <p style={{ fontWeight: 500, marginBottom: "0.5rem" }}>💇‍♀️ Hair</p>
+                <p style={{ color: "#888" }}>{suggestion.hairstyleRec}</p>
               </div>
             )}
-            
             {suggestion.makeupVibeRec && (
-              <div className="p-4 bg-white rounded-xl">
-                <div className="flex items-center gap-3 mb-2">
-                  <span className="text-2xl">💄</span>
-                  <h3 className="font-medium text-[var(--naia-charcoal)]">
-                    Makeup
-                  </h3>
-                </div>
-                <p className="text-[var(--naia-text-muted)]">
-                  {suggestion.makeupVibeRec}
-                </p>
+              <div style={{ padding: "1rem", background: "white", borderRadius: "0.75rem" }}>
+                <p style={{ fontWeight: 500, marginBottom: "0.5rem" }}>💄 Makeup</p>
+                <p style={{ color: "#888" }}>{suggestion.makeupVibeRec}</p>
               </div>
             )}
-            
             {suggestion.songRec && (
-              <div className="p-4 bg-gradient-to-br from-[var(--naia-rose)]/10 to-purple-100 rounded-xl">
-                <div className="flex items-center gap-3 mb-2">
-                  <span className="text-2xl">🎵</span>
-                  <h3 className="font-medium text-[var(--naia-charcoal)]">
-                    Your Confidence Song
-                  </h3>
-                </div>
-                <p className="text-[var(--naia-charcoal)] font-medium">
-                  {suggestion.songRec}
-                </p>
-                <p className="text-sm text-[var(--naia-text-muted)] mt-1">
-                  Play this while getting ready ✨
-                </p>
+              <div style={{ padding: "1rem", background: "white", borderRadius: "0.75rem" }}>
+                <p style={{ fontWeight: 500, marginBottom: "0.5rem" }}>🎵 Your Confidence Song</p>
+                <p style={{ fontWeight: 500 }}>{suggestion.songRec}</p>
+                <p style={{ fontSize: "0.875rem", color: "#888", marginTop: "0.25rem" }}>Play this while getting ready ✨</p>
               </div>
             )}
           </div>
         )}
 
-        {/* Action Buttons */}
-        <div className="flex gap-3 mt-8">
-          <Link
-            to="/style-me/mood"
-            className="flex-1 py-3 px-4 bg-white text-[var(--naia-charcoal)] text-center rounded-full font-medium border border-[var(--naia-gray-200)]"
-          >
+        <div style={{ display: "flex", gap: "0.75rem", marginTop: "2rem" }}>
+          <Link to="/style-me/mood" style={{ flex: 1, padding: "0.75rem 1rem", background: "white", color: "#2d2d2d", textAlign: "center", borderRadius: "9999px", fontWeight: 500, textDecoration: "none", border: "1px solid #e5e5e5" }}>
             New Look
           </Link>
-          <Link
-            to="/try-on"
-            className="flex-1 py-3 px-4 bg-[var(--naia-rose)] text-white text-center rounded-full font-medium"
-          >
-            Try It On ✨
+          <Link to="https://naiabynadine.com" style={{ flex: 1, padding: "0.75rem 1rem", background: "#c4a0a0", color: "white", textAlign: "center", borderRadius: "9999px", fontWeight: 500, textDecoration: "none" }}>
+            Shop nAia ✨
           </Link>
         </div>
       </main>
