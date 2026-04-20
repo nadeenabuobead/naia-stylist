@@ -1,6 +1,6 @@
 // app/routes/style-me/result.tsx
 import { Link, useLoaderData, useFetcher } from "react-router";
-import { json, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
+import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
 import { useState, useEffect } from "react";
 import { getCustomerId } from "~/lib/auth.server";
 import { prisma } from "~/lib/prisma.server";
@@ -25,7 +25,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
     
     if (session) {
-      return json({
+      return data({
         isLoading: false,
         session,
         suggestion: session.suggestions[0] || null
@@ -64,7 +64,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   cookieSession.unset("styleMeOccasion");
   cookieSession.unset("styleMeSource");
   
-  return json(
+  return data(
     {
       isLoading: true,
       sessionId: stylingSession.id,
@@ -99,7 +99,7 @@ export async function action({ request }: ActionFunctionArgs) {
       });
       
       if (!session) {
-        return json({ error: "Session not found" }, { status: 404 });
+        return data({ error: "Session not found" }, { status: 404 });
       }
       
       // Update session status
@@ -153,12 +153,12 @@ export async function action({ request }: ActionFunctionArgs) {
         include: { items: true }
       });
       
-      return json({ suggestion });
+      return data({ suggestion });
     }
     
     case "save": {
       if (!customerId) {
-        return json({ error: "Must be logged in to save looks" }, { status: 401 });
+        return data({ error: "Must be logged in to save looks" }, { status: 401 });
       }
       
       const suggestion = await prisma.outfitSuggestion.findUnique({
@@ -167,7 +167,7 @@ export async function action({ request }: ActionFunctionArgs) {
       });
       
       if (!suggestion) {
-        return json({ error: "Suggestion not found" }, { status: 404 });
+        return data({ error: "Suggestion not found" }, { status: 404 });
       }
       
       await prisma.savedLook.create({
@@ -187,11 +187,11 @@ export async function action({ request }: ActionFunctionArgs) {
         }
       });
       
-      return json({ saved: true });
+      return data({ saved: true });
     }
     
     default:
-      return json({ error: "Invalid intent" }, { status: 400 });
+      return data({ error: "Invalid intent" }, { status: 400 });
   }
 }
 

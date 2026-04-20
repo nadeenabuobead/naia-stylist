@@ -1,6 +1,6 @@
 // app/routes/style-me/feeling.tsx
 import { Form, Link, useLoaderData } from "react-router";
-import { json, redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
+import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 
@@ -29,7 +29,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return redirect("/style-me/mood");
   }
   
-  return json({ mood });
+  return data({ mood });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -37,13 +37,13 @@ export async function action({ request }: ActionFunctionArgs) {
   const feelingsRaw = formData.get("feelings") as string;
   
   if (!feelingsRaw) {
-    return json({ error: "Please select at least one feeling" }, { status: 400 });
+    return data({ error: "Please select at least one feeling" }, { status: 400 });
   }
   
   const selectedFeelings = feelingsRaw.split(",").filter(Boolean);
   
   if (selectedFeelings.length === 0) {
-    return json({ error: "Please select at least one feeling" }, { status: 400 });
+    return data({ error: "Please select at least one feeling" }, { status: 400 });
   }
   
   // Store in session

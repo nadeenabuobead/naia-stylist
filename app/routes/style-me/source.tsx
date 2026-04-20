@@ -1,6 +1,6 @@
 // app/routes/style-me/source.tsx
 import { Form, Link, useLoaderData } from "react-router";
-import { json, redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
+import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
 import { useState } from "react";
 import { getCustomerId } from "~/lib/auth.server";
 import { prisma } from "~/lib/prisma.server";
@@ -56,7 +56,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     closetCount = await prisma.closetItem.count({ where: { customerId } });
   }
   
-  return json({ mood, feelings, occasion, closetCount });
+  return data({ mood, feelings, occasion, closetCount });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -64,7 +64,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const source = formData.get("source") as SourceType;
   
   if (!source || !["CLOSET", "NAIA", "BOTH"].includes(source)) {
-    return json({ error: "Please select a source" }, { status: 400 });
+    return data({ error: "Please select a source" }, { status: 400 });
   }
   
   const session = await getSession(request.headers.get("Cookie"));

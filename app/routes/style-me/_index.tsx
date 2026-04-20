@@ -1,6 +1,6 @@
 // app/routes/style-me/_index.tsx
 import { Link, useLoaderData } from "react-router";
-import { json, type LoaderFunctionArgs } from "react-router";
+import { data, type LoaderFunctionArgs } from "react-router";
 import { getCustomerId } from "~/lib/auth.server";
 import { prisma } from "~/lib/prisma.server";
 
@@ -8,7 +8,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const customerId = await getCustomerId(request);
   
   if (!customerId) {
-    return json({ hasProfile: false, hasClosetItems: false, recentSessions: [] });
+    return data({ hasProfile: false, hasClosetItems: false, recentSessions: [] });
   }
   
   const [profile, closetCount, recentSessions] = await Promise.all([
@@ -33,7 +33,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     })
   ]);
   
-  return json({
+  return data({
     hasProfile: !!profile,
     stylePersonality: profile?.stylePersonality,
     hasClosetItems: closetCount > 0,

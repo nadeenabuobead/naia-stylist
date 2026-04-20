@@ -1,6 +1,6 @@
 // app/routes/style-me/occasion.tsx
 import { Form, Link, useLoaderData } from "react-router";
-import { json, redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
+import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 
@@ -65,7 +65,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return redirect("/style-me/mood");
   }
   
-  return json({ mood, feelings });
+  return data({ mood, feelings });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -73,7 +73,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const occasion = formData.get("occasion") as string;
   
   if (!occasion) {
-    return json({ error: "Please select an occasion" }, { status: 400 });
+    return data({ error: "Please select an occasion" }, { status: 400 });
   }
   
   const session = await getSession(request.headers.get("Cookie"));

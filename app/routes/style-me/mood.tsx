@@ -1,6 +1,6 @@
 // app/routes/style-me/mood.tsx
 import { Form, Link } from "react-router";
-import { json, redirect, type ActionFunctionArgs } from "react-router";
+import { data, redirect, type ActionFunctionArgs } from "react-router";
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 
@@ -69,7 +69,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const mood = formData.get("mood") as string;
   
   if (!mood) {
-    return json({ error: "Please select a mood" }, { status: 400 });
+    return data({ error: "Please select a mood" }, { status: 400 });
   }
   
   // Store in session for the flow
