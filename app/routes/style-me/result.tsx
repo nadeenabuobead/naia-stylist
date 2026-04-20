@@ -61,10 +61,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
     });
 
-    cookieSession.unset("styleMeMood");
-    cookieSession.unset("styleMeFeelings");
-    cookieSession.unset("styleMeOccasion");
-    cookieSession.unset("styleMeSource");
 
     return data(
       { isLoading: true, sessionId: stylingSession.id, mood, occasion, suggestion: null, error: null },
