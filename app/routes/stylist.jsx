@@ -775,7 +775,7 @@ export default function Stylist() {
             ) : (
               <div>
                 {outfitHistory.slice(0, 10).map((h, idx) => {
-                  const parsed = parseStylingResult(h.result);
+                  const parsed = parseStylingResult(typeof h.result === "string" ? h.result : (h.result?.whyThisWorks || ""));
                   return (
                     <div key={h.id || idx} style={{ padding: "16px 0", borderBottom: idx < 9 ? "1px solid #e8e4df" : "none" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -783,7 +783,7 @@ export default function Stylist() {
                           <div style={{ fontSize: "15px", fontStyle: "italic", marginBottom: "4px" }}>{h.mood || "—"} → {h.feeling || "—"}</div>
                           <div style={{ fontSize: "12px", color: "#8a7f75" }}>{h.event || ""} · {new Date(h.createdAt).toLocaleDateString()}</div>
                         </div>
-                        <button style={{ ...s.outlineBtn, fontSize: "10px", padding: "6px 12px" }} onClick={() => { setStylingResult(h.result); setMood(h.mood || ""); setFeeling(h.feeling || ""); setEvent(h.event || ""); setShowHistory(false); setStep(8); }}>View</button>
+                        <button style={{ ...s.outlineBtn, fontSize: "10px", padding: "6px 12px" }} >onClick={() => { setStylingResult(typeof h.result === "string" ? h.result : ""); ...
                       </div>
                       {parsed?.shift && <p style={{ fontSize: "13px", fontStyle: "italic", color: "#4a4540", margin: "8px 0 0" }}>{parsed.shift}</p>}
                     </div>
