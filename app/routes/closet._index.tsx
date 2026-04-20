@@ -1,5 +1,5 @@
 // app/routes/closet._index.tsx
-import { Link, useLoaderData, useFetcher, useSearchParams } from "react-router";
+import { useLoaderData, useFetcher, useSearchParams } from "react-router";
 import { data, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
 import { useState, useEffect } from "react";
 import { getCustomerId } from "~/lib/auth.server";
@@ -11,12 +11,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const customerId = await getCustomerId(request);
     if (!customerId) return data({ items: [], authenticated: false });
-
     const items = await prisma.closetItem.findMany({
       where: { customerId },
       orderBy: { createdAt: "desc" },
     });
-
     return data({ items, authenticated: true });
   } catch (err: any) {
     console.error("Closet loader error:", err);
@@ -28,28 +26,23 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const customerId = await getCustomerId(request);
     if (!customerId) return data({ error: "Not authenticated" }, { status: 401 });
-
     const formData = await request.formData();
     const intent = formData.get("intent") as string;
-
     if (intent === "add") {
       const name = formData.get("name") as string;
       const category = formData.get("category") as string;
       const imageUrl = formData.get("imageUrl") as string;
       if (!name || !category) return data({ error: "Name and category required" }, { status: 400 });
-
       const item = await prisma.closetItem.create({
         data: { customerId, name, category: category as any, imageUrl: imageUrl || "" },
       });
       return data({ item, success: true });
     }
-
     if (intent === "delete") {
       const itemId = formData.get("itemId") as string;
       await prisma.closetItem.delete({ where: { id: itemId, customerId } });
       return data({ success: true });
     }
-
     return data({ error: "Invalid intent" }, { status: 400 });
   } catch (err: any) {
     console.error("Closet action error:", err);
@@ -66,17 +59,10 @@ export default function ClosetPage() {
   const [newName, setNewName] = useState("");
   const [newCategory, setNewCategory] = useState("TOPS");
   const [newImageUrl, setNewImageUrl] = useState("");
-  const [token, setToken] = useState("");
 
   useEffect(() => {
     const urlToken = searchParams.get("naia_token");
-    if (urlToken) {
-      sessionStorage.setItem("naia_token", urlToken);
-      setToken(urlToken);
-    } else {
-      const stored = sessionStorage.getItem("naia_token") || "";
-      setToken(stored);
-    }
+    if (urlToken) sessionStorage.setItem("naia_token", urlToken);
   }, []);
 
   const filtered = activeCategory === "ALL" ? items : items.filter((i: any) => i.category === activeCategory);
@@ -85,7 +71,7 @@ export default function ClosetPage() {
     if (!newName) return;
     fetcher.submit(
       { intent: "add", name: newName, category: newCategory, imageUrl: newImageUrl },
-      { method: "post", action: `/closet'
+      { method: "post" }
     );
     setNewName("");
     setNewImageUrl("");
@@ -109,7 +95,7 @@ export default function ClosetPage() {
     <div style={{ minHeight: "100vh", background: "#faf9f7" }}>
       <header style={{ padding: "1rem", background: "white", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ maxWidth: "32rem", margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <a href={`https://naiabynadine.com/apps/naia-stylist/style-me?naia_token=${token}`} style={{ color: "#888", textDecoration: "none", fontSize: "0.875rem" }}>← Back</a>
+          <a href="https://naiabynadine.com/pages/ask-naia" style={{ color: "#888", textDecoration: "none", fontSize: "0.875rem" }}>← Back</a>
           <h1 style={{ fontSize: "1.125rem", fontWeight: 500 }}>My Closet</h1>
           <button onClick={() => setShowAddForm(!showAddForm)} style={{ fontSize: "0.875rem", fontWeight: 500, color: "#c4a0a0", background: "none", border: "none", cursor: "pointer" }}>+ Add</button>
         </div>
@@ -161,16 +147,13 @@ export default function ClosetPage() {
                 <p style={{ fontWeight: 500, fontSize: "0.875rem", marginBottom: "0.25rem" }}>{item.name}</p>
                 <p style={{ fontSize: "0.75rem", color: "#888" }}>{item.category.charAt(0) + item.category.slice(1).toLowerCase()}</p>
               </div>
-              <button
-                onClick={() => fetcher.submit({ intent: "delete", itemId: item.id }, { method: "post", action: `/closet`
-                style={{ position: "absolute", top: "0.5rem", right: "0.5rem", background: "rgba(0,0,0,0.5)", color: "white", border: "none", borderRadius: "9999px", width: "1.5rem", height: "1.5rem", cursor: "pointer", fontSize: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center" }}
-              >×</button>
+              <button onClick={() => fetcher.submit({ intent: "delete", itemId: item.id }, { method: "post" })} style={{ position: "absolute", top: "0.5rem", right: "0.5rem", background: "rgba(0,0,0,0.5)", color: "white", border: "none", borderRadius: "9999px", width: "1.5rem", height: "1.5rem", cursor: "pointer", fontSize: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
             </div>
           ))}
         </div>
 
         <div style={{ marginTop: "2rem", textAlign: "center" }}>
-          <a href={`https://naiabynadine.com/apps/naia-stylist/style-me?naia_token=${token}`} style={{ padding: "0.75rem 1.5rem", background: "#2d2d2d", color: "white", borderRadius: "9999px", textDecoration: "none", fontWeight: 500, fontSize: "0.875rem" }}>
+          <a href="https://naiabynadine.com/pages/ask-naia" style={{ padding: "0.75rem 1.5rem", background: "#2d2d2d", color: "white", borderRadius: "9999px", textDecoration: "none", fontWeight: 500, fontSize: "0.875rem" }}>
             ✨ Style Me
           </a>
         </div>
@@ -178,3 +161,4 @@ export default function ClosetPage() {
     </div>
   );
 }
+
