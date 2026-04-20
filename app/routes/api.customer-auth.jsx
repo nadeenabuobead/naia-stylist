@@ -1,4 +1,4 @@
-import prisma from "./db.server.js";
+import prisma from "../db.server.js";
 
 const SECRET = process.env.NAIA_CUSTOMER_SECRET || "naia-fallback-secret";
 
