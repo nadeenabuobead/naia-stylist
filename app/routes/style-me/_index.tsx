@@ -14,7 +14,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const [profile, closetCount, recentSessions] = await Promise.all([
     prisma.onboardingProfile.findUnique({
       where: { customerId },
-      select: { stylePersonality: true }
+      select: { stylePersonalities: true }
     }),
     prisma.closetItem.count({ where: { customerId } }),
     prisma.stylingSession.findMany({
@@ -35,7 +35,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   
   return data({
     hasProfile: !!profile,
-    stylePersonality: profile?.stylePersonality,
+    stylePersonalities: profile?.stylePersonality,
     hasClosetItems: closetCount > 0,
     closetCount,
     recentSessions
