@@ -53,7 +53,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       feelings,
       occasion,
       source,
-      status: "GENERATING"
+      status: "PENDING"
     }
   });
   
