@@ -54,7 +54,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       desiredFeeling: feelings?.[0] || null,
       occasion,
       styleFrom: source === "CLOSET" ? "CLOSET" : source === "NAIA" ? "NAIA" : "BOTH",
-      status: "PENDING"
+      
     }
   });
   
@@ -105,7 +105,7 @@ export async function action({ request }: ActionFunctionArgs) {
       // Update session status
       await prisma.stylingSession.update({
         where: { id: sessionId },
-        data: { status: "COMPLETED" }
+        data: {  }
       });
       
       // Create mock suggestion
@@ -116,7 +116,7 @@ export async function action({ request }: ActionFunctionArgs) {
           system: "You are nAia, a warm and confident AI personal stylist. Respond ONLY with valid JSON, no extra text.",
           messages: [{
             role: "user",
-            content: `Create a complete outfit for someone feeling "${session.currentMood}" who wants to feel "${session.desiredFeeling}" for "${session.occasion}". Return JSON with: outfitName, styleNotes, confidenceBoost, perfumeSuggestion, hairSuggestion, makeupSuggestion, songSuggestion, and items array where each item has: type (TOP/BOTTOM/DRESS/SHOES/BAG/ACCESSORY), name, description, stylingTip.`
+            content: `Create a complete outfit for someone feeling "${session.currentMood}" who wants to feel "${session.desiredFeeling}" for "${session.occasion}". Return JSON with: outfitName, whyThisWorks, confidenceBoost, perfumeRec, hairstyleRec, makeupVibeRec, songRec, and items array where each item has: type (TOP/BOTTOM/DRESS/SHOES/BAG/ACCESSORY), name, description, stylingTip.`
           }],
           maxTokens: 1500
         });
@@ -130,12 +130,12 @@ export async function action({ request }: ActionFunctionArgs) {
         data: {
           sessionId,
           outfitName: aiResult?.outfitName || `${session.occasion} Look`,
-          styleNotes: aiResult?.styleNotes || "A beautiful outfit curated just for you.",
+          whyThisWorks: aiResult?.whyThisWorks || "A beautiful outfit curated just for you.",
           confidenceBoost: aiResult?.confidenceBoost || "You're going to look amazing!",
-          perfumeSuggestion: aiResult?.perfumeSuggestion || null,
-          hairSuggestion: aiResult?.hairSuggestion || null,
-          makeupSuggestion: aiResult?.makeupSuggestion || null,
-          songSuggestion: aiResult?.songSuggestion || null,
+          perfumeRec: aiResult?.perfumeRec || null,
+          hairstyleRec: aiResult?.hairstyleRec || null,
+          makeupVibeRec: aiResult?.makeupVibeRec || null,
+          songRec: aiResult?.songRec || null,
           items: {
             create: (aiResult?.items || [
               { type: "TOP", name: "Silk Blouse", description: "Elegant and versatile", stylingTip: "Tuck the front for a polished look", order: 0 },
@@ -440,13 +440,13 @@ export default function StyleMeResult() {
             </div>
 
             {/* Style Notes */}
-            {suggestion.styleNotes && (
+            {suggestion.whyThisWorks && (
               <div className="p-4 bg-[var(--naia-rose)]/5 rounded-xl mb-6">
                 <h3 className="font-medium text-[var(--naia-charcoal)] mb-2">
                   ✨ Styling Notes
                 </h3>
                 <p className="text-[var(--naia-text-muted)] text-sm">
-                  {suggestion.styleNotes}
+                  {suggestion.whyThisWorks}
                 </p>
               </div>
             )}
@@ -454,7 +454,7 @@ export default function StyleMeResult() {
         ) : (
           /* Vibe Tab */
           <div className="space-y-4">
-            {suggestion.perfumeSuggestion && (
+            {suggestion.perfumeRec && (
               <div className="p-4 bg-white rounded-xl">
                 <div className="flex items-center gap-3 mb-2">
                   <span className="text-2xl">🌸</span>
@@ -463,12 +463,12 @@ export default function StyleMeResult() {
                   </h3>
                 </div>
                 <p className="text-[var(--naia-text-muted)]">
-                  {suggestion.perfumeSuggestion}
+                  {suggestion.perfumeRec}
                 </p>
               </div>
             )}
             
-            {suggestion.hairSuggestion && (
+            {suggestion.hairstyleRec && (
               <div className="p-4 bg-white rounded-xl">
                 <div className="flex items-center gap-3 mb-2">
                   <span className="text-2xl">💇‍♀️</span>
@@ -477,12 +477,12 @@ export default function StyleMeResult() {
                   </h3>
                 </div>
                 <p className="text-[var(--naia-text-muted)]">
-                  {suggestion.hairSuggestion}
+                  {suggestion.hairstyleRec}
                 </p>
               </div>
             )}
             
-            {suggestion.makeupSuggestion && (
+            {suggestion.makeupVibeRec && (
               <div className="p-4 bg-white rounded-xl">
                 <div className="flex items-center gap-3 mb-2">
                   <span className="text-2xl">💄</span>
@@ -491,12 +491,12 @@ export default function StyleMeResult() {
                   </h3>
                 </div>
                 <p className="text-[var(--naia-text-muted)]">
-                  {suggestion.makeupSuggestion}
+                  {suggestion.makeupVibeRec}
                 </p>
               </div>
             )}
             
-            {suggestion.songSuggestion && (
+            {suggestion.songRec && (
               <div className="p-4 bg-gradient-to-br from-[var(--naia-rose)]/10 to-purple-100 rounded-xl">
                 <div className="flex items-center gap-3 mb-2">
                   <span className="text-2xl">🎵</span>
@@ -505,7 +505,7 @@ export default function StyleMeResult() {
                   </h3>
                 </div>
                 <p className="text-[var(--naia-charcoal)] font-medium">
-                  {suggestion.songSuggestion}
+                  {suggestion.songRec}
                 </p>
                 <p className="text-sm text-[var(--naia-text-muted)] mt-1">
                   Play this while getting ready ✨
