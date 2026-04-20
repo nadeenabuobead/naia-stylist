@@ -211,7 +211,7 @@ export default function StyleMeResult() {
         { method: "post" }
       );
     }
-  }, [loaderData.isLoading]);
+  }, []);
 
   useEffect(() => {
     if (isLoading) {
