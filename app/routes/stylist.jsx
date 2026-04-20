@@ -61,9 +61,9 @@ function parseStylingResult(text) {
   let cleaned = text
     .replace(/Accessories:.*$/im, "")
     .replace(/Perfume:.*$/im, "")
-    .replace(/Song:.*$/im, "");
+    .replace(/Song:.*$/im, "")
     .replace(/Hair:.*$/im, "")
-    .replace(/Makeup:.*$/im, "")
+    .replace(/Makeup:.*$/im, "");
   const lines = cleaned.split("\n").map(l => l.trim()).filter(Boolean);
   let currentSection = "";
   for (const line of lines) {
