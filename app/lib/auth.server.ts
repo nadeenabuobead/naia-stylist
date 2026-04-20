@@ -15,23 +15,41 @@ export async function getCustomerId(request: Request): Promise<string | null> {
 /**
  * Get the current customer from the database
  */
-export async function getCustomer(request: Request) {
-  const customerId = await getCustomerId(request);
-  
-  if (!customerId) {
+export async function getCustomerId(request: Request): Promise<string | null> {
+  // First try the session cookie
+  const session = await getSession(request.headers.get("Cookie"));
+  const customerId = session.get("customerId");
+  if (customerId) return customerId;
+
+  // Fall back to naia_customer_data cookie
+  const cookies = request.headers.get("Cookie") || "";
+  const match = cookies.match(/naia_customer_data=([^;]+)/);
+  if (!match) return null;
+
+  try {
+    const decoded = JSON.parse(atob(decodeURIComponent(match[1])));
+    if (!decoded.shopifyId) return null;
+
+    const customer = await prisma.customer.upsert({
+      where: { shopifyCustomerId: String(decoded.shopifyId) },
+      create: {
+        shopifyCustomerId: String(decoded.shopifyId),
+        email: decoded.email || null,
+        firstName: decoded.firstName || null,
+        lastName: decoded.lastName || null,
+      },
+      update: {
+        email: decoded.email || undefined,
+        firstName: decoded.firstName || undefined,
+        lastName: decoded.lastName || undefined,
+      },
+    });
+
+    return customer.id;
+  } catch {
     return null;
   }
-  
-  const customer = await prisma.customer.findUnique({
-    where: { id: customerId },
-    include: {
-      onboardingProfile: true,
-    },
-  });
-  
-  return customer;
 }
-
 /**
  * Require a logged-in customer, redirect to login if not authenticated
  */
