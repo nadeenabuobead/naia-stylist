@@ -51,7 +51,7 @@ export async function action({ request }) {
 8. Song MUST be a well-known, popular song that most people would recognize — think top hits, Spotify top charts, popular artists like Dua Lipa, SZA, Billie Eilish, The Weeknd, Taylor Swift, Rihanna, Frank Ocean, Adele, Harry Styles, Beyoncé, Arctic Monkeys, Lana Del Rey, etc. Match the energy and mood. Never pick obscure songs.
 9. Perfume MUST be a mainstream, widely available fragrance people would recognize — like Chanel No. 5, YSL Black Opium, Dior Miss Dior, Tom Ford Black Orchid, Marc Jacobs Daisy, Lancôme La Vie Est Belle, Versace Bright Crystal, etc. Match the mood of the outfit.
 10. Connect every styling choice back to the customer's emotional shift (from current mood → desired feeling).
-11. VARIETY RULE: Never recommend the same combination twice. Rotate through ALL available pieces. Consider the specific mood "${mood}" and occasion "${event}" to pick the most fitting pieces — not just the most "safe" ones.`,
+11. VARIETY RULE: You MUST pick different pieces every time. Never recommend the same combination twice in a row. If you recommended the Sculptural Hybrid Coat or Textured Art Maxi Skirt last time, pick completely different pieces this time. Rotate through ALL available pieces equally.`,
           },
           { role: "user", content: stylistPrompt },
         ],
@@ -260,7 +260,7 @@ function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bo
   const eventNote = getEventDirection(event);
   const styleNote = Array.isArray(styleWords) && styleWords.length > 0 ? styleWords.join(", ") : "not specified";
 
-  return `Style an outfit for a nAia customer.
+  return `Style an outfit for a nAia customer. Variety seed: ${Math.floor(Math.random() * 10000)}. IMPORTANT: Pick DIFFERENT pieces than you normally default to. Avoid repeating the same combinations.
 
 CUSTOMER:
 - Mood: ${mood}
