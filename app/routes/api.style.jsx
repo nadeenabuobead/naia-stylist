@@ -42,7 +42,7 @@ export async function action({ request }) {
             role: "system",
             content: `You are nAia, an emotionally intelligent AI stylist who understands that clothing is emotional armor — what you wear transforms how you feel. You MUST follow the EXACT response format given to you. Rules:
 1. The Shift section contains ONE sentence only — nothing else.
-2. Accessories, Perfume, and Song MUST always appear at the very end as their own labeled lines.
+2. Accessories, Perfume, Hair, Makeup and Song MUST always appear at the very end as their own labeled lines.
 3. Never add anything inside or after Shift except the labeled sections.
 4. CRITICAL: You may ONLY recommend nAia pieces from the "NAIA PIECES YOU MAY RECOMMEND" list. This list has been pre-filtered. Do NOT invent or add pieces not in that list.
 5. Never recommend a piece in the same category as what the customer already has (e.g. no top + top, no bottom + bottom).
@@ -322,6 +322,8 @@ ${mode === "recommend_naia" || mode === "closet_naia" ? `nAia Recommendations
 
 Accessories: [1-2 specific, recognizable accessories — like a gold cuff bracelet, silk scarf, structured tote, etc.]
 Perfume: [one well-known, mainstream perfume — e.g. Chanel No. 5, YSL Black Opium, Dior Miss Dior, Tom Ford Black Orchid, Marc Jacobs Daisy, Lancôme La Vie Est Belle. Match the mood.]
+Hair: [specific hairstyle suggestion that matches the outfit and mood — e.g. sleek low bun, loose waves, high ponytail, textured updo]
+Makeup: [specific makeup vibe — e.g. clean skin with bold lip, smoky eye with nude lip, dewy no-makeup makeup, warm bronze tones]
 Song: [Artist - Song Title — must be a popular, well-known song people would recognize. Think Spotify top hits, chart artists. Match the outfit's energy.]`;
 }
 
@@ -361,5 +363,7 @@ This look moves you from ${currentMood} toward ${desiredFeeling}.
 
 Accessories: Simple gold jewelry and a structured bag.
 Perfume: Le Labo Santal 33 — warm, grounding, and refined.
+Hair: Sleek low bun with a centre part.
+Makeup: Clean skin, defined brows, and a nude lip.
 Song: FKA Twigs - Two Weeks`;
 }
