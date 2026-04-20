@@ -38,7 +38,7 @@ export async function loader({ request }) {
     mood: session.currentMood,
     feeling: session.desiredFeeling,
     occasion: session.occasion,
-    result: session.suggestions[0] ? {
+    result: session.specificNeeds || (session.suggestions[0] ? {
       outfitName: session.suggestions[0].outfitName,
       whyThisWorks: session.suggestions[0].whyThisWorks,
       confidenceBoost: session.suggestions[0].confidenceBoost,
@@ -57,5 +57,43 @@ export async function action({ request }) {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS });
   }
+
+  const { customer } = await authenticateCustomer(request);
+  if (!customer) {
+    return Response.json({ error: "Not authenticated" }, { status: 401, headers: CORS });
+  }
+
+  const body = await request.json();
+  const { mood, feeling, event, styleWords, bodyPref, mode, result } = body;
+
+  // Find the most recent styling session for this customer and store the result text
+  const session = await prisma.stylingSession.findFirst({
+    where: { customerId: customer.id },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (session) {
+    await prisma.stylingSession.update({
+      where: { id: session.id },
+      data: {
+        currentMood: mood || session.currentMood,
+        desiredFeeling: feeling || session.desiredFeeling,
+        occasion: event || session.occasion,
+        specificNeeds: result || null,
+      },
+    });
+  } else {
+    await prisma.stylingSession.create({
+      data: {
+        customerId: customer.id,
+        currentMood: mood || "",
+        desiredFeeling: feeling || "",
+        occasion: event || "",
+        specificNeeds: result || null,
+        styleFrom: "NAIA",
+      },
+    });
+  }
+
   return Response.json({ ok: true }, { headers: CORS });
 }
