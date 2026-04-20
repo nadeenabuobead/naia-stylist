@@ -24,12 +24,6 @@ export async function loader({ request }) {
     where: { customerId: customer.id },
     orderBy: { createdAt: "desc" },
     take: limit,
-    include: {
-      suggestions: {
-        take: 1,
-        include: { items: true }
-      }
-    }
   });
 
   const history = sessions.map(session => ({
@@ -37,17 +31,8 @@ export async function loader({ request }) {
     createdAt: session.createdAt,
     mood: session.currentMood,
     feeling: session.desiredFeeling,
-    occasion: session.occasion,
-    result: session.specificNeeds || (session.suggestions[0] ? {
-      outfitName: session.suggestions[0].outfitName,
-      whyThisWorks: session.suggestions[0].whyThisWorks,
-      confidenceBoost: session.suggestions[0].confidenceBoost,
-      perfumeRec: session.suggestions[0].perfumeRec,
-      hairstyleRec: session.suggestions[0].hairstyleRec,
-      makeupVibeRec: session.suggestions[0].makeupVibeRec,
-      songRec: session.suggestions[0].songRec,
-      items: session.suggestions[0].items
-    } : null
+    event: session.occasion,
+    result: session.specificNeeds || null,
   }));
 
   return Response.json({ history, authenticated: true }, { headers: CORS });
@@ -63,26 +48,10 @@ export async function action({ request }) {
     return Response.json({ error: "Not authenticated" }, { status: 401, headers: CORS });
   }
 
-  const body = await request.json();
-  const { mood, feeling, event, styleWords, bodyPref, mode, result } = body;
+  try {
+    const body = await request.json();
+    const { mood, feeling, event, result } = body;
 
-  // Find the most recent styling session for this customer and store the result text
-  const session = await prisma.stylingSession.findFirst({
-    where: { customerId: customer.id },
-    orderBy: { createdAt: "desc" },
-  });
-
-  if (session) {
-    await prisma.stylingSession.update({
-      where: { id: session.id },
-      data: {
-        currentMood: mood || session.currentMood,
-        desiredFeeling: feeling || session.desiredFeeling,
-        occasion: event || session.occasion,
-        specificNeeds: result || null,
-      },
-    });
-  } else {
     await prisma.stylingSession.create({
       data: {
         customerId: customer.id,
@@ -93,7 +62,10 @@ export async function action({ request }) {
         styleFrom: "NAIA",
       },
     });
-  }
 
-  return Response.json({ ok: true }, { headers: CORS });
+    return Response.json({ ok: true }, { headers: CORS });
+  } catch (err) {
+    console.error("History save error:", err);
+    return Response.json({ error: "Failed to save" }, { status: 500, headers: CORS });
+  }
 }
