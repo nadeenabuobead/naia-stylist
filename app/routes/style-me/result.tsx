@@ -47,9 +47,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const customerId = await getCustomerId(request);
   
   // Create the styling session
-  const stylingSession = await prisma.stylingSession.create({
+  let resolvedCustomerId = customerId;
+if (!resolvedCustomerId) {
+  const guestCustomer = await prisma.customer.upsert({
+    where: { shopifyCustomerId: "guest" },
+    create: { shopifyCustomerId: "guest", email: "guest@naia.app" },
+    update: {},
+  });
+  resolvedCustomerId = guestCustomer.id;
+}
+
+const stylingSession = await prisma.stylingSession.create({
     data: {
-      customerId: customerId || undefined,
+      customerId: resolvedCustomerId,
       currentMood: mood,
       desiredFeeling: feelings?.[0] || null,
       occasion,
