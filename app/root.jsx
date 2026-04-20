@@ -18,6 +18,18 @@ export default function App() {
         <Meta />
         <Links />
       </head>
+      <script dangerouslySetInnerHTML={{ __html: `
+  if (window.self !== window.top) {
+    // We're in an iframe - intercept all link clicks
+    document.addEventListener('click', function(e) {
+      var a = e.target.closest('a');
+      if (a && a.href && a.href.startsWith(window.location.origin)) {
+        e.preventDefault();
+        window.location.href = a.href;
+      }
+    });
+  }
+` }} />
       <body>
         <Outlet />
         <ScrollRestoration />
