@@ -1,6 +1,6 @@
 // app/routes/onboarding/complete.tsx
-import { Link, useLoaderData } from "@remix-run/react";
-import { json, redirect, type LoaderFunctionArgs } from "@remix-run/node";
+import { Link, useLoaderData, redirect } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { getSession, commitSession } from "~/lib/session.server";
 import { getCustomerId } from "~/lib/auth.server";
 import { prisma } from "~/lib/prisma.server";
