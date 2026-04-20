@@ -1,6 +1,6 @@
 // app/routes/style-me/result.tsx
-import { Link, useLoaderData, useFetcher } from "@remix-run/react";
-import { json, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "@remix-run/node";
+import { Link, useLoaderData, useFetcher } from "react-router";
+import { json, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
 import { useState, useEffect } from "react";
 import { getCustomerId } from "~/lib/auth.server";
 import { prisma } from "~/lib/prisma.server";

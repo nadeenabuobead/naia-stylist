@@ -1,6 +1,6 @@
 // app/routes/style-me/_index.tsx
-import { Link, useLoaderData } from "@remix-run/react";
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { Link, useLoaderData } from "react-router";
+import { json, type LoaderFunctionArgs } from "react-router";
 import { getCustomerId } from "~/lib/auth.server";
 import { prisma } from "~/lib/prisma.server";
 
