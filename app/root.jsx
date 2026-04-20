@@ -32,6 +32,16 @@ export default function App() {
 ` }} />
       <body>
         <Outlet />
+        <script dangerouslySetInnerHTML={{ __html: `
+  (function() {
+    var params = new URLSearchParams(window.location.search);
+    var token = params.get('naia_token');
+    if (token) {
+      sessionStorage.setItem('naia_token', token);
+      document.cookie = 'naia_customer_data=' + token + '; path=/; max-age=2592000; SameSite=Lax';
+    }
+  })();
+` }} />
         <ScrollRestoration />
         <Scripts />
       </body>
