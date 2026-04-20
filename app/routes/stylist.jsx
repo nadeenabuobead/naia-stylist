@@ -103,7 +103,16 @@ function getTokenFromUrl() {
 
 function getSavedToken() {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("naia_customer_token") || null;
+  
+  // Check localStorage first
+  const stored = localStorage.getItem("naia_customer_token");
+  if (stored) return stored;
+  
+  // Fall back to naia_customer_data cookie
+  const match = document.cookie.match(/naia_customer_data=([^;]+)/);
+  if (match) return match[1];
+  
+  return null;
 }
 
 function saveToken(token) {
