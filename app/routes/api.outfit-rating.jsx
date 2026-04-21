@@ -69,6 +69,7 @@ export async function action({ request }) {
   didntWorkTags: didntWorkTags ?? null,
   additionalNotes: additionalNotes || null,
 },
+},
       });
     }
     return Response.json({ rating: review }, { headers: CORS });
