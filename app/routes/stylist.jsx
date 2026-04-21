@@ -360,13 +360,13 @@ function ConfidenceDashboard({ customerToken }) {
       )}
 
       {/* Best style words */}
-      {dashboard.bestStyleWords.length > 0 && (
+      {dashboard.bestStyleWords?.length > 0 && (
         <div style={{ marginBottom: "20px" }}>
           <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "10px" }}>
             Styles that boost your confidence
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-            {dashboard.bestStyleWords.map(w => (
+            {dashboard.bestStyleWords?.map(w => (
               <div key={w.name} style={{ padding: "8px 14px", background: "#1a1816", color: "#f5f2ee", borderRadius: "2px", fontSize: "13px", letterSpacing: "0.1em" }}>
                 {w.name} <span style={{ opacity: 0.7 }}>({w.avg}/5)</span>
               </div>
