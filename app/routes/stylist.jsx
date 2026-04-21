@@ -589,15 +589,47 @@ function StyleResponseProfile({ customerToken }) {
       </div>
 
       {/* What consistently works */}
-      {uniquePositive.length > 0 && (
-        <div style={s.section}>
-          <div style={s.label}>What consistently works</div>
-          <div style={{ background: "#f5f2ee", padding: "16px", borderRadius: "2px", borderLeft: "2px solid #7da563" }}>
-            {uniquePositive.slice(0, 3).map((r, i) => {
-              let text = "";
-              const moodLower = (r.mood || "").toLowerCase();
-              const feelingLower = (r.feeling || "").toLowerCase();
-              const eventLower = (r.event || "").toLowerCase();
+{uniquePositive.length > 0 && (
+  <div style={s.section}>
+    <div style={s.label}>What consistently works</div>
+    <div style={{ background: "#f5f2ee", padding: "16px", borderRadius: "2px", borderLeft: "2px solid #7da563" }}>
+      {(() => {
+        // Group similar mood+feeling+event combos
+        const insights = [];
+        const magneticTravelMoods = [];
+        
+        for (const r of uniquePositive.slice(0, 3)) {
+          const moodLower = (r.mood || "").toLowerCase();
+          const feelingLower = (r.feeling || "").toLowerCase();
+          const eventLower = (r.event || "").toLowerCase();
+          
+          // Group "magnetic travel" with different starting moods
+          if (feelingLower === "magnetic" && eventLower === "travel") {
+            magneticTravelMoods.push(moodLower);
+          } else if (moodLower && feelingLower && eventLower) {
+            insights.push(`When you're ${moodLower}, ${eventLower} looks that feel ${feelingLower} tend to land well`);
+          } else if (feelingLower && eventLower) {
+            insights.push(`${feelingLower.charAt(0).toUpperCase() + feelingLower.slice(1)} ${eventLower} looks seem to work for you`);
+          }
+        }
+        
+        // Add combined magnetic travel insight at the start if it exists
+        if (magneticTravelMoods.length > 0) {
+          const moodsList = magneticTravelMoods.length > 1 
+            ? `${magneticTravelMoods.slice(0, -1).join(", ")} or ${magneticTravelMoods[magneticTravelMoods.length - 1]}`
+            : magneticTravelMoods[0];
+          insights.unshift(`Magnetic travel looks tend to work well when you're ${moodsList}`);
+        }
+        
+        return insights.slice(0, 3).map((text, i) => (
+          <p key={i} style={{ fontSize: "14px", lineHeight: 1.6, margin: i > 0 ? "12px 0 0" : "0", color: "#1a1816" }}>
+            • {text}
+          </p>
+        ));
+      })()}
+    </div>
+  </div>
+)}
               
               // Vary sentence structure
               if (i === 0 && moodLower && feelingLower && eventLower) {
