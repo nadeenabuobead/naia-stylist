@@ -2,11 +2,11 @@ export async function action({ request }) {
   try {
     const body = await request.json();
     const {
-      mode, outfit, mood = "", feeling = "", event = "",
-      styleWords = [], bodyPref = "",
-      closetItem = null, closetItems = [],
-      naiaPiece = null, closet = [],
-    } = body || {};
+  mode, outfit, mood = "", feeling = "", event = "",
+  styleWords = [], bodyPref = "", vibe = "", styleDNA = [],
+  closetItem = null, closetItems = [],
+  naiaPiece = null, closet = [],
+} = body || {};
 
     const safeMood = String(mood || "").trim();
     const safeFeeling = String(feeling || "").trim();
