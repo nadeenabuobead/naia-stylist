@@ -1,16 +1,24 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 
 const VIBES = [
-  "Understated", "Commanding", "Playful", "Mysterious", "Romantic", "Powerful", "Invisible", "Seen"
+  "Tired", "Anxious", "Calm", "Overwhelmed", "Confident",
+  "Excited", "Low", "Happy", "Irritated", "Flat / unmotivated"
+];
+
+const FEELINGS = [
+  "Calm", "Confident", "Effortless", "Elegant", "Powerful",
+  "Soft", "Bold", "Polished", "Magnetic", "Comfortable"
 ];
 
 const STYLE_DNA = [
-  "Old money", "Streetwear", "Avant-garde", "Minimalist", "Feminine", "Edgy", "Classic", "Artistic"
+  "Classic", "Minimal", "Feminine", "Edgy", "Relaxed",
+  "Polished", "Romantic", "Artistic", "Streetwear", "Statement", "Modern", "Refined"
 ];
 
 const BODY_PREFS = [
   "Highlight waist", "Elongate legs", "Balance shoulders",
-  "Minimize volume", "Maximize volume", "No preference"
+  "Skim the body", "Define shape", "Add structure",
+  "Minimize cling", "Create ease", "Maximize volume", "No preference"
 ];
 
 const TRYON_WORKER_URL = "https://virtual-tryon-api.naia-tryon.workers.dev";
@@ -809,36 +817,34 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
           <div style={s.stepIndicator}>{Array.from({ length: 9 }).map((_, i) => (<div key={i} style={s.dot(step === i + 1, step > i + 1)} />))}</div>
         )}
 
-        {/* ─── Step 1 ─── */}
-        {step === 1 && !showHistory && !showWishlist && !showAccount && !showConfidence && (
-          <div>
-            {customer && customer.lastMood && closet.length > 0 && (
-              <div style={{ marginBottom: "40px", padding: "28px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" }}>
-                <p style={{ fontSize: "14px", color: "#8a7f75", margin: "0 0 8px", letterSpacing: "0.15em", textTransform: "uppercase" }}>Welcome back, {customer.firstName || "love"}</p>
-                <p style={{ fontSize: "22px", fontStyle: "italic", margin: "0 0 20px" }}>Last time you were feeling {customer.lastMood} and wanted to feel {customer.lastFeeling}</p>
-                <button style={s.quickBtn} onClick={quickRestyle}>✦ Style me again</button>
-                <p style={{ fontSize: "12px", color: "#8a7f75", margin: "12px 0 0" }}>or start fresh below</p>
-              </div>
-            )}
-            <div style={s.title}>Step 1 of 7</div>
-            <p style={s.bigQ}>How are you feeling right now?</p>
-            <input style={s.input} placeholder="e.g. tired, anxious, excited..." value={mood} onChange={e => setMood(e.target.value)} autoFocus />
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "16px" }}>
-              {["Tired", "Anxious", "Excited", "Confident", "Overwhelmed", "Sad", "Energized", "Calm", "Stressed", "Happy"].map(m => (
-                 <button key={m} style={s.chip(mood === m.toLowerCase())} onClick={() => setMood(m.toLowerCase())}>{m}</button>
-              ))}
-          </div>
-            <div style={{ marginTop: "32px" }}><button style={s.btn} onClick={() => mood.trim() && setStep(2)}>Continue</button></div>
-          </div>
-        )}
-
+       {/* ─── Step 1 ─── */}
+{step === 1 && !showHistory && !showWishlist && !showAccount && !showConfidence && (
+  <div>
+    {customer && customer.lastMood && closet.length > 0 && (
+      <div style={{ marginBottom: "40px", padding: "28px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" }}>
+        <p style={{ fontSize: "14px", color: "#8a7f75", margin: "0 0 8px", letterSpacing: "0.15em", textTransform: "uppercase" }}>Welcome back, {customer.firstName || "love"}</p>
+        <p style={{ fontSize: "22px", fontStyle: "italic", margin: "0 0 20px" }}>Last time you were feeling {customer.lastMood} and wanted to feel {customer.lastFeeling}</p>
+        <button style={s.quickBtn} onClick={quickRestyle}>✦ Style me again</button>
+        <p style={{ fontSize: "12px", color: "#8a7f75", margin: "12px 0 0" }}>or start fresh below</p>
+      </div>
+    )}
+    <div style={s.title}>Step 1 of 8</div>
+    <p style={s.bigQ}>How are you feeling right now?</p>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "16px" }}>
+      {VIBES.map(m => (
+        <button key={m} style={s.chip(mood === m.toLowerCase())} onClick={() => setMood(m.toLowerCase())}>{m}</button>
+      ))}
+    </div>
+    <div style={{ marginTop: "32px" }}><button style={s.btn} onClick={() => mood.trim() && setStep(2)}>Continue</button></div>
+  </div>
+)}
         {step === 2 && (
   <div>
     <div style={s.title}>Step 2 of 7</div>
     <p style={s.bigQ}>How do you want to feel?</p>
     <input style={s.input} placeholder="e.g. powerful, calm, confident..." value={feeling} onChange={e => setFeeling(e.target.value)} autoFocus />
     <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "16px" }}>
-      {["Powerful", "Calm", "Seen", "Soft", "Bold", "Elegant", "Effortless", "Playful", "Mysterious", "Confident"].map(f => (
+      {FEELINGS.map(f => (
         <button key={f} style={s.chip(feeling === f.toLowerCase())} onClick={() => setFeeling(f.toLowerCase())}>{f}</button>
       ))}
     </div>
@@ -854,7 +860,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
     <div style={s.title}>Step 3 of 7</div>
     <p style={s.bigQ}>What are you dressing for?</p>
     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-      {["Casual", "Dinner", "Party", "Formal", "Work", "Date", "Travel", "Brunch", "Wedding Guest", "Night Out"].map(e => (
+      {["Casual", "Dinner", "Date", "Work", "Brunch", "Party", "Night out", "Wedding guest", "Travel", "Weekend", "Errands", "Event"].map(e => (
         <button key={e} style={s.chip(event === e.toLowerCase())} onClick={() => setEvent(e.toLowerCase())}>{e}</button>
       ))}
     </div>
