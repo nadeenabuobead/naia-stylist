@@ -503,10 +503,10 @@ function StyleResponseProfile({ customerToken }) {
     cardLabel: { fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", margin: 0 },
   };
 
-  // Calculate scores
+  // Calculate scores - use text until enough data
   const hasEnoughData = profile.totalRatings >= 5;
-  const styleAlignment = hasEnoughData ? `${Math.round(profile.feltLikeMePercent || 0)}%` : "emerging";
-  const wearability = hasEnoughData ? `${Math.round(profile.wouldWearAgainPercent || 0)}%` : "building";
+  const styleAlignment = hasEnoughData ? `${Math.round(profile.feltLikeMePercent || 0)}%` : "taking shape";
+  const wearability = hasEnoughData ? `${Math.round(profile.wouldWearAgainPercent || 0)}%` : "emerging";
 
   // Get unique positive reviews
   const positiveReviews = profile.recentRatings?.filter(r => 
@@ -520,6 +520,19 @@ function StyleResponseProfile({ customerToken }) {
     if (!seen.has(key)) {
       seen.add(key);
       uniquePositive.push(r);
+    }
+  }
+
+  // Get unique emotional shifts (mood → feeling pairs)
+  const emotionalShifts = [];
+  const shiftsSeen = new Set();
+  for (const r of profile.recentRatings || []) {
+    if (r.mood && r.feeling) {
+      const shift = `${r.mood} → ${r.feeling}`;
+      if (!shiftsSeen.has(shift)) {
+        shiftsSeen.add(shift);
+        emotionalShifts.push(shift);
+      }
     }
   }
 
@@ -546,11 +559,11 @@ function StyleResponseProfile({ customerToken }) {
           <p style={s.cardLabel}>Looks rated</p>
         </div>
         <div style={s.card}>
-          <p style={s.cardNum}>{styleAlignment}</p>
+          <p style={{ ...s.cardNum, fontSize: hasEnoughData ? "26px" : "18px" }}>{styleAlignment}</p>
           <p style={s.cardLabel}>Style alignment</p>
         </div>
         <div style={s.card}>
-          <p style={s.cardNum}>{wearability}</p>
+          <p style={{ ...s.cardNum, fontSize: hasEnoughData ? "26px" : "18px" }}>{wearability}</p>
           <p style={s.cardLabel}>Would wear again</p>
         </div>
       </div>
@@ -563,9 +576,9 @@ function StyleResponseProfile({ customerToken }) {
             {uniquePositive.slice(0, 3).map((r, i) => {
               let text = "";
               if (r.mood && r.feeling && r.event) {
-                text = `When you're feeling ${r.mood}, ${r.event} looks that help you feel ${r.feeling} tend to work well`;
+                text = `When you're feeling ${r.mood}, ${r.feeling} ${r.event} looks tend to work well`;
               } else if (r.mood && r.feeling) {
-                text = `${r.mood} → ${r.feeling} looks seem to land well`;
+                text = `${r.feeling.charAt(0).toUpperCase() + r.feeling.slice(1)} looks when you're feeling ${r.mood}`;
               } else if (r.event) {
                 text = `${r.event.charAt(0).toUpperCase() + r.event.slice(1)} looks tend to work for you`;
               } else {
@@ -582,26 +595,22 @@ function StyleResponseProfile({ customerToken }) {
       )}
 
       {/* Best emotional shifts */}
-      {profile.bestMoods?.length > 0 && (
+      {emotionalShifts.length > 0 && (
         <div style={s.section}>
           <div style={s.label}>Best emotional shifts</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-            {profile.bestMoods.slice(0, 5).map(m => {
-              // m.name might be just "lonely" or "lonely → seen"
-              const shift = m.name.includes('→') ? m.name : m.name;
-              return (
-                <div key={m.name} style={{ 
-                  padding: "10px 16px", 
-                  background: "#1a1816", 
-                  color: "#f5f2ee", 
-                  borderRadius: "2px", 
-                  fontSize: "14px", 
-                  fontStyle: "italic" 
-                }}>
-                  {shift}
-                </div>
-              );
-            })}
+            {emotionalShifts.slice(0, 5).map(shift => (
+              <div key={shift} style={{ 
+                padding: "10px 16px", 
+                background: "#1a1816", 
+                color: "#f5f2ee", 
+                borderRadius: "2px", 
+                fontSize: "14px", 
+                fontStyle: "italic" 
+              }}>
+                {shift}
+              </div>
+            ))}
           </div>
         </div>
       )}
