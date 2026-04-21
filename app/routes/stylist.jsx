@@ -476,7 +476,7 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
 }
 
 
-// ─── Confidence Dashboard Component ───
+// ─── Style Response Profile Component ───
 function StyleResponseProfile({ customerToken }) {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -504,22 +504,41 @@ function StyleResponseProfile({ customerToken }) {
   };
 
   // Calculate scores
-  const styleAlignment = Math.round((profile.feltLikeMePercent || 0));
-  const emotionalMatch = profile.feltMoodShiftPercent || 0;
-  const wearability = profile.wouldWearAgainPercent || 0;
-  const comfortMatch = profile.physicallyComfortablePercent || 0;
+  const hasEnoughData = profile.totalRatings >= 5;
+  const styleAlignment = hasEnoughData ? `${Math.round(profile.feltLikeMePercent || 0)}%` : "emerging";
+  const wearability = hasEnoughData ? `${Math.round(profile.wouldWearAgainPercent || 0)}%` : "building";
 
-  // Pattern analysis
+  // Get unique positive reviews
   const positiveReviews = profile.recentRatings?.filter(r => 
     r.wouldWearAgain === "Definitely" || r.feltLikeMe === "Yes"
   ) || [];
   
-  const negativeReviews = profile.recentRatings?.filter(r => 
-    r.wouldWearAgain === "Probably not" || r.feltLikeMe === "No"
-  ) || [];
+  const uniquePositive = [];
+  const seen = new Set();
+  for (const r of positiveReviews) {
+    const key = `${r.mood}-${r.feeling}-${r.event}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniquePositive.push(r);
+    }
+  }
+
+  // Generate interpretation
+  const getInterpretation = () => {
+    if (profile.totalRatings < 3) return "Just getting started — keep rating looks to see patterns emerge.";
+    if (positiveReviews.length > profile.totalRatings * 0.6) {
+      return "You respond best to looks that feel polished, intentional, and emotionally clear.";
+    }
+    return "You're building a clearer sense of what works for you.";
+  };
 
   return (
     <div>
+      {/* Interpretation */}
+      <p style={{ fontSize: "15px", fontStyle: "italic", color: "#4a4540", marginBottom: "28px", lineHeight: 1.6 }}>
+        {getInterpretation()}
+      </p>
+
       {/* Top cards */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginBottom: "32px" }}>
         <div style={s.card}>
@@ -527,39 +546,37 @@ function StyleResponseProfile({ customerToken }) {
           <p style={s.cardLabel}>Looks rated</p>
         </div>
         <div style={s.card}>
-          <p style={s.cardNum}>{styleAlignment}%</p>
+          <p style={s.cardNum}>{styleAlignment}</p>
           <p style={s.cardLabel}>Style alignment</p>
         </div>
         <div style={s.card}>
-          <p style={s.cardNum}>{wearability}%</p>
+          <p style={s.cardNum}>{wearability}</p>
           <p style={s.cardLabel}>Would wear again</p>
         </div>
       </div>
 
       {/* What consistently works */}
-      {positiveReviews.length > 0 && (
+      {uniquePositive.length > 0 && (
         <div style={s.section}>
           <div style={s.label}>What consistently works</div>
           <div style={{ background: "#f5f2ee", padding: "16px", borderRadius: "2px", borderLeft: "2px solid #7da563" }}>
-            {positiveReviews.slice(0, 3).map((r, i) => (
-              <p key={i} style={{ fontSize: "14px", lineHeight: 1.6, margin: i > 0 ? "12px 0 0" : "0", color: "#1a1816" }}>
-                • {r.mood && r.feeling ? `${r.mood} → ${r.feeling} looks` : 'These looks'} {r.event && `for ${r.event}`} tend to land well
-              </p>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* What tends to miss */}
-      {negativeReviews.length > 0 && (
-        <div style={s.section}>
-          <div style={s.label}>What tends to miss</div>
-          <div style={{ background: "#f5f2ee", padding: "16px", borderRadius: "2px", borderLeft: "2px solid #c5553a" }}>
-            {negativeReviews.slice(0, 3).map((r, i) => (
-              <p key={i} style={{ fontSize: "14px", lineHeight: 1.6, margin: i > 0 ? "12px 0 0" : "0", color: "#1a1816" }}>
-                • {r.mood && r.feeling ? `${r.mood} → ${r.feeling}` : 'Looks'} {r.event && `for ${r.event}`} may not feel quite right
-              </p>
-            ))}
+            {uniquePositive.slice(0, 3).map((r, i) => {
+              let text = "";
+              if (r.mood && r.feeling && r.event) {
+                text = `When you're feeling ${r.mood}, ${r.event} looks that help you feel ${r.feeling} tend to work well`;
+              } else if (r.mood && r.feeling) {
+                text = `${r.mood} → ${r.feeling} looks seem to land well`;
+              } else if (r.event) {
+                text = `${r.event.charAt(0).toUpperCase() + r.event.slice(1)} looks tend to work for you`;
+              } else {
+                text = "These looks felt right";
+              }
+              return (
+                <p key={i} style={{ fontSize: "14px", lineHeight: 1.6, margin: i > 0 ? "12px 0 0" : "0", color: "#1a1816" }}>
+                  • {text}
+                </p>
+              );
+            })}
           </div>
         </div>
       )}
@@ -569,18 +586,22 @@ function StyleResponseProfile({ customerToken }) {
         <div style={s.section}>
           <div style={s.label}>Best emotional shifts</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-            {profile.bestMoods.slice(0, 5).map(m => (
-              <div key={m.name} style={{ 
-                padding: "10px 16px", 
-                background: "#1a1816", 
-                color: "#f5f2ee", 
-                borderRadius: "2px", 
-                fontSize: "14px", 
-                fontStyle: "italic" 
-              }}>
-                {m.name}
-              </div>
-            ))}
+            {profile.bestMoods.slice(0, 5).map(m => {
+              // m.name might be just "lonely" or "lonely → seen"
+              const shift = m.name.includes('→') ? m.name : m.name;
+              return (
+                <div key={m.name} style={{ 
+                  padding: "10px 16px", 
+                  background: "#1a1816", 
+                  color: "#f5f2ee", 
+                  borderRadius: "2px", 
+                  fontSize: "14px", 
+                  fontStyle: "italic" 
+                }}>
+                  {shift}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -590,13 +611,14 @@ function StyleResponseProfile({ customerToken }) {
         <div style={s.section}>
           <div style={s.label}>Where your style lands best</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-            {profile.bestEvents.map(e => (
+            {profile.bestEvents.map((e, idx) => (
               <div key={e.name} style={{ 
                 padding: "10px 16px", 
-                background: "#eee9e2", 
+                background: idx === 0 ? "#1a1816" : "#eee9e2",
+                color: idx === 0 ? "#f5f2ee" : "#1a1816",
                 borderRadius: "2px", 
                 fontSize: "14px",
-                fontWeight: 500
+                fontWeight: idx === 0 ? 500 : 400
               }}>
                 {e.name}
               </div>
@@ -610,11 +632,11 @@ function StyleResponseProfile({ customerToken }) {
         <div style={s.section}>
           <div style={s.label}>What stood out to you</div>
           {profile.recentRatings
-            .filter(r => r.notes)
+            .filter(r => r.notes && r.notes.trim())
             .slice(0, 3)
             .map((r, i) => (
               <div key={i} style={{ padding: "12px 16px", borderLeft: "1px solid #d4cfc9", marginBottom: "10px" }}>
-                <p style={{ fontSize: "14px", fontStyle: "italic", color: "#4a4540", margin: "0 0 4px" }}>
+                <p style={{ fontSize: "14px", fontStyle: "italic", color: "#4a4540", margin: 0 }}>
                   "{r.notes}"
                 </p>
               </div>
