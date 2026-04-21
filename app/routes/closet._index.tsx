@@ -85,9 +85,7 @@ function WardrobeInsights({ items }: { items: any[] }) {
     if (items.length < 3) return;
     setLoadingAI(true);
     const token = sessionStorage.getItem("naia_token") || "";
-fetch("/api/wardrobe-insights", {
-  headers: token ? { "Authorization": `Bearer ${token}` } : {},
-})
+fetch(`/api/wardrobe-insights?naia_token=${encodeURIComponent(token)}`)
       .then(r => r.json())
       .then(d => { if (d.insights) setAiInsights(d.insights); })
       .catch(() => {})
