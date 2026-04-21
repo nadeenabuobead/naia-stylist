@@ -195,14 +195,14 @@ fetch(`/api/wardrobe-insights?naia_token=${encodeURIComponent(token)}`)
       )}
 
       {/* Static insights */}
-      {topOccasions.length > 0 && (
+      {!loadingAI && topOccasions.length > 0 && (
         <div style={s.section}>
           <div style={s.label}>You Dress Most For</div>
           <div>{topOccasions.map(([occ, count]) => <span key={occ} style={s.tag("#1a1816", "#f5f2ee")}>{occ} ({count})</span>)}</div>
         </div>
       )}
 
-      {topCategory && (
+      {!loadingAI && topCategory && (
         <div style={s.section}>
           <div style={s.label}>Your Go-To Category</div>
           <div style={{ fontSize: "14px", fontStyle: "italic", color: "#1a1816" }}>
