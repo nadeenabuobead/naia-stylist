@@ -32,80 +32,80 @@ export async function loader({ request }) {
       authenticated: true,
       dashboard: {
         totalRatings: 0,
-        averageConfidence: 0,
         feltLikeMePercent: 0,
         wouldWearAgainPercent: 0,
         bestMoods: [],
         bestEvents: [],
         recentRatings: [],
-        confidenceOverTime: [],
       },
     }, { headers: CORS });
   }
 
   const totalRatings = ratings.length;
-  const avgConfidence = ratings.reduce((sum, r) => sum + (r.overallFeeling || 0), 0) / totalRatings;
-  const feltLikeMeCount = ratings.filter(r => r.feltLikeHer === true).length;
-  const wouldWearAgainCount = ratings.filter(r => r.wouldWearAgain === true).length;
 
-  const moodMap = {};
+  // Calculate percentages using new string values
+  const feltLikeMeCount = ratings.filter(r => r.feltLikeHer === "Yes").length;
+  const wouldWearAgainCount = ratings.filter(r => r.wouldWearAgain === "Definitely").length;
+
+  const feltLikeMePercent = Math.round((feltLikeMeCount / totalRatings) * 100);
+  const wouldWearAgainPercent = Math.round((wouldWearAgainCount / totalRatings) * 100);
+
+  // Aggregate by mood → feeling pairs for emotional shifts
+  const shiftMap = {};
   const eventMap = {};
 
   for (const r of ratings) {
     const mood = r.session?.currentMood;
+    const feeling = r.session?.desiredFeeling;
     const event = r.session?.occasion;
+    const score = r.overallFeeling || 0;
 
-    if (mood) {
-      if (!moodMap[mood]) moodMap[mood] = { total: 0, count: 0 };
-      moodMap[mood].total += r.overallFeeling || 0;
-      moodMap[mood].count += 1;
+    // Track emotional shifts (mood → feeling)
+    if (mood && feeling) {
+      const shift = `${mood} → ${feeling}`;
+      if (!shiftMap[shift]) shiftMap[shift] = { total: 0, count: 0 };
+      shiftMap[shift].total += score;
+      shiftMap[shift].count += 1;
     }
 
+    // Track events
     if (event) {
       if (!eventMap[event]) eventMap[event] = { total: 0, count: 0 };
-      eventMap[event].total += r.overallFeeling || 0;
+      eventMap[event].total += score;
       eventMap[event].count += 1;
     }
   }
 
+  // Sort by average score
   const sortByAvg = (map) =>
     Object.entries(map)
       .map(([key, val]) => ({ name: key, avg: Math.round((val.total / val.count) * 10) / 10, count: val.count }))
       .sort((a, b) => b.avg - a.avg)
       .slice(0, 5);
 
-  const confidenceOverTime = ratings
-    .slice(0, 20)
-    .reverse()
-    .map(r => ({
-      date: r.createdAt,
-      confidence: r.overallFeeling,
-      event: r.session?.occasion || "",
-    }));
+  const bestMoods = sortByAvg(shiftMap);
+  const bestEvents = sortByAvg(eventMap);
 
-  const recentRatings = ratings.slice(0, 10).map(r => ({
-    id: r.id,
-    confidence: r.overallFeeling,
+  // Recent ratings with notes
+  const recentRatings = ratings.slice(0, 20).map(r => ({
+    mood: r.session?.currentMood || "",
+    feeling: r.session?.desiredFeeling || "",
+    event: r.session?.occasion || "",
     feltLikeMe: r.feltLikeHer,
     wouldWearAgain: r.wouldWearAgain,
-    notes: r.additionalNotes,
-    mood: r.session?.currentMood,
-    feeling: r.session?.desiredFeeling,
-    event: r.session?.occasion,
-    createdAt: r.createdAt,
+    notes: r.additionalNotes || "",
+    overallFeeling: r.overallFeeling,
   }));
 
   return Response.json({
     authenticated: true,
     dashboard: {
       totalRatings,
-      averageConfidence: Math.round(avgConfidence * 10) / 10,
-      feltLikeMePercent: Math.round((feltLikeMeCount / totalRatings) * 100),
-      wouldWearAgainPercent: Math.round((wouldWearAgainCount / totalRatings) * 100),
-      bestMoods: sortByAvg(moodMap),
-      bestEvents: sortByAvg(eventMap),
+      feltLikeMePercent,
+      wouldWearAgainPercent,
+      bestMoods,
+      bestEvents,
       recentRatings,
-      confidenceOverTime,
     },
   }, { headers: CORS });
 }
