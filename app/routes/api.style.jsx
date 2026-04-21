@@ -28,7 +28,7 @@ export async function action({ request }) {
     const stylistPrompt = buildStylistPrompt({
       mode, outfit: finalOutfit, mood: safeMood, feeling: safeFeeling,
       event: safeEvent, styleWords, bodyPref, closetItem, closetItems,
-      naiaPiece, closet,
+      naiaPiece, closet, vibe, styleDNA,
     });
 
     const openAiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -158,7 +158,7 @@ return Response.json({ result });
   }
 }
 
-function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bodyPref, closetItem, closetItems, naiaPiece, closet, styleIntelligence, previousPieces }) {
+function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bodyPref, closetItem, closetItems, naiaPiece, closet, styleIntelligence, previousPieces, vibe, styleDNA }) {
   const closetList = Array.isArray(closet) && closet.length > 0
     ? closet.map(i => `- ${i.name} (${i.category}) [customer closet]`).join("\n")
     : "No closet items.";
@@ -346,6 +346,8 @@ CUSTOMER:
 - Wants to feel: ${feeling}
 - Event: ${event} — ${eventNote}
 - Style personality: ${styleNote}
+- Today's vibe: ${vibe || "not specified"}
+- Style DNA: ${styleDNA || "not specified"}
 - Body preference: ${bodyPref || "none"}
 - Mode: ${mode}
 ${styleIntelligence?.totalReviews > 0 ? `
