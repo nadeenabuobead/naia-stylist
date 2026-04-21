@@ -76,7 +76,25 @@ export async function action({ request }: ActionFunctionArgs) {
     return data({ error: err?.message }, { status: 500 });
   }
 }
-
+function AnimatedLoader() {
+  const [dots, setDots] = useState(".");
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDots(d => d.length >= 3 ? "." : d + ".");
+    }, 400);
+    return () => clearInterval(interval);
+  }, []);
+  return (
+    <div style={{ padding: "20px 0", textAlign: "center" }}>
+      <p style={{ fontSize: "14px", color: "#8a7f75", fontStyle: "italic", margin: 0 }}>
+        Analysing your wardrobe{dots}
+      </p>
+      <p style={{ fontSize: "12px", color: "#c4b5b5", margin: "6px 0 0" }}>
+        nAia is reading your style
+      </p>
+    </div>
+  );
+}
 function WardrobeInsights({ items }: { items: any[] }) {
   const [aiInsights, setAiInsights] = useState<any>(null);
   const [loadingAI, setLoadingAI] = useState(false);
@@ -115,7 +133,7 @@ fetch(`/api/wardrobe-insights?naia_token=${encodeURIComponent(token)}`)
     <div style={{ padding: "20px", background: "#faf9f7", borderRadius: "4px", marginBottom: "24px", border: "1px solid #e8e4df" }}>
       <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase" as const, color: "#8a7f75", marginBottom: "20px" }}>Wardrobe Insights</div>
 
-      {loadingAI && <p style={{ fontSize: "13px", color: "#8a7f75", fontStyle: "italic" }}>Analysing your wardrobe...</p>}
+      {loadingAI && <AnimatedLoader />}
 
       {aiInsights && (
         <>
