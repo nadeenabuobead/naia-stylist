@@ -1,11 +1,18 @@
 // app/routes/closet._index.tsx
 import { useLoaderData, useFetcher, useSearchParams } from "react-router";
 import { data, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { getCustomerId } from "~/lib/auth.server";
 import { prisma } from "~/lib/prisma.server";
 
+const CLOUDINARY_CLOUD = "diybves1z";
+const CLOUDINARY_PRESET = "kqfhwrpq";
+
 const CATEGORIES = ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS", "ACCESSORIES", "JEWELRY", "OTHER"];
+const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver", "Multicolor"];
+const OCCASIONS = ["Casual", "Work", "Dinner", "Party", "Formal", "Date", "Weekend", "Travel"];
+const SEASONS = ["Spring", "Summer", "Fall", "Winter", "All Season"];
+const PATTERNS = ["Solid", "Stripes", "Floral", "Plaid", "Animal Print", "Geometric", "Abstract", "Other"];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -28,26 +35,153 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!customerId) return data({ error: "Not authenticated" }, { status: 401 });
     const formData = await request.formData();
     const intent = formData.get("intent") as string;
+
     if (intent === "add") {
       const name = formData.get("name") as string;
       const category = formData.get("category") as string;
       const imageUrl = formData.get("imageUrl") as string;
+      const primaryColor = formData.get("primaryColor") as string;
+      const pattern = formData.get("pattern") as string;
+      const brand = formData.get("brand") as string;
+      const occasions = JSON.parse(formData.get("occasions") as string || "[]");
+      const seasons = JSON.parse(formData.get("seasons") as string || "[]");
+
       if (!name || !category) return data({ error: "Name and category required" }, { status: 400 });
+
       const item = await prisma.closetItem.create({
-        data: { customerId, name, category: category as any, imageUrl: imageUrl || "" },
+        data: {
+          customerId,
+          name,
+          category: category as any,
+          imageUrl: imageUrl || "",
+          primaryColor: primaryColor || null,
+          pattern: pattern || null,
+          brand: brand || null,
+          occasions: occasions,
+          seasons: seasons,
+        },
       });
       return data({ item, success: true });
     }
+
     if (intent === "delete") {
       const itemId = formData.get("itemId") as string;
       await prisma.closetItem.delete({ where: { id: itemId, customerId } });
       return data({ success: true });
     }
+
     return data({ error: "Invalid intent" }, { status: 400 });
   } catch (err: any) {
     console.error("Closet action error:", err);
     return data({ error: err?.message }, { status: 500 });
   }
+}
+
+function WardrobeInsights({ items }: { items: any[] }) {
+  if (items.length < 3) return null;
+
+  // Category breakdown
+  const catCount: Record<string, number> = {};
+  const colorCount: Record<string, number> = {};
+  const occasionCount: Record<string, number> = {};
+
+  for (const item of items) {
+    const cat = item.category || "OTHER";
+    catCount[cat] = (catCount[cat] || 0) + 1;
+    if (item.primaryColor) colorCount[item.primaryColor] = (colorCount[item.primaryColor] || 0) + 1;
+    if (item.occasions?.length) {
+      for (const occ of item.occasions) {
+        occasionCount[occ] = (occasionCount[occ] || 0) + 1;
+      }
+    }
+  }
+
+  const topColors = Object.entries(colorCount).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const topOccasions = Object.entries(occasionCount).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const topCategory = Object.entries(catCount).sort((a, b) => b[1] - a[1])[0];
+
+  // What's missing
+  const missing = [];
+  if (!catCount["OUTERWEAR"]) missing.push("Outerwear");
+  if (!catCount["DRESSES"]) missing.push("Dresses");
+  if (!catCount["SHOES"]) missing.push("Shoes");
+  if (!catCount["BAGS"]) missing.push("Bags");
+  if (!catCount["ACCESSORIES"]) missing.push("Accessories");
+
+  // Style personality
+  const formalOccs = (occasionCount["Work"] || 0) + (occasionCount["Formal"] || 0) + (occasionCount["Dinner"] || 0);
+  const casualOccs = (occasionCount["Casual"] || 0) + (occasionCount["Weekend"] || 0);
+  const partyOccs = (occasionCount["Party"] || 0) + (occasionCount["Date"] || 0);
+
+  let personality = "Versatile";
+  if (formalOccs > casualOccs && formalOccs > partyOccs) personality = "Polished & Professional";
+  else if (casualOccs > formalOccs && casualOccs > partyOccs) personality = "Effortlessly Casual";
+  else if (partyOccs > formalOccs && partyOccs > casualOccs) personality = "Bold & Social";
+
+  const s = {
+    section: { marginBottom: "20px" },
+    label: { fontSize: "11px", letterSpacing: "0.18em", textTransform: "uppercase" as const, color: "#8a7f75", marginBottom: "10px" },
+    tag: (bg: string, color: string) => ({ display: "inline-block", padding: "6px 12px", background: bg, color, borderRadius: "2px", fontSize: "13px", marginRight: "8px", marginBottom: "8px" }),
+  };
+
+  return (
+    <div style={{ padding: "20px", background: "#faf9f7", borderRadius: "4px", marginBottom: "24px" }}>
+      <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase" as const, color: "#8a7f75", marginBottom: "20px" }}>Wardrobe Insights</div>
+
+      {/* Style personality */}
+      <div style={s.section}>
+        <div style={s.label}>Your Style Personality</div>
+        <div style={{ fontSize: "20px", fontStyle: "italic", color: "#1a1816" }}>{personality}</div>
+        <div style={{ fontSize: "13px", color: "#8a7f75", marginTop: "4px" }}>{items.length} pieces in your wardrobe</div>
+      </div>
+
+      {/* Top colors */}
+      {topColors.length > 0 && (
+        <div style={s.section}>
+          <div style={s.label}>Your Color Story</div>
+          <div>
+            {topColors.map(([color, count]) => (
+              <span key={color} style={s.tag("#eee9e2", "#1a1816")}>{color} ({count})</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Top occasions */}
+      {topOccasions.length > 0 && (
+        <div style={s.section}>
+          <div style={s.label}>You Dress Most For</div>
+          <div>
+            {topOccasions.map(([occ, count]) => (
+              <span key={occ} style={s.tag("#1a1816", "#f5f2ee")}>{occ} ({count})</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* What's missing */}
+      {missing.length > 0 && (
+        <div style={s.section}>
+          <div style={s.label}>Missing From Your Wardrobe</div>
+          <div>
+            {missing.map(m => (
+              <span key={m} style={s.tag("#f5f2ee", "#c5553a")}>{m}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* What she repeats */}
+      {topCategory && (
+        <div style={s.section}>
+          <div style={s.label}>Your Go-To Category</div>
+          <div style={{ fontSize: "14px", fontStyle: "italic", color: "#1a1816" }}>
+            {topCategory[0].charAt(0) + topCategory[0].slice(1).toLowerCase()} — {topCategory[1]} pieces
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function ClosetPage() {
@@ -56,9 +190,18 @@ export default function ClosetPage() {
   const fetcher = useFetcher();
   const [activeCategory, setActiveCategory] = useState("ALL");
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showInsights, setShowInsights] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  // Form state
   const [newName, setNewName] = useState("");
   const [newCategory, setNewCategory] = useState("TOPS");
   const [newImageUrl, setNewImageUrl] = useState("");
+  const [newColor, setNewColor] = useState("");
+  const [newPattern, setNewPattern] = useState("");
+  const [newBrand, setNewBrand] = useState("");
+  const [newOccasions, setNewOccasions] = useState<string[]>([]);
+  const [newSeasons, setNewSeasons] = useState<string[]>([]);
 
   useEffect(() => {
     const urlToken = searchParams.get("naia_token");
@@ -67,98 +210,234 @@ export default function ClosetPage() {
 
   const filtered = activeCategory === "ALL" ? items : items.filter((i: any) => i.category === activeCategory);
 
+  const uploadToCloudinary = async (file: File) => {
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("upload_preset", CLOUDINARY_PRESET);
+      const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      setNewImageUrl(data.secure_url);
+    } catch (err) {
+      console.error("Upload failed:", err);
+    }
+    setUploading(false);
+  };
+
+  const toggleOccasion = (occ: string) => {
+    setNewOccasions(prev => prev.includes(occ) ? prev.filter(o => o !== occ) : [...prev, occ]);
+  };
+
+  const toggleSeason = (s: string) => {
+    setNewSeasons(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]);
+  };
+
   const handleAdd = () => {
     if (!newName) return;
     fetcher.submit(
-      { intent: "add", name: newName, category: newCategory, imageUrl: newImageUrl },
+      {
+        intent: "add",
+        name: newName,
+        category: newCategory,
+        imageUrl: newImageUrl,
+        primaryColor: newColor,
+        pattern: newPattern,
+        brand: newBrand,
+        occasions: JSON.stringify(newOccasions),
+        seasons: JSON.stringify(newSeasons),
+      },
       { method: "post" }
     );
-    setNewName("");
-    setNewImageUrl("");
+    setNewName(""); setNewImageUrl(""); setNewColor(""); setNewPattern("");
+    setNewBrand(""); setNewOccasions([]); setNewSeasons([]);
     setShowAddForm(false);
   };
 
+  const btnStyle = (active: boolean) => ({
+    padding: "6px 14px",
+    borderRadius: "2px",
+    fontSize: "12px",
+    fontWeight: 500,
+    border: "none",
+    cursor: "pointer",
+    background: active ? "#1a1816" : "#eee9e2",
+    color: active ? "white" : "#8a7f75",
+    fontFamily: '"Cormorant Garamond", Georgia, serif',
+  });
+
   if (!authenticated) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>
         <div style={{ textAlign: "center", maxWidth: "24rem" }}>
           <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>👗</div>
           <h1 style={{ fontSize: "1.5rem", fontWeight: 600, marginBottom: "0.5rem" }}>My Closet</h1>
-          <p style={{ color: "#888", marginBottom: "1.5rem" }}>Log in to your account on naiabynadine.com to access your closet.</p>
-          <a href="https://naiabynadine.com/account/login" style={{ padding: "0.75rem 1.5rem", background: "#c4a0a0", color: "white", borderRadius: "9999px", textDecoration: "none", fontWeight: 500 }}>Log In</a>
+          <p style={{ color: "#8a7f75", marginBottom: "1.5rem" }}>Log in to your account on naiabynadine.com to access your closet.</p>
+          <a href="https://naiabynadine.com/account/login" style={{ padding: "0.75rem 1.5rem", background: "#1a1816", color: "white", borderRadius: "2px", textDecoration: "none", fontWeight: 500 }}>Log In</a>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#faf9f7" }}>
-      <header style={{ padding: "1rem", background: "white", position: "sticky", top: 0, zIndex: 10 }}>
-        <div style={{ maxWidth: "32rem", margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <a href="https://naia-stylist.vercel.app/stylist" style={{ color: "#888", textDecoration: "none", fontSize: "0.875rem" }}>← Back</a>
-          <h1 style={{ fontSize: "1.125rem", fontWeight: 500 }}>My Closet</h1>
-          <button onClick={() => setShowAddForm(!showAddForm)} style={{ fontSize: "0.875rem", fontWeight: 500, color: "#c4a0a0", background: "none", border: "none", cursor: "pointer" }}>+ Add</button>
+    <div style={{ minHeight: "100vh", background: "#faf9f7", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>
+      <header style={{ padding: "1rem 1.5rem", background: "white", borderBottom: "1px solid #e8e4df", position: "sticky", top: 0, zIndex: 10 }}>
+        <div style={{ maxWidth: "36rem", margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <a href="https://naia-stylist.vercel.app/stylist" style={{ color: "#8a7f75", textDecoration: "none", fontSize: "13px", letterSpacing: "0.1em" }}>← Back</a>
+          <div style={{ fontSize: "13px", letterSpacing: "0.2em", textTransform: "uppercase" }}>My Closet</div>
+          <button onClick={() => setShowAddForm(!showAddForm)} style={{ fontSize: "13px", color: "#1a1816", background: "none", border: "none", cursor: "pointer", letterSpacing: "0.1em" }}>+ Add</button>
         </div>
       </header>
 
-      <main style={{ padding: "1rem", maxWidth: "32rem", margin: "0 auto" }}>
+      <main style={{ padding: "1.5rem", maxWidth: "36rem", margin: "0 auto" }}>
+
+        {/* Add Form */}
         {showAddForm && (
-          <div style={{ background: "white", borderRadius: "0.75rem", padding: "1rem", marginBottom: "1rem" }}>
-            <h3 style={{ fontWeight: 500, marginBottom: "1rem" }}>Add a piece</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-              <input type="text" placeholder="Item name (e.g. Black blazer)" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ padding: "0.75rem", borderRadius: "0.5rem", border: "1px solid #e5e5e5", fontSize: "0.875rem", width: "100%", boxSizing: "border-box" as const }} />
-              <select value={newCategory} onChange={(e) => setNewCategory(e.target.value)} style={{ padding: "0.75rem", borderRadius: "0.5rem", border: "1px solid #e5e5e5", fontSize: "0.875rem", background: "white" }}>
-                {CATEGORIES.map((c) => <option key={c} value={c}>{c.charAt(0) + c.slice(1).toLowerCase()}</option>)}
-              </select>
-              <input type="url" placeholder="Image URL (optional)" value={newImageUrl} onChange={(e) => setNewImageUrl(e.target.value)} style={{ padding: "0.75rem", borderRadius: "0.5rem", border: "1px solid #e5e5e5", fontSize: "0.875rem", width: "100%", boxSizing: "border-box" as const }} />
-              <div style={{ display: "flex", gap: "0.5rem" }}>
-                <button onClick={handleAdd} disabled={!newName} style={{ flex: 1, padding: "0.75rem", background: "#c4a0a0", color: "white", border: "none", borderRadius: "0.5rem", fontWeight: 500, cursor: "pointer" }}>Add to Closet</button>
-                <button onClick={() => setShowAddForm(false)} style={{ padding: "0.75rem 1rem", background: "transparent", color: "#888", border: "1px solid #e5e5e5", borderRadius: "0.5rem", cursor: "pointer" }}>Cancel</button>
+          <div style={{ background: "white", borderRadius: "4px", padding: "1.5rem", marginBottom: "1.5rem", border: "1px solid #e8e4df" }}>
+            <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase" as const, color: "#8a7f75", marginBottom: "1.5rem" }}>Add a piece</div>
+
+            {/* Photo upload */}
+            <div style={{ marginBottom: "1rem" }}>
+              <div style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "8px" }}>Photo</div>
+              <label style={{ display: "block", border: "1px dashed #d4cfc9", borderRadius: "4px", padding: "1rem", textAlign: "center", cursor: "pointer", background: newImageUrl ? "transparent" : "#faf9f7" }}>
+                {newImageUrl ? (
+                  <img src={newImageUrl} alt="preview" style={{ maxHeight: "160px", borderRadius: "4px", objectFit: "cover" }} />
+                ) : uploading ? (
+                  <span style={{ fontSize: "13px", color: "#8a7f75" }}>Uploading...</span>
+                ) : (
+                  <span style={{ fontSize: "13px", color: "#8a7f75" }}>Tap to upload photo</span>
+                )}
+                <input type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && uploadToCloudinary(e.target.files[0])} style={{ display: "none" }} />
+              </label>
+            </div>
+
+            {/* Name */}
+            <div style={{ marginBottom: "1rem" }}>
+              <div style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "8px" }}>Name *</div>
+              <input type="text" placeholder="e.g. Black blazer" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ width: "100%", padding: "10px", border: "1px solid #e8e4df", borderRadius: "2px", fontSize: "14px", fontFamily: '"Cormorant Garamond", Georgia, serif', boxSizing: "border-box" as const, background: "#faf9f7" }} />
+            </div>
+
+            {/* Category */}
+            <div style={{ marginBottom: "1rem" }}>
+              <div style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "8px" }}>Category *</div>
+              <div style={{ display: "flex", flexWrap: "wrap" as const, gap: "8px" }}>
+                {CATEGORIES.map(c => (
+                  <button key={c} onClick={() => setNewCategory(c)} style={btnStyle(newCategory === c)}>
+                    {c.charAt(0) + c.slice(1).toLowerCase()}
+                  </button>
+                ))}
               </div>
+            </div>
+
+            {/* Color */}
+            <div style={{ marginBottom: "1rem" }}>
+              <div style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "8px" }}>Primary Color</div>
+              <div style={{ display: "flex", flexWrap: "wrap" as const, gap: "8px" }}>
+                {COLORS.map(c => (
+                  <button key={c} onClick={() => setNewColor(c)} style={btnStyle(newColor === c)}>{c}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Pattern */}
+            <div style={{ marginBottom: "1rem" }}>
+              <div style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "8px" }}>Pattern</div>
+              <div style={{ display: "flex", flexWrap: "wrap" as const, gap: "8px" }}>
+                {PATTERNS.map(p => (
+                  <button key={p} onClick={() => setNewPattern(p)} style={btnStyle(newPattern === p)}>{p}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Occasions */}
+            <div style={{ marginBottom: "1rem" }}>
+              <div style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "8px" }}>Occasions</div>
+              <div style={{ display: "flex", flexWrap: "wrap" as const, gap: "8px" }}>
+                {OCCASIONS.map(o => (
+                  <button key={o} onClick={() => toggleOccasion(o)} style={btnStyle(newOccasions.includes(o))}>{o}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Seasons */}
+            <div style={{ marginBottom: "1rem" }}>
+              <div style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "8px" }}>Season</div>
+              <div style={{ display: "flex", flexWrap: "wrap" as const, gap: "8px" }}>
+                {SEASONS.map(s => (
+                  <button key={s} onClick={() => toggleSeason(s)} style={btnStyle(newSeasons.includes(s))}>{s}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Brand */}
+            <div style={{ marginBottom: "1.5rem" }}>
+              <div style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "8px" }}>Brand (optional)</div>
+              <input type="text" placeholder="e.g. Zara, H&M, nAia" value={newBrand} onChange={(e) => setNewBrand(e.target.value)} style={{ width: "100%", padding: "10px", border: "1px solid #e8e4df", borderRadius: "2px", fontSize: "14px", fontFamily: '"Cormorant Garamond", Georgia, serif', boxSizing: "border-box" as const, background: "#faf9f7" }} />
+            </div>
+
+            <div style={{ display: "flex", gap: "12px" }}>
+              <button onClick={handleAdd} disabled={!newName || uploading} style={{ flex: 1, padding: "12px", background: newName ? "#1a1816" : "#d4cfc9", color: "white", border: "none", borderRadius: "2px", fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase" as const, cursor: newName ? "pointer" : "default", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>
+                {uploading ? "Uploading..." : "Add to Closet"}
+              </button>
+              <button onClick={() => setShowAddForm(false)} style={{ padding: "12px 20px", background: "transparent", color: "#8a7f75", border: "1px solid #e8e4df", borderRadius: "2px", cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>Cancel</button>
             </div>
           </div>
         )}
 
-        <div style={{ display: "flex", gap: "0.5rem", overflowX: "auto", paddingBottom: "0.5rem", marginBottom: "1rem" }}>
+        {/* Insights toggle */}
+        {items.length >= 3 && (
+          <button onClick={() => setShowInsights(!showInsights)} style={{ width: "100%", padding: "12px", background: "white", border: "1px solid #e8e4df", borderRadius: "4px", marginBottom: "1rem", fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase" as const, cursor: "pointer", color: "#1a1816", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>
+            {showInsights ? "Hide" : "View"} Wardrobe Insights
+          </button>
+        )}
+
+        {showInsights && <WardrobeInsights items={items} />}
+
+        {/* Category filter */}
+        <div style={{ display: "flex", gap: "8px", overflowX: "auto", paddingBottom: "8px", marginBottom: "1rem" }}>
           {["ALL", ...CATEGORIES].map((cat) => (
-            <button key={cat} onClick={() => setActiveCategory(cat)} style={{ padding: "0.375rem 0.875rem", borderRadius: "9999px", fontSize: "0.75rem", fontWeight: 500, whiteSpace: "nowrap" as const, border: "none", cursor: "pointer", background: activeCategory === cat ? "#2d2d2d" : "white", color: activeCategory === cat ? "white" : "#888" }}>
-              {cat.charAt(0) + cat.slice(1).toLowerCase()}
+            <button key={cat} onClick={() => setActiveCategory(cat)} style={{ ...btnStyle(activeCategory === cat), whiteSpace: "nowrap" as const, padding: "6px 14px" }}>
+              {cat === "ALL" ? "All" : cat.charAt(0) + cat.slice(1).toLowerCase()}
             </button>
           ))}
         </div>
 
-        <p style={{ fontSize: "0.875rem", color: "#888", marginBottom: "1rem" }}>{filtered.length} {filtered.length === 1 ? "item" : "items"}</p>
+        <p style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "1rem" }}>{filtered.length} {filtered.length === 1 ? "piece" : "pieces"}</p>
 
         {filtered.length === 0 && (
           <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
             <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>👗</div>
-            <p style={{ color: "#888", marginBottom: "1rem" }}>No items yet in this category</p>
-            <button onClick={() => setShowAddForm(true)} style={{ padding: "0.75rem 1.5rem", background: "#c4a0a0", color: "white", border: "none", borderRadius: "9999px", fontWeight: 500, cursor: "pointer" }}>Add Your First Piece</button>
+            <p style={{ color: "#8a7f75", marginBottom: "1rem", fontStyle: "italic" }}>No pieces yet in this category</p>
+            <button onClick={() => setShowAddForm(true)} style={{ padding: "12px 28px", background: "#1a1816", color: "white", border: "none", borderRadius: "2px", fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase" as const, cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>Add Your First Piece</button>
           </div>
         )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "0.75rem" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "12px" }}>
           {filtered.map((item: any) => (
-            <div key={item.id} style={{ background: "white", borderRadius: "0.75rem", overflow: "hidden", position: "relative" }}>
-              <div style={{ aspectRatio: "1", background: "#f5f5f5", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div key={item.id} style={{ background: "white", borderRadius: "4px", overflow: "hidden", position: "relative", border: "1px solid #e8e4df" }}>
+              <div style={{ aspectRatio: "1", background: "#f5f2ee", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
                 {item.imageUrl ? <img src={item.imageUrl} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: "2.5rem" }}>👗</span>}
               </div>
-              <div style={{ padding: "0.75rem" }}>
-                <p style={{ fontWeight: 500, fontSize: "0.875rem", marginBottom: "0.25rem" }}>{item.name}</p>
-                <p style={{ fontSize: "0.75rem", color: "#888" }}>{item.category.charAt(0) + item.category.slice(1).toLowerCase()}</p>
+              <div style={{ padding: "10px" }}>
+                <p style={{ fontWeight: 500, fontSize: "14px", marginBottom: "4px", margin: "0 0 4px" }}>{item.name}</p>
+                <p style={{ fontSize: "12px", color: "#8a7f75", margin: "0 0 4px" }}>{item.category.charAt(0) + item.category.slice(1).toLowerCase()}</p>
+                {item.primaryColor && <p style={{ fontSize: "11px", color: "#8a7f75", margin: 0 }}>{item.primaryColor}{item.pattern ? ` · ${item.pattern}` : ""}</p>}
+                {item.occasions?.length > 0 && <p style={{ fontSize: "11px", color: "#8a7f75", margin: "2px 0 0" }}>{item.occasions.slice(0, 2).join(", ")}</p>}
               </div>
-              <button onClick={() => fetcher.submit({ intent: "delete", itemId: item.id }, { method: "post" })} style={{ position: "absolute", top: "0.5rem", right: "0.5rem", background: "rgba(0,0,0,0.5)", color: "white", border: "none", borderRadius: "9999px", width: "1.5rem", height: "1.5rem", cursor: "pointer", fontSize: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+              <button onClick={() => fetcher.submit({ intent: "delete", itemId: item.id }, { method: "post" })} style={{ position: "absolute", top: "8px", right: "8px", background: "rgba(0,0,0,0.5)", color: "white", border: "none", borderRadius: "50%", width: "24px", height: "24px", cursor: "pointer", fontSize: "14px", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>×</button>
             </div>
           ))}
         </div>
 
         <div style={{ marginTop: "2rem", textAlign: "center" }}>
-          <a href="https://naia-stylist.vercel.app/stylist" style={{ padding: "0.75rem 1.5rem", background: "#2d2d2d", color: "white", borderRadius: "9999px", textDecoration: "none", fontWeight: 500, fontSize: "0.875rem" }}>
-            ✨ Style Me
-         </a>
+          <a href="https://naia-stylist.vercel.app/stylist" style={{ padding: "12px 28px", background: "#1a1816", color: "white", borderRadius: "2px", textDecoration: "none", fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>
+            ✦ Style Me
+          </a>
         </div>
       </main>
     </div>
   );
 }
-
