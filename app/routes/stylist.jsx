@@ -630,32 +630,6 @@ function StyleResponseProfile({ customerToken }) {
     </div>
   </div>
 )}
-              
-              // Vary sentence structure
-              if (i === 0 && moodLower && feelingLower && eventLower) {
-                text = `${feelingLower.charAt(0).toUpperCase() + feelingLower.slice(1)} ${eventLower} looks tend to work well when you're ${moodLower}`;
-              } else if (i === 1 && moodLower && feelingLower && eventLower) {
-                text = `When you're ${moodLower}, ${eventLower} looks that feel ${feelingLower} tend to land well`;
-              } else if (moodLower && feelingLower && eventLower) {
-                text = `You respond well to ${eventLower} looks with ${feelingLower} energy when feeling ${moodLower}`;
-              } else if (feelingLower && eventLower) {
-                text = `${feelingLower.charAt(0).toUpperCase() + feelingLower.slice(1)} ${eventLower} looks seem to work for you`;
-              } else if (eventLower) {
-                text = `${eventLower.charAt(0).toUpperCase() + eventLower.slice(1)} looks tend to land well`;
-              } else {
-                return null;
-              }
-              
-              return (
-                <p key={i} style={{ fontSize: "14px", lineHeight: 1.6, margin: i > 0 ? "12px 0 0" : "0", color: "#1a1816" }}>
-                  • {text}
-                </p>
-              );
-            }).filter(Boolean)}
-          </div>
-        </div>
-      )}
-
       {/* Best emotional shifts - only strongest 3-4 */}
       {emotionalShifts.length > 0 && (
         <div style={s.section}>
