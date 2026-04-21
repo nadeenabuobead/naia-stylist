@@ -33,7 +33,7 @@ export async function action({ request }) {
   }
   const body = await request.json();
   const { historyId, overallReaction, feltLikeMe, desiredFeelingAchieved, wouldWearAgain, physicalComfort, workedTags, didntWorkTags, additionalNotes, mood, feeling, event, styleWords } = body;
-  if (!historyId || confidence === undefined) {
+  if (!historyId || overallReaction === undefined) {
     return Response.json({ error: "historyId and confidence required" }, { status: 400, headers: CORS });
   }
 
