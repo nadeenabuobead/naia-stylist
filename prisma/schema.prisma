@@ -416,14 +416,18 @@ model PostOutfitReview {
   createdAt   DateTime @default(now())
   
   // Core Feedback
-  overallFeeling      Int?     // 1-5 scale
-  feltLikeHer         Boolean?
-  wouldWearAgain      Boolean?
+  overallFeeling           Int?      // 1-5 scale
+  feltLikeHer              String?   // Yes/Somewhat/No
+  desiredFeelingAchieved   String?   // Yes/Partly/No
+  wouldWearAgain           String?   // Definitely/Maybe/Probably not
+  physicallyComfortable    String?   // Comfortable/Mostly comfortable/Not comfortable
   
-  // Detailed Feedback
-  whatWorked          String?
-  whatDidntWork       String?
+  // Tags
+  workedTags               String?   // JSON array
+  didntWorkTags            String?   // JSON array
   
+  // Notes
+  additionalNotes          String?
   // Specific Item Feedback
   itemFeedback        Json?    // { itemId: { liked: true, notes: "..." } }
   
