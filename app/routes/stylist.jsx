@@ -499,13 +499,14 @@ function StyleResponseProfile({ customerToken }) {
     label: { fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "12px" },
     card: { padding: "16px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" },
     cardNum: { fontSize: "26px", fontStyle: "italic", margin: "0 0 4px" },
+    cardSubtext: { fontSize: "11px", color: "#8a7f75", margin: "4px 0 0", fontStyle: "italic" },
     cardLabel: { fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", margin: 0 },
   };
 
-  // Calculate scores - use text until enough data
-  const hasEnoughData = profile.totalRatings >= 5;
-  const styleAlignment = hasEnoughData ? `${Math.round(profile.feltLikeMePercent || 0)}%` : "taking shape";
-  const wearability = hasEnoughData ? `${Math.round(profile.wouldWearAgainPercent || 0)}%` : "emerging";
+  // Calculate scores
+  const hasEnoughData = profile.totalRatings >= 8;
+  const styleAlignmentNum = Math.round(profile.feltLikeMePercent || 0);
+  const wearabilityNum = Math.round(profile.wouldWearAgainPercent || 0);
 
   // Get unique positive reviews
   const positiveReviews = profile.recentRatings?.filter(r => 
@@ -522,18 +523,25 @@ function StyleResponseProfile({ customerToken }) {
     }
   }
 
-  // Get unique emotional shifts (mood → feeling pairs)
+  // Get unique emotional shifts, sorted by strength
   const emotionalShifts = [];
   const shiftsSeen = new Set();
+  
+  // Prioritize strong transformations
+  const strongShifts = ["overwhelmed", "anxious", "tired", "lonely", "irritated", "low"];
+  
   for (const r of profile.recentRatings || []) {
     if (r.mood && r.feeling) {
       const shift = `${r.mood} → ${r.feeling}`;
       if (!shiftsSeen.has(shift)) {
         shiftsSeen.add(shift);
-        emotionalShifts.push(shift);
+        emotionalShifts.push({ shift, isStrong: strongShifts.includes(r.mood.toLowerCase()) });
       }
     }
   }
+  
+  // Sort: strong shifts first
+  emotionalShifts.sort((a, b) => b.isStrong - a.isStrong);
 
   // Generate interpretation
   const getInterpretation = () => {
@@ -544,12 +552,23 @@ function StyleResponseProfile({ customerToken }) {
     return "You're building a clearer sense of what works for you.";
   };
 
+  const getStyleSummary = () => {
+    if (profile.totalRatings < 5) return null;
+    return "So far, you seem to respond best to looks with presence, polish, and emotional clarity.";
+  };
+
   return (
     <div>
       {/* Interpretation */}
-      <p style={{ fontSize: "15px", fontStyle: "italic", color: "#4a4540", marginBottom: "28px", lineHeight: 1.6 }}>
+      <p style={{ fontSize: "15px", fontStyle: "italic", color: "#4a4540", marginBottom: "8px", lineHeight: 1.6 }}>
         {getInterpretation()}
       </p>
+      
+      {getStyleSummary() && (
+        <p style={{ fontSize: "14px", color: "#8a7f75", marginBottom: "28px", lineHeight: 1.6 }}>
+          {getStyleSummary()}
+        </p>
+      )}
 
       {/* Top cards */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginBottom: "32px" }}>
@@ -558,12 +577,14 @@ function StyleResponseProfile({ customerToken }) {
           <p style={s.cardLabel}>Looks rated</p>
         </div>
         <div style={s.card}>
-          <p style={{ ...s.cardNum, fontSize: hasEnoughData ? "26px" : "18px" }}>{styleAlignment}</p>
+          <p style={s.cardNum}>{styleAlignmentNum}%</p>
           <p style={s.cardLabel}>Style alignment</p>
+          {!hasEnoughData && <p style={s.cardSubtext}>still taking shape</p>}
         </div>
         <div style={s.card}>
-          <p style={{ ...s.cardNum, fontSize: hasEnoughData ? "26px" : "18px" }}>{wearability}</p>
+          <p style={s.cardNum}>{wearabilityNum}%</p>
           <p style={s.cardLabel}>Would wear again</p>
+          {!hasEnoughData && <p style={s.cardSubtext}>early preferences</p>}
         </div>
       </div>
 
@@ -574,31 +595,41 @@ function StyleResponseProfile({ customerToken }) {
           <div style={{ background: "#f5f2ee", padding: "16px", borderRadius: "2px", borderLeft: "2px solid #7da563" }}>
             {uniquePositive.slice(0, 3).map((r, i) => {
               let text = "";
-              if (r.mood && r.feeling && r.event) {
-                text = `When you're feeling ${r.mood}, ${r.feeling} ${r.event} looks tend to work well`;
-              } else if (r.mood && r.feeling) {
-                text = `${r.feeling.charAt(0).toUpperCase() + r.feeling.slice(1)} looks when you're feeling ${r.mood}`;
-              } else if (r.event) {
-                text = `${r.event.charAt(0).toUpperCase() + r.event.slice(1)} looks tend to work for you`;
+              const moodLower = (r.mood || "").toLowerCase();
+              const feelingLower = (r.feeling || "").toLowerCase();
+              const eventLower = (r.event || "").toLowerCase();
+              
+              // Vary sentence structure
+              if (i === 0 && moodLower && feelingLower && eventLower) {
+                text = `${feelingLower.charAt(0).toUpperCase() + feelingLower.slice(1)} ${eventLower} looks tend to work well when you're ${moodLower}`;
+              } else if (i === 1 && moodLower && feelingLower && eventLower) {
+                text = `When you're ${moodLower}, ${eventLower} looks that feel ${feelingLower} tend to land well`;
+              } else if (moodLower && feelingLower && eventLower) {
+                text = `You respond well to ${eventLower} looks with ${feelingLower} energy when feeling ${moodLower}`;
+              } else if (feelingLower && eventLower) {
+                text = `${feelingLower.charAt(0).toUpperCase() + feelingLower.slice(1)} ${eventLower} looks seem to work for you`;
+              } else if (eventLower) {
+                text = `${eventLower.charAt(0).toUpperCase() + eventLower.slice(1)} looks tend to land well`;
               } else {
-                text = "These looks felt right";
+                return null;
               }
+              
               return (
                 <p key={i} style={{ fontSize: "14px", lineHeight: 1.6, margin: i > 0 ? "12px 0 0" : "0", color: "#1a1816" }}>
                   • {text}
                 </p>
               );
-            })}
+            }).filter(Boolean)}
           </div>
         </div>
       )}
 
-      {/* Best emotional shifts */}
+      {/* Best emotional shifts - only strongest 3-4 */}
       {emotionalShifts.length > 0 && (
         <div style={s.section}>
           <div style={s.label}>Best emotional shifts</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-            {emotionalShifts.slice(0, 5).map(shift => (
+            {emotionalShifts.slice(0, 4).map(({ shift }) => (
               <div key={shift} style={{ 
                 padding: "10px 16px", 
                 background: "#1a1816", 
