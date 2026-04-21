@@ -22,6 +22,7 @@ export default [
   route("api/confidence-dashboard", "routes/api.confidence-dashboard.jsx"),
   route("stylist", "routes/stylist.jsx"),
   route("stylist-popup", "routes/stylist-popup.jsx"),
+  route("api/wardrobe-insights", "routes/api.wardrobe-insights.jsx"),
   route("app", "routes/app.jsx", [
     index("routes/app._index.jsx"),
   ]),

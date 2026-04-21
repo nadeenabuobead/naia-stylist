@@ -78,100 +78,111 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 function WardrobeInsights({ items }: { items: any[] }) {
+  const [aiInsights, setAiInsights] = useState<any>(null);
+  const [loadingAI, setLoadingAI] = useState(false);
+
+  useEffect(() => {
+    if (items.length < 3) return;
+    setLoadingAI(true);
+    fetch("/api/wardrobe-insights")
+      .then(r => r.json())
+      .then(d => { if (d.insights) setAiInsights(d.insights); })
+      .catch(() => {})
+      .finally(() => setLoadingAI(false));
+  }, []);
+
   if (items.length < 3) return null;
 
-  // Category breakdown
   const catCount: Record<string, number> = {};
-  const colorCount: Record<string, number> = {};
   const occasionCount: Record<string, number> = {};
-
   for (const item of items) {
-    const cat = item.category || "OTHER";
-    catCount[cat] = (catCount[cat] || 0) + 1;
-    if (item.primaryColor) colorCount[item.primaryColor] = (colorCount[item.primaryColor] || 0) + 1;
+    catCount[item.category] = (catCount[item.category] || 0) + 1;
     if (item.occasions?.length) {
-      for (const occ of item.occasions) {
-        occasionCount[occ] = (occasionCount[occ] || 0) + 1;
-      }
+      for (const occ of item.occasions) occasionCount[occ] = (occasionCount[occ] || 0) + 1;
     }
   }
-
-  const topColors = Object.entries(colorCount).sort((a, b) => b[1] - a[1]).slice(0, 3);
   const topOccasions = Object.entries(occasionCount).sort((a, b) => b[1] - a[1]).slice(0, 3);
   const topCategory = Object.entries(catCount).sort((a, b) => b[1] - a[1])[0];
 
-  // What's missing
-  const missing = [];
-  if (!catCount["OUTERWEAR"]) missing.push("Outerwear");
-  if (!catCount["DRESSES"]) missing.push("Dresses");
-  if (!catCount["SHOES"]) missing.push("Shoes");
-  if (!catCount["BAGS"]) missing.push("Bags");
-  if (!catCount["ACCESSORIES"]) missing.push("Accessories");
-
-  // Style personality
-  const formalOccs = (occasionCount["Work"] || 0) + (occasionCount["Formal"] || 0) + (occasionCount["Dinner"] || 0);
-  const casualOccs = (occasionCount["Casual"] || 0) + (occasionCount["Weekend"] || 0);
-  const partyOccs = (occasionCount["Party"] || 0) + (occasionCount["Date"] || 0);
-
-  let personality = "Versatile";
-  if (formalOccs > casualOccs && formalOccs > partyOccs) personality = "Polished & Professional";
-  else if (casualOccs > formalOccs && casualOccs > partyOccs) personality = "Effortlessly Casual";
-  else if (partyOccs > formalOccs && partyOccs > casualOccs) personality = "Bold & Social";
-
   const s = {
-    section: { marginBottom: "20px" },
+    section: { marginBottom: "20px" } as const,
     label: { fontSize: "11px", letterSpacing: "0.18em", textTransform: "uppercase" as const, color: "#8a7f75", marginBottom: "10px" },
     tag: (bg: string, color: string) => ({ display: "inline-block", padding: "6px 12px", background: bg, color, borderRadius: "2px", fontSize: "13px", marginRight: "8px", marginBottom: "8px" }),
   };
 
   return (
-    <div style={{ padding: "20px", background: "#faf9f7", borderRadius: "4px", marginBottom: "24px" }}>
+    <div style={{ padding: "20px", background: "#faf9f7", borderRadius: "4px", marginBottom: "24px", border: "1px solid #e8e4df" }}>
       <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase" as const, color: "#8a7f75", marginBottom: "20px" }}>Wardrobe Insights</div>
 
-      {/* Style personality */}
-      <div style={s.section}>
-        <div style={s.label}>Your Style Personality</div>
-        <div style={{ fontSize: "20px", fontStyle: "italic", color: "#1a1816" }}>{personality}</div>
-        <div style={{ fontSize: "13px", color: "#8a7f75", marginTop: "4px" }}>{items.length} pieces in your wardrobe</div>
-      </div>
+      {loadingAI && <p style={{ fontSize: "13px", color: "#8a7f75", fontStyle: "italic" }}>Analysing your wardrobe...</p>}
 
-      {/* Top colors */}
-      {topColors.length > 0 && (
-        <div style={s.section}>
-          <div style={s.label}>Your Color Story</div>
-          <div>
-            {topColors.map(([color, count]) => (
-              <span key={color} style={s.tag("#eee9e2", "#1a1816")}>{color} ({count})</span>
-            ))}
+      {aiInsights && (
+        <>
+          {/* Style personality */}
+          <div style={s.section}>
+            <div style={s.label}>Your Style Personality</div>
+            <div style={{ fontSize: "20px", fontStyle: "italic", color: "#1a1816" }}>{aiInsights.stylePersonality}</div>
+            <div style={{ fontSize: "13px", color: "#8a7f75", marginTop: "4px" }}>{aiInsights.styleDescription}</div>
           </div>
-        </div>
+
+          {/* Dominant colors */}
+          {aiInsights.dominantColors?.length > 0 && (
+            <div style={s.section}>
+              <div style={s.label}>Your Color Story</div>
+              <div>{aiInsights.dominantColors.map((c: string) => <span key={c} style={s.tag("#eee9e2", "#1a1816")}>{c}</span>)}</div>
+            </div>
+          )}
+
+          {/* Too much of */}
+          {aiInsights.tooMuchOf?.length > 0 && (
+            <div style={s.section}>
+              <div style={s.label}>You Have Too Much Of</div>
+              {aiInsights.tooMuchOf.map((t: string, i: number) => (
+                <div key={i} style={{ fontSize: "13px", fontStyle: "italic", color: "#1a1816", marginBottom: "4px" }}>· {t}</div>
+              ))}
+            </div>
+          )}
+
+          {/* Repeats */}
+          {aiInsights.repeats?.length > 0 && (
+            <div style={s.section}>
+              <div style={s.label}>What You Repeat</div>
+              {aiInsights.repeats.map((r: string, i: number) => (
+                <div key={i} style={{ fontSize: "13px", fontStyle: "italic", color: "#1a1816", marginBottom: "4px" }}>· {r}</div>
+              ))}
+            </div>
+          )}
+
+          {/* Missing pieces */}
+          {aiInsights.missingPieces?.length > 0 && (
+            <div style={s.section}>
+              <div style={s.label}>Missing From Your Wardrobe</div>
+              {aiInsights.missingPieces.map((m: string, i: number) => (
+                <div key={i} style={{ fontSize: "13px", color: "#c5553a", fontStyle: "italic", marginBottom: "4px" }}>· {m}</div>
+              ))}
+            </div>
+          )}
+
+          {/* Buy next */}
+          {aiInsights.buyNext && (
+            <div style={s.section}>
+              <div style={s.label}>Buy Next</div>
+              <div style={{ padding: "12px 16px", background: "#1a1816", color: "#f5f2ee", borderRadius: "2px", fontSize: "14px", fontStyle: "italic" }}>
+                ✦ {aiInsights.buyNext}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
-      {/* Top occasions */}
+      {/* Static insights */}
       {topOccasions.length > 0 && (
         <div style={s.section}>
           <div style={s.label}>You Dress Most For</div>
-          <div>
-            {topOccasions.map(([occ, count]) => (
-              <span key={occ} style={s.tag("#1a1816", "#f5f2ee")}>{occ} ({count})</span>
-            ))}
-          </div>
+          <div>{topOccasions.map(([occ, count]) => <span key={occ} style={s.tag("#1a1816", "#f5f2ee")}>{occ} ({count})</span>)}</div>
         </div>
       )}
 
-      {/* What's missing */}
-      {missing.length > 0 && (
-        <div style={s.section}>
-          <div style={s.label}>Missing From Your Wardrobe</div>
-          <div>
-            {missing.map(m => (
-              <span key={m} style={s.tag("#f5f2ee", "#c5553a")}>{m}</span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* What she repeats */}
       {topCategory && (
         <div style={s.section}>
           <div style={s.label}>Your Go-To Category</div>
@@ -183,7 +194,6 @@ function WardrobeInsights({ items }: { items: any[] }) {
     </div>
   );
 }
-
 export default function ClosetPage() {
   const { items, authenticated } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
