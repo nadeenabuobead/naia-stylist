@@ -154,13 +154,14 @@ export async function loader() {
 
 // ─── Confidence Rating Component ───
 function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styleWords, onRated }) {
+  const [showRating, setShowRating] = useState(false);
   const [overallReaction, setOverallReaction] = useState(0);
   const [feltLikeMe, setFeltLikeMe] = useState("");
   const [desiredFeelingAchieved, setDesiredFeelingAchieved] = useState("");
   const [wouldWearAgain, setWouldWearAgain] = useState("");
   const [physicalComfort, setPhysicalComfort] = useState("");
   const [workedTags, setWorkedTags] = useState([]);
-  const [didntWorkTags, setDidntWorkTags] = useState("");
+  const [didntWorkTags, setDidntWorkTags] = useState([]);
   const [additionalNotes, setAdditionalNotes] = useState("");
   const [submitted, setSubmitted] = useState(false);
 
@@ -200,8 +201,8 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
           desiredFeelingAchieved,
           wouldWearAgain,
           physicalComfort,
-          workedTags,
-          didntWorkTags,
+          workedTags: JSON.stringify(workedTags),
+          didntWorkTags: JSON.stringify(didntWorkTags),
           additionalNotes,
           mood, feeling, event,
           styleWords: Array.isArray(styleWords) ? JSON.stringify(styleWords) : styleWords,
@@ -220,6 +221,30 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
     return (
       <div style={{ padding: "24px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" }}>
         <p style={{ fontSize: "15px", margin: 0 }}>✓ Feedback saved</p>
+      </div>
+    );
+  }
+
+  if (!showRating) {
+    return (
+      <div style={{ textAlign: "center", padding: "20px 0" }}>
+        <button
+          onClick={() => setShowRating(true)}
+          style={{
+            padding: "14px 32px",
+            background: "white",
+            color: "#1a1816",
+            border: "1px solid #1a1816",
+            borderRadius: "2px",
+            cursor: "pointer",
+            fontSize: "13px",
+            letterSpacing: "0.15em",
+            textTransform: "uppercase",
+            fontFamily: '"Cormorant Garamond", Georgia, serif',
+          }}
+        >
+          Rate this look
+        </button>
       </div>
     );
   }
