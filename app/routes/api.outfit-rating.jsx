@@ -58,20 +58,21 @@ export async function action({ request }) {
 },
       });
     } else {
-      review = await prisma.postOutfitReview.create({
-        data: {
-  overallFeeling: Number(overallReaction),
-  feltLikeHer: feltLikeMe ?? null,
-  desiredFeelingAchieved: desiredFeelingAchieved ?? null,
-  wouldWearAgain: wouldWearAgain ?? null,
-  physicallyComfortable: physicalComfort ?? null,
-  workedTags: workedTags ?? null,
-  didntWorkTags: didntWorkTags ?? null,
-  additionalNotes: additionalNotes || null,
-},
-},
-      });
-    }
+  review = await prisma.postOutfitReview.create({
+    data: {
+      customerId: customer.id,
+      sessionId: historyId,
+      overallFeeling: Number(overallReaction),
+      feltLikeHer: feltLikeMe ?? null,
+      desiredFeelingAchieved: desiredFeelingAchieved ?? null,
+      wouldWearAgain: wouldWearAgain ?? null,
+      physicallyComfortable: physicalComfort ?? null,
+      workedTags: workedTags ?? null,
+      didntWorkTags: didntWorkTags ?? null,
+      additionalNotes: additionalNotes || null,
+    },
+  });
+}
     return Response.json({ rating: review }, { headers: CORS });
   } catch (err) {
     console.error("Rating save error:", err);
