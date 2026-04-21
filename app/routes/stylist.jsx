@@ -296,107 +296,88 @@ function ConfidenceDashboard({ customerToken }) {
       .finally(() => setLoading(false));
   }, [customerToken]);
 
-  if (loading) return <p style={{ fontSize: "14px", color: "#8a7f75", fontStyle: "italic" }}>Loading your confidence profile...</p>;
+  if (loading) return <p style={{ fontSize: "14px", color: "#8a7f75", fontStyle: "italic" }}>Loading your style profile...</p>;
   if (!dashboard || dashboard.totalRatings === 0) {
-    return <p style={{ fontSize: "15px", color: "#8a7f75", fontStyle: "italic" }}>No ratings yet. Rate your styled looks to build your confidence profile.</p>;
+    return <p style={{ fontSize: "15px", color: "#8a7f75", fontStyle: "italic" }}>No ratings yet. Rate your styled looks to build your style intelligence profile.</p>;
   }
 
-  const statBox = { padding: "16px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" };
-  const statNum = { fontSize: "28px", fontWeight: 400, fontStyle: "italic", margin: "0 0 4px", color: "#1a1816" };
-  const statLabel = { fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", margin: 0 };
+  const section = { marginBottom: "28px" };
+  const label = { fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "12px" };
+
+  const positiveReviews = dashboard.recentRatings?.filter(r => r.wouldWearAgain && r.feltLikeMe) || [];
+  const negativeReviews = dashboard.recentRatings?.filter(r => r.wouldWearAgain === false || r.feltLikeMe === false) || [];
+  const notesReviews = dashboard.recentRatings?.filter(r => r.notes) || [];
 
   return (
     <div>
-      {/* Overview stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "10px", marginBottom: "24px" }}>
-        <div style={statBox}>
-          <p style={statNum}>{dashboard.averageConfidence}<span style={{ fontSize: "16px" }}>/5</span></p>
-          <p style={statLabel}>Avg Confidence</p>
-        </div>
-        <div style={statBox}>
-          <p style={statNum}>{dashboard.feltLikeMePercent}%</p>
-          <p style={statLabel}>Felt like me</p>
-        </div>
-        <div style={statBox}>
-          <p style={statNum}>{dashboard.wouldWearAgainPercent}%</p>
-          <p style={statLabel}>Would rewear</p>
-        </div>
-        <div style={statBox}>
-          <p style={statNum}>{dashboard.totalRatings}</p>
-          <p style={statLabel}>Looks rated</p>
-        </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginBottom: "28px" }}>
+        {[
+          { num: dashboard.totalRatings, label: "Looks rated" },
+          { num: `${dashboard.wouldWearAgainPercent}%`, label: "Would wear again" },
+          { num: `${dashboard.feltLikeMePercent}%`, label: "Felt like her" },
+        ].map((s, i) => (
+          <div key={i} style={{ padding: "16px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" }}>
+            <p style={{ fontSize: "26px", fontStyle: "italic", margin: "0 0 4px" }}>{s.num}</p>
+            <p style={{ fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", margin: 0 }}>{s.label}</p>
+          </div>
+        ))}
       </div>
 
-      {/* Best moods */}
-      {dashboard.bestMoods.length > 0 && (
-        <div style={{ marginBottom: "20px" }}>
-          <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "10px" }}>
-            You feel most confident when
-          </div>
+      {positiveReviews.length > 0 && (
+        <div style={section}>
+          <div style={label}>What's working for her</div>
+          {positiveReviews.slice(0, 3).map((r, i) => (
+            <div key={i} style={{ padding: "12px", background: "#f5f2ee", borderRadius: "2px", marginBottom: "8px", borderLeft: "2px solid #7da563" }}>
+              <p style={{ fontSize: "13px", fontStyle: "italic", margin: "0 0 4px" }}>{r.mood} → {r.feeling} · {r.event}</p>
+              {r.notes && <p style={{ fontSize: "12px", color: "#4a4540", margin: 0 }}>"{r.notes}"</p>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {negativeReviews.length > 0 && (
+        <div style={section}>
+          <div style={label}>What's not landing</div>
+          {negativeReviews.slice(0, 3).map((r, i) => (
+            <div key={i} style={{ padding: "12px", background: "#f5f2ee", borderRadius: "2px", marginBottom: "8px", borderLeft: "2px solid #c5553a" }}>
+              <p style={{ fontSize: "13px", fontStyle: "italic", margin: "0 0 4px" }}>{r.mood} → {r.feeling} · {r.event}</p>
+              {r.notes && <p style={{ fontSize: "12px", color: "#4a4540", margin: 0 }}>"{r.notes}"</p>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {dashboard.bestMoods?.length > 0 && (
+        <div style={section}>
+          <div style={label}>She responds best when feeling</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
             {dashboard.bestMoods.map(m => (
-              <div key={m.name} style={{ padding: "8px 14px", background: "#eee9e2", borderRadius: "2px", fontSize: "14px", fontStyle: "italic" }}>
-                {m.name} <span style={{ fontSize: "12px", color: "#8a7f75" }}>({m.avg}/5)</span>
-              </div>
+              <div key={m.name} style={{ padding: "8px 14px", background: "#eee9e2", borderRadius: "2px", fontSize: "13px", fontStyle: "italic" }}>{m.name} <span style={{ fontSize: "11px", color: "#8a7f75" }}>({m.avg}/5)</span></div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Best events */}
-      {dashboard.bestEvents.length > 0 && (
-        <div style={{ marginBottom: "20px" }}>
-          <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "10px" }}>
-            Best occasions for you
-          </div>
+      {dashboard.bestEvents?.length > 0 && (
+        <div style={section}>
+          <div style={label}>Best occasions for her style</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
             {dashboard.bestEvents.map(e => (
-              <div key={e.name} style={{ padding: "8px 14px", background: "#eee9e2", borderRadius: "2px", fontSize: "14px", fontStyle: "italic" }}>
-                {e.name} <span style={{ fontSize: "12px", color: "#8a7f75" }}>({e.avg}/5)</span>
-              </div>
+              <div key={e.name} style={{ padding: "8px 14px", background: "#1a1816", color: "#f5f2ee", borderRadius: "2px", fontSize: "13px", fontStyle: "italic" }}>{e.name} <span style={{ fontSize: "11px", opacity: 0.6 }}>({e.avg}/5)</span></div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Best style words */}
-      {dashboard.bestStyleWords?.length > 0 && (
-        <div style={{ marginBottom: "20px" }}>
-          <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "10px" }}>
-            Styles that boost your confidence
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-            {dashboard.bestStyleWords?.map(w => (
-              <div key={w.name} style={{ padding: "8px 14px", background: "#1a1816", color: "#f5f2ee", borderRadius: "2px", fontSize: "13px", letterSpacing: "0.1em" }}>
-                {w.name} <span style={{ opacity: 0.7 }}>({w.avg}/5)</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Confidence over time */}
-      {dashboard.confidenceOverTime.length > 2 && (
-        <div style={{ marginBottom: "20px" }}>
-          <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "10px" }}>
-            Your confidence journey
-          </div>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: "4px", height: "80px" }}>
-            {dashboard.confidenceOverTime.map((c, i) => (
-              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}>
-                <div style={{
-                  width: "100%", maxWidth: "28px",
-                  height: `${(c.confidence / 5) * 60}px`,
-                  background: c.confidence >= 4 ? "#1a1816" : c.confidence >= 3 ? "#8a7f75" : "#d4cfc9",
-                  borderRadius: "2px 2px 0 0",
-                  transition: "height 0.3s",
-                }} />
-              </div>
-            ))}
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#8a7f75", marginTop: "4px" }}>
-            <span>Older</span><span>Recent</span>
-          </div>
+      {notesReviews.length > 0 && (
+        <div style={section}>
+          <div style={label}>In her own words</div>
+          {notesReviews.slice(0, 5).map((r, i) => (
+            <div key={i} style={{ padding: "12px 16px", borderLeft: "1px solid #d4cfc9", marginBottom: "10px" }}>
+              <p style={{ fontSize: "13px", fontStyle: "italic", color: "#4a4540", margin: "0 0 4px" }}>"{r.notes}"</p>
+              <p style={{ fontSize: "11px", color: "#8a7f75", margin: 0 }}>{r.mood} → {r.feeling} · {r.event}</p>
+            </div>
+          ))}
         </div>
       )}
     </div>
