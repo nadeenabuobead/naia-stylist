@@ -572,7 +572,7 @@ export default function Stylist() {
     const outfit = outfitParts.join(" + ");
     try {
       const res = await fetch("/api/style", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, outfit, mood, feeling, event, styleWords, bodyPref, previousPieces, closetItem: itemsToStyle[0] || null, closetItems: itemsToStyle, naiaPiece: naiaPiece ? { name: naiaPiece.name || naiaPiece.title, category: naiaPiece.category || naiaPiece.type || "", stylingNotes: naiaPiece.stylingNotes || "", moodMatch: naiaPiece.moodMatch || "", stylingRole: naiaPiece.stylingRole || "", statementLevel: naiaPiece.statementLevel || "", occasion: naiaPiece.occasion || "", sihouette: naiaPiece.sihouette || "" } : null, closet: closet.map(i => ({ name: i.name, category: i.category })) }),
+        body: JSON.stringify({ mode, outfit, mood, feeling, event, styleWords, bodyPref, styleIntelligence: customer?.styleIntelligence, closetItem: itemsToStyle[0] || null, closetItems: itemsToStyle, naiaPiece: naiaPiece ? { name: naiaPiece.name || naiaPiece.title, category: naiaPiece.category || naiaPiece.type || "", stylingNotes: naiaPiece.stylingNotes || "", moodMatch: naiaPiece.moodMatch || "", stylingRole: naiaPiece.stylingRole || "", statementLevel: naiaPiece.statementLevel || "", occasion: naiaPiece.occasion || "", sihouette: naiaPiece.sihouette || "" } : null, closet: closet.map(i => ({ name: i.name, category: i.category })) }),
       });
       const data = await res.json();
       const result = data.result || data.error || "Something went wrong.";

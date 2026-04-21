@@ -80,7 +80,7 @@ export async function action({ request }) {
   }
 }
 
-function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bodyPref, closetItem, closetItems, naiaPiece, closet, previousPieces }) {
+function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bodyPref, closetItem, closetItems, naiaPiece, closet, styleIntelligence, previousPieces }) {
   const closetList = Array.isArray(closet) && closet.length > 0
     ? closet.map(i => `- ${i.name} (${i.category}) [customer closet]`).join("\n")
     : "No closet items.";
@@ -270,6 +270,13 @@ CUSTOMER:
 - Style personality: ${styleNote}
 - Body preference: ${bodyPref || "none"}
 - Mode: ${mode}
+${styleIntelligence?.totalReviews > 0 ? `
+CUSTOMER STYLE INTELLIGENCE (learned from her past reviews):
+- Looks that worked for her: ${styleIntelligence.positiveOccasions.join(", ") || "none yet"}
+- Looks that didn't work: ${styleIntelligence.negativeOccasions.join(", ") || "none yet"}
+- She responds best when feeling: ${styleIntelligence.positiveMoods.join(", ") || "none yet"}
+${styleIntelligence.recentNotes.length > 0 ? `- Her own words: ${styleIntelligence.recentNotes.join(" | ")}` : ""}
+Use this to personalize her recommendations.` : ""}
 
 CUSTOMER'S SELECTED PIECES:
 ${selectedList}
