@@ -436,7 +436,7 @@ model PostOutfitReview {
   confidenceAfter     Int?     // 1-10
   
   // Open Feedback
-  additionalNotes     String?
+  
   
   // Photo (optional)
   woreItPhotoUrl      String?
