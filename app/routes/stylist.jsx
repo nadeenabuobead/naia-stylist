@@ -504,7 +504,7 @@ function StyleResponseProfile({ customerToken }) {
   };
 
   // Calculate scores
-  const hasEnoughData = profile.totalRatings >= 8;
+  const hasEnoughData = profile.totalRatings >= 5;
   const styleAlignmentNum = Math.round(profile.feltLikeMePercent || 0);
   const wearabilityNum = Math.round(profile.wouldWearAgainPercent || 0);
 
@@ -594,30 +594,33 @@ function StyleResponseProfile({ customerToken }) {
     <div style={s.label}>What consistently works</div>
     <div style={{ background: "#f5f2ee", padding: "16px", borderRadius: "2px", borderLeft: "2px solid #7da563" }}>
       {(() => {
-        // Extract broader patterns from unique positive reviews
-        const patterns = new Map();
+        // Group by mood, collect all feelings for that mood
+        const moodMap = new Map();
         
         for (const r of uniquePositive.slice(0, 5)) {
           const moodLower = (r.mood || "").toLowerCase();
           const feelingLower = (r.feeling || "").toLowerCase();
           
-          // Build pattern key based on mood or feeling traits
           if (moodLower && feelingLower) {
-            const key = `${moodLower}-${feelingLower}`;
-            if (!patterns.has(key)) {
-              patterns.set(key, { mood: moodLower, feeling: feelingLower, count: 0 });
+            if (!moodMap.has(moodLower)) {
+              moodMap.set(moodLower, []);
             }
-            patterns.get(key).count++;
+            if (!moodMap.get(moodLower).includes(feelingLower)) {
+              moodMap.get(moodLower).push(feelingLower);
+            }
           }
         }
         
-        // Generate insights focusing on transferable truths
+        // Generate insights - combine feelings for same mood
         const insights = [];
-        const sortedPatterns = Array.from(patterns.values()).sort((a, b) => b.count - a.count);
         
-        for (const p of sortedPatterns.slice(0, 3)) {
-          if (p.mood && p.feeling) {
-            insights.push(`When you're ${p.mood}, looks with ${p.feeling} energy tend to work well`);
+        for (const [mood, feelings] of moodMap) {
+          if (feelings.length > 1) {
+            // Multiple feelings for same mood - combine
+            const feelingList = feelings.slice(0, 2).join(" and ");
+            insights.push(`When you're ${mood}, you respond well to looks that feel ${feelingList}`);
+          } else if (feelings.length === 1) {
+            insights.push(`When you're ${mood}, looks with ${feelings[0]} energy tend to work well`);
           }
         }
         
@@ -626,7 +629,7 @@ function StyleResponseProfile({ customerToken }) {
           insights.push("You're building a clearer sense of what resonates with you");
         }
         
-        return insights.map((text, i) => (
+        return insights.slice(0, 3).map((text, i) => (
           <p key={i} style={{ fontSize: "14px", lineHeight: 1.6, margin: i > 0 ? "12px 0 0" : "0", color: "#1a1816" }}>
             • {text}
           </p>
