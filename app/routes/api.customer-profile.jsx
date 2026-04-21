@@ -1,4 +1,5 @@
 import { authenticateCustomer } from "../customer-auth.server";
+import prisma from "../db.server";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -6,9 +7,6 @@ const CORS = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
-/**
- * GET /api/customer-profile — returns customer info + last styling prefs for quick re-style
- */
 export async function loader({ request }) {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS });
@@ -24,6 +22,50 @@ export async function loader({ request }) {
     lastStyleWords = customer.lastStyleWords ? JSON.parse(customer.lastStyleWords) : [];
   } catch {}
 
+  // Get style intelligence from reviews
+  const reviews = await prisma.postOutfitReview.findMany({
+    where: { customerId: customer.id },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+    include: {
+      session: {
+        select: { currentMood: true, desiredFeeling: true, occasion: true },
+      },
+    },
+  });
+
+  // Build style intelligence summary
+  let styleIntelligence = null;
+  if (reviews.length > 0) {
+    const positiveOccasions = reviews
+      .filter(r => r.wouldWearAgain && r.feltLikeHer)
+      .map(r => r.session?.occasion)
+      .filter(Boolean);
+
+    const negativeOccasions = reviews
+      .filter(r => r.wouldWearAgain === false || r.feltLikeHer === false)
+      .map(r => r.session?.occasion)
+      .filter(Boolean);
+
+    const positiveMoods = reviews
+      .filter(r => r.wouldWearAgain && r.feltLikeHer)
+      .map(r => r.session?.currentMood)
+      .filter(Boolean);
+
+    const notes = reviews
+      .filter(r => r.additionalNotes)
+      .map(r => r.additionalNotes)
+      .slice(0, 3);
+
+    styleIntelligence = {
+      totalReviews: reviews.length,
+      positiveOccasions: [...new Set(positiveOccasions)],
+      negativeOccasions: [...new Set(negativeOccasions)],
+      positiveMoods: [...new Set(positiveMoods)],
+      recentNotes: notes,
+    };
+  }
+
   return Response.json({
     authenticated: true,
     customer: {
@@ -38,6 +80,7 @@ export async function loader({ request }) {
       lastStyleWords,
       lastBodyPref: customer.lastBodyPref,
       lastMode: customer.lastMode,
+      styleIntelligence,
     },
   }, { headers: CORS });
 }
