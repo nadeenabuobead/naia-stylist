@@ -54,13 +54,13 @@ ${closetSummary}
 
 Based on this wardrobe, provide a JSON response with exactly these fields:
 {
-  "stylePersonality": "2-3 word description of her style (e.g. Minimalist Chic, Edgy Urban, Romantic Feminine)",
-  "styleDescription": "One sentence describing her overall aesthetic",
-  "dominantColors": ["color1", "color2", "color3"],
-  "tooMuchOf": ["specific thing she has too many of, e.g. 'Black formal trousers'", "another"],
-  "repeats": ["pattern she repeats, e.g. 'Solid neutral bottoms'", "another"],
-  "missingPieces": ["specific piece that fits HER style, e.g. 'A structured leather jacket'", "another specific piece", "another"],
-  "buyNext": "One specific piece recommendation that would complete her wardrobe, fitting her exact style"
+"stylePersonality": "2-3 word description of their style (e.g. Minimalist Chic, Edgy Urban, Romantic Feminine)",
+"styleDescription": "One sentence describing their overall aesthetic using 'you/your' language, e.g. 'Your style blends...'",
+"dominantColors": ["color1", "color2", "color3"],
+"tooMuchOf": ["specific thing they have too many of, e.g. 'Black formal trousers'", "another"],
+"repeats": ["pattern they repeat, e.g. 'Solid neutral bottoms'", "another"],
+"missingPieces": ["specific piece that fits THEIR style, e.g. 'A structured leather jacket'", "another specific piece", "another"],
+"buyNext": "One specific piece recommendation that would complete their wardrobe, fitting their exact style, using 'you/your' language"
 }
 
 Be specific and style-aware. Don't recommend floral pieces for an edgy wardrobe. Don't recommend formal pieces for a casual wardrobe. Respond ONLY with the JSON object, no markdown.`;
