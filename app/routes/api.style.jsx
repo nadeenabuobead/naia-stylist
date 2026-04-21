@@ -68,9 +68,87 @@ export async function action({ request }) {
     }
 
     const result = data?.choices?.[0]?.message?.content?.trim() ||
-      buildFallback({ mood: safeMood, feeling: safeFeeling, closetItem, naiaPiece, outfit: finalOutfit });
+  buildFallback({ mood: safeMood, feeling: safeFeeling, closetItem, naiaPiece, outfit: finalOutfit });
 
-    return Response.json({ result });
+// Parse and save nAia pieces to DB
+try {
+  const { authenticateCustomer } = await import("../customer-auth.server.js");
+  const prisma = (await import("../db.server.js")).default;
+  const { customer } = await authenticateCustomer(request);
+  
+  if (customer) {
+    // Create styling session
+    const session = await prisma.stylingSession.create({
+      data: {
+        customerId: customer.id,
+        currentMood: safeMood || "",
+        desiredFeeling: safeFeeling || "",
+        occasion: safeEvent || "",
+        specificNeeds: result,
+        styleFrom: "NAIA",
+      },
+    });
+
+    // Parse nAia pieces from result
+    const ALL_PIECE_NAMES = [
+      "Sculptural Hybrid Coat", "Art Blouse", "Art Panel Tailored Blazer",
+      "Textured Art Maxi Skirt", "Wrap Cropped Top", "Printed Wrap Kimono Jacket",
+      "Art Collar Shirt", "Leather Midi Dress", "Asymmetrical Waist Pants", "Printed Straight Pants"
+    ];
+    const PIECE_IDS = {
+      "Sculptural Hybrid Coat": "7822708867114",
+      "Art Blouse": "7822708310058",
+      "Art Panel Tailored Blazer": "7822708113450",
+      "Textured Art Maxi Skirt": "7822708047914",
+      "Wrap Cropped Top": "7822707949610",
+      "Printed Wrap Kimono Jacket": "7822707589162",
+      "Art Collar Shirt": "7822707392554",
+      "Leather Midi Dress": "7822707130410",
+      "Asymmetrical Waist Pants": "7822706475050",
+      "Printed Straight Pants": "7822706016298",
+    };
+    const PIECE_IMAGES = {
+      "Sculptural Hybrid Coat": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/b7af3725-7048-4ead-8d04-d6fb42556eac.png",
+      "Art Blouse": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32674461-cac7-4699-aff1-74c435289333.png",
+      "Art Panel Tailored Blazer": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/a7b908bb-3079-4f39-93b8-e1a89435249a.png",
+      "Textured Art Maxi Skirt": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/6992350d-5695-4f28-8674-7747dfd1e680.png",
+      "Wrap Cropped Top": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3614927b-4685-4df3-aeff-b3d5a950cbd2.png",
+      "Printed Wrap Kimono Jacket": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/77d61b97-37da-4e57-8297-aa5207b35d07.png",
+      "Art Collar Shirt": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32fe2afb-b8ef-46d2-ae2c-b1adc81a1b0f.png",
+      "Leather Midi Dress": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/8a855f15-e5e9-4ef5-a7db-a7253e83a542.png",
+      "Asymmetrical Waist Pants": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/7d5d1e05-796a-45d9-b74a-4ddb0c9da3cf.png",
+      "Printed Straight Pants": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3b14fe8b-2c19-492e-82b1-44baaf3a3cc9.png",
+    };
+
+    const foundPieces = ALL_PIECE_NAMES.filter(name => result.includes(name));
+
+    if (foundPieces.length > 0) {
+      const suggestion = await prisma.outfitSuggestion.create({
+        data: {
+          sessionId: session.id,
+          whyThisWorks: result.match(/WHY THIS WORKS[\s\S]*?(?=\n[A-Z])/i)?.[0] || null,
+        },
+      });
+
+      await prisma.outfitItem.createMany({
+        data: foundPieces.map(name => ({
+          suggestionId: suggestion.id,
+          itemType: "TOP",
+          shopifyProductId: PIECE_IDS[name],
+          productTitle: name,
+          productImageUrl: PIECE_IMAGES[name],
+          productUrl: `https://naiabynadine.com/products/${name.toLowerCase().replace(/ /g, "-")}`,
+        })),
+      });
+    }
+
+    return Response.json({ result, sessionId: session.id });
+  }
+} catch (err) {
+  console.error("DB save error:", err);
+}
+
+return Response.json({ result });
 
   } catch (error) {
     return Response.json({
