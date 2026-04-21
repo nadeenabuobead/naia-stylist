@@ -63,7 +63,12 @@ export async function action({ request }) {
       },
     });
 
-    return Response.json({ ok: true }, { headers: CORS });
+    const sessions = await prisma.stylingSession.findMany({
+  where: { customerId: customer.id },
+  orderBy: { createdAt: "desc" },
+  take: 1,
+});
+return Response.json({ ok: true, entry: { id: sessions[0]?.id } }, { headers: CORS });
   } catch (err) {
     console.error("History save error:", err);
     return Response.json({ error: "Failed to save" }, { status: 500, headers: CORS });
