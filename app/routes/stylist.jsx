@@ -148,6 +148,8 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
   const [feltLikeMe, setFeltLikeMe] = useState(null);
   const [wouldWearAgain, setWouldWearAgain] = useState(null);
   const [physicallyComfortable, setPhysicallyComfortable] = useState(null);
+  const [feltMoodShift, setFeltMoodShift] = useState(null);
+  const [notes, setNotes] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -173,6 +175,7 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
         headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
         body: JSON.stringify({
           historyId, confidence, feltLikeMe, wouldWearAgain, physicallyComfortable,
+          feltMoodShift, notes,
           mood, feeling, event,
           styleWords: Array.isArray(styleWords) ? JSON.stringify(styleWords) : styleWords,
         }),
@@ -245,6 +248,25 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
           <button onClick={() => setPhysicallyComfortable(false)} style={boolBtn(false, physicallyComfortable)}>No</button>
         </div>
       </div>
+      {/* Mood shift */}
+<div style={{ marginBottom: "16px" }}>
+  <div style={{ fontSize: "14px", marginBottom: "8px", fontStyle: "italic" }}>Did you actually feel {feeling}?</div>
+  <div style={{ display: "flex", gap: "8px" }}>
+    <button onClick={() => setFeltMoodShift(true)} style={boolBtn(true, feltMoodShift)}>Yes, I felt it</button>
+    <button onClick={() => setFeltMoodShift(false)} style={boolBtn(false, feltMoodShift)}>Not really</button>
+  </div>
+</div>
+
+{/* Notes */}
+<div style={{ marginBottom: "20px" }}>
+  <div style={{ fontSize: "14px", marginBottom: "8px", fontStyle: "italic" }}>Anything else? (optional)</div>
+  <textarea
+    value={notes}
+    onChange={(e) => setNotes(e.target.value)}
+    placeholder="What worked, what didn't, how you felt..."
+    style={{ width: "100%", padding: "10px", border: "1px solid #d4cfc9", borderRadius: "2px", fontSize: "13px", fontFamily: '"Cormorant Garamond", Georgia, serif', resize: "vertical", minHeight: "80px", background: "#faf9f7", boxSizing: "border-box" }}
+  />
+</div>
 
       <button onClick={submit} disabled={!confidence || submitting} style={{
         padding: "12px 28px", background: confidence ? "#1a1816" : "#d4cfc9",
