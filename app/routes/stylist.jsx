@@ -154,143 +154,301 @@ export async function loader() {
 
 // ─── Confidence Rating Component ───
 function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styleWords, onRated }) {
-  const [confidence, setConfidence] = useState(0);
-  const [feltLikeMe, setFeltLikeMe] = useState(null);
-  const [wouldWearAgain, setWouldWearAgain] = useState(null);
-  const [physicallyComfortable, setPhysicallyComfortable] = useState(null);
-  const [feltMoodShift, setFeltMoodShift] = useState(null);
-  const [notes, setNotes] = useState("");
+  const [overallReaction, setOverallReaction] = useState(0);
+  const [feltLikeMe, setFeltLikeMe] = useState("");
+  const [desiredFeelingAchieved, setDesiredFeelingAchieved] = useState("");
+  const [wouldWearAgain, setWouldWearAgain] = useState("");
+  const [physicalComfort, setPhysicalComfort] = useState("");
+  const [workedTags, setWorkedTags] = useState([]);
+  const [didntWorkTags, setDidntWorkTags] = useState("");
+  const [additionalNotes, setAdditionalNotes] = useState("");
   const [submitted, setSubmitted] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
 
-  const boolBtn = (val, current, setter, label) => ({
-    padding: "8px 16px",
-    background: current === val ? "#1a1816" : "transparent",
-    color: current === val ? "#f5f2ee" : "#1a1816",
-    border: "1px solid #1a1816",
-    borderRadius: "2px",
-    fontSize: "12px",
-    cursor: "pointer",
-    fontFamily: '"Cormorant Garamond", Georgia, serif',
-    letterSpacing: "0.1em",
-    transition: "all 0.2s",
-  });
+  const WORKED_OPTIONS = [
+    "Felt like me", "Helped me feel more confident", "Right for the occasion",
+    "Flattering silhouette", "Comfortable", "I liked the proportions",
+    "I liked the colors", "Felt polished", "Felt attractive", "Easy to imagine wearing"
+  ];
 
-  const submit = async () => {
-    if (!confidence || !historyId) return;
-    setSubmitting(true);
+  const DIDNT_WORK_OPTIONS = [
+    "Didn't feel like me", "Missed the feeling I wanted", "Wrong for the occasion",
+    "Too exposed", "Too plain", "Too much", "Too structured", "Too loose",
+    "Too clingy", "Uncomfortable", "Hard to style in real life"
+  ];
+
+  const toggleWorkedTag = (tag) => {
+    setWorkedTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
+  };
+
+  const toggleDidntWorkTag = (tag) => {
+    setDidntWorkTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
+  };
+
+  const canSubmit = overallReaction > 0 && feltLikeMe && desiredFeelingAchieved && wouldWearAgain && physicalComfort;
+
+  const submitRating = async () => {
+    if (!canSubmit) return;
+
     try {
-      await fetch("/api/outfit-rating", {
+      const res = await fetch("/api/outfit-rating", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
+        headers: { "Content-Type": "application/json", ...(customerToken ? { "Authorization": `Bearer ${customerToken}` } : {}) },
         body: JSON.stringify({
-          historyId, confidence, feltLikeMe, wouldWearAgain, physicallyComfortable,
-          feltMoodShift, notes,
+          historyId,
+          overallReaction,
+          feltLikeMe,
+          desiredFeelingAchieved,
+          wouldWearAgain,
+          physicalComfort,
+          workedTags,
+          didntWorkTags,
+          additionalNotes,
           mood, feeling, event,
           styleWords: Array.isArray(styleWords) ? JSON.stringify(styleWords) : styleWords,
         }),
       });
-      setSubmitted(true);
-      if (onRated) onRated({ confidence, feltLikeMe, wouldWearAgain, physicallyComfortable });
-    } catch {}
-    setSubmitting(false);
+      if (res.ok) {
+        setSubmitted(true);
+        if (onRated) onRated();
+      }
+    } catch (err) {
+      console.error("Rating save error:", err);
+    }
   };
 
   if (submitted) {
     return (
-      <div style={{ padding: "24px", background: "#eee9e2", borderRadius: "2px", textAlign: "center", margin: "24px 0" }}>
-        <p style={{ fontSize: "18px", fontStyle: "italic", margin: "0 0 4px" }}>Thank you for rating this look</p>
-        <p style={{ fontSize: "13px", color: "#8a7f75", margin: 0 }}>nAia is learning your confidence patterns</p>
+      <div style={{ padding: "24px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" }}>
+        <p style={{ fontSize: "15px", margin: 0 }}>✓ Feedback saved</p>
       </div>
     );
   }
 
   return (
-    <div style={{ padding: "24px", background: "#eee9e2", borderRadius: "2px", margin: "24px 0" }}>
-      <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "16px" }}>
-        How does this look make you feel?
-      </div>
+    <div style={{ padding: "28px", background: "#f5f2ee", borderRadius: "2px" }}>
+      <p style={{ fontSize: "18px", fontWeight: 500, marginBottom: "24px" }}>How did this look land for you?</p>
 
-      {/* Confidence 1-5 */}
-      <div style={{ marginBottom: "20px" }}>
-        <div style={{ fontSize: "14px", marginBottom: "10px", fontStyle: "italic" }}>Confidence level</div>
-        <div style={{ display: "flex", gap: "8px" }}>
+      {/* Overall reaction */}
+      <div style={{ marginBottom: "24px" }}>
+        <p style={{ fontSize: "14px", marginBottom: "12px", color: "#4a4540" }}>Overall reaction</p>
+        <div style={{ display: "flex", gap: "12px" }}>
           {[1, 2, 3, 4, 5].map(n => (
-            <button key={n} onClick={() => setConfidence(n)} style={{
-              width: "44px", height: "44px", borderRadius: "50%",
-              background: confidence >= n ? "#1a1816" : "transparent",
-              color: confidence >= n ? "#f5f2ee" : "#1a1816",
-              border: "1.5px solid #1a1816",
-              fontSize: "16px", cursor: "pointer",
-              fontFamily: '"Cormorant Garamond", Georgia, serif',
-              transition: "all 0.2s",
-            }}>{n}</button>
+            <button
+              key={n}
+              onClick={() => setOverallReaction(n)}
+              style={{
+                flex: 1,
+                padding: "12px",
+                background: overallReaction === n ? "#1a1816" : "white",
+                color: overallReaction === n ? "white" : "#1a1816",
+                border: "1px solid #d4cfc9",
+                borderRadius: "2px",
+                cursor: "pointer",
+                fontSize: "16px",
+                fontWeight: 500,
+              }}
+            >
+              {n}
+            </button>
           ))}
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#8a7f75", marginTop: "6px", maxWidth: "228px" }}>
-          <span>Not confident</span><span>Very confident</span>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", fontSize: "12px", color: "#8a7f75" }}>
+          <span>Not for me</span>
+          <span>Very me</span>
         </div>
       </div>
 
       {/* Felt like me */}
-      <div style={{ marginBottom: "16px" }}>
-        <div style={{ fontSize: "14px", marginBottom: "8px", fontStyle: "italic" }}>Does this feel like you?</div>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button onClick={() => setFeltLikeMe(true)} style={boolBtn(true, feltLikeMe)}>Yes, this is me</button>
-          <button onClick={() => setFeltLikeMe(false)} style={boolBtn(false, feltLikeMe)}>Not quite</button>
+      <div style={{ marginBottom: "24px" }}>
+        <p style={{ fontSize: "14px", marginBottom: "12px", color: "#4a4540" }}>Did this feel like you?</p>
+        <div style={{ display: "flex", gap: "10px" }}>
+          {["Yes", "Somewhat", "No"].map(opt => (
+            <button
+              key={opt}
+              onClick={() => setFeltLikeMe(opt)}
+              style={{
+                flex: 1,
+                padding: "10px",
+                background: feltLikeMe === opt ? "#1a1816" : "white",
+                color: feltLikeMe === opt ? "white" : "#1a1816",
+                border: "1px solid #d4cfc9",
+                borderRadius: "2px",
+                cursor: "pointer",
+                fontSize: "14px",
+              }}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Desired feeling achieved */}
+      <div style={{ marginBottom: "24px" }}>
+        <p style={{ fontSize: "14px", marginBottom: "12px", color: "#4a4540" }}>Did it create the feeling you wanted?</p>
+        <div style={{ display: "flex", gap: "10px" }}>
+          {["Yes", "Partly", "No"].map(opt => (
+            <button
+              key={opt}
+              onClick={() => setDesiredFeelingAchieved(opt)}
+              style={{
+                flex: 1,
+                padding: "10px",
+                background: desiredFeelingAchieved === opt ? "#1a1816" : "white",
+                color: desiredFeelingAchieved === opt ? "white" : "#1a1816",
+                border: "1px solid #d4cfc9",
+                borderRadius: "2px",
+                cursor: "pointer",
+                fontSize: "14px",
+              }}
+            >
+              {opt}
+            </button>
+          ))}
         </div>
       </div>
 
       {/* Would wear again */}
-      <div style={{ marginBottom: "16px" }}>
-        <div style={{ fontSize: "14px", marginBottom: "8px", fontStyle: "italic" }}>Would you wear this again?</div>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button onClick={() => setWouldWearAgain(true)} style={boolBtn(true, wouldWearAgain)}>Definitely</button>
-          <button onClick={() => setWouldWearAgain(false)} style={boolBtn(false, wouldWearAgain)}>Probably not</button>
+      <div style={{ marginBottom: "24px" }}>
+        <p style={{ fontSize: "14px", marginBottom: "12px", color: "#4a4540" }}>Would you actually wear this?</p>
+        <div style={{ display: "flex", gap: "10px" }}>
+          {["Definitely", "Maybe", "Probably not"].map(opt => (
+            <button
+              key={opt}
+              onClick={() => setWouldWearAgain(opt)}
+              style={{
+                flex: 1,
+                padding: "10px",
+                background: wouldWearAgain === opt ? "#1a1816" : "white",
+                color: wouldWearAgain === opt ? "white" : "#1a1816",
+                border: "1px solid #d4cfc9",
+                borderRadius: "2px",
+                cursor: "pointer",
+                fontSize: "14px",
+              }}
+            >
+              {opt}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Physically comfortable */}
-      <div style={{ marginBottom: "20px" }}>
-        <div style={{ fontSize: "14px", marginBottom: "8px", fontStyle: "italic" }}>Would this feel physically comfortable?</div>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button onClick={() => setPhysicallyComfortable(true)} style={boolBtn(true, physicallyComfortable)}>Yes</button>
-          <button onClick={() => setPhysicallyComfortable(false)} style={boolBtn(false, physicallyComfortable)}>No</button>
+      {/* Physical comfort */}
+      <div style={{ marginBottom: "24px" }}>
+        <p style={{ fontSize: "14px", marginBottom: "12px", color: "#4a4540" }}>How did it feel on your body?</p>
+        <div style={{ display: "flex", gap: "10px" }}>
+          {["Comfortable", "Mostly comfortable", "Not comfortable"].map(opt => (
+            <button
+              key={opt}
+              onClick={() => setPhysicalComfort(opt)}
+              style={{
+                flex: 1,
+                padding: "10px",
+                background: physicalComfort === opt ? "#1a1816" : "white",
+                color: physicalComfort === opt ? "white" : "#1a1816",
+                border: "1px solid #d4cfc9",
+                borderRadius: "2px",
+                cursor: "pointer",
+                fontSize: "14px",
+              }}
+            >
+              {opt}
+            </button>
+          ))}
         </div>
       </div>
-      {/* Mood shift */}
-<div style={{ marginBottom: "16px" }}>
-  <div style={{ fontSize: "14px", marginBottom: "8px", fontStyle: "italic" }}>Did you actually feel {feeling}?</div>
-  <div style={{ display: "flex", gap: "8px" }}>
-    <button onClick={() => setFeltMoodShift(true)} style={boolBtn(true, feltMoodShift)}>Yes, I felt it</button>
-    <button onClick={() => setFeltMoodShift(false)} style={boolBtn(false, feltMoodShift)}>Not really</button>
-  </div>
-</div>
 
-{/* Notes */}
-<div style={{ marginBottom: "20px" }}>
-  <div style={{ fontSize: "14px", marginBottom: "8px", fontStyle: "italic" }}>Anything else? (optional)</div>
-  <textarea
-    value={notes}
-    onChange={(e) => setNotes(e.target.value)}
-    placeholder="What worked, what didn't, how you felt..."
-    style={{ width: "100%", padding: "10px", border: "1px solid #d4cfc9", borderRadius: "2px", fontSize: "13px", fontFamily: '"Cormorant Garamond", Georgia, serif', resize: "vertical", minHeight: "80px", background: "#faf9f7", boxSizing: "border-box" }}
-  />
-</div>
+      {/* What worked */}
+      <div style={{ marginBottom: "24px" }}>
+        <p style={{ fontSize: "14px", marginBottom: "12px", color: "#4a4540" }}>What worked?</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+          {WORKED_OPTIONS.map(tag => (
+            <button
+              key={tag}
+              onClick={() => toggleWorkedTag(tag)}
+              style={{
+                padding: "8px 14px",
+                background: workedTags.includes(tag) ? "#1a1816" : "white",
+                color: workedTags.includes(tag) ? "white" : "#1a1816",
+                border: "1px solid #d4cfc9",
+                borderRadius: "2px",
+                cursor: "pointer",
+                fontSize: "13px",
+              }}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      <button onClick={submit} disabled={!confidence || submitting} style={{
-        padding: "12px 28px", background: confidence ? "#1a1816" : "#d4cfc9",
-        color: "#f5f2ee", border: "none", borderRadius: "2px",
-        fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase",
-        cursor: confidence ? "pointer" : "default",
-        fontFamily: '"Cormorant Garamond", Georgia, serif',
-        opacity: submitting ? 0.6 : 1,
-      }}>
-        {submitting ? "Saving..." : "Save rating"}
+      {/* What didn't work */}
+      <div style={{ marginBottom: "24px" }}>
+        <p style={{ fontSize: "14px", marginBottom: "12px", color: "#4a4540" }}>What didn't work?</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+          {DIDNT_WORK_OPTIONS.map(tag => (
+            <button
+              key={tag}
+              onClick={() => toggleDidntWorkTag(tag)}
+              style={{
+                padding: "8px 14px",
+                background: didntWorkTags.includes(tag) ? "#1a1816" : "white",
+                color: didntWorkTags.includes(tag) ? "white" : "#1a1816",
+                border: "1px solid #d4cfc9",
+                borderRadius: "2px",
+                cursor: "pointer",
+                fontSize: "13px",
+              }}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Additional notes */}
+      <div style={{ marginBottom: "24px" }}>
+        <p style={{ fontSize: "14px", marginBottom: "12px", color: "#4a4540" }}>Anything else?</p>
+        <textarea
+          value={additionalNotes}
+          onChange={(e) => setAdditionalNotes(e.target.value)}
+          placeholder="What stood out, what felt off, or what you'd change"
+          style={{
+            width: "100%",
+            padding: "12px",
+            border: "1px solid #d4cfc9",
+            borderRadius: "2px",
+            fontSize: "14px",
+            fontFamily: "inherit",
+            minHeight: "80px",
+            resize: "vertical",
+          }}
+        />
+      </div>
+
+      <button
+        onClick={submitRating}
+        disabled={!canSubmit}
+        style={{
+          width: "100%",
+          padding: "14px",
+          background: canSubmit ? "#1a1816" : "#d4cfc9",
+          color: "white",
+          border: "none",
+          borderRadius: "2px",
+          cursor: canSubmit ? "pointer" : "not-allowed",
+          fontSize: "13px",
+          letterSpacing: "0.15em",
+          textTransform: "uppercase",
+          fontFamily: '"Cormorant Garamond", Georgia, serif',
+        }}
+      >
+        Save feedback
       </button>
     </div>
   );
 }
+
 
 // ─── Confidence Dashboard Component ───
 function ConfidenceDashboard({ customerToken }) {
