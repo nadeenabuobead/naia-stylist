@@ -172,10 +172,10 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
   ];
 
   const DIDNT_WORK_OPTIONS = [
-  "Everything worked",
-  "Didn't feel like me", "Missed the feeling I wanted", "Wrong for the occasion",
-  "Too exposed", "Too plain", "Too much", "Too structured", "Too loose",
-  "Too clingy", "Uncomfortable", "Hard to style in real life"
+  "Didn't feel like me", "Didn't create the feeling I wanted", "Wrong for the occasion",
+  "Too exposed", "Too plain", "Felt like too much for me", "Too structured", "Lacked shape",
+  "Too clingy", "Uncomfortable", "Hard to wear in real life"
+];
 ];
 
   const toggleWorkedTag = (tag) => {
@@ -336,7 +336,7 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
 
       {/* Would wear again */}
       <div style={{ marginBottom: "24px" }}>
-        <p style={{ fontSize: "14px", marginBottom: "12px", color: "#4a4540" }}>Would you actually wear this?</p>
+        <p style={{ fontSize: "14px", marginBottom: "12px", color: "#4a4540" }}>Would you wear this in real life?</p>
         <div style={{ display: "flex", gap: "10px" }}>
           {["Definitely", "Maybe", "Probably not"].map(opt => (
             <button
@@ -410,7 +410,7 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
 
       {/* What didn't work */}
       <div style={{ marginBottom: "24px" }}>
-        <p style={{ fontSize: "14px", marginBottom: "12px", color: "#4a4540" }}>What didn't work?</p>
+        <p style={{ fontSize: "14px", marginBottom: "12px", color: "#4a4540" }}>What, if anything, didn't work?</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
           {DIDNT_WORK_OPTIONS.map(tag => (
             <button
