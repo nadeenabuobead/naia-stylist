@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 
-const STYLE_WORDS = [
-  "Minimal", "Bold", "Structured", "Fluid", "Editorial",
-  "Romantic", "Sharp", "Earthy", "Monochrome", "Layered",
-  "Sculptural", "Effortless", "Dramatic", "Refined", "Raw"
+const VIBES = [
+  "Understated", "Commanding", "Playful", "Mysterious", "Romantic", "Powerful", "Invisible", "Seen"
+];
+
+const STYLE_DNA = [
+  "Old money", "Streetwear", "Avant-garde", "Minimalist", "Feminine", "Edgy", "Classic", "Artistic"
 ];
 
 const BODY_PREFS = [
@@ -397,6 +399,8 @@ export default function Stylist() {
   const [feeling, setFeeling] = useState("");
   const [event, setEvent] = useState("");
   const [styleWords, setStyleWords] = useState([]);
+  const [vibe, setVibe] = useState("");
+  const [styleDNA, setStyleDNA] = useState("");
   const [bodyPref, setBodyPref] = useState("");
   const [mode, setMode] = useState("");
   const [closet, setCloset] = useState([]);
@@ -572,7 +576,7 @@ export default function Stylist() {
     const outfit = outfitParts.join(" + ");
     try {
       const res = await fetch("/api/style", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, outfit, mood, feeling, event, styleWords, bodyPref, styleIntelligence: customer?.styleIntelligence, closetItem: itemsToStyle[0] || null, closetItems: itemsToStyle, naiaPiece: naiaPiece ? { name: naiaPiece.name || naiaPiece.title, category: naiaPiece.category || naiaPiece.type || "", stylingNotes: naiaPiece.stylingNotes || "", moodMatch: naiaPiece.moodMatch || "", stylingRole: naiaPiece.stylingRole || "", statementLevel: naiaPiece.statementLevel || "", occasion: naiaPiece.occasion || "", sihouette: naiaPiece.sihouette || "" } : null, closet: closet.map(i => ({ name: i.name, category: i.category })) }),
+        body: JSON.stringify({ mode, outfit, mood, feeling, event, styleWords, vibe, styleDNA, bodyPref, styleIntelligence: customer?.styleIntelligence, closetItem: itemsToStyle[0] || null, closetItems: itemsToStyle, naiaPiece: naiaPiece ? { name: naiaPiece.name || naiaPiece.title, category: naiaPiece.category || naiaPiece.type || "", stylingNotes: naiaPiece.stylingNotes || "", moodMatch: naiaPiece.moodMatch || "", stylingRole: naiaPiece.stylingRole || "", statementLevel: naiaPiece.statementLevel || "", occasion: naiaPiece.occasion || "", sihouette: naiaPiece.sihouette || "" } : null, closet: closet.map(i => ({ name: i.name, category: i.category })) }),
       });
       const data = await res.json();
       const result = data.result || data.error || "Something went wrong.";
@@ -802,7 +806,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
 
         {/* ─── Step dots ─── */}
         {step >= 1 && step <= 8 && !showHistory && !showWishlist && !showAccount && !showConfidence && (
-          <div style={s.stepIndicator}>{Array.from({ length: 8 }).map((_, i) => (<div key={i} style={s.dot(step === i + 1, step > i + 1)} />))}</div>
+          <div style={s.stepIndicator}>{Array.from({ length: 9 }).map((_, i) => (<div key={i} style={s.dot(step === i + 1, step > i + 1)} />))}</div>
         )}
 
         {/* ─── Step 1 ─── */}
@@ -818,22 +822,86 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
             )}
             <div style={s.title}>Step 1 of 7</div>
             <p style={s.bigQ}>How are you feeling right now?</p>
-            <input style={s.input} placeholder="overwhelmed, tired, excited..." value={mood} onChange={e => setMood(e.target.value)} autoFocus />
+            <input style={s.input} placeholder="e.g. tired, anxious, excited..." value={mood} onChange={e => setMood(e.target.value)} autoFocus />
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "16px" }}>
+              {["Tired", "Anxious", "Excited", "Confident", "Overwhelmed", "Sad", "Energized", "Calm", "Stressed", "Happy"].map(m => (
+                 <button key={m} style={s.chip(mood === m.toLowerCase())} onClick={() => setMood(m.toLowerCase())}>{m}</button>
+              ))}
+          </div>
             <div style={{ marginTop: "32px" }}><button style={s.btn} onClick={() => mood.trim() && setStep(2)}>Continue</button></div>
           </div>
         )}
 
-        {step === 2 && (<div><div style={s.title}>Step 2 of 7</div><p style={s.bigQ}>How do you want to feel?</p><input style={s.input} placeholder="powerful, calm, seen, soft..." value={feeling} onChange={e => setFeeling(e.target.value)} autoFocus /><div style={{ marginTop: "32px", display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(1)}>Back</button><button style={s.btn} onClick={() => feeling.trim() && setStep(3)}>Continue</button></div></div>)}
+        {step === 2 && (
+  <div>
+    <div style={s.title}>Step 2 of 7</div>
+    <p style={s.bigQ}>How do you want to feel?</p>
+    <input style={s.input} placeholder="e.g. powerful, calm, confident..." value={feeling} onChange={e => setFeeling(e.target.value)} autoFocus />
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "16px" }}>
+      {["Powerful", "Calm", "Seen", "Soft", "Bold", "Elegant", "Effortless", "Playful", "Mysterious", "Confident"].map(f => (
+        <button key={f} style={s.chip(feeling === f.toLowerCase())} onClick={() => setFeeling(f.toLowerCase())}>{f}</button>
+      ))}
+    </div>
+    <div style={{ marginTop: "32px", display: "flex", gap: "12px" }}>
+      <button style={s.outlineBtn} onClick={() => setStep(1)}>Back</button>
+      <button style={s.btn} onClick={() => feeling.trim() && setStep(3)}>Continue</button>
+    </div>
+  </div>
+)}
 
-        {step === 3 && (<div><div style={s.title}>Step 3 of 7</div><p style={s.bigQ}>What are you dressing for?</p><div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>{["Casual", "Dinner", "Party", "Formal", "Work", "Date", "Travel"].map(e => (<button key={e} style={s.chip(event === e.toLowerCase())} onClick={() => setEvent(e.toLowerCase())}>{e}</button>))}</div><div style={{ marginTop: "32px", display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(2)}>Back</button><button style={s.btn} onClick={() => event && setStep(4)}>Continue</button></div></div>)}
+        {step === 3 && (
+  <div>
+    <div style={s.title}>Step 3 of 7</div>
+    <p style={s.bigQ}>What are you dressing for?</p>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
+      {["Casual", "Dinner", "Party", "Formal", "Work", "Date", "Travel", "Brunch", "Wedding Guest", "Night Out"].map(e => (
+        <button key={e} style={s.chip(event === e.toLowerCase())} onClick={() => setEvent(e.toLowerCase())}>{e}</button>
+      ))}
+    </div>
+    <div style={{ marginTop: "32px", display: "flex", gap: "12px" }}>
+      <button style={s.outlineBtn} onClick={() => setStep(2)}>Back</button>
+      <button style={s.btn} onClick={() => event && setStep(4)}>Continue</button>
+    </div>
+  </div>
+)}
 
-        {step === 4 && (<div><div style={s.title}>Step 4 of 7</div><p style={s.bigQ}>Pick up to 3 words that describe your style.</p><div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>{STYLE_WORDS.map(w => (<button key={w} style={s.chip(styleWords.includes(w))} onClick={() => toggleStyleWord(w)}>{w}</button>))}</div><div style={{ marginTop: "32px", display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(3)}>Back</button><button style={s.btn} onClick={() => setStep(5)}>Continue</button></div></div>)}
+        {step === 4 && (
+  <div>
+    <div style={s.title}>Step 4 of 8</div>
+    <p style={s.bigQ}>What's your vibe today?</p>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
+      {VIBES.map(v => (
+        <button key={v} style={s.chip(vibe === v)} onClick={() => setVibe(v)}>{v}</button>
+      ))}
+    </div>
+    <div style={{ marginTop: "32px", display: "flex", gap: "12px" }}>
+      <button style={s.outlineBtn} onClick={() => setStep(3)}>Back</button>
+      <button style={s.btn} onClick={() => setStep(5)}>Continue</button>
+    </div>
+  </div>
+)}
 
-        {step === 5 && (<div><div style={s.title}>Step 5 of 7</div><p style={s.bigQ}>Any fit or body preferences?</p><div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>{BODY_PREFS.map(b => (<button key={b} style={s.chip(bodyPref === b)} onClick={() => setBodyPref(b)}>{b}</button>))}</div><div style={{ marginTop: "32px", display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(4)}>Back</button><button style={s.btn} onClick={() => setStep(6)}>Continue</button></div></div>)}
+{step === 5 && (
+  <div>
+    <div style={s.title}>Step 5 of 8</div>
+    <p style={s.bigQ}>What's your style DNA?</p>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
+      {STYLE_DNA.map(d => (
+        <button key={d} style={s.chip(styleDNA === d)} onClick={() => setStyleDNA(d)}>{d}</button>
+      ))}
+    </div>
+    <div style={{ marginTop: "32px", display: "flex", gap: "12px" }}>
+      <button style={s.outlineBtn} onClick={() => setStep(4)}>Back</button>
+      <button style={s.btn} onClick={() => setStep(6)}>Continue</button>
+    </div>
+  </div>
+)}
 
-        {step === 6 && (<div><div style={s.title}>Step 6 of 7</div><p style={s.bigQ}>What would you like to do?</p><div onClick={() => setMode("recommend_naia")} style={s.modeCard(mode === "recommend_naia")}><div style={{ fontSize: "17px", fontWeight: 500, marginBottom: "4px" }}>Find nAia pieces for what I own</div><div style={{ fontSize: "14px", opacity: 0.7 }}>Upload pieces from your closet and we'll recommend the perfect nAia match</div></div><div onClick={() => setMode("closet_only")} style={s.modeCard(mode === "closet_only")}><div style={{ fontSize: "17px", fontWeight: 500, marginBottom: "4px" }}>Style my closet pieces together</div><div style={{ fontSize: "14px", opacity: 0.7 }}>We'll pick the best combination from your closet based on your mood</div></div><div style={{ marginTop: "24px", display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(5)}>Back</button><button style={s.btn} onClick={() => mode && setStep(7)}>Continue</button></div></div>)}
+        {step === 6 && (<div><div style={s.title}>Step 5 of 7</div><p style={s.bigQ}>Any fit or body preferences?</p><div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>{BODY_PREFS.map(b => (<button key={b} style={s.chip(bodyPref === b)} onClick={() => setBodyPref(b)}>{b}</button>))}</div><div style={{ marginTop: "32px", display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(5)}>Back</button><button style={s.btn} onClick={() => setStep(7)}>Continue</button></div></div>)}
 
-        {step === 7 && (
+        {step === 7 && (<div><div style={s.title}>Step 6 of 7</div><p style={s.bigQ}>What would you like to do?</p><div onClick={() => setMode("recommend_naia")} style={s.modeCard(mode === "recommend_naia")}><div style={{ fontSize: "17px", fontWeight: 500, marginBottom: "4px" }}>Find nAia pieces for what I own</div><div style={{ fontSize: "14px", opacity: 0.7 }}>Upload pieces from your closet and we'll recommend the perfect nAia match</div></div><div onClick={() => setMode("closet_only")} style={s.modeCard(mode === "closet_only")}><div style={{ fontSize: "17px", fontWeight: 500, marginBottom: "4px" }}>Style my closet pieces together</div><div style={{ fontSize: "14px", opacity: 0.7 }}>We'll pick the best combination from your closet based on your mood</div></div><div style={{ marginTop: "24px", display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(8)}>Back</button><button style={s.btn} onClick={() => mode && setStep(7)}>Continue</button></div></div>)}
+
+        {step === 8 && (
           <div>
             <div style={s.title}>Step 7 of 7</div>
             <p style={s.bigQ}>{mode === "closet_only" ? "Add your pieces and we'll choose the best combination" : "Pick pieces from your closet"}</p>
