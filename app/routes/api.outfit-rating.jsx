@@ -32,8 +32,7 @@ export async function action({ request }) {
     return Response.json({ error: "Not authenticated" }, { status: 401, headers: CORS });
   }
   const body = await request.json();
-  const { historyId, confidence, feltLikeMe, wouldWearAgain, physicallyComfortable, feltMoodShift, notes, mood, feeling, event } = body;
-
+  const { historyId, overallReaction, feltLikeMe, desiredFeelingAchieved, wouldWearAgain, physicalComfort, workedTags, didntWorkTags, additionalNotes, mood, feeling, event, styleWords } = body;
   if (!historyId || confidence === undefined) {
     return Response.json({ error: "historyId and confidence required" }, { status: 400, headers: CORS });
   }
@@ -48,22 +47,28 @@ export async function action({ request }) {
       review = await prisma.postOutfitReview.update({
         where: { sessionId: historyId },
         data: {
-          overallFeeling: Number(confidence),
-          feltLikeHer: feltLikeMe ?? null,
-          wouldWearAgain: wouldWearAgain ?? null,
-          additionalNotes: notes || null,
-        },
+  overallFeeling: Number(overallReaction),
+  feltLikeHer: feltLikeMe ?? null,
+  desiredFeelingAchieved: desiredFeelingAchieved ?? null,
+  wouldWearAgain: wouldWearAgain ?? null,
+  physicallyComfortable: physicalComfort ?? null,
+  workedTags: workedTags ?? null,
+  didntWorkTags: didntWorkTags ?? null,
+  additionalNotes: additionalNotes || null,
+},
       });
     } else {
       review = await prisma.postOutfitReview.create({
         data: {
-          customerId: customer.id,
-          sessionId: historyId,
-          overallFeeling: Number(confidence),
-          feltLikeHer: feltLikeMe ?? null,
-          wouldWearAgain: wouldWearAgain ?? null,
-          additionalNotes: notes || null,
-        },
+  overallFeeling: Number(overallReaction),
+  feltLikeHer: feltLikeMe ?? null,
+  desiredFeelingAchieved: desiredFeelingAchieved ?? null,
+  wouldWearAgain: wouldWearAgain ?? null,
+  physicallyComfortable: physicalComfort ?? null,
+  workedTags: workedTags ?? null,
+  didntWorkTags: didntWorkTags ?? null,
+  additionalNotes: additionalNotes || null,
+},
       });
     }
     return Response.json({ rating: review }, { headers: CORS });
