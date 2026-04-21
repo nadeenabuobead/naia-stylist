@@ -408,7 +408,7 @@ export default function Stylist() {
   const [event, setEvent] = useState("");
   const [styleWords, setStyleWords] = useState([]);
   const [vibe, setVibe] = useState("");
-  const [styleDNA, setStyleDNA] = useState("");
+  const [styleDNA, setStyleDNA] = useState([]);
   const [bodyPref, setBodyPref] = useState("");
   const [mode, setMode] = useState("");
   const [closet, setCloset] = useState([]);
@@ -813,8 +813,8 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
         )}
 
         {/* ─── Step dots ─── */}
-        {step >= 1 && step <= 8 && !showHistory && !showWishlist && !showAccount && !showConfidence && (
-          <div style={s.stepIndicator}>{Array.from({ length: 9 }).map((_, i) => (<div key={i} style={s.dot(step === i + 1, step > i + 1)} />))}</div>
+        {step >= 1 && step <= 7 && !showHistory && !showWishlist && !showAccount && !showConfidence && (
+          <div style={s.stepIndicator}>{Array.from({ length: 7 }).map((_, i) => (<div key={i} style={s.dot(step === i + 1, step > i + 1)} />))}</div>
         )}
 
        {/* ─── Step 1 ─── */}
@@ -828,8 +828,9 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
         <p style={{ fontSize: "12px", color: "#8a7f75", margin: "12px 0 0" }}>or start fresh below</p>
       </div>
     )}
-    <div style={s.title}>Step 1 of 8</div>
+    <div style={s.title}>Step 1 of 7</div>
     <p style={s.bigQ}>How are you feeling right now?</p>
+    <input style={s.input} placeholder="e.g. tired, overwhelmed..." value={mood} onChange={e => setMood(e.target.value)} autoFocus />
     <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "16px" }}>
       {VIBES.map(m => (
         <button key={m} style={s.chip(mood === m.toLowerCase())} onClick={() => setMood(m.toLowerCase())}>{m}</button>
@@ -838,7 +839,9 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
     <div style={{ marginTop: "32px" }}><button style={s.btn} onClick={() => mood.trim() && setStep(2)}>Continue</button></div>
   </div>
 )}
-        {step === 2 && (
+
+{/* ─── Step 2 ─── */}
+{step === 2 && (
   <div>
     <div style={s.title}>Step 2 of 7</div>
     <p style={s.bigQ}>How do you want to feel?</p>
@@ -855,7 +858,8 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
   </div>
 )}
 
-        {step === 3 && (
+{/* ─── Step 3 ─── */}
+{step === 3 && (
   <div>
     <div style={s.title}>Step 3 of 7</div>
     <p style={s.bigQ}>What are you dressing for?</p>
@@ -871,29 +875,37 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
   </div>
 )}
 
-        {step === 4 && (
+{/* ─── Step 4 ─── */}
+{step === 4 && (
   <div>
-    <div style={s.title}>Step 4 of 8</div>
-    <p style={s.bigQ}>What's your vibe today?</p>
+    <div style={s.title}>Step 4 of 7</div>
+    <p style={s.bigQ}>Pick 1-3 that describe your style DNA</p>
     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-      {VIBES.map(v => (
-        <button key={v} style={s.chip(vibe === v)} onClick={() => setVibe(v)}>{v}</button>
+      {STYLE_DNA.map(d => (
+        <button key={d} style={s.chip(styleDNA.includes(d))} onClick={() => {
+          if (styleDNA.includes(d)) {
+            setStyleDNA(styleDNA.filter(x => x !== d));
+          } else if (styleDNA.length < 3) {
+            setStyleDNA([...styleDNA, d]);
+          }
+        }}>{d}</button>
       ))}
     </div>
     <div style={{ marginTop: "32px", display: "flex", gap: "12px" }}>
       <button style={s.outlineBtn} onClick={() => setStep(3)}>Back</button>
-      <button style={s.btn} onClick={() => setStep(5)}>Continue</button>
+      <button style={s.btn} onClick={() => styleDNA.length > 0 && setStep(5)}>Continue</button>
     </div>
   </div>
 )}
 
+{/* ─── Step 5 ─── */}
 {step === 5 && (
   <div>
-    <div style={s.title}>Step 5 of 8</div>
-    <p style={s.bigQ}>What's your style DNA?</p>
+    <div style={s.title}>Step 5 of 7</div>
+    <p style={s.bigQ}>Any fit or body preferences?</p>
     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-      {STYLE_DNA.map(d => (
-        <button key={d} style={s.chip(styleDNA === d)} onClick={() => setStyleDNA(d)}>{d}</button>
+      {BODY_PREFS.map(b => (
+        <button key={b} style={s.chip(bodyPref === b)} onClick={() => setBodyPref(b)}>{b}</button>
       ))}
     </div>
     <div style={{ marginTop: "32px", display: "flex", gap: "12px" }}>
@@ -903,47 +915,64 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
   </div>
 )}
 
-        {step === 6 && (<div><div style={s.title}>Step 5 of 7</div><p style={s.bigQ}>Any fit or body preferences?</p><div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>{BODY_PREFS.map(b => (<button key={b} style={s.chip(bodyPref === b)} onClick={() => setBodyPref(b)}>{b}</button>))}</div><div style={{ marginTop: "32px", display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(5)}>Back</button><button style={s.btn} onClick={() => setStep(7)}>Continue</button></div></div>)}
+{/* ─── Step 6 ─── */}
+{step === 6 && (
+  <div>
+    <div style={s.title}>Step 6 of 7</div>
+    <p style={s.bigQ}>What would you like to do?</p>
+    <div onClick={() => setMode("recommend_naia")} style={s.modeCard(mode === "recommend_naia")}>
+      <div style={{ fontSize: "17px", fontWeight: 500, marginBottom: "4px" }}>Find nAia pieces for what I own</div>
+      <div style={{ fontSize: "14px", opacity: 0.7 }}>Upload pieces from your closet and we'll recommend the perfect nAia match</div>
+    </div>
+    <div onClick={() => setMode("closet_only")} style={s.modeCard(mode === "closet_only")}>
+      <div style={{ fontSize: "17px", fontWeight: 500, marginBottom: "4px" }}>Style my closet pieces together</div>
+      <div style={{ fontSize: "14px", opacity: 0.7 }}>We'll pick the best combination from your closet based on your mood</div>
+    </div>
+    <div style={{ marginTop: "24px", display: "flex", gap: "12px" }}>
+      <button style={s.outlineBtn} onClick={() => setStep(5)}>Back</button>
+      <button style={s.btn} onClick={() => mode && setStep(7)}>Continue</button>
+    </div>
+  </div>
+)}
 
-        {step === 7 && (<div><div style={s.title}>Step 6 of 7</div><p style={s.bigQ}>What would you like to do?</p><div onClick={() => setMode("recommend_naia")} style={s.modeCard(mode === "recommend_naia")}><div style={{ fontSize: "17px", fontWeight: 500, marginBottom: "4px" }}>Find nAia pieces for what I own</div><div style={{ fontSize: "14px", opacity: 0.7 }}>Upload pieces from your closet and we'll recommend the perfect nAia match</div></div><div onClick={() => setMode("closet_only")} style={s.modeCard(mode === "closet_only")}><div style={{ fontSize: "17px", fontWeight: 500, marginBottom: "4px" }}>Style my closet pieces together</div><div style={{ fontSize: "14px", opacity: 0.7 }}>We'll pick the best combination from your closet based on your mood</div></div><div style={{ marginTop: "24px", display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(8)}>Back</button><button style={s.btn} onClick={() => mode && setStep(7)}>Continue</button></div></div>)}
-
-        {step === 8 && (
-          <div>
-            <div style={s.title}>Step 7 of 7</div>
-            <p style={s.bigQ}>{mode === "closet_only" ? "Add your pieces and we'll choose the best combination" : "Pick pieces from your closet"}</p>
-            <div style={{ marginBottom: "32px" }}>
-              <div style={{ ...s.resultLabel, marginBottom: "12px" }}>Your Closet{customer && closetSynced && <span style={{ color: "#7da563", marginLeft: "8px" }}>✓ Synced</span>}</div>
-              {closet.length === 0 && <p style={{ color: "#8a7f75", fontSize: "15px", marginBottom: "16px" }}>Your closet is empty. Add a piece below.</p>}
-              <div style={s.closetGrid}>
-                {closet.map(piece => (
-                  <div key={piece.id} onClick={() => mode !== "closet_only" && toggleClosetItem(piece.id)} style={{ border: `2px solid ${selectedClosetIds.includes(piece.id) ? "#1a1816" : "#d4cfc9"}`, borderRadius: "2px", overflow: "hidden", cursor: mode !== "closet_only" ? "pointer" : "default" }}>
-                    {piece.image ? <img src={piece.image} alt={piece.name} style={{ width: "100%", height: "160px", objectFit: "cover", display: "block" }} /> : <div style={{ width: "100%", height: "160px", background: "#e8e4df", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", color: "#8a7f75" }}>{piece.category}</div>}
-                    <div style={{ padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div><div style={{ fontSize: "14px", fontWeight: 500 }}>{piece.name}</div><div style={{ fontSize: "12px", color: "#8a7f75" }}>{piece.category}</div></div>
-                      <button onClick={(e) => { e.stopPropagation(); removeClosetItem(piece.id); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "#8a7f75", padding: "4px" }}>×</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {!showAddItem ? (
-                <button style={{ ...s.outlineBtn, marginTop: "16px", fontSize: "12px", padding: "10px 20px" }} onClick={() => setShowAddItem(true)}>+ Add piece</button>
-              ) : (
-                <div style={{ marginTop: "16px", padding: "20px", border: "1px solid #d4cfc9", borderRadius: "2px" }}>
-                  <input style={{ ...s.input, marginBottom: "12px" }} placeholder="Piece name (e.g. black blazer)" value={itemName} onChange={e => setItemName(e.target.value)} />
-                  <select style={{ ...s.input, marginBottom: "12px" }} value={itemCategory} onChange={e => setItemCategory(e.target.value)}><option value="top">Top</option><option value="bottom">Bottom</option><option value="outerwear">Outerwear</option><option value="dress">Dress</option><option value="shoes">Shoes</option><option value="accessory">Accessory</option></select>
-                  <input id="closet-file-input" type="file" accept="image/*" onChange={handleImageUpload} style={{ display: "none" }} />
-                  {itemImage ? (
-                    <div style={{ marginBottom: "12px", position: "relative", display: "inline-block" }}><img src={itemImage} alt="Preview" style={{ width: "100px", height: "100px", objectFit: "cover", borderRadius: "4px", display: "block" }} /><button onClick={() => setItemImage("")} style={{ position: "absolute", top: "-6px", right: "-6px", width: "20px", height: "20px", borderRadius: "50%", background: "#1a1816", color: "#fff", border: "none", fontSize: "12px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button></div>
-                  ) : (
-                    <button type="button" onClick={() => document.getElementById("closet-file-input").click()} style={{ ...s.outlineBtn, fontSize: "12px", padding: "10px 20px", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2.5"/><path d="M3 17l5-5 3 2.5 4-5 6 7.5"/></svg>Add photo (optional)</button>
-                  )}
-                  <div style={{ display: "flex", gap: "10px" }}><button style={s.btn} onClick={addItem}>Add</button><button style={s.outlineBtn} onClick={() => { setShowAddItem(false); setItemImage(""); }}>Cancel</button></div>
-                </div>
-              )}
+{/* ─── Step 7 ─── */}
+{step === 7 && (
+  <div>
+    <div style={s.title}>Step 7 of 7</div>
+    <p style={s.bigQ}>{mode === "closet_only" ? "Add your pieces and we'll choose the best combination" : "Pick pieces from your closet"}</p>
+    <div style={{ marginBottom: "32px" }}>
+      <div style={{ ...s.resultLabel, marginBottom: "12px" }}>Your Closet{customer && closetSynced && <span style={{ color: "#7da563", marginLeft: "8px" }}>✓ Synced</span>}</div>
+      {closet.length === 0 && <p style={{ color: "#8a7f75", fontSize: "15px", marginBottom: "16px" }}>Your closet is empty. Add a piece below.</p>}
+      <div style={s.closetGrid}>
+        {closet.map(piece => (
+          <div key={piece.id} onClick={() => mode !== "closet_only" && toggleClosetItem(piece.id)} style={{ border: `2px solid ${selectedClosetIds.includes(piece.id) ? "#1a1816" : "#d4cfc9"}`, borderRadius: "2px", overflow: "hidden", cursor: mode !== "closet_only" ? "pointer" : "default" }}>
+            {piece.image ? <img src={piece.image} alt={piece.name} style={{ width: "100%", height: "160px", objectFit: "cover", display: "block" }} /> : <div style={{ width: "100%", height: "160px", background: "#e8e4df", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", color: "#8a7f75" }}>{piece.category}</div>}
+            <div style={{ padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div><div style={{ fontSize: "14px", fontWeight: 500 }}>{piece.name}</div><div style={{ fontSize: "12px", color: "#8a7f75" }}>{piece.category}</div></div>
+              <button onClick={(e) => { e.stopPropagation(); removeClosetItem(piece.id); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "#8a7f75", padding: "4px" }}>×</button>
             </div>
-            <div style={{ display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(6)}>Back</button><button style={s.btn} onClick={callAI}>Style this look</button></div>
           </div>
-        )}
+        ))}
+      </div>
+      {!showAddItem ? (
+        <button style={{ ...s.outlineBtn, marginTop: "16px", fontSize: "12px", padding: "10px 20px" }} onClick={() => setShowAddItem(true)}>+ Add piece</button>
+      ) : (
+        <div style={{ marginTop: "16px", padding: "20px", border: "1px solid #d4cfc9", borderRadius: "2px" }}>
+          <input style={{ ...s.input, marginBottom: "12px" }} placeholder="Piece name (e.g. black blazer)" value={itemName} onChange={e => setItemName(e.target.value)} />
+          <select style={{ ...s.input, marginBottom: "12px" }} value={itemCategory} onChange={e => setItemCategory(e.target.value)}><option value="top">Top</option><option value="bottom">Bottom</option><option value="outerwear">Outerwear</option><option value="dress">Dress</option><option value="shoes">Shoes</option><option value="accessory">Accessory</option></select>
+          <input id="closet-file-input" type="file" accept="image/*" onChange={handleImageUpload} style={{ display: "none" }} />
+          {itemImage ? (
+            <div style={{ marginBottom: "12px", position: "relative", display: "inline-block" }}><img src={itemImage} alt="Preview" style={{ width: "100px", height: "100px", objectFit: "cover", borderRadius: "4px", display: "block" }} /><button onClick={() => setItemImage("")} style={{ position: "absolute", top: "-6px", right: "-6px", width: "20px", height: "20px", borderRadius: "50%", background: "#1a1816", color: "#fff", border: "none", fontSize: "12px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button></div>
+          ) : (
+            <button type="button" onClick={() => document.getElementById("closet-file-input").click()} style={{ ...s.outlineBtn, fontSize: "12px", padding: "10px 20px", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2.5"/><path d="M3 17l5-5 3 2.5 4-5 6 7.5"/></svg>Add photo (optional)</button>
+          )}
+          <div style={{ display: "flex", gap: "10px" }}><button style={s.btn} onClick={addItem}>Add</button><button style={s.outlineBtn} onClick={() => { setShowAddItem(false); setItemImage(""); }}>Cancel</button></div>
+        </div>
+      )}
+    </div>
+    <div style={{ display: "flex", gap: "12px" }}><button style={s.outlineBtn} onClick={() => setStep(6)}>Back</button><button style={s.btn} onClick={callAI}>Style this look</button></div>
+  </div>
+)}
 
         {/* ─── Step 8: Results ─── */}
         {step === 8 && (
