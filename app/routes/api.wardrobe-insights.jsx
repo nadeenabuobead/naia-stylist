@@ -1,5 +1,5 @@
-import { getCustomerId } from "~/lib/auth.server";
-import { prisma } from "~/lib/prisma.server";
+import { authenticateCustomer } from "../customer-auth.server";
+import prisma from "../db.server";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -12,11 +12,11 @@ export async function loader({ request }) {
     return new Response(null, { status: 204, headers: CORS });
   }
 
-  const customerId = await getCustomerId(request);
-  if (!customerId) return Response.json({ error: "Not authenticated" }, { status: 401, headers: CORS });
+const { customer } = await authenticateCustomer(request);
+if (!customer) return Response.json({ error: "Not authenticated" }, { status: 401, headers: CORS });
 
-  const items = await prisma.closetItem.findMany({
-    where: { customerId },
+const items = await prisma.closetItem.findMany({
+  where: { customerId: customer.id },
     orderBy: { createdAt: "desc" },
   });
 
