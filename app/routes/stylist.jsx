@@ -176,7 +176,6 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
   "Too exposed", "Too plain", "Felt like too much for me", "Too structured", "Lacked shape",
   "Too clingy", "Uncomfortable", "Hard to wear in real life"
 ];
-];
 
   const toggleWorkedTag = (tag) => {
     setWorkedTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
