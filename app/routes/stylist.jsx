@@ -624,6 +624,13 @@ function StyleResponseProfile({ customerToken }) {
     </div>
   );
 }
+// ─── Main Component ───
+export default function Stylist() {
+  // ─── Auth state ───
+  const [customerToken, setCustomerToken] = useState(null);
+  const [customer, setCustomer] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
   // ─── Flow state ───
   const [step, setStep] = useState(0);
   const [mood, setMood] = useState("");
