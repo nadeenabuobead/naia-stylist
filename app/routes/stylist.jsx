@@ -571,22 +571,22 @@ function StyleResponseProfile({ customerToken }) {
       )}
 
       {/* Top cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginBottom: "32px" }}>
-        <div style={s.card}>
-          <p style={s.cardNum}>{profile.totalRatings}</p>
-          <p style={s.cardLabel}>Looks rated</p>
-        </div>
-        <div style={s.card}>
-          <p style={s.cardNum}>{styleAlignmentNum}%</p>
-          <p style={s.cardLabel}>Style alignment</p>
-          {!hasEnoughData && <p style={s.cardSubtext}>still taking shape</p>}
-        </div>
-        <div style={s.card}>
-          <p style={s.cardNum}>{wearabilityNum}%</p>
-          <p style={s.cardLabel}>Would wear again</p>
-          {!hasEnoughData && <p style={s.cardSubtext}>early preferences</p>}
-        </div>
-      </div>
+<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginBottom: "32px" }}>
+  <div style={s.card}>
+    <p style={s.cardNum}>{profile.totalRatings}</p>
+    <p style={s.cardLabel}>Looks rated</p>
+  </div>
+  <div style={s.card}>
+    <p style={s.cardNum}>{styleAlignmentNum}%</p>
+    <p style={s.cardLabel}>Style alignment</p>
+    {!hasEnoughData && <p style={s.cardSubtext}>still taking shape</p>}
+  </div>
+  <div style={s.card}>
+    <p style={s.cardNum}>{wearabilityNum}%</p>
+    <p style={s.cardLabel}>Would wear again</p>
+    {!hasEnoughData && <p style={s.cardSubtext}>preferences emerging</p>}
+  </div>
+</div>
 
       {/* What consistently works */}
 {uniquePositive.length > 0 && (
@@ -594,34 +594,39 @@ function StyleResponseProfile({ customerToken }) {
     <div style={s.label}>What consistently works</div>
     <div style={{ background: "#f5f2ee", padding: "16px", borderRadius: "2px", borderLeft: "2px solid #7da563" }}>
       {(() => {
-        // Group similar mood+feeling+event combos
-        const insights = [];
-        const magneticTravelMoods = [];
+        // Extract broader patterns from unique positive reviews
+        const patterns = new Map();
         
-        for (const r of uniquePositive.slice(0, 3)) {
+        for (const r of uniquePositive.slice(0, 5)) {
           const moodLower = (r.mood || "").toLowerCase();
           const feelingLower = (r.feeling || "").toLowerCase();
-          const eventLower = (r.event || "").toLowerCase();
           
-          // Group "magnetic travel" with different starting moods
-          if (feelingLower === "magnetic" && eventLower === "travel") {
-            magneticTravelMoods.push(moodLower);
-          } else if (moodLower && feelingLower && eventLower) {
-            insights.push(`When you're ${moodLower}, ${eventLower} looks that feel ${feelingLower} tend to land well`);
-          } else if (feelingLower && eventLower) {
-            insights.push(`${feelingLower.charAt(0).toUpperCase() + feelingLower.slice(1)} ${eventLower} looks seem to work for you`);
+          // Build pattern key based on mood or feeling traits
+          if (moodLower && feelingLower) {
+            const key = `${moodLower}-${feelingLower}`;
+            if (!patterns.has(key)) {
+              patterns.set(key, { mood: moodLower, feeling: feelingLower, count: 0 });
+            }
+            patterns.get(key).count++;
           }
         }
         
-        // Add combined magnetic travel insight at the start if it exists
-        if (magneticTravelMoods.length > 0) {
-          const moodsList = magneticTravelMoods.length > 1 
-            ? `${magneticTravelMoods.slice(0, -1).join(", ")} or ${magneticTravelMoods[magneticTravelMoods.length - 1]}`
-            : magneticTravelMoods[0];
-          insights.unshift(`Magnetic travel looks tend to work well when you're ${moodsList}`);
+        // Generate insights focusing on transferable truths
+        const insights = [];
+        const sortedPatterns = Array.from(patterns.values()).sort((a, b) => b.count - a.count);
+        
+        for (const p of sortedPatterns.slice(0, 3)) {
+          if (p.mood && p.feeling) {
+            insights.push(`When you're ${p.mood}, looks with ${p.feeling} energy tend to work well`);
+          }
         }
         
-        return insights.slice(0, 3).map((text, i) => (
+        // Fallback if not enough patterns
+        if (insights.length === 0 && uniquePositive.length > 0) {
+          insights.push("You're building a clearer sense of what resonates with you");
+        }
+        
+        return insights.map((text, i) => (
           <p key={i} style={{ fontSize: "14px", lineHeight: 1.6, margin: i > 0 ? "12px 0 0" : "0", color: "#1a1816" }}>
             • {text}
           </p>
