@@ -223,7 +223,7 @@ try {
       });
     }
 
-    return Response.json({ result, sessionId: session.id, debug_styleIntelligence: styleIntelligence });
+    return Response.json({ result: "TEST - Intelligence has " + (styleIntelligence ? styleIntelligence.totalReviews : "NO") + " reviews", sessionId: session.id });
   }
 } catch (err) {
   console.error("DB save error:", err);
