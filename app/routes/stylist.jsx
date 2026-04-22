@@ -866,10 +866,6 @@ if (isDesignerMode && customer) {
   }, []);
 
 // Show designer dashboard if in designer mode
-if (isDesignerMode && customer) {
-  return <DesignerDashboardEmbed />;
-}
-
   // ─── Load closet ───
   useEffect(() => {
     if (authLoading) return;
