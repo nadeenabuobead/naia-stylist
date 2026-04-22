@@ -5,16 +5,16 @@ function DesignerDashboardEmbed() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Fetch all reviews directly (designer mode)
     fetch("/api/confidence-dashboard")
       .then(r => r.json())
       .then(d => {
-        // Use the confidence dashboard API for now since designer-dashboard isn't working
-        // We'll calculate designer stats from this data
+        console.log("Dashboard data:", d);
         if (d.dashboard) {
           setDashboard(d.dashboard);
         }
       })
-      .catch(err => console.error(err))
+      .catch(err => console.error("Fetch error:", err))
       .finally(() => setLoading(false));
   }, []);
 
