@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+export const config = { runtime: 'nodejs' };
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",

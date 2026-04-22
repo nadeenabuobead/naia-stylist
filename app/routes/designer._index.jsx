@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+export const meta = () => {
+  return [{ title: "Designer Dashboard - nAia" }];
+};
 
 export default function DesignerDashboard() {
   const [dashboard, setDashboard] = useState(null);
