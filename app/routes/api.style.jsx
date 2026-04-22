@@ -132,7 +132,9 @@ console.log("Style Intelligence:", JSON.stringify(styleIntelligence, null, 2));
 8. Song MUST be a well-known, popular song that most people would recognize — think top hits, Spotify top charts, popular artists like Dua Lipa, SZA, Billie Eilish, The Weeknd, Taylor Swift, Rihanna, Frank Ocean, Adele, Harry Styles, Beyoncé, Arctic Monkeys, Lana Del Rey, etc. Match the energy and mood. Never pick obscure songs.
 9. Perfume MUST be a mainstream, widely available fragrance people would recognize — like Chanel No. 5, YSL Black Opium, Dior Miss Dior, Tom Ford Black Orchid, Marc Jacobs Daisy, Lancôme La Vie Est Belle, Versace Bright Crystal, etc. Match the mood of the outfit.
 10. Connect every styling choice back to the customer's emotional shift (from current mood → desired feeling).
-11. VARIETY RULE: You MUST pick different pieces every time. Never recommend the same combination twice in a row. If you recommended the Sculptural Hybrid Coat or Textured Art Maxi Skirt last time, pick completely different pieces this time. Rotate through ALL available pieces equally.`,
+11. VARIETY RULE: You MUST pick different pieces every time. Never recommend the same combination twice in a row. If you recommended the Sculptural Hybrid Coat or Textured Art Maxi Skirt last time, pick completely different pieces this time. Rotate through ALL available pieces equally.
+12. CRITICAL: If the customer has CUSTOMER STYLE INTELLIGENCE data, you MUST prioritize and reference it. Use what has worked for her in the past, avoid what hasn't worked, and acknowledge her preferences in your recommendations.`,
+
           },
           { role: "user", content: stylistPrompt },
         ],
