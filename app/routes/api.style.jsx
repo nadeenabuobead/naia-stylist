@@ -223,13 +223,13 @@ try {
       });
     }
 
-    return Response.json({ result, sessionId: session.id });
+    return Response.json({ result, sessionId: session.id, debug_styleIntelligence: styleIntelligence });
   }
 } catch (err) {
   console.error("DB save error:", err);
 }
 
-return Response.json({ result });
+return Response.json({ result, debug_styleIntelligence: styleIntelligence });
 
   } catch (error) {
     return Response.json({
