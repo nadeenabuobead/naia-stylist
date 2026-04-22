@@ -103,6 +103,9 @@ try {
 } catch (err) {
   console.error("Failed to fetch style intelligence:", err);
 }
+
+// Debug: log what intelligence was gathered
+console.log("Style Intelligence:", JSON.stringify(styleIntelligence, null, 2));
     const stylistPrompt = buildStylistPrompt({
   mode, outfit: finalOutfit, mood: safeMood, feeling: safeFeeling,
   event: safeEvent, styleWords, bodyPref, closetItem, closetItems,
