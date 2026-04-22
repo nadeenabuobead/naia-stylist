@@ -1,4 +1,86 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
+// Designer Dashboard Component (embedded)
+function DesignerDashboardEmbed() {
+  const [dashboard, setDashboard] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/confidence-dashboard")
+      .then(r => r.json())
+      .then(d => {
+        // Use the confidence dashboard API for now since designer-dashboard isn't working
+        // We'll calculate designer stats from this data
+        if (d.dashboard) {
+          setDashboard(d.dashboard);
+        }
+      })
+      .catch(err => console.error(err))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div style={{ padding: "48px", textAlign: "center" }}>Loading designer insights...</div>;
+  if (!dashboard) return <div style={{ padding: "48px", textAlign: "center", color: "#c5553a" }}>No data available</div>;
+
+  return (
+    <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "48px 24px", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>
+      <h1 style={{ fontSize: "36px", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: "8px" }}>Designer Dashboard</h1>
+      <p style={{ fontSize: "15px", fontStyle: "italic", color: "#8a7f75", marginBottom: "48px" }}>Your aggregate insights</p>
+      
+      <div style={{ padding: "24px", background: "#f5f2ee", borderRadius: "2px", marginBottom: "24px" }}>
+        <p style={{ fontSize: "14px", margin: 0 }}>
+          <strong>Note:</strong> This is using your personal data as a demo. The full designer dashboard with all users' data is still being configured.
+        </p>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", marginBottom: "48px" }}>
+        <div style={{ padding: "24px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" }}>
+          <p style={{ fontSize: "32px", fontStyle: "italic", margin: "0 0 8px" }}>{dashboard.totalRatings}</p>
+          <p style={{ fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", margin: 0 }}>Total Ratings</p>
+        </div>
+        <div style={{ padding: "24px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" }}>
+          <p style={{ fontSize: "32px", fontStyle: "italic", margin: "0 0 8px" }}>{dashboard.feltLikeMePercent}%</p>
+          <p style={{ fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", margin: 0 }}>Style Alignment</p>
+        </div>
+        <div style={{ padding: "24px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" }}>
+          <p style={{ fontSize: "32px", fontStyle: "italic", margin: "0 0 8px" }}>{dashboard.wouldWearAgainPercent}%</p>
+          <p style={{ fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", margin: 0 }}>Would Wear Again</p>
+        </div>
+      </div>
+
+      {dashboard.bestMoods?.length > 0 && (
+        <div style={{ marginBottom: "48px" }}>
+          <h2 style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "16px" }}>Best Emotional Shifts</h2>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+            {dashboard.bestMoods.map(m => (
+              <div key={m.name} style={{ padding: "12px 20px", background: "#1a1816", color: "#f5f2ee", borderRadius: "2px", fontSize: "14px", fontStyle: "italic" }}>
+                {m.name} <span style={{ fontSize: "12px", opacity: 0.7 }}>({m.avg}/5)</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {dashboard.bestEvents?.length > 0 && (
+        <div style={{ marginBottom: "48px" }}>
+          <h2 style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "16px" }}>Best Occasions</h2>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+            {dashboard.bestEvents.map((e, idx) => (
+              <div key={e.name} style={{ 
+                padding: "12px 20px", 
+                background: idx === 0 ? "#1a1816" : "#eee9e2",
+                color: idx === 0 ? "#f5f2ee" : "#1a1816",
+                borderRadius: "2px", 
+                fontSize: "14px" 
+              }}>
+                {e.name} <span style={{ fontSize: "12px", opacity: 0.7 }}>({e.avg}/5)</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const VIBES = [
   "Tired", "Anxious", "Calm", "Overwhelmed", "Confident",
@@ -742,6 +824,13 @@ export default function Stylist() {
   const [lastHistoryId, setLastHistoryId] = useState(null);
   const [previousPieces, setPreviousPieces] = useState([]);
 
+  // Check for designer mode
+const isDesignerMode = typeof window !== 'undefined' && window.location.search.includes('designer=true');
+
+if (isDesignerMode && customer) {
+  return <DesignerDashboardEmbed />;
+}
+
   const LOADING_PHRASES = [
     "Reading your mood...", "Exploring your closet...",
     "Matching textures and tones...", "Finding the perfect pairing...",
@@ -775,6 +864,11 @@ export default function Stylist() {
     }
     init();
   }, []);
+
+// Show designer dashboard if in designer mode
+if (isDesignerMode && customer) {
+  return <DesignerDashboardEmbed />;
+}
 
   // ─── Load closet ───
   useEffect(() => {
