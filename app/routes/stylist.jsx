@@ -6,14 +6,12 @@ function DesignerDashboardEmbed() {
 
   useEffect(() => {
     // Fetch all reviews directly (designer mode)
-    fetch("/api/confidence-dashboard")
+    fetch("/api/stats")
       .then(r => r.json())
       .then(d => {
-        console.log("Dashboard data:", d);
-        if (d.dashboard) {
-          setDashboard(d.dashboard);
-        }
-      })
+       console.log("Stats data:", d);
+       setDashboard(d);
+})
       .catch(err => console.error("Fetch error:", err))
       .finally(() => setLoading(false));
   }, []);
