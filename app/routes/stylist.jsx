@@ -824,13 +824,6 @@ export default function Stylist() {
   const [lastHistoryId, setLastHistoryId] = useState(null);
   const [previousPieces, setPreviousPieces] = useState([]);
 
-  // Check for designer mode
-const isDesignerMode = typeof window !== 'undefined' && window.location.search.includes('designer=true');
-
-if (isDesignerMode && customer) {
-  return <DesignerDashboardEmbed />;
-}
-
   const LOADING_PHRASES = [
     "Reading your mood...", "Exploring your closet...",
     "Matching textures and tones...", "Finding the perfect pairing...",
@@ -865,7 +858,7 @@ if (isDesignerMode && customer) {
     init();
   }, []);
 
-// Show designer dashboard if in designer mode
+
   // ─── Load closet ───
   useEffect(() => {
     if (authLoading) return;
@@ -1097,7 +1090,10 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
     tryOnBtn: { padding: "8px 16px", background: "transparent", color: "#1a1816", border: "1px solid #1a1816", borderRadius: "2px", fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif', marginTop: "8px" },
     quickBtn: { padding: "16px 32px", background: "transparent", border: "2px solid #1a1816", borderRadius: "2px", fontSize: "15px", letterSpacing: "0.1em", cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif', fontStyle: "italic", transition: "all 0.2s" },
   };
-
+// Check for designer mode
+  if (typeof window !== 'undefined' && window.location.search.includes('designer=true') && customer) {
+    return <DesignerDashboardEmbed />;
+  }
   return (
     <div style={s.page}>
       <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap" rel="stylesheet" />
