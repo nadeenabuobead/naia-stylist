@@ -24,12 +24,90 @@ export async function action({ request }) {
     if (!apiKey) {
       return Response.json({ result: buildFallback({ mood: safeMood, feeling: safeFeeling, closetItem, naiaPiece, outfit: finalOutfit }) });
     }
-
-    const stylistPrompt = buildStylistPrompt({
-      mode, outfit: finalOutfit, mood: safeMood, feeling: safeFeeling,
-      event: safeEvent, styleWords, bodyPref, closetItem, closetItems,
-      naiaPiece, closet, vibe, styleDNA,
+// Fetch customer's style intelligence
+let styleIntelligence = null;
+try {
+  const { authenticateCustomer } = await import("../customer-auth.server.js");
+  const prisma = (await import("../db.server.js")).default;
+  const { customer } = await authenticateCustomer(request);
+  
+  if (customer) {
+    const reviews = await prisma.postOutfitReview.findMany({
+      where: { customerId: customer.id },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+      include: {
+        session: {
+          select: { currentMood: true, desiredFeeling: true, occasion: true }
+        }
+      }
     });
+    
+    if (reviews.length > 0) {
+      // Extract what worked
+      const workedTags = [];
+      const didntWorkTags = [];
+      const positiveMoods = [];
+      const positiveOccasions = [];
+      const negativeOccasions = [];
+      const recentNotes = [];
+      
+      for (const r of reviews) {
+        // Parse tags
+        if (r.workedTags) {
+          try {
+            const tags = JSON.parse(r.workedTags);
+            workedTags.push(...tags);
+          } catch {}
+        }
+        if (r.didntWorkTags) {
+          try {
+            const tags = JSON.parse(r.didntWorkTags);
+            didntWorkTags.push(...tags);
+          } catch {}
+        }
+        
+        // Track successful patterns
+        if (r.feltLikeHer === "Yes" || r.wouldWearAgain === "Definitely") {
+          if (r.session?.currentMood) positiveMoods.push(r.session.currentMood);
+          if (r.session?.occasion) positiveOccasions.push(r.session.occasion);
+        }
+        
+        // Track unsuccessful patterns
+        if (r.feltLikeHer === "No" || r.wouldWearAgain === "Probably not") {
+          if (r.session?.occasion) negativeOccasions.push(r.session.occasion);
+        }
+        
+        // Collect notes
+        if (r.additionalNotes) recentNotes.push(r.additionalNotes);
+      }
+      
+      // Get top patterns
+      const topWorked = [...new Set(workedTags)].slice(0, 5);
+      const topDidntWork = [...new Set(didntWorkTags)].slice(0, 5);
+      const topPositiveMoods = [...new Set(positiveMoods)].slice(0, 3);
+      const topPositiveOccasions = [...new Set(positiveOccasions)].slice(0, 3);
+      const topNegativeOccasions = [...new Set(negativeOccasions)].slice(0, 2);
+      
+      styleIntelligence = {
+        totalReviews: reviews.length,
+        workedTags: topWorked,
+        didntWorkTags: topDidntWork,
+        positiveMoods: topPositiveMoods,
+        positiveOccasions: topPositiveOccasions,
+        negativeOccasions: topNegativeOccasions,
+        recentNotes: recentNotes.slice(0, 3)
+      };
+    }
+  }
+} catch (err) {
+  console.error("Failed to fetch style intelligence:", err);
+}
+    const stylistPrompt = buildStylistPrompt({
+  mode, outfit: finalOutfit, mood: safeMood, feeling: safeFeeling,
+  event: safeEvent, styleWords, bodyPref, closetItem, closetItems,
+  naiaPiece, closet, vibe, styleDNA, styleIntelligence,
+});
 
     const openAiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -351,12 +429,19 @@ CUSTOMER:
 - Body preference: ${bodyPref || "none"}
 - Mode: ${mode}
 ${styleIntelligence?.totalReviews > 0 ? `
-CUSTOMER STYLE INTELLIGENCE (learned from her past reviews):
-- Looks that worked for her: ${styleIntelligence.positiveOccasions.join(", ") || "none yet"}
-- Looks that didn't work: ${styleIntelligence.negativeOccasions.join(", ") || "none yet"}
-- She responds best when feeling: ${styleIntelligence.positiveMoods.join(", ") || "none yet"}
-${styleIntelligence.recentNotes.length > 0 ? `- Her own words: ${styleIntelligence.recentNotes.join(" | ")}` : ""}
-Use this to personalize her recommendations.` : ""}
+CUSTOMER STYLE INTELLIGENCE (learned from ${styleIntelligence.totalReviews} past reviews):
+What consistently works for her:
+${styleIntelligence.workedTags.length > 0 ? `- ${styleIntelligence.workedTags.join(", ")}` : "- Still learning"}
+${styleIntelligence.positiveOccasions.length > 0 ? `- Best occasions: ${styleIntelligence.positiveOccasions.join(", ")}` : ""}
+${styleIntelligence.positiveMoods.length > 0 ? `- Successful when feeling: ${styleIntelligence.positiveMoods.join(", ")}` : ""}
+
+What hasn't worked:
+${styleIntelligence.didntWorkTags.length > 0 ? `- ${styleIntelligence.didntWorkTags.join(", ")}` : "- No clear patterns yet"}
+${styleIntelligence.negativeOccasions.length > 0 ? `- Struggled with: ${styleIntelligence.negativeOccasions.join(", ")}` : ""}
+
+${styleIntelligence.recentNotes.length > 0 ? `In her own words: "${styleIntelligence.recentNotes.join('" | "')}"` : ""}
+
+IMPORTANT: Use this intelligence to avoid past mistakes and lean into what has worked. Prioritize elements she's responded well to.` : ""}
 
 CUSTOMER'S SELECTED PIECES:
 ${selectedList}
