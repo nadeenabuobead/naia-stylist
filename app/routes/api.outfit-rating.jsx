@@ -52,8 +52,8 @@ export async function action({ request }) {
   desiredFeelingAchieved: desiredFeelingAchieved ?? null,
   wouldWearAgain: wouldWearAgain ?? null,
   physicallyComfortable: physicalComfort ?? null,
-  workedTags: workedTags ?? null,
-  didntWorkTags: didntWorkTags ?? null,
+  workedTags: workedTags ? JSON.stringify(workedTags) : null,
+  didntWorkTags: didntWorkTags ? JSON.stringify(didntWorkTags) : null,
   additionalNotes: additionalNotes || null,
 },
       });
@@ -67,8 +67,8 @@ export async function action({ request }) {
       desiredFeelingAchieved: desiredFeelingAchieved ?? null,
       wouldWearAgain: wouldWearAgain ?? null,
       physicallyComfortable: physicalComfort ?? null,
-      workedTags: workedTags ?? null,
-      didntWorkTags: didntWorkTags ?? null,
+      workedTags: workedTags ? JSON.stringify(workedTags) : null,
+      didntWorkTags: didntWorkTags ? JSON.stringify(didntWorkTags) : null,  
       additionalNotes: additionalNotes || null,
     },
   });
