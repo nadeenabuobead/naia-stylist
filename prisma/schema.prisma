@@ -175,6 +175,7 @@ model StylingSession {
   desiredFeeling  String?   // How she wants to feel
   occasion        String?   // Where she's going
   specificNeeds   String?   // Any specific requirements
+  bodyPreference  String?   // Body fit preferences
   
   // Source Selection
   styleFrom       StyleSource @default(BOTH)
