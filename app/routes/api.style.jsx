@@ -205,6 +205,9 @@ try {
 
     const foundPieces = ALL_PIECE_NAMES.filter(name => result.includes(name));
 
+    const foundPieces = ALL_PIECE_NAMES.filter(name => result.includes(name));
+    console.log('AI Result:', result);
+    console.log('Found pieces:', foundPieces);
     if (foundPieces.length > 0) {
       const suggestion = await prisma.outfitSuggestion.create({
         data: {
