@@ -31,39 +31,43 @@ export default function TrendReports() {
 
   const reportTypes = [
     { id: "seasonal", label: "Seasonal Trends", placeholder: "e.g., Spring 2026 trends" },
-    { id: "runway", label: "Fashion Week Review", placeholder: "e.g., Paris Fashion Week Fall 2026" },
-    { id: "category", label: "Category Deep Dive", placeholder: "e.g., Designer bags, Denim, Outerwear" },
-    { id: "color", label: "Color Trends", placeholder: "e.g., Spring 2026 color palette" },
-    { id: "brand", label: "Brand Profile", placeholder: "e.g., LOEWE Spring 2026 collection" },
+    { id: "runway", label: "Fashion Week", placeholder: "e.g., Paris Fashion Week Fall 2026" },
+    { id: "category", label: "Category Deep Dive", placeholder: "e.g., Designer bags, Denim" },
+    { id: "color", label: "Color Trends", placeholder: "e.g., Spring 2026 colors" },
+    { id: "brand", label: "Brand Profile", placeholder: "e.g., LOEWE Spring 2026" },
+    { id: "accessories", label: "Accessory Watch", placeholder: "e.g., Spring 2026 bags" },
+    { id: "emerging", label: "Emerging Brands", placeholder: "e.g., New designers to watch" },
   ];
 
   const currentType = reportTypes.find(t => t.id === reportType);
 
+  const downloadReport = () => {
+    const blob = new Blob([report], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${query.replace(/\s+/g, '-').toLowerCase()}-trend-report.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div style={s.container}>
-      <h1 style={s.title}>AI Fashion Intelligence</h1>
-      <p style={s.subtitle}>Generate authoritative trend reports from fashion sources</p>
+      <h1 style={s.title}>Fashion Intelligence</h1>
+      <p style={s.subtitle}>Authoritative trend reports from runway, retail, and market signals</p>
 
       {/* Report Type Selector */}
       <div style={{ marginBottom: "24px" }}>
-        <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "12px" }}>
-          Report Type
-        </div>
+        <div style={s.label}>Report Type</div>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           {reportTypes.map(type => (
             <button
               key={type.id}
               onClick={() => setReportType(type.id)}
               style={{
-                padding: "10px 16px",
-                fontSize: "12px",
-                letterSpacing: "0.05em",
-                fontFamily: '"Cormorant Garamond", Georgia, serif',
+                ...s.typeButton,
                 background: reportType === type.id ? "#1a1816" : "#eee9e2",
                 color: reportType === type.id ? "#f5f2ee" : "#1a1816",
-                border: "none",
-                borderRadius: "2px",
-                cursor: "pointer",
               }}
             >
               {type.label}
@@ -82,7 +86,15 @@ export default function TrendReports() {
           onKeyDown={(e) => e.key === "Enter" && generateReport()}
           style={s.input}
         />
-        <button onClick={generateReport} disabled={loading || !query.trim()} style={s.button}>
+        <button 
+          onClick={generateReport} 
+          disabled={loading || !query.trim()} 
+          style={{
+            ...s.button,
+            opacity: (loading || !query.trim()) ? 0.5 : 1,
+            cursor: (loading || !query.trim()) ? "not-allowed" : "pointer",
+          }}
+        >
           {loading ? "Generating..." : "Generate Report"}
         </button>
       </div>
@@ -95,22 +107,58 @@ export default function TrendReports() {
 
       {report && (
         <div style={s.reportBox}>
+          {/* Header */}
           <div style={s.reportHeader}>
             <div>
               <h2 style={s.reportTitle}>{currentType?.label}</h2>
-              <p style={{ fontSize: "13px", color: "#8a7f75", margin: "4px 0 0", fontStyle: "italic" }}>{query}</p>
+              <p style={s.reportSubtitle}>{query}</p>
             </div>
-            <button onClick={() => navigator.clipboard.writeText(report)} style={s.copyButton}>
-              Copy Report
-            </button>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button onClick={() => navigator.clipboard.writeText(report)} style={s.actionButton}>
+                Copy
+              </button>
+              <button onClick={downloadReport} style={s.actionButton}>
+                Download
+              </button>
+            </div>
           </div>
+
+          {/* Report Content */}
           <div style={s.reportContent}>
-            {report.split('\n\n').map((paragraph, i) => (
-              <p key={i} style={s.paragraph}>{paragraph}</p>
-            ))}
+            {report.split('\n').map((line, i) => {
+              // Section headers (## )
+              if (line.startsWith('## ')) {
+                return <h3 key={i} style={s.sectionHeader}>{line.replace('## ', '')}</h3>;
+              } 
+              // Sub headers (**text**)
+              else if (line.match(/^\*\*.+\*\*$/)) {
+                return <h4 key={i} style={s.subHeader}>{line.replace(/\*\*/g, '')}</h4>;
+              }
+              // Bold inline text
+              else if (line.includes('**')) {
+                const parts = line.split(/(\*\*.*?\*\*)/g);
+                return (
+                  <p key={i} style={s.paragraph}>
+                    {parts.map((part, idx) => 
+                      part.startsWith('**') && part.endsWith('**') 
+                        ? <strong key={idx}>{part.replace(/\*\*/g, '')}</strong>
+                        : part
+                    )}
+                  </p>
+                );
+              }
+              // List items
+              else if (line.match(/^[\*\-]\s/)) {
+                return <li key={i} style={s.listItem}>{line.replace(/^[\*\-]\s/, '')}</li>;
+              }
+              // Regular paragraphs
+              else if (line.trim()) {
+                return <p key={i} style={s.paragraph}>{line}</p>;
+              }
+              // Empty lines
+              return <div key={i} style={{ height: '8px' }} />;
+            })}
           </div>
-          
-          
         </div>
       )}
     </div>
@@ -138,6 +186,23 @@ const s = {
     color: "#8a7f75",
     margin: "0 0 48px",
   },
+  label: {
+    fontSize: "11px",
+    letterSpacing: "0.2em",
+    textTransform: "uppercase",
+    color: "#8a7f75",
+    marginBottom: "12px",
+  },
+  typeButton: {
+    padding: "10px 16px",
+    fontSize: "12px",
+    letterSpacing: "0.05em",
+    fontFamily: '"Cormorant Garamond", Georgia, serif',
+    border: "none",
+    borderRadius: "2px",
+    cursor: "pointer",
+    transition: "all 0.2s",
+  },
   inputSection: {
     display: "flex",
     gap: "12px",
@@ -162,7 +227,6 @@ const s = {
     color: "#f5f2ee",
     border: "none",
     borderRadius: "4px",
-    cursor: "pointer",
     fontWeight: 500,
     whiteSpace: "nowrap",
   },
@@ -188,17 +252,23 @@ const s = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: "24px",
+    marginBottom: "32px",
     paddingBottom: "16px",
-    borderBottom: "1px solid #d4cfc9",
+    borderBottom: "2px solid #1a1816",
   },
   reportTitle: {
     fontSize: "24px",
     fontWeight: 500,
     color: "#1a1816",
-    margin: 0,
+    margin: "0 0 4px",
   },
-  copyButton: {
+  reportSubtitle: {
+    fontSize: "13px",
+    color: "#8a7f75",
+    margin: 0,
+    fontStyle: "italic",
+  },
+  actionButton: {
     padding: "8px 16px",
     fontSize: "11px",
     letterSpacing: "0.1em",
@@ -209,13 +279,37 @@ const s = {
     border: "1px solid #1a1816",
     borderRadius: "4px",
     cursor: "pointer",
+    transition: "all 0.2s",
   },
   reportContent: {
     lineHeight: 1.8,
   },
+  sectionHeader: {
+    fontSize: "16px",
+    fontWeight: 500,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    color: "#1a1816",
+    margin: "32px 0 16px",
+    paddingBottom: "8px",
+    borderBottom: "1px solid #e8e4df",
+  },
+  subHeader: {
+    fontSize: "14px",
+    fontWeight: 500,
+    color: "#4a4540",
+    margin: "16px 0 8px",
+  },
   paragraph: {
     fontSize: "15px",
     color: "#1a1816",
-    margin: "0 0 16px",
+    margin: "0 0 12px",
+    lineHeight: 1.7,
+  },
+  listItem: {
+    fontSize: "15px",
+    color: "#1a1816",
+    margin: "0 0 8px 20px",
+    lineHeight: 1.7,
   },
 };
