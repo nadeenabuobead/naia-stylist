@@ -237,7 +237,6 @@ try {
       });
    }
 
-  }  // Close if (customer)
 } catch (err) {
   console.error("DB save error:", err);
 }
