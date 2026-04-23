@@ -204,11 +204,10 @@ try {
     };
 
     const foundPieces = ALL_PIECE_NAMES.filter(name => result.includes(name));
-
-    const foundPieces = ALL_PIECE_NAMES.filter(name => result.includes(name));
-    console.log('AI Result:', result);
+    console.log('=== PIECE DETECTION DEBUG ===');
     console.log('Found pieces:', foundPieces);
-    if (foundPieces.length > 0) {
+    console.log('Looking for:', ALL_PIECE_NAMES);
+    console.log('In result:', result.substring(0, 500));
       const suggestion = await prisma.outfitSuggestion.create({
         data: {
           sessionId: session.id,
