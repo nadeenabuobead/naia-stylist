@@ -204,38 +204,41 @@ try {
     };
 
   const foundPieces = ALL_PIECE_NAMES.filter(name => result.includes(name));
-  console.log('=== PIECE DETECTION DEBUG ===');
-  console.log('Found pieces:', foundPieces);
-  console.log('Looking for:', ALL_PIECE_NAMES);
-  console.log('In result:', result.substring(0, 500));
+  
+  // Debug: Add to response so we can see it
+  const debugInfo = {
+    foundPieces,
+    searchedFor: ALL_PIECE_NAMES,
+    resultSnippet: result.substring(0, 500)
+  };
 
   if (foundPieces.length > 0) {
-  const suggestion = await prisma.outfitSuggestion.create({
-        data: {
-          sessionId: session.id,
-          whyThisWorks: result.match(/WHY THIS WORKS[\s\S]*?(?=\n[A-Z])/i)?.[0] || null,
-        },
-      });
+    const suggestion = await prisma.outfitSuggestion.create({
+      data: {
+        sessionId: session.id,
+        whyThisWorks: result.match(/WHY THIS WORKS[\s\S]*?(?=\n[A-Z])/i)?.[0] || null,
+      },
+    });
 
-      await prisma.outfitItem.createMany({
-        data: foundPieces.map(name => ({
-          suggestionId: suggestion.id,
-          itemType: "TOP",
-          shopifyProductId: PIECE_IDS[name],
-          productTitle: name,
-          productImageUrl: PIECE_IMAGES[name],
-          productUrl: `https://naiabynadine.com/products/${name.toLowerCase().replace(/ /g, "-")}`,
-        })),
-      });
-    }
+    await prisma.outfitItem.createMany({
+      data: foundPieces.map(name => ({
+        suggestionId: suggestion.id,
+        itemType: "TOP",
+        shopifyProductId: PIECE_IDS[name],
+        productTitle: name,
+        productImageUrl: PIECE_IMAGES[name],
+        productUrl: `https://naiabynadine.com/products/${name.toLowerCase().replace(/ /g, "-")}`,
+      })),
+    });
+  }
 
-    // Piece detection and saving successful, return normal result
+  // Piece detection and saving successful, return normal result
   }
 } catch (err) {
   console.error("DB save error:", err);
 }
 
-return Response.json({ result, debug_styleIntelligence: styleIntelligence });
+return Response.json({ result, debug_styleIntelligence: styleIntelligence, debug_pieceDetection: debugInfo });
 
   } catch (error) {
     return Response.json({
