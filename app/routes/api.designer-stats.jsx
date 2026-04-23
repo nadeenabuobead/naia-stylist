@@ -53,6 +53,7 @@ export async function loader() {
               ratings: [],
               feltLikeMe: 0,
               wouldWear: 0,
+              comfort: 0,
               workedTags: {},
               didntWorkTags: {},
               moods: {},
@@ -70,6 +71,7 @@ export async function loader() {
             if (review.overallFeeling) piece.ratings.push(review.overallFeeling);
             if (review.feltLikeHer === "Yes") piece.feltLikeMe += 1;
             if (review.wouldWearAgain === "Definitely") piece.wouldWear += 1;
+            if (review.physicalComfort === "Comfortable") piece.comfort += 1;
             
             if (review.workedTags) {
               try {
@@ -95,16 +97,78 @@ export async function loader() {
           }
         });
       });
-    });
-
     const pieces = Object.values(piecePerformance).map(piece => {
-      const avgRating = piece.ratings.length > 0 
-        ? piece.ratings.reduce((sum, r) => sum + r, 0) / piece.ratings.length 
+      const numRatings = piece.ratings.length;
+      
+      // Calculate normalized scores (0-100)
+      const avgRating = numRatings > 0 
+        ? piece.ratings.reduce((sum, r) => sum + r, 0) / numRatings 
+        : 0;
+      const ratingScore = ((avgRating - 1) / 4) * 100;
+      
+      const styleAlignment = numRatings > 0
+        ? Math.round((piece.feltLikeMe / numRatings) * 100)
         : 0;
       
-      const wouldWearPercent = piece.ratings.length > 0
-        ? Math.round((piece.wouldWear / piece.ratings.length) * 100)
+      const wouldWearPercent = numRatings > 0
+        ? Math.round((piece.wouldWear / numRatings) * 100)
         : 0;
+        
+      const comfortPercent = numRatings > 0
+        ? Math.round((piece.comfort / numRatings) * 100)
+        : 0;
+      
+      // Calculate positive feedback score (simplified version)
+      const totalPositiveTags = Object.values(piece.workedTags).reduce((sum, count) => sum + count, 0);
+      const positiveFeedbackScore = numRatings > 0 ? Math.min(100, (totalPositiveTags / numRatings) * 25) : 0;
+      
+      // Calculate negative feedback score
+      const totalNegativeTags = Object.values(piece.didntWorkTags).reduce((sum, count) => sum + count, 0);
+      const negativeFeedbackScore = numRatings > 0 ? Math.min(100, (totalNegativeTags / numRatings) * 25) : 0;
+      
+      // Calculate Piece Response Score
+      const pieceResponseScore = Math.round(
+        0.25 * ratingScore +
+        0.25 * styleAlignment +
+        0.20 * wouldWearPercent +
+        0.15 * comfortPercent +
+        0.10 * positiveFeedbackScore -
+        0.15 * negativeFeedbackScore
+      );
+      
+      // Classify piece
+      let classification = 'underperforming';
+      let classificationReason = '';
+      
+      if (numRatings < 2) {
+        classification = 'to_watch';
+        classificationReason = 'Too little data';
+      } else if (
+        pieceResponseScore >= 70 &&
+        styleAlignment >= 60 &&
+        wouldWearPercent >= 60 &&
+        negativeFeedbackScore < 35
+      ) {
+        classification = 'top_performing';
+        classificationReason = 'Strong across all metrics';
+      } else if (
+        (pieceResponseScore >= 50 && pieceResponseScore < 70) ||
+        (ratingScore >= 75 && wouldWearPercent < 60) ||
+        (ratingScore >= 75 && comfortPercent < 60) ||
+        (styleAlignment >= 60 && negativeFeedbackScore >= 35)
+      ) {
+        classification = 'mixed_signal';
+        if (ratingScore >= 75 && wouldWearPercent < 60) {
+          classificationReason = 'High rating but low would-wear-again';
+        } else if (ratingScore >= 75 && comfortPercent < 60) {
+          classificationReason = 'High rating but comfort issues';
+        } else {
+          classificationReason = 'Good response but needs attention';
+        }
+      } else {
+        classification = 'underperforming';
+        classificationReason = 'Weak response across metrics';
+      }
         
       const topWorked = Object.entries(piece.workedTags)
         .sort((a, b) => b[1] - a[1])
@@ -136,9 +200,14 @@ export async function loader() {
         name: piece.name,
         category: piece.category,
         timesRecommended: piece.timesRecommended,
-        timesRated: piece.ratings.length,
+        timesRated: numRatings,
         avgRating: Math.round(avgRating * 10) / 10,
+        styleAlignment,
         wouldWearPercent,
+        comfortPercent,
+        pieceResponseScore,
+        classification,
+        classificationReason,
         topWorked,
         topDidntWork,
         topFeelings,
@@ -146,6 +215,7 @@ export async function loader() {
         topBodyPrefs,
         quote: piece.quotes[0] || null
       };
+    });
     });
 
     const topPieces = pieces
