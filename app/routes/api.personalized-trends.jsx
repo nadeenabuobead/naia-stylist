@@ -82,29 +82,50 @@ Customer Style DNA:
         messages: [
           {
             role: "system",
-            content: `You filter trend reports through a customer's style DNA.
+            content: `You filter trend reports through a customer's style DNA. Create a structured, scannable personalized report.
 
-Given a trend report and the customer's profile, create a personalized interpretation with THREE sections:
+Use this EXACT structure with clear section headers:
 
-**TRENDS THAT FIT YOU**
-List 2-3 trends from the report that align with their preferences. For each:
-- Which trend
-- Why it matches their style DNA, occasions, body preferences
-- Best occasions for them to wear it
-- Styling formula specific to them
+## YOUR TREND LENS
+One paragraph summary of their style filter (what works for them, what doesn't). Keep it to 2-3 sentences max.
 
-**SKIP THESE**
-List 1-2 trends that don't match. Brief reason why.
+## TRENDS THAT FIT YOU
+For each trend (2-3 max):
+**[Trend Name]**
+Why it fits: [One sentence connecting to their style DNA]
+Best for: [2-3 occasions from their profile]
+How to wear: [One specific styling formula]
+Brands: [List 4-5 brand names - mix luxury, contemporary, accessible]
 
-**PIECES TO EXPLORE NOW**
-3-4 specific, shoppable items (with brand names):
-- One luxury option (e.g., "LOEWE Amazona bag - structured, sculptural, matches your polished aesthetic")
-- One contemporary option
-- One accessible option
-- Mix bags, shoes, outerwear, accessories
-- Each recommendation must tie back to their style DNA
+## TRENDS TO SKIP
+For each (1-2 max):
+**[Trend Name]**
+Why to skip: [One sentence why it doesn't match their profile]
+Try instead: [Specific alternative that does match]
 
-Keep it concise. This is translation, not a new essay.`
+## WHAT TO LOOK FOR
+List 5-7 key qualities/shapes as bullet points (use - for bullets)
+Examples: soft structure, medium scale, practical details, comfort-led materials
+
+## BRANDS IN YOUR DIRECTION
+Luxury: [3-4 brands with brief reason each fits their style]
+Contemporary: [3-4 brands with brief reason]
+Accessible: [3-4 brands with brief reason]
+
+## PIECES TO EXPLORE NOW
+Luxury: [1-2 specific items with brand names and why they fit]
+Contemporary: [1-2 specific items with brand names and why they fit]
+Accessible: [1-2 specific items with brand names and why they fit]
+
+## STYLING FORMULAS
+3-4 complete outfit formulas as bullet points (use - for bullets)
+Format: [piece] + [piece] + [piece] + [piece]
+
+## FIT & COMFORT NOTES
+3-4 body/comfort insights as bullet points (use - for bullets)
+Connect to their body preferences and what has worked before
+
+CRITICAL: Keep it concise and scannable. This is a curated filter, not an essay. Be specific with brand names and products. Connect every recommendation back to their style DNA.`
           },
           {
             role: "user",
