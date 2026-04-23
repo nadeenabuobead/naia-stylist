@@ -50,25 +50,10 @@ export async function action({ request }) {
 
   try {
     const body = await request.json();
-    const { mood, feeling, event, result } = body;
+    const { sessionId } = body;
 
-    await prisma.stylingSession.create({
-      data: {
-        customerId: customer.id,
-        currentMood: mood || "",
-        desiredFeeling: feeling || "",
-        occasion: event || "",
-        specificNeeds: result || null,
-        styleFrom: "NAIA",
-      },
-    });
-
-    const sessions = await prisma.stylingSession.findMany({
-  where: { customerId: customer.id },
-  orderBy: { createdAt: "desc" },
-  take: 1,
-});
-return Response.json({ ok: true, entry: { id: sessions[0]?.id } }, { headers: CORS });
+    // Just return the session ID passed from the frontend, don't create a new session
+    return Response.json({ ok: true, entry: { id: sessionId } }, { headers: CORS });
   } catch (err) {
     console.error("History save error:", err);
     return Response.json({ error: "Failed to save" }, { status: 500, headers: CORS });
