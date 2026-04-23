@@ -22,6 +22,7 @@ export default [
   route("api/confidence-dashboard", "routes/api.confidence-dashboard.jsx"),
   route("api/designer-stats", "routes/api.designer-stats.jsx"),
   route("api/generate-trend-report", "routes/api.generate-trend-report.jsx"),
+  route("api/personalized-trends", "routes/api.personalized-trends.jsx"),
   route("trends", "routes/trends.jsx"),
   route("naia-designer-dashboard-2026", "routes/naia-designer-dashboard-2026.jsx"),
   route("stylist", "routes/stylist.jsx"),
