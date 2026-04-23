@@ -55,17 +55,38 @@ export default function DesignerDashboard() {
         )}
       </Section>
 
-      {/* Struggling Pieces */}
-      {data.strugglingPieces?.length > 0 && (
-        <Section title="Pieces That Need Attention" subtitle="Garments with lower ratings or frequent rejection">
+      {/* Underperforming Pieces */}
+      {data.underperformingPieces?.length > 0 && (
+        <Section title="Underperforming Pieces" subtitle="Garments with ratings below 3.5">
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            {data.strugglingPieces.map(piece => (
+            {data.underperformingPieces.slice(0, 5).map(piece => (
               <PieceCard key={piece.name} piece={piece} variant="warning" />
             ))}
           </div>
         </Section>
       )}
 
+      {/* Mixed Signal Pieces */}
+      {data.mixedSignalPieces?.length > 0 && (
+        <Section title="Mixed-Signal Pieces" subtitle="Good ratings but specific issues to address">
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {data.mixedSignalPieces.slice(0, 5).map(piece => (
+              <PieceCard key={piece.name} piece={piece} variant="caution" />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Pieces to Watch */}
+      {data.piecesToWatch?.length > 0 && (
+        <Section title="Pieces to Watch" subtitle="Only one rating — need more data">
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {data.piecesToWatch.slice(0, 3).map(piece => (
+              <PieceCard key={piece.name} piece={piece} variant="neutral" />
+            ))}
+          </div>
+        </Section>
+      )}
       {/* What Users Liked Most */}
       <Section title="What Users Liked Most" subtitle="Most selected positive feedback across all looks">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px" }}>

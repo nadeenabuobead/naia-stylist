@@ -153,10 +153,21 @@ export async function loader() {
       .sort((a, b) => b.avgRating - a.avgRating)
       .slice(0, 10);
       
-    const strugglingPieces = pieces
-      .filter(p => p.timesRated > 1)
-      .sort((a, b) => a.avgRating - b.avgRating)
-      .slice(0, 5);
+    // Split pieces into performance categories
+    const underperformingPieces = pieces
+      .filter(p => p.timesRated > 0 && p.avgRating < 3.5)
+      .sort((a, b) => a.avgRating - b.avgRating);
+      
+    const mixedSignalPieces = pieces
+      .filter(p => p.timesRated > 1 && p.avgRating >= 3.5 && (
+        p.topDidntWork.length > 0 || 
+        p.wouldWearPercent < 75
+      ))
+      .sort((a, b) => a.avgRating - b.avgRating);
+      
+    const piecesToWatch = pieces
+      .filter(p => p.timesRated === 1)
+      .sort((a, b) => b.avgRating - a.avgRating);
 
     const allWorkedTags = {};
     const allDidntWorkTags = {};
@@ -217,7 +228,9 @@ export async function loader() {
       feltLikeMePercent: Math.round((feltLikeMe / totalReviews) * 100) || 0,
       wouldWearPercent: Math.round((wouldWear / totalReviews) * 100) || 0,
       topPieces,
-      strugglingPieces,
+      underperformingPieces,
+      mixedSignalPieces,
+      piecesToWatch,
       topWorkedOverall,
       topDidntWorkOverall,
       topBodyPrefsOverall,
