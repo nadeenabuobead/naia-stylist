@@ -167,7 +167,7 @@ Examples:
 - If comfort worked: "Prioritize comfort-led fabrics over rigid materials"
 
 Be SPECIFIC. Use fashion-editorial language. Reference their ACTUAL profile data in every section.`
-}
+          }
           },
           {
             role: "user",
