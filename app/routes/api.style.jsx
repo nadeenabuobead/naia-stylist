@@ -545,4 +545,3 @@ Hair: Sleek low bun with a centre part.
 Makeup: Clean skin, defined brows, and a nude lip.
 Song: FKA Twigs - Two Weeks`;
 }
-}
