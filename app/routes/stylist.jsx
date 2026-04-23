@@ -1377,16 +1377,14 @@ export default function Stylist() {
     const outfitParts = [...itemsToStyle.map(i => i.name), naiaPiece ? (naiaPiece.name || naiaPiece.title) : null].filter(Boolean);
     const outfit = outfitParts.join(" + ");
     try {
-      const res = await fetch("/api/style", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
-        body: JSON.stringify({ mode, outfit, mood, feeling, event, styleWords, vibe, styleDNA, bodyPref, styleIntelligence: customer?.styleIntelligence, closetItem: itemsToStyle[0] || null, closetItems: itemsToStyle, naiaPiece: naiaPiece ? { name: naiaPiece.name || naiaPiece.title, category: naiaPiece.category || naiaPiece.type || "", stylingNotes: naiaPiece.stylingNotes || "", moodMatch: naiaPiece.moodMatch || "", stylingRole: naiaPiece.stylingRole || "", statementLevel: naiaPiece.statementLevel || "", occasion: naiaPiece.occasion || "", sihouette: naiaPiece.sihouette || "" } : null, closet: closet.map(i => ({ name: i.name, category: i.category })) }),
-      });
       const data = await res.json();
       const result = data.result || data.error || "Something went wrong.";
+      const sessionId = data.sessionId;  // Capture session ID
       setStylingResult(result);
-      if (customerToken && result && !result.startsWith("Something went wrong")) {
+      if (customerToken && result && !result.startsWith("Something went wrong") && sessionId) {
         try {
           const hRes = await fetch("/api/outfit-history", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
-            body: JSON.stringify({ mood, feeling, event, styleWords, bodyPref, mode, closetItemIds: selectedClosetIds, result }),
+            body: JSON.stringify({ sessionId }),  // Pass session ID instead of creating new session
           });
           const hData = await hRes.json();
           if (hData.entry?.id) setLastHistoryId(hData.entry.id);
