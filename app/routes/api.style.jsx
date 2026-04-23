@@ -164,8 +164,6 @@ try {
   console.log('CUSTOMER CHECK:', !!customer, customer?.id);
 
   if (customer) {
-  
-  if (customer) {
     // Create styling session
     const session = await prisma.stylingSession.create({
       data: {
