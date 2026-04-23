@@ -96,6 +96,7 @@ export async function loader() {
             if (review.additionalNotes) piece.quotes.push(review.additionalNotes);
           }
         });
+    });
       });
     const pieces = Object.values(piecePerformance).map(piece => {
       const numRatings = piece.ratings.length;
