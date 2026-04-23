@@ -1377,7 +1377,7 @@ export default function Stylist() {
     const outfitParts = [...itemsToStyle.map(i => i.name), naiaPiece ? (naiaPiece.name || naiaPiece.title) : null].filter(Boolean);
     const outfit = outfitParts.join(" + ");
     try {
-      const res = await fetch("/api/style", { method: "POST", headers: { "Content-Type": "application/json" },
+      const res = await fetch("/api/style", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
         body: JSON.stringify({ mode, outfit, mood, feeling, event, styleWords, vibe, styleDNA, bodyPref, styleIntelligence: customer?.styleIntelligence, closetItem: itemsToStyle[0] || null, closetItems: itemsToStyle, naiaPiece: naiaPiece ? { name: naiaPiece.name || naiaPiece.title, category: naiaPiece.category || naiaPiece.type || "", stylingNotes: naiaPiece.stylingNotes || "", moodMatch: naiaPiece.moodMatch || "", stylingRole: naiaPiece.stylingRole || "", statementLevel: naiaPiece.statementLevel || "", occasion: naiaPiece.occasion || "", sihouette: naiaPiece.sihouette || "" } : null, closet: closet.map(i => ({ name: i.name, category: i.category })) }),
       });
       const data = await res.json();
@@ -1406,7 +1406,7 @@ export default function Stylist() {
     setStyleWords(customer.lastStyleWords || []); setBodyPref(customer.lastBodyPref || ""); setMode(customer.lastMode || "closet_only");
     setLoading(true); setStylingResult(""); setStep(8); setLastHistoryId(null);
     try {
-      const res = await fetch("/api/style", { method: "POST", headers: { "Content-Type": "application/json" },
+      const res = await fetch("/api/style", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
         body: JSON.stringify({ mode: customer.lastMode || "closet_only", outfit: closet.map(i => i.name).join(" + "), mood: customer.lastMood || "", feeling: customer.lastFeeling || "", event: customer.lastEvent || "", styleWords: customer.lastStyleWords || [], bodyPref: customer.lastBodyPref || "", closetItems: closet, closet: closet.map(i => ({ name: i.name, category: i.category })) }),
       });
       const data = await res.json();
