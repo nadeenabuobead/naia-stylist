@@ -866,6 +866,7 @@ function PersonalizedTrends({ customerToken }) {
           </button>
           
           
+          <a
             href="/trends"
             target="_blank"
             style={{
