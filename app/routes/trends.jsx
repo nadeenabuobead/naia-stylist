@@ -110,14 +110,7 @@ export default function TrendReports() {
             ))}
           </div>
           
-          <div style={{ marginTop: "32px", padding: "16px", background: "#f5f2ee", borderRadius: "4px", borderLeft: "3px solid #1a1816" }}>
-            <div style={{ fontSize: "12px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "8px" }}>
-              Next Step
-            </div>
-            <p style={{ fontSize: "14px", color: "#1a1816", margin: 0 }}>
-              Copy this report to publish on your Shopify blog, or use it to generate personalized recommendations for customers in the styling app.
-            </p>
-          </div>
+          
         </div>
       )}
     </div>
