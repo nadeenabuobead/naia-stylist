@@ -154,6 +154,7 @@ console.log("Style Intelligence:", JSON.stringify(styleIntelligence, null, 2));
   buildFallback({ mood: safeMood, feeling: safeFeeling, closetItem, naiaPiece, outfit: finalOutfit });
 
 // Parse and save nAia pieces to DB
+console.log('MARKER: About to parse nAia pieces');
 try {
   const { authenticateCustomer } = await import("../customer-auth.server.js");
   const prisma = (await import("../db.server.js")).default;
@@ -203,6 +204,7 @@ try {
       "Printed Straight Pants": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3b14fe8b-2c19-492e-82b1-44baaf3a3cc9.png",
     };
 
+ console.log('MARKER: Inside customer block, checking pieces');
   const foundPieces = ALL_PIECE_NAMES.filter(name => result.includes(name));
   console.log('=== PIECE DETECTION DEBUG ===');
   console.log('Found pieces:', foundPieces);
