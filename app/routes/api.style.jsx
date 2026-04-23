@@ -236,9 +236,9 @@ try {
           productUrl: `https://naiabynadine.com/products/${name.toLowerCase().replace(/ /g, "-")}`,
         })),
       });
-    }
+   }
 
-   // Piece detection and saving successful, return normal result
+  }  // Close if (customer)
 } catch (err) {
   console.error("DB save error:", err);
 }
