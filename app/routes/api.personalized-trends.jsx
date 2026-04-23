@@ -11,7 +11,6 @@ export async function action({ request }) {
     const body = await request.json();
     const { trendReport } = body;
 
-    // Get customer's style intelligence
     const reviews = await prisma.postOutfitReview.findMany({
       where: { customerId: customer.id },
       include: {
@@ -35,7 +34,6 @@ export async function action({ request }) {
       });
     }
 
-    // Build style profile
     const workedTags = [];
     const didntWorkTags = [];
     const feelings = [];
@@ -79,98 +77,14 @@ Customer Style DNA:
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-       messages: [
+        messages: [
           {
             role: "system",
-            content: `You are a personal fashion analyst...
-
-CRITICAL RULES:
-1. Use SPECIFIC fashion language from the trend report - not generic terms
-2. Connect EVERY recommendation to their actual profile data (what worked, occasions, body preferences)
-3. Brand recommendations must have clear rationale tied to their style
-4. Make it feel like this came from their quiz answers and rating history
-
-Use this EXACT structure:
-
-## YOUR TREND LENS
-Write 2-3 sentences that reference:
-- Their actual top occasions (use the specific occasions from their profile)
-- What has actually worked for them (use their actual workedTags)
-- Their body preferences (use their actual bodyPreference data)
-- Their desired feelings (use their actual feelings)
-
-Example tone: "You tend to respond best to looks that feel [actual feeling] but [actual quality], especially for [actual occasions]. You gravitate toward [actual workedTags], but still want [what they've consistently chosen]."
-
-## TRENDS THAT FIT YOU
-Pick 2-3 SPECIFIC trends from the report (use actual trend names from the report, not generic ones).
-For each:
-
-**[Exact trend name from report]**
-Why it fits: [One sentence connecting this specific trend to their actual workedTags and feelings]
-Best for: [List their actual top 2-3 occasions]
-Silhouette logic: [How this trend's shapes align with their body preferences]
-Brands: [List 4-5 brands that do this specific trend well]
-Styling formula: [One complete outfit using pieces from this trend + their preferred silhouettes]
-
-## TRENDS TO SKIP
-Pick 1-2 trends from the report that conflict with their didntWorkTags or body preferences.
-
-**[Trend name from report]**
-Why to skip: [Connect to their actual didntWorkTags or what hasn't worked]
-Try instead: [Specific alternative from the report that matches their profile better]
-
-## WHAT TO LOOK FOR
-List 5-7 specific qualities as bullets (use - ).
-These should come from:
-- Their body preferences (e.g., "length and vertical lines" if they want elongation)
-- Their workedTags (e.g., "soft drape" if comfortable worked)
-- Silhouettes that match their profile
-
-## BRANDS IN YOUR DIRECTION
-Group by tier with ONE-LINE rationale for each brand:
-
-Luxury:
-- [Brand] — [why this brand expresses their version of the trend]
-- [Brand] — [specific reason tied to their style DNA]
-
-Contemporary:
-- [Brand] — [reason]
-- [Brand] — [reason]
-
-Accessible:
-- [Brand] — [reason]
-- [Brand] — [reason]
-
-## PIECES TO EXPLORE NOW
-Format as search-ready items with context:
-
-Luxury:
-- [Specific item description] from [Brand] — [why it fits their profile]
-
-Contemporary:
-- [Specific item description] from [Brand] — [why it fits]
-
-Accessible:
-- [Specific item description] from [Brand] — [why it fits]
-
-## STYLING FORMULAS
-Write 3-4 complete outfit formulas as bullets (use - ).
-Format: [piece] + [piece] + [piece] + [piece]
-Make sure silhouettes align with their body preferences.
-
-## FIT & COMFORT NOTES
-Write 3-4 bullets (use - ) that DIRECTLY reference their body preferences.
-Examples:
-- If they want elongation: "Look for length and vertical lines"
-- If they prefer ease: "Choose soft drape over cling"
-- If comfort worked: "Prioritize comfort-led fabrics over rigid materials"
-
-Be SPECIFIC. Use fashion-editorial language. Reference their ACTUAL profile data in every section.`
-          }
+            content: "You are a personal fashion analyst. Filter trend reports through customer style data. Be specific with fashion language. Connect recommendations to their actual profile. Keep sections concise and scannable."
           },
           {
             role: "user",
-            content: `TREND REPORT:\n${trendReport}\n\n${styleProfile}`
+            content: `TREND REPORT:\n${trendReport}\n\n${styleProfile}\n\nCreate a personalized report with sections: YOUR TREND LENS (2-3 sentences), TRENDS THAT FIT YOU (2-3 trends with why/best for/brands/styling), TRENDS TO SKIP (1-2 with alternatives), WHAT TO LOOK FOR (5-7 bullets), BRANDS IN YOUR DIRECTION (by tier with reasons), PIECES TO EXPLORE NOW (by tier), STYLING FORMULAS (3-4 bullets), FIT & COMFORT NOTES (3-4 bullets tied to body preferences). Be specific and reference their actual data.`
           }
         ],
       }),
