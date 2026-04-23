@@ -154,27 +154,23 @@ console.log("Style Intelligence:", JSON.stringify(styleIntelligence, null, 2));
   buildFallback({ mood: safeMood, feeling: safeFeeling, closetItem, naiaPiece, outfit: finalOutfit });
 
 // Parse and save nAia pieces to DB
-console.log('FULL AI RESULT:', result);
-console.log('MARKER: About to parse nAia pieces');
-let session = null;
 try {
   const { authenticateCustomer } = await import("../customer-auth.server.js");
   const prisma = (await import("../db.server.js")).default;
   const { customer } = await authenticateCustomer(request);
-
-  console.log('CUSTOMER CHECK:', !!customer, customer?.id);
-
- // Create session WITHOUT auth requirement (temporary fix)
-  session = await prisma.stylingSession.create({
-    data: {
-      customerId: customer?.id || null,
-      currentMood: safeMood || "",
-      desiredFeeling: safeFeeling || "",
-      occasion: safeEvent || "",
-      specificNeeds: result,
-      styleFrom: "NAIA",
-    },
-  });
+  
+  if (customer) {
+    // Create styling session
+    const session = await prisma.stylingSession.create({
+      data: {
+        customerId: customer.id,
+        currentMood: safeMood || "",
+        desiredFeeling: safeFeeling || "",
+        occasion: safeEvent || "",
+        specificNeeds: result,
+        styleFrom: "NAIA",
+      },
+    });
 
     // Parse nAia pieces from result
     const ALL_PIECE_NAMES = [
@@ -207,19 +203,10 @@ try {
       "Printed Straight Pants": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3b14fe8b-2c19-492e-82b1-44baaf3a3cc9.png",
     };
 
- console.log('MARKER: Inside customer block, checking pieces');
-  const foundPieces = ALL_PIECE_NAMES.filter(name => result.includes(name));
-  console.log('=== PIECE DETECTION DEBUG ===');
-  console.log('Found pieces:', foundPieces);
-  console.log('Looking for:', ALL_PIECE_NAMES);
-  console.log('In result:', result.substring(0, 500));
+    const foundPieces = ALL_PIECE_NAMES.filter(name => result.includes(name));
 
-  if (foundPieces.length === 0) {
-    throw new Error(`NO PIECES FOUND! Searched for: ${ALL_PIECE_NAMES.join(', ')}. Result snippet: ${result.substring(0, 200)}`);
-  }
-  
-  if (foundPieces.length > 0) {
-  const suggestion = await prisma.outfitSuggestion.create({
+    if (foundPieces.length > 0) {
+      const suggestion = await prisma.outfitSuggestion.create({
         data: {
           sessionId: session.id,
           whyThisWorks: result.match(/WHY THIS WORKS[\s\S]*?(?=\n[A-Z])/i)?.[0] || null,
@@ -236,19 +223,22 @@ try {
           productUrl: `https://naiabynadine.com/products/${name.toLowerCase().replace(/ /g, "-")}`,
         })),
       });
-   }
+    }
 
+    return Response.json({ result: "TEST - Intelligence has " + (styleIntelligence ? styleIntelligence.totalReviews : "NO") + " reviews", sessionId: session.id });
+  }
 } catch (err) {
   console.error("DB save error:", err);
 }
 
-return Response.json({ result, debug_styleIntelligence: styleIntelligence, sessionId: session?.id });
+return Response.json({ result, debug_styleIntelligence: styleIntelligence });
 
-} catch (error) {
-  return Response.json({
-    result: buildFallback({ mood: "", feeling: "", closetItem: null, naiaPiece: null, outfit: "" }),
-    error: error?.message || "Something went wrong.",
-  }, { status: 200 });
+  } catch (error) {
+    return Response.json({
+      result: buildFallback({ mood: "", feeling: "", closetItem: null, naiaPiece: null, outfit: "" }),
+      error: error?.message || "Something went wrong.",
+    }, { status: 200 });
+  }
 }
 
 function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bodyPref, closetItem, closetItems, naiaPiece, closet, styleIntelligence, previousPieces, vibe, styleDNA }) {
@@ -554,5 +544,4 @@ Perfume: Le Labo Santal 33 — warm, grounding, and refined.
 Hair: Sleek low bun with a centre part.
 Makeup: Clean skin, defined brows, and a nude lip.
 Song: FKA Twigs - Two Weeks`;
-}
 }
