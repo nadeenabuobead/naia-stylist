@@ -160,6 +160,10 @@ try {
   const { authenticateCustomer } = await import("../customer-auth.server.js");
   const prisma = (await import("../db.server.js")).default;
   const { customer } = await authenticateCustomer(request);
+
+  console.log('CUSTOMER CHECK:', !!customer, customer?.id);
+
+  if (customer) {
   
   if (customer) {
     // Create styling session
