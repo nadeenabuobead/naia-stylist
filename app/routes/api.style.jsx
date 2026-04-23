@@ -163,18 +163,17 @@ try {
 
   console.log('CUSTOMER CHECK:', !!customer, customer?.id);
 
- if (true) {  // TEMP: bypass auth to test piece detection
-    // Create styling session
-    const session = await prisma.stylingSession.create({
-      data: {
-        customerId: customer?.id || "cm7ykkg5h000008l2809qd0s4",  // TEMP: use fallback ID
-        currentMood: safeMood || "",
-        desiredFeeling: safeFeeling || "",
-        occasion: safeEvent || "",
-        specificNeeds: result,
-        styleFrom: "NAIA",
-      },
-    });
+ // Create session WITHOUT auth requirement (temporary fix)
+  const session = await prisma.stylingSession.create({
+    data: {
+      customerId: customer?.id || null,
+      currentMood: safeMood || "",
+      desiredFeeling: safeFeeling || "",
+      occasion: safeEvent || "",
+      specificNeeds: result,
+      styleFrom: "NAIA",
+    },
+  });
 
     // Parse nAia pieces from result
     const ALL_PIECE_NAMES = [
