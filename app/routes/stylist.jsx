@@ -1044,7 +1044,7 @@ function PersonalizedTrends({ customerToken }) {
             whiteSpace: 'nowrap',
           }}
         >
-          {loading ? 'Analyzing...' : 'Show Me'}
+          {loading ? 'Analyzing...' : 'Generate My Report'}
         </button>
       </div>
 
