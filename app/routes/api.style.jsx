@@ -211,6 +211,10 @@ try {
   console.log('Looking for:', ALL_PIECE_NAMES);
   console.log('In result:', result.substring(0, 500));
 
+  if (foundPieces.length === 0) {
+    throw new Error(`NO PIECES FOUND! Searched for: ${ALL_PIECE_NAMES.join(', ')}. Result snippet: ${result.substring(0, 200)}`);
+  }
+  
   if (foundPieces.length > 0) {
   const suggestion = await prisma.outfitSuggestion.create({
         data: {
