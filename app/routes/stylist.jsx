@@ -779,6 +779,38 @@ function StyleResponseProfile({ customerToken }) {
     </div>
   );
 }
+// ─── Personalized Trends Component ───
+function PersonalizedTrends({ customerToken }) {
+  const [trends, setTrends] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!customerToken) return;
+    fetch("/api/personalized-trends", { headers: authHeaders(customerToken) })
+      .then(r => r.json())
+      .then(d => setTrends(d))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [customerToken]);
+
+  if (loading) {
+    return <p style={{ fontSize: "14px", color: "#8a7f75", fontStyle: "italic" }}>Loading trend recommendations...</p>;
+  }
+
+  if (!trends?.hasEnoughData) {
+    return (
+      <p style={{ fontSize: "15px", color: "#8a7f75", fontStyle: "italic" }}>
+        Rate at least 3 looks to get personalized trend recommendations based on your style DNA.
+      </p>
+    );
+  }
+
+  return (
+    <div style={{ fontSize: "15px", lineHeight: 1.8, whiteSpace: "pre-line" }}>
+      {trends.recommendations}
+    </div>
+  );
+}
 // ─── Main Component ───
 export default function Stylist() {
   // ─── Auth state ───
@@ -1150,7 +1182,13 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
             <StyleResponseProfile customerToken={customerToken} />
           </div>
         )}
-
+        {/* ─── Trends For You Panel ─── */}
+        {showConfidence && customer && (
+          <div style={s.panel}>
+            <div style={s.title}>Trends For You</div>
+            <PersonalizedTrends customerToken={customerToken} />
+          </div>
+        )}
         {/* ─── Wishlist Panel ─── */}
         {showWishlist && customer && (
           <div style={s.panel}>
