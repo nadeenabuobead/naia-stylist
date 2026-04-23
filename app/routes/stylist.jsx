@@ -780,11 +780,14 @@ function StyleResponseProfile({ customerToken }) {
   );
 }
 // ─── Personalized Trends Component ───
+// ─── Personalized Trends Component ───
 function PersonalizedTrends({ customerToken }) {
   const [query, setQuery] = useState("");
   const [reportType, setReportType] = useState("seasonal");
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState(null);
+  const [expandedSections, setExpandedSections] = useState({ trendLens: true }); // Only trend lens open by default
+  const [expandedTrends, setExpandedTrends] = useState({});
 
   const reportTypes = [
     { id: "seasonal", label: "Seasonal Trends", placeholder: "e.g., Spring 2026 trends" },
@@ -798,14 +801,23 @@ function PersonalizedTrends({ customerToken }) {
 
   const currentType = reportTypes.find(t => t.id === reportType);
 
+  const toggleSection = (section) => {
+    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  const toggleTrend = (trendId) => {
+    setExpandedTrends(prev => ({ ...prev, [trendId]: !prev[trendId] }));
+  };
+
   const generatePersonalized = async () => {
     if (!query.trim()) return;
 
     setLoading(true);
     setReport(null);
+    setExpandedSections({ trendLens: true });
+    setExpandedTrends({});
 
     try {
-      // Generate public report first
       const publicRes = await fetch("/api/generate-trend-report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -813,7 +825,6 @@ function PersonalizedTrends({ customerToken }) {
       });
       const publicData = await publicRes.json();
 
-      // Personalize it
       const personalRes = await fetch("/api/personalized-trends", {
         method: "POST",
         headers: {
@@ -845,6 +856,40 @@ function PersonalizedTrends({ customerToken }) {
     return match ? match[1].trim() : null;
   };
 
+  const AccordionSection = ({ title, sectionKey, children }) => {
+    const isExpanded = expandedSections[sectionKey];
+    
+    return (
+      <div style={{ marginBottom: '16px', border: '1px solid #d4cfc9', borderRadius: '2px', overflow: 'hidden' }}>
+        <button
+          onClick={() => toggleSection(sectionKey)}
+          style={{
+            width: '100%',
+            padding: '16px',
+            background: isExpanded ? '#f5f2ee' : '#fff',
+            border: 'none',
+            textAlign: 'left',
+            cursor: 'pointer',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontFamily: '"Cormorant Garamond", Georgia, serif',
+          }}
+        >
+          <span style={{ fontSize: '13px', letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 500, color: '#1a1816' }}>
+            {title}
+          </span>
+          <span style={{ fontSize: '16px', color: '#8a7f75' }}>{isExpanded ? '−' : '+'}</span>
+        </button>
+        {isExpanded && (
+          <div style={{ padding: '16px', background: '#fff' }}>
+            {children}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderReport = () => {
     if (!report) return null;
 
@@ -857,101 +902,124 @@ function PersonalizedTrends({ customerToken }) {
     const styling = parseSection(report, 'STYLING FORMULAS');
     const fitNotes = parseSection(report, 'FIT & COMFORT NOTES');
 
+    // Parse individual trends
+    const parseTrends = (content) => {
+      if (!content) return [];
+      const trends = [];
+      const blocks = content.split('**').filter(Boolean);
+      
+      for (let i = 0; i < blocks.length; i += 2) {
+        if (blocks[i] && blocks[i + 1]) {
+          const name = blocks[i].trim();
+          const details = blocks[i + 1];
+          trends.push({ id: `trend-${i}`, name, details });
+        }
+      }
+      return trends;
+    };
+
+    const fitTrends = parseTrends(trendsFit);
+    const skipTrends = parseTrends(trendsSkip);
+
     return (
-      <div>
-        {/* Trend Lens */}
+      <div style={{ marginTop: '32px' }}>
+        {/* Trend Lens - Always Visible */}
         {trendLens && (
-          <div style={ps.section}>
-            <div style={ps.sectionTitle}>Your Trend Lens</div>
-            <div style={ps.lensCard}>
-              <p style={{ margin: 0, fontSize: '15px', lineHeight: 1.7, color: '#1a1816' }}>{trendLens}</p>
+          <div style={{ padding: '20px', background: '#f5f2ee', borderRadius: '2px', borderLeft: '3px solid #1a1816', marginBottom: '24px' }}>
+            <div style={{ fontSize: '13px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#8a7f75', marginBottom: '12px', fontWeight: 500 }}>
+              Your Trend Lens
             </div>
+            <p style={{ margin: 0, fontSize: '15px', lineHeight: 1.7, color: '#1a1816' }}>{trendLens}</p>
           </div>
         )}
 
-        {/* Trends That Fit */}
-        {trendsFit && (
-          <div style={ps.section}>
-            <div style={ps.sectionTitle}>Trends That Fit You</div>
-            {trendsFit.split('**').filter(Boolean).map((block, i) => {
-              if (i % 2 === 0) return null; // Skip non-trend blocks
-              const [trendName, ...rest] = block.split('\n');
-              const content = rest.join('\n');
-              
-              return (
-                <div key={i} style={ps.trendCard}>
-                  <div style={ps.trendName}>{trendName}</div>
-                  <div style={{ fontSize: '14px', lineHeight: 1.7, color: '#4a4540', whiteSpace: 'pre-line' }}>
-                    {content}
+        {/* Trends That Fit You - Nested Accordions */}
+        {fitTrends.length > 0 && (
+          <AccordionSection title="Trends That Fit You" sectionKey="trendsFit">
+            {fitTrends.map(trend => (
+              <div key={trend.id} style={{ marginBottom: '12px', border: '1px solid #e8e4df', borderRadius: '2px' }}>
+                <button
+                  onClick={() => toggleTrend(trend.id)}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: expandedTrends[trend.id] ? '#fafaf9' : '#fff',
+                    border: 'none',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    fontFamily: '"Cormorant Garamond", Georgia, serif',
+                  }}
+                >
+                  <span style={{ fontSize: '15px', fontWeight: 500, color: '#1a1816' }}>{trend.name}</span>
+                  <span style={{ fontSize: '14px', color: '#8a7f75' }}>{expandedTrends[trend.id] ? '▲' : '▼'}</span>
+                </button>
+                {expandedTrends[trend.id] && (
+                  <div style={{ padding: '12px', fontSize: '14px', lineHeight: 1.7, color: '#4a4540', whiteSpace: 'pre-line', background: '#fafaf9' }}>
+                    {trend.details}
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                )}
+              </div>
+            ))}
+          </AccordionSection>
         )}
 
         {/* Trends to Skip */}
-        {trendsSkip && (
-          <div style={ps.section}>
-            <div style={ps.sectionTitle}>Trends to Skip</div>
-            {trendsSkip.split('**').filter(Boolean).map((block, i) => {
-              if (i % 2 === 0) return null;
-              const [trendName, ...rest] = block.split('\n');
-              const content = rest.join('\n');
-              
-              return (
-                <div key={i} style={ps.skipCard}>
-                  <div style={ps.skipName}>{trendName}</div>
-                  <div style={{ fontSize: '14px', lineHeight: 1.7, color: '#4a4540', whiteSpace: 'pre-line' }}>
-                    {content}
-                  </div>
+        {skipTrends.length > 0 && (
+          <AccordionSection title="Trends to Skip" sectionKey="trendsSkip">
+            {skipTrends.map(trend => (
+              <div key={trend.id} style={{ padding: '12px', background: '#fef2f2', borderRadius: '2px', marginBottom: '12px', border: '1px solid #fee2e2' }}>
+                <div style={{ fontSize: '14px', fontWeight: 500, color: '#991b1b', marginBottom: '8px' }}>{trend.name}</div>
+                <div style={{ fontSize: '14px', lineHeight: 1.7, color: '#7f1d1d', whiteSpace: 'pre-line' }}>
+                  {trend.details}
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            ))}
+          </AccordionSection>
         )}
 
-        {/* What to Look For */}
+        {/* What to Look For - Chips */}
         {whatToLookFor && (
-          <div style={ps.section}>
-            <div style={ps.sectionTitle}>What to Look For</div>
-            <div style={ps.chipContainer}>
+          <AccordionSection title="What to Look For" sectionKey="whatToLookFor">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
               {whatToLookFor.split('\n').filter(l => l.trim().startsWith('-') || l.trim().startsWith('*')).map((item, i) => (
-                <div key={i} style={ps.chip}>
+                <div key={i} style={{ padding: '8px 14px', background: '#eee9e2', borderRadius: '20px', fontSize: '13px', color: '#1a1816' }}>
                   {item.replace(/^[\-\*]\s*/, '')}
                 </div>
               ))}
             </div>
-          </div>
+          </AccordionSection>
         )}
 
         {/* Brands */}
         {brands && (
-          <div style={ps.section}>
-            <div style={ps.sectionTitle}>Brands in Your Direction</div>
+          <AccordionSection title="Brands in Your Direction" sectionKey="brands">
             <div style={{ fontSize: '15px', lineHeight: 1.8, whiteSpace: 'pre-line' }}>
               {brands}
             </div>
-          </div>
+          </AccordionSection>
         )}
 
-        {/* Pieces to Explore */}
+        {/* Pieces */}
         {pieces && (
-          <div style={ps.section}>
-            <div style={ps.sectionTitle}>Pieces to Explore Now</div>
+          <AccordionSection title="Pieces to Explore Now" sectionKey="pieces">
             <div style={{ fontSize: '15px', lineHeight: 1.8, whiteSpace: 'pre-line' }}>
               {pieces}
             </div>
-          </div>
+          </AccordionSection>
         )}
 
-        {/* Styling Formulas */}
+        {/* Styling Formulas - Always Visible */}
         {styling && (
-          <div style={ps.section}>
-            <div style={ps.sectionTitle}>How to Wear the Trend</div>
-            <div style={{ fontSize: '15px', lineHeight: 1.8 }}>
+          <div style={{ marginBottom: '16px' }}>
+            <div style={{ fontSize: '13px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#1a1816', marginBottom: '12px', fontWeight: 500 }}>
+              How to Wear the Trend
+            </div>
+            <div>
               {styling.split('\n').filter(l => l.trim().startsWith('-') || l.trim().startsWith('*')).map((formula, i) => (
-                <div key={i} style={ps.formula}>
+                <div key={i} style={{ padding: '12px 16px', background: '#f5f2ee', borderRadius: '2px', marginBottom: '8px', fontSize: '14px' }}>
                   {formula.replace(/^[\-\*]\s*/, '')}
                 </div>
               ))}
@@ -961,16 +1029,13 @@ function PersonalizedTrends({ customerToken }) {
 
         {/* Fit Notes */}
         {fitNotes && (
-          <div style={ps.section}>
-            <div style={ps.sectionTitle}>Fit & Comfort Notes</div>
-            <div style={{ fontSize: '14px', lineHeight: 1.7 }}>
-              {fitNotes.split('\n').filter(l => l.trim().startsWith('-') || l.trim().startsWith('*')).map((note, i) => (
-                <div key={i} style={{ marginBottom: '8px', paddingLeft: '16px', borderLeft: '2px solid #d4cfc9' }}>
-                  {note.replace(/^[\-\*]\s*/, '')}
-                </div>
-              ))}
-            </div>
-          </div>
+          <AccordionSection title="Fit & Comfort Notes" sectionKey="fitNotes">
+            {fitNotes.split('\n').filter(l => l.trim().startsWith('-') || l.trim().startsWith('*')).map((note, i) => (
+              <div key={i} style={{ marginBottom: '8px', paddingLeft: '16px', borderLeft: '2px solid #d4cfc9', fontSize: '14px', lineHeight: 1.7 }}>
+                {note.replace(/^[\-\*]\s*/, '')}
+              </div>
+            ))}
+          </AccordionSection>
         )}
       </div>
     );
@@ -982,7 +1047,6 @@ function PersonalizedTrends({ customerToken }) {
         Get personalized trend insights filtered through your style DNA, body preferences, and the way you want to feel.
       </p>
 
-      {/* Type Selector */}
       <div style={{ marginBottom: '16px' }}>
         <div style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#8a7f75', marginBottom: '10px' }}>
           What are you interested in?
@@ -1009,7 +1073,6 @@ function PersonalizedTrends({ customerToken }) {
         </div>
       </div>
 
-      {/* Input */}
       <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
         <input
           type="text"
