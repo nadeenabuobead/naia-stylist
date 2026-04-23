@@ -2,6 +2,7 @@ import { useState } from "react";
 
 export default function TrendReports() {
   const [query, setQuery] = useState("");
+  const [reportType, setReportType] = useState("seasonal");
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState(null);
 
@@ -15,7 +16,7 @@ export default function TrendReports() {
       const response = await fetch("/api/generate-trend-report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query, reportType }),
       });
 
       const data = await response.json();
@@ -28,15 +29,54 @@ export default function TrendReports() {
     }
   }
 
+  const reportTypes = [
+    { id: "seasonal", label: "Seasonal Trends", placeholder: "e.g., Spring 2026 trends" },
+    { id: "runway", label: "Fashion Week Review", placeholder: "e.g., Paris Fashion Week Fall 2026" },
+    { id: "category", label: "Category Deep Dive", placeholder: "e.g., Designer bags, Denim, Outerwear" },
+    { id: "color", label: "Color Trends", placeholder: "e.g., Spring 2026 color palette" },
+    { id: "brand", label: "Brand Profile", placeholder: "e.g., LOEWE Spring 2026 collection" },
+  ];
+
+  const currentType = reportTypes.find(t => t.id === reportType);
+
   return (
     <div style={s.container}>
-      <h1 style={s.title}>AI Trend Intelligence Generator</h1>
-      <p style={s.subtitle}>Generate trend reports from fashion sources</p>
+      <h1 style={s.title}>AI Fashion Intelligence</h1>
+      <p style={s.subtitle}>Generate authoritative trend reports from fashion sources</p>
 
+      {/* Report Type Selector */}
+      <div style={{ marginBottom: "24px" }}>
+        <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "12px" }}>
+          Report Type
+        </div>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          {reportTypes.map(type => (
+            <button
+              key={type.id}
+              onClick={() => setReportType(type.id)}
+              style={{
+                padding: "10px 16px",
+                fontSize: "12px",
+                letterSpacing: "0.05em",
+                fontFamily: '"Cormorant Garamond", Georgia, serif',
+                background: reportType === type.id ? "#1a1816" : "#eee9e2",
+                color: reportType === type.id ? "#f5f2ee" : "#1a1816",
+                border: "none",
+                borderRadius: "2px",
+                cursor: "pointer",
+              }}
+            >
+              {type.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Input Section */}
       <div style={s.inputSection}>
         <input
           type="text"
-          placeholder="e.g., 'Spring 2026 color trends' or 'Quiet luxury styling'"
+          placeholder={currentType?.placeholder}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && generateReport()}
@@ -49,14 +89,17 @@ export default function TrendReports() {
 
       {loading && (
         <div style={s.loadingBox}>
-          <p style={s.loadingText}>Searching fashion sources and analyzing trends...</p>
+          <p style={s.loadingText}>Analyzing fashion sources and generating {currentType?.label.toLowerCase()}...</p>
         </div>
       )}
 
       {report && (
         <div style={s.reportBox}>
           <div style={s.reportHeader}>
-            <h2 style={s.reportTitle}>Trend Report</h2>
+            <div>
+              <h2 style={s.reportTitle}>{currentType?.label}</h2>
+              <p style={{ fontSize: "13px", color: "#8a7f75", margin: "4px 0 0", fontStyle: "italic" }}>{query}</p>
+            </div>
             <button onClick={() => navigator.clipboard.writeText(report)} style={s.copyButton}>
               Copy Report
             </button>
@@ -65,6 +108,15 @@ export default function TrendReports() {
             {report.split('\n\n').map((paragraph, i) => (
               <p key={i} style={s.paragraph}>{paragraph}</p>
             ))}
+          </div>
+          
+          <div style={{ marginTop: "32px", padding: "16px", background: "#f5f2ee", borderRadius: "4px", borderLeft: "3px solid #1a1816" }}>
+            <div style={{ fontSize: "12px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "8px" }}>
+              Next Step
+            </div>
+            <p style={{ fontSize: "14px", color: "#1a1816", margin: 0 }}>
+              Copy this report to publish on your Shopify blog, or use it to generate personalized recommendations for customers in the styling app.
+            </p>
           </div>
         </div>
       )}
@@ -119,6 +171,7 @@ const s = {
     borderRadius: "4px",
     cursor: "pointer",
     fontWeight: 500,
+    whiteSpace: "nowrap",
   },
   loadingBox: {
     padding: "32px",
@@ -141,7 +194,7 @@ const s = {
   reportHeader: {
     display: "flex",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
     marginBottom: "24px",
     paddingBottom: "16px",
     borderBottom: "1px solid #d4cfc9",

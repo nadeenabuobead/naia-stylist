@@ -781,33 +781,136 @@ function StyleResponseProfile({ customerToken }) {
 }
 // ─── Personalized Trends Component ───
 function PersonalizedTrends({ customerToken }) {
-  const [trends, setTrends] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [publicReport, setPublicReport] = useState("");
+  const [personalizedReport, setPersonalizedReport] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState(1); // 1 = input, 2 = results
 
-  useEffect(() => {
-    if (!customerToken) return;
-    fetch("/api/personalized-trends", { headers: authHeaders(customerToken) })
-      .then(r => r.json())
-      .then(d => setTrends(d))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [customerToken]);
+  const generatePersonalized = async () => {
+    if (!publicReport.trim()) {
+      alert("Paste a trend report first");
+      return;
+    }
 
-  if (loading) {
-    return <p style={{ fontSize: "14px", color: "#8a7f75", fontStyle: "italic" }}>Loading trend recommendations...</p>;
-  }
+    setLoading(true);
+    try {
+      const res = await fetch("/api/personalized-trends", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(customerToken)
+        },
+        body: JSON.stringify({ trendReport: publicReport }),
+      });
 
-  if (!trends?.hasEnoughData) {
+      const data = await res.json();
+      
+      if (!data.hasEnoughData) {
+        alert(data.message);
+        return;
+      }
+
+      setPersonalizedReport(data.personalizedReport);
+      setStep(2);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate personalized trends");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (step === 1) {
     return (
-      <p style={{ fontSize: "15px", color: "#8a7f75", fontStyle: "italic" }}>
-        Rate at least 3 looks to get personalized trend recommendations based on your style DNA.
-      </p>
+      <div>
+        <p style={{ fontSize: "15px", color: "#4a4540", marginBottom: "16px", lineHeight: 1.6 }}>
+          Paste any trend report to see which trends fit your style DNA and get personalized product recommendations.
+        </p>
+        
+        <textarea
+          value={publicReport}
+          onChange={(e) => setPublicReport(e.target.value)}
+          placeholder="Paste a trend report here (from the Trends page or any fashion source)..."
+          style={{
+            width: "100%",
+            minHeight: "200px",
+            padding: "16px",
+            fontSize: "14px",
+            fontFamily: '"Cormorant Garamond", Georgia, serif',
+            border: "1px solid #d4cfc9",
+            borderRadius: "4px",
+            resize: "vertical",
+            marginBottom: "16px",
+          }}
+        />
+
+        <div style={{ display: "flex", gap: "12px" }}>
+          <button
+            onClick={generatePersonalized}
+            disabled={loading || !publicReport.trim()}
+            style={{
+              padding: "12px 24px",
+              fontSize: "13px",
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              fontFamily: '"Cormorant Garamond", Georgia, serif',
+              background: "#1a1816",
+              color: "#f5f2ee",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontWeight: 500,
+            }}
+          >
+            {loading ? "Analyzing..." : "Personalize For Me"}
+          </button>
+          
+          
+            href="/trends"
+            target="_blank"
+            style={{
+              padding: "12px 24px",
+              fontSize: "13px",
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              fontFamily: '"Cormorant Garamond", Georgia, serif',
+              background: "transparent",
+              color: "#1a1816",
+              border: "1px solid #1a1816",
+              borderRadius: "4px",
+              textDecoration: "none",
+              display: "inline-block",
+            }}
+          >
+            Generate Trend Report
+          </a>
+        </div>
+      </div>
     );
   }
 
   return (
-    <div style={{ fontSize: "15px", lineHeight: 1.8, whiteSpace: "pre-line" }}>
-      {trends.recommendations}
+    <div>
+      <div style={{ marginBottom: "24px" }}>
+        <button
+          onClick={() => { setStep(1); setPersonalizedReport(null); }}
+          style={{
+            fontSize: "12px",
+            color: "#8a7f75",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            textDecoration: "underline",
+            padding: 0,
+          }}
+        >
+          ← Try another trend
+        </button>
+      </div>
+
+      <div style={{ fontSize: "15px", lineHeight: 1.8, whiteSpace: "pre-line" }}>
+        {personalizedReport}
+      </div>
     </div>
   );
 }
