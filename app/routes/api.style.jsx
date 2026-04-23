@@ -156,6 +156,7 @@ console.log("Style Intelligence:", JSON.stringify(styleIntelligence, null, 2));
 // Parse and save nAia pieces to DB
 console.log('FULL AI RESULT:', result);
 console.log('MARKER: About to parse nAia pieces');
+let session = null;
 try {
   const { authenticateCustomer } = await import("../customer-auth.server.js");
   const prisma = (await import("../db.server.js")).default;
@@ -164,7 +165,7 @@ try {
   console.log('CUSTOMER CHECK:', !!customer, customer?.id);
 
  // Create session WITHOUT auth requirement (temporary fix)
-  const session = await prisma.stylingSession.create({
+  session = await prisma.stylingSession.create({
     data: {
       customerId: customer?.id || null,
       currentMood: safeMood || "",
@@ -249,7 +250,7 @@ try {
   console.error("DB save error:", err);
 }
 
-return Response.json({ result, debug_styleIntelligence: styleIntelligence });
+return Response.json({ result, debug_styleIntelligence: styleIntelligence, sessionId: session?.id });
 
   } catch (error) {
     return Response.json({
