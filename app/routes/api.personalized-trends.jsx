@@ -1,9 +1,9 @@
 import prisma from "../db.server";
-import { getCustomerFromRequest } from "../customer-auth.server";
+import { authenticateCustomer } from "../customer-auth.server";
 
 export async function loader({ request }) {
   try {
-    const customer = await getCustomerFromRequest(request);
+    const customer = await authenticateCustomer(request);
     if (!customer) {
       return Response.json({ error: "Not authenticated" }, { status: 401 });
     }
