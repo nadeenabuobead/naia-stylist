@@ -174,6 +174,8 @@ export async function loader() {
     const allBodyPrefs = {};
     const allOccasions = {};
     
+    const tagToPieces = {};
+    const didntWorkTagToPieces = {};
     reviews.forEach(r => {
       if (r.workedTags) {
         try {
@@ -181,6 +183,18 @@ export async function loader() {
             allWorkedTags[tag] = (allWorkedTags[tag] || 0) + 1;
           });
         } catch {}
+        }
+        // Track which pieces had this tag
+        const sessionPieces = sessions.find(s => s.id === r.sessionId)?.suggestions?.flatMap(sug => sug.items.map(i => i.productTitle)) || [];
+        if (r.workedTags) {
+          try {
+            JSON.parse(r.workedTags).forEach(tag => {
+              if (!tagToPieces[tag]) tagToPieces[tag] = {};
+              sessionPieces.forEach(piece => {
+                tagToPieces[tag][piece] = (tagToPieces[tag][piece] || 0) + 1;
+              });
+            });
+          } catch {}
       }
       if (r.didntWorkTags) {
         try {
@@ -189,6 +203,14 @@ export async function loader() {
           });
         } catch {}
       }
+        try {
+          JSON.parse(r.didntWorkTags).forEach(tag => {
+            if (!didntWorkTagToPieces[tag]) didntWorkTagToPieces[tag] = {};
+            sessionPieces.forEach(piece => {
+              didntWorkTagToPieces[tag][piece] = (didntWorkTagToPieces[tag][piece] || 0) + 1;
+            });
+          });
+        } catch {}
     });
     
     sessions.forEach(s => {
