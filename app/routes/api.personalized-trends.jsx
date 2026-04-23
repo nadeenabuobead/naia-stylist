@@ -69,6 +69,56 @@ Customer Style DNA:
 
     const apiKey = process.env.OPENAI_API_KEY;
     
+    const systemPrompt = `You are a personal fashion analyst filtering trend reports through a customer's style DNA.
+
+CRITICAL: Use this EXACT format with ## headers:
+
+## YOUR TREND LENS
+2-3 sentences referencing their actual occasions (${topOccasions}), what works (${topWorked}), and feelings (${topFeelings}).
+
+## TRENDS THAT FIT YOU
+For each trend (pick 2-3 SPECIFIC trends from the report):
+
+**[Exact trend name from report]**
+Why it fits: [One sentence connecting to their workedTags]
+Best for: [Their actual top occasions]
+Brands: [4-5 brands - just list names separated by commas]
+Styling: [One complete outfit formula]
+
+## TRENDS TO SKIP
+**[Trend name]**
+Why to skip: [Connect to their didntWorkTags]
+Try instead: [Alternative]
+
+## WHAT TO LOOK FOR
+- [quality 1]
+- [quality 2]
+- [quality 3]
+- [quality 4]
+- [quality 5]
+
+## BRANDS IN YOUR DIRECTION
+Luxury: [Brand] - [reason], [Brand] - [reason]
+Contemporary: [Brand] - [reason], [Brand] - [reason]  
+Accessible: [Brand] - [reason], [Brand] - [reason]
+
+## PIECES TO EXPLORE NOW
+Luxury: [Item] from [Brand] - [why it fits]
+Contemporary: [Item] from [Brand] - [why it fits]
+Accessible: [Item] from [Brand] - [why it fits]
+
+## STYLING FORMULAS
+- [piece] + [piece] + [piece] + [piece]
+- [piece] + [piece] + [piece] + [piece]
+- [piece] + [piece] + [piece] + [piece]
+
+## FIT & COMFORT NOTES
+- [Note about their body preferences]
+- [Note about comfort]
+- [Note about silhouettes that work]
+
+Use ## for section headers. Be specific. Reference their actual data.`;
+
     const openAiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -80,11 +130,11 @@ Customer Style DNA:
         messages: [
           {
             role: "system",
-            content: "You are a personal fashion analyst. Filter trend reports through customer style data. Be specific with fashion language. Connect recommendations to their actual profile. Keep sections concise and scannable."
+            content: systemPrompt
           },
           {
             role: "user",
-            content: `TREND REPORT:\n${trendReport}\n\n${styleProfile}\n\nCreate a personalized report with sections: YOUR TREND LENS (2-3 sentences), TRENDS THAT FIT YOU (2-3 trends with why/best for/brands/styling), TRENDS TO SKIP (1-2 with alternatives), WHAT TO LOOK FOR (5-7 bullets), BRANDS IN YOUR DIRECTION (by tier with reasons), PIECES TO EXPLORE NOW (by tier), STYLING FORMULAS (3-4 bullets), FIT & COMFORT NOTES (3-4 bullets tied to body preferences). Be specific and reference their actual data.`
+            content: `TREND REPORT:\n${trendReport}\n\nCUSTOMER PROFILE:\n${styleProfile}`
           }
         ],
       }),
