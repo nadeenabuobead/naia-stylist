@@ -203,12 +203,14 @@ try {
       "Printed Straight Pants": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3b14fe8b-2c19-492e-82b1-44baaf3a3cc9.png",
     };
 
-    const foundPieces = ALL_PIECE_NAMES.filter(name => result.includes(name));
-    console.log('=== PIECE DETECTION DEBUG ===');
-    console.log('Found pieces:', foundPieces);
-    console.log('Looking for:', ALL_PIECE_NAMES);
-    console.log('In result:', result.substring(0, 500));
-      const suggestion = await prisma.outfitSuggestion.create({
+  const foundPieces = ALL_PIECE_NAMES.filter(name => result.includes(name));
+  console.log('=== PIECE DETECTION DEBUG ===');
+  console.log('Found pieces:', foundPieces);
+  console.log('Looking for:', ALL_PIECE_NAMES);
+  console.log('In result:', result.substring(0, 500));
+
+  if (foundPieces.length > 0) {
+  const suggestion = await prisma.outfitSuggestion.create({
         data: {
           sessionId: session.id,
           whyThisWorks: result.match(/WHY THIS WORKS[\s\S]*?(?=\n[A-Z])/i)?.[0] || null,
