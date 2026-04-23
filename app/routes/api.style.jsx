@@ -154,6 +154,7 @@ console.log("Style Intelligence:", JSON.stringify(styleIntelligence, null, 2));
   buildFallback({ mood: safeMood, feeling: safeFeeling, closetItem, naiaPiece, outfit: finalOutfit });
 
 // Parse and save nAia pieces to DB
+console.log('FULL AI RESULT:', result);
 console.log('MARKER: About to parse nAia pieces');
 try {
   const { authenticateCustomer } = await import("../customer-auth.server.js");
