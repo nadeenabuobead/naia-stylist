@@ -240,8 +240,7 @@ try {
       });
     }
 
-    // Piece detection and saving successful, return normal result
-  }
+   // Piece detection and saving successful, return normal result
 } catch (err) {
   console.error("DB save error:", err);
 }
