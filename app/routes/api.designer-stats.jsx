@@ -218,25 +218,22 @@ export async function loader() {
       };
     });
 
+
     const topPieces = pieces
-      .filter(p => p.timesRated > 0)
-      .sort((a, b) => b.avgRating - a.avgRating)
+      .filter(p => p.classification === "top_performing")
+      .sort((a, b) => b.pieceResponseScore - a.pieceResponseScore)
       .slice(0, 10);
       
-    // Split pieces into performance categories
     const underperformingPieces = pieces
-      .filter(p => p.timesRated > 0 && p.avgRating < 3.5)
-      .sort((a, b) => a.avgRating - b.avgRating);
+      .filter(p => p.classification === "underperforming")
+      .sort((a, b) => a.pieceResponseScore - b.pieceResponseScore);
       
     const mixedSignalPieces = pieces
-      .filter(p => p.timesRated > 1 && p.avgRating >= 3.5 && (
-        p.topDidntWork.length > 0 || 
-        p.wouldWearPercent < 75
-      ))
-      .sort((a, b) => a.avgRating - b.avgRating);
+      .filter(p => p.classification === "mixed_signal")
+      .sort((a, b) => a.pieceResponseScore - b.pieceResponseScore);
       
     const piecesToWatch = pieces
-      .filter(p => p.timesRated === 1)
+      .filter(p => p.classification === "to_watch")
       .sort((a, b) => b.avgRating - a.avgRating);
 
     const allWorkedTags = {};
@@ -293,16 +290,28 @@ export async function loader() {
     });
 
     const topWorkedOverall = Object.entries(allWorkedTags)
+    const topWorkedOverall = Object.entries(allWorkedTags)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 6)
-      .map(([tag, count]) => ({ tag, count }));
-      
+      .map(([tag, count]) => {
+        const topPieces = Object.entries(tagToPieces[tag] || {})
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([piece, count]) => ({ piece, count }));
+        return { tag, count, topPieces };
+      });
+    const topDidntWorkOverall = Object.entries(allDidntWorkTags)
     const topDidntWorkOverall = Object.entries(allDidntWorkTags)
       .filter(([tag]) => tag !== "Everything worked")
       .sort((a, b) => b[1] - a[1])
       .slice(0, 6)
-      .map(([tag, count]) => ({ tag, count }));
-      
+      .map(([tag, count]) => {
+        const topPieces = Object.entries(didntWorkTagToPieces[tag] || {})
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([piece, count]) => ({ piece, count }));
+        return { tag, count, topPieces };
+      });
     const topBodyPrefsOverall = Object.entries(allBodyPrefs)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 6)
