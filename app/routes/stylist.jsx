@@ -784,14 +784,16 @@ function PersonalizedTrends({ customerToken }) {
   const [query, setQuery] = useState("");
   const [reportType, setReportType] = useState("seasonal");
   const [loading, setLoading] = useState(false);
-  const [personalizedReport, setPersonalizedReport] = useState(null);
+  const [report, setReport] = useState(null);
 
   const reportTypes = [
     { id: "seasonal", label: "Seasonal Trends", placeholder: "e.g., Spring 2026 trends" },
     { id: "runway", label: "Fashion Week", placeholder: "e.g., Paris Fashion Week Fall 2026" },
-    { id: "category", label: "Category", placeholder: "e.g., Designer bags, Denim" },
-    { id: "color", label: "Colors", placeholder: "e.g., Spring 2026 colors" },
-    { id: "brand", label: "Brand", placeholder: "e.g., LOEWE Spring 2026" },
+    { id: "category", label: "Category Deep Dive", placeholder: "e.g., Designer bags, Denim" },
+    { id: "color", label: "Color Trends", placeholder: "e.g., Spring 2026 colors" },
+    { id: "brand", label: "Brand Profile", placeholder: "e.g., LOEWE Spring 2026" },
+    { id: "accessories", label: "Accessory Watch", placeholder: "e.g., Spring 2026 bags" },
+    { id: "emerging", label: "Emerging Brands", placeholder: "e.g., New designers to watch" },
   ];
 
   const currentType = reportTypes.find(t => t.id === reportType);
@@ -800,10 +802,10 @@ function PersonalizedTrends({ customerToken }) {
     if (!query.trim()) return;
 
     setLoading(true);
-    setPersonalizedReport(null);
+    setReport(null);
 
     try {
-      // Step 1: Generate public report
+      // Generate public report first
       const publicRes = await fetch("/api/generate-trend-report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -811,7 +813,7 @@ function PersonalizedTrends({ customerToken }) {
       });
       const publicData = await publicRes.json();
 
-      // Step 2: Personalize it
+      // Personalize it
       const personalRes = await fetch("/api/personalized-trends", {
         method: "POST",
         headers: {
@@ -828,7 +830,7 @@ function PersonalizedTrends({ customerToken }) {
         return;
       }
 
-      setPersonalizedReport(personalData.personalizedReport);
+      setReport(personalData.personalizedReport);
     } catch (err) {
       console.error(err);
       alert("Failed to generate personalized trends");
@@ -837,31 +839,168 @@ function PersonalizedTrends({ customerToken }) {
     }
   };
 
+  const parseSection = (content, sectionName) => {
+    const regex = new RegExp(`## ${sectionName}([\\s\\S]*?)(?=##|$)`);
+    const match = content.match(regex);
+    return match ? match[1].trim() : null;
+  };
+
+  const renderReport = () => {
+    if (!report) return null;
+
+    const trendLens = parseSection(report, 'YOUR TREND LENS');
+    const trendsFit = parseSection(report, 'TRENDS THAT FIT YOU');
+    const trendsSkip = parseSection(report, 'TRENDS TO SKIP');
+    const whatToLookFor = parseSection(report, 'WHAT TO LOOK FOR');
+    const brands = parseSection(report, 'BRANDS IN YOUR DIRECTION');
+    const pieces = parseSection(report, 'PIECES TO EXPLORE NOW');
+    const styling = parseSection(report, 'STYLING FORMULAS');
+    const fitNotes = parseSection(report, 'FIT & COMFORT NOTES');
+
+    return (
+      <div>
+        {/* Trend Lens */}
+        {trendLens && (
+          <div style={ps.section}>
+            <div style={ps.sectionTitle}>Your Trend Lens</div>
+            <div style={ps.lensCard}>
+              <p style={{ margin: 0, fontSize: '15px', lineHeight: 1.7, color: '#1a1816' }}>{trendLens}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Trends That Fit */}
+        {trendsFit && (
+          <div style={ps.section}>
+            <div style={ps.sectionTitle}>Trends That Fit You</div>
+            {trendsFit.split('**').filter(Boolean).map((block, i) => {
+              if (i % 2 === 0) return null; // Skip non-trend blocks
+              const [trendName, ...rest] = block.split('\n');
+              const content = rest.join('\n');
+              
+              return (
+                <div key={i} style={ps.trendCard}>
+                  <div style={ps.trendName}>{trendName}</div>
+                  <div style={{ fontSize: '14px', lineHeight: 1.7, color: '#4a4540', whiteSpace: 'pre-line' }}>
+                    {content}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Trends to Skip */}
+        {trendsSkip && (
+          <div style={ps.section}>
+            <div style={ps.sectionTitle}>Trends to Skip</div>
+            {trendsSkip.split('**').filter(Boolean).map((block, i) => {
+              if (i % 2 === 0) return null;
+              const [trendName, ...rest] = block.split('\n');
+              const content = rest.join('\n');
+              
+              return (
+                <div key={i} style={ps.skipCard}>
+                  <div style={ps.skipName}>{trendName}</div>
+                  <div style={{ fontSize: '14px', lineHeight: 1.7, color: '#4a4540', whiteSpace: 'pre-line' }}>
+                    {content}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* What to Look For */}
+        {whatToLookFor && (
+          <div style={ps.section}>
+            <div style={ps.sectionTitle}>What to Look For</div>
+            <div style={ps.chipContainer}>
+              {whatToLookFor.split('\n').filter(l => l.trim().startsWith('-') || l.trim().startsWith('*')).map((item, i) => (
+                <div key={i} style={ps.chip}>
+                  {item.replace(/^[\-\*]\s*/, '')}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Brands */}
+        {brands && (
+          <div style={ps.section}>
+            <div style={ps.sectionTitle}>Brands in Your Direction</div>
+            <div style={{ fontSize: '15px', lineHeight: 1.8, whiteSpace: 'pre-line' }}>
+              {brands}
+            </div>
+          </div>
+        )}
+
+        {/* Pieces to Explore */}
+        {pieces && (
+          <div style={ps.section}>
+            <div style={ps.sectionTitle}>Pieces to Explore Now</div>
+            <div style={{ fontSize: '15px', lineHeight: 1.8, whiteSpace: 'pre-line' }}>
+              {pieces}
+            </div>
+          </div>
+        )}
+
+        {/* Styling Formulas */}
+        {styling && (
+          <div style={ps.section}>
+            <div style={ps.sectionTitle}>How to Wear the Trend</div>
+            <div style={{ fontSize: '15px', lineHeight: 1.8 }}>
+              {styling.split('\n').filter(l => l.trim().startsWith('-') || l.trim().startsWith('*')).map((formula, i) => (
+                <div key={i} style={ps.formula}>
+                  {formula.replace(/^[\-\*]\s*/, '')}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Fit Notes */}
+        {fitNotes && (
+          <div style={ps.section}>
+            <div style={ps.sectionTitle}>Fit & Comfort Notes</div>
+            <div style={{ fontSize: '14px', lineHeight: 1.7 }}>
+              {fitNotes.split('\n').filter(l => l.trim().startsWith('-') || l.trim().startsWith('*')).map((note, i) => (
+                <div key={i} style={{ marginBottom: '8px', paddingLeft: '16px', borderLeft: '2px solid #d4cfc9' }}>
+                  {note.replace(/^[\-\*]\s*/, '')}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div>
-      <p style={{ fontSize: "15px", color: "#4a4540", marginBottom: "20px", lineHeight: 1.6 }}>
-        Get personalized trend insights filtered through your style DNA. We'll show you which trends fit you and which to skip.
+      <p style={{ fontSize: '15px', color: '#4a4540', marginBottom: '20px', lineHeight: 1.6 }}>
+        Get personalized trend insights filtered through your style DNA, body preferences, and the way you want to feel.
       </p>
 
-      {/* Report Type Selector */}
-      <div style={{ marginBottom: "20px" }}>
-        <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "12px" }}>
+      {/* Type Selector */}
+      <div style={{ marginBottom: '16px' }}>
+        <div style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#8a7f75', marginBottom: '10px' }}>
           What are you interested in?
         </div>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           {reportTypes.map(type => (
             <button
               key={type.id}
               onClick={() => setReportType(type.id)}
               style={{
-                padding: "8px 14px",
-                fontSize: "12px",
+                padding: '8px 14px',
+                fontSize: '12px',
                 fontFamily: '"Cormorant Garamond", Georgia, serif',
-                background: reportType === type.id ? "#1a1816" : "#eee9e2",
-                color: reportType === type.id ? "#f5f2ee" : "#1a1816",
-                border: "none",
-                borderRadius: "2px",
-                cursor: "pointer",
+                background: reportType === type.id ? '#1a1816' : '#eee9e2',
+                color: reportType === type.id ? '#f5f2ee' : '#1a1816',
+                border: 'none',
+                borderRadius: '2px',
+                cursor: 'pointer',
               }}
             >
               {type.label}
@@ -871,65 +1010,120 @@ function PersonalizedTrends({ customerToken }) {
       </div>
 
       {/* Input */}
-      <div style={{ display: "flex", gap: "12px", marginBottom: "24px" }}>
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
         <input
           type="text"
           placeholder={currentType?.placeholder}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && generatePersonalized()}
+          onKeyDown={(e) => e.key === 'Enter' && generatePersonalized()}
           style={{
             flex: 1,
-            padding: "12px",
-            fontSize: "14px",
+            padding: '12px',
+            fontSize: '14px',
             fontFamily: '"Cormorant Garamond", Georgia, serif',
-            border: "1px solid #d4cfc9",
-            borderRadius: "2px",
+            border: '1px solid #d4cfc9',
+            borderRadius: '2px',
           }}
         />
         <button
           onClick={generatePersonalized}
           disabled={loading || !query.trim()}
           style={{
-            padding: "12px 24px",
-            fontSize: "12px",
-            letterSpacing: "0.1em",
-            textTransform: "uppercase",
+            padding: '12px 24px',
+            fontSize: '12px',
+            letterSpacing: '0.1em',
+            textTransform: 'uppercase',
             fontFamily: '"Cormorant Garamond", Georgia, serif',
-            background: "#1a1816",
-            color: "#f5f2ee",
-            border: "none",
-            borderRadius: "2px",
-            cursor: "pointer",
-            whiteSpace: "nowrap",
+            background: '#1a1816',
+            color: '#f5f2ee',
+            border: 'none',
+            borderRadius: '2px',
+            cursor: loading || !query.trim() ? 'not-allowed' : 'pointer',
+            opacity: loading || !query.trim() ? 0.5 : 1,
+            whiteSpace: 'nowrap',
           }}
         >
-          {loading ? "Analyzing..." : "Show Me"}
+          {loading ? 'Analyzing...' : 'Show Me'}
         </button>
       </div>
 
       {loading && (
-        <p style={{ fontSize: "14px", color: "#8a7f75", fontStyle: "italic" }}>
+        <p style={{ fontSize: '14px', color: '#8a7f75', fontStyle: 'italic' }}>
           Analyzing trends and filtering through your style DNA...
         </p>
       )}
 
-      {personalizedReport && (
-        <div style={{ 
-          padding: "20px", 
-          background: "#f5f2ee", 
-          borderRadius: "2px", 
-          borderLeft: "3px solid #1a1816",
-          fontSize: "15px", 
-          lineHeight: 1.8, 
-          whiteSpace: "pre-line" 
-        }}>
-          {personalizedReport}
-        </div>
-      )}
+      {renderReport()}
     </div>
   );
 }
+
+// Personalized styles
+const ps = {
+  section: {
+    marginBottom: '32px',
+  },
+  sectionTitle: {
+    fontSize: '13px',
+    letterSpacing: '0.15em',
+    textTransform: 'uppercase',
+    color: '#1a1816',
+    marginBottom: '16px',
+    fontWeight: 500,
+  },
+  lensCard: {
+    padding: '20px',
+    background: '#f5f2ee',
+    borderRadius: '2px',
+    borderLeft: '3px solid #1a1816',
+  },
+  trendCard: {
+    padding: '16px',
+    background: '#fff',
+    border: '1px solid #d4cfc9',
+    borderRadius: '2px',
+    marginBottom: '12px',
+  },
+  trendName: {
+    fontSize: '15px',
+    fontWeight: 500,
+    color: '#1a1816',
+    marginBottom: '10px',
+  },
+  skipCard: {
+    padding: '16px',
+    background: '#fef2f2',
+    border: '1px solid #fee2e2',
+    borderRadius: '2px',
+    marginBottom: '12px',
+  },
+  skipName: {
+    fontSize: '15px',
+    fontWeight: 500,
+    color: '#991b1b',
+    marginBottom: '10px',
+  },
+  chipContainer: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '8px',
+  },
+  chip: {
+    padding: '8px 14px',
+    background: '#eee9e2',
+    borderRadius: '20px',
+    fontSize: '13px',
+    color: '#1a1816',
+  },
+  formula: {
+    padding: '12px 16px',
+    background: '#f5f2ee',
+    borderRadius: '2px',
+    marginBottom: '8px',
+    fontSize: '14px',
+  },
+};
 // ─── Main Component ───
 export default function Stylist() {
   // ─── Auth state ───
