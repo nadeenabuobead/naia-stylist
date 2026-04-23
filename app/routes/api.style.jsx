@@ -242,13 +242,13 @@ try {
   console.error("DB save error:", err);
 }
 
-return Response.json({ result, debug_styleIntelligence: styleIntelligence, sessionId: session?.id });
-  } catch (error) {
-    return Response.json({
-      result: buildFallback({ mood: "", feeling: "", closetItem: null, naiaPiece: null, outfit: "" }),
-      error: error?.message || "Something went wrong.",
-    }, { status: 200 });
-  }
+  return Response.json({ result, debug_styleIntelligence: styleIntelligence, sessionId: session?.id });
+
+} catch (error) {
+  return Response.json({
+    result: buildFallback({ mood: "", feeling: "", closetItem: null, naiaPiece: null, outfit: "" }),
+    error: error?.message || "Something went wrong.",
+  }, { status: 200 });
 }
 
 function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bodyPref, closetItem, closetItems, naiaPiece, closet, styleIntelligence, previousPieces, vibe, styleDNA }) {
