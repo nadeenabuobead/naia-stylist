@@ -238,6 +238,14 @@ try {
    }
 
 } catch (err) {
+  // Save error to session so we can see it
+  try {
+    const prisma = (await import("../db.server.js")).default;
+    await prisma.stylingSession.updateMany({
+      where: { styleFrom: "NAIA", specificNeeds: { contains: result.substring(0, 50) } },
+      data: { occasion: `ERROR: ${err.message}` }
+    });
+  } catch {}
   console.error("DB save error:", err);
 }
 
