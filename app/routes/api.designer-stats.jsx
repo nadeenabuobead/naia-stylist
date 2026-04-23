@@ -217,7 +217,6 @@ export async function loader() {
         quote: piece.quotes[0] || null
       };
     });
-    });
 
     const topPieces = pieces
       .filter(p => p.timesRated > 0)
