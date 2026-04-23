@@ -229,7 +229,7 @@ try {
       });
     }
 
-    return Response.json({ result: "TEST - Intelligence has " + (styleIntelligence ? styleIntelligence.totalReviews : "NO") + " reviews", sessionId: session.id });
+    // Piece detection and saving successful, return normal result
   }
 } catch (err) {
   console.error("DB save error:", err);
