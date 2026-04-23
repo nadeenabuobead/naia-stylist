@@ -201,6 +201,18 @@ try {
       "Leather Midi Dress": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/8a855f15-e5e9-4ef5-a7db-a7253e83a542.png",
       "Asymmetrical Waist Pants": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/7d5d1e05-796a-45d9-b74a-4ddb0c9da3cf.png",
       "Printed Straight Pants": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3b14fe8b-2c19-492e-82b1-44baaf3a3cc9.png",
+    const PIECE_CATEGORIES = {
+      "Sculptural Hybrid Coat": "Outerwear",
+      "Art Blouse": "Top",
+      "Art Panel Tailored Blazer": "Outerwear",
+      "Textured Art Maxi Skirt": "Skirt",
+      "Wrap Cropped Top": "Top",
+      "Printed Wrap Kimono Jacket": "Outerwear",
+      "Art Collar Shirt": "Top",
+      "Leather Midi Dress": "Dress",
+      "Asymmetrical Waist Pants": "Trouser",
+      "Printed Straight Pants": "Trouser",
+    };
     };
 
     const foundPieces = ALL_PIECE_NAMES.filter(name => result.includes(name));
@@ -216,7 +228,7 @@ try {
       await prisma.outfitItem.createMany({
         data: foundPieces.map(name => ({
           suggestionId: suggestion.id,
-          itemType: "TOP",
+          itemType: PIECE_CATEGORIES[name],
           shopifyProductId: PIECE_IDS[name],
           productTitle: name,
           productImageUrl: PIECE_IMAGES[name],
