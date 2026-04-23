@@ -79,11 +79,10 @@ Customer Style DNA:
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        messages: [
+       messages: [
           {
-          
-  role: "system",
-  content: `You are a personal fashion analyst filtering trend reports through a customer's actual style data.
+            role: "system",
+            content: `You are a personal fashion analyst...
 
 CRITICAL RULES:
 1. Use SPECIFIC fashion language from the trend report - not generic terms
