@@ -242,7 +242,7 @@ try {
   console.error("DB save error:", err);
 }
 
-  return Response.json({ result, debug_styleIntelligence: styleIntelligence, sessionId: session?.id });
+return Response.json({ result, debug_styleIntelligence: styleIntelligence, sessionId: session?.id });
 
 } catch (error) {
   return Response.json({
