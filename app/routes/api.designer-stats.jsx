@@ -148,16 +148,15 @@ export async function loader() {
       let classification = 'underperforming';
       let classificationReason = '';
       
-      if (numRatings < 2) {
-        classification = 'to_watch';
-        classificationReason = 'Too little data';
       } else if (
-        pieceResponseScore >= 70 &&
-        styleAlignment >= 60 &&
-        wouldWearPercent >= 60 &&
-        negativeFeedbackScore < 35
+        numRatings >= 2 &&
+        pieceResponseScore >= 60 &&
+        styleAlignment >= 50 &&
+        wouldWearPercent >= 60
       ) {
-        classification = 'top_performing';
+        classification = "top_performing";
+        classificationReason = "Strong across all metrics";
+      } else if (
         classificationReason = 'Strong across all metrics';
       } else if (
         (pieceResponseScore >= 50 && pieceResponseScore < 70) ||
