@@ -167,9 +167,10 @@ try {
         currentMood: safeMood || "",
         desiredFeeling: safeFeeling || "",
         occasion: safeEvent || "",
+        bodyPreference: bodyPref || "",
+        styleDNA: JSON.stringify(styleDNA || []),
         specificNeeds: result,
         styleFrom: "NAIA",
-      },
     });
 
     // Parse nAia pieces from result
