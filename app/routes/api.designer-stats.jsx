@@ -334,6 +334,10 @@ export async function loader() {
       .slice(0, 8)
       .map(([occasion, count]) => ({ occasion, count }));
 
+    const topStyleDNAOverall = Object.entries(allStyleDNA)
+      .sort((a, b) => b[1] - a[1])
+      .map(([dna, count]) => ({ dna, count }));
+
     return Response.json({
       totalReviews,
       totalUsers,
