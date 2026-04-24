@@ -87,6 +87,27 @@ export default function DesignerDashboard() {
           </div>
         </Section>
       )}
+
+      {/* Style DNA Breakdown */}
+      {data.topStyleDNAOverall?.length > 0 && (
+        <Section title="Style DNA Breakdown" subtitle="Customer style identity distribution">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px" }}>
+            {data.topStyleDNAOverall.map(item => {
+              const total = data.topStyleDNAOverall.reduce((sum, d) => sum + d.count, 0);
+              const percent = Math.round((item.count / total) * 100);
+              return (
+                <div key={item.dna} style={{ background: "#fff", padding: "16px", borderRadius: "4px", border: "1px solid #d4cfc9" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "4px" }}>
+                    <span style={{ fontSize: "14px", fontWeight: 500, color: "#1a1816" }}>{item.dna}</span>
+                    <span style={{ fontSize: "12px", color: "#8a7f75" }}>{percent}%</span>
+                  </div>
+                  <div style={{ fontSize: "11px", color: "#8a7f75" }}>{item.count} user{item.count !== 1 ? "s" : ""}</div>
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+      )}
       {/* What Users Liked Most */}
       <Section title="What Users Liked Most" subtitle="Most selected positive feedback across all looks">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px" }}>
@@ -103,13 +124,29 @@ export default function DesignerDashboard() {
 
       {/* What Didn't Work */}
       <Section title="What Didn't Work" subtitle="Most common rejection points">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "12px" }}>
           {data.topDidntWorkOverall?.map(item => (
             <div key={item.tag} style={{ background: "#fef2f2", padding: "16px", borderRadius: "4px", border: "1px solid #fee2e2" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
                 <span style={{ fontSize: "14px", fontWeight: 500, color: "#991b1b" }}>{item.tag}</span>
-                <span style={{ fontSize: "12px", color: "#dc2626" }}>{item.count} look{item.count !== 1 ? 's' : ''}</span>
+                <span style={{ fontSize: "12px", color: "#dc2626" }}>{item.count} look{item.count !== 1 ? "s" : ""}</span>
               </div>
+              {item.topPieces?.length > 0 && (
+                <div>
+                  <div style={{ fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.1em", color: "#991b1b", marginBottom: "4px" }}>Most Linked Pieces</div>
+                  <div style={{ fontSize: "12px", color: "#991b1b" }}>
+                    {item.topPieces.map((p, i) => (
+                      <span key={p.piece}>
+                        {p.piece}{i < item.topPieces.length - 1 ? ", " : ""}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </Section>
             </div>
           ))}
         </div>
@@ -235,6 +272,12 @@ function PieceCard({ piece, variant }) {
           <div>
             <div style={{ fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.1em", color: "#8a7f75", marginBottom: "4px" }}>Body Match</div>
             <div style={{ fontSize: "12px", color: "#1a1816" }}>{piece.topBodyPrefs.join(', ')}</div>
+          </div>
+        )}
+        {piece.topStyleDNA?.length > 0 && (
+          <div>
+            <div style={{ fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.1em", color: "#8a7f75", marginBottom: "4px" }}>Resonates With</div>
+            <div style={{ fontSize: "12px", color: "#1a1816" }}>{piece.topStyleDNA.join(", ")}</div>
           </div>
         )}
       </div>
