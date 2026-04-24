@@ -203,6 +203,11 @@ export async function loader() {
         .slice(0, 2)
         .map(([pref]) => pref);
       
+      const topStyleDNA = Object.entries(piece.styleDNA || {})
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([dna]) => dna);
+      
       return {
         name: piece.name,
         category: piece.category,
@@ -328,6 +333,10 @@ export async function loader() {
       .slice(0, 8)
       .map(([occasion, count]) => ({ occasion, count }));
 
+
+    const topStyleDNAOverall = Object.entries(allStyleDNA)
+      .sort((a, b) => b[1] - a[1])
+      .map(([dna, count]) => ({ dna, count }));
     return Response.json({
       totalReviews,
       totalUsers,
