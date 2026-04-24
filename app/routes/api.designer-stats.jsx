@@ -60,6 +60,7 @@ export async function loader() {
               feelings: {},
               occasions: {},
               bodyPrefs: {},
+              styleDNA: {},
               quotes: []
             };
           }
@@ -92,6 +93,12 @@ export async function loader() {
             if (session.desiredFeeling) piece.feelings[session.desiredFeeling] = (piece.feelings[session.desiredFeeling] || 0) + 1;
             if (session.occasion) piece.occasions[session.occasion] = (piece.occasions[session.occasion] || 0) + 1;
             if (session.bodyPreference) piece.bodyPrefs[session.bodyPreference] = (piece.bodyPrefs[session.bodyPreference] || 0) + 1;
+            if (session.styleDNA) {
+              const dnas = Array.isArray(session.styleDNA) ? session.styleDNA : JSON.parse(session.styleDNA || "[]");
+              dnas.forEach(dna => {
+                piece.styleDNA[dna] = (piece.styleDNA[dna] || 0) + 1;
+              });
+            }
             
             if (review.additionalNotes) piece.quotes.push(review.additionalNotes);
           }
@@ -214,6 +221,7 @@ export async function loader() {
         topFeelings,
         topOccasions,
         topBodyPrefs,
+        topStyleDNA,
         quote: piece.quotes[0] || null
       };
     });
@@ -240,6 +248,7 @@ export async function loader() {
     const allDidntWorkTags = {};
     const allBodyPrefs = {};
     const allOccasions = {};
+    const allStyleDNA = {};
     
     const tagToPieces = {};
     const didntWorkTagToPieces = {};
@@ -336,6 +345,7 @@ export async function loader() {
       topDidntWorkOverall,
       topBodyPrefsOverall,
       topOccasionsOverall,
+      topStyleDNAOverall,
     });
   } catch (error) {
     console.error('API Error:', error);
