@@ -147,10 +147,6 @@ export default function DesignerDashboard() {
           ))}
         </div>
       </Section>
-            </div>
-          ))}
-        </div>
-      </Section>
 
       {/* Body Preference Patterns */}
       {data.topBodyPrefsOverall?.length > 0 && (
