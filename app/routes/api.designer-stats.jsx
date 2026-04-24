@@ -148,15 +148,15 @@ export async function loader() {
       let classification = 'underperforming';
       let classificationReason = '';
       
+      if (numRatings < 2) {
+        classification = 'to_watch';
+        classificationReason = 'Too little data';
       } else if (
-        numRatings >= 2 &&
-        pieceResponseScore >= 60 &&
+        pieceResponseScore >= 55 &&
         styleAlignment >= 50 &&
-        wouldWearPercent >= 60
+        wouldWearPercent >= 50
       ) {
-        classification = "top_performing";
-        classificationReason = "Strong across all metrics";
-      } else if (
+        classification = 'top_performing';
         classificationReason = 'Strong across all metrics';
       } else if (
         (pieceResponseScore >= 50 && pieceResponseScore < 70) ||
@@ -202,11 +202,6 @@ export async function loader() {
         .sort((a, b) => b[1] - a[1])
         .slice(0, 2)
         .map(([pref]) => pref);
-      
-      const topStyleDNA = Object.entries(piece.styleDNA)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([dna]) => dna);
       
       return {
         name: piece.name,
@@ -303,6 +298,7 @@ export async function loader() {
     });
 
     const topWorkedOverall = Object.entries(allWorkedTags)
+    const topWorkedOverall = Object.entries(allWorkedTags)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 6)
       .map(([tag, count]) => {
@@ -312,6 +308,7 @@ export async function loader() {
           .map(([piece, count]) => ({ piece, count }));
         return { tag, count, topPieces };
       });
+    const topDidntWorkOverall = Object.entries(allDidntWorkTags)
     const topDidntWorkOverall = Object.entries(allDidntWorkTags)
       .filter(([tag]) => tag !== "Everything worked")
       .sort((a, b) => b[1] - a[1])
@@ -332,10 +329,6 @@ export async function loader() {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 8)
       .map(([occasion, count]) => ({ occasion, count }));
-
-    const topStyleDNAOverall = Object.entries(allStyleDNA)
-      .sort((a, b) => b[1] - a[1])
-      .map(([dna, count]) => ({ dna, count }));
 
     return Response.json({
       totalReviews,
