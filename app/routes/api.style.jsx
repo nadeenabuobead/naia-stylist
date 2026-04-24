@@ -173,7 +173,6 @@ try {
         styleFrom: "NAIA",
       },
     });
-    });
 
     // Parse nAia pieces from result
     const ALL_PIECE_NAMES = [
