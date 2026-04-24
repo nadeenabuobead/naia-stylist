@@ -298,7 +298,6 @@ export async function loader() {
     });
 
     const topWorkedOverall = Object.entries(allWorkedTags)
-    const topWorkedOverall = Object.entries(allWorkedTags)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 6)
       .map(([tag, count]) => {
@@ -308,7 +307,6 @@ export async function loader() {
           .map(([piece, count]) => ({ piece, count }));
         return { tag, count, topPieces };
       });
-    const topDidntWorkOverall = Object.entries(allDidntWorkTags)
     const topDidntWorkOverall = Object.entries(allDidntWorkTags)
       .filter(([tag]) => tag !== "Everything worked")
       .sort((a, b) => b[1] - a[1])
