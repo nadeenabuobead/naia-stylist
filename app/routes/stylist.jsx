@@ -817,6 +817,11 @@ export default function Stylist() {
   const [tryOnState, setTryOnState] = useState({});
   const [tryOnPhoto, setTryOnPhoto] = useState(null);
   const [showAccount, setShowAccount] = useState(false);
+  const [showTrends, setShowTrends] = useState(false);  
+  const [trendQuery, setTrendQuery] = useState("");
+  const [trendReport, setTrendReport] = useState(null);
+  const [personalizedReport, setPersonalizedReport] = useState(null);
+  const [loadingTrends, setLoadingTrends] = useState(false);
   const [closetSynced, setClosetSynced] = useState(false);
   const [showConfidence, setShowConfidence] = useState(false);
   const [lastHistoryId, setLastHistoryId] = useState(null);
@@ -1103,7 +1108,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             {customer && (
               <>
-                <button style={s.iconBtn} onClick={() => { setShowConfidence(false); setShowHistory(false); setShowWishlist(false); setShowAccount(false); setStep(1); }} title="Style me">
+                <button style={s.iconBtn} onClick={() => { setShowConfidence(false); setShowHistory(false); setShowWishlist(false); setShowAccount(false); setShowTrends(false); setStep(1); }} title="Style me">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
                 </button>
                 {/* Confidence dashboard button */}
@@ -1117,7 +1122,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
                 <button style={s.iconBtn} onClick={() => { setShowWishlist(!showWishlist); setShowHistory(false); setShowAccount(false); setShowConfidence(false); }} title="Wishlist">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill={wishlist.length > 0 ? "#c5553a" : "none"} stroke={wishlist.length > 0 ? "#c5553a" : "currentColor"} strokeWidth="1.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
                 </button>
-                <div style={s.avatar} onClick={() => { setShowAccount(!showAccount); setShowHistory(false); setShowWishlist(false); setShowConfidence(false); }}>
+                <div style={s.avatar} onClick={() => { setShowAccount(!showAccount); setShowHistory(false); setShowWishlist(false); setShowConfidence(false); setShowTrends(false); }}>
                   {(customer.firstName || customer.email || "?")[0].toUpperCase()}
                 </div>
               </>
@@ -1132,17 +1137,221 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
 
         {/* ─── Account Panel ─── */}
         {showAccount && customer && (
-          <div style={s.panel}>
-            <div style={s.title}>Your Account</div>
-            <p style={{ fontSize: "18px", margin: "0 0 8px" }}>{customer.firstName} {customer.lastName}</p>
-            <p style={{ fontSize: "14px", color: "#8a7f75", margin: "0 0 16px" }}>{customer.email}</p>
-            <p style={{ fontSize: "13px", color: "#8a7f75", margin: "0 0 16px" }}>
-              {closet.length} closet piece{closet.length !== 1 ? "s" : ""} · {wishlist.length} wishlisted · {outfitHistory.length} past look{outfitHistory.length !== 1 ? "s" : ""}
-            </p>
-            <button style={{ ...s.outlineBtn, fontSize: "11px", padding: "10px 20px" }} onClick={logout}>Sign out</button>
-          </div>
-        )}
+  <div style={s.panel}>
+    <div style={s.title}>Your Account</div>
+    <p style={{ fontSize: "18px", margin: "0 0 8px" }}>{customer.firstName} {customer.lastName}</p>
+    <p style={{ fontSize: "14px", color: "#8a7f75", margin: "0 0 16px" }}>{customer.email}</p>
+    <p style={{ fontSize: "13px", color: "#8a7f75", margin: "0 0 16px" }}>
+      {closet.length} closet piece{closet.length !== 1 ? "s" : ""} · {wishlist.length} wishlisted · {outfitHistory.length} past look{outfitHistory.length !== 1 ? "s" : ""}
+    </p>
+    <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+      <button 
+        style={{ ...s.btn, fontSize: "11px", padding: "10px 20px", flex: 1 }} 
+        onClick={() => { setShowTrends(true); setShowAccount(false); }}
+      >
+        Personalized Trends
+      </button>
+    </div>
+    <button style={{ ...s.outlineBtn, fontSize: "11px", padding: "10px 20px" }} onClick={logout}>Sign out</button>
+  </div>
+)}
+{/* ─── Personalized Trends Panel ─── */}
+{showTrends && customer && (
+  <div style={s.panel}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
+      <div style={s.title}>Personalized Trend Reports</div>
+      <button 
+        style={{ ...s.outlineBtn, fontSize: "10px", padding: "6px 12px" }} 
+        onClick={() => { setShowTrends(false); setTrendReport(null); setPersonalizedReport(null); }}
+      >
+        Close
+      </button>
+    </div>
+    
+    <p style={{ fontSize: "14px", color: "#8a7f75", marginBottom: "24px", fontStyle: "italic" }}>
+      Get trend insights filtered through your personal style DNA based on your past outfit ratings.
+    </p>
 
+    <div style={{ marginBottom: "24px" }}>
+      <label style={{ fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", display: "block", marginBottom: "8px" }}>
+        What trend report do you want?
+      </label>
+      <input
+        type="text"
+        placeholder="e.g., Spring 2026 trends, Designer bags, Paris Fashion Week"
+        value={trendQuery}
+        onChange={(e) => setTrendQuery(e.target.value)}
+        onKeyDown={async (e) => {
+          if (e.key === "Enter" && trendQuery.trim() && !loadingTrends) {
+            setLoadingTrends(true);
+            setTrendReport(null);
+            setPersonalizedReport(null);
+            
+            try {
+              const trendRes = await fetch("/api/generate-trend-report", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Customer-Token": customerToken },
+                body: JSON.stringify({ query: trendQuery, reportType: "seasonal" }),
+              });
+              const trendData = await trendRes.json();
+              setTrendReport(trendData.report);
+
+              const personalRes = await fetch("/api/personalized-trends", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Customer-Token": customerToken },
+                body: JSON.stringify({ trendReport: trendData.report }),
+              });
+              const personalData = await personalRes.json();
+              
+              if (personalData.hasEnoughData) {
+                setPersonalizedReport(personalData.personalizedReport);
+              } else {
+                alert(personalData.message || "Rate more looks to unlock personalized trends!");
+              }
+            } catch (err) {
+              console.error(err);
+              alert("Failed to generate report");
+            } finally {
+              setLoadingTrends(false);
+            }
+          }
+        }}
+        style={{ 
+          width: "100%", 
+          padding: "12px", 
+          fontSize: "14px", 
+          border: "1px solid #d4cfc9", 
+          borderRadius: "2px",
+          fontFamily: '"Cormorant Garamond", Georgia, serif'
+        }}
+      />
+      <button 
+        style={{ 
+          ...s.btn, 
+          marginTop: "12px", 
+          width: "100%",
+          opacity: (loadingTrends || !trendQuery.trim()) ? 0.5 : 1,
+          cursor: (loadingTrends || !trendQuery.trim()) ? "not-allowed" : "pointer"
+        }}
+        disabled={loadingTrends || !trendQuery.trim()}
+        onClick={async () => {
+          if (!trendQuery.trim() || loadingTrends) return;
+          
+          setLoadingTrends(true);
+          setTrendReport(null);
+          setPersonalizedReport(null);
+          
+          try {
+            const trendRes = await fetch("/api/generate-trend-report", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Customer-Token": customerToken },
+              body: JSON.stringify({ query: trendQuery, reportType: "seasonal" }),
+            });
+            const trendData = await trendRes.json();
+            setTrendReport(trendData.report);
+
+            const personalRes = await fetch("/api/personalized-trends", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Customer-Token": customerToken },
+              body: JSON.stringify({ trendReport: trendData.report }),
+            });
+            const personalData = await personalRes.json();
+            
+            if (personalData.hasEnoughData) {
+              setPersonalizedReport(personalData.personalizedReport);
+            } else {
+              alert(personalData.message || "Rate more looks to unlock personalized trends!");
+            }
+          } catch (err) {
+            console.error(err);
+            alert("Failed to generate report");
+          } finally {
+            setLoadingTrends(false);
+          }
+        }}
+      >
+        {loadingTrends ? "Generating..." : "Generate Report"}
+      </button>
+    </div>
+
+    {loadingTrends && (
+      <div style={{ padding: "32px", background: "#f5f2ee", borderRadius: "2px", textAlign: "center", marginBottom: "24px" }}>
+        <p style={{ fontSize: "14px", color: "#8a7f75", fontStyle: "italic", margin: 0 }}>
+          Analyzing trends and filtering through your style DNA...
+        </p>
+      </div>
+    )}
+
+    {personalizedReport && (
+      <div style={{ background: "#fff", border: "1px solid #d4cfc9", borderRadius: "2px", padding: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", paddingBottom: "12px", borderBottom: "2px solid #1a1816" }}>
+          <div>
+            <h3 style={{ fontSize: "18px", fontWeight: 500, margin: "0 0 4px" }}>Your Personalized Report</h3>
+            <p style={{ fontSize: "12px", color: "#8a7f75", margin: 0, fontStyle: "italic" }}>{trendQuery}</p>
+          </div>
+          <button 
+            onClick={() => navigator.clipboard.writeText(personalizedReport)} 
+            style={{ ...s.outlineBtn, fontSize: "10px", padding: "6px 12px" }}
+          >
+            Copy
+          </button>
+        </div>
+        
+        <div style={{ lineHeight: 1.7, fontSize: "14px" }}>
+          {personalizedReport.split('\n').map((line, i) => {
+            if (line.startsWith('## ')) {
+              return (
+                <h4 key={i} style={{ 
+                  fontSize: "14px", 
+                  fontWeight: 500, 
+                  letterSpacing: "0.1em", 
+                  textTransform: "uppercase", 
+                  color: "#1a1816", 
+                  margin: "24px 0 12px",
+                  paddingBottom: "6px",
+                  borderBottom: "1px solid #e8e4df"
+                }}>
+                  {line.replace('## ', '')}
+                </h4>
+              );
+            } else if (line.match(/^\*\*.+\*\*$/)) {
+              return (
+                <h5 key={i} style={{ 
+                  fontSize: "13px", 
+                  fontWeight: 500, 
+                  color: "#4a4540", 
+                  margin: "12px 0 6px" 
+                }}>
+                  {line.replace(/\*\*/g, '')}
+                </h5>
+              );
+            } else if (line.includes('**')) {
+              const parts = line.split(/(\*\*.*?\*\*)/g);
+              return (
+                <p key={i} style={{ margin: "0 0 8px" }}>
+                  {parts.map((part, idx) => 
+                    part.startsWith('**') && part.endsWith('**') 
+                      ? <strong key={idx}>{part.replace(/\*\*/g, '')}</strong>
+                      : part
+                  )}
+                </p>
+              );
+            } else if (line.match(/^[\*\-]\s/)) {
+              return (
+                <li key={i} style={{ margin: "0 0 6px 20px" }}>
+                  {line.replace(/^[\*\-]\s/, '')}
+                </li>
+              );
+            } else if (line.trim()) {
+              return <p key={i} style={{ margin: "0 0 8px" }}>{line}</p>;
+            }
+            return <div key={i} style={{ height: '6px' }} />;
+          })}
+        </div>
+      </div>
+    )}
+  </div>
+)}
         {/* ─── Confidence Dashboard Panel ─── */}
         {showConfidence && customer && (
           <div style={s.panel}>
@@ -1202,12 +1411,12 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
         )}
 
         {/* ─── Step dots ─── */}
-        {step >= 1 && step <= 7 && !showHistory && !showWishlist && !showAccount && !showConfidence && (
-          <div style={s.stepIndicator}>{Array.from({ length: 7 }).map((_, i) => (<div key={i} style={s.dot(step === i + 1, step > i + 1)} />))}</div>
-        )}
+        {step >= 1 && step <= 7 && !showHistory && !showWishlist && !showAccount && !showConfidence && !showTrends && (
+  <div style={s.stepIndicator}>{Array.from({ length: 7 }).map((_, i) => (<div key={i} style={s.dot(step === i + 1, step > i + 1)} />))}</div>
+)}
 
        {/* ─── Step 1 ─── */}
-{step === 1 && !showHistory && !showWishlist && !showAccount && !showConfidence && (
+{step === 1 && !showHistory && !showWishlist && !showAccount && !showConfidence && !showTrends && (
   <div>
     {customer && customer.lastMood && closet.length > 0 && (
       <div style={{ marginBottom: "40px", padding: "28px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" }}>
