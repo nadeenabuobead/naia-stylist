@@ -1169,6 +1169,12 @@ export default function Stylist() {
   const [trendQuery, setTrendQuery] = useState("");
   const [trendReport, setTrendReport] = useState(null);
   const [personalizedReport, setPersonalizedReport] = useState(null);
+  
+  useEffect(() => {
+    if (personalizedReport) {
+      console.log("Personalized report set:", personalizedReport);
+    }
+  }, [personalizedReport]);
   const [loadingTrends, setLoadingTrends] = useState(false);
   const [closetSynced, setClosetSynced] = useState(false);
   const [showConfidence, setShowConfidence] = useState(false);
