@@ -509,11 +509,6 @@ function authHeaders(token) {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-// ─── Loader ───
-export async function loader() {
-  return null;
-}
-
 // ─── Confidence Rating Component ───
 function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styleWords, onRated }) {
   const [showRating, setShowRating] = useState(false);
