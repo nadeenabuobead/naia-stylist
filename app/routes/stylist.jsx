@@ -1531,7 +1531,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
         <label style={{ fontSize: "10px", letterSpacing: "0.25em", textTransform: "uppercase", color: "#8a7f75", display: "block", marginBottom: "16px", fontWeight: 600 }}>Report Type</label>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "12px" }}>
           {[{ id: "seasonal", label: "Seasonal Trends" }, { id: "runway", label: "Fashion Week" }, { id: "category", label: "Category Deep Dive" }, { id: "color", label: "Color Trends" }, { id: "brand", label: "Brand Profile" }, { id: "accessories", label: "Accessory Watch" }, { id: "emerging", label: "Emerging Brands" }].map(type => (
-            <button key={type.id} onClick={() => setTrendReportType(type.id)} style={{ padding: "12px 16px", fontSize: "12px", letterSpacing: "0.05em", fontFamily: 'Cormorant Garamond', Georgia, serif", borderRadius: "2px", cursor: "pointer", transition: "all 0.2s", background: trendReportType === type.id ? "#1a1816" : "#fff", color: trendReportType === type.id ? "#f5f2ee" : "#1a1816", border: trendReportType === type.id ? "1px solid #1a1816" : "1px solid #d4cfc9" }}>{type.label}</button>
+            <button key={type.id} onClick={() => setTrendReportType(type.id)} style={{ padding: "12px 16px", fontSize: "12px", letterSpacing: "0.05em", fontFamily: ""Cormorant Garamond", Georgia, serif", borderRadius: "2px", cursor: "pointer", transition: "all 0.2s", background: trendReportType === type.id ? "#1a1816" : "#fff", color: trendReportType === type.id ? "#f5f2ee" : "#1a1816", border: trendReportType === type.id ? "1px solid #1a1816" : "1px solid #d4cfc9" }}>{type.label}</button>
           ))}
         </div>
       </div>
