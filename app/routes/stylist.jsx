@@ -1163,6 +1163,7 @@ export default function Stylist() {
   const [tryOnPhoto, setTryOnPhoto] = useState(null);
   const [showAccount, setShowAccount] = useState(false);
   const [showTrends, setShowTrends] = useState(false);  
+  const [showCloset, setShowCloset] = useState(false);
   const [trendQuery, setTrendQuery] = useState("");
   const [trendReportType, setTrendReportType] = useState("seasonal");
   const [trendReport, setTrendReport] = useState(null);
@@ -1502,11 +1503,17 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
     <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
       <button 
         style={{ ...s.btn, fontSize: "11px", padding: "10px 20px", flex: 1 }} 
-        onClick={() => { setShowTrends(true); setShowAccount(false); }}
+        onClick={() => { setShowTrends(true); setShowAccount(false); setShowCloset(false); setShowHistory(false); setShowWishlist(false); setShowConfidence(false); }}
       >
         Personalized Trends
       </button>
     </div>
+      <button 
+        style={{ ...s.outlineBtn, fontSize: "11px", padding: "10px 20px", flex: 1 }} 
+        onClick={() => { setShowCloset(true); setShowAccount(false); }}
+      >
+        My Closet
+      </button>
     <button style={{ ...s.outlineBtn, fontSize: "11px", padding: "10px 20px" }} onClick={logout}>Sign out</button>
   </div>
 )}
@@ -1649,6 +1656,37 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
 
     {personalizedReport && <TrendReportDisplay report={personalizedReport} query={trendQuery} />}
   </div>
+
+{/* ─── My Closet Panel ─── */}
+{showCloset && customer && !showHistory && !showWishlist && !showAccount && !showConfidence && !showTrends && (
+  <div style={s.panel}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
+      <div style={s.title}>My Closet</div>
+      <button 
+        style={{ ...s.outlineBtn, fontSize: "10px", padding: "6px 12px" }} 
+        onClick={() => setShowCloset(false)}
+      >
+        Close
+      </button>
+    </div>
+
+    {closet.length === 0 ? (
+      <p style={{ fontSize: "15px", color: "#8a7f75", fontStyle: "italic" }}>Your closet is empty. Add pieces from the catalog.</p>
+    ) : (
+      <div style={s.productGrid}>
+        {closet.map(item => (
+          <div key={item.id} style={{ border: "1px solid #d4cfc9", borderRadius: "2px", overflow: "hidden" }}>
+            <a href={`https://naia-9417.myshopify.com/products/${item.handle}`} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit" }}>
+              {item.image && <img src={item.image} alt={item.title} style={{ width: "100%", height: "140px", objectFit: "cover", display: "block" }} />}
+              <div style={{ padding: "8px", fontSize: "12px" }}>{item.title}</div>
+            </a>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+)}
+
 )}
         {/* ─── Confidence Dashboard Panel ─── */}
         {showConfidence && customer && (
