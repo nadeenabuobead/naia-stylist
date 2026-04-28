@@ -1891,7 +1891,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
 
                 {(parsedResult.accessories || parsedResult.perfume || parsedResult.song) && (<><div style={s.divider} /><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "24px" }}>{parsedResult.accessories && <div style={s.vibeCard}><div style={s.resultLabel}>Accessories</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.accessories}</p></div>}{parsedResult.perfume && <div style={s.vibeCard}><div style={s.resultLabel}>Perfume</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.perfume}</p></div>}{parsedResult.song && <div style={s.vibeCard}><div style={s.resultLabel}>Song</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.song}</p></div>}</div></>)}
                 {parsedResult.hair && <div style={s.vibeCard}><div style={s.resultLabel}>Hair</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.hair}</p></div>}
-                {parsedResult.makeup && <div style={s.vibeCard}><div style={s.resultLabel}>Makeup</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.makeup}</p></div>}.    
+                {parsedResult.makeup && <div style={s.vibeCard}><div style={s.resultLabel}>Makeup</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.makeup}</p></div>}
                 {parsedResult.shift && (<><div style={s.divider} /><div style={{ marginBottom: "24px" }}><div style={s.resultLabel}>The shift</div><p style={{ fontSize: "19px", fontStyle: "italic", lineHeight: 1.6, margin: 0 }}>{parsedResult.shift}</p></div></>)}
 
                 {/* ─── Shop recommended pieces ─── */}
