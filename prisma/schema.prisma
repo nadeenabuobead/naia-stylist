@@ -176,6 +176,7 @@ model StylingSession {
   occasion        String?   // Where she's going
   specificNeeds   String?   // Any specific requirements
   bodyPreference  String?   // Body fit preferences
+  styleDNA        String?   // Style DNA preferences (JSON array)
   
   // Source Selection
   styleFrom       StyleSource @default(BOTH)
