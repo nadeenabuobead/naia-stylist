@@ -1658,8 +1658,8 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
   </div>
 )
 
-{/* ─── My Closet Panel ─── */}
-{showCloset && customer && !showHistory && !showWishlist && !showAccount && !showConfidence && !showTrends && (
+        {/* ─── My Closet Panel ─── */}
+        {showCloset && customer && !showHistory && !showWishlist && !showAccount && !showConfidence && !showTrends && (
   <div style={s.panel}>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
       <div style={s.title}>My Closet</div>
