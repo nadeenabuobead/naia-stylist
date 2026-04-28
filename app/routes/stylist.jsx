@@ -8,77 +8,11 @@ function TrendReportDisplay({ report, query }) {
   };
   
   const downloadPDF = () => {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    
-    // Cover page - Vogue style
-    doc.setFontSize(48);
-    doc.setFont(undefined, 'normal');
-    doc.text('nAia', 105, 80, { align: 'center' });
-    
-    doc.setFontSize(11);
-    doc.setTextColor(138, 127, 117);
-    doc.text('FASHION INTELLIGENCE', 105, 100, { align: 'center' });
-    
-    doc.setFontSize(16);
-    doc.setTextColor(26, 24, 22);
-    doc.text(query.toUpperCase(), 105, 140, { align: 'center', maxWidth: 160 });
-    
-    doc.setFontSize(9);
-    doc.setTextColor(138, 127, 117);
-    doc.text(`Personalized for you • ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`, 105, 260, { align: 'center' });
-    
-    doc.addPage();
-    let y = 40;
-    const lines = report.split('\n');
-    doc.setTextColor(26, 24, 22);
-    
-    lines.forEach(line => {
-      if (y > 270) {
-        doc.addPage();
-        y = 40;
-      }
-      
-      if (line.startsWith('## ')) {
-        y += 12;
-        doc.setFontSize(10);
-        doc.setFont(undefined, 'bold');
-        const text = line.replace('## ', '');
-        doc.text(text, 105, y, { align: 'center' });
-        doc.setLineWidth(0.3);
-        doc.line(70, y + 2, 140, y + 2);
-        y += 10;
-        doc.setFont(undefined, 'normal');
-      } else if (line.match(/^\*\*.+\*\*$/)) {
-        doc.setFontSize(9);
-        doc.setFont(undefined, 'bold');
-        y += 6;
-        doc.text(line.replace(/\*\*/g, ''), 25, y);
-        y += 5;
-        doc.setFont(undefined, 'normal');
-      } else if (line.trim()) {
-        doc.setFontSize(9);
-        const splitText = doc.splitTextToSize(line, 160);
-        doc.text(splitText, 25, y);
-        y += splitText.length * 5;
-      } else {
-        y += 4;
-      }
-    });
-    
-    const pageCount = doc.internal.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-      doc.setPage(i);
-      if (i > 1) {
-        doc.setFontSize(7);
-        doc.setTextColor(138, 127, 117);
-        doc.text('nAia', 105, 285, { align: 'center' });
-        doc.text(`${i - 1}`, 105, 290, { align: 'center' });
-      }
+    if (typeof window === "undefined" || !window.jspdf) {
+      alert("PDF library not loaded");
+      return;
     }
-    
-    doc.save(`${query.replace(/\s+/g, '-').toLowerCase()}-naia-report.pdf`);
-  };
+    const { jsPDF } = window.jspdf;
   
   const sections = [];
   const lines = report.split('\n');
@@ -1167,6 +1101,7 @@ export default function Stylist() {
   const [showAccount, setShowAccount] = useState(false);
   const [showTrends, setShowTrends] = useState(false);  
   const [trendQuery, setTrendQuery] = useState("");
+  const [trendReportType, setTrendReportType] = useState("seasonal");
   const [trendReport, setTrendReport] = useState(null);
   const [personalizedReport, setPersonalizedReport] = useState(null);
   
@@ -1529,6 +1464,16 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
       Get trend insights filtered through your personal style DNA based on your past outfit ratings.
     </p>
 
+      <div style={{ marginBottom: "24px" }}>
+        <label style={{ fontSize: "10px", letterSpacing: "0.25em", textTransform: "uppercase", color: "#8a7f75", display: "block", marginBottom: "16px", fontWeight: 600 }}>Report Type</label>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "12px" }}>
+          {[{ id: "seasonal", label: "Seasonal Trends" }, { id: "runway", label: "Fashion Week" }, { id: "category", label: "Category Deep Dive" }, { id: "color", label: "Color Trends" }, { id: "brand", label: "Brand Profile" }, { id: "accessories", label: "Accessory Watch" }, { id: "emerging", label: "Emerging Brands" }].map(type => (
+            <button key={type.id} onClick={() => setTrendReportType(type.id)} style={{ padding: "12px 16px", fontSize: "12px", letterSpacing: "0.05em", fontFamily: ""Cormorant Garamond", Georgia, serif", borderRadius: "2px", cursor: "pointer", transition: "all 0.2s", background: trendReportType === type.id ? "#1a1816" : "#fff", color: trendReportType === type.id ? "#f5f2ee" : "#1a1816", border: trendReportType === type.id ? "1px solid #1a1816" : "1px solid #d4cfc9" }}>{type.label}</button>
+          ))}
+        </div>
+      </div>
+
+
     <div style={{ marginBottom: "24px" }}>
       <label style={{ fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", display: "block", marginBottom: "8px" }}>
         What trend report do you want?
@@ -1548,7 +1493,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
               const trendRes = await fetch("/api/generate-trend-report", {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "X-Customer-Token": customerToken },
-                body: JSON.stringify({ query: trendQuery, reportType: "seasonal" }),
+                body: JSON.stringify({ query: trendQuery, reportType: trendReportType }),
               });
               const trendData = await trendRes.json();
               setTrendReport(trendData.report);
@@ -1602,7 +1547,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
             const trendRes = await fetch("/api/generate-trend-report", {
               method: "POST",
               headers: { "Content-Type": "application/json", "X-Customer-Token": customerToken },
-              body: JSON.stringify({ query: trendQuery, reportType: "seasonal" }),
+              body: JSON.stringify({ query: trendQuery, reportType: trendReportType }),
             });
             const trendData = await trendRes.json();
             setTrendReport(trendData.report);
