@@ -8,13 +8,10 @@ function TrendReportDisplay({ report, query }) {
   };
   
   const downloadPDF = () => {
-    if (typeof window === "undefined" || !window.jspdf) {
-      alert("PDF library not loaded");
-      return;
-    }
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
     
+    // Cover page - Vogue style
     doc.setFontSize(48);
     doc.setFont(undefined, 'normal');
     doc.text('nAia', 105, 80, { align: 'center' });
@@ -82,6 +79,7 @@ function TrendReportDisplay({ report, query }) {
     
     doc.save(`${query.replace(/\s+/g, '-').toLowerCase()}-naia-report.pdf`);
   };
+  
   const sections = [];
   const lines = report.split('\n');
   let currentSection = null;
@@ -575,6 +573,11 @@ function clearToken() {
 
 function authHeaders(token) {
   return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+// ─── Loader ───
+export async function loader() {
+  return null;
 }
 
 // ─── Confidence Rating Component ───
@@ -1164,15 +1167,8 @@ export default function Stylist() {
   const [showAccount, setShowAccount] = useState(false);
   const [showTrends, setShowTrends] = useState(false);  
   const [trendQuery, setTrendQuery] = useState("");
-  const [trendReportType, setTrendReportType] = useState("seasonal");
   const [trendReport, setTrendReport] = useState(null);
   const [personalizedReport, setPersonalizedReport] = useState(null);
-  
-  useEffect(() => {
-    if (personalizedReport) {
-      console.log("Personalized report set:", personalizedReport);
-    }
-  }, [personalizedReport]);
   const [loadingTrends, setLoadingTrends] = useState(false);
   const [closetSynced, setClosetSynced] = useState(false);
   const [showConfidence, setShowConfidence] = useState(false);
@@ -1464,27 +1460,27 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
                 </button>
                 {/* Confidence dashboard button */}
-                <button style={s.iconBtn} onClick={() => { setShowConfidence(!showConfidence); setShowHistory(false); setShowWishlist(false); setShowAccount(false); setShowTrends(false); }} title="Confidence profile">
+                <button style={s.iconBtn} onClick={() => { setShowConfidence(!showConfidence); setShowHistory(false); setShowWishlist(false); setShowAccount(false); }} title="Confidence profile">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                 </button>
-                <button style={s.iconBtn} onClick={() => { setShowHistory(!showHistory); setShowWishlist(false); setShowAccount(false); setShowConfidence(false); setShowTrends(false); }} title="Past looks">
+                <button style={s.iconBtn} onClick={() => { setShowHistory(!showHistory); setShowWishlist(false); setShowAccount(false); setShowConfidence(false); }} title="Past looks">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                   {outfitHistory.length > 0 && <div style={s.badge} />}
                 </button>
-                <button style={s.iconBtn} onClick={() => { setShowWishlist(!showWishlist); setShowHistory(false); setShowAccount(false); setShowConfidence(false); setShowTrends(false); }} title="Wishlist">
+                <button style={s.iconBtn} onClick={() => { setShowWishlist(!showWishlist); setShowHistory(false); setShowAccount(false); setShowConfidence(false); }} title="Wishlist">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill={wishlist.length > 0 ? "#c5553a" : "none"} stroke={wishlist.length > 0 ? "#c5553a" : "currentColor"} strokeWidth="1.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
                 </button>
                 <button style={s.iconBtn} onClick={() => { setShowTrends(!showTrends); setShowHistory(false); setShowWishlist(false); setShowAccount(false); setShowConfidence(false); }} title="Trend Reports">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
                 </button>
                 <div style={s.avatar} onClick={() => { setShowAccount(!showAccount); setShowHistory(false); setShowWishlist(false); setShowConfidence(false); setShowTrends(false); }}>
+                <a href="/closet" style={s.iconBtn} title="My Closet">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                </a>
                   {(customer.firstName || customer.email || "?")[0].toUpperCase()}
                 </div>
               </>
             )}
-                <a href="/closet" style={s.iconBtn} title="My Closet">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-                </a>
             {!customer && !authLoading && (
               <div style={{ fontSize: "12px", color: "#8a7f75" }}>
                 <a href="https://naia-9417.myshopify.com/account/login" target="_blank" rel="noreferrer" style={{ color: "#1a1816", textDecoration: "underline", textUnderlineOffset: "3px" }}>Sign in</a>{" "}to save your closet
@@ -1503,6 +1499,14 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
       {closet.length} closet piece{closet.length !== 1 ? "s" : ""} · {wishlist.length} wishlisted · {outfitHistory.length} past look{outfitHistory.length !== 1 ? "s" : ""}
     </p>
     <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+      <button 
+        style={{ ...s.btn, fontSize: "11px", padding: "10px 20px", flex: 1 }} 
+        onClick={() => { setShowTrends(true); setShowAccount(false); }}
+      >
+        Personalized Trends
+      </button>
+    </div>
+    <button style={{ ...s.outlineBtn, fontSize: "11px", padding: "10px 20px" }} onClick={logout}>Sign out</button>
   </div>
 )}
 {/* ─── Personalized Trends Panel ─── */}
@@ -1521,16 +1525,6 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
     <p style={{ fontSize: "14px", color: "#8a7f75", marginBottom: "24px", fontStyle: "italic" }}>
       Get trend insights filtered through your personal style DNA based on your past outfit ratings.
     </p>
-
-      <div style={{ marginBottom: "24px" }}>
-        <label style={{ fontSize: "10px", letterSpacing: "0.25em", textTransform: "uppercase", color: "#8a7f75", display: "block", marginBottom: "16px", fontWeight: 600 }}>Report Type</label>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "12px" }}>
-          {[{ id: "seasonal", label: "Seasonal Trends" }, { id: "runway", label: "Fashion Week" }, { id: "category", label: "Category Deep Dive" }, { id: "color", label: "Color Trends" }, { id: "brand", label: "Brand Profile" }, { id: "accessories", label: "Accessory Watch" }, { id: "emerging", label: "Emerging Brands" }].map(type => (
-              <button key={type.id} onClick={() => setTrendReportType(type.id)} style={{ padding: "12px 16px", fontSize: "12px", letterSpacing: "0.05em", fontFamily: '"Cormorant Garamond", Georgia, serif', borderRadius: "2px", cursor: "pointer", transition: "all 0.2s", background: trendReportType === type.id ? "#1a1816" : "#fff", color: trendReportType === type.id ? "#f5f2ee" : "#1a1816", border: trendReportType === type.id ? "1px solid #1a1816" : "1px solid #d4cfc9" }}>{type.label}</button>
-          ))}
-        </div>
-      </div>
-
 
     <div style={{ marginBottom: "24px" }}>
       <label style={{ fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", display: "block", marginBottom: "8px" }}>
@@ -1551,7 +1545,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
               const trendRes = await fetch("/api/generate-trend-report", {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "X-Customer-Token": customerToken },
-                body: JSON.stringify({ query: trendQuery, reportType: trendReportType }),
+                body: JSON.stringify({ query: trendQuery, reportType: "seasonal" }),
               });
               const trendData = await trendRes.json();
               setTrendReport(trendData.report);
@@ -1605,7 +1599,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
             const trendRes = await fetch("/api/generate-trend-report", {
               method: "POST",
               headers: { "Content-Type": "application/json", "X-Customer-Token": customerToken },
-              body: JSON.stringify({ query: trendQuery, reportType: trendReportType }),
+              body: JSON.stringify({ query: trendQuery, reportType: "seasonal" }),
             });
             const trendData = await trendRes.json();
             setTrendReport(trendData.report);
@@ -1644,7 +1638,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
 
     {personalizedReport && <TrendReportDisplay report={personalizedReport} query={trendQuery} />}
   </div>
-        )}
+)}
         {/* ─── Confidence Dashboard Panel ─── */}
         {showConfidence && customer && (
           <div style={s.panel}>
@@ -1891,7 +1885,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
 
                 {(parsedResult.accessories || parsedResult.perfume || parsedResult.song) && (<><div style={s.divider} /><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "24px" }}>{parsedResult.accessories && <div style={s.vibeCard}><div style={s.resultLabel}>Accessories</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.accessories}</p></div>}{parsedResult.perfume && <div style={s.vibeCard}><div style={s.resultLabel}>Perfume</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.perfume}</p></div>}{parsedResult.song && <div style={s.vibeCard}><div style={s.resultLabel}>Song</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.song}</p></div>}</div></>)}
                 {parsedResult.hair && <div style={s.vibeCard}><div style={s.resultLabel}>Hair</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.hair}</p></div>}
-                {parsedResult.makeup && <div style={s.vibeCard}><div style={s.resultLabel}>Makeup</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.makeup}</p></div>}
+                {parsedResult.makeup && <div style={s.vibeCard}><div style={s.resultLabel}>Makeup</div><p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{parsedResult.makeup}</p></div>}.    
                 {parsedResult.shift && (<><div style={s.divider} /><div style={{ marginBottom: "24px" }}><div style={s.resultLabel}>The shift</div><p style={{ fontSize: "19px", fontStyle: "italic", lineHeight: 1.6, margin: 0 }}>{parsedResult.shift}</p></div></>)}
 
                 {/* ─── Shop recommended pieces ─── */}
@@ -1959,5 +1953,4 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
     </div>
   );
 }
-
 
