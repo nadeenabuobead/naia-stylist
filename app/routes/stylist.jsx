@@ -1660,32 +1660,32 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
 
         {/* ─── My Closet Panel ─── */}
         {showCloset && customer && !showHistory && !showWishlist && !showAccount && !showConfidence && !showTrends && (
-  <div style={s.panel}>
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
-      <div style={s.title}>My Closet</div>
-      <button 
-        style={{ ...s.outlineBtn, fontSize: "10px", padding: "6px 12px" }} 
-        onClick={() => setShowCloset(false)}
-      >
-        Close
-      </button>
-    </div>
-
-    {closet.length === 0 ? (
-      <p style={{ fontSize: "15px", color: "#8a7f75", fontStyle: "italic" }}>Your closet is empty. Add pieces from the catalog.</p>
-    ) : (
-      <div style={s.productGrid}>
-        {closet.map(item => (
-          <div key={item.id} style={{ border: "1px solid #d4cfc9", borderRadius: "2px", overflow: "hidden" }}>
-            <a href={`https://naia-9417.myshopify.com/products/${item.handle}`} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit" }}>
-              {item.image && <img src={item.image} alt={item.title} style={{ width: "100%", height: "140px", objectFit: "cover", display: "block" }} />}
-              <div style={{ padding: "8px", fontSize: "12px" }}>{item.title}</div>
-            </a>
-          </div>
-        ))}
+    <div style={s.panel}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
+        <div style={s.title}>My Closet</div>
+        <button 
+          style={{ ...s.outlineBtn, fontSize: "10px", padding: "6px 12px" }} 
+          onClick={() => setShowCloset(false)}
+        >
+          Close
+        </button>
       </div>
-    )}
-  </div>
+
+      {closet.length === 0 ? (
+        <p style={{ fontSize: "15px", color: "#8a7f75", fontStyle: "italic" }}>Your closet is empty. Add pieces from the catalog.</p>
+      ) : (
+        <div style={s.productGrid}>
+          {closet.map(item => (
+            <div key={item.id} style={{ border: "1px solid #d4cfc9", borderRadius: "2px", overflow: "hidden" }}>
+              <a href={`https://naia-9417.myshopify.com/products/${item.handle}`} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit" }}>
+                {item.image && <img src={item.image} alt={item.title} style={{ width: "100%", height: "140px", objectFit: "cover", display: "block" }} />}
+                <div style={{ padding: "8px", fontSize: "12px" }}>{item.title}</div>
+              </a>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
 )}
 
 )}
