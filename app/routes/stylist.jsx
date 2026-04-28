@@ -1163,7 +1163,6 @@ export default function Stylist() {
   const [tryOnPhoto, setTryOnPhoto] = useState(null);
   const [showAccount, setShowAccount] = useState(false);
   const [showTrends, setShowTrends] = useState(false);  
-  const [showCloset, setShowCloset] = useState(false);
   const [trendQuery, setTrendQuery] = useState("");
   const [trendReportType, setTrendReportType] = useState("seasonal");
   const [trendReport, setTrendReport] = useState(null);
@@ -1461,18 +1460,18 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             {customer && (
               <>
-                <button style={s.iconBtn} onClick={() => { setShowConfidence(false); setShowHistory(false); setShowWishlist(false); setShowAccount(false); setShowTrends(false); setShowCloset(false); setStep(1); }} title="Style me">
+                <button style={s.iconBtn} onClick={() => { setShowConfidence(false); setShowHistory(false); setShowWishlist(false); setShowAccount(false); setShowTrends(false); setStep(1); }} title="Style me">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
                 </button>
                 {/* Confidence dashboard button */}
-                <button style={s.iconBtn} onClick={() => { setShowConfidence(!showConfidence); setShowHistory(false); setShowWishlist(false); setShowAccount(false); setShowCloset(false); setShowTrends(false); }} title="Confidence profile">
+                <button style={s.iconBtn} onClick={() => { setShowConfidence(!showConfidence); setShowHistory(false); setShowWishlist(false); setShowAccount(false); setShowTrends(false); }} title="Confidence profile">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                 </button>
-                <button style={s.iconBtn} onClick={() => { setShowHistory(!showHistory); setShowWishlist(false); setShowAccount(false); setShowConfidence(false); setShowCloset(false); setShowTrends(false); }} title="Past looks">
+                <button style={s.iconBtn} onClick={() => { setShowHistory(!showHistory); setShowWishlist(false); setShowAccount(false); setShowConfidence(false); setShowTrends(false); }} title="Past looks">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                   {outfitHistory.length > 0 && <div style={s.badge} />}
                 </button>
-                <button style={s.iconBtn} onClick={() => { setShowWishlist(!showWishlist); setShowHistory(false); setShowAccount(false); setShowConfidence(false); setShowCloset(false); setShowTrends(false); }} title="Wishlist">
+                <button style={s.iconBtn} onClick={() => { setShowWishlist(!showWishlist); setShowHistory(false); setShowAccount(false); setShowConfidence(false); setShowTrends(false); }} title="Wishlist">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill={wishlist.length > 0 ? "#c5553a" : "none"} stroke={wishlist.length > 0 ? "#c5553a" : "currentColor"} strokeWidth="1.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
                 </button>
                 <button style={s.iconBtn} onClick={() => { setShowTrends(!showTrends); setShowHistory(false); setShowWishlist(false); setShowAccount(false); setShowConfidence(false); }} title="Trend Reports">
@@ -1483,9 +1482,9 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
                 </div>
               </>
             )}
-                <button style={s.iconBtn} onClick={() => { setShowCloset(!showCloset); setShowTrends(false); setShowHistory(false); setShowWishlist(false); setShowAccount(false); setShowConfidence(false); }} title="My Closet">
+                <a href="/closet" style={s.iconBtn} title="My Closet">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-                </button>
+                </a>
             {!customer && !authLoading && (
               <div style={{ fontSize: "12px", color: "#8a7f75" }}>
                 <a href="https://naia-9417.myshopify.com/account/login" target="_blank" rel="noreferrer" style={{ color: "#1a1816", textDecoration: "underline", textUnderlineOffset: "3px" }}>Sign in</a>{" "}to save your closet
