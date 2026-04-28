@@ -819,7 +819,6 @@ export default function Stylist() {
   const [showAccount, setShowAccount] = useState(false);
   const [closetSynced, setClosetSynced] = useState(false);
   const [showConfidence, setShowConfidence] = useState(false);
-  const [showTrends, setShowTrends] = useState(false);
   const [lastHistoryId, setLastHistoryId] = useState(null);
   const [previousPieces, setPreviousPieces] = useState([]);
 
@@ -1110,9 +1109,6 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
                 {/* Confidence dashboard button */}
                 <button style={s.iconBtn} onClick={() => { setShowConfidence(!showConfidence); setShowHistory(false); setShowWishlist(false); setShowAccount(false); }} title="Confidence profile">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                <button style={s.iconBtn} onClick={() => { setShowTrends(!showTrends); setShowConfidence(false); setShowHistory(false); setShowWishlist(false); setShowAccount(false); }} title="Trend Reports">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 3h18v18H3z"/><path d="M9 9h6M9 15h6"/></svg>
-                </button>
                 </button>
                 <button style={s.iconBtn} onClick={() => { setShowHistory(!showHistory); setShowWishlist(false); setShowAccount(false); setShowConfidence(false); }} title="Past looks">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
