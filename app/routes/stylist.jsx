@@ -1159,7 +1159,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
   </div>
 )}
 {/* ─── Personalized Trends Panel ─── */}
-{showTrends && customer && (
+{showTrends && customer && !showHistory && !showWishlist && !showAccount && !showConfidence && (
   <div style={s.panel}>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
       <div style={s.title}>Personalized Trend Reports</div>
