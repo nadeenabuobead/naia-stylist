@@ -1123,7 +1123,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
                   <svg width="20" height="20" viewBox="0 0 24 24" fill={wishlist.length > 0 ? "#c5553a" : "none"} stroke={wishlist.length > 0 ? "#c5553a" : "currentColor"} strokeWidth="1.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
                 </button>
                 <button style={s.iconBtn} onClick={() => { setShowTrends(!showTrends); setShowHistory(false); setShowWishlist(false); setShowAccount(false); setShowConfidence(false); }} title="Trend Reports">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
                 </button>
                 <div style={s.avatar} onClick={() => { setShowAccount(!showAccount); setShowHistory(false); setShowWishlist(false); setShowConfidence(false); setShowTrends(false); }}>
                   {(customer.firstName || customer.email || "?")[0].toUpperCase()}
