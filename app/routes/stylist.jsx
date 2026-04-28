@@ -1,5 +1,94 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 // Designer Dashboard Component (embedded)
+function TrendReportDisplay({ report, query }) {
+  const [expandedSections, setExpandedSections] = useState({});
+  
+  const toggleSection = (section) => {
+    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+  };
+  
+  const sections = [];
+  const lines = report.split('\n');
+  let currentSection = null;
+  let currentContent = [];
+  
+  lines.forEach(line => {
+    if (line.startsWith('## ')) {
+      if (currentSection) {
+        sections.push({ title: currentSection, content: currentContent.join('\n') });
+      }
+      currentSection = line.replace('## ', '');
+      currentContent = [];
+    } else if (currentSection) {
+      currentContent.push(line);
+    }
+  });
+  
+  if (currentSection) {
+    sections.push({ title: currentSection, content: currentContent.join('\n') });
+  }
+  
+  return (
+    <div style={{ background: "#fff", border: "1px solid #d4cfc9", borderRadius: "2px", padding: "24px" }}>
+      <div style={{ marginBottom: "16px", paddingBottom: "12px", borderBottom: "2px solid #1a1816" }}>
+        <h3 style={{ fontSize: "18px", fontWeight: 500, margin: "0 0 4px" }}>Your Personalized Report</h3>
+        <p style={{ fontSize: "12px", color: "#8a7f75", margin: 0, fontStyle: "italic" }}>{query}</p>
+      </div>
+      
+      {sections.map((section, idx) => (
+        <div key={idx} style={{ borderBottom: idx < sections.length - 1 ? "1px solid #e8e4df" : "none", marginBottom: "16px" }}>
+          <button
+            onClick={() => toggleSection(idx)}
+            style={{
+              width: "100%",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "16px 0",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: "14px",
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              fontWeight: 500,
+              fontFamily: '"Cormorant Garamond", Georgia, serif'
+            }}
+          >
+            {section.title}
+            <span style={{ fontSize: "20px" }}>{expandedSections[idx] ? '−' : '+'}</span>
+          </button>
+          
+          {expandedSections[idx] && (
+            <div style={{ padding: "0 0 16px", lineHeight: 1.7, fontSize: "14px" }}>
+              {section.content.split('\n').map((line, i) => {
+                if (line.match(/^\*\*.+\*\*$/)) {
+                  return <h5 key={i} style={{ fontSize: "13px", fontWeight: 500, color: "#4a4540", margin: "12px 0 6px" }}>{line.replace(/\*\*/g, '')}</h5>;
+                } else if (line.includes('**')) {
+                  const parts = line.split(/(\*\*.*?\*\*)/g);
+                  return (
+                    <p key={i} style={{ margin: "0 0 8px" }}>
+                      {parts.map((part, idx) => 
+                        part.startsWith('**') && part.endsWith('**') 
+                          ? <strong key={idx}>{part.replace(/\*\*/g, '')}</strong>
+                          : part
+                      )}
+                    </p>
+                  );
+                } else if (line.match(/^[\*\-]\s/)) {
+                  return <li key={i} style={{ margin: "0 0 6px 20px" }}>{line.replace(/^[\*\-]\s/, '')}</li>;
+                } else if (line.trim()) {
+                  return <p key={i} style={{ margin: "0 0 8px" }}>{line}</p>;
+                }
+                return <div key={i} style={{ height: '6px' }} />;
+              })}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 function DesignerDashboardEmbed() {
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1286,73 +1375,9 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
     )}
 
     {personalizedReport && (
-      <div style={{ background: "#fff", border: "1px solid #d4cfc9", borderRadius: "2px", padding: "24px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", paddingBottom: "12px", borderBottom: "2px solid #1a1816" }}>
-          <div>
-            <h3 style={{ fontSize: "18px", fontWeight: 500, margin: "0 0 4px" }}>Your Personalized Report</h3>
-            <p style={{ fontSize: "12px", color: "#8a7f75", margin: 0, fontStyle: "italic" }}>{trendQuery}</p>
-          </div>
-          <button 
-            onClick={() => navigator.clipboard.writeText(personalizedReport)} 
-            style={{ ...s.outlineBtn, fontSize: "10px", padding: "6px 12px" }}
-          >
-            Copy
-          </button>
-        </div>
-        
-        <div style={{ lineHeight: 1.7, fontSize: "14px" }}>
-          {personalizedReport.split('\n').map((line, i) => {
-            if (line.startsWith('## ')) {
-              return (
-                <h4 key={i} style={{ 
-                  fontSize: "14px", 
-                  fontWeight: 500, 
-                  letterSpacing: "0.1em", 
-                  textTransform: "uppercase", 
-                  color: "#1a1816", 
-                  margin: "24px 0 12px",
-                  paddingBottom: "6px",
-                  borderBottom: "1px solid #e8e4df"
-                }}>
-                  {line.replace('## ', '')}
-                </h4>
-              );
-            } else if (line.match(/^\*\*.+\*\*$/)) {
-              return (
-                <h5 key={i} style={{ 
-                  fontSize: "13px", 
-                  fontWeight: 500, 
-                  color: "#4a4540", 
-                  margin: "12px 0 6px" 
-                }}>
-                  {line.replace(/\*\*/g, '')}
-                </h5>
-              );
-            } else if (line.includes('**')) {
-              const parts = line.split(/(\*\*.*?\*\*)/g);
-              return (
-                <p key={i} style={{ margin: "0 0 8px" }}>
-                  {parts.map((part, idx) => 
-                    part.startsWith('**') && part.endsWith('**') 
-                      ? <strong key={idx}>{part.replace(/\*\*/g, '')}</strong>
-                      : part
-                  )}
-                </p>
-              );
-            } else if (line.match(/^[\*\-]\s/)) {
-              return (
-                <li key={i} style={{ margin: "0 0 6px 20px" }}>
-                  {line.replace(/^[\*\-]\s/, '')}
-                </li>
-              );
-            } else if (line.trim()) {
-              return <p key={i} style={{ margin: "0 0 8px" }}>{line}</p>;
-            }
-            return <div key={i} style={{ height: '6px' }} />;
-          })}
-        </div>
-      </div>
-    )}
+    {personalizedReport && <TrendReportDisplay report={personalizedReport} query={trendQuery} />}
+  </div>
+)}
   </div>
 )}
         {/* ─── Confidence Dashboard Panel ─── */}
