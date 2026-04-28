@@ -17,6 +17,7 @@ export default function App() {
         />
         <Meta />
         <Links />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
       </head>
       <script dangerouslySetInnerHTML={{ __html: `
   if (window.self !== window.top) {
