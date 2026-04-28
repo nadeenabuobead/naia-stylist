@@ -1956,6 +1956,11 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
           </div>
         )}
       </div>
+      </div>
+      </div>
+      </div>
+      </div>
+      </div>
     </div>
   );
 }
