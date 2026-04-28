@@ -1656,8 +1656,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
 
     {personalizedReport && <TrendReportDisplay report={personalizedReport} query={trendQuery} />}
   </div>
-)
-)}
+        )}
         {/* ─── My Closet Panel ─── */}
         {showCloset && customer && !showHistory && !showWishlist && !showAccount && !showConfidence && !showTrends && (
           <div style={s.panel}>
