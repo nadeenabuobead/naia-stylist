@@ -1374,10 +1374,8 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
       </div>
     )}
 
-    {personalizedReport && (
     {personalizedReport && <TrendReportDisplay report={personalizedReport} query={trendQuery} />}
   </div>
-)}
   </div>
 )}
         {/* ─── Confidence Dashboard Panel ─── */}
