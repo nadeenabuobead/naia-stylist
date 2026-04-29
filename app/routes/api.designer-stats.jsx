@@ -3,87 +3,141 @@ import { prisma } from "~/lib/prisma.server";
 
 export async function loader() {
   try {
-    // Fetch all outfit ratings with related data
-    const ratings = await prisma.outfitRating.findMany({
+    // Fetch all reviews with sessions and items
+    const reviews = await prisma.postOutfitReview.findMany({
       include: {
-        customer: true,
+        session: {
+          include: {
+            suggestions: {
+              include: {
+                items: true,
+              },
+            },
+          },
+        },
+        customer: {
+          select: {
+            id: true,
+            onboardingProfile: true,
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
 
     const totalUsers = await prisma.customer.count();
-    const totalLooks = ratings.length;
+    const totalLooks = reviews.length;
 
     if (totalLooks === 0) {
-      return json({
-        totalUsers,
-        totalLooks: 0,
-        avgRating: 0,
-        avgAlignment: 0,
-        avgRewear: 0,
-        topPieces: [],
-        mixedPieces: [],
-        underperformingPieces: [],
-        watchPieces: [],
-        positiveTags: [],
-        negativeTags: [],
-        styleDNA: [],
-        piecesByDNA: [],
-        bodyPatterns: [],
-        stylingNeeds: [],
-        emotionalOutcomes: [],
-        topOccasions: [],
-        quotes: [],
-      });
+      return json(getEmptyStats(totalUsers));
     }
 
     // 1. Overview Stats
-    const avgRating = ratings.reduce((sum, r) => sum + (r.rating || 0), 0) / totalLooks;
-    const avgAlignment = ratings.filter(r => r.feltLikeMe === "yes").length / totalLooks;
-    const avgRewear = ratings.filter(r => r.wouldWearAgain === "yes").length / totalLooks;
+    const avgRating = reviews.reduce((sum, r) => sum + (r.overallFeeling || 0), 0) / totalLooks;
+    const avgAlignment = reviews.filter(r => r.feltLikeHer === "Yes").length / totalLooks;
+    const avgRewear = reviews.filter(r => r.wouldWearAgain === "Definitely").length / totalLooks;
 
     // 2. Piece Performance Analysis
     const pieceStats = {};
     
-    ratings.forEach(rating => {
-      // Parse pieces from the rating (assuming they're stored in a pieces field or similar)
-      const pieces = rating.pieces || []; // Adjust based on your schema
+    reviews.forEach(review => {
+      // Get items from the selected suggestion
+      const selectedSuggestion = review.session.suggestions.find(
+        s => s.id === review.session.selectedSuggestionId
+      ) || review.session.suggestions[0];
       
-      pieces.forEach(piece => {
-        if (!pieceStats[piece.name]) {
-          pieceStats[piece.name] = {
-            name: piece.name,
-            category: piece.category || "Unknown",
+      if (!selectedSuggestion) return;
+      
+      selectedSuggestion.items.forEach(item => {
+        const pieceName = item.productTitle || `Closet Item ${item.closetItemId}`;
+        
+        if (!pieceStats[pieceName]) {
+          pieceStats[pieceName] = {
+            name: pieceName,
+            category: item.itemType || "Unknown",
             ratings: [],
             rewearYes: 0,
-            rewearNo: 0,
+            rewearTotal: 0,
             helpedFeel: [],
             occasions: [],
             styleDNA: [],
-            positiveComments: [],
-            negativeComments: [],
+            workedTags: [],
+            didntWorkTags: [],
+            quotes: [],
+            confidenceDeltas: [],
+            moods: [],
+            desiredFeelings: [],
           };
         }
         
-        const stats = pieceStats[piece.name];
-        stats.ratings.push(rating.rating || 0);
+        const stats = pieceStats[pieceName];
         
-        if (rating.wouldWearAgain === "yes") stats.rewearYes++;
-        else if (rating.wouldWearAgain === "no") stats.rewearNo++;
+        // Rating
+        if (review.overallFeeling) {
+          stats.ratings.push(review.overallFeeling);
+        }
         
-        if (rating.helpedFeel) stats.helpedFeel.push(rating.helpedFeel);
-        if (rating.occasion) stats.occasions.push(rating.occasion);
-        if (rating.customer?.styleDNA) stats.styleDNA.push(rating.customer.styleDNA);
-        if (rating.whatWorked) stats.positiveComments.push(rating.whatWorked);
-        if (rating.whatDidntWork) stats.negativeComments.push(rating.whatDidntWork);
+        // Rewear
+        stats.rewearTotal++;
+        if (review.wouldWearAgain === "Definitely") stats.rewearYes++;
+        
+        // Emotional outcomes
+        if (review.session.desiredFeeling) {
+          stats.helpedFeel.push(review.session.desiredFeeling);
+        }
+        
+        // Occasions
+        if (review.session.occasion) {
+          stats.occasions.push(review.session.occasion);
+        }
+        
+        // Style DNA
+        if (review.customer?.onboardingProfile?.styleDNA) {
+          const dna = JSON.parse(review.customer.onboardingProfile.styleDNA);
+          stats.styleDNA.push(...dna);
+        }
+        
+        // Tags
+        if (review.workedTags) {
+          const tags = JSON.parse(review.workedTags);
+          stats.workedTags.push(...tags);
+        }
+        
+        if (review.didntWorkTags) {
+          const tags = JSON.parse(review.didntWorkTags);
+          stats.didntWorkTags.push(...tags);
+        }
+        
+        // Quotes
+        if (review.additionalNotes) {
+          stats.quotes.push(review.additionalNotes);
+        }
+        
+        // Confidence
+        if (review.confidenceBefore && review.confidenceAfter) {
+          stats.confidenceDeltas.push(review.confidenceAfter - review.confidenceBefore);
+        }
+        
+        // Moods
+        if (review.session.currentMood) {
+          stats.moods.push(review.session.currentMood);
+        }
+        if (review.session.desiredFeeling) {
+          stats.desiredFeelings.push(review.session.desiredFeeling);
+        }
       });
     });
 
     // Calculate piece metrics
     const pieces = Object.values(pieceStats).map(p => {
-      const avgRating = p.ratings.reduce((a, b) => a + b, 0) / p.ratings.length;
-      const rewear = p.rewearYes / (p.rewearYes + p.rewearNo);
+      const avgRating = p.ratings.length > 0 
+        ? p.ratings.reduce((a, b) => a + b, 0) / p.ratings.length 
+        : 0;
+      const rewear = p.rewearTotal > 0 ? p.rewearYes / p.rewearTotal : 0;
       const ratingCount = p.ratings.length;
+      const avgConfidenceBoost = p.confidenceDeltas.length > 0
+        ? p.confidenceDeltas.reduce((a, b) => a + b, 0) / p.confidenceDeltas.length
+        : 0;
       
       return {
         name: p.name,
@@ -91,38 +145,41 @@ export async function loader() {
         avgRating,
         ratingCount,
         rewear,
-        helpedFeel: [...new Set(p.helpedFeel)].slice(0, 3),
+        helpedFeel: getMostCommon(p.helpedFeel, 3),
         bestOccasions: getMostCommon(p.occasions, 3),
         topDNA: getMostCommon(p.styleDNA, 3),
-        positiveComments: p.positiveComments,
-        negativeComments: p.negativeComments,
+        positiveComments: getMostCommon(p.workedTags, 3),
+        negativeComments: getMostCommon(p.didntWorkTags, 3),
+        quotes: p.quotes,
+        avgConfidenceBoost,
+        startingMoods: getMostCommon(p.moods, 3),
       };
     });
 
-    // 2. Top Performing (high rating + high rewear + enough data)
+    // 2. Top Performing
     const topPieces = pieces
       .filter(p => p.ratingCount >= 3)
       .filter(p => p.avgRating >= 4 && p.rewear >= 0.7)
       .sort((a, b) => b.avgRating - a.avgRating)
       .slice(0, 10);
 
-    // 3. Mixed Signal (high rating but low rewear, or vice versa)
+    // 3. Mixed Signal
     const mixedPieces = pieces
       .filter(p => p.ratingCount >= 3)
       .filter(p => 
         (p.avgRating >= 4 && p.rewear < 0.5) || 
-        (p.avgRating < 3 && p.rewear >= 0.7)
+        (p.avgRating < 3.5 && p.rewear >= 0.7)
       )
       .map(p => ({
         ...p,
         reason: p.avgRating >= 4 && p.rewear < 0.5 
-          ? "High rating, low rewear" 
-          : "Admired but not practical",
-        friction: p.negativeComments[0] || "Unknown friction point",
+          ? "High rating, low rewear - admired but not practical" 
+          : "Lower rating but high rewear - functional but not exciting",
+        friction: p.negativeComments[0] || "Needs investigation",
       }))
       .slice(0, 10);
 
-    // 4. Underperforming (low rating + low rewear)
+    // 4. Underperforming
     const underperformingPieces = pieces
       .filter(p => p.ratingCount >= 3)
       .filter(p => p.avgRating < 3 || p.rewear < 0.3)
@@ -130,38 +187,49 @@ export async function loader() {
         ...p,
         weakSignals: [
           p.avgRating < 3 ? "low rating" : null,
-          p.rewear < 0.3 ? "low rewear" : null,
+          p.rewear < 0.3 ? "low rewear intent" : null,
         ].filter(Boolean),
         rejectionReasons: p.negativeComments.slice(0, 3),
       }))
+      .sort((a, b) => a.avgRating - b.avgRating)
       .slice(0, 10);
 
-    // 5. Watch (not enough data)
+    // 5. Watch
     const watchPieces = pieces
-      .filter(p => p.ratingCount < 3)
+      .filter(p => p.ratingCount > 0 && p.ratingCount < 3)
       .slice(0, 10);
 
     // 6 & 7. Positive/Negative Tags
-    const allPositive = ratings.flatMap(r => r.whatWorked || "").filter(Boolean);
-    const allNegative = ratings.flatMap(r => r.whatDidntWork || "").filter(Boolean);
+    const allWorkedTags = pieces.flatMap(p => p.positiveComments);
+    const allDidntWorkTags = pieces.flatMap(p => p.negativeComments);
     
-    const positiveTags = countTags(allPositive, pieces);
-    const negativeTags = countTags(allNegative, pieces);
+    const positiveTags = countTags(allWorkedTags, pieces).slice(0, 10);
+    const negativeTags = countTags(allDidntWorkTags, pieces).slice(0, 10);
 
     // 8. Style DNA Breakdown
+    const customers = await prisma.customer.findMany({
+      include: { onboardingProfile: true },
+    });
+    
     const dnaCount = {};
-    const customers = await prisma.customer.findMany({ select: { styleDNA: true } });
     customers.forEach(c => {
-      if (c.styleDNA) {
-        dnaCount[c.styleDNA] = (dnaCount[c.styleDNA] || 0) + 1;
+      if (c.onboardingProfile?.styleDNA) {
+        try {
+          const dnas = JSON.parse(c.onboardingProfile.styleDNA);
+          dnas.forEach(dna => {
+            dnaCount[dna] = (dnaCount[dna] || 0) + 1;
+          });
+        } catch {}
       }
     });
     
-    const styleDNA = Object.entries(dnaCount).map(([name, count]) => ({
-      name,
-      count,
-      percentage: count / customers.length,
-    })).sort((a, b) => b.count - a.count);
+    const styleDNA = Object.entries(dnaCount)
+      .map(([name, count]) => ({
+        name,
+        count,
+        percentage: count / customers.length,
+      }))
+      .sort((a, b) => b.count - a.count);
 
     // 9. Pieces by DNA
     const piecesByDNA = pieces
@@ -169,29 +237,27 @@ export async function loader() {
       .slice(0, 15);
 
     // 10. Body Patterns
-    const bodyPrefs = {};
-    ratings.forEach(r => {
-      if (r.bodyPreference) {
-        if (!bodyPrefs[r.bodyPreference]) {
-          bodyPrefs[r.bodyPreference] = { count: 0, pieces: [] };
-        }
-        bodyPrefs[r.bodyPreference].count++;
-        // Track which pieces worked for this body pref
+    const bodyCount = {};
+    reviews.forEach(r => {
+      if (r.session.bodyPreference) {
+        bodyCount[r.session.bodyPreference] = (bodyCount[r.session.bodyPreference] || 0) + 1;
       }
     });
     
-    const bodyPatterns = Object.entries(bodyPrefs).map(([pref, data]) => ({
-      preference: pref,
-      userCount: data.count,
-      bestPieces: [], // Would need more logic
-      worstPieces: [],
-    }));
+    const bodyPatterns = Object.entries(bodyCount)
+      .map(([preference, userCount]) => ({
+        preference,
+        userCount,
+        bestPieces: [], // Would need cross-referencing
+        worstPieces: [],
+      }))
+      .sort((a, b) => b.userCount - a.userCount);
 
     // 11. Styling Needs
     const occasionCount = {};
-    ratings.forEach(r => {
-      if (r.occasion) {
-        occasionCount[r.occasion] = (occasionCount[r.occasion] || 0) + 1;
+    reviews.forEach(r => {
+      if (r.session.occasion) {
+        occasionCount[r.session.occasion] = (occasionCount[r.session.occasion] || 0) + 1;
       }
     });
     
@@ -203,24 +269,31 @@ export async function loader() {
     // 12. Emotional Outcomes
     const emotionalOutcomes = pieces
       .filter(p => p.helpedFeel.length > 0)
+      .map(p => ({
+        name: p.name,
+        emotions: p.helpedFeel,
+        startingStates: p.startingMoods,
+      }))
       .slice(0, 15);
 
     // 13. Top Occasions
     const occasionStats = {};
-    ratings.forEach(r => {
-      if (!r.occasion) return;
-      if (!occasionStats[r.occasion]) {
-        occasionStats[r.occasion] = { ratings: [], rewear: 0, total: 0 };
+    reviews.forEach(r => {
+      if (!r.session.occasion) return;
+      if (!occasionStats[r.session.occasion]) {
+        occasionStats[r.session.occasion] = { ratings: [], rewear: 0, total: 0 };
       }
-      occasionStats[r.occasion].ratings.push(r.rating || 0);
-      occasionStats[r.occasion].total++;
-      if (r.wouldWearAgain === "yes") occasionStats[r.occasion].rewear++;
+      if (r.overallFeeling) occasionStats[r.session.occasion].ratings.push(r.overallFeeling);
+      occasionStats[r.session.occasion].total++;
+      if (r.wouldWearAgain === "Definitely") occasionStats[r.session.occasion].rewear++;
     });
     
     const topOccasions = Object.entries(occasionStats)
       .map(([name, data]) => ({
         name,
-        avgRating: data.ratings.reduce((a, b) => a + b, 0) / data.ratings.length,
+        avgRating: data.ratings.length > 0 
+          ? data.ratings.reduce((a, b) => a + b, 0) / data.ratings.length 
+          : 0,
         lookCount: data.total,
         rewear: data.rewear / data.total,
       }))
@@ -228,12 +301,9 @@ export async function loader() {
       .slice(0, 10);
 
     // 14. Quotes
-    const quotes = ratings
-      .filter(r => r.comments && r.comments.length > 20)
-      .map(r => ({
-        text: r.comments,
-        piece: r.pieces?.[0]?.name || null,
-      }))
+    const quotes = pieces
+      .flatMap(p => p.quotes.map(q => ({ text: q, piece: p.name })))
+      .filter(q => q.text.length > 20)
       .slice(0, 10);
 
     return json({
@@ -267,7 +337,7 @@ export async function loader() {
 function getMostCommon(arr, limit = 3) {
   const counts = {};
   arr.forEach(item => {
-    counts[item] = (counts[item] || 0) + 1;
+    if (item) counts[item] = (counts[item] || 0) + 1;
   });
   return Object.entries(counts)
     .sort((a, b) => b[1] - a[1])
@@ -275,24 +345,40 @@ function getMostCommon(arr, limit = 3) {
     .map(([item]) => item);
 }
 
-function countTags(comments, pieces) {
-  const tags = {};
+function countTags(tags, pieces) {
+  const tagCounts = {};
   
-  // Simple keyword extraction (you'd want better NLP here)
-  const keywords = ["flattering", "comfortable", "structured", "loose", "tight", "elegant", "casual"];
-  
-  comments.forEach(comment => {
-    keywords.forEach(keyword => {
-      if (comment.toLowerCase().includes(keyword)) {
-        if (!tags[keyword]) {
-          tags[keyword] = { name: keyword, count: 0, topPieces: [] };
-        }
-        tags[keyword].count++;
-      }
-    });
+  tags.forEach(tag => {
+    if (!tag) return;
+    if (!tagCounts[tag]) {
+      tagCounts[tag] = { name: tag, count: 0, topPieces: [] };
+    }
+    tagCounts[tag].count++;
   });
   
-  return Object.values(tags)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 10);
+  return Object.values(tagCounts)
+    .sort((a, b) => b.count - a.count);
+}
+
+function getEmptyStats(totalUsers) {
+  return {
+    totalUsers,
+    totalLooks: 0,
+    avgRating: 0,
+    avgAlignment: 0,
+    avgRewear: 0,
+    topPieces: [],
+    mixedPieces: [],
+    underperformingPieces: [],
+    watchPieces: [],
+    positiveTags: [],
+    negativeTags: [],
+    styleDNA: [],
+    piecesByDNA: [],
+    bodyPatterns: [],
+    stylingNeeds: [],
+    emotionalOutcomes: [],
+    topOccasions: [],
+    quotes: [],
+  };
 }
