@@ -98,14 +98,38 @@ export async function loader() {
         }
         
         // Tags
+        // Tags
         if (review.workedTags) {
-          const tags = JSON.parse(review.workedTags);
-          stats.workedTags.push(...tags);
+          try {
+            let tags = review.workedTags;
+            if (typeof tags === 'string') {
+              tags = JSON.parse(tags);
+            }
+            if (Array.isArray(tags)) {
+              stats.workedTags.push(...tags);
+            } else if (typeof tags === 'string') {
+              stats.workedTags.push(tags);
+            }
+          } catch (e) {
+            console.error('Failed to parse workedTags:', e);
+          }
         }
         
         if (review.didntWorkTags) {
-          const tags = JSON.parse(review.didntWorkTags);
-          stats.didntWorkTags.push(...tags);
+          try {
+            let tags = review.didntWorkTags;
+            if (typeof tags === 'string') {
+              tags = JSON.parse(tags);
+            }
+            if (Array.isArray(tags)) {
+              stats.didntWorkTags.push(...tags);
+            } else if (typeof tags === 'string') {
+              stats.didntWorkTags.push(tags);
+            }
+          } catch (e) {
+            console.error('Failed to parse didntWorkTags:', e);
+          }
+        }
         }
         
         // Quotes
