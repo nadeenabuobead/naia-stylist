@@ -101,10 +101,14 @@ export async function loader() {
         if (review.workedTags) {
           const tags = JSON.parse(review.workedTags);
           stats.workedTags.push(...tags);
+          console.log("workedTags raw:", review.workedTags);
+          console.log("workedTags parsed:", tags);
         }
         
         if (review.didntWorkTags) {
           const tags = JSON.parse(review.didntWorkTags);
+          console.log("didntWorkTags raw:", review.didntWorkTags);
+          console.log("didntWorkTags parsed:", tags);
           stats.didntWorkTags.push(...tags);
         }
         
