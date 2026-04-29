@@ -1,5 +1,5 @@
-import { json } from "@remix-run/node";
-import { prisma } from "~/lib/prisma.server";
+import prisma from "../db.server";
+
 
 export async function loader() {
   try {
@@ -29,7 +29,7 @@ export async function loader() {
     const totalLooks = reviews.length;
 
     if (totalLooks === 0) {
-      return json(getEmptyStats(totalUsers));
+      return Response.json(getEmptyStats(totalUsers));
     }
 
     // 1. Overview Stats
@@ -306,7 +306,7 @@ export async function loader() {
       .filter(q => q.text.length > 20)
       .slice(0, 10);
 
-    return json({
+    return Response.json({
       totalUsers,
       totalLooks,
       avgRating,
@@ -329,7 +329,7 @@ export async function loader() {
 
   } catch (error) {
     console.error("Designer stats error:", error);
-    return json({ error: error.message }, { status: 500 });
+    return Response.json({ error: error.message }, { status: 500 });
   }
 }
 
