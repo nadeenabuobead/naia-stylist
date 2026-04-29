@@ -214,8 +214,9 @@ export async function loader() {
       );
       
       // Process worked tags
-      if (review.workedTags) {
-        try {
+          const tags = JSON.parse(review.workedTags);
+          if (Array.isArray(tags)) {
+            tags.forEach(tag => {
           const tags = JSON.parse(review.workedTags);
           tags.forEach(tag => {
             if (!tagStats.positive[tag]) {
@@ -223,11 +224,14 @@ export async function loader() {
             }
             tagStats.positive[tag].count++;
             tagStats.positive[tag].pieces.push(...pieceNames);
+            });
+          }
           });
         } catch (e) {}
       }
-      
-      // Process didn't work tags
+          const tags = JSON.parse(review.didntWorkTags);
+          if (Array.isArray(tags)) {
+            tags.forEach(tag => {
       if (review.didntWorkTags) {
         try {
           const tags = JSON.parse(review.didntWorkTags);
@@ -235,6 +239,8 @@ export async function loader() {
             if (!tagStats.negative[tag]) {
               tagStats.negative[tag] = { name: tag, count: 0, pieces: [] };
             }
+            });
+          }
             tagStats.negative[tag].count++;
             tagStats.negative[tag].pieces.push(...pieceNames);
           });
