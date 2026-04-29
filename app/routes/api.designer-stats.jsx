@@ -1,360 +1,298 @@
-import prisma from "../db.server";
+import { json } from "@remix-run/node";
+import { prisma } from "~/lib/prisma.server";
 
 export async function loader() {
   try {
-    console.log('Fetching sessions...');
-    
-    const sessions = await prisma.stylingSession.findMany({
-      take: 100,
-      orderBy: { createdAt: 'desc' },
+    // Fetch all outfit ratings with related data
+    const ratings = await prisma.outfitRating.findMany({
       include: {
-        suggestions: {
-          include: {
-            items: {
-              select: {
-                productTitle: true,
-                shopifyProductId: true,
-                itemType: true,
-              }
-            }
-          }
-        },
-        review: true,
-      }
+        customer: true,
+      },
+      orderBy: { createdAt: 'desc' },
     });
 
-    console.log('Sessions fetched:', sessions.length);
-
-    const reviews = sessions.flatMap(s => s.review ? [s.review] : []);
-    
-    const totalReviews = reviews.length;
     const totalUsers = await prisma.customer.count();
+    const totalLooks = ratings.length;
 
-    const avgFeeling = reviews.reduce((sum, r) => sum + (r.overallFeeling || 0), 0) / totalReviews || 0;
-    const feltLikeMe = reviews.filter(r => r.feltLikeHer === "Yes").length;
-    const wouldWear = reviews.filter(r => r.wouldWearAgain === "Definitely").length;
-
-    const piecePerformance = {};
-    
-    sessions.forEach(session => {
-      const review = session.review;
-      
-      session.suggestions?.forEach(sug => {
-        sug.items.forEach(item => {
-          if (!item.productTitle) return;
-          
-          const pieceName = item.productTitle;
-          
-          if (!piecePerformance[pieceName]) {
-            piecePerformance[pieceName] = {
-              name: pieceName,
-              category: item.itemType,
-              timesRecommended: 0,
-              ratings: [],
-              feltLikeMe: 0,
-              wouldWear: 0,
-              comfort: 0,
-              workedTags: {},
-              didntWorkTags: {},
-              moods: {},
-              feelings: {},
-              occasions: {},
-              bodyPrefs: {},
-              styleDNA: {},
-              quotes: []
-            };
-          }
-          
-          const piece = piecePerformance[pieceName];
-          piece.timesRecommended += 1;
-          
-          if (review) {
-            if (review.overallFeeling) piece.ratings.push(review.overallFeeling);
-            if (review.feltLikeHer === "Yes") piece.feltLikeMe += 1;
-            if (review.wouldWearAgain === "Definitely") piece.wouldWear += 1;
-            if (review.physicalComfort === "Comfortable") piece.comfort += 1;
-            
-            if (review.workedTags) {
-              try {
-                JSON.parse(review.workedTags).forEach(tag => {
-                  piece.workedTags[tag] = (piece.workedTags[tag] || 0) + 1;
-                });
-              } catch {}
-            }
-            if (review.didntWorkTags) {
-              try {
-                JSON.parse(review.didntWorkTags).forEach(tag => {
-                  piece.didntWorkTags[tag] = (piece.didntWorkTags[tag] || 0) + 1;
-                });
-              } catch {}
-            }
-            
-            if (session.currentMood) piece.moods[session.currentMood] = (piece.moods[session.currentMood] || 0) + 1;
-            if (session.desiredFeeling) piece.feelings[session.desiredFeeling] = (piece.feelings[session.desiredFeeling] || 0) + 1;
-            if (session.occasion) piece.occasions[session.occasion] = (piece.occasions[session.occasion] || 0) + 1;
-            if (session.bodyPreference) piece.bodyPrefs[session.bodyPreference] = (piece.bodyPrefs[session.bodyPreference] || 0) + 1;
-            if (session.styleDNA) {
-              const dnas = Array.isArray(session.styleDNA) ? session.styleDNA : JSON.parse(session.styleDNA || "[]");
-              dnas.forEach(dna => {
-                piece.styleDNA[dna] = (piece.styleDNA[dna] || 0) + 1;
-              });
-            }
-            
-            if (review.additionalNotes) piece.quotes.push(review.additionalNotes);
-          }
-        });
-    });
+    if (totalLooks === 0) {
+      return json({
+        totalUsers,
+        totalLooks: 0,
+        avgRating: 0,
+        avgAlignment: 0,
+        avgRewear: 0,
+        topPieces: [],
+        mixedPieces: [],
+        underperformingPieces: [],
+        watchPieces: [],
+        positiveTags: [],
+        negativeTags: [],
+        styleDNA: [],
+        piecesByDNA: [],
+        bodyPatterns: [],
+        stylingNeeds: [],
+        emotionalOutcomes: [],
+        topOccasions: [],
+        quotes: [],
       });
-    const pieces = Object.values(piecePerformance).map(piece => {
-      const numRatings = piece.ratings.length;
+    }
+
+    // 1. Overview Stats
+    const avgRating = ratings.reduce((sum, r) => sum + (r.rating || 0), 0) / totalLooks;
+    const avgAlignment = ratings.filter(r => r.feltLikeMe === "yes").length / totalLooks;
+    const avgRewear = ratings.filter(r => r.wouldWearAgain === "yes").length / totalLooks;
+
+    // 2. Piece Performance Analysis
+    const pieceStats = {};
+    
+    ratings.forEach(rating => {
+      // Parse pieces from the rating (assuming they're stored in a pieces field or similar)
+      const pieces = rating.pieces || []; // Adjust based on your schema
       
-      // Calculate normalized scores (0-100)
-      const avgRating = numRatings > 0 
-        ? piece.ratings.reduce((sum, r) => sum + r, 0) / numRatings 
-        : 0;
-      const ratingScore = ((avgRating - 1) / 4) * 100;
-      
-      const styleAlignment = numRatings > 0
-        ? Math.round((piece.feltLikeMe / numRatings) * 100)
-        : 0;
-      
-      const wouldWearPercent = numRatings > 0
-        ? Math.round((piece.wouldWear / numRatings) * 100)
-        : 0;
-        
-      const comfortPercent = numRatings > 0
-        ? Math.round((piece.comfort / numRatings) * 100)
-        : 0;
-      
-      // Calculate positive feedback score (simplified version)
-      const totalPositiveTags = Object.values(piece.workedTags).reduce((sum, count) => sum + count, 0);
-      const positiveFeedbackScore = numRatings > 0 ? Math.min(100, (totalPositiveTags / numRatings) * 25) : 0;
-      
-      // Calculate negative feedback score
-      const totalNegativeTags = Object.values(piece.didntWorkTags).reduce((sum, count) => sum + count, 0);
-      const negativeFeedbackScore = numRatings > 0 ? Math.min(100, (totalNegativeTags / numRatings) * 25) : 0;
-      
-      // Calculate Piece Response Score
-      const pieceResponseScore = Math.round(
-        0.25 * ratingScore +
-        0.25 * styleAlignment +
-        0.20 * wouldWearPercent +
-        0.15 * comfortPercent +
-        0.10 * positiveFeedbackScore -
-        0.15 * negativeFeedbackScore
-      );
-      
-      // Classify piece
-      let classification = 'underperforming';
-      let classificationReason = '';
-      
-      if (numRatings < 2) {
-        classification = 'to_watch';
-        classificationReason = 'Too little data';
-      } else if (
-        pieceResponseScore >= 55 &&
-        styleAlignment >= 50 &&
-        wouldWearPercent >= 50
-      ) {
-        classification = 'top_performing';
-        classificationReason = 'Strong across all metrics';
-      } else if (
-        (pieceResponseScore >= 50 && pieceResponseScore < 70) ||
-        (ratingScore >= 75 && wouldWearPercent < 60) ||
-        (ratingScore >= 75 && comfortPercent < 60) ||
-        (styleAlignment >= 60 && negativeFeedbackScore >= 35)
-      ) {
-        classification = 'mixed_signal';
-        if (ratingScore >= 75 && wouldWearPercent < 60) {
-          classificationReason = 'High rating but low would-wear-again';
-        } else if (ratingScore >= 75 && comfortPercent < 60) {
-          classificationReason = 'High rating but comfort issues';
-        } else {
-          classificationReason = 'Good response but needs attention';
+      pieces.forEach(piece => {
+        if (!pieceStats[piece.name]) {
+          pieceStats[piece.name] = {
+            name: piece.name,
+            category: piece.category || "Unknown",
+            ratings: [],
+            rewearYes: 0,
+            rewearNo: 0,
+            helpedFeel: [],
+            occasions: [],
+            styleDNA: [],
+            positiveComments: [],
+            negativeComments: [],
+          };
         }
-      } else {
-        classification = 'underperforming';
-        classificationReason = 'Weak response across metrics';
-      }
         
-      const topWorked = Object.entries(piece.workedTags)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([tag]) => tag);
+        const stats = pieceStats[piece.name];
+        stats.ratings.push(rating.rating || 0);
         
-      const topDidntWork = Object.entries(piece.didntWorkTags)
-        .filter(([tag]) => tag !== "Everything worked")
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([tag]) => tag);
+        if (rating.wouldWearAgain === "yes") stats.rewearYes++;
+        else if (rating.wouldWearAgain === "no") stats.rewearNo++;
         
-      const topFeelings = Object.entries(piece.feelings)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([feeling]) => feeling);
-        
-      const topOccasions = Object.entries(piece.occasions)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([occasion]) => occasion);
-        
-      const topBodyPrefs = Object.entries(piece.bodyPrefs)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 2)
-        .map(([pref]) => pref);
-      
-      const topStyleDNA = Object.entries(piece.styleDNA || {})
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([dna]) => dna);
+        if (rating.helpedFeel) stats.helpedFeel.push(rating.helpedFeel);
+        if (rating.occasion) stats.occasions.push(rating.occasion);
+        if (rating.customer?.styleDNA) stats.styleDNA.push(rating.customer.styleDNA);
+        if (rating.whatWorked) stats.positiveComments.push(rating.whatWorked);
+        if (rating.whatDidntWork) stats.negativeComments.push(rating.whatDidntWork);
+      });
+    });
+
+    // Calculate piece metrics
+    const pieces = Object.values(pieceStats).map(p => {
+      const avgRating = p.ratings.reduce((a, b) => a + b, 0) / p.ratings.length;
+      const rewear = p.rewearYes / (p.rewearYes + p.rewearNo);
+      const ratingCount = p.ratings.length;
       
       return {
-        name: piece.name,
-        category: piece.category,
-        timesRecommended: piece.timesRecommended,
-        timesRated: numRatings,
-        avgRating: Math.round(avgRating * 10) / 10,
-        styleAlignment,
-        wouldWearPercent,
-        comfortPercent,
-        pieceResponseScore,
-        classification,
-        classificationReason,
-        topWorked,
-        topDidntWork,
-        topFeelings,
-        topOccasions,
-        topBodyPrefs,
-        topStyleDNA,
-        quote: piece.quotes[0] || null
+        name: p.name,
+        category: p.category,
+        avgRating,
+        ratingCount,
+        rewear,
+        helpedFeel: [...new Set(p.helpedFeel)].slice(0, 3),
+        bestOccasions: getMostCommon(p.occasions, 3),
+        topDNA: getMostCommon(p.styleDNA, 3),
+        positiveComments: p.positiveComments,
+        negativeComments: p.negativeComments,
       };
     });
 
-
+    // 2. Top Performing (high rating + high rewear + enough data)
     const topPieces = pieces
-      .filter(p => p.classification === "top_performing")
-      .sort((a, b) => b.pieceResponseScore - a.pieceResponseScore)
+      .filter(p => p.ratingCount >= 3)
+      .filter(p => p.avgRating >= 4 && p.rewear >= 0.7)
+      .sort((a, b) => b.avgRating - a.avgRating)
       .slice(0, 10);
-      
+
+    // 3. Mixed Signal (high rating but low rewear, or vice versa)
+    const mixedPieces = pieces
+      .filter(p => p.ratingCount >= 3)
+      .filter(p => 
+        (p.avgRating >= 4 && p.rewear < 0.5) || 
+        (p.avgRating < 3 && p.rewear >= 0.7)
+      )
+      .map(p => ({
+        ...p,
+        reason: p.avgRating >= 4 && p.rewear < 0.5 
+          ? "High rating, low rewear" 
+          : "Admired but not practical",
+        friction: p.negativeComments[0] || "Unknown friction point",
+      }))
+      .slice(0, 10);
+
+    // 4. Underperforming (low rating + low rewear)
     const underperformingPieces = pieces
-      .filter(p => p.classification === "underperforming")
-      .sort((a, b) => a.pieceResponseScore - b.pieceResponseScore);
-      
-    const mixedSignalPieces = pieces
-      .filter(p => p.classification === "mixed_signal")
-      .sort((a, b) => a.pieceResponseScore - b.pieceResponseScore);
-      
-    const piecesToWatch = pieces
-      .filter(p => p.classification === "to_watch")
-      .sort((a, b) => b.avgRating - a.avgRating);
+      .filter(p => p.ratingCount >= 3)
+      .filter(p => p.avgRating < 3 || p.rewear < 0.3)
+      .map(p => ({
+        ...p,
+        weakSignals: [
+          p.avgRating < 3 ? "low rating" : null,
+          p.rewear < 0.3 ? "low rewear" : null,
+        ].filter(Boolean),
+        rejectionReasons: p.negativeComments.slice(0, 3),
+      }))
+      .slice(0, 10);
 
-    const allWorkedTags = {};
-    const allDidntWorkTags = {};
-    const allBodyPrefs = {};
-    const allOccasions = {};
-    const allStyleDNA = {};
+    // 5. Watch (not enough data)
+    const watchPieces = pieces
+      .filter(p => p.ratingCount < 3)
+      .slice(0, 10);
+
+    // 6 & 7. Positive/Negative Tags
+    const allPositive = ratings.flatMap(r => r.whatWorked || "").filter(Boolean);
+    const allNegative = ratings.flatMap(r => r.whatDidntWork || "").filter(Boolean);
     
-    const tagToPieces = {};
-    const didntWorkTagToPieces = {};
-    reviews.forEach(r => {
-      if (r.workedTags) {
-        try {
-          JSON.parse(r.workedTags).forEach(tag => {
-            allWorkedTags[tag] = (allWorkedTags[tag] || 0) + 1;
-          });
-        } catch {}
+    const positiveTags = countTags(allPositive, pieces);
+    const negativeTags = countTags(allNegative, pieces);
+
+    // 8. Style DNA Breakdown
+    const dnaCount = {};
+    const customers = await prisma.customer.findMany({ select: { styleDNA: true } });
+    customers.forEach(c => {
+      if (c.styleDNA) {
+        dnaCount[c.styleDNA] = (dnaCount[c.styleDNA] || 0) + 1;
+      }
+    });
+    
+    const styleDNA = Object.entries(dnaCount).map(([name, count]) => ({
+      name,
+      count,
+      percentage: count / customers.length,
+    })).sort((a, b) => b.count - a.count);
+
+    // 9. Pieces by DNA
+    const piecesByDNA = pieces
+      .filter(p => p.topDNA.length > 0)
+      .slice(0, 15);
+
+    // 10. Body Patterns
+    const bodyPrefs = {};
+    ratings.forEach(r => {
+      if (r.bodyPreference) {
+        if (!bodyPrefs[r.bodyPreference]) {
+          bodyPrefs[r.bodyPreference] = { count: 0, pieces: [] };
         }
-        // Track which pieces had this tag
-        const sessionPieces = sessions.find(s => s.id === r.sessionId)?.suggestions?.flatMap(sug => sug.items.map(i => i.productTitle)) || [];
-        if (r.workedTags) {
-          try {
-            JSON.parse(r.workedTags).forEach(tag => {
-              if (!tagToPieces[tag]) tagToPieces[tag] = {};
-              sessionPieces.forEach(piece => {
-                tagToPieces[tag][piece] = (tagToPieces[tag][piece] || 0) + 1;
-              });
-            });
-          } catch {}
+        bodyPrefs[r.bodyPreference].count++;
+        // Track which pieces worked for this body pref
       }
-      if (r.didntWorkTags) {
-        try {
-          JSON.parse(r.didntWorkTags).forEach(tag => {
-            allDidntWorkTags[tag] = (allDidntWorkTags[tag] || 0) + 1;
-          });
-        } catch {}
-      }
-        try {
-          JSON.parse(r.didntWorkTags).forEach(tag => {
-            if (!didntWorkTagToPieces[tag]) didntWorkTagToPieces[tag] = {};
-            sessionPieces.forEach(piece => {
-              didntWorkTagToPieces[tag][piece] = (didntWorkTagToPieces[tag][piece] || 0) + 1;
-            });
-          });
-        } catch {}
     });
     
-    sessions.forEach(s => {
-      if (s.bodyPreference) {
-        allBodyPrefs[s.bodyPreference] = (allBodyPrefs[s.bodyPreference] || 0) + 1;
-      }
-      if (s.occasion) {
-        allOccasions[s.occasion] = (allOccasions[s.occasion] || 0) + 1;
+    const bodyPatterns = Object.entries(bodyPrefs).map(([pref, data]) => ({
+      preference: pref,
+      userCount: data.count,
+      bestPieces: [], // Would need more logic
+      worstPieces: [],
+    }));
+
+    // 11. Styling Needs
+    const occasionCount = {};
+    ratings.forEach(r => {
+      if (r.occasion) {
+        occasionCount[r.occasion] = (occasionCount[r.occasion] || 0) + 1;
       }
     });
+    
+    const stylingNeeds = Object.entries(occasionCount)
+      .map(([occasion, count]) => ({ occasion, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
 
-    const topWorkedOverall = Object.entries(allWorkedTags)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-      .map(([tag, count]) => {
-        const topPieces = Object.entries(tagToPieces[tag] || {})
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 3)
-          .map(([piece, count]) => ({ piece, count }));
-        return { tag, count, topPieces };
-      });
-    const topDidntWorkOverall = Object.entries(allDidntWorkTags)
-      .filter(([tag]) => tag !== "Everything worked")
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-      .map(([tag, count]) => {
-        const topPieces = Object.entries(didntWorkTagToPieces[tag] || {})
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 3)
-          .map(([piece, count]) => ({ piece, count }));
-        return { tag, count, topPieces };
-      });
-    const topBodyPrefsOverall = Object.entries(allBodyPrefs)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-      .map(([pref, count]) => ({ pref, count }));
-      
-    const topOccasionsOverall = Object.entries(allOccasions)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8)
-      .map(([occasion, count]) => ({ occasion, count }));
+    // 12. Emotional Outcomes
+    const emotionalOutcomes = pieces
+      .filter(p => p.helpedFeel.length > 0)
+      .slice(0, 15);
 
+    // 13. Top Occasions
+    const occasionStats = {};
+    ratings.forEach(r => {
+      if (!r.occasion) return;
+      if (!occasionStats[r.occasion]) {
+        occasionStats[r.occasion] = { ratings: [], rewear: 0, total: 0 };
+      }
+      occasionStats[r.occasion].ratings.push(r.rating || 0);
+      occasionStats[r.occasion].total++;
+      if (r.wouldWearAgain === "yes") occasionStats[r.occasion].rewear++;
+    });
+    
+    const topOccasions = Object.entries(occasionStats)
+      .map(([name, data]) => ({
+        name,
+        avgRating: data.ratings.reduce((a, b) => a + b, 0) / data.ratings.length,
+        lookCount: data.total,
+        rewear: data.rewear / data.total,
+      }))
+      .sort((a, b) => b.avgRating - a.avgRating)
+      .slice(0, 10);
 
-    const topStyleDNAOverall = Object.entries(allStyleDNA)
-      .sort((a, b) => b[1] - a[1])
-      .map(([dna, count]) => ({ dna, count }));
-    return Response.json({
-      totalReviews,
+    // 14. Quotes
+    const quotes = ratings
+      .filter(r => r.comments && r.comments.length > 20)
+      .map(r => ({
+        text: r.comments,
+        piece: r.pieces?.[0]?.name || null,
+      }))
+      .slice(0, 10);
+
+    return json({
       totalUsers,
-      avgFeeling: Math.round(avgFeeling * 10) / 10,
-      feltLikeMePercent: Math.round((feltLikeMe / totalReviews) * 100) || 0,
-      wouldWearPercent: Math.round((wouldWear / totalReviews) * 100) || 0,
+      totalLooks,
+      avgRating,
+      avgAlignment,
+      avgRewear,
       topPieces,
+      mixedPieces,
       underperformingPieces,
-      mixedSignalPieces,
-      piecesToWatch,
-      topWorkedOverall,
-      topDidntWorkOverall,
-      topBodyPrefsOverall,
-      topOccasionsOverall,
-      topStyleDNAOverall,
+      watchPieces,
+      positiveTags,
+      negativeTags,
+      styleDNA,
+      piecesByDNA,
+      bodyPatterns,
+      stylingNeeds,
+      emotionalOutcomes,
+      topOccasions,
+      quotes,
     });
+
   } catch (error) {
-    console.error('API Error:', error);
-    return Response.json({ error: error.message }, { status: 500 });
+    console.error("Designer stats error:", error);
+    return json({ error: error.message }, { status: 500 });
   }
+}
+
+// Helper functions
+function getMostCommon(arr, limit = 3) {
+  const counts = {};
+  arr.forEach(item => {
+    counts[item] = (counts[item] || 0) + 1;
+  });
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([item]) => item);
+}
+
+function countTags(comments, pieces) {
+  const tags = {};
+  
+  // Simple keyword extraction (you'd want better NLP here)
+  const keywords = ["flattering", "comfortable", "structured", "loose", "tight", "elegant", "casual"];
+  
+  comments.forEach(comment => {
+    keywords.forEach(keyword => {
+      if (comment.toLowerCase().includes(keyword)) {
+        if (!tags[keyword]) {
+          tags[keyword] = { name: keyword, count: 0, topPieces: [] };
+        }
+        tags[keyword].count++;
+      }
+    });
+  });
+  
+  return Object.values(tags)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
 }
