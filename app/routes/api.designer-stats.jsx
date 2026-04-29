@@ -199,12 +199,66 @@ export async function loader() {
       .filter(p => p.ratingCount > 0 && p.ratingCount < 3)
       .slice(0, 10);
 
-    // 6 & 7. Positive/Negative Tags
-    const allWorkedTags = pieces.flatMap(p => p.positiveComments);
-    const allDidntWorkTags = pieces.flatMap(p => p.negativeComments);
+    // 6 & 7. Positive/Negative Tags - WITH PIECE LINKING
+    const tagStats = { positive: {}, negative: {} };
     
-    const positiveTags = countTags(allWorkedTags, pieces).slice(0, 10);
-    const negativeTags = countTags(allDidntWorkTags, pieces).slice(0, 10);
+    reviews.forEach(review => {
+      const selectedSuggestion = review.session.suggestions.find(
+        s => s.id === review.session.selectedSuggestionId
+      ) || review.session.suggestions[0];
+      
+      if (!selectedSuggestion) return;
+      
+      const pieceNames = selectedSuggestion.items.map(item => 
+        item.productTitle || `Closet Item ${item.closetItemId}`
+      );
+      
+      // Process worked tags
+      if (review.workedTags) {
+        try {
+          const tags = JSON.parse(review.workedTags);
+          tags.forEach(tag => {
+            if (!tagStats.positive[tag]) {
+              tagStats.positive[tag] = { name: tag, count: 0, pieces: [] };
+            }
+            tagStats.positive[tag].count++;
+            tagStats.positive[tag].pieces.push(...pieceNames);
+          });
+        } catch (e) {}
+      }
+      
+      // Process didn't work tags
+      if (review.didntWorkTags) {
+        try {
+          const tags = JSON.parse(review.didntWorkTags);
+          tags.forEach(tag => {
+            if (!tagStats.negative[tag]) {
+              tagStats.negative[tag] = { name: tag, count: 0, pieces: [] };
+            }
+            tagStats.negative[tag].count++;
+            tagStats.negative[tag].pieces.push(...pieceNames);
+          });
+        } catch (e) {}
+      }
+    });
+    
+    const positiveTags = Object.values(tagStats.positive)
+      .map(tag => ({
+        name: tag.name,
+        count: tag.count,
+        topPieces: getMostCommon(tag.pieces, 3),
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+      
+    const negativeTags = Object.values(tagStats.negative)
+      .map(tag => ({
+        name: tag.name,
+        count: tag.count,
+        topPieces: getMostCommon(tag.pieces, 3),
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
 
     // 8. Style DNA Breakdown
     const customers = await prisma.customer.findMany({
