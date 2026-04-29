@@ -91,10 +91,17 @@ export async function loader() {
           stats.occasions.push(review.session.occasion);
         }
         
-        // Style DNA
-        if (review.customer?.onboardingProfile?.styleDNA) {
-          const dna = JSON.parse(review.customer.onboardingProfile.styleDNA);
-          stats.styleDNA.push(...dna);
+        // Style DNA - try customer profile first, then session
+        let styleDNA = review.customer?.onboardingProfile?.styleDNA || review.session.styleDNA;
+        if (styleDNA) {
+          try {
+            const dna = JSON.parse(styleDNA);
+            if (Array.isArray(dna)) {
+              stats.styleDNA.push(...dna);
+            }
+          } catch (e) {
+            // Silent fail on parse error
+          }
         }
         
         // Tags
