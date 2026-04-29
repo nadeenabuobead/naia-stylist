@@ -1474,7 +1474,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
                 </button>
                 <a href="/closet" style={s.iconBtn} title="My Closet">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="4" r="1.5"/><line x1="12" y1="5.5" x2="12" y2="8"/><path d="M5 8 L12 8 L19 8 L18 11 L6 11 Z"/></svg>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="4" r="1.5"/><line x1="12" y1="5.5" x2="12" y2="8"/><path d="M5 8h14l-1 3H6z"/></svg>
                 </a>
                 <div style={s.avatar} onClick={() => { setShowAccount(!showAccount); setShowHistory(false); setShowWishlist(false); setShowConfidence(false); setShowTrends(false); }}>
                   {(customer.firstName || customer.email || "?")[0].toUpperCase()}
