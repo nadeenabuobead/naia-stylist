@@ -130,7 +130,6 @@ export async function loader() {
             console.error('Failed to parse didntWorkTags:', e);
           }
         }
-        }
         
         // Quotes
         if (review.additionalNotes) {
