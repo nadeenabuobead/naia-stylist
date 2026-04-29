@@ -298,19 +298,6 @@ export default function ClosetPage() {
     fontFamily: '"Cormorant Garamond", Georgia, serif',
   });
 
-  if (!authenticated) {
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>
-        <div style={{ textAlign: "center", maxWidth: "24rem" }}>
-          <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>👗</div>
-          <h1 style={{ fontSize: "1.5rem", fontWeight: 600, marginBottom: "0.5rem" }}>My Closet</h1>
-          <p style={{ color: "#8a7f75", marginBottom: "1.5rem" }}>Log in to your account on naiabynadine.com to access your closet.</p>
-          <a href="https://naiabynadine.com/account/login" style={{ padding: "0.75rem 1.5rem", background: "#1a1816", color: "white", borderRadius: "2px", textDecoration: "none", fontWeight: 500 }}>Log In</a>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={{ minHeight: "100vh", background: "#faf9f7", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>
       <header style={{ padding: "1rem 1.5rem", background: "white", borderBottom: "1px solid #e8e4df", position: "sticky", top: 0, zIndex: 10 }}>
