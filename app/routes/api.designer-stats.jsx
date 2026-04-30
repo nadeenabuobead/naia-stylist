@@ -230,47 +230,30 @@ export async function loader() {
       .filter(p => p.ratingCount > 0 && p.ratingCount < 3)
       .slice(0, 10);
 
-    // 6 & 7. Positive/Negative Tags - WITH PIECE LINKING
+    // 6 & 7. Positive/Negative Tags - built from piece stats
     const tagStats = { positive: {}, negative: {} };
     
-    reviews.forEach(review => {
-      const selectedSuggestion = review.session.suggestions.find(
-        s => s.id === review.session.selectedSuggestionId
-      ) || review.session.suggestions[0];
+    // Collect tags from already-parsed piece stats
+    pieces.forEach(piece => {
+      // Positive tags
+      piece.positiveComments.forEach(tag => {
+        if (!tag || tag === '[]') return; // Skip empty
+        if (!tagStats.positive[tag]) {
+          tagStats.positive[tag] = { name: tag, count: 0, pieces: [] };
+        }
+        tagStats.positive[tag].count++;
+        tagStats.positive[tag].pieces.push(piece.name);
+      });
       
-      if (!selectedSuggestion) return;
-      
-      const pieceNames = selectedSuggestion.items.map(item => 
-        item.productTitle || `Closet Item ${item.closetItemId}`
-      );
-      
-      // Process worked tags
-      if (review.workedTags) {
-        try {
-          const tags = JSON.parse(review.workedTags);
-          tags.forEach(tag => {
-            if (!tagStats.positive[tag]) {
-              tagStats.positive[tag] = { name: tag, count: 0, pieces: [] };
-            }
-            tagStats.positive[tag].count++;
-            tagStats.positive[tag].pieces.push(...pieceNames);
-          });
-        } catch (e) {}
-      }
-      
-      // Process didn't work tags
-      if (review.didntWorkTags) {
-        try {
-          const tags = JSON.parse(review.didntWorkTags);
-          tags.forEach(tag => {
-            if (!tagStats.negative[tag]) {
-              tagStats.negative[tag] = { name: tag, count: 0, pieces: [] };
-            }
-            tagStats.negative[tag].count++;
-            tagStats.negative[tag].pieces.push(...pieceNames);
-          });
-        } catch (e) {}
-      }
+      // Negative tags
+      piece.negativeComments.forEach(tag => {
+        if (!tag || tag === '[]') return; // Skip empty
+        if (!tagStats.negative[tag]) {
+          tagStats.negative[tag] = { name: tag, count: 0, pieces: [] };
+        }
+        tagStats.negative[tag].count++;
+        tagStats.negative[tag].pieces.push(piece.name);
+      });
     });
     
     const positiveTags = Object.values(tagStats.positive)
