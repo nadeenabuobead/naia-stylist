@@ -25,9 +25,13 @@ export async function loader() {
       orderBy: { createdAt: 'desc' },
     });
 
-    console.log("Total reviews fetched:", reviews.length);
-    console.log("Reviews with bodyPreference:", reviews.filter(r => r.session?.bodyPreference).length);
-    console.log("Sample session data:", reviews[0]?.session ? {bodyPref: reviews[0].session.bodyPreference, styleDNA: reviews[0].session.styleDNA} : "no session");
+    const withBodyPref = reviews.filter(r => r.session?.bodyPreference);
+    console.log("DEBUG:", {
+      totalReviews: reviews.length,
+      withBodyPref: withBodyPref.length,
+      firstBodyPref: withBodyPref[0]?.session?.bodyPreference || "none",
+      firstStyleDNA: withBodyPref[0]?.session?.styleDNA || "none"
+    });
     const totalUsers = await prisma.customer.count();
     const totalLooks = reviews.length;
 
