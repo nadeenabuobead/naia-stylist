@@ -312,21 +312,53 @@ export async function loader() {
       .filter(p => p.topDNA.length > 0)
       .slice(0, 15);
 
-    // 10. Body Patterns
-    const bodyCount = {};
-    reviews.forEach(r => {
-      if (r.session.bodyPreference) {
-        bodyCount[r.session.bodyPreference] = (bodyCount[r.session.bodyPreference] || 0) + 1;
+    // 10. Body Patterns - with piece performance
+    const bodyStats = {};
+    
+    reviews.forEach(review => {
+      const bodyPref = review.session.bodyPreference;
+      if (!bodyPref) return;
+      
+      if (!bodyStats[bodyPref]) {
+        bodyStats[bodyPref] = { count: 0, pieces: {} };
+      }
+      bodyStats[bodyPref].count++;
+      
+      // Track piece performance for this body preference
+      const selectedSuggestion = review.session.suggestions.find(
+        s => s.id === review.session.selectedSuggestionId
+      ) || review.session.suggestions[0];
+      
+      if (selectedSuggestion) {
+        selectedSuggestion.items.forEach(item => {
+          const pieceName = item.productTitle || `Closet Item ${item.closetItemId}`;
+          if (!bodyStats[bodyPref].pieces[pieceName]) {
+            bodyStats[bodyPref].pieces[pieceName] = { good: 0, bad: 0 };
+          }
+          
+          // Track if this was a good or bad experience
+          if (review.overallFeeling >= 4) {
+            bodyStats[bodyPref].pieces[pieceName].good++;
+          } else if (review.overallFeeling <= 2) {
+            bodyStats[bodyPref].pieces[pieceName].bad++;
+          }
+        });
       }
     });
     
-    const bodyPatterns = Object.entries(bodyCount)
-      .map(([preference, userCount]) => ({
-        preference,
-        userCount,
-        bestPieces: [], // Would need cross-referencing
-        worstPieces: [],
-      }))
+    const bodyPatterns = Object.entries(bodyStats)
+      .map(([preference, data]) => {
+        const piecePerformance = Object.entries(data.pieces)
+          .map(([name, perf]) => ({ name, ...perf, score: perf.good - perf.bad }))
+          .sort((a, b) => b.score - a.score);
+        
+        return {
+          preference,
+          userCount: data.count,
+          bestPieces: piecePerformance.filter(p => p.score > 0).slice(0, 3).map(p => p.name),
+          worstPieces: piecePerformance.filter(p => p.score < 0).slice(-3).reverse().map(p => p.name),
+        };
+      })
       .sort((a, b) => b.userCount - a.userCount);
 
     // 11. Styling Needs
