@@ -238,6 +238,10 @@ export async function loader() {
       // Positive tags
       piece.positiveComments.forEach(tag => {
         if (!tag || tag === '[]') return; // Skip empty
+        // Remove JSON formatting if present
+        if (typeof tag === 'string' && tag.startsWith('["')) {
+          try { tag = JSON.parse(tag)[0]; } catch(e) {}
+        }
         if (!tagStats.positive[tag]) {
           tagStats.positive[tag] = { name: tag, count: 0, pieces: [] };
         }
@@ -248,6 +252,10 @@ export async function loader() {
       // Negative tags
       piece.negativeComments.forEach(tag => {
         if (!tag || tag === '[]') return; // Skip empty
+        // Remove JSON formatting if present
+        if (typeof tag === 'string' && tag.startsWith('["')) {
+          try { tag = JSON.parse(tag)[0]; } catch(e) {}
+        }
         if (!tagStats.negative[tag]) {
           tagStats.negative[tag] = { name: tag, count: 0, pieces: [] };
         }
