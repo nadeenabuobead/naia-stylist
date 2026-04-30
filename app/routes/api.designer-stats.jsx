@@ -109,13 +109,14 @@ export async function loader() {
         if (review.workedTags) {
           try {
             let tags = review.workedTags;
+            // Parse if string
             if (typeof tags === 'string') {
               tags = JSON.parse(tags);
             }
+            // If array, parse each element if it's a string
             if (Array.isArray(tags)) {
-              stats.workedTags.push(...tags);
-            } else if (typeof tags === 'string') {
-              stats.workedTags.push(tags);
+              tags = tags.map(t => typeof t === 'string' ? (t.startsWith('[') ? JSON.parse(t) : t) : t).flat();
+              stats.workedTags.push(...tags.filter(Boolean));
             }
           } catch (e) {
             console.error('Failed to parse workedTags:', e);
