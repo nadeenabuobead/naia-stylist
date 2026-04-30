@@ -97,6 +97,7 @@ export async function loader() {
           try {
             const dna = JSON.parse(styleDNA);
             if (Array.isArray(dna)) {
+    console.log("Style DNA found:", reviews.map(r => r.session.styleDNA).filter(Boolean));
               stats.styleDNA.push(...dna);
             }
           } catch (e) {
@@ -315,6 +316,7 @@ export async function loader() {
     // 10. Body Patterns - with piece performance
     const bodyStats = {};
     
+    console.log("Body preferences found:", reviews.map(r => r.session.bodyPreference).filter(Boolean));
     reviews.forEach(review => {
       const bodyPref = review.session.bodyPreference;
       if (!bodyPref) return;
