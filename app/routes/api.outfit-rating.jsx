@@ -58,6 +58,9 @@ export async function action({ request }) {
 },
       });
     } else {
+  // Debug: Check the session being linked
+  const linkedSession = await prisma.stylingSession.findUnique({ where: { id: historyId } });
+  console.log("Review linking to session:", { historyId, bodyPref: linkedSession?.bodyPreference, styleDNA: linkedSession?.styleDNA });
   review = await prisma.postOutfitReview.create({
     data: {
       customerId: customer.id,
