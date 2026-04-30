@@ -161,14 +161,14 @@ try {
   
   if (customer) {
     // Create styling session
+    console.log("Saving styleDNA to session:", styleDNA);
+    console.log("Saving bodyPref to session:", bodyPref);
     const session = await prisma.stylingSession.create({
       data: {
         customerId: customer.id,
         currentMood: safeMood || "",
         desiredFeeling: safeFeeling || "",
         occasion: safeEvent || "",
-    console.log("Saving styleDNA to session:", styleDNA);
-    console.log("Saving bodyPref to session:", bodyPref);
         bodyPreference: bodyPref || "",
         styleDNA: JSON.stringify(styleDNA || []),
         specificNeeds: result,
