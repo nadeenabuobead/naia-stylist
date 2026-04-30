@@ -4,6 +4,7 @@ export async function action({ request }) {
     const {
   mode, outfit, mood = "", feeling = "", event = "",
   styleWords = [], bodyPref = "", vibe = "", styleDNA = [],
+  console.log("API received - bodyPref:", bodyPref, "styleDNA:", styleDNA);
   closetItem = null, closetItems = [],
   naiaPiece = null, closet = [],
 } = body || {};
