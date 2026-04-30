@@ -32,6 +32,7 @@ export async function action({ request }) {
     return Response.json({ error: "Not authenticated" }, { status: 401, headers: CORS });
   }
   const body = await request.json();
+  console.log("Review data received:", { workedTags: body.workedTags, didntWorkTags: body.didntWorkTags });
   const { historyId, overallReaction, feltLikeMe, desiredFeelingAchieved, wouldWearAgain, physicalComfort, workedTags, didntWorkTags, additionalNotes, mood, feeling, event, styleWords } = body;
   if (!historyId || overallReaction === undefined) {
     return Response.json({ error: "historyId and confidence required" }, { status: 400, headers: CORS });
