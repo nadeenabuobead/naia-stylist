@@ -105,7 +105,6 @@ export async function loader() {
         }
         
         // Tags
-        // Tags
         if (review.workedTags) {
           try {
             let tags = review.workedTags;
