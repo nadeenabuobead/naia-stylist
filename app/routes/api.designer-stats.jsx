@@ -390,8 +390,8 @@ export async function loader() {
     
     const bodyPatterns = Object.entries(bodyStats)
       .map(([preference, data]) => {
-        // Get all reviews from users with this preference
-        const preferenceSessions = reviews.filter(r => r.bodyPreference === preference);
+        // Get all reviews from users with this preference (bodyPreference is on session, not review)
+        const preferenceSessions = reviews.filter(r => r.session?.bodyPreference === preference);
         
         // Track piece performance for this preference
         const pieceStats = {};
@@ -465,19 +465,42 @@ export async function loader() {
         
         const uniqueStruggles = [...new Set(struggles)];
         
-        // Design implication
+        // Design implication - adjust confidence based on sample size
         let implication = '';
         const prefLower = preference.toLowerCase();
-        if (prefLower.includes('elongate') || prefLower.includes('leg')) {
-          implication = 'Continue using vertical lines, higher waist placement, and styling that lengthens the leg line.';
-        } else if (prefLower.includes('balance') || prefLower.includes('proportion')) {
-          implication = 'Focus on pieces that create visual balance through strategic volume.';
-        } else if (prefLower.includes('structure') || prefLower.includes('define') || prefLower.includes('add structure')) {
-          implication = 'Prioritize tailoring, waist definition, and architectural lines.';
-        } else if (prefLower.includes('comfort') || prefLower.includes('ease')) {
-          implication = 'Emphasize soft fabrics, relaxed fits, and forgiving silhouettes.';
+        const userCount = data.count;
+        
+        if (userCount === 1) {
+          implication = 'Early directional signal only. Continue collecting feedback before using this as a design decision.';
+        } else if (userCount <= 2) {
+          implication = 'Early preference signal. Continue collecting rated looks before drawing design conclusions.';
+        } else if (userCount <= 4) {
+          if (rankedPieces.length === 0) {
+            implication = 'Continue collecting rated looks before drawing a design conclusion.';
+          } else if (prefLower.includes('elongate') || prefLower.includes('leg')) {
+            implication = 'Early signal that vertical lines, longer silhouettes, or waist placement may support this preference. Continue testing before making design decisions.';
+          } else if (prefLower.includes('balance') || prefLower.includes('proportion')) {
+            implication = 'Early signal that pieces creating visual balance through strategic volume may support this preference. Continue testing.';
+          } else if (prefLower.includes('structure') || prefLower.includes('define') || prefLower.includes('add structure')) {
+            implication = 'Early signal that tailoring, waist definition, or architectural lines may support this preference. Continue testing.';
+          } else if (prefLower.includes('comfort') || prefLower.includes('ease')) {
+            implication = 'Early signal that soft fabrics, relaxed fits, or forgiving silhouettes may support this preference. Continue testing.';
+          } else {
+            implication = 'Early preference signal. Continue testing pieces that support this fit need.';
+          }
         } else {
-          implication = 'Continue current design direction based on positive performance.';
+          // 5+ users - more confident
+          if (prefLower.includes('elongate') || prefLower.includes('leg')) {
+            implication = 'Continue using vertical lines, higher waist placement, and styling that lengthens the leg line.';
+          } else if (prefLower.includes('balance') || prefLower.includes('proportion')) {
+            implication = 'Focus on pieces that create visual balance through strategic volume.';
+          } else if (prefLower.includes('structure') || prefLower.includes('define') || prefLower.includes('add structure')) {
+            implication = 'Prioritize tailoring, waist definition, and architectural lines.';
+          } else if (prefLower.includes('comfort') || prefLower.includes('ease')) {
+            implication = 'Emphasize soft fabrics, relaxed fits, and forgiving silhouettes.';
+          } else {
+            implication = 'Continue current design direction based on positive performance.';
+          }
         }
         
         // Determine piece signal state
@@ -498,7 +521,10 @@ export async function loader() {
           pieceSignal,
           struggles: uniqueStruggles.length > 0 ? uniqueStruggles.slice(0, 3) : [],
           implication,
-          confidence: data.count === 1 ? 'Low — based on 1 user' : data.count < 3 ? 'Low — early signal' : 'Medium'
+          confidence: data.count <= 2 ? 'Low confidence' : 
+                       data.count <= 4 ? 'Early signal' : 
+                       data.count <= 9 ? 'Medium confidence' : 
+                       'Strong signal'
         };
       })
       .sort((a, b) => b.userCount - a.userCount)   // 11. Styling Needs
