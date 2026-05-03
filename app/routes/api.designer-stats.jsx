@@ -165,6 +165,19 @@ export async function loader() {
           stats.desiredFeelings.push(review.session.desiredFeeling);
         }
       });
+    
+    // High-demand styling needs: design to fill gaps
+    if (stylingNeeds && stylingNeeds.length > 0) {
+      const topNeed = stylingNeeds[0];
+      if (topNeed.count >= 5) {
+        designActions.push({
+          piece: `New ${topNeed.occasion} piece`,
+          action: "Consider designing for high demand",
+          reason: `${topNeed.count} styling requests for "${topNeed.occasion}" occasions`,
+          priority: "medium"
+        });
+      }
+    }
     });
 
     // Calculate piece metrics
