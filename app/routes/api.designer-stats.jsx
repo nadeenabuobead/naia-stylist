@@ -572,10 +572,20 @@ export async function loader() {
       .slice(0, 10);
 
     // 14. Quotes
-    const quotes = pieces
-      .flatMap(p => p.quotes.map(q => ({ text: q, piece: p.name })))
-      .filter(q => q.text.length > 20)
-      .slice(0, 10);
+    // Collect ALL quotes from reviews
+    const allQuotes = [];
+    reviews.forEach(review => {
+      if (review.additionalNotes && review.additionalNotes.length > 10) {
+        const suggestion = review.session?.suggestions?.find(
+          s => s.id === review.session.selectedSuggestionId
+        ) || review.session?.suggestions?.[0];
+        
+        const pieceName = suggestion?.items?.[0]?.productTitle || "General feedback";
+        allQuotes.push({ text: review.additionalNotes, piece: pieceName });
+      }
+    });
+    
+    const quotes = allQuotes.slice(0, 10);
 
 
     // Design Actions - PIECE-SPECIFIC tags only
