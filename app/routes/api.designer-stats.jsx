@@ -5,12 +5,37 @@ export async function loader() {
   try {
     // Fetch all reviews with sessions and items
     const reviews = await prisma.postOutfitReview.findMany({
-      include: {
+      select: {
+        id: true,
+        rating: true,
+        overallFeeling: true,
+        wouldWearAgain: true,
+        workedTags: true,
+        didntWorkTags: true,
+        additionalNotes: true,
+        confidenceBefore: true,
+        confidenceAfter: true,
+        createdAt: true,
         session: {
-          include: {
+          select: {
+            id: true,
+            bodyPreference: true,
+            selectedSuggestionId: true,
+            currentMood: true,
+            desiredFeeling: true,
+            occasion: true,
+            styleDNA: true,
             suggestions: {
-              include: {
-                items: true,
+              select: {
+                id: true,
+                items: {
+                  select: {
+                    id: true,
+                    productTitle: true,
+                    itemType: true,
+                    closetItemId: true,
+                  },
+                },
               },
             },
           },
