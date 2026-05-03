@@ -426,10 +426,10 @@ export async function loader() {
       .slice(0, 10);
 
 
-    // Design Actions - aggregate ALL feedback tags from ALL reviews
+    // Design Actions - aggregate ALL feedback tags from ALL reviews with action logic
     const designActions = [];
     
-    // First, collect ALL positive and negative tags across all reviews
+    // Collect ALL positive and negative tags across all reviews
     const allPositiveTags = [];
     const allNegativeTags = [];
     
@@ -457,9 +457,6 @@ export async function loader() {
       }
     });
     
-    console.log("All positive tags collected:", allPositiveTags);
-    console.log("All negative tags collected:", allNegativeTags);
-    
     const getTopFeedback = (arr, count = 5) => {
       const freq = {};
       arr.forEach(item => {
@@ -468,19 +465,55 @@ export async function loader() {
           if (clean) freq[clean] = (freq[clean] || 0) + 1;
         }
       });
-      return Object.entries(freq)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, count);
+      return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, count);
     };
     
-    const formatTagsWithCounts = (tags) => {
-      return tags.map(([tag, count]) => `"${tag}" x${count}`).join(', ');
+    const formatTags = (tags) => tags.map(([tag, count]) => `"${tag}"`).join(', ');
+    const formatTagsWithCounts = (tags) => tags.map(([tag, count]) => `"${tag}" x${count}`).join(', ');
+    
+    const globalPositive = getTopFeedback(allPositiveTags, 5);
+    const globalNegative = getTopFeedback(allNegativeTags, 5);
+    
+    // Action logic based on tags
+    const getPositiveAction = (tags, occasions) => {
+      if (!tags || tags.length === 0) return null;
+      const topTag = tags[0][0].toLowerCase();
+      const occ = occasions.slice(0, 2).join('/') || 'styling';
+      
+      if (topTag.includes('right for the occasion')) return `Create content for ${occ}`;
+      if (topTag.includes('easy to imagine')) return `Feature as wearable hero piece in ${occ} content`;
+      if (topTag.includes('flattering') || topTag.includes('silhouette')) return `Highlight silhouette in ${occ} styling`;
+      if (topTag.includes('proportions')) return `Use as fit reference and preserve proportions`;
+      if (topTag.includes('colors')) return `Expand similar colorway`;
+      if (topTag.includes('comfortable')) return `Highlight comfort in product copy`;
+      if (topTag.includes('polished')) return `Position for elevated ${occ} styling`;
+      if (topTag.includes('attractive')) return `Position for date/night out styling`;
+      if (topTag.includes('confident')) return `Use in confidence/transformation messaging`;
+      if (topTag.includes('felt like me')) return `Feature for style DNA alignment`;
+      
+      return `Create ${occ} styling content`;
     };
     
-    const globalPositiveFeedback = getTopFeedback(allPositiveTags, 5);
-    const globalNegativeFeedback = getTopFeedback(allNegativeTags, 5);
+    const getNegativeFix = (tags) => {
+      if (!tags || tags.length === 0) return null;
+      const topTag = tags[0][0].toLowerCase();
+      
+      if (topTag.includes('clingy')) return "Review fabric, lining, pattern ease. If repeated, test a less clingy fabric or looser cut.";
+      if (topTag.includes('uncomfortable')) return "Review comfort, construction, seam placement, fabric weight, or fit.";
+      if (topTag.includes('exposed')) return "Adjust neckline, length, transparency, or offer more covered styling.";
+      if (topTag.includes('structured')) return "Test softer construction, lighter interfacing, or more fluid fabric.";
+      if (topTag.includes('lacked shape')) return "Add waist definition, darts, tailoring, or belt option.";
+      if (topTag.includes('plain')) return "Add detail, colorway, texture, or statement pairing.";
+      if (topTag.includes('too much')) return "Create toned-down styling or simpler version.";
+      if (topTag.includes('hard to wear')) return "Create more wearable styling examples before changing design.";
+      if (topTag.includes('wrong for')) return "Reposition for better occasion based on performance.";
+      if (topTag.includes('didn\'t create feeling')) return "Reposition emotional styling language or pairing.";
+      if (topTag.includes('didn\'t feel like me')) return "Review style DNA match and avoid for this segment.";
+      
+      return `Monitor "${tags[0][0]}" feedback.`;
+    };
     
-    // Now create actions for each piece, using global feedback when piece-specific is empty
+    // Create actions for each piece
     pieces.forEach(piece => {
       const reviewCount = piece.ratingCount;
       const wouldWear = Math.round(piece.rewear * 100);
@@ -489,103 +522,99 @@ export async function loader() {
       if (reviewCount === 0) return;
       
       const occasions = piece.bestOccasions || [];
+      const occasionText = occasions.slice(0, 2).join(' and ') || 'styling';
       
-      // Get confidence
+      // Confidence
       let confidenceBadge, confidenceReason;
       if (reviewCount <= 2) {
         confidenceBadge = "Low Confidence";
-        confidenceReason = `only ${reviewCount} review${reviewCount === 1 ? '' : 's'} available`;
+        confidenceReason = `only ${reviewCount} review${reviewCount === 1 ? '' : 's'}`;
       } else if (reviewCount <= 4) {
         confidenceBadge = "Early Signal";
-        confidenceReason = `based on ${reviewCount} reviews`;
+        confidenceReason = `${reviewCount} reviews`;
       } else if (reviewCount <= 9) {
         confidenceBadge = "Medium Confidence";
-        confidenceReason = `based on ${reviewCount} reviews`;
+        confidenceReason = `${reviewCount} reviews`;
       } else {
         confidenceBadge = "High Confidence";
-        confidenceReason = `based on ${reviewCount} reviews`;
+        confidenceReason = `${reviewCount} reviews`;
       }
       
-      // Use global tags as fallback
-      const positiveFeedback = globalPositiveFeedback.length > 0 ? globalPositiveFeedback : [];
-      const negativeFeedback = globalNegativeFeedback.length > 0 ? globalNegativeFeedback : [];
+      const positiveFeedback = globalPositive.length > 0 ? globalPositive : [];
+      const negativeFeedback = globalNegative.length > 0 ? globalNegative : [];
       
-      // Build what worked
-      let whatWorked = `${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life`;
-      if (occasions.length > 0) whatWorked += ` for ${occasions.slice(0, 2).join(' and ')}`;
-      whatWorked += `.`;
+      // Build "Why it works"
+      let whyItWorks = '';
+      if (reviewCount <= 2) {
+        whyItWorks = `Initial rating is positive (${rating.toFixed(1)}/5), but only ${reviewCount} review${reviewCount === 1 ? ' is' : 's are'} available.`;
+      } else {
+        const signal = reviewCount <= 4 ? "Strong early response" : reviewCount <= 9 ? "Good performance" : "Proven performance";
+        whyItWorks = `${signal} with ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life.`;
+        if (occasions.length > 0) whyItWorks += ` Best occasion signals are ${occasionText}.`;
+      }
       
       if (positiveFeedback.length > 0 && reviewCount >= 3) {
-        const posTags = formatTagsWithCounts(positiveFeedback.slice(0, 3));
-        whatWorked = `Top positive feedback across reviews: ${posTags}. ${whatWorked}`;
+        whyItWorks += ` Positive tags: ${formatTags(positiveFeedback.slice(0, 3))}.`;
       }
       
-      // Build what to watch
-      let whatToWatch = reviewCount <= 2 ? "Not enough data yet." : "No repeated watch-outs yet.";
-      if (negativeFeedback.length > 0 && reviewCount >= 3) {
-        const negTags = formatTagsWithCounts(negativeFeedback.slice(0, 2));
-        whatToWatch = `Negative feedback seen: ${negTags}.`;
-      }
-      
-      // Determine action
-      let decision, action, nextStep, actionType;
-      
+      // Build "Watch-out"
+      let watchOut = '';
       if (reviewCount <= 2) {
-        decision = "Continue gathering feedback";
-        action = "Not enough reviews yet";
-        actionType = "Recommended action";
-        nextStep = "Collect at least 5 ratings before making decisions.";
-      } else if (reviewCount <= 4) {
+        watchOut = "Not enough data yet to identify reliable fit, styling, or production issues.";
+      } else if (negativeFeedback.length === 0) {
+        watchOut = "No repeated watch-outs yet.";
+      } else {
+        const count = negativeFeedback[0][1];
+        watchOut = `${count} user${count > 1 ? 's' : ''} mentioned "${negativeFeedback[0][0]}."`;
+      }
+      
+      // Primary action
+      let action = '';
+      if (reviewCount <= 2) {
+        action = "Continue gathering feedback";
+      } else if (rating >= 4.5 && wouldWear >= 70) {
+        action = getPositiveAction(positiveFeedback, occasions) || `Create ${occasionText} styling content`;
+      } else {
+        action = "Monitor performance";
+      }
+      
+      // Recommended fix
+      let recommendedFix = '';
+      if (reviewCount <= 2) {
+        recommendedFix = "Collect more ratings before deciding whether to feature, adjust, restock, or reposition.";
+      } else if (negativeFeedback.length > 0) {
+        const fix = getNegativeFix(negativeFeedback);
         if (rating >= 4.5 && wouldWear >= 70) {
-          decision = "Test in content";
-          action = `Create ${occasions.slice(0, 2).join('/')} styling content`;
-          actionType = "Recommended action";
-          nextStep = `Test styling content and gather more feedback.`;
+          recommendedFix = `Monitor fit and fabric comfort. If repeated, ${fix.toLowerCase()}`;
         } else {
-          decision = "Monitor";
-          action = "Continue gathering feedback";
-          actionType = "Recommended action";
-          nextStep = "Need more reviews.";
-        }
-      } else if (reviewCount <= 9) {
-        if (rating >= 4.5 && wouldWear >= 70) {
-          decision = "Feature in content";
-          action = "Feature in styling content";
-          actionType = "Recommended action";
-          nextStep = `Feature in content and consider increasing availability.`;
-        } else {
-          decision = "Monitor";
-          action = "Gather more data";
-          actionType = "Recommended action";
-          nextStep = "Continue collecting reviews.";
+          recommendedFix = fix;
         }
       } else {
-        if (rating >= 4.5 && wouldWear >= 70) {
-          decision = "Consider restock";
-          action = "Feature and consider production";
-          actionType = "Recommended action";
-          nextStep = `Scale production and feature prominently.`;
+        if (reviewCount <= 4) {
+          recommendedFix = "Continue gathering feedback to confirm patterns.";
+        } else if (reviewCount <= 9) {
+          recommendedFix = "Consider featuring in content and increasing availability.";
+        } else {
+          recommendedFix = "Scale production and feature prominently.";
         }
       }
       
-      if (decision) {
-        const posData = positiveFeedback.length > 0 ? `, positive: ${formatTagsWithCounts(positiveFeedback.slice(0, 3))}` : '';
-        const negData = negativeFeedback.length > 0 ? `, negative: ${formatTagsWithCounts(negativeFeedback.slice(0, 2))}` : '';
-        
-        designActions.push({
-          piece: piece.name,
-          decision,
-          actionType,
-          action,
-          confidenceBadge,
-          confidenceReason,
-          whatWorked,
-          whatToWatch,
-          nextStep,
-          data: `${reviewCount} reviews · ${rating.toFixed(1)}/5 rating · ${wouldWear}% would wear${posData}${negData}`,
-          priority: confidenceBadge
-        });
-      }
+      // Data line
+      const posData = positiveFeedback.length > 0 ? `, positive tags: ${formatTags(positiveFeedback.slice(0, 3))}` : '';
+      const negData = negativeFeedback.length > 0 ? `, negative tags: ${formatTags(negativeFeedback.slice(0, 2))}` : '';
+      
+      designActions.push({
+        piece: piece.name,
+        actionType: "Primary action",
+        action,
+        confidenceBadge,
+        confidenceReason,
+        whyItWorks,
+        watchOut,
+        recommendedFix,
+        data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life${posData}${negData}`,
+        priority: confidenceBadge
+      });
     });
     
     const priorityOrder = { 
