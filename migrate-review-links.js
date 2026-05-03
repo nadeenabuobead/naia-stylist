@@ -40,18 +40,28 @@ async function migrate() {
       continue;
     }
     
-    // Extract product names from bold markdown (**Product Name**)
-    const productMatches = result.match(/\*\*([^*]+)\*\*/g) || [];
-    const products = productMatches
-      .map(m => m.replace(/\*\*/g, '').trim())
-      .filter(p => p.length > 0 && !p.toLowerCase().includes('how to style'));
-    
-    if (products.length === 0) {
-      console.log(`  ✗ No products found in result`);
+    // Extract products from "Your outfit direction" section
+    const outfitMatch = result.match(/Your outfit direction\s*([\s\S]*?)(?:\n\nWhy this works|$)/i);
+    if (!outfitMatch) {
+      console.log(`  ✗ No outfit direction section found`);
       continue;
     }
     
-    console.log(`  Found products: ${products.join(', ')}`);
+    // Extract bullet points
+    const outfitSection = outfitMatch[1];
+    const items = outfitSection
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.startsWith('-'))
+      .map(line => line.replace(/^-\s*/, '').trim())
+      .filter(line => line.length > 0);
+    
+    if (items.length === 0) {
+      console.log(`  ✗ No items found in outfit direction`);
+      continue;
+    }
+    
+    console.log(`  Found items: ${items.join(', ')}`);
     
     // Create suggestion with items
     try {
@@ -59,7 +69,7 @@ async function migrate() {
         data: {
           sessionId: review.sessionId,
           items: {
-            create: products.map(productTitle => ({
+            create: items.map(productTitle => ({
               productTitle: productTitle,
               itemType: "clothing"
             }))
@@ -73,7 +83,7 @@ async function migrate() {
         data: { selectedSuggestionId: suggestion.id }
       });
       
-      console.log(`  ✓ Created suggestion with ${products.length} items`);
+      console.log(`  ✓ Created suggestion with ${items.length} items`);
     } catch (err) {
       console.log(`  ✗ Error creating suggestion:`, err.message);
     }
