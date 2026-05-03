@@ -24,17 +24,20 @@ export async function loader() {
       },
       orderBy: { createdAt: 'desc' },
     });
-
-    // TEMPORARY DEBUG: Check if workedTags exist on first review with suggestions
-    const testReview = reviews.find(r => r.session?.suggestions?.length > 0 && r.workedTags);
-    if (testReview) {
-      console.log("🔴 TEST REVIEW FOUND:");
-      console.log("  ID:", testReview.id.slice(0, 8));
-      console.log("  workedTags:", testReview.workedTags);
-      console.log("  typeof:", typeof testReview.workedTags);
-      console.log("  session has suggestions:", !!testReview.session?.suggestions?.length);
-    } else {
       console.log("🔴 NO TEST REVIEW FOUND - no reviews have both suggestions and workedTags");
+    // TEMPORARY: Return debug info
+    const testReview = reviews.find(r => r.session?.suggestions?.length > 0 && r.workedTags);
+    if (!testReview) {
+      return Response.json({ DEBUG: "NO REVIEWS WITH SUGGESTIONS AND WORKEDTAGS", totalReviews: reviews.length });
+    }
+    const testParsed = JSON.parse(testReview.workedTags);
+    return Response.json({ 
+      DEBUG: "FOUND REVIEW", 
+      reviewId: testReview.id.slice(0,8),
+      workedTags: testReview.workedTags,
+      parsed: testParsed,
+      hasSuggestions: testReview.session?.suggestions?.length || 0
+    });
     }
     const withBodyPref = reviews.filter(r => r.session?.bodyPreference);
     console.log("DEBUG:", {
