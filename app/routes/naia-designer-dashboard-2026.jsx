@@ -52,6 +52,9 @@ export default function DesignerDashboard() {
 
       {/* 2. Top-Performing Pieces */}
       <Section title="Top-Performing Pieces" desc="What's working best">
+        <p style={{ fontSize: "13px", color: "#999", fontStyle: "italic", marginBottom: "16px" }}>
+          Early leaders ranked by rating, wearability, and positive feedback.
+        </p>
         <div style={s.pieceGrid}>
           {(data.topPieces || []).map((piece, i) => (
             <PieceCard key={i} piece={piece} type="top" />
@@ -315,15 +318,15 @@ function PieceCard({ piece }) {
         <div style={{ marginTop: "8px" }}>
           <span style={s.muted}>Watch-outs: </span>
           <span style={{ fontSize: "13px", color: "#d97706" }}>
-            {piece.negativeComments && piece.negativeComments.filter(c => c && c !== '[]').length > 0 
-              ? piece.negativeComments.filter(c => c && c !== '[]').join(", ")
+            {piece.negativeComments && piece.negativeComments.length > 0 
+              ? piece.negativeComments.join(", ")
               : "No repeated watch-outs yet"}
           </span>
         </div>
         
         <div style={{ marginTop: "8px" }}>
           <span style={s.muted}>Resonates with: </span>
-          <span style={s.dna}>{piece.topDNA && piece.topDNA.length > 0 ? piece.topDNA.join(", ") : "Not enough data yet"}</span>
+          <span style={s.dna}>{piece.topDNA && piece.topDNA.length > 0 ? piece.topDNA.join(", ") : "More style DNA data needed"}</span>
         </div>
       </div>
     </div>

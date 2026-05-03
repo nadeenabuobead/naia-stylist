@@ -198,7 +198,19 @@ export async function loader() {
         bestOccasions: getMostCommon(p.occasions, 3),
         topDNA: getMostCommon(p.styleDNA, 3),
         positiveComments: getMostCommon(p.workedTags, 3),
-        negativeComments: getMostCommon(p.didntWorkTags, 3),
+        negativeComments: (() => {
+          const freq = {};
+          p.didntWorkTags.forEach(item => {
+            if (item && item !== '[]') {
+              const clean = item.replace(/[\[\]"]/g, '').trim();
+              if (clean) freq[clean] = (freq[clean] || 0) + 1;
+            }
+          });
+          return Object.entries(freq)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(([tag, count]) => `${tag} x${count}`);
+        })(),
         quotes: p.quotes,
         avgConfidenceBoost,
         startingMoods: getMostCommon(p.moods, 3),
