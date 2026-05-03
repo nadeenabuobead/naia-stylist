@@ -424,76 +424,181 @@ export async function loader() {
       .slice(0, 10);
 
 
-    // Design Actions - data-driven recommendations
+    // Design Actions - data-driven with confidence levels
     const designActions = [];
+    const actionsMap = new Map(); // Avoid duplicates
     
-    // 1. High performers: marketing/production actions
-    topPieces.slice(0, 2)
-      .filter(p => p.avgRating >= 4.5 && p.rewear >= 0.7)
-      .forEach(p => {
-        const occasions = p.bestOccasions.slice(0, 2).join(", ");
-        designActions.push({
-          piece: p.name,
-          actionType: "Marketing action",
-          action: "Feature in campaign",
-          reason: `Strong performance: ${p.avgRating.toFixed(1)}/5 rating, ${Math.round(p.rewear * 100)}% would wear in real life. Best for ${occasions} occasions.`,
-          data: `${p.avgRating.toFixed(1)}/5, ${Math.round(p.rewear * 100)}% would wear, ${p.ratingCount} reviews`,
-          priority: "High priority"
-        });
-      });
+    // Helper to determine confidence level based on review count
+    const getConfidence = (reviewCount) => {
+      if (reviewCount <= 4) return "Early Signal";
+      if (reviewCount <= 9) return "Medium Confidence";
+      return "High Confidence";
+    };
     
-    // 2. Negative tag signals: design/fit actions
-    negativeTags.forEach(tag => {
-      if (tag.count >= 2 && tag.topPieces.length > 0) {
-        const piece = tag.topPieces[0];
-        let actionType = "Design action";
-        let action = "";
-        let reason = "";
-        
-        if (tag.name.toLowerCase().includes("clingy")) {
-          actionType = "Fit action";
-          action = "Review fabric and fit";
-          reason = `${tag.count} users reported "${tag.name}". May need less clingy fabric or looser fit.`;
-        } else if (tag.name.toLowerCase().includes("exposed")) {
-          action = "Adjust coverage";
-          reason = `${tag.count} users reported "${tag.name}". Consider more coverage options.`;
-        } else if (tag.name.toLowerCase().includes("structured")) {
-          action = "Create softer version";
-          reason = `${tag.count} users reported "${tag.name}". Test with drapier fabric.`;
-        } else if (tag.name.toLowerCase().includes("plain")) {
-          action = "Add detail or new colorway";
-          reason = `${tag.count} users reported "${tag.name}". Consider more visual interest.`;
-        } else {
-          action = "Address feedback";
-          reason = `${tag.count} users mentioned "${tag.name}".`;
+    // Helper to determine if occasion is brand-elevated
+    const isBrandOccasion = (occasions) => {
+      const elevated = ["date", "night out", "dinner", "event", "formal", "work-to-evening"];
+      return occasions.some(occ => elevated.includes(occ.toLowerCase()));
+    };
+    
+    // Helper to get most common feedback
+    const getTopFeedback = (arr, count = 3) => {
+      const freq = {};
+      arr.forEach(item => {
+        if (item && item !== '[]') {
+          const clean = item.replace(/[\[\]"]/g, '').trim();
+          if (clean) freq[clean] = (freq[clean] || 0) + 1;
         }
-        
-        if (action) {
-          designActions.push({
-            piece,
-            actionType,
-            action,
+      });
+      return Object.entries(freq)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, count);
+    };
+    
+    pieces.forEach(piece => {
+      const reviewCount = piece.ratingCount;
+      const wouldWear = Math.round(piece.rewear * 100);
+      const rating = piece.avgRating;
+      
+      // Skip if no reviews
+      if (reviewCount === 0) return;
+      
+      // Get feedback
+      const negativeFeedback = getTopFeedback(piece.negativeComments);
+      const positiveFeedback = getTopFeedback(piece.positiveComments);
+      const occasions = piece.bestOccasions || [];
+      
+      // RULE 1: Fewer than 5 reviews = Low Confidence / Early Signal
+      if (reviewCount <= 4) {
+        // Check for strong early performance
+        if (rating >= 4.5 && wouldWear >= 70) {
+          const isBrand = isBrandOccasion(occasions);
+          const occasionText = occasions.slice(0, 2).join(" and ");
+          
+          let primaryAction = isBrand 
+            ? "Feature in campaign (pending more data)"
+            : "Create everyday styling content";
+          
+          let reason = `Strong early response: ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life${occasionText ? `, especially for ${occasionText}` : ''}.`;
+          
+          // Add watch-out if there's negative feedback
+          let watchOut = null;
+          if (negativeFeedback.length > 0) {
+            const [feedback, count] = negativeFeedback[0];
+            watchOut = `${count} user${count > 1 ? 's' : ''} mentioned "${feedback}" - monitor before scaling production.`;
+          }
+          
+          actionsMap.set(piece.name, {
+            piece: piece.name,
+            actionType: isBrand ? "Marketing action" : "Content action",
+            action: primaryAction,
             reason,
-            data: `${tag.count} mentions of "${tag.name}"`,
-            priority: "Medium priority"
+            watchOut,
+            data: `${reviewCount} review${reviewCount === 1 ? '' : 's'}, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear${negativeFeedback.length > 0 ? `, ${negativeFeedback[0][1]} mention${negativeFeedback[0][1] > 1 ? 's' : ''} of "${negativeFeedback[0][0]}"` : ''}`,
+            priority: "Early Signal"
+          });
+        } else {
+          // Not strong enough for early recommendation
+          actionsMap.set(piece.name, {
+            piece: piece.name,
+            actionType: "Research action",
+            action: "Continue gathering feedback",
+            reason: `Only ${reviewCount} review${reviewCount === 1 ? '' : 's'} so far. Need more data to make confident recommendations.`,
+            watchOut: null,
+            data: `${reviewCount} review${reviewCount === 1 ? '' : 's'}, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear`,
+            priority: "Low Confidence"
           });
         }
+        return;
+      }
+      
+      // RULE 2: 5-9 reviews = Medium Confidence
+      if (reviewCount <= 9) {
+        if (rating >= 4.5 && wouldWear >= 70) {
+          const isBrand = isBrandOccasion(occasions);
+          const occasionText = occasions.slice(0, 2).join(" and ");
+          
+          let primaryAction = isBrand 
+            ? "Feature in campaign"
+            : "Feature in everyday styling content";
+          
+          let reason = `Strong performance: ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life${occasionText ? `, best for ${occasionText}` : ''}.`;
+          
+          let watchOut = null;
+          if (negativeFeedback.length > 0 && negativeFeedback[0][1] >= 2) {
+            const [feedback, count] = negativeFeedback[0];
+            watchOut = `${count} users mentioned "${feedback}" - consider addressing before major production increase.`;
+          }
+          
+          actionsMap.set(piece.name, {
+            piece: piece.name,
+            actionType: isBrand ? "Marketing action" : "Content action",
+            action: primaryAction,
+            reason,
+            watchOut,
+            data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear${negativeFeedback.length > 0 ? `, ${negativeFeedback[0][1]} mention${negativeFeedback[0][1] > 1 ? 's' : ''} of "${negativeFeedback[0][0]}"` : ''}`,
+            priority: "Medium Confidence"
+          });
+        } else if (rating >= 4.0 && wouldWear < 50) {
+          // High rating but low wearability
+          actionsMap.set(piece.name, {
+            piece: piece.name,
+            actionType: "Styling action",
+            action: "Show more wearable outfit examples",
+            reason: `Users like the piece (${rating.toFixed(1)}/5 rating), but only ${wouldWear}% would wear in real life. This suggests a styling clarity issue.`,
+            watchOut: null,
+            data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, only ${wouldWear}% would wear`,
+            priority: "Medium Confidence"
+          });
+        }
+        return;
+      }
+      
+      // RULE 3: 10+ reviews = High Confidence
+      if (rating >= 4.5 && wouldWear >= 70) {
+        const isBrand = isBrandOccasion(occasions);
+        const occasionText = occasions.slice(0, 2).join(" and ");
+        
+        let primaryAction = isBrand 
+          ? "Feature in campaign"
+          : "Feature in wardrobe basics / everyday edit";
+        
+        let actionType = isBrand ? "Marketing action" : "Merchandising action";
+        
+        let reason = `Proven strong performance: ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life across ${reviewCount} reviews${occasionText ? `, best for ${occasionText}` : ''}.`;
+        
+        let watchOut = null;
+        if (negativeFeedback.length > 0 && negativeFeedback[0][1] >= 3) {
+          const [feedback, count] = negativeFeedback[0];
+          watchOut = `${count} users mentioned "${feedback}" - address in next production run.`;
+        }
+        
+        actionsMap.set(piece.name, {
+          piece: piece.name,
+          actionType,
+          action: primaryAction,
+          reason,
+          watchOut,
+          data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear${positiveFeedback.length > 0 ? `, top feedback: "${positiveFeedback[0][0]}"` : ''}`,
+          priority: "High Confidence"
+        });
       }
     });
     
-    // 3. Watch pieces: research actions
-    if (watchPieces && watchPieces.length > 0) {
-      watchPieces.slice(0, 1).forEach(p => {
-        designActions.push({
-          piece: p.name,
-          actionType: "Research action",
-          action: "Monitor closely",
-          reason: `Only ${p.ratingCount} reviews so far. Gather more data before deciding whether to feature, adjust, or restock.`,
-          data: `${p.ratingCount} reviews, ${p.avgRating.toFixed(1)}/5 rating`,
-          priority: "Low confidence"
-        });
-      });
-    }
+    // Convert map to array and sort by priority
+    const priorityOrder = { 
+      "High Confidence": 1, 
+      "Medium Confidence": 2, 
+      "Early Signal": 3, 
+      "Low Confidence": 4 
+    };
+    
+    actionsMap.forEach(action => designActions.push(action));
+    designActions.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+    
+    // Limit to top 8
+    designActions.splice(8);
+
 
     return Response.json({
       totalUsers,
