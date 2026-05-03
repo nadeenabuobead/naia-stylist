@@ -373,6 +373,7 @@ export async function loader() {
       ) || review.session.suggestions[0];
       
       if (selectedSuggestion) {
+          console.log("🔍 Review", review.id.slice(0,8), "has suggestions:", selectedSuggestion ? "YES" : "NO", "items:", selectedSuggestion?.items?.length || 0);
         selectedSuggestion.items.forEach(item => {
           const pieceName = item.productTitle || `Closet Item ${item.closetItemId}`;
           if (!bodyStats[bodyPref].pieces[pieceName]) {
