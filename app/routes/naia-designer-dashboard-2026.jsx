@@ -189,6 +189,67 @@ export default function DesignerDashboard() {
           ))}
         </div>
       </Section>
+
+
+      {/* Purchase Behavior */}
+      <div style={s.section}>
+        <h2 style={s.h2}>Purchase Behavior</h2>
+        <p style={{ fontSize: "14px", color: "#999", marginBottom: "20px", fontStyle: "italic" }}>
+          Tracking not yet implemented. Will show: product page clicks, add-to-cart rate, checkout rate, 
+          purchase rate, wishlist/save rate, try-on usage, and style recommendation → shop clicks.
+        </p>
+        <div style={{ padding: "40px", textAlign: "center", background: "#faf9f7", border: "1px dashed #ddd", borderRadius: "4px" }}>
+          <div style={{ fontSize: "16px", color: "#8a7f75", marginBottom: "12px" }}>📊 Coming Soon</div>
+          <div style={{ fontSize: "14px", color: "#999" }}>
+            This will track the full purchase funnel from styling recommendation to checkout
+          </div>
+        </div>
+      </div>
+
+      {/* Styling Conversion */}
+      <div style={s.section}>
+        <h2 style={s.h2}>Styling Conversion</h2>
+        <p style={{ fontSize: "14px", color: "#999", marginBottom: "20px", fontStyle: "italic" }}>
+          Tracking not yet implemented. Will show: users who used Style Me, clicked recommended pieces, 
+          tried on pieces, added to cart after styling, and purchased after styling.
+        </p>
+        <div style={{ padding: "40px", textAlign: "center", background: "#faf9f7", border: "1px dashed #ddd", borderRadius: "4px" }}>
+          <div style={{ fontSize: "16px", color: "#8a7f75", marginBottom: "12px" }}>📈 Coming Soon</div>
+          <div style={{ fontSize: "14px", color: "#999" }}>
+            This will prove your business model: Does styling lead to buying?
+          </div>
+        </div>
+      </div>
+
+      {/* Product Pairing Insights */}
+      <div style={s.section}>
+        <h2 style={s.h2}>Product Pairing Insights</h2>
+        <p style={{ fontSize: "14px", color: "#999", marginBottom: "20px", fontStyle: "italic" }}>
+          Tracking not yet implemented. Will show: most recommended pairings (closet item + nAia piece) 
+          and highest-rated pairings based on outfit reviews.
+        </p>
+        <div style={{ padding: "40px", textAlign: "center", background: "#faf9f7", border: "1px dashed #ddd", borderRadius: "4px" }}>
+          <div style={{ fontSize: "16px", color: "#8a7f75", marginBottom: "12px" }}>👗 Coming Soon</div>
+          <div style={{ fontSize: "14px", color: "#999" }}>
+            Examples: "white top + Sculptural Hybrid Coat: 4.8/5", "jeans + Art Maxi Skirt: 4.6/5"
+          </div>
+        </div>
+      </div>
+
+      {/* Objection Tracker */}
+      <div style={s.section}>
+        <h2 style={s.h2}>Objection Tracker</h2>
+        <p style={{ fontSize: "14px", color: "#999", marginBottom: "20px", fontStyle: "italic" }}>
+          Tracking not yet implemented. Will show: why customers hesitate (too expensive, too bold, 
+          unsure how to style, wrong for lifestyle, etc.)
+        </p>
+        <div style={{ padding: "40px", textAlign: "center", background: "#faf9f7", border: "1px dashed #ddd", borderRadius: "4px" }}>
+          <div style={{ fontSize: "16px", color: "#8a7f75", marginBottom: "12px" }}>💭 Coming Soon</div>
+          <div style={{ fontSize: "14px", color: "#999" }}>
+            This will help product, styling, content, and pricing decisions
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
