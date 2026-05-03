@@ -356,7 +356,7 @@ export async function loader() {
     // 10. Body Patterns - with piece performance
     const bodyStats = {};
     
-    console.log("Body preferences found:", reviews.map(r => r.session.bodyPreference).filter(Boolean));
+    console.log("🔍 BODY PREFS DEBUG - Body preferences found:", reviews.map(r => r.session.bodyPreference).filter(Boolean));
     reviews.filter(r => r.session?.suggestions?.length > 0).forEach(review => {
       const bodyPref = review.session.bodyPreference;
       if (!bodyPref) return;
@@ -388,6 +388,7 @@ export async function loader() {
       }
     });
     
+    console.log("🔍 BODY STATS RESULT:", Object.keys(bodyStats), "Total entries:", Object.keys(bodyStats).length);
     const bodyPatterns = Object.entries(bodyStats)
       .map(([preference, data]) => {
         const piecePerformance = Object.entries(data.pieces)
