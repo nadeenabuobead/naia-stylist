@@ -65,39 +65,49 @@ export async function action({ request }) {
       },
     });
     
-    // Parse and save the suggestions/items from the AI result
-    if (result && closetItemIds) {
+    // Save the outfit items as a suggestion
+    if (closetItems || naiaPiece) {
       try {
-        // Extract nAia product recommendations from result
-        const naiaMatches = result.match(/\*\*([^*]+)\*\*/g) || [];
-        const naiaProducts = naiaMatches.map(m => m.replace(/\*\*/g, '').trim()).filter(Boolean);
+        const suggestionItems = [];
         
-        // Create a suggestion with the items
-        await prisma.outfitSuggestion.create({
-          data: {
-            sessionId: session.id,
-            items: {
-              create: [
-                // Add closet items
-                ...closetItemIds.map(itemId => ({
-                  closetItemId: parseInt(itemId),
-                  itemType: "closet"
-                })),
-                // Add nAia products
-                ...naiaProducts.map(productTitle => ({
-                  productTitle: productTitle,
-                  itemType: "naia"
-                }))
-              ]
+        // Add closet items
+        if (closetItems && Array.isArray(closetItems)) {
+          closetItems.forEach(item => {
+            suggestionItems.push({
+              closetItemId: item.id ? parseInt(item.id) : null,
+              itemType: item.category || "clothing",
+              productTitle: item.name
+            });
+          });
+        }
+        
+        // Add nAia piece
+        if (naiaPiece && naiaPiece.title) {
+          suggestionItems.push({
+            productTitle: naiaPiece.title,
+            itemType: naiaPiece.category || "clothing"
+          });
+        }
+        
+        // Create suggestion with items
+        if (suggestionItems.length > 0) {
+          const suggestion = await prisma.outfitSuggestion.create({
+            data: {
+              sessionId: session.id,
+              items: {
+                create: suggestionItems
+              }
             }
-          }
-        });
-        
-        // Set this as the selected suggestion
-        await prisma.stylingSession.update({
-          where: { id: session.id },
-          data: { selectedSuggestionId: session.id } // This will need to be the actual suggestion ID
-        });
+          });
+          
+          // Set as selected suggestion
+          await prisma.stylingSession.update({
+            where: { id: session.id },
+            data: { selectedSuggestionId: suggestion.id }
+          });
+          
+          console.log(`Created suggestion ${suggestion.id} with ${suggestionItems.length} items`);
+        }
       } catch (err) {
         console.error("Failed to save suggestions:", err);
       }
