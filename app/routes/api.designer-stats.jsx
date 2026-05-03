@@ -390,23 +390,64 @@ export async function loader() {
     
     const bodyPatterns = Object.entries(bodyStats)
       .map(([preference, data]) => {
-        const piecePerformance = Object.entries(data.pieces)
-          .map(([name, perf]) => ({ name, ...perf, score: perf.good - perf.bad }))
-          .filter(p => {
-            // Exclude closet items
-            const nameLower = p.name.toLowerCase();
-            return !nameLower.includes('white top') && 
-                   !nameLower.includes('black top') && 
-                   !nameLower.includes('your ') &&
-                   nameLower !== 'top' &&
-                   nameLower !== 'bottom';
+        // Get all reviews from users with this preference
+        const preferenceSessions = reviews.filter(r => r.bodyPreference === preference);
+        
+        // Track piece performance for this preference
+        const pieceStats = {};
+        
+        preferenceSessions.forEach(review => {
+          if (review.session.suggestions && review.session.suggestions.length > 0) {
+            const suggestion = review.session.suggestions[0];
+            if (suggestion.items) {
+              suggestion.items.forEach(item => {
+                // Exclude closet items
+                const nameLower = item.productTitle.toLowerCase();
+                if (nameLower.includes('white top') || 
+                    nameLower.includes('black top') || 
+                    nameLower.includes('your ') ||
+                    nameLower === 'top' ||
+                    nameLower === 'bottom') {
+                  return;
+                }
+                
+                if (!pieceStats[item.productTitle]) {
+                  pieceStats[item.productTitle] = {
+                    ratings: [],
+                    wouldWear: 0,
+                    wouldWearCount: 0,
+                    positiveCount: 0
+                  };
+                }
+                
+                if (review.rating) pieceStats[item.productTitle].ratings.push(review.rating);
+                if (review.wouldWearAgain !== null) {
+                  pieceStats[item.productTitle].wouldWear += review.wouldWearAgain ? 1 : 0;
+                  pieceStats[item.productTitle].wouldWearCount++;
+                }
+                if (review.workedTags && review.workedTags !== '[]') {
+                  pieceStats[item.productTitle].positiveCount++;
+                }
+              });
+            }
+          }
+        });
+        
+        // Calculate scores and rank pieces
+        const rankedPieces = Object.entries(pieceStats)
+          .filter(([_, stats]) => stats.ratings.length >= 2) // Need at least 2 ratings
+          .map(([name, stats]) => {
+            const avgRating = stats.ratings.reduce((a, b) => a + b, 0) / stats.ratings.length;
+            const wearRate = stats.wouldWearCount > 0 ? stats.wouldWear / stats.wouldWearCount : 0;
+            const score = avgRating * 0.5 + wearRate * 2.5 + (stats.positiveCount * 0.3);
+            return { name, avgRating, wearRate, score, count: stats.ratings.length };
           })
           .sort((a, b) => b.score - a.score);
         
-        // Get fit concerns (negative tags related to fit)
+        // Get fit concerns
         const struggles = [];
-        reviews.forEach(r => {
-          if (r.bodyPreference === preference && r.didntWorkTags) {
+        preferenceSessions.forEach(r => {
+          if (r.didntWorkTags) {
             try {
               const tags = JSON.parse(r.didntWorkTags);
               tags.forEach(tag => {
@@ -431,25 +472,36 @@ export async function loader() {
           implication = 'Continue using vertical lines, higher waist placement, and styling that lengthens the leg line.';
         } else if (prefLower.includes('balance') || prefLower.includes('proportion')) {
           implication = 'Focus on pieces that create visual balance through strategic volume.';
-        } else if (prefLower.includes('structure') || prefLower.includes('define')) {
-          implication = 'Prioritize tailoring, waist definition, architectural lines.';
+        } else if (prefLower.includes('structure') || prefLower.includes('define') || prefLower.includes('add structure')) {
+          implication = 'Prioritize tailoring, waist definition, and architectural lines.';
         } else if (prefLower.includes('comfort') || prefLower.includes('ease')) {
-          implication = 'Emphasize soft fabrics, relaxed fits, forgiving silhouettes.';
+          implication = 'Emphasize soft fabrics, relaxed fits, and forgiving silhouettes.';
         } else {
           implication = 'Continue current design direction based on positive performance.';
+        }
+        
+        // Determine piece signal state
+        let bestPieces = [];
+        let pieceSignal = 'Not enough rated looks yet to identify a clear piece signal';
+        
+        if (rankedPieces.length > 0) {
+          bestPieces = rankedPieces.slice(0, 3).map(p => p.name);
+          pieceSignal = 'pieces';
+        } else if (preferenceSessions.length === 0) {
+          pieceSignal = 'No nAia piece signal yet';
         }
         
         return {
           preference,
           userCount: data.count,
-          bestPieces: piecePerformance.filter(p => p.score > 0).slice(0, 3).map(p => p.name),
-          struggles: uniqueStruggles.length > 0 ? uniqueStruggles.slice(0, 3) : ['No repeated fit concerns yet'],
-          implication
+          bestPieces,
+          pieceSignal,
+          struggles: uniqueStruggles.length > 0 ? uniqueStruggles.slice(0, 3) : [],
+          implication,
+          confidence: data.count === 1 ? 'Low — based on 1 user' : data.count < 3 ? 'Low — early signal' : 'Medium'
         };
       })
-      .sort((a, b) => b.userCount - a.userCount);
-
-    // 11. Styling Needs
+      .sort((a, b) => b.userCount - a.userCount)   // 11. Styling Needs
     const occasionCount = {};
     reviews.forEach(r => {
       if (r.session.occasion) {
