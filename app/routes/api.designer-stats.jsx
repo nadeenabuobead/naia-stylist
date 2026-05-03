@@ -390,7 +390,7 @@ export async function loader() {
     
     const bodyPatterns = Object.entries(bodyStats)
       .map(([preference, data]) => {
-        // Get all reviews from users with this preference (bodyPreference is on session, not review)
+        // Get all reviews from users with this preference (bodyPreference is on session)
         const preferenceSessions = reviews.filter(r => r.session?.bodyPreference === preference);
         
         // Track piece performance for this preference
@@ -413,35 +413,49 @@ export async function loader() {
                 
                 if (!pieceStats[item.productTitle]) {
                   pieceStats[item.productTitle] = {
-                    ratings: [],
+                    name: item.productTitle,
+                    goodCount: 0,
+                    badCount: 0,
+                    totalRatings: 0,
+                    avgRating: 0,
                     wouldWear: 0,
-                    wouldWearCount: 0,
-                    positiveCount: 0
+                    wouldWearCount: 0
                   };
                 }
                 
-                if (review.rating) pieceStats[item.productTitle].ratings.push(review.rating);
-                if (review.wouldWearAgain !== null) {
-                  pieceStats[item.productTitle].wouldWear += review.wouldWearAgain ? 1 : 0;
-                  pieceStats[item.productTitle].wouldWearCount++;
+                const stats = pieceStats[item.productTitle];
+                
+                if (review.rating) {
+                  stats.totalRatings++;
+                  stats.avgRating = ((stats.avgRating * (stats.totalRatings - 1)) + review.rating) / stats.totalRatings;
+                  
+                  // Good = high rating + would wear
+                  if (review.rating >= 4 && review.wouldWearAgain) {
+                    stats.goodCount++;
+                  }
+                  // Bad = low rating or wouldn't wear
+                  if (review.rating < 3 || review.wouldWearAgain === false) {
+                    stats.badCount++;
+                  }
                 }
-                if (review.workedTags && review.workedTags !== '[]') {
-                  pieceStats[item.productTitle].positiveCount++;
+                
+                if (review.wouldWearAgain !== null) {
+                  stats.wouldWear += review.wouldWearAgain ? 1 : 0;
+                  stats.wouldWearCount++;
                 }
               });
             }
           }
         });
         
-        // Calculate scores and rank pieces
-        const rankedPieces = Object.entries(pieceStats)
-          .filter(([_, stats]) => stats.ratings.length >= 2) // Need at least 2 ratings
-          .map(([name, stats]) => {
-            const avgRating = stats.ratings.reduce((a, b) => a + b, 0) / stats.ratings.length;
-            const wearRate = stats.wouldWearCount > 0 ? stats.wouldWear / stats.wouldWearCount : 0;
-            const score = avgRating * 0.5 + wearRate * 2.5 + (stats.positiveCount * 0.3);
-            return { name, avgRating, wearRate, score, count: stats.ratings.length };
-          })
+        // Calculate score for each piece (good performance - bad performance)
+        const rankedPieces = Object.values(pieceStats)
+          .filter(p => p.totalRatings >= 1)
+          .map(p => ({
+            ...p,
+            score: p.goodCount - p.badCount,
+            wearRate: p.wouldWearCount > 0 ? p.wouldWear / p.wouldWearCount : 0
+          }))
           .sort((a, b) => b.score - a.score);
         
         // Get fit concerns
@@ -508,8 +522,8 @@ export async function loader() {
         let pieceSignal = 'Not enough rated looks yet to identify a clear piece signal';
         
         if (rankedPieces.length > 0) {
-          bestPieces = rankedPieces.slice(0, 3).map(p => p.name);
-          pieceSignal = 'pieces';
+          bestPieces = rankedPieces.filter(p => p.score > 0).slice(0, 3).map(p => p.name);
+          pieceSignal = bestPieces.length > 0 ? 'pieces' : 'Not enough rated looks yet to identify a clear piece signal';
         } else if (preferenceSessions.length === 0) {
           pieceSignal = 'No nAia piece signal yet';
         }
@@ -522,350 +536,9 @@ export async function loader() {
           struggles: uniqueStruggles.length > 0 ? uniqueStruggles.slice(0, 3) : [],
           implication,
           confidence: data.count <= 2 ? 'Low confidence' : 
-                       data.count <= 4 ? 'Early signal' : 
-                       data.count <= 9 ? 'Medium confidence' : 
-                       'Strong signal'
+                     data.count <= 4 ? 'Early signal' : 
+                     data.count <= 9 ? 'Medium confidence' : 
+                     'Strong signal'
         };
       })
-      .sort((a, b) => b.userCount - a.userCount)   // 11. Styling Needs
-    const occasionCount = {};
-    reviews.forEach(r => {
-      if (r.session.occasion) {
-        occasionCount[r.session.occasion] = (occasionCount[r.session.occasion] || 0) + 1;
-      }
-    });
-    
-    const stylingNeeds = Object.entries(occasionCount)
-      .map(([occasion, count]) => ({ occasion, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
-
-    // 12. Emotional Outcomes
-    const emotionalOutcomes = pieces
-      .filter(p => p.helpedFeel.length > 0)
-      .map(p => ({
-        name: p.name,
-        emotions: p.helpedFeel,
-        startingStates: p.startingMoods,
-      }))
-      .slice(0, 15);
-
-    // 13. Top Occasions
-    const occasionStats = {};
-    reviews.forEach(r => {
-      if (!r.session.occasion) return;
-      if (!occasionStats[r.session.occasion]) {
-        occasionStats[r.session.occasion] = { ratings: [], rewear: 0, total: 0 };
-      }
-      if (r.overallFeeling) occasionStats[r.session.occasion].ratings.push(r.overallFeeling);
-      occasionStats[r.session.occasion].total++;
-      if (r.wouldWearAgain === "Definitely") occasionStats[r.session.occasion].rewear++;
-    });
-    
-    const topOccasions = Object.entries(occasionStats)
-      .map(([name, data]) => ({
-        name,
-        avgRating: data.ratings.length > 0 
-          ? data.ratings.reduce((a, b) => a + b, 0) / data.ratings.length 
-          : 0,
-        lookCount: data.total,
-        rewear: data.rewear / data.total,
-      }))
-      .sort((a, b) => b.avgRating - a.avgRating)
-      .slice(0, 10);
-
-    // 14. Quotes
-    const quotes = pieces
-      .flatMap(p => p.quotes.map(q => ({ text: q, piece: p.name })))
-      .filter(q => q.text.length > 20)
-      .slice(0, 10);
-
-
-    // Design Actions - PIECE-SPECIFIC tags only
-    console.log("DEBUG - Pieces being tracked:", pieces.map(p => p.name));
-    const designActions = [];
-    
-    const getTopFeedback = (arr, count = 5) => {
-      const freq = {};
-      arr.forEach(item => {
-        if (item && item !== '[]') {
-          const clean = item.replace(/[\[\]"]/g, '').trim();
-          if (clean) freq[clean] = (freq[clean] || 0) + 1;
-        }
-      });
-      return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, count);
-    };
-    
-    const formatTags = (tags) => tags.map(([tag]) => tag).join(', ');
-    const formatTagsShort = (tags) => tags.map(([tag]) => tag.toLowerCase().replace('helped me feel more ', '').replace('i liked the ', '')).join(', ');
-    
-    const categorizeFix = (tags) => {
-      if (!tags || tags.length === 0) return null;
-      
-      const fitIssues = [];
-      const emotionalIssues = [];
-      const stylingIssues = [];
-      const occasionIssues = [];
-      
-      tags.forEach(([tag, count]) => {
-        const lower = tag.toLowerCase();
-        if (lower.includes('clingy') || lower.includes('uncomfortable') || lower.includes('lacked shape') || 
-            lower.includes('structured') || lower.includes('exposed')) {
-          fitIssues.push([tag, count]);
-        } else if (lower.includes('didn\'t create') || lower.includes('didn\'t feel like me')) {
-          emotionalIssues.push([tag, count]);
-        } else if (lower.includes('hard to wear') || lower.includes('too much') || lower.includes('plain')) {
-          stylingIssues.push([tag, count]);
-        } else if (lower.includes('wrong for')) {
-          occasionIssues.push([tag, count]);
-        } else {
-          stylingIssues.push([tag, count]);
-        }
-      });
-      
-      return { fitIssues, emotionalIssues, stylingIssues, occasionIssues };
-    };
-    
-    const getRecommendedFix = (categories, reviewCount, hasPositiveConfidence) => {
-      if (!categories) return "Collect at least 5 ratings before making decisions.";
-      
-      const { fitIssues, emotionalIssues, stylingIssues, occasionIssues } = categories;
-      
-      if (reviewCount <= 2) {
-        return "Collect at least 5 ratings before making campaign, restock, design, or positioning decisions.";
-      }
-      
-      let fixes = [];
-      
-      if (fitIssues.length > 0) {
-        const [tag] = fitIssues[0];
-        const lower = tag.toLowerCase();
-        if (lower.includes('clingy')) fixes.push("review fabric, lining, pattern ease, or test a looser cut");
-        else if (lower.includes('uncomfortable')) fixes.push("review comfort, construction, seam placement");
-        else if (lower.includes('exposed')) fixes.push("review coverage options or neckline");
-        else if (lower.includes('structured')) fixes.push("test softer construction or fluid fabric");
-        else if (lower.includes('lacked shape')) fixes.push("add waist definition or tailoring");
-      }
-      
-      if (emotionalIssues.length > 0) {
-        const [tag] = emotionalIssues[0];
-        const lower = tag.toLowerCase();
-        if (lower.includes('didn\'t create') && hasPositiveConfidence) {
-          fixes.push("review emotional pairing");
-        } else if (lower.includes('didn\'t create')) {
-          fixes.push("review emotional positioning and outfit pairing");
-        } else if (lower.includes('didn\'t feel like me')) {
-          fixes.push("review style DNA match");
-        }
-      }
-      
-      if (stylingIssues.length > 0) {
-        const [tag] = stylingIssues[0];
-        const lower = tag.toLowerCase();
-        if (lower.includes('hard to wear')) fixes.push("create more wearable styling examples");
-        else if (lower.includes('too much')) fixes.push("create toned-down styling");
-        else if (lower.includes('plain')) fixes.push("add detail or statement pairing");
-      }
-      
-      if (occasionIssues.length > 0) {
-        fixes.push("reposition for better occasion");
-      }
-      
-      if (fixes.length === 0) {
-        if (reviewCount <= 4) return "Continue gathering feedback to confirm patterns.";
-        if (reviewCount <= 9) return "Consider featuring in content and increasing availability.";
-        return "Scale production and feature prominently.";
-      }
-      
-      return fixes.join('; ');
-    };
-    
-    const getAction = (positiveTags, negativeTags, occasions, reviewCount, rating, wouldWear) => {
-      if (reviewCount <= 2) return "Continue gathering feedback";
-      if (rating < 4.5 || wouldWear < 70) return "Monitor performance";
-      
-      const occ = occasions.slice(0, 2).join('/') || 'styling';
-      const hasConfidence = positiveTags.some(([tag]) => tag.toLowerCase().includes('confident'));
-      const hasEmotionalMismatch = negativeTags.some(([tag]) => tag.toLowerCase().includes('didn\'t create'));
-      
-      if (hasConfidence && hasEmotionalMismatch) {
-        return `Test confidence-led ${occ} styling`;
-      }
-      
-      if (!positiveTags || positiveTags.length === 0) {
-        return `Create ${occ} styling content`;
-      }
-      
-      const topTag = positiveTags[0][0].toLowerCase();
-      if (topTag.includes('right for the occasion')) return `Create ${occ} content`;
-      if (topTag.includes('confident')) return `Feature in confidence messaging`;
-      if (topTag.includes('easy to imagine')) return `Feature as wearable hero`;
-      if (topTag.includes('flattering') || topTag.includes('silhouette')) return `Highlight silhouette in ${occ} styling`;
-      if (topTag.includes('polished')) return `Position for elevated styling`;
-      if (topTag.includes('attractive')) return `Position for date/night out`;
-      
-      return `Create ${occ} styling content`;
-    };
-    
-    // Create actions for EACH PIECE with its OWN tags
-    pieces.forEach(piece => {
-      const reviewCount = piece.ratingCount;
-      const wouldWear = Math.round(piece.rewear * 100);
-      const rating = piece.avgRating;
-      
-      if (reviewCount === 0) return;
-      
-      const occasions = piece.bestOccasions || [];
-      const occasionText = occasions.slice(0, 2).join('/') || 'styling';
-      
-      // PIECE-SPECIFIC tags from piece.positiveComments and piece.negativeComments
-      const positiveFeedback = getTopFeedback(piece.workedTags || [], 5);
-      const negativeFeedback = getTopFeedback((piece.didntWorkTags || []).filter(t => !t.toLowerCase().includes('everything worked')), 5);
-      
-      // Validate: tag count cannot exceed review count
-      const validPositive = positiveFeedback.filter(([tag, count]) => count <= reviewCount);
-      const validNegative = negativeFeedback.filter(([tag, count]) => count <= reviewCount);
-      
-      // Confidence
-      let confidenceBadge;
-      if (reviewCount <= 2) confidenceBadge = "Low Confidence";
-      else if (reviewCount <= 4) confidenceBadge = "Early Signal";
-      else if (reviewCount <= 9) confidenceBadge = "Medium Confidence";
-      else confidenceBadge = "High Confidence";
-      
-      // Performance signal
-      let performance = `${reviewCount} reviews · ${rating.toFixed(1)}/5 · ${wouldWear}% would wear`;
-      if (occasions.length > 0) performance += ` · Best for ${occasionText}`;
-      
-      // What customers liked
-      let liked = validPositive.length > 0 ? formatTagsShort(validPositive.slice(0, 3)) : "No positive tags yet";
-      
-      // What to watch
-      let watch = '';
-      if (reviewCount <= 2) {
-        watch = "Not enough data yet";
-      } else if (validNegative.length === 0) {
-        watch = "No watch-outs yet";
-      } else {
-        const tags = validNegative.slice(0, 2).map(([tag, count]) => `${tag.toLowerCase()} x${count}`).join(', ');
-        watch = tags;
-      }
-      
-      // Primary action
-      const hasPositiveConfidence = validPositive.some(([tag]) => tag.toLowerCase().includes('confident'));
-      const action = getAction(validPositive, validNegative, occasions, reviewCount, rating, wouldWear);
-      
-      // Recommended fix
-      const categories = categorizeFix(validNegative);
-      let nextStep = getRecommendedFix(categories, reviewCount, hasPositiveConfidence);
-      
-      // Make it action-oriented
-      if (reviewCount > 2 && validNegative.length > 0 && rating >= 4.5 && wouldWear >= 70) {
-        nextStep = `Test ${occasionText} styling; ${nextStep}`;
-      }
-      
-      // Data line
-      const posData = validPositive.length > 0 ? ` · positive: ${formatTags(validPositive.slice(0, 3))}` : '';
-      const negData = validNegative.length > 0 ? ` · negative: ${validNegative.map(([tag, count]) => `${tag} x${count}`).join(', ')}` : '';
-      
-      designActions.push({
-        piece: piece.name,
-        actionType: "Primary Action",
-        action,
-        confidenceBadge,
-        performance,
-        liked,
-        watch,
-        nextStep,
-        data: `${reviewCount} reviews · ${rating.toFixed(1)}/5 · ${wouldWear}% would wear${posData}${negData}`,
-        priority: confidenceBadge
-      });
-    });
-    
-    const priorityOrder = { 
-      "High Confidence": 1, 
-      "Medium Confidence": 2, 
-      "Early Signal": 3, 
-      "Low Confidence": 4 
-    };
-    
-    designActions.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
-    designActions.splice(8);
-
-    return Response.json({
-      totalUsers,
-      totalLooks,
-      avgRating,
-      avgAlignment,
-      avgRewear,
-      topPieces,
-      mixedPieces,
-      underperformingPieces,
-      watchPieces,
-      positiveTags,
-      negativeTags,
-      styleDNA,
-      piecesByDNA,
-      bodyPatterns,
-      stylingNeeds,
-      emotionalOutcomes,
-      topOccasions,
-      quotes,
-      designActions,
-    });
-
-  } catch (error) {
-    console.error("Designer stats error:", error);
-    return Response.json({ error: error.message }, { status: 500 });
-  }
-}
-
-// Helper functions
-function getMostCommon(arr, limit = 3) {
-  const counts = {};
-  arr.forEach(item => {
-    if (item) counts[item] = (counts[item] || 0) + 1;
-  });
-  return Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit)
-    .map(([item]) => item);
-}
-
-function countTags(tags, pieces) {
-  const tagCounts = {};
-  
-  tags.forEach(tag => {
-    if (!tag) return;
-    if (!tagCounts[tag]) {
-      tagCounts[tag] = { name: tag, count: 0, topPieces: [] };
-    }
-    tagCounts[tag].count++;
-  });
-  
-  return Object.values(tagCounts)
-    .sort((a, b) => b.count - a.count);
-}
-
-function getEmptyStats(totalUsers) {
-  return {
-    totalUsers,
-    totalLooks: 0,
-    avgRating: 0,
-    avgAlignment: 0,
-    avgRewear: 0,
-    topPieces: [],
-    mixedPieces: [],
-    underperformingPieces: [],
-    watchPieces: [],
-    positiveTags: [],
-    negativeTags: [],
-    styleDNA: [],
-    piecesByDNA: [],
-    bodyPatterns: [],
-    stylingNeeds: [],
-    emotionalOutcomes: [],
-    topOccasions: [],
-    quotes: [],
-  };
-}
+      .sort((a, b) => b.userCount - a.userCount)
