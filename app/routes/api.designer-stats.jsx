@@ -58,7 +58,6 @@ export async function loader() {
     // 2. Piece Performance Analysis
     const pieceStats = {};
     
-    let workedTagsProcessedCount = 0;
     reviews.filter(r => r.session?.suggestions?.length > 0).forEach(review => {
       const selectedSuggestion = review.session.suggestions.find(
         s => s.id === review.session.selectedSuggestionId
@@ -126,7 +125,6 @@ export async function loader() {
         // Tags
         // Tags
         if (review.workedTags) {
-          workedTagsProcessedCount++;
           console.log("🔍 CHECKING workedTags - Review:", review.id.slice(0,8), "workedTags exists:", !!review.workedTags, "value:", review.workedTags);
           try {
         console.log("Processing review - workedTags:", review.workedTags, "for pieces:", selectedSuggestion.items.map(i => i.productTitle));
@@ -183,7 +181,6 @@ export async function loader() {
     });
 
     console.log("📊 PIECE STATS after forEach - Total pieces:", Object.keys(pieceStats).length);
-    console.log("📊 workedTags processed count:", workedTagsProcessedCount);
     Object.entries(pieceStats).forEach(([name, stats]) => {
       console.log(`  ${name}: workedTags=${stats.workedTags.length}, didntWorkTags=${stats.didntWorkTags.length}`);
     });
@@ -376,7 +373,6 @@ export async function loader() {
     console.log("🔍 STARTING BODY STATS CALCULATION");
     
     console.log("🔍 BODY PREFS DEBUG - Body preferences found:", reviews.map(r => r.session.bodyPreference).filter(Boolean));
-    let workedTagsProcessedCount = 0;
     reviews.filter(r => r.session?.suggestions?.length > 0).forEach(review => {
       const bodyPref = review.session.bodyPreference;
       if (!bodyPref) return;
