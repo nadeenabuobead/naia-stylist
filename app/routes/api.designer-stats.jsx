@@ -48,7 +48,6 @@ export async function loader() {
     const pieceStats = {};
     
     reviews.filter(r => r.session?.suggestions?.length > 0).forEach(review => {
-      console.log("🔍 PIECE STATS - Review:", review.id.slice(0,8), "has suggestions:", !!selectedSuggestion, "workedTags:", review.workedTags ? "YES" : "NO");
       const selectedSuggestion = review.session.suggestions.find(
         s => s.id === review.session.selectedSuggestionId
       ) || review.session.suggestions[0];
