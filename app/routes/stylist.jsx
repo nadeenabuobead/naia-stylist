@@ -1331,7 +1331,13 @@ export default function Stylist() {
       if (customerToken && result && !result.startsWith("Something went wrong")) {
         try {
           const hRes = await fetch("/api/outfit-history", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
-            body: JSON.stringify({ mood, feeling, event, styleWords, bodyPref, mode, closetItemIds: selectedClosetIds, result }),
+            body: JSON.stringify({ 
+            mood, feeling, event, styleWords, bodyPref, mode, 
+            closetItemIds: selectedClosetIds, 
+            naiaPiece: naiaPiece ? { title: naiaPiece.name || naiaPiece.title, category: naiaPiece.category || naiaPiece.type } : null,
+            closetItems: itemsToStyle.map(i => ({ id: i.id, name: i.name, category: i.category })),
+            result 
+          }),
           });
           const hData = await hRes.json();
           if (hData.entry?.id) setLastHistoryId(hData.entry.id);

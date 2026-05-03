@@ -50,9 +50,9 @@ export async function action({ request }) {
 
   try {
     const body = await request.json();
-    const { mood, feeling, event, result } = body;
+    const { mood, feeling, event, result, styleWords, bodyPref, closetItemIds, naiaPiece, closetItems } = body;
 
-    await prisma.stylingSession.create({
+    const session = await prisma.stylingSession.create({
       data: {
         customerId: customer.id,
         currentMood: mood || "",
@@ -60,15 +60,55 @@ export async function action({ request }) {
         occasion: event || "",
         specificNeeds: result || null,
         styleFrom: "NAIA",
+        bodyPreference: bodyPref || null,
+        styleDNA: styleWords ? JSON.stringify(styleWords) : null,
       },
     });
+    
+    // Parse and save the suggestions/items from the AI result
+    if (result && closetItemIds) {
+      try {
+        // Extract nAia product recommendations from result
+        const naiaMatches = result.match(/\*\*([^*]+)\*\*/g) || [];
+        const naiaProducts = naiaMatches.map(m => m.replace(/\*\*/g, '').trim()).filter(Boolean);
+        
+        // Create a suggestion with the items
+        await prisma.outfitSuggestion.create({
+          data: {
+            sessionId: session.id,
+            items: {
+              create: [
+                // Add closet items
+                ...closetItemIds.map(itemId => ({
+                  closetItemId: parseInt(itemId),
+                  itemType: "closet"
+                })),
+                // Add nAia products
+                ...naiaProducts.map(productTitle => ({
+                  productTitle: productTitle,
+                  itemType: "naia"
+                }))
+              ]
+            }
+          }
+        });
+        
+        // Set this as the selected suggestion
+        await prisma.stylingSession.update({
+          where: { id: session.id },
+          data: { selectedSuggestionId: session.id } // This will need to be the actual suggestion ID
+        });
+      } catch (err) {
+        console.error("Failed to save suggestions:", err);
+      }
+    }
 
     const sessions = await prisma.stylingSession.findMany({
   where: { customerId: customer.id },
   orderBy: { createdAt: "desc" },
   take: 1,
 });
-return Response.json({ ok: true, entry: { id: sessions[0]?.id } }, { headers: CORS });
+return Response.json({ ok: true, entry: { id: session.id } }, { headers: CORS });
   } catch (err) {
     console.error("History save error:", err);
     return Response.json({ error: "Failed to save" }, { status: 500, headers: CORS });
