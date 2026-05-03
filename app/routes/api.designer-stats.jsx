@@ -125,6 +125,7 @@ export async function loader() {
             if (Array.isArray(tags)) {
               tags = tags.map(t => typeof t === 'string' ? (t.startsWith('[') ? JSON.parse(t) : t) : t).flat();
               stats.workedTags.push(...tags.filter(Boolean));
+              console.log(`Added workedTags to ${pieceName}:`, tags);
             }
           } catch (e) {
             console.error('Failed to parse workedTags:', e);
