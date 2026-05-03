@@ -170,6 +170,10 @@ export async function loader() {
       });
     });
 
+    console.log("📊 PIECE STATS after forEach - Total pieces:", Object.keys(pieceStats).length);
+    Object.entries(pieceStats).forEach(([name, stats]) => {
+      console.log(`  ${name}: workedTags=${stats.workedTags.length}, didntWorkTags=${stats.didntWorkTags.length}`);
+    });
     // Calculate piece metrics
     const pieces = Object.values(pieceStats).map(p => {
       const avgRating = p.ratings.length > 0 
