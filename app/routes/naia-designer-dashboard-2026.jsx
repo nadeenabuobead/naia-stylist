@@ -426,7 +426,7 @@ function DesignActionCard({ action }) {
           What worked:
         </div>
         <div style={{ fontSize: "14px", color: "#333", lineHeight: "1.7" }}>
-          {action.whyItWorks}
+          {action.whatWorked || action.whyItWorks}
         </div>
       </div>
       
@@ -436,7 +436,7 @@ function DesignActionCard({ action }) {
             What to watch:
           </div>
           <div style={{ fontSize: "14px", color: "#92400e", lineHeight: "1.7" }}>
-            {action.watchOut}
+            {action.whatToWatch || action.watchOut}
           </div>
         </div>
       )}
@@ -446,7 +446,7 @@ function DesignActionCard({ action }) {
           Recommended next step:
         </div>
         <div style={{ fontSize: "14px", color: "#333", lineHeight: "1.7" }}>
-          {action.recommendedFix}
+          {action.nextStep || action.recommendedFix}
         </div>
       </div>
       
