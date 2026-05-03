@@ -885,6 +885,7 @@ export async function loader() {
       topOccasions,
       quotes,
       designActions,
+      productPairings,
     });
 
   } catch (error) {
