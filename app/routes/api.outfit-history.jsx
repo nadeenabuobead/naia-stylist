@@ -51,6 +51,7 @@ export async function action({ request }) {
   try {
     const body = await request.json();
     const { mood, feeling, event, result, styleWords, bodyPref, closetItemIds, naiaPiece, closetItems } = body;
+    console.log("OUTFIT-HISTORY DEBUG:", JSON.stringify({ hasClosetItems: !!closetItems, hasNaiaPiece: !!naiaPiece, closetItemsLength: closetItems?.length, naiaPieceTitle: naiaPiece?.title }));
   console.log("Outfit history received:", { hasClosetItems: !!closetItems, hasNaiaPiece: !!naiaPiece, closetItems, naiaPiece });
 
     const session = await prisma.stylingSession.create({
@@ -68,6 +69,7 @@ export async function action({ request }) {
     
     // Save the outfit items as a suggestion
     if (closetItems || naiaPiece) {
+      console.log("SAVING SUGGESTIONS - closetItems:", closetItems, "naiaPiece:", naiaPiece);
       try {
         const suggestionItems = [];
         
