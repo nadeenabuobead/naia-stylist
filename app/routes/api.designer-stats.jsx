@@ -357,7 +357,7 @@ export async function loader() {
     const bodyStats = {};
     
     console.log("Body preferences found:", reviews.map(r => r.session.bodyPreference).filter(Boolean));
-    reviews.forEach(review => {
+    reviews.filter(r => r.session?.suggestions?.length > 0).forEach(review => {
       const bodyPref = review.session.bodyPreference;
       if (!bodyPref) return;
       
