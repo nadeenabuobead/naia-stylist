@@ -129,9 +129,13 @@ export async function loader() {
           try {
         console.log("Processing review - workedTags:", review.workedTags, "for pieces:", selectedSuggestion.items.map(i => i.productTitle));
             let tags = review.workedTags;
-            // Parse if string
+            // Parse if string (may need double parse due to double-encoding)
             if (typeof tags === 'string') {
               tags = JSON.parse(tags);
+              // Check if still a string (double-encoded)
+              if (typeof tags === 'string') {
+                tags = JSON.parse(tags);
+              }
             }
             // If array, already parsed correctly
             if (Array.isArray(tags)) {
