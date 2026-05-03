@@ -126,6 +126,7 @@ export async function loader() {
             if (Array.isArray(tags)) {
               tags = tags.map(t => typeof t === 'string' ? (t.startsWith('[') ? JSON.parse(t) : t) : t).flat();
               stats.workedTags.push(...tags.filter(Boolean));
+              console.log("✅ PUSHED TO STATS - piece:", pieceName, "now has", stats.workedTags.length, "worked tags");
               console.log(`Added workedTags to ${pieceName}:`, tags);
             }
           } catch (e) {
