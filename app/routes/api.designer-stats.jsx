@@ -190,6 +190,7 @@ export async function loader() {
         positiveComments: getMostCommon(p.workedTags, 3),
         negativeComments: getMostCommon(p.didntWorkTags, 3),
         quotes: p.quotes,
+      designActions,
         avgConfidenceBoost,
         startingMoods: getMostCommon(p.moods, 3),
       };
@@ -423,6 +424,17 @@ export async function loader() {
       .filter(q => q.text.length > 20)
       .slice(0, 10);
 
+
+    // Design Actions
+    const designActions = topPieces.slice(0, 2)
+      .filter(p => p.avgRating >= 4.5 && p.rewear >= 0.7)
+      .map(p => ({
+        piece: p.name,
+        action: "Feature in campaign",
+        reason: `Strong: ${p.avgRating.toFixed(1)}/5, ${Math.round(p.rewear * 100)}% rewear`,
+        priority: "high"
+      }));
+
     return Response.json({
       totalUsers,
       totalLooks,
@@ -442,6 +454,7 @@ export async function loader() {
       emotionalOutcomes,
       topOccasions,
       quotes,
+      designActions,
     });
 
   } catch (error) {
