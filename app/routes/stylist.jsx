@@ -1344,12 +1344,17 @@ export default function Stylist() {
               // Find nAia products (not "your X" items)
               const naiaPieces = items.filter(item => !item.toLowerCase().startsWith('your '));
               if (naiaPieces.length > 0) {
+                // Extract just the product name (before "for" or "with" or "to")
+                let productName = naiaPieces[0];
+                const match = productName.match(/^([^,]+?)(?:\s+(?:for|with|to|as|in)\s|$)/i);
+                if (match) productName = match[1].trim();
+                
                 extractedNaiaPiece = { 
-                  title: naiaPieces[0],
-                  name: naiaPieces[0],
-                  category: naiaPieces[0].toLowerCase().includes('pant') || naiaPieces[0].toLowerCase().includes('skirt') ? 'BOTTOMS' : 
-                           naiaPieces[0].toLowerCase().includes('dress') ? 'DRESS' :
-                           naiaPieces[0].toLowerCase().includes('jacket') || naiaPieces[0].toLowerCase().includes('coat') || naiaPieces[0].toLowerCase().includes('blazer') ? 'OUTERWEAR' : 'TOP'
+                  title: productName,
+                  name: productName,
+                  category: productName.toLowerCase().includes('pant') || productName.toLowerCase().includes('skirt') ? 'BOTTOMS' : 
+                           productName.toLowerCase().includes('dress') ? 'DRESS' :
+                           productName.toLowerCase().includes('jacket') || productName.toLowerCase().includes('coat') || productName.toLowerCase().includes('blazer') ? 'OUTERWEAR' : 'TOP'
                 };
               }
             }
