@@ -442,10 +442,27 @@ export async function loader() {
       emotionalOutcomes,
       topOccasions,
       quotes,
+      designActions,
     });
 
   } catch (error) {
     console.error("Designer stats error:", error);
+    // Design Actions - actionable recommendations
+    const designActions = [];
+    
+    if (topPieces && topPieces.length > 0) {
+      topPieces.slice(0, 2).forEach(piece => {
+        if (piece.avgRating >= 4.5 && piece.rewear >= 0.7) {
+          designActions.push({
+            piece: piece.name,
+            action: "Feature in campaign",
+            reason: `Strong performance: ${piece.avgRating.toFixed(1)}/5 rating, ${Math.round(piece.rewear * 100)}% rewear`,
+            priority: "high"
+          });
+        }
+      });
+    }
+    
     return Response.json({ error: error.message }, { status: 500 });
   }
 }
