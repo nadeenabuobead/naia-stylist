@@ -237,19 +237,31 @@ export default function DesignerDashboard() {
       </div>
 
       {/* Product Pairing Insights */}
-      <div style={s.section}>
-        <h2 style={s.h2}>Product Pairing Insights</h2>
-        <p style={{ fontSize: "14px", color: "#999", marginBottom: "20px", fontStyle: "italic" }}>
-          Tracking not yet implemented. Will show: most recommended pairings (closet item + nAia piece) 
-          and highest-rated pairings based on outfit reviews.
-        </p>
-        <div style={{ padding: "40px", textAlign: "center", background: "#faf9f7", border: "1px dashed #ddd", borderRadius: "4px" }}>
-          <div style={{ fontSize: "16px", color: "#8a7f75", marginBottom: "12px" }}>👗 Coming Soon</div>
-          <div style={{ fontSize: "14px", color: "#999" }}>
-            Examples: "white top + Sculptural Hybrid Coat: 4.8/5", "jeans + Art Maxi Skirt: 4.6/5"
+      <Section title="Product Pairing Insights" desc="Best closet + nAia combinations">
+        {data.productPairings && data.productPairings.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            {data.productPairings.map((pairing, i) => (
+              <div key={i} style={{ 
+                padding: "16px", 
+                background: "#fff", 
+                border: "1px solid #e5e5e5",
+                borderRadius: "4px"
+              }}>
+                <div style={{ fontSize: "16px", fontWeight: 500, marginBottom: "8px" }}>
+                  {pairing.closetItem} + {pairing.naiaPiece}
+                </div>
+                <div style={{ fontSize: "14px", color: "#666" }}>
+                  {pairing.avgRating.toFixed(1)}/5 rating • {pairing.reviewCount} review{pairing.reviewCount !== 1 ? 's' : ''} • {Math.round(pairing.rewearRate * 100)}% would wear again
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
-      </div>
+        ) : (
+          <div style={{ padding: "32px", textAlign: "center", color: "#999", fontStyle: "italic" }}>
+            No pairings yet. Try styling sessions that combine your closet items with nAia pieces!
+          </div>
+        )}
+      </Section>
 
       {/* Objection Tracker */}
       <div style={s.section}>
