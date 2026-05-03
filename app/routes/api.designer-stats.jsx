@@ -190,7 +190,6 @@ export async function loader() {
         positiveComments: getMostCommon(p.workedTags, 3),
         negativeComments: getMostCommon(p.didntWorkTags, 3),
         quotes: p.quotes,
-      designActions,
         avgConfidenceBoost,
         startingMoods: getMostCommon(p.moods, 3),
       };
