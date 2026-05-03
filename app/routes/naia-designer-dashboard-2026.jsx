@@ -371,13 +371,10 @@ function QuoteCard({ quote }) {
 
 
 function DesignActionCard({ action }) {
-  const borderColor = action.priority === "high" ? "#1a1816" : action.priority === "medium" ? "#8B7355" : "#D4C4B0";
-  const badgeColor = action.priority === "high" ? "#1a1816" : action.priority === "medium" ? "#8B7355" : "#D4C4B0";
-  
   return (
     <div style={{
       padding: "20px",
-      border: `2px solid ${borderColor}`,
+      border: `2px solid ${action.priority === "high" ? "#1a1816" : "#8B7355"}`,
       borderRadius: "4px",
       marginBottom: "16px",
     }}>
@@ -388,7 +385,7 @@ function DesignActionCard({ action }) {
           textTransform: "uppercase",
           letterSpacing: "1px",
           padding: "4px 12px",
-          background: badgeColor,
+          background: action.priority === "high" ? "#1a1816" : "#8B7355",
           color: "#faf9f7",
           borderRadius: "2px",
         }}>
