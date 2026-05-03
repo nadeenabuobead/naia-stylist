@@ -406,7 +406,7 @@ export async function loader() {
         // Get fit concerns (negative tags related to fit)
         const struggles = [];
         reviews.forEach(r => {
-          if (r.bodyPreference === preference && r.didntWorkTags) {
+          if (r.session?.bodyPreference === preference && r.didntWorkTags) {
             try {
               const tags = JSON.parse(r.didntWorkTags);
               tags.forEach(tag => {
