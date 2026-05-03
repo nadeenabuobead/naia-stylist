@@ -424,7 +424,7 @@ export async function loader() {
       .slice(0, 10);
 
 
-    // Design Actions - data-driven with proper confidence thresholds
+    // Design Actions - final refined version with proper confidence and specificity
     const designActions = [];
     const actionsMap = new Map(); // Avoid duplicates
     
@@ -440,6 +440,21 @@ export async function loader() {
     const isBrandOccasion = (occasions) => {
       const elevated = ["date", "night out", "dinner", "event", "formal", "work-to-evening"];
       return occasions.some(occ => elevated.includes(occ.toLowerCase()));
+    };
+    
+    // Helper to get specific content action based on occasions
+    const getContentAction = (occasions) => {
+      if (!occasions || occasions.length === 0) return "Create styling content";
+      
+      const occ = occasions.map(o => o.toLowerCase());
+      
+      if (occ.includes("night out") || occ.includes("date")) return "Create night-out styling content";
+      if (occ.includes("weekend")) return "Create weekend styling content";
+      if (occ.includes("errands") || occ.includes("travel")) return "Create errands/travel styling content";
+      if (occ.includes("work")) return "Create work styling content";
+      if (occ.includes("brunch") || occ.includes("casual")) return "Create casual styling content";
+      
+      return `Create ${occasions[0]} styling content`;
     };
     
     // Helper to get most common feedback
@@ -470,18 +485,30 @@ export async function loader() {
       const occasions = piece.bestOccasions || [];
       const confidence = getConfidence(reviewCount);
       
-      // CASE 1: 1-2 reviews = Low Confidence (softer wording)
+      // CASE 1: 1-2 reviews = Low Confidence (very cautious wording)
       if (reviewCount <= 2) {
         if (rating >= 4.5 && wouldWear >= 70) {
           const occasionText = occasions.length > 0 ? occasions[0] : '';
+          
+          let reason;
+          if (reviewCount === 1) {
+            reason = `Initial positive signal: 1 review with a ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life.`;
+            if (occasionText) {
+              reason += ` The only occasion signal so far is ${occasionText}, so more reviews are needed before making production or campaign decisions.`;
+            } else {
+              reason += ` More reviews are needed before making production or campaign decisions.`;
+            }
+          } else {
+            reason = `Initial positive signals: ${reviewCount} reviews with a ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life${occasionText ? ` for ${occasionText}` : ''}. More reviews are needed before making production or campaign decisions.`;
+          }
           
           actionsMap.set(piece.name, {
             piece: piece.name,
             actionType: "Research action",
             action: "Continue gathering feedback",
-            reason: `Initial positive signal: ${reviewCount} review${reviewCount === 1 ? '' : 's'} with a ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear response${occasionText ? ` for ${occasionText}` : ''}. More reviews are needed before making production or campaign decisions.`,
+            reason,
             watchOut: null,
-            data: `${reviewCount} review${reviewCount === 1 ? '' : 's'}, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear`,
+            data: `${reviewCount} review${reviewCount === 1 ? '' : 's'}, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life`,
             priority: "Low Confidence"
           });
         } else {
@@ -498,28 +525,32 @@ export async function loader() {
         return;
       }
       
-      // CASE 2: 3-4 reviews = Early Signal (content/testing only, not production)
+      // CASE 2: 3-4 reviews = Early Signal (content/testing only)
       if (reviewCount <= 4) {
         if (rating >= 4.5 && wouldWear >= 70) {
           const isBrand = isBrandOccasion(occasions);
           const occasionText = occasions.slice(0, 2).join(" and ");
           
-          // Always recommend content/testing for 3-4 reviews, not production
-          let primaryAction = "Create everyday styling content";
+          // Get specific content action based on occasions
+          let primaryAction = isBrand ? "Test campaign styling" : getContentAction(occasions);
           let actionType = "Content action";
-          
-          if (isBrand) {
-            primaryAction = "Test campaign styling";
-            actionType = "Content action";
-          }
           
           let reason = `Strong early response: ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life${occasionText ? `, especially for ${occasionText}` : ''}.`;
           
-          // Add watch-out for negative feedback (visible, not just in data)
+          // IMPORTANT: Add visible watch-out for negative feedback
           let watchOut = null;
           if (negativeFeedback.length > 0) {
             const [feedback, count] = negativeFeedback[0];
-            watchOut = `${count} user${count > 1 ? 's' : ''} mentioned "${feedback}" - continue monitoring ${feedback.toLowerCase().includes('clingy') ? 'comfort and fabric behavior' : 'this feedback'} before scaling production.`;
+            
+            if (feedback.toLowerCase().includes('clingy')) {
+              watchOut = `${count} user${count > 1 ? 's' : ''} mentioned "too clingy," so continue monitoring comfort and fit.`;
+            } else if (feedback.toLowerCase().includes('exposed')) {
+              watchOut = `${count} user${count > 1 ? 's' : ''} mentioned "${feedback}" - consider coverage adjustments.`;
+            } else if (feedback.toLowerCase().includes('uncomfortable')) {
+              watchOut = `${count} user${count > 1 ? 's' : ''} mentioned comfort issues - monitor fabric and fit.`;
+            } else {
+              watchOut = `${count} user${count > 1 ? 's' : ''} mentioned "${feedback}" - continue monitoring before scaling production.`;
+            }
           }
           
           actionsMap.set(piece.name, {
@@ -528,7 +559,7 @@ export async function loader() {
             action: primaryAction,
             reason,
             watchOut,
-            data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear${negativeFeedback.length > 0 ? `, ${negativeFeedback[0][1]} mention${negativeFeedback[0][1] > 1 ? 's' : ''} of "${negativeFeedback[0][0]}"` : ''}`,
+            data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life${negativeFeedback.length > 0 ? `, ${negativeFeedback[0][1]} mention${negativeFeedback[0][1] > 1 ? 's' : ''} of "${negativeFeedback[0][0]}"` : ''}`,
             priority: "Early Signal"
           });
         } else {
@@ -538,7 +569,7 @@ export async function loader() {
             action: "Continue gathering feedback",
             reason: `${reviewCount} reviews so far. Need more data to make confident recommendations.`,
             watchOut: null,
-            data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear`,
+            data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life`,
             priority: "Early Signal"
           });
         }
@@ -560,7 +591,12 @@ export async function loader() {
           let watchOut = null;
           if (negativeFeedback.length > 0 && negativeFeedback[0][1] >= 2) {
             const [feedback, count] = negativeFeedback[0];
-            watchOut = `${count} users mentioned "${feedback}" - ${feedback.toLowerCase().includes('clingy') ? 'monitor comfort and fabric behavior' : 'address this feedback'} before major production increase.`;
+            
+            if (feedback.toLowerCase().includes('clingy')) {
+              watchOut = `${count} users mentioned "too clingy" - monitor comfort and fabric behavior before major production increase.`;
+            } else {
+              watchOut = `${count} users mentioned "${feedback}" - address this feedback before major production increase.`;
+            }
           }
           
           actionsMap.set(piece.name, {
@@ -569,7 +605,7 @@ export async function loader() {
             action: primaryAction,
             reason,
             watchOut,
-            data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear${negativeFeedback.length > 0 ? `, ${negativeFeedback[0][1]} mention${negativeFeedback[0][1] > 1 ? 's' : ''} of "${negativeFeedback[0][0]}"` : ''}`,
+            data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life${negativeFeedback.length > 0 ? `, ${negativeFeedback[0][1]} mention${negativeFeedback[0][1] > 1 ? 's' : ''} of "${negativeFeedback[0][0]}"` : ''}`,
             priority: "Medium Confidence"
           });
         } else if (rating >= 4.0 && wouldWear < 50) {
@@ -579,7 +615,7 @@ export async function loader() {
             action: "Show more wearable outfit examples",
             reason: `Users like the piece (${rating.toFixed(1)}/5 rating), but only ${wouldWear}% would wear in real life. This suggests a styling clarity issue.`,
             watchOut: null,
-            data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, only ${wouldWear}% would wear`,
+            data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, only ${wouldWear}% would wear in real life`,
             priority: "Medium Confidence"
           });
         }
@@ -611,13 +647,13 @@ export async function loader() {
           action: primaryAction,
           reason,
           watchOut,
-          data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear${positiveFeedback.length > 0 ? `, top feedback: "${positiveFeedback[0][0]}"` : ''}`,
+          data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life${positiveFeedback.length > 0 ? `, top feedback: "${positiveFeedback[0][0]}"` : ''}`,
           priority: "High Confidence"
         });
       }
     });
     
-    // Convert map to array and sort by priority
+    // Convert map to array and sort by priority (High Confidence first, Low Confidence last)
     const priorityOrder = { 
       "High Confidence": 1, 
       "Medium Confidence": 2, 
