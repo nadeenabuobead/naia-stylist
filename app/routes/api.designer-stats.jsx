@@ -184,6 +184,10 @@ export async function loader() {
     Object.entries(pieceStats).forEach(([name, stats]) => {
       console.log(`  ${name}: workedTags=${stats.workedTags.length}, didntWorkTags=${stats.didntWorkTags.length}`);
     });
+    const testPiece = Object.values(pieceStats).find(p => p.workedTags && p.workedTags.length > 0);
+    if (!testPiece) {
+      throw new Error("DEBUG: NO PIECE HAS WORKED TAGS! All pieces have empty workedTags arrays");
+    }
     // Calculate piece metrics
     const pieces = Object.values(pieceStats).map(p => {
       const avgRating = p.ratings.length > 0 
