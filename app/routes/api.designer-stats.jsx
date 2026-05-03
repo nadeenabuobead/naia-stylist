@@ -426,6 +426,72 @@ export async function loader() {
       .slice(0, 15);
 
     // 10. Body Patterns - with piece performance
+    // Product Pairing Insights
+    const pairingStats = {};
+    
+    reviews.filter(r => r.session?.suggestions?.length > 0).forEach(review => {
+      const suggestion = review.session.suggestions.find(
+        s => s.id === review.session.selectedSuggestionId
+      ) || review.session.suggestions[0];
+      
+      if (!suggestion?.items || suggestion.items.length < 2) return;
+      
+      // Find closet items and nAia pieces in the outfit
+      const closetItems = suggestion.items.filter(item => 
+        item.closetItemId || 
+        (item.productTitle && (
+          item.productTitle.toLowerCase().includes('your ') ||
+          item.productTitle.toLowerCase() === 'top' ||
+          item.productTitle.toLowerCase() === 'bottom'
+        ))
+      );
+      const naiaItems = suggestion.items.filter(item => 
+        !closetItems.includes(item) &&
+        item.productTitle &&
+        !item.productTitle.toLowerCase().includes('white top') &&
+        !item.productTitle.toLowerCase().includes('black top')
+      );
+      
+      // Create pairings
+      closetItems.forEach(closetItem => {
+        naiaItems.forEach(naiaItem => {
+          const closetName = closetItem.productTitle || `Closet item ${closetItem.closetItemId}`;
+          const naiaName = naiaItem.productTitle;
+          const pairKey = `${closetName}|||${naiaName}`;
+          
+          if (!pairingStats[pairKey]) {
+            pairingStats[pairKey] = {
+              closetItem: closetName,
+              naiaPiece: naiaName,
+              ratings: [],
+              rewearYes: 0,
+              rewearTotal: 0
+            };
+          }
+          
+          if (review.overallFeeling) {
+            pairingStats[pairKey].ratings.push(review.overallFeeling);
+          }
+          pairingStats[pairKey].rewearTotal++;
+          if (review.wouldWearAgain === "Definitely") {
+            pairingStats[pairKey].rewearYes++;
+          }
+        });
+      });
+    });
+    
+    const productPairings = Object.values(pairingStats)
+      .filter(p => p.ratings.length > 0)
+      .map(p => ({
+        closetItem: p.closetItem,
+        naiaPiece: p.naiaPiece,
+        avgRating: p.ratings.reduce((a, b) => a + b, 0) / p.ratings.length,
+        reviewCount: p.ratings.length,
+        rewearRate: p.rewearYes / p.rewearTotal
+      }))
+      .sort((a, b) => b.avgRating - a.avgRating)
+      .slice(0, 10);
+
     const bodyStats = {};
     console.log("🔍 STARTING BODY STATS CALCULATION");
     
