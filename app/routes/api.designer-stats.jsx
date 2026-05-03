@@ -182,7 +182,15 @@ export async function loader() {
       
       return {
         name: p.name,
-        category: p.category,
+        category: (() => {
+          const n = p.name.toLowerCase();
+          if (n.includes('pant') || n.includes('trouser')) return 'Pants';
+          if (n.includes('jacket') || n.includes('blazer') || n.includes('coat')) return 'Outerwear';
+          if (n.includes('dress')) return 'Dress';
+          if (n.includes('skirt')) return 'Skirt';
+          if (n.includes('top') || n.includes('shirt') || n.includes('blouse')) return 'Top';
+          return p.category || 'Clothing';
+        })(),
         avgRating,
         ratingCount,
         rewear,
@@ -197,9 +205,20 @@ export async function loader() {
       };
     });
 
-    // 2. Top Performing
+    // 2. Top Performing (nAia products only, exclude closet items)
     const topPieces = pieces
       .filter(p => p.ratingCount >= 3)
+      .filter(p => {
+        // Exclude common closet item names
+        const name = p.name.toLowerCase();
+        return !name.includes('white top') && 
+               !name.includes('black top') && 
+               !name.includes('jeans') &&
+               !name.includes('your ') &&
+               name !== 'top' &&
+               name !== 'bottom' &&
+               name !== 'dress';
+      })
       .filter(p => p.avgRating >= 4 && p.rewear >= 0.7)
       .sort((a, b) => b.avgRating - a.avgRating)
       .slice(0, 10);
