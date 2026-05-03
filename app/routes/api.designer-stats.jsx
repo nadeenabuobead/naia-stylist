@@ -427,6 +427,7 @@ export async function loader() {
 
 
     // Design Actions - PIECE-SPECIFIC tags only
+    console.log("DEBUG - Pieces being tracked:", pieces.map(p => p.name));
     const designActions = [];
     
     const getTopFeedback = (arr, count = 5) => {
