@@ -184,6 +184,26 @@ export async function loader() {
       });
     });
 
+    // Collect quotes from ALL reviews (including those without suggestions)
+    reviews.forEach(review => {
+      if (review.additionalNotes) {
+        // Try to find which piece this quote is about
+        const suggestion = review.session?.suggestions?.find(
+          s => s.id === review.session.selectedSuggestionId
+        ) || review.session?.suggestions?.[0];
+        
+        if (suggestion?.items?.length > 0) {
+          // Add quote to each piece in the outfit
+          suggestion.items.forEach(item => {
+            const pieceName = item.productTitle || `Closet Item ${item.closetItemId}`;
+            if (pieceStats[pieceName] && !pieceStats[pieceName].quotes.includes(review.additionalNotes)) {
+              pieceStats[pieceName].quotes.push(review.additionalNotes);
+            }
+          });
+        }
+      }
+    });
+
     console.log("📊 PIECE STATS after forEach - Total pieces:", Object.keys(pieceStats).length);
     Object.entries(pieceStats).forEach(([name, stats]) => {
       console.log(`  ${name}: workedTags=${stats.workedTags.length}, didntWorkTags=${stats.didntWorkTags.length}`);
