@@ -424,15 +424,62 @@ export async function loader() {
       .slice(0, 10);
 
 
-    // Design Actions
-    const designActions = topPieces.slice(0, 2)
+    // Design Actions - comprehensive recommendations
+    const designActions = [];
+    
+    // High performers: feature these
+    topPieces.slice(0, 2)
       .filter(p => p.avgRating >= 4.5 && p.rewear >= 0.7)
-      .map(p => ({
-        piece: p.name,
-        action: "Feature in campaign",
-        reason: `Strong: ${p.avgRating.toFixed(1)}/5, ${Math.round(p.rewear * 100)}% rewear`,
-        priority: "high"
-      }));
+      .forEach(p => {
+        designActions.push({
+          piece: p.name,
+          action: "Feature in campaign",
+          reason: `Strong performance: ${p.avgRating.toFixed(1)}/5, ${Math.round(p.rewear * 100)}% rewear`,
+          priority: "high"
+        });
+      });
+    
+    // Mixed signals: investigate
+    if (mixedPieces && mixedPieces.length > 0) {
+      mixedPieces.slice(0, 2).forEach(p => {
+        const issues = [];
+        if (p.avgRating >= 4 && p.rewear < 0.5) issues.push("loved visually but low wearability");
+        if (p.negativeComments && p.negativeComments.length > 0) issues.push(p.negativeComments[0]);
+        
+        if (issues.length > 0) {
+          designActions.push({
+            piece: p.name,
+            action: "Investigate friction points",
+            reason: issues.join(" · "),
+            priority: "medium"
+          });
+        }
+      });
+    }
+    
+    // Underperforming: review or discontinue
+    if (underperformingPieces && underperformingPieces.length > 0) {
+      underperformingPieces.slice(0, 1).forEach(p => {
+        designActions.push({
+          piece: p.name,
+          action: "Review for improvements",
+          reason: `${p.avgRating.toFixed(1)}/5 rating, ${p.weakSignals.join(", ")}`,
+          priority: "medium"
+        });
+      });
+    }
+    
+    // Watch pieces: early signals
+    if (watchPieces && watchPieces.length > 0) {
+      watchPieces.slice(0, 1).forEach(p => {
+        designActions.push({
+          piece: p.name,
+          action: "Monitor closely",
+          reason: `Only ${p.ratingCount} reviews - gather more data before decisions`,
+          priority: "low"
+        });
+      });
+    }
 
     return Response.json({
       totalUsers,
