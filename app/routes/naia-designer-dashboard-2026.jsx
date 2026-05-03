@@ -423,7 +423,7 @@ function DesignActionCard({ action }) {
       
       <div style={{ marginBottom: "12px" }}>
         <div style={{ fontSize: "13px", fontWeight: 600, color: "#1a1816", marginBottom: "4px" }}>
-          Why it works:
+          What worked:
         </div>
         <div style={{ fontSize: "14px", color: "#333", lineHeight: "1.7" }}>
           {action.whyItWorks}
@@ -433,7 +433,7 @@ function DesignActionCard({ action }) {
       {action.watchOut && (
         <div style={{ marginBottom: "12px" }}>
           <div style={{ fontSize: "13px", fontWeight: 600, color: "#d97706", marginBottom: "4px" }}>
-            Watch-out:
+            What to watch:
           </div>
           <div style={{ fontSize: "14px", color: "#92400e", lineHeight: "1.7" }}>
             {action.watchOut}
@@ -443,7 +443,7 @@ function DesignActionCard({ action }) {
       
       <div style={{ marginBottom: "14px" }}>
         <div style={{ fontSize: "13px", fontWeight: 600, color: "#1a1816", marginBottom: "4px" }}>
-          Recommended fix:
+          Recommended next step:
         </div>
         <div style={{ fontSize: "14px", color: "#333", lineHeight: "1.7" }}>
           {action.recommendedFix}
