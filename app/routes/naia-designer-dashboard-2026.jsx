@@ -64,20 +64,32 @@ export default function DesignerDashboard() {
 
       {/* 3. Mixed-Signal Pieces */}
       <Section title="Mixed-Signal Pieces" desc="High potential with friction">
-        <div style={s.pieceGrid}>
-          {(data.mixedPieces || []).map((piece, i) => (
-            <MixedPieceCard key={i} piece={piece} />
-          ))}
-        </div>
+        {data.mixedPieces && data.mixedPieces.length > 0 ? (
+          <div style={s.pieceGrid}>
+            {data.mixedPieces.map((piece, i) => (
+              <MixedPieceCard key={i} piece={piece} />
+            ))}
+          </div>
+        ) : (
+          <div style={{ padding: "32px", textAlign: "center", color: "#999", fontStyle: "italic" }}>
+            No pieces with mixed signals yet. This section shows pieces with 5+ reviews that have high ratings but low rewear intent (or vice versa).
+          </div>
+        )}
       </Section>
 
       {/* 4. Underperforming Pieces */}
       <Section title="Underperforming Pieces" desc="Not landing with customers">
-        <div style={s.pieceGrid}>
-          {(data.underperformingPieces || []).map((piece, i) => (
-            <UnderperformingCard key={i} piece={piece} />
-          ))}
-        </div>
+        {data.underperformingPieces && data.underperformingPieces.length > 0 ? (
+          <div style={s.pieceGrid}>
+            {data.underperformingPieces.map((piece, i) => (
+              <UnderperformingCard key={i} piece={piece} />
+            ))}
+          </div>
+        ) : (
+          <div style={{ padding: "32px", textAlign: "center", color: "#999", fontStyle: "italic" }}>
+            Great news! No underperforming pieces yet. This section shows pieces with 5+ reviews and ratings below 3.0 or rewear intent below 30%.
+          </div>
+        )}
       </Section>
 
       {/* 5. Pieces to Watch */}
