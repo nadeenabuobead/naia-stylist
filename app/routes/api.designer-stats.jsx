@@ -169,6 +169,22 @@ export async function loader() {
           stats.quotes.push(review.additionalNotes);
         }
         
+    });
+    
+    // Collect quotes from ALL reviews (not just those with suggestions)
+    reviews.forEach(review => {
+      if (review.additionalNotes) {
+        // Find the piece name from the review if possible
+        const piece = review.session?.suggestions?.[0]?.items?.[0]?.productTitle || "General feedback";
+        if (!pieceStats[piece]) {
+          pieceStats[piece] = { quotes: [] };
+        }
+        if (!pieceStats[piece].quotes) {
+          pieceStats[piece].quotes = [];
+        }
+        pieceStats[piece].quotes.push(review.additionalNotes);
+      }
+    });
         // Confidence
         if (review.confidenceBefore && review.confidenceAfter) {
           stats.confidenceDeltas.push(review.confidenceAfter - review.confidenceBefore);
