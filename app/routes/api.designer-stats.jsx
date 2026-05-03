@@ -424,59 +424,73 @@ export async function loader() {
       .slice(0, 10);
 
 
-    // Design Actions - comprehensive recommendations
+    // Design Actions - data-driven recommendations
     const designActions = [];
     
-    // High performers: feature these
+    // 1. High performers: marketing/production actions
     topPieces.slice(0, 2)
       .filter(p => p.avgRating >= 4.5 && p.rewear >= 0.7)
       .forEach(p => {
+        const occasions = p.bestOccasions.slice(0, 2).join(", ");
         designActions.push({
           piece: p.name,
+          actionType: "Marketing action",
           action: "Feature in campaign",
-          reason: `Strong performance: ${p.avgRating.toFixed(1)}/5, ${Math.round(p.rewear * 100)}% rewear`,
-          priority: "high"
+          reason: `Strong performance: ${p.avgRating.toFixed(1)}/5 rating, ${Math.round(p.rewear * 100)}% would wear in real life. Best for ${occasions} occasions.`,
+          data: `${p.avgRating.toFixed(1)}/5, ${Math.round(p.rewear * 100)}% would wear, ${p.ratingCount} reviews`,
+          priority: "High priority"
         });
       });
     
-    // Mixed signals: investigate
-    if (mixedPieces && mixedPieces.length > 0) {
-      mixedPieces.slice(0, 2).forEach(p => {
-        const issues = [];
-        if (p.avgRating >= 4 && p.rewear < 0.5) issues.push("loved visually but low wearability");
-        if (p.negativeComments && p.negativeComments.length > 0) issues.push(p.negativeComments[0]);
+    // 2. Negative tag signals: design/fit actions
+    negativeTags.forEach(tag => {
+      if (tag.count >= 2 && tag.topPieces.length > 0) {
+        const piece = tag.topPieces[0];
+        let actionType = "Design action";
+        let action = "";
+        let reason = "";
         
-        if (issues.length > 0) {
+        if (tag.name.toLowerCase().includes("clingy")) {
+          actionType = "Fit action";
+          action = "Review fabric and fit";
+          reason = `${tag.count} users reported "${tag.name}". May need less clingy fabric or looser fit.`;
+        } else if (tag.name.toLowerCase().includes("exposed")) {
+          action = "Adjust coverage";
+          reason = `${tag.count} users reported "${tag.name}". Consider more coverage options.`;
+        } else if (tag.name.toLowerCase().includes("structured")) {
+          action = "Create softer version";
+          reason = `${tag.count} users reported "${tag.name}". Test with drapier fabric.`;
+        } else if (tag.name.toLowerCase().includes("plain")) {
+          action = "Add detail or new colorway";
+          reason = `${tag.count} users reported "${tag.name}". Consider more visual interest.`;
+        } else {
+          action = "Address feedback";
+          reason = `${tag.count} users mentioned "${tag.name}".`;
+        }
+        
+        if (action) {
           designActions.push({
-            piece: p.name,
-            action: "Investigate friction points",
-            reason: issues.join(" · "),
-            priority: "medium"
+            piece,
+            actionType,
+            action,
+            reason,
+            data: `${tag.count} mentions of "${tag.name}"`,
+            priority: "Medium priority"
           });
         }
-      });
-    }
+      }
+    });
     
-    // Underperforming: review or discontinue
-    if (underperformingPieces && underperformingPieces.length > 0) {
-      underperformingPieces.slice(0, 1).forEach(p => {
-        designActions.push({
-          piece: p.name,
-          action: "Review for improvements",
-          reason: `${p.avgRating.toFixed(1)}/5 rating, ${p.weakSignals.join(", ")}`,
-          priority: "medium"
-        });
-      });
-    }
-    
-    // Watch pieces: early signals
+    // 3. Watch pieces: research actions
     if (watchPieces && watchPieces.length > 0) {
       watchPieces.slice(0, 1).forEach(p => {
         designActions.push({
           piece: p.name,
+          actionType: "Research action",
           action: "Monitor closely",
-          reason: `Only ${p.ratingCount} reviews - gather more data before decisions`,
-          priority: "low"
+          reason: `Only ${p.ratingCount} reviews so far. Gather more data before deciding whether to feature, adjust, or restock.`,
+          data: `${p.ratingCount} reviews, ${p.avgRating.toFixed(1)}/5 rating`,
+          priority: "Low confidence"
         });
       });
     }
