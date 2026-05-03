@@ -393,96 +393,49 @@ function DesignActionCard({ action }) {
   
   return (
     <div style={{
-      padding: "26px",
+      padding: "24px",
       border: `2px solid ${color}`,
       borderRadius: "4px",
-      marginBottom: "22px",
+      marginBottom: "20px",
     }}>
-      {/* Header with piece name and badge */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: "18px" }}>
-        <h4 style={{ margin: 0, fontFamily: "Cormorant Garamond", fontSize: "23px", fontWeight: 600, color: "#1a1816" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: "16px" }}>
+        <h4 style={{ margin: 0, fontFamily: "Cormorant Garamond", fontSize: "22px", fontWeight: 600 }}>
           {action.piece}
         </h4>
         <span style={{
           fontSize: "10px",
           textTransform: "uppercase",
-          letterSpacing: "1.4px",
-          padding: "7px 15px",
+          letterSpacing: "1.3px",
+          padding: "6px 14px",
           background: color,
           color: "#faf9f7",
           borderRadius: "3px",
           whiteSpace: "nowrap",
           fontWeight: 600,
         }}>
-          {action.confidenceBadge}
+          {action.priority}
         </span>
       </div>
       
-      {/* Decision */}
-      <div style={{ 
-        fontSize: "17px", 
-        fontWeight: 700, 
-        color: "#1a1816", 
-        marginBottom: "6px",
-        fontFamily: "Cormorant Garamond"
-      }}>
-        Decision: {action.decision}
+      <div style={{ fontSize: "15px", color: "#8B7355", marginBottom: "12px", fontWeight: 600 }}>
+        <span style={{ textTransform: "capitalize" }}>{action.actionType}:</span> {action.action}
       </div>
       
-      {/* Action type and action */}
-      <div style={{ fontSize: "15px", color: "#8B7355", marginBottom: "14px", fontWeight: 600 }}>
-        {action.actionType}: {action.action}
-      </div>
-      
-      {/* Confidence reason */}
-      <div style={{ fontSize: "13px", color: "#999", fontStyle: "italic", marginBottom: "16px" }}>
-        Confidence: {action.confidenceBadge} — {action.confidenceReason}
-      </div>
-      
-      {/* What worked */}
-      <div style={{ marginBottom: "14px" }}>
-        <div style={{ fontSize: "13px", fontWeight: 600, color: "#1a1816", marginBottom: "5px" }}>
-          What worked:
+      <div style={{ marginBottom: "12px" }}>
+        <div style={{ fontSize: "13px", fontWeight: 600, color: "#1a1816", marginBottom: "4px" }}>
+          Why it works:
         </div>
         <div style={{ fontSize: "14px", color: "#333", lineHeight: "1.7" }}>
-          {action.whatWorked}
+          {action.whyItWorks}
         </div>
       </div>
       
-      {/* What to watch */}
-      <div style={{ marginBottom: "14px" }}>
-        <div style={{ fontSize: "13px", fontWeight: 600, color: "#92400e", marginBottom: "5px" }}>
-          What to watch:
-        </div>
-        <div style={{ fontSize: "14px", color: "#78350f", lineHeight: "1.7" }}>
-          {action.whatToWatch}
-        </div>
-      </div>
-      
-      {/* Next step */}
-      <div style={{ marginBottom: "16px" }}>
-        <div style={{ fontSize: "13px", fontWeight: 600, color: "#1a1816", marginBottom: "5px" }}>
-          Recommended next step:
-        </div>
-        <div style={{ fontSize: "14px", color: "#333", lineHeight: "1.7" }}>
-          {action.nextStep}
-        </div>
-      </div>
-      
-      {/* Data */}
-      <div style={{ 
-        fontSize: "13px", 
-        color: "#999", 
-        paddingTop: "14px",
-        borderTop: "1px solid #f0f0f0",
-        lineHeight: "1.6"
-      }}>
-        <strong>Data:</strong> {action.data}
-      </div>
-    </div>
-  );
-}
-
+      {action.watchOut && (
+        <div style={{ marginBottom: "12px" }}>
+          <div style={{ fontSize: "13px", fontWeight: 600, color: "#d97706", marginBottom: "4px" }}>
+            Watch-out:
+          </div>
+          <div style={{ fontSize: "14px", color: "#92400e", lineHeight: "1.7" }}>
             {action.watchOut}
           </div>
         </div>
