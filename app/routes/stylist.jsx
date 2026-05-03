@@ -591,6 +591,7 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
   const [workedTags, setWorkedTags] = useState([]);
   const [didntWorkTags, setDidntWorkTags] = useState([]);
   const [additionalNotes, setAdditionalNotes] = useState("");
+  const [objections, setObjections] = useState([]);
   const [submitted, setSubmitted] = useState(false);
 
   const WORKED_OPTIONS = [
@@ -605,12 +606,27 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
   "Too clingy", "Uncomfortable", "Hard to wear in real life"
 ];
 
+  const OBJECTION_OPTIONS = [
+    "Too expensive",
+    "Too bold/statement",
+    "Unsure how to style it",
+    "Wrong for my lifestyle",
+    "Doesn't fit my body type",
+    "Too similar to what I own",
+    "Concerned about quality",
+    "Not versatile enough"
+  ];
+
   const toggleWorkedTag = (tag) => {
     setWorkedTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
   };
 
   const toggleDidntWorkTag = (tag) => {
     setDidntWorkTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
+  };
+
+  const toggleObjection = (tag) => {
+    setObjections(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
   };
 
   const canSubmit = overallReaction > 0 && feltLikeMe && desiredFeelingAchieved && wouldWearAgain && physicalComfort;
@@ -632,6 +648,7 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
           workedTags: JSON.stringify(workedTags),
           didntWorkTags: JSON.stringify(didntWorkTags),
           additionalNotes,
+          objections: JSON.stringify(objections),
           mood, feeling, event,
           styleDNA: Array.isArray(styleDNA) ? JSON.stringify(styleDNA) : styleDNA,
         }),
