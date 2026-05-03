@@ -50,7 +50,7 @@ export async function action({ request }) {
 
   try {
     const body = await request.json();
-    const { mood, feeling, event, result, styleWords, bodyPref, closetItemIds, naiaPiece, closetItems } = body;
+    const { mood, feeling, event, result, styleDNA, bodyPref, closetItemIds, naiaPiece, closetItems } = body;
     console.log("OUTFIT-HISTORY DEBUG:", JSON.stringify({ hasClosetItems: !!closetItems, hasNaiaPiece: !!naiaPiece, closetItemsLength: closetItems?.length, naiaPieceTitle: naiaPiece?.title }));
   console.log("Outfit history received:", { hasClosetItems: !!closetItems, hasNaiaPiece: !!naiaPiece, closetItems, naiaPiece });
 
@@ -63,7 +63,7 @@ export async function action({ request }) {
         specificNeeds: result || null,
         styleFrom: "NAIA",
         bodyPreference: bodyPref || null,
-        styleDNA: styleWords ? JSON.stringify(styleWords) : null,
+        styleDNA: styleDNA ? JSON.stringify(styleDNA) : null,
       },
     });
     
