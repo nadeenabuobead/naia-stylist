@@ -390,10 +390,10 @@ export async function loader() {
     
     const bodyPatterns = Object.entries(bodyStats)
       .map(([preference, data]) => {
-        // Get all reviews from users with this preference (bodyPreference is on session)
+        // Get all reviews from users with this preference
         const preferenceSessions = reviews.filter(r => r.session?.bodyPreference === preference);
         
-        // Track piece performance for this preference
+        // Track piece performance
         const pieceStats = {};
         
         preferenceSessions.forEach(review => {
@@ -414,52 +414,73 @@ export async function loader() {
                 if (!pieceStats[item.productTitle]) {
                   pieceStats[item.productTitle] = {
                     name: item.productTitle,
-                    goodCount: 0,
-                    badCount: 0,
-                    totalRatings: 0,
-                    avgRating: 0,
+                    ratings: [],
                     wouldWear: 0,
-                    wouldWearCount: 0
+                    wouldWearCount: 0,
+                    positiveCount: 0,
+                    negativeFit: []
                   };
                 }
                 
                 const stats = pieceStats[item.productTitle];
                 
-                if (review.rating) {
-                  stats.totalRatings++;
-                  stats.avgRating = ((stats.avgRating * (stats.totalRatings - 1)) + review.rating) / stats.totalRatings;
-                  
-                  // Good = high rating + would wear
-                  if (review.rating >= 4 && review.wouldWearAgain) {
-                    stats.goodCount++;
-                  }
-                  // Bad = low rating or wouldn't wear
-                  if (review.rating < 3 || review.wouldWearAgain === false) {
-                    stats.badCount++;
-                  }
-                }
-                
+                if (review.rating) stats.ratings.push(review.rating);
                 if (review.wouldWearAgain !== null) {
                   stats.wouldWear += review.wouldWearAgain ? 1 : 0;
                   stats.wouldWearCount++;
+                }
+                if (review.workedTags && review.workedTags !== '[]') {
+                  stats.positiveCount++;
+                }
+                
+                // Track negative fit tags
+                if (review.didntWorkTags) {
+                  try {
+                    const tags = JSON.parse(review.didntWorkTags);
+                    tags.forEach(tag => {
+                      if (tag.toLowerCase().includes('clingy') ||
+                          tag.toLowerCase().includes('tight') ||
+                          tag.toLowerCase().includes('loose') ||
+                          tag.toLowerCase().includes('uncomfortable') ||
+                          tag.toLowerCase().includes('exposed')) {
+                        stats.negativeFit.push(tag);
+                      }
+                    });
+                  } catch (e) {}
                 }
               });
             }
           }
         });
         
-        // Calculate score for each piece (good performance - bad performance)
+        // Rank pieces - show ALL pieces with data, even if only 1 rating
         const rankedPieces = Object.values(pieceStats)
-          .filter(p => p.totalRatings >= 1)
-          .map(p => ({
-            ...p,
-            score: p.goodCount - p.badCount,
-            wearRate: p.wouldWearCount > 0 ? p.wouldWear / p.wouldWearCount : 0
-          }))
+          .filter(p => p.ratings.length >= 1)
+          .map(p => {
+            const avgRating = p.ratings.reduce((a, b) => a + b, 0) / p.ratings.length;
+            const wearRate = p.wouldWearCount > 0 ? (p.wouldWear / p.wouldWearCount) * 100 : 0;
+            const score = avgRating * 0.5 + (wearRate / 100) * 2.5 + (p.positiveCount * 0.3);
+            
+            // Count fit friction
+            const frictionCount = {};
+            p.negativeFit.forEach(tag => {
+              frictionCount[tag] = (frictionCount[tag] || 0) + 1;
+            });
+            
+            return {
+              name: p.name,
+              avgRating,
+              wearRate,
+              score,
+              ratingCount: p.ratings.length,
+              frictionTags: Object.entries(frictionCount).map(([tag, count]) => `${tag} x${count}`),
+              hasFriction: p.negativeFit.length > 0
+            };
+          })
           .sort((a, b) => b.score - a.score);
         
-        // Get fit concerns
-        const struggles = [];
+        // Get overall fit concerns
+        const allStruggles = [];
         preferenceSessions.forEach(r => {
           if (r.didntWorkTags) {
             try {
@@ -470,37 +491,40 @@ export async function loader() {
                     tag.toLowerCase().includes('loose') ||
                     tag.toLowerCase().includes('uncomfortable') ||
                     tag.toLowerCase().includes('exposed')) {
-                  struggles.push(tag);
+                  allStruggles.push(tag);
                 }
               });
             } catch (e) {}
           }
         });
         
-        const uniqueStruggles = [...new Set(struggles)];
+        // Count struggles
+        const struggleCount = {};
+        allStruggles.forEach(s => {
+          struggleCount[s] = (struggleCount[s] || 0) + 1;
+        });
+        const struggles = Object.entries(struggleCount).map(([tag, count]) => `${tag} x${count}`);
         
-        // Design implication - adjust confidence based on sample size
-        let implication = '';
+        // Design implication
         const prefLower = preference.toLowerCase();
         const userCount = data.count;
+        let implication = '';
         
-        if (userCount === 1) {
-          implication = 'Early directional signal only. Continue collecting feedback before using this as a design decision.';
+        if (rankedPieces.length === 0) {
+          implication = 'Continue collecting rated looks before drawing a design conclusion.';
         } else if (userCount <= 2) {
-          implication = 'Early preference signal. Continue collecting rated looks before drawing design conclusions.';
+          implication = 'Early directional signal only. Continue collecting feedback before using this as a design decision.';
         } else if (userCount <= 4) {
-          if (rankedPieces.length === 0) {
-            implication = 'Continue collecting rated looks before drawing a design conclusion.';
-          } else if (prefLower.includes('elongate') || prefLower.includes('leg')) {
-            implication = 'Early signal that vertical lines, longer silhouettes, or waist placement may support this preference. Continue testing before making design decisions.';
+          if (prefLower.includes('elongate') || prefLower.includes('leg')) {
+            implication = 'Early signal that vertical lines, higher waist placement, and longer silhouettes may support this fit preference. Continue testing before making final design decisions.';
           } else if (prefLower.includes('balance') || prefLower.includes('proportion')) {
-            implication = 'Early signal that pieces creating visual balance through strategic volume may support this preference. Continue testing.';
+            implication = 'Early signal that pieces creating visual balance through strategic volume may support this preference. Continue testing before making final design decisions.';
           } else if (prefLower.includes('structure') || prefLower.includes('define') || prefLower.includes('add structure')) {
-            implication = 'Early signal that tailoring, waist definition, or architectural lines may support this preference. Continue testing.';
+            implication = 'Early signal that tailoring, waist definition, or architectural lines may support this preference. Continue testing before making final design decisions.';
           } else if (prefLower.includes('comfort') || prefLower.includes('ease')) {
-            implication = 'Early signal that soft fabrics, relaxed fits, or forgiving silhouettes may support this preference. Continue testing.';
+            implication = 'Early signal that soft fabrics, relaxed fits, or forgiving silhouettes may support this preference. Continue testing before making final design decisions.';
           } else {
-            implication = 'Early preference signal. Continue testing pieces that support this fit need.';
+            implication = 'Early preference signal. Continue testing pieces that support this fit need before making final design decisions.';
           }
         } else {
           // 5+ users - more confident
@@ -517,28 +541,18 @@ export async function loader() {
           }
         }
         
-        // Determine piece signal state
-        let bestPieces = [];
-        let pieceSignal = 'Not enough rated looks yet to identify a clear piece signal';
-        
-        if (rankedPieces.length > 0) {
-          bestPieces = rankedPieces.filter(p => p.score > 0).slice(0, 3).map(p => p.name);
-          pieceSignal = bestPieces.length > 0 ? 'pieces' : 'Not enough rated looks yet to identify a clear piece signal';
-        } else if (preferenceSessions.length === 0) {
-          pieceSignal = 'No nAia piece signal yet';
-        }
-        
         return {
           preference,
           userCount: data.count,
-          bestPieces,
-          pieceSignal,
-          struggles: uniqueStruggles.length > 0 ? uniqueStruggles.slice(0, 3) : [],
-          implication,
           confidence: data.count <= 2 ? 'Low confidence' : 
                      data.count <= 4 ? 'Early signal' : 
                      data.count <= 9 ? 'Medium confidence' : 
-                     'Strong signal'
+                     'Strong signal',
+          bestPieces: rankedPieces.slice(0, 3),
+          piecesWithFriction: rankedPieces.filter(p => p.hasFriction).slice(0, 3),
+          struggles,
+          implication,
+          hasData: rankedPieces.length > 0
         };
       })
       .sort((a, b) => b.userCount - a.userCount)

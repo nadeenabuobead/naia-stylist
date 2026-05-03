@@ -421,24 +421,36 @@ function BodyPatternCard({ pattern }) {
       <div style={s.bodyCount}>
         {pattern.userCount} {pattern.userCount === 1 ? "user" : "users"} selected this preference
       </div>
-      {pattern.confidence && (
-        <div style={{ fontSize: "12px", color: "#999", marginTop: "4px", fontStyle: "italic" }}>
-          Confidence: {pattern.confidence}
-        </div>
-      )}
+      <div style={{ fontSize: "12px", color: "#999", marginTop: "4px", fontStyle: "italic" }}>
+        Confidence: {pattern.confidence}
+      </div>
       
       <div style={{ marginTop: "12px" }}>
         <div style={s.label}>Best-performing nAia pieces:</div>
-        {pattern.bestPieces && pattern.bestPieces.length > 0 ? (
+        {pattern.hasData && pattern.bestPieces && pattern.bestPieces.length > 0 ? (
           pattern.bestPieces.map((p, i) => (
-            <div key={i} style={{ fontSize: "14px", color: "#333", marginTop: "4px" }}>• {p}</div>
+            <div key={i} style={{ fontSize: "14px", color: "#333", marginTop: "4px" }}>
+              • {p.name} — {p.avgRating.toFixed(1)}/5, {Math.round(p.wearRate)}% would wear
+              {p.ratingCount <= 2 && <span style={{ fontSize: "12px", color: "#999", fontStyle: "italic" }}> (early signal)</span>}
+            </div>
           ))
         ) : (
           <div style={{ fontSize: "14px", color: "#999", marginTop: "4px", fontStyle: "italic" }}>
-            {pattern.pieceSignal || "Not enough rated looks yet to identify a clear piece signal"}
+            No nAia piece signal yet
           </div>
         )}
       </div>
+      
+      {pattern.hasData && pattern.piecesWithFriction && pattern.piecesWithFriction.length > 0 && (
+        <div style={{ marginTop: "12px" }}>
+          <div style={s.label}>Pieces with fit friction:</div>
+          {pattern.piecesWithFriction.map((p, i) => (
+            <div key={i} style={{ fontSize: "14px", color: "#d97706", marginTop: "4px" }}>
+              • {p.name} — {p.frictionTags.join(", ")}
+            </div>
+          ))}
+        </div>
+      )}
       
       <div style={{ marginTop: "12px" }}>
         <div style={s.label}>Fit concerns:</div>
@@ -451,14 +463,12 @@ function BodyPatternCard({ pattern }) {
         )}
       </div>
       
-      {pattern.implication && (
-        <div style={{ marginTop: "12px" }}>
-          <div style={s.label}>Design implication:</div>
-          <div style={{ fontSize: "14px", color: "#666", fontStyle: "italic", marginTop: "4px" }}>
-            {pattern.implication}
-          </div>
+      <div style={{ marginTop: "12px" }}>
+        <div style={s.label}>Design implication:</div>
+        <div style={{ fontSize: "14px", color: "#666", fontStyle: "italic", marginTop: "4px" }}>
+          {pattern.implication}
         </div>
-      )}
+      </div>
     </div>
   );
 }
