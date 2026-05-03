@@ -371,36 +371,61 @@ function QuoteCard({ quote }) {
 
 
 function DesignActionCard({ action }) {
+  const getPriorityColor = (priority) => {
+    if (priority === "High priority") return "#1a1816";
+    if (priority === "Medium priority") return "#8B7355";
+    if (priority === "Monitor") return "#9CA3AF";
+    return "#D4C4B0";
+  };
+  
+  const color = getPriorityColor(action.priority);
+  
   return (
     <div style={{
       padding: "20px",
-      border: `2px solid ${action.priority === "high" ? "#1a1816" : "#8B7355"}`,
+      border: `2px solid ${color}`,
       borderRadius: "4px",
       marginBottom: "16px",
     }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: "8px" }}>
-        <h4 style={{ margin: 0, fontFamily: "Cormorant Garamond", fontSize: "18px" }}>{action.piece}</h4>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: "12px" }}>
+        <h4 style={{ margin: 0, fontFamily: "Cormorant Garamond", fontSize: "20px", fontWeight: 600 }}>
+          {action.piece}
+        </h4>
         <span style={{
-          fontSize: "11px",
+          fontSize: "10px",
           textTransform: "uppercase",
-          letterSpacing: "1px",
-          padding: "4px 12px",
-          background: action.priority === "high" ? "#1a1816" : "#8B7355",
+          letterSpacing: "1.2px",
+          padding: "5px 12px",
+          background: color,
           color: "#faf9f7",
-          borderRadius: "2px",
+          borderRadius: "3px",
+          whiteSpace: "nowrap",
         }}>
           {action.priority}
         </span>
       </div>
-      <div style={{ fontSize: "16px", fontWeight: "bold", marginBottom: "4px" }}>
-        {action.action}
+      
+      <div style={{ fontSize: "14px", color: "#8B7355", marginBottom: "8px", fontWeight: 600 }}>
+        {action.actionType}: {action.action}
       </div>
-      <div style={{ fontSize: "14px", color: "#6b6b6b", lineHeight: "1.6" }}>
+      
+      <div style={{ fontSize: "14px", color: "#4a4a4a", lineHeight: "1.6", marginBottom: "10px" }}>
         {action.reason}
+      </div>
+      
+      <div style={{ 
+        fontSize: "13px", 
+        color: "#999", 
+        fontStyle: "italic",
+        paddingTop: "8px",
+        borderTop: "1px solid #f0f0f0"
+      }}>
+        Data: {action.data}
       </div>
     </div>
   );
 }
+
 
 // Styles
 const s = {
