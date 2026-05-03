@@ -421,17 +421,14 @@ function BodyPatternCard({ pattern }) {
       <div style={s.bodyCount}>
         {pattern.userCount} {pattern.userCount === 1 ? "user" : "users"} selected this preference
       </div>
-      <div style={{ fontSize: "12px", color: "#999", marginTop: "4px", fontStyle: "italic" }}>
-        Confidence: {pattern.confidence}
-      </div>
+
       
       <div style={{ marginTop: "12px" }}>
         <div style={s.label}>Best-performing nAia pieces:</div>
-        {pattern.hasData && pattern.bestPieces && pattern.bestPieces.length > 0 ? (
+        {pattern.bestPieces && pattern.bestPieces.length > 0 ? (
           pattern.bestPieces.map((p, i) => (
             <div key={i} style={{ fontSize: "14px", color: "#333", marginTop: "4px" }}>
-              • {p.name} — {p.avgRating.toFixed(1)}/5, {Math.round(p.wearRate)}% would wear
-              {p.ratingCount <= 2 && <span style={{ fontSize: "12px", color: "#999", fontStyle: "italic" }}> (early signal)</span>}
+              • {typeof p === 'string' ? p : p.name}
             </div>
           ))
         ) : (
@@ -441,16 +438,7 @@ function BodyPatternCard({ pattern }) {
         )}
       </div>
       
-      {pattern.hasData && pattern.piecesWithFriction && pattern.piecesWithFriction.length > 0 && (
-        <div style={{ marginTop: "12px" }}>
-          <div style={s.label}>Pieces with fit friction:</div>
-          {pattern.piecesWithFriction.map((p, i) => (
-            <div key={i} style={{ fontSize: "14px", color: "#d97706", marginTop: "4px" }}>
-              • {p.name} — {p.frictionTags.join(", ")}
-            </div>
-          ))}
-        </div>
-      )}
+
       
       <div style={{ marginTop: "12px" }}>
         <div style={s.label}>Fit concerns:</div>

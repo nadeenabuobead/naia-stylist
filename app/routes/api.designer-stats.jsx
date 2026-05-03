@@ -444,7 +444,7 @@ export async function loader() {
         return {
           preference,
           userCount: data.count,
-          bestPieces: piecePerformance.filter(p => p.score > 0).slice(0, 3).map(p => p.name),
+          bestPieces: piecePerformance.filter(p => p.score > 0).slice(0, 3),
           struggles: uniqueStruggles.length > 0 ? uniqueStruggles.slice(0, 3) : ['No repeated fit concerns yet'],
           implication
         };
