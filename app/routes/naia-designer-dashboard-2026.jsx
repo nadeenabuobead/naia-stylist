@@ -450,17 +450,17 @@ function DesignActionCard({ action }) {
     return "#D4C4B0";
   };
   
-  const color = getPriorityColor(action.priority);
+  const color = getPriorityColor(action.priority || action.confidenceBadge);
   
   return (
     <div style={{
-      padding: "24px",
+      padding: "22px",
       border: `2px solid ${color}`,
       borderRadius: "4px",
-      marginBottom: "20px",
+      marginBottom: "18px",
     }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: "16px" }}>
-        <h4 style={{ margin: 0, fontFamily: "Cormorant Garamond", fontSize: "22px", fontWeight: 600 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: "14px" }}>
+        <h4 style={{ margin: 0, fontFamily: "Cormorant Garamond", fontSize: "21px", fontWeight: 600 }}>
           {action.piece}
         </h4>
         <span style={{
@@ -474,56 +474,45 @@ function DesignActionCard({ action }) {
           whiteSpace: "nowrap",
           fontWeight: 600,
         }}>
-          {action.priority}
+          {action.confidenceBadge || action.priority}
         </span>
       </div>
       
-      <div style={{ fontSize: "15px", color: "#8B7355", marginBottom: "12px", fontWeight: 600 }}>
-        <span style={{ textTransform: "capitalize" }}>{action.actionType}:</span> {action.action}
+      <div style={{ fontSize: "14px", color: "#8B7355", marginBottom: "14px", fontWeight: 600 }}>
+        {action.actionType}: {action.action}
       </div>
       
-      <div style={{ marginBottom: "12px" }}>
-        <div style={{ fontSize: "13px", fontWeight: 600, color: "#1a1816", marginBottom: "4px" }}>
-          What worked:
-        </div>
-        <div style={{ fontSize: "14px", color: "#333", lineHeight: "1.7" }}>
-          {action.whatWorked || action.whyItWorks}
-        </div>
+      <div style={{ marginBottom: "10px" }}>
+        <span style={{ fontSize: "12px", fontWeight: 600, color: "#666", marginRight: "8px" }}>Performance:</span>
+        <span style={{ fontSize: "13px", color: "#333" }}>{action.performance}</span>
       </div>
       
-      {action.watchOut && (
-        <div style={{ marginBottom: "12px" }}>
-          <div style={{ fontSize: "13px", fontWeight: 600, color: "#d97706", marginBottom: "4px" }}>
-            What to watch:
-          </div>
-          <div style={{ fontSize: "14px", color: "#92400e", lineHeight: "1.7" }}>
-            {action.whatToWatch || action.watchOut}
-          </div>
-        </div>
-      )}
+      <div style={{ marginBottom: "10px" }}>
+        <span style={{ fontSize: "12px", fontWeight: 600, color: "#2a9d8f", marginRight: "8px" }}>Liked:</span>
+        <span style={{ fontSize: "13px", color: "#333" }}>{action.liked}</span>
+      </div>
+      
+      <div style={{ marginBottom: "10px" }}>
+        <span style={{ fontSize: "12px", fontWeight: 600, color: "#d97706", marginRight: "8px" }}>Watch:</span>
+        <span style={{ fontSize: "13px", color: "#92400e" }}>{action.watch}</span>
+      </div>
       
       <div style={{ marginBottom: "14px" }}>
-        <div style={{ fontSize: "13px", fontWeight: 600, color: "#1a1816", marginBottom: "4px" }}>
-          Recommended next step:
-        </div>
-        <div style={{ fontSize: "14px", color: "#333", lineHeight: "1.7" }}>
-          {action.nextStep || action.recommendedFix}
-        </div>
+        <span style={{ fontSize: "12px", fontWeight: 600, color: "#1a1816", marginRight: "8px" }}>Next step:</span>
+        <span style={{ fontSize: "13px", color: "#333" }}>{action.nextStep}</span>
       </div>
       
       <div style={{ 
-        fontSize: "13px", 
+        fontSize: "12px", 
         color: "#999", 
-        fontStyle: "italic",
-        paddingTop: "12px",
+        paddingTop: "10px",
         borderTop: "1px solid #f0f0f0"
       }}>
-        <strong>Data:</strong> {action.data}
+        {action.data}
       </div>
     </div>
   );
 }
-
 
 
 // Styles
