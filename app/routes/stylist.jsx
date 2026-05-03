@@ -1961,7 +1961,6 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
 
                 {/* ─── Confidence Rating ─── */}
                 {customer && lastHistoryId && (
-                {console.log("DEBUG - customer:", !!customer, "lastHistoryId:", !!lastHistoryId)}
                   <>
                     <div style={s.divider} />
                     <ConfidenceRating
