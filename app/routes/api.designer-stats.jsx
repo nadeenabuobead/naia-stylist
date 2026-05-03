@@ -355,6 +355,7 @@ export async function loader() {
 
     // 10. Body Patterns - with piece performance
     const bodyStats = {};
+    console.log("🔍 STARTING BODY STATS CALCULATION");
     
     console.log("🔍 BODY PREFS DEBUG - Body preferences found:", reviews.map(r => r.session.bodyPreference).filter(Boolean));
     reviews.filter(r => r.session?.suggestions?.length > 0).forEach(review => {
