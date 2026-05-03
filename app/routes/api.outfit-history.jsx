@@ -76,9 +76,21 @@ export async function action({ request }) {
         // Add closet items
         if (closetItems && Array.isArray(closetItems)) {
           closetItems.forEach(item => {
+            // Map category to valid OutfitItemType enum
+            let itemType = "TOP"; // default
+            const cat = (item.category || "").toUpperCase();
+            if (cat.includes("TOP") || cat.includes("SHIRT") || cat.includes("BLOUSE")) itemType = "TOP";
+            else if (cat.includes("BOTTOM") || cat.includes("PANT") || cat.includes("JEAN") || cat.includes("SKIRT")) itemType = "BOTTOM";
+            else if (cat.includes("DRESS")) itemType = "DRESS";
+            else if (cat.includes("OUTERWEAR") || cat.includes("JACKET") || cat.includes("COAT") || cat.includes("BLAZER")) itemType = "OUTERWEAR";
+            else if (cat.includes("SHOE") || cat.includes("BOOT") || cat.includes("SNEAKER")) itemType = "SHOES";
+            else if (cat.includes("BAG") || cat.includes("PURSE") || cat.includes("TOTE")) itemType = "BAG";
+            else if (cat.includes("JEWELRY") || cat.includes("NECKLACE") || cat.includes("EARRING")) itemType = "JEWELRY";
+            else if (cat.includes("ACCESSORY") || cat.includes("SCARF") || cat.includes("HAT")) itemType = "ACCESSORY";
+            
             suggestionItems.push({
-              closetItemId: item.id ? parseInt(item.id) : null,
-              itemType: item.category || "clothing",
+              closetItemId: item.id && !isNaN(parseInt(item.id)) ? parseInt(item.id) : null,
+              itemType: itemType,
               productTitle: item.name
             });
           });
@@ -86,9 +98,19 @@ export async function action({ request }) {
         
         // Add nAia piece
         if (naiaPiece && naiaPiece.title) {
+          // Map nAia category to valid enum
+          let itemType = "TOP"; // default
+          const cat = (naiaPiece.category || "").toUpperCase();
+          if (cat.includes("TOP") || cat.includes("SHIRT") || cat.includes("BLOUSE")) itemType = "TOP";
+          else if (cat.includes("BOTTOM") || cat.includes("PANT") || cat.includes("JEAN") || cat.includes("SKIRT")) itemType = "BOTTOM";
+          else if (cat.includes("DRESS")) itemType = "DRESS";
+          else if (cat.includes("OUTERWEAR") || cat.includes("JACKET") || cat.includes("COAT")) itemType = "OUTERWEAR";
+          else if (cat.includes("SHOE")) itemType = "SHOES";
+          else if (cat.includes("BAG")) itemType = "BAG";
+          
           suggestionItems.push({
             productTitle: naiaPiece.title,
-            itemType: naiaPiece.category || "clothing"
+            itemType: itemType
           });
         }
         
