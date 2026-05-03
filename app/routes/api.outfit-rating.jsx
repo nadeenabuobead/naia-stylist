@@ -35,6 +35,7 @@ export async function action({ request }) {
   console.log("Review data received:", { workedTags: body.workedTags, didntWorkTags: body.didntWorkTags });
   console.log("Review data received:", { workedTags: body.workedTags, didntWorkTags: body.didntWorkTags });
   const { historyId, overallReaction, feltLikeMe, desiredFeelingAchieved, wouldWearAgain, physicalComfort, workedTags, didntWorkTags, additionalNotes, mood, feeling, event, styleWords } = body;
+  console.log("Review historyId received:", historyId);
   if (!historyId || overallReaction === undefined) {
     return Response.json({ error: "historyId and confidence required" }, { status: 400, headers: CORS });
   }
@@ -62,6 +63,14 @@ export async function action({ request }) {
     } else {
   // Debug: Check the session being linked
   const linkedSession = await prisma.stylingSession.findUnique({ where: { id: historyId } });
+  const linkedSession = await prisma.stylingSession.findUnique({ 
+    where: { id: historyId }, 
+    include: { suggestions: { include: { items: true } } } 
+  }); 
+  console.log("Session being linked:", { 
+    sessionId: historyId, 
+    pieces: linkedSession?.suggestions?.[0]?.items?.map(i => i.productTitle || `Closet ${i.closetItemId}`) || [] 
+  });
   console.log("Review linking to session:", { historyId, bodyPref: linkedSession?.bodyPreference, styleDNA: linkedSession?.styleDNA });
   review = await prisma.postOutfitReview.create({
     data: {
