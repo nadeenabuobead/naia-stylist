@@ -257,6 +257,14 @@ export async function loader() {
     // 3. Mixed Signal
     const mixedPieces = pieces
       .filter(p => p.ratingCount >= 2)
+      .filter(p => {
+        const nameLower = p.name.toLowerCase();
+        return !nameLower.includes('white top') && 
+               !nameLower.includes('black top') && 
+               !nameLower.includes('your ') &&
+               nameLower !== 'top' &&
+               nameLower !== 'bottom';
+      })
       .filter(p => 
         (p.avgRating >= 4 && p.rewear < 0.5) || 
         (p.avgRating < 3.5 && p.rewear >= 0.7)
@@ -273,6 +281,14 @@ export async function loader() {
     // 4. Underperforming
     const underperformingPieces = pieces
       .filter(p => p.ratingCount >= 2)
+      .filter(p => {
+        const nameLower = p.name.toLowerCase();
+        return !nameLower.includes('white top') && 
+               !nameLower.includes('black top') && 
+               !nameLower.includes('your ') &&
+               nameLower !== 'top' &&
+               nameLower !== 'bottom';
+      })
       .filter(p => p.avgRating < 3 || p.rewear < 0.3)
       .map(p => ({
         ...p,
