@@ -424,11 +424,11 @@ export async function loader() {
       .slice(0, 10);
 
 
-    // Design Actions - final refined version with proper confidence and specificity
+    // Design Actions - comprehensive: what worked + what didn't + what to do
     const designActions = [];
-    const actionsMap = new Map(); // Avoid duplicates
+    const actionsMap = new Map();
     
-    // Helper to determine confidence level based on review count
+    // Helper: confidence based on review count
     const getConfidence = (reviewCount) => {
       if (reviewCount <= 2) return "Low Confidence";
       if (reviewCount <= 4) return "Early Signal";
@@ -436,29 +436,35 @@ export async function loader() {
       return "High Confidence";
     };
     
-    // Helper to determine if occasion is brand-elevated
+    // Helper: is this a brand-elevated occasion?
     const isBrandOccasion = (occasions) => {
       const elevated = ["date", "night out", "dinner", "event", "formal", "work-to-evening"];
       return occasions.some(occ => elevated.includes(occ.toLowerCase()));
     };
     
-    // Helper to get specific content action based on occasions
+    // Helper: get specific content action from occasions
     const getContentAction = (occasions) => {
       if (!occasions || occasions.length === 0) return "Create styling content";
       
       const occ = occasions.map(o => o.toLowerCase());
+      const uniqueOcc = [...new Set(occ)].slice(0, 2);
       
-      if (occ.includes("night out") || occ.includes("date")) return "Create night-out styling content";
-      if (occ.includes("weekend")) return "Create weekend styling content";
-      if (occ.includes("errands") || occ.includes("travel")) return "Create errands/travel styling content";
-      if (occ.includes("work")) return "Create work styling content";
-      if (occ.includes("brunch") || occ.includes("casual")) return "Create casual styling content";
+      if (uniqueOcc.includes("night out") || uniqueOcc.includes("date")) return `Create ${uniqueOcc.join("/")} styling content`;
+      if (uniqueOcc.includes("weekend")) {
+        if (uniqueOcc.includes("errands")) return "Create errands/weekend styling content";
+        return "Create weekend styling content";
+      }
+      if (uniqueOcc.includes("errands")) {
+        if (uniqueOcc.includes("travel")) return "Create errands/travel styling content";
+        return "Create errands styling content";
+      }
+      if (uniqueOcc.includes("work")) return "Create work styling content";
       
-      return `Create ${occasions[0]} styling content`;
+      return `Create ${uniqueOcc.join("/")} styling content`;
     };
     
-    // Helper to get most common feedback
-    const getTopFeedback = (arr, count = 3) => {
+    // Helper: get top feedback with counts
+    const getTopFeedback = (arr, count = 5) => {
       const freq = {};
       arr.forEach(item => {
         if (item && item !== '[]') {
@@ -471,189 +477,210 @@ export async function loader() {
         .slice(0, count);
     };
     
+    // Helper: translate negative tag to recommended fix
+    const getRecommendedFix = (tag) => {
+      const lower = tag.toLowerCase();
+      
+      if (lower.includes('clingy')) return "Review fabric, lining, pattern ease, or fit. Consider a less clingy fabric or looser cut.";
+      if (lower.includes('uncomfortable')) return "Review comfort, construction, seam placement, fabric weight, or fit.";
+      if (lower.includes('exposed')) return "Adjust neckline, length, transparency, coverage, or offer a more covered styling option.";
+      if (lower.includes('structured') || lower.includes('stiff')) return "Test softer construction, lighter interfacing, more fluid fabric, or relaxed styling.";
+      if (lower.includes('lacked shape') || lower.includes('shapeless')) return "Add waist definition, darts, tailoring, belt option, or stronger silhouette.";
+      if (lower.includes('plain') || lower.includes('boring')) return "Add stronger detail, colorway, texture, styling layer, or statement pairing.";
+      if (lower.includes('too much')) return "Create toned-down styling content or consider a simpler version.";
+      if (lower.includes('hard to wear')) return "Create more wearable styling examples before changing the design.";
+      if (lower.includes('wrong for')) return "Reposition the piece for a better occasion based on where it performs best.";
+      if (lower.includes("didn't create") || lower.includes("didn't feel")) return "Review style DNA match or reposition emotional styling language.";
+      
+      return `Address "${tag}" feedback through fit, styling, or positioning adjustments.`;
+    };
+    
     pieces.forEach(piece => {
       const reviewCount = piece.ratingCount;
       const wouldWear = Math.round(piece.rewear * 100);
       const rating = piece.avgRating;
       
-      // Skip if no reviews
       if (reviewCount === 0) return;
       
-      // Get feedback
       const negativeFeedback = getTopFeedback(piece.negativeComments);
       const positiveFeedback = getTopFeedback(piece.positiveComments);
       const occasions = piece.bestOccasions || [];
       const confidence = getConfidence(reviewCount);
       
-      // CASE 1: 1-2 reviews = Low Confidence (very cautious wording)
+      // Build the action card
+      let actionType, primaryAction, whyItWorks, watchOut, recommendedFix, dataLine;
+      
+      // === CASE 1: 1-2 reviews = Low Confidence ===
       if (reviewCount <= 2) {
-        if (rating >= 4.5 && wouldWear >= 70) {
-          const occasionText = occasions.length > 0 ? occasions[0] : '';
-          
-          let reason;
-          if (reviewCount === 1) {
-            reason = `Initial positive signal: 1 review with a ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life.`;
-            if (occasionText) {
-              reason += ` The only occasion signal so far is ${occasionText}, so more reviews are needed before making production or campaign decisions.`;
-            } else {
-              reason += ` More reviews are needed before making production or campaign decisions.`;
-            }
-          } else {
-            reason = `Initial positive signals: ${reviewCount} reviews with a ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life${occasionText ? ` for ${occasionText}` : ''}. More reviews are needed before making production or campaign decisions.`;
-          }
-          
-          actionsMap.set(piece.name, {
-            piece: piece.name,
-            actionType: "Research action",
-            action: "Continue gathering feedback",
-            reason,
-            watchOut: null,
-            data: `${reviewCount} review${reviewCount === 1 ? '' : 's'}, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life`,
-            priority: "Low Confidence"
-          });
+        actionType = "Validation action";
+        primaryAction = "Continue gathering feedback";
+        
+        if (reviewCount === 1) {
+          whyItWorks = `Initial rating is positive (${rating.toFixed(1)}/5), but only 1 review is available${occasions.length > 0 ? `. The only occasion signal so far is ${occasions[0]}` : ''}.`;
         } else {
-          actionsMap.set(piece.name, {
-            piece: piece.name,
-            actionType: "Research action",
-            action: "Monitor closely",
-            reason: `Only ${reviewCount} review${reviewCount === 1 ? '' : 's'} so far. Gather more data before making any decisions.`,
-            watchOut: null,
-            data: `${reviewCount} review${reviewCount === 1 ? '' : 's'}, ${rating.toFixed(1)}/5 rating`,
-            priority: "Low Confidence"
-          });
+          whyItWorks = `Initial ratings are positive (${rating.toFixed(1)}/5 average), but only ${reviewCount} reviews are available.`;
         }
-        return;
-      }
-      
-      // CASE 2: 3-4 reviews = Early Signal (content/testing only)
-      if (reviewCount <= 4) {
-        if (rating >= 4.5 && wouldWear >= 70) {
-          const isBrand = isBrandOccasion(occasions);
-          const occasionText = occasions.slice(0, 2).join(" and ");
-          
-          // Get specific content action based on occasions
-          let primaryAction = isBrand ? "Test campaign styling" : getContentAction(occasions);
-          let actionType = "Content action";
-          
-          let reason = `Strong early response: ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life${occasionText ? `, especially for ${occasionText}` : ''}.`;
-          
-          // IMPORTANT: Add visible watch-out for negative feedback
-          let watchOut = null;
-          if (negativeFeedback.length > 0) {
-            const [feedback, count] = negativeFeedback[0];
-            
-            if (feedback.toLowerCase().includes('clingy')) {
-              watchOut = `${count} user${count > 1 ? 's' : ''} mentioned "too clingy," so continue monitoring comfort and fit.`;
-            } else if (feedback.toLowerCase().includes('exposed')) {
-              watchOut = `${count} user${count > 1 ? 's' : ''} mentioned "${feedback}" - consider coverage adjustments.`;
-            } else if (feedback.toLowerCase().includes('uncomfortable')) {
-              watchOut = `${count} user${count > 1 ? 's' : ''} mentioned comfort issues - monitor fabric and fit.`;
-            } else {
-              watchOut = `${count} user${count > 1 ? 's' : ''} mentioned "${feedback}" - continue monitoring before scaling production.`;
-            }
-          }
-          
-          actionsMap.set(piece.name, {
-            piece: piece.name,
-            actionType,
-            action: primaryAction,
-            reason,
-            watchOut,
-            data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life${negativeFeedback.length > 0 ? `, ${negativeFeedback[0][1]} mention${negativeFeedback[0][1] > 1 ? 's' : ''} of "${negativeFeedback[0][0]}"` : ''}`,
-            priority: "Early Signal"
-          });
-        } else {
-          actionsMap.set(piece.name, {
-            piece: piece.name,
-            actionType: "Research action",
-            action: "Continue gathering feedback",
-            reason: `${reviewCount} reviews so far. Need more data to make confident recommendations.`,
-            watchOut: null,
-            data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life`,
-            priority: "Early Signal"
-          });
-        }
-        return;
-      }
-      
-      // CASE 3: 5-9 reviews = Medium Confidence
-      if (reviewCount <= 9) {
-        if (rating >= 4.5 && wouldWear >= 70) {
-          const isBrand = isBrandOccasion(occasions);
-          const occasionText = occasions.slice(0, 2).join(" and ");
-          
-          let primaryAction = isBrand 
-            ? "Feature in campaign"
-            : "Feature in everyday styling content";
-          
-          let reason = `Strong performance: ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life${occasionText ? `, best for ${occasionText}` : ''}.`;
-          
-          let watchOut = null;
-          if (negativeFeedback.length > 0 && negativeFeedback[0][1] >= 2) {
-            const [feedback, count] = negativeFeedback[0];
-            
-            if (feedback.toLowerCase().includes('clingy')) {
-              watchOut = `${count} users mentioned "too clingy" - monitor comfort and fabric behavior before major production increase.`;
-            } else {
-              watchOut = `${count} users mentioned "${feedback}" - address this feedback before major production increase.`;
-            }
-          }
-          
-          actionsMap.set(piece.name, {
-            piece: piece.name,
-            actionType: isBrand ? "Marketing action" : "Content action",
-            action: primaryAction,
-            reason,
-            watchOut,
-            data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life${negativeFeedback.length > 0 ? `, ${negativeFeedback[0][1]} mention${negativeFeedback[0][1] > 1 ? 's' : ''} of "${negativeFeedback[0][0]}"` : ''}`,
-            priority: "Medium Confidence"
-          });
-        } else if (rating >= 4.0 && wouldWear < 50) {
-          actionsMap.set(piece.name, {
-            piece: piece.name,
-            actionType: "Styling action",
-            action: "Show more wearable outfit examples",
-            reason: `Users like the piece (${rating.toFixed(1)}/5 rating), but only ${wouldWear}% would wear in real life. This suggests a styling clarity issue.`,
-            watchOut: null,
-            data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, only ${wouldWear}% would wear in real life`,
-            priority: "Medium Confidence"
-          });
-        }
-        return;
-      }
-      
-      // CASE 4: 10+ reviews = High Confidence
-      if (rating >= 4.5 && wouldWear >= 70) {
-        const isBrand = isBrandOccasion(occasions);
-        const occasionText = occasions.slice(0, 2).join(" and ");
         
-        let primaryAction = isBrand 
-          ? "Feature in campaign"
-          : "Feature in wardrobe basics edit";
+        watchOut = "Not enough data yet to identify reliable fit, styling, or production issues.";
+        recommendedFix = "Collect more ratings before deciding whether to feature, adjust, restock, or reposition.";
         
-        let actionType = isBrand ? "Marketing action" : "Merchandising action";
-        
-        let reason = `Proven strong performance: ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life across ${reviewCount} reviews${occasionText ? `, best for ${occasionText}` : ''}.`;
-        
-        let watchOut = null;
-        if (negativeFeedback.length > 0 && negativeFeedback[0][1] >= 3) {
-          const [feedback, count] = negativeFeedback[0];
-          watchOut = `${count} users mentioned "${feedback}" - address in next production run.`;
-        }
+        const positiveTags = positiveFeedback.map(([tag]) => tag).join(", ");
+        dataLine = `${reviewCount} review${reviewCount === 1 ? '' : 's'}, ${rating.toFixed(1)}/5 rating${wouldWear ? `, ${wouldWear}% would wear in real life` : ''}${positiveTags ? `, positive tags: "${positiveTags}"` : ''}`;
         
         actionsMap.set(piece.name, {
           piece: piece.name,
           actionType,
           action: primaryAction,
-          reason,
+          whyItWorks,
           watchOut,
-          data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life${positiveFeedback.length > 0 ? `, top feedback: "${positiveFeedback[0][0]}"` : ''}`,
-          priority: "High Confidence"
+          recommendedFix,
+          data: dataLine,
+          priority: confidence
+        });
+        return;
+      }
+      
+      // === CASE 2: 3-4 reviews = Early Signal ===
+      if (reviewCount <= 4) {
+        const isBrand = isBrandOccasion(occasions);
+        const occasionText = occasions.slice(0, 2).join(" and ");
+        
+        if (rating >= 4.5 && wouldWear >= 70) {
+          actionType = "Content action";
+          primaryAction = isBrand ? "Test campaign styling" : getContentAction(occasions);
+          
+          whyItWorks = `Strong early response with a ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life.`;
+          if (occasionText) whyItWorks += ` Best occasion signals are ${occasionText}.`;
+          
+          // Add positive tags if any
+          if (positiveFeedback.length > 0) {
+            const topPositive = positiveFeedback.slice(0, 2).map(([tag]) => tag).join('", "');
+            whyItWorks += ` Users mentioned "${topPositive}."`;
+          }
+          
+          // Watch-out and fix from negative feedback
+          if (negativeFeedback.length > 0) {
+            const [negTag, negCount] = negativeFeedback[0];
+            watchOut = `${negCount} user${negCount > 1 ? 's' : ''} mentioned "${negTag}."`;
+            recommendedFix = `Monitor ${negTag.toLowerCase().includes('clingy') || negTag.toLowerCase().includes('uncomfortable') ? 'fit and fabric comfort' : 'this feedback'}. If this repeats, ${getRecommendedFix(negTag).toLowerCase()}`;
+          } else {
+            watchOut = null;
+            recommendedFix = `Continue gathering feedback while using in ${occasionText || 'styling'} content.`;
+          }
+          
+          const positiveTags = positiveFeedback.map(([tag]) => tag).join('", "');
+          const negativeTags = negativeFeedback.map(([tag]) => tag).join('", "');
+          dataLine = `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life${positiveTags ? `, positive tags: "${positiveTags}"` : ''}${negativeTags ? `, negative tags: "${negativeTags}"` : ''}`;
+          
+          actionsMap.set(piece.name, {
+            piece: piece.name,
+            actionType,
+            action: primaryAction,
+            whyItWorks,
+            watchOut,
+            recommendedFix,
+            data: dataLine,
+            priority: confidence
+          });
+        } else {
+          actionType = "Validation action";
+          primaryAction = "Continue gathering feedback";
+          whyItWorks = `${reviewCount} reviews collected so far (${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life).`;
+          watchOut = "Not enough data to confidently recommend production or campaign use.";
+          recommendedFix = "Gather more reviews to identify patterns in fit, styling, or occasion performance.";
+          dataLine = `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life`;
+          
+          actionsMap.set(piece.name, {
+            piece: piece.name,
+            actionType,
+            action: primaryAction,
+            whyItWorks,
+            watchOut,
+            recommendedFix,
+            data: dataLine,
+            priority: confidence
+          });
+        }
+        return;
+      }
+      
+      // === CASE 3: 5-9 reviews = Medium Confidence ===
+      if (reviewCount <= 9) {
+        if (rating >= 4.5 && wouldWear >= 70) {
+          const isBrand = isBrandOccasion(occasions);
+          const occasionText = occasions.slice(0, 2).join(" and ");
+          
+          actionType = isBrand ? "Marketing action" : "Content action";
+          primaryAction = isBrand ? "Feature in campaign" : "Feature in everyday styling content";
+          
+          whyItWorks = `Strong performance with ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life across ${reviewCount} reviews.`;
+          if (occasionText) whyItWorks += ` Best for ${occasionText}.`;
+          
+          if (negativeFeedback.length > 0 && negativeFeedback[0][1] >= 2) {
+            const [negTag, negCount] = negativeFeedback[0];
+            watchOut = `${negCount} users mentioned "${negTag}."`;
+            recommendedFix = getRecommendedFix(negTag) + " Address before major production increase.";
+          } else {
+            watchOut = null;
+            recommendedFix = `Consider featuring in ${isBrand ? 'campaign' : 'styling content'} and increasing availability.`;
+          }
+          
+          const positiveTags = positiveFeedback.slice(0, 3).map(([tag]) => tag).join('", "');
+          const negativeTags = negativeFeedback.map(([tag]) => tag).join('", "');
+          dataLine = `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life${positiveTags ? `, positive tags: "${positiveTags}"` : ''}${negativeTags ? `, negative tags: "${negativeTags}"` : ''}`;
+          
+          actionsMap.set(piece.name, {
+            piece: piece.name,
+            actionType,
+            action: primaryAction,
+            whyItWorks,
+            watchOut,
+            recommendedFix,
+            data: dataLine,
+            priority: confidence
+          });
+        }
+        return;
+      }
+      
+      // === CASE 4: 10+ reviews = High Confidence ===
+      if (rating >= 4.5 && wouldWear >= 70) {
+        const isBrand = isBrandOccasion(occasions);
+        const occasionText = occasions.slice(0, 2).join(" and ");
+        
+        actionType = isBrand ? "Marketing action" : "Merchandising action";
+        primaryAction = isBrand ? "Feature in campaign" : "Feature in wardrobe basics edit";
+        
+        whyItWorks = `Proven strong performance: ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life across ${reviewCount} reviews.`;
+        if (occasionText) whyItWorks += ` Best for ${occasionText}.`;
+        
+        if (negativeFeedback.length > 0 && negativeFeedback[0][1] >= 3) {
+          const [negTag, negCount] = negativeFeedback[0];
+          watchOut = `${negCount} users mentioned "${negTag}."`;
+          recommendedFix = getRecommendedFix(negTag) + " Address in next production run.";
+        } else {
+          watchOut = null;
+          recommendedFix = `Scale production and feature prominently in ${isBrand ? 'brand campaign' : 'core collection'}.`;
+        }
+        
+        const positiveTags = positiveFeedback.slice(0, 3).map(([tag]) => tag).join('", "');
+        const negativeTags = negativeFeedback.map(([tag]) => tag).join('", "');
+        dataLine = `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear in real life${positiveTags ? `, top positive: "${positiveTags}"` : ''}${negativeTags ? `, negative tags: "${negativeTags}"` : ''}`;
+        
+        actionsMap.set(piece.name, {
+          piece: piece.name,
+          actionType,
+          action: primaryAction,
+          whyItWorks,
+          watchOut,
+          recommendedFix,
+          data: dataLine,
+          priority: confidence
         });
       }
     });
     
-    // Convert map to array and sort by priority (High Confidence first, Low Confidence last)
+    // Sort by priority
     const priorityOrder = { 
       "High Confidence": 1, 
       "Medium Confidence": 2, 
@@ -663,8 +690,6 @@ export async function loader() {
     
     actionsMap.forEach(action => designActions.push(action));
     designActions.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
-    
-    // Limit to top 8
     designActions.splice(8);
 
 
