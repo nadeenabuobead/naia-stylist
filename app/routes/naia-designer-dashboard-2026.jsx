@@ -161,6 +161,17 @@ export default function DesignerDashboard() {
 
       {/* Design Actions */}
       <Section title="Design Actions" desc="Recommended next steps">
+        <div style={{ 
+          fontSize: "13px", 
+          color: "#8B7355", 
+          backgroundColor: "#faf9f7", 
+          padding: "12px 16px", 
+          borderLeft: "3px solid #8B7355",
+          marginBottom: "20px",
+          lineHeight: "1.6"
+        }}>
+          <strong>Note:</strong> Recommendations become more confident after 5+ reviews per piece. Early signals should guide testing and styling content, not final production decisions.
+        </div>
         {data.designActions && data.designActions.length > 0 ? (
           data.designActions.map((action, i) => (
             <DesignActionCard key={i} action={action} />

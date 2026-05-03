@@ -424,12 +424,13 @@ export async function loader() {
       .slice(0, 10);
 
 
-    // Design Actions - data-driven with confidence levels
+    // Design Actions - data-driven with proper confidence thresholds
     const designActions = [];
     const actionsMap = new Map(); // Avoid duplicates
     
     // Helper to determine confidence level based on review count
     const getConfidence = (reviewCount) => {
+      if (reviewCount <= 2) return "Low Confidence";
       if (reviewCount <= 4) return "Early Signal";
       if (reviewCount <= 9) return "Medium Confidence";
       return "High Confidence";
@@ -467,52 +468,84 @@ export async function loader() {
       const negativeFeedback = getTopFeedback(piece.negativeComments);
       const positiveFeedback = getTopFeedback(piece.positiveComments);
       const occasions = piece.bestOccasions || [];
+      const confidence = getConfidence(reviewCount);
       
-      // RULE 1: Fewer than 5 reviews = Low Confidence / Early Signal
-      if (reviewCount <= 4) {
-        // Check for strong early performance
+      // CASE 1: 1-2 reviews = Low Confidence (softer wording)
+      if (reviewCount <= 2) {
         if (rating >= 4.5 && wouldWear >= 70) {
-          const isBrand = isBrandOccasion(occasions);
-          const occasionText = occasions.slice(0, 2).join(" and ");
+          const occasionText = occasions.length > 0 ? occasions[0] : '';
           
-          let primaryAction = isBrand 
-            ? "Feature in campaign (pending more data)"
-            : "Create everyday styling content";
-          
-          let reason = `Strong early response: ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life${occasionText ? `, especially for ${occasionText}` : ''}.`;
-          
-          // Add watch-out if there's negative feedback
-          let watchOut = null;
-          if (negativeFeedback.length > 0) {
-            const [feedback, count] = negativeFeedback[0];
-            watchOut = `${count} user${count > 1 ? 's' : ''} mentioned "${feedback}" - monitor before scaling production.`;
-          }
-          
-          actionsMap.set(piece.name, {
-            piece: piece.name,
-            actionType: isBrand ? "Marketing action" : "Content action",
-            action: primaryAction,
-            reason,
-            watchOut,
-            data: `${reviewCount} review${reviewCount === 1 ? '' : 's'}, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear${negativeFeedback.length > 0 ? `, ${negativeFeedback[0][1]} mention${negativeFeedback[0][1] > 1 ? 's' : ''} of "${negativeFeedback[0][0]}"` : ''}`,
-            priority: "Early Signal"
-          });
-        } else {
-          // Not strong enough for early recommendation
           actionsMap.set(piece.name, {
             piece: piece.name,
             actionType: "Research action",
             action: "Continue gathering feedback",
-            reason: `Only ${reviewCount} review${reviewCount === 1 ? '' : 's'} so far. Need more data to make confident recommendations.`,
+            reason: `Initial positive signal: ${reviewCount} review${reviewCount === 1 ? '' : 's'} with a ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear response${occasionText ? ` for ${occasionText}` : ''}. More reviews are needed before making production or campaign decisions.`,
             watchOut: null,
             data: `${reviewCount} review${reviewCount === 1 ? '' : 's'}, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear`,
+            priority: "Low Confidence"
+          });
+        } else {
+          actionsMap.set(piece.name, {
+            piece: piece.name,
+            actionType: "Research action",
+            action: "Monitor closely",
+            reason: `Only ${reviewCount} review${reviewCount === 1 ? '' : 's'} so far. Gather more data before making any decisions.`,
+            watchOut: null,
+            data: `${reviewCount} review${reviewCount === 1 ? '' : 's'}, ${rating.toFixed(1)}/5 rating`,
             priority: "Low Confidence"
           });
         }
         return;
       }
       
-      // RULE 2: 5-9 reviews = Medium Confidence
+      // CASE 2: 3-4 reviews = Early Signal (content/testing only, not production)
+      if (reviewCount <= 4) {
+        if (rating >= 4.5 && wouldWear >= 70) {
+          const isBrand = isBrandOccasion(occasions);
+          const occasionText = occasions.slice(0, 2).join(" and ");
+          
+          // Always recommend content/testing for 3-4 reviews, not production
+          let primaryAction = "Create everyday styling content";
+          let actionType = "Content action";
+          
+          if (isBrand) {
+            primaryAction = "Test campaign styling";
+            actionType = "Content action";
+          }
+          
+          let reason = `Strong early response: ${rating.toFixed(1)}/5 rating and ${wouldWear}% would wear in real life${occasionText ? `, especially for ${occasionText}` : ''}.`;
+          
+          // Add watch-out for negative feedback (visible, not just in data)
+          let watchOut = null;
+          if (negativeFeedback.length > 0) {
+            const [feedback, count] = negativeFeedback[0];
+            watchOut = `${count} user${count > 1 ? 's' : ''} mentioned "${feedback}" - continue monitoring ${feedback.toLowerCase().includes('clingy') ? 'comfort and fabric behavior' : 'this feedback'} before scaling production.`;
+          }
+          
+          actionsMap.set(piece.name, {
+            piece: piece.name,
+            actionType,
+            action: primaryAction,
+            reason,
+            watchOut,
+            data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear${negativeFeedback.length > 0 ? `, ${negativeFeedback[0][1]} mention${negativeFeedback[0][1] > 1 ? 's' : ''} of "${negativeFeedback[0][0]}"` : ''}`,
+            priority: "Early Signal"
+          });
+        } else {
+          actionsMap.set(piece.name, {
+            piece: piece.name,
+            actionType: "Research action",
+            action: "Continue gathering feedback",
+            reason: `${reviewCount} reviews so far. Need more data to make confident recommendations.`,
+            watchOut: null,
+            data: `${reviewCount} reviews, ${rating.toFixed(1)}/5 rating, ${wouldWear}% would wear`,
+            priority: "Early Signal"
+          });
+        }
+        return;
+      }
+      
+      // CASE 3: 5-9 reviews = Medium Confidence
       if (reviewCount <= 9) {
         if (rating >= 4.5 && wouldWear >= 70) {
           const isBrand = isBrandOccasion(occasions);
@@ -527,7 +560,7 @@ export async function loader() {
           let watchOut = null;
           if (negativeFeedback.length > 0 && negativeFeedback[0][1] >= 2) {
             const [feedback, count] = negativeFeedback[0];
-            watchOut = `${count} users mentioned "${feedback}" - consider addressing before major production increase.`;
+            watchOut = `${count} users mentioned "${feedback}" - ${feedback.toLowerCase().includes('clingy') ? 'monitor comfort and fabric behavior' : 'address this feedback'} before major production increase.`;
           }
           
           actionsMap.set(piece.name, {
@@ -540,7 +573,6 @@ export async function loader() {
             priority: "Medium Confidence"
           });
         } else if (rating >= 4.0 && wouldWear < 50) {
-          // High rating but low wearability
           actionsMap.set(piece.name, {
             piece: piece.name,
             actionType: "Styling action",
@@ -554,14 +586,14 @@ export async function loader() {
         return;
       }
       
-      // RULE 3: 10+ reviews = High Confidence
+      // CASE 4: 10+ reviews = High Confidence
       if (rating >= 4.5 && wouldWear >= 70) {
         const isBrand = isBrandOccasion(occasions);
         const occasionText = occasions.slice(0, 2).join(" and ");
         
         let primaryAction = isBrand 
           ? "Feature in campaign"
-          : "Feature in wardrobe basics / everyday edit";
+          : "Feature in wardrobe basics edit";
         
         let actionType = isBrand ? "Marketing action" : "Merchandising action";
         
