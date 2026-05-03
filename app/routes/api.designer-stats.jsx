@@ -116,6 +116,7 @@ export async function loader() {
         // Tags
         if (review.workedTags) {
           try {
+        console.log("Processing review - workedTags:", review.workedTags, "for pieces:", selectedSuggestion.items.map(i => i.productTitle));
             let tags = review.workedTags;
             // Parse if string
             if (typeof tags === 'string') {
