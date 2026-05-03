@@ -392,13 +392,59 @@ export async function loader() {
       .map(([preference, data]) => {
         const piecePerformance = Object.entries(data.pieces)
           .map(([name, perf]) => ({ name, ...perf, score: perf.good - perf.bad }))
+          .filter(p => {
+            // Exclude closet items
+            const nameLower = p.name.toLowerCase();
+            return !nameLower.includes('white top') && 
+                   !nameLower.includes('black top') && 
+                   !nameLower.includes('your ') &&
+                   nameLower !== 'top' &&
+                   nameLower !== 'bottom';
+          })
           .sort((a, b) => b.score - a.score);
+        
+        // Get fit concerns (negative tags related to fit)
+        const struggles = [];
+        reviews.forEach(r => {
+          if (r.bodyPreference === preference && r.didntWorkTags) {
+            try {
+              const tags = JSON.parse(r.didntWorkTags);
+              tags.forEach(tag => {
+                if (tag.toLowerCase().includes('clingy') ||
+                    tag.toLowerCase().includes('tight') ||
+                    tag.toLowerCase().includes('loose') ||
+                    tag.toLowerCase().includes('uncomfortable') ||
+                    tag.toLowerCase().includes('exposed')) {
+                  struggles.push(tag);
+                }
+              });
+            } catch (e) {}
+          }
+        });
+        
+        const uniqueStruggles = [...new Set(struggles)];
+        
+        // Design implication
+        let implication = '';
+        const prefLower = preference.toLowerCase();
+        if (prefLower.includes('elongate') || prefLower.includes('leg')) {
+          implication = 'Continue using vertical lines, higher waist placement, and styling that lengthens the leg line.';
+        } else if (prefLower.includes('balance') || prefLower.includes('proportion')) {
+          implication = 'Focus on pieces that create visual balance through strategic volume.';
+        } else if (prefLower.includes('structure') || prefLower.includes('define')) {
+          implication = 'Prioritize tailoring, waist definition, architectural lines.';
+        } else if (prefLower.includes('comfort') || prefLower.includes('ease')) {
+          implication = 'Emphasize soft fabrics, relaxed fits, forgiving silhouettes.';
+        } else {
+          implication = 'Continue current design direction based on positive performance.';
+        }
         
         return {
           preference,
           userCount: data.count,
           bestPieces: piecePerformance.filter(p => p.score > 0).slice(0, 3).map(p => p.name),
-          worstPieces: piecePerformance.filter(p => p.score < 0).slice(-3).reverse().map(p => p.name),
+          struggles: uniqueStruggles.length > 0 ? uniqueStruggles.slice(0, 3) : ['No repeated fit concerns yet'],
+          implication
         };
       })
       .sort((a, b) => b.userCount - a.userCount);

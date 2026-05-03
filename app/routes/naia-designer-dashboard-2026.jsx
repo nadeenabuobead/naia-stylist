@@ -126,7 +126,7 @@ export default function DesignerDashboard() {
       </Section>
 
       {/* 10. Body and Fit Patterns */}
-      <Section title="Body and Fit Patterns" desc="How pieces perform for different bodies">
+      <Section title="Body and Fit Patterns" desc="What works for different fit and comfort needs">
         <div style={s.bodyGrid}>
           {(data.bodyPatterns || []).map((pattern, i) => (
             <BodyPatternCard key={i} pattern={pattern} />
@@ -418,17 +418,28 @@ function BodyPatternCard({ pattern }) {
   return (
     <div style={s.bodyCard}>
       <div style={s.bodyName}>{pattern.preference}</div>
-      <div style={s.bodyCount}>{pattern.userCount} users</div>
-      {pattern.bestPieces && (
-        <div style={s.bodyPieces}>
-          <div style={s.label}>Works best:</div>
-          {pattern.bestPieces.map((p, i) => <div key={i}>• {p}</div>)}
+      <div style={s.bodyCount}>{pattern.userCount} {pattern.userCount === 1 ? "user" : "users"} selected this preference</div>
+      
+      {pattern.bestPieces && pattern.bestPieces.length > 0 && (
+        <div style={{ marginTop: "12px" }}>
+          <div style={s.label}>Best-performing nAia pieces:</div>
+          {pattern.bestPieces.map((p, i) => <div key={i} style={{ fontSize: "14px", color: "#333", marginTop: "4px" }}>• {p}</div>)}
         </div>
       )}
-      {pattern.worstPieces && (
-        <div style={s.bodyPieces}>
-          <div style={s.label}>Struggles:</div>
-          {pattern.worstPieces.map((p, i) => <div key={i} style={{color: "#c5553a"}}>• {p}</div>)}
+      
+      <div style={{ marginTop: "12px" }}>
+        <div style={s.label}>Fit concerns:</div>
+        {pattern.struggles && pattern.struggles.length > 0 && pattern.struggles[0] !== 'No repeated fit concerns yet' ? (
+          pattern.struggles.map((s, i) => <div key={i} style={{ fontSize: "14px", color: "#c5553a", marginTop: "4px" }}>• {s}</div>)
+        ) : (
+          <div style={{ fontSize: "14px", color: "#999", marginTop: "4px" }}>No repeated fit concerns yet</div>
+        )}
+      </div>
+      
+      {pattern.implication && (
+        <div style={{ marginTop: "12px" }}>
+          <div style={s.label}>Design implication:</div>
+          <div style={{ fontSize: "14px", color: "#666", fontStyle: "italic", marginTop: "4px" }}>{pattern.implication}</div>
         </div>
       )}
     </div>
