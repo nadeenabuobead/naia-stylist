@@ -115,6 +115,7 @@ export async function loader() {
         // Tags
         // Tags
         if (review.workedTags) {
+          console.log("🔍 CHECKING workedTags - Review:", review.id.slice(0,8), "workedTags exists:", !!review.workedTags, "value:", review.workedTags);
           try {
         console.log("Processing review - workedTags:", review.workedTags, "for pieces:", selectedSuggestion.items.map(i => i.productTitle));
             let tags = review.workedTags;
