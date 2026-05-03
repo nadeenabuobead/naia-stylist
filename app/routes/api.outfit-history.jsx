@@ -51,6 +51,7 @@ export async function action({ request }) {
   try {
     const body = await request.json();
     const { mood, feeling, event, result, styleWords, bodyPref, closetItemIds, naiaPiece, closetItems } = body;
+  console.log("Outfit history received:", { hasClosetItems: !!closetItems, hasNaiaPiece: !!naiaPiece, closetItems, naiaPiece });
 
     const session = await prisma.stylingSession.create({
       data: {
