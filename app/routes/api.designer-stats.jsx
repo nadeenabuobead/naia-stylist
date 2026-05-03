@@ -47,7 +47,7 @@ export async function loader() {
     // 2. Piece Performance Analysis
     const pieceStats = {};
     
-    reviews.forEach(review => {
+    reviews.filter(r => r.session?.suggestions?.length > 0).forEach(review => {
       // Get items from the selected suggestion
       const selectedSuggestion = review.session.suggestions.find(
         s => s.id === review.session.selectedSuggestionId
