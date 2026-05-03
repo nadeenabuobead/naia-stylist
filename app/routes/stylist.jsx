@@ -633,7 +633,7 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
           didntWorkTags: JSON.stringify(didntWorkTags),
           additionalNotes,
           mood, feeling, event,
-          styleWords: Array.isArray(styleWords) ? JSON.stringify(styleWords) : styleWords,
+          styleDNA: Array.isArray(styleDNA) ? JSON.stringify(styleDNA) : styleDNA,
         }),
       });
       if (res.ok) {
