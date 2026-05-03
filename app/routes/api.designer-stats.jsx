@@ -104,7 +104,6 @@ export async function loader() {
           try {
             const dna = JSON.parse(styleDNA);
             if (Array.isArray(dna)) {
-    console.log("Style DNA found:", reviews.map(r => r.session.styleDNA).filter(Boolean));
               stats.styleDNA.push(...dna);
             }
           } catch (e) {
