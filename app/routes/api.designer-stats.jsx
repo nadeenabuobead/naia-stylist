@@ -359,6 +359,23 @@ export async function loader() {
       }
     });
     
+    // Also collect from styling sessions
+    const sessions = await prisma.stylingSession.findMany({
+      where: { styleDNA: { not: null, not: "[]" } },
+      select: { styleDNA: true }
+    });
+    
+    sessions.forEach(s => {
+      try {
+        const dnas = JSON.parse(s.styleDNA);
+        if (Array.isArray(dnas)) {
+          dnas.forEach(dna => {
+            dnaCount[dna] = (dnaCount[dna] || 0) + 1;
+          });
+        }
+      } catch {}
+    });
+    
     const styleDNA = Object.entries(dnaCount)
       .map(([name, count]) => ({
         name,
