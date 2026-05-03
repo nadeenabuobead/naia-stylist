@@ -158,6 +158,18 @@ export default function DesignerDashboard() {
         </div>
       </Section>
 
+
+      {/* Design Actions */}
+      <Section title="Design Actions" desc="Recommended next steps">
+        {data.designActions && data.designActions.length > 0 ? (
+          data.designActions.map((action, i) => (
+            <DesignActionCard key={i} action={action} />
+          ))
+        ) : (
+          <p style={{ color: "#999", fontStyle: "italic" }}>No actions yet</p>
+        )}
+      </Section>
+
       {/* 14. User Quotes */}
       <Section title="User Quotes" desc="Qualitative insights">
         <div style={s.quotesGrid}>
@@ -353,6 +365,39 @@ function QuoteCard({ quote }) {
     <div style={s.quoteCard}>
       <div style={s.quoteText}>"{quote.text}"</div>
       {quote.piece && <div style={s.quotePiece}>— about {quote.piece}</div>}
+    </div>
+  );
+}
+
+
+function DesignActionCard({ action }) {
+  return (
+    <div style={{
+      padding: "20px",
+      border: `2px solid ${action.priority === "high" ? "#1a1816" : "#8B7355"}`,
+      borderRadius: "4px",
+      marginBottom: "16px",
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: "8px" }}>
+        <h4 style={{ margin: 0, fontFamily: "Cormorant Garamond", fontSize: "18px" }}>{action.piece}</h4>
+        <span style={{
+          fontSize: "11px",
+          textTransform: "uppercase",
+          letterSpacing: "1px",
+          padding: "4px 12px",
+          background: action.priority === "high" ? "#1a1816" : "#8B7355",
+          color: "#faf9f7",
+          borderRadius: "2px",
+        }}>
+          {action.priority}
+        </span>
+      </div>
+      <div style={{ fontSize: "16px", fontWeight: "bold", marginBottom: "4px" }}>
+        {action.action}
+      </div>
+      <div style={{ fontSize: "14px", color: "#6b6b6b", lineHeight: "1.6" }}>
+        {action.reason}
+      </div>
     </div>
   );
 }
