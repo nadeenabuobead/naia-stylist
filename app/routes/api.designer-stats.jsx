@@ -389,7 +389,8 @@ export async function loader() {
     });
     
     const bodyPatterns = Object.entries(bodyStats)
-      .map(([preference, data]) => {
+    console.log("DEBUG bodyStats:", Object.keys(bodyStats), "reviews with sessions:", reviews.filter(r => r.session).length);
+
         // Get all reviews from users with this preference
         const preferenceSessions = reviews.filter(r => r.session?.bodyPreference === preference);
         
