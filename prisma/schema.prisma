@@ -430,7 +430,6 @@ model PostOutfitReview {
   
   // Notes
   additionalNotes          String?
-  objections              String?   @db.Text  // JSON array of hesitation reasons
   // Specific Item Feedback
   itemFeedback        Json?    // { itemId: { liked: true, notes: "..." } }
   
