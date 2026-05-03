@@ -1330,11 +1330,36 @@ export default function Stylist() {
       setStylingResult(result);
       if (customerToken && result && !result.startsWith("Something went wrong")) {
         try {
+          // Extract nAia pieces from the result text
+          let extractedNaiaPiece = naiaPiece;
+          if (!extractedNaiaPiece && result && mode !== "closet_only") {
+            // Parse "Your outfit direction" section
+            const outfitMatch = result.match(/Your outfit direction\s*([\s\S]*?)(?:\n\nWhy this works|$)/i);
+            if (outfitMatch) {
+              const items = outfitMatch[1].split('\n')
+                .map(l => l.trim())
+                .filter(l => l.startsWith('-'))
+                .map(l => l.replace(/^-\s*/, '').trim());
+              
+              // Find nAia products (not "your X" items)
+              const naiaPieces = items.filter(item => !item.toLowerCase().startsWith('your '));
+              if (naiaPieces.length > 0) {
+                extractedNaiaPiece = { 
+                  title: naiaPieces[0],
+                  name: naiaPieces[0],
+                  category: naiaPieces[0].toLowerCase().includes('pant') || naiaPieces[0].toLowerCase().includes('skirt') ? 'BOTTOMS' : 
+                           naiaPieces[0].toLowerCase().includes('dress') ? 'DRESS' :
+                           naiaPieces[0].toLowerCase().includes('jacket') || naiaPieces[0].toLowerCase().includes('coat') || naiaPieces[0].toLowerCase().includes('blazer') ? 'OUTERWEAR' : 'TOP'
+                };
+              }
+            }
+          }
+          
           const hRes = await fetch("/api/outfit-history", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
             body: JSON.stringify({ 
             mood, feeling, event, styleWords, bodyPref, mode, 
             closetItemIds: selectedClosetIds, 
-            naiaPiece: naiaPiece ? { title: naiaPiece.name || naiaPiece.title, category: naiaPiece.category || naiaPiece.type } : null,
+            naiaPiece: extractedNaiaPiece ? { title: extractedNaiaPiece.name || extractedNaiaPiece.title, category: extractedNaiaPiece.category || extractedNaiaPiece.type } : null,
             closetItems: itemsToStyle.map(i => ({ id: i.id, name: i.name, category: i.category })),
             result 
           }),
