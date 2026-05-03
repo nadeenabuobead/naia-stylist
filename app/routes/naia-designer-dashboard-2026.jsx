@@ -279,12 +279,52 @@ function PieceCard({ piece }) {
     <div style={s.pieceCard}>
       <div style={s.pieceName}>{piece.name}</div>
       <div style={s.pieceCategory}>{piece.category}</div>
+      
       <div style={s.pieceStats}>
-        <div>★ {piece.avgRating?.toFixed(1)} <span style={s.muted}>({piece.ratingCount} ratings)</span></div>
-        <div>Would wear again: <strong>{Math.round(piece.rewear * 100)}%</strong></div>
-        {piece.helpedFeel && <div style={s.helpedFeel}>Helped users feel: {piece.helpedFeel.join(", ")}</div>}
-        {piece.bestOccasions && <div style={s.occasions}>Best for: {piece.bestOccasions.join(", ")}</div>}
-        {piece.topDNA && <div style={s.dna}>Resonates with: {piece.topDNA.join(", ")}</div>}
+        <div>★ {piece.avgRating?.toFixed(1)} ({piece.ratingCount} ratings)</div>
+        <div>Would wear in real life: <strong>{Math.round(piece.rewear * 100)}%</strong></div>
+        
+        {piece.helpedFeel && piece.helpedFeel.length > 0 && (
+          <div style={{ marginTop: "8px" }}>
+            <span style={s.muted}>Helped users feel: </span>
+            <span style={s.helpedFeel}>{piece.helpedFeel.join(", ").toLowerCase()}</span>
+          </div>
+        )}
+        
+        {piece.bestOccasions && piece.bestOccasions.length > 0 && (
+          <div style={{ marginTop: "8px" }}>
+            <span style={s.muted}>Best for: </span>
+            <span style={s.occasions}>{piece.bestOccasions.slice(0, 2).join(", ")}</span>
+            {piece.bestOccasions.length > 2 && (
+              <>
+                <br />
+                <span style={s.muted}>Secondary: </span>
+                <span style={{ fontSize: "13px", color: "#666" }}>{piece.bestOccasions.slice(2).join(", ")}</span>
+              </>
+            )}
+          </div>
+        )}
+        
+        {piece.positiveComments && piece.positiveComments.length > 0 && (
+          <div style={{ marginTop: "8px" }}>
+            <span style={s.muted}>Top feedback: </span>
+            <span style={{ fontSize: "13px", color: "#2a9d8f" }}>{piece.positiveComments.join(", ").toLowerCase()}</span>
+          </div>
+        )}
+        
+        <div style={{ marginTop: "8px" }}>
+          <span style={s.muted}>Watch-outs: </span>
+          <span style={{ fontSize: "13px", color: "#d97706" }}>
+            {piece.negativeComments && piece.negativeComments.filter(c => c && c !== '[]').length > 0 
+              ? piece.negativeComments.filter(c => c && c !== '[]').join(", ")
+              : "No repeated watch-outs yet"}
+          </span>
+        </div>
+        
+        <div style={{ marginTop: "8px" }}>
+          <span style={s.muted}>Resonates with: </span>
+          <span style={s.dna}>{piece.topDNA && piece.topDNA.length > 0 ? piece.topDNA.join(", ") : "Not enough data yet"}</span>
+        </div>
       </div>
     </div>
   );
