@@ -342,32 +342,21 @@ export async function loader() {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    // 8. Style DNA Breakdown - from styling sessions
-    const sessions = await prisma.stylingSession.findMany({
-      where: { styleDNA: { not: null } },
-      select: { styleDNA: true, customerId: true }
+    // 8. Style DNA Breakdown
+    const customers = await prisma.customer.findMany({
+      include: { onboardingProfile: true },
     });
     
     const dnaCount = {};
-    const customerDNAs = new Map(); // Track unique customers
-    
-    sessions.forEach(s => {
-      if (s.styleDNA) {
+    customers.forEach(c => {
+      if (c.onboardingProfile?.styleDNA) {
         try {
-          const dnas = JSON.parse(s.styleDNA);
-          if (Array.isArray(dnas) && dnas.length > 0) {
-            // Only count once per customer (use their most recent DNA)
-            customerDNAs.set(s.customerId, dnas);
-          }
+          const dnas = JSON.parse(c.onboardingProfile.styleDNA);
+          dnas.forEach(dna => {
+            dnaCount[dna] = (dnaCount[dna] || 0) + 1;
+          });
         } catch {}
       }
-    });
-    
-    // Now count across all unique customers
-    customerDNAs.forEach(dnas => {
-      dnas.forEach(dna => {
-        dnaCount[dna] = (dnaCount[dna] || 0) + 1;
-      });
     });
     
     const styleDNA = Object.entries(dnaCount)
