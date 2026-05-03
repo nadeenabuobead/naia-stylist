@@ -442,7 +442,9 @@ export async function loader() {
         (item.productTitle && (
           item.productTitle.toLowerCase().includes('your ') ||
           item.productTitle.toLowerCase() === 'top' ||
-          item.productTitle.toLowerCase() === 'bottom'
+          item.productTitle.toLowerCase() === 'bottom' ||
+          item.productTitle.toLowerCase() === 'white top' ||
+          item.productTitle.toLowerCase() === 'black top'
         ))
       );
       const naiaItems = suggestion.items.filter(item => 
