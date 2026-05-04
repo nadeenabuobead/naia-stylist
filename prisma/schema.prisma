@@ -513,3 +513,19 @@ model TrendReportView {
   relevanceScore  Int?
   matchingStyles  String[]
 }
+
+model StylingEvent {
+  id           String         @id @default(cuid())
+  customerId   String
+  customer     Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  sessionId    String
+  session      StylingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  productId    String
+  productTitle String
+  eventType    String
+  createdAt    DateTime       @default(now())
+
+  @@index([sessionId])
+  @@index([productId])
+  @@index([eventType])
+}
