@@ -592,6 +592,7 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
   const [didntWorkTags, setDidntWorkTags] = useState([]);
   const [additionalNotes, setAdditionalNotes] = useState("");
   const [objections, setObjections] = useState([]);
+  const [objections, setObjections] = useState([]);
   const [submitted, setSubmitted] = useState(false);
 
   const WORKED_OPTIONS = [
@@ -627,12 +628,24 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
     "Nothing — I'd wear it"
   ];
 
+  const OBJECTION_OPTIONS = [
+    "Too expensive", "Too bold", "Too plain", "Too exposed", "Too formal", "Too casual",
+    "Not comfortable", "Too clingy", "Lacked shape", "Hard to wear in real life",
+    "Unsure how to style it", "Wrong for my lifestyle", "Wrong for the occasion",
+    "Doesn't feel like me", "Doesn't create the feeling I wanted",
+    "I need to see it on me first", "I need more styling ideas", "Nothing — I'd wear it"
+  ];
+
   const toggleWorkedTag = (tag) => {
     setWorkedTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
   };
 
   const toggleDidntWorkTag = (tag) => {
     setDidntWorkTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
+  };
+
+  const toggleObjection = (obj) => {
+    setObjections(prev => prev.includes(obj) ? prev.filter(o => o !== obj) : [...prev, obj]);
   };
 
   const toggleObjection = (objection) => {
