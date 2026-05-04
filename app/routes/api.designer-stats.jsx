@@ -494,6 +494,57 @@ export async function loader() {
       .sort((a, b) => b.avgRating - a.avgRating)
       .slice(0, 10);
 
+    // Objection Tracker
+    const objectionStats = {};
+    
+    reviews.forEach(review => {
+      if (review.objections) {
+        try {
+          const objectionList = JSON.parse(review.objections);
+          if (Array.isArray(objectionList)) {
+            objectionList.forEach(objection => {
+              if (objection === "Nothing — I'd wear it") return; // Skip positive responses
+              
+              if (!objectionStats[objection]) {
+                objectionStats[objection] = {
+                  name: objection,
+                  count: 0,
+                  pieces: []
+                };
+              }
+              
+              objectionStats[objection].count++;
+              
+              // Track which piece this objection is about
+              const suggestion = review.session?.suggestions?.find(
+                s => s.id === review.session.selectedSuggestionId
+              ) || review.session?.suggestions?.[0];
+              
+              if (suggestion?.items) {
+                suggestion.items.forEach(item => {
+                  const pieceName = item.productTitle || `Closet ${item.closetItemId}`;
+                  if (!objectionStats[objection].pieces.includes(pieceName)) {
+                    objectionStats[objection].pieces.push(pieceName);
+                  }
+                });
+              }
+            });
+          }
+        } catch (e) {
+          console.error('Failed to parse objections:', e);
+        }
+      }
+    });
+    
+    const topObjections = Object.values(objectionStats)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10)
+      .map(obj => ({
+        name: obj.name,
+        count: obj.count,
+        topPieces: obj.pieces.slice(0, 3)
+      }));
+
     const bodyStats = {};
     console.log("🔍 STARTING BODY STATS CALCULATION");
     
