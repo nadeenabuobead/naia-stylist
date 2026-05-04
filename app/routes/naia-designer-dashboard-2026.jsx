@@ -206,35 +206,6 @@ export default function DesignerDashboard() {
       </Section>
 
 
-      {/* Purchase Behavior */}
-      <div style={s.section}>
-        <h2 style={s.h2}>Purchase Behavior</h2>
-        <p style={{ fontSize: "14px", color: "#999", marginBottom: "20px", fontStyle: "italic" }}>
-          Tracking not yet implemented. Will show: product page clicks, add-to-cart rate, checkout rate, 
-          purchase rate, wishlist/save rate, try-on usage, and style recommendation → shop clicks.
-        </p>
-        <div style={{ padding: "40px", textAlign: "center", background: "#faf9f7", border: "1px dashed #ddd", borderRadius: "4px" }}>
-          <div style={{ fontSize: "16px", color: "#8a7f75", marginBottom: "12px" }}>📊 Coming Soon</div>
-          <div style={{ fontSize: "14px", color: "#999" }}>
-            This will track the full purchase funnel from styling recommendation to checkout
-          </div>
-        </div>
-      </div>
-
-      {/* Styling Conversion */}
-      <div style={s.section}>
-        <h2 style={s.h2}>Styling Conversion</h2>
-        <p style={{ fontSize: "14px", color: "#999", marginBottom: "20px", fontStyle: "italic" }}>
-          Tracking not yet implemented. Will show: users who used Style Me, clicked recommended pieces, 
-          tried on pieces, added to cart after styling, and purchased after styling.
-        </p>
-        <div style={{ padding: "40px", textAlign: "center", background: "#faf9f7", border: "1px dashed #ddd", borderRadius: "4px" }}>
-          <div style={{ fontSize: "16px", color: "#8a7f75", marginBottom: "12px" }}>📈 Coming Soon</div>
-          <div style={{ fontSize: "14px", color: "#999" }}>
-            This will prove your business model: Does styling lead to buying?
-          </div>
-        </div>
-      </div>
 
       {/* Product Pairing Insights */}
       <Section title="Product Pairing Insights" desc="Best closet + nAia combinations">
@@ -264,19 +235,68 @@ export default function DesignerDashboard() {
       </Section>
 
       {/* Objection Tracker */}
-      <div style={s.section}>
-        <h2 style={s.h2}>Objection Tracker</h2>
-        <p style={{ fontSize: "14px", color: "#999", marginBottom: "20px", fontStyle: "italic" }}>
-          Tracking not yet implemented. Will show: why customers hesitate (too expensive, too bold, 
-          unsure how to style, wrong for lifestyle, etc.)
-        </p>
-        <div style={{ padding: "40px", textAlign: "center", background: "#faf9f7", border: "1px dashed #ddd", borderRadius: "4px" }}>
-          <div style={{ fontSize: "16px", color: "#8a7f75", marginBottom: "12px" }}>💭 Coming Soon</div>
-          <div style={{ fontSize: "14px", color: "#999" }}>
-            This will help product, styling, content, and pricing decisions
+      <Section title="Objection Tracker" desc="Why users hesitate">
+        {data.topObjections && data.topObjections.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {data.topObjections.map((obj, i) => (
+              <div key={i} style={{ padding: "16px", background: "#fff", border: "1px solid #e5e5e5", borderRadius: "4px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <div style={{ fontSize: "16px", fontWeight: 500 }}>{obj.name}</div>
+                  <div style={{ fontSize: "14px", color: "#fff", background: "#d97706", padding: "4px 12px", borderRadius: "12px" }}>
+                    {obj.count} {obj.count === 1 ? 'mention' : 'mentions'}
+                  </div>
+                </div>
+                {obj.topPieces && obj.topPieces.length > 0 && (
+                  <div style={{ fontSize: "13px", color: "#666", marginTop: "8px" }}>
+                    Most mentioned with: {obj.topPieces.join(', ')}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-        </div>
-      </div>
+        ) : (
+          <div style={{ padding: "32px", textAlign: "center", color: "#999", fontStyle: "italic" }}>
+            No objections tracked yet. Users will share what stops them from wearing or buying pieces.
+          </div>
+        )}
+      </Section>
+
+      {/* Styling-to-Shopping Conversion */}
+      <Section title="Styling-to-Shopping Conversion" desc="Does AI styling lead to purchases?">
+        {data.conversionStats && data.conversionStats.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {data.conversionStats.map((product, i) => (
+              <div key={i} style={{ padding: "16px", background: "#fff", border: "1px solid #e5e5e5", borderRadius: "4px" }}>
+                <div style={{ fontSize: "16px", fontWeight: 500, marginBottom: "12px" }}>{product.productTitle}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "12px", fontSize: "13px" }}>
+                  <div>
+                    <div style={{ color: "#999" }}>Recommended</div>
+                    <div style={{ fontSize: "18px", fontWeight: 500 }}>{product.recommended}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: "#999" }}>Clicked</div>
+                    <div style={{ fontSize: "18px", fontWeight: 500 }}>{product.clicked}</div>
+                    <div style={{ fontSize: "11px", color: "#666" }}>{product.clickRate}% click rate</div>
+                  </div>
+                  <div>
+                    <div style={{ color: "#999" }}>Try-on used</div>
+                    <div style={{ fontSize: "18px", fontWeight: 500 }}>{product.tryon}</div>
+                    {product.clicked > 0 && <div style={{ fontSize: "11px", color: "#666" }}>{product.tryonRate}% of clicks</div>}
+                  </div>
+                  <div>
+                    <div style={{ color: "#999" }}>Wishlisted</div>
+                    <div style={{ fontSize: "18px", fontWeight: 500 }}>{product.wishlisted}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ padding: "32px", textAlign: "center", color: "#999", fontStyle: "italic" }}>
+            Start tracking! When users click products, use try-on, or save items from styling results, conversion data will appear here.
+          </div>
+        )}
+      </Section>
     </div>
   );
 }
