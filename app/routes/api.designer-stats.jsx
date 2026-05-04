@@ -914,6 +914,7 @@ export async function loader() {
       quotes,
       designActions,
       productPairings,
+      topObjections,
     });
 
   } catch (error) {
