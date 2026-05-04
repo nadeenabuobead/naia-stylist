@@ -199,6 +199,7 @@ export async function loader({ request }) {
         if (suggestion?.items?.length > 0) {
           // Add quote to each piece in the outfit
           suggestion.items.forEach(item => {
+          if (!item.shopifyProductId) return;
             const pieceName = item.productTitle || `Closet Item ${item.closetItemId}`;
             if (pieceStats[pieceName] && !pieceStats[pieceName].quotes.includes(review.additionalNotes)) {
               pieceStats[pieceName].quotes.push(review.additionalNotes);
@@ -512,6 +513,7 @@ export async function loader({ request }) {
               const suggestion = review.session?.suggestions?.find(s => s.id === review.session.selectedSuggestionId) || review.session?.suggestions?.[0];
               if (suggestion?.items) {
                 suggestion.items.forEach(item => {
+          if (!item.shopifyProductId) return;
                   const pieceName = item.productTitle || `Closet ${item.closetItemId}`;
                   if (!objectionStats[obj].pieces.includes(pieceName)) objectionStats[obj].pieces.push(pieceName);
                 });
@@ -903,6 +905,7 @@ export async function loader({ request }) {
       const suggestion = review.session?.suggestions?.find(s => s.id === review.session.selectedSuggestionId) || review.session?.suggestions?.[0];
       if (suggestion?.items) {
         suggestion.items.forEach(item => {
+          if (!item.shopifyProductId) return;
           const key = item.shopifyProductId || item.productTitle;
           if (!key) return;
           if (!productConversion[key]) {
