@@ -591,6 +591,7 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
   const [workedTags, setWorkedTags] = useState([]);
   const [didntWorkTags, setDidntWorkTags] = useState([]);
   const [additionalNotes, setAdditionalNotes] = useState("");
+  const [objections, setObjections] = useState([]);
   const [submitted, setSubmitted] = useState(false);
 
   const WORKED_OPTIONS = [
@@ -605,12 +606,37 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
   "Too clingy", "Uncomfortable", "Hard to wear in real life"
 ];
 
+  const OBJECTION_OPTIONS = [
+    "Too expensive",
+    "Too bold",
+    "Too plain",
+    "Too exposed",
+    "Too formal",
+    "Too casual",
+    "Not comfortable",
+    "Too clingy",
+    "Lacked shape",
+    "Hard to wear in real life",
+    "Unsure how to style it",
+    "Wrong for my lifestyle",
+    "Wrong for the occasion",
+    "Doesn't feel like me",
+    "Doesn't create the feeling I wanted",
+    "I need to see it on me first",
+    "I need more styling ideas",
+    "Nothing — I'd wear it"
+  ];
+
   const toggleWorkedTag = (tag) => {
     setWorkedTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
   };
 
   const toggleDidntWorkTag = (tag) => {
     setDidntWorkTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
+  };
+
+  const toggleObjection = (objection) => {
+    setObjections(prev => prev.includes(objection) ? prev.filter(o => o !== objection) : [...prev, objection]);
   };
 
   const canSubmit = overallReaction > 0 && feltLikeMe && desiredFeelingAchieved && wouldWearAgain && physicalComfort;
@@ -631,6 +657,7 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
           physicalComfort,
           workedTags: JSON.stringify(workedTags),
           didntWorkTags: JSON.stringify(didntWorkTags),
+          objections: JSON.stringify(objections),
           additionalNotes,
           mood, feeling, event,
           styleDNA: Array.isArray(styleDNA) ? JSON.stringify(styleDNA) : styleDNA,
