@@ -46,6 +46,25 @@ export async function action({ request }) {
   const body = await request.json();
   const { action: act } = body;
 
+  // Handle pure tracking events (no wishlist modification)
+  if (act === "track" && body.sessionId) {
+    try {
+      await prisma.stylingEvent.create({
+        data: {
+          customerId: customer.id,
+          sessionId: body.sessionId,
+          productId: body.naiaProductId,
+          productTitle: body.title || "Unknown",
+          eventType: body.eventType,
+        },
+      });
+      return Response.json({ success: true }, { headers: CORS });
+    } catch (err) {
+      console.error('Event tracking failed:', err);
+      return Response.json({ error: err.message }, { status: 500, headers: CORS });
+    }
+  }
+
   // Track wishlist event if sessionId is provided
   if (act === "add" && body.sessionId) {
     try {
