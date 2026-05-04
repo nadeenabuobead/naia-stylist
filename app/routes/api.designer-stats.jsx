@@ -903,7 +903,7 @@ export async function loader({ request }) {
       const suggestion = review.session?.suggestions?.find(s => s.id === review.session.selectedSuggestionId) || review.session?.suggestions?.[0];
       if (suggestion?.items) {
         suggestion.items.forEach(item => {
-          const key = item.productId || item.productTitle;
+          const key = item.shopifyProductId || item.productTitle;
           if (!key) return;
           if (!productConversion[key]) {
             productConversion[key] = { productTitle: item.productTitle, recommended: 0, clicked: 0, tryon: 0, wishlisted: 0 };
