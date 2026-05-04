@@ -1461,6 +1461,29 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
   };
 
   // ─── Virtual try-on ───
+  // Track styling events
+  const trackEvent = async (productId, productTitle, eventType) => {
+    if (!customerToken || !lastHistoryId) return;
+    try {
+      await fetch("/api/track-event", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${customerToken}`
+        },
+        body: JSON.stringify({
+          sessionId: lastHistoryId,
+          productId: String(productId),
+          productTitle,
+          eventType
+        })
+      });
+    } catch (err) {
+      console.error("Track event error:", err);
+    }
+  };
+
+
   const startTryOn = async (productTitle, productImage) => {
     if (!tryOnPhoto) return;
     setTryOnState(prev => ({ ...prev, [productTitle]: { loading: true, result: null, error: null } }));
