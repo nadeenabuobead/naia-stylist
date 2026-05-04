@@ -46,6 +46,7 @@ model Customer {
   postOutfitReviews   PostOutfitReview[]
   confidenceScores    ConfidenceScore[]
   trendReportViews    TrendReportView[]
+  stylingEvents       StylingEvent[]
 }
 
 // ============================================
@@ -193,6 +194,7 @@ model StylingSession {
   
   // Follow-up
   review          PostOutfitReview?
+  events              StylingEvent[]
 }
 
 enum StyleSource {
