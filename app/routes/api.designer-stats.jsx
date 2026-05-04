@@ -893,6 +893,34 @@ export async function loader() {
     designActions.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
     designActions.splice(8);
 
+    // Styling-to-Shopping Conversion Stats
+    const productConversion = {};
+    reviews.forEach(review => {
+      const suggestion = review.session?.suggestions?.find(s => s.id === review.session.selectedSuggestionId) || review.session?.suggestions?.[0];
+      if (suggestion?.items) {
+        suggestion.items.forEach(item => {
+          const key = item.productId || item.productTitle;
+          if (!key) return;
+          if (!productConversion[key]) {
+            productConversion[key] = { productTitle: item.productTitle, recommended: 0, clicked: 0, tryon: 0, wishlisted: 0 };
+          }
+          productConversion[key].recommended++;
+        });
+      }
+    });
+    const events = await prisma.stylingEvent.findMany({ where: { createdAt: { gte: dateFrom } } });
+    events.forEach(event => {
+      const key = event.productId;
+      if (!productConversion[key]) {
+        productConversion[key] = { productTitle: event.productTitle, recommended: 0, clicked: 0, tryon: 0, wishlisted: 0 };
+      }
+      if (event.eventType === "clicked") productConversion[key].clicked++;
+      if (event.eventType === "tryon") productConversion[key].tryon++;
+      if (event.eventType === "wishlisted") productConversion[key].wishlisted++;
+    });
+    const conversionStats = Object.values(productConversion).filter(p => p.recommended > 0).map(p => ({ ...p, clickRate: p.recommended > 0 ? (p.clicked / p.recommended * 100).toFixed(1) : 0, tryonRate: p.clicked > 0 ? (p.tryon / p.clicked * 100).toFixed(1) : 0 })).sort((a, b) => b.recommended - a.recommended).slice(0, 10);
+
+
     return Response.json({
       totalUsers,
       totalLooks,
@@ -915,6 +943,7 @@ export async function loader() {
       designActions,
       productPairings,
       topObjections,
+      conversionStats,
     });
 
   } catch (error) {
