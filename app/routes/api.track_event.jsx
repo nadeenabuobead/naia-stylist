@@ -25,12 +25,12 @@ export async function action({ request }) {
       return Response.json({ error: "Missing required fields" }, { status: 400, headers: CORS });
     }
 
-    const validEvents = ["clicked", "tryon", "wishlisted", "addedToCart", "purchased"];
+    const validEvents = ["clicked", "tryon", "wishlisted"];
     if (!validEvents.includes(eventType)) {
       return Response.json({ error: "Invalid event type" }, { status: 400, headers: CORS });
     }
 
-    const event = await prisma.stylingEvent.create({
+    await prisma.stylingEvent.create({
       data: {
         customerId: customer.id,
         sessionId,
@@ -40,10 +40,9 @@ export async function action({ request }) {
       },
     });
 
-    return Response.json({ success: true, event }, { headers: CORS });
+    return Response.json({ success: true }, { headers: CORS });
   } catch (error) {
     console.error("Track event error:", error);
     return Response.json({ error: error.message }, { status: 500, headers: CORS });
   }
 }
-

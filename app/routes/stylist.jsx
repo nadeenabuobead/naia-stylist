@@ -1465,7 +1465,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
   const trackEvent = async (productId, productTitle, eventType) => {
     if (!customerToken || !lastHistoryId) return;
     try {
-      await fetch("/api/trackevent", {
+      await fetch("/api/track_event", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
