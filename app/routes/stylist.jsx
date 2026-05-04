@@ -885,23 +885,6 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
             </button>
           ))}
         </div>
-
-      {/* Objections */}
-      <div style={{ marginBottom: "24px" }}>
-        <p style={{ fontSize: "14px", marginBottom: "12px", color: "#4a4540" }}>What would stop you from wearing or buying this look?</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-          {OBJECTION_OPTIONS.map(obj => (
-            <button key={obj} onClick={() => toggleObjection(obj)}
-              style={{
-                padding: "8px 14px",
-                background: objections.includes(obj) ? "#1a1816" : "white",
-                color: objections.includes(obj) ? "white" : "#1a1816",
-                border: "1px solid #d4cfc9", borderRadius: "2px",
-                cursor: "pointer", fontSize: "13px"
-              }}>{obj}</button>
-          ))}
-        </div>
-      </div>
       </div>
 
       {/* Objections - what would stop you */}
