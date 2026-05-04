@@ -264,44 +264,19 @@ export default function DesignerDashboard() {
       </Section>
 
       {/* Objection Tracker */}
-      <Section title="Objection Tracker" desc="Why users hesitate">
-        {data.topObjections && data.topObjections.length > 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            {data.topObjections.map((objection, i) => (
-              <div key={i} style={{ 
-                padding: "16px", 
-                background: "#fff", 
-                border: "1px solid #e5e5e5",
-                borderRadius: "4px"
-              }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                  <div style={{ fontSize: "16px", fontWeight: 500 }}>
-                    {objection.name}
-                  </div>
-                  <div style={{ 
-                    fontSize: "14px", 
-                    color: "#fff", 
-                    background: "#d97706",
-                    padding: "4px 12px",
-                    borderRadius: "12px"
-                  }}>
-                    {objection.count} {objection.count === 1 ? 'mention' : 'mentions'}
-                  </div>
-                </div>
-                {objection.topPieces && objection.topPieces.length > 0 && (
-                  <div style={{ fontSize: "13px", color: "#666", marginTop: "8px" }}>
-                    Most mentioned with: {objection.topPieces.join(', ')}
-                  </div>
-                )}
-              </div>
-            ))}
+      <div style={s.section}>
+        <h2 style={s.h2}>Objection Tracker</h2>
+        <p style={{ fontSize: "14px", color: "#999", marginBottom: "20px", fontStyle: "italic" }}>
+          Tracking not yet implemented. Will show: why customers hesitate (too expensive, too bold, 
+          unsure how to style, wrong for lifestyle, etc.)
+        </p>
+        <div style={{ padding: "40px", textAlign: "center", background: "#faf9f7", border: "1px dashed #ddd", borderRadius: "4px" }}>
+          <div style={{ fontSize: "16px", color: "#8a7f75", marginBottom: "12px" }}>💭 Coming Soon</div>
+          <div style={{ fontSize: "14px", color: "#999" }}>
+            This will help product, styling, content, and pricing decisions
           </div>
-        ) : (
-          <div style={{ padding: "32px", textAlign: "center", color: "#999", fontStyle: "italic" }}>
-            No objections tracked yet. Users will share what stops them from wearing or buying pieces.
-          </div>
-        )}
-      </Section>
+        </div>
+      </div>
     </div>
   );
 }

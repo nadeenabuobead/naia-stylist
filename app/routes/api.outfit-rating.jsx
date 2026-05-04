@@ -34,7 +34,7 @@ export async function action({ request }) {
   const body = await request.json();
   console.log("Review data received:", { workedTags: body.workedTags, didntWorkTags: body.didntWorkTags });
   console.log("Review data received:", { workedTags: body.workedTags, didntWorkTags: body.didntWorkTags });
-  const { historyId, overallReaction, feltLikeMe, desiredFeelingAchieved, wouldWearAgain, physicalComfort, workedTags, didntWorkTags, objections, additionalNotes, mood, feeling, event, styleWords } = body;
+  const { historyId, overallReaction, feltLikeMe, desiredFeelingAchieved, wouldWearAgain, physicalComfort, workedTags, didntWorkTags, additionalNotes, mood, feeling, event, styleWords } = body;
   if (!historyId || overallReaction === undefined) {
     return Response.json({ error: "historyId and confidence required" }, { status: 400, headers: CORS });
   }
@@ -56,7 +56,6 @@ export async function action({ request }) {
   physicallyComfortable: physicalComfort ?? null,
   workedTags: workedTags ? JSON.stringify(workedTags) : null,
   didntWorkTags: didntWorkTags ? JSON.stringify(didntWorkTags) : null,
-  objections: objections || null,
   additionalNotes: additionalNotes || null,
 },
       });
@@ -74,8 +73,7 @@ export async function action({ request }) {
       wouldWearAgain: wouldWearAgain ?? null,
       physicallyComfortable: physicalComfort ?? null,
       workedTags: workedTags ? JSON.stringify(workedTags) : null,
-      didntWorkTags: didntWorkTags ? JSON.stringify(didntWorkTags) : null,
-      objections: objections || null,
+      didntWorkTags: didntWorkTags ? JSON.stringify(didntWorkTags) : null,  
       additionalNotes: additionalNotes || null,
     },
   });
