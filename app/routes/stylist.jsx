@@ -1346,7 +1346,7 @@ export default function Stylist() {
       try { await fetch("/api/wishlist", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) }, body: JSON.stringify({ action: "remove", naiaProductId: pid }) }); } catch {}
     } else {
       const newItem = { naiaProductId: pid, title: product.title, handle: product.handle, image: product.image, createdAt: new Date().toISOString() };
-      setWishlist(prev => [newItem, ...prev]);
+      setWishlist(prev => [newItem, ...prev]); trackEvent(product.id, product.title, "wishlisted");
       try { await fetch("/api/wishlist", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) }, body: JSON.stringify({ action: "add", ...newItem }) }); } catch {}
     }
   }, [customerToken, wishlistIds]);
@@ -1487,6 +1487,8 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
   const startTryOn = async (productTitle, productImage) => {
     if (!tryOnPhoto) return;
     setTryOnState(prev => ({ ...prev, [productTitle]: { loading: true, result: null, error: null } }));
+    const product = naiaProducts.find(p => p.title === productTitle);
+    if (product) trackEvent(product.id, productTitle, "tryon");
     try {
       let garmentUrl = productImage;
       if (garmentUrl && garmentUrl.startsWith("//")) garmentUrl = "https:" + garmentUrl;
@@ -2024,7 +2026,7 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
                         const tryOn = tryOnState[p.title];
                         return (
                           <div key={p.id} style={{ border: "1px solid #d4cfc9", borderRadius: "2px", overflow: "hidden", position: "relative" }}>
-                            <a href={p.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit" }}><img src={p.image} alt={p.title} style={{ width: "100%", height: "140px", objectFit: "cover", display: "block" }} /><div style={{ padding: "8px", fontSize: "12px" }}>{p.title}</div></a>
+                            <a href={p.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit" }} onClick={() => trackEvent(p.id, p.title, "clicked")}><img src={p.image} alt={p.title} style={{ width: "100%", height: "140px", objectFit: "cover", display: "block" }} /><div style={{ padding: "8px", fontSize: "12px" }}>{p.title}</div></a>
                             {customer && (<button style={{ ...s.heartBtn(wishlistIds.has(String(p.id))), position: "absolute", top: "6px", right: "6px", background: "rgba(255,255,255,0.8)", borderRadius: "50%", width: "28px", height: "28px", display: "flex", alignItems: "center", justifyContent: "center" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleWishlist(p); }}>{wishlistIds.has(String(p.id)) ? "♥" : "♡"}</button>)}
                             {tryOnPhoto && (<div style={{ padding: "0 8px 8px" }}>{tryOn?.loading ? (<div style={{ fontSize: "11px", color: "#8a7f75", textAlign: "center", padding: "8px" }}>Trying on...</div>) : tryOn?.result ? (<img src={tryOn.result} alt="Try-on result" style={{ width: "100%", borderRadius: "2px", marginTop: "4px" }} />) : (<button style={s.tryOnBtn} onClick={() => startTryOn(p.title, p.image)}>Try this on</button>)}{tryOn?.error && (<div style={{ fontSize: "11px", color: "#c5553a", marginTop: "4px" }}>{tryOn.error}</div>)}</div>)}
                           </div>
