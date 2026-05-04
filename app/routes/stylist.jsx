@@ -1488,6 +1488,10 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
     if (!tryOnPhoto) return;
     setTryOnState(prev => ({ ...prev, [productTitle]: { loading: true, result: null, error: null } }));
     const product = naiaProducts.find(p => p.title === productTitle);
+    if (product && customerToken && lastHistoryId) {
+      fetch("/api/wishlist", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${customerToken}` }, body: JSON.stringify({ action: "track", sessionId: lastHistoryId, naiaProductId: String(product.id), title: productTitle, eventType: "tryon" }) }).catch(() => {});
+    }
+    const product = naiaProducts.find(p => p.title === productTitle);
     if (product) trackEvent(product.id, productTitle, "tryon");
     try {
       let garmentUrl = productImage;
