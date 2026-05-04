@@ -46,6 +46,23 @@ export async function action({ request }) {
   const body = await request.json();
   const { action: act } = body;
 
+  // Track wishlist event if sessionId is provided
+  if (act === "add" && body.sessionId) {
+    try {
+      await prisma.stylingEvent.create({
+        data: {
+          customerId: customer.id,
+          sessionId: body.sessionId,
+          productId: body.naiaProductId,
+          productTitle: body.title || "Unknown",
+          eventType: "wishlisted",
+        },
+      });
+    } catch (err) {
+      console.error('Event tracking failed:', err);
+    }
+  }
+
   if (act === "add") {
     const { naiaProductId, title, handle, image } = body;
     if (!naiaProductId || !title) {
