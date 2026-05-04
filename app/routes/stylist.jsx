@@ -635,11 +635,10 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
     setDidntWorkTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
   };
 
-  const toggleObjection = (obj) => {
-    setObjections(prev => prev.includes(obj) ? prev.filter(o => o !== obj) : [...prev, obj]);
+  const toggleObjection = (objection) => {
+    setObjections(prev => prev.includes(objection) ? prev.filter(o => o !== objection) : [...prev, objection]);
   };
 
-  const toggleObjection = (objection) => {
   const canSubmit = overallReaction > 0 && feltLikeMe && desiredFeelingAchieved && wouldWearAgain && physicalComfort;
 
   const submitRating = async () => {
