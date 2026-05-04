@@ -494,6 +494,32 @@ export async function loader() {
       .sort((a, b) => b.avgRating - a.avgRating)
       .slice(0, 10);
 
+    // Objection Tracker
+    const objectionStats = {};
+    reviews.forEach(review => {
+      if (review.objections) {
+        try {
+          const list = JSON.parse(review.objections);
+          if (Array.isArray(list)) {
+            list.forEach(obj => {
+              if (obj === "Nothing — I'd wear it") return;
+              if (!objectionStats[obj]) objectionStats[obj] = { name: obj, count: 0, pieces: [] };
+              objectionStats[obj].count++;
+              const suggestion = review.session?.suggestions?.find(s => s.id === review.session.selectedSuggestionId) || review.session?.suggestions?.[0];
+              if (suggestion?.items) {
+                suggestion.items.forEach(item => {
+                  const pieceName = item.productTitle || `Closet ${item.closetItemId}`;
+                  if (!objectionStats[obj].pieces.includes(pieceName)) objectionStats[obj].pieces.push(pieceName);
+                });
+              }
+            });
+          }
+        } catch (e) {}
+      }
+    });
+    const topObjections = Object.values(objectionStats).sort((a,b) => b.count - a.count).slice(0,10).map(o => ({ name: o.name, count: o.count, topPieces: o.pieces.slice(0,3) }));
+
+
     const bodyStats = {};
     console.log("🔍 STARTING BODY STATS CALCULATION");
     
