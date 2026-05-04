@@ -939,9 +939,9 @@ export async function loader() {
       quotes,
       designActions,
       productPairings,
+      topObjections,
     });
 
-      topObjections,
   } catch (error) {
     console.error("Designer stats error:", error);
     return Response.json({ error: error.message }, { status: 500 });
