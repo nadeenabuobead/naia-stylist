@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
+// Force rebuild - objection tracker clean
 // Designer Dashboard Component (embedded)
 function TrendReportDisplay({ report, query }) {
   const [expandedSections, setExpandedSections] = useState({});
