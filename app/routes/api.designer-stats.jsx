@@ -1,7 +1,11 @@
 import prisma from "../db.server";
 
 
-export async function loader() {
+export async function loader({ request }) {
+  const url = new URL(request.url);
+  const dateRange = url.searchParams.get("dateRange") || "30";
+  const dateFrom = new Date();
+  dateFrom.setDate(dateFrom.getDate() - parseInt(dateRange));
   try {
     // Fetch all reviews with sessions and items
     const reviews = await prisma.postOutfitReview.findMany({
