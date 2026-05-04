@@ -1,0 +1,67 @@
+// Add these models to your existing Prisma schema
+
+// Tracks when a product is recommended through AI styling
+model StylingRecommendation {
+  id                String   @id @default(cuid())
+  userId            String
+  productId         String
+  sessionId         String   // Links to the styling session
+  lookId            String?  // If part of a complete look
+  recommendedAt     DateTime @default(now())
+  
+  // Track subsequent actions
+  clicked           Boolean  @default(false)
+  clickedAt         DateTime?
+  
+  virtualTryOn      Boolean  @default(false)
+  virtualTryOnAt    DateTime?
+  
+  saved             Boolean  @default(false)
+  savedAt           DateTime?
+  
+  addedToCart       Boolean  @default(false)
+  addedToCartAt     DateTime?
+  
+  purchased         Boolean  @default(false)
+  purchasedAt       DateTime?
+  orderId           String?
+  
+  // Relations
+  user              User     @relation(fields: [userId], references: [id])
+  product           Product  @relation(fields: [productId], references: [id])
+  
+  @@index([userId])
+  @@index([productId])
+  @@index([sessionId])
+  @@index([recommendedAt])
+}
+
+// Tracks styling sessions
+model StylingSession {
+  id                String   @id @default(cuid())
+  userId            String
+  startedAt         DateTime @default(now())
+  completedAt       DateTime?
+  sessionType       String   // "outfit_builder", "style_quiz", "ai_chat", etc.
+  
+  user              User     @relation(fields: [userId], references: [id])
+  
+  @@index([userId])
+  @@index([startedAt])
+}
+
+// Optional: Track drop-off points for funnel analysis
+model ConversionDropOff {
+  id                String   @id @default(cuid())
+  productId         String
+  userId            String
+  recommendationId  String
+  dropOffStage      String   // "viewed", "clicked", "tried_on", "saved", "carted"
+  timestamp         DateTime @default(now())
+  
+  product           Product  @relation(fields: [productId], references: [id])
+  
+  @@index([productId])
+  @@index([dropOffStage])
+  @@index([timestamp])
+}
