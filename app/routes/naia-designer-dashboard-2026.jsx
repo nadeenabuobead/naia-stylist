@@ -57,7 +57,7 @@ export default function DesignerDashboard() {
         </p>
         <div style={s.pieceGrid}>
           {(data.topPieces || []).map((piece, i) => (
-            <PieceCard key={i} piece={piece} type="top" />
+            <PieceCard key={i} piece={piece} type="top" styleDNA={data.styleDNA} />
           ))}
         </div>
       </Section>
