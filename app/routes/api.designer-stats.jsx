@@ -20,8 +20,13 @@ export async function loader({ request }) {
             bodyPreference: true,
             selectedSuggestionId: true,
             suggestions: {
-              include: {
+              select: {
+                id: true,
                 items: true,
+                makeupVibeRec: true,
+                hairstyleRec: true,
+                perfumeRec: true,
+                songRec: true,
               },
             },
           },
