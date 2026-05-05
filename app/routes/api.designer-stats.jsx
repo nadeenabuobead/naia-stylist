@@ -119,13 +119,17 @@ export async function loader({ request }) {
         // Style DNA - try customer profile first, then session
         let styleDNA = review.customer?.onboardingProfile?.stylePersonalities || review.session.styleDNA;
         if (styleDNA) {
-          try {
-            const dna = JSON.parse(styleDNA);
-            if (Array.isArray(dna)) {
-              stats.styleDNA.push(...dna);
+          // stylePersonalities is already an array, styleDNA from session needs parsing
+          let dna = styleDNA;
+          if (typeof styleDNA === 'string') {
+            try {
+              dna = JSON.parse(styleDNA);
+            } catch (e) {
+              dna = [];
             }
-          } catch (e) {
-            // Silent fail on parse error
+          }
+          if (Array.isArray(dna) && dna.length > 0) {
+            stats.styleDNA.push(...dna);
           }
         }
         
