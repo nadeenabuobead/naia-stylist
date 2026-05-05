@@ -67,6 +67,7 @@ export async function loader({ request }) {
     const pieceStats = {};
     
     const reviewsWithSuggestions = reviews.filter(r => r.session?.suggestions?.length > 0);
+    console.log(`📊 Total reviews: ${reviews.length}, with suggestions: ${reviewsWithSuggestions.length}`);
     
     reviewsWithSuggestions.forEach(review => {
       const selectedSuggestion = review.session.suggestions.find(
