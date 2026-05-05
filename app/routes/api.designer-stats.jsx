@@ -730,27 +730,34 @@ export async function loader({ request }) {
           s => s.id === review.session.selectedSuggestionId
         ) || review.session?.suggestions?.[0];
         
-        // Get only nAia pieces from the outfit for the quote attribution
-        const naiaItems = suggestion?.items?.filter(item => {
-          if (!item.productTitle) return false;
-          const title = item.productTitle.toLowerCase();
-          // Exclude all AI-generated descriptions and closet items
-          if (item.closetItemId) return false;
-          if (title.includes('your ')) return false;
-          if (title.includes('layer')) return false;
-          if (title.includes('pair ')) return false;
-          if (title.includes('wear ')) return false;
-          if (title.includes('complement')) return false;
-          if (title === 'white top' || title === 'black top') return false;
-          if (title === 'top' || title === 'bottom') return false;
-          return true;
-        }) || [];
+        // Build the full look description
+        const outfitParts = [];
         
-        const pieceName = naiaItems.length > 0 
-          ? naiaItems.map(i => i.productTitle).join(' + ') 
-          : null;
+        // Add all items (closet + nAia, excluding AI descriptions)
+        if (suggestion?.items) {
+          suggestion.items.forEach(item => {
+            if (!item.productTitle) return;
+            const title = item.productTitle.toLowerCase();
+            // Only exclude AI-generated descriptions
+            if (title.includes('layer') || title.includes('pair ') || 
+                title.includes('wear ') || title.includes('complement')) return;
+            outfitParts.push(item.productTitle);
+          });
+        }
         
-        if (!pieceName) return; // Skip if no nAia pieces
+        // Add styling details
+        const stylingDetails = [];
+        if (suggestion.makeupVibeRec) stylingDetails.push(suggestion.makeupVibeRec);
+        if (suggestion.hairstyleRec) stylingDetails.push(suggestion.hairstyleRec);
+        if (suggestion.perfumeRec) stylingDetails.push(suggestion.perfumeRec);
+        if (suggestion.songRec) stylingDetails.push(`Song: ${suggestion.songRec}`);
+        
+        let pieceName = outfitParts.join(' + ');
+        if (stylingDetails.length > 0) {
+          pieceName += ` (${stylingDetails.join(', ')})`;
+        }
+        
+        if (!pieceName) return; // Skip if empty
         allQuotes.push({ text: review.additionalNotes, piece: pieceName });
       }
     });
