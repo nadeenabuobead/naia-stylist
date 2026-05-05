@@ -754,6 +754,7 @@ export async function loader({ request }) {
         }
         
         // Add styling details
+        console.log('Styling fields - makeup:', !!suggestion?.makeupVibeRec, 'hair:', !!suggestion?.hairstyleRec, 'song:', !!suggestion?.songRec);
         const stylingDetails = [];
         if (suggestion?.makeupVibeRec) stylingDetails.push(suggestion.makeupVibeRec);
         if (suggestion?.hairstyleRec) stylingDetails.push(suggestion.hairstyleRec);
