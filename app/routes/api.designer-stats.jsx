@@ -728,6 +728,7 @@ export async function loader({ request }) {
         
         // Add all items (closet + nAia, excluding AI descriptions)
         if (suggestion?.items) {
+          console.log('Quote - items in suggestion:', suggestion.items.map(i => i.productTitle));
           suggestion.items.forEach(item => {
             if (!item.productTitle) return;
             const title = item.productTitle.toLowerCase();
