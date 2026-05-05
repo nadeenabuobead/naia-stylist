@@ -79,7 +79,12 @@ export async function loader({ request }) {
       ) || review.session.suggestions[0];
       
       if (!selectedSuggestion) return;
-      console.log("🔍 PIECE STATS - Review:", review.id.slice(0,8), "has suggestions:", !!selectedSuggestion, "workedTags:", review.workedTags ? "YES" : "NO");
+      console.log("🔍 PIECE STATS - Review:", review.id.slice(0,8), "has suggestions:", !!selectedSuggestion, "items count:", selectedSuggestion.items?.length || 0);
+      
+      if (!selectedSuggestion.items || selectedSuggestion.items.length === 0) {
+        console.log("⚠️ NO ITEMS in suggestion", selectedSuggestion.id);
+        return;
+      }
       
       selectedSuggestion.items.forEach(item => {
         console.log(`DEBUG ITEM - productTitle: ${item.productTitle}, shopifyProductId: ${item.shopifyProductId}`);
