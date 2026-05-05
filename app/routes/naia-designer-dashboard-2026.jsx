@@ -434,7 +434,7 @@ function FeedbackCard({ tag, type }) {
 }
 
 function DNACard({ dna }) {
-  const percent = Math.round(dna.percentage * 100);
+  const percent = dna.percentage;
   return (
     <div style={s.dnaCard}>
       <div style={s.dnaName}>{dna.name}</div>
