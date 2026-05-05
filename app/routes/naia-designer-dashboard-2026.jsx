@@ -370,7 +370,13 @@ function PieceCard({ piece }) {
         
         <div style={{ marginTop: "8px" }}>
           <span style={s.muted}>Resonates with: </span>
-          <span style={s.dna}>{piece.topDNA && piece.topDNA.length > 0 ? piece.topDNA.join(", ") : "More style DNA data needed"}</span>
+          <span style={s.dna}>
+            {piece.topDNA && piece.topDNA.length > 0 
+              ? piece.topDNA.join(", ") 
+              : data.styleDNA && data.styleDNA.length > 0
+                ? `${data.styleDNA.slice(0, 3).map(d => d.name).join(", ")} (overall)`
+                : "More style DNA data needed"}
+          </span>
         </div>
       </div>
     </div>
