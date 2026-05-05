@@ -134,6 +134,8 @@ export async function loader({ request }) {
           stats.occasions.push(review.session.occasion);
         }
         
+        console.log(`🔍 About to collect DNA for piece: ${pieceName}, review: ${review.id.slice(0,8)}`);
+        
         // Style DNA - try customer profile first, then session
         let styleDNA = review.customer?.onboardingProfile?.stylePersonalities || review.session?.styleDNA;
         console.log(`DEBUG DNA for ${pieceName}: styleDNA=`, styleDNA, 'type:', typeof styleDNA);
