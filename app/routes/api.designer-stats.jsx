@@ -908,8 +908,16 @@ export async function loader({ request }) {
       const occasionText = occasions.slice(0, 2).join('/') || 'styling';
       
       // PIECE-SPECIFIC tags from piece.positiveComments and piece.negativeComments
-      const positiveFeedback = getTopFeedback(piece.workedTags || [], 5);
-      const negativeFeedback = getTopFeedback((piece.didntWorkTags || []).filter(t => !t.toLowerCase().includes('everything worked')), 5);
+      // positiveComments is already an array of top 3 strings
+      // negativeComments is already formatted as "tag x count"
+      const positiveFeedback = (piece.positiveComments || []).map(tag => [tag, 1]); // Convert to [tag, count] format
+      const negativeFeedback = (piece.negativeComments || [])
+        .map(item => {
+          // Parse "tag x count" format
+          const match = item.match(/^(.+?)\s+x(\d+)$/);
+          if (match) return [match[1], parseInt(match[2])];
+          return [item, 1];
+        });
       
       // Validate: tag count cannot exceed review count
       const validPositive = positiveFeedback.filter(([tag, count]) => count <= reviewCount);
