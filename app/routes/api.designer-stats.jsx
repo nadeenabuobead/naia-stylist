@@ -361,9 +361,12 @@ export async function loader({ request }) {
         if (typeof tag === 'string' && tag.startsWith('["')) {
           try { tag = JSON.parse(tag)[0]; } catch(e) {}
         }
-        if (!tagStats.negative[tag]) {
-          tagStats.negative[tag] = { name: tag, count: 0, pieces: [] };
+        // Remove " x1", " x2" etc. from tag names
+        const cleanTag = tag.replace(/\s+x\d+$/i, '').trim();
+        if (!tagStats.negative[cleanTag]) {
+          tagStats.negative[cleanTag] = { name: cleanTag, count: 0, pieces: [] };
         }
+        tag = cleanTag;
         tagStats.negative[tag].count++;
         tagStats.negative[tag].pieces.push(piece.name);
       });
