@@ -731,13 +731,20 @@ export async function loader({ request }) {
         ) || review.session?.suggestions?.[0];
         
         // Get only nAia pieces from the outfit for the quote attribution
-        const naiaItems = suggestion?.items?.filter(item => 
-          item.productTitle && !item.closetItemId &&
-          item.productTitle.toLowerCase() !== 'white top' &&
-          item.productTitle.toLowerCase() !== 'black top' &&
-          !item.productTitle.toLowerCase().includes('layer') &&
-          !item.productTitle.toLowerCase().includes('pair your')
-        ) || [];
+        const naiaItems = suggestion?.items?.filter(item => {
+          if (!item.productTitle) return false;
+          const title = item.productTitle.toLowerCase();
+          // Exclude all AI-generated descriptions and closet items
+          if (item.closetItemId) return false;
+          if (title.includes('your ')) return false;
+          if (title.includes('layer')) return false;
+          if (title.includes('pair ')) return false;
+          if (title.includes('wear ')) return false;
+          if (title.includes('complement')) return false;
+          if (title === 'white top' || title === 'black top') return false;
+          if (title === 'top' || title === 'bottom') return false;
+          return true;
+        }) || [];
         
         const pieceName = naiaItems.length > 0 
           ? naiaItems.map(i => i.productTitle).join(' + ') 
