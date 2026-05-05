@@ -82,6 +82,7 @@ export async function loader({ request }) {
       console.log("🔍 PIECE STATS - Review:", review.id.slice(0,8), "has suggestions:", !!selectedSuggestion, "workedTags:", review.workedTags ? "YES" : "NO");
       
       selectedSuggestion.items.forEach(item => {
+        console.log(`DEBUG ITEM - productTitle: ${item.productTitle}, shopifyProductId: ${item.shopifyProductId}`);
         // Skip closet items - only track nAia products
         if (!item.shopifyProductId || !item.productTitle) return;
         
