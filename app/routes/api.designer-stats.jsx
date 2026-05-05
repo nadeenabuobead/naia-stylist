@@ -522,12 +522,16 @@ export async function loader({ request }) {
     const productPairings = Object.values(pairingStats)
       .filter(p => {
         if (p.ratings.length === 0) return false;
-        // Exclude AI-generated descriptions
+        // Exclude AI-generated descriptions and fragments
         const naia = p.naiaPiece.toLowerCase();
         return !naia.includes('layer') && 
                !naia.includes('pair your') && 
+               !naia.includes('pair the') &&
                !naia.includes('complemented') &&
-               !naia.includes('wear your');
+               !naia.includes('wear your') &&
+               !naia.includes('wear the') &&
+               !naia.includes('flowing') &&
+               naia.length > 10; // Skip very short fragments
       })
       .map(p => ({
         closetItem: p.closetItem,
