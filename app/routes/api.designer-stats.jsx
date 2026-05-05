@@ -67,7 +67,6 @@ export async function loader({ request }) {
     const pieceStats = {};
     
     const reviewsWithSuggestions = reviews.filter(r => r.session?.suggestions?.length > 0);
-    console.log(`📊 Reviews with suggestions: ${reviewsWithSuggestions.length} out of ${reviews.length} total`);
     
     reviewsWithSuggestions.forEach(review => {
       const selectedSuggestion = review.session.suggestions.find(
@@ -75,11 +74,17 @@ export async function loader({ request }) {
       ) || review.session.suggestions[0];
       
       if (!selectedSuggestion) return;
-      console.log("🔍 PIECE STATS - Review:", review.id.slice(0,8), "has suggestions:", !!selectedSuggestion, "items count:", selectedSuggestion.items?.length || 0);
+      if (!selectedSuggestion.items || selectedSuggestion.items.length === 0) return;
       
-      if (!selectedSuggestion.items || selectedSuggestion.items.length === 0) {
-        console.log("⚠️ NO ITEMS in suggestion", selectedSuggestion.id);
-        return;
+      // Get session DNA once for this review
+      const sessionDNA = review.customer?.onboardingProfile?.stylePersonalities || review.session?.styleDNA;
+      let parsedDNA = [];
+      if (sessionDNA) {
+        if (typeof sessionDNA === 'string') {
+          try { parsedDNA = JSON.parse(sessionDNA); } catch (e) { parsedDNA = []; }
+        } else if (Array.isArray(sessionDNA)) {
+          parsedDNA = sessionDNA;
+        }
       }
       
       selectedSuggestion.items.forEach(item => {
@@ -137,24 +142,9 @@ export async function loader({ request }) {
           stats.occasions.push(review.session.occasion);
         }
         
-        console.log(`🔍 About to collect DNA for piece: ${pieceName}, review: ${review.id.slice(0,8)}`);
-        
-        // Style DNA - try customer profile first, then session
-        let styleDNA = review.customer?.onboardingProfile?.stylePersonalities || review.session?.styleDNA;
-        console.log(`DEBUG DNA for ${pieceName}: styleDNA=`, styleDNA, 'type:', typeof styleDNA);
-        if (styleDNA) {
-          // stylePersonalities is already an array, styleDNA from session needs parsing
-          let dna = styleDNA;
-          if (typeof styleDNA === 'string') {
-            try {
-              dna = JSON.parse(styleDNA);
-            } catch (e) {
-              dna = [];
-            }
-          }
-          if (Array.isArray(dna) && dna.length > 0) {
-            stats.styleDNA.push(...dna);
-          }
+        // Add session DNA to this piece
+        if (parsedDNA.length > 0) {
+          stats.styleDNA.push(...parsedDNA);
         }
         
         // Tags
