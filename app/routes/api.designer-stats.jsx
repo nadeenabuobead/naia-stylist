@@ -555,7 +555,8 @@ export async function loader({ request }) {
       if (selectedSuggestion) {
           console.log("🔍 Review", review.id.slice(0,8), "has suggestions:", selectedSuggestion ? "YES" : "NO", "items:", selectedSuggestion?.items?.length || 0);
         selectedSuggestion.items.forEach(item => {
-          const pieceName = item.productTitle || `Closet Item ${item.closetItemId}`;
+          if (!item.shopifyProductId || !item.productTitle) return;
+          const pieceName = item.productTitle;
           if (!bodyStats[bodyPref].pieces[pieceName]) {
             bodyStats[bodyPref].pieces[pieceName] = { good: 0, bad: 0 };
           }
