@@ -71,7 +71,10 @@ export async function loader({ request }) {
       console.log("🔍 PIECE STATS - Review:", review.id.slice(0,8), "has suggestions:", !!selectedSuggestion, "workedTags:", review.workedTags ? "YES" : "NO");
       
       selectedSuggestion.items.forEach(item => {
-        const pieceName = item.productTitle || `Closet Item ${item.closetItemId}`;
+        // Skip closet items - only track nAia products
+        if (!item.shopifyProductId || !item.productTitle) return;
+        
+        const pieceName = item.productTitle;
         
         if (!pieceStats[pieceName]) {
           pieceStats[pieceName] = {
@@ -200,7 +203,8 @@ export async function loader({ request }) {
           // Add quote to each piece in the outfit
           suggestion.items.forEach(item => {
           if (!item.shopifyProductId) return;
-            const pieceName = item.productTitle || `Closet Item ${item.closetItemId}`;
+            if (!item.shopifyProductId || !item.productTitle) return;
+            const pieceName = item.productTitle;
             if (pieceStats[pieceName] && !pieceStats[pieceName].quotes.includes(review.additionalNotes)) {
               pieceStats[pieceName].quotes.push(review.additionalNotes);
             }
@@ -514,7 +518,8 @@ export async function loader({ request }) {
               if (suggestion?.items) {
                 suggestion.items.forEach(item => {
           if (!item.shopifyProductId) return;
-                  const pieceName = item.productTitle || `Closet ${item.closetItemId}`;
+                  if (!item.shopifyProductId || !item.productTitle) return;
+                  const pieceName = item.productTitle;
                   if (!objectionStats[obj].pieces.includes(pieceName)) objectionStats[obj].pieces.push(pieceName);
                 });
               }
