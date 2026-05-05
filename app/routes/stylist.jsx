@@ -1380,6 +1380,16 @@ export default function Stylist() {
       const data = await res.json();
       const result = data.result || data.error || "Something went wrong.";
       setStylingResult(result);
+      
+      // Extract nAia pieces from result and update previousPieces
+      const pieceMatches = result.match(/Sculptural Hybrid Coat|Art Blouse|Art Panel Tailored Blazer|Textured Art Maxi Skirt|Wrap Cropped Top|Printed Wrap Kimono Jacket|Art Collar Shirt|Leather Midi Dress|Asymmetrical Waist Pants|Printed Straight Pants/g);
+      if (pieceMatches && pieceMatches.length > 0) {
+        setPreviousPieces(prev => {
+          const updated = [...new Set([...prev, ...pieceMatches])];
+          return updated.slice(-5);
+        });
+      }
+      
       if (customerToken && result && !result.startsWith("Something went wrong")) {
         try {
           // Extract nAia pieces from the result text
@@ -1445,8 +1455,16 @@ export default function Stylist() {
       const data = await res.json();
       const result = data.result || data.error || "Something went wrong.";
       setStylingResult(result);
+      
+      // Extract and update previousPieces
       const pieceMatches = result.match(/Sculptural Hybrid Coat|Art Blouse|Art Panel Tailored Blazer|Textured Art Maxi Skirt|Wrap Cropped Top|Printed Wrap Kimono Jacket|Art Collar Shirt|Leather Midi Dress|Asymmetrical Waist Pants|Printed Straight Pants/g);
-if (pieceMatches) setPreviousPieces(pieceMatches);
+      if (pieceMatches && pieceMatches.length > 0) {
+        setPreviousPieces(prev => {
+          const updated = [...new Set([...prev, ...pieceMatches])];
+          return updated.slice(-5);
+        });
+      }
+      
       if (customerToken && result) {
         try {
           const hRes = await fetch("/api/outfit-history", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },
