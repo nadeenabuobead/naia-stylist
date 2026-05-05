@@ -620,8 +620,11 @@ export async function loader({ request }) {
     });
     
     console.log("🔍 BODY STATS RESULT:", Object.keys(bodyStats), "Total entries:", Object.keys(bodyStats).length);
+    console.log('🔍 BODY STATS:', Object.keys(bodyStats).map(pref => `${pref}: ${Object.keys(bodyStats[pref].pieces).length} pieces`));
+    
     const bodyPatterns = Object.entries(bodyStats)
       .map(([preference, data]) => {
+        console.log(`Processing ${preference}: ${Object.keys(data.pieces).length} pieces before filter`);
         const piecePerformance = Object.entries(data.pieces)
           .map(([name, perf]) => ({ name, ...perf, score: perf.good - perf.bad }))
           .filter(p => {
