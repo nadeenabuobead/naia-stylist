@@ -421,11 +421,14 @@ export async function loader({ request }) {
       } catch {}
     });
     
+    // Calculate total selections (users can pick multiple)
+    const totalDNASelections = Object.values(dnaCount).reduce((sum, count) => sum + count, 0);
+    
     const styleDNA = Object.entries(dnaCount)
       .map(([name, count]) => ({
         name,
         count,
-        percentage: count / customers.length,
+        percentage: totalDNASelections > 0 ? Math.round((count / totalDNASelections) * 100) : 0,
       }))
       .sort((a, b) => b.count - a.count);
 
