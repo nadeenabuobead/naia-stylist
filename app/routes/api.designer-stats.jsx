@@ -135,8 +135,8 @@ export async function loader({ request }) {
         }
         
         // Style DNA - try customer profile first, then session
-        console.log(`DEBUG DNA - piece: ${pieceName}, profile DNA:`, review.customer?.onboardingProfile?.stylePersonalities, 'session DNA:', review.session?.styleDNA);
-        let styleDNA = review.customer?.onboardingProfile?.stylePersonalities || review.session.styleDNA;
+        let styleDNA = review.customer?.onboardingProfile?.stylePersonalities || review.session?.styleDNA;
+        console.log(`DEBUG DNA for ${pieceName}: styleDNA=`, styleDNA, 'type:', typeof styleDNA);
         if (styleDNA) {
           // stylePersonalities is already an array, styleDNA from session needs parsing
           let dna = styleDNA;
