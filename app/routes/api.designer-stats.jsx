@@ -740,10 +740,10 @@ export async function loader({ request }) {
         
         // Add styling details
         const stylingDetails = [];
-        if (suggestion.makeupVibeRec) stylingDetails.push(suggestion.makeupVibeRec);
-        if (suggestion.hairstyleRec) stylingDetails.push(suggestion.hairstyleRec);
-        if (suggestion.perfumeRec) stylingDetails.push(suggestion.perfumeRec);
-        if (suggestion.songRec) stylingDetails.push(`Song: ${suggestion.songRec}`);
+        if (suggestion?.makeupVibeRec) stylingDetails.push(suggestion.makeupVibeRec);
+        if (suggestion?.hairstyleRec) stylingDetails.push(suggestion.hairstyleRec);
+        if (suggestion?.perfumeRec) stylingDetails.push(suggestion.perfumeRec);
+        if (suggestion?.songRec) stylingDetails.push(`Song: ${suggestion.songRec}`);
         
         let pieceName = outfitParts.join(' + ');
         if (stylingDetails.length > 0) {
