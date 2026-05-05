@@ -22,7 +22,11 @@ export async function loader({ request }) {
         customer: {
           select: {
             id: true,
-            onboardingProfile: true,
+            onboardingProfile: {
+              select: {
+                stylePersonalities: true,
+              }
+            },
           },
         },
       },
