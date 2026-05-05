@@ -736,14 +736,51 @@ export async function loader({ request }) {
     });
     
     const topOccasions = Object.entries(occasionStats)
-      .map(([name, data]) => ({
-        name,
-        avgRating: data.ratings.length > 0 
-          ? data.ratings.reduce((a, b) => a + b, 0) / data.ratings.length 
-          : 0,
-        lookCount: data.total,
-        rewear: data.rewear / data.total,
-      }))
+      .map(([name, data]) => {
+        // Get top performing pieces for this occasion
+        const piecesForOccasion = {};
+        reviews.filter(r => r.session?.occasion === name && r.session?.suggestions?.length > 0).forEach(review => {
+          const suggestion = review.session.suggestions.find(s => s.id === review.session.selectedSuggestionId) || review.session.suggestions[0];
+          if (suggestion?.items) {
+            suggestion.items.forEach(item => {
+              if (!item.productTitle || item.closetItemId) return;
+              const title = item.productTitle.toLowerCase();
+              if (title === 'white top' || title === 'black top' || 
+                  title.includes('your ') || title.includes('layer') || 
+                  title.includes('pair ') || title.includes('complement') ||
+                  title.includes('flowing')) return;
+              
+              if (!piecesForOccasion[item.productTitle]) {
+                piecesForOccasion[item.productTitle] = { count: 0, totalRating: 0 };
+              }
+              piecesForOccasion[item.productTitle].count++;
+              if (review.overallFeeling) {
+                piecesForOccasion[item.productTitle].totalRating += review.overallFeeling;
+              }
+            });
+          }
+        });
+        
+        const topPieces = Object.entries(piecesForOccasion)
+          .map(([piece, stats]) => ({
+            name: piece,
+            count: stats.count,
+            avgRating: stats.totalRating / stats.count
+          }))
+          .sort((a, b) => b.avgRating - a.avgRating)
+          .slice(0, 3)
+          .map(p => p.name);
+        
+        return {
+          name,
+          avgRating: data.ratings.length > 0 
+            ? data.ratings.reduce((a, b) => a + b, 0) / data.ratings.length 
+            : 0,
+          lookCount: data.total,
+          rewear: data.rewear / data.total,
+          topPieces,
+        };
+      })
       .sort((a, b) => b.avgRating - a.avgRating)
       .slice(0, 10);
 
