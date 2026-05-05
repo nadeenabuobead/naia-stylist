@@ -66,7 +66,10 @@ export async function loader({ request }) {
     // 2. Piece Performance Analysis
     const pieceStats = {};
     
-    reviews.filter(r => r.session?.suggestions?.length > 0).forEach(review => {
+    const reviewsWithSuggestions = reviews.filter(r => r.session?.suggestions?.length > 0);
+    console.log(`📊 Reviews with suggestions: ${reviewsWithSuggestions.length} out of ${reviews.length} total`);
+    
+    reviewsWithSuggestions.forEach(review => {
       const selectedSuggestion = review.session.suggestions.find(
         s => s.id === review.session.selectedSuggestionId
       ) || review.session.suggestions[0];
