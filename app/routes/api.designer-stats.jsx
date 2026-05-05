@@ -117,7 +117,7 @@ export async function loader({ request }) {
         }
         
         // Style DNA - try customer profile first, then session
-        let styleDNA = review.customer?.onboardingProfile?.styleDNA || review.session.styleDNA;
+        let styleDNA = review.customer?.onboardingProfile?.stylePersonalities || review.session.styleDNA;
         if (styleDNA) {
           try {
             const dna = JSON.parse(styleDNA);
@@ -392,7 +392,7 @@ export async function loader({ request }) {
 
     // 8. Style DNA Breakdown
     const customers = await prisma.customer.findMany({
-      include: { onboardingProfile: true },
+      include: { onboardingProfile: { select: { stylePersonalities: true } } },
     });
     
     const dnaCount = {};
