@@ -87,9 +87,17 @@ export async function loader({ request }) {
       }
       
       selectedSuggestion.items.forEach(item => {
-        console.log(`DEBUG ITEM - productTitle: ${item.productTitle}, shopifyProductId: ${item.shopifyProductId}`);
-        // Skip closet items - only track nAia products
-        if (!item.shopifyProductId || !item.productTitle) return;
+        // Skip if no product title
+        if (!item.productTitle) return;
+        
+        // Skip closet items (these have closetItemId OR are known closet pieces)
+        if (item.closetItemId) return;
+        const titleLower = item.productTitle.toLowerCase();
+        if (titleLower === 'white top' || titleLower === 'black top' || 
+            titleLower.includes('your ') || titleLower.includes('layer') || 
+            titleLower.includes('pair your') || titleLower.includes('complemented')) {
+          return;
+        }
         
         const pieceName = item.productTitle;
         
