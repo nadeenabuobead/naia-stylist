@@ -1346,7 +1346,7 @@ export default function Stylist() {
       try { await fetch("/api/wishlist", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) }, body: JSON.stringify({ action: "remove", naiaProductId: pid }) }); } catch {}
     } else {
       const newItem = { naiaProductId: pid, title: product.title, handle: product.handle, image: product.image, createdAt: new Date().toISOString() };
-      setWishlist(prev => [newItem, ...prev]); trackEvent(product.id, product.title, "wishlisted");
+      setWishlist(prev => [newItem, ...prev]);
       try { await fetch("/api/wishlist", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) }, body: JSON.stringify({ action: "add", ...newItem, trackEvent: "wishlisted", sessionId: lastHistoryId }) }); } catch {}
     }
   }, [customerToken, wishlistIds]);
