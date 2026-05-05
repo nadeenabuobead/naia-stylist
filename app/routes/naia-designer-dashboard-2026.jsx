@@ -541,6 +541,11 @@ function OccasionCard({ occasion }) {
         <div>{occasion.lookCount} looks</div>
         <div>{Math.round(occasion.rewear * 100)}% rewear</div>
       </div>
+      {occasion.topPieces && occasion.topPieces.length > 0 && (
+        <div style={{ fontSize: "11px", color: "#666", marginTop: "8px" }}>
+          Best pieces: {occasion.topPieces.join(", ")}
+        </div>
+      )}
     </div>
   );
 }
