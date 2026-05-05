@@ -498,7 +498,15 @@ export async function loader({ request }) {
     });
     
     const productPairings = Object.values(pairingStats)
-      .filter(p => p.ratings.length > 0)
+      .filter(p => {
+        if (p.ratings.length === 0) return false;
+        // Exclude AI-generated descriptions
+        const naia = p.naiaPiece.toLowerCase();
+        return !naia.includes('layer') && 
+               !naia.includes('pair your') && 
+               !naia.includes('complemented') &&
+               !naia.includes('wear your');
+      })
       .map(p => ({
         closetItem: p.closetItem,
         naiaPiece: p.naiaPiece,
