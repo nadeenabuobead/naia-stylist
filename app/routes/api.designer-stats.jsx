@@ -603,7 +603,18 @@ export async function loader({ request }) {
       if (selectedSuggestion) {
           console.log("🔍 Review", review.id.slice(0,8), "has suggestions:", selectedSuggestion ? "YES" : "NO", "items:", selectedSuggestion?.items?.length || 0);
         selectedSuggestion.items.forEach(item => {
-          if (!item.shopifyProductId || !item.productTitle) return;
+          // Skip if no product title
+          if (!item.productTitle) return;
+          
+          // Skip closet items and AI descriptions
+          if (item.closetItemId) return;
+          const titleLower = item.productTitle.toLowerCase();
+          if (titleLower === 'white top' || titleLower === 'black top' || 
+              titleLower.includes('your ') || titleLower.includes('layer') || 
+              titleLower.includes('pair your') || titleLower.includes('complemented')) {
+            return;
+          }
+          
           const pieceName = item.productTitle;
           if (!bodyStats[bodyPref].pieces[pieceName]) {
             bodyStats[bodyPref].pieces[pieceName] = { good: 0, bad: 0 };
