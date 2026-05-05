@@ -452,16 +452,16 @@ export async function loader({ request }) {
       if (!suggestion?.items || suggestion.items.length < 2) return;
       
       // Find closet items and nAia pieces in the outfit
-      const closetItems = suggestion.items.filter(item => 
-        item.closetItemId || 
-        (item.productTitle && (
-          item.productTitle.toLowerCase().includes('your ') ||
-          item.productTitle.toLowerCase() === 'top' ||
-          item.productTitle.toLowerCase() === 'bottom' ||
-          item.productTitle.toLowerCase() === 'white top' ||
-          item.productTitle.toLowerCase() === 'black top'
-        ))
-      );
+      const closetItems = suggestion.items.filter(item => {
+        if (item.closetItemId) return true;
+        if (!item.productTitle) return false;
+        const title = item.productTitle.toLowerCase();
+        // Only exact matches for known closet items
+        return title === 'white top' || 
+               title === 'black top' || 
+               title === 'your white top' ||
+               title === 'your black top';
+      });
       const naiaItems = suggestion.items.filter(item => 
         !closetItems.includes(item) &&
         item.productTitle &&
