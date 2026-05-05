@@ -728,16 +728,28 @@ export async function loader({ request }) {
         // Build the full look description
         const outfitParts = [];
         
-        // Add all items (closet + nAia, excluding AI descriptions)
+        // Add all items (closet + nAia, extracting from AI descriptions)
         if (suggestion?.items) {
-          console.log('Quote - items in suggestion:', suggestion.items.map(i => i.productTitle));
           suggestion.items.forEach(item => {
             if (!item.productTitle) return;
-            const title = item.productTitle.toLowerCase();
-            // Only exclude AI-generated descriptions
-            if (title.includes('layer') || title.includes('pair ') || 
-                title.includes('wear ') || title.includes('complement')) return;
-            outfitParts.push(item.productTitle);
+            let productName = item.productTitle;
+            
+            // Extract actual product name from AI descriptions
+            if (productName.toLowerCase().includes('complemented by the ')) {
+              productName = productName.replace(/complemented by the /i, '').trim();
+            }
+            if (productName.toLowerCase().includes('wear your ')) {
+              // Skip - this is just repeating the closet item
+              return;
+            }
+            if (productName.toLowerCase().includes('layer your ')) {
+              productName = productName.replace(/layer your .* (under|over|with) the /i, '').trim();
+            }
+            if (productName.toLowerCase().includes('pair your ')) {
+              productName = productName.replace(/pair your .* with the /i, '').trim();
+            }
+            
+            outfitParts.push(productName);
           });
         }
         
