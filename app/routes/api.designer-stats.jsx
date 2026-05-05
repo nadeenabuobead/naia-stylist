@@ -78,6 +78,7 @@ export async function loader({ request }) {
       
       // Get session DNA once for this review
       const sessionDNA = review.customer?.onboardingProfile?.stylePersonalities || review.session?.styleDNA;
+      console.log('🧬 Session DNA check - raw:', sessionDNA);
       let parsedDNA = [];
       if (sessionDNA) {
         if (typeof sessionDNA === 'string') {
@@ -143,8 +144,10 @@ export async function loader({ request }) {
         }
         
         // Add session DNA to this piece
+        console.log(`🧬 Adding DNA to ${pieceName}: parsedDNA=`, parsedDNA);
         if (parsedDNA.length > 0) {
           stats.styleDNA.push(...parsedDNA);
+          console.log(`✅ Added! Now has ${stats.styleDNA.length} DNA entries`);
         }
         
         // Tags
