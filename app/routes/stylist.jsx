@@ -1491,8 +1491,6 @@ if (pieceMatches) setPreviousPieces(pieceMatches);
     if (product && customerToken && lastHistoryId) {
       fetch("/api/wishlist", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${customerToken}` }, body: JSON.stringify({ action: "track", sessionId: lastHistoryId, naiaProductId: String(product.id), title: productTitle, eventType: "tryon" }) }).catch(() => {});
     }
-    const product = naiaProducts.find(p => p.title === productTitle);
-    if (product) trackEvent(product.id, productTitle, "tryon");
     try {
       let garmentUrl = productImage;
       if (garmentUrl && garmentUrl.startsWith("//")) garmentUrl = "https:" + garmentUrl;
