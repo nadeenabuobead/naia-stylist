@@ -1438,15 +1438,29 @@ export default function Stylist() {
     setMood(customer.lastMood || ""); setFeeling(customer.lastFeeling || ""); setEvent(customer.lastEvent || "");
     setStyleWords(customer.lastStyleWords || []); setBodyPref(customer.lastBodyPref || ""); setMode(customer.lastMode || "closet_only");
     setLoading(true); setStylingResult(""); setStep(8); setLastHistoryId(null);
+  // ─── Quick re-style ───
+  const quickRestyle = async () => {
+    if (!customer) return;
+    setMood(customer.lastMood || ""); setFeeling(customer.lastFeeling || ""); setEvent(customer.lastEvent || "");
+    setStyleWords(customer.lastStyleWords || []); setBodyPref(customer.lastBodyPref || ""); setMode(customer.lastMode || "closet_only");
+    setLoading(true); setStylingResult(""); setStep(8); setLastHistoryId(null);
     try {
       const res = await fetch("/api/style", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: customer.lastMode || "closet_only", outfit: closet.map(i => i.name).join(" + "), mood: customer.lastMood || "", feeling: customer.lastFeeling || "", event: customer.lastEvent || "", styleDNA: customer.lastStyleDNA || [], bodyPref: customer.lastBodyPref || "", closetItems: closet, closet: closet.map(i => ({ name: i.name, category: i.category })) }),
+        body: JSON.stringify({ mode: customer.lastMode || "closet_only", outfit: closet.map(i => i.name).join(" + "), mood: customer.lastMood || "", feeling: customer.lastFeeling || "", event: customer.lastEvent || "", styleDNA: customer.lastStyleDNA || [], bodyPref: customer.lastBodyPref || "", previousPieces, closetItems: closet, closet: closet.map(i => ({ name: i.name, category: i.category })) }),
       });
       const data = await res.json();
       const result = data.result || data.error || "Something went wrong.";
       setStylingResult(result);
+      
+      // Extract and update previousPieces
       const pieceMatches = result.match(/Sculptural Hybrid Coat|Art Blouse|Art Panel Tailored Blazer|Textured Art Maxi Skirt|Wrap Cropped Top|Printed Wrap Kimono Jacket|Art Collar Shirt|Leather Midi Dress|Asymmetrical Waist Pants|Printed Straight Pants/g);
-if (pieceMatches) setPreviousPieces(pieceMatches);
+      if (pieceMatches && pieceMatches.length > 0) {
+        setPreviousPieces(prev => {
+          const updated = [...new Set([...prev, ...pieceMatches])];
+          return updated.slice(-5);
+        });
+      }
+      
       if (customerToken && result) {
         try {
           const hRes = await fetch("/api/outfit-history", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(customerToken) },

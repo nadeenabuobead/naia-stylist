@@ -128,13 +128,15 @@ console.log("Style Intelligence:", JSON.stringify(styleIntelligence, null, 2));
 3. Never add anything inside or after Shift except the labeled sections.
 4. CRITICAL: You may ONLY recommend nAia pieces from the "NAIA PIECES YOU MAY RECOMMEND" list. This list has been pre-filtered. Do NOT invent or add pieces not in that list.
 5. Never recommend a piece in the same category as what the customer already has (e.g. no top + top, no bottom + bottom).
-6. CRITICAL: Never recommend TWO pieces from the same category. Each recommendation must be a DIFFERENT category. For example, do NOT recommend two outerwear pieces, or two bottoms. One outerwear + one bottom = good. Two outerwear = bad.
+6. CRITICAL: If recommending 2 pieces, never recommend TWO pieces from the same category. Each must be DIFFERENT (e.g. one outerwear + one bottom = good; two outerwear = bad).
 7. Refer to customer's closet pieces as "your [piece name]" and nAia pieces by their exact product name.
-8. Song MUST be a well-known, popular song that most people would recognize — think top hits, Spotify top charts, popular artists like Dua Lipa, SZA, Billie Eilish, The Weeknd, Taylor Swift, Rihanna, Frank Ocean, Adele, Harry Styles, Beyoncé, Arctic Monkeys, Lana Del Rey, etc. Match the energy and mood. Never pick obscure songs.
-9. Perfume MUST be a mainstream, widely available fragrance people would recognize — like Chanel No. 5, YSL Black Opium, Dior Miss Dior, Tom Ford Black Orchid, Marc Jacobs Daisy, Lancôme La Vie Est Belle, Versace Bright Crystal, etc. Match the mood of the outfit.
-10. Connect every styling choice back to the customer's emotional shift (from current mood → desired feeling).
-11. VARIETY RULE: You MUST pick different pieces every time. Never recommend the same combination twice in a row. If you recommended the Sculptural Hybrid Coat or Textured Art Maxi Skirt last time, pick completely different pieces this time. Rotate through ALL available pieces equally.
-12. CRITICAL: If the customer has CUSTOMER STYLE INTELLIGENCE data, you MUST prioritize and reference it. Use what has worked for her in the past, avoid what hasn't worked, and acknowledge her preferences in your recommendations.`,
+8. Song MUST be a 2025/2026 hit that matches the mood transformation. Use current artists: Sabrina Carpenter, Chappell Roan, Charli XCX, Billie Eilish, SZA, Olivia Rodrigo, Tate McRae, The Weeknd, Ariana Grande, etc.
+9. Perfume MUST match the feeling they want to achieve AND the occasion. Evening/bold = YSL Black Opium, Tom Ford. Soft/romantic = Miss Dior, Daisy. Fresh/casual = Chanel Chance.
+10. Hair MUST be a 2025/2026 trend: glass hair, wet look, 90s blowout, slicked-back, curtain bangs, editorial textures. Match to occasion and desired feeling.
+11. Makeup MUST be a 2025/2026 trend: latte makeup, clean girl, burgundy tones, glass skin, graphic liner. Match to desired feeling and occasion.
+12. Connect every styling choice (outfit, accessories, hair, makeup, perfume, song) back to the customer's emotional shift (current mood → desired feeling) and their specific occasion.
+13. VARIETY RULE: Pick different pieces every time based on occasion, mood, body preference, and style DNA. The same occasion + mood combination should still yield variety by considering all factors.
+14. CRITICAL: If the customer has CUSTOMER STYLE INTELLIGENCE data, you MUST prioritize and reference it. Use what has worked for her in the past, avoid what hasn't worked, and acknowledge her preferences in your recommendations.`,
 
           },
           { role: "user", content: stylistPrompt },
@@ -163,228 +165,247 @@ try {
   if (customer) {
     // Create styling session
     console.log("Saving styleDNA to session:", styleDNA);
-    console.log("Saving bodyPref to session:", bodyPref);
-    const session = await prisma.stylingSession.create({
+    await prisma.stylingSession.create({
       data: {
         customerId: customer.id,
-        currentMood: safeMood || "",
-        desiredFeeling: safeFeeling || "",
-        occasion: safeEvent || "",
-        bodyPreference: bodyPref || "",
+        currentMood: safeMood,
+        desiredFeeling: safeFeeling,
+        occasion: safeEvent,
         styleDNA: JSON.stringify(styleDNA || []),
-        specificNeeds: result,
-        styleFrom: "NAIA",
+        bodyPreference: bodyPref || null,
+        mode,
       },
     });
 
-    // Parse nAia pieces from result
-    const ALL_PIECE_NAMES = [
-      "Sculptural Hybrid Coat", "Art Blouse", "Art Panel Tailored Blazer",
-      "Textured Art Maxi Skirt", "Wrap Cropped Top", "Printed Wrap Kimono Jacket",
-      "Art Collar Shirt", "Leather Midi Dress", "Asymmetrical Waist Pants", "Printed Straight Pants"
-    ];
-    const PIECE_IDS = {
-      "Sculptural Hybrid Coat": "7822708867114",
-      "Art Blouse": "7822708310058",
-      "Art Panel Tailored Blazer": "7822708113450",
-      "Textured Art Maxi Skirt": "7822708047914",
-      "Wrap Cropped Top": "7822707949610",
-      "Printed Wrap Kimono Jacket": "7822707589162",
-      "Art Collar Shirt": "7822707392554",
-      "Leather Midi Dress": "7822707130410",
-      "Asymmetrical Waist Pants": "7822706475050",
-      "Printed Straight Pants": "7822706016298",
-    };
-    const PIECE_IMAGES = {
-      "Sculptural Hybrid Coat": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/b7af3725-7048-4ead-8d04-d6fb42556eac.png",
-      "Art Blouse": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32674461-cac7-4699-aff1-74c435289333.png",
-      "Art Panel Tailored Blazer": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/a7b908bb-3079-4f39-93b8-e1a89435249a.png",
-      "Textured Art Maxi Skirt": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/6992350d-5695-4f28-8674-7747dfd1e680.png",
-      "Wrap Cropped Top": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3614927b-4685-4df3-aeff-b3d5a950cbd2.png",
-      "Printed Wrap Kimono Jacket": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/77d61b97-37da-4e57-8297-aa5207b35d07.png",
-      "Art Collar Shirt": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32fe2afb-b8ef-46d2-ae2c-b1adc81a1b0f.png",
-      "Leather Midi Dress": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/8a855f15-e5e9-4ef5-a7db-a7253e83a542.png",
-      "Asymmetrical Waist Pants": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/7d5d1e05-796a-45d9-b74a-4ddb0c9da3cf.png",
-      "Printed Straight Pants": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3b14fe8b-2c19-492e-82b1-44baaf3a3cc9.png",
-    };
-
-    const foundPieces = ALL_PIECE_NAMES.filter(name => result.includes(name));
-
-    if (foundPieces.length > 0) {
-      const suggestion = await prisma.outfitSuggestion.create({
-        data: {
-          sessionId: session.id,
-          whyThisWorks: result.match(/WHY THIS WORKS[\s\S]*?(?=\n[A-Z])/i)?.[0] || null,
-        },
-      });
-
-      await prisma.outfitItem.createMany({
-        data: foundPieces.map(name => ({
-          suggestionId: suggestion.id,
-          itemType: "TOP",
-          shopifyProductId: PIECE_IDS[name],
-          productTitle: name,
-          productImageUrl: PIECE_IMAGES[name],
-          productUrl: `https://naiabynadine.com/products/${name.toLowerCase().replace(/ /g, "-")}`,
-        })),
-      });
+    // Parse nAia recommendations from result
+    const naiaSection = result.match(/nAia Recommendations\s*([\s\S]*?)(?:\n\nAccessories:|$)/i);
+    if (naiaSection) {
+      const lines = naiaSection[1].split('\n').filter(l => l.trim().startsWith('-'));
+      
+      for (const line of lines) {
+        // Extract product name (before the colon)
+        const match = line.match(/^-\s*([^:]+):/);
+        if (match) {
+          const productName = match[1].trim();
+          
+          // Find matching product from ALL_NAIA
+          const product = ALL_NAIA.find(p => 
+            p.name.toLowerCase() === productName.toLowerCase()
+          );
+          
+          if (product) {
+            // Check if already in closet
+            const existing = await prisma.closetItem.findFirst({
+              where: {
+                customerId: customer.id,
+                name: product.name,
+                source: "naia"
+              }
+            });
+            
+            if (!existing) {
+              await prisma.closetItem.create({
+                data: {
+                  customerId: customer.id,
+                  name: product.name,
+                  category: product.category,
+                  color: product.color || null,
+                  image: product.image || null,
+                  source: "naia",
+                  productId: product.id?.toString() || null,
+                },
+              });
+              console.log(`Added ${product.name} to customer closet`);
+            }
+          }
+        }
+      }
     }
-
-    return Response.json({ result: "TEST - Intelligence has " + (styleIntelligence ? styleIntelligence.totalReviews : "NO") + " reviews", sessionId: session.id });
   }
 } catch (err) {
-  console.error("DB save error:", err);
+  console.error("Failed to save nAia pieces:", err);
 }
 
-return Response.json({ result, debug_styleIntelligence: styleIntelligence });
-
+    return Response.json({ result });
   } catch (error) {
-    return Response.json({
-      result: buildFallback({ mood: "", feeling: "", closetItem: null, naiaPiece: null, outfit: "" }),
-      error: error?.message || "Something went wrong.",
-    }, { status: 200 });
+    console.error("Style API error:", error);
+    return Response.json({ error: "Internal server error." }, { status: 500 });
   }
 }
 
+const ALL_NAIA = [
+  {
+    id: "9781793104094",
+    name: "Sculptural Hybrid Coat",
+    category: "OUTERWEAR",
+    color: "BLACK",
+    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4444.jpg?v=1732531829",
+    styleSignal: "Architectural, bold",
+    emotionalEffect: "Powerful, grounded",
+    occasion: "Formal, statement events",
+    statementLevel: "High",
+    visualWeight: "Heavy",
+    pairingBehavior: "Anchors simple bases",
+    outfitCompleteness: "Statement piece, needs minimal styling"
+  },
+  {
+    id: "9781793136926",
+    name: "Art Blouse",
+    category: "TOP",
+    color: "CREAM/PRINT",
+    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4490.jpg?v=1732532166",
+    styleSignal: "Artistic, soft structure",
+    emotionalEffect: "Creative, refined",
+    occasion: "Work, dinner, creative settings",
+    statementLevel: "Medium",
+    visualWeight: "Light-medium",
+    pairingBehavior: "Pairs with structured bottoms",
+    outfitCompleteness: "Needs tailored bottom to balance"
+  },
+  {
+    id: "9781793169630",
+    name: "Art Panel Tailored Blazer",
+    category: "OUTERWEAR",
+    color: "BLACK/PRINT",
+    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4503.jpg?v=1732532364",
+    styleSignal: "Sharp, editorial",
+    emotionalEffect: "Confident, polished",
+    occasion: "Work, formal, meetings",
+    statementLevel: "High",
+    visualWeight: "Medium-heavy",
+    pairingBehavior: "Elevates simple pieces",
+    outfitCompleteness: "Statement piece, pairs with basics"
+  },
+  {
+    id: "9781793202398",
+    name: "Textured Art Maxi Skirt",
+    category: "BOTTOMS",
+    color: "BLACK/TEXTURE",
+    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4512.jpg?v=1732532538",
+    styleSignal: "Dramatic, flowing",
+    emotionalEffect: "Elegant, magnetic",
+    occasion: "Evening, formal, events",
+    statementLevel: "High",
+    visualWeight: "Heavy",
+    pairingBehavior: "Needs simple top to balance",
+    outfitCompleteness: "Statement piece, keep top minimal"
+  },
+  {
+    id: "9781793235166",
+    name: "Wrap Cropped Top",
+    category: "TOP",
+    color: "BLACK",
+    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4534.jpg?v=1732532720",
+    styleSignal: "Minimal, modern",
+    emotionalEffect: "Clean, intentional",
+    occasion: "Casual, layering, versatile",
+    statementLevel: "Low",
+    visualWeight: "Light",
+    pairingBehavior: "Layers under blazers, pairs with high-waist",
+    outfitCompleteness: "Base piece, needs layering or statement bottom"
+  },
+  {
+    id: "9781793267934",
+    name: "Printed Wrap Kimono Jacket",
+    category: "OUTERWEAR",
+    color: "PRINT/MULTI",
+    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4525.jpg?v=1732532920",
+    styleSignal: "Artistic, layered",
+    emotionalEffect: "Creative, soft",
+    occasion: "Casual, creative, travel",
+    statementLevel: "Medium",
+    visualWeight: "Light-medium",
+    pairingBehavior: "Layers over simple bases",
+    outfitCompleteness: "Layering piece, needs base underneath"
+  },
+  {
+    id: "9781793300702",
+    name: "Art Collar Shirt",
+    category: "TOP",
+    color: "WHITE/PRINT",
+    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4540.jpg?v=1732533084",
+    styleSignal: "Sharp, detailed",
+    emotionalEffect: "Polished, refined",
+    occasion: "Work, formal, meetings",
+    statementLevel: "Medium",
+    visualWeight: "Medium",
+    pairingBehavior: "Pairs with tailored bottoms",
+    outfitCompleteness: "Needs structured bottom to complete"
+  },
+  {
+    id: "9781793333470",
+    name: "Leather Midi Dress",
+    category: "DRESS",
+    color: "BLACK",
+    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4549.jpg?v=1732533272",
+    styleSignal: "Bold, sleek",
+    emotionalEffect: "Powerful, magnetic",
+    occasion: "Evening, dinner, events",
+    statementLevel: "High",
+    visualWeight: "Heavy",
+    pairingBehavior: "Complete look, minimal accessories",
+    outfitCompleteness: "Complete outfit, just add shoes"
+  },
+  {
+    id: "9781793366238",
+    name: "Asymmetrical Waist Pants",
+    category: "BOTTOMS",
+    color: "BLACK",
+    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4560.jpg?v=1732533461",
+    styleSignal: "Modern, architectural",
+    emotionalEffect: "Sharp, intentional",
+    occasion: "Work, formal, creative",
+    statementLevel: "Medium-high",
+    visualWeight: "Medium",
+    pairingBehavior: "Pairs with simple tops",
+    outfitCompleteness: "Statement bottom, keep top simple"
+  },
+  {
+    id: "9781793399006",
+    name: "Printed Straight Pants",
+    category: "BOTTOMS",
+    color: "PRINT/MULTI",
+    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4567.jpg?v=1732533638",
+    styleSignal: "Artistic, bold",
+    emotionalEffect: "Creative, confident",
+    occasion: "Casual, creative, work",
+    statementLevel: "Medium",
+    visualWeight: "Medium",
+    pairingBehavior: "Needs simple top to balance",
+    outfitCompleteness: "Statement bottom, keep top minimal"
+  },
+];
+
 function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bodyPref, closetItem, closetItems, naiaPiece, closet, styleIntelligence, previousPieces, vibe, styleDNA }) {
-  const closetList = Array.isArray(closet) && closet.length > 0
-    ? closet.map(i => `- ${i.name} (${i.category}) [customer closet]`).join("\n")
-    : "No closet items.";
-
+  // Build lists
   const selectedList = Array.isArray(closetItems) && closetItems.length > 0
-    ? closetItems.map(i => `- ${i.name} (${i.category}) [customer closet]`).join("\n")
-    : closetItem ? `- ${closetItem.name} (${closetItem.category}) [customer closet]` : "None";
+    ? closetItems.map(i => `- ${i.name} (${i.category || ""})`).join("\n")
+    : closetItem
+    ? `- ${closetItem.name} (${closetItem.category || ""})`
+    : "No specific pieces selected";
 
-  // All nAia pieces with full styling metadata
-  const ALL_NAIA = [
-    {
-      name: "Sculptural Hybrid Coat", category: "outerwear",
-      color: "soft beige + deep brown + art print panel", stylingRole: "statement",
-      silhouette: "structured, longline, asymmetric", fit: "tailored", length: "full",
-      visualWeight: "heavy", statementLevel: "high",
-      styleSignal: "dramatic, sculptural, refined, editorial",
-      occasion: "event, dinner, evening, work",
-      emotionalEffect: "empowering, elevating, commanding",
-      pairingBehavior: "Best with minimal, clean base layers. Avoid competing statement outerwear or heavily detailed tops underneath. Works best over fitted or straight silhouettes. Can finish the whole look on its own.",
-      outfitCompleteness: "near-complete"
-    },
-    {
-      name: "Printed Wrap Kimono Jacket", category: "outerwear",
-      color: "cream, rust, espresso brown", stylingRole: "statement",
-      silhouette: "wrap, soft-structured, defined waist", fit: "adjustable", length: "hip",
-      visualWeight: "medium", statementLevel: "medium",
-      styleSignal: "artistic, textured, layered",
-      occasion: "day, evening",
-      emotionalEffect: "comforting, enveloping",
-      pairingBehavior: "Pair with slim/straight bottoms. Avoid excess volume underneath. Can replace top + jacket.",
-      outfitCompleteness: "builder"
-    },
-    {
-      name: "Art Panel Tailored Blazer", category: "outerwear",
-      color: "espresso brown + beige/brown print accent", stylingRole: "statement",
-      silhouette: "structured, tailored", fit: "tailored", length: "hip",
-      visualWeight: "medium-heavy", statementLevel: "medium-high",
-      styleSignal: "sculptural, editorial, refined",
-      occasion: "work, dinner, event",
-      emotionalEffect: "empowering, elevated",
-      pairingBehavior: "Pair with clean minimal tops, straight or fluid bottoms. Avoid competing prints, heavy detailing underneath, overlayering.",
-      outfitCompleteness: "builder"
-    },
-    {
-      name: "Art Blouse", category: "top",
-      color: "deep chocolate brown + burnt bronze", stylingRole: "statement",
-      silhouette: "structured, waist defined", fit: "fitted", length: "hip",
-      visualWeight: "medium-high", statementLevel: "high",
-      styleSignal: "sculptural, editorial, dramatic",
-      occasion: "dinner, event, evening",
-      emotionalEffect: "powerful, protective",
-      pairingBehavior: "Pair with minimal bottoms. Avoid additional statement pieces. No heavy layering.",
-      outfitCompleteness: "builder"
-    },
-    {
-      name: "Textured Art Maxi Skirt", category: "bottom",
-      color: "warm beige, rust, deep brown mix", stylingRole: "statement",
-      silhouette: "long, straight, slightly fluid", fit: "skimming", length: "maxi",
-      visualWeight: "medium-high", statementLevel: "high",
-      styleSignal: "editorial, sculptural, artistic",
-      occasion: "dinner, event",
-      emotionalEffect: "grounding, expressive",
-      pairingBehavior: "Pair with clean, structured, or minimal tops. Avoid competing textures. Keep upper half refined.",
-      outfitCompleteness: "builder"
-    },
-    {
-      name: "Wrap Cropped Top", category: "top",
-      color: "warm beige, rust, deep brown blend", stylingRole: "statement",
-      silhouette: "fitted, sculpting", fit: "fitted", length: "hip",
-      visualWeight: "medium", statementLevel: "medium-high",
-      styleSignal: "artistic, sculptural",
-      occasion: "dinner, casual event",
-      emotionalEffect: "expressive, elevated",
-      pairingBehavior: "Pair with clean bottoms. Avoid busy combinations.",
-      outfitCompleteness: "builder"
-    },
-    {
-      name: "Art Collar Layered Shirt", category: "top",
-      color: "crisp white + warm brown accent in collar", stylingRole: "anchor",
-      silhouette: "structured, waist defined", fit: "tailored", length: "hip",
-      visualWeight: "medium", statementLevel: "medium",
-      styleSignal: "structured, sharp, refined, slightly editorial",
-      occasion: "work, dinner, event",
-      emotionalEffect: "empowering, polished, composed",
-      pairingBehavior: "Pair with fluid or statement bottoms. Works well under clean outerwear. Avoid overly busy necklines or heavy accessories (collar is already a feature). Can elevate otherwise minimal outfits.",
-      outfitCompleteness: "builder"
-    },
-    {
-      name: "Leather Midi Dress", category: "dress",
-      color: "deep burgundy brown + muted beige print", stylingRole: "statement",
-      silhouette: "fitted top + straight skirt", fit: "fitted (top), relaxed (skirt)", length: "midi",
-      visualWeight: "high", statementLevel: "high",
-      styleSignal: "sculptural, editorial, refined",
-      occasion: "dinner, evening, event",
-      emotionalEffect: "grounded, powerful",
-      pairingBehavior: "Minimal layering, keep everything else simple, avoid competing textures.",
-      outfitCompleteness: "near-complete"
-    },
-    {
-      name: "Asymmetrical Waist Pants", category: "bottom",
-      color: "dark brown + neutral underlayer accent", stylingRole: "anchor",
-      silhouette: "structured, elongated", fit: "tailored", length: "full",
-      visualWeight: "medium", statementLevel: "medium",
-      styleSignal: "structured, refined, slightly editorial",
-      occasion: "work, dinner, day",
-      emotionalEffect: "grounding, polished",
-      pairingBehavior: "Pair with clean or minimal tops, structured or fluid tops. Avoid too much detail at the waist, and overly complex layering at midsection.",
-      outfitCompleteness: "builder"
-    },
-    {
-      name: "Printed Straight Pants", category: "bottom",
-      color: "rust, brown, charcoal blend", stylingRole: "statement",
-      silhouette: "wide-leg, flowing", fit: "relaxed", length: "full",
-      visualWeight: "medium-high", statementLevel: "high",
-      styleSignal: "fluid, artistic, expressive",
-      occasion: "dinner, event, evening",
-      emotionalEffect: "expressive, expansive, slightly dramatic",
-      pairingBehavior: "Pair with structured tops, clean silhouettes, minimal layers. Avoid other strong prints, overly voluminous tops and competing textures.",
-      outfitCompleteness: "anchor+statement in one"
-    },
-  ];
+  const closetList = Array.isArray(closet) && closet.length > 0
+    ? closet.map(i => `- ${i.name} (${i.category || ""})`).join("\n")
+    : "Empty closet";
 
-  // Determine which categories the customer already has covered
-  const allSelectedItems = [
-    ...(Array.isArray(closetItems) && closetItems.length > 0 ? closetItems : []),
-    ...(closetItem ? [closetItem] : []),
-  ];
-  const customerCategories = allSelectedItems
-    .map(i => (i.category || "").toLowerCase().trim())
-    .filter(Boolean);
+  // Filter nAia pieces if needed
+  const customerCategories = [];
+  if (Array.isArray(closetItems) && closetItems.length > 0) {
+    closetItems.forEach(i => {
+      if (i.category) customerCategories.push(i.category);
+    });
+  } else if (closetItem?.category) {
+    customerCategories.push(closetItem.category);
+  }
 
-  // Category grouping: "top" and "shirt" are both upper body, etc.
-  const normalize = (cat) => {
-    const c = (cat || "").toLowerCase().trim();
-    if (["top", "shirt", "blouse", "tshirt", "t-shirt", "sweater", "knit"].includes(c)) return "top";
-    if (["bottom", "pants", "trousers", "skirt", "shorts", "jeans"].includes(c)) return "bottom";
-    if (["outerwear", "jacket", "coat", "blazer", "cardigan"].includes(c)) return "outerwear";
-    if (["dress", "jumpsuit", "romper", "one-piece"].includes(c)) return "dress";
+  // Normalize category names for comparison
+  const normalize = (c) => {
+    if (!c) return "";
+    c = String(c).toLowerCase().trim();
+    if (c === "tops" || c === "top") return "top";
+    if (c === "bottoms" || c === "bottom" || c === "pants" || c === "skirt") return "bottom";
+    if (c === "outerwear" || c === "jacket" || c === "coat" || c === "blazer") return "outerwear";
+    if (c === "dresses" || c === "dress") return "dress";
     return c;
   };
 
@@ -473,11 +494,12 @@ MODE RULES:
 ${mode === "closet_only" ? `- Style ONLY the customer's closet pieces together.
 - Do NOT mention or recommend any nAia pieces.
 - Focus on how to combine what they already own.` : ""}
-${mode === "recommend_naia" ? `- Recommend exactly 2 nAia pieces from the FILTERED list above.
+${mode === "recommend_naia" ? `- Recommend 1-2 nAia pieces from the FILTERED list above. You can recommend just 1 piece if it's a complete statement (like a dress or coat), or 2 complementary pieces.
 - You may ONLY recommend pieces from the list above — no others.
 - The list has already been filtered to exclude the customer's existing categories.
-- CRITICAL: Each recommendation MUST be a DIFFERENT category. Never recommend two pieces of the same type (e.g. never two outerwear pieces, never two bottoms). Pick from different categories.
-- Each recommendation must complement (not duplicate) what the customer already owns.` : ""}
+- CRITICAL: If recommending 2 pieces, each MUST be a DIFFERENT category. Never recommend two pieces of the same type (e.g. never two outerwear pieces, never two bottoms). Pick from different categories.
+- Each recommendation must complement (not duplicate) what the customer already owns.
+- VARIETY PRIORITY: Choose pieces based on occasion (${event}), mood (${mood} → ${feeling}), body preference (${bodyPref}), and style DNA (${Array.isArray(styleDNA) ? styleDNA.join(", ") : styleDNA}). Different occasions and moods should lead to different recommendations.` : ""}
 ${mode === "closet_naia" ? `- Style the customer's closet piece WITH the selected nAia piece together as one outfit.
 - Explain how to wear them together.` : ""}
 
@@ -501,13 +523,13 @@ Shift
 
 ${mode === "recommend_naia" || mode === "closet_naia" ? `nAia Recommendations
 - [exact nAia piece name from the filtered list]: [specific reason it works with their pieces and mood]
-- [exact nAia piece name from a DIFFERENT category than the first]: [specific reason]` : ""}
+${mode === "recommend_naia" ? "- [OPTIONAL second piece - only if complementary and from a DIFFERENT category]: [specific reason]" : ""}` : ""}
 
-Accessories: [1-2 specific, recognizable accessories — like a gold cuff bracelet, silk scarf, structured tote, etc.]
-Perfume: [one well-known, mainstream perfume — e.g. Chanel No. 5, YSL Black Opium, Dior Miss Dior, Tom Ford Black Orchid, Marc Jacobs Daisy, Lancôme La Vie Est Belle. Match the mood.]
-Hair: [specific hairstyle suggestion that matches the outfit and mood — e.g. sleek low bun, loose waves, high ponytail, textured updo]
-Makeup: [specific makeup vibe — e.g. clean skin with bold lip, smoky eye with nude lip, dewy no-makeup makeup, warm bronze tones]
-Song: [Artist - Song Title — must be a popular, well-known song people would recognize. Think Spotify top hits, chart artists. Match the outfit's energy.]`;
+Accessories: [1-2 specific, recognizable accessories that match the ${event} occasion and ${feeling} mood — like a gold cuff bracelet, silk scarf, structured tote, micro bag, etc.]
+Perfume: [one well-known, mainstream perfume that matches the ${feeling} mood and ${event} occasion — e.g. for confident/evening: YSL Black Opium, Tom Ford Black Orchid; for soft/romantic: Miss Dior, Marc Jacobs Daisy; for fresh/casual: Chanel Chance, Jo Malone Wood Sage. Must be a 2025/2026 popular fragrance.]
+Hair: [specific 2025/2026 trending hairstyle that matches the outfit, ${feeling} mood, and ${event} occasion — e.g. for polished: sleek low bun, slicked-back ponytail; for effortless: loose waves, curtain bangs; for bold: textured updo, wet look, glass hair. Reference current trends like glass hair, 90s blowouts, wet look, or editorial textures.]
+Makeup: [specific 2025/2026 makeup trend that matches ${feeling} mood and ${event} occasion — e.g. for bold: graphic liner with bare skin, burgundy lip; for soft: latte makeup, no-makeup makeup; for editorial: glass skin with inner corner highlight, sculpted cheekbones. Reference 2025/2026 trends like latte makeup, clean girl aesthetic, burgundy tones, glass skin, or editorial drama.]
+Song: [Artist - Song Title — MUST be a 2025/2026 popular song or recent hit that matches the outfit's ${feeling} energy and ${mood} → ${feeling} transformation. Think current Spotify top charts: Sabrina Carpenter, Chappell Roan, Charli XCX, Billie Eilish, SZA, The Weeknd, Dua Lipa, Olivia Rodrigo, Tate McRae, Ariana Grande, Taylor Swift. Match the exact vibe: confident = "Espresso" by Sabrina Carpenter; soft = "Birds of a Feather" by Billie Eilish; bold = "360" by Charli XCX.]`;
 }
 
 function getEventDirection(event) {
@@ -545,8 +567,8 @@ Shift
 This look moves you from ${currentMood} toward ${desiredFeeling}.
 
 Accessories: Simple gold jewelry and a structured bag.
-Perfume: Le Labo Santal 33 — warm, grounding, and refined.
-Hair: Sleek low bun with a centre part.
-Makeup: Clean skin, defined brows, and a nude lip.
-Song: FKA Twigs - Two Weeks`;
+Perfume: YSL Black Opium — confident, warm, and evening-ready.
+Hair: Slicked-back low bun with wet-look finish — polished and editorial.
+Makeup: Glass skin with sculpted cheekbones and a nude lip — clean and refined.
+Song: Sabrina Carpenter - Espresso`;
 }
