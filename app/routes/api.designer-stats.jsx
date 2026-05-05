@@ -11,7 +11,14 @@ export async function loader({ request }) {
     const reviews = await prisma.postOutfitReview.findMany({
       include: {
         session: {
-          include: {
+          select: {
+            id: true,
+            styleDNA: true,
+            currentMood: true,
+            desiredFeeling: true,
+            occasion: true,
+            bodyPreference: true,
+            selectedSuggestionId: true,
             suggestions: {
               include: {
                 items: true,
