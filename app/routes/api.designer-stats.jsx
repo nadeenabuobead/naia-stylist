@@ -768,6 +768,13 @@ export async function loader({ request }) {
         }
         
         if (!pieceName) return; // Skip if empty
+        
+        // Skip if only closet items (no nAia pieces)
+        const onlyCloset = outfitParts.length === 1 && 
+                          (outfitParts[0].toLowerCase() === 'white top' || 
+                           outfitParts[0].toLowerCase() === 'black top');
+        if (onlyCloset) return;
+        
         allQuotes.push({ text: review.additionalNotes, piece: pieceName });
       }
     });
