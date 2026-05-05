@@ -639,13 +639,18 @@ export async function loader({ request }) {
         const piecePerformance = Object.entries(data.pieces)
           .map(([name, perf]) => ({ name, ...perf, score: perf.good - perf.bad }))
           .filter(p => {
-            // Exclude closet items
+            // Exclude closet items and AI fragments
             const nameLower = p.name.toLowerCase();
             return !nameLower.includes('white top') && 
                    !nameLower.includes('black top') && 
                    !nameLower.includes('your ') &&
+                   !nameLower.includes('flowing') &&
+                   !nameLower.includes('layer') &&
+                   !nameLower.includes('pair ') &&
+                   !nameLower.includes('complement') &&
                    nameLower !== 'top' &&
-                   nameLower !== 'bottom';
+                   nameLower !== 'bottom' &&
+                   p.name.length > 10;
           })
           .sort((a, b) => b.score - a.score);
         
