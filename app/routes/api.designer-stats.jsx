@@ -240,7 +240,18 @@ export async function loader({ request }) {
       console.log(`  ${name}: workedTags=${stats.workedTags.length}, didntWorkTags=${stats.didntWorkTags.length}`);
     });
     // Calculate piece metrics
-    const pieces = Object.values(pieceStats).map(p => {
+    const pieces = Object.values(pieceStats)
+      .filter(p => {
+        // Exclude AI fragments and incomplete descriptions
+        const name = p.name.toLowerCase();
+        return !name.includes('flowing') && 
+               !name.includes('layer') &&
+               !name.includes('pair ') &&
+               !name.includes('wear ') &&
+               !name.includes('complement') &&
+               name.length > 10; // Skip very short fragments
+      })
+      .map(p => {
       const avgRating = p.ratings.length > 0 
         ? p.ratings.reduce((a, b) => a + b, 0) / p.ratings.length 
         : 0;
