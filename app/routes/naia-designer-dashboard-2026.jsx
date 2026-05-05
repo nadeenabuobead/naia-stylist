@@ -321,7 +321,7 @@ function StatCard({ label, value, suffix = "" }) {
   );
 }
 
-function PieceCard({ piece }) {
+function PieceCard({ piece, styleDNA }) {
   return (
     <div style={s.pieceCard}>
       <div style={s.pieceName}>{piece.name}</div>
@@ -370,7 +370,7 @@ function PieceCard({ piece }) {
         
         <div style={{ marginTop: "8px" }}>
           <span style={s.muted}>Resonates with: </span>
-          <span style={s.dna}>{piece.topDNA && piece.topDNA.length > 0 ? piece.topDNA.join(", ") : "More style DNA data needed"}</span>
+          <span style={s.dna}>{piece.topDNA && piece.topDNA.length > 0 ? piece.topDNA.join(", ") : (styleDNA && styleDNA.length > 0 ? styleDNA.slice(0,3).map(d => d.name).join(", ") + " (overall)" : "More style DNA data needed")}</span>
         </div>
       </div>
     </div>
