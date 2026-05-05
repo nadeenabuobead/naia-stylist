@@ -734,19 +734,20 @@ export async function loader({ request }) {
             let productName = item.productTitle;
             
             // Skip AI-generated descriptions that just repeat closet items
-            const lower = productName.toLowerCase();
-            if (lower.startsWith('wear your ') || 
-                lower.startsWith('pair your ') ||
-                lower.startsWith('layer your ')) {
-              return; // Skip these entirely
+            const lower = productName.toLowerCase().trim();
+            if (lower.startsWith('wear your') || 
+                lower.startsWith('pair your') ||
+                lower.startsWith('layer your') ||
+                lower.startsWith('wear the') ||
+                lower.startsWith('pair the')) {
+              return;
             }
             
-            // Extract actual product name from descriptive text
+            // Extract actual product name from "Complemented by" phrases
             if (lower.includes('complemented by the ')) {
-              productName = productName.replace(/complemented by the /i, '').trim();
-            }
-            if (lower.includes('complemented by ')) {
-              productName = productName.replace(/complemented by /i, '').trim();
+              productName = productName.replace(/.*complemented by the /i, '').trim();
+            } else if (lower.includes('complemented by ')) {
+              productName = productName.replace(/.*complemented by /i, '').trim();
             }
             
             outfitParts.push(productName);
