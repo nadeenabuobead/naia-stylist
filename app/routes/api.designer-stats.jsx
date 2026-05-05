@@ -730,7 +730,20 @@ export async function loader({ request }) {
           s => s.id === review.session.selectedSuggestionId
         ) || review.session?.suggestions?.[0];
         
-        const pieceName = suggestion?.items?.[0]?.productTitle || "General feedback";
+        // Get only nAia pieces from the outfit for the quote attribution
+        const naiaItems = suggestion?.items?.filter(item => 
+          item.productTitle && !item.closetItemId &&
+          item.productTitle.toLowerCase() !== 'white top' &&
+          item.productTitle.toLowerCase() !== 'black top' &&
+          !item.productTitle.toLowerCase().includes('layer') &&
+          !item.productTitle.toLowerCase().includes('pair your')
+        ) || [];
+        
+        const pieceName = naiaItems.length > 0 
+          ? naiaItems.map(i => i.productTitle).join(' + ') 
+          : null;
+        
+        if (!pieceName) return; // Skip if no nAia pieces
         allQuotes.push({ text: review.additionalNotes, piece: pieceName });
       }
     });
