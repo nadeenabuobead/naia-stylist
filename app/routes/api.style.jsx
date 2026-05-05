@@ -134,6 +134,11 @@ console.log("Style Intelligence:", JSON.stringify(styleIntelligence, null, 2));
 9. Perfume MUST match the feeling they want to achieve AND the occasion. Evening/bold = YSL Black Opium, Tom Ford. Soft/romantic = Miss Dior, Daisy. Fresh/casual = Chanel Chance.
 10. Hair MUST be a 2025/2026 trend: glass hair, wet look, 90s blowout, slicked-back, curtain bangs, editorial textures. Match to occasion and desired feeling.
 11. Makeup MUST be a 2025/2026 trend: latte makeup, clean girl, burgundy tones, glass skin, graphic liner. Match to desired feeling and occasion.
+- If you just recommended "Espresso" by Sabrina Carpenter, pick a different song this time. Rotate through current hits.
+- If you just recommended YSL Black Opium, try Tom Ford Black Orchid, Miss Dior, or Chanel Chance.
+- If you just recommended glass hair, try wet look, 90s blowout, slicked-back, or curtain bangs.
+- If you just recommended latte makeup, try burgundy tones, clean girl, or glass skin with sculpted cheeks.
+- Change accessories too: if you suggested gold jewelry last time, try silver or mixed metals.
 12. Connect every styling choice (outfit, accessories, hair, makeup, perfume, song) back to the customer's emotional shift (current mood → desired feeling) and their specific occasion.
 13. VARIETY RULE: Pick different pieces every time based on occasion, mood, body preference, and style DNA. The same occasion + mood combination should still yield variety by considering all factors.
 14. CRITICAL: If the customer has CUSTOMER STYLE INTELLIGENCE data, you MUST prioritize and reference it. Use what has worked for her in the past, avoid what hasn't worked, and acknowledge her preferences in your recommendations.`,
