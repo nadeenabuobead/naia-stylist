@@ -723,6 +723,8 @@ export async function loader({ request }) {
           s => s.id === review.session.selectedSuggestionId
         ) || review.session?.suggestions?.[0];
         
+        console.log('Quote debug - has suggestion:', !!suggestion, 'has items:', suggestion?.items?.length || 0);
+        
         // Build the full look description
         const outfitParts = [];
         
