@@ -1549,31 +1549,237 @@ export default function Stylist() {
 
   // ─── Styles ───
   const s = {
-    page: { minHeight: "100vh", background: "#f5f2ee", color: "#1a1816", fontFamily: '"Cormorant Garamond", Georgia, serif' },
-    container: { maxWidth: "680px", margin: "0 auto", padding: "40px 24px 80px" },
-    stepIndicator: { display: "flex", gap: "6px", marginBottom: "40px", justifyContent: "center" },
-    dot: (active, done) => ({ width: active ? "24px" : "8px", height: "8px", borderRadius: "4px", background: (done || active) ? "#1a1816" : "#d4cfc9", transition: "all 0.3s" }),
-    title: { fontSize: "13px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "12px" },
-    bigQ: { fontSize: "32px", lineHeight: 1.2, fontWeight: 400, margin: "0 0 32px", fontStyle: "italic" },
-    input: { width: "100%", padding: "16px 0", background: "transparent", border: "none", borderBottom: "1px solid #c8c2bb", fontSize: "18px", color: "#1a1816", outline: "none", fontFamily: '"Cormorant Garamond", Georgia, serif', boxSizing: "border-box" },
-    btn: { padding: "14px 32px", background: "#1a1816", color: "#f5f2ee", border: "none", borderRadius: "2px", fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase", cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif' },
-    outlineBtn: { padding: "14px 32px", background: "transparent", color: "#1a1816", border: "1px solid #1a1816", borderRadius: "2px", fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase", cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif' },
-    chip: (active) => ({ padding: "10px 18px", background: active ? "#1a1816" : "transparent", color: active ? "#f5f2ee" : "#1a1816", border: "1px solid #1a1816", borderRadius: "2px", fontSize: "13px", letterSpacing: "0.1em", cursor: "pointer", transition: "all 0.2s", fontFamily: '"Cormorant Garamond", Georgia, serif' }),
-    modeCard: (active) => ({ padding: "24px", border: `1px solid ${active ? "#1a1816" : "#d4cfc9"}`, background: active ? "#1a1816" : "transparent", color: active ? "#f5f2ee" : "#1a1816", cursor: "pointer", marginBottom: "12px", transition: "all 0.2s", borderRadius: "2px" }),
-    productGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px", marginTop: "16px" },
-    closetGrid: { display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "12px", marginTop: "16px" },
-    resultLabel: { fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "8px" },
-    resultValue: { fontSize: "22px", fontStyle: "italic", lineHeight: 1.4 },
-    divider: { borderTop: "1px solid #d4cfc9", margin: "24px 0" },
-    vibeCard: { padding: "16px 20px", background: "#eee9e2", borderRadius: "2px" },
-    topBar: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px", paddingBottom: "16px", borderBottom: "1px solid #e8e4df" },
-    avatar: { width: "36px", height: "36px", borderRadius: "50%", background: "#1a1816", color: "#f5f2ee", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px", fontWeight: 500, cursor: "pointer" },
-    iconBtn: { background: "none", border: "none", cursor: "pointer", padding: "8px", color: "#1a1816", position: "relative" },
-    badge: { position: "absolute", top: "2px", right: "2px", width: "8px", height: "8px", borderRadius: "50%", background: "#c5553a" },
-    heartBtn: (active) => ({ background: "none", border: "none", cursor: "pointer", padding: "4px", color: active ? "#c5553a" : "#8a7f75", fontSize: "18px", transition: "color 0.2s" }),
-    panel: { background: "#fff", borderRadius: "2px", border: "1px solid #d4cfc9", padding: "24px", marginBottom: "24px" },
-    tryOnBtn: { padding: "8px 16px", background: "transparent", color: "#1a1816", border: "1px solid #1a1816", borderRadius: "2px", fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif', marginTop: "8px" },
-    quickBtn: { padding: "16px 32px", background: "transparent", border: "2px solid #1a1816", borderRadius: "2px", fontSize: "15px", letterSpacing: "0.1em", cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif', fontStyle: "italic", transition: "all 0.2s" },
+    page: { 
+      minHeight: "100vh", 
+      background: "#f4f4f1", // nAia cream
+      color: "#221516", // nAia deep
+      fontFamily: '"Cormorant Garamond", Garamond, serif',
+      position: "relative"
+    },
+    container: { 
+      maxWidth: "780px", 
+      margin: "0 auto", 
+      padding: "56px 32px 100px" 
+    },
+    stepIndicator: { 
+      display: "flex", 
+      gap: "8px", 
+      marginBottom: "48px", 
+      justifyContent: "center" 
+    },
+    dot: (active, done) => ({ 
+      width: active ? "32px" : "8px", 
+      height: "8px", 
+      borderRadius: "4px", 
+      background: (done || active) ? "#3b0510" : "#e1dbd7", // burgundy when active
+      transition: "all 0.4s cubic-bezier(0.16, 1, 0.3, 1)" 
+    }),
+    title: { 
+      fontSize: "10px", 
+      letterSpacing: "0.3em", 
+      textTransform: "uppercase", 
+      color: "#8b2035", // burgundy accent
+      marginBottom: "16px",
+      fontFamily: '"Space Mono", "Courier New", monospace'
+    },
+    bigQ: { 
+      fontSize: "42px", 
+      lineHeight: 1.1, 
+      fontWeight: 400, 
+      margin: "0 0 40px", 
+      fontStyle: "italic",
+      fontFamily: '"Playfair Display", Georgia, serif',
+      letterSpacing: "-1px",
+      color: "#221516"
+    },
+    input: { 
+      width: "100%", 
+      padding: "18px 0", 
+      background: "transparent", 
+      border: "none", 
+      borderBottom: "1px solid rgba(59,5,16,0.15)", 
+      fontSize: "20px", 
+      color: "#221516", 
+      outline: "none", 
+      fontFamily: '"Cormorant Garamond", Garamond, serif',
+      fontStyle: "italic",
+      boxSizing: "border-box",
+      transition: "border-color 0.3s"
+    },
+    btn: { 
+      padding: "16px 40px", 
+      background: "#3b0510", // burgundy
+      color: "#f4f4f1", 
+      border: "none", 
+      borderRadius: "0", 
+      fontSize: "10px", 
+      letterSpacing: "0.25em", 
+      textTransform: "uppercase", 
+      cursor: "pointer", 
+      fontFamily: '"Space Mono", "Courier New", monospace',
+      transition: "all 0.3s",
+      boxShadow: "none"
+    },
+    outlineBtn: { 
+      padding: "16px 40px", 
+      background: "transparent", 
+      color: "#221516", 
+      border: "1px solid rgba(59,5,16,0.2)", 
+      borderRadius: "0", 
+      fontSize: "10px", 
+      letterSpacing: "0.25em", 
+      textTransform: "uppercase", 
+      cursor: "pointer", 
+      fontFamily: '"Space Mono", "Courier New", monospace',
+      transition: "all 0.3s"
+    },
+    chip: (active) => ({ 
+      padding: "12px 22px", 
+      background: active ? "#221516" : "transparent", 
+      color: active ? "#f4f4f1" : "#221516", 
+      border: `1px solid ${active ? "#221516" : "rgba(34,21,22,0.12)"}`, 
+      borderRadius: "0", 
+      fontSize: "14px", 
+      letterSpacing: "0.05em", 
+      cursor: "pointer", 
+      transition: "all 0.3s cubic-bezier(0.16, 1, 0.3, 1)", 
+      fontFamily: '"Cormorant Garamond", Garamond, serif',
+      fontStyle: "italic"
+    }),
+    modeCard: (active) => ({ 
+      padding: "28px", 
+      border: `1px solid ${active ? "#3b0510" : "rgba(59,5,16,0.08)"}`, 
+      background: active ? "#221516" : "transparent", 
+      color: active ? "#f4f4f1" : "#221516", 
+      cursor: "pointer", 
+      marginBottom: "16px", 
+      transition: "all 0.3s cubic-bezier(0.16, 1, 0.3, 1)", 
+      borderRadius: "0",
+      position: "relative"
+    }),
+    productGrid: { 
+      display: "grid", 
+      gridTemplateColumns: "repeat(3, 1fr)", 
+      gap: "16px", 
+      marginTop: "24px" 
+    },
+    closetGrid: { 
+      display: "grid", 
+      gridTemplateColumns: "repeat(2, 1fr)", 
+      gap: "16px", 
+      marginTop: "24px" 
+    },
+    resultLabel: { 
+      fontSize: "9px", 
+      letterSpacing: "0.3em", 
+      textTransform: "uppercase", 
+      color: "#c8a96e", // honey
+      marginBottom: "12px",
+      fontFamily: '"Space Mono", "Courier New", monospace'
+    },
+    resultValue: { 
+      fontSize: "28px", 
+      fontStyle: "italic", 
+      lineHeight: 1.3,
+      fontFamily: '"Playfair Display", Georgia, serif',
+      fontWeight: 400,
+      letterSpacing: "-0.5px"
+    },
+    divider: { 
+      borderTop: "1px solid rgba(59,5,16,0.06)", 
+      margin: "32px 0" 
+    },
+    vibeCard: { 
+      padding: "20px 24px", 
+      background: "#e1dbd7", // warm grey
+      borderRadius: "0",
+      border: "1px solid rgba(59,5,16,0.04)"
+    },
+    topBar: { 
+      display: "flex", 
+      justifyContent: "space-between", 
+      alignItems: "center", 
+      marginBottom: "32px", 
+      paddingBottom: "20px", 
+      borderBottom: "1px solid rgba(59,5,16,0.06)" 
+    },
+    avatar: { 
+      width: "38px", 
+      height: "38px", 
+      borderRadius: "50%", 
+      background: "#221516", 
+      color: "#f4f4f1", 
+      display: "flex", 
+      alignItems: "center", 
+      justifyContent: "center", 
+      fontSize: "14px", 
+      fontWeight: 400, 
+      cursor: "pointer",
+      fontFamily: '"Space Mono", "Courier New", monospace',
+      letterSpacing: "0.1em"
+    },
+    iconBtn: { 
+      background: "none", 
+      border: "none", 
+      cursor: "pointer", 
+      padding: "8px", 
+      color: "#221516", 
+      position: "relative",
+      transition: "opacity 0.2s"
+    },
+    badge: { 
+      position: "absolute", 
+      top: "4px", 
+      right: "4px", 
+      width: "6px", 
+      height: "6px", 
+      borderRadius: "50%", 
+      background: "#8b2035" // accent burgundy
+    },
+    heartBtn: (active) => ({ 
+      background: "none", 
+      border: "none", 
+      cursor: "pointer", 
+      padding: "6px", 
+      color: active ? "#8b2035" : "#7a6f6a", 
+      fontSize: "20px", 
+      transition: "all 0.2s" 
+    }),
+    panel: { 
+      background: "#fff", 
+      borderRadius: "0", 
+      border: "1px solid rgba(59,5,16,0.06)", 
+      padding: "32px", 
+      marginBottom: "32px",
+      boxShadow: "0 2px 8px rgba(34,21,22,0.02)"
+    },
+    tryOnBtn: { 
+      padding: "10px 20px", 
+      background: "transparent", 
+      color: "#221516", 
+      border: "1px solid rgba(34,21,22,0.2)", 
+      borderRadius: "0", 
+      fontSize: "9px", 
+      letterSpacing: "0.2em", 
+      textTransform: "uppercase", 
+      cursor: "pointer", 
+      fontFamily: '"Space Mono", "Courier New", monospace', 
+      marginTop: "10px",
+      transition: "all 0.3s"
+    },
+    quickBtn: { 
+      padding: "18px 36px", 
+      background: "transparent", 
+      border: "2px solid #221516", 
+      borderRadius: "0", 
+      fontSize: "15px", 
+      letterSpacing: "0.05em", 
+      cursor: "pointer", 
+      fontFamily: '"Cormorant Garamond", Garamond, serif', 
+      fontStyle: "italic", 
+      transition: "all 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+      color: "#221516"
+    },
   };
 // Check for designer mode
   if (typeof window !== 'undefined' && window.location.search.includes('designer=true') && customer) {
@@ -1581,12 +1787,31 @@ export default function Stylist() {
   }
   return (
     <div style={s.page}>
-      <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap" rel="stylesheet" />
+      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400;1,700&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+      
+      {/* Grain texture overlay */}
+      <div style={{
+        content: '',
+        position: 'fixed',
+        inset: 0,
+        pointerEvents: 'none',
+        zIndex: 9999,
+        opacity: 0.03,
+        backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")",
+        backgroundSize: '200px'
+      }} />
+      
       <div style={s.container}>
 
         {/* ─── Top Bar ─── */}
         <div style={s.topBar}>
-          <div style={{ fontSize: "22px", fontStyle: "italic", fontWeight: 300 }}>nAia</div>
+          <div style={{ 
+            fontSize: "22px", 
+            fontStyle: "italic", 
+            fontWeight: 400,
+            fontFamily: '"Playfair Display", Georgia, serif',
+            letterSpacing: "3px"
+          }}>nAia</div>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             {customer && (
               <>
