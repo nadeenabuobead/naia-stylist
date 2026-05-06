@@ -21,7 +21,7 @@ export async function action({ request }) {
       return Response.json({ error: "Missing outfit information." }, { status: 400 });
     }
 
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return Response.json({ result: buildFallback({ mood: safeMood, feeling: safeFeeling, closetItem, naiaPiece, outfit: finalOutfit }) });
     }
@@ -183,33 +183,34 @@ try {
 
     // Parse nAia pieces from result
     const ALL_PIECE_NAMES = [
-      "Sculptural Hybrid Coat", "Art Blouse", "Art Panel Tailored Blazer",
-      "Textured Art Maxi Skirt", "Wrap Cropped Top", "Printed Wrap Kimono Jacket",
-      "Art Collar Shirt", "Leather Midi Dress", "Asymmetrical Waist Pants", "Printed Straight Pants"
+      "Calm", "Open", "Sharp", "Defined", "Balanced", 
+      "Fluid", "Refined", "Soft", "Grounded", "Light", "Whole"
     ];
     const PIECE_IDS = {
-      "Sculptural Hybrid Coat": "7822708867114",
-      "Art Blouse": "7822708310058",
-      "Art Panel Tailored Blazer": "7822708113450",
-      "Textured Art Maxi Skirt": "7822708047914",
-      "Wrap Cropped Top": "7822707949610",
-      "Printed Wrap Kimono Jacket": "7822707589162",
-      "Art Collar Shirt": "7822707392554",
-      "Leather Midi Dress": "7822707130410",
-      "Asymmetrical Waist Pants": "7822706475050",
-      "Printed Straight Pants": "7822706016298",
+      "Calm": "7822708867114",
+      "Open": "7822707589162",
+      "Sharp": "7822708113450",
+      "Defined": "7822708310058",
+      "Balanced": "7822708047914",
+      "Fluid": "7822707949610",
+      "Refined": "7822707392554",
+      "Soft": "7822707130410",
+      "Grounded": "7822706475050",
+      "Light": "7822706016298",
+      "Whole": "7822706016299", // Update with actual Whole product ID
     };
     const PIECE_IMAGES = {
-      "Sculptural Hybrid Coat": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/b7af3725-7048-4ead-8d04-d6fb42556eac.png",
-      "Art Blouse": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32674461-cac7-4699-aff1-74c435289333.png",
-      "Art Panel Tailored Blazer": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/a7b908bb-3079-4f39-93b8-e1a89435249a.png",
-      "Textured Art Maxi Skirt": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/6992350d-5695-4f28-8674-7747dfd1e680.png",
-      "Wrap Cropped Top": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3614927b-4685-4df3-aeff-b3d5a950cbd2.png",
-      "Printed Wrap Kimono Jacket": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/77d61b97-37da-4e57-8297-aa5207b35d07.png",
-      "Art Collar Shirt": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32fe2afb-b8ef-46d2-ae2c-b1adc81a1b0f.png",
-      "Leather Midi Dress": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/8a855f15-e5e9-4ef5-a7db-a7253e83a542.png",
-      "Asymmetrical Waist Pants": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/7d5d1e05-796a-45d9-b74a-4ddb0c9da3cf.png",
-      "Printed Straight Pants": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3b14fe8b-2c19-492e-82b1-44baaf3a3cc9.png",
+      "Calm": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/b7af3725-7048-4ead-8d04-d6fb42556eac.png",
+      "Open": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/77d61b97-37da-4e57-8297-aa5207b35d07.png",
+      "Sharp": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/a7b908bb-3079-4f39-93b8-e1a89435249a.png",
+      "Defined": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32674461-cac7-4699-aff1-74c435289333.png",
+      "Balanced": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/6992350d-5695-4f28-8674-7747dfd1e680.png",
+      "Fluid": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3614927b-4685-4df3-aeff-b3d5a950cbd2.png",
+      "Refined": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32fe2afb-b8ef-46d2-ae2c-b1adc81a1b0f.png",
+      "Soft": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/8a855f15-e5e9-4ef5-a7db-a7253e83a542.png",
+      "Grounded": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/7d5d1e05-796a-45d9-b74a-4ddb0c9da3cf.png",
+      "Light": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3b14fe8b-2c19-492e-82b1-44baaf3a3cc9.png",
+      "Whole": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/whole-gown.png", // Update with actual image
     };
 
     const foundPieces = ALL_PIECE_NAMES.filter(name => result.includes(name));
@@ -520,44 +521,44 @@ ${mode === "recommend_naia" ? `- Recommend 1-2 nAia pieces from the FILTERED lis
 ${mode === "closet_naia" ? `- Style the customer's closet piece WITH the selected nAia piece together as one outfit.
 - Explain how to wear them together.` : ""}
 
-RESPOND IN THIS EXACT FORMAT — copy the section headers exactly:
+RESPOND IN THIS EXACT FORMAT — copy the section headers WORD FOR WORD. Do NOT deviate:
 
 You're feeling: ${mood}
 You want to feel: ${feeling}
 Dressing for: ${event}
 
 ${mode === "recommend_naia" || mode === "closet_naia" ? `Starting with
-- [list customer's closet pieces they're using, e.g. "your white top", "your black jeans"]
+- your white top (example - replace with their actual piece)
 
 nAia adds
-- [nAia piece name only, no category]
-${mode === "recommend_naia" ? "- [OPTIONAL second nAia piece if complementary]" : ""}
+- Calm (example - replace with actual recommended piece)
+${mode === "recommend_naia" ? "- Light (example - ONLY if second piece needed)" : ""}
 
 Styling direction
-[2-4 word style vibe for this look — e.g. "Sculptural, polished, magnetic" or "Soft, flowing, editorial" or "Sharp, refined, powerful"]` : `Your outfit
-- [list all pieces being styled together]
+Sculptural, polished, magnetic (example - replace with actual vibe)` : `Your outfit
+- your black jeans (example)
+- your white top (example)
 
 Styling direction
-[2-4 word style vibe for this look]`}
+Effortless, refined, chic (example)`}
 
 Why this works
-[Write 2-3 sentences in PROSE (not bullets) that are deeply personal and connect to their inputs. Reference their current mood (${mood}), desired feeling (${feeling}), occasion (${event}), body preference (${bodyPref}), and style DNA (${Array.isArray(styleDNA) ? styleDNA.join("/") : styleDNA}). Explain how the outfit solves their emotional need and fits their body preferences. Make it feel like you understand them specifically, not generic styling advice.]
+You're feeling ${mood}, so this look starts with something familiar: your [piece]. nAia then adds [transformation]. The [first piece] gives you [benefit], while the [second piece] adds [benefit]. For ${event}, this creates a ${feeling} effect without [problem it avoids]. Because your style leans ${Array.isArray(styleDNA) ? styleDNA.join("/") : styleDNA}, the combination feels [authentic to them].
 
 ${mode === "recommend_naia" || mode === "closet_naia" ? `Why these nAia pieces are worth trying
-[Write 2-3 short bullet points explaining the VALUE of adding these nAia pieces:
-- How each piece transforms or elevates their closet item
-- What problem it solves (e.g. "adds structure", "creates movement", "gives instant presence")
-- Why it's worth buying (e.g. "turns a basic top into a night-out look")]` : ""}
+- The [piece name] transforms your [closet item] by [specific value]
+- The [piece name] solves [specific problem] by [how]
+- Together they turn [what they had] into [what they get]` : ""}
 
 The shift
-[ONE powerful sentence: "From ${mood} to ${feeling} — through [how the outfit achieves this transformation]." Example: "From overwhelmed to magnetic — through structure, movement, and controlled drama."]
+From ${mood} to ${feeling} — through [how the transformation happens].
 
 Complete the mood
-Accessories: [1-2 specific accessories]
-Perfume: [specific 2025/2026 fragrance matching ${feeling} and ${event}]
-Hair: [specific 2025/2026 hairstyle matching the look]
-Makeup: [specific 2025/2026 makeup trend matching ${feeling}]
-Song: [Artist - Song Title from 2025/2026]`;
+Accessories: Gold hoop earrings and structured tote (example)
+Perfume: Chanel Chance Eau Tendre (example)
+Hair: Loose waves with curtain bangs (example)
+Makeup: Clean girl aesthetic with glossy skin (example)
+Song: Sabrina Carpenter - Espresso (example)`;
 }
 
 function getEventDirection(event) {
