@@ -123,20 +123,22 @@ console.log("Style Intelligence:", JSON.stringify(styleIntelligence, null, 2));
           {
             role: "system",
             content: `You are nAia, an emotionally intelligent AI stylist who understands that clothing is emotional armor — what you wear transforms how you feel. You MUST follow the EXACT response format given to you. Rules:
-1. The Shift section contains ONE sentence only — nothing else.
-2. Accessories, Perfume, Hair, Makeup and Song MUST always appear at the very end as their own labeled lines.
-3. Never add anything inside or after Shift except the labeled sections.
-4. CRITICAL: You may ONLY recommend nAia pieces from the "NAIA PIECES YOU MAY RECOMMEND" list. This list has been pre-filtered. Do NOT invent or add pieces not in that list.
-5. Never recommend a piece in the same category as what the customer already has (e.g. no top + top, no bottom + bottom).
-6. CRITICAL: If recommending 2 pieces, never recommend TWO pieces from the same category. Each must be DIFFERENT (e.g. one outerwear + one bottom = good; two outerwear = bad).
-7. Refer to customer's closet pieces as "your [piece name]" and nAia pieces by their exact product name.
-8. Song MUST be a 2025/2026 hit that matches the mood transformation. Use current artists: Sabrina Carpenter, Chappell Roan, Charli XCX, Billie Eilish, SZA, Olivia Rodrigo, Tate McRae, The Weeknd, Ariana Grande, etc.
-9. Perfume MUST match the feeling they want to achieve AND the occasion. Evening/bold = YSL Black Opium, Tom Ford. Soft/romantic = Miss Dior, Daisy. Fresh/casual = Chanel Chance.
-10. Hair MUST be a 2025/2026 trend: glass hair, wet look, 90s blowout, slicked-back, curtain bangs, editorial textures. Match to occasion and desired feeling.
-11. Makeup MUST be a 2025/2026 trend: latte makeup, clean girl, burgundy tones, glass skin, graphic liner. Match to desired feeling and occasion.
-12. Connect every styling choice (outfit, accessories, hair, makeup, perfume, song) back to the customer's emotional shift (current mood → desired feeling) and their specific occasion.
-13. VARIETY RULE: Pick different pieces every time based on occasion, mood, body preference, and style DNA. The same occasion + mood combination should still yield variety by considering all factors.
-14. CRITICAL: If the customer has CUSTOMER STYLE INTELLIGENCE data, you MUST prioritize and reference it. Use what has worked for her in the past, avoid what hasn't worked, and acknowledge her preferences in your recommendations.`,
+1. Write in PROSE for "Why this works" — not bullets. Make it deeply personal by referencing their specific mood, desired feeling, occasion, body preference, and style DNA.
+2. "Why these nAia pieces are worth trying" should SELL the value — explain what problem each piece solves and why it's worth buying.
+3. "The shift" must follow this exact format: "From [mood] to [feeling] — through [transformation method]."
+4. "Complete the mood" comes at the END with Accessories, Perfume, Hair, Makeup, Song as separate labeled lines.
+5. CRITICAL: You may ONLY recommend nAia pieces from the "NAIA PIECES YOU MAY RECOMMEND" list. This list has been pre-filtered. Do NOT invent or add pieces not in that list.
+6. Never recommend a piece in the same category as what the customer already has (e.g. no top + top, no bottom + bottom).
+7. CRITICAL: If recommending 2 pieces, never recommend TWO pieces from the same category. Each must be DIFFERENT (e.g. one outerwear + one bottom = good; two outerwear = bad).
+8. CRITICAL: If the customer has a top, DO NOT recommend another top. Tops pair with bottoms/outerwear/dresses ONLY.
+9. Refer to customer's closet pieces as "your [piece name]" and nAia pieces by JUST their name (no category).
+10. Song MUST be a 2025/2026 hit. Use current artists: Sabrina Carpenter, Chappell Roan, Charli XCX, Billie Eilish, SZA, Olivia Rodrigo, Tate McRae, The Weeknd, Ariana Grande.
+11. Perfume MUST match the feeling AND occasion. Evening/bold = YSL Black Opium, Tom Ford. Soft/romantic = Miss Dior, Daisy. Fresh/casual = Chanel Chance.
+12. Hair MUST be 2025/2026: glass hair, wet look, 90s blowout, slicked-back, curtain bangs, editorial textures.
+13. Makeup MUST be 2025/2026: latte makeup, clean girl, burgundy tones, glass skin, graphic liner.
+14. VARIETY RULE FOR EVERYTHING: Rotate through different pieces, songs, perfumes, hairstyles, makeup looks, and accessories every time.
+15. CRITICAL: If the customer has CUSTOMER STYLE INTELLIGENCE data, you MUST prioritize and reference it. Use what has worked for her in the past, avoid what hasn't worked, and acknowledge her preferences in your recommendations.
+16. BE SPECIFIC AND PERSONAL: Don't write generic styling advice. Connect everything back to THEIR inputs — their current mood, their desired feeling, their body preference, their occasion, their style DNA. Make them feel understood.`,
 
           },
           { role: "user", content: stylistPrompt },
@@ -522,29 +524,40 @@ RESPOND IN THIS EXACT FORMAT — copy the section headers exactly:
 
 You're feeling: ${mood}
 You want to feel: ${feeling}
+Dressing for: ${event}
 
-Your outfit direction
-- [direction using "your [piece]" for closet pieces, JUST the name for nAia pieces (e.g. "Layer on Calm" NOT "Layer on Calm (outerwear)")]
-- [direction]
-- [direction]
+${mode === "recommend_naia" || mode === "closet_naia" ? `Starting with
+- [list customer's closet pieces they're using, e.g. "your white top", "your black jeans"]
+
+nAia adds
+- [nAia piece name only, no category]
+${mode === "recommend_naia" ? "- [OPTIONAL second nAia piece if complementary]" : ""}
+
+Styling direction
+[2-4 word style vibe for this look — e.g. "Sculptural, polished, magnetic" or "Soft, flowing, editorial" or "Sharp, refined, powerful"]` : `Your outfit
+- [list all pieces being styled together]
+
+Styling direction
+[2-4 word style vibe for this look]`}
 
 Why this works
-- [reason tying the outfit to their emotional shift and body preference]
-- [reason about the silhouette and occasion]
-- [reason about style personality alignment]
+[Write 2-3 sentences in PROSE (not bullets) that are deeply personal and connect to their inputs. Reference their current mood (${mood}), desired feeling (${feeling}), occasion (${event}), body preference (${bodyPref}), and style DNA (${Array.isArray(styleDNA) ? styleDNA.join("/") : styleDNA}). Explain how the outfit solves their emotional need and fits their body preferences. Make it feel like you understand them specifically, not generic styling advice.]
 
-Shift
-[ONE sentence only about the emotional transformation this outfit creates. Nothing else here.]
+${mode === "recommend_naia" || mode === "closet_naia" ? `Why these nAia pieces are worth trying
+[Write 2-3 short bullet points explaining the VALUE of adding these nAia pieces:
+- How each piece transforms or elevates their closet item
+- What problem it solves (e.g. "adds structure", "creates movement", "gives instant presence")
+- Why it's worth buying (e.g. "turns a basic top into a night-out look")]` : ""}
 
-${mode === "recommend_naia" || mode === "closet_naia" ? `nAia Recommendations
-- [exact nAia piece name from the filtered list]: [specific reason it works with their pieces and mood]
-${mode === "recommend_naia" ? "- [OPTIONAL second piece - only if complementary and from a DIFFERENT category]: [specific reason]" : ""}` : ""}
+The shift
+[ONE powerful sentence: "From ${mood} to ${feeling} — through [how the outfit achieves this transformation]." Example: "From overwhelmed to magnetic — through structure, movement, and controlled drama."]
 
-Accessories: [1-2 specific, recognizable accessories that match the ${event} occasion and ${feeling} mood — like a gold cuff bracelet, silk scarf, structured tote, micro bag, etc.]
-Perfume: [one well-known, mainstream perfume that matches the ${feeling} mood and ${event} occasion — e.g. for confident/evening: YSL Black Opium, Tom Ford Black Orchid; for soft/romantic: Miss Dior, Marc Jacobs Daisy; for fresh/casual: Chanel Chance, Jo Malone Wood Sage. Must be a 2025/2026 popular fragrance.]
-Hair: [specific 2025/2026 trending hairstyle that matches the outfit, ${feeling} mood, and ${event} occasion — e.g. for polished: sleek low bun, slicked-back ponytail; for effortless: loose waves, curtain bangs; for bold: textured updo, wet look, glass hair. Reference current trends like glass hair, 90s blowouts, wet look, or editorial textures.]
-Makeup: [specific 2025/2026 makeup trend that matches ${feeling} mood and ${event} occasion — e.g. for bold: graphic liner with bare skin, burgundy lip; for soft: latte makeup, no-makeup makeup; for editorial: glass skin with inner corner highlight, sculpted cheekbones. Reference 2025/2026 trends like latte makeup, clean girl aesthetic, burgundy tones, glass skin, or editorial drama.]
-Song: [Artist - Song Title — MUST be a 2025/2026 popular song or recent hit that matches the outfit's ${feeling} energy and ${mood} → ${feeling} transformation. Think current Spotify top charts: Sabrina Carpenter, Chappell Roan, Charli XCX, Billie Eilish, SZA, The Weeknd, Dua Lipa, Olivia Rodrigo, Tate McRae, Ariana Grande, Taylor Swift. Match the exact vibe: confident = "Espresso" by Sabrina Carpenter; soft = "Birds of a Feather" by Billie Eilish; bold = "360" by Charli XCX.]`;
+Complete the mood
+Accessories: [1-2 specific accessories]
+Perfume: [specific 2025/2026 fragrance matching ${feeling} and ${event}]
+Hair: [specific 2025/2026 hairstyle matching the look]
+Makeup: [specific 2025/2026 makeup trend matching ${feeling}]
+Song: [Artist - Song Title from 2025/2026]`;
 }
 
 function getEventDirection(event) {
@@ -567,23 +580,32 @@ function buildFallback({ mood, feeling, closetItem, naiaPiece, outfit }) {
 
   return `You're feeling: ${currentMood}
 You want to feel: ${desiredFeeling}
+Dressing for: your occasion
 
-Your outfit direction
-- Start with your ${chosenCloset} as the foundation of the look.
-- Add the ${chosenNaia} to create a more intentional silhouette.
-- Keep the finish aligned with your desired feeling.
+Starting with
+- ${chosenCloset}
+
+nAia adds
+- ${chosenNaia}
+
+Styling direction
+Refined, intentional, elevated
 
 Why this works
-- It shifts the look with clarity instead of adding random pieces.
-- It balances emotion and structure so the outfit feels considered.
-- It keeps the styling aligned with nAia's refined aesthetic.
+You're starting from ${currentMood}, so this look gives you structure and clarity. The ${chosenNaia} transforms your ${chosenCloset} into something more intentional and polished, aligned with how you want to feel: ${desiredFeeling}.
 
-Shift
-This look moves you from ${currentMood} toward ${desiredFeeling}.
+Why these nAia pieces are worth trying
+- Elevates your existing piece instantly
+- Creates a more intentional silhouette
+- Gives you confidence through refined structure
 
-Accessories: Simple gold jewelry and a structured bag.
-Perfume: YSL Black Opium — confident, warm, and evening-ready.
-Hair: Slicked-back low bun with wet-look finish — polished and editorial.
-Makeup: Glass skin with sculpted cheekbones and a nude lip — clean and refined.
+The shift
+From ${currentMood} to ${desiredFeeling} — through refined structure and intentional styling.
+
+Complete the mood
+Accessories: Simple gold jewelry and a structured bag
+Perfume: YSL Black Opium — confident, warm, and evening-ready
+Hair: Slicked-back low bun with wet-look finish — polished and editorial
+Makeup: Glass skin with sculpted cheekbones and a nude lip — clean and refined
 Song: Sabrina Carpenter - Espresso`;
 }
