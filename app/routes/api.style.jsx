@@ -449,11 +449,11 @@ function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bo
     });
   }
 
-  const naiaList = filteredNaia.map(p => `- ${p.name} (${p.category})
-    Color: ${p.color} | Style: ${p.styleSignal} | Mood: ${p.emotionalEffect}
-    Occasion: ${p.occasion} | Statement: ${p.statementLevel} | Weight: ${p.visualWeight}
-    Pairing: ${p.pairingBehavior}
-    Completeness: ${p.outfitCompleteness}`).join("\n");
+  const naiaList = filteredNaia.map(p => `- ${p.name}
+    Style DNA: ${p.styleDNA} | Mood Match: ${p.moodMatch}
+    Occasion: ${p.occasion} | Body Preferences: ${p.bodyPreferences}
+    Statement Level: ${p.statementLevel} | Visual Weight: ${p.visualWeight}
+    Pairing: ${p.pairingBehavior}`).join("\n");
   const removedCategories = mode === "recommend_naia" && customerNormalized.length > 0
     ? `\nIMPORTANT: The customer already has: ${customerNormalized.join(", ")}. The list below has been pre-filtered to EXCLUDE those categories. Only recommend from this list.`
     : "";
@@ -511,7 +511,8 @@ ${mode === "closet_only" ? `- Style ONLY the customer's closet pieces together.
 ${mode === "recommend_naia" ? `- Recommend 1-2 nAia pieces from the FILTERED list above. You can recommend just 1 piece if it's a complete statement (like a dress or coat), or 2 complementary pieces.
 - You may ONLY recommend pieces from the list above — no others.
 - The list has already been filtered to exclude the customer's existing categories.
-- CRITICAL: If recommending 2 pieces, each MUST be a DIFFERENT category. Never recommend two pieces of the same type (e.g. never two outerwear pieces, never two bottoms). Pick from different categories.
+- CRITICAL: If recommending 2 pieces, each MUST be a DIFFERENT category. Never recommend two pieces of the same type (e.g. never two outerwear pieces, never two bottoms, NEVER two tops). Pick from different categories.
+- CRITICAL: If the customer has a top (white top, black top, ANY top), DO NOT recommend another top. Tops can ONLY be paired with bottoms, outerwear, or dresses - NEVER with other tops.
 - Each recommendation must complement (not duplicate) what the customer already owns.
 - VARIETY PRIORITY: Choose pieces based on occasion (${event}), mood (${mood} → ${feeling}), body preference (${bodyPref}), and style DNA (${Array.isArray(styleDNA) ? styleDNA.join(", ") : styleDNA}). Different occasions and moods should lead to different recommendations.` : ""}
 ${mode === "closet_naia" ? `- Style the customer's closet piece WITH the selected nAia piece together as one outfit.
@@ -523,7 +524,7 @@ You're feeling: ${mood}
 You want to feel: ${feeling}
 
 Your outfit direction
-- [direction using "your [piece]" for closet pieces, exact name for nAia pieces]
+- [direction using "your [piece]" for closet pieces, JUST the name for nAia pieces (e.g. "Layer on Calm" NOT "Layer on Calm (outerwear)")]
 - [direction]
 - [direction]
 
