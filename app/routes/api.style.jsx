@@ -134,11 +134,6 @@ console.log("Style Intelligence:", JSON.stringify(styleIntelligence, null, 2));
 9. Perfume MUST match the feeling they want to achieve AND the occasion. Evening/bold = YSL Black Opium, Tom Ford. Soft/romantic = Miss Dior, Daisy. Fresh/casual = Chanel Chance.
 10. Hair MUST be a 2025/2026 trend: glass hair, wet look, 90s blowout, slicked-back, curtain bangs, editorial textures. Match to occasion and desired feeling.
 11. Makeup MUST be a 2025/2026 trend: latte makeup, clean girl, burgundy tones, glass skin, graphic liner. Match to desired feeling and occasion.
-- If you just recommended "Espresso" by Sabrina Carpenter, pick a different song this time. Rotate through current hits.
-- If you just recommended YSL Black Opium, try Tom Ford Black Orchid, Miss Dior, or Chanel Chance.
-- If you just recommended glass hair, try wet look, 90s blowout, slicked-back, or curtain bangs.
-- If you just recommended latte makeup, try burgundy tones, clean girl, or glass skin with sculpted cheeks.
-- Change accessories too: if you suggested gold jewelry last time, try silver or mixed metals.
 12. Connect every styling choice (outfit, accessories, hair, makeup, perfume, song) back to the customer's emotional shift (current mood → desired feeling) and their specific occasion.
 13. VARIETY RULE: Pick different pieces every time based on occasion, mood, body preference, and style DNA. The same occasion + mood combination should still yield variety by considering all factors.
 14. CRITICAL: If the customer has CUSTOMER STYLE INTELLIGENCE data, you MUST prioritize and reference it. Use what has worked for her in the past, avoid what hasn't worked, and acknowledge her preferences in your recommendations.`,
@@ -170,247 +165,261 @@ try {
   if (customer) {
     // Create styling session
     console.log("Saving styleDNA to session:", styleDNA);
-    await prisma.stylingSession.create({
+    console.log("Saving bodyPref to session:", bodyPref);
+    const session = await prisma.stylingSession.create({
       data: {
         customerId: customer.id,
-        currentMood: safeMood,
-        desiredFeeling: safeFeeling,
-        occasion: safeEvent,
+        currentMood: safeMood || "",
+        desiredFeeling: safeFeeling || "",
+        occasion: safeEvent || "",
+        bodyPreference: bodyPref || "",
         styleDNA: JSON.stringify(styleDNA || []),
-        bodyPreference: bodyPref || null,
-        mode,
+        specificNeeds: result,
+        styleFrom: "NAIA",
       },
     });
 
-    // Parse nAia recommendations from result
-    const naiaSection = result.match(/nAia Recommendations\s*([\s\S]*?)(?:\n\nAccessories:|$)/i);
-    if (naiaSection) {
-      const lines = naiaSection[1].split('\n').filter(l => l.trim().startsWith('-'));
-      
-      for (const line of lines) {
-        // Extract product name (before the colon)
-        const match = line.match(/^-\s*([^:]+):/);
-        if (match) {
-          const productName = match[1].trim();
-          
-          // Find matching product from ALL_NAIA
-          const product = ALL_NAIA.find(p => 
-            p.name.toLowerCase() === productName.toLowerCase()
-          );
-          
-          if (product) {
-            // Check if already in closet
-            const existing = await prisma.closetItem.findFirst({
-              where: {
-                customerId: customer.id,
-                name: product.name,
-                source: "naia"
-              }
-            });
-            
-            if (!existing) {
-              await prisma.closetItem.create({
-                data: {
-                  customerId: customer.id,
-                  name: product.name,
-                  category: product.category,
-                  color: product.color || null,
-                  image: product.image || null,
-                  source: "naia",
-                  productId: product.id?.toString() || null,
-                },
-              });
-              console.log(`Added ${product.name} to customer closet`);
-            }
-          }
-        }
-      }
+    // Parse nAia pieces from result
+    const ALL_PIECE_NAMES = [
+      "Sculptural Hybrid Coat", "Art Blouse", "Art Panel Tailored Blazer",
+      "Textured Art Maxi Skirt", "Wrap Cropped Top", "Printed Wrap Kimono Jacket",
+      "Art Collar Shirt", "Leather Midi Dress", "Asymmetrical Waist Pants", "Printed Straight Pants"
+    ];
+    const PIECE_IDS = {
+      "Sculptural Hybrid Coat": "7822708867114",
+      "Art Blouse": "7822708310058",
+      "Art Panel Tailored Blazer": "7822708113450",
+      "Textured Art Maxi Skirt": "7822708047914",
+      "Wrap Cropped Top": "7822707949610",
+      "Printed Wrap Kimono Jacket": "7822707589162",
+      "Art Collar Shirt": "7822707392554",
+      "Leather Midi Dress": "7822707130410",
+      "Asymmetrical Waist Pants": "7822706475050",
+      "Printed Straight Pants": "7822706016298",
+    };
+    const PIECE_IMAGES = {
+      "Sculptural Hybrid Coat": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/b7af3725-7048-4ead-8d04-d6fb42556eac.png",
+      "Art Blouse": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32674461-cac7-4699-aff1-74c435289333.png",
+      "Art Panel Tailored Blazer": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/a7b908bb-3079-4f39-93b8-e1a89435249a.png",
+      "Textured Art Maxi Skirt": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/6992350d-5695-4f28-8674-7747dfd1e680.png",
+      "Wrap Cropped Top": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3614927b-4685-4df3-aeff-b3d5a950cbd2.png",
+      "Printed Wrap Kimono Jacket": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/77d61b97-37da-4e57-8297-aa5207b35d07.png",
+      "Art Collar Shirt": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32fe2afb-b8ef-46d2-ae2c-b1adc81a1b0f.png",
+      "Leather Midi Dress": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/8a855f15-e5e9-4ef5-a7db-a7253e83a542.png",
+      "Asymmetrical Waist Pants": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/7d5d1e05-796a-45d9-b74a-4ddb0c9da3cf.png",
+      "Printed Straight Pants": "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3b14fe8b-2c19-492e-82b1-44baaf3a3cc9.png",
+    };
+
+    const foundPieces = ALL_PIECE_NAMES.filter(name => result.includes(name));
+
+    if (foundPieces.length > 0) {
+      const suggestion = await prisma.outfitSuggestion.create({
+        data: {
+          sessionId: session.id,
+          whyThisWorks: result.match(/WHY THIS WORKS[\s\S]*?(?=\n[A-Z])/i)?.[0] || null,
+        },
+      });
+
+      await prisma.outfitItem.createMany({
+        data: foundPieces.map(name => ({
+          suggestionId: suggestion.id,
+          itemType: "TOP",
+          shopifyProductId: PIECE_IDS[name],
+          productTitle: name,
+          productImageUrl: PIECE_IMAGES[name],
+          productUrl: `https://naiabynadine.com/products/${name.toLowerCase().replace(/ /g, "-")}`,
+        })),
+      });
     }
+
+    return Response.json({ result: "TEST - Intelligence has " + (styleIntelligence ? styleIntelligence.totalReviews : "NO") + " reviews", sessionId: session.id });
   }
 } catch (err) {
-  console.error("Failed to save nAia pieces:", err);
+  console.error("DB save error:", err);
 }
 
-    return Response.json({ result });
+return Response.json({ result, debug_styleIntelligence: styleIntelligence });
+
   } catch (error) {
-    console.error("Style API error:", error);
-    return Response.json({ error: "Internal server error." }, { status: 500 });
+    return Response.json({
+      result: buildFallback({ mood: "", feeling: "", closetItem: null, naiaPiece: null, outfit: "" }),
+      error: error?.message || "Something went wrong.",
+    }, { status: 200 });
   }
 }
-
-const ALL_NAIA = [
-  {
-    id: "9781793104094",
-    name: "Sculptural Hybrid Coat",
-    category: "OUTERWEAR",
-    color: "BLACK",
-    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4444.jpg?v=1732531829",
-    styleSignal: "Architectural, bold",
-    emotionalEffect: "Powerful, grounded",
-    occasion: "Formal, statement events",
-    statementLevel: "High",
-    visualWeight: "Heavy",
-    pairingBehavior: "Anchors simple bases",
-    outfitCompleteness: "Statement piece, needs minimal styling"
-  },
-  {
-    id: "9781793136926",
-    name: "Art Blouse",
-    category: "TOP",
-    color: "CREAM/PRINT",
-    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4490.jpg?v=1732532166",
-    styleSignal: "Artistic, soft structure",
-    emotionalEffect: "Creative, refined",
-    occasion: "Work, dinner, creative settings",
-    statementLevel: "Medium",
-    visualWeight: "Light-medium",
-    pairingBehavior: "Pairs with structured bottoms",
-    outfitCompleteness: "Needs tailored bottom to balance"
-  },
-  {
-    id: "9781793169630",
-    name: "Art Panel Tailored Blazer",
-    category: "OUTERWEAR",
-    color: "BLACK/PRINT",
-    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4503.jpg?v=1732532364",
-    styleSignal: "Sharp, editorial",
-    emotionalEffect: "Confident, polished",
-    occasion: "Work, formal, meetings",
-    statementLevel: "High",
-    visualWeight: "Medium-heavy",
-    pairingBehavior: "Elevates simple pieces",
-    outfitCompleteness: "Statement piece, pairs with basics"
-  },
-  {
-    id: "9781793202398",
-    name: "Textured Art Maxi Skirt",
-    category: "BOTTOMS",
-    color: "BLACK/TEXTURE",
-    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4512.jpg?v=1732532538",
-    styleSignal: "Dramatic, flowing",
-    emotionalEffect: "Elegant, magnetic",
-    occasion: "Evening, formal, events",
-    statementLevel: "High",
-    visualWeight: "Heavy",
-    pairingBehavior: "Needs simple top to balance",
-    outfitCompleteness: "Statement piece, keep top minimal"
-  },
-  {
-    id: "9781793235166",
-    name: "Wrap Cropped Top",
-    category: "TOP",
-    color: "BLACK",
-    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4534.jpg?v=1732532720",
-    styleSignal: "Minimal, modern",
-    emotionalEffect: "Clean, intentional",
-    occasion: "Casual, layering, versatile",
-    statementLevel: "Low",
-    visualWeight: "Light",
-    pairingBehavior: "Layers under blazers, pairs with high-waist",
-    outfitCompleteness: "Base piece, needs layering or statement bottom"
-  },
-  {
-    id: "9781793267934",
-    name: "Printed Wrap Kimono Jacket",
-    category: "OUTERWEAR",
-    color: "PRINT/MULTI",
-    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4525.jpg?v=1732532920",
-    styleSignal: "Artistic, layered",
-    emotionalEffect: "Creative, soft",
-    occasion: "Casual, creative, travel",
-    statementLevel: "Medium",
-    visualWeight: "Light-medium",
-    pairingBehavior: "Layers over simple bases",
-    outfitCompleteness: "Layering piece, needs base underneath"
-  },
-  {
-    id: "9781793300702",
-    name: "Art Collar Shirt",
-    category: "TOP",
-    color: "WHITE/PRINT",
-    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4540.jpg?v=1732533084",
-    styleSignal: "Sharp, detailed",
-    emotionalEffect: "Polished, refined",
-    occasion: "Work, formal, meetings",
-    statementLevel: "Medium",
-    visualWeight: "Medium",
-    pairingBehavior: "Pairs with tailored bottoms",
-    outfitCompleteness: "Needs structured bottom to complete"
-  },
-  {
-    id: "9781793333470",
-    name: "Leather Midi Dress",
-    category: "DRESS",
-    color: "BLACK",
-    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4549.jpg?v=1732533272",
-    styleSignal: "Bold, sleek",
-    emotionalEffect: "Powerful, magnetic",
-    occasion: "Evening, dinner, events",
-    statementLevel: "High",
-    visualWeight: "Heavy",
-    pairingBehavior: "Complete look, minimal accessories",
-    outfitCompleteness: "Complete outfit, just add shoes"
-  },
-  {
-    id: "9781793366238",
-    name: "Asymmetrical Waist Pants",
-    category: "BOTTOMS",
-    color: "BLACK",
-    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4560.jpg?v=1732533461",
-    styleSignal: "Modern, architectural",
-    emotionalEffect: "Sharp, intentional",
-    occasion: "Work, formal, creative",
-    statementLevel: "Medium-high",
-    visualWeight: "Medium",
-    pairingBehavior: "Pairs with simple tops",
-    outfitCompleteness: "Statement bottom, keep top simple"
-  },
-  {
-    id: "9781793399006",
-    name: "Printed Straight Pants",
-    category: "BOTTOMS",
-    color: "PRINT/MULTI",
-    image: "https://cdn.shopify.com/s/files/1/0888/6736/0318/files/IMG_4567.jpg?v=1732533638",
-    styleSignal: "Artistic, bold",
-    emotionalEffect: "Creative, confident",
-    occasion: "Casual, creative, work",
-    statementLevel: "Medium",
-    visualWeight: "Medium",
-    pairingBehavior: "Needs simple top to balance",
-    outfitCompleteness: "Statement bottom, keep top minimal"
-  },
-];
 
 function buildStylistPrompt({ mode, outfit, mood, feeling, event, styleWords, bodyPref, closetItem, closetItems, naiaPiece, closet, styleIntelligence, previousPieces, vibe, styleDNA }) {
-  // Build lists
-  const selectedList = Array.isArray(closetItems) && closetItems.length > 0
-    ? closetItems.map(i => `- ${i.name} (${i.category || ""})`).join("\n")
-    : closetItem
-    ? `- ${closetItem.name} (${closetItem.category || ""})`
-    : "No specific pieces selected";
-
   const closetList = Array.isArray(closet) && closet.length > 0
-    ? closet.map(i => `- ${i.name} (${i.category || ""})`).join("\n")
-    : "Empty closet";
+    ? closet.map(i => `- ${i.name} (${i.category}) [customer closet]`).join("\n")
+    : "No closet items.";
 
-  // Filter nAia pieces if needed
-  const customerCategories = [];
-  if (Array.isArray(closetItems) && closetItems.length > 0) {
-    closetItems.forEach(i => {
-      if (i.category) customerCategories.push(i.category);
-    });
-  } else if (closetItem?.category) {
-    customerCategories.push(closetItem.category);
-  }
+  const selectedList = Array.isArray(closetItems) && closetItems.length > 0
+    ? closetItems.map(i => `- ${i.name} (${i.category}) [customer closet]`).join("\n")
+    : closetItem ? `- ${closetItem.name} (${closetItem.category}) [customer closet]` : "None";
 
-  // Normalize category names for comparison
-  const normalize = (c) => {
-    if (!c) return "";
-    c = String(c).toLowerCase().trim();
-    if (c === "tops" || c === "top") return "top";
-    if (c === "bottoms" || c === "bottom" || c === "pants" || c === "skirt") return "bottom";
-    if (c === "outerwear" || c === "jacket" || c === "coat" || c === "blazer") return "outerwear";
-    if (c === "dresses" || c === "dress") return "dress";
+  // All nAia pieces with full styling metadata
+  const ALL_NAIA = [
+    {
+      name: "Calm", category: "outerwear",
+      color: "soft beige + deep brown + art print panel", stylingRole: "statement",
+      silhouette: "structured, longline, asymmetric", fit: "tailored", length: "full",
+      visualWeight: "heavy", statementLevel: "high",
+      styleDNA: "Statement, Refined, Artistic",
+      occasion: "Dinner, Event, Night out, Date, Work",
+      moodMatch: "Powerful, Confident, Magnetic, Bold",
+      bodyPreferences: "Add structure, Define shape, Elongate legs",
+      emotionalEffect: "empowering, elevating, commanding",
+      pairingBehavior: "Best with minimal, clean base layers. Avoid competing statement outerwear or heavily detailed tops underneath.",
+      outfitCompleteness: "near-complete"
+    },
+    {
+      name: "Open", category: "outerwear",
+      color: "cream, art print", stylingRole: "statement",
+      silhouette: "wrap, soft-structured, defined waist", fit: "adjustable", length: "hip",
+      visualWeight: "medium", statementLevel: "medium",
+      styleDNA: "Artistic, Feminine, Relaxed",
+      occasion: "Casual, Brunch, Weekend, Travel, Errands",
+      moodMatch: "Comfortable, Soft, Effortless",
+      bodyPreferences: "Create ease, Skim the body, Balance shoulders",
+      emotionalEffect: "comforting, enveloping",
+      pairingBehavior: "Pair with slim/straight bottoms. Avoid excess volume underneath.",
+      outfitCompleteness: "builder"
+    },
+    {
+      name: "Sharp", category: "outerwear",
+      color: "dark brown + art print", stylingRole: "statement",
+      silhouette: "structured, tailored", fit: "tailored", length: "hip",
+      visualWeight: "medium-heavy", statementLevel: "medium-high",
+      styleDNA: "Polished, Statement, Refined",
+      occasion: "Work, Dinner, Event, Date",
+      moodMatch: "Confident, Powerful, Polished, Elegant",
+      bodyPreferences: "Add structure, Define shape, Balance shoulders",
+      emotionalEffect: "empowering, elevated",
+      pairingBehavior: "Pair with clean minimal tops, straight or fluid bottoms. Avoid competing prints.",
+      outfitCompleteness: "builder"
+    },
+    {
+      name: "Defined", category: "top",
+      color: "deep chocolate brown + art print", stylingRole: "statement",
+      silhouette: "structured, waist defined", fit: "fitted", length: "hip",
+      visualWeight: "medium-high", statementLevel: "high",
+      styleDNA: "Statement, Feminine, Artistic",
+      occasion: "Dinner, Date, Event, Night out",
+      moodMatch: "Powerful, Confident, Magnetic, Bold",
+      bodyPreferences: "Highlight waist, Define shape",
+      emotionalEffect: "powerful, protective",
+      pairingBehavior: "Pair with minimal bottoms. Avoid additional statement pieces.",
+      outfitCompleteness: "builder"
+    },
+    {
+      name: "Balanced", category: "bottom",
+      color: "Camel/tan knit + structured brown leather", stylingRole: "Anchor",
+      silhouette: "Column ankle length with dramatic waist detail", fit: "skimming", length: "Midi",
+      visualWeight: "medium-high", statementLevel: "Medium",
+      styleDNA: "Statement, Refined, Edgy",
+      occasion: "Dinner, Event, Date, Night out, Party, Brunch",
+      moodMatch: "Confident, Powerful, Magnetic, Bold, Elegant",
+      bodyPreferences: "Highlight waist, Elongate legs, Define shape",
+      emotionalEffect: "grounding, expressive",
+      pairingBehavior: "The waist IS the statement - pair with simple, minimal tops (tanks, bodysuits, fitted knits). Avoid anything with waist detail, busy necklines, or volume on top. Tuck tops IN to show the corset.",
+      outfitCompleteness: "Near-complete"
+    },
+    {
+      name: "Fluid", category: "top",
+      color: "warm beige, rust + art print", stylingRole: "statement",
+      silhouette: "fitted, sculpting", fit: "fitted", length: "hip",
+      visualWeight: "medium", statementLevel: "medium-high",
+      styleDNA: "Minimal, Artistic, Statement",
+      occasion: "Dinner, Date, Event, Casual",
+      moodMatch: "Confident, Bold, Magnetic",
+      bodyPreferences: "Highlight waist, Define shape, Skim the body",
+      emotionalEffect: "expressive, elevated",
+      pairingBehavior: "Pair with clean bottoms. Avoid busy combinations.",
+      outfitCompleteness: "builder"
+    },
+    {
+      name: "Refined", category: "top",
+      color: "crisp white + art print", stylingRole: "anchor",
+      silhouette: "structured, waist defined", fit: "tailored", length: "hip",
+      visualWeight: "medium", statementLevel: "medium",
+      styleDNA: "Polished, Refined, Classic",
+      occasion: "Work, Dinner, Event, Brunch",
+      moodMatch: "Polished, Confident, Elegant",
+      bodyPreferences: "Add structure, Define shape, Balance shoulders",
+      emotionalEffect: "empowering, polished, composed",
+      pairingBehavior: "Pair with fluid or statement bottoms. Works well under clean outerwear.",
+      outfitCompleteness: "builder"
+    },
+    {
+      name: "Soft", category: "dress",
+      color: "deep burgundy brown + art print", stylingRole: "statement",
+      silhouette: "fitted top + straight skirt", fit: "fitted (top), relaxed (skirt)", length: "midi",
+      visualWeight: "high", statementLevel: "high",
+      styleDNA: "Statement, Refined, Edgy",
+      occasion: "Dinner, Event, Night out, Date, Party",
+      moodMatch: "Powerful, Confident, Magnetic, Bold",
+      bodyPreferences: "Define shape, Skim the body, Elongate legs",
+      emotionalEffect: "grounded, powerful",
+      pairingBehavior: "Minimal layering, keep everything else simple, avoid competing textures.",
+      outfitCompleteness: "near-complete"
+    },
+    {
+      name: "Grounded", category: "bottom",
+      color: "dark brown + art print", stylingRole: "anchor",
+      silhouette: "structured, elongated", fit: "tailored", length: "full",
+      visualWeight: "medium", statementLevel: "medium",
+      styleDNA: "Polished, Refined, Modern",
+      occasion: "Work, Dinner, Date, Brunch, Weekend",
+      moodMatch: "Polished, Confident, Elegant, Effortless",
+      bodyPreferences: "Elongate legs, Define shape, Highlight waist",
+      emotionalEffect: "grounding, polished",
+      pairingBehavior: "Pair with clean or minimal tops. Avoid too much detail at the waist.",
+      outfitCompleteness: "builder"
+    },
+    {
+      name: "Light", category: "bottom",
+      color: "rust, brown, art print", stylingRole: "statement",
+      silhouette: "wide-leg, flowing", fit: "relaxed", length: "full",
+      visualWeight: "medium-high", statementLevel: "high",
+      styleDNA: "Artistic, Statement, Feminine",
+      occasion: "Dinner, Event, Date, Brunch, Weekend",
+      moodMatch: "Confident, Bold, Effortless, Magnetic",
+      bodyPreferences: "Elongate legs, Create ease, Skim the body, Balance shoulders",
+      emotionalEffect: "expressive, expansive, slightly dramatic",
+      pairingBehavior: "Pair with structured tops, clean silhouettes. Avoid other strong prints.",
+      outfitCompleteness: "anchor+statement in one"
+    },
+    {
+      name: "Whole", category: "dress",
+      color: "Cream/beige base with art print + structured corset bodice", stylingRole: "Complete statement",
+      silhouette: "Fitted corset bodice + full maxi skirt with train + detached sleeves", fit: "Structured (corset) + flowing (skirt)", length: "Full maxi with train",
+      visualWeight: "very heavy", statementLevel: "maximum",
+      styleDNA: "Statement, Artistic, Edgy, Refined",
+      occasion: "Wedding guest, Event, Party",
+      moodMatch: "Powerful, Magnetic, Bold, Confident, Elegant",
+      bodyPreferences: "Highlight waist, Define shape, Add structure, Elongate legs",
+      emotionalEffect: "commanding, artistic, theatrical, unforgettable",
+      pairingBehavior: "This IS the entire look. Nothing else needed except shoes (hidden under train) and minimal jewelry. The sleeves, corset, print, and train do ALL the work.",
+      outfitCompleteness: "complete"
+    },
+  ];
+
+  // Determine which categories the customer already has covered
+  const allSelectedItems = [
+    ...(Array.isArray(closetItems) && closetItems.length > 0 ? closetItems : []),
+    ...(closetItem ? [closetItem] : []),
+  ];
+  const customerCategories = allSelectedItems
+    .map(i => (i.category || "").toLowerCase().trim())
+    .filter(Boolean);
+
+  // Category grouping: "top" and "shirt" are both upper body, etc.
+  const normalize = (cat) => {
+    const c = (cat || "").toLowerCase().trim();
+    if (["top", "shirt", "blouse", "tshirt", "t-shirt", "sweater", "knit"].includes(c)) return "top";
+    if (["bottom", "pants", "trousers", "skirt", "shorts", "jeans"].includes(c)) return "bottom";
+    if (["outerwear", "jacket", "coat", "blazer", "cardigan"].includes(c)) return "outerwear";
+    if (["dress", "jumpsuit", "romper", "one-piece"].includes(c)) return "dress";
     return c;
   };
 

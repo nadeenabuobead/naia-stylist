@@ -1382,10 +1382,11 @@ export default function Stylist() {
       setStylingResult(result);
       
       // Extract nAia pieces from result and update previousPieces
-      const pieceMatches = result.match(/Sculptural Hybrid Coat|Art Blouse|Art Panel Tailored Blazer|Textured Art Maxi Skirt|Wrap Cropped Top|Printed Wrap Kimono Jacket|Art Collar Shirt|Leather Midi Dress|Asymmetrical Waist Pants|Printed Straight Pants/g);
+      const pieceMatches = result.match(/\b(Calm|Open|Sharp|Defined|Balanced|Fluid|Refined|Soft|Grounded|Light|Whole)\b/g);
       if (pieceMatches && pieceMatches.length > 0) {
         setPreviousPieces(prev => {
           const updated = [...new Set([...prev, ...pieceMatches])];
+          // Keep only last 5 recommendations to allow rotation
           return updated.slice(-5);
         });
       }
@@ -1457,7 +1458,7 @@ export default function Stylist() {
       setStylingResult(result);
       
       // Extract and update previousPieces
-      const pieceMatches = result.match(/Sculptural Hybrid Coat|Art Blouse|Art Panel Tailored Blazer|Textured Art Maxi Skirt|Wrap Cropped Top|Printed Wrap Kimono Jacket|Art Collar Shirt|Leather Midi Dress|Asymmetrical Waist Pants|Printed Straight Pants/g);
+      const pieceMatches = result.match(/\b(Calm|Open|Sharp|Defined|Balanced|Fluid|Refined|Soft|Grounded|Light|Whole)\b/g);
       if (pieceMatches && pieceMatches.length > 0) {
         setPreviousPieces(prev => {
           const updated = [...new Set([...prev, ...pieceMatches])];
