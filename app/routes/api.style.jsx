@@ -113,16 +113,70 @@ console.log("Style Intelligence:", JSON.stringify(styleIntelligence, null, 2));
   naiaPiece, closet, vibe, styleDNA, styleIntelligence,
 });
 
-    const openAiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-        temperature: 0.8,
-        messages: [
-          {
-            role: "system",
-            content: `You are nAia, an emotionally intelligent AI stylist who understands that clothing is emotional armor — what you wear transforms how you feel. You MUST follow the EXACT response format given to you. Rules:
+    // Prefer Anthropic Claude API for better format adherence
+    const useAnthropic = !!process.env.ANTHROPIC_API_KEY;
+    
+    let result;
+    
+    if (useAnthropic) {
+      // Use Claude API
+      const anthropicResponse = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json", 
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01"
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 2000,
+          temperature: 0.8,
+          system: `You are nAia, an emotionally intelligent AI stylist who understands that clothing is emotional armor — what you wear transforms how you feel. You MUST follow the EXACT response format given to you. Rules:
+1. Write in PROSE for "Why this works" — not bullets. Make it deeply personal by referencing their specific mood, desired feeling, occasion, body preference, and style DNA.
+2. "Why these nAia pieces are worth trying" should SELL the value — explain what problem each piece solves and why it's worth buying.
+3. "The shift" must follow this exact format: "From [mood] to [feeling] — through [transformation method]."
+4. "Complete the mood" comes at the END with Accessories, Perfume, Hair, Makeup, Song as separate labeled lines.
+5. CRITICAL: You may ONLY recommend nAia pieces from the "NAIA PIECES YOU MAY RECOMMEND" list. This list has been pre-filtered. Do NOT invent or add pieces not in that list.
+6. Never recommend a piece in the same category as what the customer already has (e.g. no top + top, no bottom + bottom).
+7. CRITICAL: If recommending 2 pieces, never recommend TWO pieces from the same category. Each must be DIFFERENT (e.g. one outerwear + one bottom = good; two outerwear = bad).
+8. CRITICAL: If the customer has a top, DO NOT recommend another top. Tops pair with bottoms/outerwear/dresses ONLY.
+9. Refer to customer's closet pieces as "your [piece name]" and nAia pieces by JUST their name (no category).
+10. Song MUST be a 2025/2026 hit. Use current artists: Sabrina Carpenter, Chappell Roan, Charli XCX, Billie Eilish, SZA, Olivia Rodrigo, Tate McRae, The Weeknd, Ariana Grande.
+11. Perfume MUST match the feeling AND occasion. Evening/bold = YSL Black Opium, Tom Ford. Soft/romantic = Miss Dior, Daisy. Fresh/casual = Chanel Chance.
+12. Hair MUST be 2025/2026: glass hair, wet look, 90s blowout, slicked-back, curtain bangs, editorial textures.
+13. Makeup MUST be 2025/2026: latte makeup, clean girl, burgundy tones, glass skin, graphic liner.
+14. VARIETY RULE FOR EVERYTHING: Rotate through different pieces, songs, perfumes, hairstyles, makeup looks, and accessories every time.
+15. CRITICAL: If the customer has CUSTOMER STYLE INTELLIGENCE data, you MUST prioritize and reference it. Use what has worked for her in the past, avoid what hasn't worked, and acknowledge her preferences in your recommendations.
+16. BE SPECIFIC AND PERSONAL: Don't write generic styling advice. Connect everything back to THEIR inputs — their current mood, their desired feeling, their body preference, their occasion, their style DNA. Make them feel understood.`,
+          messages: [
+            { role: "user", content: stylistPrompt }
+          ],
+        }),
+      });
+
+      const anthropicData = await anthropicResponse.json();
+      
+      if (!anthropicResponse.ok) {
+        return Response.json({
+          result: buildFallback({ mood: safeMood, feeling: safeFeeling, closetItem, naiaPiece, outfit: finalOutfit }),
+          error: anthropicData.error?.message || "Anthropic API error",
+        });
+      }
+
+      result = anthropicData.content[0].text.trim();
+      
+    } else {
+      // Fallback to OpenAI
+      const openAiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: process.env.OPENAI_MODEL || "gpt-4o",
+          temperature: 0.8,
+          messages: [
+            {
+              role: "system",
+              content: `You are nAia, an emotionally intelligent AI stylist who understands that clothing is emotional armor — what you wear transforms how you feel. You MUST follow the EXACT response format given to you. Rules:
 1. Write in PROSE for "Why this works" — not bullets. Make it deeply personal by referencing their specific mood, desired feeling, occasion, body preference, and style DNA.
 2. "Why these nAia pieces are worth trying" should SELL the value — explain what problem each piece solves and why it's worth buying.
 3. "The shift" must follow this exact format: "From [mood] to [feeling] — through [transformation method]."
@@ -140,23 +194,24 @@ console.log("Style Intelligence:", JSON.stringify(styleIntelligence, null, 2));
 15. CRITICAL: If the customer has CUSTOMER STYLE INTELLIGENCE data, you MUST prioritize and reference it. Use what has worked for her in the past, avoid what hasn't worked, and acknowledge her preferences in your recommendations.
 16. BE SPECIFIC AND PERSONAL: Don't write generic styling advice. Connect everything back to THEIR inputs — their current mood, their desired feeling, their body preference, their occasion, their style DNA. Make them feel understood.`,
 
-          },
-          { role: "user", content: stylistPrompt },
-        ],
-      }),
-    });
-
-    const data = await openAiResponse.json();
-
-    if (!openAiResponse.ok) {
-      return Response.json({
-        result: buildFallback({ mood: safeMood, feeling: safeFeeling, closetItem, naiaPiece, outfit: finalOutfit }),
-        error: data?.error?.message || "OpenAI request failed.",
+            },
+            { role: "user", content: stylistPrompt },
+          ],
+        }),
       });
-    }
 
-    const result = data?.choices?.[0]?.message?.content?.trim() ||
-  buildFallback({ mood: safeMood, feeling: safeFeeling, closetItem, naiaPiece, outfit: finalOutfit });
+      const data = await openAiResponse.json();
+
+      if (!openAiResponse.ok) {
+        return Response.json({
+          result: buildFallback({ mood: safeMood, feeling: safeFeeling, closetItem, naiaPiece, outfit: finalOutfit }),
+          error: data?.error?.message || "OpenAI request failed.",
+        });
+      }
+
+      result = data?.choices?.[0]?.message?.content?.trim() ||
+        buildFallback({ mood: safeMood, feeling: safeFeeling, closetItem, naiaPiece, outfit: finalOutfit });
+    }
 
 // Parse and save nAia pieces to DB
 try {
