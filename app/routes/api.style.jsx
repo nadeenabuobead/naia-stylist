@@ -529,44 +529,44 @@ ${mode === "recommend_naia" ? `- Recommend 1-2 nAia pieces from the FILTERED lis
 ${mode === "closet_naia" ? `- Style the customer's closet piece WITH the selected nAia piece together as one outfit.
 - Explain how to wear them together.` : ""}
 
-RESPOND IN THIS EXACT FORMAT — copy the section headers WORD FOR WORD. Do NOT deviate:
+RESPOND IN THIS EXACT FORMAT. Copy these headers EXACTLY. Replace only the content after colons and dashes:
 
 You're feeling: ${mood}
 You want to feel: ${feeling}
 Dressing for: ${event}
 
 ${mode === "recommend_naia" || mode === "closet_naia" ? `Starting with
-- your white top (example - replace with their actual piece)
+- your [insert their actual closet piece name]
 
 nAia adds
-- Calm (example - replace with actual recommended piece)
-${mode === "recommend_naia" ? "- Light (example - ONLY if second piece needed)" : ""}
+- [insert first nAia piece name ONLY, no category in parentheses]
+${mode === "recommend_naia" ? "- [insert second nAia piece name ONLY if needed, must be different category]" : ""}
 
 Styling direction
-Sculptural, polished, magnetic (example - replace with actual vibe)` : `Your outfit
-- your black jeans (example)
-- your white top (example)
+[2-4 descriptive words about the vibe, like: Sculptural, polished, magnetic]` : `Your outfit
+- your [piece1]
+- your [piece2]
 
 Styling direction
-Effortless, refined, chic (example)`}
+[2-4 descriptive words about the vibe]`}
 
 Why this works
-You're feeling ${mood}, so this look starts with something familiar: your [piece]. nAia then adds [transformation]. The [first piece] gives you [benefit], while the [second piece] adds [benefit]. For ${event}, this creates a ${feeling} effect without [problem it avoids]. Because your style leans ${Array.isArray(styleDNA) ? styleDNA.join("/") : styleDNA}, the combination feels [authentic to them].
+[Write 2-3 sentences in natural prose. Reference their mood: ${mood}, desired feeling: ${feeling}, occasion: ${event}, body preference: ${bodyPref}, and style DNA: ${Array.isArray(styleDNA) ? styleDNA.join("/") : styleDNA}. Make it personal and specific to THEM.]
 
 ${mode === "recommend_naia" || mode === "closet_naia" ? `Why these nAia pieces are worth trying
-- The [piece name] transforms your [closet item] by [specific value]
-- The [piece name] solves [specific problem] by [how]
-- Together they turn [what they had] into [what they get]` : ""}
+- [How first piece elevates their closet]
+- [What problem each piece solves]
+- [Why worth buying - the transformation]` : ""}
 
 The shift
-From ${mood} to ${feeling} — through [how the transformation happens].
+From ${mood} to ${feeling} — through [describe how outfit achieves this].
 
 Complete the mood
-Accessories: Gold hoop earrings and structured tote (example)
-Perfume: Chanel Chance Eau Tendre (example)
-Hair: Loose waves with curtain bangs (example)
-Makeup: Clean girl aesthetic with glossy skin (example)
-Song: Sabrina Carpenter - Espresso (example)`;
+Accessories: [specific accessories]
+Perfume: [specific 2025/2026 fragrance]
+Hair: [specific 2025/2026 hairstyle]
+Makeup: [specific 2025/2026 makeup trend]
+Song: [Artist - Song Title from 2025/2026]`;
 }
 
 function getEventDirection(event) {
