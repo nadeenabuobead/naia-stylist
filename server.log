@@ -1,0 +1,98 @@
+npm warn Unknown project config "shamefully-hoist". This will stop working in the next major version of npm.
+
+> start
+> react-router-serve ./build/server/index.js
+
+[shopify-api/INFO] version 13.0.0, environment React Router
+[react-router-serve] http://localhost:3000 (http://172.20.10.2:3000)
+PrismaClientValidationError: 
+Invalid `prisma.customer.findFirst()` invocation:
+
+{
+  where: {
+    shopifyCustomerId: "guest"
+  },
+  include: {
+    stylingSessions: {
+      take: 10,
+      orderBy: {
+        createdAt: "desc"
+      },
+      include: {
+        suggestions: true
+      }
+    },
+    closetItems: {
+      take: 20
+    },
+    postOutfitReviews: {
+      include: {
+        suggestion: true,
+        ~~~~~~~~~~
+?       session?: true,
+?       customer?: true
+      }
+    },
+    savedLooks: true
+  }
+}
+
+Unknown field `suggestion` for include statement on model `PostOutfitReview`. Available options are marked with ?.
+    at throwValidationException (/Users/nadeenabuobead/naia-stylist/node_modules/@prisma/client/src/runtime/core/errorRendering/throwValidationException.ts:45:9)
+    at ei.handleRequestError (/Users/nadeenabuobead/naia-stylist/node_modules/@prisma/client/src/runtime/RequestHandler.ts:202:7)
+    at ei.handleAndLogRequestError (/Users/nadeenabuobead/naia-stylist/node_modules/@prisma/client/src/runtime/RequestHandler.ts:174:12)
+    at ei.request (/Users/nadeenabuobead/naia-stylist/node_modules/@prisma/client/src/runtime/RequestHandler.ts:143:12)
+    at a (/Users/nadeenabuobead/naia-stylist/node_modules/@prisma/client/src/runtime/getPrismaClient.ts:833:24)
+    at loader$m (file:///Users/nadeenabuobead/naia-stylist/build/server/index.js:146:20)
+    at callRouteHandler (file:///Users/nadeenabuobead/naia-stylist/node_modules/react-router/dist/development/chunk-JPUPSTYD.mjs:509:16)
+    at commonRoute.loader (file:///Users/nadeenabuobead/naia-stylist/node_modules/react-router/dist/development/chunk-JPUPSTYD.mjs:659:19)
+    at file:///Users/nadeenabuobead/naia-stylist/node_modules/react-router/dist/development/chunk-LFPYN7LY.mjs:4809:19
+    at callLoaderOrAction (file:///Users/nadeenabuobead/naia-stylist/node_modules/react-router/dist/development/chunk-LFPYN7LY.mjs:4861:16) {
+  clientVersion: '6.19.2'
+}
+PrismaClientValidationError: 
+Invalid `prisma.customer.findFirst()` invocation:
+
+{
+  where: {
+    shopifyCustomerId: "guest"
+  },
+  include: {
+    stylingSessions: {
+      take: 10,
+      orderBy: {
+        createdAt: "desc"
+      },
+      include: {
+        suggestions: true
+      }
+    },
+    closetItems: {
+      take: 20
+    },
+    postOutfitReviews: {
+      include: {
+        suggestion: true,
+        ~~~~~~~~~~
+?       session?: true,
+?       customer?: true
+      }
+    },
+    savedLooks: true
+  }
+}
+
+Unknown field `suggestion` for include statement on model `PostOutfitReview`. Available options are marked with ?.
+    at throwValidationException (/Users/nadeenabuobead/naia-stylist/node_modules/@prisma/client/src/runtime/core/errorRendering/throwValidationException.ts:45:9)
+    at ei.handleRequestError (/Users/nadeenabuobead/naia-stylist/node_modules/@prisma/client/src/runtime/RequestHandler.ts:202:7)
+    at ei.handleAndLogRequestError (/Users/nadeenabuobead/naia-stylist/node_modules/@prisma/client/src/runtime/RequestHandler.ts:174:12)
+    at ei.request (/Users/nadeenabuobead/naia-stylist/node_modules/@prisma/client/src/runtime/RequestHandler.ts:143:12)
+    at a (/Users/nadeenabuobead/naia-stylist/node_modules/@prisma/client/src/runtime/getPrismaClient.ts:833:24)
+    at loader$m (file:///Users/nadeenabuobead/naia-stylist/build/server/index.js:146:20)
+    at callRouteHandler (file:///Users/nadeenabuobead/naia-stylist/node_modules/react-router/dist/development/chunk-JPUPSTYD.mjs:509:16)
+    at commonRoute.loader (file:///Users/nadeenabuobead/naia-stylist/node_modules/react-router/dist/development/chunk-JPUPSTYD.mjs:659:19)
+    at file:///Users/nadeenabuobead/naia-stylist/node_modules/react-router/dist/development/chunk-LFPYN7LY.mjs:4809:19
+    at callLoaderOrAction (file:///Users/nadeenabuobead/naia-stylist/node_modules/react-router/dist/development/chunk-LFPYN7LY.mjs:4861:16) {
+  clientVersion: '6.19.2'
+}
+GET / 500 - - 116.284 ms

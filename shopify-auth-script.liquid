@@ -1,0 +1,25 @@
+{% comment %}
+  Add this to your Shopify theme's theme.liquid file, right before </body>
+  This will automatically authenticate customers in your nAia app
+{% endcomment %}
+
+{% if customer %}
+<script>
+(function() {
+  const customerData = {
+    shopifyId: {{ customer.id | json }},
+    email: {{ customer.email | json }},
+    firstName: {{ customer.first_name | json }},
+    lastName: {{ customer.last_name | json }}
+  };
+  
+  // Encode as base64
+  const encoded = btoa(JSON.stringify(customerData));
+  
+  // Set cookie for nAia app
+  document.cookie = 'naia_customer_data=' + encodeURIComponent(encoded) + '; path=/; max-age=2592000; SameSite=Lax';
+  
+  console.log('nAia: Customer authenticated', customerData.email);
+})();
+</script>
+{% endif %}

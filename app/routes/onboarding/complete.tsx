@@ -1,66 +1,74 @@
-// app/routes/onboarding/complete.tsx
 import { Link, useLoaderData, redirect, data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { getSession, commitSession } from "~/lib/session.server";
-import { getCustomerId } from "~/lib/auth.server";
 import { prisma } from "~/lib/prisma.server";
+import { getCustomer } from "~/lib/auth.server";
 import type { OnboardingAnswers } from "~/lib/onboarding/quiz-data";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await getSession(request.headers.get("Cookie"));
   const answers = session.get("onboardingAnswers") as OnboardingAnswers | undefined;
 
-  if (!answers || !answers["style-personality"]) {
+  if (!answers || !answers["style-personalities"]) {
     return redirect("/onboarding/step/1");
   }
 
-  const customerId = await getCustomerId(request);
+  let customer = await getCustomer(request);
+  
+  if (!customer) {
+    customer = await prisma.customer.findFirst({
+      where: { shopifyCustomerId: "guest" }
+    });
+  }
 
-  // Save to database if logged in
-  if (customerId) {
+  if (customer) {
     await prisma.onboardingProfile.upsert({
-      where: { customerId },
+      where: { customerId: customer.id },
       create: {
-        customerId,
-        stylePersonality: [answers["style-personality"]].filter(Boolean),
-        lifestyle: answers.lifestyle,
-        desiredFeeling: answers["mood-feelings"]?.[0] || null,
-        styleStruggles: answers.struggles || [],
-        favoriteColors: answers.colors || [],
+        customerId: customer.id,
+        completed: true,
+        stylePersonalities: answers["style-personalities"] || [],
+        styleIcons: [],
+        favoriteColors: answers["favorite-colors"] || [],
         avoidColors: answers["avoid-colors"] || [],
-        fitPreferences: answers["fit-preferences"] || [],
-        budgetRange: answers.budget || null,
+        lifestyle: Array.isArray(answers.lifestyle) ? answers.lifestyle[0] : answers.lifestyle || null,
+        dressesFor: Array.isArray(answers.lifestyle) ? answers.lifestyle : [],
+        typicalDay: null,
+        currentMood: null,
+        desiredFeeling: answers["desired-feelings"]?.[0] || null,
+        confidenceBlockers: answers.struggles || [],
+        styleStruggles: answers.struggles || [],
+        comfortLevel: null,
+        budgetRange: null,
+        shoppingHabits: null,
         helpWantedMost: answers["help-wanted"]?.[0] || null,
       },
       update: {
-        stylePersonality: answers["style-personality"],
-        lifestyle: answers.lifestyle,
-        moodFeelings: answers["mood-feelings"] || [],
-        styleStruggles: answers.struggles || [],
-        colorPreferences: answers.colors || [],
+        completed: true,
+        stylePersonalities: answers["style-personalities"] || [],
+        favoriteColors: answers["favorite-colors"] || [],
         avoidColors: answers["avoid-colors"] || [],
-        fitPreferences: answers["fit-preferences"] || [],
-        budget: answers.budget,
-        helpWanted: answers["help-wanted"] || [],
-        additionalNotes: answers["final-thoughts"],
+        dressesFor: Array.isArray(answers.lifestyle) ? answers.lifestyle : [],
+        desiredFeeling: answers["desired-feelings"]?.[0] || null,
+        confidenceBlockers: answers.struggles || [],
+        styleStruggles: answers.struggles || [],
+        helpWantedMost: answers["help-wanted"]?.[0] || null,
       },
     });
   }
 
-  // Clear onboarding answers from session
   session.unset("onboardingAnswers");
 
-  // Generate style summary
   const styleSummary = generateStyleSummary(answers);
 
-return data(
-  { answers, styleSummary },
-  {
-    headers: {
-      "Set-Cookie": await commitSession(session),
-    },
-  }
-);
+  return data(
+    { answers, styleSummary },
+    {
+      headers: {
+        "Set-Cookie": await commitSession(session),
+      },
+    }
+  );
 }
 
 function generateStyleSummary(answers: OnboardingAnswers): {
@@ -68,56 +76,58 @@ function generateStyleSummary(answers: OnboardingAnswers): {
   description: string;
   traits: string[];
 } {
-  const personality = answers["style-personality"];
+  const personalities = answers["style-personalities"] || [];
+  const primaryStyle = personalities[0] || "effortlessly-chic";
 
   const summaries: Record<string, { title: string; description: string }> = {
-    classic: {
-      title: "The Timeless Elegant",
-      description: "You appreciate quality over quantity and gravitate towards pieces that never go out of style. Your wardrobe is built on a foundation of well-tailored basics.",
+    "old-money": {
+      title: "The Timeless Classic",
+      description: "You appreciate quality, heritage, and understated elegance.",
     },
-    bohemian: {
-      title: "The Free Spirit",
-      description: "You express yourself through artistic, flowy pieces that tell a story. Comfort and creativity are your style priorities.",
+    "artsy": {
+      title: "The Creative Spirit",
+      description: "You express yourself through unique pieces and artistic flair.",
     },
-    minimalist: {
-      title: "The Modern Curator",
-      description: "You believe in the power of simplicity. Every piece in your wardrobe is intentional, and you master the art of looking effortlessly chic.",
+    "edgy": {
+      title: "The Bold Rebel",
+      description: "You're not afraid to make a statement and push boundaries.",
     },
-    romantic: {
-      title: "The Soft Dreamer",
-      description: "You're drawn to feminine details, soft textures, and delicate touches. Your style is graceful and inherently elegant.",
+    "feminine": {
+      title: "The Soft Romantic",
+      description: "You're drawn to delicate details and graceful silhouettes.",
     },
-    edgy: {
-      title: "The Bold Statement",
-      description: "You're not afraid to stand out. Your style pushes boundaries and makes a statement without saying a word.",
+    "corporate-chic": {
+      title: "The Polished Professional",
+      description: "You blend sophistication with modern elegance.",
     },
-    trendy: {
+    "effortlessly-chic": {
+      title: "The Natural Stylist",
+      description: "You make looking put-together seem completely effortless.",
+    },
+    "minimal": {
+      title: "The Modern Minimalist",
+      description: "You believe in the power of simplicity and intentional pieces.",
+    },
+    "trendy": {
       title: "The Fashion Forward",
-      description: "You love being ahead of the curve. Experimenting with new trends and styles is your creative outlet.",
+      description: "You love staying ahead of the curve and experimenting with new styles.",
+    },
+    "romantic": {
+      title: "The Dreamer",
+      description: "You're drawn to soft, feminine pieces that tell a story.",
+    },
+    "casual-cool": {
+      title: "The Relaxed Stylist",
+      description: "You master the art of looking good without trying too hard.",
     },
   };
 
-  const summary = summaries[personality || "classic"] || summaries.classic;
+  const summary = summaries[primaryStyle] || summaries["effortlessly-chic"];
 
-  // Build traits from answers
+  // Build traits from ALL desired feelings (not just one)
   const traits: string[] = [];
-
-  if (answers["mood-feelings"]) {
-    traits.push(...answers["mood-feelings"].slice(0, 2).map((f) => f.charAt(0).toUpperCase() + f.slice(1)));
-  }
-
-  if (answers.lifestyle) {
-    const lifestyleTraits: Record<string, string> = {
-      office: "Professional polish",
-      creative: "Creative flair",
-      wfh: "Comfortable chic",
-      active: "On-the-go ready",
-      social: "Event-ready",
-      mom: "Practical elegance",
-    };
-    if (lifestyleTraits[answers.lifestyle]) {
-      traits.push(lifestyleTraits[answers.lifestyle]);
-    }
+  if (answers["desired-feelings"] && answers["desired-feelings"].length > 0) {
+    traits.push(...answers["desired-feelings"].map((f) => f.charAt(0).toUpperCase() + f.slice(1)));
   }
 
   return { ...summary, traits };
@@ -127,104 +137,97 @@ export default function OnboardingComplete() {
   const { styleSummary } = useLoaderData<typeof loader>();
 
   return (
-    <div className="min-h-screen bg-[var(--naia-cream)]">
-      {/* Celebration Header */}
-      <div className="bg-gradient-to-br from-[var(--naia-rose)] to-[var(--naia-rose-dark)] text-white px-4 py-12 text-center">
-        <div className="max-w-lg mx-auto">
-          <div className="w-20 h-20 mx-auto mb-6 bg-white/20 rounded-full flex items-center justify-center">
-            <span className="text-4xl">✨</span>
-          </div>
-          <h1 className="font-display text-3xl font-medium mb-2">
-            Welcome to nAia!
+    <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
+      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+      
+      {/* Header */}
+      <div style={{ background: "#221516", color: "#f4f4f1", padding: "80px 40px", textAlign: "center" }}>
+        <div style={{ maxWidth: "600px", margin: "0 auto" }}>
+          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "72px", marginBottom: "24px", opacity: 0.2 }}>◇</div>
+          <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: "clamp(36px,5vw,56px)", fontWeight: 900, marginBottom: "16px" }}>
+            Welcome to nAia
           </h1>
-          <p className="text-white/80">
+          <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "20px", fontStyle: "italic", opacity: 0.9 }}>
             I've got to know your style. Let's create some magic together.
           </p>
         </div>
       </div>
 
-      {/* Style Summary Card */}
-      <main className="px-4 py-8 max-w-lg mx-auto -mt-6">
-        <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
-          <div className="text-center mb-6">
-            <p className="text-sm text-[var(--naia-text-muted)] mb-1">Your style personality</p>
-            <h2 className="font-display text-2xl font-medium text-[var(--naia-charcoal)]">
+      {/* Style Summary */}
+      <main style={{ maxWidth: "800px", margin: "-40px auto 0", padding: "0 40px 80px" }}>
+        <div style={{ background: "rgba(255,255,255,0.95)", padding: "48px", border: "1px solid rgba(59,5,16,0.06)", boxShadow: "0 8px 32px rgba(0,0,0,0.08)" }}>
+          <div style={{ textAlign: "center", marginBottom: "32px" }}>
+            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>YOUR STYLE PERSONALITY</div>
+            <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "36px", fontWeight: 700, color: "#221516", marginBottom: "16px" }}>
               {styleSummary.title}
             </h2>
+            <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "20px", fontStyle: "italic", color: "#7a6f6a", lineHeight: 1.6 }}>
+              {styleSummary.description}
+            </p>
           </div>
 
-          <p className="text-[var(--naia-text-muted)] text-center mb-6">
-            {styleSummary.description}
-          </p>
-
-          {/* Style Traits */}
+          {/* Traits - Show ALL desired feelings */}
           {styleSummary.traits.length > 0 && (
-            <div className="flex flex-wrap justify-center gap-2">
-              {styleSummary.traits.map((trait) => (
-                <span
-                  key={trait}
-                  className="px-3 py-1 bg-[var(--naia-rose)]/10 text-[var(--naia-rose)] rounded-full text-sm font-medium"
-                >
-                  {trait}
-                </span>
-              ))}
+            <div style={{ marginBottom: "40px" }}>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "16px", textAlign: "center" }}>
+                YOU WANT TO FEEL
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "12px" }}>
+                {styleSummary.traits.map((trait) => (
+                  <span
+                    key={trait}
+                    style={{ padding: "8px 16px", background: "rgba(139,32,53,0.08)", color: "#8b2035", fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", border: "1px solid rgba(139,32,53,0.1)" }}
+                  >
+                    {trait}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
+
+          {/* Actions */}
+          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "20px", textAlign: "center" }}>
+            WHAT WOULD YOU LIKE TO DO FIRST?
+          </div>
+
+          <div style={{ display: "grid", gap: "16px" }}>
+            <Link
+              to="/quick-style"
+              style={{ display: "flex", alignItems: "center", gap: "20px", padding: "24px", background: "rgba(255,255,255,0.5)", border: "1px solid rgba(59,5,16,0.06)", textDecoration: "none", transition: "all 0.2s" }}
+            >
+              <div style={{ width: "48px", height: "48px", background: "rgba(139,32,53,0.08)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Playfair Display',serif", fontSize: "24px", color: "#8b2035" }}>◇</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "20px", fontWeight: 600, color: "#221516", marginBottom: "4px" }}>Style Me</div>
+                <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#7a6f6a" }}>Get outfit ideas based on your mood</div>
+              </div>
+              <span style={{ fontFamily: "'Space Mono',monospace", fontSize: "12px", color: "#8b2035" }}>→</span>
+            </Link>
+
+            <Link
+              to="/closet"
+              style={{ display: "flex", alignItems: "center", gap: "20px", padding: "24px", background: "rgba(255,255,255,0.5)", border: "1px solid rgba(59,5,16,0.06)", textDecoration: "none", transition: "all 0.2s" }}
+            >
+              <div style={{ width: "48px", height: "48px", background: "rgba(139,32,53,0.08)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Playfair Display',serif", fontSize: "24px", color: "#8b2035" }}>◼</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "20px", fontWeight: 600, color: "#221516", marginBottom: "4px" }}>Digital Wardrobe</div>
+                <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#7a6f6a" }}>Upload your pieces for personalized styling</div>
+              </div>
+              <span style={{ fontFamily: "'Space Mono',monospace", fontSize: "12px", color: "#8b2035" }}>→</span>
+            </Link>
+
+            <Link
+              to="/"
+              style={{ display: "flex", alignItems: "center", gap: "20px", padding: "24px", background: "rgba(255,255,255,0.5)", border: "1px solid rgba(59,5,16,0.06)", textDecoration: "none", transition: "all 0.2s" }}
+            >
+              <div style={{ width: "48px", height: "48px", background: "rgba(139,32,53,0.08)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Playfair Display',serif", fontSize: "24px", color: "#8b2035" }}>★</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "20px", fontWeight: 600, color: "#221516", marginBottom: "4px" }}>View Dashboard</div>
+                <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#7a6f6a" }}>Explore all features</div>
+              </div>
+              <span style={{ fontFamily: "'Space Mono',monospace", fontSize: "12px", color: "#8b2035" }}>→</span>
+            </Link>
+          </div>
         </div>
-
-        {/* Quick Actions */}
-        <div className="space-y-4">
-          <h3 className="font-display text-lg font-medium text-[var(--naia-charcoal)] text-center">
-            What would you like to do first?
-          </h3>
-
-          <Link
-            to="/style-me"
-            className="flex items-center gap-4 p-4 bg-white rounded-xl hover:shadow-md transition-shadow"
-          >
-            <div className="w-12 h-12 bg-[var(--naia-rose)]/10 rounded-full flex items-center justify-center">
-              <span className="text-2xl">👗</span>
-            </div>
-            <div className="flex-1">
-              <p className="font-medium text-[var(--naia-charcoal)]">Style Me</p>
-              <p className="text-sm text-[var(--naia-text-muted)]">Get outfit ideas based on your mood</p>
-            </div>
-            <span className="text-[var(--naia-text-muted)]">→</span>
-          </Link>
-
-          <Link
-            to="/closet/upload"
-            className="flex items-center gap-4 p-4 bg-white rounded-xl hover:shadow-md transition-shadow"
-          >
-            <div className="w-12 h-12 bg-[var(--naia-rose)]/10 rounded-full flex items-center justify-center">
-              <span className="text-2xl">📸</span>
-            </div>
-            <div className="flex-1">
-              <p className="font-medium text-[var(--naia-charcoal)]">Add to Closet</p>
-              <p className="text-sm text-[var(--naia-text-muted)]">Upload your wardrobe for personalized styling</p>
-            </div>
-            <span className="text-[var(--naia-text-muted)]">→</span>
-          </Link>
-
-          <Link
-            to="/"
-            className="flex items-center gap-4 p-4 bg-white rounded-xl hover:shadow-md transition-shadow"
-          >
-            <div className="w-12 h-12 bg-[var(--naia-rose)]/10 rounded-full flex items-center justify-center">
-              <span className="text-2xl">🏠</span>
-            </div>
-            <div className="flex-1">
-              <p className="font-medium text-[var(--naia-charcoal)]">Explore nAia</p>
-              <p className="text-sm text-[var(--naia-text-muted)]">Browse all features</p>
-            </div>
-            <span className="text-[var(--naia-text-muted)]">→</span>
-          </Link>
-        </div>
-
-        {/* Bottom message */}
-        <p className="text-center text-sm text-[var(--naia-text-muted)] mt-8">
-          You can update your style profile anytime in settings 💕
-        </p>
       </main>
     </div>
   );

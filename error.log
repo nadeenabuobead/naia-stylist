@@ -1,0 +1,20 @@
+npm warn Unknown project config "shamefully-hoist". This will stop working in the next major version of npm.
+
+> start
+> react-router-serve ./build/server/index.js
+
+[shopify-api/INFO] version 13.0.0, environment React Router
+[react-router-serve] http://localhost:3000 (http://172.20.10.2:3000)
+ReferenceError: recentSessions is not defined
+    at loader$m (file:///Users/nadeenabuobead/naia-stylist/build/server/index.js:212:10)
+    at callRouteHandler (file:///Users/nadeenabuobead/naia-stylist/node_modules/react-router/dist/development/chunk-JPUPSTYD.mjs:509:16)
+    at commonRoute.loader (file:///Users/nadeenabuobead/naia-stylist/node_modules/react-router/dist/development/chunk-JPUPSTYD.mjs:659:19)
+    at file:///Users/nadeenabuobead/naia-stylist/node_modules/react-router/dist/development/chunk-LFPYN7LY.mjs:4809:19
+    at callLoaderOrAction (file:///Users/nadeenabuobead/naia-stylist/node_modules/react-router/dist/development/chunk-LFPYN7LY.mjs:4861:16)
+    at async Promise.all (index 0)
+    at defaultDataStrategy (file:///Users/nadeenabuobead/naia-stylist/node_modules/react-router/dist/development/chunk-LFPYN7LY.mjs:4486:17)
+    at callDataStrategyImpl (file:///Users/nadeenabuobead/naia-stylist/node_modules/react-router/dist/development/chunk-LFPYN7LY.mjs:4755:17)
+    at callDataStrategy (file:///Users/nadeenabuobead/naia-stylist/node_modules/react-router/dist/development/chunk-LFPYN7LY.mjs:3793:19)
+    at loadRouteData (file:///Users/nadeenabuobead/naia-stylist/node_modules/react-router/dist/development/chunk-LFPYN7LY.mjs:3770:19)
+[Error: Unexpected Server Error]
+GET / 500 - - 2715.189 ms

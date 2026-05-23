@@ -4,13 +4,8 @@ import { authenticateCustomer } from "../customer-auth.server";
 import prisma from "../db.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  // Try to authenticate from Shopify cookie
-  const { customer: authCustomer } = await authenticateCustomer(request);
-  
-  // Get customer from DB (authenticated or guest)
-  const customerId = authCustomer?.shopifyCustomerId || "guest";
   const customer = await prisma.customer.findFirst({
-    where: { shopifyCustomerId: customerId },
+    where: { shopifyCustomerId: "guest" },
     include: {
       onboardingProfile: true,
       stylingSessions: { 
@@ -77,7 +72,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     customer,
-    profile,
     stats: {
       looksStyled: customer.stylingSessions.length,
       closetPieces: customer.closetItems.length,
@@ -93,7 +87,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export default function Index() {
-  const { customer, stats, insights, profile } = useLoaderData<typeof loader>();
+  const { customer, stats, insights } = useLoaderData<typeof loader>();
 
   return (
     <div style={{ minHeight: "100vh", background: "#f4f4f1", position: "relative" }}>
@@ -144,9 +138,27 @@ export default function Index() {
 
         {/* Styling Identity */}
         <div style={{ background: "rgba(255,255,255,0.5)", padding: "28px 36px", marginBottom: "60px", border: "1px solid rgba(59,5,16,0.06)", textAlign: "center" }}>
-          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>YOUR STYLE DNA</div>
+          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>YOUR STYLING IDENTITY</div>
           <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "36px", fontWeight: 700, fontStyle: "italic", color: "#8b2035" }}>
             {insights.stylingIdentity}
+          </div>
+        </div>
+
+        {/* Style DNA */}
+        <div style={{ marginBottom: "60px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
+            <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "36px", fontWeight: 900 }}>Your Style DNA</h2>
+            <Link to="/onboarding/step/1" style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>
+              {insights.styleDNA[0]?.score === 0 ? "COMPLETE PROFILE" : "EDIT PROFILE"}
+            </Link>
+          </div>
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+            {insights.styleDNA.map((dna, i) => (
+              <div key={i} style={{ padding: "8px 16px", background: dna.score === 0 ? "rgba(139,32,53,0.1)" : "rgba(59,5,16,0.05)", border: "1px solid rgba(59,5,16,0.1)" }}>
+                <span style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic" }}>{dna.trait}</span>
+                {dna.score > 0 && <strong style={{ fontWeight: 600, marginLeft: "8px", color: "#8b2035" }}></strong>}
+              </div>
+            ))}
           </div>
         </div>
 
@@ -162,60 +174,6 @@ export default function Index() {
           <Link to="/quick-style" style={{ display: "inline-block", padding: "16px 40px", border: "1px solid #f4f4f1", color: "#f4f4f1", fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", textDecoration: "none" }}>
             →
           </Link>
-        </div>
-
-
-        {/* Style Profile Summary */}
-        <div style={{ marginBottom: "60px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
-            <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "36px", fontWeight: 900 }}>Your Style Profile</h2>
-            <Link to="/onboarding/step/1" style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>
-              {!profile?.completed ? "COMPLETE PROFILE" : "EDIT PROFILE"}
-            </Link>
-          </div>
-
-          {profile?.completed ? (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: "20px" }}>
-              
-              <div style={{ background: "rgba(255,255,255,0.5)", padding: "24px", border: "1px solid rgba(59,5,16,0.06)" }}>
-                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>LIFESTYLE</div>
-                <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#221516" }}>
-                  {profile.dressesFor?.map((l: string) => l.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')).join(', ') || 'Not set'}
-                </div>
-              </div>
-
-              <div style={{ background: "rgba(255,255,255,0.5)", padding: "24px", border: "1px solid rgba(59,5,16,0.06)" }}>
-                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>WANTS TO FEEL</div>
-                <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#221516" }}>
-                  {profile.desiredFeeling?.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') || 'Not set'}
-                </div>
-              </div>
-
-              <div style={{ background: "rgba(255,255,255,0.5)", padding: "24px", border: "1px solid rgba(59,5,16,0.06)" }}>
-                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>FAVORITE COLORS</div>
-                <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", color: "#221516" }}>
-                  {profile.favoriteColors?.map((c: string) => c.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')).join(', ') || 'Not set'}
-                </div>
-              </div>
-
-              <div style={{ background: "rgba(255,255,255,0.5)", padding: "24px", border: "1px solid rgba(59,5,16,0.06)" }}>
-                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>WORKING ON</div>
-                <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", color: "#221516" }}>
-                  {profile.styleStruggles?.[0]?.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') || 'Not set'}
-                </div>
-              </div>
-
-            </div>
-          ) : (
-            <div style={{ background: "rgba(139,32,53,0.05)", padding: "40px", textAlign: "center", border: "1px solid rgba(139,32,53,0.1)" }}>
-              <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "20px" }}>
-                Complete your style profile to get personalized recommendations
-              </p>
-              <Link to="/onboarding/step/1" style={{ display: "inline-block", padding: "16px 32px", background: "#8b2035", color: "#f4f4f1", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", textDecoration: "none" }}>
-                START NOW
-              </Link>
-            </div>
-          )}
         </div>
 
         {/* Tools */}

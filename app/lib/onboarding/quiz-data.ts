@@ -10,217 +10,193 @@ export interface QuizQuestion {
     label: string;
     emoji?: string;
     description?: string;
-    imageUrl?: string;
   }>;
   colors?: Array<{ id: string; hex: string; name: string }>;
   maxSelections?: number;
   maxLength?: number;
   placeholder?: string;
-  min?: number;
-  max?: number;
-  minLabel?: string;
-  maxLabel?: string;
 }
 
 export const quizQuestions: QuizQuestion[] = [
-  // Step 1: Welcome / Style Personality
+  // STEP 1 — YOUR STYLE
   {
-    id: "style-personality",
-    type: "single",
-    title: "How would you describe your style?",
-    subtitle: "Pick the one that feels most like you",
-    options: [
-      { id: "classic", label: "Classic & Timeless", emoji: "🎩", description: "Clean lines, neutral colors, quality pieces" },
-      { id: "bohemian", label: "Bohemian & Free", emoji: "🌻", description: "Flowy fabrics, earthy tones, artistic vibes" },
-      { id: "minimalist", label: "Minimalist & Modern", emoji: "○", description: "Simple, clean, less is more" },
-      { id: "romantic", label: "Romantic & Feminine", emoji: "🌸", description: "Soft colors, delicate details, florals" },
-      { id: "edgy", label: "Edgy & Bold", emoji: "⚡", description: "Dark colors, leather, statement pieces" },
-      { id: "trendy", label: "Trendy & Fashion-Forward", emoji: "✨", description: "Latest styles, love experimenting" },
-    ],
-  },
-
-  // Step 2: Lifestyle
-  {
-    id: "lifestyle",
-    type: "single",
-    title: "What does a typical day look like for you?",
-    subtitle: "This helps me suggest practical outfits",
-    options: [
-      { id: "office", label: "Office / Corporate", emoji: "💼", description: "Professional environment" },
-      { id: "creative", label: "Creative / Casual workplace", emoji: "🎨", description: "Relaxed dress code" },
-      { id: "wfh", label: "Work from home", emoji: "🏠", description: "Comfort meets video calls" },
-      { id: "active", label: "Always on the go", emoji: "🏃‍♀️", description: "Need versatile, comfy pieces" },
-      { id: "social", label: "Social butterfly", emoji: "🦋", description: "Lots of events and outings" },
-      { id: "mom", label: "Busy mom life", emoji: "👩‍👧", description: "Practical but still stylish" },
-    ],
-  },
-
-  // Step 3: Mood & Feelings
-  {
-    id: "mood-feelings",
+    id: "style-personalities",
     type: "multi",
-    title: "How do you want to FEEL in your clothes?",
-    subtitle: "Pick up to 3",
+    title: "Which styles feel most like you?",
+    subtitle: "Choose up to 3",
     maxSelections: 3,
     options: [
-      { id: "confident", label: "Confident", emoji: "💪" },
-      { id: "comfortable", label: "Comfortable", emoji: "☁️" },
-      { id: "powerful", label: "Powerful", emoji: "👑" },
-      { id: "feminine", label: "Feminine", emoji: "🌸" },
-      { id: "creative", label: "Creative", emoji: "🎨" },
-      { id: "elegant", label: "Elegant", emoji: "💎" },
-      { id: "playful", label: "Playful", emoji: "🎀" },
-      { id: "sophisticated", label: "Sophisticated", emoji: "✨" },
+      { id: "old-money", label: "Old Money" },
+      { id: "artsy", label: "Artsy" },
+      { id: "edgy", label: "Edgy" },
+      { id: "feminine", label: "Feminine" },
+      { id: "corporate-chic", label: "Corporate Chic" },
+      { id: "effortlessly-chic", label: "Effortlessly Chic" },
+      { id: "minimal", label: "Minimal" },
+      { id: "trendy", label: "Trendy" },
+      { id: "romantic", label: "Romantic" },
+      { id: "casual-cool", label: "Casual Cool" },
     ],
   },
 
-  // Step 4: Style Struggles
+  // STEP 2 — YOUR LIFESTYLE
   {
-    id: "struggles",
+    id: "lifestyle",
     type: "multi",
-    title: "What are your biggest style struggles?",
-    subtitle: "Select all that apply — no judgment here!",
-    maxSelections: 5,
+    title: "What does your day-to-day usually look like?",
+    subtitle: "Choose all that apply",
+    maxSelections: 10,
     options: [
-      { id: "nothing-to-wear", label: "\"Nothing to wear\" syndrome", emoji: "😩" },
-      { id: "body-confidence", label: "Finding clothes that flatter my body", emoji: "🪞" },
-      { id: "outfit-combining", label: "Putting outfits together", emoji: "🧩" },
-      { id: "overdressed", label: "Feeling overdressed or underdressed", emoji: "😬" },
-      { id: "trends", label: "Keeping up with trends", emoji: "📱" },
-      { id: "budget", label: "Building a wardrobe on a budget", emoji: "💰" },
-      { id: "comfort-style", label: "Balancing comfort and style", emoji: "⚖️" },
-      { id: "colors", label: "Knowing which colors suit me", emoji: "🎨" },
+      { id: "office", label: "Office / Corporate Life" },
+      { id: "busy-mom", label: "Busy Mom" },
+      { id: "creative", label: "Creative / Freelance" },
+      { id: "casual-days", label: "Mostly Casual Days" },
+      { id: "events", label: "Events & Dinners" },
+      { id: "on-the-go", label: "Always On-The-Go" },
+      { id: "travel", label: "Travel & Social Plans" },
+      { id: "hybrid", label: "Hybrid / Remote Work" },
     ],
   },
 
-  // Step 5: Color Preferences
+  // STEP 3 — HOW DO YOU WANT TO FEEL?
   {
-    id: "colors",
-    type: "color",
-    title: "Which colors do you love wearing?",
-    subtitle: "Pick your top 5 favorites",
-    maxSelections: 5,
-    colors: [
-      { id: "black", hex: "#1a1a1a", name: "Black" },
-      { id: "white", hex: "#ffffff", name: "White" },
-      { id: "navy", hex: "#1e3a5f", name: "Navy" },
-      { id: "beige", hex: "#d4c4a8", name: "Beige" },
-      { id: "brown", hex: "#8b5a2b", name: "Brown" },
-      { id: "gray", hex: "#808080", name: "Gray" },
-      { id: "red", hex: "#c41e3a", name: "Red" },
-      { id: "pink", hex: "#e8a0b2", name: "Pink" },
-      { id: "blush", hex: "#f4c2c2", name: "Blush" },
-      { id: "burgundy", hex: "#722f37", name: "Burgundy" },
-      { id: "orange", hex: "#e86100", name: "Orange" },
-      { id: "yellow", hex: "#f4c430", name: "Yellow" },
-      { id: "green", hex: "#2e8b57", name: "Green" },
-      { id: "olive", hex: "#6b8e23", name: "Olive" },
-      { id: "teal", hex: "#008080", name: "Teal" },
-      { id: "blue", hex: "#4169e1", name: "Blue" },
-      { id: "purple", hex: "#7851a9", name: "Purple" },
-      { id: "lavender", hex: "#b57edc", name: "Lavender" },
+    id: "desired-feelings",
+    type: "multi",
+    title: "How do you want your outfits to make you feel?",
+    subtitle: "Choose up to 3",
+    maxSelections: 3,
+    options: [
+      { id: "confident", label: "Confident" },
+      { id: "comfortable", label: "Comfortable" },
+      { id: "put-together", label: "Put Together" },
+      { id: "elegant", label: "Elegant" },
+      { id: "feminine", label: "Feminine" },
+      { id: "powerful", label: "Powerful" },
+      { id: "effortless", label: "Effortless" },
+      { id: "attractive", label: "Attractive" },
     ],
   },
 
-  // Step 6: Colors to Avoid
-  {
-    id: "avoid-colors",
-    type: "color",
-    title: "Any colors you avoid?",
-    subtitle: "Pick colors you rarely or never wear (optional)",
-    maxSelections: 5,
-    colors: [
-      { id: "black", hex: "#1a1a1a", name: "Black" },
-      { id: "white", hex: "#ffffff", name: "White" },
-      { id: "navy", hex: "#1e3a5f", name: "Navy" },
-      { id: "beige", hex: "#d4c4a8", name: "Beige" },
-      { id: "brown", hex: "#8b5a2b", name: "Brown" },
-      { id: "gray", hex: "#808080", name: "Gray" },
-      { id: "red", hex: "#c41e3a", name: "Red" },
-      { id: "pink", hex: "#e8a0b2", name: "Pink" },
-      { id: "orange", hex: "#e86100", name: "Orange" },
-      { id: "yellow", hex: "#f4c430", name: "Yellow" },
-      { id: "green", hex: "#2e8b57", name: "Green" },
-      { id: "purple", hex: "#7851a9", name: "Purple" },
-      { id: "neon", hex: "#39ff14", name: "Neon" },
-    ],
-  },
-
-  // Step 7: Body Type / Fit Preferences
+  // STEP 4 — WHAT DO YOU FEEL BEST IN?
   {
     id: "fit-preferences",
     type: "multi",
-    title: "What fits make you feel best?",
-    subtitle: "Select all that apply",
-    maxSelections: 4,
+    title: "What usually makes you feel best in clothing?",
+    subtitle: "Choose up to 3",
+    maxSelections: 3,
     options: [
-      { id: "fitted", label: "Fitted & tailored", emoji: "📐" },
-      { id: "relaxed", label: "Relaxed & flowy", emoji: "🌊" },
-      { id: "oversized", label: "Oversized & cozy", emoji: "🧸" },
-      { id: "high-waisted", label: "High-waisted bottoms", emoji: "⬆️" },
-      { id: "midi", label: "Midi lengths", emoji: "📏" },
-      { id: "mini", label: "Mini lengths", emoji: "✂️" },
-      { id: "maxi", label: "Maxi lengths", emoji: "👗" },
-      { id: "structured", label: "Structured pieces", emoji: "🔲" },
+      { id: "defined-waist", label: "Defined Waist" },
+      { id: "relaxed-fits", label: "Relaxed Fits" },
+      { id: "structured", label: "Structured Pieces" },
+      { id: "oversized", label: "Oversized Layers" },
+      { id: "flowy", label: "Flowy Pieces" },
+      { id: "coverage", label: "More Coverage" },
+      { id: "fitted", label: "Fitted Looks" },
+      { id: "simple", label: "Simple Outfits" },
     ],
   },
 
-  // Step 8: Budget
+  // STEP 5 — COLORS
   {
-    id: "budget",
-    type: "single",
-    title: "What's your typical budget for a single piece?",
-    subtitle: "This helps me make realistic suggestions",
-    options: [
-      { id: "budget", label: "Budget-friendly", emoji: "💚", description: "Under $50" },
-      { id: "mid", label: "Mid-range", emoji: "💛", description: "$50 - $150" },
-      { id: "investment", label: "Investment pieces", emoji: "🧡", description: "$150 - $300" },
-      { id: "luxury", label: "Luxury", emoji: "💎", description: "$300+" },
-      { id: "mix", label: "Mix of all", emoji: "🌈", description: "Depends on the piece" },
+    id: "favorite-colors",
+    type: "color",
+    title: "Which colors do you wear the most?",
+    subtitle: "Choose up to 5",
+    maxSelections: 5,
+    colors: [
+      { id: "black", hex: "#000000", name: "Black" },
+      { id: "white-cream", hex: "#f5f5dc", name: "White / Cream" },
+      { id: "beige-brown", hex: "#c19a6b", name: "Beige / Brown" },
+      { id: "grey", hex: "#808080", name: "Grey" },
+      { id: "navy", hex: "#1e3a5f", name: "Navy" },
+      { id: "red-burgundy", hex: "#722f37", name: "Red / Burgundy" },
+      { id: "green", hex: "#2e8b57", name: "Green" },
+      { id: "pink", hex: "#e8a0b2", name: "Pink" },
+      { id: "prints", hex: "#ffffff", name: "Prints" },
+      { id: "colorful", hex: "#ff6b6b", name: "Colorful Pieces" },
     ],
   },
 
-  // Step 9: What help do you want?
+  // STEP 5b — COLORS TO AVOID (optional)
+  {
+    id: "avoid-colors",
+    type: "color",
+    title: "Any colors you usually avoid?",
+    subtitle: "Optional — select colors you rarely wear",
+    maxSelections: 5,
+    colors: [
+      { id: "black", hex: "#000000", name: "Black" },
+      { id: "white-cream", hex: "#f5f5dc", name: "White / Cream" },
+      { id: "beige-brown", hex: "#c19a6b", name: "Beige / Brown" },
+      { id: "grey", hex: "#808080", name: "Grey" },
+      { id: "navy", hex: "#1e3a5f", name: "Navy" },
+      { id: "red-burgundy", hex: "#722f37", name: "Red / Burgundy" },
+      { id: "green", hex: "#2e8b57", name: "Green" },
+      { id: "pink", hex: "#e8a0b2", name: "Pink" },
+      { id: "yellow", hex: "#f4c430", name: "Yellow" },
+      { id: "orange", hex: "#e86100", name: "Orange" },
+    ],
+  },
+
+  // STEP 6 — STYLE STRUGGLES
+  {
+    id: "struggles",
+    type: "multi",
+    title: "What do you struggle with most?",
+    subtitle: "Choose up to 3",
+    maxSelections: 3,
+    options: [
+      { id: "nothing-to-wear", label: "I have clothes but nothing to wear" },
+      { id: "repeat-outfits", label: "I repeat the same outfits" },
+      { id: "more-elevated", label: "I want to look more elevated" },
+      { id: "statement-pieces", label: "I don't know how to style statement pieces" },
+      { id: "body-dressing", label: "I struggle dressing for my body sometimes" },
+      { id: "disconnected", label: "My wardrobe feels disconnected" },
+      { id: "effortless", label: "I want more effortless outfits" },
+      { id: "confidence", label: "I want to feel more confident" },
+    ],
+  },
+
+  // STEP 7 — WHAT DO YOU WANT HELP WITH?
   {
     id: "help-wanted",
     type: "multi",
-    title: "What would help you most?",
-    subtitle: "Select all that excite you",
-    maxSelections: 5,
+    title: "What would you like nAia to help you with?",
+    subtitle: "Choose all that apply",
+    maxSelections: 8,
     options: [
-      { id: "daily-outfits", label: "Daily outfit ideas", emoji: "👗" },
-      { id: "closet-organize", label: "Organizing my closet", emoji: "🗄️" },
-      { id: "shopping-guide", label: "Smart shopping guidance", emoji: "🛍️" },
-      { id: "occasion-styling", label: "Styling for occasions", emoji: "🎉" },
-      { id: "capsule", label: "Building a capsule wardrobe", emoji: "💊" },
-      { id: "trends", label: "Understanding trends", emoji: "📈" },
-      { id: "confidence", label: "Boosting my confidence", emoji: "💪" },
-      { id: "color-advice", label: "Color & pattern advice", emoji: "🎨" },
+      { id: "styling-wardrobe", label: "Styling my wardrobe" },
+      { id: "styling-naia", label: "Styling nAia pieces" },
+      { id: "outfit-recs", label: "Outfit recommendations" },
+      { id: "discover-style", label: "Discovering my style" },
+      { id: "buy-skip", label: "Buy or Skip recommendations" },
+      { id: "trend-reports", label: "Personalized trend reports" },
+      { id: "better-outfits", label: "Building better outfits" },
+      { id: "confidence", label: "Feeling more confident in what I wear" },
     ],
   },
 
-  // Step 10: Anything else?
+  // FINAL STEP — ANYTHING ELSE
   {
-    id: "final-thoughts",
+    id: "final-notes",
     type: "text",
-    title: "Anything else I should know?",
-    subtitle: "Share your style goals, frustrations, or anything that would help me style you better",
-    placeholder: "e.g., I have a wedding coming up, I'm trying to dress more professionally, I just had a baby and nothing fits...",
+    title: "Anything else you want nAia to know about your style?",
+    subtitle: "Optional",
+    placeholder: "e.g., I have a wedding coming up, I'm trying to dress more professionally, I just had a baby...",
     maxLength: 500,
   },
 ];
 
 export type OnboardingAnswers = {
-  "style-personality"?: string;
-  lifestyle?: string;
-  "mood-feelings"?: string[];
-  struggles?: string[];
-  colors?: string[];
-  "avoid-colors"?: string[];
+  "style-personalities"?: string[];
+  lifestyle?: string[];
+  "desired-feelings"?: string[];
   "fit-preferences"?: string[];
-  budget?: string;
+  "favorite-colors"?: string[];
+  "avoid-colors"?: string[];
+  struggles?: string[];
   "help-wanted"?: string[];
-  "final-thoughts"?: string;
+  "final-notes"?: string;
 };
 
 export function getQuestionByStep(step: number): QuizQuestion | undefined {

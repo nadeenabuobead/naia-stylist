@@ -1,5 +1,5 @@
 import { useState } from "react";
-import jsPDF from "jspdf";
+import { Link } from "react-router";
 
 export default function TrendReports() {
   const [query, setQuery] = useState("");
@@ -48,460 +48,177 @@ export default function TrendReports() {
 
   const currentType = reportTypes.find(t => t.id === reportType);
 
-  const downloadReport = () => {
-    const doc = new jsPDF();
-    
-    // Cover page - Vogue style
-    doc.setFontSize(48);
-    doc.setFont(undefined, 'normal');
-    doc.text('nAia', 105, 80, { align: 'center' });
-    
-    doc.setFontSize(11);
-    doc.setTextColor(138, 127, 117);
-    doc.text('FASHION INTELLIGENCE', 105, 100, { align: 'center' });
-    
-    doc.setFontSize(16);
-    doc.setTextColor(26, 24, 22);
-    doc.text(query.toUpperCase(), 105, 140, { align: 'center', maxWidth: 160 });
-    
-    doc.setFontSize(9);
-    doc.text(currentType?.label.toUpperCase(), 105, 155, { align: 'center' });
-    
-    doc.setTextColor(138, 127, 117);
-    doc.text(`${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`, 105, 260, { align: 'center' });
-    
-    doc.addPage();
-    let y = 40;
-    const lines = report.split('\n');
-    doc.setTextColor(26, 24, 22);
-    
-    lines.forEach(line => {
-      if (y > 270) {
-        doc.addPage();
-        y = 40;
-      }
-      
-      if (line.startsWith('## ')) {
-        y += 12;
-        doc.setFontSize(10);
-        doc.setFont(undefined, 'bold');
-        const text = line.replace('## ', '');
-        doc.text(text, 105, y, { align: 'center' });
-        doc.setLineWidth(0.3);
-        doc.line(70, y + 2, 140, y + 2);
-        y += 10;
-        doc.setFont(undefined, 'normal');
-      } else if (line.match(/^\*\*.+\*\*$/)) {
-        doc.setFontSize(9);
-        doc.setFont(undefined, 'bold');
-        y += 6;
-        doc.text(line.replace(/\*\*/g, ''), 25, y);
-        y += 5;
-        doc.setFont(undefined, 'normal');
-      } else if (line.trim()) {
-        doc.setFontSize(9);
-        const splitText = doc.splitTextToSize(line, 160);
-        doc.text(splitText, 25, y);
-        y += splitText.length * 5;
-      } else {
-        y += 4;
-      }
-    });
-    
-    const pageCount = doc.internal.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-      doc.setPage(i);
-      if (i > 1) {
-        doc.setFontSize(7);
-        doc.setTextColor(138, 127, 117);
-        doc.text('nAia', 105, 285, { align: 'center' });
-        doc.text(`${i - 1}`, 105, 290, { align: 'center' });
-      }
-    }
-    
-    doc.save(`${query.replace(/\s+/g, '-').toLowerCase()}-trend-report.pdf`);
-  };
-
-  // Parse sections
-  const parsedSections = report ? (() => {
-    const sections = [];
-    const lines = report.split('\n');
-    let currentSection = null;
-    let currentContent = [];
-    
-    lines.forEach(line => {
-      if (line.startsWith('## ')) {
-        if (currentSection) {
-          sections.push({ title: currentSection, content: currentContent.join('\n') });
-        }
-        currentSection = line.replace('## ', '');
-        currentContent = [];
-      } else if (currentSection) {
-        currentContent.push(line);
-      }
-    });
-    
-    if (currentSection) {
-      sections.push({ title: currentSection, content: currentContent.join('\n') });
-    }
-    
-    return sections;
-  })() : [];
-
   return (
-    <div style={s.container}>
-      {/* Header */}
-      <div style={s.header}>
-        <div style={s.logo}>nAia</div>
-        <div style={s.tagline}>Fashion Intelligence</div>
-        <p style={s.subtitle}>Authoritative trend reports from runway, retail, and market signals</p>
-      </div>
-
-      {/* Input Section */}
-      <div style={s.inputCard}>
-        <div style={s.label}>Report Type</div>
-        <div style={s.typeGrid}>
-          {reportTypes.map(type => (
-            <button
-              key={type.id}
-              onClick={() => setReportType(type.id)}
-              style={{
-                ...s.typeButton,
-                background: reportType === type.id ? "#1a1816" : "#fff",
-                color: reportType === type.id ? "#f5f2ee" : "#1a1816",
-                border: reportType === type.id ? "1px solid #1a1816" : "1px solid #d4cfc9"
-              }}
-            >
-              {type.label}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ marginTop: "32px" }}>
-          <input
-            type="text"
-            placeholder={currentType?.placeholder}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && generateReport()}
-            style={s.input}
-          />
-          <button 
-            onClick={generateReport} 
-            disabled={loading || !query.trim()} 
-            style={{
-              ...s.button,
-              opacity: (loading || !query.trim()) ? 0.5 : 1,
-              cursor: (loading || !query.trim()) ? "not-allowed" : "pointer",
-            }}
-          >
-            {loading ? "Generating..." : "Generate Report"}
-          </button>
-        </div>
-      </div>
-
-      {loading && (
-        <div style={s.loadingBox}>
-          <p style={s.loadingText}>Analyzing fashion sources and generating {currentType?.label.toLowerCase()}...</p>
-        </div>
-      )}
-
-      {report && (
-        <div style={s.reportContainer}>
-          {/* Editorial Header */}
-          <div style={s.reportHeader}>
-            <div style={s.reportLogo}>nAia</div>
-            <div style={s.reportSubtitle}>Fashion Intelligence</div>
-            <div style={s.reportTitle}>{query}</div>
-            <div style={s.reportMeta}>
-              {currentType?.label} • {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-            </div>
+    <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
+      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+      
+      <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "60px 40px" }}>
+        
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "60px" }}>
+          <div>
+            <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: "clamp(48px,6vw,72px)", fontWeight: 900, lineHeight: 1, marginBottom: "12px" }}>
+              Personalized Trends
+            </h1>
+            <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "20px", fontStyle: "italic", color: "#7a6f6a" }}>
+              Trend reports filtered through your style DNA.
+            </p>
           </div>
+          <Link to="/" style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>
+            ← DASHBOARD
+          </Link>
+        </div>
 
-          {/* Action Buttons */}
-          <div style={s.actionBar}>
-            <button onClick={() => navigator.clipboard.writeText(report)} style={s.actionButton}>
-              Copy Report
-            </button>
-            <button onClick={downloadReport} style={s.downloadButton}>
-              Download PDF
-            </button>
-          </div>
-
-          {/* Report Content */}
-          <div style={s.reportContent}>
-            {parsedSections.map((section, idx) => (
-              <div key={idx} style={s.section}>
-                <button
-                  onClick={() => toggleSection(idx)}
-                  style={s.sectionButton}
-                >
-                  {section.title}
-                  <span style={s.sectionIcon}>
-                    {expandedSections[idx] ? '−' : '+'}
-                  </span>
-                </button>
-                
-                {expandedSections[idx] && (
-                  <div style={s.sectionContent}>
-                    {section.content.split('\n').map((line, i) => {
-                      if (line.match(/^\*\*.+\*\*$/)) {
-                        return <h5 key={i} style={s.subheader}>{line.replace(/\*\*/g, '')}</h5>;
-                      } else if (line.includes('**')) {
-                        const parts = line.split(/(\*\*.*?\*\*)/g);
-                        return (
-                          <p key={i} style={s.paragraph}>
-                            {parts.map((part, idx) => 
-                              part.startsWith('**') && part.endsWith('**') 
-                                ? <strong key={idx}>{part.replace(/\*\*/g, '')}</strong>
-                                : part
-                            )}
-                          </p>
-                        );
-                      } else if (line.match(/^[\*\-]\s/)) {
-                        return <li key={i} style={s.listItem}>{line.replace(/^[\*\-]\s/, '')}</li>;
-                      } else if (line.trim()) {
-                        return <p key={i} style={s.paragraph}>{line}</p>;
-                      }
-                      return <div key={i} style={{ height: '8px' }} />;
-                    })}
-                  </div>
-                )}
-              </div>
+        {/* Report Type Selection */}
+        <div style={{ background: "rgba(255,255,255,0.5)", padding: "32px", marginBottom: "32px", border: "1px solid rgba(59,5,16,0.06)" }}>
+          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "16px" }}>REPORT TYPE</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px" }}>
+            {reportTypes.map(type => (
+              <button
+                key={type.id}
+                onClick={() => setReportType(type.id)}
+                style={{
+                  padding: "16px",
+                  background: reportType === type.id ? "rgba(139,32,53,0.08)" : "rgba(255,255,255,0.7)",
+                  border: reportType === type.id ? "1px solid rgba(139,32,53,0.2)" : "1px solid rgba(59,5,16,0.08)",
+                  cursor: "pointer",
+                  fontFamily: "'Cormorant Garamond',serif",
+                  fontSize: "16px",
+                  fontStyle: "italic",
+                  color: reportType === type.id ? "#8b2035" : "#221516",
+                  transition: "all 0.2s"
+                }}
+              >
+                {type.label}
+              </button>
             ))}
           </div>
-
-          {/* Footer */}
-          <div style={s.footer}>
-            nAia Fashion Intelligence • Trend Analysis & Forecasting
-          </div>
         </div>
-      )}
+
+        {/* Query Input */}
+        <div style={{ background: "rgba(255,255,255,0.8)", padding: "40px", marginBottom: "40px", border: "1px solid rgba(59,5,16,0.06)" }}>
+          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "16px" }}>
+            {currentType?.label.toUpperCase()}
+          </div>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyPress={(e) => e.key === "Enter" && generateReport()}
+            placeholder={currentType?.placeholder}
+            style={{
+              width: "100%",
+              padding: "20px",
+              border: "1px solid rgba(59,5,16,0.1)",
+              fontSize: "20px",
+              fontFamily: "'Cormorant Garamond',serif",
+              fontStyle: "italic",
+              boxSizing: "border-box",
+              background: "rgba(255,255,255,0.7)",
+              marginBottom: "24px"
+            }}
+          />
+          <button
+            onClick={generateReport}
+            disabled={!query.trim() || loading}
+            style={{
+              width: "100%",
+              padding: "20px",
+              background: query.trim() && !loading ? "#8b2035" : "#d4cfc9",
+              color: "#f4f4f1",
+              border: "none",
+              fontSize: "14px",
+              letterSpacing: "2px",
+              textTransform: "uppercase",
+              cursor: query.trim() && !loading ? "pointer" : "default",
+              fontFamily: "'Space Mono',monospace"
+            }}
+          >
+            {loading ? "Generating Report..." : "Generate Trend Report"}
+          </button>
+        </div>
+
+        {/* Loading State */}
+        {loading && (
+          <div style={{ background: "rgba(255,255,255,0.5)", padding: "80px 40px", textAlign: "center", border: "1px solid rgba(59,5,16,0.06)" }}>
+            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "48px", marginBottom: "20px", opacity: 0.2 }}>◇</div>
+            <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "20px", fontStyle: "italic", color: "#7a6f6a" }}>
+              Analyzing trends and filtering through your style DNA...
+            </p>
+          </div>
+        )}
+
+        {/* Report Display */}
+        {report && !loading && (
+          <div style={{ background: "#ffffff", border: "1px solid rgba(59,5,16,0.06)" }}>
+            
+            {/* Report Header */}
+            <div style={{ background: "#221516", padding: "60px 40px", textAlign: "center" }}>
+              <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "clamp(32px,5vw,48px)", fontWeight: 900, color: "#f4f4f1", marginBottom: "16px" }}>
+                nAia Trend Report
+              </div>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "8px", letterSpacing: "3px", textTransform: "uppercase", color: "#8b2035", marginBottom: "24px" }}>
+                PERSONALIZED FOR YOU
+              </div>
+              <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "24px", fontStyle: "italic", color: "#f4f4f1", marginBottom: "16px", lineHeight: 1.4 }}>
+                {report.title}
+              </div>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", color: "#7a6f6a", letterSpacing: "2px" }}>
+                {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+              </div>
+            </div>
+
+            {/* Report Content */}
+            <div style={{ padding: "60px 40px" }}>
+              {Object.entries(report.sections || {}).map(([key, content]) => (
+                <div key={key} style={{ borderBottom: "1px solid rgba(59,5,16,0.06)", paddingBottom: "40px", marginBottom: "40px" }}>
+                  <button
+                    onClick={() => toggleSection(key)}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "0",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      marginBottom: "24px"
+                    }}
+                  >
+                    <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: "28px", fontWeight: 700, margin: 0, color: "#221516" }}>
+                      {key.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}
+                    </h3>
+                    <span style={{ fontFamily: "'Playfair Display',serif", fontSize: "32px", color: "#8b2035" }}>
+                      {expandedSections[key] ? "−" : "+"}
+                    </span>
+                  </button>
+                  
+                  {expandedSections[key] && (
+                    <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", lineHeight: 1.8, color: "#221516" }}>
+                      {typeof content === "string" ? (
+                        content.split("\n").map((para, i) => (
+                          <p key={i} style={{ marginBottom: "16px" }}>{para}</p>
+                        ))
+                      ) : (
+                        <div dangerouslySetInnerHTML={{ __html: content }} />
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: "32px 40px", background: "rgba(244,244,241,0.5)", borderTop: "1px solid rgba(59,5,16,0.06)", textAlign: "center" }}>
+              <p style={{ fontFamily: "'Space Mono',monospace", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", margin: 0 }}>
+                Generated by nAia • Filtered through your style DNA
+              </p>
+            </div>
+          </div>
+        )}
+
+      </div>
     </div>
   );
 }
-
-const s = {
-  container: {
-    maxWidth: "900px",
-    margin: "0 auto",
-    padding: "48px 24px",
-    fontFamily: '"Cormorant Garamond", Georgia, serif',
-  },
-  header: {
-    textAlign: "center",
-    marginBottom: "48px",
-  },
-  logo: {
-    fontSize: "48px",
-    fontWeight: 300,
-    letterSpacing: "0.15em",
-    color: "#1a1816",
-    marginBottom: "8px",
-  },
-  tagline: {
-    fontSize: "10px",
-    letterSpacing: "0.3em",
-    textTransform: "uppercase",
-    color: "#8a7f75",
-    marginBottom: "16px",
-  },
-  subtitle: {
-    fontSize: "15px",
-    fontStyle: "italic",
-    color: "#8a7f75",
-    margin: "0",
-  },
-  inputCard: {
-    background: "#fff",
-    border: "1px solid #d4cfc9",
-    borderRadius: "4px",
-    padding: "32px",
-    marginBottom: "32px",
-  },
-  label: {
-    fontSize: "10px",
-    letterSpacing: "0.25em",
-    textTransform: "uppercase",
-    color: "#8a7f75",
-    marginBottom: "16px",
-    fontWeight: 600,
-  },
-  typeGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-    gap: "12px",
-  },
-  typeButton: {
-    padding: "12px 16px",
-    fontSize: "12px",
-    letterSpacing: "0.05em",
-    fontFamily: '"Cormorant Garamond", Georgia, serif',
-    borderRadius: "2px",
-    cursor: "pointer",
-    transition: "all 0.2s",
-  },
-  input: {
-    width: "100%",
-    padding: "16px",
-    fontSize: "15px",
-    fontFamily: '"Cormorant Garamond", Georgia, serif',
-    border: "1px solid #d4cfc9",
-    borderRadius: "2px",
-    outline: "none",
-    marginBottom: "16px",
-  },
-  button: {
-    width: "100%",
-    padding: "16px 32px",
-    fontSize: "12px",
-    letterSpacing: "0.1em",
-    textTransform: "uppercase",
-    fontFamily: '"Cormorant Garamond", Georgia, serif',
-    background: "#1a1816",
-    color: "#f5f2ee",
-    border: "none",
-    borderRadius: "2px",
-    fontWeight: 500,
-  },
-  loadingBox: {
-    padding: "32px",
-    background: "#f5f2ee",
-    borderRadius: "4px",
-    textAlign: "center",
-  },
-  loadingText: {
-    fontSize: "14px",
-    color: "#8a7f75",
-    fontStyle: "italic",
-    margin: 0,
-  },
-  reportContainer: {
-    background: "linear-gradient(to bottom, #fafafa 0%, #ffffff 100%)",
-    borderRadius: "0",
-    overflow: "hidden",
-    boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
-  },
-  reportHeader: {
-    background: "#1a1816",
-    padding: "48px 32px 32px",
-    textAlign: "center",
-    borderBottom: "1px solid #d4cfc9",
-  },
-  reportLogo: {
-    fontSize: "42px",
-    fontWeight: 300,
-    letterSpacing: "0.15em",
-    color: "#f5f2ee",
-    marginBottom: "12px",
-  },
-  reportSubtitle: {
-    fontSize: "10px",
-    letterSpacing: "0.3em",
-    textTransform: "uppercase",
-    color: "#8a7f75",
-    marginBottom: "24px",
-  },
-  reportTitle: {
-    fontSize: "20px",
-    fontWeight: 400,
-    letterSpacing: "0.05em",
-    color: "#f5f2ee",
-    fontStyle: "italic",
-    marginBottom: "16px",
-    lineHeight: 1.4,
-  },
-  reportMeta: {
-    fontSize: "10px",
-    color: "#8a7f75",
-    letterSpacing: "0.15em",
-  },
-  actionBar: {
-    padding: "20px 32px",
-    background: "#fafafa",
-    borderBottom: "1px solid #e8e4df",
-    display: "flex",
-    justifyContent: "flex-end",
-    gap: "12px",
-  },
-  actionButton: {
-    fontSize: "10px",
-    padding: "10px 20px",
-    letterSpacing: "0.1em",
-    textTransform: "uppercase",
-    background: "transparent",
-    color: "#1a1816",
-    border: "1px solid #1a1816",
-    cursor: "pointer",
-    fontFamily: '"Cormorant Garamond", Georgia, serif',
-  },
-  downloadButton: {
-    fontSize: "10px",
-    padding: "10px 20px",
-    letterSpacing: "0.1em",
-    textTransform: "uppercase",
-    background: "#1a1816",
-    color: "#f5f2ee",
-    border: "1px solid #1a1816",
-    cursor: "pointer",
-    fontFamily: '"Cormorant Garamond", Georgia, serif',
-  },
-  reportContent: {
-    padding: "40px 32px",
-  },
-  section: {
-    borderBottom: "1px solid #e8e4df",
-  },
-  sectionButton: {
-    width: "100%",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "24px 0",
-    background: "none",
-    border: "none",
-    cursor: "pointer",
-    fontSize: "12px",
-    letterSpacing: "0.2em",
-    textTransform: "uppercase",
-    fontWeight: 500,
-    color: "#1a1816",
-    fontFamily: '"Cormorant Garamond", Georgia, serif',
-  },
-  sectionIcon: {
-    fontSize: "24px",
-    fontWeight: 300,
-    color: "#8a7f75",
-  },
-  sectionContent: {
-    padding: "0 0 32px",
-    lineHeight: 1.9,
-    fontSize: "15px",
-    color: "#1a1816",
-  },
-  subheader: {
-    fontSize: "14px",
-    fontWeight: 600,
-    color: "#1a1816",
-    margin: "20px 0 10px",
-    letterSpacing: "0.02em",
-  },
-  paragraph: {
-    margin: "0 0 12px",
-  },
-  listItem: {
-    margin: "0 0 10px 24px",
-    lineHeight: 1.8,
-  },
-  footer: {
-    padding: "24px 32px",
-    background: "#fafafa",
-    borderTop: "1px solid #e8e4df",
-    textAlign: "center",
-    fontSize: "9px",
-    letterSpacing: "0.15em",
-    textTransform: "uppercase",
-    color: "#8a7f75",
-  },
-};
-

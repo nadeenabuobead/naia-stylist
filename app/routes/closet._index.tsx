@@ -1,9 +1,7 @@
-// app/routes/closet._index.tsx
-import { useLoaderData, useFetcher, useSearchParams } from "react-router";
+import { useLoaderData, useFetcher, Link } from "react-router";
 import { data, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
-import { useState, useEffect, useRef } from "react";
-import { getCustomerId } from "~/lib/auth.server";
-import { prisma } from "~/lib/prisma.server";
+import { useState } from "react";
+import prisma from "../db.server";
 
 const CLOUDINARY_CLOUD = "diybves1z";
 const CLOUDINARY_PRESET = "kqfhwrpq";
@@ -16,13 +14,15 @@ const PATTERNS = ["Solid", "Stripes", "Floral", "Plaid", "Animal Print", "Geomet
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    const customerId = await getCustomerId(request);
-    if (!customerId) return data({ items: [], authenticated: false });
-    const items = await prisma.closetItem.findMany({
-      where: { customerId },
-      orderBy: { createdAt: "desc" },
+    // Use guest customer for now (same as dashboard)
+    const customer = await prisma.customer.findFirst({
+      where: { shopifyCustomerId: "guest" },
+      include: { closetItems: { orderBy: { createdAt: "desc" } } }
     });
-    return data({ items, authenticated: true });
+    
+    if (!customer) return data({ items: [], authenticated: false });
+    
+    return data({ items: customer.closetItems, authenticated: true });
   } catch (err: any) {
     console.error("Closet loader error:", err);
     return data({ items: [], authenticated: false });
@@ -31,8 +31,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export async function action({ request }: ActionFunctionArgs) {
   try {
-    const customerId = await getCustomerId(request);
-    if (!customerId) return data({ error: "Not authenticated" }, { status: 401 });
+    // Use guest customer for now
+    const customer = await prisma.customer.findFirst({
+      where: { shopifyCustomerId: "guest" }
+    });
+    
+    if (!customer) return data({ error: "Not authenticated" }, { status: 401 });
+    
     const formData = await request.formData();
     const intent = formData.get("intent") as string;
 
@@ -46,183 +51,45 @@ export async function action({ request }: ActionFunctionArgs) {
       const occasions = JSON.parse(formData.get("occasions") as string || "[]");
       const seasons = JSON.parse(formData.get("seasons") as string || "[]");
 
-      if (!name || !category) return data({ error: "Name and category required" }, { status: 400 });
+      if (!name || !category || !imageUrl) return data({ error: "Name and category required" }, { status: 400 });
 
-      const item = await prisma.closetItem.create({
+      await prisma.closetItem.create({
         data: {
-          customerId,
-          name,
-          category: category as any,
+          customerId: customer.id,
+          name: name,
+          category,
           imageUrl: imageUrl || "",
           primaryColor: primaryColor || null,
           pattern: pattern || null,
           brand: brand || null,
-          occasions: occasions,
-          seasons: seasons,
+          occasions: occasions.length > 0 ? occasions : null,
+          seasons: seasons.length > 0 ? seasons : null,
         },
       });
-      return data({ item, success: true });
+      return data({ success: true });
     }
 
     if (intent === "delete") {
       const itemId = formData.get("itemId") as string;
-      await prisma.closetItem.delete({ where: { id: itemId, customerId } });
+      await prisma.closetItem.delete({ where: { id: itemId } });
       return data({ success: true });
     }
 
-    return data({ error: "Invalid intent" }, { status: 400 });
+    return data({ error: "Unknown intent" }, { status: 400 });
   } catch (err: any) {
     console.error("Closet action error:", err);
-    return data({ error: err?.message }, { status: 500 });
+    return data({ error: err.message }, { status: 500 });
   }
 }
-function AnimatedLoader() {
-  const [dots, setDots] = useState(".");
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setDots(d => d.length >= 3 ? "." : d + ".");
-    }, 400);
-    return () => clearInterval(interval);
-  }, []);
-  return (
-    <div style={{ padding: "20px 0", textAlign: "center" }}>
-      <p style={{ fontSize: "14px", color: "#8a7f75", fontStyle: "italic", margin: 0 }}>
-        Analysing your wardrobe{dots}
-      </p>
-      <p style={{ fontSize: "12px", color: "#c4b5b5", margin: "6px 0 0" }}>
-        nAia is reading your style
-      </p>
-    </div>
-  );
-}
-function WardrobeInsights({ items }: { items: any[] }) {
-  const [aiInsights, setAiInsights] = useState<any>(null);
-  const [loadingAI, setLoadingAI] = useState(false);
 
-  useEffect(() => {
-    if (items.length < 3) return;
-    setLoadingAI(true);
-    const token = sessionStorage.getItem("naia_token") || "";
-fetch(`/api/wardrobe-insights?naia_token=${encodeURIComponent(token)}`)
-      .then(r => r.json())
-      .then(d => { if (d.insights) setAiInsights(d.insights); })
-      .catch(() => {})
-      .finally(() => setLoadingAI(false));
-  }, []);
-
-  if (items.length < 3) return null;
-
-  const catCount: Record<string, number> = {};
-  const occasionCount: Record<string, number> = {};
-  for (const item of items) {
-    catCount[item.category] = (catCount[item.category] || 0) + 1;
-    if (item.occasions?.length) {
-      for (const occ of item.occasions) occasionCount[occ] = (occasionCount[occ] || 0) + 1;
-    }
-  }
-  const topOccasions = Object.entries(occasionCount).sort((a, b) => b[1] - a[1]).slice(0, 3);
-  const topCategory = Object.entries(catCount).sort((a, b) => b[1] - a[1])[0];
-
-  const s = {
-    section: { marginBottom: "20px" } as const,
-    label: { fontSize: "11px", letterSpacing: "0.18em", textTransform: "uppercase" as const, color: "#8a7f75", marginBottom: "10px" },
-    tag: (bg: string, color: string) => ({ display: "inline-block", padding: "6px 12px", background: bg, color, borderRadius: "2px", fontSize: "13px", marginRight: "8px", marginBottom: "8px" }),
-  };
-
-  return (
-    <div style={{ padding: "20px", background: "#faf9f7", borderRadius: "4px", marginBottom: "24px", border: "1px solid #e8e4df" }}>
-      <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase" as const, color: "#8a7f75", marginBottom: "20px" }}>Wardrobe Insights</div>
-
-      {loadingAI && <AnimatedLoader />}
-
-      {aiInsights && (
-        <>
-          {/* Style personality */}
-          <div style={s.section}>
-            <div style={s.label}>Your Style Personality</div>
-            <div style={{ fontSize: "20px", fontStyle: "italic", color: "#1a1816" }}>{aiInsights.stylePersonality}</div>
-            <div style={{ fontSize: "13px", color: "#8a7f75", marginTop: "4px" }}>{aiInsights.styleDescription}</div>
-          </div>
-
-          {/* Dominant colors */}
-          {aiInsights.dominantColors?.length > 0 && (
-            <div style={s.section}>
-              <div style={s.label}>Your Color Story</div>
-              <div>{aiInsights.dominantColors.map((c: string) => <span key={c} style={s.tag("#eee9e2", "#1a1816")}>{c}</span>)}</div>
-            </div>
-          )}
-
-          {/* Too much of */}
-          {aiInsights.tooMuchOf?.length > 0 && (
-            <div style={s.section}>
-              <div style={s.label}>You Have Too Much Of</div>
-              {aiInsights.tooMuchOf.map((t: string, i: number) => (
-                <div key={i} style={{ fontSize: "13px", fontStyle: "italic", color: "#1a1816", marginBottom: "4px" }}>· {t}</div>
-              ))}
-            </div>
-          )}
-
-          {/* Repeats */}
-          {aiInsights.repeats?.length > 0 && (
-            <div style={s.section}>
-              <div style={s.label}>What You Repeat</div>
-              {aiInsights.repeats.map((r: string, i: number) => (
-                <div key={i} style={{ fontSize: "13px", fontStyle: "italic", color: "#1a1816", marginBottom: "4px" }}>· {r}</div>
-              ))}
-            </div>
-          )}
-
-          {/* Missing pieces */}
-          {aiInsights.missingPieces?.length > 0 && (
-            <div style={s.section}>
-              <div style={s.label}>Missing From Your Wardrobe</div>
-              {aiInsights.missingPieces.map((m: string, i: number) => (
-                <div key={i} style={{ fontSize: "13px", color: "#c5553a", fontStyle: "italic", marginBottom: "4px" }}>· {m}</div>
-              ))}
-            </div>
-          )}
-
-          {/* Buy next */}
-          {aiInsights.buyNext && (
-            <div style={s.section}>
-              <div style={s.label}>Buy Next</div>
-              <div style={{ padding: "12px 16px", background: "#1a1816", color: "#f5f2ee", borderRadius: "2px", fontSize: "14px", fontStyle: "italic" }}>
-                ✦ {aiInsights.buyNext}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Static insights */}
-      {!loadingAI && topOccasions.length > 0 && (
-        <div style={s.section}>
-          <div style={s.label}>You Dress Most For</div>
-          <div>{topOccasions.map(([occ, count]) => <span key={occ} style={s.tag("#1a1816", "#f5f2ee")}>{occ} ({count})</span>)}</div>
-        </div>
-      )}
-
-      {!loadingAI && topCategory && (
-        <div style={s.section}>
-          <div style={s.label}>Your Go-To Category</div>
-          <div style={{ fontSize: "14px", fontStyle: "italic", color: "#1a1816" }}>
-            {topCategory[0].charAt(0) + topCategory[0].slice(1).toLowerCase()} — {topCategory[1]} pieces
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-export default function ClosetPage() {
-  const { items, authenticated } = useLoaderData<typeof loader>();
-  const [searchParams] = useSearchParams();
+export default function Closet() {
+  const { items } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
-  const [activeCategory, setActiveCategory] = useState("ALL");
+  
   const [showAddForm, setShowAddForm] = useState(false);
-  const [showInsights, setShowInsights] = useState(false);
+  const [activeCategory, setActiveCategory] = useState("ALL");
   const [uploading, setUploading] = useState(false);
-
-  // Form state
+  
   const [newName, setNewName] = useState("");
   const [newCategory, setNewCategory] = useState("TOPS");
   const [newImageUrl, setNewImageUrl] = useState("");
@@ -232,19 +99,14 @@ export default function ClosetPage() {
   const [newOccasions, setNewOccasions] = useState<string[]>([]);
   const [newSeasons, setNewSeasons] = useState<string[]>([]);
 
-  useEffect(() => {
-    const urlToken = searchParams.get("naia_token");
-    if (urlToken) sessionStorage.setItem("naia_token", urlToken);
-  }, []);
-
   const filtered = activeCategory === "ALL" ? items : items.filter((i: any) => i.category === activeCategory);
 
   const uploadToCloudinary = async (file: File) => {
     setUploading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("upload_preset", CLOUDINARY_PRESET);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("upload_preset", CLOUDINARY_PRESET);
       const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`, {
         method: "POST",
         body: formData,
@@ -252,9 +114,10 @@ export default function ClosetPage() {
       const data = await res.json();
       setNewImageUrl(data.secure_url);
     } catch (err) {
-      console.error("Upload failed:", err);
+      console.error("Upload error:", err);
+    } finally {
+      setUploading(false);
     }
-    setUploading(false);
   };
 
   const toggleOccasion = (occ: string) => {
@@ -287,59 +150,95 @@ export default function ClosetPage() {
   };
 
   const btnStyle = (active: boolean) => ({
-    padding: "6px 14px",
-    borderRadius: "2px",
-    fontSize: "12px",
-    fontWeight: 500,
-    border: "none",
+    padding: "8px 16px",
+    fontSize: "14px",
+    fontWeight: active ? 600 : 400,
+    border: active ? "1px solid rgba(59,5,16,0.2)" : "1px solid rgba(59,5,16,0.08)",
     cursor: "pointer",
-    background: active ? "#1a1816" : "#eee9e2",
-    color: active ? "white" : "#8a7f75",
-    fontFamily: '"Cormorant Garamond", Georgia, serif',
+    background: active ? "rgba(139,32,53,0.08)" : "rgba(255,255,255,0.5)",
+    color: active ? "#8b2035" : "#7a6f6a",
+    fontFamily: "'Cormorant Garamond',serif",
+    fontStyle: "italic",
+    transition: "all 0.2s",
   });
 
   return (
-    <div style={{ minHeight: "100vh", background: "#faf9f7", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>
-      <header style={{ padding: "1rem 1.5rem", background: "white", borderBottom: "1px solid #e8e4df", position: "sticky", top: 0, zIndex: 10 }}>
-        <div style={{ maxWidth: "36rem", margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <a href="https://naia-stylist.vercel.app/stylist" style={{ color: "#8a7f75", textDecoration: "none", fontSize: "13px", letterSpacing: "0.1em" }}>← Back</a>
-          <div style={{ fontSize: "13px", letterSpacing: "0.2em", textTransform: "uppercase" }}>My Closet</div>
-          <button onClick={() => setShowAddForm(!showAddForm)} style={{ fontSize: "13px", color: "#1a1816", background: "none", border: "none", cursor: "pointer", letterSpacing: "0.1em" }}>+ Add</button>
+    <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
+      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+      
+      <div style={{ maxWidth: "1400px", margin: "0 auto", padding: "60px 40px" }}>
+        
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "40px" }}>
+          <div>
+            <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: "clamp(48px,6vw,72px)", fontWeight: 900, lineHeight: 1, marginBottom: "12px" }}>
+              Digital Wardrobe
+            </h1>
+            <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "20px", fontStyle: "italic", color: "#7a6f6a" }}>
+              Upload, save, and style your pieces with nAia.
+            </p>
+          </div>
+          <Link to="/" style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>
+            ← DASHBOARD
+          </Link>
         </div>
-      </header>
 
-      <main style={{ padding: "1.5rem", maxWidth: "36rem", margin: "0 auto" }}>
+        {/* Stats */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", marginBottom: "40px" }}>
+          <div style={{ background: "rgba(255,255,255,0.5)", padding: "24px", border: "1px solid rgba(59,5,16,0.06)" }}>
+            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "48px", fontWeight: 900 }}>{items.length}</div>
+            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a" }}>TOTAL PIECES</div>
+          </div>
+          <div style={{ background: "rgba(255,255,255,0.5)", padding: "24px", border: "1px solid rgba(59,5,16,0.06)" }}>
+            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "48px", fontWeight: 900 }}>{new Set(items.map((i: any) => i.category)).size}</div>
+            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a" }}>CATEGORIES</div>
+          </div>
+          <div style={{ background: "rgba(255,255,255,0.5)", padding: "24px", border: "1px solid rgba(59,5,16,0.06)" }}>
+            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "48px", fontWeight: 900 }}>{new Set(items.map((i: any) => i.brand).filter(Boolean)).size}</div>
+            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a" }}>BRANDS</div>
+          </div>
+        </div>
+
+        {/* Toggle Add Form Button */}
+        {!showAddForm && (
+          <button onClick={() => setShowAddForm(true)} style={{ width: "100%", padding: "20px", background: "#221516", color: "#f4f4f1", border: "none", marginBottom: "40px", cursor: "pointer", fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic" }}>
+            + Add a Piece
+          </button>
+        )}
 
         {/* Add Form */}
         {showAddForm && (
-          <div style={{ background: "white", borderRadius: "4px", padding: "1.5rem", marginBottom: "1.5rem", border: "1px solid #e8e4df" }}>
-            <div style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase" as const, color: "#8a7f75", marginBottom: "1.5rem" }}>Add a piece</div>
+          <div style={{ background: "rgba(255,255,255,0.8)", padding: "40px", marginBottom: "40px", border: "1px solid rgba(59,5,16,0.06)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
+              <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: "24px", fontWeight: 700 }}>Add to Wardrobe</h3>
+              <button onClick={() => setShowAddForm(false)} style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", color: "#7a6f6a" }}>Cancel</button>
+            </div>
 
             {/* Photo upload */}
-            <div style={{ marginBottom: "1rem" }}>
-              <div style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "8px" }}>Photo</div>
-              <label style={{ display: "block", border: "1px dashed #d4cfc9", borderRadius: "4px", padding: "1rem", textAlign: "center", cursor: "pointer", background: newImageUrl ? "transparent" : "#faf9f7" }}>
+            <div style={{ marginBottom: "24px" }}>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>PHOTO</div>
+              <label style={{ display: "block", border: "1px dashed rgba(59,5,16,0.2)", padding: "40px", textAlign: "center", cursor: "pointer", background: "rgba(255,255,255,0.5)" }}>
                 {newImageUrl ? (
-                  <img src={newImageUrl} alt="preview" style={{ maxHeight: "160px", borderRadius: "4px", objectFit: "cover" }} />
+                  <img src={newImageUrl} alt="preview" style={{ maxHeight: "200px", objectFit: "cover" }} />
                 ) : uploading ? (
-                  <span style={{ fontSize: "13px", color: "#8a7f75" }}>Uploading...</span>
+                  <span style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#7a6f6a" }}>Uploading...</span>
                 ) : (
-                  <span style={{ fontSize: "13px", color: "#8a7f75" }}>Tap to upload photo</span>
+                  <span style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#7a6f6a" }}>Click to upload photo</span>
                 )}
                 <input type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && uploadToCloudinary(e.target.files[0])} style={{ display: "none" }} />
               </label>
             </div>
 
             {/* Name */}
-            <div style={{ marginBottom: "1rem" }}>
-              <div style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "8px" }}>Name *</div>
-              <input type="text" placeholder="e.g. Black blazer" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ width: "100%", padding: "10px", border: "1px solid #e8e4df", borderRadius: "2px", fontSize: "14px", fontFamily: '"Cormorant Garamond", Georgia, serif', boxSizing: "border-box" as const, background: "#faf9f7" }} />
+            <div style={{ marginBottom: "24px" }}>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>NAME *</div>
+              <input type="text" placeholder="e.g. Black silk blazer" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ width: "100%", padding: "14px", border: "1px solid rgba(59,5,16,0.1)", fontSize: "16px", fontFamily: "'Cormorant Garamond',serif", fontStyle: "italic", boxSizing: "border-box", background: "rgba(255,255,255,0.7)" }} />
             </div>
 
             {/* Category */}
-            <div style={{ marginBottom: "1rem" }}>
-              <div style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "8px" }}>Category *</div>
-              <div style={{ display: "flex", flexWrap: "wrap" as const, gap: "8px" }}>
+            <div style={{ marginBottom: "24px" }}>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>CATEGORY *</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
                 {CATEGORIES.map(c => (
                   <button key={c} onClick={() => setNewCategory(c)} style={btnStyle(newCategory === c)}>
                     {c.charAt(0) + c.slice(1).toLowerCase()}
@@ -349,9 +248,9 @@ export default function ClosetPage() {
             </div>
 
             {/* Color */}
-            <div style={{ marginBottom: "1rem" }}>
-              <div style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "8px" }}>Primary Color</div>
-              <div style={{ display: "flex", flexWrap: "wrap" as const, gap: "8px" }}>
+            <div style={{ marginBottom: "24px" }}>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>COLOR</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
                 {COLORS.map(c => (
                   <button key={c} onClick={() => setNewColor(c)} style={btnStyle(newColor === c)}>{c}</button>
                 ))}
@@ -359,9 +258,9 @@ export default function ClosetPage() {
             </div>
 
             {/* Pattern */}
-            <div style={{ marginBottom: "1rem" }}>
-              <div style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "8px" }}>Pattern</div>
-              <div style={{ display: "flex", flexWrap: "wrap" as const, gap: "8px" }}>
+            <div style={{ marginBottom: "24px" }}>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>PATTERN</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
                 {PATTERNS.map(p => (
                   <button key={p} onClick={() => setNewPattern(p)} style={btnStyle(newPattern === p)}>{p}</button>
                 ))}
@@ -369,9 +268,9 @@ export default function ClosetPage() {
             </div>
 
             {/* Occasions */}
-            <div style={{ marginBottom: "1rem" }}>
-              <div style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "8px" }}>Occasions</div>
-              <div style={{ display: "flex", flexWrap: "wrap" as const, gap: "8px" }}>
+            <div style={{ marginBottom: "24px" }}>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>OCCASIONS</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
                 {OCCASIONS.map(o => (
                   <button key={o} onClick={() => toggleOccasion(o)} style={btnStyle(newOccasions.includes(o))}>{o}</button>
                 ))}
@@ -379,9 +278,9 @@ export default function ClosetPage() {
             </div>
 
             {/* Seasons */}
-            <div style={{ marginBottom: "1rem" }}>
-              <div style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "8px" }}>Season</div>
-              <div style={{ display: "flex", flexWrap: "wrap" as const, gap: "8px" }}>
+            <div style={{ marginBottom: "24px" }}>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>SEASON</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
                 {SEASONS.map(s => (
                   <button key={s} onClick={() => toggleSeason(s)} style={btnStyle(newSeasons.includes(s))}>{s}</button>
                 ))}
@@ -389,71 +288,94 @@ export default function ClosetPage() {
             </div>
 
             {/* Brand */}
-            <div style={{ marginBottom: "1.5rem" }}>
-              <div style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "8px" }}>Brand (optional)</div>
-              <input type="text" placeholder="e.g. Zara, H&M, nAia" value={newBrand} onChange={(e) => setNewBrand(e.target.value)} style={{ width: "100%", padding: "10px", border: "1px solid #e8e4df", borderRadius: "2px", fontSize: "14px", fontFamily: '"Cormorant Garamond", Georgia, serif', boxSizing: "border-box" as const, background: "#faf9f7" }} />
+            <div style={{ marginBottom: "32px" }}>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>BRAND (OPTIONAL)</div>
+              <input type="text" placeholder="Brand name" value={newBrand} onChange={(e) => setNewBrand(e.target.value)} style={{ width: "100%", padding: "14px", border: "1px solid rgba(59,5,16,0.1)", fontSize: "16px", fontFamily: "'Cormorant Garamond',serif", fontStyle: "italic", boxSizing: "border-box", background: "rgba(255,255,255,0.7)" }} />
             </div>
 
-            <div style={{ display: "flex", gap: "12px" }}>
-              <button onClick={handleAdd} disabled={!newName || uploading} style={{ flex: 1, padding: "12px", background: newName ? "#1a1816" : "#d4cfc9", color: "white", border: "none", borderRadius: "2px", fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase" as const, cursor: newName ? "pointer" : "default", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>
-                {uploading ? "Uploading..." : "Add to Closet"}
-              </button>
-              <button onClick={() => setShowAddForm(false)} style={{ padding: "12px 20px", background: "transparent", color: "#8a7f75", border: "1px solid #e8e4df", borderRadius: "2px", cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>Cancel</button>
-            </div>
+            <button onClick={handleAdd} disabled={!newName || !newImageUrl || uploading} style={{ width: "100%", padding: "16px", background: newName ? "#8b2035" : "#d4cfc9", color: "#f4f4f1", border: "none", fontSize: "14px", letterSpacing: "2px", textTransform: "uppercase", cursor: newName ? "pointer" : "default", fontFamily: "'Space Mono',monospace" }}>
+              {uploading ? "Uploading..." : "Add to Wardrobe"}
+            </button>
           </div>
         )}
 
-        {/* Insights toggle */}
-        {items.length >= 3 && (
-          <button onClick={() => setShowInsights(!showInsights)} style={{ width: "100%", padding: "12px", background: "white", border: "1px solid #e8e4df", borderRadius: "4px", marginBottom: "1rem", fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase" as const, cursor: "pointer", color: "#1a1816", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>
-            {showInsights ? "Hide" : "View"} Wardrobe Insights
-          </button>
-        )}
-
-        {showInsights && <WardrobeInsights items={items} />}
-
         {/* Category filter */}
-        <div style={{ display: "flex", gap: "8px", overflowX: "auto", paddingBottom: "8px", marginBottom: "1rem" }}>
+        <div style={{ display: "flex", gap: "8px", overflowX: "auto", paddingBottom: "12px", marginBottom: "24px" }}>
           {["ALL", ...CATEGORIES].map((cat) => (
-            <button key={cat} onClick={() => setActiveCategory(cat)} style={{ ...btnStyle(activeCategory === cat), whiteSpace: "nowrap" as const, padding: "6px 14px" }}>
+            <button key={cat} onClick={() => setActiveCategory(cat)} style={{ ...btnStyle(activeCategory === cat), whiteSpace: "nowrap", flexShrink: 0 }}>
               {cat === "ALL" ? "All" : cat.charAt(0) + cat.slice(1).toLowerCase()}
             </button>
           ))}
         </div>
 
-        <p style={{ fontSize: "13px", color: "#8a7f75", marginBottom: "1rem" }}>{filtered.length} {filtered.length === 1 ? "piece" : "pieces"}</p>
+        <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "24px" }}>
+          {filtered.length} {filtered.length === 1 ? "piece" : "pieces"}
+        </p>
 
+        {/* Empty state */}
         {filtered.length === 0 && (
-          <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
-            <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>👗</div>
-            <p style={{ color: "#8a7f75", marginBottom: "1rem", fontStyle: "italic" }}>No pieces yet in this category</p>
-            <button onClick={() => setShowAddForm(true)} style={{ padding: "12px 28px", background: "#1a1816", color: "white", border: "none", borderRadius: "2px", fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase" as const, cursor: "pointer", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>Add Your First Piece</button>
+          <div style={{ textAlign: "center", padding: "80px 40px", background: "rgba(255,255,255,0.3)", border: "1px solid rgba(59,5,16,0.06)" }}>
+            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "64px", marginBottom: "20px" }}>◇</div>
+            <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "20px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "32px" }}>
+              No pieces yet in this category
+            </p>
+            <button onClick={() => setShowAddForm(true)} style={{ padding: "16px 32px", background: "#221516", color: "#f4f4f1", border: "none", fontSize: "12px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", fontFamily: "'Space Mono',monospace" }}>
+              Add Your First Piece
+            </button>
           </div>
         )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "12px" }}>
+        {/* Items grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: "24px" }}>
           {filtered.map((item: any) => (
-            <div key={item.id} style={{ background: "white", borderRadius: "4px", overflow: "hidden", position: "relative", border: "1px solid #e8e4df" }}>
+            <div key={item.id} style={{ background: "rgba(255,255,255,0.5)", border: "1px solid rgba(59,5,16,0.06)", overflow: "hidden", position: "relative" }}>
               <div style={{ aspectRatio: "1", background: "#f5f2ee", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-                {item.imageUrl ? <img src={item.imageUrl} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: "2.5rem" }}>👗</span>}
+                {item.imageUrl ? (
+                  <img src={item.imageUrl} alt={item.itemName} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  <span style={{ fontSize: "64px", opacity: 0.2 }}>◇</span>
+                )}
               </div>
-              <div style={{ padding: "10px" }}>
-                <p style={{ fontWeight: 500, fontSize: "14px", marginBottom: "4px", margin: "0 0 4px" }}>{item.name}</p>
-                <p style={{ fontSize: "12px", color: "#8a7f75", margin: "0 0 4px" }}>{item.category.charAt(0) + item.category.slice(1).toLowerCase()}</p>
-                {item.primaryColor && <p style={{ fontSize: "11px", color: "#8a7f75", margin: 0 }}>{item.primaryColor}{item.pattern ? ` · ${item.pattern}` : ""}</p>}
-                {item.occasions?.length > 0 && <p style={{ fontSize: "11px", color: "#8a7f75", margin: "2px 0 0" }}>{item.occasions.slice(0, 2).join(", ")}</p>}
+              <div style={{ padding: "20px" }}>
+                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "8px" }}>
+                  {item.category}
+                </div>
+                <p style={{ fontFamily: "'Playfair Display',serif", fontSize: "18px", fontWeight: 600, marginBottom: "8px" }}>
+                  {item.itemName}
+                </p>
+                {item.color && (
+                  <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "4px" }}>
+                    {item.color}{item.pattern ? ` · ${item.pattern}` : ""}
+                  </p>
+                )}
+                {item.brand && (
+                  <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "4px" }}>
+                    {item.brand}
+                  </p>
+                )}
+                {item.occasions?.length > 0 && (
+                  <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "12px", color: "#7a6f6a", marginTop: "8px" }}>
+                    {item.occasions.slice(0, 2).join(", ")}
+                  </p>
+                )}
               </div>
-              <button onClick={() => fetcher.submit({ intent: "delete", itemId: item.id }, { method: "post" })} style={{ position: "absolute", top: "8px", right: "8px", background: "rgba(0,0,0,0.5)", color: "white", border: "none", borderRadius: "50%", width: "24px", height: "24px", cursor: "pointer", fontSize: "14px", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>×</button>
+              <button 
+                onClick={() => fetcher.submit({ intent: "delete", itemId: item.id }, { method: "post" })} 
+                style={{ position: "absolute", top: "12px", right: "12px", background: "rgba(34,21,22,0.8)", color: "#f4f4f1", border: "none", borderRadius: "50%", width: "32px", height: "32px", cursor: "pointer", fontSize: "18px", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}
+              >
+                ×
+              </button>
             </div>
           ))}
         </div>
 
-        <div style={{ marginTop: "2rem", textAlign: "center" }}>
-          <a href="https://naia-stylist.vercel.app/stylist" style={{ padding: "12px 28px", background: "#1a1816", color: "white", borderRadius: "2px", textDecoration: "none", fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>
-            ✦ Style Me
-          </a>
+        {/* CTA */}
+        <div style={{ marginTop: "60px", textAlign: "center" }}>
+          <Link to="/quick-style" style={{ display: "inline-block", padding: "20px 40px", background: "#8b2035", color: "#f4f4f1", textDecoration: "none", fontSize: "14px", letterSpacing: "2px", textTransform: "uppercase", fontFamily: "'Space Mono',monospace" }}>
+            Style Me →
+          </Link>
         </div>
-      </main>
+      </div>
     </div>
   );
 }
