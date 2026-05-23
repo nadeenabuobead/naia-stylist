@@ -25,5 +25,5 @@ redirect_urls = [ "https://naia-stylist.vercel.app/api/auth" ]
 
 [app_proxy]
 url = "https://naia-stylist.vercel.app"
-subpath = "naia"
+subpath = "naia-stylist"
 prefix = "apps"
