@@ -1,4 +1,4 @@
-// app/routes/style-me/result.tsx
+// app/routes/style-me/result.tsx - REDESIGNED WITH PROPER AESTHETICS
 import { Link, useLoaderData, useFetcher } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
 import { useState, useEffect } from "react";
@@ -23,6 +23,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           sessionId: session.id,
           mood: session.currentMood,
           occasion: session.occasion,
+          desiredFeeling: session.desiredFeeling,
           suggestion: session.suggestions[0] || null,
           error: null,
         });
@@ -61,14 +62,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
     });
 
-
     return data(
-      { isLoading: true, sessionId: stylingSession.id, mood, occasion, suggestion: null, error: null },
+      { isLoading: true, sessionId: stylingSession.id, mood, currentMood: mood, desiredFeeling: feelings?.[0] || null, occasion, suggestion: null, error: null },
       { headers: { "Set-Cookie": await commitSession(cookieSession) } }
     );
   } catch (err: any) {
     console.error("Result loader error:", err);
-    return data({ isLoading: false, sessionId: null, mood: null, occasion: null, suggestion: null, error: err?.message || "Something went wrong" });
+    return data({ isLoading: false, sessionId: null, mood: null, currentMood: null, desiredFeeling: null, occasion: null, suggestion: null, error: err?.message || "Something went wrong" });
   }
 }
 
@@ -124,6 +124,8 @@ Create a complete outfit using 2-3 of these pieces. Return JSON with: outfitName
         itemType: item.itemType || "TOP",
         productTitle: item.productTitle || null,
         stylingNotes: item.stylingNotes || null,
+        shopifyProductId: item.shopifyProductId || null,
+        productImageUrl: item.productImageUrl || null,
       }));
 
       const suggestion = await prisma.outfitSuggestion.create({
@@ -169,6 +171,41 @@ Create a complete outfit using 2-3 of these pieces. Return JSON with: outfitName
       });
 
       return data({ saved: true, error: null });
+
+    if (intent === "review") {
+      const overallReaction = parseInt(formData.get("overallReaction") as string);
+      const feltLikeMe = formData.get("feltLikeMe") === "true";
+      const createdFeeling = formData.get("createdFeeling") === "true";
+      const wouldWear = formData.get("wouldWear") === "true";
+      const physicalComfort = parseInt(formData.get("physicalComfort") as string);
+      const whatWorked = (formData.get("whatWorked") as string || "").split(",").filter(Boolean);
+      const whatDidnt = (formData.get("whatDidnt") as string || "").split(",").filter(Boolean);
+
+      const session = await prisma.stylingSession.findUnique({
+        where: { id: sessionId },
+        include: { suggestions: true }
+      });
+
+      if (!session || !session.suggestions[0]) {
+        return data({ error: "Session not found" }, { status: 404 });
+      }
+
+      await prisma.postOutfitReview.create({
+        data: {
+          suggestionId: session.suggestions[0].id,
+          overallReaction,
+          feltLikeMe,
+          createdTheFeeling: createdFeeling,
+          wouldWearThis: wouldWear,
+          physicalComfort,
+          whatWorked,
+          whatDidnt,
+        }
+      });
+
+      return data({ reviewSaved: true, error: null });
+    }
+
     }
 
     return data({ error: "Invalid intent" }, { status: 400 });
@@ -178,20 +215,71 @@ Create a complete outfit using 2-3 of these pieces. Return JSON with: outfitName
   }
 }
 
-const loadingMessages = [
-  "Reading your vibe... ✨",
-  "Finding the perfect pieces... 💎",
-  "Adding the finishing touches... 🎀",
-  "Picking your confidence song... 🎵",
-  "Almost ready... 💫",
-];
+const loadingMessages = ["Reading the runways...", "Consulting your mood...", "Matching textures and fabrics...", "Finalizing your look..."];
 
 export default function StyleMeResult() {
   const loaderData = useLoaderData<typeof loader>();
   const fetcher = useFetcher<{ suggestion?: any; error?: string; saved?: boolean }>();
   const [msgIndex, setMsgIndex] = useState(0);
   const [isSaved, setIsSaved] = useState(false);
-  const [activeTab, setActiveTab] = useState<"outfit" | "vibe">("outfit");
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [reviewData, setReviewData] = useState({
+    overallReaction: 0,
+    feltLikeMe: null as boolean | null,
+    createdFeeling: null as boolean | null,
+    wouldWear: null as boolean | null,
+    physicalComfort: 0,
+    whatWorked: [] as string[],
+    whatDidnt: [] as string[]
+  });
+
+  const whatWorkedOptions = ["Silhouette", "Color palette", "Styling approach", "Accessories", "Hair suggestion", "Makeup suggestion", "Perfume", "Song", "Confidence boost", "Overall vibe"];
+  const whatDidntOptions = ["Too formal", "Too casual", "Wrong colors", "Uncomfortable silhouette", "Doesn't match my style", "Too bold", "Too safe", "Wrong occasion", "Accessories felt off", "Hair/makeup didn't resonate", "Not my vibe"];
+
+  const submitReview = () => {
+    if (!reviewData.overallReaction || reviewData.feltLikeMe === null || reviewData.createdFeeling === null || reviewData.wouldWear === null || !reviewData.physicalComfort) {
+      alert("Please answer all required questions");
+      return;
+    }
+    
+    const formData = new FormData();
+    formData.append("intent", "review");
+    formData.append("sessionId", loaderData.sessionId || "");
+    formData.append("overallReaction", reviewData.overallReaction.toString());
+    formData.append("feltLikeMe", reviewData.feltLikeMe.toString());
+    formData.append("createdFeeling", reviewData.createdFeeling.toString());
+    formData.append("wouldWear", reviewData.wouldWear.toString());
+    formData.append("physicalComfort", reviewData.physicalComfort.toString());
+    formData.append("whatWorked", reviewData.whatWorked.join(","));
+    formData.append("whatDidnt", reviewData.whatDidnt.join(","));
+    
+    fetcher.submit(formData, { method: "post" });
+    setShowReviewModal(false);
+    alert("Review saved! Thank you for your feedback.");
+  };
+
+
+
+
+
+
+
+
+
+
+  const toggleWorkedTag = (tag: string) => {
+    setReviewData({
+      ...reviewData,
+      whatWorked: reviewData.whatWorked.includes(tag) ? reviewData.whatWorked.filter(t => t !== tag) : [...reviewData.whatWorked, tag]
+    });
+  };
+
+  const toggleDidntTag = (tag: string) => {
+    setReviewData({
+      ...reviewData,
+      whatDidnt: reviewData.whatDidnt.includes(tag) ? reviewData.whatDidnt.filter(t => t !== tag) : [...reviewData.whatDidnt, tag]
+    });
+  };
 
   const isLoading = loaderData.isLoading && !fetcher.data?.suggestion;
   const suggestion = fetcher.data?.suggestion || loaderData.suggestion;
@@ -215,94 +303,146 @@ export default function StyleMeResult() {
 
   if (isLoading) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#faf9f7" }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "4rem", marginBottom: "1.5rem" }}>✨</div>
-          <p style={{ fontSize: "1.25rem", fontWeight: 500, marginBottom: "0.5rem" }}>Creating your look</p>
-          <p style={{ color: "#888" }}>{loadingMessages[msgIndex]}</p>
+      <div style={{ minHeight: "100vh", background: "#f4f4f1", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&family=Caveat:wght@400;700&display=swap" rel="stylesheet" />
+        <div style={{ textAlign: "center", maxWidth: "700px", padding: "40px" }}>
+          <h2 style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "32px", fontWeight: 900, fontStyle: "italic", color: "#221516", marginBottom: "16px" }}>nAia is styling you...</h2>
+          <p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "40px" }}>Building your look based on mood, occasion, and wardrobe.</p>
+          <div style={{ width: "200px", height: "3px", background: "#e1dbd7", margin: "0 auto", overflow: "hidden", position: "relative" }}>
+            <div style={{ position: "absolute", left: "-60%", width: "60%", height: "100%", background: "#8b2035", animation: "loadSlide 1.5s ease infinite" }} />
+          </div>
+          <div style={{ fontFamily: "'Caveat',cursive", fontSize: "18px", color: "#8b2035", opacity: 0.5, marginTop: "24px" }}>{loadingMessages[msgIndex]}</div>
         </div>
+        <style>{`@keyframes loadSlide{0%{left:-60%}100%{left:100%}}`}</style>
       </div>
     );
   }
 
   if (error || !suggestion) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
-        <div style={{ textAlign: "center", maxWidth: "24rem" }}>
-          <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>😔</div>
-          <h1 style={{ fontSize: "1.5rem", fontWeight: 600, marginBottom: "0.5rem" }}>Something went wrong</h1>
-          <p style={{ color: "#888", marginBottom: "1.5rem", fontSize: "0.875rem" }}>{error || "Couldn't create your outfit. Let's try again!"}</p>
-          <Link to="/style-me/mood" style={{ padding: "0.75rem 1.5rem", background: "#c4a0a0", color: "white", borderRadius: "9999px", textDecoration: "none", fontWeight: 500 }}>
-            Start Over
-          </Link>
+      <div style={{ minHeight: "100vh", background: "#f4f4f1", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px" }}>
+        <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+        <div style={{ textAlign: "center", maxWidth: "500px" }}>
+          <h1 style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "32px", fontWeight: 900, color: "#221516", marginBottom: "16px" }}>Something went wrong</h1>
+          <p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "32px" }}>{error || "Couldn't create your outfit. Let's try again"}</p>
+          <Link to="/style-me/mood" style={{ display: "inline-block", padding: "14px 32px", background: "#221516", color: "#f4f4f1", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none" }}>Start Over</Link>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#faf9f7" }}>
-      <header style={{ padding: "1rem", background: "white", position: "sticky", top: 0, zIndex: 10 }}>
-        <div style={{ maxWidth: "32rem", margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <Link to="/style-me" style={{ color: "#888", textDecoration: "none", fontSize: "0.875rem" }}>← Back</Link>
-          <h1 style={{ fontSize: "1.125rem", fontWeight: 500 }}>Your Look</h1>
-          <button onClick={() => fetcher.submit({ intent: "save", suggestionId: suggestion.id }, { method: "post" })} disabled={isSaved} style={{ fontSize: "0.875rem", fontWeight: 500, color: isSaved ? "green" : "#c4a0a0", background: "none", border: "none", cursor: "pointer" }}>
-            {isSaved ? "✓ Saved" : "Save"}
-          </button>
+    <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
+      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+      <div style={{ content: '', position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 9999, opacity: 0.03, backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")", backgroundSize: '200px' }} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 40px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
+        <Link to="/style-me" style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", textDecoration: "none" }}>Back</Link>
+        <div style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "22px", fontStyle: "italic", letterSpacing: "3px", color: "#221516" }}>nAia</div>
+        <button onClick={() => fetcher.submit({ intent: "save", suggestionId: suggestion.id }, { method: "post" })} disabled={isSaved} style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: isSaved ? "#8b2035" : "#7a6f6a", background: "none", border: "none", cursor: "pointer" }}>{isSaved ? "Saved" : "Save"}</button>
+      </div>
+      <main style={{ maxWidth: "800px", margin: "0 auto", padding: "48px 40px 80px" }}>
+        <div style={{ marginBottom: "40px" }}>
+          <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "4px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>Your Styling</div>
+          <h1 style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "clamp(28px,4vw,42px)", fontWeight: 900, color: "#221516", letterSpacing: "-1px", marginBottom: "8px" }}>{suggestion.outfitName}</h1>
+          <p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a" }}>Styled around your mood, your wardrobe, and the way you want to feel.</p>
         </div>
-      </header>
-
-      <main style={{ padding: "1.5rem 1rem", maxWidth: "32rem", margin: "0 auto" }}>
-        <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
-          <h2 style={{ fontSize: "1.5rem", fontWeight: 600, marginBottom: "0.5rem" }}>{suggestion.outfitName}</h2>
-          {suggestion.confidenceBoost && <p style={{ color: "#c4a0a0", fontStyle: "italic" }}>"{suggestion.confidenceBoost}"</p>}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "16px", padding: "20px 0", borderTop: "1px solid rgba(59,5,16,0.06)", borderBottom: "1px solid rgba(59,5,16,0.06)", marginBottom: "40px" }}>
+          <div><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "4px" }}>You're Feeling</div><div style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "20px", fontStyle: "italic", color: "#221516" }}>{loaderData.currentMood}</div></div>
+          <div><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "4px" }}>You Want to Feel</div><div style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "20px", fontStyle: "italic", color: "#221516" }}>{loaderData.desiredFeeling}</div></div>
+          <div><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "4px" }}>Dressing For</div><div style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "20px", fontStyle: "italic", color: "#221516" }}>{loaderData.occasion}</div></div>
         </div>
-
-        <div style={{ display: "flex", background: "white", borderRadius: "9999px", padding: "0.25rem", marginBottom: "1.5rem" }}>
-          {(["outfit", "vibe"] as const).map((tab) => (
-            <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, padding: "0.5rem 1rem", borderRadius: "9999px", fontSize: "0.875rem", fontWeight: 500, border: "none", cursor: "pointer", background: activeTab === tab ? "#2d2d2d" : "transparent", color: activeTab === tab ? "white" : "#888" }}>
-              {tab === "outfit" ? "👗 Outfit" : "✨ Complete Vibe"}
-            </button>
-          ))}
+        <div style={{ marginBottom: "36px" }}>
+          <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "#8b2035", marginBottom: "16px", paddingBottom: "8px", borderBottom: "1px solid rgba(139,32,53,0.1)" }}>Your Outfit Direction</div>
+          {suggestion.items?.map((item: any) => (<div key={item.id} style={{ padding: "14px 0", borderLeft: "3px solid #8b2035", paddingLeft: "20px", marginBottom: "12px" }}>{item.productImageUrl && <img src={item.productImageUrl} alt={item.productTitle} style={{ width: "140px", height: "180px", objectFit: "contain", marginBottom: "12px" }} />}<div style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "17px", lineHeight: 1.6, color: "#221516" }}>{item.stylingNotes || item.productTitle}</div>{item.shopifyProductId && <a href={`https://naiabynadine.com/products/${item.shopifyProductId}`} style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none", display: "inline-block", marginTop: "8px" }}>View in store →</a>}</div>))}
         </div>
+        {suggestion.whyThisWorks && <div style={{ background: "rgba(59,5,16,0.02)", padding: "28px", marginBottom: "36px" }}><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>Why This Works</div><p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "16px", lineHeight: 1.8, color: "#7a6f6a" }}>{suggestion.whyThisWorks}</p></div>}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "16px", marginBottom: "36px" }}>
+          {suggestion.perfumeRec && <div style={{ background: "#f0e8e4", padding: "20px" }}><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "8px" }}>Perfume</div><div style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "16px", color: "#221516" }}>{suggestion.perfumeRec}</div></div>}
+          {suggestion.songRec && <div style={{ background: "#f0e8e4", padding: "20px" }}><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "8px" }}>Song</div><div style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "16px", color: "#221516" }}>{suggestion.songRec}</div></div>}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "36px" }}>
+          {suggestion.hairstyleRec && <div style={{ background: "#f0e8e4", padding: "20px" }}><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "8px" }}>Hair</div><div style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "16px", color: "#221516" }}>{suggestion.hairstyleRec}</div></div>}
+          {suggestion.makeupVibeRec && <div style={{ background: "#f0e8e4", padding: "20px" }}><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "8px" }}>Makeup</div><div style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "16px", color: "#221516" }}>{suggestion.makeupVibeRec}</div></div>}
+        </div>
+        {suggestion.confidenceBoost && <div style={{ padding: "28px 0", borderTop: "1px solid rgba(59,5,16,0.06)", borderBottom: "1px solid rgba(59,5,16,0.06)", marginBottom: "36px" }}><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>The Shift</div><div style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "22px", fontWeight: 400, fontStyle: "italic", lineHeight: 1.5, color: "#221516" }}>{suggestion.confidenceBoost}</div></div>}
+        <div style={{ display: "flex", gap: "12px", justifyContent: "center", marginTop: "40px", paddingTop: "28px", borderTop: "1px solid rgba(59,5,16,0.06)" }}>
 
-        {activeTab === "outfit" ? (
-          <>
-            <h3 style={{ fontWeight: 500, marginBottom: "1rem" }}>The Pieces</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: "1rem", marginBottom: "1.5rem" }}>
-              {suggestion.items?.map((item: any) => (
-                <div key={item.id} style={{ display: "flex", gap: "1rem", padding: "1rem", background: "white", borderRadius: "0.75rem" }}>
-                  <div style={{ width: "5rem", height: "5rem", borderRadius: "0.5rem", background: "#f5f5f5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "2rem", flexShrink: 0 }}>
-                    {item.productImageUrl ? <img src={item.productImageUrl} alt={item.productTitle} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "0.5rem" }} /> : "👗"}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <span style={{ fontSize: "0.75rem", color: "#888", textTransform: "uppercase" }}>{item.itemType}</span>
-                    <p style={{ fontWeight: 500, margin: "0.25rem 0" }}>{item.productTitle || item.itemType}</p>
-                    {item.stylingNotes && <p style={{ fontSize: "0.875rem", color: "#888" }}>💡 {item.stylingNotes}</p>}
-                    {item.shopifyProductId && <a href={`https://naiabynadine.com/products/${item.shopifyProductId}`} style={{ fontSize: "0.75rem", color: "#c4a0a0" }}>View in store →</a>}
-                  </div>
-                </div>
-              ))}
-            </div>
-            {suggestion.whyThisWorks && (
-              <div style={{ padding: "1rem", background: "rgba(196,160,160,0.08)", borderRadius: "0.75rem", marginBottom: "1.5rem" }}>
-                <h3 style={{ fontWeight: 500, marginBottom: "0.5rem" }}>✨ Why This Works</h3>
-                <p style={{ color: "#888", fontSize: "0.875rem" }}>{suggestion.whyThisWorks}</p>
+      {showReviewModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000, padding: "20px" }} onClick={() => setShowReviewModal(false)}>
+          <div style={{ background: "#f4f4f1", maxWidth: "600px", width: "100%", padding: "40px", maxHeight: "90vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "32px", fontWeight: 900, fontStyle: "italic", marginBottom: "32px" }}>How was this look?</h2>
+
+            <div style={{ marginBottom: "32px" }}>
+              <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>Overall Reaction *</div>
+              <div style={{ display: "flex", gap: "12px" }}>
+                {[1,2,3,4,5].map(n => (
+                  <button key={n} onClick={() => setReviewData({...reviewData, overallReaction: n})} style={{ width: "50px", height: "50px", border: reviewData.overallReaction === n ? "2px solid #8b2035" : "1px solid rgba(59,5,16,0.12)", background: reviewData.overallReaction === n ? "#8b2035" : "transparent", color: reviewData.overallReaction === n ? "#f4f4f1" : "#221516", fontFamily: "'Space Mono',monospace", fontSize: "18px", cursor: "pointer", transition: "all 0.3s" }}>{"★"}</button>
+                ))}
               </div>
-            )}
-          </>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-            {suggestion.perfumeRec && <div style={{ padding: "1rem", background: "white", borderRadius: "0.75rem" }}><p style={{ fontWeight: 500, marginBottom: "0.5rem" }}>🌸 Scent</p><p style={{ color: "#888" }}>{suggestion.perfumeRec}</p></div>}
-            {suggestion.hairstyleRec && <div style={{ padding: "1rem", background: "white", borderRadius: "0.75rem" }}><p style={{ fontWeight: 500, marginBottom: "0.5rem" }}>💇‍♀️ Hair</p><p style={{ color: "#888" }}>{suggestion.hairstyleRec}</p></div>}
-            {suggestion.makeupVibeRec && <div style={{ padding: "1rem", background: "white", borderRadius: "0.75rem" }}><p style={{ fontWeight: 500, marginBottom: "0.5rem" }}>💄 Makeup</p><p style={{ color: "#888" }}>{suggestion.makeupVibeRec}</p></div>}
-            {suggestion.songRec && <div style={{ padding: "1rem", background: "white", borderRadius: "0.75rem" }}><p style={{ fontWeight: 500, marginBottom: "0.5rem" }}>🎵 Your Confidence Song</p><p style={{ fontWeight: 500 }}>{suggestion.songRec}</p><p style={{ fontSize: "0.875rem", color: "#888", marginTop: "0.25rem" }}>Play this while getting ready ✨</p></div>}
-          </div>
-        )}
+            </div>
 
-        <div style={{ display: "flex", gap: "0.75rem", marginTop: "2rem" }}>
-          <Link to="/style-me/mood" style={{ flex: 1, padding: "0.75rem 1rem", background: "white", color: "#2d2d2d", textAlign: "center", borderRadius: "9999px", fontWeight: 500, textDecoration: "none", border: "1px solid #e5e5e5" }}>New Look</Link>
-          <a href="https://naiabynadine.com" style={{ flex: 1, padding: "0.75rem 1rem", background: "#c4a0a0", color: "white", textAlign: "center", borderRadius: "9999px", fontWeight: 500, textDecoration: "none" }}>Shop nAia ✨</a>
+            <div style={{ marginBottom: "32px" }}>
+              <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>Did it feel like you? *</div>
+              <div style={{ display: "flex", gap: "12px" }}>
+                <button onClick={() => setReviewData({...reviewData, feltLikeMe: true})} style={{ padding: "12px 24px", border: reviewData.feltLikeMe === true ? "2px solid #8b2035" : "1px solid rgba(59,5,16,0.12)", background: reviewData.feltLikeMe === true ? "#8b2035" : "transparent", color: reviewData.feltLikeMe === true ? "#f4f4f1" : "#221516", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>Yes</button>
+                <button onClick={() => setReviewData({...reviewData, feltLikeMe: false})} style={{ padding: "12px 24px", border: reviewData.feltLikeMe === false ? "2px solid #8b2035" : "1px solid rgba(59,5,16,0.12)", background: reviewData.feltLikeMe === false ? "#8b2035" : "transparent", color: reviewData.feltLikeMe === false ? "#f4f4f1" : "#221516", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>No</button>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: "32px" }}>
+              <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>Created the feeling you wanted? *</div>
+              <div style={{ display: "flex", gap: "12px" }}>
+                <button onClick={() => setReviewData({...reviewData, createdFeeling: true})} style={{ padding: "12px 24px", border: reviewData.createdFeeling === true ? "2px solid #8b2035" : "1px solid rgba(59,5,16,0.12)", background: reviewData.createdFeeling === true ? "#8b2035" : "transparent", color: reviewData.createdFeeling === true ? "#f4f4f1" : "#221516", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>Yes</button>
+                <button onClick={() => setReviewData({...reviewData, createdFeeling: false})} style={{ padding: "12px 24px", border: reviewData.createdFeeling === false ? "2px solid #8b2035" : "1px solid rgba(59,5,16,0.12)", background: reviewData.createdFeeling === false ? "#8b2035" : "transparent", color: reviewData.createdFeeling === false ? "#f4f4f1" : "#221516", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>No</button>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: "32px" }}>
+              <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>Would you wear this? *</div>
+              <div style={{ display: "flex", gap: "12px" }}>
+                <button onClick={() => setReviewData({...reviewData, wouldWear: true})} style={{ padding: "12px 24px", border: reviewData.wouldWear === true ? "2px solid #8b2035" : "1px solid rgba(59,5,16,0.12)", background: reviewData.wouldWear === true ? "#8b2035" : "transparent", color: reviewData.wouldWear === true ? "#f4f4f1" : "#221516", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>Yes</button>
+                <button onClick={() => setReviewData({...reviewData, wouldWear: false})} style={{ padding: "12px 24px", border: reviewData.wouldWear === false ? "2px solid #8b2035" : "1px solid rgba(59,5,16,0.12)", background: reviewData.wouldWear === false ? "#8b2035" : "transparent", color: reviewData.wouldWear === false ? "#f4f4f1" : "#221516", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>No</button>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: "32px" }}>
+              <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>Physical Comfort *</div>
+              <div style={{ display: "flex", gap: "12px" }}>
+                {[1,2,3,4,5].map(n => (
+                  <button key={n} onClick={() => setReviewData({...reviewData, physicalComfort: n})} style={{ width: "50px", height: "50px", border: reviewData.physicalComfort === n ? "2px solid #8b2035" : "1px solid rgba(59,5,16,0.12)", background: reviewData.physicalComfort === n ? "#8b2035" : "transparent", color: reviewData.physicalComfort === n ? "#f4f4f1" : "#221516", fontFamily: "'Space Mono',monospace", fontSize: "14px", cursor: "pointer" }}>{n}</button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: "32px" }}>
+              <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>What Worked?</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                {whatWorkedOptions.map(tag => (
+                  <button key={tag} onClick={() => toggleWorkedTag(tag)} style={{ padding: "10px 18px", border: reviewData.whatWorked.includes(tag) ? "1px solid #8b2035" : "1px solid rgba(59,5,16,0.12)", background: reviewData.whatWorked.includes(tag) ? "#8b2035" : "transparent", color: reviewData.whatWorked.includes(tag) ? "#f4f4f1" : "#221516", fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "1px", textTransform: "uppercase", cursor: "pointer" }}>{tag}</button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: "32px" }}>
+              <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>What Didn't Work?</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                {whatDidntOptions.map(tag => (
+                  <button key={tag} onClick={() => toggleDidntTag(tag)} style={{ padding: "10px 18px", border: reviewData.whatDidnt.includes(tag) ? "1px solid #8b2035" : "1px solid rgba(59,5,16,0.12)", background: reviewData.whatDidnt.includes(tag) ? "#8b2035" : "transparent", color: reviewData.whatDidnt.includes(tag) ? "#f4f4f1" : "#221516", fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "1px", textTransform: "uppercase", cursor: "pointer" }}>{tag}</button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: "12px", marginTop: "32px" }}>
+              <button onClick={() => setShowReviewModal(false)} style={{ flex: 1, padding: "14px 32px", border: "1px solid rgba(59,5,16,0.12)", background: "transparent", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", cursor: "pointer" }}>Cancel</button>
+              <button onClick={submitReview} style={{ flex: 1, padding: "14px 32px", border: "none", background: "#221516", color: "#f4f4f1", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", cursor: "pointer" }}>Submit Review</button>
+            </div>
+          </div>
+        </div>
+      )}
+          <Link to="/quick-style" style={{ padding: "14px 32px", background: "transparent", color: "#221516", border: "1px solid rgba(59,5,16,0.12)", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none" }}>Start Over</Link>
+          <Link to="/quick-style" style={{ padding: "14px 32px", background: "#221516", color: "#f4f4f1", border: "none", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none" }}>New Look, Same Vibe</Link>
+          <button onClick={() => setShowReviewModal(true)} style={{ padding: "14px 32px", background: "transparent", color: "#221516", border: "1px solid rgba(59,5,16,0.12)", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", cursor: "pointer" }}>Rate This Look</button>
+          <a href="https://naiabynadine.com" style={{ padding: "14px 32px", background: "transparent", color: "#221516", border: "1px solid rgba(59,5,16,0.12)", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none" }}>Shop nAia</a>
         </div>
       </main>
     </div>

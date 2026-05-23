@@ -36,7 +36,6 @@ export default [
   route("webhooks/app/scopes_update", "routes/webhooks.app.scopes_update.jsx"),
   route("webhooks/app/uninstalled", "routes/webhooks.app.uninstalled.jsx"),
   route("quick-style", "routes/quick-style/_index.tsx"),
-  route("quick-style/result", "routes/quick-style/result.tsx"),
   route("api/quick-style", "routes/api.quick-style.jsx"),
   route("full-style-profile", "routes/full-style-profile/_index.tsx"),
   route("api/full-style-profile", "routes/api.full-style-profile.jsx"),

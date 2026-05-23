@@ -1,221 +1,291 @@
-import { useState, useEffect } from "react";
-import { useNavigate, useLocation } from "react-router";
+import { useState } from "react";
+import { Form, redirect } from "react-router";
+import type { ActionFunctionArgs } from "react-router";
+
+export async function action({ request }: ActionFunctionArgs) {
+  const { getSession, commitSession } = await import("~/lib/session.server");
+  
+  const formData = await request.formData();
+  const mood = formData.get("mood") as string;
+  const feelings = formData.get("feelings") as string;
+  const occasion = formData.get("occasion") as string;
+  const source = formData.get("source") as string;
+  
+  const session = await getSession(request.headers.get("Cookie"));
+  session.set("styleMeMood", mood);
+  session.set("styleMeFeelings", [feelings]);
+  session.set("styleMeOccasion", occasion);
+  session.set("styleMeSource", source);
+  
+  return redirect("/style-me/result", {
+    headers: { "Set-Cookie": await commitSession(session) }
+  });
+}
 
 export default function QuickStyle() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  
-  const [preselectedProduct, setPreselectedProduct] = useState(null);
-
-  useEffect(() => {
-    const productFromState = location.state?.product;
-    const urlParams = new URLSearchParams(location.search);
-    const productFromUrl = urlParams.get("product");
-    
-    if (productFromState) {
-      setPreselectedProduct(productFromState);
-    } else if (productFromUrl) {
-      try {
-        setPreselectedProduct(JSON.parse(decodeURIComponent(productFromUrl)));
-      } catch (err) {
-        console.error("Failed to parse product from URL:", err);
-      }
-    }
-  }, [location]);
-  
-  const [step, setStep] = useState(1);
-  const [session, setSession] = useState({
-    currentMood: "",
-    desiredMood: "",
-    occasion: "",
-    bodyComfortToday: [],
-    stylingSource: "nAia only",
-    uploadedItem: null
+  const [currentStep, setCurrentStep] = useState(1);
+  const [showModal, setShowModal] = useState(false);
+  const [uploadPreview, setUploadPreview] = useState<string>("");
+  const [uploadedItem, setUploadedItem] = useState<any>(null);
+  const [itemDetails, setItemDetails] = useState({
+    category: "",
+    color: "",
+    tags: [] as string[]
   });
-  const [customer, setCustomer] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [guestSession, setGuestSession] = useState(null);
+  
+  const [sessionData, setSessionData] = useState({
+    mood: "",
+    feeling: "",
+    occasion: "",
+    bodyComfort: [] as string[],
+    source: ""
+  });
 
-  useEffect(() => {
-    async function loadCustomer() {
-      try {
-        const res = await fetch("/api/customer-profile");
-        if (res.ok) {
-          const data = await res.json();
-          setCustomer(data.customer);
-        } else {
-          setGuestSession(`guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
-        }
-      } catch (err) {
-        setGuestSession(`guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
-      }
-    }
-    loadCustomer();
-  }, []);
+  const categories = ["Top", "Bottom", "Dress", "Outerwear", "Shoes", "Bag", "Accessory"];
+  const colors = ["Black", "White", "Grey", "Beige", "Brown", "Red", "Pink", "Orange", "Yellow", "Green", "Blue", "Purple"];
+  const tagOptions = ["Casual", "Formal", "Work", "Evening", "Summer", "Winter", "Comfortable", "Statement"];
 
-  const steps = [
-    { id: 1, question: "How are you feeling today?", field: "currentMood" },
-    { id: 2, question: "How do you want to feel?", field: "desiredMood" },
-    { id: 3, question: "What's the occasion?", field: "occasion" },
-    { id: 4, question: "Any body comfort needs today?", field: "bodyComfortToday" },
-    { id: 5, question: "What do you want to style from?", field: "stylingSource" }
-  ];
-
-  const options = {
-    currentMood: ["Overwhelmed", "Tired", "Uninspired", "Neutral", "Confident", "Excited", "Powerful"],
-    desiredMood: ["Confident", "Comfortable", "Polished", "Powerful", "Effortless", "Bold", "Relaxed"],
-    occasion: ["Work", "Meeting", "Date", "Event", "Casual", "Travel", "Special Occasion"],
-    bodyComfortToday: [
-      "Feeling bloated", "Want more coverage", "Want waist definition", 
-      "Want something relaxed", "Want something structured", 
-      "Want to feel taller", "Want to feel balanced", "Feeling great"
-    ],
-    stylingSource: ["nAia only", "My closet only", "nAia + My closet"]
-  };
-
-  const handleSelect = (value) => {
-    const currentField = steps[step - 1].field;
-    if (currentField === "bodyComfortToday") {
-      const updated = session[currentField].includes(value)
-        ? session[currentField].filter(v => v !== value)
-        : [...session[currentField], value];
-      setSession({ ...session, [currentField]: updated });
-    } else {
-      setSession({ ...session, [currentField]: value });
-    }
-  };
-
-  const handleNext = () => {
-    if (step < steps.length) {
-      setStep(step + 1);
-    } else {
-      handleSubmit();
-    }
-  };
-
-  const handleBack = () => {
-    if (step > 1) setStep(step - 1);
-  };
-
-  const handleSubmit = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/quick-style", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...session,
-          preselectedProduct,
-          customerId: customer?.id,
-          guestSessionId: guestSession,
-          isGuest: !customer
-        })
-      });
-      
-      const data = await res.json();
-      
-      if (res.ok) {
-        navigate("/quick-style/result", { 
-          state: { 
-            result: data.result,
-            session,
-            isGuest: !customer,
-            guestSessionId: guestSession
-          } 
-        });
+  const selectPill = (value: string, field: keyof typeof sessionData, multi?: boolean) => {
+    if (field === 'bodyComfort' && multi) {
+      const arr = sessionData.bodyComfort;
+      if (arr.includes(value)) {
+        setSessionData({ ...sessionData, bodyComfort: arr.filter(v => v !== value) });
       } else {
-        alert("Styling failed. Please try again.");
+        setSessionData({ ...sessionData, bodyComfort: [...arr, value] });
       }
-    } catch (err) {
-      console.error("Styling error:", err);
-      alert("Something went wrong.");
+    } else {
+      setSessionData({ ...sessionData, [field]: value });
     }
-    setLoading(false);
   };
 
-  const currentStep = steps[step - 1];
-  const currentField = currentStep.field;
-  const currentValue = session[currentField];
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setUploadPreview(reader.result as string);
+        setShowModal(true);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const toggleTag = (tag: string) => {
+    const updated = itemDetails.tags.includes(tag)
+      ? itemDetails.tags.filter(t => t !== tag)
+      : [...itemDetails.tags, tag];
+    setItemDetails({ ...itemDetails, tags: updated });
+  };
+
+  const saveItem = () => {
+    if (!itemDetails.category || !itemDetails.color) {
+      alert("Please select category and color");
+      return;
+    }
+    setUploadedItem({
+      image: uploadPreview,
+      category: itemDetails.category,
+      color: itemDetails.color,
+      tags: itemDetails.tags
+    });
+    setShowModal(false);
+  };
+
+  const cancelModal = () => {
+    setShowModal(false);
+    setUploadPreview("");
+    setItemDetails({ category: "", color: "", tags: [] });
+  };
+
+  const canProceed = () => {
+    if (currentStep === 1) return !!sessionData.mood;
+    if (currentStep === 2) return !!sessionData.feeling;
+    if (currentStep === 3) return !!sessionData.occasion;
+    if (currentStep === 4) return sessionData.bodyComfort.length > 0;
+    if (currentStep === 5) {
+      if (!sessionData.source) return false;
+      const needsUpload = sessionData.source !== "nAia only";
+      if (needsUpload && !uploadedItem) return false;
+      return true;
+    }
+    return false;
+  };
+
+  const nextStep = () => {
+    if (canProceed() && currentStep < 5) {
+      setCurrentStep(currentStep + 1);
+    }
+  };
+
+  const prevStep = () => {
+    if (currentStep > 1) {
+      setCurrentStep(currentStep - 1);
+    }
+  };
+
+  const getSourceValue = () => {
+    if (sessionData.source === "nAia only") return "NAIA";
+    if (sessionData.source === "My closet only") return "CLOSET";
+    return "BOTH";
+  };
+
+  const needsUpload = sessionData.source && sessionData.source !== "nAia only";
+
+  const css = `:root{--cream:#f4f4f1;--warm:#e1dbd7;--burg:#3b0510;--deep:#221516;--accent:#8b2035;--muted:#7a6f6a;--ff-display:'Playfair Display',Georgia,serif;--ff-body:'Cormorant Garamond',Garamond,serif;--ff-mono:'Space Mono','Courier New',monospace}*{margin:0;padding:0;box-sizing:border-box}body{background:var(--cream);color:var(--deep);font-family:var(--ff-body);-webkit-font-smoothing:antialiased}body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:0.03;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:200px}.topbar{display:flex;justify-content:space-between;align-items:center;padding:20px 40px;border-bottom:1px solid rgba(59,5,16,.06)}.topbar-logo{font-family:var(--ff-display);font-size:22px;font-style:italic;letter-spacing:3px;color:var(--deep)}.topbar-close{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);text-decoration:none}.progress{padding:24px 40px 0;max-width:700px;margin:0 auto}.progress-dots{display:flex;gap:8px;justify-content:center;margin-bottom:8px}.progress-dot{width:10px;height:10px;border-radius:50%;background:var(--warm);transition:all .4s}.progress-dot.active{width:28px;border-radius:14px;background:var(--deep)}.progress-dot.done{background:var(--accent)}.progress-label{text-align:center;font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted)}.step{display:none;max-width:700px;margin:0 auto;padding:48px 40px 80px}.step.active{display:block;animation:fadeUp .5s ease}@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}.step-label{font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--accent);margin-bottom:12px}.step h2{font-family:var(--ff-display);font-size:clamp(28px,4vw,42px);font-weight:900;font-style:italic;color:var(--deep);letter-spacing:-1px;margin-bottom:32px;line-height:1.1}.pills{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:32px}.pill{padding:12px 22px;border:1px solid rgba(59,5,16,.12);font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--deep);cursor:pointer;transition:all .3s;background:transparent}.pill:hover{border-color:var(--deep)}.pill.selected{background:var(--deep);color:var(--cream)}.step-buttons{display:flex;gap:12px;margin-top:16px}.btn-back{padding:14px 32px;border:1px solid rgba(59,5,16,.1);background:transparent;font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--deep);cursor:pointer}.btn-next{padding:14px 40px;border:none;background:var(--deep);font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--cream);cursor:pointer}.btn-next:disabled{opacity:.3;cursor:not-allowed}.btn-next.generate{background:var(--burg);padding:14px 48px;letter-spacing:5px}.upload-box{margin:24px 0;padding:32px;border:2px dashed rgba(59,5,16,.2);text-align:center;cursor:pointer;transition:border-color .3s}.upload-box:hover{border-color:var(--deep)}.uploaded-preview{margin:24px 0;padding:20px;background:rgba(59,5,16,.02);text-align:center}.modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:10000;padding:20px}.modal-content{background:var(--cream);max-width:500px;width:100%;padding:32px;max-height:90vh;overflow-y:auto}.modal-section{margin-bottom:24px}`;
 
   return (
-    <div style={s.page}>
-      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Cormorant+Garamond:ital,wght@0,400;1,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-      
-      <div style={s.grain} />
-      
-      <div style={s.container}>
-        <div style={s.header}>
-          <div style={s.logo}>nAia</div>
-          <div style={s.headerTitle}>Style Me</div>
+    <div>
+      <style>{css}</style>
+      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+
+      <div className="topbar">
+        <div className="topbar-logo">nAia</div>
+        <a href="/" className="topbar-close">Exit Session</a>
+      </div>
+
+      <div className="progress">
+        <div className="progress-dots">
+          {[1,2,3,4,5].map(n => (
+            <div key={n} className={`progress-dot ${n < currentStep ? 'done' : ''} ${n === currentStep ? 'active' : ''}`} />
+          ))}
         </div>
+        <div className="progress-label">Step {currentStep} of 5</div>
+      </div>
 
-        <div style={s.progress}>
-          <div style={s.progressBar}>
-            <div style={{ ...s.progressFill, width: `${(step / steps.length) * 100}%` }} />
-          </div>
-          <div style={s.progressText}>Step {step} of {steps.length}</div>
+      <div className={`step ${currentStep === 1 ? 'active' : ''}`}>
+        <div className="step-label">Step 1 of 5</div>
+        <h2>How are you feeling right now?</h2>
+        <div className="pills">
+          {["Tired", "Anxious", "Calm", "Overwhelmed", "Confident", "Excited", "Low", "Happy"].map(m => (
+            <div key={m} className={`pill ${sessionData.mood === m ? 'selected' : ''}`} onClick={() => selectPill(m, 'mood')}>{m}</div>
+          ))}
         </div>
-
-        {preselectedProduct && (
-          <div style={s.productBanner}>
-            Styling: {preselectedProduct.title}
-          </div>
-        )}
-
-        <div style={s.questionSection}>
-          <div style={s.question}>{currentStep.question}</div>
+        <div className="step-buttons">
+          <button className="btn-next" onClick={nextStep} disabled={!canProceed()}>Continue</button>
         </div>
+      </div>
 
-        <div style={s.optionsGrid}>
-          {options[currentField]?.map(option => (
-            <div
-              key={option}
-              style={s.chip(
-                currentField === "bodyComfortToday" 
-                  ? currentValue.includes(option)
-                  : currentValue === option
-              )}
-              onClick={() => handleSelect(option)}
-            >
-              {option}
-            </div>
+      <div className={`step ${currentStep === 2 ? 'active' : ''}`}>
+        <div className="step-label">Step 2 of 5</div>
+        <h2>How do you want to feel?</h2>
+        <div className="pills">
+          {["Calm", "Confident", "Effortless", "Powerful", "Bold", "Polished"].map(f => (
+            <div key={f} className={`pill ${sessionData.feeling === f ? 'selected' : ''}`} onClick={() => selectPill(f, 'feeling')}>{f}</div>
+          ))}
+        </div>
+        <div className="step-buttons">
+          <button className="btn-back" onClick={prevStep}>Back</button>
+          <button className="btn-next" onClick={nextStep} disabled={!canProceed()}>Continue</button>
+        </div>
+      </div>
+
+      <div className={`step ${currentStep === 3 ? 'active' : ''}`}>
+        <div className="step-label">Step 3 of 5</div>
+        <h2>What are you dressing for?</h2>
+        <div className="pills">
+          {["Casual", "Work", "Date", "Event", "Party", "Travel"].map(o => (
+            <div key={o} className={`pill ${sessionData.occasion === o ? 'selected' : ''}`} onClick={() => selectPill(o, 'occasion')}>{o}</div>
+          ))}
+        </div>
+        <div className="step-buttons">
+          <button className="btn-back" onClick={prevStep}>Back</button>
+          <button className="btn-next" onClick={nextStep} disabled={!canProceed()}>Continue</button>
+        </div>
+      </div>
+
+      <div className={`step ${currentStep === 4 ? 'active' : ''}`}>
+        <div className="step-label">Step 4 of 5</div>
+        <h2>Any body comfort needs today?</h2>
+        <div className="pills">
+          {["Feeling bloated", "Want more coverage", "Want waist definition", "Want something relaxed", "Feeling great"].map(b => (
+            <div key={b} className={`pill ${sessionData.bodyComfort.includes(b) ? 'selected' : ''}`} onClick={() => selectPill(b, 'bodyComfort', true)}>{b}</div>
+          ))}
+        </div>
+        <div className="step-buttons">
+          <button className="btn-back" onClick={prevStep}>Back</button>
+          <button className="btn-next" onClick={nextStep} disabled={!canProceed()}>Continue</button>
+        </div>
+      </div>
+
+      <div className={`step ${currentStep === 5 ? 'active' : ''}`}>
+        <div className="step-label">Step 5 of 5</div>
+        <h2>What do you want to style from?</h2>
+        <div className="pills">
+          {["nAia only", "My closet only", "nAia + My closet"].map(s => (
+            <div key={s} className={`pill ${sessionData.source === s ? 'selected' : ''}`} onClick={() => selectPill(s, 'source')}>{s}</div>
           ))}
         </div>
 
-        <div style={s.nav}>
-          {step > 1 && (
-            <button style={s.backBtn} onClick={handleBack}>Back</button>
-          )}
-          <button 
-            style={s.nextBtn} 
-            onClick={handleNext}
-            disabled={loading}
-          >
-            {loading ? "Styling..." : step === steps.length ? "Get My Look" : "Next"}
-          </button>
-        </div>
+        {needsUpload && !uploadedItem && (
+          <div>
+            <input type="file" id="file-upload" accept="image/*" style={{ display: "none" }} onChange={handleFileSelect} />
+            <div className="upload-box" onClick={() => document.getElementById('file-upload')?.click()}>
+              <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "8px" }}>Upload from Closet</div>
+              <div style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "16px", fontStyle: "italic", color: "#7a6f6a" }}>Click to select an image</div>
+            </div>
+          </div>
+        )}
+
+        {needsUpload && uploadedItem && (
+          <div className="uploaded-preview">
+            <img src={uploadedItem.image} alt="Upload" style={{ maxWidth: "150px", maxHeight: "150px", objectFit: "contain", marginBottom: "12px" }} />
+            <div style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "16px", marginBottom: "8px" }}><strong>{uploadedItem.category}</strong> • {uploadedItem.color}</div>
+            {uploadedItem.tags.length > 0 && <div style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "14px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "12px" }}>{uploadedItem.tags.join(", ")}</div>}
+            <button onClick={() => setUploadedItem(null)} style={{ padding: "10px 20px", background: "transparent", border: "1px solid rgba(59,5,16,.12)", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", cursor: "pointer" }}>Remove</button>
+          </div>
+        )}
+
+        <Form method="post" className="step-buttons">
+          <input type="hidden" name="mood" value={sessionData.mood} />
+          <input type="hidden" name="feelings" value={sessionData.feeling} />
+          <input type="hidden" name="occasion" value={sessionData.occasion} />
+          <input type="hidden" name="source" value={getSourceValue()} />
+          <button type="button" className="btn-back" onClick={prevStep}>Back</button>
+          <button type="submit" className="btn-next generate" disabled={!canProceed()}>Get My Look</button>
+        </Form>
       </div>
+
+      {showModal && (
+        <div className="modal" onClick={cancelModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "28px", fontWeight: 900, marginBottom: "24px" }}>Tell us about this item</h2>
+            
+            {uploadPreview && <img src={uploadPreview} alt="Preview" style={{ maxWidth: "150px", maxHeight: "150px", objectFit: "contain", display: "block", margin: "0 auto 24px" }} />}
+
+            <div className="modal-section">
+              <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", marginBottom: "12px", color: "#8b2035" }}>Category *</div>
+              <div className="pills">
+                {categories.map(cat => (
+                  <div key={cat} onClick={() => setItemDetails({ ...itemDetails, category: cat })} className={`pill ${itemDetails.category === cat ? 'selected' : ''}`}>{cat}</div>
+                ))}
+              </div>
+            </div>
+
+            <div className="modal-section">
+              <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", marginBottom: "12px", color: "#8b2035" }}>Color *</div>
+              <div className="pills">
+                {colors.map(color => (
+                  <div key={color} onClick={() => setItemDetails({ ...itemDetails, color })} className={`pill ${itemDetails.color === color ? 'selected' : ''}`}>{color}</div>
+                ))}
+              </div>
+            </div>
+
+            <div className="modal-section">
+              <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", marginBottom: "12px", color: "#7a6f6a" }}>Tags (optional)</div>
+              <div className="pills">
+                {tagOptions.map(tag => (
+                  <div key={tag} onClick={() => toggleTag(tag)} className={`pill ${itemDetails.tags.includes(tag) ? 'selected' : ''}`}>{tag}</div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: "12px", marginTop: "32px" }}>
+              <button onClick={cancelModal} className="btn-back" style={{ flex: 1 }}>Cancel</button>
+              <button onClick={saveItem} className="btn-next" style={{ flex: 1 }}>Save Item</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
-const s = {
-  page: { minHeight: "100vh", background: "#f4f4f1", color: "#221516", fontFamily: '"Cormorant Garamond", serif' },
-  grain: { content: '', position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 9999, opacity: 0.03, backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")", backgroundSize: '200px' },
-  container: { maxWidth: "680px", margin: "0 auto", padding: "56px 32px 100px" },
-  header: { marginBottom: "48px", textAlign: "center" },
-  logo: { fontSize: "22px", fontStyle: "italic", fontWeight: 400, fontFamily: '"Playfair Display", serif', letterSpacing: "3px", marginBottom: "16px" },
-  headerTitle: { fontSize: "14px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8b2035", fontFamily: '"Space Mono", monospace' },
-  progress: { marginBottom: "56px" },
-  progressBar: { width: "100%", height: "2px", background: "#e1dbd7", marginBottom: "12px" },
-  progressFill: { height: "100%", background: "#3b0510", transition: "width 0.3s cubic-bezier(0.16, 1, 0.3, 1)" },
-  progressText: { fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#c8a96e", fontFamily: '"Space Mono", monospace', textAlign: "center" },
-  productBanner: { padding: "16px", background: "#3b0510", color: "#f4f4f1", textAlign: "center", marginBottom: "32px", fontSize: "14px", letterSpacing: "0.1em", fontStyle: "italic" },
-  questionSection: { marginBottom: "40px" },
-  question: { fontSize: "36px", lineHeight: 1.2, fontWeight: 400, fontStyle: "italic", fontFamily: '"Playfair Display", serif', letterSpacing: "-0.5px", textAlign: "center" },
-  optionsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "12px", marginBottom: "48px" },
-  chip: (active) => ({ padding: "14px 20px", background: active ? "#221516" : "transparent", color: active ? "#f4f4f1" : "#221516", border: `1px solid ${active ? "#221516" : "rgba(34,21,22,0.12)"}`, fontSize: "15px", letterSpacing: "0.03em", cursor: "pointer", transition: "all 0.3s cubic-bezier(0.16, 1, 0.3, 1)", fontStyle: "italic", textAlign: "center" }),
-  nav: { display: "flex", gap: "16px", justifyContent: "center" },
-  backBtn: { padding: "16px 40px", background: "transparent", color: "#221516", border: "1px solid rgba(34,21,22,0.2)", fontSize: "10px", letterSpacing: "0.25em", textTransform: "uppercase", cursor: "pointer", fontFamily: '"Space Mono", monospace' },
-  nextBtn: { padding: "16px 40px", background: "#3b0510", color: "#f4f4f1", border: "none", fontSize: "10px", letterSpacing: "0.25em", textTransform: "uppercase", cursor: "pointer", fontFamily: '"Space Mono", monospace' }
-};

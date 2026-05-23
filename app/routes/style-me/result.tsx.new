@@ -1,0 +1,11 @@
+import { useEffect, useState } from "react";
+import { Link, useLoaderData } from "react-router";
+import { useFetcher } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, redirect } from "react-router";
+import { prisma } from "../db.server";
+import { getSession, commitSession } from "../lib/session.server";
+import { callClaude } from "../lib/ai/claude.server";
+import { getCustomerId } from "../customer-auth.server";
+
+export async function loader({ request }: LoaderFunctionArgs) {

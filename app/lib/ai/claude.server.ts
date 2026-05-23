@@ -1,13 +1,6 @@
 // app/lib/ai/claude.server.ts
-// Using OpenAI instead of Claude
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!
-});
-
 interface Message {
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant";
   content: string;
 }
 
@@ -19,45 +12,52 @@ interface CallAIParams {
 }
 
 /**
- * Call OpenAI API with messages
+ * Call Claude API with messages
  */
 export async function callClaude({
   messages,
   system,
   maxTokens = 4096,
-  temperature = 0.7
+  temperature = 1
 }: CallAIParams): Promise<string> {
   try {
-    const allMessages: Message[] = [];
-    
-    if (system) {
-      allMessages.push({ role: "system", content: system });
-    }
-    
-    allMessages.push(...messages);
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: maxTokens,
-      temperature,
-      messages: allMessages
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY!,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: "claude-opus-4-7",
+        max_tokens: maxTokens,
+        system: system || undefined,
+        messages: messages
+      })
     });
 
-    return response.choices[0]?.message?.content || "";
+    const data = await response.json();
+    
+    if (!response.ok) {
+      console.error("Claude API Error:", data);
+      throw new Error(data.error?.message || "Claude API failed");
+    }
+
+    return data.content[0]?.text || "";
   } catch (error) {
-    console.error("OpenAI API error:", error);
+    console.error("Claude API error:", error);
     throw error;
   }
 }
 
 /**
- * Call OpenAI with JSON output parsing
+ * Call Claude with JSON output parsing
  */
 export async function callClaudeJSON<T>({
   messages,
   system,
   maxTokens = 4096,
-  temperature = 0.5
+  temperature = 1
 }: CallAIParams): Promise<T> {
   const enhancedSystem = system 
     ? `${system}\n\nIMPORTANT: Respond ONLY with valid JSON. No markdown formatting, no code blocks, no explanatory text.`
@@ -95,7 +95,7 @@ export async function callClaudeJSON<T>({
 }
 
 /**
- * Analyze an image with OpenAI Vision
+ * Analyze an image with Claude Vision (not yet implemented - use OpenAI for now)
  */
 export async function analyzeImage({
   imageUrl,
@@ -110,35 +110,9 @@ export async function analyzeImage({
   prompt: string;
   system?: string;
 }): Promise<string> {
-  if (!imageUrl && !imageBase64) {
-    throw new Error("Either imageUrl or imageBase64 must be provided");
-  }
-
-  const imageContent = imageUrl
-    ? { type: "image_url" as const, image_url: { url: imageUrl } }
-    : { type: "image_url" as const, image_url: { url: `data:${mediaType};base64,${imageBase64}` } };
-
-  const messages: any[] = [];
-  
-  if (system) {
-    messages.push({ role: "system", content: system });
-  }
-  
-  messages.push({
-    role: "user",
-    content: [
-      imageContent,
-      { type: "text", text: prompt }
-    ]
-  });
-
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    max_tokens: 2048,
-    messages
-  });
-
-  return response.choices[0]?.message?.content || "";
+  // For image analysis, we'd need to use Claude's vision API
+  // For now, return placeholder
+  throw new Error("Image analysis not yet implemented with Claude");
 }
 
 /**
@@ -154,23 +128,5 @@ export async function analyzeClosetItem(imageBase64: string): Promise<{
   occasions: string[];
   description: string;
 }> {
-  const prompt = `Analyze this clothing item and provide details in JSON format:
-
-{
-  "category": "TOPS|BOTTOMS|DRESSES|OUTERWEAR|SHOES|BAGS|ACCESSORIES|JEWELRY|OTHER",
-  "colors": ["array of hex color codes found in the item"],
-  "pattern": "solid|striped|floral|plaid|geometric|animal|abstract|other|null",
-  "material": "best guess of material (cotton, silk, denim, leather, etc.) or null",
-  "styleTags": ["casual", "formal", "bohemian", "minimalist", "edgy", etc.],
-  "seasons": ["spring", "summer", "fall", "winter"],
-  "occasions": ["everyday", "work", "datenight", "special", etc.],
-  "description": "Brief description of the item"
-}
-
-Respond ONLY with valid JSON.`;
-
-  return callClaudeJSON({
-    messages: [{ role: "user", content: prompt }],
-    system: "You are a fashion expert analyzing clothing items. Be accurate and detailed in your analysis. Always respond with valid JSON only."
-  });
+  throw new Error("Image analysis not yet implemented with Claude");
 }

@@ -1,0 +1,277 @@
+// app/routes/style-me/result.tsx - REDESIGNED WITH PROPER AESTHETICS
+import { Link, useLoaderData, useFetcher } from "react-router";
+import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
+import { useState, useEffect } from "react";
+import { getCustomerId } from "~/lib/auth.server";
+import { prisma } from "~/lib/prisma.server";
+import { getSession, commitSession } from "~/lib/session.server";
+import { callClaude } from "~/lib/ai/claude.server";
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  try {
+    const url = new URL(request.url);
+    const sessionId = url.searchParams.get("sessionId");
+
+    if (sessionId) {
+      const session = await prisma.stylingSession.findUnique({
+        where: { id: sessionId },
+        include: { suggestions: { include: { items: true } } },
+      });
+      if (session) {
+        return data({
+          isLoading: false,
+          sessionId: session.id,
+          mood: session.currentMood,
+          occasion: session.occasion,
+          suggestion: session.suggestions[0] || null,
+          error: null,
+        });
+      }
+    }
+
+    const cookieSession = await getSession(request.headers.get("Cookie"));
+    const mood = cookieSession.get("styleMeMood");
+    const feelings = cookieSession.get("styleMeFeelings") as string[] | undefined;
+    const occasion = cookieSession.get("styleMeOccasion");
+    const source = cookieSession.get("styleMeSource");
+
+    if (!mood || !feelings || !occasion || !source) {
+      return redirect("/style-me/mood");
+    }
+
+    const customerId = await getCustomerId(request);
+
+    let resolvedCustomerId = customerId;
+    if (!resolvedCustomerId) {
+      const guest = await prisma.customer.upsert({
+        where: { shopifyCustomerId: "guest" },
+        create: { shopifyCustomerId: "guest", email: "guest@naia.app" },
+        update: {},
+      });
+      resolvedCustomerId = guest.id;
+    }
+
+    const stylingSession = await prisma.stylingSession.create({
+      data: {
+        customerId: resolvedCustomerId,
+        currentMood: mood,
+        desiredFeeling: feelings?.[0] || null,
+        occasion,
+        styleFrom: source === "CLOSET" ? "CLOSET" : source === "NAIA" ? "NAIA" : "BOTH",
+      },
+    });
+
+    return data(
+      { isLoading: true, sessionId: stylingSession.id, mood, occasion, suggestion: null, error: null },
+      { headers: { "Set-Cookie": await commitSession(cookieSession) } }
+    );
+  } catch (err: any) {
+    console.error("Result loader error:", err);
+    return data({ isLoading: false, sessionId: null, mood: null, occasion: null, suggestion: null, error: err?.message || "Something went wrong" });
+  }
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  try {
+    const formData = await request.formData();
+    const intent = formData.get("intent") as string;
+    const sessionId = formData.get("sessionId") as string;
+    const suggestionId = formData.get("suggestionId") as string;
+    const customerId = await getCustomerId(request);
+
+    if (intent === "generate") {
+      const session = await prisma.stylingSession.findUnique({ where: { id: sessionId } });
+      if (!session) return data({ error: "Session not found" }, { status: 404 });
+
+      let aiResult: any = null;
+      try {
+        const aiResponse = await callClaude({
+          system: "You are nAia, a warm and confident AI personal stylist. Respond ONLY with valid JSON, no extra text.",
+          messages: [{
+            role: "user",
+            content: `You are styling for nAia, a womenswear brand. The customer is feeling "${session.currentMood}" and wants to feel "${session.desiredFeeling}" for "${session.occasion}".
+
+Here are the available nAia pieces to choose from:
+1. Sculptural Hybrid Coat - outerwear
+2. Art Blouse - top
+3. Art Panel Tailored Blazer - outerwear
+4. Textured Art Maxi Skirt - bottom
+5. Wrap Cropped Top - top
+6. Printed Wrap Kimono Jacket - outerwear
+7. Art Collar Shirt - top
+8. Leather Midi Dress - dress
+9. Asymmetrical Waist Pants - bottom
+10. Printed Straight Pants - bottom
+
+Create a complete outfit using 2-3 of these pieces. Return JSON with: outfitName, whyThisWorks, confidenceBoost, perfumeRec, hairstyleRec, makeupVibeRec, songRec, and items array where each item has: itemType (one of: TOP, BOTTOM, DRESS, OUTERWEAR, SHOES, BAG, ACCESSORY, JEWELRY), productTitle (must be exact name from the list above), stylingNotes, shopifyProductId (the numeric ID from this mapping: Sculptural Hybrid Coat=7822708867114, Art Blouse=7822708310058, Art Panel Tailored Blazer=7822708113450, Textured Art Maxi Skirt=7822708047914, Wrap Cropped Top=7822707949610, Printed Wrap Kimono Jacket=7822707589162, Art Collar Shirt=7822707392554, Leather Midi Dress=7822707130410, Asymmetrical Waist Pants=7822706475050, Printed Straight Pants=7822706016298), productImageUrl (from this mapping: Sculptural Hybrid Coat=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/b7af3725-7048-4ead-8d04-d6fb42556eac.png, Art Blouse=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32674461-cac7-4699-aff1-74c435289333.png, Art Panel Tailored Blazer=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/a7b908bb-3079-4f39-93b8-e1a89435249a.png, Textured Art Maxi Skirt=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/6992350d-5695-4f28-8674-7747dfd1e680.png, Wrap Cropped Top=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3614927b-4685-4df3-aeff-b3d5a950cbd2.png, Printed Wrap Kimono Jacket=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/77d61b97-37da-4e57-8297-aa5207b35d07.png, Art Collar Shirt=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32fe2afb-b8ef-46d2-ae2c-b1adc81a1b0f.png, Leather Midi Dress=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/8a855f15-e5e9-4ef5-a7db-a7253e83a542.png, Asymmetrical Waist Pants=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/7d5d1e05-796a-45d9-b74a-4ddb0c9da3cf.png, Printed Straight Pants=https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3b14fe8b-2c19-492e-82b1-44baaf3a3cc9.png).`,
+          }],
+          maxTokens: 1500,
+        });
+        const clean = aiResponse.replace(/```json|```/g, "").trim();
+        aiResult = JSON.parse(clean);
+      } catch (e) {
+        console.error("AI generation failed:", e);
+      }
+
+      const defaultItems = [
+        { itemType: "TOP", productTitle: "Silk Blouse", stylingNotes: "Tuck the front for a polished look" },
+        { itemType: "BOTTOM", productTitle: "High-Waisted Trousers", stylingNotes: "Pair with heels to elongate" },
+        { itemType: "SHOES", productTitle: "Pointed Toe Heels", stylingNotes: "Nude tones work with everything" },
+      ];
+
+      const items = (aiResult?.items || defaultItems).map((item: any) => ({
+        itemType: item.itemType || "TOP",
+        productTitle: item.productTitle || null,
+        stylingNotes: item.stylingNotes || null,
+        shopifyProductId: item.shopifyProductId || null,
+        productImageUrl: item.productImageUrl || null,
+      }));
+
+      const suggestion = await prisma.outfitSuggestion.create({
+        data: {
+          sessionId,
+          outfitName: aiResult?.outfitName || `${session.occasion} Look`,
+          whyThisWorks: aiResult?.whyThisWorks || "A beautiful outfit curated just for you.",
+          confidenceBoost: aiResult?.confidenceBoost || "You're going to look amazing!",
+          perfumeRec: aiResult?.perfumeRec || null,
+          hairstyleRec: aiResult?.hairstyleRec || null,
+          makeupVibeRec: aiResult?.makeupVibeRec || null,
+          songRec: aiResult?.songRec || null,
+          items: { create: items },
+        },
+        include: { items: true },
+      });
+
+      return data({ suggestion, error: null });
+    }
+
+    if (intent === "save") {
+      if (!customerId) return data({ error: "Must be logged in to save looks" }, { status: 401 });
+
+      const suggestion = await prisma.outfitSuggestion.findUnique({
+        where: { id: suggestionId },
+        include: { items: true },
+      });
+      if (!suggestion) return data({ error: "Suggestion not found" }, { status: 404 });
+
+      await prisma.savedLook.create({
+        data: {
+          customerId,
+          name: suggestion.outfitName,
+          fromSuggestionId: suggestion.id,
+          items: {
+            create: suggestion.items.map((item) => ({
+              itemType: item.itemType,
+              closetItemId: item.closetItemId || null,
+              shopifyProductId: item.shopifyProductId || null,
+            })),
+          },
+        },
+      });
+
+      return data({ saved: true, error: null });
+    }
+
+    return data({ error: "Invalid intent" }, { status: 400 });
+  } catch (err: any) {
+    console.error("Result action error:", err);
+    return data({ error: err?.message || "Something went wrong" }, { status: 500 });
+  }
+}
+
+const loadingMessages = ["Reading your vibe", "Finding the perfect pieces", "Adding the finishing touches", "Picking your confidence song", "Almost ready"];
+
+export default function StyleMeResult() {
+  const loaderData = useLoaderData<typeof loader>();
+  const fetcher = useFetcher<{ suggestion?: any; error?: string; saved?: boolean }>();
+  const [msgIndex, setMsgIndex] = useState(0);
+  const [isSaved, setIsSaved] = useState(false);
+
+  const isLoading = loaderData.isLoading && !fetcher.data?.suggestion;
+  const suggestion = fetcher.data?.suggestion || loaderData.suggestion;
+  const error = fetcher.data?.error || loaderData.error;
+
+  useEffect(() => {
+    if (loaderData.isLoading && loaderData.sessionId && fetcher.state === "idle" && !fetcher.data) {
+      fetcher.submit({ intent: "generate", sessionId: loaderData.sessionId }, { method: "post" });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isLoading) return;
+    const t = setInterval(() => setMsgIndex((i) => (i + 1) % loadingMessages.length), 2500);
+    return () => clearInterval(t);
+  }, [isLoading]);
+
+  useEffect(() => {
+    if (fetcher.data?.saved) setIsSaved(true);
+  }, [fetcher.data]);
+
+  if (isLoading) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#f4f4f1", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+        <div style={{ textAlign: "center", maxWidth: "700px", padding: "40px" }}>
+          <h2 style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "32px", fontWeight: 900, fontStyle: "italic", color: "#221516", marginBottom: "16px" }}>Creating your look</h2>
+          <p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "40px" }}>{loadingMessages[msgIndex]}</p>
+          <div style={{ width: "200px", height: "3px", background: "#e1dbd7", margin: "0 auto", overflow: "hidden", position: "relative" }}>
+            <div style={{ position: "absolute", left: "-60%", width: "60%", height: "100%", background: "#8b2035", animation: "loadSlide 1.5s ease infinite" }} />
+          </div>
+        </div>
+        <style>{`@keyframes loadSlide{0%{left:-60%}100%{left:100%}}`}</style>
+      </div>
+    );
+  }
+
+  if (error || !suggestion) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#f4f4f1", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px" }}>
+        <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+        <div style={{ textAlign: "center", maxWidth: "500px" }}>
+          <h1 style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "32px", fontWeight: 900, color: "#221516", marginBottom: "16px" }}>Something went wrong</h1>
+          <p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "32px" }}>{error || "Couldn't create your outfit. Let's try again"}</p>
+          <Link to="/style-me/mood" style={{ display: "inline-block", padding: "14px 32px", background: "#221516", color: "#f4f4f1", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none" }}>Start Over</Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
+      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+      <div style={{ content: '', position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 9999, opacity: 0.03, backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")", backgroundSize: '200px' }} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 40px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
+        <Link to="/style-me" style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", textDecoration: "none" }}>Back</Link>
+        <div style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "22px", fontStyle: "italic", letterSpacing: "3px", color: "#221516" }}>nAia</div>
+        <button onClick={() => fetcher.submit({ intent: "save", suggestionId: suggestion.id }, { method: "post" })} disabled={isSaved} style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: isSaved ? "#8b2035" : "#7a6f6a", background: "none", border: "none", cursor: "pointer" }}>{isSaved ? "Saved" : "Save"}</button>
+      </div>
+      <main style={{ maxWidth: "800px", margin: "0 auto", padding: "48px 40px 80px" }}>
+        <div style={{ marginBottom: "40px" }}>
+          <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "4px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>Your Look</div>
+          <h1 style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "clamp(28px,4vw,42px)", fontWeight: 900, color: "#221516", letterSpacing: "-1px", marginBottom: "8px" }}>{suggestion.outfitName}</h1>
+          {suggestion.confidenceBoost && <p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a" }}>"{suggestion.confidenceBoost}"</p>}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "16px", padding: "20px 0", borderTop: "1px solid rgba(59,5,16,0.06)", borderBottom: "1px solid rgba(59,5,16,0.06)", marginBottom: "40px" }}>
+          <div><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "4px" }}>Mood</div><div style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "20px", fontStyle: "italic", color: "#221516" }}>{loaderData.mood}</div></div>
+          <div><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "4px" }}>Occasion</div><div style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "20px", fontStyle: "italic", color: "#221516" }}>{loaderData.occasion}</div></div>
+          <div><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "4px" }}>Pieces</div><div style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "20px", fontStyle: "italic", color: "#221516" }}>{suggestion.items?.length || 0}</div></div>
+        </div>
+        <div style={{ marginBottom: "36px" }}>
+          <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "#8b2035", marginBottom: "16px", paddingBottom: "8px", borderBottom: "1px solid rgba(139,32,53,0.1)" }}>The Pieces</div>
+          {suggestion.items?.map((item: any) => (<div key={item.id} style={{ padding: "14px 0", borderLeft: "3px solid #8b2035", paddingLeft: "20px", marginBottom: "12px" }}>{item.productImageUrl && <img src={item.productImageUrl} alt={item.productTitle} style={{ width: "120px", height: "160px", objectFit: "contain", marginBottom: "12px" }} />}<div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "4px" }}>{item.itemType}</div><div style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "17px", lineHeight: 1.6, color: "#221516", marginBottom: "4px" }}>{item.productTitle}</div>{item.stylingNotes && <div style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>{item.stylingNotes}</div>}{item.shopifyProductId && <a href={`https://naiabynadine.com/products/${item.shopifyProductId}`} style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none", display: "inline-block", marginTop: "8px" }}>View in store →</a>}</div>))}
+        </div>
+        {suggestion.whyThisWorks && <div style={{ background: "rgba(59,5,16,0.02)", padding: "28px", marginBottom: "36px" }}><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>Why This Works</div><p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "16px", lineHeight: 1.8, color: "#7a6f6a" }}>{suggestion.whyThisWorks}</p></div>}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "16px", marginBottom: "36px" }}>
+          {suggestion.perfumeRec && <div style={{ background: "#f0e8e4", padding: "20px" }}><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "8px" }}>Scent</div><div style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "16px", color: "#221516" }}>{suggestion.perfumeRec}</div></div>}
+          {suggestion.hairstyleRec && <div style={{ background: "#f0e8e4", padding: "20px" }}><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "8px" }}>Hair</div><div style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "16px", color: "#221516" }}>{suggestion.hairstyleRec}</div></div>}
+          {suggestion.makeupVibeRec && <div style={{ background: "#f0e8e4", padding: "20px" }}><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "8px" }}>Makeup</div><div style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "16px", color: "#221516" }}>{suggestion.makeupVibeRec}</div></div>}
+        </div>
+        {suggestion.songRec && <div style={{ padding: "28px 0", borderTop: "1px solid rgba(59,5,16,0.06)", borderBottom: "1px solid rgba(59,5,16,0.06)", marginBottom: "36px" }}><div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>Your Confidence Song</div><div style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "22px", fontWeight: 400, fontStyle: "italic", lineHeight: 1.5, color: "#221516" }}>{suggestion.songRec}</div></div>}
+        <div style={{ display: "flex", gap: "12px", justifyContent: "center", marginTop: "40px", paddingTop: "28px", borderTop: "1px solid rgba(59,5,16,0.06)" }}>
+          <Link to="/style-me/mood" style={{ padding: "14px 32px", background: "transparent", color: "#221516", border: "1px solid rgba(59,5,16,0.12)", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none" }}>New Look</Link>
+          <a href="https://naiabynadine.com" style={{ padding: "14px 32px", background: "#221516", color: "#f4f4f1", border: "none", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none" }}>Shop nAia</a>
+        </div>
+      </main>
+    </div>
+  );
+}
