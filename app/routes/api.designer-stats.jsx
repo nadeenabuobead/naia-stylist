@@ -22,11 +22,7 @@ export async function loader({ request }) {
         customer: {
           select: {
             id: true,
-            onboardingProfile: {
-              select: {
-                stylePersonalities: true,
-              }
-            },
+            onboardingProfile: true,
           },
         },
       },
@@ -1101,6 +1097,88 @@ export async function loader({ request }) {
     const conversionStats = Object.values(productConversion).filter(p => p.recommended > 0).map(p => ({ ...p, clickRate: p.recommended > 0 ? (p.clicked / p.recommended * 100).toFixed(1) : 0, tryonRate: p.clicked > 0 ? (p.tryon / p.clicked * 100).toFixed(1) : 0 })).sort((a, b) => b.recommended - a.recommended).slice(0, 10);
 
 
+    
+    // ONBOARDING PROFILE INSIGHTS
+    const allProfiles = await prisma.onboardingProfile.findMany({
+      where: { completed: true }
+    });
+
+    // Style DNA Distribution
+    const styleDNADist = {};
+    allProfiles.forEach(p => {
+      (p.stylePersonalities || []).forEach(style => {
+        styleDNADist[style] = (styleDNADist[style] || 0) + 1;
+      });
+    });
+    const styleDNADistribution = Object.entries(styleDNADist)
+      .map(([style, count]) => ({ 
+        style: style.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '), 
+        count,
+        percentage: ((count / allProfiles.length) * 100).toFixed(1)
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    // Favorite Colors Distribution
+    const colorDist = {};
+    allProfiles.forEach(p => {
+      (p.favoriteColors || []).forEach(color => {
+        colorDist[color] = (colorDist[color] || 0) + 1;
+      });
+    });
+    const colorDistribution = Object.entries(colorDist)
+      .map(([color, count]) => ({ 
+        color: color.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '), 
+        count,
+        percentage: ((count / allProfiles.length) * 100).toFixed(1)
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    // Common Struggles
+    const struggleDist = {};
+    allProfiles.forEach(p => {
+      (p.styleStruggles || []).forEach(struggle => {
+        struggleDist[struggle] = (struggleDist[struggle] || 0) + 1;
+      });
+    });
+    const commonStruggles = Object.entries(struggleDist)
+      .map(([struggle, count]) => ({ 
+        struggle: struggle.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '), 
+        count,
+        percentage: ((count / allProfiles.length) * 100).toFixed(1)
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    // Lifestyle Distribution
+    const lifestyleDist = {};
+    allProfiles.forEach(p => {
+      (p.dressesFor || []).forEach(lifestyle => {
+        lifestyleDist[lifestyle] = (lifestyleDist[lifestyle] || 0) + 1;
+      });
+    });
+    const lifestyleDistribution = Object.entries(lifestyleDist)
+      .map(([lifestyle, count]) => ({ 
+        lifestyle: lifestyle.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '), 
+        count,
+        percentage: ((count / allProfiles.length) * 100).toFixed(1)
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    // Desired Feelings
+    const feelingDist = {};
+    allProfiles.forEach(p => {
+      if (p.desiredFeeling) {
+        feelingDist[p.desiredFeeling] = (feelingDist[p.desiredFeeling] || 0) + 1;
+      }
+    });
+    const desiredFeelings = Object.entries(feelingDist)
+      .map(([feeling, count]) => ({ 
+        feeling: feeling.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '), 
+        count,
+        percentage: ((count / allProfiles.length) * 100).toFixed(1)
+      }))
+      .sort((a, b) => b.count - a.count);
+
+
     return Response.json({
       totalUsers,
       totalLooks,
@@ -1124,6 +1202,15 @@ export async function loader({ request }) {
       productPairings,
       topObjections,
       conversionStats,
+      // NEW: Onboarding Insights
+      onboarding: {
+        totalProfiles: allProfiles.length,
+        styleDNADistribution,
+        colorDistribution,
+        commonStruggles,
+        lifestyleDistribution,
+        desiredFeelings,
+      },
     });
 
   } catch (error) {

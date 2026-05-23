@@ -50,6 +50,67 @@ export default function DesignerDashboard() {
         </div>
       </Section>
 
+      {/* ONBOARDING INSIGHTS - NEW */}
+      {data.onboarding && data.onboarding.totalProfiles > 0 && (
+        <>
+          <Section title="Customer Style DNA" desc={`Based on ${data.onboarding.totalProfiles} completed profiles`}>
+            <div style={s.grid3}>
+              {data.onboarding.styleDNADistribution.slice(0, 9).map(item => (
+                <div key={item.style} style={s.card}>
+                  <div style={s.cardLabel}>{item.style}</div>
+                  <div style={s.cardValue}>{item.count} users ({item.percentage}%)</div>
+                </div>
+              ))}
+            </div>
+          </Section>
+
+          <Section title="Favorite Colors" desc="What colors your customers gravitate toward">
+            <div style={s.grid3}>
+              {data.onboarding.colorDistribution.slice(0, 9).map(item => (
+                <div key={item.color} style={s.card}>
+                  <div style={s.cardLabel}>{item.color}</div>
+                  <div style={s.cardValue}>{item.count} users ({item.percentage}%)</div>
+                </div>
+              ))}
+            </div>
+          </Section>
+
+          <Section title="Common Styling Struggles" desc="What your customers need help with">
+            <div style={s.grid3}>
+              {data.onboarding.commonStruggles.slice(0, 6).map(item => (
+                <div key={item.struggle} style={s.card}>
+                  <div style={s.cardLabel}>{item.struggle}</div>
+                  <div style={s.cardValue}>{item.count} users ({item.percentage}%)</div>
+                </div>
+              ))}
+            </div>
+          </Section>
+
+          <Section title="Lifestyle Contexts" desc="How your customers dress in daily life">
+            <div style={s.grid3}>
+              {data.onboarding.lifestyleDistribution.slice(0, 9).map(item => (
+                <div key={item.lifestyle} style={s.card}>
+                  <div style={s.cardLabel}>{item.lifestyle}</div>
+                  <div style={s.cardValue}>{item.count} users ({item.percentage}%)</div>
+                </div>
+              ))}
+            </div>
+          </Section>
+
+          <Section title="Desired Feelings" desc="How your customers want to feel when dressed">
+            <div style={s.grid3}>
+              {data.onboarding.desiredFeelings.slice(0, 6).map(item => (
+                <div key={item.feeling} style={s.card}>
+                  <div style={s.cardLabel}>{item.feeling}</div>
+                  <div style={s.cardValue}>{item.count} users ({item.percentage}%)</div>
+                </div>
+              ))}
+            </div>
+          </Section>
+        </>
+      )}
+
+
       {/* 2. Top-Performing Pieces */}
       <Section title="Top-Performing Pieces" desc="What's working best">
         <p style={{ fontSize: "13px", color: "#999", fontStyle: "italic", marginBottom: "16px" }}>
