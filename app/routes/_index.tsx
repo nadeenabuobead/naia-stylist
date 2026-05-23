@@ -241,10 +241,6 @@ export default function Index() {
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "24px", marginBottom: "60px" }}>
-          <a href="https://naiabynadine.com/pages/wishlist" style={{ background: "#221516", color: "#f4f4f1", padding: "32px", minHeight: "180px", textDecoration: "none", display: "block" }}>
-            <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: "24px", fontWeight: 700, marginBottom: "8px" }}>Wishlist</h3>
-            <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#e1dbd7" }}>Saved pieces, tracked prices, ready to buy.</p>
-          </a>
         </div>
 
 

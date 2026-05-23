@@ -18,7 +18,10 @@ export default function DesignerDashboard() {
   if (loading) {
     return (
       <div style={s.container}>
-        <div style={s.loading}>Loading designer insights...</div>
+        <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+        <div style={s.innerContainer}>
+          <div style={s.loading}>Loading designer insights...</div>
+        </div>
       </div>
     );
   }
@@ -26,13 +29,18 @@ export default function DesignerDashboard() {
   if (!data) {
     return (
       <div style={s.container}>
-        <div style={s.error}>Unable to load dashboard data</div>
+        <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+        <div style={s.innerContainer}>
+          <div style={s.error}>Unable to load dashboard data</div>
+        </div>
       </div>
     );
   }
 
   return (
     <div style={s.container}>
+      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+      <div style={s.innerContainer}>
       {/* Header */}
       <div style={s.header}>
         <h1 style={s.h1}>nAia Designer Dashboard</h1>
@@ -358,6 +366,7 @@ export default function DesignerDashboard() {
           </div>
         )}
       </Section>
+      </div>
     </div>
   );
 }
@@ -694,68 +703,210 @@ function DesignActionCard({ action }) {
 }
 
 
+
 // Styles
 const s = {
-  container: { maxWidth: "1400px", margin: "0 auto", padding: "40px 20px", fontFamily: '"Cormorant Garamond", Georgia, serif', background: "#faf9f7", minHeight: "100vh" },
-  header: { marginBottom: "48px", borderBottom: "1px solid #e0e0e0", paddingBottom: "24px", background: "white", padding: "32px", borderRadius: "4px" },
-  h1: { fontSize: "36px", fontWeight: 400, margin: "0 0 8px", color: "#1a1816" },
-  subtitle: { fontSize: "16px", color: "#8a7f75", margin: 0 },
-  h2: { fontSize: "24px", fontWeight: 500, margin: "0 0 16px", color: "#1a1816" },
-  section: { marginBottom: "56px", background: "white", padding: "32px", borderRadius: "4px", border: "1px solid #e8e4df" },
-  sectionDesc: { fontSize: "14px", color: "#8a7f75", margin: "0 0 24px", fontStyle: "italic" },
-  statsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "20px" },
-  statCard: { padding: "24px", background: "#faf9f7", borderRadius: "4px", border: "1px solid #e8e4df" },
-  statValue: { fontSize: "32px", fontWeight: 500, color: "#1a1816", marginBottom: "8px" },
-  statLabel: { fontSize: "13px", color: "#8a7f75", textTransform: "uppercase", letterSpacing: "0.1em" },
-  pieceGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "20px" },
-  pieceCard: { padding: "20px", background: "#fafafa", border: "1px solid #e8e4df", borderRadius: "4px" },
-  pieceName: { fontSize: "18px", fontWeight: 500, marginBottom: "4px", color: "#1a1816" },
-  pieceCategory: { fontSize: "12px", color: "#8a7f75", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "12px" },
-  pieceStats: { fontSize: "14px", color: "#4a4540", display: "flex", flexDirection: "column", gap: "8px" },
-  muted: { color: "#8a7f75", fontSize: "13px" },
-  helpedFeel: { fontStyle: "italic", color: "#2a9d8f" },
-  occasions: { fontSize: "13px" },
-  dna: { fontSize: "13px", color: "#6a4c93" },
-  mixedReason: { fontSize: "14px", fontStyle: "italic", color: "#f4a261", marginBottom: "12px" },
-  friction: { color: "#f4a261", fontSize: "13px" },
-  weakSignals: { fontSize: "14px", color: "#c5553a", marginBottom: "12px" },
-  label: { fontSize: "12px", color: "#8a7f75", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "6px", marginTop: "8px" },
+  container: { 
+    background: "#f4f4f1", 
+    minHeight: "100vh",
+    padding: "60px 0"
+  },
+  innerContainer: {
+    maxWidth: "1400px", 
+    margin: "0 auto", 
+    padding: "0 40px"
+  },
+  header: { 
+    marginBottom: "60px", 
+    paddingBottom: "32px",
+    borderBottom: "1px solid rgba(59,5,16,0.1)"
+  },
+  h1: { 
+    fontFamily: "'Playfair Display', serif", 
+    fontSize: "clamp(48px, 6vw, 72px)", 
+    fontWeight: 900, 
+    lineHeight: 1,
+    margin: "0 0 12px", 
+    color: "#221516" 
+  },
+  subtitle: { 
+    fontFamily: "'Cormorant Garamond', serif", 
+    fontSize: "20px", 
+    fontStyle: "italic",
+    color: "#7a6f6a", 
+    margin: 0 
+  },
+  h2: { 
+    fontFamily: "'Playfair Display', serif", 
+    fontSize: "28px", 
+    fontWeight: 700, 
+    margin: "0 0 8px", 
+    color: "#221516" 
+  },
+  section: { 
+    marginBottom: "48px", 
+    background: "rgba(255,255,255,0.6)", 
+    padding: "40px", 
+    border: "1px solid rgba(59,5,16,0.06)",
+    backdropFilter: "blur(10px)"
+  },
+  sectionDesc: { 
+    fontFamily: "'Cormorant Garamond', serif", 
+    fontSize: "16px", 
+    color: "#7a6f6a", 
+    margin: "0 0 32px", 
+    fontStyle: "italic" 
+  },
+  statsGrid: { 
+    display: "grid", 
+    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", 
+    gap: "20px" 
+  },
+  statCard: { 
+    padding: "24px", 
+    background: "rgba(255,255,255,0.8)", 
+    border: "1px solid rgba(59,5,16,0.08)" 
+  },
+  statValue: { 
+    fontFamily: "'Playfair Display', serif", 
+    fontSize: "36px", 
+    fontWeight: 700, 
+    color: "#8b2035", 
+    marginBottom: "8px" 
+  },
+  statLabel: { 
+    fontFamily: "'Space Mono', monospace", 
+    fontSize: "9px", 
+    color: "#7a6f6a", 
+    textTransform: "uppercase", 
+    letterSpacing: "2px" 
+  },
+  grid3: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+    gap: "20px"
+  },
+  card: {
+    padding: "20px",
+    background: "rgba(255,255,255,0.8)",
+    border: "1px solid rgba(59,5,16,0.06)"
+  },
+  cardLabel: {
+    fontFamily: "'Cormorant Garamond', serif",
+    fontSize: "18px",
+    fontWeight: 600,
+    color: "#221516",
+    marginBottom: "8px"
+  },
+  cardValue: {
+    fontFamily: "'Space Mono', monospace",
+    fontSize: "11px",
+    letterSpacing: "1px",
+    color: "#7a6f6a"
+  },
+  pieceGrid: { 
+    display: "grid", 
+    gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", 
+    gap: "20px" 
+  },
+  pieceCard: { 
+    padding: "24px", 
+    background: "rgba(255,255,255,0.8)", 
+    border: "1px solid rgba(59,5,16,0.06)" 
+  },
+  pieceName: { 
+    fontFamily: "'Playfair Display', serif", 
+    fontSize: "20px", 
+    fontWeight: 600, 
+    marginBottom: "8px", 
+    color: "#221516" 
+  },
+  pieceCategory: { 
+    fontFamily: "'Space Mono', monospace", 
+    fontSize: "9px", 
+    color: "#7a6f6a", 
+    textTransform: "uppercase", 
+    letterSpacing: "2px", 
+    marginBottom: "16px" 
+  },
+  pieceStats: { 
+    fontFamily: "'Cormorant Garamond', serif", 
+    fontSize: "15px", 
+    color: "#221516", 
+    lineHeight: 1.6 
+  },
+  muted: { 
+    color: "#7a6f6a", 
+    fontSize: "14px",
+    fontFamily: "'Cormorant Garamond', serif",
+    fontStyle: "italic"
+  },
+  helpedFeel: { 
+    fontStyle: "italic", 
+    color: "#8b2035",
+    fontFamily: "'Cormorant Garamond', serif"
+  },
+  occasions: { fontSize: "14px", fontFamily: "'Cormorant Garamond', serif" },
+  dna: { fontSize: "14px", color: "#8b2035", fontFamily: "'Cormorant Garamond', serif", fontStyle: "italic" },
+  mixedReason: { 
+    fontSize: "15px", 
+    fontStyle: "italic", 
+    color: "#8b2035", 
+    marginBottom: "12px",
+    fontFamily: "'Cormorant Garamond', serif"
+  },
+  friction: { color: "#8b2035", fontSize: "14px", fontFamily: "'Cormorant Garamond', serif" },
+  weakSignals: { 
+    fontSize: "15px", 
+    color: "#8b2035", 
+    marginBottom: "12px",
+    fontFamily: "'Cormorant Garamond', serif"
+  },
+  label: { 
+    fontFamily: "'Space Mono', monospace", 
+    fontSize: "9px", 
+    color: "#7a6f6a", 
+    textTransform: "uppercase", 
+    letterSpacing: "2px", 
+    marginBottom: "8px", 
+    marginTop: "12px" 
+  },
   rejections: { marginTop: "12px" },
-  rejection: { fontSize: "13px", color: "#c5553a", marginLeft: "8px" },
-  early: { fontSize: "13px", color: "#8a7f75", fontStyle: "italic", marginBottom: "12px" },
-  feedbackGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "16px" },
-  feedbackCard: { padding: "16px", background: "#fafafa", border: "1px solid #e8e4df", borderRadius: "4px" },
-  tagName: { fontSize: "16px", fontWeight: 500, marginBottom: "4px", color: "#1a1816" },
-  tagCount: { fontSize: "13px", color: "#8a7f75", marginBottom: "12px" },
-  linkedPieces: { marginTop: "8px" },
-  linkedPiece: { fontSize: "13px", marginLeft: "8px", color: "#4a4540" },
+  rejection: { fontSize: "14px", color: "#8b2035", marginLeft: "8px", fontFamily: "'Cormorant Garamond', serif" },
+  early: { fontSize: "14px", color: "#7a6f6a", fontStyle: "italic", marginBottom: "12px", fontFamily: "'Cormorant Garamond', serif" },
+  feedbackGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "20px" },
+  feedbackCard: { padding: "20px", background: "rgba(255,255,255,0.8)", border: "1px solid rgba(59,5,16,0.06)" },
+  tagName: { fontFamily: "'Playfair Display', serif", fontSize: "18px", fontWeight: 600, marginBottom: "8px", color: "#221516" },
+  tagCount: { fontFamily: "'Space Mono', monospace", fontSize: "11px", color: "#7a6f6a", marginBottom: "12px" },
+  linkedPieces: { marginTop: "12px" },
+  linkedPiece: { fontSize: "14px", marginLeft: "8px", color: "#221516", fontFamily: "'Cormorant Garamond', serif" },
   dnaGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: "20px" },
-  dnaCard: { padding: "20px", background: "#fafafa", border: "1px solid #e8e4df", borderRadius: "4px" },
-  dnaName: { fontSize: "16px", fontWeight: 500, marginBottom: "12px", color: "#1a1816" },
-  dnaBar: { height: "8px", background: "#e8e4df", borderRadius: "4px", overflow: "hidden", marginBottom: "8px" },
-  dnaFill: { height: "100%", background: "#6a4c93" },
-  dnaPercent: { fontSize: "14px", color: "#8a7f75" },
-  dnaList: { display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "8px" },
-  dnaBadge: { padding: "4px 12px", background: "#6a4c93", color: "white", borderRadius: "12px", fontSize: "13px" },
+  dnaCard: { padding: "24px", background: "rgba(255,255,255,0.8)", border: "1px solid rgba(59,5,16,0.06)" },
+  dnaName: { fontFamily: "'Playfair Display', serif", fontSize: "18px", fontWeight: 600, marginBottom: "16px", color: "#221516" },
+  dnaBar: { height: "8px", background: "rgba(59,5,16,0.1)", borderRadius: "4px", overflow: "hidden", marginBottom: "8px" },
+  dnaFill: { height: "100%", background: "#8b2035" },
+  dnaPercent: { fontFamily: "'Space Mono', monospace", fontSize: "11px", color: "#7a6f6a" },
+  dnaList: { display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "12px" },
+  dnaBadge: { padding: "6px 12px", background: "#8b2035", color: "#f4f4f1", borderRadius: "20px", fontSize: "12px", fontFamily: "'Space Mono', monospace" },
   bodyGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "20px" },
-  bodyCard: { padding: "20px", background: "#fafafa", border: "1px solid #e8e4df", borderRadius: "4px" },
-  bodyName: { fontSize: "16px", fontWeight: 500, marginBottom: "4px", color: "#1a1816" },
-  bodyCount: { fontSize: "13px", color: "#8a7f75", marginBottom: "12px" },
-  bodyPieces: { marginTop: "12px", fontSize: "13px" },
-  occasionGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "16px" },
-  needCard: { padding: "16px", background: "#fafafa", border: "1px solid #e8e4df", borderRadius: "4px" },
-  needName: { fontSize: "16px", fontWeight: 500, marginBottom: "4px", color: "#1a1816" },
-  needCount: { fontSize: "13px", color: "#8a7f75" },
-  emotionList: { marginTop: "8px" },
-  emotion: { fontSize: "14px", marginBottom: "4px", color: "#2a9d8f" },
-  startingStates: { marginTop: "12px", fontSize: "13px" },
-  occasionCard: { padding: "16px", background: "#fafafa", border: "1px solid #e8e4df", borderRadius: "4px" },
-  occasionName: { fontSize: "16px", fontWeight: 500, marginBottom: "8px", color: "#1a1816" },
-  occasionStats: { fontSize: "13px", color: "#4a4540", display: "flex", gap: "12px" },
+  bodyCard: { padding: "24px", background: "rgba(255,255,255,0.8)", border: "1px solid rgba(59,5,16,0.06)" },
+  bodyName: { fontFamily: "'Playfair Display', serif", fontSize: "18px", fontWeight: 600, marginBottom: "8px", color: "#221516" },
+  bodyCount: { fontFamily: "'Space Mono', monospace", fontSize: "11px", color: "#7a6f6a", marginBottom: "12px" },
+  bodyPieces: { marginTop: "12px", fontSize: "14px", fontFamily: "'Cormorant Garamond', serif" },
+  occasionGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "20px" },
+  needCard: { padding: "20px", background: "rgba(255,255,255,0.8)", border: "1px solid rgba(59,5,16,0.06)" },
+  needName: { fontFamily: "'Cormorant Garamond', serif", fontSize: "16px", fontWeight: 600, marginBottom: "8px", color: "#221516" },
+  needCount: { fontFamily: "'Space Mono', monospace", fontSize: "11px", color: "#7a6f6a" },
+  emotionList: { marginTop: "12px" },
+  emotion: { fontSize: "15px", marginBottom: "6px", color: "#8b2035", fontFamily: "'Cormorant Garamond', serif", fontStyle: "italic" },
+  startingStates: { marginTop: "12px", fontSize: "14px" },
+  occasionCard: { padding: "20px", background: "rgba(255,255,255,0.8)", border: "1px solid rgba(59,5,16,0.06)" },
+  occasionName: { fontFamily: "'Playfair Display', serif", fontSize: "18px", fontWeight: 600, marginBottom: "12px", color: "#221516" },
+  occasionStats: { fontFamily: "'Space Mono', monospace", fontSize: "11px", color: "#7a6f6a", display: "flex", gap: "16px" },
   quotesGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))", gap: "20px" },
-  quoteCard: { padding: "20px", background: "#fafafa", border: "1px solid #e8e4df", borderRadius: "4px", borderLeft: "3px solid #2a9d8f" },
-  quoteText: { fontSize: "15px", fontStyle: "italic", color: "#1a1816", marginBottom: "8px", lineHeight: 1.6 },
-  quotePiece: { fontSize: "13px", color: "#8a7f75" },
-  loading: { textAlign: "center", padding: "100px 20px", fontSize: "18px", color: "#8a7f75", fontStyle: "italic" },
-  error: { textAlign: "center", padding: "100px 20px", fontSize: "18px", color: "#c5553a" },
+  quoteCard: { padding: "24px", background: "rgba(255,255,255,0.8)", border: "1px solid rgba(59,5,16,0.06)", borderLeft: "3px solid #8b2035" },
+  quoteText: { fontFamily: "'Cormorant Garamond', serif", fontSize: "16px", fontStyle: "italic", color: "#221516", marginBottom: "12px", lineHeight: 1.7 },
+  quotePiece: { fontFamily: "'Space Mono', monospace", fontSize: "10px", color: "#7a6f6a", letterSpacing: "1px" },
+  loading: { textAlign: "center", padding: "100px 20px", fontSize: "20px", color: "#7a6f6a", fontStyle: "italic", fontFamily: "'Cormorant Garamond', serif" },
+  error: { textAlign: "center", padding: "100px 20px", fontSize: "20px", color: "#8b2035", fontFamily: "'Cormorant Garamond', serif" },
 };
