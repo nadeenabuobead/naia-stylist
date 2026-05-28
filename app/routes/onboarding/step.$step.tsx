@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Form, Link, useLoaderData, useParams } from "react-router";
+import { Form, Link, useLoaderData } from "react-router";
 import { redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
 import { getSession, commitSession } from "~/lib/session.server";
 import {
@@ -11,43 +11,24 @@ import {
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const step = parseInt(params.step || "1", 10);
   const totalSteps = getTotalSteps();
-
-  if (isNaN(step) || step < 1 || step > totalSteps) {
-    return redirect("/onboarding/step/1");
-  }
-
+  if (isNaN(step) || step < 1 || step > totalSteps) return redirect("/onboarding/step/1");
   const question = getQuestionByStep(step);
-  if (!question) {
-    return redirect("/onboarding/step/1");
-  }
-
+  if (!question) return redirect("/onboarding/step/1");
   const session = await getSession(request.headers.get("Cookie"));
   const answers = (session.get("onboardingAnswers") || {}) as OnboardingAnswers;
-
-  return {
-    step,
-    totalSteps,
-    question,
-    previousAnswer: answers[question.id as keyof OnboardingAnswers],
-  };
+  return { step, totalSteps, question, previousAnswer: answers[question.id as keyof OnboardingAnswers] };
 }
 
 export async function action({ params, request }: ActionFunctionArgs) {
   const step = parseInt(params.step || "1", 10);
   const totalSteps = getTotalSteps();
   const question = getQuestionByStep(step);
-
-  if (!question) {
-    return redirect("/onboarding/step/1");
-  }
-
+  if (!question) return redirect("/onboarding/step/1");
   const formData = await request.formData();
   const answer = formData.get("answer") as string;
   const direction = formData.get("direction") as string;
-
   const session = await getSession(request.headers.get("Cookie"));
   const answers = (session.get("onboardingAnswers") || {}) as OnboardingAnswers;
-
   if (answer) {
     if (question.type === "multi" || question.type === "color") {
       answers[question.id as keyof OnboardingAnswers] = answer.split(",").filter(Boolean) as any;
@@ -57,24 +38,49 @@ export async function action({ params, request }: ActionFunctionArgs) {
       answers[question.id as keyof OnboardingAnswers] = answer as any;
     }
   }
-
   session.set("onboardingAnswers", answers);
-
   let nextUrl: string;
-  if (direction === "back" && step > 1) {
-    nextUrl = `/onboarding/step/${step - 1}`;
-  } else if (step >= totalSteps) {
-    nextUrl = "/onboarding/complete";
-  } else {
-    nextUrl = `/onboarding/step/${step + 1}`;
-  }
-
-  return redirect(nextUrl, {
-    headers: {
-      "Set-Cookie": await commitSession(session),
-    },
-  });
+  if (direction === "back" && step > 1) nextUrl = `/onboarding/step/${step - 1}`;
+  else if (step >= totalSteps) nextUrl = "/onboarding/complete";
+  else nextUrl = `/onboarding/step/${step + 1}`;
+  return redirect(nextUrl, { headers: { "Set-Cookie": await commitSession(session) } });
 }
+
+const css = `
+  :root{--cream:#f4f4f1;--warm:#e1dbd7;--burg:#3b0510;--deep:#221516;--accent:#8b2035;--muted:#7a6f6a;--ff-display:'Playfair Display',Georgia,serif;--ff-body:'Cormorant Garamond',Garamond,serif;--ff-mono:'Space Mono','Courier New',monospace}
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--cream);color:var(--deep);font-family:var(--ff-body);-webkit-font-smoothing:antialiased}
+  .ob-topbar{display:flex;justify-content:space-between;align-items:center;padding:20px 40px;border-bottom:1px solid rgba(59,5,16,.06)}
+  .ob-topbar-logo{font-family:var(--ff-display);font-size:22px;font-style:italic;letter-spacing:3px;color:var(--deep)}
+  .ob-topbar-close{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);text-decoration:none;background:none;border:none;cursor:pointer}
+  .ob-progress{padding:24px 40px 0;max-width:700px;margin:0 auto}
+  .ob-progress-dots{display:flex;gap:8px;justify-content:center;margin-bottom:8px}
+  .ob-progress-dot{width:10px;height:10px;border-radius:50%;background:var(--warm);transition:all .4s}
+  .ob-progress-dot.active{width:28px;border-radius:14px;background:var(--deep)}
+  .ob-progress-dot.done{background:var(--accent)}
+  .ob-progress-label{text-align:center;font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted)}
+  .ob-main{max-width:700px;margin:0 auto;padding:48px 40px 80px}
+  .ob-step-label{font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--accent);margin-bottom:12px}
+  .ob-headline{font-family:var(--ff-display);font-size:clamp(28px,4vw,42px);font-weight:900;font-style:italic;color:var(--deep);letter-spacing:-1px;margin-bottom:8px;line-height:1.1}
+  .ob-subtitle{font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:32px}
+  .ob-pills{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:32px}
+  .ob-pill{padding:12px 22px;border:1px solid rgba(59,5,16,.12);font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--deep);cursor:pointer;transition:all .3s;background:transparent}
+  .ob-pill:hover{border-color:var(--deep)}
+  .ob-pill.selected{background:var(--deep);color:var(--cream)}
+  .ob-pill:disabled{opacity:.35;cursor:not-allowed}
+  .ob-color-grid{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:32px}
+  .ob-color-swatch{padding:12px 16px;border:1px solid rgba(59,5,16,.12);font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--deep);cursor:pointer;transition:all .3s;background:transparent;display:flex;align-items:center;gap:10px}
+  .ob-color-swatch:hover{border-color:var(--deep)}
+  .ob-color-swatch.selected{background:var(--deep);color:var(--cream)}
+  .ob-color-dot{width:20px;height:20px;border:1px solid rgba(0,0,0,0.15);flex-shrink:0}
+  .ob-textarea{width:100%;min-height:150px;padding:20px;border:1px solid rgba(59,5,16,.12);font-size:18px;font-family:var(--ff-body);font-style:italic;background:transparent;resize:vertical;color:var(--deep);outline:none}
+  .ob-textarea:focus{border-color:var(--deep)}
+  .ob-charcount{font-family:var(--ff-mono);font-size:9px;color:var(--muted);text-align:right;margin-top:6px;margin-bottom:32px}
+  .ob-buttons{display:flex;gap:12px;margin-top:16px}
+  .ob-btn-continue{padding:14px 40px;border:none;background:var(--deep);font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--cream);cursor:pointer}
+  .ob-btn-continue:disabled{opacity:.3;cursor:not-allowed}
+  .ob-btn-skip{padding:14px 32px;border:1px solid rgba(59,5,16,.1);background:transparent;font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--deep);cursor:pointer}
+`;
 
 export default function OnboardingStep() {
   const { step, totalSteps, question, previousAnswer } = useLoaderData<typeof loader>();
@@ -89,275 +95,158 @@ export default function OnboardingStep() {
     typeof previousAnswer === "string" ? previousAnswer : ""
   );
   const [scaleValue, setScaleValue] = useState<number>(
-    typeof previousAnswer === "number" ? previousAnswer : question.min || 5
+    typeof previousAnswer === "number" ? previousAnswer : 5
   );
 
   useEffect(() => {
-    if (typeof previousAnswer === "string") {
-      setSingleValue(previousAnswer);
-      setTextValue(previousAnswer);
-    } else if (Array.isArray(previousAnswer)) {
-      setMultiValue(previousAnswer);
-    } else if (typeof previousAnswer === "number") {
-      setScaleValue(previousAnswer);
-    } else {
-      setSingleValue(null);
-      setMultiValue([]);
-      setTextValue("");
-      setScaleValue(question.min || 5);
-    }
+    if (typeof previousAnswer === "string") { setSingleValue(previousAnswer); setTextValue(previousAnswer); }
+    else if (Array.isArray(previousAnswer)) setMultiValue(previousAnswer);
+    else if (typeof previousAnswer === "number") setScaleValue(previousAnswer);
+    else { setSingleValue(null); setMultiValue([]); setTextValue(""); setScaleValue(5); }
   }, [question.id, previousAnswer]);
 
   const getCurrentAnswer = (): string => {
-    switch (question.type) {
-      case "single":
-        return singleValue || "";
-      case "multi":
-      case "color":
-        return multiValue.join(",");
-      case "text":
-        return textValue;
-      case "scale":
-        return scaleValue.toString();
-      default:
-        return "";
-    }
+    if (question.type === "single") return singleValue || "";
+    if (question.type === "multi" || question.type === "color") return multiValue.join(",");
+    if (question.type === "text") return textValue;
+    if (question.type === "scale") return scaleValue.toString();
+    return "";
   };
 
   const canProceed = (): boolean => {
-    switch (question.type) {
-      case "single":
-        return !!singleValue;
-      case "multi":
-      case "color":
-        return multiValue.length > 0;
-      case "text":
-        return true;
-      case "scale":
-        return true;
-      default:
-        return true;
-    }
+    if (question.type === "single") return !!singleValue;
+    if (question.type === "multi" || question.type === "color") return multiValue.length > 0;
+    return true;
   };
 
   const toggleMulti = (id: string) => {
     setMultiValue(prev => {
-      if (prev.includes(id)) {
-        return prev.filter(v => v !== id);
-      } else if (!question.maxSelections || prev.length < question.maxSelections) {
-        return [...prev, id];
-      }
+      if (prev.includes(id)) return prev.filter(v => v !== id);
+      if (!question.maxSelections || prev.length < question.maxSelections) return [...prev, id];
       return prev;
     });
   };
 
+  const totalDots = Math.min(totalSteps, 10);
+
   return (
-    <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
-      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-      
-      {/* Progress Bar */}
-      <div style={{ background: "rgba(255,255,255,0.8)", padding: "24px 40px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-        <div style={{ maxWidth: "800px", margin: "0 auto" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-            {step > 1 ? (
-              <Form method="post" style={{ margin: 0 }}>
-                <input type="hidden" name="answer" value={getCurrentAnswer()} />
-                <input type="hidden" name="direction" value="back" />
-                <button type="submit" style={{ background: "none", border: "none", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", cursor: "pointer" }}>
-                  ← BACK
-                </button>
-              </Form>
-            ) : (
-              <Link to="/" style={{ fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", textDecoration: "none" }}>
-                ← EXIT
-              </Link>
-            )}
-            <span style={{ fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a" }}>
-              STEP {step} OF {totalSteps}
-            </span>
-          </div>
-          <div style={{ height: "4px", background: "rgba(59,5,16,0.1)", borderRadius: "2px", overflow: "hidden" }}>
-            <div style={{ height: "100%", background: "#8b2035", width: `${(step / totalSteps) * 100}%`, transition: "width 0.3s" }} />
-          </div>
-        </div>
+    <div>
+      <style>{css}</style>
+      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+
+      <div className="ob-topbar">
+        <div className="ob-topbar-logo">nAia</div>
+        <Link to="/" className="ob-topbar-close">Exit Session</Link>
       </div>
 
-      {/* Main Content */}
-      <main style={{ maxWidth: "800px", margin: "0 auto", padding: "60px 40px" }}>
+      <div className="ob-progress">
+        <div className="ob-progress-dots">
+          {Array.from({ length: totalDots }).map((_, i) => {
+            const n = i + 1;
+            return (
+              <div key={n} className={`ob-progress-dot${n < step ? " done" : ""}${n === step ? " active" : ""}`} />
+            );
+          })}
+        </div>
+        <div className="ob-progress-label">Step {step} of {totalSteps}</div>
+      </div>
+
+      <main className="ob-main">
         <Form method="post">
           <input type="hidden" name="answer" value={getCurrentAnswer()} />
 
-          {/* Question */}
-          <div style={{ marginBottom: "40px" }}>
-            <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: "clamp(32px,5vw,48px)", fontWeight: 900, lineHeight: 1.2, marginBottom: "12px", color: "#221516" }}>
-              {question.title}
-            </h1>
-            {question.subtitle && (
-              <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "20px", fontStyle: "italic", color: "#7a6f6a" }}>
-                {question.subtitle}
-              </p>
-            )}
-          </div>
+          <div className="ob-step-label">Step {step} of {totalSteps}</div>
+          <h2 className="ob-headline">{question.title}</h2>
+          {question.subtitle && (
+            <p className="ob-subtitle">{question.subtitle}</p>
+          )}
 
-          {/* Single Select */}
           {question.type === "single" && question.options && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "16px", marginBottom: "40px" }}>
+            <div className="ob-pills">
               {question.options.map(opt => (
                 <button
                   key={opt.id}
                   type="button"
                   onClick={() => setSingleValue(opt.id)}
-                  style={{
-                    padding: "20px",
-                    background: singleValue === opt.id ? "rgba(139,32,53,0.08)" : "rgba(255,255,255,0.7)",
-                    border: singleValue === opt.id ? "2px solid #8b2035" : "1px solid rgba(59,5,16,0.1)",
-                    cursor: "pointer",
-                    fontFamily: "'Cormorant Garamond',serif",
-                    fontSize: "18px",
-                    color: "#221516",
-                    transition: "all 0.2s",
-                    textAlign: "left"
-                  }}
+                  className={`ob-pill${singleValue === opt.id ? " selected" : ""}`}
                 >
-                  {opt.emoji && <span style={{ marginRight: "8px" }}>{opt.emoji}</span>}
+                  {opt.emoji && <span style={{ marginRight: "6px" }}>{opt.emoji}</span>}
                   {opt.label}
-                  {opt.description && (
-                    <div style={{ fontSize: "14px", color: "#7a6f6a", fontStyle: "italic", marginTop: "4px" }}>
-                      {opt.description}
-                    </div>
-                  )}
                 </button>
               ))}
             </div>
           )}
 
-          {/* Multi Select */}
           {question.type === "multi" && question.options && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "16px", marginBottom: "40px" }}>
-              {question.options.map(opt => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => toggleMulti(opt.id)}
-                  disabled={!multiValue.includes(opt.id) && question.maxSelections && multiValue.length >= question.maxSelections}
-                  style={{
-                    padding: "20px",
-                    background: multiValue.includes(opt.id) ? "rgba(139,32,53,0.08)" : "rgba(255,255,255,0.7)",
-                    border: multiValue.includes(opt.id) ? "2px solid #8b2035" : "1px solid rgba(59,5,16,0.1)",
-                    cursor: "pointer",
-                    fontFamily: "'Cormorant Garamond',serif",
-                    fontSize: "18px",
-                    color: "#221516",
-                    transition: "all 0.2s",
-                    textAlign: "left",
-                    opacity: (!multiValue.includes(opt.id) && question.maxSelections && multiValue.length >= question.maxSelections) ? 0.5 : 1
-                  }}
-                >
-                  {opt.emoji && <span style={{ marginRight: "8px" }}>{opt.emoji}</span>}
-                  {opt.label}
-                </button>
-              ))}
+            <div className="ob-pills">
+              {question.options.map(opt => {
+                const isSelected = multiValue.includes(opt.id);
+                const isDisabled = !isSelected && !!question.maxSelections && multiValue.length >= question.maxSelections;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => toggleMulti(opt.id)}
+                    disabled={isDisabled}
+                    className={`ob-pill${isSelected ? " selected" : ""}`}
+                  >
+                    {opt.emoji && <span style={{ marginRight: "6px" }}>{opt.emoji}</span>}
+                    {opt.label}
+                  </button>
+                );
+              })}
             </div>
           )}
 
-          {/* Color Picker */}
           {question.type === "color" && question.colors && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: "16px", marginBottom: "40px" }}>
-              {question.colors.map(color => (
-                <button
-                  key={color.id}
-                  type="button"
-                  onClick={() => toggleMulti(color.id)}
-                  disabled={!multiValue.includes(color.id) && question.maxSelections && multiValue.length >= question.maxSelections}
-                  style={{
-                    padding: "16px",
-                    background: "rgba(255,255,255,0.7)",
-                    border: multiValue.includes(color.id) ? "2px solid #8b2035" : "1px solid rgba(59,5,16,0.1)",
-                    cursor: "pointer",
-                    textAlign: "center",
-                    transition: "all 0.2s",
-                    opacity: (!multiValue.includes(color.id) && question.maxSelections && multiValue.length >= question.maxSelections) ? 0.5 : 1
-                  }}
-                >
-                  <div style={{ width: "100%", height: "60px", background: color.hex, border: "1px solid rgba(0,0,0,0.1)", marginBottom: "12px" }} />
-                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", color: "#221516" }}>
+            <div className="ob-color-grid">
+              {question.colors.map(color => {
+                const isSelected = multiValue.includes(color.id);
+                const isDisabled = !isSelected && !!question.maxSelections && multiValue.length >= question.maxSelections;
+                return (
+                  <button
+                    key={color.id}
+                    type="button"
+                    onClick={() => toggleMulti(color.id)}
+                    disabled={isDisabled}
+                    className={`ob-color-swatch${isSelected ? " selected" : ""}`}
+                  >
+                    <span className="ob-color-dot" style={{ background: color.hex }} />
                     {color.name}
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
           )}
 
-          {/* Text Input */}
           {question.type === "text" && (
-            <div style={{ marginBottom: "40px" }}>
+            <>
               <textarea
+                className="ob-textarea"
                 value={textValue}
-                onChange={(e) => setTextValue(e.target.value)}
+                onChange={e => setTextValue(e.target.value)}
                 placeholder={question.placeholder}
                 maxLength={question.maxLength}
-                style={{
-                  width: "100%",
-                  minHeight: "150px",
-                  padding: "20px",
-                  border: "1px solid rgba(59,5,16,0.1)",
-                  fontSize: "18px",
-                  fontFamily: "'Cormorant Garamond',serif",
-                  fontStyle: "italic",
-                  boxSizing: "border-box",
-                  background: "rgba(255,255,255,0.7)",
-                  resize: "vertical"
-                }}
               />
               {question.maxLength && (
-                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "10px", color: "#7a6f6a", marginTop: "8px", textAlign: "right" }}>
-                  {textValue.length} / {question.maxLength}
-                </div>
+                <div className="ob-charcount">{textValue.length} / {question.maxLength}</div>
               )}
-            </div>
+            </>
           )}
 
-          {/* Continue Button */}
-          <button
-            type="submit"
-            disabled={!canProceed()}
-            style={{
-              width: "100%",
-              padding: "20px",
-              background: canProceed() ? "#8b2035" : "#d4cfc9",
-              color: "#f4f4f1",
-              border: "none",
-              fontSize: "14px",
-              letterSpacing: "2px",
-              textTransform: "uppercase",
-              cursor: canProceed() ? "pointer" : "default",
-              fontFamily: "'Space Mono',monospace",
-              transition: "all 0.2s"
-            }}
-          >
-            {step === totalSteps ? "COMPLETE ✨" : "CONTINUE →"}
-          </button>
-
-          {/* Skip for text */}
-          {question.type === "text" && (
-            <button
-              type="submit"
-              style={{
-                width: "100%",
-                marginTop: "16px",
-                padding: "16px",
-                background: "none",
-                border: "none",
-                fontFamily: "'Cormorant Garamond',serif",
-                fontSize: "16px",
-                fontStyle: "italic",
-                color: "#7a6f6a",
-                cursor: "pointer"
-              }}
-            >
-              Skip for now
+          <div className="ob-buttons">
+            {step > 1 && (
+              <button type="submit" name="direction" value="back" className="ob-btn-skip">
+                Back
+              </button>
+            )}
+            <button type="submit" disabled={!canProceed()} className="ob-btn-continue">
+              {step === totalSteps ? "Complete" : "Continue"}
             </button>
-          )}
+            {question.type === "text" && (
+              <button type="submit" className="ob-btn-skip">Skip</button>
+            )}
+          </div>
         </Form>
       </main>
     </div>
