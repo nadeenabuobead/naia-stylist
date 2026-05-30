@@ -7,57 +7,63 @@ export async function action({ request }) {
   }
 
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
-    
-    const prompts = {
-      seasonal: `You are a fashion intelligence analyst. Create an authoritative trend report on: ${query}
+    const prompt = `You are nAia's fashion intelligence analyst. Write an editorial trend report on: "${query}"
 
-Structure:
-- Overview: What's happening this season
-- Key Colors: Specific color stories and palettes
-- Silhouettes: Dominant shapes and proportions
-- Standout Moments: Noteworthy runway shows or designer moves
-- New Brands to Watch: Emerging designers worth tracking
-- Category Deep Dive: Pick one (bags, shoes, outerwear, etc.) and analyze current direction
-- Who This Suits: Style personalities and body types that align
-- Predicted Longevity: Investment-worthy vs. fleeting
+This is not a generic AI fashion summary. This is a premium, emotionally intelligent trend report that connects fashion to how women want to feel.
 
-Write with authority. Cite specific collections, designers, shows. This is editorial, not shopping content.`,
-      
-      runway: `Create a fashion week review for: ${query}
-Cover: standout shows, key themes, color stories, silhouette shifts, designers to watch, commercial viability.`,
-      
-      category: `Analyze the current state of ${query} (bags/shoes/denim/etc.)
-Cover: trending styles, price points, brands leading the category, what's new, what's fading, investment pieces.`,
-      
-      color: `Create a color trend report for: ${query}
-Cover: color families, mood, pairings, who wears it well, longevity, cultural context.`,
-      
-      brand: `Profile this brand/collection: ${query}
-Cover: brand DNA, recent shifts, standout pieces, target customer, styling direction, value proposition.`
-    };
+Return ONLY valid JSON with this exact structure, no markdown, no explanation:
+{
+  "title": "nAia Trend Notes: [topic] [year]",
+  "editorialIntro": "2-3 sentence mood-setting intro. Editorial, not corporate.",
+  "keyTrends": [
+    { "name": "Trend name", "description": "2-3 sentences. Specific. Cite real designers." },
+    { "name": "Trend name", "description": "..." },
+    { "name": "Trend name", "description": "..." },
+    { "name": "Trend name", "description": "..." }
+  ],
+  "rising": ["specific thing rising", "specific thing rising", "specific thing rising"],
+  "fading": ["specific thing fading", "specific thing fading", "specific thing fading"],
+  "brandsToWatch": [
+    { "name": "Brand name", "why": "One sentence on why they matter right now." },
+    { "name": "Brand name", "why": "..." },
+    { "name": "Brand name", "why": "..." }
+  ],
+  "investmentNotes": "2-3 sentences on what is worth spending on vs what to skip.",
+  "naiaInterpretation": "3-4 sentences explaining what this trend means EMOTIONALLY. Connect it to how women want to feel: powerful, effortless, polished, romantic, magnetic, artistic, soft, confident.",
+  "howToWear": [
+    { "feeling": "Polished", "direction": "Specific styling advice" },
+    { "feeling": "Magnetic", "direction": "Specific styling advice" },
+    { "feeling": "Effortless", "direction": "Specific styling advice" },
+    { "feeling": "Powerful", "direction": "Specific styling advice" }
+  ],
+  "wardrobeNote": "2-3 sentences on what this means for her wardrobe."
+}`;
 
-    const prompt = prompts[reportType] || prompts.seasonal;
-    
-    const openAiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01"
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: "You are a fashion intelligence analyst writing for industry professionals and informed consumers. Authoritative, specific, insightful." },
-          { role: "user", content: prompt }
-        ],
-      }),
+        model: "claude-opus-4-5",
+        max_tokens: 3000,
+        messages: [{ role: "user", content: prompt }]
+      })
     });
 
-    const data = await openAiResponse.json();
-    const report = data.choices[0].message.content;
+    const data = await response.json();
 
-    return Response.json({ report, reportType });
+    if (!response.ok) {
+      throw new Error(data.error?.message || "Claude API error");
+    }
+
+    const text = data.content[0].text;
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const report = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+
+    return Response.json({ report });
   } catch (error) {
     console.error("Trend report error:", error);
     return Response.json({ error: error.message }, { status: 500 });

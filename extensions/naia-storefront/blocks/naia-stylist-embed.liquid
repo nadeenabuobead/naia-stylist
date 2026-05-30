@@ -3,28 +3,12 @@
 <meta name="naia-customer" content='{"id":"{{ customer.id }}","email":"{{ customer.email | escape }}","firstName":"{{ customer.first_name | escape }}","lastName":"{{ customer.last_name | escape }}"}'>
 {% endif %}
 
-{% if product.featured_image %}
-<div
-  id="naia-stylist-root"
-  data-product-image="{{ product.featured_image | image_url: width: 1200 }}"
-  data-product-title="{{ product.title | escape }}"
-  data-product-id="{{ product.id }}"
-  data-product-type="{{ product.type | escape }}"
-  data-styling-notes="{{ product.metafields.custom.styling_notes | escape }}"
-  data-mood-match="{{ product.metafields.custom.mood_match | escape }}"
-  data-styling-role="{{ product.metafields.custom.styling_role | escape }}"
-  data-statement-level="{{ product.metafields.custom.statement_level | escape }}"
-  data-occasion="{{ product.metafields.custom.occasion | escape }}"
-  data-sihouette="{{ product.metafields.custom.sihouette | escape }}"
-></div>
-{% else %}
-<div id="naia-stylist-root"></div>
-{% endif %}
+<div id="naia-stylist-widget"></div>
 
 {% schema %}
 {
-  "name": "nAia Stylist Button",
-  "target": "body",
+  "name": "nAia Style Me Button",
+  "target": "section",
   "stylesheet": "naia-stylist.css",
   "javascript": "naia-stylist.js",
   "settings": []

@@ -51,7 +51,7 @@ export default function StyleMeIndex() {
       {/* Header */}
       <header className="px-4 py-6 bg-white/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="max-w-lg mx-auto">
-          <Link to="/" className="text-[var(--naia-text-muted)] text-sm">
+          <Link to="/apps/naia-stylist/" className="text-[var(--naia-text-muted)] text-sm">
             ← Back
           </Link>
         </div>
@@ -100,7 +100,7 @@ export default function StyleMeIndex() {
             </div>
             {!hasProfile && (
               <Link 
-                to="/onboarding/step/1"
+                to="/apps/naia-stylist/onboarding/step/1"
                 className="text-sm text-[var(--naia-rose)] font-medium"
               >
                 Start →

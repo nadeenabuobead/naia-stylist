@@ -40,4 +40,5 @@ export default [
   route("full-style-profile", "routes/full-style-profile/_index.tsx"),
   route("api/full-style-profile", "routes/api.full-style-profile.jsx"),
   route("api/save-look", "routes/api.save-look.jsx"),
+  route("buyskip", "routes/buyskip._index.tsx"),
 ];

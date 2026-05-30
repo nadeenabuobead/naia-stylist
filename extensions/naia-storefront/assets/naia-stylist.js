@@ -70,8 +70,8 @@
 
   var button = document.createElement("a");
   button.href = "#";
-  button.innerText = "Ask nAia";
-  button.style.cssText = "position:fixed;bottom:28px;right:28px;background:#1d1b19;color:#fff;padding:14px 24px;border-radius:999px;font-size:15px;font-weight:600;text-decoration:none;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.2);font-family:Inter,sans-serif;cursor:pointer;";
+  button.innerText = "Style Me";
+  button.style.cssText = "position:fixed;bottom:28px;right:28px;background:#221516;color:#fff;padding:14px 32px;border-radius:999px;font-size:15px;font-weight:600;text-decoration:none;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.2);font-family:Inter,sans-serif;cursor:pointer;";
 
   button.addEventListener("click", function (e) {
     e.preventDefault();

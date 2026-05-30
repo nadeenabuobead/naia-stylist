@@ -104,7 +104,7 @@ export default function QuickStyle() {
     if (currentStep === 4) return sessionData.bodyComfort.length > 0;
     if (currentStep === 5) {
       if (!sessionData.source) return false;
-      const needsUpload = sessionData.source !== "nAia only";
+      const needsUpload = sessionData.source !== "A nAia piece";
       if (needsUpload && !uploadedItem) return false;
       return true;
     }
@@ -129,9 +129,9 @@ export default function QuickStyle() {
     return "BOTH";
   };
 
-  const needsUpload = sessionData.source && sessionData.source !== "nAia only";
+  const needsUpload = sessionData.source && sessionData.source !== "A nAia piece";
 
-  const css = `:root{--cream:#f4f4f1;--warm:#e1dbd7;--burg:#3b0510;--deep:#221516;--accent:#8b2035;--muted:#7a6f6a;--ff-display:'Playfair Display',Georgia,serif;--ff-body:'Cormorant Garamond',Garamond,serif;--ff-mono:'Space Mono','Courier New',monospace}*{margin:0;padding:0;box-sizing:border-box}body{background:var(--cream);color:var(--deep);font-family:var(--ff-body);-webkit-font-smoothing:antialiased}body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:0.03;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:200px}.topbar{display:flex;justify-content:space-between;align-items:center;padding:20px 40px;border-bottom:1px solid rgba(59,5,16,.06)}.topbar-logo{font-family:var(--ff-display);font-size:22px;font-style:italic;letter-spacing:3px;color:var(--deep)}.topbar-close{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);text-decoration:none}.progress{padding:24px 40px 0;max-width:700px;margin:0 auto}.progress-dots{display:flex;gap:8px;justify-content:center;margin-bottom:8px}.progress-dot{width:10px;height:10px;border-radius:50%;background:var(--warm);transition:all .4s}.progress-dot.active{width:28px;border-radius:14px;background:var(--deep)}.progress-dot.done{background:var(--accent)}.progress-label{text-align:center;font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted)}.step{display:none;max-width:700px;margin:0 auto;padding:48px 40px 80px}.step.active{display:block;animation:fadeUp .5s ease}@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}.step-label{font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--accent);margin-bottom:12px}.step h2{font-family:var(--ff-display);font-size:clamp(28px,4vw,42px);font-weight:900;font-style:italic;color:var(--deep);letter-spacing:-1px;margin-bottom:32px;line-height:1.1}.pills{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:32px}.pill{padding:12px 22px;border:1px solid rgba(59,5,16,.12);font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--deep);cursor:pointer;transition:all .3s;background:transparent}.pill:hover{border-color:var(--deep)}.pill.selected{background:var(--deep);color:var(--cream)}.step-buttons{display:flex;gap:12px;margin-top:16px}.btn-back{padding:14px 32px;border:1px solid rgba(59,5,16,.1);background:transparent;font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--deep);cursor:pointer}.btn-next{padding:14px 40px;border:none;background:var(--deep);font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--cream);cursor:pointer}.btn-next:disabled{opacity:.3;cursor:not-allowed}.btn-next.generate{background:var(--burg);padding:14px 48px;letter-spacing:5px}.upload-box{margin:24px 0;padding:32px;border:2px dashed rgba(59,5,16,.2);text-align:center;cursor:pointer;transition:border-color .3s}.upload-box:hover{border-color:var(--deep)}.uploaded-preview{margin:24px 0;padding:20px;background:rgba(59,5,16,.02);text-align:center}.modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:10000;padding:20px}.modal-content{background:var(--cream);max-width:500px;width:100%;padding:32px;max-height:90vh;overflow-y:auto}.modal-section{margin-bottom:24px}`;
+  const css = `:root{--cream:#f4f4f1;--warm:#e1dbd7;--burg:#3b0510;--deep:#221516;--accent:#8b2035;--muted:#7a6f6a;--ff-display:'Playfair Display',Georgia,serif;--ff-body:'Cormorant Garamond',Garamond,serif;--ff-mono:'Space Mono','Courier New',monospace}*{margin:0;padding:0;box-sizing:border-box}body{background:var(--cream);color:var(--deep);font-family:var(--ff-body);-webkit-font-smoothing:antialiased}body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:0.03;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:200px}.topbar{display:flex;justify-content:space-between;align-items:center;padding:20px 40px;border-bottom:1px solid rgba(59,5,16,.06)}.topbar-logo{font-family:var(--ff-display);font-size:22px;font-style:italic;letter-spacing:3px;color:var(--deep)}.topbar-close{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);text-decoration:none}.progress{padding:24px 40px 0;max-width:700px;margin:0 auto}.progress-dots{display:flex;gap:8px;justify-content:center;margin-bottom:8px}.progress-dot{width:10px;height:10px;border-radius:50%;background:var(--warm);transition:all .4s}.progress-dot.active{width:28px;border-radius:14px;background:var(--deep)}.progress-dot.done{background:var(--accent)}.progress-label{text-align:center;font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted)}.step{display:none;max-width:700px;margin:0 auto;padding:48px 40px 80px}.step.active{display:block;animation:fadeUp .5s ease}@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}.step-label{font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--accent);margin-bottom:12px}.step h2{font-family:var(--ff-display);font-size:clamp(28px,4vw,42px);font-weight:900;font-style:italic;color:var(--deep);letter-spacing:-1px;margin-bottom:32px;line-height:1.1}.pills{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:32px}.pill{padding:12px 22px;border:1px solid rgba(59,5,16,.12);font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--deep);cursor:pointer;transition:all .3s;background:transparent}.pill:hover{border-color:var(--deep)}.pill.selected{background:#8b2035;color:var(--cream)}.step-buttons{display:flex;gap:12px;margin-top:16px}.btn-back{padding:14px 32px;border:1px solid rgba(59,5,16,.1);background:transparent;font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--deep);cursor:pointer}.btn-next{padding:14px 40px;border:none;background:var(--deep);font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--cream);cursor:pointer}.btn-next:disabled{opacity:.3;cursor:not-allowed}.btn-next.generate{background:var(--burg);padding:14px 48px;letter-spacing:5px}.upload-box{margin:24px 0;padding:32px;border:2px dashed rgba(59,5,16,.2);text-align:center;cursor:pointer;transition:border-color .3s}.upload-box:hover{border-color:var(--deep)}.uploaded-preview{margin:24px 0;padding:20px;background:rgba(59,5,16,.02);text-align:center}.modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:10000;padding:20px}.modal-content{background:var(--cream);max-width:500px;width:100%;padding:32px;max-height:90vh;overflow-y:auto}.modal-section{margin-bottom:24px}`;
 
   return (
     <div>
@@ -140,7 +140,7 @@ export default function QuickStyle() {
 
       <div className="topbar">
         <div className="topbar-logo">nAia</div>
-        <a href="/" className="topbar-close">Exit Session</a>
+        <a href="/apps/naia-stylist/" className="topbar-close">Exit Session</a>
       </div>
 
       <div className="progress">
@@ -154,9 +154,9 @@ export default function QuickStyle() {
 
       <div className={`step ${currentStep === 1 ? 'active' : ''}`}>
         <div className="step-label">Step 1 of 5</div>
-        <h2>How are you feeling right now?</h2>
+        <h2>How are you feeling?</h2>
         <div className="pills">
-          {["Tired", "Anxious", "Calm", "Overwhelmed", "Confident", "Excited", "Low", "Happy"].map(m => (
+          {["I feel confident", "I feel tired", "I feel bloated", "I feel low-energy", "I feel playful", "I feel romantic", "I feel powerful", "I feel like I need a reset", "I feel good, I just need styling"].map(m => (
             <div key={m} className={`pill ${sessionData.mood === m ? 'selected' : ''}`} onClick={() => selectPill(m, 'mood')}>{m}</div>
           ))}
         </div>
@@ -167,9 +167,9 @@ export default function QuickStyle() {
 
       <div className={`step ${currentStep === 2 ? 'active' : ''}`}>
         <div className="step-label">Step 2 of 5</div>
-        <h2>How do you want to feel?</h2>
+        <h2>How do you want this outfit to shift your energy?</h2>
         <div className="pills">
-          {["Calm", "Confident", "Effortless", "Powerful", "Bold", "Polished"].map(f => (
+          {["Make me feel more confident", "Make me feel more put together", "Make me feel softer", "Make me feel more powerful", "Make me feel more feminine", "Make me feel more effortless", "Make me feel more elevated", "Make me feel more attractive", "Make me feel like myself again"].map(f => (
             <div key={f} className={`pill ${sessionData.feeling === f ? 'selected' : ''}`} onClick={() => selectPill(f, 'feeling')}>{f}</div>
           ))}
         </div>
@@ -181,9 +181,9 @@ export default function QuickStyle() {
 
       <div className={`step ${currentStep === 3 ? 'active' : ''}`}>
         <div className="step-label">Step 3 of 5</div>
-        <h2>What are you dressing for?</h2>
+        <h2>What does the outfit need to work for?</h2>
         <div className="pills">
-          {["Casual", "Work", "Date", "Event", "Party", "Travel"].map(o => (
+          {["Everyday / casual plans", "Work / meetings", "Dinner", "Date night", "Girls' night", "Family gathering", "Special event", "Travel day", "I'm not sure yet"].map(o => (
             <div key={o} className={`pill ${sessionData.occasion === o ? 'selected' : ''}`} onClick={() => selectPill(o, 'occasion')}>{o}</div>
           ))}
         </div>
@@ -195,9 +195,9 @@ export default function QuickStyle() {
 
       <div className={`step ${currentStep === 4 ? 'active' : ''}`}>
         <div className="step-label">Step 4 of 5</div>
-        <h2>Any body comfort needs today?</h2>
+        <h2>What does your body need from this outfit today?</h2>
         <div className="pills">
-          {["Feeling bloated", "Want more coverage", "Want waist definition", "Want something relaxed", "Feeling great"].map(b => (
+          {["Waist definition", "More coverage", "Something relaxed", "Something structured", "Something that elongates me", "Something that balances my shape", "Something comfortable but still elevated", "I feel bloated", "Nothing specific"].map(b => (
             <div key={b} className={`pill ${sessionData.bodyComfort.includes(b) ? 'selected' : ''}`} onClick={() => selectPill(b, 'bodyComfort', true)}>{b}</div>
           ))}
         </div>
@@ -209,9 +209,9 @@ export default function QuickStyle() {
 
       <div className={`step ${currentStep === 5 ? 'active' : ''}`}>
         <div className="step-label">Step 5 of 5</div>
-        <h2>What do you want to style from?</h2>
+        <h2>What are we building the look around?</h2>
         <div className="pills">
-          {["nAia only", "My closet only", "nAia + My closet"].map(s => (
+          {["A nAia piece", "Something from my closet", "nAia + my closet"].map(s => (
             <div key={s} className={`pill ${sessionData.source === s ? 'selected' : ''}`} onClick={() => selectPill(s, 'source')}>{s}</div>
           ))}
         </div>

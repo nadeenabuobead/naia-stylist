@@ -1,67 +1,18 @@
-// app/routes/style-me/mood.tsx
 import { Form, Link } from "react-router";
 import { data, redirect, type ActionFunctionArgs } from "react-router";
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 
-// Mood options with gradients matching the design system
-const moods = [
-  {
-    id: "confident",
-    label: "Confident",
-    emoji: "💪",
-    gradient: "from-rose-400 to-pink-500",
-    description: "Ready to own the room"
-  },
-  {
-    id: "calm",
-    label: "Calm",
-    emoji: "🌿",
-    gradient: "from-teal-400 to-cyan-500",
-    description: "Peaceful and centered"
-  },
-  {
-    id: "playful",
-    label: "Playful",
-    emoji: "🎀",
-    gradient: "from-pink-400 to-purple-500",
-    description: "Fun and carefree"
-  },
-  {
-    id: "romantic",
-    label: "Romantic",
-    emoji: "🌹",
-    gradient: "from-rose-300 to-red-400",
-    description: "Soft and dreamy"
-  },
-  {
-    id: "powerful",
-    label: "Powerful",
-    emoji: "👑",
-    gradient: "from-amber-400 to-orange-500",
-    description: "Strong and in charge"
-  },
-  {
-    id: "mysterious",
-    label: "Mysterious",
-    emoji: "🌙",
-    gradient: "from-slate-600 to-purple-700",
-    description: "Intriguing and alluring"
-  },
-  {
-    id: "joyful",
-    label: "Joyful",
-    emoji: "☀️",
-    gradient: "from-yellow-400 to-orange-400",
-    description: "Bright and happy"
-  },
-  {
-    id: "sophisticated",
-    label: "Sophisticated",
-    emoji: "✨",
-    gradient: "from-slate-400 to-gray-600",
-    description: "Elegant and refined"
-  },
+const currentStates = [
+  { id: "confident", label: "I feel confident", emoji: "💪" },
+  { id: "tired", label: "I feel tired", emoji: "😴" },
+  { id: "bloated", label: "I feel bloated", emoji: "🌊" },
+  { id: "low-energy", label: "I feel low-energy", emoji: "🔋" },
+  { id: "playful", label: "I feel playful", emoji: "🎀" },
+  { id: "romantic", label: "I feel romantic", emoji: "🌹" },
+  { id: "powerful", label: "I feel powerful", emoji: "👑" },
+  { id: "need-reset", label: "I feel like I need a reset", emoji: "🔄" },
+  { id: "feel-good", label: "I feel good, I just need styling", emoji: "✨" },
 ];
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -69,123 +20,82 @@ export async function action({ request }: ActionFunctionArgs) {
   const mood = formData.get("mood") as string;
   
   if (!mood) {
-    return data({ error: "Please select a mood" }, { status: 400 });
+    return data({ error: "Please select how you're feeling" }, { status: 400 });
   }
   
-  // Store in session for the flow
   const session = await getSession(request.headers.get("Cookie"));
   session.set("styleMeMood", mood);
   
   return redirect("/style-me/feeling", {
-    headers: {
-      "Set-Cookie": await commitSession(session)
-    }
+    headers: { "Set-Cookie": await commitSession(session) }
   });
 }
 
 export default function StyleMeMood() {
-  const [selectedMood, setSelectedMood] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
 
   return (
-    <div className="min-h-screen bg-[var(--naia-cream)]">
-      {/* Header */}
-      <header className="px-4 py-6 bg-white/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-lg mx-auto flex items-center justify-between">
-          <Link to="/style-me" className="text-[var(--naia-text-muted)] text-sm">
-            ← Back
-          </Link>
-          <div className="flex gap-1">
-            {[1, 2, 3, 4].map((step) => (
-              <div
-                key={step}
-                className={`w-8 h-1 rounded-full ${
-                  step === 1 ? "bg-[var(--naia-rose)]" : "bg-[var(--naia-gray-200)]"
-                }`}
-              />
-            ))}
-          </div>
-          <span className="text-sm text-[var(--naia-text-muted)]">1/4</span>
-        </div>
-      </header>
-
-      <main className="px-4 py-8 max-w-lg mx-auto">
-        {/* Question */}
-        <div className="text-center mb-8">
-          <h1 className="font-display text-2xl font-medium text-[var(--naia-charcoal)] mb-2">
-            How are you feeling today?
-          </h1>
-          <p className="text-[var(--naia-text-muted)]">
-            Your mood guides everything — let's start here
-          </p>
-        </div>
-
-        {/* Mood Grid */}
+    <div style={{ minHeight: "100vh", background: "#f4f4f1", padding: "40px 20px" }}>
+      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+      <div style={{ maxWidth: "600px", margin: "0 auto" }}>
+        <Link to="/" style={{ display: "inline-block", marginBottom: "32px", color: "#7a6f6a", textDecoration: "none", fontSize: "11px", fontFamily: "'Space Mono',monospace", letterSpacing: "2px", textTransform: "uppercase" }}>← Back to Dashboard</Link>
+        
+        <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: "42px", fontWeight: 900, marginBottom: "12px", color: "#221516", letterSpacing: "-1px" }}>How are you feeling?</h1>
+        <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "40px" }}>Your current emotional state</p>
+        
         <Form method="post">
-          <input type="hidden" name="mood" value={selectedMood || ""} />
-          
-          <div className="grid grid-cols-2 gap-4 mb-8">
-            {moods.map((mood) => (
+          <div style={{ display: "grid", gap: "12px", marginBottom: "40px" }}>
+            {currentStates.map((state) => (
               <button
-                key={mood.id}
+                key={state.id}
                 type="button"
-                onClick={() => setSelectedMood(mood.id)}
-                className={`
-                  relative p-5 rounded-2xl text-left transition-all duration-200
-                  ${selectedMood === mood.id 
-                    ? "ring-2 ring-[var(--naia-rose)] ring-offset-2 scale-[1.02]" 
-                    : "hover:scale-[1.02]"
-                  }
-                `}
+                onClick={() => setSelected(state.id)}
+                style={{
+                  padding: "20px 24px",
+                  background: selected === state.id ? "#8b2035" : "rgba(255,255,255,0.8)",
+                  color: selected === state.id ? "#f4f4f1" : "#221516",
+                  border: selected === state.id ? "2px solid #8b2035" : "1px solid rgba(59,5,16,0.1)",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "16px",
+                  fontFamily: "'Cormorant Garamond',serif",
+                  fontSize: "18px",
+                  transition: "all 0.3s",
+                }}
               >
-                {/* Gradient background */}
-                <div className={`
-                  absolute inset-0 rounded-2xl bg-gradient-to-br ${mood.gradient}
-                `} />
-                
-                {/* Content */}
-                <div className="relative z-10">
-                  <span className="text-3xl mb-2 block">{mood.emoji}</span>
-                  <p className="font-medium text-white text-lg">{mood.label}</p>
-                  <p className="text-white/80 text-sm">{mood.description}</p>
-                </div>
-
-                {/* Selection indicator */}
-                {selectedMood === mood.id && (
-                  <div className="absolute top-3 right-3 w-6 h-6 bg-white rounded-full flex items-center justify-center z-10">
-                    <svg className="w-4 h-4 text-[var(--naia-rose)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                  </div>
-                )}
+                <span style={{ fontSize: "24px" }}>{state.emoji}</span>
+                <span>{state.label}</span>
               </button>
             ))}
           </div>
 
-          {/* Continue Button */}
+          <input type="hidden" name="mood" value={selected || ""} />
+          
           <button
             type="submit"
-            disabled={!selectedMood}
-            className={`
-              w-full py-4 px-6 rounded-full font-medium text-center
-              transition-all duration-200
-              ${selectedMood
-                ? "bg-[var(--naia-rose)] text-white hover:bg-[var(--naia-rose-dark)] shadow-lg"
-                : "bg-[var(--naia-gray-200)] text-[var(--naia-text-muted)] cursor-not-allowed"
-              }
-            `}
+            disabled={!selected}
+            style={{
+              width: "100%",
+              padding: "18px",
+              background: selected ? "#221516" : "#7a6f6a",
+              color: "#f4f4f1",
+              border: "none",
+              fontFamily: "'Space Mono',monospace",
+              fontSize: "10px",
+              letterSpacing: "4px",
+              textTransform: "uppercase",
+              cursor: selected ? "pointer" : "not-allowed",
+              borderRadius: "4px",
+              opacity: selected ? 1 : 0.6,
+            }}
           >
-            Continue →
+            Continue
           </button>
         </Form>
-
-        {/* Tip */}
-        <div className="mt-8 p-4 bg-white/60 rounded-xl">
-          <p className="text-sm text-[var(--naia-text-muted)] text-center">
-            💡 <span className="font-medium">Tip:</span> There's no wrong answer — 
-            your outfit will match however you're feeling right now.
-          </p>
-        </div>
-      </main>
+      </div>
     </div>
   );
 }

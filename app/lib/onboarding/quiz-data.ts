@@ -18,11 +18,11 @@ export interface QuizQuestion {
 }
 
 export const quizQuestions: QuizQuestion[] = [
-  // STEP 1 — YOUR STYLE
+  // STEP 1 — STYLE ENERGIES
   {
     id: "style-personalities",
     type: "multi",
-    title: "Which styles feel most like you?",
+    title: "Which style energies feel most like you?",
     subtitle: "Choose up to 3",
     maxSelections: 3,
     options: [
@@ -39,11 +39,30 @@ export const quizQuestions: QuizQuestion[] = [
     ],
   },
 
-  // STEP 2 — YOUR LIFESTYLE
+  // STEP 2 — DESIRED IMPRESSION (NEW!)
+  {
+    id: "desired-impression",
+    type: "multi",
+    title: "What do you want your clothes to say before you speak?",
+    subtitle: "Choose up to 2",
+    maxSelections: 2,
+    options: [
+      { id: "refined", label: "I'm refined" },
+      { id: "creative", label: "I'm creative" },
+      { id: "powerful", label: "I'm powerful" },
+      { id: "soft-confident", label: "I'm soft but confident" },
+      { id: "effortless", label: "I'm effortless" },
+      { id: "interesting", label: "I'm interesting" },
+      { id: "feminine", label: "I'm feminine" },
+      { id: "put-together", label: "I'm put together" },
+    ],
+  },
+
+  // STEP 3 — LIFESTYLE (REWORDED)
   {
     id: "lifestyle",
     type: "multi",
-    title: "What does your day-to-day usually look like?",
+    title: "What does your life usually ask you to dress for?",
     subtitle: "Choose all that apply",
     maxSelections: 10,
     options: [
@@ -58,11 +77,11 @@ export const quizQuestions: QuizQuestion[] = [
     ],
   },
 
-  // STEP 3 — HOW DO YOU WANT TO FEEL?
+  // STEP 4 — DESIRED FEELINGS (SLIGHTLY REWORDED)
   {
     id: "desired-feelings",
     type: "multi",
-    title: "How do you want your outfits to make you feel?",
+    title: "How do you want to feel in your outfits most often?",
     subtitle: "Choose up to 3",
     maxSelections: 3,
     options: [
@@ -77,7 +96,27 @@ export const quizQuestions: QuizQuestion[] = [
     ],
   },
 
-  // STEP 4 — WHAT DO YOU FEEL BEST IN?
+  // STEP 5 — BECOMING QUESTION (NEW!)
+  {
+    id: "becoming",
+    type: "multi",
+    title: "What version of yourself are you dressing for right now?",
+    subtitle: "Choose up to 2",
+    maxSelections: 2,
+    options: [
+      { id: "more-confident", label: "More confident" },
+      { id: "more-polished", label: "More polished" },
+      { id: "more-feminine", label: "More feminine" },
+      { id: "more-creative", label: "More creative" },
+      { id: "more-powerful", label: "More powerful" },
+      { id: "more-effortless", label: "More effortless" },
+      { id: "more-visible", label: "More visible" },
+      { id: "more-refined", label: "More refined" },
+      { id: "new-chapter", label: "A new chapter" },
+    ],
+  },
+
+  // STEP 6 — FIT PREFERENCES
   {
     id: "fit-preferences",
     type: "multi",
@@ -96,11 +135,30 @@ export const quizQuestions: QuizQuestion[] = [
     ],
   },
 
-  // STEP 5 — COLORS
+  // STEP 7 — WARDROBE DISCONNECTION (REPLACES STRUGGLES)
+  {
+    id: "wardrobe-disconnection",
+    type: "multi",
+    title: "When do you feel most disconnected from your wardrobe?",
+    subtitle: "Choose up to 3",
+    maxSelections: 3,
+    options: [
+      { id: "rush", label: "When I'm getting ready in a rush" },
+      { id: "body-different", label: "When my body feels different" },
+      { id: "event", label: "When I have an event" },
+      { id: "elevated", label: "When I want to look elevated but still like myself" },
+      { id: "dont-style", label: "When I buy pieces but don't know how to style them" },
+      { id: "mood-mismatch", label: "When my mood doesn't match my clothes" },
+      { id: "too-basic", label: "When everything feels too basic" },
+      { id: "new-phase", label: "When I'm entering a new phase of life" },
+    ],
+  },
+
+  // STEP 8 — COLORS (MERGED)
   {
     id: "favorite-colors",
     type: "color",
-    title: "Which colors do you wear the most?",
+    title: "Which colors do you naturally reach for?",
     subtitle: "Choose up to 5",
     maxSelections: 5,
     colors: [
@@ -117,12 +175,12 @@ export const quizQuestions: QuizQuestion[] = [
     ],
   },
 
-  // STEP 5b — COLORS TO AVOID (optional)
+  // STEP 8b — AVOID COLORS (OPTIONAL, SAME STEP)
   {
     id: "avoid-colors",
     type: "color",
-    title: "Any colors you usually avoid?",
-    subtitle: "Optional — select colors you rarely wear",
+    title: "Any colors you avoid?",
+    subtitle: "Optional",
     maxSelections: 5,
     colors: [
       { id: "black", hex: "#000000", name: "Black" },
@@ -138,64 +196,47 @@ export const quizQuestions: QuizQuestion[] = [
     ],
   },
 
-  // STEP 6 — STYLE STRUGGLES
+  // STEP 9 — STYLE SUPPORT (REPLACES HELP WANTED)
   {
-    id: "struggles",
+    id: "style-support",
     type: "multi",
-    title: "What do you struggle with most?",
+    title: "What would make getting dressed easier for you?",
     subtitle: "Choose up to 3",
     maxSelections: 3,
     options: [
-      { id: "nothing-to-wear", label: "I have clothes but nothing to wear" },
-      { id: "repeat-outfits", label: "I repeat the same outfits" },
-      { id: "more-elevated", label: "I want to look more elevated" },
-      { id: "statement-pieces", label: "I don't know how to style statement pieces" },
-      { id: "body-dressing", label: "I struggle dressing for my body sometimes" },
-      { id: "disconnected", label: "My wardrobe feels disconnected" },
-      { id: "effortless", label: "I want more effortless outfits" },
-      { id: "confidence", label: "I want to feel more confident" },
+      { id: "style-what-i-own", label: "Knowing how to style what I already own" },
+      { id: "elevate-wardrobe", label: "Finding pieces that elevate my wardrobe" },
+      { id: "body-mood", label: "Dressing better for my body and mood" },
+      { id: "polished-easy", label: "Looking polished without overthinking" },
+      { id: "statement-pieces", label: "Styling statement pieces with confidence" },
+      { id: "what-suits", label: "Understanding what suits me" },
+      { id: "event-outfits", label: "Building outfits for events" },
+      { id: "feel-myself", label: "Feeling more like myself in clothes" },
     ],
   },
 
-  // STEP 7 — WHAT DO YOU WANT HELP WITH?
-  {
-    id: "help-wanted",
-    type: "multi",
-    title: "What would you like nAia to help you with?",
-    subtitle: "Choose all that apply",
-    maxSelections: 8,
-    options: [
-      { id: "styling-wardrobe", label: "Styling my wardrobe" },
-      { id: "styling-naia", label: "Styling nAia pieces" },
-      { id: "outfit-recs", label: "Outfit recommendations" },
-      { id: "discover-style", label: "Discovering my style" },
-      { id: "buy-skip", label: "Buy or Skip recommendations" },
-      { id: "trend-reports", label: "Personalized trend reports" },
-      { id: "better-outfits", label: "Building better outfits" },
-      { id: "confidence", label: "Feeling more confident in what I wear" },
-    ],
-  },
-
-  // FINAL STEP — ANYTHING ELSE
+  // STEP 10 — FINAL NOTES (REWORDED)
   {
     id: "final-notes",
     type: "text",
-    title: "Anything else you want nAia to know about your style?",
+    title: "Anything else you want nAia to understand about your style?",
     subtitle: "Optional",
-    placeholder: "e.g., I have a wedding coming up, I'm trying to dress more professionally, I just had a baby...",
+    placeholder: "e.g., I'm trying to dress more professionally, I just had a baby, I want to feel more feminine again, I have a wedding coming up, I'm entering a new chapter...",
     maxLength: 500,
   },
 ];
 
 export type OnboardingAnswers = {
   "style-personalities"?: string[];
+  "desired-impression"?: string[];
   lifestyle?: string[];
   "desired-feelings"?: string[];
+  becoming?: string[];
   "fit-preferences"?: string[];
+  "wardrobe-disconnection"?: string[];
   "favorite-colors"?: string[];
   "avoid-colors"?: string[];
-  struggles?: string[];
-  "help-wanted"?: string[];
+  "style-support"?: string[];
   "final-notes"?: string;
 };
 

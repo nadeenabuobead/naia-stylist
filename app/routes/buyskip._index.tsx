@@ -1,380 +1,260 @@
-import { useLoaderData, useFetcher, Link } from "react-router";
-import { data, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
-import { useState } from "react";
-import prisma from "../db.server";
+import * as React from "react";
+import { Link } from "react-router";
+
+export async function loader() {
+  return {};
+}
 
 const CLOUDINARY_CLOUD = "diybves1z";
 const CLOUDINARY_PRESET = "kqfhwrpq";
 
-const CATEGORIES = ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS", "ACCESSORIES", "JEWELRY", "OTHER"];
-const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver", "Multicolor"];
-const OCCASIONS = ["Casual", "Work", "Dinner", "Party", "Formal", "Date", "Weekend", "Travel"];
-const SEASONS = ["Spring", "Summer", "Fall", "Winter", "All Season"];
-const PATTERNS = ["Solid", "Stripes", "Floral", "Plaid", "Animal Print", "Geometric", "Abstract", "Other"];
+const css = `
+  :root{--cream:#f4f4f1;--deep:#221516;--accent:#8b2035;--muted:#7a6f6a;--ff-display:'Playfair Display',Georgia,serif;--ff-body:'Cormorant Garamond',Garamond,serif;--ff-mono:'Space Mono','Courier New',monospace}
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--cream);color:var(--deep);font-family:var(--ff-body);-webkit-font-smoothing:antialiased}
+  .bs-topbar{display:flex;justify-content:space-between;align-items:center;padding:20px 40px;border-bottom:1px solid rgba(59,5,16,.06)}
+  .bs-topbar-logo{font-family:var(--ff-display);font-size:22px;font-style:italic;letter-spacing:3px;color:var(--deep)}
+  .bs-topbar-link{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);text-decoration:none}
+  .bs-wrap{max-width:900px;margin:0 auto;padding:60px 40px}
+  .bs-headline{font-family:var(--ff-display);font-size:clamp(36px,5vw,56px);font-weight:900;font-style:italic;color:var(--deep);margin-bottom:8px}
+  .bs-sub{font-family:var(--ff-body);font-size:18px;font-style:italic;color:var(--muted);margin-bottom:48px;line-height:1.6}
+  .bs-pill{padding:10px 18px;border:1px solid rgba(59,5,16,.12);font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--deep);cursor:pointer;background:transparent;transition:all .2s}
+  .bs-pill:hover{border-color:var(--deep)}
+  .bs-pill.on{background:var(--accent);color:var(--cream);border-color:var(--accent)}
+  .bs-pill:disabled{opacity:.35;cursor:not-allowed}
+  .bs-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:12px;display:block}
+  .bs-input{width:100%;padding:14px;border:1px solid rgba(59,5,16,.12);font-family:var(--ff-body);font-size:16px;font-style:italic;background:rgba(255,255,255,0.7);color:var(--deep);outline:none}
+  .bs-input:focus{border-color:var(--deep)}
+  .bs-btn{padding:16px 40px;border:none;background:var(--accent);color:var(--cream);font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;cursor:pointer}
+  .bs-btn:disabled{background:#d4cfc9;cursor:not-allowed}
+  .bs-btn-outline{padding:14px 32px;border:1px solid rgba(59,5,16,.12);background:transparent;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--deep);cursor:pointer}
+`;
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  try {
-    // Use guest customer for now (same as dashboard)
-    const customer = await prisma.customer.findFirst({
-      where: { shopifyCustomerId: "guest" },
-      include: { closetItems: { orderBy: { createdAt: "desc" } } }
-    });
-    
-    if (!customer) return data({ items: [], authenticated: false });
-    
-    return data({ items: customer.closetItems, authenticated: true });
-  } catch (err: any) {
-    console.error("Closet loader error:", err);
-    return data({ items: [], authenticated: false });
-  }
-}
+export default function BuyOrSkip() {
+  const [step, setStep] = React.useState("upload");
+  const [imageUrl, setImageUrl] = React.useState("");
+  const [uploading, setUploading] = React.useState(false);
+  const [analyzing, setAnalyzing] = React.useState(false);
+  const [result, setResult] = React.useState<any>(null);
+  const [category, setCategory] = React.useState("");
+  const [color, setColor] = React.useState<string[]>([]);
+  const [brand, setBrand] = React.useState("");
+  const [itemLink, setItemLink] = React.useState("");
 
-export async function action({ request }: ActionFunctionArgs) {
-  try {
-    // Use guest customer for now
-    const customer = await prisma.customer.findFirst({
-      where: { shopifyCustomerId: "guest" }
-    });
-    
-    if (!customer) return data({ error: "Not authenticated" }, { status: 401 });
-    
-    const formData = await request.formData();
-    const intent = formData.get("intent") as string;
+  const CATEGORIES = ["Top", "Bottom", "Dress", "Outerwear", "Shoes", "Bag", "Accessory", "Jewelry"];
+  const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver"];
 
-    if (intent === "add") {
-      const name = formData.get("name") as string;
-      const category = formData.get("category") as string;
-      const imageUrl = formData.get("imageUrl") as string;
-      const primaryColor = formData.get("primaryColor") as string;
-      const pattern = formData.get("pattern") as string;
-      const brand = formData.get("brand") as string;
-      const occasions = JSON.parse(formData.get("occasions") as string || "[]");
-      const seasons = JSON.parse(formData.get("seasons") as string || "[]");
-
-      if (!name || !category || !imageUrl) return data({ error: "Name and category required" }, { status: 400 });
-
-      await prisma.closetItem.create({
-        data: {
-          customerId: customer.id,
-          name: name,
-          category,
-          imageUrl: imageUrl || "",
-          primaryColor: primaryColor || null,
-          pattern: pattern || null,
-          brand: brand || null,
-          occasions: occasions.length > 0 ? occasions : null,
-          seasons: seasons.length > 0 ? seasons : null,
-        },
-      });
-      return data({ success: true });
-    }
-
-    if (intent === "delete") {
-      const itemId = formData.get("itemId") as string;
-      await prisma.closetItem.delete({ where: { id: itemId } });
-      return data({ success: true });
-    }
-
-    return data({ error: "Unknown intent" }, { status: 400 });
-  } catch (err: any) {
-    console.error("Closet action error:", err);
-    return data({ error: err.message }, { status: 500 });
-  }
-}
-
-export default function BuySkip() {
-  const { items } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher();
-  
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [activeCategory, setActiveCategory] = useState("ALL");
-  const [uploading, setUploading] = useState(false);
-  
-  const [newName, setNewName] = useState("");
-  const [newCategory, setNewCategory] = useState("TOPS");
-  const [newImageUrl, setNewImageUrl] = useState("");
-  const [newColor, setNewColor] = useState("");
-  const [newPattern, setNewPattern] = useState("");
-  const [newBrand, setNewBrand] = useState("");
-  const [newOccasions, setNewOccasions] = useState<string[]>([]);
-  const [newSeasons, setNewSeasons] = useState<string[]>([]);
-
-  const filtered = activeCategory === "ALL" ? items : items.filter((i: any) => i.category === activeCategory);
-
-  const uploadToCloudinary = async (file: File) => {
+  const handleUpload = async (file: File) => {
     setUploading(true);
     const formData = new FormData();
     formData.append("file", file);
     formData.append("upload_preset", CLOUDINARY_PRESET);
     try {
-      const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`, {
-        method: "POST",
-        body: formData,
-      });
+      const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`, { method: "POST", body: formData });
       const data = await res.json();
-      setNewImageUrl(data.secure_url);
+      setImageUrl(data.secure_url);
+      setStep("tag");
+    } catch (err) { console.error("Upload failed:", err); }
+    finally { setUploading(false); }
+  };
+
+  const handleAnalyze = async () => {
+    setAnalyzing(true);
+    try {
+      const response = await fetch("/api/wishlist?action=analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl, category, color, brand, itemLink })
+      });
+      const data = await response.json();
+      if (data.success) {
+        const a = data.analysis;
+        setResult({
+          verdict: a.verdict,
+          confidence: a.confidence,
+          styleAlignment: a.styleDNAMatch,
+          details: a.detailedAnalysis,
+          closetPairings: a.closetPairings || [],
+          fillsGap: a.fillsGap,
+          naiaMatch: a.naiaMatch,
+          occasions: a.occasions || [],
+          finalThought: a.finalThought
+        });
+        setStep("result");
+      } else {
+        setResult({ verdict: "ERROR", confidence: 0, finalThought: "Unable to analyze. Please try another photo." });
+        setStep("result");
+      }
     } catch (err) {
-      console.error("Upload error:", err);
-    } finally {
-      setUploading(false);
-    }
+      setResult({ verdict: "ERROR", confidence: 0, finalThought: "Analysis failed. Please try again." });
+      setStep("result");
+    } finally { setAnalyzing(false); }
   };
 
-  const toggleOccasion = (occ: string) => {
-    setNewOccasions(prev => prev.includes(occ) ? prev.filter(o => o !== occ) : [...prev, occ]);
+  const reset = () => {
+    setImageUrl(""); setResult(null); setCategory(""); setColor([]); setBrand(""); setItemLink(""); setStep("upload");
   };
 
-  const toggleSeason = (s: string) => {
-    setNewSeasons(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]);
-  };
-
-  const handleAdd = () => {
-    if (!newName) return;
-    fetcher.submit(
-      {
-        intent: "add",
-        name: newName,
-        category: newCategory,
-        imageUrl: newImageUrl,
-        primaryColor: newColor,
-        pattern: newPattern,
-        brand: newBrand,
-        occasions: JSON.stringify(newOccasions),
-        seasons: JSON.stringify(newSeasons),
-      },
-      { method: "post" }
-    );
-    setNewName(""); setNewImageUrl(""); setNewColor(""); setNewPattern("");
-    setNewBrand(""); setNewOccasions([]); setNewSeasons([]);
-    setShowAddForm(false);
-  };
-
-  const btnStyle = (active: boolean) => ({
-    padding: "8px 16px",
-    fontSize: "14px",
-    fontWeight: active ? 600 : 400,
-    border: active ? "1px solid rgba(59,5,16,0.2)" : "1px solid rgba(59,5,16,0.08)",
-    cursor: "pointer",
-    background: active ? "rgba(139,32,53,0.08)" : "rgba(255,255,255,0.5)",
-    color: active ? "#8b2035" : "#7a6f6a",
-    fontFamily: "'Cormorant Garamond',serif",
-    fontStyle: "italic",
-    transition: "all 0.2s",
-  });
+  const labelStyle: React.CSSProperties = { fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px", display: "block" };
+  const pillStyle = (active: boolean): React.CSSProperties => ({ padding: "10px 18px", border: active ? "none" : "1px solid rgba(59,5,16,.12)", fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: active ? "#f4f4f1" : "#221516", cursor: "pointer", background: active ? "#8b2035" : "transparent", transition: "all .2s" });
 
   return (
     <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
-      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-      
-      <div style={{ maxWidth: "1400px", margin: "0 auto", padding: "60px 40px" }}>
-        
-        {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "40px" }}>
-          <div>
-            <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: "clamp(48px,6vw,72px)", fontWeight: 900, lineHeight: 1, marginBottom: "12px" }}>
-              Buy or Skip
-            </h1>
-            <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "20px", fontStyle: "italic", color: "#7a6f6a" }}>
-              Upload, save, and style your pieces with nAia.
-            </p>
-          </div>
-          <Link to="/" style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>
-            ← DASHBOARD
-          </Link>
-        </div>
+      <style>{css}</style>
+      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
 
-        {/* Stats */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", marginBottom: "40px" }}>
-          <div style={{ background: "rgba(255,255,255,0.5)", padding: "24px", border: "1px solid rgba(59,5,16,0.06)" }}>
-            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "48px", fontWeight: 900 }}>{items.length}</div>
-            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a" }}>TOTAL PIECES</div>
-          </div>
-          <div style={{ background: "rgba(255,255,255,0.5)", padding: "24px", border: "1px solid rgba(59,5,16,0.06)" }}>
-            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "48px", fontWeight: 900 }}>{new Set(items.map((i: any) => i.category)).size}</div>
-            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a" }}>CATEGORIES</div>
-          </div>
-          <div style={{ background: "rgba(255,255,255,0.5)", padding: "24px", border: "1px solid rgba(59,5,16,0.06)" }}>
-            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "48px", fontWeight: 900 }}>{new Set(items.map((i: any) => i.brand).filter(Boolean)).size}</div>
-            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a" }}>BRANDS</div>
-          </div>
-        </div>
+      <div className="bs-topbar">
+        <div className="bs-topbar-logo">nAia</div>
+        <Link to="/apps/naia-stylist/" className="bs-topbar-link">← Dashboard</Link>
+      </div>
 
-        {/* Toggle Add Form Button */}
-        {!showAddForm && (
-          <button onClick={() => setShowAddForm(true)} style={{ width: "100%", padding: "20px", background: "#221516", color: "#f4f4f1", border: "none", marginBottom: "40px", cursor: "pointer", fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic" }}>
-            + Add a Piece
-          </button>
-        )}
+      <div className="bs-wrap">
+        <h1 className="bs-headline">Buy or Skip?</h1>
+        <p className="bs-sub">Thinking of buying something? Upload it and nAia will tell you if it fits your wardrobe, style, and lifestyle.</p>
 
-        {/* Add Form */}
-        {showAddForm && (
-          <div style={{ background: "rgba(255,255,255,0.8)", padding: "40px", marginBottom: "40px", border: "1px solid rgba(59,5,16,0.06)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
-              <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: "24px", fontWeight: 700 }}>Add to Wardrobe</h3>
-              <button onClick={() => setShowAddForm(false)} style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", color: "#7a6f6a" }}>Cancel</button>
-            </div>
-
-            {/* Photo upload */}
-            <div style={{ marginBottom: "24px" }}>
-              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>PHOTO</div>
-              <label style={{ display: "block", border: "1px dashed rgba(59,5,16,0.2)", padding: "40px", textAlign: "center", cursor: "pointer", background: "rgba(255,255,255,0.5)" }}>
-                {newImageUrl ? (
-                  <img src={newImageUrl} alt="preview" style={{ maxHeight: "200px", objectFit: "cover" }} />
-                ) : uploading ? (
-                  <span style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#7a6f6a" }}>Uploading...</span>
-                ) : (
-                  <span style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#7a6f6a" }}>Click to upload photo</span>
-                )}
-                <input type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && uploadToCloudinary(e.target.files[0])} style={{ display: "none" }} />
-              </label>
-            </div>
-
-            {/* Name */}
-            <div style={{ marginBottom: "24px" }}>
-              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>NAME *</div>
-              <input type="text" placeholder="e.g. Black silk blazer" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ width: "100%", padding: "14px", border: "1px solid rgba(59,5,16,0.1)", fontSize: "16px", fontFamily: "'Cormorant Garamond',serif", fontStyle: "italic", boxSizing: "border-box", background: "rgba(255,255,255,0.7)" }} />
-            </div>
-
-            {/* Category */}
-            <div style={{ marginBottom: "24px" }}>
-              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>CATEGORY *</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                {CATEGORIES.map(c => (
-                  <button key={c} onClick={() => setNewCategory(c)} style={btnStyle(newCategory === c)}>
-                    {c.charAt(0) + c.slice(1).toLowerCase()}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Color */}
-            <div style={{ marginBottom: "24px" }}>
-              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>COLOR</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                {COLORS.map(c => (
-                  <button key={c} onClick={() => setNewColor(c)} style={btnStyle(newColor === c)}>{c}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* Pattern */}
-            <div style={{ marginBottom: "24px" }}>
-              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>PATTERN</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                {PATTERNS.map(p => (
-                  <button key={p} onClick={() => setNewPattern(p)} style={btnStyle(newPattern === p)}>{p}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* Occasions */}
-            <div style={{ marginBottom: "24px" }}>
-              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>OCCASIONS</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                {OCCASIONS.map(o => (
-                  <button key={o} onClick={() => toggleOccasion(o)} style={btnStyle(newOccasions.includes(o))}>{o}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* Seasons */}
-            <div style={{ marginBottom: "24px" }}>
-              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>SEASON</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                {SEASONS.map(s => (
-                  <button key={s} onClick={() => toggleSeason(s)} style={btnStyle(newSeasons.includes(s))}>{s}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* Brand */}
-            <div style={{ marginBottom: "32px" }}>
-              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>BRAND (OPTIONAL)</div>
-              <input type="text" placeholder="Brand name" value={newBrand} onChange={(e) => setNewBrand(e.target.value)} style={{ width: "100%", padding: "14px", border: "1px solid rgba(59,5,16,0.1)", fontSize: "16px", fontFamily: "'Cormorant Garamond',serif", fontStyle: "italic", boxSizing: "border-box", background: "rgba(255,255,255,0.7)" }} />
-            </div>
-
-            <button onClick={handleAdd} disabled={!newName || !newImageUrl || uploading} style={{ width: "100%", padding: "16px", background: newName ? "#8b2035" : "#d4cfc9", color: "#f4f4f1", border: "none", fontSize: "14px", letterSpacing: "2px", textTransform: "uppercase", cursor: newName ? "pointer" : "default", fontFamily: "'Space Mono',monospace" }}>
-              {uploading ? "Uploading..." : "Add to Wardrobe"}
-            </button>
+        {/* Step 1: Upload */}
+        {step === "upload" && (
+          <div style={{ background: "rgba(255,255,255,0.8)", border: "1px solid rgba(59,5,16,0.06)", padding: "60px", textAlign: "center" }}>
+            <input type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} style={{ display: "none" }} id="bsInput" />
+            <label htmlFor="bsInput" style={{ display: "inline-block", padding: "16px 40px", background: "#8b2035", color: "#f4f4f1", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", marginBottom: "16px" }}>
+              {uploading ? "UPLOADING..." : "CHOOSE PHOTO"}
+            </label>
+            <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#7a6f6a" }}>Upload a photo of the item you're thinking of buying</p>
           </div>
         )}
 
-        {/* Category filter */}
-        <div style={{ display: "flex", gap: "8px", overflowX: "auto", paddingBottom: "12px", marginBottom: "24px" }}>
-          {["ALL", ...CATEGORIES].map((cat) => (
-            <button key={cat} onClick={() => setActiveCategory(cat)} style={{ ...btnStyle(activeCategory === cat), whiteSpace: "nowrap", flexShrink: 0 }}>
-              {cat === "ALL" ? "All" : cat.charAt(0) + cat.slice(1).toLowerCase()}
-            </button>
-          ))}
-        </div>
-
-        <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "24px" }}>
-          {filtered.length} {filtered.length === 1 ? "piece" : "pieces"}
-        </p>
-
-        {/* Empty state */}
-        {filtered.length === 0 && (
-          <div style={{ textAlign: "center", padding: "80px 40px", background: "rgba(255,255,255,0.3)", border: "1px solid rgba(59,5,16,0.06)" }}>
-            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "64px", marginBottom: "20px" }}>◇</div>
-            <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "20px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "32px" }}>
-              No pieces yet in this category
-            </p>
-            <button onClick={() => setShowAddForm(true)} style={{ padding: "16px 32px", background: "#221516", color: "#f4f4f1", border: "none", fontSize: "12px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", fontFamily: "'Space Mono',monospace" }}>
-              Add Your First Piece
-            </button>
-          </div>
-        )}
-
-        {/* Items grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: "24px" }}>
-          {filtered.map((item: any) => (
-            <div key={item.id} style={{ background: "rgba(255,255,255,0.5)", border: "1px solid rgba(59,5,16,0.06)", overflow: "hidden", position: "relative" }}>
-              <div style={{ aspectRatio: "1", background: "#f5f2ee", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-                {item.imageUrl ? (
-                  <img src={item.imageUrl} alt={item.itemName} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                ) : (
-                  <span style={{ fontSize: "64px", opacity: 0.2 }}>◇</span>
-                )}
+        {/* Step 2: Tag */}
+        {step === "tag" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "48px" }}>
+            <div>
+              <img src={imageUrl} alt="Item" style={{ width: "100%", border: "1px solid rgba(59,5,16,0.06)" }} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+              <div>
+                <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "24px", fontWeight: 900, fontStyle: "italic", marginBottom: "8px" }}>Tell us about this piece</h2>
+                <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>Help nAia understand what it is</p>
               </div>
-              <div style={{ padding: "20px" }}>
-                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "8px" }}>
-                  {item.category}
+
+              <div>
+                <span style={labelStyle}>Category *</span>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                  {CATEGORIES.map(c => <button key={c} onClick={() => setCategory(c)} style={pillStyle(category === c)}>{c}</button>)}
                 </div>
-                <p style={{ fontFamily: "'Playfair Display',serif", fontSize: "18px", fontWeight: 600, marginBottom: "8px" }}>
-                  {item.itemName}
-                </p>
-                {item.color && (
-                  <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "4px" }}>
-                    {item.color}{item.pattern ? ` · ${item.pattern}` : ""}
-                  </p>
-                )}
-                {item.brand && (
-                  <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "4px" }}>
-                    {item.brand}
-                  </p>
-                )}
-                {item.occasions?.length > 0 && (
-                  <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "12px", color: "#7a6f6a", marginTop: "8px" }}>
-                    {item.occasions.slice(0, 2).join(", ")}
-                  </p>
-                )}
               </div>
-              <button 
-                onClick={() => fetcher.submit({ intent: "delete", itemId: item.id }, { method: "post" })} 
-                style={{ position: "absolute", top: "12px", right: "12px", background: "rgba(34,21,22,0.8)", color: "#f4f4f1", border: "none", borderRadius: "50%", width: "32px", height: "32px", cursor: "pointer", fontSize: "18px", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}
-              >
-                ×
+
+              <div>
+                <span style={labelStyle}>Color * (choose all that apply)</span>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                  {COLORS.map(c => <button key={c} onClick={() => setColor(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])} style={pillStyle(color.includes(c))}>{c}</button>)}
+                </div>
+              </div>
+
+              <div>
+                <span style={labelStyle}>Brand (optional)</span>
+                <input className="bs-input" type="text" placeholder="e.g. Zara, H&M" value={brand} onChange={e => setBrand(e.target.value)} />
+              </div>
+
+              <div>
+                <span style={labelStyle}>Product Link (optional)</span>
+                <input className="bs-input" type="text" placeholder="e.g. https://zara.com/..." value={itemLink} onChange={e => setItemLink(e.target.value)} />
+                <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "13px", fontStyle: "italic", color: "#7a6f6a", marginTop: "6px" }}>Helps nAia understand the exact item</p>
+              </div>
+
+              <div style={{ display: "flex", gap: "12px" }}>
+                <button onClick={reset} className="bs-btn-outline">← Back</button>
+                <button onClick={handleAnalyze} disabled={!category || color.length === 0 || analyzing} className="bs-btn" style={{ flex: 1, background: (!category || color.length === 0) ? "#d4cfc9" : "#8b2035" }}>
+                  {analyzing ? "ANALYZING..." : "ANALYZE →"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Result */}
+        {step === "result" && result && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "48px" }}>
+            <div>
+              <img src={imageUrl} alt="Item" style={{ width: "100%", border: "1px solid rgba(59,5,16,0.06)", marginBottom: "16px" }} />
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                {category && <span style={pillStyle(true)}>{category}</span>}
+                {color.map(c => <span key={c} style={pillStyle(true)}>{c}</span>)}
+                {brand && <span style={pillStyle(false)}>{brand}</span>}
+              </div>
+            </div>
+
+            <div style={{ background: "rgba(255,255,255,0.8)", padding: "40px", border: "1px solid rgba(59,5,16,0.06)" }}>
+              <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "64px", fontWeight: 900, color: result.verdict === "BUY" ? "#8b2035" : "#7a6f6a", marginBottom: "4px" }}>{result.verdict}</div>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "10px", color: "#7a6f6a", marginBottom: "32px", letterSpacing: "1px" }}>{result.confidence}% CONFIDENCE</div>
+
+              {result.styleAlignment && (
+                <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
+                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "10px" }}>STYLE DNA MATCH</div>
+                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#221516", lineHeight: 1.7 }}>{result.styleAlignment}</div>
+                </div>
+              )}
+
+              {result.details && (
+                <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
+                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "10px" }}>ANALYSIS</div>
+                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", color: "#221516", lineHeight: 1.8 }}>
+                    {result.details.silhouette && <div style={{ marginBottom: "6px" }}><strong>Silhouette:</strong> {result.details.silhouette}</div>}
+                    {result.details.color && <div style={{ marginBottom: "6px" }}><strong>Color:</strong> {result.details.color}</div>}
+                    {result.details.fabric && <div style={{ marginBottom: "6px" }}><strong>Fabric:</strong> {result.details.fabric}</div>}
+                    {result.details.versatility && <div><strong>Versatility:</strong> {result.details.versatility}</div>}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
+                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "10px" }}>PAIRS WITH YOUR CLOSET</div>
+                {result.closetPairings?.length > 0 ? (
+                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", color: "#221516", lineHeight: 1.8 }}>{result.closetPairings.join(", ")}</div>
+                ) : (
+                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>
+                    No closet items yet.{" "}
+                    <a href="/apps/naia-stylist/closet" style={{ color: "#8b2035", textDecoration: "none" }}>Add pieces to your wardrobe</a>
+                    {" "}and nAia will tell you what this pairs with.
+                  </div>
+                )}
+                {result.fillsGap && <div style={{ color: "#8b2035", fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", marginTop: "8px" }}>✓ {result.fillsGap}</div>}
+              </div>
+
+              {result.naiaMatch && (
+                <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
+                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "10px" }}>PAIR IT WITH FROM NAIA</div>
+                  <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "18px", fontWeight: 700, color: "#221516", marginBottom: "6px" }}>
+                    {typeof result.naiaMatch === "object" ? result.naiaMatch.title : result.naiaMatch}
+                  </div>
+                  {typeof result.naiaMatch === "object" && result.naiaMatch.reason && (
+                    <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "10px" }}>{result.naiaMatch.reason}</div>
+                  )}
+                  {typeof result.naiaMatch === "object" && result.naiaMatch.url && (
+                    <a href={result.naiaMatch.url} target="_blank" rel="noreferrer" style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>SHOP THIS PIECE →</a>
+                  )}
+                </div>
+              )}
+
+              {result.occasions?.length > 0 && (
+                <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
+                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "10px" }}>PERFECT FOR</div>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    {result.occasions.map((occ: string, i: number) => <span key={i} style={{ padding: "6px 12px", background: "rgba(139,32,53,0.08)", color: "#8b2035", fontSize: "11px", fontFamily: "'Space Mono',monospace" }}>{occ}</span>)}
+                  </div>
+                </div>
+              )}
+
+              {result.finalThought && (
+                <div style={{ marginBottom: "32px" }}>
+                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#221516", lineHeight: 1.7 }}>{result.finalThought}</div>
+                </div>
+              )}
+
+              <button onClick={reset} style={{ width: "100%", padding: "14px", background: "transparent", border: "1px solid #8b2035", color: "#8b2035", fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>
+                TRY ANOTHER
               </button>
             </div>
-          ))}
-        </div>
-
-        {/* CTA */}
-        <div style={{ marginTop: "60px", textAlign: "center" }}>
-          <Link to="/quick-style" style={{ display: "inline-block", padding: "20px 40px", background: "#8b2035", color: "#f4f4f1", textDecoration: "none", fontSize: "14px", letterSpacing: "2px", textTransform: "uppercase", fontFamily: "'Space Mono',monospace" }}>
-            Style Me →
-          </Link>
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

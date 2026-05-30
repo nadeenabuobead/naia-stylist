@@ -1,30 +1,24 @@
-// app/routes/style-me/feeling.tsx
 import { Form, Link, useLoaderData } from "react-router";
 import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 
-// Feelings - how user wants to FEEL in their outfit
-const feelings = [
-  { id: "elegant", label: "Elegant", emoji: "💎", color: "bg-purple-100 text-purple-700" },
-  { id: "cozy", label: "Cozy", emoji: "🧸", color: "bg-amber-100 text-amber-700" },
-  { id: "bold", label: "Bold", emoji: "🔥", color: "bg-red-100 text-red-700" },
-  { id: "effortless", label: "Effortless", emoji: "🌊", color: "bg-blue-100 text-blue-700" },
-  { id: "feminine", label: "Feminine", emoji: "🌸", color: "bg-pink-100 text-pink-700" },
-  { id: "edgy", label: "Edgy", emoji: "⚡", color: "bg-slate-200 text-slate-700" },
-  { id: "classic", label: "Classic", emoji: "🎩", color: "bg-gray-100 text-gray-700" },
-  { id: "trendy", label: "Trendy", emoji: "✨", color: "bg-fuchsia-100 text-fuchsia-700" },
-  { id: "minimalist", label: "Minimalist", emoji: "○", color: "bg-stone-100 text-stone-700" },
-  { id: "glamorous", label: "Glamorous", emoji: "💄", color: "bg-rose-100 text-rose-700" },
-  { id: "bohemian", label: "Bohemian", emoji: "🌻", color: "bg-orange-100 text-orange-700" },
-  { id: "professional", label: "Professional", emoji: "💼", color: "bg-indigo-100 text-indigo-700" },
+const desiredFeelings = [
+  { id: "more-confident", label: "Make me feel more confident", emoji: "💪" },
+  { id: "more-put-together", label: "Make me feel more put together", emoji: "✨" },
+  { id: "softer", label: "Make me feel softer", emoji: "🌸" },
+  { id: "more-powerful", label: "Make me feel more powerful", emoji: "👑" },
+  { id: "more-feminine", label: "Make me feel more feminine", emoji: "💐" },
+  { id: "more-effortless", label: "Make me feel more effortless", emoji: "🌊" },
+  { id: "more-elevated", label: "Make me feel more elevated", emoji: "🎯" },
+  { id: "more-attractive", label: "Make me feel more attractive", emoji: "💫" },
+  { id: "like-myself", label: "Make me feel like myself again", emoji: "🌟" },
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await getSession(request.headers.get("Cookie"));
   const mood = session.get("styleMeMood");
   
-  // Redirect back if no mood selected
   if (!mood) {
     return redirect("/style-me/mood");
   }
@@ -34,205 +28,85 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
-  const feelingsRaw = formData.get("feelings") as string;
+  const feeling = formData.get("feeling") as string;
   
-  if (!feelingsRaw) {
-    return data({ error: "Please select at least one feeling" }, { status: 400 });
+  if (!feeling) {
+    return data({ error: "Please select how you want to feel" }, { status: 400 });
   }
   
-  const selectedFeelings = feelingsRaw.split(",").filter(Boolean);
-  
-  if (selectedFeelings.length === 0) {
-    return data({ error: "Please select at least one feeling" }, { status: 400 });
-  }
-  
-  // Store in session
   const session = await getSession(request.headers.get("Cookie"));
-  session.set("styleMeFeelings", selectedFeelings);
+  session.set("styleMeFeeling", feeling);
   
   return redirect("/style-me/occasion", {
-    headers: {
-      "Set-Cookie": await commitSession(session)
-    }
+    headers: { "Set-Cookie": await commitSession(session) }
   });
 }
 
 export default function StyleMeFeeling() {
-  const { mood } = useLoaderData<typeof loader>();
-  const [selectedFeelings, setSelectedFeelings] = useState<string[]>([]);
-
-  const toggleFeeling = (feelingId: string) => {
-    setSelectedFeelings((prev) => {
-      if (prev.includes(feelingId)) {
-        return prev.filter((id) => id !== feelingId);
-      }
-      // Max 3 selections
-      if (prev.length >= 3) {
-        return prev;
-      }
-      return [...prev, feelingId];
-    });
-  };
-
-  // Get mood emoji for display
-  const moodEmoji: Record<string, string> = {
-    confident: "💪",
-    calm: "🌿",
-    playful: "🎀",
-    romantic: "🌹",
-    powerful: "👑",
-    mysterious: "🌙",
-    joyful: "☀️",
-    sophisticated: "✨",
-  };
+  const [selected, setSelected] = useState<string | null>(null);
 
   return (
-    <div className="min-h-screen bg-[var(--naia-cream)]">
-      {/* Header */}
-      <header className="px-4 py-6 bg-white/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-lg mx-auto flex items-center justify-between">
-          <Link to="/style-me/mood" className="text-[var(--naia-text-muted)] text-sm">
-            ← Back
-          </Link>
-          <div className="flex gap-1">
-            {[1, 2, 3, 4].map((step) => (
-              <div
-                key={step}
-                className={`w-8 h-1 rounded-full ${
-                  step <= 2 ? "bg-[var(--naia-rose)]" : "bg-[var(--naia-gray-200)]"
-                }`}
-              />
-            ))}
-          </div>
-          <span className="text-sm text-[var(--naia-text-muted)]">2/4</span>
-        </div>
-      </header>
-
-      <main className="px-4 py-8 max-w-lg mx-auto">
-        {/* Context from previous step */}
-        <div className="flex items-center justify-center gap-2 mb-6">
-          <span className="text-2xl">{moodEmoji[mood] || "✨"}</span>
-          <span className="text-[var(--naia-text-muted)] capitalize">
-            Feeling {mood}
-          </span>
-        </div>
-
-        {/* Question */}
-        <div className="text-center mb-8">
-          <h1 className="font-display text-2xl font-medium text-[var(--naia-charcoal)] mb-2">
-            How do you want to look?
-          </h1>
-          <p className="text-[var(--naia-text-muted)]">
-            Pick up to 3 vibes for your outfit
-          </p>
-        </div>
-
-        {/* Feelings Grid */}
+    <div style={{ minHeight: "100vh", background: "#f4f4f1", padding: "40px 20px" }}>
+      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+      <div style={{ maxWidth: "600px", margin: "0 auto" }}>
+        <Link to="/style-me/mood" style={{ display: "inline-block", marginBottom: "32px", color: "#7a6f6a", textDecoration: "none", fontSize: "11px", fontFamily: "'Space Mono',monospace", letterSpacing: "2px", textTransform: "uppercase" }}>← Back</Link>
+        
+        <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: "42px", fontWeight: 900, marginBottom: "12px", color: "#221516", letterSpacing: "-1px" }}>How do you want to feel?</h1>
+        <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "40px" }}>The transformation you're seeking</p>
+        
         <Form method="post">
-          <input type="hidden" name="feelings" value={selectedFeelings.join(",")} />
-          
-          <div className="grid grid-cols-3 gap-3 mb-8">
-            {feelings.map((feeling) => {
-              const isSelected = selectedFeelings.includes(feeling.id);
-              const isDisabled = !isSelected && selectedFeelings.length >= 3;
-              
-              return (
-                <button
-                  key={feeling.id}
-                  type="button"
-                  onClick={() => toggleFeeling(feeling.id)}
-                  disabled={isDisabled}
-                  className={`
-                    relative p-4 rounded-xl text-center transition-all duration-200
-                    ${isSelected 
-                      ? "ring-2 ring-[var(--naia-rose)] ring-offset-2 scale-[1.02]" 
-                      : isDisabled
-                        ? "opacity-40 cursor-not-allowed"
-                        : "hover:scale-[1.02]"
-                    }
-                    ${feeling.color}
-                  `}
-                >
-                  <span className="text-2xl block mb-1">{feeling.emoji}</span>
-                  <span className="text-sm font-medium">{feeling.label}</span>
-                  
-                  {isSelected && (
-                    <div className="absolute -top-1 -right-1 w-5 h-5 bg-[var(--naia-rose)] rounded-full flex items-center justify-center">
-                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Selection Counter */}
-          <div className="flex justify-center gap-2 mb-6">
-            {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                className={`
-                  w-3 h-3 rounded-full transition-colors
-                  ${i < selectedFeelings.length 
-                    ? "bg-[var(--naia-rose)]" 
-                    : "bg-[var(--naia-gray-200)]"
-                  }
-                `}
-              />
+          <div style={{ display: "grid", gap: "12px", marginBottom: "40px" }}>
+            {desiredFeelings.map((feeling) => (
+              <button
+                key={feeling.id}
+                type="button"
+                onClick={() => setSelected(feeling.id)}
+                style={{
+                  padding: "20px 24px",
+                  background: selected === feeling.id ? "#8b2035" : "rgba(255,255,255,0.8)",
+                  color: selected === feeling.id ? "#f4f4f1" : "#221516",
+                  border: selected === feeling.id ? "2px solid #8b2035" : "1px solid rgba(59,5,16,0.1)",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "16px",
+                  fontFamily: "'Cormorant Garamond',serif",
+                  fontSize: "18px",
+                  transition: "all 0.3s",
+                }}
+              >
+                <span style={{ fontSize: "24px" }}>{feeling.emoji}</span>
+                <span>{feeling.label}</span>
+              </button>
             ))}
           </div>
 
-          {/* Selected Pills */}
-          {selectedFeelings.length > 0 && (
-            <div className="flex flex-wrap justify-center gap-2 mb-6">
-              {selectedFeelings.map((id) => {
-                const feeling = feelings.find((f) => f.id === id);
-                return feeling ? (
-                  <span
-                    key={id}
-                    className="inline-flex items-center gap-1 px-3 py-1 bg-[var(--naia-rose)]/10 text-[var(--naia-rose)] rounded-full text-sm font-medium"
-                  >
-                    {feeling.emoji} {feeling.label}
-                    <button
-                      type="button"
-                      onClick={() => toggleFeeling(id)}
-                      className="ml-1 hover:text-[var(--naia-rose-dark)]"
-                    >
-                      ×
-                    </button>
-                  </span>
-                ) : null;
-              })}
-            </div>
-          )}
-
-          {/* Continue Button */}
+          <input type="hidden" name="feeling" value={selected || ""} />
+          
           <button
             type="submit"
-            disabled={selectedFeelings.length === 0}
-            className={`
-              w-full py-4 px-6 rounded-full font-medium text-center
-              transition-all duration-200
-              ${selectedFeelings.length > 0
-                ? "bg-[var(--naia-rose)] text-white hover:bg-[var(--naia-rose-dark)] shadow-lg"
-                : "bg-[var(--naia-gray-200)] text-[var(--naia-text-muted)] cursor-not-allowed"
-              }
-            `}
+            disabled={!selected}
+            style={{
+              width: "100%",
+              padding: "18px",
+              background: selected ? "#221516" : "#7a6f6a",
+              color: "#f4f4f1",
+              border: "none",
+              fontFamily: "'Space Mono',monospace",
+              fontSize: "10px",
+              letterSpacing: "4px",
+              textTransform: "uppercase",
+              cursor: selected ? "pointer" : "not-allowed",
+              borderRadius: "4px",
+              opacity: selected ? 1 : 0.6,
+            }}
           >
-            Continue →
+            Continue
           </button>
         </Form>
-
-        {/* Tip */}
-        <div className="mt-8 p-4 bg-white/60 rounded-xl">
-          <p className="text-sm text-[var(--naia-text-muted)] text-center">
-            💡 <span className="font-medium">Tip:</span> Mix different vibes 
-            for a unique look — like "elegant + edgy" or "cozy + glamorous"
-          </p>
-        </div>
-      </main>
+      </div>
     </div>
   );
 }

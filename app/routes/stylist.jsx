@@ -598,14 +598,15 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
   const WORKED_OPTIONS = [
     "Felt like me", "Helped me feel more confident", "Right for the occasion",
     "Flattering silhouette", "Comfortable", "I liked the proportions",
-    "I liked the colors", "Felt polished", "Felt attractive", "Easy to imagine wearing"
+    "I liked the colors", "Felt polished", "Felt attractive", "Easy to imagine wearing",
+    "Made my own piece feel more elevated"
   ];
 
   const DIDNT_WORK_OPTIONS = [
-  "Didn't feel like me", "Didn't create the feeling I wanted", "Wrong for the occasion",
-  "Too exposed", "Too plain", "Felt like too much for me", "Too structured", "Lacked shape",
-  "Too clingy", "Uncomfortable", "Hard to wear in real life"
-];
+    "Didn't feel like me", "Didn't create the feeling I wanted", "Wrong for the occasion",
+    "Too exposed", "Too plain", "Felt like too much for me", "Too structured", "Lacked shape",
+    "Too clingy", "Uncomfortable", "Hard to wear in real life", "Hard to style with my closet"
+  ];
 
   const OBJECTION_OPTIONS = [
     "Too expensive",
@@ -707,11 +708,12 @@ function ConfidenceRating({ historyId, customerToken, mood, feeling, event, styl
 
   return (
     <div style={{ padding: "28px", background: "#f5f2ee", borderRadius: "2px" }}>
-      <p style={{ fontSize: "18px", fontWeight: 500, marginBottom: "24px" }}>How did this look land for you?</p>
+      <p style={{ fontSize: "18px", fontWeight: 500, marginBottom: "8px" }}>How did this look land for you?</p>
+      <p style={{ fontSize: "14px", fontStyle: "italic", color: "#8a7f75", marginBottom: "24px" }}>Help nAia learn your style — this takes 30 seconds.</p>
 
       {/* Overall reaction */}
       <div style={{ marginBottom: "24px" }}>
-        <p style={{ fontSize: "14px", marginBottom: "12px", color: "#4a4540" }}>Overall reaction</p>
+        <p style={{ fontSize: "14px", marginBottom: "12px", color: "#4a4540" }}>Overall, how did this look feel?</p>
         <div style={{ display: "flex", gap: "12px" }}>
           {[1, 2, 3, 4, 5].map(n => (
             <button
