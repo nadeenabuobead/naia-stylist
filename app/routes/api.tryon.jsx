@@ -1,12 +1,9 @@
-import prisma from "../db.server";
-
 const FASHN_API_KEY = process.env.FASHN_API_KEY;
 const FASHN_BASE = "https://api.fashn.ai/v1";
 
-// POST — start a try-on
 export async function action({ request }) {
   try {
-    const { customerId, modelImage, garmentImage } = await request.json();
+    const { customerId, modelImage, garmentImage, resolution = "1k", quality = "balanced" } = await request.json();
 
     if (!customerId || !modelImage || !garmentImage) {
       return Response.json({ error: "customerId, modelImage and garmentImage required" }, { status: 400 });
@@ -19,11 +16,14 @@ export async function action({ request }) {
         "Authorization": `Bearer ${FASHN_API_KEY}`,
       },
       body: JSON.stringify({
-        model_name: "tryon-v1.6",
+        model_name: "tryon-max",
         inputs: {
           model_image: modelImage,
-          garment_image: garmentImage,
-        },
+          product_image: garmentImage,
+          resolution,
+          generation_mode: quality,
+          output_format: "jpeg",
+        }
       }),
     });
 
@@ -40,7 +40,6 @@ export async function action({ request }) {
   }
 }
 
-// GET — poll for result
 export async function loader({ request }) {
   try {
     const url = new URL(request.url);
