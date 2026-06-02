@@ -1,0 +1,367 @@
+cat > public/scan.html << 'ENDOFFILE'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+  <title>nAia Body Scan</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{background:#000;font-family:system-ui,sans-serif;overflow:hidden;height:100vh;}
+    #video{position:fixed;top:0;left:0;width:100vw;height:100vh;object-fit:cover;z-index:1;}
+    #header{position:fixed;top:0;left:0;right:0;background:rgba(0,0,0,0.85);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;z-index:10;display:none;}
+    .logo{color:#7F77DD;font-size:18px;font-weight:600;}
+    .step-lbl{color:#fff;font-size:13px;opacity:0.8;}
+    #border{position:fixed;top:0;left:0;right:0;bottom:0;border:3px solid #444;z-index:5;pointer-events:none;transition:border-color .3s,box-shadow .3s;}
+    #silsvg{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:4;pointer-events:none;}
+    #status{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#fff;padding:8px 20px;border-radius:20px;font-size:14px;font-weight:500;z-index:10;white-space:nowrap;transition:background .3s;}
+    #guide{position:fixed;bottom:40px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#fff;padding:8px 20px;border-radius:20px;font-size:13px;z-index:10;text-align:center;max-width:88vw;}
+    #cdown{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-size:120px;font-weight:700;color:#fff;text-shadow:0 0 60px rgba(0,0,0,0.9);z-index:11;display:none;}
+    #flash{position:fixed;top:0;left:0;width:100vw;height:100vh;background:#fff;z-index:20;display:none;}
+    #flip{position:fixed;bottom:100px;right:20px;background:rgba(0,0,0,0.6);border:1.5px solid rgba(255,255,255,0.3);border-radius:50%;width:50px;height:50px;font-size:22px;z-index:10;cursor:pointer;display:none;align-items:center;justify-content:center;}
+
+    /* START SCREEN */
+    #start{position:fixed;top:0;left:0;width:100vw;height:100vh;background:#0a0a0a;display:flex;align-items:center;justify-content:center;z-index:30;}
+    .card{background:#fff;border-radius:20px;padding:40px 28px;max-width:380px;width:90%;text-align:center;}
+    .card-logo{font-size:24px;font-weight:600;color:#7F77DD;margin-bottom:20px;}
+    .card h1{font-size:22px;font-weight:600;margin-bottom:10px;color:#111;}
+    .card p{font-size:14px;color:#666;line-height:1.6;margin-bottom:22px;}
+    .tips{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:22px;}
+    .tip{display:flex;align-items:center;gap:8px;padding:9px 11px;background:#f5f5f5;border-radius:10px;font-size:12px;color:#555;}
+    .btn{width:100%;padding:14px;background:#7F77DD;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:500;cursor:pointer;}
+
+    /* GYRO SCREEN */
+    #gyro-screen{position:fixed;top:0;left:0;width:100vw;height:100vh;background:#0a0a0a;display:none;flex-direction:column;align-items:center;justify-content:center;z-index:25;}
+    #gyro-title{color:#fff;font-size:18px;font-weight:600;margin-bottom:8px;text-align:center;}
+    #gyro-sub{color:#888;font-size:13px;margin-bottom:40px;text-align:center;padding:0 20px;}
+    #gyro-circle-wrap{position:relative;width:200px;height:200px;margin-bottom:40px;}
+    #gyro-outer{width:200px;height:200px;border-radius:50%;border:3px solid #333;position:absolute;top:0;left:0;}
+    #gyro-inner{width:24px;height:24px;border-radius:50%;background:#7F77DD;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);transition:left .1s,top .1s,background .2s;}
+    #gyro-target{width:48px;height:48px;border-radius:50%;border:2px dashed #555;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);}
+    #gyro-status{color:#888;font-size:14px;font-weight:500;}
+    .naia-logo-gyro{color:#7F77DD;font-size:20px;font-weight:600;margin-bottom:30px;}
+  </style>
+</head>
+<body>
+
+<!-- START SCREEN -->
+<div id="start">
+  <div class="card">
+    <div class="card-logo">nAia</div>
+    <h1>Your body scan</h1>
+    <p>Our AI guides you with voice instructions and auto-captures when your pose is correct.</p>
+    <div class="tips">
+      <div class="tip">👕 Fitted clothes</div>
+      <div class="tip">💡 Good lighting</div>
+      <div class="tip">📏 Stand 2m away</div>
+      <div class="tip">🔒 Never stored</div>
+    </div>
+    <button class="btn" onclick="init()">Start scan</button>
+  </div>
+</div>
+
+<!-- GYRO SCREEN -->
+<div id="gyro-screen">
+  <div class="naia-logo-gyro">nAia</div>
+  <div id="gyro-title">Hold your phone upright</div>
+  <div id="gyro-sub">Keep your phone level and pointed straight ahead. The dot will turn green when the angle is correct.</div>
+  <div id="gyro-circle-wrap">
+    <div id="gyro-outer"></div>
+    <div id="gyro-target"></div>
+    <div id="gyro-inner"></div>
+  </div>
+  <div id="gyro-status">Adjusting...</div>
+</div>
+
+<!-- CAMERA -->
+<div id="header"><span class="logo">nAia</span><span class="step-lbl" id="step-lbl">Step 1 of 2 — Face forward</span></div>
+<video id="video" autoplay playsinline muted></video>
+<svg id="silsvg" viewBox="0 0 390 844" preserveAspectRatio="xMidYMid meet">
+  <g id="sil-f" opacity="0.3" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">
+    <ellipse cx="195" cy="105" rx="38" ry="44"/>
+    <path d="M178 147 L175 170 Q195 178 215 170 L212 147"/>
+    <path d="M120 192 Q158 180 195 180 Q232 180 270 192"/>
+    <path d="M120 192 L72 275 L66 355"/>
+    <path d="M270 192 L318 275 L324 355"/>
+    <ellipse cx="64" cy="364" rx="11" ry="15"/>
+    <ellipse cx="326" cy="364" rx="11" ry="15"/>
+    <path d="M120 192 L112 300 Q110 375 128 396 L195 408 L262 396 Q280 375 278 300 L270 192"/>
+    <path d="M128 396 Q161 422 195 424 Q229 422 262 396"/>
+    <path d="M150 424 L143 572 L140 715"/>
+    <path d="M240 424 L247 572 L250 715"/>
+    <path d="M130 715 L140 715 L148 732 Q138 738 122 733 Z"/>
+    <path d="M260 715 L250 715 L242 732 Q252 738 268 733 Z"/>
+  </g>
+  <g id="sil-s" opacity="0" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">
+    <ellipse cx="200" cy="105" rx="34" ry="44"/>
+    <path d="M186 147 L184 170 Q200 178 212 170 L210 147"/>
+    <path d="M168 192 L160 300 Q158 375 172 396 L228 396 Q242 375 240 300 L222 192 Z"/>
+    <path d="M168 192 L140 275 L136 355"/>
+    <ellipse cx="134" cy="364" rx="11" ry="15"/>
+    <path d="M172 396 Q186 422 200 424 Q214 422 228 396"/>
+    <path d="M176 424 L170 572 L168 715"/>
+    <path d="M216 424 L222 572 L224 715"/>
+    <path d="M156 715 L168 715 L174 732 Q164 738 148 733 Z"/>
+  </g>
+</svg>
+<div id="border"></div>
+<div id="status" style="display:none">Preparing...</div>
+<div id="guide" style="display:none">Face forward · Arms slightly out · Full body visible</div>
+<div id="cdown"></div>
+<div id="flash"></div>
+<button id="flip" onclick="flipCam()">🔄</button>
+
+<script type="module">
+const params = new URLSearchParams(window.location.search);
+const CUST = params.get('customer');
+const BASE = window.location.origin;
+let forSide=false, goodStart=null, cdInt=null, afr=null, lm=null, stream=null;
+let facingMode='environment', lastMsg='', msgCount=0, femVoice=null;
+
+// ── VOICE ──
+function loadVoices(){
+  const vs = speechSynthesis.getVoices();
+  femVoice = vs.find(v=>v.lang.startsWith('en')&&(
+    v.name.includes('Samantha')||v.name.includes('Victoria')||
+    v.name.includes('Karen')||v.name.includes('Moira')||
+    v.name.includes('Ava')||v.name.includes('Allison')||
+    v.name.includes('female')||v.name.includes('Female')
+  ))||vs.find(v=>v.lang.startsWith('en'));
+}
+speechSynthesis.onvoiceschanged=loadVoices; loadVoices();
+
+function say(txt,force=false){
+  if(!force&&lastMsg===txt)return;
+  lastMsg=txt; speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(txt);
+  if(femVoice)u.voice=femVoice;
+  u.rate=0.85;u.pitch=1.2;u.volume=1;
+  speechSynthesis.speak(u);
+}
+function sayAll(arr){
+  speechSynthesis.cancel(); lastMsg='';
+  arr.forEach(t=>{const u=new SpeechSynthesisUtterance(t);if(femVoice)u.voice=femVoice;u.rate=0.85;u.pitch=1.2;u.volume=1;speechSynthesis.speak(u);});
+}
+function click(){
+  try{const c=new(window.AudioContext||window.webkitAudioContext)();
+  const o=c.createOscillator(),g=c.createGain();
+  o.connect(g);g.connect(c.destination);
+  o.frequency.value=880;o.type='sine';
+  g.gain.setValueAtTime(0.3,c.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001,c.currentTime+0.15);
+  o.start(c.currentTime);o.stop(c.currentTime+0.15);}catch(e){}
+}
+
+// ── GYRO ──
+let gyroOK=false, gyroInterval=null;
+function startGyro(){
+  return new Promise(resolve=>{
+    const inner=document.getElementById('gyro-inner');
+    const gstatus=document.getElementById('gyro-status');
+    const outer=document.getElementById('gyro-outer');
+    let stableCount=0;
+
+    function handleOrientation(e){
+      const beta=e.beta||0; // front-back tilt (-180 to 180)
+      const gamma=e.gamma||0; // left-right tilt (-90 to 90)
+      // Target: beta ~90 (phone upright), gamma ~0 (not tilted sideways)
+      const bOff=beta-90; // how far from upright
+      const gOff=gamma;
+      // Map to circle (max offset 30 degrees = edge of circle)
+      const maxR=76; // radius of movement area
+      const x=50+(gOff/30)*maxR;
+      const y=50+(bOff/30)*maxR;
+      const cx=Math.max(12,Math.min(188,x*2));
+      const cy=Math.max(12,Math.min(188,y*2));
+      inner.style.left=cx+'px';
+      inner.style.top=cy+'px';
+      const isGood=Math.abs(bOff)<8&&Math.abs(gOff)<8;
+      inner.style.background=isGood?'#1D9E75':'#7F77DD';
+      outer.style.borderColor=isGood?'#1D9E75':'#333';
+      gstatus.style.color=isGood?'#1D9E75':'#888';
+      gstatus.textContent=isGood?'✓ Perfect — hold still':'Adjust your phone angle';
+      if(isGood){
+        stableCount++;
+        if(stableCount>15){
+          window.removeEventListener('deviceorientation',handleOrientation);
+          clearInterval(gyroInterval);
+          click();
+          resolve();
+        }
+      } else { stableCount=0; }
+    }
+
+    // Request permission on iOS 13+
+    if(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function'){
+      DeviceOrientationEvent.requestPermission().then(state=>{
+        if(state==='granted') window.addEventListener('deviceorientation',handleOrientation);
+        else resolve(); // skip gyro if denied
+      }).catch(()=>resolve());
+    } else {
+      window.addEventListener('deviceorientation',handleOrientation);
+      // If no gyro events after 3s, skip
+      gyroInterval=setTimeout(()=>{window.removeEventListener('deviceorientation',handleOrientation);resolve();},3000);
+    }
+  });
+}
+
+// ── CAMERA ──
+async function startCam(mode){
+  if(stream)stream.getTracks().forEach(t=>t.stop());
+  stream=await navigator.mediaDevices.getUserMedia({
+    video:{facingMode:{ideal:mode},width:{ideal:1280},height:{ideal:720}}
+  });
+  const v=document.getElementById('video');
+  v.srcObject=stream; v.play();
+}
+window.flipCam=async()=>{
+  facingMode=facingMode==='environment'?'user':'environment';
+  await startCam(facingMode);
+}
+
+// ── MEDIAPIPE ──
+async function loadMP(){
+  const{PoseLandmarker,FilesetResolver}=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs');
+  const v=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm');
+  lm=await PoseLandmarker.createFromOptions(v,{
+    baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',delegate:'GPU'},
+    runningMode:'VIDEO',numPoses:1,
+    minPoseDetectionConfidence:0.6,
+    minPosePresenceConfidence:0.6,
+    minTrackingConfidence:0.6,
+  });
+}
+
+function checkPose(landmarks){
+  if(!landmarks||!landmarks.length)return{good:false,msg:'Step back — full body must be visible'};
+  const p=landmarks[0];
+  const nose=p[0],ls=p[11],rs=p[12],lh=p[23],rh=p[24],la=p[27],ra=p[28];
+  const nv=nose.visibility||0,lav=la.visibility||0,rav=ra.visibility||0;
+  const lhv=lh.visibility||0,rhv=rh.visibility||0;
+
+  if(nv<0.5)return{good:false,msg:'Move into frame — we can\'t see your face'};
+  if(lav<0.4&&rav<0.4)return{good:false,msg:'Step back — we need to see your feet'};
+
+  const cx=(ls.x+rs.x)/2;
+  if(cx<0.2||cx>0.8)return{good:false,msg:'Move to the center of the frame'};
+
+  const bh=Math.abs(nose.y-((la.y+ra.y)/2));
+  if(bh<0.35)return{good:false,msg:'Step closer to the camera'};
+  if(bh>0.9)return{good:false,msg:'Step back a little'};
+
+  // Check standing straight — shoulders level
+  const shoulderDiff=Math.abs(ls.y-rs.y);
+  if(!forSide&&shoulderDiff>0.06)return{good:false,msg:'Stand straight — level your shoulders'};
+
+  // Check not slouching — hip to shoulder vertical
+  const torsoLean=Math.abs(((ls.x+rs.x)/2)-((lh.x+rh.x)/2));
+  if(torsoLean>0.12)return{good:false,msg:'Stand straight — don\'t lean'};
+
+  return{good:true,msg:forSide?'Perfect — hold that pose':'Perfect — hold still'};
+}
+
+function updateSil(good){
+  const f=document.getElementById('sil-f'),s=document.getElementById('sil-s');
+  const c=good?'#1D9E75':'white', o=good?'0.65':'0.3';
+  if(!forSide){f.setAttribute('opacity',o);f.setAttribute('stroke',c);s.setAttribute('opacity','0');}
+  else{f.setAttribute('opacity','0');s.setAttribute('opacity',o);s.setAttribute('stroke',c);}
+}
+
+function detect(){
+  const v=document.getElementById('video');
+  if(!lm||v.readyState<2){afr=requestAnimationFrame(detect);return;}
+  try{
+    const r=lm.detectForVideo(v,performance.now());
+    const{good,msg}=checkPose(r.landmarks);
+    const st=document.getElementById('status');
+    const bd=document.getElementById('border');
+    st.textContent=good?'✓ Perfect pose':msg;
+    st.style.background=good?'#1D9E75':'rgba(226,75,74,0.85)';
+    bd.style.borderColor=good?'#1D9E75':'#E24B4A';
+    bd.style.boxShadow=good?'0 0 40px #1D9E7544':'none';
+    updateSil(good);
+    if(good){
+      if(!goodStart){
+        goodStart=Date.now(); click();
+        let c=3;
+        const cd=document.getElementById('cdown');
+        cd.textContent=c; cd.style.display='block';
+        cdInt=setInterval(()=>{
+          c--;
+          if(c>0){cd.textContent=c;click();}
+          else{
+            clearInterval(cdInt);cd.style.display='none';
+            goodStart=null; cancelAnimationFrame(afr);
+            capture();
+          }
+        },1000);
+      }
+    } else {
+      if(msg!==lastMsg){lastMsg=msg;msgCount=0;say(msg,true);}
+      else{msgCount++;if(msgCount%90===0)say(msg,true);}
+      if(goodStart){goodStart=null;clearInterval(cdInt);document.getElementById('cdown').style.display='none';}
+    }
+  }catch(e){}
+  afr=requestAnimationFrame(detect);
+}
+
+function capture(){
+  const v=document.getElementById('video');
+  const fl=document.getElementById('flash');
+  fl.style.display='block'; setTimeout(()=>fl.style.display='none',300);
+  if(!forSide){
+    forSide=true;
+    document.getElementById('step-lbl').textContent='Step 2 of 2 — Side view';
+    document.getElementById('guide').textContent='Turn 90° to your right · Arms relaxed · Full body visible';
+    sayAll(['Front photo taken.','Now turn 90 degrees to your right.','Keep your full body visible.']);
+    setTimeout(()=>{lastMsg='';msgCount=0;detect();},3000);
+  } else {
+    sayAll(['Side photo taken.','Building your Nay-ah avatar now.']);
+    submit();
+  }
+}
+
+async function submit(){
+  if(stream)stream.getTracks().forEach(t=>t.stop());
+  document.body.innerHTML=`<div style="position:fixed;top:0;left:0;width:100vw;height:100vh;background:#0a0a0a;display:flex;align-items:center;justify-content:center"><div style="background:#fff;border-radius:20px;padding:40px 32px;max-width:380px;width:90%;text-align:center"><div style="color:#7F77DD;font-size:22px;font-weight:600;margin-bottom:24px">nAia</div><div style="width:40px;height:40px;border:3px solid #f0f0f0;border-top:3px solid #7F77DD;border-radius:50%;margin:0 auto 24px;animation:spin 1s linear infinite"></div><h2 style="font-size:20px;font-weight:600;margin-bottom:12px">Building your avatar...</h2><p style="font-size:14px;color:#666">Analysing your measurements.</p></div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
+  try{
+    const sr=await fetch(`${BASE}/api/body-scan`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({customerId:CUST})});
+    const sd=await sr.json();
+    if(sd.error){alert('Error: '+sd.error);return;}
+    const pi=setInterval(async()=>{
+      const r=await fetch(`${BASE}/api/body-scan?sessionId=${sd.sessionId}&customerId=${CUST}`);
+      const d=await r.json();
+      if(d.status==='success'){clearInterval(pi);window.location.href=`${BASE}/onboarding/body-scan?done=true&customer=${CUST}`;}
+      else if(d.status==='error'){clearInterval(pi);alert('Scan failed: '+d.message);}
+    },3000);
+    setTimeout(()=>clearInterval(pi),120000);
+  }catch(e){alert('Something went wrong.');}
+}
+
+// ── INIT ──
+window.init=async function(){
+  loadVoices();
+  // Speak immediately on button tap
+  sayAll(['Hi, I am Nay-ah.','I will guide you through your body scan.','First, let\'s make sure your phone is held at the right angle.']);
+  // Request camera permission immediately
+  try{await startCam('environment');}
+  catch(e){try{await startCam('user');}catch(e2){alert('Camera access denied. Go to Settings → Safari → Camera → Allow');return;}}
+  document.getElementById('start').style.display='none';
+  // Show gyro screen
+  document.getElementById('gyro-screen').style.display='flex';
+  await startGyro();
+  // Gyro done — show camera
+  document.getElementById('gyro-screen').style.display='none';
+  document.getElementById('header').style.display='flex';
+  document.getElementById('status').style.display='block';
+  document.getElementById('guide').style.display='block';
+  document.getElementById('flip').style.display='flex';
+  sayAll(['Great. Now stand straight with your full body visible.','Keep your arms slightly away from your body.']);
+  await loadMP();
+  lastMsg=''; msgCount=0;
+  detect();
+}
+</script>
+</body>
+</html>
+ENDOFFILE

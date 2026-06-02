@@ -511,7 +511,7 @@ function BuySkipWidget() {
           ) : (
             <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a", lineHeight: 1.7 }}>
               No closet items saved yet.{" "}
-              <a href="/apps/naia-stylist/closet" style={{ color: "#8b2035", textDecoration: "none" }}>Add pieces to your wardrobe</a>
+              <a href="/closet" style={{ color: "#8b2035", textDecoration: "none" }}>Add pieces to your wardrobe</a>
               {" "}and nAia will tell you exactly what this pairs with.
             </div>
           )}
@@ -590,7 +590,7 @@ export default function Index() {
               Get a look based on your mood, plans, comfort needs, and Style DNA.
             </p>
           </div>
-          <Link to="/apps/naia-stylist/quick-style" style={{ display: "inline-block", padding: "20px 40px", border: "1px solid #f4f4f1", color: "#f4f4f1", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none", whiteSpace: "nowrap" }}>
+          <Link to="/quick-style" style={{ display: "inline-block", padding: "20px 40px", border: "1px solid #f4f4f1", color: "#f4f4f1", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none", whiteSpace: "nowrap" }}>
             START SESSION →
           </Link>
         </div>
@@ -617,12 +617,12 @@ export default function Index() {
         <div style={{ marginBottom: "60px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
             <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "32px", fontWeight: 900 }}>Your recent looks</h2>
-            <Link to="/apps/naia-stylist/quick-style" style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>STYLE AGAIN →</Link>
+            <Link to="/quick-style" style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>STYLE AGAIN →</Link>
           </div>
           {customer.stylingSessions.length === 0 ? (
             <div style={{ padding: "60px", textAlign: "center", background: "rgba(255,255,255,0.3)", border: "1px solid rgba(59,5,16,0.06)" }}>
               <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "24px" }}>No looks yet — start your first session</p>
-              <Link to="/apps/naia-stylist/quick-style" style={{ display: "inline-block", padding: "14px 32px", background: "#8b2035", color: "#f4f4f1", textDecoration: "none", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "3px", textTransform: "uppercase" }}>STYLE ME</Link>
+              <Link to="/quick-style" style={{ display: "inline-block", padding: "14px 32px", background: "#8b2035", color: "#f4f4f1", textDecoration: "none", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "3px", textTransform: "uppercase" }}>STYLE ME</Link>
             </div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "24px" }}>
@@ -638,7 +638,7 @@ export default function Index() {
                     {session.currentMood} → {session.desiredFeeling}
                   </div>
                   <div style={{ display: "flex", gap: "12px" }}>
-                    <Link to={`/style-me/result?sessionId=${session.id}`} style={{ fontFamily: "'Space Mono',monospace", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>VIEW LOOK →</Link>
+                    <Link to={`/apps/naia-stylist/style-me/result?sessionId=${session.id}`} style={{ fontFamily: "'Space Mono',monospace", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>VIEW LOOK →</Link>
                   </div>
                 </div>
               ))}
@@ -730,7 +730,7 @@ export default function Index() {
               <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "32px" }}>
                 Rate a few looks and nAia will start building a profile that's truly yours — your moods, your occasions, your feelings.
               </p>
-              <Link to="/apps/naia-stylist/quick-style" style={{ display: "inline-block", padding: "16px 32px", background: "#8b2035", color: "#f4f4f1", textDecoration: "none", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase" }}>RATE A LOOK →</Link>
+              <Link to="/quick-style" style={{ display: "inline-block", padding: "16px 32px", background: "#8b2035", color: "#f4f4f1", textDecoration: "none", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase" }}>RATE A LOOK →</Link>
             </div>
           )}
         </div>
@@ -778,17 +778,17 @@ export default function Index() {
           <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "32px", fontWeight: 900, marginBottom: "8px" }}>Style tools</h2>
           <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "24px" }}>Everything you need in one place</p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "20px" }}>
-            <Link to="/apps/naia-stylist/closet" style={{ background: "rgba(255,255,255,0.5)", padding: "32px", border: "1px solid rgba(59,5,16,0.06)", textDecoration: "none", color: "inherit", display: "block" }}>
+            <Link to="/closet" style={{ background: "rgba(255,255,255,0.5)", padding: "32px", border: "1px solid rgba(59,5,16,0.06)", textDecoration: "none", color: "inherit", display: "block" }}>
               <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>WARDROBE</div>
               <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: "22px", fontWeight: 700, marginBottom: "8px", color: "#221516" }}>Digital Wardrobe</h3>
               <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>Upload, save, and style your pieces with nAia.</p>
             </Link>
-            <Link to="/apps/naia-stylist/quick-style" style={{ background: "#221516", color: "#f4f4f1", padding: "32px", textDecoration: "none", display: "block" }}>
+            <Link to="/quick-style" style={{ background: "#221516", color: "#f4f4f1", padding: "32px", textDecoration: "none", display: "block" }}>
               <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>STYLING SESSION</div>
               <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: "22px", fontWeight: 900, marginBottom: "8px" }}>Style Me</h3>
               <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", opacity: 0.8 }}>Get a personalized outfit based on your mood and occasion.</p>
             </Link>
-            <Link to="/apps/naia-stylist/buyskip" style={{ background: "rgba(139,32,53,0.06)", padding: "32px", border: "1px solid rgba(139,32,53,0.12)", textDecoration: "none", display: "block" }}>
+            <Link to="/buyskip" style={{ background: "rgba(139,32,53,0.06)", padding: "32px", border: "1px solid rgba(139,32,53,0.12)", textDecoration: "none", display: "block" }}>
               <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>SHOPPING TOOL</div>
               <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: "22px", fontWeight: 700, marginBottom: "8px", color: "#221516" }}>Buy or Skip?</h3>
               <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>Thinking of buying something? Upload it and nAia will tell you if it fits your wardrobe, style, and lifestyle.</p>
