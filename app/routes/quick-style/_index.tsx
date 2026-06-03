@@ -140,7 +140,7 @@ export default function QuickStyle() {
 
       <div className="topbar">
         <div className="topbar-logo">nAia</div>
-        <a href="/apps/naia-stylist/" className="topbar-close">Exit Session</a>
+        <a href="/" className="topbar-close">Exit Session</a>
       </div>
 
       <div className="progress">

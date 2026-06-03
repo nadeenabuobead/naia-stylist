@@ -105,7 +105,7 @@ export default function BuyOrSkip() {
 
       <div className="bs-topbar">
         <div className="bs-topbar-logo">nAia</div>
-        <Link to="/apps/naia-stylist/" className="bs-topbar-link">← Dashboard</Link>
+        <Link to="/" className="bs-topbar-link">← Dashboard</Link>
       </div>
 
       <div className="bs-wrap">
@@ -212,7 +212,7 @@ export default function BuyOrSkip() {
                 ) : (
                   <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>
                     No closet items yet.{" "}
-                    <a href="/apps/naia-stylist/closet" style={{ color: "#8b2035", textDecoration: "none" }}>Add pieces to your wardrobe</a>
+                    <a href="/closet" style={{ color: "#8b2035", textDecoration: "none" }}>Add pieces to your wardrobe</a>
                     {" "}and nAia will tell you what this pairs with.
                   </div>
                 )}

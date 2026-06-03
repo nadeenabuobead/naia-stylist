@@ -157,7 +157,7 @@ export default function Closet() {
 
       <div className="cl-topbar">
         <div className="cl-topbar-logo">nAia</div>
-        <Link to="/apps/naia-stylist/" className="cl-topbar-link">← Dashboard</Link>
+        <Link to="/" className="cl-topbar-link">← Dashboard</Link>
       </div>
 
       <div className="cl-wrap">
@@ -272,7 +272,7 @@ export default function Closet() {
         </div>
 
         <div className="cl-cta">
-          <Link to="/apps/naia-stylist/quick-style">Style Me →</Link>
+          <Link to="/quick-style">Style Me →</Link>
         </div>
       </div>
     </div>
