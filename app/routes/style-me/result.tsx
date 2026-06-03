@@ -222,7 +222,9 @@ export default function StyleMeResult() {
   const fetcher = useFetcher<{ suggestion?: any; error?: string; saved?: boolean }>();
   const [msgIndex, setMsgIndex] = useState(0);
   const [isSaved, setIsSaved] = useState(false);
+  const [reviewSaved, setReviewSaved] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const reviewFetcher = useFetcher();
   const [reviewData, setReviewData] = useState({
     overallReaction: 0,
     feltLikeMe: null as boolean | null,
@@ -253,9 +255,10 @@ export default function StyleMeResult() {
     formData.append("whatWorked", reviewData.whatWorked.join(","));
     formData.append("whatDidnt", reviewData.whatDidnt.join(","));
     
-    fetcher.submit(formData, { method: "post" });
-    setShowReviewModal(false);
-    alert("Review saved! Thank you for your feedback.");
+    reviewFetcher.submit(formData, { method: "post" });
+  setShowReviewModal(false);
+setReviewSaved(true);
+setTimeout(() => setReviewSaved(false), 3000);
   };
 
 
@@ -444,6 +447,16 @@ export default function StyleMeResult() {
           <button onClick={() => setShowReviewModal(true)} style={{ padding: "14px 32px", background: "transparent", color: "#221516", border: "1px solid rgba(59,5,16,0.12)", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", cursor: "pointer" }}>Rate This Look</button>
           <a href="https://naiabynadine.com" style={{ padding: "14px 32px", background: "transparent", color: "#221516", border: "1px solid rgba(59,5,16,0.12)", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none" }}>Shop nAia</a>
         </div>
+        {reviewSaved && (
+  <div style={{
+    position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)",
+    background: "#221516", color: "#f4f4f1", padding: "14px 32px",
+    fontFamily: "'Space Mono',monospace", fontSize: "10px",
+    letterSpacing: "3px", textTransform: "uppercase", zIndex: 99999,
+  }}>
+    Review saved — thank you
+  </div>
+)}
       </main>
     </div>
   );
