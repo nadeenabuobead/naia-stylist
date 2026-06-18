@@ -2,9 +2,7 @@ import { useLoaderData, useFetcher, Link } from "react-router";
 import { data, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
 import { useState } from "react";
 import prisma from "../db.server";
-
-const CLOUDINARY_CLOUD = "diybves1z";
-const CLOUDINARY_PRESET = "kqfhwrpq";
+import { getProxyCustomerId } from "~/lib/auth.server";
 
 const CATEGORIES = ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS", "ACCESSORIES", "JEWELRY", "OTHER"];
 const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver", "Multicolor"];
@@ -13,52 +11,82 @@ const SEASONS = ["Spring", "Summer", "Fall", "Winter", "All Season"];
 const PATTERNS = ["Solid", "Stripes", "Floral", "Plaid", "Animal Print", "Geometric", "Abstract", "Other"];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  try {
-    const customer = await prisma.customer.findFirst({
-      where: { shopifyCustomerId: "guest" },
-      include: { closetItems: { orderBy: { createdAt: "desc" } } }
-    });
-    if (!customer) return data({ items: [], authenticated: false });
-    return data({ items: customer.closetItems, authenticated: true });
-  } catch (err: any) {
-    console.error("Closet loader error:", err);
-    return data({ items: [], authenticated: false });
+  // authenticate.public.appProxy (called inside getProxyCustomerId) throws a 400 Response
+  // for any direct Vercel access or tampered HMAC — React Router surfaces it to the client.
+  const customerId = await getProxyCustomerId(request);
+
+  const url = new URL(request.url);
+  const shopifyCustomerId = url.searchParams.get("logged_in_customer_id") ?? "";
+
+  if (!shopifyCustomerId) {
+    return data({ items: [], authState: "logged_out" as const });
   }
+  if (!customerId) {
+    // Shopify-authenticated but no nAia Customer record yet.
+    return data({ items: [], authState: "no_profile" as const });
+  }
+
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    include: { closetItems: { orderBy: { createdAt: "desc" } } },
+  });
+  if (!customer) return data({ items: [], authState: "no_profile" as const });
+  return data({ items: customer.closetItems, authState: "authenticated" as const });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  try {
-    const customer = await prisma.customer.findFirst({ where: { shopifyCustomerId: "guest" } });
-    if (!customer) return data({ error: "Not authenticated" }, { status: 401 });
-    const formData = await request.formData();
-    const intent = formData.get("intent") as string;
-
-    if (intent === "add") {
-      const name = formData.get("name") as string;
-      const category = formData.get("category") as string;
-      const imageUrl = formData.get("imageUrl") as string;
-      const primaryColor = formData.get("primaryColor") as string;
-      const pattern = formData.get("pattern") as string;
-      const brand = formData.get("brand") as string;
-      const occasions = JSON.parse(formData.get("occasions") as string || "[]");
-      const seasons = JSON.parse(formData.get("seasons") as string || "[]");
-      if (!name || !category || !imageUrl) return data({ error: "Name and category required" }, { status: 400 });
-      await prisma.closetItem.create({
-        data: { customerId: customer.id, name, category, imageUrl: imageUrl || "", primaryColor: primaryColor || null, pattern: pattern || null, brand: brand || null, occasions: occasions.length > 0 ? occasions : null, seasons: seasons.length > 0 ? seasons : null },
-      });
-      return data({ success: true });
-    }
-
-    if (intent === "delete") {
-      const itemId = formData.get("itemId") as string;
-      await prisma.closetItem.delete({ where: { id: itemId } });
-      return data({ success: true });
-    }
-
-    return data({ error: "Unknown intent" }, { status: 400 });
-  } catch (err: any) {
-    return data({ error: err.message }, { status: 500 });
+  // Let the 400 throw propagate for non-App-Proxy requests.
+  const customerId = await getProxyCustomerId(request);
+  if (!customerId) {
+    return data({ error: "Not authenticated" }, { status: 401 });
   }
+  const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+  if (!customer) {
+    return data({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  const formData = await request.formData();
+  const intent = formData.get("intent") as string;
+
+  if (intent === "add") {
+    const name = formData.get("name") as string;
+    const category = formData.get("category") as string;
+    const imageUrl = formData.get("imageUrl") as string;
+    const primaryColor = formData.get("primaryColor") as string;
+    const pattern = formData.get("pattern") as string;
+    const brand = formData.get("brand") as string;
+    const occasions = JSON.parse((formData.get("occasions") as string) || "[]");
+    const seasons = JSON.parse((formData.get("seasons") as string) || "[]");
+    if (!name || !category || !imageUrl) return data({ error: "Name and category required" }, { status: 400 });
+    await prisma.closetItem.create({
+      data: {
+        customerId: customer.id,
+        name,
+        category,
+        imageUrl,
+        primaryColor: primaryColor || null,
+        pattern: pattern || null,
+        brand: brand || null,
+        occasions: occasions.length > 0 ? occasions : null,
+        seasons: seasons.length > 0 ? seasons : null,
+      },
+    });
+    return data({ success: true });
+  }
+
+  if (intent === "delete") {
+    const itemId = formData.get("itemId") as string;
+    // deleteMany with both id and customerId prevents cross-customer deletion.
+    const deleted = await prisma.closetItem.deleteMany({
+      where: { id: itemId, customerId: customer.id },
+    });
+    if (deleted.count === 0) {
+      return data({ error: "Item not found" }, { status: 403 });
+    }
+    return data({ success: true });
+  }
+
+  return data({ error: "Unknown intent" }, { status: 400 });
 }
 
 const css = `
@@ -71,7 +99,7 @@ const css = `
   .cl-topbar-link{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);text-decoration:none}
   .cl-headline{font-family:var(--ff-display);font-size:clamp(40px,5vw,64px);font-weight:900;line-height:1;margin-bottom:12px}
   .cl-sub{font-family:var(--ff-mono);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:40px}
-  .cl-stats{display:grid;gridTemplateColumns:repeat(3,1fr);gap:16px;margin-bottom:40px}
+  .cl-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:40px}
   .cl-stat{background:rgba(255,255,255,0.5);padding:24px;border:1px solid rgba(59,5,16,.06)}
   .cl-stat-num{font-family:var(--ff-display);font-size:48px;font-weight:900;color:var(--deep)}
   .cl-stat-label{font-family:var(--ff-mono);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--muted)}
@@ -85,8 +113,10 @@ const css = `
   .cl-pill{padding:10px 18px;border:1px solid rgba(59,5,16,.12);font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--deep);cursor:pointer;background:transparent;transition:all .2s}
   .cl-pill:hover{border-color:var(--deep)}
   .cl-pill.on{background:#8b2035;color:var(--cream)}
-  .cl-upload-box{border:1px dashed rgba(59,5,16,.2);padding:40px;text-align:center;cursor:pointer;background:rgba(255,255,255,0.5);margin-bottom:24px;display:block}
+  .cl-upload-box{border:1px dashed rgba(59,5,16,.2);padding:40px;text-align:center;cursor:pointer;background:rgba(255,255,255,0.5);margin-bottom:8px;display:block}
   .cl-upload-hint{font-family:var(--ff-body);font-size:16px;font-style:italic;color:var(--muted)}
+  .cl-upload-notice{font-family:var(--ff-mono);font-size:8px;letter-spacing:1px;line-height:1.6;color:var(--muted);margin-bottom:16px}
+  .cl-upload-error{font-family:var(--ff-mono);font-size:9px;letter-spacing:1px;color:#8b2035;margin-bottom:16px}
   .cl-submit{width:100%;padding:16px;background:#8b2035;color:var(--cream);border:none;font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;cursor:pointer}
   .cl-submit:disabled{opacity:.3;cursor:not-allowed}
   .cl-filters{display:flex;gap:8px;overflow-x:auto;padding-bottom:12px;margin-bottom:24px}
@@ -109,13 +139,17 @@ const css = `
   .cl-cta a{display:inline-block;padding:16px 40px;background:var(--deep);color:var(--cream);text-decoration:none;font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase}
 `;
 
+const FONTS = "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap";
+
 export default function Closet() {
-  const { items } = useLoaderData<typeof loader>();
+  const { items, authState } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
 
+  // All hooks must be declared unconditionally before any early returns.
   const [showAddForm, setShowAddForm] = useState(false);
   const [activeCategory, setActiveCategory] = useState("ALL");
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [newCategory, setNewCategory] = useState("TOPS");
   const [newImageUrl, setNewImageUrl] = useState("");
@@ -125,19 +159,108 @@ export default function Closet() {
   const [newOccasions, setNewOccasions] = useState<string[]>([]);
   const [newSeasons, setNewSeasons] = useState<string[]>([]);
 
+  if (authState === "logged_out") {
+    return (
+      <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
+        <style>{css}</style>
+        <link href={FONTS} rel="stylesheet" />
+        <div className="cl-topbar">
+          <div className="cl-topbar-logo">nAia</div>
+        </div>
+        <div style={{ maxWidth: "600px", margin: "0 auto", padding: "120px 40px", textAlign: "center" }}>
+          <h1 style={{ fontFamily: "var(--ff-display)", fontSize: "clamp(28px,4vw,42px)", fontWeight: 900, fontStyle: "italic", color: "var(--deep)", marginBottom: "16px" }}>
+            My Pieces
+          </h1>
+          <p style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--muted)", marginBottom: "40px" }}>
+            Sign in to view your pieces.
+          </p>
+          <a
+            href="/account/login"
+            style={{ display: "inline-block", padding: "16px 40px", background: "#8b2035", color: "#f4f4f1", textDecoration: "none", fontFamily: "var(--ff-mono)", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase" }}
+          >
+            SIGN IN
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  if (authState === "no_profile") {
+    return (
+      <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
+        <style>{css}</style>
+        <link href={FONTS} rel="stylesheet" />
+        <div className="cl-topbar">
+          <div className="cl-topbar-logo">nAia</div>
+        </div>
+        <div style={{ maxWidth: "600px", margin: "0 auto", padding: "120px 40px", textAlign: "center" }}>
+          <h1 style={{ fontFamily: "var(--ff-display)", fontSize: "clamp(28px,4vw,42px)", fontWeight: 900, fontStyle: "italic", color: "var(--deep)", marginBottom: "16px" }}>
+            My Pieces
+          </h1>
+          <p style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--muted)" }}>
+            Complete your Style Profile to start building your edit.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // authState === "authenticated"
   const filtered = activeCategory === "ALL" ? items : items.filter((i: any) => i.category === activeCategory);
 
   const uploadToCloudinary = async (file: File) => {
     setUploading(true);
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("upload_preset", CLOUDINARY_PRESET);
+    setUploadError(null);
+
+    // Client-side pre-check only. IMPORTANT: the authoritative 5 MB limit must be
+    // configured in the signed Cloudinary upload preset before deployment — the client
+    // check can be bypassed and Cloudinary will accept the file if the preset has no limit.
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError("Image must be smaller than 5 MB.");
+      setUploading(false);
+      return;
+    }
+
     try {
-      const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`, { method: "POST", body: formData });
-      const d = await res.json();
-      setNewImageUrl(d.secure_url);
-    } catch (err) { console.error("Upload error:", err); }
-    finally { setUploading(false); }
+      // Step 1: get a short-lived signed upload token from the server.
+      // This call goes through the Shopify App Proxy, which re-verifies the customer identity.
+      const sigRes = await fetch("/apps/naia-stylist/api/cloudinary-signature");
+      if (!sigRes.ok) {
+        const errData = await sigRes.json().catch(() => ({} as any));
+        setUploadError((errData as any).error || "Upload service unavailable. Please try again.");
+        setUploading(false);
+        return;
+      }
+      const sig = await sigRes.json() as any;
+
+      // Step 2: upload directly to Cloudinary using the signed payload.
+      // asset_folder and allowed_formats are server-controlled; the browser cannot override them.
+      const form = new FormData();
+      form.append("file", file);
+      form.append("api_key", sig.apiKey);
+      form.append("timestamp", String(sig.timestamp));
+      form.append("signature", sig.signature);
+      form.append("asset_folder", sig.assetFolder);
+      form.append("upload_preset", sig.uploadPreset);
+      form.append("allowed_formats", sig.allowedFormats);
+
+      const cloudRes = await fetch(
+        `https://api.cloudinary.com/v1_1/${sig.cloudName}/image/upload`,
+        { method: "POST", body: form }
+      );
+      if (!cloudRes.ok) {
+        const errData = await cloudRes.json().catch(() => ({} as any));
+        setUploadError((errData as any).error?.message || "Upload failed. Please try again.");
+        setUploading(false);
+        return;
+      }
+      const cloudData = await cloudRes.json() as any;
+      setNewImageUrl(cloudData.secure_url);
+    } catch {
+      setUploadError("Upload failed. Please check your connection and try again.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const toggleOccasion = (o: string) => setNewOccasions(prev => prev.includes(o) ? prev.filter(x => x !== o) : [...prev, o]);
@@ -145,7 +268,10 @@ export default function Closet() {
 
   const handleAdd = () => {
     if (!newName) return;
-    fetcher.submit({ intent: "add", name: newName, category: newCategory, imageUrl: newImageUrl, primaryColor: newColor, pattern: newPattern, brand: newBrand, occasions: JSON.stringify(newOccasions), seasons: JSON.stringify(newSeasons) }, { method: "post" });
+    fetcher.submit(
+      { intent: "add", name: newName, category: newCategory, imageUrl: newImageUrl, primaryColor: newColor, pattern: newPattern, brand: newBrand, occasions: JSON.stringify(newOccasions), seasons: JSON.stringify(newSeasons) },
+      { method: "post" }
+    );
     setNewName(""); setNewImageUrl(""); setNewColor(""); setNewPattern(""); setNewBrand(""); setNewOccasions([]); setNewSeasons([]);
     setShowAddForm(false);
   };
@@ -153,7 +279,7 @@ export default function Closet() {
   return (
     <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
       <style>{css}</style>
-      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+      <link href={FONTS} rel="stylesheet" />
 
       <div className="cl-topbar">
         <div className="cl-topbar-logo">nAia</div>
@@ -192,9 +318,23 @@ export default function Closet() {
 
             <div className="cl-label">Photo</div>
             <label className="cl-upload-box">
-              {newImageUrl ? <img src={newImageUrl} alt="preview" style={{ maxHeight: "200px", objectFit: "cover" }} /> : uploading ? <span className="cl-upload-hint">Uploading...</span> : <span className="cl-upload-hint">Click to upload photo</span>}
-              <input type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && uploadToCloudinary(e.target.files[0])} style={{ display: "none" }} />
+              {newImageUrl
+                ? <img src={newImageUrl} alt="preview" style={{ maxHeight: "200px", objectFit: "cover" }} />
+                : uploading
+                  ? <span className="cl-upload-hint">Uploading...</span>
+                  : <span className="cl-upload-hint">Click to upload photo</span>
+              }
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => e.target.files?.[0] && uploadToCloudinary(e.target.files[0])}
+                style={{ display: "none" }}
+              />
             </label>
+            <p className="cl-upload-notice">
+              Upload photos of clothing items only. Please do not upload selfies, face photos, mirror photos, body scans, or personal images.
+            </p>
+            {uploadError && <p className="cl-upload-error">{uploadError}</p>}
 
             <div className="cl-label">Name *</div>
             <input className="cl-input" type="text" placeholder="e.g. Black silk blazer" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ marginBottom: "24px" }} />

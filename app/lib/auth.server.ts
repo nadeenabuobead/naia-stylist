@@ -1,5 +1,6 @@
 import { getSession } from "~/lib/session.server";
 import { prisma } from "~/lib/prisma.server";
+import { authenticate } from "~/shopify.server";
 
 export async function getCustomerId(request: Request): Promise<string | null> {
   // Check URL param first (for Shopify App Proxy)
@@ -66,4 +67,20 @@ export async function authenticateShopifyCustomer({ shopifyCustomerId, email, fi
     create: { shopifyCustomerId, email, firstName, lastName },
     update: { email, firstName, lastName, updatedAt: new Date() },
   });
+}
+
+// Verifies the Shopify App Proxy HMAC on every request (throws 400 for direct/invalid access),
+// then looks up the nAia Customer record by the proxy-signed logged_in_customer_id.
+// Returns the internal CUID, or null if the visitor is logged out or has no nAia profile.
+// Never creates or upserts a customer record.
+export async function getProxyCustomerId(request: Request): Promise<string | null> {
+  await authenticate.public.appProxy(request);
+  const url = new URL(request.url);
+  const shopifyCustomerId = url.searchParams.get("logged_in_customer_id");
+  if (!shopifyCustomerId) return null;
+  const customer = await prisma.customer.findUnique({
+    where: { shopifyCustomerId },
+    select: { id: true },
+  });
+  return customer?.id ?? null;
 }
