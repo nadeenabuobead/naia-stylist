@@ -17,21 +17,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const shopifyCustomerId = url.searchParams.get("logged_in_customer_id") ?? "";
+  const rawPathPrefix = url.searchParams.get("path_prefix");
+  const proxyPathPrefix: string | null =
+    typeof rawPathPrefix === "string" &&
+    /^\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*$/.test(rawPathPrefix)
+      ? rawPathPrefix
+      : null;
 
   if (!shopifyCustomerId) {
-    return data({ items: [], authState: "logged_out" as const });
+    return data({ items: [], authState: "logged_out" as const, proxyPathPrefix });
   }
   if (!customerId) {
     // Shopify-authenticated but no nAia Customer record yet.
-    return data({ items: [], authState: "no_profile" as const });
+    return data({ items: [], authState: "no_profile" as const, proxyPathPrefix });
   }
 
   const customer = await prisma.customer.findUnique({
     where: { id: customerId },
     include: { closetItems: { orderBy: { createdAt: "desc" } } },
   });
-  if (!customer) return data({ items: [], authState: "no_profile" as const });
-  return data({ items: customer.closetItems, authState: "authenticated" as const });
+  if (!customer) return data({ items: [], authState: "no_profile" as const, proxyPathPrefix });
+  return data({ items: customer.closetItems, authState: "authenticated" as const, proxyPathPrefix });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -142,7 +148,7 @@ const css = `
 const FONTS = "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap";
 
 export default function Closet() {
-  const { items, authState } = useLoaderData<typeof loader>();
+  const { items, authState, proxyPathPrefix } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
 
   // All hooks must be declared unconditionally before any early returns.
@@ -221,10 +227,16 @@ export default function Closet() {
       return;
     }
 
+    if (!proxyPathPrefix) {
+      setUploadError("Upload is unavailable in this context. Please try again from the store.");
+      setUploading(false);
+      return;
+    }
+
     try {
       // Step 1: get a short-lived signed upload token from the server.
-      // This call goes through the Shopify App Proxy, which re-verifies the customer identity.
-      const sigRes = await fetch("/apps/naia-stylist/api/cloudinary-signature");
+      // Path prefix comes from the Shopify App Proxy signed params; never hardcoded.
+      const sigRes = await fetch(`${proxyPathPrefix}/api/cloudinary-signature`);
       if (!sigRes.ok) {
         const errData = await sigRes.json().catch(() => ({} as any));
         setUploadError((errData as any).error || "Upload service unavailable. Please try again.");
