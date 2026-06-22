@@ -4,6 +4,8 @@ import { route } from "@react-router/dev/routes";
 
 const _discovered = await flatRoutes();
 
+throw new Error("DIAG:" + JSON.stringify(_discovered.map((r: any) => r.id ?? r.file)));
+
 // Exclude routes registered explicitly below to prevent duplicate-id errors
 // if flatRoutes() happens to discover the same files in some build contexts.
 const _explicitIds = new Set([
