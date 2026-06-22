@@ -13,5 +13,13 @@ export default [
   route("onboarding/complete", "./routes/onboarding/complete.tsx"),
   route("style-me", "./routes/style-me/_index.tsx"),
   route("style-me/result", "./routes/style-me/result.tsx"),
-  route("full-style-profile", "./routes/full-style-profile/_index.tsx")
+  route("full-style-profile", "./routes/full-style-profile/_index.tsx"),
+  // Explicit registrations for routes flatRoutes() fails to discover
+  route("api/analyze-item", "./routes/api.analyze-item.jsx"),
+  route("api/cloudinary-signature", "./routes/api.cloudinary-signature.jsx"),
+  route("api/customer-account-identity", "./routes/api.customer-account-identity.jsx"),
+  route("api/designer-dashboard", "./routes/api.designer-dashboard.jsx"),
+  route("api/seed-staging", "./routes/api.seed-staging.jsx"),
+  route("api/stats", "./routes/api.stats.jsx"),
+  route("api/track_event", "./routes/api.track_event.jsx")
 ] satisfies RouteConfig;
