@@ -13,5 +13,6 @@ export default [
   route("onboarding/complete", "./routes/onboarding/complete.tsx"),
   route("style-me", "./routes/style-me/_index.tsx"),
   route("style-me/result", "./routes/style-me/result.tsx"),
-  route("full-style-profile", "./routes/full-style-profile/_index.tsx")
+  route("full-style-profile", "./routes/full-style-profile/_index.tsx"),
+  route("api/sentinel-v1", "./routes/api.sentinel-v1.jsx")
 ] satisfies RouteConfig;
