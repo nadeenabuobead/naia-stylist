@@ -66,7 +66,7 @@ export async function generateOutfit(params: GenerateOutfitParams): Promise<Gene
       select: {
         stylePersonalities: true,
         lifestyle: true,
-        favoritePreferences: true,
+        favoriteColors: true,
         avoidColors: true,
         styleStruggles: true,
         fitPreferences: true

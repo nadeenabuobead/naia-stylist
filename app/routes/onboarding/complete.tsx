@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { OnboardingAnswers } from "~/lib/onboarding/quiz-data";
 
 function generateStyleSummary(answers: OnboardingAnswers) {
@@ -43,23 +43,98 @@ const css = `
   .cp-action-title{font-family:var(--ff-display);font-size:20px;font-weight:700;color:var(--deep);margin-bottom:4px}
   .cp-action-sub{font-family:var(--ff-body);font-size:16px;font-style:italic;color:var(--muted)}
   .cp-arrow{font-family:var(--ff-mono);font-size:12px;color:var(--accent);margin-left:auto;flex-shrink:0}
+  .cp-status{padding:12px 40px;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;display:flex;align-items:center;gap:16px;border-bottom:1px solid rgba(59,5,16,.06)}
+  .cp-status-saving{color:var(--muted);background:rgba(59,5,16,.02)}
+  .cp-status-error{color:var(--accent);background:rgba(139,32,53,.06)}
+  .cp-status-unsigned{color:var(--accent);background:rgba(139,32,53,.06)}
+  .cp-status-btn{padding:6px 14px;border:1px solid currentColor;background:transparent;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:inherit;cursor:pointer}
+  .cp-status-link{color:inherit;text-decoration:underline;letter-spacing:2px}
 `;
+
+type SaveStatus = "saving" | "saved" | "not_signed_in" | "error" | "not_proxied";
 
 export default function OnboardingComplete() {
   const [styleSummary, setStyleSummary] = useState<{ title: string; description: string; traits: string[] } | null>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saving");
+  const [proxyPrefix, setProxyPrefix] = useState<string | null>(null);
 
-  useEffect(() => {
+  const attemptSave = useCallback(async (answers: OnboardingAnswers, prefix: string) => {
+    setSaveStatus("saving");
     try {
-      const stored = localStorage.getItem("naia_onboarding");
-      const answers: OnboardingAnswers = stored ? JSON.parse(stored) : {};
-      setStyleSummary(generateStyleSummary(answers));
+      const res = await fetch(`${prefix}/api/save-style-profile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stylePersonalities: answers["style-personalities"] ?? [],
+          favoriteColors:     answers["favorite-colors"]     ?? [],
+          avoidColors:        answers["avoid-colors"]        ?? [],
+          lifestyle:          answers["lifestyle"]           ?? [],
+          fitPreferences:     answers["fit-preferences"]     ?? [],
+        }),
+      });
+      if (res.status === 401) {
+        // Shopify confirms the customer is not signed in.
+        // Keep localStorage so the profile is available after sign-in.
+        setSaveStatus("not_signed_in");
+        return;
+      }
+      if (!res.ok) {
+        setSaveStatus("error");
+        return;
+      }
+      // Only clear after confirmed success.
       localStorage.removeItem("naia_onboarding");
+      setSaveStatus("saved");
     } catch {
-      setStyleSummary({ title: "The Natural Stylist", description: "You make looking put-together seem completely effortless.", traits: [] });
+      setSaveStatus("error");
     }
   }, []);
 
+  useEffect(() => {
+    const stored = localStorage.getItem("naia_onboarding");
+    const answers: OnboardingAnswers = (() => {
+      try { return stored ? JSON.parse(stored) : {}; } catch { return {}; }
+    })();
+
+    // Always compute and show the style summary immediately, regardless of save outcome.
+    setStyleSummary(generateStyleSummary(answers));
+
+    // Extract the Shopify proxy prefix from the current browser URL.
+    // Pattern: /apps/<slug>/... → prefix is /apps/<slug>
+    const m = window.location.pathname.match(/^(\/apps\/[^/]+)\//);
+    const prefix = m ? m[1] : null;
+    setProxyPrefix(prefix);
+
+    if (!prefix) {
+      // Page is accessed directly (not through the Shopify proxy).
+      // Cannot authenticate the save request.
+      setSaveStatus("not_proxied");
+      return;
+    }
+
+    if (!stored || stored === "{}") {
+      // No quiz data in localStorage — either already saved or quiz was skipped.
+      setSaveStatus("saved");
+      return;
+    }
+
+    attemptSave(answers, prefix);
+  }, [attemptSave]);
+
+  const handleRetry = useCallback(() => {
+    const stored = localStorage.getItem("naia_onboarding");
+    if (!stored || !proxyPrefix) return;
+    try {
+      const answers: OnboardingAnswers = JSON.parse(stored);
+      attemptSave(answers, proxyPrefix);
+    } catch {}
+  }, [attemptSave, proxyPrefix]);
+
   if (!styleSummary) return <div style={{ minHeight: "100vh", background: "#f4f4f1" }} />;
+
+  const signInHref = proxyPrefix
+    ? `${proxyPrefix}/customer_authentication/login?return_to=${encodeURIComponent(`${proxyPrefix}/onboarding/complete`)}`
+    : "/customer_authentication/login";
 
   return (
     <div>
@@ -69,6 +144,34 @@ export default function OnboardingComplete() {
       <div className="cp-topbar">
         <div className="cp-topbar-logo">nAia</div>
       </div>
+
+      {saveStatus === "saving" && (
+        <div className={`cp-status cp-status-saving`}>
+          Saving your style profile…
+        </div>
+      )}
+
+      {saveStatus === "not_signed_in" && (
+        <div className={`cp-status cp-status-unsigned`}>
+          Sign in to save your profile —{" "}
+          <a href={signInHref} className="cp-status-link">Sign in</a>
+          <span style={{ color: "var(--muted)", fontSize: "9px" }}>
+            (your answers are preserved)
+          </span>
+        </div>
+      )}
+
+      {saveStatus === "error" && (
+        <div className={`cp-status cp-status-error`}>
+          Could not save your profile —{" "}
+          <button type="button" className="cp-status-btn" onClick={handleRetry}>
+            Try again
+          </button>
+          <span style={{ color: "var(--muted)", fontSize: "9px" }}>
+            (your answers are preserved)
+          </span>
+        </div>
+      )}
 
       <main className="cp-main">
         <div className="cp-eyebrow">Your Style Profile</div>
