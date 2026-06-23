@@ -43,4 +43,12 @@ export default [
   route("buyskip", "routes/buyskip._index.tsx"),
   route("api/tryon", "routes/api.tryon.jsx"),
   route("api/body-scan", "routes/api.bodyscan.jsx"),
+  route("account", "routes/account.jsx"),
+  route("api/analyze-item", "routes/api.analyze-item.jsx"),
+  route("api/cloudinary-signature", "routes/api.cloudinary-signature.jsx"),
+  route("api/customer-account-identity", "routes/api.customer-account-identity.jsx"),
+  route("api/designer-dashboard", "routes/api.designer-dashboard.jsx"),
+  route("api/seed-staging", "routes/api.seed-staging.jsx"),
+  route("api/stats", "routes/api.stats.jsx"),
+  route("api/track_event", "routes/api.track_event.jsx"),
 ];

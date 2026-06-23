@@ -1,5 +1,5 @@
-import prisma from "~/db.server";
-import { getCustomer } from "~/lib/auth.server";
+import prisma from "../db.server";
+import { getCustomer } from "../lib/auth.server";
 
 export async function action({ request }) {
   try {

@@ -1,4 +1,4 @@
-import prisma from "~/db.server";
+import prisma from "../db.server";
 
 // One-time staging fixture endpoint. Returns 403 unless STAGING_SEED_SECRET is set
 // AND the caller supplies a matching x-seed-secret header. Remove this file after seeding.
