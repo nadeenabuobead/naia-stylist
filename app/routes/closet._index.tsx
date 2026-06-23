@@ -1,4 +1,4 @@
-import { useLoaderData, useFetcher, Link } from "react-router";
+import { useLoaderData, useFetcher, Link, useLocation } from "react-router";
 import { data, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
 import { useState } from "react";
 import prisma from "../db.server";
@@ -164,6 +164,7 @@ export default function Closet() {
   const [newBrand, setNewBrand] = useState("");
   const [newOccasions, setNewOccasions] = useState<string[]>([]);
   const [newSeasons, setNewSeasons] = useState<string[]>([]);
+  const location = useLocation();
 
   if (authState === "logged_out") {
     return (
@@ -181,7 +182,7 @@ export default function Closet() {
             Sign in to view your pieces.
           </p>
           <a
-            href="/account/login"
+            href={`/customer_authentication/login?return_to=${encodeURIComponent(`${proxyPathPrefix ?? ""}${location.pathname}`)}`}
             style={{ display: "inline-block", padding: "16px 40px", background: "#8b2035", color: "#f4f4f1", textDecoration: "none", fontFamily: "var(--ff-mono)", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase" }}
           >
             SIGN IN
