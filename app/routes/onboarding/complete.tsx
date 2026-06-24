@@ -1,4 +1,3 @@
-import { Link } from "react-router";
 import { useState, useEffect, useCallback } from "react";
 import type { OnboardingAnswers } from "~/lib/onboarding/quiz-data";
 
@@ -193,29 +192,29 @@ export default function OnboardingComplete() {
 
         <div className="cp-section-label">What would you like to do first?</div>
 
-        <Link to="/apps/naia-stylist/quick-style" className="cp-action">
+        <a href={proxyPrefix ? `${proxyPrefix}/quick-style` : '#'} className="cp-action">
           <div>
             <div className="cp-action-title">Style Me</div>
             <div className="cp-action-sub">Get outfit ideas based on your mood</div>
           </div>
           <span className="cp-arrow">→</span>
-        </Link>
+        </a>
 
-        <Link to="/apps/naia-stylist/closet" className="cp-action">
+        <a href={proxyPrefix ? `${proxyPrefix}/closet` : '#'} className="cp-action">
           <div>
             <div className="cp-action-title">Digital Wardrobe</div>
             <div className="cp-action-sub">Upload your pieces for personalized styling</div>
           </div>
           <span className="cp-arrow">→</span>
-        </Link>
+        </a>
 
-        <Link to="/apps/naia-stylist/" className="cp-action">
+        <a href={proxyPrefix ? `${proxyPrefix}/` : '#'} className="cp-action">
           <div>
             <div className="cp-action-title">View Dashboard</div>
             <div className="cp-action-sub">Explore all features</div>
           </div>
           <span className="cp-arrow">→</span>
-        </Link>
+        </a>
       </main>
     </div>
   );
