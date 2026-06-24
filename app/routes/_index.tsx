@@ -5,16 +5,15 @@ import { authenticateCustomer } from "../customer-auth.server";
 import prisma from "../db.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  // Try to authenticate from Shopify cookie
   const { customer: authCustomer } = await authenticateCustomer(request);
-  
-  // Get customer from DB (authenticated or guest)
+  const pathPrefix = new URL(request.url).searchParams.get("path_prefix") ?? "";
+
   const customerId = authCustomer?.shopifyCustomerId || "guest";
   const customer = await prisma.customer.findFirst({
     where: { shopifyCustomerId: customerId },
     include: {
       onboardingProfile: true,
-      stylingSessions: { 
+      stylingSessions: {
         take: 10,
         orderBy: { createdAt: "desc" },
         include: { suggestions: true }
@@ -26,16 +25,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 
   if (!customer) {
-  return redirect("/quick-style");
-}
+    return redirect(`${pathPrefix}/quick-style`);
+  }
 
-if (customer.shopifyCustomerId !== "guest" && !customer.onboardingProfile?.completed) {
-  return redirect("/onboarding/step/1");
-}
-
-if (customer.stylingSessions.length === 0) {
-  return redirect("/quick-style");
-}
+  if (customer.shopifyCustomerId !== "guest" && !customer.onboardingProfile?.completed) {
+    return redirect(`${pathPrefix}/onboarding/step/1`);
+  }
 
   const avgRating = customer.postOutfitReviews.length > 0
     ? (customer.postOutfitReviews.reduce((sum, r) => sum + r.overallReaction, 0) / customer.postOutfitReviews.length).toFixed(1)
