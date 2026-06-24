@@ -21,3 +21,7 @@ api_version = "2026-04"
 url = "https://naia-stylist-staging.vercel.app"
 subpath = "naia-stylist-staging"
 prefix = "apps"
+
+[customer_authentication]
+redirect_uris = [ "https://naia-stylist-staging.vercel.app/auth/shopify/callback" ]
+logout_urls   = [ "https://naia-stylist-staging.vercel.app/auth/logout" ]

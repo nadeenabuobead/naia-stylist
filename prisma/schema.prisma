@@ -48,6 +48,7 @@ model Customer {
   confidenceScores    ConfidenceScore[]
   trendReportViews    TrendReportView[]
   stylingEvents       StylingEvent[]
+  sessions            NaiaSession[]
 }
 
 // ============================================
@@ -531,4 +532,22 @@ model StylingEvent {
   @@index([sessionId])
   @@index([productId])
   @@index([eventType])
+}
+
+// ============================================
+// NAIA CUSTOMER SESSIONS
+// ============================================
+
+model NaiaSession {
+  id          String   @id @default(cuid())
+  tokenHash   String   @unique                // SHA-256(rawToken) — raw token never stored
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  expiresAt   DateTime
+  userAgent   String?
+
+  @@index([customerId])
+  @@index([expiresAt])
 }

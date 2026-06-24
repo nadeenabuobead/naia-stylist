@@ -1,36 +1,15 @@
 import * as React from "react";
 import { useLoaderData, Link, redirect } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
-import { authenticateCustomer } from "../customer-auth.server";
-import { authenticate } from "../shopify.server";
+import { requireCurrentNaiaCustomer } from "../lib/naia-session.server";
 import prisma from "../db.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const url = new URL(request.url);
-  const pathPrefix = url.searchParams.get("path_prefix") ?? "";
+  // Throws redirect to /auth/shopify/login if no valid nAia session
+  const sessionCustomer = await requireCurrentNaiaCustomer(request);
 
-  // Path 1: JWT cookie (direct nAia web access)
-  const { customer: authCustomer } = await authenticateCustomer(request);
-
-  let customerId: string;
-  if (authCustomer?.shopifyCustomerId) {
-    customerId = authCustomer.shopifyCustomerId;
-  } else {
-    // Path 2: Shopify app-proxy — HMAC must pass before trusting logged_in_customer_id
-    const proxyId = url.searchParams.get("logged_in_customer_id");
-    if (proxyId) {
-      try {
-        await authenticate.public.appProxy(request);
-        customerId = proxyId;
-      } catch {
-        customerId = "guest";
-      }
-    } else {
-      customerId = "guest";
-    }
-  }
   const customer = await prisma.customer.findFirst({
-    where: { shopifyCustomerId: customerId },
+    where: { id: sessionCustomer.id },
     include: {
       onboardingProfile: true,
       stylingSessions: {
@@ -45,15 +24,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 
   if (!customer) {
-    return redirect(`${pathPrefix}/quick-style`);
+    return redirect("/auth/shopify/login");
   }
 
-  if (customer.shopifyCustomerId !== "guest" && !customer.onboardingProfile?.completed) {
-    return redirect(`${pathPrefix}/onboarding/step/1`);
+  if (!customer.onboardingProfile?.completed) {
+    return redirect("/onboarding/step/1");
   }
 
   const avgRating = customer.postOutfitReviews.length > 0
-    ? (customer.postOutfitReviews.reduce((sum, r) => sum + r.overallReaction, 0) / customer.postOutfitReviews.length).toFixed(1)
+    ? (customer.postOutfitReviews.reduce((sum, r) => sum + (r.overallFeeling ?? 0), 0) / customer.postOutfitReviews.length).toFixed(1)
     : "0";
 
   const quotes = [
