@@ -2,13 +2,33 @@ import * as React from "react";
 import { useLoaderData, Link, redirect } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticateCustomer } from "../customer-auth.server";
+import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { customer: authCustomer } = await authenticateCustomer(request);
-  const pathPrefix = new URL(request.url).searchParams.get("path_prefix") ?? "";
+  const url = new URL(request.url);
+  const pathPrefix = url.searchParams.get("path_prefix") ?? "";
 
-  const customerId = authCustomer?.shopifyCustomerId || "guest";
+  // Path 1: JWT cookie (direct nAia web access)
+  const { customer: authCustomer } = await authenticateCustomer(request);
+
+  let customerId: string;
+  if (authCustomer?.shopifyCustomerId) {
+    customerId = authCustomer.shopifyCustomerId;
+  } else {
+    // Path 2: Shopify app-proxy — HMAC must pass before trusting logged_in_customer_id
+    const proxyId = url.searchParams.get("logged_in_customer_id");
+    if (proxyId) {
+      try {
+        await authenticate.public.appProxy(request);
+        customerId = proxyId;
+      } catch {
+        customerId = "guest";
+      }
+    } else {
+      customerId = "guest";
+    }
+  }
   const customer = await prisma.customer.findFirst({
     where: { shopifyCustomerId: customerId },
     include: {
