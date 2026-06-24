@@ -5,6 +5,7 @@ import {
   getOidcConfig,
   exchangeCodeForTokens,
   validateIdToken,
+  fetchCustomerGid,
   validateReturnTo,
   IdTokenValidationError,
 } from "~/lib/shopify-customer-oauth.server";
@@ -84,10 +85,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return fail(502, "Token exchange failed");
   }
 
-  // ── 3–7: validate id_token (nonce, issuer, audience, expiry, RS256 via JWKS) ──
-  let claims;
+  // ── 3–7: validate id_token (signature, issuer, audience, expiry, max-age, nonce) ──
   try {
-    claims = await validateIdToken(tokens.id_token, storedNonce, oidcConfig);
+    await validateIdToken(tokens.id_token, storedNonce, oidcConfig);
   } catch (e) {
     console.error(JSON.stringify({
       stage:     "id_token_validation",
@@ -98,23 +98,48 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return fail(400, "ID token validation failed");
   }
 
-  // ── Resolve or create the Customer record ──
-  const { shopifyCustomerId } = claims;
+  // ── 8: access_token guard ──
+  if (typeof tokens.access_token !== "string" || tokens.access_token.length === 0) {
+    return fail(502, "No access token returned");
+  }
 
-  const customer = await prisma.customer.findUnique({
-    where: { shopifyCustomerId },
-  });
+  // ── 9: resolve verified customer GID via Customer Account API ──
+  let shopifyCustomerId: string;
+  try {
+    shopifyCustomerId = await fetchCustomerGid(tokens.access_token);
+  } catch {
+    return fail(502, "Customer identity lookup failed");
+  }
+
+  // ── Resolve or create the Customer record (with staging DB diagnostics) ──
+  const stagingDiag = Boolean(process.env.STAGING_SEED_SECRET);
+
+  let customer;
+  try {
+    customer = await prisma.customer.findUnique({ where: { shopifyCustomerId } });
+  } catch {
+    if (stagingDiag) console.error(JSON.stringify({ stage: "db_op", category: "db_connection" }));
+    return fail(502, "Database error");
+  }
 
   if (!customer) {
+    if (stagingDiag) console.error(JSON.stringify({ stage: "db_op", category: "customer_not_found" }));
     // No nAia profile for this Shopify customer yet — redirect to onboarding entry
-    // (Phase 2 will handle upsert + redirect to Passport Lite quiz)
     return redirect("/quick-style", {
       headers: { "Set-Cookie": clearedSessionCookie },
     });
   }
 
   // ── Create the nAia session ──
-  const rawToken = await createNaiaSession(customer.id, request);
+  let rawToken: string;
+  try {
+    rawToken = await createNaiaSession(customer.id, request);
+  } catch {
+    if (stagingDiag) console.error(JSON.stringify({ stage: "db_op", category: "session_create" }));
+    return fail(502, "Session creation failed");
+  }
+
+  if (stagingDiag) console.error(JSON.stringify({ stage: "db_op", category: "success" }));
 
   const headers = new Headers();
   headers.append("Set-Cookie", clearedSessionCookie);

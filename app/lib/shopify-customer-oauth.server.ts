@@ -168,18 +168,14 @@ export async function exchangeCodeForTokens(
 }
 
 // ---------------------------------------------------------------------------
-// id_token validation (all 7 checks)
+// id_token validation (signature, issuer, audience, expiry, max-age, nonce)
 // ---------------------------------------------------------------------------
-
-export interface VerifiedCustomerClaims {
-  shopifyCustomerId: string; // numeric portion of gid://shopify/Customer/<id>
-}
 
 export async function validateIdToken(
   idToken:     string,
   storedNonce: string,
   oidcConfig:  OidcConfig
-): Promise<VerifiedCustomerClaims> {
+): Promise<void> {
   const clientId = process.env.SHOPIFY_API_KEY!;
 
   // jwtVerify validates RS256 signature (via JWKS), issuer, audience, and exp.
@@ -220,18 +216,51 @@ export async function validateIdToken(
     throw new IdTokenValidationError("nonce"); // timingSafeEqual RangeError on length mismatch
   }
 
-  // Extract and validate sub
-  const sub = payload.sub;
-  if (typeof sub !== "string" || !sub.startsWith("gid://shopify/Customer/")) {
-    throw new IdTokenValidationError("customer_gid_format");
-  }
+}
 
-  const shopifyCustomerId = sub.split("/").pop();
-  if (!shopifyCustomerId || !/^\d+$/.test(shopifyCustomerId)) {
-    throw new IdTokenValidationError("customer_gid_format");
-  }
+// ---------------------------------------------------------------------------
+// Customer Account API — discover GraphQL endpoint + fetch verified customer GID
+// ---------------------------------------------------------------------------
 
-  return { shopifyCustomerId };
+let customerAccountApiEndpoint: string | null = null;
+
+async function getCustomerAccountApiEndpoint(): Promise<string> {
+  if (customerAccountApiEndpoint) return customerAccountApiEndpoint;
+  const storeDomain = process.env.SHOPIFY_STORE_DOMAIN!;
+  const res = await fetch(`https://${storeDomain}/.well-known/customer-account-api`);
+  if (!res.ok) throw new Error("discovery_failed");
+  const data = await res.json() as { graphql_api?: string };
+  const endpoint = data.graphql_api;
+  if (typeof endpoint !== "string" || !endpoint) throw new Error("discovery_endpoint_missing");
+  customerAccountApiEndpoint = endpoint;
+  return endpoint;
+}
+
+export async function fetchCustomerGid(accessToken: string): Promise<string> {
+  const endpoint = await getCustomerAccountApiEndpoint();
+
+  const res = await fetch(endpoint, {
+    method:  "POST",
+    headers: {
+      "Content-Type":  "application/json",
+      "Authorization": accessToken,
+      "Origin":        process.env.SHOPIFY_APP_URL!,
+      "User-Agent":    "nAia Stylist Staging",
+    },
+    body: JSON.stringify({ query: "query CurrentCustomer { customer { id } }" }),
+  });
+  if (!res.ok) throw new Error("customer_identity_query_failed");
+
+  const body = await res.json() as { data?: { customer?: { id?: unknown } }; errors?: unknown };
+  if (body.errors) throw new Error("customer_identity_query_failed");
+
+  const gid = body.data?.customer?.id;
+  if (typeof gid !== "string" || !gid.startsWith("gid://shopify/Customer/")) {
+    throw new Error("customer_gid_format_invalid");
+  }
+  const numericId = gid.split("/").pop();
+  if (!numericId || !/^\d+$/.test(numericId)) throw new Error("customer_gid_format_invalid");
+  return numericId;
 }
 
 // ---------------------------------------------------------------------------
