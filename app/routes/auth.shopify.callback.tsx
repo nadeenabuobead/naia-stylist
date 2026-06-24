@@ -6,6 +6,7 @@ import {
   exchangeCodeForTokens,
   validateIdToken,
   validateReturnTo,
+  IdTokenValidationError,
 } from "~/lib/shopify-customer-oauth.server";
 import { getSession, commitSession } from "~/lib/session.server";
 import {
@@ -87,7 +88,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let claims;
   try {
     claims = await validateIdToken(tokens.id_token, storedNonce, oidcConfig);
-  } catch {
+  } catch (e) {
+    console.error(JSON.stringify({
+      stage:     "id_token_validation",
+      category:  e instanceof IdTokenValidationError ? e.category : "unknown_validation_error",
+      errorName: e instanceof Error ? e.name : "Unknown",
+      ...(e instanceof IdTokenValidationError && e.joseCode ? { joseCode: e.joseCode } : {}),
+    }));
     return fail(400, "ID token validation failed");
   }
 

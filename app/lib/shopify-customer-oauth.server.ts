@@ -2,6 +2,31 @@ import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
 // ---------------------------------------------------------------------------
+// Structured validation error — carries a fixed safe category for log output.
+// Raw jose messages, claim values, and token content are never stored here.
+// ---------------------------------------------------------------------------
+
+type ValidationCategory =
+  | "signature_or_jwks"
+  | "issuer"
+  | "audience"
+  | "expiry_or_token_age"
+  | "nonce"
+  | "customer_gid_format"
+  | "unknown_validation_error";
+
+export class IdTokenValidationError extends Error {
+  readonly category: ValidationCategory;
+  readonly joseCode?: string;
+  constructor(category: ValidationCategory, joseCode?: string) {
+    super("id_token_validation_failed");
+    this.name     = "IdTokenValidationError";
+    this.category = category;
+    this.joseCode = joseCode;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // OIDC discovery — fetched once per cold start, cached with TTL
 // ---------------------------------------------------------------------------
 
@@ -159,28 +184,51 @@ export async function validateIdToken(
 
   // jwtVerify validates RS256 signature (via JWKS), issuer, audience, and exp.
   // It does NOT automatically enforce iat freshness — that requires explicit maxTokenAge.
-  const { payload } = await jwtVerify(idToken, getJwksSet(oidcConfig.jwks_uri), {
-    issuer:         oidcConfig.issuer,
-    audience:       clientId,
-    clockTolerance: 30,  // seconds — tolerate minor clock skew
-    maxTokenAge:    300, // seconds — id_token must have been issued within 5 minutes
-  });
+  let payload: import("jose").JWTPayload;
+  try {
+    ({ payload } = await jwtVerify(idToken, getJwksSet(oidcConfig.jwks_uri), {
+      issuer:         oidcConfig.issuer,
+      audience:       clientId,
+      clockTolerance: 30,  // seconds — tolerate minor clock skew
+      maxTokenAge:    300, // seconds — id_token must have been issued within 5 minutes
+    }));
+  } catch (e) {
+    const code  = (e as { code?: string }).code  ?? "";
+    const claim = (e as { claim?: string }).claim ?? "";
+    let category: ValidationCategory = "unknown_validation_error";
+    if (code === "ERR_JWS_SIGNATURE_VERIFICATION_FAILED" || code.startsWith("ERR_JWKS_")) {
+      category = "signature_or_jwks";
+    } else if (code === "ERR_JWT_CLAIM_VALIDATION_FAILED") {
+      if      (claim === "iss")                                         category = "issuer";
+      else if (claim === "aud")                                         category = "audience";
+      else if (claim === "exp" || claim === "iat" || claim === "nbf")   category = "expiry_or_token_age";
+    } else if (code === "ERR_JWT_EXPIRED") {
+      category = "expiry_or_token_age";
+    }
+    throw new IdTokenValidationError(category, code || undefined);
+  }
 
   // Check 3: nonce (replay prevention)
   const nonce = payload.nonce as string | undefined;
-  if (!nonce || !timingSafeEqual(Buffer.from(nonce), Buffer.from(storedNonce))) {
-    throw new Error("nonce mismatch");
+  if (!nonce) throw new IdTokenValidationError("nonce");
+  try {
+    if (!timingSafeEqual(Buffer.from(nonce), Buffer.from(storedNonce))) {
+      throw new IdTokenValidationError("nonce");
+    }
+  } catch (e) {
+    if (e instanceof IdTokenValidationError) throw e;
+    throw new IdTokenValidationError("nonce"); // timingSafeEqual RangeError on length mismatch
   }
 
   // Extract and validate sub
   const sub = payload.sub;
   if (typeof sub !== "string" || !sub.startsWith("gid://shopify/Customer/")) {
-    throw new Error("unexpected sub claim format");
+    throw new IdTokenValidationError("customer_gid_format");
   }
 
   const shopifyCustomerId = sub.split("/").pop();
   if (!shopifyCustomerId || !/^\d+$/.test(shopifyCustomerId)) {
-    throw new Error("could not parse numeric customer ID from sub");
+    throw new IdTokenValidationError("customer_gid_format");
   }
 
   return { shopifyCustomerId };
