@@ -31,7 +31,7 @@ model Session {
 model Customer {
   id                String   @id @default(cuid())
   shopifyCustomerId String   @unique
-  email             String   @unique
+  email             String?  @unique
   firstName         String?
   lastName          String?
   createdAt         DateTime @default(now())
