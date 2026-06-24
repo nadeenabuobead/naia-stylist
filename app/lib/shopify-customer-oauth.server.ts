@@ -127,6 +127,7 @@ export async function exchangeCodeForTokens(
     },
     body: new URLSearchParams({
       grant_type:    "authorization_code",
+      client_id:     clientId,
       code,
       redirect_uri:  redirectUri,
       code_verifier: codeVerifier,
