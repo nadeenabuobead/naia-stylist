@@ -224,43 +224,87 @@ export async function validateIdToken(
 
 let customerAccountApiEndpoint: string | null = null;
 
-async function getCustomerAccountApiEndpoint(): Promise<string> {
-  if (customerAccountApiEndpoint) return customerAccountApiEndpoint;
-  const storeDomain = process.env.SHOPIFY_STORE_DOMAIN!;
-  const res = await fetch(`https://${storeDomain}/.well-known/customer-account-api`);
-  if (!res.ok) throw new Error("discovery_failed");
-  const data = await res.json() as { graphql_api?: string };
-  const endpoint = data.graphql_api;
-  if (typeof endpoint !== "string" || !endpoint) throw new Error("discovery_endpoint_missing");
-  customerAccountApiEndpoint = endpoint;
-  return endpoint;
-}
-
 export async function fetchCustomerGid(accessToken: string): Promise<string> {
-  const endpoint = await getCustomerAccountApiEndpoint();
+  const stagingDiag = Boolean(process.env.STAGING_SEED_SECRET);
+  try {
+    // ── Discover endpoint (module-level cache after first call) ──
+    if (!customerAccountApiEndpoint) {
+      const storeDomain = process.env.SHOPIFY_STORE_DOMAIN!;
+      let discRes: Response;
+      try {
+        discRes = await fetch(`https://${storeDomain}/.well-known/customer-account-api`);
+      } catch {
+        if (stagingDiag) console.error(JSON.stringify({ stage: "fetch_customer_gid", category: "customer_api_discovery_http", httpStatus: 0 }));
+        throw new Error("discovery_failed");
+      }
+      if (!discRes.ok) {
+        if (stagingDiag) console.error(JSON.stringify({ stage: "fetch_customer_gid", category: "customer_api_discovery_http", httpStatus: discRes.status }));
+        throw new Error("discovery_failed");
+      }
+      const data = await discRes.json() as { graphql_api?: string };
+      const ep = data.graphql_api;
+      if (typeof ep !== "string" || !ep) {
+        if (stagingDiag) console.error(JSON.stringify({ stage: "fetch_customer_gid", category: "customer_api_discovery_payload" }));
+        throw new Error("discovery_endpoint_missing");
+      }
+      customerAccountApiEndpoint = ep;
+    }
+    const endpoint = customerAccountApiEndpoint;
 
-  const res = await fetch(endpoint, {
-    method:  "POST",
-    headers: {
-      "Content-Type":  "application/json",
-      "Authorization": accessToken,
-      "Origin":        process.env.SHOPIFY_APP_URL!,
-      "User-Agent":    "nAia Stylist Staging",
-    },
-    body: JSON.stringify({ query: "query CurrentCustomer { customer { id } }" }),
-  });
-  if (!res.ok) throw new Error("customer_identity_query_failed");
+    // ── Query customer identity ──
+    let gqlRes: Response;
+    try {
+      gqlRes = await fetch(endpoint, {
+        method:  "POST",
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": accessToken,
+          "Origin":        process.env.SHOPIFY_APP_URL!,
+          "User-Agent":    "nAia Stylist Staging",
+        },
+        body: JSON.stringify({ query: "query CurrentCustomer { customer { id } }" }),
+      });
+    } catch {
+      if (stagingDiag) console.error(JSON.stringify({ stage: "fetch_customer_gid", category: "customer_api_query_http", httpStatus: 0 }));
+      throw new Error("customer_identity_query_failed");
+    }
+    if (!gqlRes.ok) {
+      if (stagingDiag) console.error(JSON.stringify({ stage: "fetch_customer_gid", category: "customer_api_query_http", httpStatus: gqlRes.status }));
+      throw new Error("customer_identity_query_failed");
+    }
 
-  const body = await res.json() as { data?: { customer?: { id?: unknown } }; errors?: unknown };
-  if (body.errors) throw new Error("customer_identity_query_failed");
+    const body = await gqlRes.json() as { data?: { customer?: { id?: unknown } }; errors?: unknown };
+    if (body.errors) {
+      const errorsCount = Array.isArray(body.errors) ? body.errors.length : 1;
+      if (stagingDiag) console.error(JSON.stringify({ stage: "fetch_customer_gid", category: "customer_api_query_graphql", errorsPresent: true, errorsCount }));
+      throw new Error("customer_identity_query_failed");
+    }
 
-  const gid = body.data?.customer?.id;
-  if (typeof gid !== "string" || !gid.startsWith("gid://shopify/Customer/")) {
-    throw new Error("customer_gid_format_invalid");
+    const gid = body.data?.customer?.id;
+    if (typeof gid !== "string" || !gid.startsWith("gid://shopify/Customer/")) {
+      if (stagingDiag) console.error(JSON.stringify({ stage: "fetch_customer_gid", category: "customer_api_customer_id_format" }));
+      throw new Error("customer_gid_format_invalid");
+    }
+    const numericId = gid.split("/").pop();
+    if (!numericId || !/^\d+$/.test(numericId)) {
+      if (stagingDiag) console.error(JSON.stringify({ stage: "fetch_customer_gid", category: "customer_api_customer_id_format" }));
+      throw new Error("customer_gid_format_invalid");
+    }
+    return numericId;
+
+  } catch (e) {
+    if (
+      e instanceof Error &&
+      (e.message === "discovery_failed" ||
+       e.message === "discovery_endpoint_missing" ||
+       e.message === "customer_identity_query_failed" ||
+       e.message === "customer_gid_format_invalid")
+    ) {
+      throw e;
+    }
+    if (stagingDiag) console.error(JSON.stringify({ stage: "fetch_customer_gid", category: "customer_api_unknown" }));
+    throw e;
   }
-  const numericId = gid.split("/").pop();
-  if (!numericId || !/^\d+$/.test(numericId)) throw new Error("customer_gid_format_invalid");
-  return numericId;
 }
 
 // ---------------------------------------------------------------------------
