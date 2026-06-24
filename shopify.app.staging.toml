@@ -23,5 +23,6 @@ subpath = "naia-stylist-staging"
 prefix = "apps"
 
 [customer_authentication]
-redirect_uris = [ "https://naia-stylist-staging.vercel.app/auth/shopify/callback" ]
-logout_urls   = [ "https://naia-stylist-staging.vercel.app/auth/logout" ]
+redirect_uris      = [ "https://naia-stylist-staging.vercel.app/auth/shopify/callback" ]
+logout_urls        = [ "https://naia-stylist-staging.vercel.app/auth/logout" ]
+javascript_origins = [ "https://naia-stylist-staging.vercel.app" ]
