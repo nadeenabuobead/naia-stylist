@@ -1,19 +1,28 @@
 import { useState, useEffect } from "react";
 import { Link, useLoaderData, useNavigate } from "react-router";
 import { redirect, type LoaderFunctionArgs } from "react-router";
-import {
-  getQuestionByStep,
-  getTotalSteps,
-  type OnboardingAnswers,
-} from "~/lib/onboarding/quiz-data";
+import type { OnboardingAnswers } from "~/lib/onboarding/quiz-data";
+import { getQuestionByStep, getTotalSteps } from "~/lib/onboarding/quiz-data";
+import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 
-export async function loader({ params }: LoaderFunctionArgs) {
+export async function loader({ params, request }: LoaderFunctionArgs) {
   const step = parseInt(params.step || "1", 10);
   const totalSteps = getTotalSteps();
   if (isNaN(step) || step < 1 || step > totalSteps) return redirect("/onboarding/step/1");
   const question = getQuestionByStep(step);
   if (!question) return redirect("/onboarding/step/1");
-  return { step, totalSteps, question };
+
+  const customer = await requireCurrentNaiaCustomer(request);
+  const op = customer.onboardingProfile;
+  const existingAnswers: OnboardingAnswers = {};
+  if (op) {
+    if (op.stylePersonalities.length) existingAnswers["style-personalities"] = op.stylePersonalities;
+    if (op.favoriteColors.length)     existingAnswers["favorite-colors"]     = op.favoriteColors;
+    if (op.avoidColors.length)        existingAnswers["avoid-colors"]        = op.avoidColors;
+    if (op.lifestyle)                 existingAnswers["lifestyle"]           = op.lifestyle.split(", ").filter(Boolean);
+    if (op.fitPreferences.length)     existingAnswers["fit-preferences"]     = op.fitPreferences;
+  }
+  return { step, totalSteps, question, existingAnswers };
 }
 
 const css = `
@@ -53,7 +62,7 @@ const css = `
 `;
 
 export default function OnboardingStep() {
-  const { step, totalSteps, question } = useLoaderData<typeof loader>();
+  const { step, totalSteps, question, existingAnswers } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
 
   const [allAnswers, setAllAnswers] = useState<OnboardingAnswers>({});
@@ -61,13 +70,19 @@ export default function OnboardingStep() {
   const [multiValue, setMultiValue] = useState<string[]>([]);
   const [textValue, setTextValue] = useState<string>("");
 
-  // Load answers from localStorage on mount and when step changes
+  // Load answers from localStorage on mount and when step changes.
+  // DB values (existingAnswers) are the base; any localStorage entry overrides them.
+  // This ensures a fresh browser or cleared cache still shows the saved profile.
   useEffect(() => {
     try {
       const stored = localStorage.getItem("naia_onboarding");
-      const parsed = stored ? JSON.parse(stored) : {};
-      setAllAnswers(parsed);
-      const prev = parsed[question.id];
+      const fromStorage: OnboardingAnswers = stored ? JSON.parse(stored) : {};
+      const merged: OnboardingAnswers = { ...existingAnswers, ...fromStorage };
+      if (JSON.stringify(merged) !== JSON.stringify(fromStorage)) {
+        localStorage.setItem("naia_onboarding", JSON.stringify(merged));
+      }
+      setAllAnswers(merged);
+      const prev = merged[question.id];
       if (Array.isArray(prev)) setMultiValue(prev);
       else if (typeof prev === "string") { setSingleValue(prev); setTextValue(prev); }
       else { setSingleValue(null); setMultiValue([]); setTextValue(""); }
@@ -115,7 +130,7 @@ export default function OnboardingStep() {
 
       <div className="ob-topbar">
         <div className="ob-topbar-logo">nAia</div>
-        <Link to="/apps/naia-stylist/" className="ob-topbar-close">Exit Session</Link>
+        <Link to="/" className="ob-topbar-close">Exit Session</Link>
       </div>
 
       <div className="ob-progress">

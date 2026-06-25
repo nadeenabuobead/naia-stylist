@@ -736,7 +736,7 @@ export default function Index() {
               <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "32px", fontWeight: 900, marginBottom: "4px" }}>Your Style DNA</h2>
               <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>Based on your onboarding quiz</p>
             </div>
-            <Link to="/apps/naia-stylist/onboarding/step/1" style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>
+            <Link to="/onboarding/step/1" style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>
               {!profile?.completed ? "COMPLETE PROFILE" : "EDIT"}
             </Link>
           </div>
@@ -760,7 +760,7 @@ export default function Index() {
               <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "20px" }}>
                 Complete your style quiz so nAia truly knows you
               </p>
-              <Link to="/apps/naia-stylist/onboarding/step/1" style={{ display: "inline-block", padding: "14px 32px", background: "#8b2035", color: "#f4f4f1", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", textDecoration: "none" }}>
+              <Link to="/onboarding/step/1" style={{ display: "inline-block", padding: "14px 32px", background: "#8b2035", color: "#f4f4f1", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", textDecoration: "none" }}>
                 START QUIZ
               </Link>
             </div>
