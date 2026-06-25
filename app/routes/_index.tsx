@@ -3,6 +3,24 @@ import { useLoaderData, Link, redirect } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { requireCurrentNaiaCustomer } from "../lib/naia-session.server";
 import prisma from "../db.server";
+import { quizQuestions } from "../lib/onboarding/quiz-data";
+
+// Option label and colour-hex lookups for the Passport Lite summary
+const PASSPORT_LABELS: Record<string, Record<string, string>> = {};
+const PASSPORT_COLOR_HEX: Record<string, string> = {};
+for (const q of quizQuestions) {
+  if (q.options) {
+    PASSPORT_LABELS[q.id] = Object.fromEntries(q.options.map(o => [o.id, o.label]));
+  }
+  if (q.colors) {
+    PASSPORT_LABELS[q.id] = Object.fromEntries(q.colors.map(c => [c.id, c.name]));
+    for (const c of q.colors) PASSPORT_COLOR_HEX[c.id] = c.hex;
+  }
+}
+
+function passportLabel(qId: string, oId: string): string {
+  return PASSPORT_LABELS[qId]?.[oId] ?? oId.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   // Throws redirect to /auth/shopify/login if no valid nAia session
@@ -729,33 +747,106 @@ export default function Index() {
           )}
         </div>
 
-        {/* 6. Style DNA */}
+        {/* 6. Passport Lite */}
         <div style={{ marginBottom: "60px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
             <div>
-              <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "32px", fontWeight: 900, marginBottom: "4px" }}>Your Style DNA</h2>
-              <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>Based on your onboarding quiz</p>
+              <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "32px", fontWeight: 900, marginBottom: "4px" }}>Your Passport Lite</h2>
+              <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>Your style identity, in full</p>
             </div>
             <Link to="/onboarding/step/1" style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>
               {!profile?.completed ? "COMPLETE PROFILE" : "EDIT"}
             </Link>
           </div>
 
-          {profile?.completed ? (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px,1fr))", gap: "16px" }}>
-              {[
-                { label: "Style personalities", value: profile.stylePersonalities?.map((s: string) => s.split('-').map((w: string) => w.charAt(0).toUpperCase()+w.slice(1)).join(' ')).join(', ') },
-                { label: "Wants to feel", value: profile.desiredFeeling?.split('-').map((w: string) => w.charAt(0).toUpperCase()+w.slice(1)).join(' ') },
-                { label: "Lifestyle", value: profile.dressesFor?.map((l: string) => l.split('-').map((w: string) => w.charAt(0).toUpperCase()+w.slice(1)).join(' ')).join(', ') },
-                { label: "Favorite colors", value: profile.favoriteColors?.map((c: string) => c.split('-').map((w: string) => w.charAt(0).toUpperCase()+w.slice(1)).join(' ')).join(', ') },
-              ].filter(i => i.value).map(({ label, value }) => (
-                <div key={label} style={{ background: "rgba(255,255,255,0.5)", padding: "24px", border: "1px solid rgba(59,5,16,0.06)" }}>
-                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "8px" }}>{label}</div>
-                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#221516" }}>{value}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
+          {profile?.completed ? (() => {
+            const p = profile;
+            const monoLabel: React.CSSProperties = { fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase" as const, color: "#7a6f6a", marginBottom: "8px" };
+            const bodyText: React.CSSProperties = { fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#221516" };
+            const rowStyle: React.CSSProperties = { paddingBottom: "20px", marginBottom: "20px", borderBottom: "1px solid rgba(59,5,16,0.06)" };
+            const pillStyle: React.CSSProperties = { display: "inline-block", padding: "6px 14px", border: "1px solid rgba(59,5,16,.1)", fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "1px", textTransform: "uppercase" as const, color: "#221516", marginRight: "8px", marginBottom: "6px" };
+
+            // Rehydrate lifestyle from comma-joined string
+            const lifestyleArr: string[] = p.lifestyle ? p.lifestyle.split(", ").filter(Boolean) : [];
+
+            const sections: Array<{ label: string; content: React.ReactNode } | null> = [
+              p.stylePersonalities?.length ? {
+                label: "Style energies",
+                content: <div>{p.stylePersonalities.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("style-personalities", id)}</span>)}</div>
+              } : null,
+              p.desiredImpression?.length ? {
+                label: "The impression you make",
+                content: <div>{p.desiredImpression.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("desired-impression", id)}</span>)}</div>
+              } : null,
+              p.desiredFeelings?.length ? {
+                label: "How you want to feel",
+                content: <div>{p.desiredFeelings.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("desired-feelings", id)}</span>)}</div>
+              } : null,
+              p.favoriteColors?.length ? {
+                label: "Colour palette",
+                content: (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                    {p.favoriteColors.map((id: string) => (
+                      <span key={id} style={{ ...pillStyle, display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ width: "12px", height: "12px", background: PASSPORT_COLOR_HEX[id] ?? "#ccc", border: "1px solid rgba(0,0,0,0.1)", flexShrink: 0 }} />
+                        {passportLabel("favorite-colors", id)}
+                      </span>
+                    ))}
+                  </div>
+                )
+              } : null,
+              p.avoidColors?.length ? {
+                label: "Colours to avoid",
+                content: (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", opacity: 0.7 }}>
+                    {p.avoidColors.map((id: string) => (
+                      <span key={id} style={{ ...pillStyle, display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ width: "12px", height: "12px", background: PASSPORT_COLOR_HEX[id] ?? "#ccc", border: "1px solid rgba(0,0,0,0.1)", flexShrink: 0 }} />
+                        {passportLabel("avoid-colors", id)}
+                      </span>
+                    ))}
+                  </div>
+                )
+              } : null,
+              lifestyleArr.length ? {
+                label: "Lifestyle",
+                content: <div>{lifestyleArr.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("lifestyle", id)}</span>)}</div>
+              } : null,
+              p.fitPreferences?.length ? {
+                label: "Fit preferences",
+                content: <div>{p.fitPreferences.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("fit-preferences", id)}</span>)}</div>
+              } : null,
+              p.becoming?.length ? {
+                label: "Who you're becoming",
+                content: <div>{p.becoming.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("becoming", id)}</span>)}</div>
+              } : null,
+              p.styleStruggles?.length ? {
+                label: "Wardrobe disconnects",
+                content: <div>{p.styleStruggles.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("wardrobe-disconnection", id)}</span>)}</div>
+              } : null,
+              p.styleSupport?.length ? {
+                label: "What would help most",
+                content: <div>{p.styleSupport.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("style-support", id)}</span>)}</div>
+              } : null,
+              p.finalNotes ? {
+                label: "Notes to nAia",
+                content: <div style={{ ...bodyText, fontStyle: "italic" }}>&ldquo;{p.finalNotes}&rdquo;</div>
+              } : null,
+            ];
+
+            const populated = sections.filter(Boolean) as Array<{ label: string; content: React.ReactNode }>;
+
+            return (
+              <div style={{ background: "rgba(255,255,255,0.5)", padding: "32px", border: "1px solid rgba(59,5,16,0.06)" }}>
+                {populated.map(({ label, content }, i) => (
+                  <div key={label} style={i < populated.length - 1 ? rowStyle : { paddingBottom: "4px" }}>
+                    <div style={monoLabel}>{label.toUpperCase()}</div>
+                    {content}
+                  </div>
+                ))}
+              </div>
+            );
+          })() : (
             <div style={{ background: "rgba(139,32,53,0.05)", padding: "40px", textAlign: "center", border: "1px solid rgba(139,32,53,0.1)" }}>
               <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "20px" }}>
                 Complete your style quiz so nAia truly knows you

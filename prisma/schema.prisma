@@ -96,6 +96,13 @@ model OnboardingProfile {
   bottomSize          String?
   dressSize           String?
   shoeSize            String?
+
+  // Passport Lite v1 — quiz answers
+  desiredImpression   String[]  @default([])
+  desiredFeelings     String[]  @default([])
+  becoming            String[]  @default([])
+  styleSupport        String[]  @default([])
+  finalNotes          String?
 }
 
 // ============================================
