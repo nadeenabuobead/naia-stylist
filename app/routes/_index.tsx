@@ -26,6 +26,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Throws redirect to /auth/shopify/login if no valid nAia session
   const sessionCustomer = await requireCurrentNaiaCustomer(request);
 
+  // Short-circuit before all profile-dependent queries.
+  // sessionCustomer.onboardingProfile is already loaded by resolveNaiaSession.
+  if (!sessionCustomer.onboardingProfile?.completed) {
+    return { profileCompleted: false as const };
+  }
+
+  // Full query — only runs for customers with a completed Passport
   const customer = await prisma.customer.findFirst({
     where: { id: sessionCustomer.id },
     include: {
@@ -43,10 +50,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (!customer) {
     return redirect("/auth/shopify/login");
-  }
-
-  if (!customer.onboardingProfile?.completed) {
-    return redirect("/onboarding/step/1");
   }
 
   const avgRating = customer.postOutfitReviews.length > 0
@@ -267,6 +270,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 
   return {
+    profileCompleted: true as const,
     customer,
     profile,
     isDemoMode,
@@ -286,6 +290,41 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
+
+function NoPassportDashboard() {
+  return (
+    <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 40px", borderBottom: "1px solid rgba(59,5,16,.06)" }}>
+        <div style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "22px", fontStyle: "italic", letterSpacing: "3px", color: "#221516" }}>nAia</div>
+      </div>
+      <div style={{ maxWidth: "700px", margin: "0 auto", padding: "80px 40px" }}>
+        <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", color: "#8b2035", marginBottom: "16px" }}>
+          YOUR nAia PASSPORT
+        </div>
+        <h1 style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "clamp(28px,4vw,44px)", fontWeight: 900, fontStyle: "italic", color: "#221516", letterSpacing: "-1px", marginBottom: "20px", lineHeight: 1.1 }}>
+          Create your nAia Passport
+        </h1>
+        <p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "19px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "40px", lineHeight: 1.6 }}>
+          Let nAia get to know you — your style, how you want to feel, your lifestyle and fit. Your answers become your personal styling memory.
+        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: "32px", flexWrap: "wrap" }}>
+          <Link
+            to="/onboarding/step/1"
+            style={{ display: "inline-block", padding: "14px 32px", background: "#221516", color: "#f4f4f1", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "3px", textTransform: "uppercase", textDecoration: "none" }}
+          >
+            CREATE YOUR PASSPORT →
+          </Link>
+          <Link
+            to="/quick-style"
+            style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}
+          >
+            Try Quick Style →
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function BuySkipWidget() {
   const [step, setStep] = React.useState("upload"); // upload | tag | result
@@ -570,7 +609,13 @@ function BuySkipWidget() {
 
 
 export default function Index() {
-  const { customer, stats, insights, profile, styleResponseProfile, isDemoMode } = useLoaderData<typeof loader>();
+  const data = useLoaderData<typeof loader>();
+
+  if (!data.profileCompleted) {
+    return <NoPassportDashboard />;
+  }
+
+  const { customer, stats, insights, profile, styleResponseProfile, isDemoMode } = data;
 
   return (
     <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
