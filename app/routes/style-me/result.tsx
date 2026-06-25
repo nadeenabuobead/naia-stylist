@@ -2,7 +2,7 @@
 import { Link, useLoaderData, useFetcher } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
 import { useState, useEffect } from "react";
-import { getCustomerId } from "~/lib/auth.server";
+import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { prisma } from "~/lib/prisma.server";
 import { getSession, commitSession } from "~/lib/session.server";
 import { callClaude } from "~/lib/ai/claude.server";
@@ -12,22 +12,56 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const url = new URL(request.url);
     const sessionId = url.searchParams.get("sessionId");
 
+    // Resolve the optional nAia session once — used by both the direct-load and cookie paths.
+    const naiaCustomer = await getCurrentNaiaCustomer(request);
+
     if (sessionId) {
+      // Only the owning authenticated customer may view a session by direct ID.
+      // Return the same generic response whether the session is missing or belongs to someone
+      // else — do not reveal whether a supplied sessionId exists.
+      if (!naiaCustomer) {
+        return data(
+          {
+            isLoading: false,
+            sessionId: null,
+            mood: null,
+            currentMood: null,
+            desiredFeeling: null,
+            occasion: null,
+            suggestion: null,
+            error: "Not found",
+          },
+          { status: 404 },
+        );
+      }
       const session = await prisma.stylingSession.findUnique({
         where: { id: sessionId },
         include: { suggestions: { include: { items: true } } },
       });
-      if (session) {
-        return data({
-          isLoading: false,
-          sessionId: session.id,
-          mood: session.currentMood,
-          occasion: session.occasion,
-          desiredFeeling: session.desiredFeeling,
-          suggestion: session.suggestions[0] || null,
-          error: null,
-        });
+      if (!session || session.customerId !== naiaCustomer.id) {
+        return data(
+          {
+            isLoading: false,
+            sessionId: null,
+            mood: null,
+            currentMood: null,
+            desiredFeeling: null,
+            occasion: null,
+            suggestion: null,
+            error: "Not found",
+          },
+          { status: 404 },
+        );
       }
+      return data({
+        isLoading: false,
+        sessionId: session.id,
+        mood: session.currentMood,
+        occasion: session.occasion,
+        desiredFeeling: session.desiredFeeling,
+        suggestion: session.suggestions[0] || null,
+        error: null,
+      });
     }
 
     const cookieSession = await getSession(request.headers.get("Cookie"));
@@ -40,9 +74,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return redirect("/style-me/mood");
     }
 
-    const customerId = await getCustomerId(request);
-
-    let resolvedCustomerId = customerId;
+    // Authenticated customers use their real ID; unauthenticated visitors fall back to the
+    // shared guest row so the anonymous flow continues unchanged.
+    let resolvedCustomerId = naiaCustomer?.id ?? null;
     if (!resolvedCustomerId) {
       const guest = await prisma.customer.upsert({
         where: { shopifyCustomerId: "guest" },
@@ -78,7 +112,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const intent = formData.get("intent") as string;
     const sessionId = formData.get("sessionId") as string;
     const suggestionId = formData.get("suggestionId") as string;
-    const customerId = await getCustomerId(request);
+    const naiaCustomer = await getCurrentNaiaCustomer(request);
 
     if (intent === "generate") {
       const session = await prisma.stylingSession.findUnique({ where: { id: sessionId } });
@@ -147,17 +181,23 @@ Create a complete outfit using 2-3 of these pieces. Return JSON with: outfitName
     }
 
     if (intent === "save") {
-      if (!customerId) return data({ error: "Must be logged in to save looks" }, { status: 401 });
+      if (!naiaCustomer) return data({ error: "Must be logged in to save looks" }, { status: 401 });
+
+      if (!naiaCustomer.onboardingProfile?.completed) {
+        return data({ error: "passport_required", code: "passport_required" }, { status: 403 });
+      }
 
       const suggestion = await prisma.outfitSuggestion.findUnique({
         where: { id: suggestionId },
-        include: { items: true },
+        include: { session: true, items: true },
       });
-      if (!suggestion) return data({ error: "Suggestion not found" }, { status: 404 });
+      if (!suggestion || suggestion.session.customerId !== naiaCustomer.id) {
+        return data({ error: "Not found" }, { status: 404 });
+      }
 
       await prisma.savedLook.create({
         data: {
-          customerId,
+          customerId: naiaCustomer.id,
           name: suggestion.outfitName,
           fromSuggestionId: suggestion.id,
           items: {
