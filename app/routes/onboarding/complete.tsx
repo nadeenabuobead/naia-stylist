@@ -94,7 +94,7 @@ export default function OnboardingComplete() {
         return;
       }
       localStorage.removeItem("naia_onboarding");
-      window.location.href = "/";
+      setSaveStatus("saved");
     } catch {
       setSaveStatus("error");
     }
@@ -189,8 +189,12 @@ export default function OnboardingComplete() {
 
         <a href="/" className="cp-action">
           <div>
-            <div className="cp-action-title">View Dashboard</div>
-            <div className="cp-action-sub">Explore all features</div>
+            <div className="cp-action-title">
+              {saveStatus === "saved" ? "View your updated Style DNA" : "View Dashboard"}
+            </div>
+            <div className="cp-action-sub">
+              {saveStatus === "saved" ? "Your Passport Lite has been saved" : "Explore all features"}
+            </div>
           </div>
           <span className="cp-arrow">→</span>
         </a>
