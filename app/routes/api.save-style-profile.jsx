@@ -102,10 +102,13 @@ export async function action({ request }) {
     }
   }
 
-  // finalNotes, if present, must be a string or null
+  // finalNotes, if present, must be a string or null, max 500 chars
   if (Object.hasOwn(body, "finalNotes")) {
     const v = body["finalNotes"];
     if (v !== null && typeof v !== "string") {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+    if (typeof v === "string" && v.length > 500) {
       return Response.json({ error: "invalid_body" }, { status: 400 });
     }
   }

@@ -4,6 +4,7 @@ export default [
   index("routes/_index.tsx"),
   route("onboarding/step/:step", "routes/onboarding/step.$step.tsx"),
   route("onboarding/complete", "routes/onboarding/complete.tsx"),
+  route("passport",            "routes/passport.tsx"),
   route("closet", "routes/closet._index.tsx"),
   route("style-me", "routes/style-me/_index.tsx"),
   route("style-me/mood", "routes/style-me/mood.tsx"),

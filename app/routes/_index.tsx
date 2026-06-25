@@ -754,7 +754,7 @@ export default function Index() {
               <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "32px", fontWeight: 900, marginBottom: "4px" }}>Your nAia Passport</h2>
               <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>Your style identity, in full</p>
             </div>
-            <Link to="/onboarding/step/1" style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>
+            <Link to={profile?.completed ? "/passport" : "/onboarding/step/1"} style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>
               {!profile?.completed ? "COMPLETE PROFILE" : "EDIT"}
             </Link>
           </div>
