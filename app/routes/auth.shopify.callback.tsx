@@ -14,6 +14,7 @@ import {
   buildSessionCookieHeader,
 } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
+import { Prisma } from "@prisma/client";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const url     = new URL(request.url);
@@ -113,10 +114,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   if (!customer) {
-    // No nAia profile for this Shopify customer yet — redirect to onboarding entry
-    return redirect("/quick-style", {
-      headers: { "Set-Cookie": clearedSessionCookie },
-    });
+    // First-time Shopify customer — create a minimal record using the already-verified
+    // shopifyCustomerId. email is left null; no additional token parsing needed.
+    try {
+      customer = await prisma.customer.create({
+        data: { shopifyCustomerId },
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        // Concurrent callback won the race on the unique key — re-read the row.
+        try {
+          customer = await prisma.customer.findUnique({ where: { shopifyCustomerId } });
+        } catch {
+          return fail(502, "Database error");
+        }
+        if (!customer) return fail(502, "Database error");
+      } else {
+        return fail(502, "Database error");
+      }
+    }
   }
 
   // ── Create the nAia session ──
