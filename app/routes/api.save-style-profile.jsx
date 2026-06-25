@@ -1,5 +1,5 @@
-import prisma from "~/db.server";
-import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import prisma from "../db.server";
+import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 
 export async function action({ request }) {
   const customer = await getCurrentNaiaCustomer(request);
