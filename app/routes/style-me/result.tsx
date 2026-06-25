@@ -1,6 +1,6 @@
 // app/routes/style-me/result.tsx - REDESIGNED WITH PROPER AESTHETICS
 import { Link, useLoaderData, useFetcher } from "react-router";
-import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
+import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type ShouldRevalidateFunctionArgs } from "react-router";
 import { useState, useEffect } from "react";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { prisma } from "~/lib/prisma.server";
@@ -255,11 +255,23 @@ Create a complete outfit using 2-3 of these pieces. Return JSON with: outfitName
   }
 }
 
+export function shouldRevalidate({
+  formData,
+  defaultShouldRevalidate,
+}: ShouldRevalidateFunctionArgs) {
+  // A save POST must not re-run the loader: the cookie-path loader creates a new
+  // StylingSession on every invocation and returns isLoading:true, which would
+  // put the result page back into the loading/generate state.
+  if (formData?.get("intent") === "save") return false;
+  return defaultShouldRevalidate;
+}
+
 const loadingMessages = ["Reading the runways...", "Consulting your mood...", "Matching textures and fabrics...", "Finalizing your look..."];
 
 export default function StyleMeResult() {
   const loaderData = useLoaderData<typeof loader>();
-  const fetcher = useFetcher<{ suggestion?: any; error?: string; saved?: boolean }>();
+  const generateFetcher = useFetcher<{ suggestion?: any; error?: string }>();
+  const saveFetcher = useFetcher<{ saved?: boolean; error?: string; code?: string }>();
   const [msgIndex, setMsgIndex] = useState(0);
   const [isSaved, setIsSaved] = useState(false);
   const [reviewSaved, setReviewSaved] = useState(false);
@@ -324,13 +336,13 @@ setTimeout(() => setReviewSaved(false), 3000);
     });
   };
 
-  const isLoading = loaderData.isLoading && !fetcher.data?.suggestion;
-  const suggestion = fetcher.data?.suggestion || loaderData.suggestion;
-  const error = fetcher.data?.error || loaderData.error;
+  const isLoading = loaderData.isLoading && !generateFetcher.data?.suggestion;
+  const suggestion = generateFetcher.data?.suggestion || loaderData.suggestion;
+  const error = generateFetcher.data?.error || loaderData.error;
 
   useEffect(() => {
-    if (loaderData.isLoading && loaderData.sessionId && fetcher.state === "idle" && !fetcher.data) {
-      fetcher.submit({ intent: "generate", sessionId: loaderData.sessionId }, { method: "post" });
+    if (loaderData.isLoading && loaderData.sessionId && generateFetcher.state === "idle" && !generateFetcher.data) {
+      generateFetcher.submit({ intent: "generate", sessionId: loaderData.sessionId }, { method: "post" });
     }
   }, []);
 
@@ -341,8 +353,8 @@ setTimeout(() => setReviewSaved(false), 3000);
   }, [isLoading]);
 
   useEffect(() => {
-    if (fetcher.data?.saved) setIsSaved(true);
-  }, [fetcher.data]);
+    if (saveFetcher.data?.saved) setIsSaved(true);
+  }, [saveFetcher.data]);
 
   if (isLoading) {
     return (
@@ -368,7 +380,7 @@ setTimeout(() => setReviewSaved(false), 3000);
         <div style={{ textAlign: "center", maxWidth: "500px" }}>
           <h1 style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "32px", fontWeight: 900, color: "#221516", marginBottom: "16px" }}>Something went wrong</h1>
           <p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "32px" }}>{error || "Couldn't create your outfit. Let's try again"}</p>
-          <button onClick={() => fetcher.submit({ intent: "regenerate", sessionId: loaderData.sessionId }, { method: "post" })} style={{ display: "inline-block", padding: "14px 32px", background: "#221516", color: "#f4f4f1", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", border: "none", cursor: "pointer" }}>New Look, Same Vibe</button>
+          <button onClick={() => generateFetcher.submit({ intent: "regenerate", sessionId: loaderData.sessionId }, { method: "post" })} style={{ display: "inline-block", padding: "14px 32px", background: "#221516", color: "#f4f4f1", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", border: "none", cursor: "pointer" }}>New Look, Same Vibe</button>
         </div>
       </div>
     );
@@ -381,7 +393,7 @@ setTimeout(() => setReviewSaved(false), 3000);
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 40px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
         <Link to="/quick-style" style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", textDecoration: "none" }}>Back</Link>
         <div style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "22px", fontStyle: "italic", letterSpacing: "3px", color: "#221516" }}>nAia</div>
-        <button onClick={() => fetcher.submit({ intent: "save", suggestionId: suggestion.id }, { method: "post" })} disabled={isSaved} style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: isSaved ? "#8b2035" : "#7a6f6a", background: "none", border: "none", cursor: "pointer" }}>{isSaved ? "Saved" : "Save"}</button>
+        <button onClick={() => saveFetcher.submit({ intent: "save", suggestionId: suggestion.id }, { method: "post" })} disabled={isSaved} style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: isSaved ? "#8b2035" : "#7a6f6a", background: "none", border: "none", cursor: "pointer" }}>{isSaved ? "Saved" : "Save"}</button>
       </div>
       <main style={{ maxWidth: "800px", margin: "0 auto", padding: "48px 40px 80px" }}>
         <div style={{ marginBottom: "40px" }}>
@@ -483,7 +495,7 @@ setTimeout(() => setReviewSaved(false), 3000);
         </div>
       )}
           <Link to="/apps/naia-stylist/quick-style" style={{ padding: "14px 32px", background: "transparent", color: "#221516", border: "1px solid rgba(59,5,16,0.12)", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none" }}>Start Over</Link>
-          <button onClick={() => fetcher.submit({ intent: "regenerate", sessionId: loaderData.sessionId }, { method: "post" })} style={{ padding: "14px 32px", background: "#221516", color: "#f4f4f1", border: "none", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", cursor: "pointer" }}>New Look, Same Vibe</button>
+          <button onClick={() => generateFetcher.submit({ intent: "regenerate", sessionId: loaderData.sessionId }, { method: "post" })} style={{ padding: "14px 32px", background: "#221516", color: "#f4f4f1", border: "none", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", cursor: "pointer" }}>New Look, Same Vibe</button>
           <button onClick={() => setShowReviewModal(true)} style={{ padding: "14px 32px", background: "transparent", color: "#221516", border: "1px solid rgba(59,5,16,0.12)", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", cursor: "pointer" }}>Rate This Look</button>
           <a href="https://naiabynadine.com" style={{ padding: "14px 32px", background: "transparent", color: "#221516", border: "1px solid rgba(59,5,16,0.12)", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none" }}>Shop nAia</a>
         </div>
