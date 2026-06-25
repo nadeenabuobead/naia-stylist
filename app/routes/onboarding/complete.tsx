@@ -42,7 +42,7 @@ function buildNaiaNote(a: OnboardingAnswers): string {
   const p = (a["style-personalities"] ?? []).slice(0, 2).map(id => lbl("style-personalities", id));
   const f = (a["desired-feelings"] ?? []).slice(0, 2).map(id => lbl("desired-feelings", id).toLowerCase());
   const av = (a["avoid-colors"] ?? []).map(id => lbl("avoid-colors", id).toLowerCase());
-  let note = "nAia will use your Passport Lite to personalise every styling suggestion to your unique aesthetic.";
+  let note = "nAia will use your style passport to personalise every styling suggestion to your unique aesthetic.";
   if (p.length && f.length) {
     note = `nAia knows your style runs ${p.join(" and ")} and you want to feel ${f.join(" and ")} — every suggestion will lead with that.`;
   } else if (p.length) {
@@ -304,7 +304,7 @@ export default function OnboardingComplete() {
 
       {saveStatus === "saving" && (
         <div className="cp-status cp-status-saving">
-          Saving your Passport Lite…
+          Saving your nAia Passport…
         </div>
       )}
 
@@ -330,7 +330,7 @@ export default function OnboardingComplete() {
       )}
 
       <main className="cp-main">
-        <div className="cp-eyebrow">Your Passport Lite</div>
+        <div className="cp-eyebrow">Your nAia Passport</div>
 
         {/* 1 — Style identity */}
         {identity && (
@@ -515,7 +515,7 @@ export default function OnboardingComplete() {
               {saveStatus === "saved" ? "View your updated Style DNA" : "View Dashboard"}
             </div>
             <div className="cp-action-sub">
-              {saveStatus === "saved" ? "Your Passport Lite has been saved" : "Explore all features"}
+              {saveStatus === "saved" ? "Your nAia Passport has been saved" : "Explore all features"}
             </div>
           </div>
           <span className="cp-arrow">→</span>
