@@ -7,7 +7,6 @@ import {
   validateIdToken,
   fetchCustomerGid,
   validateReturnTo,
-  IdTokenValidationError,
 } from "~/lib/shopify-customer-oauth.server";
 import { getSession, commitSession } from "~/lib/session.server";
 import {
@@ -88,13 +87,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // ── 3–7: validate id_token (signature, issuer, audience, expiry, max-age, nonce) ──
   try {
     await validateIdToken(tokens.id_token, storedNonce, oidcConfig);
-  } catch (e) {
-    console.error(JSON.stringify({
-      stage:     "id_token_validation",
-      category:  e instanceof IdTokenValidationError ? e.category : "unknown_validation_error",
-      errorName: e instanceof Error ? e.name : "Unknown",
-      ...(e instanceof IdTokenValidationError && e.joseCode ? { joseCode: e.joseCode } : {}),
-    }));
+  } catch {
     return fail(400, "ID token validation failed");
   }
 
@@ -111,19 +104,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return fail(502, "Customer identity lookup failed");
   }
 
-  // ── Resolve or create the Customer record (with staging DB diagnostics) ──
-  const stagingDiag = Boolean(process.env.STAGING_SEED_SECRET);
-
+  // ── Resolve or create the Customer record ──
   let customer;
   try {
     customer = await prisma.customer.findUnique({ where: { shopifyCustomerId } });
   } catch {
-    if (stagingDiag) console.error(JSON.stringify({ stage: "db_op", category: "db_connection" }));
     return fail(502, "Database error");
   }
 
   if (!customer) {
-    if (stagingDiag) console.error(JSON.stringify({ stage: "db_op", category: "customer_not_found" }));
     // No nAia profile for this Shopify customer yet — redirect to onboarding entry
     return redirect("/quick-style", {
       headers: { "Set-Cookie": clearedSessionCookie },
@@ -135,11 +124,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     rawToken = await createNaiaSession(customer.id, request);
   } catch {
-    if (stagingDiag) console.error(JSON.stringify({ stage: "db_op", category: "session_create" }));
     return fail(502, "Session creation failed");
   }
-
-  if (stagingDiag) console.error(JSON.stringify({ stage: "db_op", category: "success" }));
 
   const headers = new Headers();
   headers.append("Set-Cookie", clearedSessionCookie);
