@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
 import { Link, useLoaderData, useNavigate } from "react-router";
-import { redirect, type LoaderFunctionArgs } from "react-router";
+import { data, redirect, type LoaderFunctionArgs } from "react-router";
 import type { OnboardingAnswers } from "~/lib/onboarding/quiz-data";
 import { getQuestionByStep, getTotalSteps, quizQuestions } from "~/lib/onboarding/quiz-data";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import { prisma } from "~/lib/prisma.server";
+import { readPendingSave, clearPendingSave } from "~/lib/pending-save.server";
 
 // Valid option IDs per draft key — derived from quiz data at module load time
 const VALID_DRAFT_IDS: Record<string, Set<string>> = {};
@@ -122,14 +124,40 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     if (op.styleSupport.length)        existingAnswers["style-support"]          = op.styleSupport;
     if (op.finalNotes)                 existingAnswers["final-notes"]            = op.finalNotes;
   }
-  return {
+  const pendingSave = await readPendingSave(request);
+
+  let hasPendingLook = false;
+  let pendingClearHeader: string | undefined;
+
+  if (pendingSave.status === "invalid_or_expired") {
+    pendingClearHeader = await clearPendingSave(request);
+  } else if (pendingSave.status === "valid") {
+    const pendingSuggestion = await prisma.outfitSuggestion.findUnique({
+      where: { id: pendingSave.sid },
+      include: { session: { include: { customer: true } } },
+    });
+    const isOwned = pendingSuggestion?.session?.customerId === customer.id;
+    const isGuestClaimable =
+      pendingSuggestion?.session?.customer?.shopifyCustomerId === "guest";
+    if (!pendingSuggestion || (!isOwned && !isGuestClaimable)) {
+      pendingClearHeader = await clearPendingSave(request);
+    } else {
+      hasPendingLook = true;
+    }
+  }
+
+  const payload = {
     step,
     totalSteps,
     question,
     existingAnswers,
     draftScope:       customer.id,
     profileUpdatedAt: op?.updatedAt?.toISOString() ?? null,
+    hasPendingLook,
   };
+  return pendingClearHeader
+    ? data(payload, { headers: { "Set-Cookie": pendingClearHeader } })
+    : payload;
 }
 
 const css = `
@@ -169,7 +197,7 @@ const css = `
 `;
 
 export default function OnboardingStep() {
-  const { step, totalSteps, question, existingAnswers, draftScope, profileUpdatedAt } =
+  const { step, totalSteps, question, existingAnswers, draftScope, profileUpdatedAt, hasPendingLook } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
 
@@ -273,6 +301,20 @@ export default function OnboardingStep() {
         </div>
         <div className="ob-progress-label">Step {step} of {totalSteps}</div>
       </div>
+
+      {hasPendingLook && step === 1 && (
+        <div style={{ background: "rgba(139,32,53,0.04)", borderBottom: "1px solid rgba(139,32,53,0.1)", padding: "20px 40px" }}>
+          <p style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "#8b2035", marginBottom: "8px" }}>
+            YOUR nAia PASSPORT
+          </p>
+          <p style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "20px", fontStyle: "italic", color: "#221516", marginBottom: "6px" }}>
+            Create your nAia Passport
+          </p>
+          <p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "16px", color: "#7a6f6a" }}>
+            Your Style Me look will be waiting for you once your Passport is complete.
+          </p>
+        </div>
+      )}
 
       <main className="ob-main">
         <div className="ob-step-label">Step {step} of {totalSteps}</div>
