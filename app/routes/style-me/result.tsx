@@ -407,7 +407,7 @@ export function shouldRevalidate({
   // the cookie-path loader creates a new StylingSession on every invocation and returns
   // isLoading:true, which would put the result page back into the loading/generate state.
   const intent = formData?.get("intent");
-  if (intent === "save" || intent === "save-pending" || intent === "clear-pending") return false;
+  if (intent === "generate" || intent === "save" || intent === "save-pending" || intent === "clear-pending") return false;
   return defaultShouldRevalidate;
 }
 
@@ -421,7 +421,10 @@ export default function StyleMeResult() {
   const [msgIndex, setMsgIndex] = useState(0);
   const [isSaved, setIsSaved] = useState(false);
   const [pendingDismissed, setPendingDismissed] = useState(false);
-  const [minDelayPassed, setMinDelayPassed] = useState(!loaderData.isLoading);
+  const [isInitialGeneration] = useState(() => loaderData.isLoading);
+  const [minDelayPassed, setMinDelayPassed] = useState(
+    () => !loaderData.isLoading,
+  );
   const [reviewSaved, setReviewSaved] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const reviewFetcher = useFetcher();
@@ -477,7 +480,8 @@ setTimeout(() => setReviewSaved(false), 3000);
 
   const generationSettled =
     !!generateFetcher.data?.suggestion || !!generateFetcher.data?.error;
-  const isLoading = loaderData.isLoading && !(generationSettled && minDelayPassed);
+  const isLoading =
+    isInitialGeneration && (!generationSettled || !minDelayPassed);
   const suggestion = generateFetcher.data?.suggestion || loaderData.suggestion;
   const error = generateFetcher.data?.error || loaderData.error;
 
@@ -491,15 +495,14 @@ setTimeout(() => setReviewSaved(false), 3000);
   }, []);
 
   useEffect(() => {
-    if (!loaderData.isLoading) {
-      setMinDelayPassed(true);
-      return;
-    }
+    if (!isInitialGeneration) return;
 
-    setMinDelayPassed(false);
-    const t = setTimeout(() => setMinDelayPassed(true), MIN_LOADING_MS);
-    return () => clearTimeout(t);
-  }, [loaderData.isLoading]);
+    const timer = setTimeout(() => {
+      setMinDelayPassed(true);
+    }, MIN_LOADING_MS);
+
+    return () => clearTimeout(timer);
+  }, [isInitialGeneration]);
 
   useEffect(() => {
     if (!isLoading) return;
