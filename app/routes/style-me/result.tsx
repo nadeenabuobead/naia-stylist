@@ -411,6 +411,7 @@ export function shouldRevalidate({
   return defaultShouldRevalidate;
 }
 
+const MIN_LOADING_MS = 4800;
 const loadingMessages = ["Reading the runways...", "Consulting your mood...", "Matching textures and fabrics...", "Finalizing your look..."];
 
 export default function StyleMeResult() {
@@ -420,6 +421,7 @@ export default function StyleMeResult() {
   const [msgIndex, setMsgIndex] = useState(0);
   const [isSaved, setIsSaved] = useState(false);
   const [pendingDismissed, setPendingDismissed] = useState(false);
+  const [minDelayPassed, setMinDelayPassed] = useState(!loaderData.isLoading);
   const [reviewSaved, setReviewSaved] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const reviewFetcher = useFetcher();
@@ -473,7 +475,9 @@ setTimeout(() => setReviewSaved(false), 3000);
     });
   };
 
-  const isLoading = loaderData.isLoading && !generateFetcher.data?.suggestion;
+  const generationSettled =
+    !!generateFetcher.data?.suggestion || !!generateFetcher.data?.error;
+  const isLoading = loaderData.isLoading && !(generationSettled && minDelayPassed);
   const suggestion = generateFetcher.data?.suggestion || loaderData.suggestion;
   const error = generateFetcher.data?.error || loaderData.error;
 
@@ -487,8 +491,19 @@ setTimeout(() => setReviewSaved(false), 3000);
   }, []);
 
   useEffect(() => {
+    if (!loaderData.isLoading) {
+      setMinDelayPassed(true);
+      return;
+    }
+
+    setMinDelayPassed(false);
+    const t = setTimeout(() => setMinDelayPassed(true), MIN_LOADING_MS);
+    return () => clearTimeout(t);
+  }, [loaderData.isLoading]);
+
+  useEffect(() => {
     if (!isLoading) return;
-    const t = setInterval(() => setMsgIndex((i) => (i + 1) % loadingMessages.length), 2500);
+    const t = setInterval(() => setMsgIndex((i) => (i + 1) % loadingMessages.length), 1200);
     return () => clearInterval(t);
   }, [isLoading]);
 
