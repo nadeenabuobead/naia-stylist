@@ -1,8 +1,8 @@
-import { useLoaderData, useFetcher, Link, useLocation } from "react-router";
-import { data, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
+import { useLoaderData, useFetcher, Link } from "react-router";
+import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
 import { useState } from "react";
 import prisma from "../db.server";
-import { getProxyCustomerId } from "~/lib/auth.server";
+import { requireCurrentNaiaCustomer, getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 
 const CATEGORIES = ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS", "ACCESSORIES", "JEWELRY", "OTHER"];
 const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver", "Multicolor"];
@@ -11,42 +11,21 @@ const SEASONS = ["Spring", "Summer", "Fall", "Winter", "All Season"];
 const PATTERNS = ["Solid", "Stripes", "Floral", "Plaid", "Animal Print", "Geometric", "Abstract", "Other"];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  // authenticate.public.appProxy (called inside getProxyCustomerId) throws a 400 Response
-  // for any direct Vercel access or tampered HMAC — React Router surfaces it to the client.
-  const customerId = await getProxyCustomerId(request);
-
-  const url = new URL(request.url);
-  const shopifyCustomerId = url.searchParams.get("logged_in_customer_id") ?? "";
-  const rawPathPrefix = url.searchParams.get("path_prefix");
-  const proxyPathPrefix: string | null =
-    typeof rawPathPrefix === "string" &&
-    /^\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*$/.test(rawPathPrefix)
-      ? rawPathPrefix
-      : null;
-
-  if (!shopifyCustomerId) {
-    return data({ items: [], authState: "logged_out" as const, proxyPathPrefix });
-  }
-  if (!customerId) {
-    // Shopify-authenticated but no nAia Customer record yet.
-    return data({ items: [], authState: "no_profile" as const, proxyPathPrefix });
-  }
-
+  const naiaCustomer = await requireCurrentNaiaCustomer(request);
   const customer = await prisma.customer.findUnique({
-    where: { id: customerId },
+    where: { id: naiaCustomer.id },
     include: { closetItems: { orderBy: { createdAt: "desc" } } },
   });
-  if (!customer) return data({ items: [], authState: "no_profile" as const, proxyPathPrefix });
-  return data({ items: customer.closetItems, authState: "authenticated" as const, proxyPathPrefix });
+  if (!customer) return redirect("/auth/shopify/login");
+  return data({ items: customer.closetItems });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  // Let the 400 throw propagate for non-App-Proxy requests.
-  const customerId = await getProxyCustomerId(request);
-  if (!customerId) {
+  const naiaCustomer = await getCurrentNaiaCustomer(request);
+  if (!naiaCustomer) {
     return data({ error: "Not authenticated" }, { status: 401 });
   }
-  const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+  const customer = await prisma.customer.findUnique({ where: { id: naiaCustomer.id } });
   if (!customer) {
     return data({ error: "Not authenticated" }, { status: 401 });
   }
@@ -148,10 +127,9 @@ const css = `
 const FONTS = "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap";
 
 export default function Closet() {
-  const { items, authState, proxyPathPrefix } = useLoaderData<typeof loader>();
+  const { items } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
 
-  // All hooks must be declared unconditionally before any early returns.
   const [showAddForm, setShowAddForm] = useState(false);
   const [activeCategory, setActiveCategory] = useState("ALL");
   const [uploading, setUploading] = useState(false);
@@ -164,55 +142,7 @@ export default function Closet() {
   const [newBrand, setNewBrand] = useState("");
   const [newOccasions, setNewOccasions] = useState<string[]>([]);
   const [newSeasons, setNewSeasons] = useState<string[]>([]);
-  const location = useLocation();
 
-  if (authState === "logged_out") {
-    return (
-      <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
-        <style>{css}</style>
-        <link href={FONTS} rel="stylesheet" />
-        <div className="cl-topbar">
-          <div className="cl-topbar-logo">nAia</div>
-        </div>
-        <div style={{ maxWidth: "600px", margin: "0 auto", padding: "120px 40px", textAlign: "center" }}>
-          <h1 style={{ fontFamily: "var(--ff-display)", fontSize: "clamp(28px,4vw,42px)", fontWeight: 900, fontStyle: "italic", color: "var(--deep)", marginBottom: "16px" }}>
-            My Pieces
-          </h1>
-          <p style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--muted)", marginBottom: "40px" }}>
-            Sign in to view your pieces.
-          </p>
-          <a
-            href={`/customer_authentication/login?return_to=${encodeURIComponent(`${proxyPathPrefix ?? ""}${location.pathname}`)}`}
-            style={{ display: "inline-block", padding: "16px 40px", background: "#8b2035", color: "#f4f4f1", textDecoration: "none", fontFamily: "var(--ff-mono)", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase" }}
-          >
-            SIGN IN
-          </a>
-        </div>
-      </div>
-    );
-  }
-
-  if (authState === "no_profile") {
-    return (
-      <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
-        <style>{css}</style>
-        <link href={FONTS} rel="stylesheet" />
-        <div className="cl-topbar">
-          <div className="cl-topbar-logo">nAia</div>
-        </div>
-        <div style={{ maxWidth: "600px", margin: "0 auto", padding: "120px 40px", textAlign: "center" }}>
-          <h1 style={{ fontFamily: "var(--ff-display)", fontSize: "clamp(28px,4vw,42px)", fontWeight: 900, fontStyle: "italic", color: "var(--deep)", marginBottom: "16px" }}>
-            My Pieces
-          </h1>
-          <p style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--muted)" }}>
-            Complete your Style Profile to start building your edit.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // authState === "authenticated"
   const filtered = activeCategory === "ALL" ? items : items.filter((i: any) => i.category === activeCategory);
 
   const uploadToCloudinary = async (file: File) => {
@@ -228,16 +158,11 @@ export default function Closet() {
       return;
     }
 
-    if (!proxyPathPrefix) {
-      setUploadError("Upload is unavailable in this context. Please try again from the store.");
-      setUploading(false);
-      return;
-    }
-
     try {
       // Step 1: get a short-lived signed upload token from the server.
-      // Path prefix comes from the Shopify App Proxy signed params; never hardcoded.
-      const sigRes = await fetch(`${proxyPathPrefix}/api/cloudinary-signature`);
+      const sigRes = await fetch("/api/cloudinary-signature", {
+        credentials: "same-origin",
+      });
       if (!sigRes.ok) {
         const errData = await sigRes.json().catch(() => ({} as any));
         setUploadError((errData as any).error || "Upload service unavailable. Please try again.");

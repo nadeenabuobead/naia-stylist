@@ -1,5 +1,4 @@
-import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
+import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import crypto from "node:crypto";
 
 // Max file size enforced by the Cloudinary upload preset (set in the Cloudinary dashboard).
@@ -7,26 +6,9 @@ import crypto from "node:crypto";
 const CLIENT_MAX_BYTES = 5 * 1024 * 1024;
 
 export async function loader({ request }) {
-  // Throws 400 if this is not a valid Shopify App Proxy request (invalid/missing HMAC).
-  // Direct Vercel URL access will never reach the code below.
-  await authenticate.public.appProxy(request);
-
-  const url = new URL(request.url);
-  const shopifyCustomerId = url.searchParams.get("logged_in_customer_id");
-  if (!shopifyCustomerId) {
+  const naiaCustomer = await getCurrentNaiaCustomer(request);
+  if (!naiaCustomer) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
-  }
-
-  // findUnique only — no upsert, no create. Customer must already have a nAia profile.
-  const customer = await prisma.customer.findUnique({
-    where: { shopifyCustomerId },
-    select: { id: true },
-  });
-  if (!customer) {
-    return Response.json(
-      { error: "No nAia profile found. Please complete your Style Profile first." },
-      { status: 403 }
-    );
   }
 
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
@@ -43,7 +25,7 @@ export async function loader({ request }) {
   // asset_folder organises files in Cloudinary's dynamic folder mode without placing the
   // customer's internal CUID in the public image URL. Cloudinary upload signatures are
   // valid for one hour from their timestamp.
-  const assetFolder = `naia-wardrobe/${customer.id}`;
+  const assetFolder = `naia-wardrobe/${naiaCustomer.id}`;
   const allowedFormats = "jpg,jpeg,png,webp";
 
   // Parameters must be sorted alphabetically for the Cloudinary signature.
