@@ -206,7 +206,7 @@ export default function BuyOrSkip() {
               <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "#7a6f6a" }}>OPTION 1</div>
               <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "22px", fontWeight: 900, fontStyle: "italic", color: "#221516" }}>Paste a product link</div>
               <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a", lineHeight: 1.6, margin: 0 }}>
-                From Zara, H&M, Farfetch, Net-A-Porter, and more
+                From selected retailers, where available.
               </p>
               <input
                 className="bs-input"
