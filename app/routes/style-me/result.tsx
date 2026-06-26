@@ -6,6 +6,7 @@ import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { prisma } from "~/lib/prisma.server";
 import { getSession, commitSession } from "~/lib/session.server";
 import { callClaude } from "~/lib/ai/claude.server";
+import { readPendingSave, writePendingSave, clearPendingSave } from "~/lib/pending-save.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -29,6 +30,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             desiredFeeling: null,
             occasion: null,
             suggestion: null,
+            pendingState: null as "needs_passport" | "ready_to_save" | null,
             error: "Not found",
           },
           { status: 404 },
@@ -48,6 +50,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             desiredFeeling: null,
             occasion: null,
             suggestion: null,
+            pendingState: null as "needs_passport" | "ready_to_save" | null,
             error: "Not found",
           },
           { status: 404 },
@@ -57,9 +60,54 @@ export async function loader({ request }: LoaderFunctionArgs) {
         isLoading: false,
         sessionId: session.id,
         mood: session.currentMood,
+        currentMood: session.currentMood,
         occasion: session.occasion,
         desiredFeeling: session.desiredFeeling,
         suggestion: session.suggestions[0] || null,
+        pendingState: null as "needs_passport" | "ready_to_save" | null,
+        error: null,
+      });
+    }
+
+    // Check pending-save cookie before the Quick Style cookie path that creates a new
+    // StylingSession. A valid pending look is shown directly without triggering a new generation.
+    const pendingResult = await readPendingSave(request);
+
+    if (pendingResult.status === "invalid_or_expired") {
+      // Expired or malformed — clear the stale cookie and continue to the normal flow.
+      return redirect("/style-me/result", {
+        headers: { "Set-Cookie": await clearPendingSave(request) },
+      });
+    }
+
+    if (pendingResult.status === "valid" && naiaCustomer) {
+      const pendingSuggestion = await prisma.outfitSuggestion.findUnique({
+        where: { id: pendingResult.sid },
+        include: { session: { include: { customer: true } }, items: true },
+      });
+      const isOwned = pendingSuggestion?.session?.customerId === naiaCustomer.id;
+      const isGuestClaimable =
+        pendingSuggestion?.session?.customer?.shopifyCustomerId === "guest";
+
+      if (!pendingSuggestion || (!isOwned && !isGuestClaimable)) {
+        // Missing suggestion or invalid ownership — clear cookie and restart the normal flow.
+        return redirect("/style-me/result", {
+          headers: { "Set-Cookie": await clearPendingSave(request) },
+        });
+      }
+
+      const pendingState: "needs_passport" | "ready_to_save" =
+        naiaCustomer.onboardingProfile?.completed ? "ready_to_save" : "needs_passport";
+
+      return data({
+        isLoading: false,
+        sessionId: pendingSuggestion.sessionId,
+        mood: pendingSuggestion.session.currentMood,
+        currentMood: pendingSuggestion.session.currentMood,
+        desiredFeeling: pendingSuggestion.session.desiredFeeling,
+        occasion: pendingSuggestion.session.occasion,
+        suggestion: pendingSuggestion,
+        pendingState,
         error: null,
       });
     }
@@ -97,12 +145,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
 
     return data(
-      { isLoading: true, sessionId: stylingSession.id, mood, currentMood: mood, desiredFeeling: feelings?.[0] || null, occasion, suggestion: null, error: null },
+      { isLoading: true, sessionId: stylingSession.id, mood, currentMood: mood, desiredFeeling: feelings?.[0] || null, occasion, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, error: null },
       { headers: { "Set-Cookie": await commitSession(cookieSession) } }
     );
   } catch (err: any) {
     console.error("Result loader error:", err);
-    return data({ isLoading: false, sessionId: null, mood: null, currentMood: null, desiredFeeling: null, occasion: null, suggestion: null, error: err?.message || "Something went wrong" });
+    return data({ isLoading: false, sessionId: null, mood: null, currentMood: null, desiredFeeling: null, occasion: null, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, error: err?.message || "Something went wrong" });
   }
 }
 
@@ -181,18 +229,143 @@ Create a complete outfit using 2-3 of these pieces. Return JSON with: outfitName
     }
 
     if (intent === "save") {
-      if (!naiaCustomer) return data({ error: "Must be logged in to save looks" }, { status: 401 });
+      // Case 1: Completed-Passport customer — immediate save (C3.0 path preserved).
+      if (naiaCustomer?.onboardingProfile?.completed) {
+        const suggestion = await prisma.outfitSuggestion.findUnique({
+          where: { id: suggestionId },
+          include: { session: true, items: true },
+        });
+        if (!suggestion || suggestion.session.customerId !== naiaCustomer.id) {
+          return data({ error: "Not found" }, { status: 404 });
+        }
+        await prisma.savedLook.create({
+          data: {
+            customerId: naiaCustomer.id,
+            name: suggestion.outfitName,
+            fromSuggestionId: suggestion.id,
+            items: {
+              create: suggestion.items.map((item) => ({
+                itemType: item.itemType,
+                closetItemId: item.closetItemId || null,
+                shopifyProductId: item.shopifyProductId || null,
+              })),
+            },
+          },
+        });
+        return data({ saved: true, error: null });
+      }
 
+      // Case 2: Authenticated, no completed Passport — write pending cookie.
+      if (naiaCustomer) {
+        const suggestion = await prisma.outfitSuggestion.findUnique({
+          where: { id: suggestionId },
+          include: { session: true },
+        });
+        if (!suggestion || suggestion.session.customerId !== naiaCustomer.id) {
+          return data({ error: "Not found" }, { status: 404 });
+        }
+        const pendingHeader = await writePendingSave(suggestionId);
+        return data(
+          { pending: true, next: "create_passport" },
+          { headers: { "Set-Cookie": pendingHeader } },
+        );
+      }
+
+      // Case 3: Guest — verify guest ownership, write pending cookie.
+      const guestCustomer = await prisma.customer.findUnique({
+        where: { shopifyCustomerId: "guest" },
+      });
+      if (!guestCustomer) return data({ error: "Not found" }, { status: 404 });
+      const guestSuggestion = await prisma.outfitSuggestion.findUnique({
+        where: { id: suggestionId },
+        include: { session: true },
+      });
+      if (!guestSuggestion || guestSuggestion.session.customerId !== guestCustomer.id) {
+        return data({ error: "Not found" }, { status: 404 });
+      }
+      const pendingHeader = await writePendingSave(suggestionId);
+      return data(
+        { pending: true, next: "sign_in" },
+        { headers: { "Set-Cookie": pendingHeader } },
+      );
+
+      if (intent === "review") {
+        const overallReaction = parseInt(formData.get("overallReaction") as string);
+        const feltLikeMe = formData.get("feltLikeMe") === "true";
+        const createdFeeling = formData.get("createdFeeling") === "true";
+        const wouldWear = formData.get("wouldWear") === "true";
+        const physicalComfort = parseInt(formData.get("physicalComfort") as string);
+        const whatWorked = (formData.get("whatWorked") as string || "").split(",").filter(Boolean);
+        const whatDidnt = (formData.get("whatDidnt") as string || "").split(",").filter(Boolean);
+
+        const session = await prisma.stylingSession.findUnique({
+          where: { id: sessionId },
+          include: { suggestions: true }
+        });
+
+        if (!session || !session.suggestions[0]) {
+          return data({ error: "Session not found" }, { status: 404 });
+        }
+
+        await prisma.postOutfitReview.create({
+          data: {
+            suggestionId: session.suggestions[0].id,
+            overallReaction,
+            feltLikeMe,
+            createdTheFeeling: createdFeeling,
+            wouldWearThis: wouldWear,
+            physicalComfort,
+            whatWorked,
+            whatDidnt,
+          }
+        });
+
+        return data({ reviewSaved: true, error: null });
+      }
+
+    }
+
+    // Read suggestion ID from pending cookie only — never from form data.
+    if (intent === "save-pending") {
+      if (!naiaCustomer) return data({ error: "Must be logged in" }, { status: 401 });
       if (!naiaCustomer.onboardingProfile?.completed) {
-        return data({ error: "passport_required", code: "passport_required" }, { status: 403 });
+        return data({ error: "passport_required" }, { status: 403 });
+      }
+      const pendingRead = await readPendingSave(request);
+      if (pendingRead.status === "invalid_or_expired") {
+        const clearHeader = await clearPendingSave(request);
+        return data({ error: "No pending save" }, { status: 400, headers: { "Set-Cookie": clearHeader } });
+      }
+      if (pendingRead.status === "none") {
+        return data({ error: "No pending save" }, { status: 400 });
+      }
+      const { sid } = pendingRead;
+
+      // Idempotent: already saved this look for this customer.
+      const existing = await prisma.savedLook.findFirst({
+        where: { customerId: naiaCustomer.id, fromSuggestionId: sid },
+      });
+      if (existing) {
+        const clearHeader = await clearPendingSave(request);
+        return data(
+          { saved: true, alreadySaved: true },
+          { headers: { "Set-Cookie": clearHeader } },
+        );
       }
 
       const suggestion = await prisma.outfitSuggestion.findUnique({
-        where: { id: suggestionId },
-        include: { session: true, items: true },
+        where: { id: sid },
+        include: { session: { include: { customer: true } }, items: true },
       });
-      if (!suggestion || suggestion.session.customerId !== naiaCustomer.id) {
-        return data({ error: "Not found" }, { status: 404 });
+      const isOwned = suggestion?.session?.customerId === naiaCustomer.id;
+      const isGuestClaimable =
+        suggestion?.session?.customer?.shopifyCustomerId === "guest";
+      if (!suggestion || (!isOwned && !isGuestClaimable)) {
+        const clearHeader = await clearPendingSave(request);
+        return data(
+          { error: "Not found" },
+          { status: 404, headers: { "Set-Cookie": clearHeader } },
+        );
       }
 
       await prisma.savedLook.create({
@@ -210,42 +383,13 @@ Create a complete outfit using 2-3 of these pieces. Return JSON with: outfitName
         },
       });
 
-      return data({ saved: true, error: null });
-
-    if (intent === "review") {
-      const overallReaction = parseInt(formData.get("overallReaction") as string);
-      const feltLikeMe = formData.get("feltLikeMe") === "true";
-      const createdFeeling = formData.get("createdFeeling") === "true";
-      const wouldWear = formData.get("wouldWear") === "true";
-      const physicalComfort = parseInt(formData.get("physicalComfort") as string);
-      const whatWorked = (formData.get("whatWorked") as string || "").split(",").filter(Boolean);
-      const whatDidnt = (formData.get("whatDidnt") as string || "").split(",").filter(Boolean);
-
-      const session = await prisma.stylingSession.findUnique({
-        where: { id: sessionId },
-        include: { suggestions: true }
-      });
-
-      if (!session || !session.suggestions[0]) {
-        return data({ error: "Session not found" }, { status: 404 });
-      }
-
-      await prisma.postOutfitReview.create({
-        data: {
-          suggestionId: session.suggestions[0].id,
-          overallReaction,
-          feltLikeMe,
-          createdTheFeeling: createdFeeling,
-          wouldWearThis: wouldWear,
-          physicalComfort,
-          whatWorked,
-          whatDidnt,
-        }
-      });
-
-      return data({ reviewSaved: true, error: null });
+      const clearHeader = await clearPendingSave(request);
+      return data({ saved: true }, { headers: { "Set-Cookie": clearHeader } });
     }
 
+    if (intent === "clear-pending") {
+      const clearHeader = await clearPendingSave(request);
+      return data({ cleared: true }, { headers: { "Set-Cookie": clearHeader } });
     }
 
     return data({ error: "Invalid intent" }, { status: 400 });
@@ -259,10 +403,11 @@ export function shouldRevalidate({
   formData,
   defaultShouldRevalidate,
 }: ShouldRevalidateFunctionArgs) {
-  // A save POST must not re-run the loader: the cookie-path loader creates a new
-  // StylingSession on every invocation and returns isLoading:true, which would
-  // put the result page back into the loading/generate state.
-  if (formData?.get("intent") === "save") return false;
+  // save, save-pending, and clear-pending must not re-run the side-effecting loader:
+  // the cookie-path loader creates a new StylingSession on every invocation and returns
+  // isLoading:true, which would put the result page back into the loading/generate state.
+  const intent = formData?.get("intent");
+  if (intent === "save" || intent === "save-pending" || intent === "clear-pending") return false;
   return defaultShouldRevalidate;
 }
 
@@ -271,9 +416,10 @@ const loadingMessages = ["Reading the runways...", "Consulting your mood...", "M
 export default function StyleMeResult() {
   const loaderData = useLoaderData<typeof loader>();
   const generateFetcher = useFetcher<{ suggestion?: any; error?: string }>();
-  const saveFetcher = useFetcher<{ saved?: boolean; error?: string; code?: string }>();
+  const saveFetcher = useFetcher<{ saved?: boolean; error?: string; code?: string; pending?: boolean; next?: string; cleared?: boolean; alreadySaved?: boolean }>();
   const [msgIndex, setMsgIndex] = useState(0);
   const [isSaved, setIsSaved] = useState(false);
+  const [pendingDismissed, setPendingDismissed] = useState(false);
   const [reviewSaved, setReviewSaved] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const reviewFetcher = useFetcher();
@@ -295,7 +441,7 @@ export default function StyleMeResult() {
       alert("Please answer all required questions");
       return;
     }
-    
+
     const formData = new FormData();
     formData.append("intent", "review");
     formData.append("sessionId", loaderData.sessionId || "");
@@ -306,21 +452,12 @@ export default function StyleMeResult() {
     formData.append("physicalComfort", reviewData.physicalComfort.toString());
     formData.append("whatWorked", reviewData.whatWorked.join(","));
     formData.append("whatDidnt", reviewData.whatDidnt.join(","));
-    
+
     reviewFetcher.submit(formData, { method: "post" });
   setShowReviewModal(false);
 setReviewSaved(true);
 setTimeout(() => setReviewSaved(false), 3000);
   };
-
-
-
-
-
-
-
-
-
 
   const toggleWorkedTag = (tag: string) => {
     setReviewData({
@@ -340,6 +477,9 @@ setTimeout(() => setReviewSaved(false), 3000);
   const suggestion = generateFetcher.data?.suggestion || loaderData.suggestion;
   const error = generateFetcher.data?.error || loaderData.error;
 
+  // Whether to show the pending-save banner (active pending state, not dismissed, not yet saved).
+  const showPendingBanner = !!loaderData.pendingState && !pendingDismissed && !isSaved;
+
   useEffect(() => {
     if (loaderData.isLoading && loaderData.sessionId && generateFetcher.state === "idle" && !generateFetcher.data) {
       generateFetcher.submit({ intent: "generate", sessionId: loaderData.sessionId }, { method: "post" });
@@ -353,7 +493,16 @@ setTimeout(() => setReviewSaved(false), 3000);
   }, [isLoading]);
 
   useEffect(() => {
-    if (saveFetcher.data?.saved) setIsSaved(true);
+    if (!saveFetcher.data) return;
+    if (saveFetcher.data.saved) setIsSaved(true);
+    if (saveFetcher.data.cleared) setPendingDismissed(true);
+    if (saveFetcher.data.pending) {
+      if (saveFetcher.data.next === "sign_in") {
+        window.location.href = "/auth/shopify/login?return_to=/style-me/result";
+      } else if (saveFetcher.data.next === "create_passport") {
+        window.location.href = "/onboarding/step/1";
+      }
+    }
   }, [saveFetcher.data]);
 
   if (isLoading) {
@@ -393,8 +542,56 @@ setTimeout(() => setReviewSaved(false), 3000);
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 40px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
         <Link to="/quick-style" style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", textDecoration: "none" }}>Back</Link>
         <div style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "22px", fontStyle: "italic", letterSpacing: "3px", color: "#221516" }}>nAia</div>
-        <button onClick={() => saveFetcher.submit({ intent: "save", suggestionId: suggestion.id }, { method: "post" })} disabled={isSaved} style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: isSaved ? "#8b2035" : "#7a6f6a", background: "none", border: "none", cursor: "pointer" }}>{isSaved ? "Saved" : "Save"}</button>
+        {isSaved ? (
+          <span style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035" }}>Saved</span>
+        ) : showPendingBanner ? (
+          <span style={{ width: "42px" }} />
+        ) : (
+          <button onClick={() => saveFetcher.submit({ intent: "save", suggestionId: suggestion.id }, { method: "post" })} style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", background: "none", border: "none", cursor: "pointer" }}>Save</button>
+        )}
       </div>
+
+      {showPendingBanner && loaderData.pendingState === "needs_passport" && (
+        <div style={{ background: "rgba(139,32,53,0.04)", borderBottom: "1px solid rgba(139,32,53,0.1)", padding: "16px 40px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "24px" }}>
+          <p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "17px", fontStyle: "italic", color: "#221516", margin: 0 }}>
+            To save this look, create your nAia Passport. Your look will be waiting here.
+          </p>
+          <div style={{ display: "flex", gap: "12px", alignItems: "center", flexShrink: 0 }}>
+            <a href="/onboarding/step/1" style={{ padding: "12px 24px", background: "#221516", color: "#f4f4f1", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", textDecoration: "none", display: "inline-block" }}>
+              CREATE YOUR PASSPORT →
+            </a>
+            <button
+              onClick={() => saveFetcher.submit({ intent: "clear-pending" }, { method: "post" })}
+              style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", background: "none", border: "none", cursor: "pointer" }}
+            >
+              NOT NOW
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showPendingBanner && loaderData.pendingState === "ready_to_save" && (
+        <div style={{ background: "rgba(139,32,53,0.04)", borderBottom: "1px solid rgba(139,32,53,0.1)", padding: "16px 40px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "24px" }}>
+          <p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "17px", fontStyle: "italic", color: "#221516", margin: 0 }}>
+            Your look is ready to save to your nAia Passport.
+          </p>
+          <div style={{ display: "flex", gap: "12px", alignItems: "center", flexShrink: 0 }}>
+            <button
+              onClick={() => saveFetcher.submit({ intent: "save-pending" }, { method: "post" })}
+              style={{ padding: "12px 24px", background: "#8b2035", color: "#f4f4f1", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", border: "none", cursor: "pointer" }}
+            >
+              SAVE TO MY PASSPORT
+            </button>
+            <button
+              onClick={() => saveFetcher.submit({ intent: "clear-pending" }, { method: "post" })}
+              style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", background: "none", border: "none", cursor: "pointer" }}
+            >
+              NOT NOW
+            </button>
+          </div>
+        </div>
+      )}
+
       <main style={{ maxWidth: "800px", margin: "0 auto", padding: "48px 40px 80px" }}>
         <div style={{ marginBottom: "40px" }}>
           <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "4px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>Your Styling</div>

@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
-import { useLoaderData } from "react-router";
+import { useLoaderData, data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import type { OnboardingAnswers } from "~/lib/onboarding/quiz-data";
 import { quizQuestions } from "~/lib/onboarding/quiz-data";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import { prisma } from "~/lib/prisma.server";
+import { readPendingSave, clearPendingSave } from "~/lib/pending-save.server";
 
 // Option label, colour-hex, and valid-ID lookups built from quiz data at module load time
 const OPTION_LABELS: Record<string, Record<string, string>> = {};
@@ -167,11 +169,37 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (op.styleSupport.length)        existingAnswers["style-support"]          = op.styleSupport;
     if (op.finalNotes)                 existingAnswers["final-notes"]            = op.finalNotes;
   }
-  return {
+  const pendingSave = await readPendingSave(request);
+
+  let hasPendingLook = false;
+  let pendingClearHeader: string | undefined;
+
+  if (pendingSave.status === "invalid_or_expired") {
+    pendingClearHeader = await clearPendingSave(request);
+  } else if (pendingSave.status === "valid") {
+    const pendingSuggestion = await prisma.outfitSuggestion.findUnique({
+      where: { id: pendingSave.sid },
+      include: { session: { include: { customer: true } } },
+    });
+    const isOwned = pendingSuggestion?.session?.customerId === customer.id;
+    const isGuestClaimable =
+      pendingSuggestion?.session?.customer?.shopifyCustomerId === "guest";
+    if (!pendingSuggestion || (!isOwned && !isGuestClaimable)) {
+      pendingClearHeader = await clearPendingSave(request);
+    } else {
+      hasPendingLook = true;
+    }
+  }
+
+  const payload = {
     existingAnswers,
     draftScope:       customer.id,
     profileUpdatedAt: op?.updatedAt?.toISOString() ?? null,
+    hasPendingLook,
   };
+  return pendingClearHeader
+    ? data(payload, { headers: { "Set-Cookie": pendingClearHeader } })
+    : payload;
 }
 
 const css = `
@@ -210,7 +238,7 @@ const css = `
 type SaveStatus = "saving" | "saved" | "error" | "conflict";
 
 export default function OnboardingComplete() {
-  const { existingAnswers, draftScope, profileUpdatedAt } = useLoaderData<typeof loader>();
+  const { existingAnswers, draftScope, profileUpdatedAt, hasPendingLook } = useLoaderData<typeof loader>();
 
   const storageKey = `naia_onboarding_v2:${draftScope}`;
 
@@ -520,6 +548,16 @@ export default function OnboardingComplete() {
           </div>
           <span className="cp-arrow">→</span>
         </a>
+
+        {saveStatus === "saved" && hasPendingLook && (
+          <a href="/style-me/result" className="cp-action">
+            <div>
+              <div className="cp-action-title">YOUR LOOK IS READY TO SAVE</div>
+              <div className="cp-action-sub">Return to your Style Me result to save it to your Passport</div>
+            </div>
+            <span className="cp-arrow">→</span>
+          </a>
+        )}
       </main>
     </div>
   );
