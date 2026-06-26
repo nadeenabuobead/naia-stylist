@@ -551,6 +551,20 @@ setTimeout(() => setReviewSaved(false), 3000);
         )}
       </div>
 
+      {isSaved && (
+        <div style={{ background: "rgba(139,32,53,0.06)", borderBottom: "1px solid rgba(139,32,53,0.12)", padding: "16px 40px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "24px" }}>
+          <p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "17px", fontStyle: "italic", color: "#221516", margin: 0 }}>
+            Saved to your nAia Passport.
+          </p>
+          <Link
+            to="/"
+            style={{ padding: "12px 24px", background: "#8b2035", color: "#f4f4f1", fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", textDecoration: "none", display: "inline-block", flexShrink: 0 }}
+          >
+            VIEW MY DASHBOARD →
+          </Link>
+        </div>
+      )}
+
       {showPendingBanner && loaderData.pendingState === "needs_passport" && (
         <div style={{ background: "rgba(139,32,53,0.04)", borderBottom: "1px solid rgba(139,32,53,0.1)", padding: "16px 40px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "24px" }}>
           <p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "17px", fontStyle: "italic", color: "#221516", margin: 0 }}>
