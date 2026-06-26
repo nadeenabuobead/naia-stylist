@@ -41,6 +41,7 @@ export default function BuyOrSkip() {
   const [itemLink, setItemLink] = React.useState("");
   const [uploadError, setUploadError] = React.useState("");
   const [analyzeError, setAnalyzeError] = React.useState("");
+  const [closetItemCount, setClosetItemCount] = React.useState(0);
 
   const CATEGORIES = ["Top", "Bottom", "Dress", "Outerwear", "Shoes", "Bag", "Accessory", "Jewelry"];
   const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver"];
@@ -101,6 +102,7 @@ export default function BuyOrSkip() {
       const data = await response.json();
       if (data.success) {
         const a = data.analysis;
+        setClosetItemCount(typeof data.closetItemCount === "number" ? data.closetItemCount : 0);
         setResult({
           verdict: a.verdict,
           confidence: a.confidence,
@@ -124,7 +126,7 @@ export default function BuyOrSkip() {
   };
 
   const reset = () => {
-    setImageUrl(""); setResult(null); setCategory(""); setColor([]); setBrand(""); setItemLink(""); setUploadError(""); setAnalyzeError(""); setStep("upload");
+    setImageUrl(""); setResult(null); setCategory(""); setColor([]); setBrand(""); setItemLink(""); setUploadError(""); setAnalyzeError(""); setClosetItemCount(0); setStep("upload");
   };
 
   const labelStyle: React.CSSProperties = { fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px", display: "block" };
@@ -254,6 +256,10 @@ export default function BuyOrSkip() {
                         {p.reason && <span style={{ color: "#7a6f6a" }}> — {p.reason}</span>}
                       </div>
                     ))}
+                  </div>
+                ) : closetItemCount > 0 ? (
+                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>
+                    You already have pieces in your Closet, but nAia could not find a clear pairing for this item yet.
                   </div>
                 ) : (
                   <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>

@@ -162,6 +162,10 @@ ${fallbackProducts.map(p => `- ${p.title}`).join("\n")}
 
 STRICT STYLING RULES:
 1. closetPairings: ONLY use items from the customer's real closet list above. If closet is empty, return []
+   - If a closet item is category-compatible with the uploaded piece, include it as a pairing even if the outfit is not complete
+   - Do not return an empty list merely because the customer does not own a full outfit
+   - Never invent closet items; never suggest items not in the list above
+   - Only leave closetPairings empty if a real listed item is genuinely incompatible
 2. naiaMatch: ONLY pick from the nAia collection list above — return exact title only (no URL)
 3. Do not invent, hallucinate, or suggest items not in these lists
 
@@ -202,17 +206,32 @@ Respond ONLY with valid JSON, no markdown:
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     const analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(text);
 
-    // Normalize closetPairings: coerce strings/objects to {name, reason}, filter to real closet items, deduplicate
-    const validClosetNames = new Set(closetItems.map(i => i.name));
+    // Normalize closetPairings: case-insensitive trimmed map → canonical stored name; accept name/item/title fields
+    const closetNameMap = new Map(
+      closetItems
+        .filter(i => i.name != null && i.name.trim() !== "")
+        .map(i => [i.name.toLowerCase().trim(), i.name])
+    );
     const seen = new Set();
     const rawPairings = Array.isArray(analysis.closetPairings) ? analysis.closetPairings : [];
     analysis.closetPairings = rawPairings
       .map(p => {
-        if (typeof p === "string") return { name: p, reason: null };
-        if (p && typeof p.name === "string") return { name: p.name, reason: p.reason || null };
-        return null;
+        let rawName, reason;
+        if (typeof p === "string") {
+          rawName = p;
+          reason = null;
+        } else if (p && typeof p === "object") {
+          rawName = p.name ?? p.item ?? p.title ?? null;
+          reason = p.reason || null;
+        } else {
+          return null;
+        }
+        if (typeof rawName !== "string") return null;
+        const canonical = closetNameMap.get(rawName.toLowerCase().trim());
+        if (!canonical) return null;
+        return { name: canonical, reason };
       })
-      .filter(p => p !== null && validClosetNames.has(p.name) && !seen.has(p.name) && seen.add(p.name));
+      .filter(p => p !== null && !seen.has(p.name) && seen.add(p.name));
 
     // Validate naiaMatch title against eligible catalog; overwrite URL from server-side data
     const matchedProduct = fallbackProducts.find(p => p.title === analysis.naiaMatch?.title);
@@ -224,7 +243,7 @@ Respond ONLY with valid JSON, no markdown:
       analysis.naiaMatch = { title: fallback.title, url: fallback.url, reason: null };
     }
 
-    return json({ success: true, analysis });
+    return json({ success: true, analysis, closetItemCount: closetItems.length });
 
   } catch (error) {
     console.error("Analysis error:", error);
