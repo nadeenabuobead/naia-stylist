@@ -40,6 +40,18 @@ const COMPLEMENTARY_CATEGORIES = {
   "Jewelry":   ["Top", "Bottom", "Dress", "Outerwear"],
 };
 
+// Maps uploaded-item category (Buy or Skip values) to compatible Closet enum values
+const CLOSET_COMPATIBLE_CATEGORIES = {
+  "Top":       ["BOTTOMS", "OUTERWEAR"],
+  "Bottom":    ["TOPS", "OUTERWEAR"],
+  "Dress":     ["OUTERWEAR"],
+  "Outerwear": ["TOPS", "BOTTOMS", "DRESSES"],
+  "Shoes":     ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"],
+  "Bag":       ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"],
+  "Accessory": ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"],
+  "Jewelry":   ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"],
+};
+
 function hashForIndex(str) {
   let h = 0;
   for (let i = 0; i < str.length; i++) {
@@ -124,6 +136,9 @@ async function analyzeItem(request) {
     const eligibleProducts = NAIA_PRODUCTS.filter(p => allowed.includes(p.category));
     const fallbackProducts = eligibleProducts.length > 0 ? eligibleProducts : NAIA_PRODUCTS;
 
+    const compatibleClosetCategories = CLOSET_COMPATIBLE_CATEGORIES[normalizedCategory] || ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"];
+    const eligibleClosetItems = closetItems.filter(i => compatibleClosetCategories.includes(i.category));
+
     const analysisResponse = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -154,18 +169,17 @@ ${styleProfile ? `CUSTOMER STYLE PROFILE:
 - Lifestyle: ${styleProfile.dressesFor?.join(", ")}
 - Desired feeling: ${styleProfile.desiredFeeling}` : "No style profile — give general analysis."}
 
-${closetItems.length > 0 ? `CUSTOMER REAL CLOSET (ONLY suggest pairings from this exact list, do not invent items):
-${closetItems.map(i => `- ${i.name} (${i.category}${i.primaryColor ? ", "+i.primaryColor : ""})`).join("\n")}` : "CLOSET: Empty — do NOT suggest any closet pairings. Leave closetPairings as an empty array."}
+${eligibleClosetItems.length > 0 ? `COMPATIBLE CLOSET CANDIDATES (pairings must come ONLY from this list — never invent items):
+${eligibleClosetItems.map(i => `- ${i.name} (${i.category}${i.primaryColor ? ", "+i.primaryColor : ""})`).join("\n")}` : "NO COMPATIBLE CLOSET ITEMS — leave closetPairings as an empty array."}
 
 NAIA COLLECTION (you MUST pick naiaMatch ONLY from this list, use exact title):
 ${fallbackProducts.map(p => `- ${p.title}`).join("\n")}
 
 STRICT STYLING RULES:
-1. closetPairings: ONLY use items from the customer's real closet list above. If closet is empty, return []
-   - If a closet item is category-compatible with the uploaded piece, include it as a pairing even if the outfit is not complete
-   - Do not return an empty list merely because the customer does not own a full outfit
-   - Never invent closet items; never suggest items not in the list above
-   - Only leave closetPairings empty if a real listed item is genuinely incompatible
+1. closetPairings: ONLY use items from the compatible Closet candidates list above
+   - When candidates are listed, select at least one unless it is genuinely impractical to wear together
+   - Never invent Closet items; only use items explicitly listed above
+   - If no candidates are listed, return []
 2. naiaMatch: ONLY pick from the nAia collection list above — return exact title only (no URL)
 3. Do not invent, hallucinate, or suggest items not in these lists
 
@@ -206,9 +220,9 @@ Respond ONLY with valid JSON, no markdown:
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     const analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(text);
 
-    // Harden closetPairings: each candidate field individually validated as primitive non-empty string
-    const closetNameMap = new Map(
-      closetItems
+    // Harden closetPairings: validate against eligible closet items only; all fields individually type-checked
+    const eligibleClosetNameMap = new Map(
+      eligibleClosetItems
         .filter(i => i.name != null && i.name.trim() !== "")
         .map(i => [i.name.toLowerCase().trim(), i.name])
     );
@@ -230,11 +244,24 @@ Respond ONLY with valid JSON, no markdown:
           return null;
         }
         if (typeof rawName !== "string" || rawName.trim() === "") return null;
-        const canonical = closetNameMap.get(rawName.toLowerCase().trim());
+        const canonical = eligibleClosetNameMap.get(rawName.toLowerCase().trim());
         if (!canonical) return null;
         return { name: canonical, reason: rawReason };
       })
       .filter(p => p !== null && !seen.has(p.name) && seen.add(p.name));
+
+    // Deterministic fallback: when eligible closet items exist but model returned no valid pairing
+    if (analysis.closetPairings.length === 0 && eligibleClosetItems.length > 0) {
+      const namedEligible = eligibleClosetItems.filter(i => i.name != null && i.name.trim() !== "");
+      if (namedEligible.length > 0) {
+        const idx = hashForIndex((imageUrl || "") + normalizedCategory) % namedEligible.length;
+        const fallbackItem = namedEligible[idx];
+        analysis.closetPairings = [{
+          name: fallbackItem.name,
+          reason: "A complementary piece from your Closet to build this look around."
+        }];
+      }
+    }
 
     // Validate naiaMatch title against eligible catalog; overwrite URL from server-side data
     const matchedProduct = fallbackProducts.find(p => p.title === analysis.naiaMatch?.title);
@@ -246,7 +273,7 @@ Respond ONLY with valid JSON, no markdown:
       analysis.naiaMatch = { title: fallback.title, url: fallback.url, reason: null };
     }
 
-    return json({ success: true, analysis, closetItemCount: closetItems.length });
+    return json({ success: true, analysis, closetItemCount: closetItems.length, eligibleClosetItemCount: eligibleClosetItems.length });
 
   } catch (error) {
     console.error("Analysis error:", error);
