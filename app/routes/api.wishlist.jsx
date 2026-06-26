@@ -60,46 +60,153 @@ function hashForIndex(str) {
   return h;
 }
 
-async function scrapeProductDetails(url) {
+const SUPPORTED_PRODUCT_LINK_DOMAINS = [
+  "zara.com",
+  "hm.com",
+  "ounass.ae",
+  "farfetch.com",
+  "net-a-porter.com",
+  "mytheresa.com",
+  "ssense.com",
+  "shopbop.com",
+  "nordstrom.com",
+];
+
+const MAX_BODY_BYTES = 500 * 1024;
+
+function validateProductUrl(urlString) {
+  let parsed;
   try {
-    const res = await fetch(url, {
+    parsed = new URL(urlString);
+  } catch {
+    return "invalid-url";
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return "invalid-protocol";
+  }
+  const { hostname } = parsed;
+  if (
+    hostname === "localhost" ||
+    hostname === "0.0.0.0" ||
+    /^127\./.test(hostname) ||
+    /^10\./.test(hostname) ||
+    /^192\.168\./.test(hostname) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
+    /^169\.254\./.test(hostname) ||
+    hostname === "::1" ||
+    hostname === "[::1]"
+  ) {
+    return "blocked-host";
+  }
+  const allowed = SUPPORTED_PRODUCT_LINK_DOMAINS.some(
+    d => hostname === d || hostname.endsWith("." + d)
+  );
+  if (!allowed) return "unsupported-domain";
+  return null;
+}
+
+async function fetchHtmlWithRedirectCheck(urlString, redirectsLeft = 3) {
+  const validationError = validateProductUrl(urlString);
+  if (validationError) return { error: validationError, html: null };
+
+  let res;
+  try {
+    res = await fetch(urlString, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
-      signal: AbortSignal.timeout(8000)
+      redirect: "manual",
+      signal: AbortSignal.timeout(8000),
     });
+  } catch {
+    return { error: "fetch-failed", html: null };
+  }
 
-    if (!res.ok) return null;
+  if (res.status >= 300 && res.status < 400) {
+    if (redirectsLeft <= 0) return { error: "too-many-redirects", html: null };
+    const location = res.headers.get("location");
+    if (!location) return { error: "bad-redirect", html: null };
+    let nextUrl;
+    try {
+      nextUrl = new URL(location, urlString).toString();
+    } catch {
+      return { error: "bad-redirect", html: null };
+    }
+    const nextError = validateProductUrl(nextUrl);
+    if (nextError) return { error: "blocked-redirect", html: null };
+    return fetchHtmlWithRedirectCheck(nextUrl, redirectsLeft - 1);
+  }
 
-    const html = await res.text();
+  if (!res.ok) return { error: "http-error", html: null };
 
-    // Extract title
-    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i) ||
-                       html.match(/og:title[^>]*content="([^"]+)"/i);
-    const title = titleMatch ? titleMatch[1].replace(/\s+/g, " ").trim() : null;
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("text/html")) return { error: "not-html", html: null };
 
-    // Extract description
-    const descMatch = html.match(/og:description[^>]*content="([^"]+)"/i) ||
-                      html.match(/meta[^>]*name="description"[^>]*content="([^"]+)"/i);
-    const description = descMatch ? descMatch[1].replace(/\s+/g, " ").trim().slice(0, 300) : null;
+  const contentLength = res.headers.get("content-length");
+  if (contentLength && parseInt(contentLength, 10) > MAX_BODY_BYTES) {
+    return { error: "too-large", html: null };
+  }
 
-    // Extract price
-    const priceMatch = html.match(/["'](\$|€|£|AED)?\s*\d+[.,]\d{2}["']/) ||
-                       html.match(/price["'][^>]*>[^<]*?(\$|€|£|AED)?\s*(\d+[.,]\d{2})/i);
-    const price = priceMatch ? priceMatch[0].replace(/["\']/g, "").trim() : null;
+  try {
+    const reader = res.body.getReader();
+    const chunks = [];
+    let totalBytes = 0;
 
-    // Extract brand from og:site_name or domain
-    const brandMatch = html.match(/og:site_name[^>]*content="([^"]+)"/i);
-    const scrapedBrand = brandMatch ? brandMatch[1].trim() : new URL(url).hostname.replace("www.", "").split(".")[0];
+    let reading = true;
+    while (reading) {
+      const { done, value } = await reader.read();
+      if (done) {
+        reading = false;
+      } else if (value) {
+        if (totalBytes + value.byteLength > MAX_BODY_BYTES) {
+          await reader.cancel().catch(() => {});
+          return { error: "too-large", html: null };
+        }
+        chunks.push(value);
+        totalBytes += value.byteLength;
+      }
+    }
 
-    // Extract product image
-    const imgMatch = html.match(/og:image[^>]*content="([^"]+)"/i);
-    const productImage = imgMatch ? imgMatch[1] : null;
+    const totalLength = chunks.reduce((sum, c) => sum + c.byteLength, 0);
+    const merged = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return { error: null, html: new TextDecoder().decode(merged) };
+  } catch {
+    return { error: "read-failed", html: null };
+  }
+}
 
-    return { title, description, price, brand: scrapedBrand, productImage };
-  } catch (err) {
-    console.log("Scrape failed:", err.message);
+async function scrapeProductDetails(urlString) {
+  const { error, html } = await fetchHtmlWithRedirectCheck(urlString);
+  if (error) return { scrapeError: error };
+  if (!html) return null;
+
+  try {
+    const ogTitleMeta = html.match(/<meta[^>]+og:title[^>]+>/i)?.[0];
+    const titleFromOg = ogTitleMeta
+      ? (ogTitleMeta.match(/content="([^"]+)"/i)?.[1] ?? ogTitleMeta.match(/content='([^']+)'/i)?.[1] ?? null)
+      : null;
+    const titleFromTag = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ?? null;
+    const title = (titleFromOg ?? titleFromTag)?.replace(/\s+/g, " ").trim() ?? null;
+
+    const ogSiteNameMeta = html.match(/<meta[^>]+og:site_name[^>]+>/i)?.[0];
+    const brandFromOg = ogSiteNameMeta
+      ? (ogSiteNameMeta.match(/content="([^"]+)"/i)?.[1] ?? ogSiteNameMeta.match(/content='([^']+)'/i)?.[1] ?? null)
+      : null;
+    const scrapedBrand = brandFromOg ? brandFromOg.trim() : new URL(urlString).hostname.replace("www.", "").split(".")[0];
+
+    const ogImgMeta = html.match(/<meta[^>]+og:image[^>]+>/i)?.[0];
+    const productImage = ogImgMeta
+      ? (ogImgMeta.match(/content="([^"]+)"/i)?.[1] ?? ogImgMeta.match(/content='([^']+)'/i)?.[1] ?? null)
+      : null;
+
+    return { title, brand: scrapedBrand, productImage };
+  } catch {
     return null;
   }
 }
@@ -311,21 +418,50 @@ export async function action({ request }) {
     const naiaCustomer = await getCurrentNaiaCustomer(request);
     if (!naiaCustomer) {
       return Response.json(
-        { error: "Not authenticated" },
+        { imageUrl: null, title: null, brand: null, error: "not-authenticated" },
         { status: 401, headers: CORS }
       );
     }
+    let productUrl;
     try {
-      const { url: productUrl } = await request.json();
-      const details = await scrapeProductDetails(productUrl);
-      return Response.json({ 
-        imageUrl: details?.productImage || null,
-        brand: details?.brand || null,
-        title: details?.title || null
-      });
-    } catch (e) {
-      return Response.json({ imageUrl: null });
+      const body = await request.json();
+      productUrl = typeof body.url === "string" ? body.url.trim() : null;
+    } catch {
+      return Response.json(
+        { imageUrl: null, title: null, brand: null, error: "invalid-request" },
+        { status: 400, headers: CORS }
+      );
     }
+    if (!productUrl) {
+      return Response.json(
+        { imageUrl: null, title: null, brand: null, error: "url-required" },
+        { status: 400, headers: CORS }
+      );
+    }
+    const urlError = validateProductUrl(productUrl);
+    if (urlError) {
+      return Response.json(
+        { imageUrl: null, title: null, brand: null, error: "unsupported" },
+        { headers: CORS }
+      );
+    }
+    const details = await scrapeProductDetails(productUrl);
+    if (details?.scrapeError) {
+      return Response.json(
+        { imageUrl: null, title: null, brand: null, error: details.scrapeError },
+        { headers: CORS }
+      );
+    }
+    if (!details?.productImage) {
+      return Response.json(
+        { imageUrl: null, title: null, brand: null, error: "no-image" },
+        { headers: CORS }
+      );
+    }
+    return Response.json(
+      { imageUrl: details.productImage, title: details.title || null, brand: details.brand || null },
+      { headers: CORS }
+    );
   }
 
   // original action below

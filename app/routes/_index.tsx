@@ -338,6 +338,7 @@ function BuySkipWidget() {
   const [color, setColor] = React.useState([]);
   const [brand, setBrand] = React.useState("");
   const [itemLink, setItemLink] = React.useState("");
+  const [linkError, setLinkError] = React.useState("");
 
   const CATEGORIES = ["Top", "Bottom", "Dress", "Outerwear", "Shoes", "Bag", "Accessory", "Jewelry"];
   const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver"];
@@ -362,8 +363,8 @@ function BuySkipWidget() {
   const handleLinkSubmit = async () => {
     if (!itemLink) return;
     setUploading(true);
+    setLinkError("");
     try {
-      // Ask our server to scrape the image from the link
       const res = await fetch("/api/wishlist?action=scrape-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -375,13 +376,11 @@ function BuySkipWidget() {
         if (data.brand) setBrand(data.brand);
         setStep("tag");
       } else {
-        // No image found — go to tag step anyway, AI will use link details
-        setImageUrl("https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400");
-        setStep("tag");
+        setLinkError("We couldn't load this product automatically. Upload a screenshot or photo instead, and nAia can still analyse it.");
       }
     } catch (err) {
       console.error("Link scrape failed:", err);
-      setStep("tag");
+      setLinkError("We couldn't load this product automatically. Upload a screenshot or photo instead, and nAia can still analyse it.");
     } finally {
       setUploading(false);
     }
@@ -425,6 +424,7 @@ function BuySkipWidget() {
 
   const reset = () => {
     setImageUrl(""); setResult(null); setCategory(""); setColor([]); setBrand(""); setItemLink("");
+    setLinkError("");
     setStep("upload");
   };
 
@@ -454,6 +454,11 @@ function BuySkipWidget() {
       <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#7a6f6a", marginTop: "16px" }}>
         Upload a photo of the item you're thinking of buying
       </p>
+      {linkError && (
+        <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", color: "#8b2035", marginTop: "12px", lineHeight: 1.6 }}>
+          {linkError}
+        </p>
+      )}
     </div>
   );
 

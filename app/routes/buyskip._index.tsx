@@ -43,6 +43,10 @@ export default function BuyOrSkip() {
   const [analyzeError, setAnalyzeError] = React.useState("");
   const [closetItemCount, setClosetItemCount] = React.useState(0);
   const [eligibleClosetItemCount, setEligibleClosetItemCount] = React.useState(0);
+  const [linkInput, setLinkInput] = React.useState("");
+  const [linkFetching, setLinkFetching] = React.useState(false);
+  const [linkError, setLinkError] = React.useState("");
+  const [scrapedTitle, setScrapedTitle] = React.useState("");
 
   const CATEGORIES = ["Top", "Bottom", "Dress", "Outerwear", "Shoes", "Bag", "Accessory", "Jewelry"];
   const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver"];
@@ -87,6 +91,38 @@ export default function BuyOrSkip() {
     }
   };
 
+  const handleLinkSubmit = async () => {
+    if (!linkInput.trim()) return;
+    setLinkFetching(true);
+    setLinkError("");
+    setUploadError("");
+    try {
+      const res = await fetch("/api/wishlist?action=scrape-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: linkInput.trim() }),
+      });
+      if (res.status === 401) {
+        setLinkError("Your session has expired. Please sign in again to continue.");
+        return;
+      }
+      const data = await res.json();
+      if (data.imageUrl) {
+        setImageUrl(data.imageUrl);
+        setItemLink(linkInput.trim());
+        if (data.brand) setBrand(data.brand);
+        if (data.title) setScrapedTitle(data.title);
+        setStep("tag");
+      } else {
+        setLinkError("We couldn't load this product automatically. Upload a screenshot or photo instead, and nAia can still analyse it.");
+      }
+    } catch {
+      setLinkError("We couldn't load this product automatically. Upload a screenshot or photo instead, and nAia can still analyse it.");
+    } finally {
+      setLinkFetching(false);
+    }
+  };
+
   const handleAnalyze = async () => {
     setAnalyzing(true);
     setAnalyzeError("");
@@ -128,7 +164,10 @@ export default function BuyOrSkip() {
   };
 
   const reset = () => {
-    setImageUrl(""); setResult(null); setCategory(""); setColor([]); setBrand(""); setItemLink(""); setUploadError(""); setAnalyzeError(""); setClosetItemCount(0); setEligibleClosetItemCount(0); setStep("upload");
+    setImageUrl(""); setResult(null); setCategory(""); setColor([]); setBrand(""); setItemLink("");
+    setUploadError(""); setAnalyzeError(""); setClosetItemCount(0); setEligibleClosetItemCount(0);
+    setLinkInput(""); setLinkFetching(false); setLinkError(""); setScrapedTitle("");
+    setStep("upload");
   };
 
   const labelStyle: React.CSSProperties = { fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px", display: "block" };
@@ -159,15 +198,56 @@ export default function BuyOrSkip() {
         <h1 className="bs-headline">Buy or Skip?</h1>
         <p className="bs-sub">Thinking of buying something? Upload it and nAia will tell you if it fits your wardrobe, style, and lifestyle.</p>
 
-        {/* Step 1: Upload */}
+        {/* Step 1: Upload — two equal choices */}
         {step === "upload" && (
-          <div style={{ background: "rgba(255,255,255,0.8)", border: "1px solid rgba(59,5,16,0.06)", padding: "60px", textAlign: "center" }}>
-            <input type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} style={{ display: "none" }} id="bsInput" />
-            <label htmlFor="bsInput" style={{ display: "inline-block", padding: "16px 40px", background: "#8b2035", color: "#f4f4f1", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", marginBottom: "16px" }}>
-              {uploading ? "UPLOADING..." : "CHOOSE PHOTO"}
-            </label>
-            <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#7a6f6a" }}>Upload a photo of the item you're thinking of buying</p>
-            {uploadError && <p style={{ fontFamily: "'Space Mono',monospace", fontSize: "11px", letterSpacing: "1px", color: "#8b2035", marginTop: "12px" }}>{uploadError}</p>}
+          <div style={{ background: "rgba(255,255,255,0.8)", border: "1px solid rgba(59,5,16,0.06)", display: "grid", gridTemplateColumns: "1fr auto 1fr" }}>
+            {/* Left — Paste link */}
+            <div style={{ padding: "60px 48px", display: "flex", flexDirection: "column", gap: "20px" }}>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "#7a6f6a" }}>OPTION 1</div>
+              <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "22px", fontWeight: 900, fontStyle: "italic", color: "#221516" }}>Paste a product link</div>
+              <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a", lineHeight: 1.6, margin: 0 }}>
+                From Zara, H&M, Farfetch, Net-A-Porter, and more
+              </p>
+              <input
+                className="bs-input"
+                type="url"
+                placeholder="https://zara.com/..."
+                value={linkInput}
+                onChange={e => { setLinkInput(e.target.value); if (linkError) setLinkError(""); }}
+                onKeyDown={e => { if (e.key === "Enter" && !linkFetching && linkInput.trim()) handleLinkSubmit(); }}
+                disabled={linkFetching}
+              />
+              <button
+                onClick={handleLinkSubmit}
+                disabled={!linkInput.trim() || linkFetching}
+                className="bs-btn"
+                style={{ background: !linkInput.trim() || linkFetching ? "#d4cfc9" : "#8b2035" }}
+              >
+                {linkFetching ? "FETCHING..." : "FETCH PREVIEW"}
+              </button>
+              {linkError && (
+                <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", color: "#8b2035", lineHeight: 1.6, margin: 0 }}>
+                  {linkError}
+                </p>
+              )}
+            </div>
+
+            {/* Divider */}
+            <div style={{ width: "1px", background: "rgba(59,5,16,0.06)", margin: "40px 0" }} />
+
+            {/* Right — Upload photo */}
+            <div style={{ padding: "60px 48px", display: "flex", flexDirection: "column", gap: "20px" }}>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "#7a6f6a" }}>OPTION 2</div>
+              <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "22px", fontWeight: 900, fontStyle: "italic", color: "#221516" }}>Upload a photo</div>
+              <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a", lineHeight: 1.6, margin: 0 }}>
+                {"Screenshot, product photo, or anything you've saved"}
+              </p>
+              <input type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} style={{ display: "none" }} id="bsInput" />
+              <label htmlFor="bsInput" style={{ display: "inline-block", padding: "16px 40px", background: "#8b2035", color: "#f4f4f1", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>
+                {uploading ? "UPLOADING..." : "CHOOSE PHOTO"}
+              </label>
+              {uploadError && <p style={{ fontFamily: "'Space Mono',monospace", fontSize: "11px", letterSpacing: "1px", color: "#8b2035", margin: 0 }}>{uploadError}</p>}
+            </div>
           </div>
         )}
 
@@ -182,6 +262,13 @@ export default function BuyOrSkip() {
                 <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "24px", fontWeight: 900, fontStyle: "italic", marginBottom: "8px" }}>Tell us about this piece</h2>
                 <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>Help nAia understand what it is</p>
               </div>
+
+              {scrapedTitle && (
+                <div style={{ padding: "12px 16px", background: "rgba(59,5,16,0.03)", border: "1px solid rgba(59,5,16,0.06)" }}>
+                  <span style={{ fontFamily: "'Space Mono',monospace", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", display: "block", marginBottom: "4px" }}>PRODUCT</span>
+                  <span style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#221516" }}>{scrapedTitle}</span>
+                </div>
+              )}
 
               <div>
                 <span style={labelStyle}>Category *</span>
@@ -200,12 +287,6 @@ export default function BuyOrSkip() {
               <div>
                 <span style={labelStyle}>Brand (optional)</span>
                 <input className="bs-input" type="text" placeholder="e.g. Zara, H&M" value={brand} onChange={e => setBrand(e.target.value)} />
-              </div>
-
-              <div>
-                <span style={labelStyle}>Product Link (optional)</span>
-                <input className="bs-input" type="text" placeholder="e.g. https://zara.com/..." value={itemLink} onChange={e => setItemLink(e.target.value)} />
-                <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "13px", fontStyle: "italic", color: "#7a6f6a", marginTop: "6px" }}>Helps nAia understand the exact item</p>
               </div>
 
               <div style={{ display: "flex", gap: "12px" }}>
