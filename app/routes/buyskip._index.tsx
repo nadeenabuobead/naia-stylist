@@ -1,12 +1,11 @@
 import * as React from "react";
-import { Link } from "react-router";
+import { Link, type LoaderFunctionArgs } from "react-router";
+import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 
-export async function loader() {
+export async function loader({ request }: LoaderFunctionArgs) {
+  await requireCurrentNaiaCustomer(request);
   return {};
 }
-
-const CLOUDINARY_CLOUD = "diybves1z";
-const CLOUDINARY_PRESET = "kqfhwrpq";
 
 const css = `
   :root{--cream:#f4f4f1;--deep:#221516;--accent:#8b2035;--muted:#7a6f6a;--ff-display:'Playfair Display',Georgia,serif;--ff-body:'Cormorant Garamond',Garamond,serif;--ff-mono:'Space Mono','Courier New',monospace}
@@ -40,32 +39,65 @@ export default function BuyOrSkip() {
   const [color, setColor] = React.useState<string[]>([]);
   const [brand, setBrand] = React.useState("");
   const [itemLink, setItemLink] = React.useState("");
+  const [uploadError, setUploadError] = React.useState("");
+  const [analyzeError, setAnalyzeError] = React.useState("");
 
   const CATEGORIES = ["Top", "Bottom", "Dress", "Outerwear", "Shoes", "Bag", "Accessory", "Jewelry"];
   const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver"];
 
   const handleUpload = async (file: File) => {
     setUploading(true);
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("upload_preset", CLOUDINARY_PRESET);
+    setUploadError("");
     try {
-      const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`, { method: "POST", body: formData });
-      const data = await res.json();
-      setImageUrl(data.secure_url);
+      const sigRes = await fetch("/api/cloudinary-signature", {
+        credentials: "same-origin",
+      });
+      if (sigRes.status === 401) {
+        setUploadError("Your session has expired. Please sign in again to continue.");
+        return;
+      }
+      if (!sigRes.ok) {
+        setUploadError("Upload service unavailable. Please try again.");
+        return;
+      }
+      const { signature, timestamp, apiKey, cloudName, assetFolder, uploadPreset, allowedFormats } = await sigRes.json();
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("upload_preset", uploadPreset);
+      formData.append("api_key", apiKey);
+      formData.append("timestamp", String(timestamp));
+      formData.append("signature", signature);
+      formData.append("asset_folder", assetFolder);
+      formData.append("allowed_formats", allowedFormats);
+      const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, { method: "POST", body: formData });
+      const uploadData = await res.json();
+      if (!uploadData.secure_url) {
+        setUploadError("Upload failed. Please try another photo.");
+        return;
+      }
+      setImageUrl(uploadData.secure_url);
       setStep("tag");
-    } catch (err) { console.error("Upload failed:", err); }
-    finally { setUploading(false); }
+    } catch (err) {
+      console.error("Upload failed:", err);
+      setUploadError("Upload failed. Please try again.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleAnalyze = async () => {
     setAnalyzing(true);
+    setAnalyzeError("");
     try {
       const response = await fetch("/api/wishlist?action=analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imageUrl, category, color, brand, itemLink })
       });
+      if (response.status === 401) {
+        setAnalyzeError("Your session has expired. Please sign in again to continue.");
+        return;
+      }
       const data = await response.json();
       if (data.success) {
         const a = data.analysis;
@@ -92,7 +124,7 @@ export default function BuyOrSkip() {
   };
 
   const reset = () => {
-    setImageUrl(""); setResult(null); setCategory(""); setColor([]); setBrand(""); setItemLink(""); setStep("upload");
+    setImageUrl(""); setResult(null); setCategory(""); setColor([]); setBrand(""); setItemLink(""); setUploadError(""); setAnalyzeError(""); setStep("upload");
   };
 
   const labelStyle: React.CSSProperties = { fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px", display: "block" };
@@ -120,6 +152,7 @@ export default function BuyOrSkip() {
               {uploading ? "UPLOADING..." : "CHOOSE PHOTO"}
             </label>
             <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#7a6f6a" }}>Upload a photo of the item you're thinking of buying</p>
+            {uploadError && <p style={{ fontFamily: "'Space Mono',monospace", fontSize: "11px", letterSpacing: "1px", color: "#8b2035", marginTop: "12px" }}>{uploadError}</p>}
           </div>
         )}
 
@@ -166,6 +199,12 @@ export default function BuyOrSkip() {
                   {analyzing ? "ANALYZING..." : "ANALYZE →"}
                 </button>
               </div>
+              {analyzeError && (
+                <p style={{ fontFamily: "'Space Mono',monospace", fontSize: "11px", letterSpacing: "1px", color: "#8b2035", marginTop: "4px" }}>
+                  {analyzeError}{" "}
+                  <a href="/auth/shopify/login?return_to=/buyskip" style={{ color: "#8b2035", textDecoration: "underline" }}>Sign in →</a>
+                </p>
+              )}
             </div>
           </div>
         )}

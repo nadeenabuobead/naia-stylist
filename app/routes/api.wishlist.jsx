@@ -1,6 +1,6 @@
 import { authenticateCustomer } from "../customer-auth.server";
 import { data as json } from "react-router";
-import { getCustomer } from "../lib/auth.server.ts";
+import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import prisma from "../db.server";
 
 const CORS = {
@@ -81,37 +81,24 @@ async function analyzeItem(request) {
       return json({ error: "Image required" }, { status: 400 });
     }
 
-    // Scrape product details from link if provided
-    let scrapedDetails = null;
-    if (itemLink) {
-      try {
-        const url = itemLink.startsWith("http") ? itemLink : "https://" + itemLink;
-        scrapedDetails = await scrapeProductDetails(url);
-        console.log("Scraped product details:", scrapedDetails);
-      } catch (e) {
-        console.log("Could not scrape link:", e.message);
-      }
+    const naiaCustomer = await getCurrentNaiaCustomer(request);
+    if (!naiaCustomer) {
+      return json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    // Get authenticated customer
-    const customer = await getCustomer(request);
-    const customerId = customer?.id || null;
+    const styleProfile = naiaCustomer.onboardingProfile;
 
-    let styleProfile = null;
-    let closetItems = [];
-    
-    if (customerId) {
-      const customerData = await prisma.customer.findUnique({
-        where: { id: customerId },
-        include: {
-          onboardingProfile: true,
-          closetItems: { take: 20, orderBy: { createdAt: 'desc' } }
+    const closetData = await prisma.customer.findUnique({
+      where: { id: naiaCustomer.id },
+      select: {
+        closetItems: {
+          take: 20,
+          orderBy: { createdAt: "desc" },
+          select: { name: true, category: true, primaryColor: true }
         }
-      });
-      
-      styleProfile = customerData?.onboardingProfile;
-      closetItems = customerData?.closetItems || [];
-    }
+      }
+    });
+    const closetItems = closetData?.closetItems || [];
 
     const analysisResponse = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -134,13 +121,8 @@ async function analyzeItem(request) {
 Known details provided by user:
 - Category: ${category||"unknown"}
 - Color: ${Array.isArray(color) ? color.join(", ") : color||"unknown"}
-- Brand: ${scrapedDetails?.brand || brand || "unknown"}
-${scrapedDetails ? `
-Scraped from product page:
-- Product title: ${scrapedDetails.title||"N/A"}
-- Description: ${scrapedDetails.description||"N/A"}
-- Price: ${scrapedDetails.price||"N/A"}
-- Brand: ${scrapedDetails.brand||"N/A"}` : itemLink ? `- Product link provided: ${itemLink}` : ""}
+- Brand: ${brand || "unknown"}
+${itemLink ? `- Product link provided by customer: ${itemLink}` : ""}
 
 ${styleProfile ? `CUSTOMER STYLE PROFILE:
 - Style personalities: ${styleProfile.stylePersonalities?.join(", ")}
@@ -216,7 +198,7 @@ Respond ONLY with valid JSON, no markdown:
 
   } catch (error) {
     console.error("Analysis error:", error);
-    return json({ error: "Analysis failed", details: error.message }, { status: 500 });
+    return json({ error: "Analysis failed" }, { status: 500 });
   }
 }
 
@@ -247,6 +229,13 @@ export async function loader({ request }) {
 export async function action({ request }) {
   const url = new URL(request.url);
   if (url.searchParams.get("action") === "scrape-image") {
+    const naiaCustomer = await getCurrentNaiaCustomer(request);
+    if (!naiaCustomer) {
+      return Response.json(
+        { error: "Not authenticated" },
+        { status: 401, headers: CORS }
+      );
+    }
     try {
       const { url: productUrl } = await request.json();
       const details = await scrapeProductDetails(productUrl);
