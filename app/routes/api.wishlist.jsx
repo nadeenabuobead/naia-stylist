@@ -206,7 +206,7 @@ Respond ONLY with valid JSON, no markdown:
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     const analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(text);
 
-    // Normalize closetPairings: case-insensitive trimmed map → canonical stored name; accept name/item/title fields
+    // Harden closetPairings: each candidate field individually validated as primitive non-empty string
     const closetNameMap = new Map(
       closetItems
         .filter(i => i.name != null && i.name.trim() !== "")
@@ -216,20 +216,23 @@ Respond ONLY with valid JSON, no markdown:
     const rawPairings = Array.isArray(analysis.closetPairings) ? analysis.closetPairings : [];
     analysis.closetPairings = rawPairings
       .map(p => {
-        let rawName, reason;
+        let rawName = null;
+        let rawReason = null;
         if (typeof p === "string") {
           rawName = p;
-          reason = null;
-        } else if (p && typeof p === "object") {
-          rawName = p.name ?? p.item ?? p.title ?? null;
-          reason = p.reason || null;
+        } else if (p !== null && typeof p === "object" && !Array.isArray(p)) {
+          const nameVal  = typeof p.name  === "string" && p.name.trim()  !== "" ? p.name  : null;
+          const itemVal  = typeof p.item  === "string" && p.item.trim()  !== "" ? p.item  : null;
+          const titleVal = typeof p.title === "string" && p.title.trim() !== "" ? p.title : null;
+          rawName = nameVal ?? itemVal ?? titleVal;
+          rawReason = typeof p.reason === "string" && p.reason.trim() !== "" ? p.reason.trim() : null;
         } else {
           return null;
         }
-        if (typeof rawName !== "string") return null;
+        if (typeof rawName !== "string" || rawName.trim() === "") return null;
         const canonical = closetNameMap.get(rawName.toLowerCase().trim());
         if (!canonical) return null;
-        return { name: canonical, reason };
+        return { name: canonical, reason: rawReason };
       })
       .filter(p => p !== null && !seen.has(p.name) && seen.add(p.name));
 

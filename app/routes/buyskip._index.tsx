@@ -132,6 +132,17 @@ export default function BuyOrSkip() {
   const labelStyle: React.CSSProperties = { fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px", display: "block" };
   const pillStyle = (active: boolean): React.CSSProperties => ({ padding: "10px 18px", border: active ? "none" : "1px solid rgba(59,5,16,.12)", fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: active ? "#f4f4f1" : "#221516", cursor: "pointer", background: active ? "#8b2035" : "transparent", transition: "all .2s" });
 
+  const renderablePairings: Array<{ name: string; reason: string | null }> = [];
+  if (result?.closetPairings && Array.isArray(result.closetPairings)) {
+    for (const p of result.closetPairings) {
+      if (p === null || typeof p !== "object" || Array.isArray(p)) continue;
+      const name = typeof p.name === "string" && p.name.trim() !== "" ? p.name.trim() : null;
+      if (!name) continue;
+      const reason = typeof p.reason === "string" && p.reason.trim() !== "" ? p.reason.trim() : null;
+      renderablePairings.push({ name, reason });
+    }
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
       <style>{css}</style>
@@ -248,12 +259,12 @@ export default function BuyOrSkip() {
 
               <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
                 <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "10px" }}>PAIRS WITH YOUR CLOSET</div>
-                {result.closetPairings?.length > 0 ? (
+                {renderablePairings.length > 0 ? (
                   <div>
-                    {result.closetPairings.map((p: { name: string; reason: string | null }, i: number) => (
+                    {renderablePairings.map((p, i) => (
                       <div key={i} style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", color: "#221516", lineHeight: 1.8, marginBottom: "6px" }}>
                         <strong>{p.name}</strong>
-                        {p.reason && <span style={{ color: "#7a6f6a" }}> — {p.reason}</span>}
+                        {p.reason !== null && <span style={{ color: "#7a6f6a" }}> — {p.reason}</span>}
                       </div>
                     ))}
                   </div>
