@@ -247,7 +247,14 @@ export default function BuyOrSkip() {
               <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
                 <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "10px" }}>PAIRS WITH YOUR CLOSET</div>
                 {result.closetPairings?.length > 0 ? (
-                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", color: "#221516", lineHeight: 1.8 }}>{result.closetPairings.join(", ")}</div>
+                  <div>
+                    {result.closetPairings.map((p: { name: string; reason: string | null }, i: number) => (
+                      <div key={i} style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", color: "#221516", lineHeight: 1.8, marginBottom: "6px" }}>
+                        <strong>{p.name}</strong>
+                        {p.reason && <span style={{ color: "#7a6f6a" }}> — {p.reason}</span>}
+                      </div>
+                    ))}
+                  </div>
                 ) : (
                   <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>
                     No closet items yet.{" "}

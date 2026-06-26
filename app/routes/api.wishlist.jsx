@@ -17,17 +17,36 @@ const CORS = {
 
 
 const NAIA_PRODUCTS = [
-  { title: "Sculptural Hybrid Coat", handle: "trench-coat", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/b7af3725-7048-4ead-8d04-d6fb42556eac.png", url: "https://naia-9417.myshopify.com/products/trench-coat" },
-  { title: "Art Blouse", handle: "silk-top", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32674461-cac7-4699-aff1-74c435289333.png", url: "https://naia-9417.myshopify.com/products/silk-top" },
-  { title: "Art Panel Tailored Blazer", handle: "blazer", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/a7b908bb-3079-4f39-93b8-e1a89435249a.png", url: "https://naia-9417.myshopify.com/products/blazer" },
-  { title: "Textured Art Maxi Skirt", handle: "skirt", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/6992350d-5695-4f28-8674-7747dfd1e680.png", url: "https://naia-9417.myshopify.com/products/skirt" },
-  { title: "Wrap Cropped Top", handle: "top", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3614927b-4685-4df3-aeff-b3d5a950cbd2.png", url: "https://naia-9417.myshopify.com/products/top" },
-  { title: "Printed Wrap Kimono Jacket", handle: "kimono", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/77d61b97-37da-4e57-8297-aa5207b35d07.png", url: "https://naia-9417.myshopify.com/products/kimono" },
-  { title: "Art Collar Shirt", handle: "shirt-1", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32fe2afb-b8ef-46d2-ae2c-b1adc81a1b0f.png", url: "https://naia-9417.myshopify.com/products/shirt-1" },
-  { title: "Leather Midi Dress", handle: "shirt", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/8a855f15-e5e9-4ef5-a7db-a7253e83a542.png", url: "https://naia-9417.myshopify.com/products/shirt" },
-  { title: "Asymmetrical Waist Pants", handle: "pants", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/7d5d1e05-796a-45d9-b74a-4ddb0c9da3cf.png", url: "https://naia-9417.myshopify.com/products/pants" },
-  { title: "Printed Straight Pants", handle: "trousers", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3b14fe8b-2c19-492e-82b1-44baaf3a3cc9.png", url: "https://naia-9417.myshopify.com/products/trousers" },
+  { title: "Sculptural Hybrid Coat", category: "Outerwear", handle: "trench-coat", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/b7af3725-7048-4ead-8d04-d6fb42556eac.png", url: "https://naia-9417.myshopify.com/products/trench-coat" },
+  { title: "Art Blouse", category: "Top", handle: "silk-top", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32674461-cac7-4699-aff1-74c435289333.png", url: "https://naia-9417.myshopify.com/products/silk-top" },
+  { title: "Art Panel Tailored Blazer", category: "Outerwear", handle: "blazer", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/a7b908bb-3079-4f39-93b8-e1a89435249a.png", url: "https://naia-9417.myshopify.com/products/blazer" },
+  { title: "Textured Art Maxi Skirt", category: "Bottom", handle: "skirt", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/6992350d-5695-4f28-8674-7747dfd1e680.png", url: "https://naia-9417.myshopify.com/products/skirt" },
+  { title: "Wrap Cropped Top", category: "Top", handle: "top", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3614927b-4685-4df3-aeff-b3d5a950cbd2.png", url: "https://naia-9417.myshopify.com/products/top" },
+  { title: "Printed Wrap Kimono Jacket", category: "Outerwear", handle: "kimono", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/77d61b97-37da-4e57-8297-aa5207b35d07.png", url: "https://naia-9417.myshopify.com/products/kimono" },
+  { title: "Art Collar Shirt", category: "Top", handle: "shirt-1", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32fe2afb-b8ef-46d2-ae2c-b1adc81a1b0f.png", url: "https://naia-9417.myshopify.com/products/shirt-1" },
+  { title: "Leather Midi Dress", category: "Dress", handle: "shirt", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/8a855f15-e5e9-4ef5-a7db-a7253e83a542.png", url: "https://naia-9417.myshopify.com/products/shirt" },
+  { title: "Asymmetrical Waist Pants", category: "Bottom", handle: "pants", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/7d5d1e05-796a-45d9-b74a-4ddb0c9da3cf.png", url: "https://naia-9417.myshopify.com/products/pants" },
+  { title: "Printed Straight Pants", category: "Bottom", handle: "trousers", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3b14fe8b-2c19-492e-82b1-44baaf3a3cc9.png", url: "https://naia-9417.myshopify.com/products/trousers" },
 ];
+
+const COMPLEMENTARY_CATEGORIES = {
+  "Top":       ["Bottom", "Outerwear"],
+  "Bottom":    ["Top", "Outerwear"],
+  "Dress":     ["Outerwear"],
+  "Outerwear": ["Top", "Bottom", "Dress"],
+  "Shoes":     ["Top", "Bottom", "Dress", "Outerwear"],
+  "Bag":       ["Top", "Bottom", "Dress", "Outerwear"],
+  "Accessory": ["Top", "Bottom", "Dress", "Outerwear"],
+  "Jewelry":   ["Top", "Bottom", "Dress", "Outerwear"],
+};
+
+function hashForIndex(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = (Math.imul(31, h) + str.charCodeAt(i)) >>> 0;
+  }
+  return h;
+}
 
 async function scrapeProductDetails(url) {
   try {
@@ -100,6 +119,11 @@ async function analyzeItem(request) {
     });
     const closetItems = closetData?.closetItems || [];
 
+    const normalizedCategory = (category || "").trim();
+    const allowed = COMPLEMENTARY_CATEGORIES[normalizedCategory] || ["Top", "Bottom", "Dress", "Outerwear"];
+    const eligibleProducts = NAIA_PRODUCTS.filter(p => allowed.includes(p.category));
+    const fallbackProducts = eligibleProducts.length > 0 ? eligibleProducts : NAIA_PRODUCTS;
+
     const analysisResponse = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -133,29 +157,13 @@ ${styleProfile ? `CUSTOMER STYLE PROFILE:
 ${closetItems.length > 0 ? `CUSTOMER REAL CLOSET (ONLY suggest pairings from this exact list, do not invent items):
 ${closetItems.map(i => `- ${i.name} (${i.category}${i.primaryColor ? ", "+i.primaryColor : ""})`).join("\n")}` : "CLOSET: Empty — do NOT suggest any closet pairings. Leave closetPairings as an empty array."}
 
-NAIA COLLECTION (you MUST pick naiaMatch ONLY from this list, use exact title and url):
-- Sculptural Hybrid Coat → https://naia-9417.myshopify.com/products/trench-coat
-- Art Blouse → https://naia-9417.myshopify.com/products/silk-top
-- Art Panel Tailored Blazer → https://naia-9417.myshopify.com/products/blazer
-- Textured Art Maxi Skirt → https://naia-9417.myshopify.com/products/skirt
-- Wrap Cropped Top → https://naia-9417.myshopify.com/products/top
-- Printed Wrap Kimono Jacket → https://naia-9417.myshopify.com/products/kimono
-- Art Collar Shirt → https://naia-9417.myshopify.com/products/shirt-1
-- Leather Midi Dress → https://naia-9417.myshopify.com/products/shirt
-- Asymmetrical Waist Pants → https://naia-9417.myshopify.com/products/pants
-- Printed Straight Pants → https://naia-9417.myshopify.com/products/trousers
+NAIA COLLECTION (you MUST pick naiaMatch ONLY from this list, use exact title):
+${fallbackProducts.map(p => `- ${p.title}`).join("\n")}
 
 STRICT STYLING RULES:
 1. closetPairings: ONLY use items from the customer's real closet list above. If closet is empty, return []
-2. naiaMatch: ONLY pick from the nAia collection list above — return exact title and url
+2. naiaMatch: ONLY pick from the nAia collection list above — return exact title only (no URL)
 3. Do not invent, hallucinate, or suggest items not in these lists
-4. CATEGORY LOGIC — only suggest complementary categories:
-   - If item is a TOP → suggest bottoms (skirts, pants, trousers) or outerwear (blazer, jacket, coat) only
-   - If item is a BOTTOM → suggest tops, blouses, shirts or outerwear only
-   - If item is a DRESS → suggest outerwear (blazer, jacket, coat) only
-   - If item is OUTERWEAR → suggest tops + bottoms or dresses underneath only
-   - If item is SHOES/BAGS/ACCESSORIES → suggest any clothing category
-   - NEVER suggest the same category as the uploaded item
 
 Respond ONLY with valid JSON, no markdown:
 {
@@ -169,10 +177,10 @@ Respond ONLY with valid JSON, no markdown:
     "fabric": "...",
     "versatility": "..."
   },
-  "closetPairings": [],
+  "closetPairings": [{"name": "...", "reason": "..."}],
   "fillsGap": null,
   "occasions": [],
-  "naiaMatch": { "title": "...", "url": "...", "reason": "..." },
+  "naiaMatch": { "title": "...", "reason": "..." },
   "finalThought": "..."
 }`
             }
@@ -193,6 +201,28 @@ Respond ONLY with valid JSON, no markdown:
     const text = data.content[0].text;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     const analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(text);
+
+    // Normalize closetPairings: coerce strings/objects to {name, reason}, filter to real closet items, deduplicate
+    const validClosetNames = new Set(closetItems.map(i => i.name));
+    const seen = new Set();
+    const rawPairings = Array.isArray(analysis.closetPairings) ? analysis.closetPairings : [];
+    analysis.closetPairings = rawPairings
+      .map(p => {
+        if (typeof p === "string") return { name: p, reason: null };
+        if (p && typeof p.name === "string") return { name: p.name, reason: p.reason || null };
+        return null;
+      })
+      .filter(p => p !== null && validClosetNames.has(p.name) && !seen.has(p.name) && seen.add(p.name));
+
+    // Validate naiaMatch title against eligible catalog; overwrite URL from server-side data
+    const matchedProduct = fallbackProducts.find(p => p.title === analysis.naiaMatch?.title);
+    if (matchedProduct) {
+      analysis.naiaMatch = { title: matchedProduct.title, url: matchedProduct.url, reason: analysis.naiaMatch?.reason || null };
+    } else {
+      const idx = hashForIndex((imageUrl || "") + normalizedCategory) % fallbackProducts.length;
+      const fallback = fallbackProducts[idx];
+      analysis.naiaMatch = { title: fallback.title, url: fallback.url, reason: null };
+    }
 
     return json({ success: true, analysis });
 
