@@ -623,7 +623,7 @@ export default function Index() {
           <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "8px" }}>
             — {insights.dailyNote.attribution}
           </div>
-          <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--c-burg)" }}>
+          <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--c-burg)", marginTop: "28px" }}>
             Today's style energy: {insights.todayStyleEnergy || insights.stylingIdentity}
           </div>
         </div>
