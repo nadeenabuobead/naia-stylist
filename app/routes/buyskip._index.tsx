@@ -8,25 +8,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 const css = `
-  :root{--cream:#f4f4f1;--deep:#221516;--accent:#8b2035;--muted:#7a6f6a;--ff-display:'Playfair Display',Georgia,serif;--ff-body:'Cormorant Garamond',Garamond,serif;--ff-mono:'Space Mono','Courier New',monospace}
   *{margin:0;padding:0;box-sizing:border-box}
-  body{background:var(--cream);color:var(--deep);font-family:var(--ff-body);-webkit-font-smoothing:antialiased}
-  .bs-topbar{display:flex;justify-content:space-between;align-items:center;padding:20px 40px;border-bottom:1px solid rgba(59,5,16,.06)}
-  .bs-topbar-logo{font-family:var(--ff-display);font-size:22px;font-style:italic;letter-spacing:3px;color:var(--deep)}
-  .bs-topbar-link{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);text-decoration:none}
+  body{background:var(--c-bg);color:var(--c-ink);font-family:var(--ff-body);-webkit-font-smoothing:antialiased}
+  .bs-topbar{display:flex;justify-content:space-between;align-items:center;padding:20px 40px;border-bottom:1px solid var(--c-border)}
+  .bs-topbar-logo{font-family:var(--ff-display);font-size:22px;font-style:italic;letter-spacing:3px;color:var(--c-ink)}
+  .bs-topbar-link{font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--c-burg);text-decoration:none}
   .bs-wrap{max-width:900px;margin:0 auto;padding:60px 40px}
-  .bs-headline{font-family:var(--ff-display);font-size:clamp(36px,5vw,56px);font-weight:900;font-style:italic;color:var(--deep);margin-bottom:8px}
-  .bs-sub{font-family:var(--ff-body);font-size:18px;font-style:italic;color:var(--muted);margin-bottom:48px;line-height:1.6}
-  .bs-pill{padding:10px 18px;border:1px solid rgba(59,5,16,.12);font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--deep);cursor:pointer;background:transparent;transition:all .2s}
-  .bs-pill:hover{border-color:var(--deep)}
-  .bs-pill.on{background:var(--accent);color:var(--cream);border-color:var(--accent)}
+  .bs-headline{font-family:var(--ff-display);font-size:clamp(36px,5vw,56px);font-weight:900;font-style:italic;color:var(--c-ink);margin-bottom:8px}
+  .bs-sub{font-family:var(--ff-body);font-size:18px;font-style:italic;color:var(--c-muted);margin-bottom:48px;line-height:1.6}
+  .bs-pill{padding:10px 18px;border:1px solid var(--c-border);font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--c-ink);cursor:pointer;background:transparent;transition:all .2s}
+  .bs-pill:hover{border-color:var(--c-ink)}
+  .bs-pill.on{background:var(--c-burg);color:#FAF6F1;border-color:var(--c-burg)}
   .bs-pill:disabled{opacity:.35;cursor:not-allowed}
-  .bs-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:12px;display:block}
-  .bs-input{width:100%;padding:14px;border:1px solid rgba(59,5,16,.12);font-family:var(--ff-body);font-size:16px;font-style:italic;background:rgba(255,255,255,0.7);color:var(--deep);outline:none}
-  .bs-input:focus{border-color:var(--deep)}
-  .bs-btn{padding:16px 40px;border:none;background:var(--accent);color:var(--cream);font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;cursor:pointer}
-  .bs-btn:disabled{background:#d4cfc9;cursor:not-allowed}
-  .bs-btn-outline{padding:14px 32px;border:1px solid rgba(59,5,16,.12);background:transparent;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--deep);cursor:pointer}
+  .bs-label{font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--c-muted);margin-bottom:12px;display:block}
+  .bs-input{width:100%;padding:14px;border:1px solid var(--c-border);font-family:var(--ff-ui);font-size:16px;font-style:normal;background:var(--c-surface);color:var(--c-ink);outline:none}
+  .bs-input:focus{border-color:var(--c-ink)}
+  .bs-btn{padding:16px 40px;border:none;background:var(--c-burg);color:#FAF6F1;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase;cursor:pointer}
+  .bs-btn:disabled{background:var(--c-muted-bg);color:var(--c-muted);opacity:.65;cursor:not-allowed}
+  .bs-btn-outline{padding:14px 32px;border:1px solid var(--c-border);background:transparent;font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--c-ink);cursor:pointer}
 `;
 
 export default function BuyOrSkip() {
@@ -132,8 +131,8 @@ export default function BuyOrSkip() {
     setStep("upload");
   };
 
-  const labelStyle: React.CSSProperties = { fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px", display: "block" };
-  const pillStyle = (active: boolean): React.CSSProperties => ({ padding: "10px 18px", border: active ? "none" : "1px solid rgba(59,5,16,.12)", fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: active ? "#f4f4f1" : "#221516", cursor: "pointer", background: active ? "#8b2035" : "transparent", transition: "all .2s" });
+  const labelStyle: React.CSSProperties = { fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "12px", display: "block" };
+  const pillStyle = (active: boolean): React.CSSProperties => ({ padding: "10px 18px", border: active ? "none" : "1px solid var(--c-border)", fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: active ? "#FAF6F1" : "var(--c-ink)", cursor: "pointer", background: active ? "var(--c-burg)" : "transparent", transition: "all .2s" });
 
   const renderablePairings: Array<{ name: string; reason: string | null }> = [];
   if (result?.closetPairings && Array.isArray(result.closetPairings)) {
@@ -147,9 +146,8 @@ export default function BuyOrSkip() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
+    <div style={{ minHeight: "100vh", background: "var(--c-bg)" }}>
       <style>{css}</style>
-      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
 
       <div className="bs-topbar">
         <div className="bs-topbar-logo">nAia</div>
@@ -162,16 +160,16 @@ export default function BuyOrSkip() {
 
         {/* Step 1: Upload */}
         {step === "upload" && (
-          <div style={{ background: "rgba(255,255,255,0.8)", border: "1px solid rgba(59,5,16,0.06)", padding: "60px 48px", textAlign: "center" }}>
-            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "20px" }}>UPLOAD A PHOTO</div>
-            <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a", lineHeight: 1.6, marginBottom: "32px" }}>
+          <div style={{ background: "var(--c-panel)", border: "1px solid var(--c-border)", padding: "60px 48px", textAlign: "center" }}>
+            <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "20px" }}>UPLOAD A PHOTO</div>
+            <p style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)", lineHeight: 1.6, marginBottom: "32px" }}>
               Take a photo in store, upload a screenshot, or save a product image from any website.
             </p>
             <input type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} style={{ display: "none" }} id="bsInput" />
-            <label htmlFor="bsInput" style={{ display: "inline-block", padding: "16px 40px", background: "#8b2035", color: "#f4f4f1", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>
+            <label htmlFor="bsInput" style={{ display: "inline-block", padding: "16px 40px", background: "var(--c-burg)", color: "#FAF6F1", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>
               {uploading ? "UPLOADING..." : "CHOOSE PHOTO"}
             </label>
-            {uploadError && <p style={{ fontFamily: "'Space Mono',monospace", fontSize: "11px", letterSpacing: "1px", color: "#8b2035", marginTop: "12px" }}>{uploadError}</p>}
+            {uploadError && <p style={{ fontFamily: "var(--ff-ui)", fontSize: "11px", letterSpacing: "1px", color: "var(--c-burg)", marginTop: "12px" }}>{uploadError}</p>}
           </div>
         )}
 
@@ -179,12 +177,12 @@ export default function BuyOrSkip() {
         {step === "tag" && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "48px" }}>
             <div>
-              <img src={imageUrl} alt="Item" style={{ width: "100%", border: "1px solid rgba(59,5,16,0.06)" }} />
+              <img src={imageUrl} alt="Item" style={{ width: "100%", border: "1px solid var(--c-border)" }} />
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
               <div>
-                <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "24px", fontWeight: 900, fontStyle: "italic", marginBottom: "8px" }}>Tell us about this piece</h2>
-                <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>Help nAia understand what it is</p>
+                <h2 style={{ fontFamily: "var(--ff-display)", fontSize: "24px", fontWeight: 900, fontStyle: "italic", marginBottom: "8px" }}>Tell us about this piece</h2>
+                <p style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)" }}>Help nAia understand what it is</p>
               </div>
 
               <div>
@@ -208,14 +206,14 @@ export default function BuyOrSkip() {
 
               <div style={{ display: "flex", gap: "12px" }}>
                 <button onClick={reset} className="bs-btn-outline">← Back</button>
-                <button onClick={handleAnalyze} disabled={!category || color.length === 0 || analyzing} className="bs-btn" style={{ flex: 1, background: (!category || color.length === 0) ? "#d4cfc9" : "#8b2035" }}>
+                <button onClick={handleAnalyze} disabled={!category || color.length === 0 || analyzing} className="bs-btn" style={{ flex: 1, background: (!category || color.length === 0) ? "var(--c-muted-bg)" : "var(--c-burg)" }}>
                   {analyzing ? "ANALYZING..." : "ANALYZE →"}
                 </button>
               </div>
               {analyzeError && (
-                <p style={{ fontFamily: "'Space Mono',monospace", fontSize: "11px", letterSpacing: "1px", color: "#8b2035", marginTop: "4px" }}>
+                <p style={{ fontFamily: "var(--ff-ui)", fontSize: "11px", letterSpacing: "1px", color: "var(--c-burg)", marginTop: "4px" }}>
                   {analyzeError}{" "}
-                  <a href="/auth/shopify/login?return_to=/buyskip" style={{ color: "#8b2035", textDecoration: "underline" }}>Sign in →</a>
+                  <a href="/auth/shopify/login?return_to=/buyskip" style={{ color: "var(--c-burg)", textDecoration: "underline" }}>Sign in →</a>
                 </p>
               )}
             </div>
@@ -226,7 +224,7 @@ export default function BuyOrSkip() {
         {step === "result" && result && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "48px" }}>
             <div>
-              <img src={imageUrl} alt="Item" style={{ width: "100%", border: "1px solid rgba(59,5,16,0.06)", marginBottom: "16px" }} />
+              <img src={imageUrl} alt="Item" style={{ width: "100%", border: "1px solid var(--c-border)", marginBottom: "16px" }} />
               <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
                 {category && <span style={pillStyle(true)}>{category}</span>}
                 {color.map(c => <span key={c} style={pillStyle(true)}>{c}</span>)}
@@ -234,21 +232,21 @@ export default function BuyOrSkip() {
               </div>
             </div>
 
-            <div style={{ background: "rgba(255,255,255,0.8)", padding: "40px", border: "1px solid rgba(59,5,16,0.06)" }}>
-              <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "64px", fontWeight: 900, color: result.verdict === "BUY" ? "#8b2035" : "#7a6f6a", marginBottom: "4px" }}>{result.verdict}</div>
-              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "10px", color: "#7a6f6a", marginBottom: "32px", letterSpacing: "1px" }}>{result.confidence}% CONFIDENCE</div>
+            <div style={{ background: "var(--c-panel)", padding: "40px", border: "1px solid var(--c-border)" }}>
+              <div style={{ fontFamily: "var(--ff-display)", fontSize: "64px", fontWeight: 900, color: result.verdict === "BUY" ? "var(--c-burg)" : "var(--c-muted)", marginBottom: "4px" }}>{result.verdict}</div>
+              <div style={{ fontFamily: "var(--ff-ui)", fontSize: "10px", color: "var(--c-muted)", marginBottom: "32px", letterSpacing: "1px" }}>{result.confidence}% CONFIDENCE</div>
 
               {result.styleAlignment && (
-                <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "10px" }}>STYLE DNA MATCH</div>
-                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#221516", lineHeight: 1.7 }}>{result.styleAlignment}</div>
+                <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid var(--c-border)" }}>
+                  <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "10px" }}>STYLE DNA MATCH</div>
+                  <div style={{ fontFamily: "var(--ff-body)", fontSize: "16px", fontStyle: "italic", color: "var(--c-ink)", lineHeight: 1.7 }}>{result.styleAlignment}</div>
                 </div>
               )}
 
               {result.details && (
-                <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "10px" }}>ANALYSIS</div>
-                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", color: "#221516", lineHeight: 1.8 }}>
+                <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid var(--c-border)" }}>
+                  <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "10px" }}>ANALYSIS</div>
+                  <div style={{ fontFamily: "var(--ff-body)", fontSize: "15px", color: "var(--c-ink)", lineHeight: 1.8 }}>
                     {result.details.silhouette && <div style={{ marginBottom: "6px" }}><strong>Silhouette:</strong> {result.details.silhouette}</div>}
                     {result.details.color && <div style={{ marginBottom: "6px" }}><strong>Color:</strong> {result.details.color}</div>}
                     {result.details.fabric && <div style={{ marginBottom: "6px" }}><strong>Fabric:</strong> {result.details.fabric}</div>}
@@ -257,62 +255,62 @@ export default function BuyOrSkip() {
                 </div>
               )}
 
-              <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "10px" }}>PAIRS WITH YOUR CLOSET</div>
+              <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid var(--c-border)" }}>
+                <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "10px" }}>PAIRS WITH YOUR CLOSET</div>
                 {renderablePairings.length > 0 ? (
                   <div>
                     {renderablePairings.map((p, i) => (
-                      <div key={i} style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", color: "#221516", lineHeight: 1.8, marginBottom: "6px" }}>
+                      <div key={i} style={{ fontFamily: "var(--ff-body)", fontSize: "15px", color: "var(--c-ink)", lineHeight: 1.8, marginBottom: "6px" }}>
                         <strong>{p.name}</strong>
-                        {p.reason !== null && <span style={{ color: "#7a6f6a" }}> — {p.reason}</span>}
+                        {p.reason !== null && <span style={{ color: "var(--c-muted)" }}> — {p.reason}</span>}
                       </div>
                     ))}
                   </div>
                 ) : closetItemCount > 0 && eligibleClosetItemCount === 0 ? (
-                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>
+                  <div style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)" }}>
                     You already have pieces in your Closet, but nAia could not find a clear pairing for this item yet.
                   </div>
                 ) : (
-                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>
+                  <div style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)" }}>
                     No closet items yet.{" "}
-                    <a href="/closet" style={{ color: "#8b2035", textDecoration: "none" }}>Add pieces to your wardrobe</a>
+                    <a href="/closet" style={{ color: "var(--c-burg)", textDecoration: "none" }}>Add pieces to your wardrobe</a>
                     {" "}and nAia will tell you what this pairs with.
                   </div>
                 )}
-                {result.fillsGap && <div style={{ color: "#8b2035", fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", marginTop: "8px" }}>✓ {result.fillsGap}</div>}
+                {result.fillsGap && <div style={{ color: "var(--c-burg)", fontFamily: "var(--ff-body)", fontSize: "14px", fontStyle: "italic", marginTop: "8px" }}>✓ {result.fillsGap}</div>}
               </div>
 
               {result.naiaMatch && (
-                <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "10px" }}>PAIR IT WITH FROM NAIA</div>
-                  <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "18px", fontWeight: 700, color: "#221516", marginBottom: "6px" }}>
+                <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid var(--c-border)" }}>
+                  <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "10px" }}>PAIR IT WITH FROM NAIA</div>
+                  <div style={{ fontFamily: "var(--ff-display)", fontSize: "18px", fontWeight: 700, color: "var(--c-ink)", marginBottom: "6px" }}>
                     {typeof result.naiaMatch === "object" ? result.naiaMatch.title : result.naiaMatch}
                   </div>
                   {typeof result.naiaMatch === "object" && result.naiaMatch.reason && (
-                    <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "10px" }}>{result.naiaMatch.reason}</div>
+                    <div style={{ fontFamily: "var(--ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--c-muted)", marginBottom: "10px" }}>{result.naiaMatch.reason}</div>
                   )}
                   {typeof result.naiaMatch === "object" && result.naiaMatch.url && (
-                    <a href={result.naiaMatch.url} target="_blank" rel="noreferrer" style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>SHOP THIS PIECE →</a>
+                    <a href={result.naiaMatch.url} target="_blank" rel="noreferrer" style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", textDecoration: "none" }}>SHOP THIS PIECE →</a>
                   )}
                 </div>
               )}
 
               {result.occasions?.length > 0 && (
-                <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "10px" }}>PERFECT FOR</div>
+                <div style={{ marginBottom: "24px", paddingBottom: "24px", borderBottom: "1px solid var(--c-border)" }}>
+                  <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "10px" }}>PERFECT FOR</div>
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                    {result.occasions.map((occ: string, i: number) => <span key={i} style={{ padding: "6px 12px", background: "rgba(139,32,53,0.08)", color: "#8b2035", fontSize: "11px", fontFamily: "'Space Mono',monospace" }}>{occ}</span>)}
+                    {result.occasions.map((occ: string, i: number) => <span key={i} style={{ padding: "6px 12px", background: "var(--c-tint)", color: "var(--c-burg)", fontSize: "11px", fontFamily: "var(--ff-ui)" }}>{occ}</span>)}
                   </div>
                 </div>
               )}
 
               {result.finalThought && (
                 <div style={{ marginBottom: "32px" }}>
-                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#221516", lineHeight: 1.7 }}>{result.finalThought}</div>
+                  <div style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--c-ink)", lineHeight: 1.7 }}>{result.finalThought}</div>
                 </div>
               )}
 
-              <button onClick={reset} style={{ width: "100%", padding: "14px", background: "transparent", border: "1px solid #8b2035", color: "#8b2035", fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>
+              <button onClick={reset} style={{ width: "100%", padding: "14px", background: "transparent", border: "1px solid var(--c-burg)", color: "var(--c-burg)", fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>
                 TRY ANOTHER
               </button>
             </div>
