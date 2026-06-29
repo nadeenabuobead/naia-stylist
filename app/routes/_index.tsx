@@ -38,6 +38,18 @@ function getDubaiDayOfYear(): number {
   return Math.floor((current.getTime() - start.getTime()) / 86400000);
 }
 
+function logDiagError(op: string, err: unknown): void {
+  const e = err as any;
+  console.error(`dashboard-loader: ${op}: FAILED`);
+  console.error(`dashboard-loader: ${op}: class: ${e?.constructor?.name ?? e?.name ?? "unknown"}`);
+  if (e?.code != null) console.error(`dashboard-loader: ${op}: code: ${e.code}`);
+  if (e?.meta != null) console.error(`dashboard-loader: ${op}: meta: ${JSON.stringify(e.meta)}`);
+  const msg = String(e?.message ?? "");
+  for (let i = 0; i < msg.length; i += 40) {
+    console.error(`dashboard-loader: ${op}: msg[${i}]: ${msg.slice(i, i + 40)}`);
+  }
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   // Throws redirect to /auth/shopify/login if no valid nAia session
   const sessionCustomer = await requireCurrentNaiaCustomer(request);
@@ -49,20 +61,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   // Full query — only runs for customers with a completed Passport
-  const customer = await prisma.customer.findFirst({
-    where: { id: sessionCustomer.id },
-    include: {
-      onboardingProfile: true,
-      stylingSessions: {
-        take: 10,
-        orderBy: { createdAt: "desc" },
-        include: { suggestions: true }
-      },
-      closetItems: { take: 20, orderBy: { createdAt: "desc" } },
-      postOutfitReviews: { include: { session: true } },
-      savedLooks: true
-    }
-  });
+  console.log("dashboard-loader: customer.findFirst: start");
+  let customer;
+  try {
+    customer = await prisma.customer.findFirst({
+      where: { id: sessionCustomer.id },
+      include: {
+        onboardingProfile: true,
+        stylingSessions: {
+          take: 10,
+          orderBy: { createdAt: "desc" },
+          include: { suggestions: true }
+        },
+        closetItems: { take: 20, orderBy: { createdAt: "desc" } },
+        postOutfitReviews: { include: { session: true } },
+        savedLooks: true
+      }
+    });
+    console.log("dashboard-loader: customer.findFirst: success");
+  } catch (err: unknown) {
+    logDiagError("customer.findFirst", err);
+    throw err;
+  }
 
   if (!customer) {
     return redirect("/auth/shopify/login");
@@ -114,17 +134,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 
   // Fetch outfit reviews to calculate Style Response Profile
-  const reviews = await prisma.postOutfitReview.findMany({
-    where: { 
-      session: { 
-        customerId: customer.id 
-      }
-    },
-    include: {
-      session: true
-    },
-    orderBy: { createdAt: 'desc' }
-  });
+  console.log("dashboard-loader: postOutfitReview.findMany: start");
+  let reviews;
+  try {
+    reviews = await prisma.postOutfitReview.findMany({
+      where: {
+        session: {
+          customerId: customer.id
+        }
+      },
+      include: {
+        session: true
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    console.log("dashboard-loader: postOutfitReview.findMany: success");
+  } catch (err: unknown) {
+    logDiagError("postOutfitReview.findMany", err);
+    throw err;
+  }
 
   // Calculate style response metrics
   const totalReviews = reviews.length;
