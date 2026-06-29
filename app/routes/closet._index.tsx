@@ -121,6 +121,13 @@ const css = `
   .cl-empty-text{font-family:var(--ff-body);font-size:20px;font-style:italic;color:var(--c-muted);margin-bottom:32px}
   .cl-cta{margin-top:60px;text-align:center}
   .cl-cta a{display:inline-block;padding:16px 40px;background:var(--c-ink);color:#FAF6F1;text-decoration:none;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase}
+  @media(max-width:640px){
+    .cl-topbar{padding:16px 20px}
+    .cl-wrap{padding:40px 20px}
+    .cl-stats{grid-template-columns:1fr}
+    .cl-stat{display:flex;align-items:center;gap:16px;padding:16px 20px}
+    .cl-stat-num{font-size:32px}
+  }
 `;
 
 export default function Closet() {

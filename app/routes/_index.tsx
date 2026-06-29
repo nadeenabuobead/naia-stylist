@@ -597,6 +597,21 @@ function BuySkipWidget() {
 
 
 
+const dbCss = `
+  .db-wrap{padding:60px 40px}
+  .db-cta{display:grid;grid-template-columns:1fr auto;align-items:center;gap:40px;padding:60px 48px}
+  .db-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+  .db-recent{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+  .db-tools{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+  @media(max-width:640px){
+    .db-wrap{padding:60px 20px}
+    .db-cta{grid-template-columns:1fr;padding:40px 24px}
+    .db-stats{grid-template-columns:repeat(2,1fr)}
+    .db-recent{grid-template-columns:repeat(2,1fr)}
+    .db-tools{grid-template-columns:1fr}
+  }
+`;
+
 export default function Index() {
   const data = useLoaderData<typeof loader>();
 
@@ -608,7 +623,8 @@ export default function Index() {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--c-bg)" }}>
-      <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "60px 40px" }}>
+      <style>{dbCss}</style>
+      <div className="db-wrap" style={{ maxWidth: "1200px", margin: "0 auto" }}>
 
         {/* Welcome */}
         <h1 style={{ fontFamily: "var(--ff-display)", fontSize: "clamp(40px,5vw,64px)", fontWeight: 900, lineHeight: 1, marginBottom: "8px" }}>
@@ -629,7 +645,7 @@ export default function Index() {
         </div>
 
         {/* 2. Style Me CTA — hero */}
-        <div style={{ background: "var(--c-ink)", color: "var(--c-bg)", padding: "60px 48px", marginBottom: "48px", display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: "40px" }}>
+        <div className="db-cta" style={{ background: "var(--c-ink)", color: "var(--c-bg)", marginBottom: "48px" }}>
           <div>
             <div style={{ fontFamily: "var(--ff-ui)", fontSize: "8px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--c-burg)", marginBottom: "16px" }}>YOUR PERSONAL STYLIST</div>
             <h2 style={{ fontFamily: "var(--ff-display)", fontSize: "clamp(32px,4vw,48px)", fontWeight: 900, marginBottom: "16px", lineHeight: 1.1 }}>
@@ -647,7 +663,7 @@ export default function Index() {
         {/* 3. Styling snapshot */}
         <div style={{ marginBottom: "60px" }}>
           <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "20px" }}>Your styling snapshot</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "16px" }}>
+          <div className="db-stats">
             {[
               { num: stats.looksStyled, label: "Looks created" },
               { num: stats.closetPieces, label: "Wardrobe pieces" },
@@ -674,7 +690,7 @@ export default function Index() {
               <Link to="/quick-style" style={{ display: "inline-block", padding: "14px 32px", background: "var(--c-burg)", color: "var(--c-bg)", textDecoration: "none", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "3px", textTransform: "uppercase" }}>STYLE ME</Link>
             </div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "24px" }}>
+            <div className="db-recent">
               {customer.stylingSessions.slice(0,6).map((session: any) => (
                 <div key={session.id} style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)", padding: "24px" }}>
                   <div style={{ fontFamily: "var(--ff-ui)", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "8px" }}>
@@ -899,7 +915,7 @@ export default function Index() {
         <div style={{ marginBottom: "60px" }}>
           <h2 style={{ fontFamily: "var(--ff-display)", fontSize: "32px", fontWeight: 900, marginBottom: "8px" }}>Style tools</h2>
           <p style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)", marginBottom: "24px" }}>Everything you need in one place</p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "20px" }}>
+          <div className="db-tools">
             <Link to="/closet" style={{ background: "var(--c-surface)", padding: "32px", border: "1px solid var(--c-border)", textDecoration: "none", color: "inherit", display: "block" }}>
               <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "12px" }}>WARDROBE</div>
               <h3 style={{ fontFamily: "var(--ff-display)", fontSize: "22px", fontWeight: 700, marginBottom: "8px", color: "var(--c-ink)" }}>Digital Wardrobe</h3>

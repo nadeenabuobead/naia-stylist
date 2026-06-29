@@ -26,6 +26,12 @@ const css = `
   .bs-btn{padding:16px 40px;border:none;background:var(--c-burg);color:#FAF6F1;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase;cursor:pointer}
   .bs-btn:disabled{background:var(--c-muted-bg);color:var(--c-muted);opacity:.65;cursor:not-allowed}
   .bs-btn-outline{padding:14px 32px;border:1px solid var(--c-border);background:transparent;font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--c-ink);cursor:pointer}
+  .bs-two-col{display:grid;grid-template-columns:1fr 1fr;gap:48px}
+  @media(max-width:640px){
+    .bs-topbar{padding:16px 20px}
+    .bs-wrap{padding:40px 20px}
+    .bs-two-col{grid-template-columns:1fr;gap:32px}
+  }
 `;
 
 export default function BuyOrSkip() {
@@ -175,7 +181,7 @@ export default function BuyOrSkip() {
 
         {/* Step 2: Tag */}
         {step === "tag" && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "48px" }}>
+          <div className="bs-two-col">
             <div>
               <img src={imageUrl} alt="Item" style={{ width: "100%", border: "1px solid var(--c-border)" }} />
             </div>
@@ -222,7 +228,7 @@ export default function BuyOrSkip() {
 
         {/* Step 3: Result */}
         {step === "result" && result && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "48px" }}>
+          <div className="bs-two-col">
             <div>
               <img src={imageUrl} alt="Item" style={{ width: "100%", border: "1px solid var(--c-border)", marginBottom: "16px" }} />
               <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
