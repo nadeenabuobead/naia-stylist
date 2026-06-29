@@ -346,7 +346,7 @@ export default function Closet() {
         </div>
 
         <div className="cl-cta">
-          <Link to="/quick-style">Style Me →</Link>
+          <Link to="/style-me">Style Me →</Link>
         </div>
       </div>
     </div>

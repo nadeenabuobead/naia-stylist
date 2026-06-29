@@ -315,7 +315,7 @@ function NoPassportDashboard() {
             CREATE YOUR PASSPORT →
           </Link>
           <Link
-            to="/quick-style"
+            to="/style-me"
             style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", textDecoration: "none" }}
           >
             Try Quick Style →
@@ -652,7 +652,7 @@ export default function Index() {
               Get a look based on your mood, plans, comfort needs, and Style DNA.
             </p>
           </div>
-          <Link to="/quick-style" style={{ display: "inline-block", padding: "20px 40px", border: "1px solid var(--c-bg)", color: "var(--c-bg)", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none", whiteSpace: "nowrap" }}>
+          <Link to="/style-me" style={{ display: "inline-block", padding: "20px 40px", border: "1px solid var(--c-bg)", color: "var(--c-bg)", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none", whiteSpace: "nowrap" }}>
             START SESSION →
           </Link>
         </div>
@@ -679,12 +679,12 @@ export default function Index() {
         <div style={{ marginBottom: "60px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
             <h2 style={{ fontFamily: "var(--ff-display)", fontSize: "32px", fontWeight: 900 }}>Your recent looks</h2>
-            <Link to="/quick-style" style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", textDecoration: "none" }}>STYLE AGAIN →</Link>
+            <Link to="/style-me" style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", textDecoration: "none" }}>STYLE AGAIN →</Link>
           </div>
           {customer.stylingSessions.length === 0 ? (
             <div style={{ padding: "60px", textAlign: "center", background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
               <p style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--c-muted)", marginBottom: "24px" }}>No looks yet — start your first session</p>
-              <Link to="/quick-style" style={{ display: "inline-block", padding: "14px 32px", background: "var(--c-burg)", color: "var(--c-bg)", textDecoration: "none", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "3px", textTransform: "uppercase" }}>STYLE ME</Link>
+              <Link to="/style-me" style={{ display: "inline-block", padding: "14px 32px", background: "var(--c-burg)", color: "var(--c-bg)", textDecoration: "none", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "3px", textTransform: "uppercase" }}>STYLE ME</Link>
             </div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "24px" }}>
@@ -792,7 +792,7 @@ export default function Index() {
               <p style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--c-muted)", marginBottom: "32px" }}>
                 Rate a few looks and nAia will start building a profile that's truly yours — your moods, your occasions, your feelings.
               </p>
-              <Link to="/quick-style" style={{ display: "inline-block", padding: "16px 32px", background: "var(--c-burg)", color: "var(--c-bg)", textDecoration: "none", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase" }}>RATE A LOOK →</Link>
+              <Link to="/style-me" style={{ display: "inline-block", padding: "16px 32px", background: "var(--c-burg)", color: "var(--c-bg)", textDecoration: "none", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase" }}>RATE A LOOK →</Link>
             </div>
           )}
         </div>
@@ -918,7 +918,7 @@ export default function Index() {
               <h3 style={{ fontFamily: "var(--ff-display)", fontSize: "22px", fontWeight: 700, marginBottom: "8px", color: "var(--c-ink)" }}>Digital Wardrobe</h3>
               <p style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)" }}>Upload, save, and style your pieces with nAia.</p>
             </Link>
-            <Link to="/quick-style" style={{ background: "var(--c-ink)", color: "var(--c-bg)", padding: "32px", textDecoration: "none", display: "block" }}>
+            <Link to="/style-me" style={{ background: "var(--c-ink)", color: "var(--c-bg)", padding: "32px", textDecoration: "none", display: "block" }}>
               <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", marginBottom: "12px" }}>STYLING SESSION</div>
               <h3 style={{ fontFamily: "var(--ff-display)", fontSize: "22px", fontWeight: 900, marginBottom: "8px" }}>Style Me</h3>
               <p style={{ fontFamily: "var(--ff-body)", fontSize: "14px", fontStyle: "italic", opacity: 0.8 }}>Get a personalized outfit based on your mood and occasion.</p>

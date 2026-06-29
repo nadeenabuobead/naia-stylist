@@ -521,7 +521,7 @@ export default function OnboardingComplete() {
         {/* CTAs */}
         <div className="cp-section-label">What would you like to do first?</div>
 
-        <a href="/quick-style" className="cp-action">
+        <a href="/style-me" className="cp-action">
           <div>
             <div className="cp-action-title">Style Me</div>
             <div className="cp-action-sub">Get outfit ideas based on your mood</div>

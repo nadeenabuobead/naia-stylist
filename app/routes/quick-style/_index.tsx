@@ -2,6 +2,10 @@ import { useState } from "react";
 import { Form, redirect } from "react-router";
 import type { ActionFunctionArgs } from "react-router";
 
+export async function loader() {
+  return redirect("/style-me");
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   const { getSession, commitSession } = await import("~/lib/session.server");
   
