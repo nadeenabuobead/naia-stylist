@@ -921,7 +921,7 @@ export default function Index() {
             <Link to="/quick-style" style={{ background: "var(--c-ink)", color: "var(--c-bg)", padding: "32px", textDecoration: "none", display: "block" }}>
               <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", marginBottom: "12px" }}>STYLING SESSION</div>
               <h3 style={{ fontFamily: "var(--ff-display)", fontSize: "22px", fontWeight: 900, marginBottom: "8px" }}>Style Me</h3>
-              <p style={{ fontFamily: "var(--ff-body)", fontSize: "14px", fontStyle: "italic", opacity: 0.8 }}>Get a personalized outfit based on your mood and occasion.</p>
+              <p style={{ fontFamily: "var(--ff-body)", fontSize: "14px", fontStyle: "italic", opacity: 0.8 }}>Get a personalized outfit based on your mood, occasion, and what feels right today.</p>
             </Link>
             <Link to="/buyskip" style={{ background: "var(--c-tint)", padding: "32px", border: "1px solid var(--c-tint-med)", textDecoration: "none", display: "block" }}>
               <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", marginBottom: "12px" }}>SHOPPING TOOL</div>
