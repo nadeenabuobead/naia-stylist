@@ -10,7 +10,6 @@ export default [
   route("style-me/mood", "routes/style-me/mood.tsx"),
   route("style-me/feeling", "routes/style-me/feeling.tsx"),
   route("style-me/occasion", "routes/style-me/occasion.tsx"),
-  route("style-me/comfort", "routes/style-me/comfort.tsx"),
   route("style-me/source", "routes/style-me/source.tsx"),
   route("style-me/result", "routes/style-me/result.tsx"),
   route("api/customer-auth", "routes/api.customer-auth.jsx"),
