@@ -26,7 +26,7 @@ export async function loader({ request }) {
   // customer's internal CUID in the public image URL. Cloudinary upload signatures are
   // valid for one hour from their timestamp.
   const assetFolder = `naia-wardrobe/${naiaCustomer.id}`;
-  const allowedFormats = "jpg,jpeg,png,webp";
+  const allowedFormats = "jpg,jpeg,png,webp,heic,heif";
 
   // Parameters must be sorted alphabetically for the Cloudinary signature.
   // public_id is intentionally excluded so Cloudinary auto-generates it;

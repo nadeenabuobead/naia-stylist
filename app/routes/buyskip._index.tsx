@@ -52,6 +52,19 @@ export default function BuyOrSkip() {
   const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver"];
 
   const handleUpload = async (file: File) => {
+    const mimeType = file.type.toLowerCase();
+    const ext = (file.name.split(".").pop() ?? "").toLowerCase();
+    const formatOk = mimeType
+      ? ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"].includes(mimeType)
+      : ["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(ext);
+    if (!formatOk) {
+      setUploadError("Unsupported format. Please upload a JPG, PNG, WEBP, or HEIC photo.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadError("Photo is too large. Please choose an image under 10 MB.");
+      return;
+    }
     setUploading(true);
     setUploadError("");
     try {
@@ -78,7 +91,8 @@ export default function BuyOrSkip() {
       const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, { method: "POST", body: formData });
       const uploadData = await res.json();
       if (!uploadData.secure_url) {
-        setUploadError("Upload failed. Please try another photo.");
+        const cloudMsg = typeof uploadData?.error?.message === "string" ? uploadData.error.message : null;
+        setUploadError(cloudMsg ? `Upload failed: ${cloudMsg}` : "Upload failed. Please try another photo.");
         return;
       }
       setImageUrl(uploadData.secure_url);
