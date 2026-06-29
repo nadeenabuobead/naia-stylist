@@ -26,7 +26,7 @@ export default function App() {
             --c-bg:       #F6EFE8;
             --c-surface:  #FAF6F1;
             --c-panel:    rgba(252,249,245,0.76);
-            --c-ink:      #28150C;
+            --c-ink:      #4A322B;
             --c-muted:    #64544C;
             --c-burg:     #6B1D26;
             --c-taupe:    #E3D4C9;
