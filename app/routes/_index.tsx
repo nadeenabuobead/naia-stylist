@@ -4,6 +4,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { requireCurrentNaiaCustomer } from "../lib/naia-session.server";
 import prisma from "../db.server";
 import { quizQuestions } from "../lib/onboarding/quiz-data";
+import { dailyStyleNotes } from "../lib/daily-style-notes";
 
 // Option label and colour-hex lookups for the Passport Lite summary
 const PASSPORT_LABELS: Record<string, Record<string, string>> = {};
@@ -20,6 +21,21 @@ for (const q of quizQuestions) {
 
 function passportLabel(qId: string, oId: string): string {
   return PASSPORT_LABELS[qId]?.[oId] ?? oId.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function getDubaiDayOfYear(): number {
+  const dubaiDate = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Dubai",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).formatToParts(new Date());
+  const year = Number(dubaiDate.find(p => p.type === "year")!.value);
+  const month = Number(dubaiDate.find(p => p.type === "month")!.value);
+  const day = Number(dubaiDate.find(p => p.type === "day")!.value);
+  const start = new Date(year, 0, 0);
+  const current = new Date(year, month - 1, day);
+  return Math.floor((current.getTime() - start.getTime()) / 86400000);
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -56,40 +72,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? (customer.postOutfitReviews.reduce((sum, r) => sum + (r.overallFeeling ?? 0), 0) / customer.postOutfitReviews.length).toFixed(1)
     : "0";
 
-  const quotes = [
-    "Some days call for softness. Others for structure.",
-    "Dress for the version of yourself you're becoming.",
-    "Confidence begins in silhouette.",
-    "Today asks for ease, not effort.",
-    "Elegance is often restraint.",
-    "Power can be quiet.",
-    "A look can shift the way you move through the world.",
-    "What you wear is how you greet the world.",
-    "Style is the shape of your inner life.",
-    "Becoming is a matter of small choices.",
-    "The right outfit doesn't just cover you — it carries you.",
-    "Dressing well is a form of self-respect.",
-    "Your wardrobe is a conversation you have with yourself every morning.",
-    "Wear what makes you feel like the best version of today.",
-    "Style is not about what you own. It's about what you choose.",
-    "The most powerful thing you can wear is intention.",
-    "Effortless is the result of thought, not the absence of it.",
-    "A great outfit begins with knowing how you want to feel.",
-    "Fashion fades. The feeling you dress for stays.",
-    "You don't need more clothes. You need the right ones.",
-    "Dress for the energy you want to walk into the room with.",
-    "Every outfit is a decision about who you are today.",
-    "The way you dress is the first thing you say before you speak.",
-    "Softness is not weakness. It is its own kind of power.",
-    "The most elegant women dress for themselves first.",
-    "Your style is not a trend. It is a language.",
-    "Wear something today that makes you stand a little taller.",
-    "Getting dressed is an act of becoming.",
-    "A wardrobe built with intention never runs out of options.",
-    "Style is remembering who you are, even on hard days.",
-    "The best looks are the ones that feel like you — only more so."
-  ];
-  const dailyQuote = quotes[(new Date().getDate() - 1) % quotes.length];
+  const enabledNotes = dailyStyleNotes.filter(n => n.enabled);
+  const dailyNote = enabledNotes[(getDubaiDayOfYear() - 1) % enabledNotes.length];
 
   const profile = customer.onboardingProfile;
 
@@ -282,7 +266,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
     styleResponseProfile,
     insights: {
-      dailyQuote,
+      dailyNote: { text: dailyNote.text, attribution: dailyNote.attribution },
       stylingIdentity,
       styleDNA,
       todayStyleEnergy
@@ -631,10 +615,13 @@ export default function Index() {
           Welcome back, <em style={{ fontStyle: "italic", color: "var(--c-burg)" }}>{customer.firstName || "there"}</em>.
         </h1>
 
-        {/* 1. Daily quote / today's style energy */}
+        {/* 1. Daily Style Note / today's style energy */}
         <div style={{ marginBottom: "48px", marginTop: "32px", padding: "24px 32px", borderLeft: "2px solid var(--c-tint-med)" }}>
           <div style={{ fontFamily: "var(--ff-display)", fontSize: "20px", fontStyle: "italic", color: "var(--c-ink)", marginBottom: "8px" }}>
-            "{insights.dailyQuote}"
+            "{insights.dailyNote.text}"
+          </div>
+          <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "8px" }}>
+            — {insights.dailyNote.attribution}
           </div>
           <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--c-burg)" }}>
             Today's style energy: {insights.todayStyleEnergy || insights.stylingIdentity}
