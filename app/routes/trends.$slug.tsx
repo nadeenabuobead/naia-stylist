@@ -44,6 +44,8 @@ const css = `
   .tr-wrap{max-width:900px;margin:0 auto;padding:60px 40px}
   .tr-section-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--accent);margin-bottom:16px}
   .tr-body{font-family:var(--ff-body);font-size:18px;line-height:1.8;color:var(--deep)}
+  .tr-edit-entry{display:inline-block;padding:14px 32px;border:1px solid var(--accent);color:var(--accent);font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;text-decoration:none;transition:background .2s,color .2s}
+  .tr-edit-entry:hover{background:var(--accent);color:#f4f4f1}
   .tr-divider{height:1px;background:rgba(59,5,16,.08);margin:40px 0}
   .tr-tag{display:inline-block;padding:6px 14px;font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;margin:4px 4px 4px 0}
   .tr-tag.rising{background:rgba(139,32,53,0.08);color:var(--accent)}
@@ -292,6 +294,11 @@ export default function TrendReportDetail() {
           <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "20px", fontStyle: "italic", color: "#e1dbd7", lineHeight: 1.7 }}>
             {report.editorialIntro}
           </p>
+        </div>
+
+        {/* My nAia Trend Edit entry point */}
+        <div style={{ textAlign: "center", marginBottom: "48px" }}>
+          <Link to={`/trends/${report.slug}/edit`} className="tr-edit-entry">My nAia Trend Edit →</Link>
         </div>
 
         {/* Key trends */}
