@@ -25,9 +25,12 @@ const css = `
 `;
 
 export default function TrendReports() {
+  // Equal-date entries keep their order from trendReports (stable sort);
+  // the comparator must return 0 on ties or the native sort does not
+  // guarantee that original order is preserved.
   const publishedReports = trendReports
     .filter((r) => r.published)
-    .sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1));
+    .sort((a, b) => (a.publishedAt === b.publishedAt ? 0 : a.publishedAt < b.publishedAt ? 1 : -1));
 
   return (
     <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>

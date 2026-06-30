@@ -2,6 +2,18 @@ import { useState } from "react";
 import { Link, useLoaderData, type LoaderFunctionArgs } from "react-router";
 import { trendReports, type TrendReportData } from "../lib/trend-reports";
 
+const SOURCE_DATE_MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+// Editorial display only — the underlying "YYYY-MM-DD" source value is unchanged.
+// Formatted by string parts (not Date/Intl) so there is no local-timezone shift risk.
+function formatSourceDate(isoDate: string): string {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  return `${day} ${SOURCE_DATE_MONTHS[month - 1]} ${year}`;
+}
+
 export async function loader({ params }: LoaderFunctionArgs) {
   const report = trendReports.find((r) => r.slug === params.slug && r.published);
 
@@ -168,7 +180,7 @@ export default function TrendReportDetail() {
 
     // Brands
     if (report.brandsToWatch?.length) {
-      addText("BRANDS TO WATCH", 8, "bold", [139, 32, 53], 4);
+      addText("REFERENCES BEHIND THIS EDIT", 8, "bold", [139, 32, 53], 4);
       report.brandsToWatch.forEach((b) => { addText(`${b.name} — ${b.why}`, 10, "normal", [34, 21, 22], 4); });
       y += 4;
     }
@@ -176,16 +188,54 @@ export default function TrendReportDetail() {
     // Investment
     if (report.investmentNotes) { addText("INVESTMENT NOTES", 8, "bold", [139, 32, 53], 3); addText(report.investmentNotes, 10, "normal", [34, 21, 22], 8); }
 
-    // nAia interpretation
+    // nAia interpretation — compact editorial quote block, sized to its actual content
+    // (previously a fixed-height box drawn before the text, leaving empty space below short copy).
     if (report.naiaInterpretation) {
+      const boxPad = 8; // mm, ≈ the webpage callout's 32px padding
+      const boxTextWidth = maxW - boxPad * 2;
+      const labelLineHeight = 8 * 0.45;
+      const bodyLineHeight = 11 * 0.45;
+
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      const labelLines = doc.splitTextToSize("NAIA INTERPRETATION", boxTextWidth);
+
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "italic");
+      const bodyLines = doc.splitTextToSize(String(report.naiaInterpretation || ""), boxTextWidth);
+
+      const labelBlockHeight = labelLines.length * labelLineHeight + 3;
+      const bodyBlockHeight = bodyLines.length * bodyLineHeight;
+      const boxHeight = labelBlockHeight + bodyBlockHeight + boxPad * 2;
+
+      if (y + boxHeight > 280) { doc.addPage(); y = 20; }
+
       doc.setFillColor(250, 245, 242);
-      doc.rect(margin - 2, y - 2, maxW + 4, 40, "F");
+      doc.rect(margin - 2, y - 2, maxW + 4, boxHeight, "F");
       doc.setDrawColor(139, 32, 53);
       doc.setLineWidth(0.8);
-      doc.line(margin, y - 2, margin, y + 38);
+      doc.line(margin, y - 2, margin, y - 2 + boxHeight);
       doc.setLineWidth(0.2);
-      addText("NAIA INTERPRETATION", 8, "bold", [139, 32, 53], 3);
-      addText(report.naiaInterpretation, 11, "italic", [34, 21, 22], 8);
+
+      let textY = y + boxPad;
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(139, 32, 53);
+      labelLines.forEach((line: string) => {
+        doc.text(line, margin + boxPad, textY);
+        textY += labelLineHeight;
+      });
+      textY += 3;
+
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "italic");
+      doc.setTextColor(34, 21, 22);
+      bodyLines.forEach((line: string) => {
+        doc.text(line, margin + boxPad, textY);
+        textY += bodyLineHeight;
+      });
+
+      y += boxHeight + 8;
     }
 
     // How to wear
@@ -203,7 +253,7 @@ export default function TrendReportDetail() {
     if (report.sources?.length) {
       addText("SOURCES", 8, "bold", [139, 32, 53], 4);
       report.sources.forEach((s) => {
-        const dateSuffix = s.publishedAt ? ` (${s.publishedAt})` : "";
+        const dateSuffix = s.publishedAt ? ` (${formatSourceDate(s.publishedAt)})` : "";
         addText(`${s.publisher} — ${s.title}${dateSuffix}`, 10, "normal", [34, 21, 22], 6);
       });
       const reportUrl = typeof window !== "undefined" ? window.location.href : "";
@@ -282,7 +332,7 @@ export default function TrendReportDetail() {
         {/* Brands to watch */}
         {report.brandsToWatch?.length ? (
           <div style={{ marginBottom: "48px" }}>
-            <div className="tr-section-label">Brands & Designers to Watch</div>
+            <div className="tr-section-label">References Behind This Edit</div>
             {report.brandsToWatch.map((b, i) => (
               <div key={i} className="tr-brand-card">
                 <div className="tr-brand-name">{b.name}</div>
@@ -346,7 +396,7 @@ export default function TrendReportDetail() {
               <div className="tr-source-title">
                 <a href={s.url} target="_blank" rel="noreferrer">{s.title}</a>
               </div>
-              {s.publishedAt && <div className="tr-source-date">{s.publishedAt}</div>}
+              {s.publishedAt && <div className="tr-source-date">{formatSourceDate(s.publishedAt)}</div>}
             </div>
           ))}
         </div>
