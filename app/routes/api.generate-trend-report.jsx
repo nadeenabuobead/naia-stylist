@@ -1,4 +1,8 @@
+import { requireStaffAccess } from "../lib/staff-auth.server";
+
 export async function action({ request }) {
+  await requireStaffAccess(request);
+
   const body = await request.json();
   const { query, reportType = "seasonal" } = body;
 

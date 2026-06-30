@@ -349,86 +349,6 @@ function TrendReportDisplay({ report, query }) {
     </div>
   );
 }
-function DesignerDashboardEmbed() {
-  const [dashboard, setDashboard] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // Fetch all reviews directly (designer mode)
-    fetch("/api/stats")
-      .then(r => r.json())
-      .then(d => {
-       console.log("Stats data:", d);
-       setDashboard(d);
-})
-      .catch(err => console.error("Fetch error:", err))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <div style={{ padding: "48px", textAlign: "center" }}>Loading designer insights...</div>;
-  if (!dashboard) return <div style={{ padding: "48px", textAlign: "center", color: "#c5553a" }}>No data available</div>;
-
-  return (
-    <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "48px 24px", fontFamily: '"Cormorant Garamond", Georgia, serif' }}>
-      <h1 style={{ fontSize: "36px", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: "8px" }}>Designer Dashboard</h1>
-      <p style={{ fontSize: "15px", fontStyle: "italic", color: "#8a7f75", marginBottom: "48px" }}>Your aggregate insights</p>
-      
-      <div style={{ padding: "24px", background: "#f5f2ee", borderRadius: "2px", marginBottom: "24px" }}>
-        <p style={{ fontSize: "14px", margin: 0 }}>
-          <strong>Note:</strong> This is using your personal data as a demo. The full designer dashboard with all users' data is still being configured.
-        </p>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", marginBottom: "48px" }}>
-        <div style={{ padding: "24px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" }}>
-          <p style={{ fontSize: "32px", fontStyle: "italic", margin: "0 0 8px" }}>{dashboard.totalRatings}</p>
-          <p style={{ fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", margin: 0 }}>Total Ratings</p>
-        </div>
-        <div style={{ padding: "24px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" }}>
-          <p style={{ fontSize: "32px", fontStyle: "italic", margin: "0 0 8px" }}>{dashboard.feltLikeMePercent}%</p>
-          <p style={{ fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", margin: 0 }}>Style Alignment</p>
-        </div>
-        <div style={{ padding: "24px", background: "#eee9e2", borderRadius: "2px", textAlign: "center" }}>
-          <p style={{ fontSize: "32px", fontStyle: "italic", margin: "0 0 8px" }}>{dashboard.wouldWearAgainPercent}%</p>
-          <p style={{ fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", margin: 0 }}>Would Wear Again</p>
-        </div>
-      </div>
-
-      {dashboard.bestMoods?.length > 0 && (
-        <div style={{ marginBottom: "48px" }}>
-          <h2 style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "16px" }}>Best Emotional Shifts</h2>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
-            {dashboard.bestMoods.map(m => (
-              <div key={m.name} style={{ padding: "12px 20px", background: "#1a1816", color: "#f5f2ee", borderRadius: "2px", fontSize: "14px", fontStyle: "italic" }}>
-                {m.name} <span style={{ fontSize: "12px", opacity: 0.7 }}>({m.avg}/5)</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {dashboard.bestEvents?.length > 0 && (
-        <div style={{ marginBottom: "48px" }}>
-          <h2 style={{ fontSize: "11px", letterSpacing: "0.2em", textTransform: "uppercase", color: "#8a7f75", marginBottom: "16px" }}>Best Occasions</h2>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
-            {dashboard.bestEvents.map((e, idx) => (
-              <div key={e.name} style={{ 
-                padding: "12px 20px", 
-                background: idx === 0 ? "#1a1816" : "#eee9e2",
-                color: idx === 0 ? "#f5f2ee" : "#1a1816",
-                borderRadius: "2px", 
-                fontSize: "14px" 
-              }}>
-                {e.name} <span style={{ fontSize: "12px", opacity: 0.7 }}>({e.avg}/5)</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 const VIBES = [
   "Tired", "Anxious", "Calm", "Overwhelmed", "Confident",
   "Excited", "Low", "Happy", "Irritated", "Flat / unmotivated"
@@ -1220,10 +1140,10 @@ export default function Stylist() {
   const [tryOnPhoto, setTryOnPhoto] = useState(null);
   const [showAccount, setShowAccount] = useState(false);
   const [showTrends, setShowTrends] = useState(false);  
-  const [trendQuery, setTrendQuery] = useState("");
+  const [trendQuery] = useState("");
   const [trendReport, setTrendReport] = useState(null);
   const [personalizedReport, setPersonalizedReport] = useState(null);
-  const [loadingTrends, setLoadingTrends] = useState(false);
+  const [loadingTrends] = useState(false);
   const [closetSynced, setClosetSynced] = useState(false);
   const [showConfidence, setShowConfidence] = useState(false);
   const [lastHistoryId, setLastHistoryId] = useState(null);
@@ -1783,10 +1703,6 @@ export default function Stylist() {
       color: "#221516"
     },
   };
-// Check for designer mode
-  if (typeof window !== 'undefined' && window.location.search.includes('designer=true') && customer) {
-    return <DesignerDashboardEmbed />;
-  }
   return (
     <div style={s.page}>
       <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400;1,700&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
@@ -1883,111 +1799,9 @@ export default function Stylist() {
       </button>
     </div>
     
-    <p style={{ fontSize: "14px", color: "#8a7f75", marginBottom: "24px", fontStyle: "italic" }}>
-      Get trend insights filtered through your personal style DNA based on your past outfit ratings.
+    <p style={{ fontSize: "14px", color: "#8a7f75", fontStyle: "italic" }}>
+      Trend reports are being updated.
     </p>
-
-    <div style={{ marginBottom: "24px" }}>
-      <label style={{ fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#8a7f75", display: "block", marginBottom: "8px" }}>
-        What trend report do you want?
-      </label>
-      <input
-        type="text"
-        placeholder="e.g., Spring 2026 trends, Designer bags, Paris Fashion Week"
-        value={trendQuery}
-        onChange={(e) => setTrendQuery(e.target.value)}
-        onKeyDown={async (e) => {
-          if (e.key === "Enter" && trendQuery.trim() && !loadingTrends) {
-            setLoadingTrends(true);
-            setTrendReport(null);
-            setPersonalizedReport(null);
-            
-            try {
-              const trendRes = await fetch("/api/generate-trend-report", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-Customer-Token": customerToken },
-                body: JSON.stringify({ query: trendQuery, reportType: "seasonal" }),
-              });
-              const trendData = await trendRes.json();
-              setTrendReport(trendData.report);
-
-              const personalRes = await fetch("/api/personalized-trends", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-Customer-Token": customerToken },
-                body: JSON.stringify({ trendReport: trendData.report }),
-              });
-              const personalData = await personalRes.json();
-              
-              if (personalData.hasEnoughData) {
-                setPersonalizedReport(personalData.personalizedReport);
-              } else {
-                alert(personalData.message || "Rate more looks to unlock personalized trends!");
-              }
-            } catch (err) {
-              console.error(err);
-              alert("Failed to generate report");
-            } finally {
-              setLoadingTrends(false);
-            }
-          }
-        }}
-        style={{ 
-          width: "100%", 
-          padding: "12px", 
-          fontSize: "14px", 
-          border: "1px solid #d4cfc9", 
-          borderRadius: "2px",
-          fontFamily: '"Cormorant Garamond", Georgia, serif'
-        }}
-      />
-      <button 
-        style={{ 
-          ...s.btn, 
-          marginTop: "12px", 
-          width: "100%",
-          opacity: (loadingTrends || !trendQuery.trim()) ? 0.5 : 1,
-          cursor: (loadingTrends || !trendQuery.trim()) ? "not-allowed" : "pointer"
-        }}
-        disabled={loadingTrends || !trendQuery.trim()}
-        onClick={async () => {
-          if (!trendQuery.trim() || loadingTrends) return;
-          
-          setLoadingTrends(true);
-          setTrendReport(null);
-          setPersonalizedReport(null);
-          
-          try {
-            const trendRes = await fetch("/api/generate-trend-report", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "X-Customer-Token": customerToken },
-              body: JSON.stringify({ query: trendQuery, reportType: "seasonal" }),
-            });
-            const trendData = await trendRes.json();
-            setTrendReport(trendData.report);
-
-            const personalRes = await fetch("/api/personalized-trends", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "X-Customer-Token": customerToken },
-              body: JSON.stringify({ trendReport: trendData.report }),
-            });
-            const personalData = await personalRes.json();
-            
-            if (personalData.hasEnoughData) {
-              setPersonalizedReport(personalData.personalizedReport);
-            } else {
-              alert(personalData.message || "Rate more looks to unlock personalized trends!");
-            }
-          } catch (err) {
-            console.error(err);
-            alert("Failed to generate report");
-          } finally {
-            setLoadingTrends(false);
-          }
-        }}
-      >
-        {loadingTrends ? "Generating..." : "Generate Report"}
-      </button>
-    </div>
 
     {loadingTrends && (
       <div style={{ padding: "32px", background: "#f5f2ee", borderRadius: "2px", textAlign: "center", marginBottom: "24px" }}>

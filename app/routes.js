@@ -25,12 +25,12 @@ export default [
   route("api/generate-trend-report", "routes/api.generate-trend-report.jsx"),
   route("api/personalized-trends", "routes/api.personalized-trends.jsx"),
   route("trends", "routes/trends.jsx"),
-  route("naia-designer-dashboard-2026", "routes/naia-designer-dashboard-2026.jsx"),
   route("stylist", "routes/stylist.jsx"),
   route("stylist-popup", "routes/stylist-popup.jsx"),
   route("api/wardrobe-insights", "routes/api.wardrobe-insights.jsx"),
   route("app", "routes/app.jsx", [
     index("routes/app._index.jsx"),
+    route("designer-intelligence", "routes/app.designer-intelligence.jsx"),
   ]),
   route("auth/login", "routes/auth.login/route.jsx"),
   route("auth/shopify/login",    "routes/auth.shopify.login.tsx"),
@@ -54,6 +54,5 @@ export default [
   route("api/customer-account-identity", "routes/api.customer-account-identity.jsx"),
   route("api/designer-dashboard", "routes/api.designer-dashboard.jsx"),
   route("api/seed-staging", "routes/api.seed-staging.jsx"),
-  route("api/stats", "routes/api.stats.jsx"),
   route("api/track_event", "routes/api.track_event.jsx"),
 ];

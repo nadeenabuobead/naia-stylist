@@ -1,41 +1,30 @@
-// app/routes/naia-designer-dashboard-2026.jsx
-import { useEffect, useState } from "react";
+// app/routes/app.designer-intelligence.jsx
+import { useLoaderData } from "react-router";
+import { requireStaffAccess } from "../lib/staff-auth.server";
+import { getDesignerStats } from "../lib/designer-stats.server";
+
+export async function loader({ request }) {
+  await requireStaffAccess(request);
+  const dashboard = await getDesignerStats();
+  if (dashboard.error) {
+    throw new Response(dashboard.error, { status: 500 });
+  }
+  return { dashboard };
+}
+
+export function ErrorBoundary() {
+  return (
+    <div style={s.container}>
+      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+      <div style={s.innerContainer}>
+        <div style={s.error}>Unable to load dashboard data</div>
+      </div>
+    </div>
+  );
+}
 
 export default function DesignerDashboard() {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch("/api/designer-stats")
-      .then(r => r.json())
-      .then(d => {
-        setData(d);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
-
-  if (loading) {
-    return (
-      <div style={s.container}>
-        <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-        <div style={s.innerContainer}>
-          <div style={s.loading}>Loading designer insights...</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!data) {
-    return (
-      <div style={s.container}>
-        <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-        <div style={s.innerContainer}>
-          <div style={s.error}>Unable to load dashboard data</div>
-        </div>
-      </div>
-    );
-  }
+  const { dashboard: data } = useLoaderData();
 
   return (
     <div style={s.container}>
@@ -245,11 +234,11 @@ export default function DesignerDashboard() {
 
       {/* Design Actions */}
       <Section title="Design Actions" desc="Recommended next steps">
-        <div style={{ 
-          fontSize: "13px", 
-          color: "#8B7355", 
-          backgroundColor: "#faf9f7", 
-          padding: "12px 16px", 
+        <div style={{
+          fontSize: "13px",
+          color: "#8B7355",
+          backgroundColor: "#faf9f7",
+          padding: "12px 16px",
           borderLeft: "3px solid #8B7355",
           marginBottom: "20px",
           lineHeight: "1.6"
@@ -281,9 +270,9 @@ export default function DesignerDashboard() {
         {data.productPairings && data.productPairings.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
             {data.productPairings.map((pairing, i) => (
-              <div key={i} style={{ 
-                padding: "16px", 
-                background: "#fff", 
+              <div key={i} style={{
+                padding: "16px",
+                background: "#fff",
                 border: "1px solid #e5e5e5",
                 borderRadius: "4px"
               }}>
@@ -396,18 +385,18 @@ function PieceCard({ piece, styleDNA }) {
     <div style={s.pieceCard}>
       <div style={s.pieceName}>{piece.name}</div>
       <div style={s.pieceCategory}>{piece.category}</div>
-      
+
       <div style={s.pieceStats}>
         <div>★ {piece.avgRating?.toFixed(1)} ({piece.ratingCount} ratings)</div>
         <div>Would wear in real life: <strong>{Math.round(piece.rewear * 100)}%</strong></div>
-        
+
         {piece.helpedFeel && piece.helpedFeel.length > 0 && (
           <div style={{ marginTop: "8px" }}>
             <span style={s.muted}>Helped users feel: </span>
             <span style={s.helpedFeel}>{piece.helpedFeel.join(", ").toLowerCase()}</span>
           </div>
         )}
-        
+
         {piece.bestOccasions && piece.bestOccasions.length > 0 && (
           <div style={{ marginTop: "8px" }}>
             <span style={s.muted}>Best for: </span>
@@ -421,23 +410,23 @@ function PieceCard({ piece, styleDNA }) {
             )}
           </div>
         )}
-        
+
         {piece.positiveComments && piece.positiveComments.length > 0 && (
           <div style={{ marginTop: "8px" }}>
             <span style={s.muted}>Top feedback: </span>
             <span style={{ fontSize: "13px", color: "#2a9d8f" }}>{piece.positiveComments.join(", ").toLowerCase()}</span>
           </div>
         )}
-        
+
         <div style={{ marginTop: "8px" }}>
           <span style={s.muted}>Watch-outs: </span>
           <span style={{ fontSize: "13px", color: "#d97706" }}>
-            {piece.negativeComments && piece.negativeComments.length > 0 
+            {piece.negativeComments && piece.negativeComments.length > 0
               ? piece.negativeComments.join(", ")
               : "No repeated watch-outs yet"}
           </span>
         </div>
-        
+
         <div style={{ marginTop: "8px" }}>
           <span style={s.muted}>Resonates with: </span>
           <span style={s.dna}>{piece.topDNA && piece.topDNA.length > 0 ? piece.topDNA.join(", ") : (styleDNA && styleDNA.length > 0 ? styleDNA.slice(0,3).map(d => d.name).join(", ") + " (overall)" : "More style DNA data needed")}</span>
@@ -536,7 +525,7 @@ function BodyPatternCard({ pattern }) {
         {pattern.userCount} {pattern.userCount === 1 ? "user" : "users"} selected this preference
       </div>
 
-      
+
       <div style={{ marginTop: "12px" }}>
         <div style={s.label}>Best-performing nAia pieces:</div>
         {pattern.bestPieces && pattern.bestPieces.length > 0 ? (
@@ -551,9 +540,9 @@ function BodyPatternCard({ pattern }) {
           </div>
         )}
       </div>
-      
 
-      
+
+
       <div style={{ marginTop: "12px" }}>
         <div style={s.label}>Fit concerns:</div>
         {pattern.struggles && pattern.struggles.length > 0 ? (
@@ -564,7 +553,7 @@ function BodyPatternCard({ pattern }) {
           <div style={{ fontSize: "14px", color: "#999", marginTop: "4px" }}>No repeated fit concerns yet</div>
         )}
       </div>
-      
+
       <div style={{ marginTop: "12px" }}>
         <div style={s.label}>Design implication:</div>
         <div style={{ fontSize: "14px", color: "#666", fontStyle: "italic", marginTop: "4px" }}>
@@ -637,9 +626,9 @@ function DesignActionCard({ action }) {
     if (priority === "Early Signal") return "#9CA3AF";
     return "#D4C4B0";
   };
-  
+
   const color = getPriorityColor(action.priority || action.confidenceBadge);
-  
+
   return (
     <div style={{
       padding: "22px",
@@ -665,34 +654,34 @@ function DesignActionCard({ action }) {
           {action.confidenceBadge || action.priority}
         </span>
       </div>
-      
+
       <div style={{ fontSize: "14px", color: "#8B7355", marginBottom: "14px", fontWeight: 600 }}>
         {action.actionType}: {action.action}
       </div>
-      
+
       <div style={{ marginBottom: "10px" }}>
         <span style={{ fontSize: "12px", fontWeight: 600, color: "#666", marginRight: "8px" }}>Performance:</span>
         <span style={{ fontSize: "13px", color: "#333" }}>{action.performance}</span>
       </div>
-      
+
       <div style={{ marginBottom: "10px" }}>
         <span style={{ fontSize: "12px", fontWeight: 600, color: "#2a9d8f", marginRight: "8px" }}>Liked:</span>
         <span style={{ fontSize: "13px", color: "#333" }}>{action.liked}</span>
       </div>
-      
+
       <div style={{ marginBottom: "10px" }}>
         <span style={{ fontSize: "12px", fontWeight: 600, color: "#d97706", marginRight: "8px" }}>Watch:</span>
         <span style={{ fontSize: "13px", color: "#92400e" }}>{action.watch}</span>
       </div>
-      
+
       <div style={{ marginBottom: "14px" }}>
         <span style={{ fontSize: "12px", fontWeight: 600, color: "#1a1816", marginRight: "8px" }}>Next step:</span>
         <span style={{ fontSize: "13px", color: "#333" }}>{action.nextStep}</span>
       </div>
-      
-      <div style={{ 
-        fontSize: "12px", 
-        color: "#999", 
+
+      <div style={{
+        fontSize: "12px",
+        color: "#999",
         paddingTop: "10px",
         borderTop: "1px solid #f0f0f0"
       }}>
@@ -706,80 +695,80 @@ function DesignActionCard({ action }) {
 
 // Styles
 const s = {
-  container: { 
-    background: "#f4f4f1", 
+  container: {
+    background: "#f4f4f1",
     minHeight: "100vh",
     padding: "60px 0"
   },
   innerContainer: {
-    maxWidth: "1400px", 
-    margin: "0 auto", 
+    maxWidth: "1400px",
+    margin: "0 auto",
     padding: "0 40px"
   },
-  header: { 
-    marginBottom: "60px", 
+  header: {
+    marginBottom: "60px",
     paddingBottom: "32px",
     borderBottom: "1px solid rgba(59,5,16,0.1)"
   },
-  h1: { 
-    fontFamily: "'Playfair Display', serif", 
-    fontSize: "clamp(48px, 6vw, 72px)", 
-    fontWeight: 900, 
+  h1: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: "clamp(48px, 6vw, 72px)",
+    fontWeight: 900,
     lineHeight: 1,
-    margin: "0 0 12px", 
-    color: "#221516" 
+    margin: "0 0 12px",
+    color: "#221516"
   },
-  subtitle: { 
-    fontFamily: "'Cormorant Garamond', serif", 
-    fontSize: "20px", 
+  subtitle: {
+    fontFamily: "'Cormorant Garamond', serif",
+    fontSize: "20px",
     fontStyle: "italic",
-    color: "#7a6f6a", 
-    margin: 0 
+    color: "#7a6f6a",
+    margin: 0
   },
-  h2: { 
-    fontFamily: "'Playfair Display', serif", 
-    fontSize: "28px", 
-    fontWeight: 700, 
-    margin: "0 0 8px", 
-    color: "#221516" 
+  h2: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: "28px",
+    fontWeight: 700,
+    margin: "0 0 8px",
+    color: "#221516"
   },
-  section: { 
-    marginBottom: "48px", 
-    background: "rgba(255,255,255,0.6)", 
-    padding: "40px", 
+  section: {
+    marginBottom: "48px",
+    background: "rgba(255,255,255,0.6)",
+    padding: "40px",
     border: "1px solid rgba(59,5,16,0.06)",
     backdropFilter: "blur(10px)"
   },
-  sectionDesc: { 
-    fontFamily: "'Cormorant Garamond', serif", 
-    fontSize: "16px", 
-    color: "#7a6f6a", 
-    margin: "0 0 32px", 
-    fontStyle: "italic" 
+  sectionDesc: {
+    fontFamily: "'Cormorant Garamond', serif",
+    fontSize: "16px",
+    color: "#7a6f6a",
+    margin: "0 0 32px",
+    fontStyle: "italic"
   },
-  statsGrid: { 
-    display: "grid", 
-    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", 
-    gap: "20px" 
+  statsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+    gap: "20px"
   },
-  statCard: { 
-    padding: "24px", 
-    background: "rgba(255,255,255,0.8)", 
-    border: "1px solid rgba(59,5,16,0.08)" 
+  statCard: {
+    padding: "24px",
+    background: "rgba(255,255,255,0.8)",
+    border: "1px solid rgba(59,5,16,0.08)"
   },
-  statValue: { 
-    fontFamily: "'Playfair Display', serif", 
-    fontSize: "36px", 
-    fontWeight: 700, 
-    color: "#8b2035", 
-    marginBottom: "8px" 
+  statValue: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: "36px",
+    fontWeight: 700,
+    color: "#8b2035",
+    marginBottom: "8px"
   },
-  statLabel: { 
-    fontFamily: "'Space Mono', monospace", 
-    fontSize: "9px", 
-    color: "#7a6f6a", 
-    textTransform: "uppercase", 
-    letterSpacing: "2px" 
+  statLabel: {
+    fontFamily: "'Space Mono', monospace",
+    fontSize: "9px",
+    color: "#7a6f6a",
+    textTransform: "uppercase",
+    letterSpacing: "2px"
   },
   grid3: {
     display: "grid",
@@ -804,72 +793,72 @@ const s = {
     letterSpacing: "1px",
     color: "#7a6f6a"
   },
-  pieceGrid: { 
-    display: "grid", 
-    gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", 
-    gap: "20px" 
+  pieceGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
+    gap: "20px"
   },
-  pieceCard: { 
-    padding: "24px", 
-    background: "rgba(255,255,255,0.8)", 
-    border: "1px solid rgba(59,5,16,0.06)" 
+  pieceCard: {
+    padding: "24px",
+    background: "rgba(255,255,255,0.8)",
+    border: "1px solid rgba(59,5,16,0.06)"
   },
-  pieceName: { 
-    fontFamily: "'Playfair Display', serif", 
-    fontSize: "20px", 
-    fontWeight: 600, 
-    marginBottom: "8px", 
-    color: "#221516" 
+  pieceName: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: "20px",
+    fontWeight: 600,
+    marginBottom: "8px",
+    color: "#221516"
   },
-  pieceCategory: { 
-    fontFamily: "'Space Mono', monospace", 
-    fontSize: "9px", 
-    color: "#7a6f6a", 
-    textTransform: "uppercase", 
-    letterSpacing: "2px", 
-    marginBottom: "16px" 
+  pieceCategory: {
+    fontFamily: "'Space Mono', monospace",
+    fontSize: "9px",
+    color: "#7a6f6a",
+    textTransform: "uppercase",
+    letterSpacing: "2px",
+    marginBottom: "16px"
   },
-  pieceStats: { 
-    fontFamily: "'Cormorant Garamond', serif", 
-    fontSize: "15px", 
-    color: "#221516", 
-    lineHeight: 1.6 
+  pieceStats: {
+    fontFamily: "'Cormorant Garamond', serif",
+    fontSize: "15px",
+    color: "#221516",
+    lineHeight: 1.6
   },
-  muted: { 
-    color: "#7a6f6a", 
+  muted: {
+    color: "#7a6f6a",
     fontSize: "14px",
     fontFamily: "'Cormorant Garamond', serif",
     fontStyle: "italic"
   },
-  helpedFeel: { 
-    fontStyle: "italic", 
+  helpedFeel: {
+    fontStyle: "italic",
     color: "#8b2035",
     fontFamily: "'Cormorant Garamond', serif"
   },
   occasions: { fontSize: "14px", fontFamily: "'Cormorant Garamond', serif" },
   dna: { fontSize: "14px", color: "#8b2035", fontFamily: "'Cormorant Garamond', serif", fontStyle: "italic" },
-  mixedReason: { 
-    fontSize: "15px", 
-    fontStyle: "italic", 
-    color: "#8b2035", 
+  mixedReason: {
+    fontSize: "15px",
+    fontStyle: "italic",
+    color: "#8b2035",
     marginBottom: "12px",
     fontFamily: "'Cormorant Garamond', serif"
   },
   friction: { color: "#8b2035", fontSize: "14px", fontFamily: "'Cormorant Garamond', serif" },
-  weakSignals: { 
-    fontSize: "15px", 
-    color: "#8b2035", 
+  weakSignals: {
+    fontSize: "15px",
+    color: "#8b2035",
     marginBottom: "12px",
     fontFamily: "'Cormorant Garamond', serif"
   },
-  label: { 
-    fontFamily: "'Space Mono', monospace", 
-    fontSize: "9px", 
-    color: "#7a6f6a", 
-    textTransform: "uppercase", 
-    letterSpacing: "2px", 
-    marginBottom: "8px", 
-    marginTop: "12px" 
+  label: {
+    fontFamily: "'Space Mono', monospace",
+    fontSize: "9px",
+    color: "#7a6f6a",
+    textTransform: "uppercase",
+    letterSpacing: "2px",
+    marginBottom: "8px",
+    marginTop: "12px"
   },
   rejections: { marginTop: "12px" },
   rejection: { fontSize: "14px", color: "#8b2035", marginLeft: "8px", fontFamily: "'Cormorant Garamond', serif" },

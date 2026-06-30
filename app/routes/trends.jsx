@@ -76,52 +76,9 @@ function TrendLoader() {
 }
 
 export default function TrendReports() {
-  const [query, setQuery] = useState("");
-  const [reportType, setReportType] = useState("category");
-  const [loading, setLoading] = useState(false);
-  const [report, setReport] = useState(null);
-  const [error, setError] = useState(null);
-
-  const reportTypes = [
-    { id: "category", label: "Category Deep Dive" },
-    { id: "seasonal", label: "Seasonal Trends" },
-    { id: "runway", label: "Fashion Week" },
-    { id: "color", label: "Color Trends" },
-    { id: "brand", label: "Brand Profile" },
-    { id: "accessories", label: "Accessory Watch" },
-    { id: "emerging", label: "Emerging Brands" },
-  ];
-
-  const placeholders = {
-    category: "e.g., Designer bags 2026, Denim 2026",
-    seasonal: "e.g., Spring 2026 trends",
-    runway: "e.g., Paris Fashion Week Fall 2026",
-    color: "e.g., Spring 2026 color stories",
-    brand: "e.g., LOEWE Spring 2026",
-    accessories: "e.g., Jewelry trends 2026",
-    emerging: "e.g., New designers to watch 2026",
-  };
-
-  async function generateReport() {
-    if (!query.trim()) return;
-    setLoading(true);
-    setReport(null);
-    setError(null);
-    try {
-      const response = await fetch("/api/generate-trend-report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, reportType }),
-      });
-      const data = await response.json();
-      if (data.error) throw new Error(data.error);
-      setReport(data.report);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [loading] = useState(false);
+  const [report] = useState(null);
+  const [error] = useState(null);
 
   return (
     <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
@@ -137,30 +94,9 @@ export default function TrendReports() {
         <h1 className="tr-headline">Trend Reports</h1>
         <p className="tr-sub">Fashion intelligence filtered through your style DNA.</p>
 
-        {/* Report type */}
-        <div style={{ marginBottom: "32px" }}>
-          <span className="tr-label">Report type</span>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-            {reportTypes.map(t => (
-              <button key={t.id} onClick={() => setReportType(t.id)} className={`tr-pill${reportType === t.id ? " on" : ""}`}>{t.label}</button>
-            ))}
-          </div>
-        </div>
-
-        {/* Input */}
-        <div style={{ marginBottom: "48px" }}>
-          <span className="tr-label">What would you like a report on?</span>
-          <input
-            className="tr-input"
-            type="text"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && generateReport()}
-            placeholder={placeholders[reportType]}
-          />
-          <button className="tr-btn" onClick={generateReport} disabled={!query.trim() || loading}>
-            {loading ? "Generating Report..." : "Generate Report →"}
-          </button>
+        {/* Trend reports are being updated */}
+        <div style={{ marginBottom: "48px", padding: "24px", border: "1px solid rgba(59,5,16,.08)", background: "rgba(255,255,255,0.5)", fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a" }}>
+          Trend reports are being updated.
         </div>
 
         {/* Loading */}
