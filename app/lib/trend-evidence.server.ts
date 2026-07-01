@@ -191,14 +191,122 @@ function matchedTerms(haystack: string, terms: string[]): string[] {
   return out;
 }
 
-// Small, explicit, code-owned signal map — connects free-text Passport
-// fields (lifestyle, desiredFeeling, desiredFeelings) to the report's own
-// howToWear contexts. Used only because these fields are rarely a literal
-// text match for a styling direction. The map never invents new styling
-// advice — it only decides whether to surface a context the report already
-// wrote (report.howToWear[].direction) for a context the shopper named.
-// Keys are literal report.howToWear[].feeling strings as written in
-// app/lib/trend-reports.ts.
+// ---------------------------------------------------------------------------
+// Style translation maps. Each map is keyed by the exact option `id` values
+// defined in app/lib/onboarding/quiz-data.ts (the only values that are ever
+// actually stored on OnboardingProfile / ClosetItem) and lists the report
+// styling-direction words that are a genuine, code-owned, human-reviewed
+// connection to that option. A map never invents a connection that isn't
+// already implied by nAia's own style vocabulary, and it is only ever used
+// to decide whether to surface a sentence already grounded in: (a) a value
+// the shopper actually chose, and (b) a word or phrase that actually
+// appears in the report's own text. No body, size, fit-success, or
+// purchase-outcome claims are made anywhere in these maps.
+// ---------------------------------------------------------------------------
+
+// Keys: style-personalities option ids.
+const PERSONALITY_STYLE_MAP: Record<string, { label: string; terms: string[] }> = {
+  "old-money": { label: "Old Money", terms: ["tailoring", "tailored", "structured", "clean", "longline"] },
+  "artsy": { label: "Artsy", terms: ["sculptural", "asymmetric", "drape", "gesture"] },
+  "edgy": { label: "Edgy", terms: ["asymmetric", "sculptural", "defined", "structured"] },
+  "feminine": { label: "Feminine", terms: ["fluid", "draped", "soft", "midi", "column", "feminine"] },
+  "corporate-chic": { label: "Corporate Chic", terms: ["tailoring", "tailored", "blazer", "trouser", "structured", "polished"] },
+  "effortlessly-chic": { label: "Effortlessly Chic", terms: ["ease", "fluid", "clean", "quiet", "familiar"] },
+  "minimal": { label: "Minimal", terms: ["clean", "restrained", "quiet", "architectural"] },
+  "trendy": { label: "Trendy", terms: ["sculptural", "asymmetric", "structured", "fluid"] },
+  "romantic": { label: "Romantic", terms: ["fluid", "draped", "soft", "midi", "ease"] },
+  "casual-cool": { label: "Casual Cool", terms: ["ease", "fluid", "familiar", "trouser", "denim"] },
+};
+
+// Keys: the union of desired-impression and desired-feelings option ids
+// (both describe an aspirational identity word, just asked two ways).
+const ASPIRATION_STYLE_MAP: Record<string, { label: string; terms: string[] }> = {
+  "refined": { label: "refined", terms: ["tailoring", "tailored", "clean", "restrained", "structured", "architectural"] },
+  "creative": { label: "creative", terms: ["sculptural", "asymmetric", "drape", "gesture", "architectural"] },
+  "powerful": { label: "powerful", terms: ["structured", "defined", "trouser", "blazer", "presence"] },
+  "soft-confident": { label: "soft but confident", terms: ["fluid", "soft", "clean", "structured", "polished", "confident"] },
+  "effortless": { label: "effortless", terms: ["ease", "fluid", "familiar", "quiet", "clean"] },
+  "interesting": { label: "interesting", terms: ["sculptural", "asymmetric", "gesture", "architectural", "drape"] },
+  "put-together": { label: "put together", terms: ["tailoring", "tailored", "structured", "clean", "polished", "blazer"] },
+  "confident": { label: "confident", terms: ["structured", "defined", "trouser", "blazer", "presence"] },
+  "comfortable": { label: "comfortable", terms: ["ease", "fluid", "familiar", "relaxed"] },
+  "elegant": { label: "elegant", terms: ["fluid", "draped", "column", "restrained", "polished"] },
+  "attractive": { label: "attractive", terms: ["polished", "feminine", "confident", "clean"] },
+  // "feminine" is shared with desired-feelings and reuses the same entry as
+  // PERSONALITY_STYLE_MAP's "feminine" terms, written out here because the
+  // two maps are keyed independently.
+  "feminine": { label: "feminine", terms: ["fluid", "draped", "midi", "column", "feminine", "soft"] },
+};
+
+// Keys: fit-preferences option ids.
+const FIT_SILHOUETTE_MAP: Record<string, { label: string; terms: string[] }> = {
+  "defined-waist": { label: "Defined Waist", terms: ["waist", "tailoring", "tailored", "structured"] },
+  "relaxed-fits": { label: "Relaxed Fits", terms: ["ease", "fluid", "relaxed", "familiar"] },
+  "structured": { label: "Structured Pieces", terms: ["structured", "blazer", "tailoring", "tailored", "architectural"] },
+  "oversized": { label: "Oversized Layers", terms: ["ease", "longline", "familiar", "fluid"] },
+  "flowy": { label: "Flowy Pieces", terms: ["fluid", "draped", "ease", "soft"] },
+  "coverage": { label: "More Coverage", terms: ["long", "layer", "trouser", "column", "vertical"] },
+  "fitted": { label: "Fitted Looks", terms: ["defined", "clean", "column", "structured"] },
+  "simple": { label: "Simple Outfits", terms: ["clean", "quiet", "restrained", "familiar"] },
+};
+
+// Keys: favorite-colors option ids. Values are the real words inside each
+// option's display name (e.g. "White / Cream" → "white", "cream"), since
+// those are the words that can plausibly appear in editorial report text —
+// the kebab-case id itself never will.
+const COLOR_SEARCH_MAP: Record<string, { label: string; terms: string[] }> = {
+  "black": { label: "Black", terms: ["black"] },
+  "white-cream": { label: "White / Cream", terms: ["white", "cream"] },
+  "beige-brown": { label: "Beige / Brown", terms: ["beige", "brown"] },
+  "grey": { label: "Grey", terms: ["grey", "gray"] },
+  "navy": { label: "Navy", terms: ["navy"] },
+  "red-burgundy": { label: "Red / Burgundy", terms: ["red", "burgundy"] },
+  "green": { label: "Green", terms: ["green"] },
+  "pink": { label: "Pink", terms: ["pink"] },
+  "prints": { label: "Prints", terms: ["print", "prints"] },
+  "colorful": { label: "Colorful Pieces", terms: ["colour", "color", "colourful", "colorful"] },
+};
+
+// Keys: the ClosetCategory enum (prisma/schema.prisma). Used only as a
+// fallback when no individual closet item's own name/tags matched — this
+// surfaces a category-level formula reference, never a claim about a
+// specific garment's styling details. Categories with no plausible report
+// vocabulary (jewelry, activewear, swimwear, loungewear, other) are left
+// empty on purpose: they simply never produce a formula match, rather than
+// forcing one.
+const CLOSET_CATEGORY_MAP: Record<string, { label: string; terms: string[] }> = {
+  TOPS: { label: "tops", terms: ["top", "knit", "shirt", "jersey"] },
+  BOTTOMS: { label: "bottoms", terms: ["trouser", "skirt", "denim"] },
+  DRESSES: { label: "dresses", terms: ["dress", "midi", "column", "slip"] },
+  OUTERWEAR: { label: "outerwear", terms: ["blazer", "jacket", "layer", "longline", "vest"] },
+  SHOES: { label: "shoes", terms: ["shoe"] },
+  BAGS: { label: "bags", terms: ["bag"] },
+  ACCESSORIES: { label: "accessories", terms: ["scarf", "accessories", "accessory"] },
+  JEWELRY: { label: "jewelry", terms: [] },
+  ACTIVEWEAR: { label: "activewear", terms: [] },
+  SWIMWEAR: { label: "swimwear", terms: [] },
+  LOUNGEWEAR: { label: "loungewear", terms: [] },
+  OTHER: { label: "other pieces", terms: [] },
+};
+
+// Keys: lifestyle option ids. Values are an ordered preference of
+// report.howToWear[].feeling labels — the first one present in a given
+// report is used, since not every report covers every context.
+const LIFESTYLE_HOWTO_MAP: Record<string, string[]> = {
+  "office": ["For work", "For everyday"],
+  "hybrid": ["For work", "For everyday"],
+  "busy-mom": ["For everyday", "For casual days"],
+  "casual-days": ["For casual days", "For everyday"],
+  "events": ["For dinner"],
+  "on-the-go": ["For everyday", "For travel"],
+  "travel": ["For travel", "For everyday"],
+  "creative": ["For everyday", "For casual days"],
+};
+
+// Free-text keyword map, used only for SavedLook.occasion (a free-text
+// field — see the "From Your Closet (saved looks)" comment below for why
+// this is the one signal that still needs fuzzy keyword matching rather
+// than an id lookup). Keys are literal report.howToWear[].feeling strings.
 const CONTEXT_SIGNAL_MAP: Record<string, string[]> = {
   "For work": ["work", "office", "professional", "career"],
   "For dinner": ["dinner", "evening", "date night", "going out"],
@@ -207,6 +315,47 @@ const CONTEXT_SIGNAL_MAP: Record<string, string[]> = {
   "For casual days": ["casual", "relaxed", "low-key"],
   "For modest dressing": ["modest", "covered", "conservative"],
 };
+
+// Positive-direction-only report text: keyTrends, rising, naiaInterpretation,
+// howToWear directions, wardrobeNote, investmentNotes. Deliberately excludes
+// `fading` — that text describes what the report says to move away from, so
+// matching a shopper's style words against it would produce a backwards
+// "this suits you" claim built from a "this is going out" sentence.
+function buildPositiveReportText(report: TrendReportData): string {
+  return [
+    ...report.keyTrends.map((t) => `${t.name} ${t.description}`),
+    ...(report.rising ?? []),
+    report.naiaInterpretation ?? "",
+    ...(report.howToWear ?? []).map((h) => h.direction),
+    report.wardrobeNote ?? "",
+    report.investmentNotes ?? "",
+  ].join(" ");
+}
+
+type TranslationHit = { label: string; term: string };
+
+// Walks `ids` against `map`, returning one hit per id that has any match in
+// `haystack`. Greedily prefers a term not already in `usedPhrases` so two
+// different sections don't lean on the exact same matched word, then
+// records whatever term it used so later calls (across sections) see it.
+function translateAllHits(
+  ids: string[],
+  map: Record<string, { label: string; terms: string[] }>,
+  haystack: string,
+  usedPhrases: Set<string>,
+): TranslationHit[] {
+  const out: TranslationHit[] = [];
+  for (const id of ids) {
+    const entry = map[id];
+    if (!entry || entry.terms.length === 0) continue;
+    const hits = matchedTerms(haystack, entry.terms);
+    if (hits.length === 0) continue;
+    const fresh = hits.find((h) => !usedPhrases.has(h.toLowerCase())) ?? hits[0];
+    out.push({ label: entry.label, term: fresh });
+    usedPhrases.add(fresh.toLowerCase());
+  }
+  return out;
+}
 
 export type ShopperEdit = {
   whatSuitsYou: string[];
@@ -219,69 +368,81 @@ export type ShopperEdit = {
   contributedEvidence: string[];
 };
 
+const MAX_SECTION_INSIGHTS = 2;
+
 export function buildShopperEdit(report: TrendReportData, evidence: ShopperEvidenceBundle): ShopperEdit {
   const profile = evidence.profile;
+  const positiveText = buildPositiveReportText(report);
 
   let profileContributed = false;
   let closetContributed = false;
   let savedLooksContributed = false;
   let reviewsContributed = false;
 
-  // Direct-overlap terms: style personalities, favourite colours, fit
-  // preferences, and desired impression — checked verbatim against report
-  // text first, before any signal map is used.
-  const styleTerms = profile
-    ? [...profile.stylePersonalities, ...profile.favoriteColors, ...profile.fitPreferences, ...profile.desiredImpression]
-    : [];
-
-  // Context text for the signal map only: lifestyle + desired feeling(s),
-  // which describe a situation rather than a style word.
-  const contextText = profile
-    ? [profile.lifestyle ?? "", profile.desiredFeeling ?? "", ...profile.desiredFeelings].filter(Boolean).join(" ")
-    : "";
+  // Shared across every section below: once a report word has been used as
+  // the grounding for one insight, later sections prefer a different word
+  // before falling back to reusing it, so the page doesn't read as the same
+  // phrase repeated five times.
+  const usedPhrases = new Set<string>();
 
   // --- What Suits You ---
+  // Priority: style-personality translation, then desired-impression /
+  // desired-feelings translation, then lifestyle → howToWear context, then
+  // (only if truly nothing translates) the report's own naiaInterpretation
+  // text, clearly framed as the report's note rather than a personal one.
   const whatSuitsYou: string[] = [];
   if (profile) {
-    for (const trend of report.keyTrends) {
-      const hits = matchedTerms(`${trend.name} ${trend.description}`, styleTerms);
-      if (hits.length > 0) {
-        whatSuitsYou.push(`${trend.name} — this lines up with ${hits.join(" and ")}, already part of how you describe your style.`);
+    for (const hit of translateAllHits(profile.stylePersonalities, PERSONALITY_STYLE_MAP, positiveText, usedPhrases)) {
+      if (whatSuitsYou.length >= MAX_SECTION_INSIGHTS) break;
+      whatSuitsYou.push(`Your ${hit.label} style direction aligns with the report's focus on ${hit.term}.`);
+      profileContributed = true;
+    }
+
+    if (whatSuitsYou.length < MAX_SECTION_INSIGHTS) {
+      const aspirationIds = [...profile.desiredImpression, ...profile.desiredFeelings];
+      for (const hit of translateAllHits(aspirationIds, ASPIRATION_STYLE_MAP, positiveText, usedPhrases)) {
+        if (whatSuitsYou.length >= MAX_SECTION_INSIGHTS) break;
+        whatSuitsYou.push(`You've said you want to feel ${hit.label} — this report's ${hit.term} note speaks directly to that.`);
         profileContributed = true;
       }
     }
 
-    if (report.naiaInterpretation) {
-      const hits = matchedTerms(report.naiaInterpretation, styleTerms);
-      if (hits.length > 0) {
-        whatSuitsYou.push(`The report's own note on who this suits mentions ${hits.join(" and ")} — already part of how you describe yourself.`);
-        profileContributed = true;
-      }
-    }
-
-    if (contextText) {
-      const contextMatch = (report.howToWear ?? []).find((entry) => {
-        const keywords = CONTEXT_SIGNAL_MAP[entry.feeling];
-        return keywords ? matchedTerms(contextText, keywords).length > 0 : false;
-      });
-      if (contextMatch) {
-        whatSuitsYou.push(`${contextMatch.feeling} — ${contextMatch.direction} This is the report's own direction for that context, and it lines up with how you described your lifestyle.`);
-        profileContributed = true;
+    if (whatSuitsYou.length < MAX_SECTION_INSIGHTS) {
+      const lifestyleIds = (profile.lifestyle ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+      for (const lid of lifestyleIds) {
+        if (whatSuitsYou.length >= MAX_SECTION_INSIGHTS) break;
+        const priority = LIFESTYLE_HOWTO_MAP[lid];
+        if (!priority) continue;
+        const match = (report.howToWear ?? []).find((h) => priority.includes(h.feeling));
+        if (match && !usedPhrases.has(match.feeling.toLowerCase())) {
+          whatSuitsYou.push(`${match.feeling} — ${match.direction} This fits how you described your day-to-day.`);
+          usedPhrases.add(match.feeling.toLowerCase());
+          profileContributed = true;
+        }
       }
     }
   }
   if (whatSuitsYou.length === 0) {
     whatSuitsYou.push(
-      "Nothing here lines up clearly with your Passport yet — that's worth knowing rather than guessing. As your Passport fills in, this section will get sharper."
+      profile && report.naiaInterpretation
+        ? `The report's own note on who this suits: "${report.naiaInterpretation}" Your Passport doesn't clearly echo this yet, but it's worth reading on its own terms.`
+        : "Nothing here lines up clearly with your Passport yet — that's worth knowing rather than guessing. As your Passport fills in, this section will get sharper."
     );
   }
 
   // --- What to Approach Carefully ---
+  // "personal": a genuine conflict between a past rated look and this
+  // report. "report-only": no personal conflict exists, so this is just the
+  // report's own fading list — rendered de-emphasised as "Report Notes" by
+  // the route, never framed as advice about the shopper. "none": neither
+  // exists, so the section is hidden entirely rather than filled with a
+  // placeholder sentence.
   let approachCarefully: string[] = [];
   let approachCarefullySource: "personal" | "report-only" | "none" = "none";
   if (evidence.reviewSignal.reviewCount > 0 && evidence.reviewSignal.didntWorkTags.length > 0) {
     const personal: string[] = [];
     for (const trend of report.keyTrends) {
+      if (personal.length >= MAX_SECTION_INSIGHTS) break;
       const hits = matchedTerms(`${trend.name} ${trend.description}`, evidence.reviewSignal.didntWorkTags);
       if (hits.length > 0) {
         personal.push(`${trend.name} — you've noted "${hits[0]}" on past looks, so approach this one carefully.`);
@@ -294,54 +455,100 @@ export function buildShopperEdit(report: TrendReportData, evidence: ShopperEvide
     }
   }
   if (approachCarefully.length === 0 && report.fading && report.fading.length > 0) {
-    approachCarefully = report.fading.map((f) => `${f} — the report itself flags this as fading.`);
+    approachCarefully = report.fading.slice(0, MAX_SECTION_INSIGHTS).map((f) => `${f} — the report itself flags this as fading.`);
     approachCarefullySource = "report-only";
-  }
-  if (approachCarefully.length === 0) {
-    approachCarefully = ["This report doesn't flag anything in particular to approach carefully — read it as an open invitation rather than a caution."];
-    approachCarefullySource = "none";
   }
 
   // --- Your Colour & Silhouette Read ---
+  // Priority: exact favourite-colour overlap, then fit-preference
+  // translation, then style-personality translation (if not already spent
+  // in What Suits You), then the report's own rising list as a last resort.
   const colourSilhouetteRead: string[] = [];
   if (profile) {
-    const trendText = [
-      ...(report.rising ?? []),
-      ...report.keyTrends.map((t) => t.description),
-    ].join(" ");
-    for (const color of profile.favoriteColors) {
-      if (matchedTerms(trendText, [color]).length > 0) {
-        colourSilhouetteRead.push(`${color} — a colour you already favour, and it shows up in this season's direction.`);
+    const colorHits: TranslationHit[] = [];
+    for (const cid of profile.favoriteColors) {
+      const entry = COLOR_SEARCH_MAP[cid];
+      if (!entry) continue;
+      const hits = matchedTerms(positiveText, entry.terms);
+      const fresh = hits.find((h) => !usedPhrases.has(h.toLowerCase()));
+      if (fresh) {
+        colorHits.push({ label: entry.label, term: fresh });
+        usedPhrases.add(fresh.toLowerCase());
+      }
+    }
+    for (const hit of colorHits) {
+      if (colourSilhouetteRead.length >= MAX_SECTION_INSIGHTS) break;
+      colourSilhouetteRead.push(`${hit.label} — a colour you already favour, and it's part of this season's palette (${hit.term}).`);
+      profileContributed = true;
+    }
+
+    if (colourSilhouetteRead.length < MAX_SECTION_INSIGHTS) {
+      for (const hit of translateAllHits(profile.fitPreferences, FIT_SILHOUETTE_MAP, positiveText, usedPhrases)) {
+        if (colourSilhouetteRead.length >= MAX_SECTION_INSIGHTS) break;
+        colourSilhouetteRead.push(`Your preference for ${hit.label.toLowerCase()} is in range here — ${hit.term} is part of this season's silhouette direction.`);
         profileContributed = true;
       }
     }
-    for (const fit of profile.fitPreferences) {
-      if (matchedTerms(trendText, [fit]).length > 0) {
-        colourSilhouetteRead.push(`${fit} — this season's silhouettes have room for this preference.`);
+
+    if (colourSilhouetteRead.length < MAX_SECTION_INSIGHTS) {
+      for (const hit of translateAllHits(profile.stylePersonalities, PERSONALITY_STYLE_MAP, positiveText, usedPhrases)) {
+        if (colourSilhouetteRead.length >= MAX_SECTION_INSIGHTS) break;
+        colourSilhouetteRead.push(`For your ${hit.label} direction, ${hit.term} is a silhouette note worth watching this season.`);
         profileContributed = true;
       }
     }
   }
   if (colourSilhouetteRead.length === 0) {
-    colourSilhouetteRead.push("Your Passport doesn't list a favourite colour or fit preference that clearly echoes this season's direction — that's alright, the next report may land differently.");
+    const risingPick = (report.rising ?? []).slice(0, MAX_SECTION_INSIGHTS);
+    colourSilhouetteRead.push(
+      risingPick.length > 0
+        ? `This season's silhouette direction centres on ${risingPick.join(" and ").toLowerCase()} — worth comparing against your own colours and fits when you're ready to shop.`
+        : "Your Passport doesn't clearly echo a colour or fit note in this particular report — that's alright, the next report may land differently."
+    );
   }
 
   // --- From Your Closet (items) ---
+  // Priority: a specific item's own name/category/colour/tags matching the
+  // report text, then — only for categories not already matched by name —
+  // a category-level formula reference. The formula reference deliberately
+  // does not quote wardrobeNote/investmentNotes verbatim (that text belongs
+  // to "One Next Step"); it names only the matched concept word and points
+  // the shopper there for the full read.
   const fromCloset: string[] = [];
-  const reportText = [
-    ...report.keyTrends.map((t) => `${t.name} ${t.description}`),
-    ...(report.rising ?? []),
-    report.wardrobeNote ?? "",
-  ].join(" ");
+  const matchedCategories = new Set<string>();
   for (const item of evidence.closetItems) {
+    if (fromCloset.length >= MAX_SECTION_INSIGHTS) break;
     const terms = [item.category, item.primaryColor ?? "", ...item.styleTags].filter(Boolean);
-    if (matchedTerms(reportText, terms).length > 0 && item.name) {
-      fromCloset.push(`${item.name} — pairs naturally with this direction.`);
+    const hits = matchedTerms(positiveText, terms);
+    if (hits.length > 0 && item.name) {
+      fromCloset.push(`${item.name} — pairs naturally with this direction (${hits[0]}).`);
       closetContributed = true;
+      matchedCategories.add(item.category);
+    }
+  }
+  if (fromCloset.length < MAX_SECTION_INSIGHTS) {
+    const consideredCategories = new Set<string>();
+    for (const item of evidence.closetItems) {
+      if (fromCloset.length >= MAX_SECTION_INSIGHTS) break;
+      if (matchedCategories.has(item.category) || consideredCategories.has(item.category)) continue;
+      consideredCategories.add(item.category);
+      const entry = CLOSET_CATEGORY_MAP[item.category];
+      if (!entry || entry.terms.length === 0) continue;
+      const hits = matchedTerms(positiveText, entry.terms);
+      const fresh = hits.find((h) => !usedPhrases.has(h.toLowerCase())) ?? hits[0];
+      if (fresh) {
+        fromCloset.push(`Start with your ${entry.label}: ${fresh} is part of the report's seasonal formula. Use that category as your starting point, then see "One Next Step" for the full styling direction.`);
+        closetContributed = true;
+        usedPhrases.add(fresh.toLowerCase());
+      }
     }
   }
 
-  // --- From Your Closet (saved looks) — only real name/occasion, only on a grounded match ---
+  // --- From Your Closet (saved looks) ---
+  // SavedLook.occasion is a free-text field (not a fixed option id like
+  // lifestyle), so it still needs keyword matching via CONTEXT_SIGNAL_MAP
+  // rather than an id lookup. Only real name/occasion, only on a grounded
+  // match.
   const fromSavedLooks: string[] = [];
   for (const look of evidence.savedLooks) {
     if (!look.name || !look.occasion) continue;
@@ -356,15 +563,20 @@ export function buildShopperEdit(report: TrendReportData, evidence: ShopperEvide
   }
 
   // --- One Next Step ---
+  // Always the report's own wardrobeNote/investmentNotes, reworded as a
+  // single action — never a description of a missing evidence type. Falls
+  // back to data-entry language only when the closet is literally empty and
+  // the report itself offers nothing (neither case applies to any of the
+  // three published reports today).
   let nextStep: string;
-  if (evidence.closetItems.length === 0) {
-    nextStep = "Add a few pieces to your Closet and this section will start pointing to specific items you already own.";
-  } else if (fromCloset.length === 0 && fromSavedLooks.length === 0) {
-    nextStep = "None of your saved Closet pieces or looks line up with this direction yet — that's a natural gap to fill, not a problem with what you already own.";
-  } else if (report.wardrobeNote) {
+  if (report.wardrobeNote) {
     nextStep = report.wardrobeNote;
+  } else if (report.investmentNotes) {
+    nextStep = report.investmentNotes;
+  } else if (evidence.closetItems.length === 0) {
+    nextStep = "Add a few pieces to your Closet and this section will start pointing to specific items you already own.";
   } else {
-    nextStep = "Revisit this report once you've added more to your Closet or Passport for a sharper read.";
+    nextStep = "Revisit this report once you've added more to your Passport for a sharper read.";
   }
 
   const contributedEvidence: string[] = [];

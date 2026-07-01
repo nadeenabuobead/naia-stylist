@@ -84,6 +84,10 @@ const css = `
   .tr-edit-list{list-style:none;margin:0;padding:0}
   .tr-edit-list li{font-family:var(--ff-body);font-size:17px;line-height:1.7;color:var(--deep);padding:14px 0;border-bottom:1px solid rgba(59,5,16,.06)}
   .tr-edit-note{font-family:var(--ff-mono);font-size:10px;letter-spacing:1px;color:var(--muted);margin-top:8px}
+  .tr-report-notes{padding:16px 0 0}
+  .tr-report-notes-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+  .tr-report-notes-list{list-style:none;margin:0;padding:0}
+  .tr-report-notes-list li{font-family:var(--ff-body);font-size:15px;font-style:italic;line-height:1.6;color:var(--muted);padding:8px 0}
   .tr-empty-state{padding:48px;text-align:center;border:1px solid rgba(59,5,16,.08);background:rgba(255,255,255,0.5)}
   .tr-empty-state-text{font-family:'Cormorant Garamond',serif;font-size:20px;font-style:italic;color:var(--deep);margin-bottom:20px;line-height:1.6}
   .tr-empty-state-cta{display:inline-block;padding:14px 32px;background:#221516;color:#f4f4f1;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;text-decoration:none}
@@ -107,7 +111,7 @@ export function ErrorBoundary() {
 }
 
 export default function TrendEdit() {
-  const { report, edit, hasProfile, hasCloset, reviewCount, generationFailed } = useLoaderData() as LoaderData;
+  const { report, edit, hasProfile, hasCloset, generationFailed } = useLoaderData() as LoaderData;
 
   return (
     <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
@@ -148,11 +152,11 @@ export default function TrendEdit() {
         ) : edit ? (
           <>
             <div className="tr-edit-banner">
-              <div className="tr-edit-banner-label">nAia&apos;s Interpretation, Based on Your Own Style Data</div>
+              <div className="tr-edit-banner-label">This Report, Read Through Your Style</div>
               <p className="tr-edit-banner-text">
                 {edit.contributedEvidence.length > 0
                   ? `Built from ${formatList(edit.contributedEvidence)} — not a second generic trend report.`
-                  : "This is the report read alongside your Passport — nothing specific matched yet, so treat this as a starting point rather than a tailored read."}
+                  : "This is the report read alongside your Passport — a starting point rather than a fully tailored read just yet."}
               </p>
             </div>
 
@@ -163,19 +167,21 @@ export default function TrendEdit() {
               </ul>
             </div>
 
-            <div className="tr-edit-section">
-              <div className="tr-section-label">What to Approach Carefully</div>
-              <ul className="tr-edit-list">
-                {edit.approachCarefully.map((line, i) => <li key={i}>{line}</li>)}
-              </ul>
-              {edit.approachCarefullySource === "report-only" && (
-                <p className="tr-edit-note">
-                  {reviewCount === 0
-                    ? "Based on the report's own direction — you haven't rated any looks yet, so this isn't personal advice yet."
-                    : "Based on the report's own direction — none of your rated looks overlapped with this particular trend."}
-                </p>
-              )}
-            </div>
+            {edit.approachCarefullySource === "personal" ? (
+              <div className="tr-edit-section">
+                <div className="tr-section-label">What to Approach Carefully</div>
+                <ul className="tr-edit-list">
+                  {edit.approachCarefully.map((line, i) => <li key={i}>{line}</li>)}
+                </ul>
+              </div>
+            ) : edit.approachCarefullySource === "report-only" ? (
+              <div className="tr-report-notes">
+                <div className="tr-report-notes-label">Report Notes</div>
+                <ul className="tr-report-notes-list">
+                  {edit.approachCarefully.map((line, i) => <li key={i}>{line}</li>)}
+                </ul>
+              </div>
+            ) : null}
 
             <div className="tr-edit-section">
               <div className="tr-section-label">Your Colour & Silhouette Read</div>
@@ -192,7 +198,7 @@ export default function TrendEdit() {
                   {edit.fromSavedLooks.map((line, i) => <li key={`s${i}`}>{line}</li>)}
                 </ul>
               ) : hasCloset ? (
-                <p className="tr-body">None of your saved Closet pieces or looks line up with this direction yet — see &quot;One Next Step&quot; below.</p>
+                <p className="tr-body">Your Closet doesn&apos;t have an obvious match for this particular direction yet — &quot;One Next Step&quot; below has a concrete way to bring it in.</p>
               ) : (
                 <p className="tr-body">You haven&apos;t saved any Closet items yet, so this section can&apos;t point to anything specific yet. Add a few pieces to unlock it.</p>
               )}
