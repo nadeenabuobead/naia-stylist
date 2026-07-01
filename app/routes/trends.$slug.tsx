@@ -62,11 +62,20 @@ const css = `
   .tr-source-title{font-family:var(--ff-body);font-size:16px;color:var(--deep)}
   .tr-source-title a{color:var(--deep);text-decoration:underline}
   .tr-source-date{font-family:var(--ff-mono);font-size:10px;color:var(--muted);margin-top:4px}
+  .tr-ref-signal{font-family:var(--ff-body);font-size:16px;font-style:italic;color:var(--deep);line-height:1.6;margin-bottom:10px}
+  .tr-ref-naia-label{font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:4px}
+  .tr-ref-naia{font-family:var(--ff-body);font-size:15px;font-style:italic;color:var(--muted);line-height:1.6}
+  .tr-sss-entry{padding:16px 0;border-bottom:1px solid rgba(59,5,16,.06)}
+  .tr-sss-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+  .tr-verdict-block{padding:24px 0;margin:8px 0 40px}
+  .tr-cta-block{text-align:center;padding:48px 40px;background:rgba(34,21,22,.03);border-top:1px solid rgba(59,5,16,.08);margin-top:48px}
+  .tr-cta-link{display:inline-block;padding:16px 40px;background:#221516;color:#f4f4f1;font-family:var(--ff-mono);font-size:10px;letter-spacing:3px;text-transform:uppercase;text-decoration:none;margin-bottom:16px}
+  .tr-cta-sub{font-family:var(--ff-body);font-size:16px;font-style:italic;color:var(--muted);line-height:1.6}
   .tr-actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
   .tr-action-btn{display:inline-flex;align-items:center;gap:10px;padding:14px 32px;border:none;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;cursor:pointer}
   .tr-action-btn.primary{background:#221516;color:#f4f4f1}
   .tr-action-btn.secondary{background:transparent;color:var(--deep);border:1px solid rgba(59,5,16,.2)}
-  @media print{.tr-topbar,.tr-actions{display:none!important}.tr-wrap{padding:0!important;max-width:100%!important}}
+  @media print{.tr-topbar,.tr-actions,.tr-cta-block{display:none!important}.tr-wrap{padding:0!important;max-width:100%!important}}
 `;
 
 export function ErrorBoundary() {
@@ -160,7 +169,16 @@ export default function TrendReportDetail() {
     doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(139, 32, 53);
-    doc.text("TREND INTELLIGENCE · " + report.season.toUpperCase(), margin, y); y += 10;
+    doc.text("TREND INTELLIGENCE · " + report.season.toUpperCase(), margin, y); y += 6;
+
+    if (report.mood) {
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "italic");
+      doc.setTextColor(122, 111, 106);
+      doc.text(report.mood, margin, y); y += 8;
+    } else {
+      y += 4;
+    }
 
     doc.setDrawColor(34, 21, 22);
     doc.line(margin, y, pageW - margin, y); y += 10;
@@ -180,15 +198,33 @@ export default function TrendReportDetail() {
     if (report.rising?.length) { addText("WHAT'S RISING", 8, "bold", [139, 32, 53], 3); addText(report.rising.join("  ·  "), 10, "normal", [34, 21, 22], 8); }
     if (report.fading?.length) { addText("WHAT'S FADING", 8, "bold", [139, 32, 53], 3); addText(report.fading.join("  ·  "), 10, "normal", [122, 111, 106], 8); }
 
-    // Brands
-    if (report.brandsToWatch?.length) {
+    // References Behind This Edit
+    if (report.referencesBehindThisEdit?.length) {
+      addText("REFERENCES BEHIND THIS EDIT", 8, "bold", [139, 32, 53], 4);
+      report.referencesBehindThisEdit.forEach((ref) => {
+        addText(ref.collection ? `${ref.brand} — ${ref.collection}` : ref.brand, 11, "bold", [34, 21, 22], 2);
+        addText(ref.signal, 10, "italic", [34, 21, 22], 2);
+        addText("nAia: " + ref.naiaRead, 9, "normal", [122, 111, 106], 6);
+      });
+      y += 4;
+    } else if (report.brandsToWatch?.length) {
       addText("REFERENCES BEHIND THIS EDIT", 8, "bold", [139, 32, 53], 4);
       report.brandsToWatch.forEach((b) => { addText(`${b.name} — ${b.why}`, 10, "normal", [34, 21, 22], 4); });
       y += 4;
     }
 
-    // Investment
-    if (report.investmentNotes) { addText("INVESTMENT NOTES", 8, "bold", [139, 32, 53], 3); addText(report.investmentNotes, 10, "normal", [34, 21, 22], 8); }
+    // Investment Notes — Spend / Save / Already Own It?
+    if (report.spendSaveSkip) {
+      addText("INVESTMENT NOTES", 8, "bold", [139, 32, 53], 4);
+      addText("Spend", 9, "bold", [139, 32, 53], 2);
+      addText(report.spendSaveSkip.spend, 10, "normal", [34, 21, 22], 4);
+      addText("Save", 9, "bold", [139, 32, 53], 2);
+      addText(report.spendSaveSkip.save, 10, "normal", [34, 21, 22], 4);
+      addText("Already Own It?", 9, "bold", [139, 32, 53], 2);
+      addText(report.spendSaveSkip.alreadyOwn, 10, "normal", [34, 21, 22], 8);
+    } else if (report.investmentNotes) {
+      addText("INVESTMENT NOTES", 8, "bold", [139, 32, 53], 3); addText(report.investmentNotes, 10, "normal", [34, 21, 22], 8);
+    }
 
     // nAia interpretation — compact editorial quote block, sized to its actual content
     // (previously a fixed-height box drawn before the text, leaving empty space below short copy).
@@ -240,6 +276,12 @@ export default function TrendReportDetail() {
       y += boxHeight + 8;
     }
 
+    // nAia Verdict
+    if (report.naiaVerdict) {
+      addText("NAIA VERDICT", 8, "bold", [139, 32, 53], 3);
+      addText(report.naiaVerdict, 10, "normal", [34, 21, 22], 8);
+    }
+
     // How to wear
     if (report.howToWear?.length) {
       addText("HOW TO WEAR THIS TREND", 8, "bold", [139, 32, 53], 4);
@@ -285,20 +327,20 @@ export default function TrendReportDetail() {
       <div className="tr-wrap">
         {/* Report header */}
         <div style={{ background: "#221516", color: "#f4f4f1", padding: "60px 48px", marginBottom: "48px" }}>
-          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "8px", letterSpacing: "3px", textTransform: "uppercase", color: "#8b2035", marginBottom: "20px" }}>
+          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "8px", letterSpacing: "3px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>
             nAia Trend Intelligence · {report.season} · {new Date(report.publishedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
           </div>
+          {report.mood && (
+            <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "17px", fontStyle: "italic", color: "rgba(225,219,215,0.72)", marginBottom: "20px", letterSpacing: "0.3px" }}>
+              {report.mood}
+            </div>
+          )}
           <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: "clamp(28px,4vw,44px)", fontWeight: 900, fontStyle: "italic", lineHeight: 1.1, marginBottom: "24px" }}>
             {report.title}
           </h1>
           <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "20px", fontStyle: "italic", color: "#e1dbd7", lineHeight: 1.7 }}>
             {report.editorialIntro}
           </p>
-        </div>
-
-        {/* My nAia Trend Edit entry point */}
-        <div style={{ textAlign: "center", marginBottom: "48px" }}>
-          <Link to={`/trends/${report.slug}/edit`} className="tr-edit-entry">My nAia Trend Edit →</Link>
         </div>
 
         {/* Key trends */}
@@ -336,24 +378,50 @@ export default function TrendReportDetail() {
 
         <div className="tr-divider" />
 
-        {/* Brands to watch */}
-        {report.brandsToWatch?.length ? (
+        {/* References Behind This Edit */}
+        {(report.referencesBehindThisEdit?.length || report.brandsToWatch?.length) ? (
           <div style={{ marginBottom: "48px" }}>
             <div className="tr-section-label">References Behind This Edit</div>
-            {report.brandsToWatch.map((b, i) => (
-              <div key={i} className="tr-brand-card">
-                <div className="tr-brand-name">{b.name}</div>
-                <div className="tr-brand-why">{b.why}</div>
-              </div>
-            ))}
+            {report.referencesBehindThisEdit
+              ? report.referencesBehindThisEdit.map((ref, i) => (
+                  <div key={i} className="tr-brand-card">
+                    <div className="tr-brand-name">{ref.collection ? `${ref.brand} — ${ref.collection}` : ref.brand}</div>
+                    <p className="tr-ref-signal">{ref.signal}</p>
+                    <div className="tr-ref-naia-label">nAia</div>
+                    <p className="tr-ref-naia">{ref.naiaRead}</p>
+                  </div>
+                ))
+              : report.brandsToWatch?.map((b, i) => (
+                  <div key={i} className="tr-brand-card">
+                    <div className="tr-brand-name">{b.name}</div>
+                    <div className="tr-brand-why">{b.why}</div>
+                  </div>
+                ))}
           </div>
         ) : null}
 
-        {/* Investment notes */}
-        {report.investmentNotes && (
+        {/* Investment Notes — Spend / Save / Already Own It? */}
+        {(report.spendSaveSkip || report.investmentNotes) && (
           <div style={{ marginBottom: "48px" }}>
             <div className="tr-section-label">Investment Notes</div>
-            <p className="tr-body">{report.investmentNotes}</p>
+            {report.spendSaveSkip ? (
+              <>
+                <div className="tr-sss-entry">
+                  <div className="tr-sss-label">Spend</div>
+                  <p className="tr-body">{report.spendSaveSkip.spend}</p>
+                </div>
+                <div className="tr-sss-entry">
+                  <div className="tr-sss-label">Save</div>
+                  <p className="tr-body">{report.spendSaveSkip.save}</p>
+                </div>
+                <div className="tr-sss-entry" style={{ borderBottom: "none" }}>
+                  <div className="tr-sss-label">Already Own It?</div>
+                  <p className="tr-body">{report.spendSaveSkip.alreadyOwn}</p>
+                </div>
+              </>
+            ) : (
+              <p className="tr-body">{report.investmentNotes}</p>
+            )}
           </div>
         )}
 
@@ -366,6 +434,14 @@ export default function TrendReportDetail() {
             <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "20px", fontStyle: "italic", color: "#221516", lineHeight: 1.8 }}>
               {report.naiaInterpretation}
             </p>
+          </div>
+        )}
+
+        {/* nAia Verdict */}
+        {report.naiaVerdict && (
+          <div className="tr-verdict-block">
+            <div className="tr-section-label">nAia Verdict</div>
+            <p className="tr-body">{report.naiaVerdict}</p>
           </div>
         )}
 
@@ -406,6 +482,16 @@ export default function TrendReportDetail() {
               {s.publishedAt && <div className="tr-source-date">{formatSourceDate(s.publishedAt)}</div>}
             </div>
           ))}
+        </div>
+
+        {/* Bottom CTA */}
+        <div className="tr-cta-block">
+          <Link to={`/trends/${report.slug}/edit`} className="tr-cta-link">
+            SEE THIS TREND IN YOUR WARDROBE →
+          </Link>
+          <p className="tr-cta-sub">
+            Get three ways to wear this direction around your style, lifestyle, and saved pieces.
+          </p>
         </div>
 
         {/* Footer */}
