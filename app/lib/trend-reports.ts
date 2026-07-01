@@ -1,5 +1,6 @@
 export type TrendReportSource = {
   publisher: string;
+  descriptor?: string;
   title: string;
   publishedAt?: string;
   url: string;
@@ -83,7 +84,7 @@ export const trendReports: TrendReportData[] = [
     fading: [
       "Rigid head-to-toe office suiting",
       "Overly complicated drape",
-      "Statement pieces with no repeat value",
+      "Statement pieces that only work once",
     ],
     referencesBehindThisEdit: [
       {
@@ -112,7 +113,7 @@ export const trendReports: TrendReportData[] = [
     investmentNotes:
       "Buy one piece that changes the proportion of what you already own: a longline blazer, draped midi dress, sharply cut wide-leg trouser, structured vest, or sculptural neutral bag. Skip extreme volume or rigid tailoring that does not suit your real life.",
     naiaInterpretation:
-      "This trend is especially useful for you if you want to feel polished and considered without relying on tight cuts, revealing silhouettes, or embellished detail — soft structure gives presence through proportion and fabric weight, not decoration.",
+      "Soft Structure is especially useful for wardrobes seeking polish and presence without tight cuts, revealing silhouettes, or embellished detail. It creates impact through proportion and fabric weight rather than decoration.",
     naiaVerdict:
       "Soft Structure is the most practically useful Spring 2026 direction for a wardrobe that already exists. It does not require starting over — it requires one anchor piece with real proportion worn against something familiar. The mistake to avoid: buying structured pieces that are too stiff or too fashion-forward to rewear across more than one season.",
     howToWear: [
@@ -139,11 +140,13 @@ export const trendReports: TrendReportData[] = [
     sources: [
       {
         publisher: "Givenchy",
+        descriptor: "Official collection notes",
         title: "Spring Summer 2026 Womenswear Show",
         url: "https://www.givenchy.com/us/en-US/cm/explore/collections/spring-summer-26-womenswear-show",
       },
       {
         publisher: "Victoria Beckham",
+        descriptor: "Official collection notes",
         title: "Spring Summer 2026",
         publishedAt: "2025-10-04",
         url: "https://www.victoriabeckham.com/pages/spring-summer-2026",
@@ -210,7 +213,7 @@ export const trendReports: TrendReportData[] = [
     investmentNotes:
       "Start with a longline blazer, straight or wide-leg tailored trouser, waistcoat, clean column skirt, or crisp shirt with enough ease to layer and restyle.",
     naiaInterpretation:
-      "This trend is especially useful for you if you need to feel composed and considered at work, dinner, or travel without appearing overly managed or formally dressed — modern tailoring is the move from dressed to considered.",
+      "Modern Tailoring is especially useful where a wardrobe needs composure without formality. One tailored anchor, styled with a softer counterpart, creates a considered look that can move between work, dinner, and travel.",
     naiaVerdict:
       "Modern tailoring works when the tailored piece is treated as a tool, not a statement. One well-cut jacket or trouser changes the register of everything worn with it. The investment is in the proportion — long enough, relaxed enough in the leg or sleeve, in a fabric that works across more than one season.",
     howToWear: [
@@ -236,6 +239,7 @@ export const trendReports: TrendReportData[] = [
     sources: [
       {
         publisher: "Victoria Beckham",
+        descriptor: "Official collection notes",
         title: "Pre Spring Summer 2026",
         url: "https://www.victoriabeckham.com/collections/pre-spring-summer-2026",
       },
@@ -307,7 +311,7 @@ export const trendReports: TrendReportData[] = [
     investmentNotes:
       "Buy one neutral foundation piece and one accent piece that works with at least three things you already own. Deep espresso is an especially useful anchor when black feels too hard and beige feels too safe.",
     naiaInterpretation:
-      "This trend is especially useful for you if you feel drawn to colour but dissatisfied with how it lands — the quiet base and one accent method gives colour a clear role in the outfit rather than leaving it to compete with everything else.",
+      "Colour Direction is especially useful for wardrobes that want colour to feel purposeful rather than reactive. A quiet base and one clear accent gives colour a defined role instead of letting it compete with the rest of the look.",
     naiaVerdict:
       "Colour direction is a method, not a palette. The nAia approach: one quiet foundation, one deep anchor, one clear accent. The value is in the discipline — choosing one accent that changes everything you already own rather than buying into a seasonal shade that only works in one context.",
     howToWear: [
@@ -334,12 +338,14 @@ export const trendReports: TrendReportData[] = [
     sources: [
       {
         publisher: "Pantone",
+        descriptor: "Fashion colour report",
         title: "Fashion Color Trend Report: New York Fashion Week Spring / Summer 2026",
         publishedAt: "2025-09-11",
         url: "https://www.pantone.com/articles/fashion-color-trend-report/new-york-fashion-week-spring-summer-2026",
       },
       {
         publisher: "Victoria Beckham",
+        descriptor: "Official collection notes",
         title: "Spring Summer 2026",
         publishedAt: "2025-10-04",
         url: "https://www.victoriabeckham.com/pages/spring-summer-2026",

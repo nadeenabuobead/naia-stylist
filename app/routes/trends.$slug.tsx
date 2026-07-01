@@ -62,6 +62,7 @@ const css = `
   .tr-source-title{font-family:var(--ff-body);font-size:16px;color:var(--deep)}
   .tr-source-title a{color:var(--deep);text-decoration:underline}
   .tr-source-date{font-family:var(--ff-mono);font-size:10px;color:var(--muted);margin-top:4px}
+  .tr-source-descriptor{font-family:var(--ff-body);font-size:13px;font-style:italic;color:var(--muted);margin-bottom:4px;margin-top:2px}
   .tr-ref-signal{font-family:var(--ff-body);font-size:16px;font-style:italic;color:var(--deep);line-height:1.6;margin-bottom:10px}
   .tr-ref-naia-label{font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:4px}
   .tr-ref-naia{font-family:var(--ff-body);font-size:15px;font-style:italic;color:var(--muted);line-height:1.6}
@@ -218,7 +219,7 @@ export default function TrendReportDetail() {
       addText("INVESTMENT NOTES", 8, "bold", [139, 32, 53], 4);
       addText("Spend", 9, "bold", [139, 32, 53], 2);
       addText(report.spendSaveSkip.spend, 10, "normal", [34, 21, 22], 4);
-      addText("Save", 9, "bold", [139, 32, 53], 2);
+      addText("Hold Off On", 9, "bold", [139, 32, 53], 2);
       addText(report.spendSaveSkip.save, 10, "normal", [34, 21, 22], 4);
       addText("Already Own It?", 9, "bold", [139, 32, 53], 2);
       addText(report.spendSaveSkip.alreadyOwn, 10, "normal", [34, 21, 22], 8);
@@ -411,7 +412,7 @@ export default function TrendReportDetail() {
                   <p className="tr-body">{report.spendSaveSkip.spend}</p>
                 </div>
                 <div className="tr-sss-entry">
-                  <div className="tr-sss-label">Save</div>
+                  <div className="tr-sss-label">Hold Off On</div>
                   <p className="tr-body">{report.spendSaveSkip.save}</p>
                 </div>
                 <div className="tr-sss-entry" style={{ borderBottom: "none" }}>
@@ -476,6 +477,7 @@ export default function TrendReportDetail() {
           {report.sources.map((s, i) => (
             <div key={i} className="tr-source">
               <div className="tr-source-publisher">{s.publisher}</div>
+              {s.descriptor && <div className="tr-source-descriptor">{s.descriptor}</div>}
               <div className="tr-source-title">
                 <a href={s.url} target="_blank" rel="noreferrer">{s.title}</a>
               </div>
@@ -487,10 +489,10 @@ export default function TrendReportDetail() {
         {/* Bottom CTA */}
         <div className="tr-cta-block">
           <Link to={`/trends/${report.slug}/edit`} className="tr-cta-link">
-            SEE THIS TREND IN YOUR WARDROBE →
+            SEE THIS TREND THROUGH YOUR STYLE →
           </Link>
           <p className="tr-cta-sub">
-            Get three ways to wear this direction around your style, lifestyle, and saved pieces.
+            A personal reading of this direction through your preferences, lifestyle, and wardrobe.
           </p>
         </div>
 
