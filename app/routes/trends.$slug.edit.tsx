@@ -1,7 +1,7 @@
 import { Link, useLoaderData, type LoaderFunctionArgs } from "react-router";
 import { trendReports, type TrendReportData } from "../lib/trend-reports";
 import { requireCurrentNaiaCustomer } from "../lib/naia-session.server";
-import { getShopperEvidence, buildShopperEdit, type ShopperEdit } from "../lib/trend-evidence.server";
+import { getShopperEvidence, buildShopperEdit, type ShopperEdit, type ClosetMatchItem } from "../lib/trend-evidence.server";
 
 type LoaderData = {
   report: TrendReportData;
@@ -54,12 +54,6 @@ export function meta({ data }: { data?: LoaderData }) {
   return [{ title: `My nAia Trend Edit — ${data.report.title}` }];
 }
 
-function formatList(items: string[]): string {
-  if (items.length === 0) return "";
-  if (items.length === 1) return items[0];
-  if (items.length === 2) return `${items[0]} and ${items[1]}`;
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
-}
 
 const css = `
   :root{--cream:#f4f4f1;--warm:#e1dbd7;--deep:#221516;--accent:#8b2035;--muted:#7a6f6a;--ff-display:'Playfair Display',Georgia,serif;--ff-body:'Cormorant Garamond',Garamond,serif;--ff-mono:'Space Mono','Courier New',monospace}
@@ -91,6 +85,17 @@ const css = `
   .tr-empty-state{padding:48px;text-align:center;border:1px solid rgba(59,5,16,.08);background:rgba(255,255,255,0.5)}
   .tr-empty-state-text{font-family:'Cormorant Garamond',serif;font-size:20px;font-style:italic;color:var(--deep);margin-bottom:20px;line-height:1.6}
   .tr-empty-state-cta{display:inline-block;padding:14px 32px;background:#221516;color:#f4f4f1;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;text-decoration:none}
+  .tr-reading-box{padding:28px 32px;border-left:3px solid var(--accent);background:rgba(139,32,53,0.04);margin-bottom:48px}
+  .tr-reading-sublabel{font-family:var(--ff-body);font-size:14px;font-style:italic;color:var(--muted);margin-bottom:16px;margin-top:4px}
+  .tr-closet-cards{display:flex;gap:20px;flex-wrap:wrap;margin-top:16px}
+  .tr-closet-card{flex:0 0 calc(50% - 10px);max-width:240px}
+  .tr-closet-card-img{width:100%;aspect-ratio:3/4;object-fit:cover;background:rgba(59,5,16,.04)}
+  .tr-closet-card-name{font-family:var(--ff-mono);font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--accent);margin-top:10px;margin-bottom:4px}
+  .tr-closet-card-note{font-family:var(--ff-body);font-size:15px;font-style:italic;color:var(--muted);line-height:1.5}
+  .tr-closet-formula{font-family:var(--ff-body);font-size:16px;font-style:italic;color:var(--muted);line-height:1.7;padding:16px 0}
+  .tr-cta-edit{margin-top:60px;padding:32px 0;border-top:1px solid rgba(59,5,16,.1);text-align:center}
+  .tr-cta-edit-btn{display:inline-block;padding:16px 40px;background:var(--deep);color:var(--cream);font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;text-decoration:none;cursor:pointer}
+  .tr-cta-edit-sub{font-family:var(--ff-body);font-size:14px;font-style:italic;color:var(--muted);margin-top:12px}
 `;
 
 export function ErrorBoundary() {
@@ -151,64 +156,91 @@ export default function TrendEdit() {
           </div>
         ) : edit ? (
           <>
-            <div className="tr-edit-banner">
-              <div className="tr-edit-banner-label">This Report, Read Through Your Style</div>
-              <p className="tr-edit-banner-text">
-                {edit.contributedEvidence.length > 0
-                  ? `Built from ${formatList(edit.contributedEvidence)} — not a second generic trend report.`
-                  : "This is the report read alongside your Passport — a starting point rather than a fully tailored read just yet."}
-              </p>
+            {/* 1. YOUR PERSONAL READING */}
+            <div className="tr-reading-box">
+              <div className="tr-section-label">YOUR PERSONAL READING</div>
+              <div className="tr-reading-sublabel">What this direction means for the way you like to dress.</div>
+              <p className="tr-body">{edit.personalReading}</p>
             </div>
 
+            {/* 2. YOUR STRONGEST MATCH */}
             <div className="tr-edit-section">
-              <div className="tr-section-label">What Suits You</div>
-              <ul className="tr-edit-list">
-                {edit.whatSuitsYou.map((line, i) => <li key={i}>{line}</li>)}
-              </ul>
+              <div className="tr-section-label">YOUR STRONGEST MATCH</div>
+              <p className="tr-body">{edit.strongestMatch}</p>
             </div>
 
-            {edit.approachCarefullySource === "personal" ? (
+            <div className="tr-divider" />
+
+            {/* 3. ADAPT, DON'T COPY */}
+            <div className="tr-edit-section">
+              <div className="tr-section-label">ADAPT, DON&apos;T COPY</div>
+              <p className="tr-body">{edit.adaptDontCopy}</p>
+            </div>
+
+            {/* 4. LESS USEFUL FOR YOU — conditional */}
+            {edit.lessUseful && (
               <div className="tr-edit-section">
-                <div className="tr-section-label">What to Approach Carefully</div>
-                <ul className="tr-edit-list">
-                  {edit.approachCarefully.map((line, i) => <li key={i}>{line}</li>)}
-                </ul>
+                <div className="tr-section-label">LESS USEFUL FOR YOU</div>
+                <p className="tr-body">{edit.lessUseful}</p>
               </div>
-            ) : edit.approachCarefullySource === "report-only" ? (
-              <div className="tr-report-notes">
-                <div className="tr-report-notes-label">Report Notes</div>
-                <ul className="tr-report-notes-list">
-                  {edit.approachCarefully.map((line, i) => <li key={i}>{line}</li>)}
-                </ul>
-              </div>
-            ) : null}
+            )}
 
-            <div className="tr-edit-section">
-              <div className="tr-section-label">Your Colour & Silhouette Read</div>
-              <ul className="tr-edit-list">
-                {edit.colourSilhouetteRead.map((line, i) => <li key={i}>{line}</li>)}
-              </ul>
-            </div>
+            <div className="tr-divider" />
 
+            {/* 5. FROM YOUR CLOSET */}
             <div className="tr-edit-section">
-              <div className="tr-section-label">From Your Closet</div>
-              {edit.fromCloset.length > 0 || edit.fromSavedLooks.length > 0 ? (
-                <ul className="tr-edit-list">
-                  {edit.fromCloset.map((line, i) => <li key={`c${i}`}>{line}</li>)}
-                  {edit.fromSavedLooks.map((line, i) => <li key={`s${i}`}>{line}</li>)}
-                </ul>
+              <div className="tr-section-label">FROM YOUR CLOSET</div>
+              {edit.fromCloset.length > 0 ? (
+                <div className="tr-closet-cards">
+                  {edit.fromCloset.map((item: ClosetMatchItem, i: number) => (
+                    <div key={i} className="tr-closet-card">
+                      {item.imageUrl && (
+                        <img
+                          src={item.imageUrl}
+                          alt={item.name}
+                          className="tr-closet-card-img"
+                        />
+                      )}
+                      <div className="tr-closet-card-name">{item.name}</div>
+                      <p className="tr-closet-card-note">{item.outfitNote}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : edit.fromClosetFormula ? (
+                <p className="tr-closet-formula">{edit.fromClosetFormula}</p>
               ) : hasCloset ? (
-                <p className="tr-body">Your Closet doesn&apos;t have an obvious match for this particular direction yet — &quot;One Next Step&quot; below has a concrete way to bring it in.</p>
+                <p className="tr-body">
+                  No clear match in your Closet for this direction yet. The look to try below works without one.
+                </p>
               ) : (
-                <p className="tr-body">You haven&apos;t saved any Closet items yet, so this section can&apos;t point to anything specific yet. Add a few pieces to unlock it.</p>
+                <p className="tr-body">
+                  Add pieces to your Closet to see what you already own that works with this direction.
+                </p>
               )}
             </div>
 
             <div className="tr-divider" />
 
+            {/* 6. ONE LOOK TO TRY THIS WEEK */}
             <div className="tr-edit-section">
-              <div className="tr-section-label">One Next Step</div>
-              <p className="tr-body">{edit.nextStep}</p>
+              <div className="tr-section-label">ONE LOOK TO TRY THIS WEEK</div>
+              <p className="tr-body">{edit.oneLookToTry}</p>
+            </div>
+
+            {/* 7. ONE PIECE THAT WOULD UNLOCK MORE — conditional */}
+            {edit.oneUnlockPiece && (
+              <div className="tr-edit-section">
+                <div className="tr-section-label">ONE PIECE THAT WOULD UNLOCK MORE</div>
+                <p className="tr-body">{edit.oneUnlockPiece}</p>
+              </div>
+            )}
+
+            {/* 8. CTA */}
+            <div className="tr-cta-edit">
+              <Link to="/closet" className="tr-cta-edit-btn">
+                OPEN MY CLOSET →
+              </Link>
+              <p className="tr-cta-edit-sub">See the pieces you already own that could work with this direction.</p>
             </div>
           </>
         ) : null}
