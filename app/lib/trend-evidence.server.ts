@@ -4,13 +4,7 @@ import type { TrendReportData } from "./trend-reports";
 // ---------------------------------------------------------------------------
 // Evidence bundle — assembled server-side, scoped to exactly one customer,
 // fetched with `select` (never `include`) so only fields this feature
-// actually reads ever leave the database. No general Customer fields and no
-// full related records are loaded.
-//
-// StylingEvent is intentionally not included: it tracks product-level
-// engagement (clicks/try-on/wishlist), which doesn't map to any of the five
-// required Trend Edit sections and would widen scope without adding a
-// signal this feature actually uses.
+// actually reads ever leave the database. savedLooks removed in Phase C.
 // ---------------------------------------------------------------------------
 
 export type ShopperProfileEvidence = {
@@ -35,11 +29,6 @@ export type ShopperClosetItemEvidence = {
   material: string | null;
 };
 
-export type ShopperSavedLookEvidence = {
-  name: string | null;
-  occasion: string | null;
-};
-
 export type ShopperReviewSignal = {
   reviewCount: number;
   workedTags: string[];
@@ -50,7 +39,6 @@ export type ShopperEvidenceBundle = {
   hasProfile: boolean;
   profile: ShopperProfileEvidence | null;
   closetItems: ShopperClosetItemEvidence[];
-  savedLooks: ShopperSavedLookEvidence[];
   reviewSignal: ShopperReviewSignal;
 };
 
@@ -58,7 +46,6 @@ const EMPTY_BUNDLE: ShopperEvidenceBundle = {
   hasProfile: false,
   profile: null,
   closetItems: [],
-  savedLooks: [],
   reviewSignal: { reviewCount: 0, workedTags: [], didntWorkTags: [] },
 };
 
@@ -93,14 +80,6 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
           styleTags: true,
           occasions: true,
           material: true,
-        },
-      },
-      savedLooks: {
-        take: 20,
-        orderBy: { createdAt: "desc" },
-        select: {
-          name: true,
-          occasion: true,
         },
       },
       postOutfitReviews: {
@@ -162,10 +141,6 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
       occasions: item.occasions ?? [],
       material: item.material ?? null,
     })),
-    savedLooks: customer.savedLooks.map((look) => ({
-      name: look.name,
-      occasion: look.occasion,
-    })),
     reviewSignal: {
       reviewCount: customer.postOutfitReviews.length,
       workedTags: [...new Set(workedTags)],
@@ -206,161 +181,162 @@ function matchedTerms(haystack: string, terms: string[]): string[] {
   return out;
 }
 
+// `becoming` stores ids like "more-confident"; ASPIRATION_STYLE_MAP is keyed
+// by "confident". Strip the "more-" prefix before lookup.
+function normalizeBecomingId(id: string): string {
+  return id.startsWith("more-") ? id.slice(5) : id;
+}
+// Retained for future aspiration-signal lookups.
+void normalizeBecomingId;
+
+const NAME_STOP_WORDS = new Set([
+  "a", "an", "the", "and", "or", "in", "on", "at", "for",
+  "with", "by", "of", "my", "your", "our",
+]);
+
+// Tokenise a garment name into searchable terms, excluding stop words and
+// single/double-character fragments.
+function extractNameTerms(name: string | null): string[] {
+  if (!name) return [];
+  return name
+    .toLowerCase()
+    .split(/[\s\-_/]+/)
+    .filter((w) => w.length > 2 && !NAME_STOP_WORDS.has(w));
+}
+
 // ---------------------------------------------------------------------------
-// Style translation maps. Each map is keyed by the exact option `id` values
-// defined in app/lib/onboarding/quiz-data.ts (the only values that are ever
-// actually stored on OnboardingProfile / ClosetItem) and lists the report
-// styling-direction words that are a genuine, code-owned, human-reviewed
-// connection to that option. A map never invents a connection that isn't
-// already implied by nAia's own style vocabulary, and it is only ever used
-// to decide whether to surface a sentence already grounded in: (a) a value
-// the shopper actually chose, and (b) a word or phrase that actually
-// appears in the report's own text. No body, size, fit-success, or
-// purchase-outcome claims are made anywhere in these maps.
+// Style register — determined by plurality of selected personality IDs
+// across clusters. Tie → neutral. Never exposes raw personality labels.
 // ---------------------------------------------------------------------------
 
-// Keys: style-personalities option ids.
-const PERSONALITY_STYLE_MAP: Record<string, { label: string; terms: string[] }> = {
-  "old-money": { label: "Old Money", terms: ["tailoring", "tailored", "structured", "clean", "longline"] },
-  "artsy": { label: "Artsy", terms: ["sculptural", "asymmetric", "drape", "gesture"] },
-  "edgy": { label: "Edgy", terms: ["asymmetric", "sculptural", "defined", "structured"] },
-  "feminine": { label: "Feminine", terms: ["fluid", "draped", "soft", "midi", "column", "feminine"] },
-  "corporate-chic": { label: "Corporate Chic", terms: ["tailoring", "tailored", "blazer", "trouser", "structured", "polished"] },
-  "effortlessly-chic": { label: "Effortlessly Chic", terms: ["ease", "fluid", "clean", "quiet", "familiar"] },
-  "minimal": { label: "Minimal", terms: ["clean", "restrained", "quiet", "architectural"] },
-  "trendy": { label: "Trendy", terms: ["sculptural", "asymmetric", "structured", "fluid"] },
-  "romantic": { label: "Romantic", terms: ["fluid", "draped", "soft", "midi", "ease"] },
-  "casual-cool": { label: "Casual Cool", terms: ["ease", "fluid", "familiar", "trouser", "denim"] },
+type StyleRegister = "clean-polished" | "fluid-ease" | "expressive" | "neutral";
+
+const REGISTER_CLUSTER_IDS: Record<Exclude<StyleRegister, "neutral">, string[]> = {
+  "clean-polished": ["old-money", "corporate-chic", "minimal", "effortlessly-chic"],
+  "fluid-ease":     ["romantic", "casual-cool", "feminine"],
+  "expressive":     ["artsy", "edgy", "trendy"],
 };
 
-// Keys: the union of desired-impression, desired-feelings, and becoming
-// option ids (all describe an aspirational identity word).
-const ASPIRATION_STYLE_MAP: Record<string, { label: string; terms: string[] }> = {
-  "refined": { label: "refined", terms: ["tailoring", "tailored", "clean", "restrained", "structured", "architectural"] },
-  "creative": { label: "creative", terms: ["sculptural", "asymmetric", "drape", "gesture", "architectural"] },
-  "powerful": { label: "powerful", terms: ["structured", "defined", "trouser", "blazer", "presence"] },
-  "soft-confident": { label: "soft but confident", terms: ["fluid", "soft", "clean", "structured", "polished", "confident"] },
-  "effortless": { label: "effortless", terms: ["ease", "fluid", "familiar", "quiet", "clean"] },
-  "interesting": { label: "interesting", terms: ["sculptural", "asymmetric", "gesture", "architectural", "drape"] },
-  "put-together": { label: "put together", terms: ["tailoring", "tailored", "structured", "clean", "polished", "blazer"] },
-  "confident": { label: "confident", terms: ["structured", "defined", "trouser", "blazer", "presence"] },
-  "comfortable": { label: "comfortable", terms: ["ease", "fluid", "familiar", "relaxed"] },
-  "elegant": { label: "elegant", terms: ["fluid", "draped", "column", "restrained", "polished"] },
-  "attractive": { label: "attractive", terms: ["polished", "feminine", "confident", "clean"] },
-  "feminine": { label: "feminine", terms: ["fluid", "draped", "midi", "column", "feminine", "soft"] },
-};
+function resolveStyleRegister(stylePersonalities: string[]): StyleRegister {
+  const counts: Record<string, number> = {
+    "clean-polished": 0,
+    "fluid-ease": 0,
+    "expressive": 0,
+  };
+  for (const id of stylePersonalities) {
+    for (const [register, ids] of Object.entries(REGISTER_CLUSTER_IDS)) {
+      if (ids.includes(id)) counts[register]++;
+    }
+  }
+  const max = Math.max(...Object.values(counts));
+  if (max === 0) return "neutral";
+  const winners = Object.entries(counts).filter(([, v]) => v === max);
+  if (winners.length > 1) return "neutral"; // tie
+  return winners[0][0] as StyleRegister;
+}
 
-// Keys: fit-preferences option ids.
-const FIT_SILHOUETTE_MAP: Record<string, { label: string; terms: string[] }> = {
-  "defined-waist": { label: "Defined Waist", terms: ["waist", "tailoring", "tailored", "structured"] },
-  "relaxed-fits": { label: "Relaxed Fits", terms: ["ease", "fluid", "relaxed", "familiar"] },
-  "structured": { label: "Structured Pieces", terms: ["structured", "blazer", "tailoring", "tailored", "architectural"] },
-  "oversized": { label: "Oversized Layers", terms: ["ease", "longline", "familiar", "fluid"] },
-  "flowy": { label: "Flowy Pieces", terms: ["fluid", "draped", "ease", "soft"] },
-  "coverage": { label: "More Coverage", terms: ["long", "layer", "trouser", "column", "vertical"] },
-  "fitted": { label: "Fitted Looks", terms: ["defined", "clean", "column", "structured"] },
-  "simple": { label: "Simple Outfits", terms: ["clean", "quiet", "restrained", "familiar"] },
-};
+// ---------------------------------------------------------------------------
+// Style translation maps (retained for future aspiration-signal use)
+// ---------------------------------------------------------------------------
 
-// Keys: favorite-colors option ids. Values are the real words inside each
-// option's display name (e.g. "White / Cream" → "white", "cream"), since
-// those are the words that can plausibly appear in editorial report text —
-// the kebab-case id itself never will.
+// Keys: favorite-colors option ids.
 const COLOR_SEARCH_MAP: Record<string, { label: string; terms: string[] }> = {
-  "black": { label: "Black", terms: ["black"] },
-  "white-cream": { label: "White / Cream", terms: ["white", "cream"] },
-  "beige-brown": { label: "Beige / Brown", terms: ["beige", "brown"] },
-  "grey": { label: "Grey", terms: ["grey", "gray"] },
-  "navy": { label: "Navy", terms: ["navy"] },
-  "red-burgundy": { label: "Red / Burgundy", terms: ["red", "burgundy"] },
-  "green": { label: "Green", terms: ["green"] },
-  "pink": { label: "Pink", terms: ["pink"] },
-  "prints": { label: "Prints", terms: ["print", "prints"] },
-  "colorful": { label: "Colorful Pieces", terms: ["colour", "color", "colourful", "colorful"] },
+  "black":        { label: "Black",           terms: ["black"] },
+  "white-cream":  { label: "White / Cream",   terms: ["white", "cream"] },
+  "beige-brown":  { label: "Beige / Brown",   terms: ["beige", "brown"] },
+  "grey":         { label: "Grey",            terms: ["grey", "gray"] },
+  "navy":         { label: "Navy",            terms: ["navy"] },
+  "red-burgundy": { label: "Red / Burgundy",  terms: ["red", "burgundy"] },
+  "green":        { label: "Green",           terms: ["green"] },
+  "pink":         { label: "Pink",            terms: ["pink"] },
+  "prints":       { label: "Prints",          terms: ["print", "prints"] },
+  "colorful":     { label: "Colorful Pieces", terms: ["colour", "color", "colourful", "colorful"] },
 };
 
-// Keys: the ClosetCategory enum (prisma/schema.prisma). Used only as a
-// fallback when no individual closet item's own name/tags matched — this
-// surfaces a category-level formula reference, never a claim about a
-// specific garment's styling details. Categories with no plausible report
-// vocabulary (jewelry, activewear, swimwear, loungewear, other) are left
-// empty on purpose: they simply never produce a formula match, rather than
-// forcing one.
+// Keys: the union of desired-impression, desired-feelings, and becoming ids.
+const ASPIRATION_STYLE_MAP: Record<string, { label: string; terms: string[] }> = {
+  "refined":        { label: "refined",          terms: ["tailoring", "tailored", "clean", "restrained", "structured", "architectural"] },
+  "creative":       { label: "creative",          terms: ["sculptural", "asymmetric", "drape", "gesture", "architectural"] },
+  "powerful":       { label: "powerful",          terms: ["structured", "defined", "trouser", "blazer", "presence"] },
+  "soft-confident": { label: "soft but confident",terms: ["fluid", "soft", "clean", "structured", "polished", "confident"] },
+  "effortless":     { label: "effortless",        terms: ["ease", "fluid", "familiar", "quiet", "clean"] },
+  "interesting":    { label: "interesting",       terms: ["sculptural", "asymmetric", "gesture", "architectural", "drape"] },
+  "put-together":   { label: "put together",      terms: ["tailoring", "tailored", "structured", "clean", "polished", "blazer"] },
+  "confident":      { label: "confident",         terms: ["structured", "defined", "trouser", "blazer", "presence"] },
+  "comfortable":    { label: "comfortable",       terms: ["ease", "fluid", "familiar", "relaxed"] },
+  "elegant":        { label: "elegant",           terms: ["fluid", "draped", "column", "restrained", "polished"] },
+  "attractive":     { label: "attractive",        terms: ["polished", "feminine", "confident", "clean"] },
+  "feminine":       { label: "feminine",          terms: ["fluid", "draped", "midi", "column", "feminine", "soft"] },
+};
+// Retained for future aspiration-signal use.
+void ASPIRATION_STYLE_MAP;
+
+const ASPIRATION_ENABLE_PHRASES: Record<string, string> = {
+  "refined":        "Composure is created without trying too hard — restraint is the whole method",
+  "creative":       "There is room for one unexpected element to carry the interest",
+  "powerful":       "Presence comes from proportion and weight, not volume or decoration",
+  "soft-confident": "Clear structure and softness are not in conflict here",
+  "effortless":     "A considered look is achievable without reading as dressed-up",
+  "interesting":    "Architectural interest comes through silhouette rather than colour or print",
+  "put-together":   "This is the most reliable route to a finished, considered look without statement pieces",
+  "confident":      "Presence is built into the proportions — nothing needs to compete for attention",
+  "comfortable":    "Ease is already built into the silhouette, so comfort does not need to be negotiated",
+  "elegant":        "Restraint is where this direction earns its keep",
+  "attractive":     "A polished silhouette carries more than most individual pieces can",
+  "feminine":       "Softness and structure are not in conflict in this direction",
+};
+// Retained for future aspiration-signal use.
+void ASPIRATION_ENABLE_PHRASES;
+
+// Keys: the ClosetCategory enum. NOT used in candidateTerms for named-card
+// scoring — only for buildClosetMatchText corpus construction.
 const CLOSET_CATEGORY_MAP: Record<string, { label: string; terms: string[] }> = {
-  TOPS: { label: "tops", terms: ["top", "knit", "shirt", "jersey"] },
-  BOTTOMS: { label: "bottoms", terms: ["trouser", "skirt", "denim"] },
-  DRESSES: { label: "dresses", terms: ["dress", "midi", "column", "slip"] },
-  OUTERWEAR: { label: "outerwear", terms: ["blazer", "jacket", "layer", "longline", "vest"] },
-  SHOES: { label: "shoes", terms: ["shoe"] },
-  BAGS: { label: "bags", terms: ["bag"] },
-  ACCESSORIES: { label: "accessories", terms: ["scarf", "accessories", "accessory"] },
-  JEWELRY: { label: "jewelry", terms: [] },
-  ACTIVEWEAR: { label: "activewear", terms: [] },
-  SWIMWEAR: { label: "swimwear", terms: [] },
-  LOUNGEWEAR: { label: "loungewear", terms: [] },
-  OTHER: { label: "other pieces", terms: [] },
+  TOPS:        { label: "tops",         terms: ["top", "knit", "shirt", "jersey"] },
+  BOTTOMS:     { label: "bottoms",      terms: ["trouser", "skirt", "denim"] },
+  DRESSES:     { label: "dresses",      terms: ["dress", "midi", "column", "slip"] },
+  OUTERWEAR:   { label: "outerwear",    terms: ["blazer", "jacket", "layer", "longline", "vest"] },
+  SHOES:       { label: "shoes",        terms: ["shoe"] },
+  BAGS:        { label: "bags",         terms: ["bag"] },
+  ACCESSORIES: { label: "accessories",  terms: ["scarf", "accessories", "accessory"] },
+  JEWELRY:     { label: "jewelry",      terms: [] },
+  ACTIVEWEAR:  { label: "activewear",   terms: [] },
+  SWIMWEAR:    { label: "swimwear",     terms: [] },
+  LOUNGEWEAR:  { label: "loungewear",   terms: [] },
+  OTHER:       { label: "other pieces", terms: [] },
 };
+// Retained for buildClosetMatchText and potential formula-text use.
+void CLOSET_CATEGORY_MAP;
 
-// Keys: lifestyle option ids. Values are an ordered preference of
-// report.howToWear[].feeling labels — the first one present in a given
-// report is used, since not every report covers every context.
+// Keys: lifestyle option ids. Values: ordered priority of howToWear[].feeling labels.
 const LIFESTYLE_HOWTO_MAP: Record<string, string[]> = {
-  "office": ["For work", "For everyday"],
-  "hybrid": ["For work", "For everyday"],
-  "busy-mom": ["For everyday", "For casual days"],
+  "office":      ["For work",        "For everyday"],
+  "hybrid":      ["For work",        "For everyday"],
+  "busy-mom":    ["For everyday",    "For casual days"],
   "casual-days": ["For casual days", "For everyday"],
-  "events": ["For dinner"],
-  "on-the-go": ["For everyday", "For travel"],
-  "travel": ["For travel", "For everyday"],
-  "creative": ["For everyday", "For casual days"],
+  "events":      ["For dinner",      "For work"],
+  "on-the-go":   ["For everyday",    "For travel"],
+  "travel":      ["For travel",      "For everyday"],
+  "creative":    ["For everyday",    "For casual days"],
 };
 
-// Free-text keyword map, used only for SavedLook.occasion (a free-text
-// field — see the "From Your Closet (saved looks)" comment below for why
-// this is the one signal that still needs fuzzy keyword matching rather
-// than an id lookup). Keys are literal report.howToWear[].feeling strings.
-const CONTEXT_SIGNAL_MAP: Record<string, string[]> = {
-  "For work": ["work", "office", "professional", "career"],
-  "For dinner": ["dinner", "evening", "date night", "going out"],
-  "For everyday": ["everyday", "daily", "errands", "weekend"],
-  "For travel": ["travel", "commute", "trips"],
-  "For casual days": ["casual", "relaxed", "low-key"],
-  "For modest dressing": ["modest", "covered", "conservative"],
+// Vocab terms signalling tension between a fit preference and report directions.
+// Retained for future adapt-instruction use.
+const FIT_TENSION_VOCAB: Partial<Record<string, string[]>> = {
+  "fitted":       ["fluid", "drape", "ease"],
+  "relaxed-fits": ["structured", "tailored", "architectural"],
+  "flowy":        ["structured", "tailored", "architectural"],
+  "structured":   ["fluid", "drape", "ease"],
+  "oversized":    ["restrained", "clean", "defined"],
 };
-// CONTEXT_SIGNAL_MAP retained for potential future saved-looks use.
-void CONTEXT_SIGNAL_MAP;
+void FIT_TENSION_VOCAB;
 
-// Positive-direction-only report text: keyTrends, rising, naiaInterpretation,
-// howToWear directions, wardrobeNote, investmentNotes. Deliberately excludes
-// `fading` — that text describes what the report says to move away from, so
-// matching a shopper's style words against it would produce a backwards
-// "this suits you" claim built from a "this is going out" sentence.
-function buildPositiveReportText(report: TrendReportData): string {
-  return [
-    ...report.keyTrends.map((t) => `${t.name} ${t.description}`),
-    ...(report.rising ?? []),
-    report.naiaInterpretation ?? "",
-    ...(report.howToWear ?? []).map((h) => h.direction),
-    report.wardrobeNote ?? "",
-    report.investmentNotes ?? "",
-  ].join(" ");
-}
+// ---------------------------------------------------------------------------
+// Report text corpus for closet matching.
+// Excludes naiaInterpretation and investmentNotes — those fields contain
+// editorial caution copy, not the silhouette/colour/category vocabulary
+// that a garment's own metadata would plausibly share.
+// ---------------------------------------------------------------------------
 
-// Key directions only — excludes investmentNotes and wardrobeNote so that
-// conflict and gap detection never fires on the report's own caution copy.
-function buildKeyDirectionsText(report: TrendReportData): string {
-  return [
-    ...report.keyTrends.map((t) => `${t.name} ${t.description}`),
-    ...(report.howToWear ?? []).map((h) => h.direction),
-    report.naiaInterpretation ?? "",
-  ].join(" ");
-}
-
-// Closet-match corpus — used exclusively to decide whether a saved Closet
-// item is relevant to this report. Excludes investmentNotes and
-// naiaInterpretation: those fields contain editorial caution copy and
-// interpretive framing, not the silhouette/colour/category vocabulary that
-// a garment's subcategory, material, or styleTags would plausibly share.
 function buildClosetMatchText(report: TrendReportData): string {
   return [
     ...report.keyTrends.map((t) => `${t.name} ${t.description}`),
@@ -369,136 +345,240 @@ function buildClosetMatchText(report: TrendReportData): string {
   ].join(" ");
 }
 
-type TranslationHit = { label: string; term: string };
-
-// Walks `ids` against `map`, returning one hit per id that has any match in
-// `haystack`. Greedily prefers a term not already in `usedPhrases` so two
-// different sections don't lean on the exact same matched word, then
-// records whatever term it used so later calls (across sections) see it.
-function translateAllHits(
-  ids: string[],
-  map: Record<string, { label: string; terms: string[] }>,
-  haystack: string,
-  usedPhrases: Set<string>,
-): TranslationHit[] {
-  const out: TranslationHit[] = [];
-  for (const id of ids) {
-    const entry = map[id];
-    if (!entry || entry.terms.length === 0) continue;
-    const hits = matchedTerms(haystack, entry.terms);
-    if (hits.length === 0) continue;
-    const fresh = hits.find((h) => !usedPhrases.has(h.toLowerCase())) ?? hits[0];
-    out.push({ label: entry.label, term: fresh });
-    usedPhrases.add(fresh.toLowerCase());
-  }
-  return out;
-}
-
 // ---------------------------------------------------------------------------
-// Editorial templates for personalReading paragraph construction.
-// Keyed by personality/aspiration option ids. These are editorial judgement
-// calls reviewed per nAia's style vocabulary — they are never auto-generated.
+// Colour evidence — gates colour-specific claims in colour-direction
 // ---------------------------------------------------------------------------
 
-const PERSONALITY_READING_OPENERS: Record<string, string> = {
-  "old-money": "A wardrobe built on quiet authority finds its most useful ground here",
-  "corporate-chic": "A wardrobe that values composure and polish is exactly what this report speaks to",
-  "minimal": "A restrained approach to dressing is well-served by this direction",
-  "effortlessly-chic": "A wardrobe that prioritises ease over effort lands well here",
-  "artsy": "A wardrobe that treats structure as a starting point rather than a rule finds room to move here",
-  "edgy": "A wardrobe that keeps one element deliberately disruptive finds this direction workable",
-  "feminine": "A wardrobe that balances soft moments with clear silhouettes is well-positioned here",
-  "trendy": "A wardrobe that responds to what is directional now finds this report's timing right",
-  "romantic": "A wardrobe that values softness within a clear shape finds this direction natural",
-  "casual-cool": "A wardrobe that prioritises ease and familiarity can work this direction without overcomplicating it",
-};
+type ColourEvidence = { found: boolean; label: string | null };
 
-const ASPIRATION_ENABLE_PHRASES: Record<string, string> = {
-  "refined": "Composure is created without trying too hard — restraint is the whole method",
-  "creative": "There is room for one unexpected element to carry the interest",
-  "powerful": "Presence comes from proportion and weight, not volume or decoration",
-  "soft-confident": "Clear structure and softness are not in conflict here",
-  "effortless": "A considered look is achievable without reading as dressed-up",
-  "interesting": "Architectural interest comes through silhouette rather than colour or print",
-  "put-together": "This is the most reliable route to a finished, considered look without statement pieces",
-  "confident": "Presence is built into the proportions — nothing needs to compete for attention",
-  "comfortable": "Ease is already built into the silhouette, so comfort does not need to be negotiated",
-  "elegant": "Restraint is where this direction earns its keep",
-  "attractive": "A polished silhouette carries more than most individual pieces can",
-  "feminine": "Softness and structure are not in conflict in this direction",
-};
-
-// ---------------------------------------------------------------------------
-// Helper: adapt instruction — evaluate ALL fit preferences, pick highest tension
-// ---------------------------------------------------------------------------
-
-// Vocab terms whose presence in key directions signals a genuine tension with
-// each fit preference id. Only preferences that have a real conceptual tension
-// with common editorial directions are listed; others (coverage, simple,
-// defined-waist) fall through to the editorial howToWear fallback.
-const FIT_TENSION_VOCAB: Partial<Record<string, string[]>> = {
-  "fitted":       ["fluid", "drape", "ease"],
-  "relaxed-fits": ["structured", "tailored", "architectural"],
-  "flowy":        ["structured", "tailored", "architectural"],
-  "structured":   ["fluid", "drape", "ease"],
-  "oversized":    ["restrained", "clean", "defined"],
-};
-
-function buildAdaptInstruction(
-  fitPreferences: string[],
-  report: TrendReportData,
-  keyDirectionsText: string,
-): string {
-  // Find the preference with the strongest vocabulary tension against key directions.
-  let bestFitId: string | null = null;
-  let bestTension = 0;
-  for (const fitId of fitPreferences) {
-    const conflictVocab = FIT_TENSION_VOCAB[fitId] ?? [];
-    const hits = matchedTerms(keyDirectionsText, conflictVocab);
-    if (hits.length > bestTension) {
-      bestTension = hits.length;
-      bestFitId = fitId;
+function buildColourEvidence(
+  profile: ShopperProfileEvidence | null,
+  closetItems: ShopperClosetItemEvidence[],
+  closetMatchText: string,
+): ColourEvidence {
+  // Path 1: favorite colors vs closetMatchText
+  if (profile) {
+    for (const colorId of profile.favoriteColors) {
+      const entry = COLOR_SEARCH_MAP[colorId];
+      if (!entry) continue;
+      if (matchedTerms(closetMatchText, entry.terms).length > 0) {
+        return { found: true, label: entry.label };
+      }
     }
   }
-
-  if (bestFitId && bestTension > 0) {
-    const hasFluid = /\bfluid\b|\bdraped?\b|\bease\b/i.test(keyDirectionsText);
-    const hasStructure = /\bstructured?\b|\btailored?\b|\barchitectural\b/i.test(keyDirectionsText);
-    const hasProportion = /\bproportion\b|\blongline\b|\bwide.leg\b/i.test(keyDirectionsText);
-
-    const map: Partial<Record<string, string>> = {
-      "fitted": hasFluid
-        ? "Introduce one fluid element — a draped top, a wide skirt, a relaxed outer layer — against something more fitted underneath. The contrast is the look."
-        : "One tailored piece carries the direction. Keep the rest clean and close — the sharpness is the point.",
-      "relaxed-fits": hasStructure
-        ? "Use the structure as one considered layer. A blazer or structured piece over something relaxed underneath keeps your ease intact."
-        : "The ease in this direction is already built in — choose pieces with enough weight to hold their shape.",
-      "flowy": hasStructure
-        ? "One structured anchor — a blazer, a waistcoat, a belt — is enough. The fluid elements take care of themselves."
-        : "Choose pieces with enough drape to move rather than those that merely sit.",
-      "structured": hasFluid
-        ? "Use one fluid counterpart to the structured piece. Rigid structure throughout reads as uniform — one fluid element makes it considered."
-        : "The structure is already in the vocabulary of this direction. Choose the most precisely cut version of what you already own.",
-      "oversized": hasProportion
-        ? "The proportion direction here is deliberate — one oversized piece and keep everything else close. Two oversized pieces compete."
-        : "Oversized works best when the other elements are specific. One considered layer; one clear counterpart.",
-    };
-
-    const instruction = map[bestFitId];
-    if (instruction) return instruction;
+  // Path 2: closet item primaryColor vs closetMatchText
+  for (const item of closetItems) {
+    if (!item.primaryColor) continue;
+    if (matchedTerms(closetMatchText, [item.primaryColor]).length > 0) {
+      return { found: true, label: item.primaryColor };
+    }
   }
-
-  // No meaningful tension found — use trend-specific editorial direction instead.
-  const howTo = (report.howToWear ?? [])[0];
-  if (howTo) return howTo.direction;
-  const primaryTrend = report.keyTrends[0];
-  return primaryTrend
-    ? `Apply ${primaryTrend.name} through one piece — keep the rest of the look familiar.`
-    : "Wear one piece from this direction against your most familiar wardrobe anchor.";
+  return { found: false, label: null };
 }
 
 // ---------------------------------------------------------------------------
-// Helper: outfit note for a matched closet item
+// Named closet card gates
+// ---------------------------------------------------------------------------
+
+// Categories whose garments can plausibly carry this report's key vocabulary.
+const SLUG_COMPATIBLE_CATEGORIES: Record<string, Set<string>> = {
+  "spring-2026-soft-structure":   new Set(["TOPS", "BOTTOMS", "OUTERWEAR", "DRESSES"]),
+  "modern-tailoring-spring-2026": new Set(["TOPS", "BOTTOMS", "OUTERWEAR", "DRESSES"]),
+  "spring-2026-colour-direction": new Set(["TOPS", "BAGS", "SHOES", "ACCESSORIES"]),
+};
+
+// Subcategory values (lowercased) that disqualify an otherwise-compatible item.
+const TAILORING_SUBCATEGORY_EXCLUDE = new Set([
+  "shorts", "mini", "crop", "cami", "bikini", "activewear", "swimwear", "loungewear",
+]);
+
+const SUBCATEGORY_EXCLUDE: Record<string, Set<string>> = {
+  "spring-2026-soft-structure":   TAILORING_SUBCATEGORY_EXCLUDE,
+  "modern-tailoring-spring-2026": TAILORING_SUBCATEGORY_EXCLUDE,
+  "spring-2026-colour-direction": new Set(),
+};
+
+// ---------------------------------------------------------------------------
+// Per-slug editorial rules
+// ---------------------------------------------------------------------------
+
+type LeaveOutCandidate = { text: string; vocab: string[] };
+
+type PersonalEditRules = {
+  verdictOpener: string;
+  verdictOpenerNeutral?: string;
+  verdictFitClose: Record<StyleRegister, string>;
+  verdictLifestyleOptional: string | null;
+  verdictLifestyleOptionalEvents?: string;
+  takeWithYou: string[];
+  takeWithYouNeutral?: string[];
+  takeWithYouWorkContext?: string;
+  leaveOutCandidates: LeaveOutCandidate[];
+  pairNote: string;
+  entryPoint: string;
+  oneThingToWatch: Record<StyleRegister, string>;
+};
+
+const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
+  "spring-2026-soft-structure": {
+    verdictOpener:
+      "Soft Structure builds presence through cut and proportion rather than stiffness or decoration. The direction works best when one clearly shaped anchor — a longline blazer, wide-leg trouser, or draped midi — carries the silhouette while the pieces around it stay calm.",
+    verdictFitClose: {
+      "clean-polished":
+        "Soft Structure is strongest here when it stays clean and fluid rather than reading as full tailoring. Keep one clear line through the blazer or trouser, then let the rest of the outfit soften around it.",
+      "fluid-ease":
+        "Keep the fluid element as contrast rather than replacing the cleaner line that holds the look together. One structured anchor against something that moves is the whole formula.",
+      "expressive":
+        "One sculptural gesture per look is the limit — it reads because everything around it stays composed. Two gestures cancel each other.",
+      "neutral":
+        "One anchor piece with real proportion, worn against something familiar, is the whole method.",
+    },
+    verdictLifestyleOptional:
+      "For work, meetings, or events, this gives presence without looking overdone.",
+    takeWithYou: [
+      "The longline blazer, clean wide-leg trouser, or draped midi — the anchor that changes proportion without adding stiffness.",
+      "Fabric that earns its place: structured crepe or dry-hand twill to hold, fluid viscose or washed linen to move.",
+      "One considered gesture per outfit — a softened shoulder, wrapped front, or curved hem. Not two.",
+    ],
+    leaveOutCandidates: [
+      {
+        text: "Head-to-toe structured suiting — stiffness reads as effort here, not polish.",
+        vocab: ["suit", "stiff", "rigid", "suiting"],
+      },
+      {
+        text: "Oversized silhouettes competing in the same outfit — one generous piece works, two compete.",
+        vocab: ["oversized", "volume", "balloon", "competing"],
+      },
+      {
+        text: "Embellishment or decorative detail — the impression comes from proportion and fabric, not surface interest.",
+        vocab: ["embellish", "decorative", "print", "beading", "detail"],
+      },
+    ],
+    pairNote: "One piece anchors the silhouette; the other softens around it — keep everything else simple.",
+    takeWithYouWorkContext: "For work, meetings, or events — the anchor piece holds the occasion without overdoing it.",
+    entryPoint: "A softly structured blazer, fluid trouser, and fine knit or clean top.",
+    oneThingToWatch: {
+      "clean-polished":
+        "Stiffness reads as effort here. Choose fabric with enough body to hold the shoulder without pressing — the structure comes from proportion, not from rigidity.",
+      "fluid-ease":
+        "One structured element and one fluid element is the formula. Fluid throughout loses the silhouette line that makes the direction legible.",
+      "expressive":
+        "Two gestures cancel each other. One defined element with everything else composed is the limit — the restraint is what makes the gesture read.",
+      "neutral":
+        "The structure here comes from proportion and fabric weight, not from construction stiffness. One element carries the silhouette; the rest can be quiet.",
+    },
+  },
+
+  "modern-tailoring-spring-2026": {
+    verdictOpener:
+      "Modern tailoring works when one well-cut piece changes the register of everything around it. It is most useful when treated as a separates question — which one tailored anchor, worn with a softer counterpart, gives the look clarity without reading as formal.",
+    verdictFitClose: {
+      "clean-polished":
+        "The pieces are already there — the update is treating each tailored piece as a separates tool rather than part of a matched set. One blazer or trouser should unlock at least three different combinations.",
+      "fluid-ease":
+        "Here, structure means a clear silhouette, not stiff construction — every other piece can stay as relaxed as needed. The contrast between the tailored anchor and the softer counterpart is the whole look.",
+      "expressive":
+        "Use one tailored piece as the composed counterpart to something more expressive. The contrast is the look — not the tailored piece alone.",
+      "neutral":
+        "One tailored anchor, worn with something softer, is the whole method. The proportion contrast between the two pieces does the styling.",
+    },
+    verdictLifestyleOptional:
+      "For work or events, one tailored piece lifts the whole look's register without reading as formal.",
+    takeWithYou: [
+      "One tailored anchor — a blazer, waistcoat, or wide-leg trouser — that functions across at least three separate outfits.",
+      "The proportion contrast: longline against narrow, cropped against wide, waistcoat against relaxed denim. That decision is the styling.",
+      "A soft counterpart — a fine knit, draped skirt, slip dress, or fluid shirt — that makes the tailored piece wearable rather than severe.",
+    ],
+    leaveOutCandidates: [
+      {
+        text: "A suit worn as a matched set — it reads as a costume rather than a wardrobe investment.",
+        vocab: ["suit", "matched", "set", "uniform"],
+      },
+      {
+        text: "Stiff fabric with no movement — the tailored piece should hold its line without being rigid.",
+        vocab: ["stiff", "rigid", "heavy", "construction"],
+      },
+      {
+        text: "Trousers that only work with heels — the proportion should work across real shoes and real occasions.",
+        vocab: ["heels", "formal", "occasion", "restrict"],
+      },
+    ],
+    pairNote: "The proportion contrast between them is the styling decision — keep everything else minimal.",
+    takeWithYouWorkContext: "For work or events — a single tailored anchor is all that needs to work harder than the rest.",
+    entryPoint: "Tailored trousers with a soft shirt, knit, or clean jersey top.",
+    oneThingToWatch: {
+      "clean-polished":
+        "The update is versatility, not formality. A tailored piece that only functions as part of its original set — or only reads at work — is not the investment. It needs to work with denim, a skirt, and a slip.",
+      "fluid-ease":
+        "One tailored piece is the anchor; the rest can stay relaxed. Two tailored pieces in one look tip toward uniform territory.",
+      "expressive":
+        "Keep the expressive element in one place — the tailored piece or the counterpart, not both. The contrast between them is what creates the look.",
+      "neutral":
+        "The tailored piece should function independently across at least three different combinations. If it only works with one counterpart, it is a costume, not a wardrobe tool.",
+    },
+  },
+
+  "spring-2026-colour-direction": {
+    verdictOpener:
+      "Colour Direction is a method, not a palette. It works best when a quiet base — soft white, cream, stone, espresso, washed denim, or black — gives one clear accent room to read. The discipline is choosing one accent that earns its place across several existing outfits rather than one that only works in a single context.",
+    verdictOpenerNeutral:
+      "Colour Direction is a method, not a palette. It works best when a quiet base — a quiet base colour already easy to repeat — gives one clear accent room to read. The discipline is choosing one accent that earns its place across several existing outfits rather than one that only works in a single context.",
+    verdictFitClose: {
+      "clean-polished":
+        "A neutral wardrobe base is the starting condition for this method — the accent does all its work against that base. The quieter the base, the more clearly the accent reads.",
+      "fluid-ease":
+        "Soft, unfussy pieces make the best base — the accent does all its work against the calm ground. The next step is one clear accent that changes the mood without competing.",
+      "expressive":
+        "One accent works here; two competing ones cancel each other. The quiet base is what gives the single accent room to read as intentional rather than accidental.",
+      "neutral":
+        "One quiet base, one clear accent — the accent's job is to interrupt the base, not to match it. Over-coordination erases the effect.",
+    },
+    verdictLifestyleOptional:
+      "For work or meetings, the accent through a bag or shoe keeps the look composed rather than expressive.",
+    verdictLifestyleOptionalEvents:
+      "For an event, one accent through a bag or shoe keeps the look composed rather than overdone.",
+    takeWithYou: [
+      "A quiet base that earns its place by working with everything: soft white, cream, stone, espresso, washed denim, or black.",
+      "One clear accent, introduced through the lowest-commitment piece first — a bag, flat, or shoe — before committing to a full accent garment.",
+      "One strong colour note lands more powerfully than two competing ones.",
+    ],
+    takeWithYouNeutral: [
+      "A quiet base — a quiet base colour already easy to repeat — is the starting condition for this method.",
+      "One clear accent, introduced through the lowest-commitment piece first — a bag, flat, or shoe — before committing to a full accent garment.",
+      "One strong colour note lands more powerfully than two competing ones.",
+    ],
+    leaveOutCandidates: [
+      {
+        text: "Several accent pieces in the same seasonal colour — one accent changes the wardrobe; three create a styling problem.",
+        vocab: ["accent", "seasonal", "shade", "colour", "color"],
+      },
+      {
+        text: "Over-coordinated colour matching — the accent's job is to interrupt the base, not to blend into it.",
+        vocab: ["coordinate", "match", "blend", "tone", "tonal"],
+      },
+      {
+        text: "Replacing an entire wardrobe for one trending shade — the method is one accent that earns its place across what you already own.",
+        vocab: ["trending", "season", "replace", "wardrobe"],
+      },
+    ],
+    pairNote: "The accent comes through the smaller piece — a bag, flat, or scarf keeps it intentional.",
+    takeWithYouWorkContext: "One accent through a bag, flat, or shoe — the most controlled entry before committing to a full garment.",
+    entryPoint: "A calm base with colour through a bag, shoe, scarf, or fine knit.",
+    oneThingToWatch: {
+      "clean-polished":
+        "The accent's effect depends on the base staying quiet. Over-coordination between base and accent removes the contrast that makes colour intentional.",
+      "fluid-ease":
+        "One accent, positioned deliberately — through a bag, flat, or scarf before committing to a full garment. The quiet base does its work by staying in the background.",
+      "expressive":
+        "Two competing colour notes cancel each other. The method is one accent against a quiet base — the restraint is what gives the accent its effect.",
+      "neutral":
+        "The accent does not need to coordinate with anything except the base. Avoid matching the accent to other colours in the outfit — that erases the point.",
+    },
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Closet item outfit note
 // ---------------------------------------------------------------------------
 
 function buildClosetItemNote(
@@ -508,19 +588,19 @@ function buildClosetItemNote(
   if (pairName) {
     const paired: Partial<Record<string, string>> = {
       OUTERWEAR: `Layer it over ${pairName} for the proportion story this direction is built on.`,
-      BOTTOMS: `Wear it with ${pairName} for the separates formula this report points to.`,
-      TOPS: `Pair with ${pairName} for the season's separates approach.`,
+      BOTTOMS:   `Wear it with ${pairName} for the separates formula this report points to.`,
+      TOPS:      `Pair with ${pairName} for the season's separates approach.`,
     };
     return paired[item.category] ?? `Pairs with ${pairName} for the look this direction points to.`;
   }
 
   const solo: Partial<Record<string, string>> = {
-    OUTERWEAR: "Wear it open over something simple. The proportion does the work.",
-    BOTTOMS: "The silhouette anchor. Keep the top quiet and let the cut speak.",
-    DRESSES: "One piece covers the whole direction. Add one structured layer if the occasion needs it.",
-    TOPS: "Works best against a more structured or tailored bottom.",
-    BAGS: "Reinforces the direction at the accessory level — no new pieces needed.",
-    SHOES: "Grounds the look at the ankle. A clean silhouette here does the most.",
+    OUTERWEAR:   "Wear it open over something simple. The proportion does the work.",
+    BOTTOMS:     "The silhouette anchor. Keep the top quiet and let the cut speak.",
+    DRESSES:     "One piece covers the whole direction. Add one structured layer if the occasion needs it.",
+    TOPS:        "Works best against a more structured or tailored bottom.",
+    BAGS:        "Reinforces the direction at the accessory level — no new pieces needed.",
+    SHOES:       "Grounds the look at the ankle. A clean silhouette here does the most.",
     ACCESSORIES: "One way into this direction without committing to new pieces.",
   };
 
@@ -528,17 +608,12 @@ function buildClosetItemNote(
 }
 
 // ---------------------------------------------------------------------------
-// Helper: identify a missing anchor piece — explicit slug-keyed rules only.
-// No prose string matching: each rule names an exact anchor category, the
-// Closet roles that must already be present for the addition to be usable,
-// and pre-authored suggestion copy. Colour Direction is absent because no
-// garment-category recommendation is defensible without a clear neutral-base
-// gap in the shopper's actual data.
+// One unlock piece — missing anchor category recommendation
 // ---------------------------------------------------------------------------
 
 type ReportAnchorRule = {
   anchorCategory: string;
-  requiresCategories: string[];  // all must be present in closet
+  requiresCategories: string[];
   suggestion: string;
 };
 
@@ -605,6 +680,114 @@ function buildOneUnlockPiece(
   return null;
 }
 
+function buildNamedEntryPoint(
+  top: ShopperClosetItemEvidence,
+  second: ShopperClosetItemEvidence | null,
+  slug: string,
+): string {
+  if (slug === "spring-2026-colour-direction") {
+    if (second) {
+      return `Start with your ${top.name!}. Introduce colour through the ${second.name!} — one clear accent against a quiet base.`;
+    }
+    return `Start with your ${top.name!}. Introduce colour through one accessory — a bag, flat, or scarf — and keep the rest of the outfit quiet.`;
+  }
+
+  if (top.category === "OUTERWEAR") {
+    if (second && second.category === "BOTTOMS") {
+      return `Start with your ${top.name!}. Wear it open over the ${second.name!} with a simple knit or clean top underneath.`;
+    }
+    if (second && second.category === "TOPS") {
+      return `Start with your ${top.name!}. Layer it over the ${second.name!} — the proportions do the work.`;
+    }
+    return `Start with your ${top.name!}. Wear it open over something simple — the proportion does the work.`;
+  }
+
+  if (top.category === "BOTTOMS") {
+    if (second && second.category === "OUTERWEAR") {
+      return `Start with your ${top.name!}. Wear it with the ${second.name!} layered open — one clear line through the outfit.`;
+    }
+    if (second) {
+      return `Start with your ${top.name!}. Wear it with the ${second.name!} and keep everything else quiet.`;
+    }
+    return `Start with your ${top.name!}. Keep the top quiet — a fine knit or clean jersey is enough to let the cut read.`;
+  }
+
+  if (top.category === "DRESSES") {
+    return `Start with your ${top.name!}. One piece covers the direction — add one structured layer only if the occasion needs it.`;
+  }
+
+  if (top.category === "TOPS") {
+    if (second) {
+      return `Start with your ${top.name!}. Pair it with the ${second.name!} for the separates approach this report points to.`;
+    }
+    return `Start with your ${top.name!}. Pair it with a tailored trouser or structured bottom and keep everything else quiet.`;
+  }
+
+  if (second) {
+    return `Start with your ${top.name!}. Pair it with the ${second.name!} and keep the rest of the outfit simple.`;
+  }
+  return `Start with your ${top.name!}. Introduce it against a quiet base and keep the rest of the outfit calm.`;
+}
+
+function buildTwoItemFormula(
+  nameA: string,
+  nameB: string,
+  catA: string,
+  catB: string,
+  slug: string,
+): string {
+  if (slug === "spring-2026-colour-direction") {
+    return `${nameA} + ${nameB} + a quiet base = one clear accent.`;
+  }
+
+  const hasOuterwear = catA === "OUTERWEAR" || catB === "OUTERWEAR";
+  const hasBottoms   = catA === "BOTTOMS"   || catB === "BOTTOMS";
+  const hasTops      = catA === "TOPS"      || catB === "TOPS";
+
+  let tertiary: string;
+  let outcome: string;
+
+  if (slug === "spring-2026-soft-structure") {
+    if (hasOuterwear && hasBottoms && !hasTops) {
+      tertiary = "a simple top";
+      outcome  = "quiet presence";
+    } else if (hasOuterwear && hasTops && !hasBottoms) {
+      tertiary = "the right trouser";
+      outcome  = "the full silhouette";
+    } else {
+      tertiary = "one quiet counterpart";
+      outcome  = "the anchor the direction needs";
+    }
+  } else {
+    // modern-tailoring-spring-2026
+    if (hasOuterwear && hasBottoms && !hasTops) {
+      tertiary = "a simple top";
+      outcome  = "the separates formula";
+    } else if (hasOuterwear && hasTops && !hasBottoms) {
+      tertiary = "a tailored trouser";
+      outcome  = "the proportion contrast";
+    } else if (hasBottoms && hasTops && !hasOuterwear) {
+      tertiary = "one tailored layer";
+      outcome  = "the full separates look";
+    } else {
+      tertiary = "one soft counterpart";
+      outcome  = "the proportion contrast";
+    }
+  }
+
+  return `${nameA} + ${nameB} + ${tertiary} = ${outcome}.`;
+}
+
+// ---------------------------------------------------------------------------
+// Short trend titles for sub-title field
+// ---------------------------------------------------------------------------
+
+const TREND_SHORT_TITLES: Record<string, string> = {
+  "spring-2026-soft-structure":   "Soft Structure",
+  "modern-tailoring-spring-2026": "Modern Tailoring",
+  "spring-2026-colour-direction": "Colour Direction",
+};
+
 // ---------------------------------------------------------------------------
 // Output types
 // ---------------------------------------------------------------------------
@@ -617,21 +800,23 @@ export type ClosetMatchItem = {
 };
 
 export type ShopperEdit = {
-  personalReading: string;
-  strongestMatch: string;
-  adaptDontCopy: string;
-  lessUseful: string | null;
-  fromCloset: ClosetMatchItem[];
-  fromClosetFormula: string | null;
+  subTitle: string;
+  verdict: string;
+  takeWithYou: string[];
+  leaveOut: string[];
+  bestEntryPoint: string;
   oneLookToTry: string;
+  oneThingToWatch: string;
+  fromCloset: ClosetMatchItem[];
+  fromClosetInsufficient: boolean;
   oneUnlockPiece: string | null;
-  contributedEvidence: string[];
+  theOneFormula: string;
 };
 
 // ---------------------------------------------------------------------------
 // buildShopperEdit — deterministic, no AI calls. Every output sentence is
-// grounded in either (a) text already present in `report`, or (b) values the
-// customer themselves provided via Passport/Closet. Nothing is invented.
+// grounded in either (a) text already present in `report`, or (b) values
+// the customer themselves provided via Passport/Closet. Nothing is invented.
 // ---------------------------------------------------------------------------
 
 export function buildShopperEdit(
@@ -639,344 +824,249 @@ export function buildShopperEdit(
   evidence: ShopperEvidenceBundle,
 ): ShopperEdit {
   const profile = evidence.profile;
-  const positiveText = buildPositiveReportText(report);
-  const keyDirectionsText = buildKeyDirectionsText(report);
+  const slug = report.slug;
   const closetMatchText = buildClosetMatchText(report);
+  const rules = PERSONAL_EDIT_RULES[slug];
 
-  let profileContributed = false;
-  let closetContributed = false;
-  let reviewsContributed = false;
+  // Style register — by evidence count; tie → neutral
+  const register: StyleRegister = profile
+    ? resolveStyleRegister(profile.stylePersonalities)
+    : "neutral";
+
+  // Colour evidence (gates colour-specific copy in colour-direction sections)
+  const colourEvidence = buildColourEvidence(profile, evidence.closetItems, closetMatchText);
+  const useNeutralColour = slug === "spring-2026-colour-direction" && !colourEvidence.found;
 
   // -------------------------------------------------------------------------
-  // Step 1: Score closet items against report vocabulary
+  // Named closet cards — correction 2: candidateTerms excludes
+  // CLOSET_CATEGORY_MAP terms so a generic item cannot qualify merely because
+  // it belongs to a compatible category.
   // -------------------------------------------------------------------------
-  type ScoredItem = { item: ShopperClosetItemEvidence; term: string; score: number };
+  const compatibleCategories = SLUG_COMPATIBLE_CATEGORIES[slug] ?? new Set<string>();
+  const excludedSubcategories = SUBCATEGORY_EXCLUDE[slug] ?? new Set<string>();
+
+  type ScoredItem = { item: ShopperClosetItemEvidence; score: number };
   const scored: ScoredItem[] = [];
 
   for (const item of evidence.closetItems) {
-    const itemTerms = [
+    // Gate 1: category must be in the compatible set for this slug
+    if (!compatibleCategories.has(item.category)) continue;
+    // Gate 2: subcategory must not be excluded
+    if (item.subcategory && excludedSubcategories.has(item.subcategory.toLowerCase())) continue;
+
+    // candidateTerms: concrete item metadata only — no category-map terms
+    const candidateTerms = [
       item.subcategory,
-      item.primaryColor,
       item.material,
+      item.primaryColor,
       ...item.styleTags,
       ...item.occasions,
-      ...(CLOSET_CATEGORY_MAP[item.category]?.terms ?? []),
+      ...extractNameTerms(item.name),
     ].filter((t): t is string => Boolean(t));
 
-    const hits = matchedTerms(closetMatchText, itemTerms);
+    const hits = matchedTerms(closetMatchText, candidateTerms);
     if (hits.length === 0) continue;
 
     let score = hits.length;
     if (item.name) score += 3;
     if (item.imageUrl) score += 1;
-    scored.push({ item, term: hits[0], score });
+    scored.push({ item, score });
   }
 
   scored.sort((a, b) => b.score - a.score);
   const namedMatches = scored.filter((m) => m.item.name).slice(0, 2);
-  const matchedCategories = new Set(scored.map((m) => m.item.category));
+  const hasCloset = evidence.closetItems.length > 0;
 
   // -------------------------------------------------------------------------
-  // Step 2: Personality and aspiration signal hits
+  // Work-context lifestyle gate — computed once, used in both verdict and
+  // takeWithYou sections so the condition fires consistently.
   // -------------------------------------------------------------------------
-  const allPersonalityHits = profile
-    ? translateAllHits(
-        profile.stylePersonalities,
-        PERSONALITY_STYLE_MAP,
-        positiveText,
-        new Set(),
-      )
+  const workContextLifestyles = new Set(["office", "hybrid", "events", "on-the-go", "travel"]);
+  const lifestyleIdsForOptional = profile
+    ? (profile.lifestyle ?? "").split(",").map((s) => s.trim()).filter(Boolean)
     : [];
-  const topPersonalityHit = allPersonalityHits[0] ?? null;
-
-  const aspirationIds = profile
-    ? [
-        ...profile.desiredImpression,
-        ...profile.desiredFeelings,
-        ...profile.becoming,
-      ]
-    : [];
-  const topAspirationHit = profile
-    ? (translateAllHits(aspirationIds, ASPIRATION_STYLE_MAP, positiveText, new Set())[0] ?? null)
-    : null;
+  const firedWorkContextIds = lifestyleIdsForOptional.filter((l) => workContextLifestyles.has(l));
+  const workContextFired = firedWorkContextIds.length > 0;
+  const workContextIsEvents = workContextFired && firedWorkContextIds.every((l) => l === "events");
 
   // -------------------------------------------------------------------------
-  // Step 3: personalReading — one editorial paragraph
+  // Section 1 — YOUR EDITORIAL VERDICT
   // -------------------------------------------------------------------------
-  let personalReading: string;
-  if (!profile) {
-    personalReading =
-      report.naiaInterpretation ??
-      "Complete your Passport to unlock a personal reading of this direction.";
+  let verdict: string;
+  if (rules) {
+    const opener = (useNeutralColour && rules.verdictOpenerNeutral)
+      ? rules.verdictOpenerNeutral
+      : rules.verdictOpener;
+    const parts: string[] = [opener, rules.verdictFitClose[register]];
+
+    if (rules.verdictLifestyleOptional && workContextFired) {
+      const optionalText = (workContextIsEvents && rules.verdictLifestyleOptionalEvents)
+        ? rules.verdictLifestyleOptionalEvents
+        : rules.verdictLifestyleOptional;
+      parts.push(optionalText);
+    }
+
+    verdict = parts.join(" ");
   } else {
-    const parts: string[] = [];
-
-    if (topPersonalityHit) {
-      const openerKey = profile.stylePersonalities.find(
-        (id) => PERSONALITY_STYLE_MAP[id]?.terms.includes(topPersonalityHit.term),
-      );
-      const opener =
-        PERSONALITY_READING_OPENERS[openerKey ?? ""] ??
-        `This direction is relevant to a ${topPersonalityHit.label.toLowerCase()} wardrobe`;
-      parts.push(`${opener}.`);
-      profileContributed = true;
-    } else {
-      parts.push("This direction is worth reading closely on its own terms.");
-    }
-
-    // Aspiration layer — add if it introduces a distinct concept
-    const aspirationMatchId = aspirationIds.find((id) => {
-      const entry = ASPIRATION_STYLE_MAP[id];
-      if (!entry) return false;
-      return matchedTerms(positiveText, entry.terms).length > 0;
-    });
-    if (
-      aspirationMatchId &&
-      topAspirationHit &&
-      topAspirationHit.term !== topPersonalityHit?.term
-    ) {
-      const enablePhrase = ASPIRATION_ENABLE_PHRASES[aspirationMatchId];
-      if (enablePhrase) {
-        parts.push(`${enablePhrase}.`);
-        profileContributed = true;
-      }
-    }
-
-    // Close with closet signal
-    if (namedMatches.length > 0) {
-      parts.push("Your Closet already has a starting point — see the section below.");
-      closetContributed = true;
-    } else if (matchedCategories.size > 0) {
-      parts.push("There is a starting point in your Closet — the section below makes it specific.");
-      closetContributed = true;
-    } else if (report.investmentNotes) {
-      const firstSentence = report.investmentNotes.split(".")[0].trim();
-      const lowered = firstSentence.slice(0, 1).toLowerCase() + firstSentence.slice(1);
-      parts.push(`The first move: ${lowered}.`);
-    }
-
-    personalReading = parts.join(" ");
+    verdict = report.naiaVerdict ?? report.naiaInterpretation ?? report.summary;
   }
 
   // -------------------------------------------------------------------------
-  // Step 4: strongestMatch
+  // Section 2 — TAKE WITH YOU
   // -------------------------------------------------------------------------
-  let strongestMatch: string;
-  if (!profile) {
-    const t = report.keyTrends[0];
-    strongestMatch = t
-      ? `${t.name} is the central direction in this report. ${t.description}`
-      : "Read the full report to identify the strongest direction for your wardrobe.";
-  } else {
-    const profileTerms = [
-      ...profile.stylePersonalities.flatMap(
-        (id) => PERSONALITY_STYLE_MAP[id]?.terms ?? [],
-      ),
-      ...profile.desiredImpression.flatMap(
-        (id) => ASPIRATION_STYLE_MAP[id]?.terms ?? [],
-      ),
-      ...profile.desiredFeelings.flatMap(
-        (id) => ASPIRATION_STYLE_MAP[id]?.terms ?? [],
-      ),
-      ...profile.becoming.flatMap(
-        (id) => ASPIRATION_STYLE_MAP[id]?.terms ?? [],
-      ),
-    ];
+  const takeWithYouBase: string[] =
+    (useNeutralColour && rules?.takeWithYouNeutral)
+      ? [...rules.takeWithYouNeutral]
+      : [...(rules?.takeWithYou ?? report.keyTrends.map((t) => `${t.name}: ${t.description}`))];
+  if (workContextFired && rules?.takeWithYouWorkContext) {
+    takeWithYouBase.push(rules.takeWithYouWorkContext);
+  }
+  const takeWithYou = takeWithYouBase;
 
-    let bestTrend = report.keyTrends[0];
-    let bestScore = -1;
-    for (const trend of report.keyTrends) {
-      const score = matchedTerms(
-        `${trend.name} ${trend.description}`,
-        profileTerms,
-      ).length;
-      if (score > bestScore) {
-        bestScore = score;
-        bestTrend = trend;
-      }
+  // -------------------------------------------------------------------------
+  // Section 3 — LEAVE OUT (correction 1: all 3 bullets always shown;
+  // review evidence reorders by vocab match, never exposes review language)
+  // -------------------------------------------------------------------------
+  let leaveOut: string[];
+  if (rules?.leaveOutCandidates?.length) {
+    const candidates = [...rules.leaveOutCandidates];
+    if (
+      evidence.reviewSignal.reviewCount >= 3 &&
+      evidence.reviewSignal.didntWorkTags.length > 0
+    ) {
+      const tagCorpus = evidence.reviewSignal.didntWorkTags.join(" ");
+      const withScores = candidates.map((c) => ({
+        c,
+        score: matchedTerms(tagCorpus, c.vocab).length,
+      }));
+      withScores.sort((a, b) => b.score - a.score);
+      leaveOut = withScores.map((s) => s.c.text);
+    } else {
+      leaveOut = candidates.map((c) => c.text);
     }
+  } else {
+    leaveOut = (report.fading ?? []).slice(0, 3);
+  }
 
-    const lifestyleIds = (profile.lifestyle ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    let concreteStyling: string | null = null;
+  // -------------------------------------------------------------------------
+  // Section 4 — YOUR BEST ENTRY POINT
+  // ≥1 named match: lead with that item directly.
+  // 0 named matches: lifestyle-matched report direction, colour-evidence
+  // personalisation, or report-level entry point.
+  // -------------------------------------------------------------------------
+  let bestEntryPoint: string;
+  if (namedMatches.length >= 1) {
+    bestEntryPoint = buildNamedEntryPoint(
+      namedMatches[0].item,
+      namedMatches[1]?.item ?? null,
+      slug,
+    );
+  } else if (useNeutralColour) {
+    bestEntryPoint = rules?.entryPoint ?? (report.howToWear ?? [])[0]?.direction ?? report.summary;
+  } else {
+    const lifestyleIds = profile
+      ? (profile.lifestyle ?? "").split(",").map((s) => s.trim()).filter(Boolean)
+      : [];
+    let found: string | null = null;
     for (const lid of lifestyleIds) {
       const priority = LIFESTYLE_HOWTO_MAP[lid];
       if (!priority) continue;
       const match = (report.howToWear ?? []).find((h) => priority.includes(h.feeling));
-      if (match) {
-        concreteStyling = match.direction;
-        break;
-      }
-    }
-    if (!concreteStyling) {
-      concreteStyling =
-        (report.howToWear ?? [])[0]?.direction ??
-        (report.investmentNotes?.split(".")[0]?.trim() ?? null);
+      if (match) { found = match.direction; break; }
     }
 
-    strongestMatch = bestTrend
-      ? `${bestTrend.name} is your strongest entry point here. ${concreteStyling ?? bestTrend.description}`
-      : "Complete your Passport for a more specific read on this report.";
-    profileContributed = true;
+    if (
+      !found &&
+      slug === "spring-2026-colour-direction" &&
+      colourEvidence.found &&
+      colourEvidence.label
+    ) {
+      found = `${colourEvidence.label} pieces can already serve as the quiet base — introduce colour through one accent: a bag, flat, scarf, or fine knit.`;
+    }
+
+    bestEntryPoint = found ?? rules?.entryPoint ?? (report.howToWear ?? [])[0]?.direction ?? report.summary;
   }
 
   // -------------------------------------------------------------------------
-  // Step 5: adaptDontCopy
+  // Section 5 — ONE LOOK TO TRY (correction 5)
+  // ≥2 named matches: exact items + one styling instruction.
+  // <2 named matches: "A suggested formula: [entry point]" — no closet implied.
   // -------------------------------------------------------------------------
-  let adaptDontCopy: string;
-  if (profile && profile.fitPreferences.length > 0) {
-    adaptDontCopy = buildAdaptInstruction(
-      profile.fitPreferences,
-      report,
-      keyDirectionsText,
-    );
-    profileContributed = true;
+  let oneLookToTry: string;
+  if (namedMatches.length >= 2) {
+    const a = namedMatches[0].item.name!;
+    const b = namedMatches[1].item.name!;
+    const note = rules?.pairNote ?? "Keep the rest of the look quiet.";
+    oneLookToTry = `${a} + ${b}. ${note}`;
   } else {
-    const howTo = (report.howToWear ?? [])[0];
-    adaptDontCopy =
-      howTo?.direction ??
-      "Wear one piece from this direction against your most familiar wardrobe anchor.";
+    const formula =
+      rules?.entryPoint ??
+      (report.howToWear ?? [])[0]?.direction ??
+      report.wardrobeNote ??
+      report.summary;
+    oneLookToTry = `A suggested formula: ${formula}`;
   }
 
   // -------------------------------------------------------------------------
-  // Step 6: lessUseful — conditional on review evidence or fit conflict
+  // Section 6 — ONE THING TO WATCH
   // -------------------------------------------------------------------------
-  let lessUseful: string | null = null;
-
-  if (
-    evidence.reviewSignal.reviewCount >= 3 &&
-    evidence.reviewSignal.didntWorkTags.length > 0
-  ) {
-    for (const trend of report.keyTrends) {
-      const hits = matchedTerms(
-        `${trend.name} ${trend.description}`,
-        evidence.reviewSignal.didntWorkTags,
-      );
-      if (hits.length > 0) {
-        const altTrend = report.keyTrends.find((t) => t !== trend);
-        const alternative = altTrend
-          ? `${altTrend.name} is a more workable entry point.`
-          : (report.howToWear ?? [])[0]?.direction ??
-            "Look for a version of this direction with more ease.";
-        lessUseful = `${trend.name} with ${hits[0]} is less useful based on what you know does not work. ${alternative}`;
-        reviewsContributed = true;
-        break;
-      }
-    }
-  }
+  const oneThingToWatch =
+    rules?.oneThingToWatch[register] ??
+    rules?.oneThingToWatch["neutral"] ??
+    (report.naiaVerdict ?? report.summary);
 
   // -------------------------------------------------------------------------
-  // Step 7: fromCloset
+  // Section 7 — FROM YOUR CLOSET
   // -------------------------------------------------------------------------
   const fromCloset: ClosetMatchItem[] = [];
-
   for (let i = 0; i < namedMatches.length; i++) {
     const { item } = namedMatches[i];
     const pairName =
       i === 0 && namedMatches.length >= 2 ? namedMatches[1].item.name! : null;
-
     fromCloset.push({
       name: item.name!,
       imageUrl: item.imageUrl,
       category: item.category,
       outfitNote: buildClosetItemNote(item, pairName),
     });
-    closetContributed = true;
   }
 
-  let fromClosetFormula: string | null = null;
-  if (fromCloset.length === 0) {
-    const seen = new Set<string>();
-    for (const item of evidence.closetItems) {
-      if (seen.has(item.category)) continue;
-      seen.add(item.category);
-      const entry = CLOSET_CATEGORY_MAP[item.category];
-      if (!entry || entry.terms.length === 0) continue;
-      const hits = matchedTerms(closetMatchText, entry.terms);
-      if (hits.length > 0) {
-        fromClosetFormula = `Your ${entry.label} is the formula starting point — the ${hits[0]} direction in this report is where that category does its work. Name a specific piece in your Closet to get a sharper read.`;
-        closetContributed = true;
-        break;
-      }
-    }
-  }
+  // fromClosetInsufficient: closet exists but no item passed the named-card threshold
+  const fromClosetInsufficient = hasCloset && fromCloset.length === 0;
+
+  // oneUnlockPiece — rendered inside FROM YOUR CLOSET in the UI
+  const oneUnlockPiece = buildOneUnlockPiece(evidence.closetItems, profile, slug);
 
   // -------------------------------------------------------------------------
-  // Step 8: oneLookToTry
+  // Section 8 — THE ONE FORMULA TO REMEMBER
   // -------------------------------------------------------------------------
-  const lifestyleIds = profile
-    ? (profile.lifestyle ?? "").split(",").map((s) => s.trim()).filter(Boolean)
-    : [];
-
-  let oneLookToTry: string;
-  if (fromCloset.length >= 2) {
-    const a = fromCloset[0].name;
-    const b = fromCloset[1].name;
-    const finish =
-      (report.howToWear ?? [])[0]?.direction ?? "Keep the rest of the look quiet.";
-    oneLookToTry = `${a} + ${b}. ${finish}`;
-  } else if (fromCloset.length === 1) {
-    const a = fromCloset[0].name;
-    let contextDirection: string | null = null;
-    for (const lid of lifestyleIds) {
-      const priority = LIFESTYLE_HOWTO_MAP[lid];
-      if (!priority) continue;
-      const match = (report.howToWear ?? []).find((h) => priority.includes(h.feeling));
-      if (match) {
-        contextDirection = match.direction;
-        break;
-      }
-    }
-    oneLookToTry = `${a} as the anchor. ${
-      contextDirection ??
-      (report.howToWear ?? [])[0]?.direction ??
-      "Build the rest of the look around it."
-    }`;
-  } else {
-    let contextDirection: string | null = null;
-    for (const lid of lifestyleIds) {
-      const priority = LIFESTYLE_HOWTO_MAP[lid];
-      if (!priority) continue;
-      const match = (report.howToWear ?? []).find((h) => priority.includes(h.feeling));
-      if (match) {
-        contextDirection = `${match.feeling}: ${match.direction}`;
-        break;
-      }
-    }
-    oneLookToTry =
-      contextDirection ??
-      (report.howToWear ?? [])[0]?.direction ??
-      report.investmentNotes ??
-      "Add items to your Closet to get a specific look instruction here.";
-  }
+  const theOneFormula = namedMatches.length >= 2
+    ? buildTwoItemFormula(
+        namedMatches[0].item.name!,
+        namedMatches[1].item.name!,
+        namedMatches[0].item.category,
+        namedMatches[1].item.category,
+        slug,
+      )
+    : (report.wardrobeNote ?? rules?.entryPoint ?? report.summary);
 
   // -------------------------------------------------------------------------
-  // Step 9: oneUnlockPiece — conditional on missing anchor category
+  // Sub-title
   // -------------------------------------------------------------------------
-  const oneUnlockPiece = buildOneUnlockPiece(evidence.closetItems, profile, report.slug);
-
-  // -------------------------------------------------------------------------
-  // Step 10: contributedEvidence
-  // -------------------------------------------------------------------------
-  const contributedEvidence: string[] = [];
-  if (profileContributed) contributedEvidence.push("your Passport");
-  if (closetContributed) contributedEvidence.push("your Closet");
-  if (reviewsContributed) {
-    const n = evidence.reviewSignal.reviewCount;
-    contributedEvidence.push(`${n} rated look${n === 1 ? "" : "s"}`);
-  }
+  const shortTitle = TREND_SHORT_TITLES[slug] ?? report.title;
+  const subTitle = `${shortTitle.toUpperCase()}, READ THROUGH YOUR STYLE`;
 
   return {
-    personalReading,
-    strongestMatch,
-    adaptDontCopy,
-    lessUseful,
-    fromCloset,
-    fromClosetFormula,
+    subTitle,
+    verdict,
+    takeWithYou,
+    leaveOut,
+    bestEntryPoint,
     oneLookToTry,
+    oneThingToWatch,
+    fromCloset,
+    fromClosetInsufficient,
     oneUnlockPiece,
-    contributedEvidence,
+    theOneFormula,
   };
 }

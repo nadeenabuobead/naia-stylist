@@ -7,8 +7,6 @@ type LoaderData = {
   report: TrendReportData;
   edit: ShopperEdit | null;
   hasProfile: boolean;
-  hasCloset: boolean;
-  reviewCount: number;
   generationFailed: boolean;
 };
 
@@ -30,8 +28,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       report,
       edit,
       hasProfile: evidence.hasProfile,
-      hasCloset: evidence.closetItems.length > 0,
-      reviewCount: evidence.reviewSignal.reviewCount,
       generationFailed: false,
     } satisfies LoaderData;
   } catch (error) {
@@ -40,8 +36,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       report,
       edit: null,
       hasProfile: false,
-      hasCloset: false,
-      reviewCount: 0,
       generationFailed: true,
     } satisfies LoaderData;
   }
@@ -53,7 +47,6 @@ export function meta({ data }: { data?: LoaderData }) {
   }
   return [{ title: `My nAia Trend Edit — ${data.report.title}` }];
 }
-
 
 const css = `
   :root{--cream:#f4f4f1;--warm:#e1dbd7;--deep:#221516;--accent:#8b2035;--muted:#7a6f6a;--ff-display:'Playfair Display',Georgia,serif;--ff-body:'Cormorant Garamond',Garamond,serif;--ff-mono:'Space Mono','Courier New',monospace}
@@ -71,31 +64,24 @@ const css = `
   .tr-recap-title{font-family:var(--ff-display);font-size:22px;font-weight:700;font-style:italic;margin-bottom:8px}
   .tr-recap-summary{font-family:var(--ff-body);font-size:15px;font-style:italic;color:var(--muted);margin-bottom:12px}
   .tr-recap-link{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);text-decoration:none}
-  .tr-edit-banner{background:rgba(139,32,53,0.04);border-left:3px solid var(--accent);padding:24px 32px;margin-bottom:40px}
-  .tr-edit-banner-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
-  .tr-edit-banner-text{font-family:var(--ff-body);font-size:15px;font-style:italic;color:var(--deep);line-height:1.6}
+  .tr-subtitle{font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-top:6px;margin-bottom:40px}
   .tr-edit-section{margin-bottom:40px}
-  .tr-edit-list{list-style:none;margin:0;padding:0}
-  .tr-edit-list li{font-family:var(--ff-body);font-size:17px;line-height:1.7;color:var(--deep);padding:14px 0;border-bottom:1px solid rgba(59,5,16,.06)}
-  .tr-edit-note{font-family:var(--ff-mono);font-size:10px;letter-spacing:1px;color:var(--muted);margin-top:8px}
-  .tr-report-notes{padding:16px 0 0}
-  .tr-report-notes-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
-  .tr-report-notes-list{list-style:none;margin:0;padding:0}
-  .tr-report-notes-list li{font-family:var(--ff-body);font-size:15px;font-style:italic;line-height:1.6;color:var(--muted);padding:8px 0}
-  .tr-empty-state{padding:48px;text-align:center;border:1px solid rgba(59,5,16,.08);background:rgba(255,255,255,0.5)}
-  .tr-empty-state-text{font-family:'Cormorant Garamond',serif;font-size:20px;font-style:italic;color:var(--deep);margin-bottom:20px;line-height:1.6}
-  .tr-empty-state-cta{display:inline-block;padding:14px 32px;background:#221516;color:#f4f4f1;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;text-decoration:none}
   .tr-reading-box{padding:28px 32px;border-left:3px solid var(--accent);background:rgba(139,32,53,0.04);margin-bottom:48px}
-  .tr-reading-sublabel{font-family:var(--ff-body);font-size:14px;font-style:italic;color:var(--muted);margin-bottom:16px;margin-top:4px}
+  .tr-bullet-list{list-style:none;margin:0;padding:0}
+  .tr-bullet-list li{font-family:var(--ff-body);font-size:17px;line-height:1.7;color:var(--deep);padding:10px 0 10px 20px;position:relative;border-bottom:1px solid rgba(59,5,16,.06)}
+  .tr-bullet-list li::before{content:"—";position:absolute;left:0;color:var(--accent)}
   .tr-closet-cards{display:flex;gap:20px;flex-wrap:wrap;margin-top:16px}
   .tr-closet-card{flex:0 0 calc(50% - 10px);max-width:240px}
   .tr-closet-card-img{width:100%;aspect-ratio:3/4;object-fit:cover;background:rgba(59,5,16,.04)}
   .tr-closet-card-name{font-family:var(--ff-mono);font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--accent);margin-top:10px;margin-bottom:4px}
   .tr-closet-card-note{font-family:var(--ff-body);font-size:15px;font-style:italic;color:var(--muted);line-height:1.5}
-  .tr-closet-formula{font-family:var(--ff-body);font-size:16px;font-style:italic;color:var(--muted);line-height:1.7;padding:16px 0}
+  .tr-formula{font-family:var(--ff-body);font-size:18px;font-style:italic;line-height:1.8;color:var(--deep)}
   .tr-cta-edit{margin-top:60px;padding:32px 0;border-top:1px solid rgba(59,5,16,.1);text-align:center}
   .tr-cta-edit-btn{display:inline-block;padding:16px 40px;background:var(--deep);color:var(--cream);font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;text-decoration:none;cursor:pointer}
   .tr-cta-edit-sub{font-family:var(--ff-body);font-size:14px;font-style:italic;color:var(--muted);margin-top:12px}
+  .tr-empty-state{padding:48px;text-align:center;border:1px solid rgba(59,5,16,.08);background:rgba(255,255,255,0.5)}
+  .tr-empty-state-text{font-family:'Cormorant Garamond',serif;font-size:20px;font-style:italic;color:var(--deep);margin-bottom:20px;line-height:1.6}
+  .tr-empty-state-cta{display:inline-block;padding:14px 32px;background:#221516;color:#f4f4f1;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;text-decoration:none}
 `;
 
 export function ErrorBoundary() {
@@ -116,7 +102,7 @@ export function ErrorBoundary() {
 }
 
 export default function TrendEdit() {
-  const { report, edit, hasProfile, hasCloset, generationFailed } = useLoaderData() as LoaderData;
+  const { report, edit, hasProfile, generationFailed } = useLoaderData() as LoaderData;
 
   return (
     <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
@@ -137,9 +123,13 @@ export default function TrendEdit() {
           <Link to={`/trends/${report.slug}`} className="tr-recap-link">Read the full report →</Link>
         </div>
 
-        <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: "clamp(28px,4vw,40px)", fontWeight: 900, fontStyle: "italic", marginBottom: "12px" }}>
+        <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: "clamp(28px,4vw,40px)", fontWeight: 900, fontStyle: "italic", marginBottom: "6px" }}>
           My nAia Trend Edit
         </h1>
+
+        {edit && (
+          <p className="tr-subtitle">{edit.subTitle}</p>
+        )}
 
         {generationFailed ? (
           <div className="tr-empty-state">
@@ -156,91 +146,99 @@ export default function TrendEdit() {
           </div>
         ) : edit ? (
           <>
-            {/* 1. YOUR PERSONAL READING */}
+            {/* 1. YOUR EDITORIAL VERDICT */}
             <div className="tr-reading-box">
-              <div className="tr-section-label">YOUR PERSONAL READING</div>
-              <div className="tr-reading-sublabel">What this direction means for the way you like to dress.</div>
-              <p className="tr-body">{edit.personalReading}</p>
+              <div className="tr-section-label">YOUR EDITORIAL VERDICT</div>
+              <p className="tr-body">{edit.verdict}</p>
             </div>
 
-            {/* 2. YOUR STRONGEST MATCH */}
+            {/* 2. TAKE WITH YOU */}
             <div className="tr-edit-section">
-              <div className="tr-section-label">YOUR STRONGEST MATCH</div>
-              <p className="tr-body">{edit.strongestMatch}</p>
+              <div className="tr-section-label">TAKE WITH YOU</div>
+              <ul className="tr-bullet-list">
+                {edit.takeWithYou.map((item, i) => (
+                  <li key={i}>{item}</li>
+                ))}
+              </ul>
+            </div>
+
+            {/* 3. LEAVE OUT */}
+            <div className="tr-edit-section">
+              <div className="tr-section-label">LEAVE OUT</div>
+              <ul className="tr-bullet-list">
+                {edit.leaveOut.map((item, i) => (
+                  <li key={i}>{item}</li>
+                ))}
+              </ul>
             </div>
 
             <div className="tr-divider" />
 
-            {/* 3. ADAPT, DON'T COPY */}
+            {/* 4. YOUR BEST ENTRY POINT */}
             <div className="tr-edit-section">
-              <div className="tr-section-label">ADAPT, DON&apos;T COPY</div>
-              <p className="tr-body">{edit.adaptDontCopy}</p>
+              <div className="tr-section-label">YOUR BEST ENTRY POINT</div>
+              <p className="tr-body">{edit.bestEntryPoint}</p>
             </div>
 
-            {/* 4. LESS USEFUL FOR YOU — conditional */}
-            {edit.lessUseful && (
-              <div className="tr-edit-section">
-                <div className="tr-section-label">LESS USEFUL FOR YOU</div>
-                <p className="tr-body">{edit.lessUseful}</p>
-              </div>
-            )}
+            {/* 5. ONE LOOK TO TRY */}
+            <div className="tr-edit-section">
+              <div className="tr-section-label">ONE LOOK TO TRY</div>
+              <p className="tr-body">{edit.oneLookToTry}</p>
+            </div>
+
+            {/* 6. ONE THING TO WATCH */}
+            <div className="tr-edit-section">
+              <div className="tr-section-label">ONE THING TO WATCH</div>
+              <p className="tr-body">{edit.oneThingToWatch}</p>
+            </div>
 
             <div className="tr-divider" />
 
-            {/* 5. FROM YOUR CLOSET */}
+            {/* 7. FROM YOUR CLOSET */}
             <div className="tr-edit-section">
               <div className="tr-section-label">FROM YOUR CLOSET</div>
               {edit.fromCloset.length > 0 ? (
-                <div className="tr-closet-cards">
-                  {edit.fromCloset.map((item: ClosetMatchItem, i: number) => (
-                    <div key={i} className="tr-closet-card">
-                      {item.imageUrl && (
-                        <img
-                          src={item.imageUrl}
-                          alt={item.name}
-                          className="tr-closet-card-img"
-                        />
-                      )}
-                      <div className="tr-closet-card-name">{item.name}</div>
-                      <p className="tr-closet-card-note">{item.outfitNote}</p>
-                    </div>
-                  ))}
-                </div>
-              ) : edit.fromClosetFormula ? (
-                <p className="tr-closet-formula">{edit.fromClosetFormula}</p>
-              ) : hasCloset ? (
-                <p className="tr-body">
-                  No clear match in your Closet for this direction yet. The look to try below works without one.
-                </p>
+                <>
+                  <div className="tr-closet-cards">
+                    {edit.fromCloset.map((item: ClosetMatchItem, i: number) => (
+                      <div key={i} className="tr-closet-card">
+                        {item.imageUrl && (
+                          <img
+                            src={item.imageUrl}
+                            alt={item.name}
+                            className="tr-closet-card-img"
+                          />
+                        )}
+                        <div className="tr-closet-card-name">{item.name}</div>
+                        <p className="tr-closet-card-note">{item.outfitNote}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {edit.oneUnlockPiece && (
+                    <p className="tr-body" style={{ marginTop: "24px" }}>
+                      {edit.oneUnlockPiece}
+                    </p>
+                  )}
+                </>
               ) : (
                 <p className="tr-body">
-                  Add pieces to your Closet to see what you already own that works with this direction.
+                  Your Closet needs a little more detail before this can become specific. Add the pieces you wear most often—especially tops, trousers, jackets, and dresses—and nAia will show you exactly where this trend already exists in your wardrobe.
                 </p>
               )}
             </div>
 
-            <div className="tr-divider" />
-
-            {/* 6. ONE LOOK TO TRY THIS WEEK */}
+            {/* 8. THE ONE FORMULA TO REMEMBER */}
             <div className="tr-edit-section">
-              <div className="tr-section-label">ONE LOOK TO TRY THIS WEEK</div>
-              <p className="tr-body">{edit.oneLookToTry}</p>
+              <div className="tr-section-label">THE ONE FORMULA TO REMEMBER</div>
+              <p className="tr-formula">{edit.theOneFormula}</p>
             </div>
 
-            {/* 7. ONE PIECE THAT WOULD UNLOCK MORE — conditional */}
-            {edit.oneUnlockPiece && (
-              <div className="tr-edit-section">
-                <div className="tr-section-label">ONE PIECE THAT WOULD UNLOCK MORE</div>
-                <p className="tr-body">{edit.oneUnlockPiece}</p>
-              </div>
-            )}
-
-            {/* 8. CTA */}
+            {/* CTA */}
             <div className="tr-cta-edit">
               <Link to="/closet" className="tr-cta-edit-btn">
                 OPEN MY CLOSET →
               </Link>
-              <p className="tr-cta-edit-sub">See the pieces you already own that could work with this direction.</p>
+              <p className="tr-cta-edit-sub">Add the pieces you wear most often — nAia will use them to make this edit specific to what you own.</p>
             </div>
           </>
         ) : null}
