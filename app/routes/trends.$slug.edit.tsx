@@ -150,41 +150,10 @@ export default function TrendEdit() {
               <p className="tr-body">{edit.yourVersion}</p>
             </div>
 
-            {/* 2. WHY IT FITS YOUR STYLE */}
-            <div className="tr-edit-section">
-              <div className="tr-section-label">WHY IT FITS YOUR STYLE</div>
-              <p className="tr-body">{edit.whyItFits}</p>
-            </div>
-
-            <div className="tr-divider" />
-
-            {/* 3. THE PART TO TAKE */}
-            <div className="tr-edit-section">
-              <div className="tr-section-label">THE PART TO TAKE</div>
-              <ul className="tr-bullet-list">
-                {edit.partToTake.map((bullet: string, i: number) => (
-                  <li key={i}>{bullet}</li>
-                ))}
-              </ul>
-            </div>
-
-            {/* 4. THE PART TO LEAVE */}
-            <div className="tr-edit-section">
-              <div className="tr-section-label">THE PART TO LEAVE</div>
-              <ul className="tr-bullet-list">
-                {edit.partToLeave.map((bullet: string, i: number) => (
-                  <li key={i}>{bullet}</li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="tr-divider" />
-
-            {/* 5. YOUR nAia EVIDENCE */}
+            {/* 2. YOUR nAia EVIDENCE */}
             <div className="tr-edit-section">
               <div className="tr-section-label">YOUR nAia EVIDENCE</div>
 
-              {/* YOUR STYLE DNA SAYS */}
               {edit.evidenceStyleDna && (
                 <div className="tr-evidence-block">
                   <div className="tr-evidence-label">YOUR STYLE DNA SAYS</div>
@@ -192,7 +161,6 @@ export default function TrendEdit() {
                 </div>
               )}
 
-              {/* YOU ALREADY OWN */}
               {edit.evidenceClosetItems.length > 0 && (
                 <div className="tr-evidence-block">
                   <div className="tr-evidence-label">YOU ALREADY OWN</div>
@@ -213,19 +181,45 @@ export default function TrendEdit() {
 
             <div className="tr-divider" />
 
-            {/* 6. A LOOK TO TRY */}
+            {/* 3. YOUR BEST ROUTE IN */}
+            <div className="tr-edit-section">
+              <div className="tr-section-label">YOUR BEST ROUTE IN</div>
+              <p className="tr-body">{edit.yourBestRouteIn}</p>
+            </div>
+
+            {/* 4. A LOOK TO TRY */}
             <div className="tr-edit-section">
               <div className="tr-section-label">A LOOK TO TRY</div>
               <p className="tr-body">{edit.aLookToTry}</p>
             </div>
 
-            {/* 7. WHAT WOULD MOVE THIS FORWARD — omit when null */}
-            {edit.whatWouldMoveForward && (
-              <div className="tr-edit-section">
-                <div className="tr-section-label">WHAT WOULD MOVE THIS FORWARD</div>
-                <p className="tr-body">{edit.whatWouldMoveForward}</p>
-              </div>
-            )}
+            <div className="tr-divider" />
+
+            {/* 5. THE BALANCE TO PROTECT */}
+            <div className="tr-edit-section">
+              <div className="tr-section-label">THE BALANCE TO PROTECT</div>
+              <p className="tr-body">{edit.theBalanceToProtect}</p>
+            </div>
+
+            {/* 6. THE PART TO TAKE */}
+            <div className="tr-edit-section">
+              <div className="tr-section-label">THE PART TO TAKE</div>
+              <ul className="tr-bullet-list">
+                {edit.partToTake.map((bullet: string, i: number) => (
+                  <li key={i}>{bullet}</li>
+                ))}
+              </ul>
+            </div>
+
+            {/* 7. THE PART TO LEAVE */}
+            <div className="tr-edit-section">
+              <div className="tr-section-label">THE PART TO LEAVE</div>
+              <ul className="tr-bullet-list">
+                {edit.partToLeave.map((bullet: string, i: number) => (
+                  <li key={i}>{bullet}</li>
+                ))}
+              </ul>
+            </div>
 
             {/* CTA */}
             <div className="tr-cta-edit">
