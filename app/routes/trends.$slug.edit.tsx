@@ -1,7 +1,7 @@
 import { Link, useLoaderData, type LoaderFunctionArgs } from "react-router";
 import { trendReports, type TrendReportData } from "../lib/trend-reports";
 import { requireCurrentNaiaCustomer } from "../lib/naia-session.server";
-import { getShopperEvidence, buildShopperEdit, type ShopperEdit, type ClosetMatchItem } from "../lib/trend-evidence.server";
+import { getShopperEvidence, buildShopperEdit, type ShopperEdit, type EvidenceClosetItem } from "../lib/trend-evidence.server";
 
 type LoaderData = {
   report: TrendReportData;
@@ -11,8 +11,6 @@ type LoaderData = {
 };
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  // Auth first, before any report lookup — so an unauthenticated visitor's
-  // experience never differs based on whether a given slug exists.
   const customer = await requireCurrentNaiaCustomer(request);
 
   const report = trendReports.find((r) => r.slug === params.slug && r.published);
@@ -70,12 +68,13 @@ const css = `
   .tr-bullet-list{list-style:none;margin:0;padding:0}
   .tr-bullet-list li{font-family:var(--ff-body);font-size:17px;line-height:1.7;color:var(--deep);padding:10px 0 10px 20px;position:relative;border-bottom:1px solid rgba(59,5,16,.06)}
   .tr-bullet-list li::before{content:"—";position:absolute;left:0;color:var(--accent)}
-  .tr-closet-cards{display:flex;gap:20px;flex-wrap:wrap;margin-top:16px}
+  .tr-evidence-block{margin-bottom:32px}
+  .tr-evidence-label{font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:12px}
+  .tr-closet-cards{display:flex;gap:20px;flex-wrap:wrap;margin-top:12px}
   .tr-closet-card{flex:0 0 calc(50% - 10px);max-width:240px}
   .tr-closet-card-img{width:100%;aspect-ratio:3/4;object-fit:cover;background:rgba(59,5,16,.04)}
   .tr-closet-card-name{font-family:var(--ff-mono);font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--accent);margin-top:10px;margin-bottom:4px}
   .tr-closet-card-note{font-family:var(--ff-body);font-size:15px;font-style:italic;color:var(--muted);line-height:1.5}
-  .tr-formula{font-family:var(--ff-body);font-size:18px;font-style:italic;line-height:1.8;color:var(--deep)}
   .tr-cta-edit{margin-top:60px;padding:32px 0;border-top:1px solid rgba(59,5,16,.1);text-align:center}
   .tr-cta-edit-btn{display:inline-block;padding:16px 40px;background:var(--deep);color:var(--cream);font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;text-decoration:none;cursor:pointer}
   .tr-cta-edit-sub{font-family:var(--ff-body);font-size:14px;font-style:italic;color:var(--muted);margin-top:12px}
@@ -115,7 +114,6 @@ export default function TrendEdit() {
       </div>
 
       <div className="tr-wrap">
-        {/* From the Report — short recap, not a duplicate of the full report */}
         <div className="tr-recap">
           <div className="tr-recap-season">{report.season}</div>
           <div className="tr-recap-title">{report.title}</div>
@@ -145,156 +143,98 @@ export default function TrendEdit() {
             <Link to="/passport" className="tr-empty-state-cta">Complete Your Passport</Link>
           </div>
         ) : edit ? (
-          edit.hasNamedMatch ? (
-            <>
-              {/* 1. YOUR VERSION OF THIS TREND */}
-              <div className="tr-reading-box">
-                <div className="tr-section-label">YOUR VERSION OF THIS TREND</div>
-                <p className="tr-body">{edit.yourVersion}</p>
-              </div>
+          <>
+            {/* 1. YOUR VERSION OF THIS TREND */}
+            <div className="tr-reading-box">
+              <div className="tr-section-label">YOUR VERSION OF THIS TREND</div>
+              <p className="tr-body">{edit.yourVersion}</p>
+            </div>
 
-              {/* 2. FROM YOUR CLOSET — shown once here; not repeated below */}
-              <div className="tr-edit-section">
-                <div className="tr-section-label">FROM YOUR CLOSET</div>
-                <div className="tr-closet-cards">
-                  {edit.fromCloset.map((item: ClosetMatchItem, i: number) => (
-                    <div key={i} className="tr-closet-card">
-                      {item.imageUrl && (
-                        <img src={item.imageUrl} alt={item.name} className="tr-closet-card-img" />
-                      )}
-                      <div className="tr-closet-card-name">{item.name}</div>
-                      <p className="tr-closet-card-note">{item.outfitNote}</p>
-                    </div>
-                  ))}
+            {/* 2. WHY IT FITS YOUR STYLE */}
+            <div className="tr-edit-section">
+              <div className="tr-section-label">WHY IT FITS YOUR STYLE</div>
+              <p className="tr-body">{edit.whyItFits}</p>
+            </div>
+
+            <div className="tr-divider" />
+
+            {/* 3. THE PART TO TAKE */}
+            <div className="tr-edit-section">
+              <div className="tr-section-label">THE PART TO TAKE</div>
+              <ul className="tr-bullet-list">
+                {edit.partToTake.map((bullet: string, i: number) => (
+                  <li key={i}>{bullet}</li>
+                ))}
+              </ul>
+            </div>
+
+            {/* 4. THE PART TO LEAVE */}
+            <div className="tr-edit-section">
+              <div className="tr-section-label">THE PART TO LEAVE</div>
+              <ul className="tr-bullet-list">
+                {edit.partToLeave.map((bullet: string, i: number) => (
+                  <li key={i}>{bullet}</li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="tr-divider" />
+
+            {/* 5. YOUR nAia EVIDENCE */}
+            <div className="tr-edit-section">
+              <div className="tr-section-label">YOUR nAia EVIDENCE</div>
+
+              {/* YOUR STYLE DNA SAYS */}
+              {edit.evidenceStyleDna && (
+                <div className="tr-evidence-block">
+                  <div className="tr-evidence-label">YOUR STYLE DNA SAYS</div>
+                  <p className="tr-body">{edit.evidenceStyleDna}</p>
                 </div>
-                {edit.oneUnlockPiece && (
-                  <p className="tr-body" style={{ marginTop: "24px" }}>
-                    {edit.oneUnlockPiece}
-                  </p>
-                )}
-              </div>
+              )}
 
-              <div className="tr-divider" />
+              {/* YOU ALREADY OWN */}
+              {edit.evidenceClosetItems.length > 0 && (
+                <div className="tr-evidence-block">
+                  <div className="tr-evidence-label">YOU ALREADY OWN</div>
+                  <div className="tr-closet-cards">
+                    {edit.evidenceClosetItems.map((item: EvidenceClosetItem, i: number) => (
+                      <div key={i} className="tr-closet-card">
+                        {item.imageUrl && (
+                          <img src={item.imageUrl} alt={item.name} className="tr-closet-card-img" />
+                        )}
+                        <div className="tr-closet-card-name">{item.name}</div>
+                        <p className="tr-closet-card-note">{item.roleNote}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
 
-              {/* 3. WHAT TO KEEP QUIET */}
+            <div className="tr-divider" />
+
+            {/* 6. A LOOK TO TRY */}
+            <div className="tr-edit-section">
+              <div className="tr-section-label">A LOOK TO TRY</div>
+              <p className="tr-body">{edit.aLookToTry}</p>
+            </div>
+
+            {/* 7. WHAT WOULD MOVE THIS FORWARD — omit when null */}
+            {edit.whatWouldMoveForward && (
               <div className="tr-edit-section">
-                <div className="tr-section-label">WHAT TO KEEP QUIET</div>
-                <ul className="tr-bullet-list">
-                  {edit.whatToKeepQuiet.map((bullet: string, i: number) => (
-                    <li key={i}>{bullet}</li>
-                  ))}
-                </ul>
+                <div className="tr-section-label">WHAT WOULD MOVE THIS FORWARD</div>
+                <p className="tr-body">{edit.whatWouldMoveForward}</p>
               </div>
+            )}
 
-              <div className="tr-divider" />
-
-              {/* 4. START WITH YOUR [ITEM NAME] */}
-              <div className="tr-edit-section">
-                <div className="tr-section-label">{edit.startWithHeading}</div>
-                <p className="tr-body">{edit.startWithBody}</p>
-              </div>
-
-              {/* 5. THE LOOK TO TRY THIS WEEK */}
-              <div className="tr-edit-section">
-                <div className="tr-section-label">THE LOOK TO TRY THIS WEEK</div>
-                <p className="tr-body">{edit.lookToTryThisWeek}</p>
-              </div>
-
-              {/* 6. THE BALANCE TO PROTECT */}
-              <div className="tr-edit-section">
-                <div className="tr-section-label">THE BALANCE TO PROTECT</div>
-                <p className="tr-body">{edit.balanceToProtect}</p>
-              </div>
-
-              <div className="tr-divider" />
-
-              {/* 7. THE ONE FORMULA TO REMEMBER */}
-              <div className="tr-edit-section">
-                <div className="tr-section-label">THE ONE FORMULA TO REMEMBER</div>
-                <p className="tr-formula">{edit.theOneFormula}</p>
-              </div>
-
-              {/* CTA */}
-              <div className="tr-cta-edit">
-                <Link to="/closet" className="tr-cta-edit-btn">
-                  OPEN MY CLOSET →
-                </Link>
-                <p className="tr-cta-edit-sub">Add more of the pieces you wear most often, and nAia will build fuller looks around what you already own.</p>
-              </div>
-            </>
-          ) : (
-            <>
-              {/* 1. YOUR EDITORIAL VERDICT */}
-              <div className="tr-reading-box">
-                <div className="tr-section-label">YOUR EDITORIAL VERDICT</div>
-                <p className="tr-body">{edit.verdict}</p>
-              </div>
-
-              {/* 2. TAKE WITH YOU */}
-              <div className="tr-edit-section">
-                <div className="tr-section-label">TAKE WITH YOU</div>
-                <ul className="tr-bullet-list">
-                  {edit.takeWithYou.map((bullet: string, i: number) => (
-                    <li key={i}>{bullet}</li>
-                  ))}
-                </ul>
-              </div>
-
-              {/* 3. LEAVE OUT */}
-              <div className="tr-edit-section">
-                <div className="tr-section-label">LEAVE OUT</div>
-                <ul className="tr-bullet-list">
-                  {edit.leaveOut.map((bullet: string, i: number) => (
-                    <li key={i}>{bullet}</li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="tr-divider" />
-
-              {/* 4. YOUR BEST ENTRY POINT */}
-              <div className="tr-edit-section">
-                <div className="tr-section-label">YOUR BEST ENTRY POINT</div>
-                <p className="tr-body">{edit.bestEntryPoint}</p>
-              </div>
-
-              {/* 5. ONE LOOK TO TRY */}
-              <div className="tr-edit-section">
-                <div className="tr-section-label">ONE LOOK TO TRY</div>
-                <p className="tr-body">{edit.oneLookToTry}</p>
-              </div>
-
-              {/* 6. ONE THING TO WATCH */}
-              <div className="tr-edit-section">
-                <div className="tr-section-label">ONE THING TO WATCH</div>
-                <p className="tr-body">{edit.oneThingToWatch}</p>
-              </div>
-
-              <div className="tr-divider" />
-
-              {/* 7. FROM YOUR CLOSET */}
-              <div className="tr-edit-section">
-                <div className="tr-section-label">FROM YOUR CLOSET</div>
-                <p className="tr-body">
-                  Your Closet needs a little more detail before this can become specific. Add the pieces you wear most often—especially tops, trousers, jackets, and dresses—and nAia will show you exactly where this trend already exists in your wardrobe.
-                </p>
-              </div>
-
-              {/* 8. THE ONE FORMULA TO REMEMBER */}
-              <div className="tr-edit-section">
-                <div className="tr-section-label">THE ONE FORMULA TO REMEMBER</div>
-                <p className="tr-formula">{edit.theOneFormula}</p>
-              </div>
-
-              {/* CTA */}
-              <div className="tr-cta-edit">
-                <Link to="/closet" className="tr-cta-edit-btn">
-                  OPEN MY CLOSET →
-                </Link>
-                <p className="tr-cta-edit-sub">Add more of the pieces you wear most often, and nAia will build fuller looks around what you already own.</p>
-              </div>
-            </>
-          )
+            {/* CTA */}
+            <div className="tr-cta-edit">
+              <Link to="/closet" className="tr-cta-edit-btn">
+                OPEN MY CLOSET →
+              </Link>
+              <p className="tr-cta-edit-sub">Add more of the pieces you wear most often, and nAia will build fuller looks around what you already own.</p>
+            </div>
+          </>
         ) : null}
       </div>
     </div>
