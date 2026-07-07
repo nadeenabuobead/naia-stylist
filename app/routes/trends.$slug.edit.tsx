@@ -132,8 +132,11 @@ export default function TrendEdit() {
         {generationFailed ? (
           <div className="tr-empty-state">
             <p className="tr-empty-state-text">
-              We couldn&apos;t build your personal edit right now. The full report above is still yours to read — try revisiting this page in a moment.
+              Your nAia Edit is taking a moment. Please try again shortly.
             </p>
+            <Link to={`/trends/${report.slug}`} className="tr-empty-state-cta">
+              Back to the report →
+            </Link>
           </div>
         ) : !hasProfile ? (
           <div className="tr-empty-state">
@@ -144,66 +147,53 @@ export default function TrendEdit() {
           </div>
         ) : edit ? (
           <>
-            {/* 1. YOUR VERSION OF THIS TREND */}
+            {/* 1. WHY THIS MATTERS TO YOU — Passport is the foundation */}
             <div className="tr-reading-box">
-              <div className="tr-section-label">YOUR VERSION OF THIS TREND</div>
+              <div className="tr-section-label">WHY THIS MATTERS TO YOU</div>
               <p className="tr-body">{edit.yourVersion}</p>
-            </div>
-
-            {/* 2. YOUR nAia EVIDENCE */}
-            <div className="tr-edit-section">
-              <div className="tr-section-label">YOUR nAia EVIDENCE</div>
-
               {edit.evidenceStyleDna && (
-                <div className="tr-evidence-block">
+                <div style={{ marginTop: "20px", paddingTop: "20px", borderTop: "1px solid rgba(139,32,53,0.12)" }}>
                   <div className="tr-evidence-label">YOUR STYLE DNA SAYS</div>
-                  <p className="tr-body">{edit.evidenceStyleDna}</p>
-                </div>
-              )}
-
-              {edit.evidenceClosetItems.length > 0 && (
-                <div className="tr-evidence-block">
-                  <div className="tr-evidence-label">YOU ALREADY OWN</div>
-                  <div className="tr-closet-cards">
-                    {edit.evidenceClosetItems.map((item: EvidenceClosetItem, i: number) => (
-                      <div key={i} className="tr-closet-card">
-                        {item.imageUrl && (
-                          <img src={item.imageUrl} alt={item.name} className="tr-closet-card-img" />
-                        )}
-                        <div className="tr-closet-card-name">{item.name}</div>
-                        <p className="tr-closet-card-note">{item.roleNote}</p>
-                      </div>
-                    ))}
-                  </div>
+                  <p className="tr-body" style={{ fontSize: "16px" }}>{edit.evidenceStyleDna}</p>
                 </div>
               )}
             </div>
 
             <div className="tr-divider" />
 
-            {/* 3. YOUR BEST ROUTE IN */}
+            {/* 2. WORTH TRYING — route in + look to try, Passport-led */}
             <div className="tr-edit-section">
-              <div className="tr-section-label">YOUR BEST ROUTE IN</div>
+              <div className="tr-section-label">WORTH TRYING</div>
               <p className="tr-body">{edit.yourBestRouteIn}</p>
+              <div style={{ marginTop: "20px", paddingTop: "20px", borderTop: "1px solid rgba(59,5,16,.06)" }}>
+                <div className="tr-evidence-label">A LOOK TO TRY</div>
+                <p className="tr-body">{edit.aLookToTry}</p>
+              </div>
             </div>
 
-            {/* 4. A LOOK TO TRY */}
-            <div className="tr-edit-section">
-              <div className="tr-section-label">A LOOK TO TRY</div>
-              <p className="tr-body">{edit.aLookToTry}</p>
-            </div>
+            {/* 3. THIS WORKS WITH WHAT YOU OWN — Closet only when it qualifies */}
+            {edit.evidenceClosetItems.length > 0 && (
+              <div className="tr-edit-section">
+                <div className="tr-section-label">THIS WORKS WITH WHAT YOU OWN</div>
+                <div className="tr-closet-cards">
+                  {edit.evidenceClosetItems.map((item: EvidenceClosetItem, i: number) => (
+                    <div key={i} className="tr-closet-card">
+                      {item.imageUrl && (
+                        <img src={item.imageUrl} alt={item.name} className="tr-closet-card-img" />
+                      )}
+                      <div className="tr-closet-card-name">{item.name}</div>
+                      <p className="tr-closet-card-note">{item.roleNote}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="tr-divider" />
 
-            {/* 5. THE BALANCE TO PROTECT */}
+            {/* 4. THE INVESTMENT */}
             <div className="tr-edit-section">
-              <div className="tr-section-label">THE BALANCE TO PROTECT</div>
-              <p className="tr-body">{edit.theBalanceToProtect}</p>
-            </div>
-
-            {/* 6. THE PART TO TAKE */}
-            <div className="tr-edit-section">
-              <div className="tr-section-label">THE PART TO TAKE</div>
+              <div className="tr-section-label">THE INVESTMENT</div>
               <ul className="tr-bullet-list">
                 {edit.partToTake.map((bullet: string, i: number) => (
                   <li key={i}>{bullet}</li>
@@ -211,9 +201,10 @@ export default function TrendEdit() {
               </ul>
             </div>
 
-            {/* 7. THE PART TO LEAVE */}
+            {/* 5. HOLD OFF ON — guardrail + specific leave-out items */}
             <div className="tr-edit-section">
-              <div className="tr-section-label">THE PART TO LEAVE</div>
+              <div className="tr-section-label">HOLD OFF ON</div>
+              <p className="tr-body" style={{ marginBottom: "16px" }}>{edit.theBalanceToProtect}</p>
               <ul className="tr-bullet-list">
                 {edit.partToLeave.map((bullet: string, i: number) => (
                   <li key={i}>{bullet}</li>

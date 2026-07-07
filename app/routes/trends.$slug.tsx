@@ -73,6 +73,13 @@ const css = `
   .tr-cta-link{display:inline-block;padding:16px 40px;background:#221516;color:#f4f4f1;font-family:var(--ff-mono);font-size:10px;letter-spacing:3px;text-transform:uppercase;text-decoration:none;margin-bottom:16px}
   .tr-cta-sub{font-family:var(--ff-body);font-size:16px;font-style:italic;color:var(--muted);line-height:1.6}
   .tr-actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .tr-lens-nav{margin:48px 0}
+  .tr-lens-nav-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:16px}
+  .tr-lens-nav-row{display:flex;flex-wrap:wrap;gap:8px}
+  .tr-lens-btn{display:inline-block;padding:10px 20px;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;text-decoration:none;border:1px solid rgba(59,5,16,.2);color:var(--deep);transition:background .15s,color .15s,border-color .15s}
+  .tr-lens-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .tr-lens-btn.for-you{border-color:var(--accent);color:var(--accent)}
+  .tr-lens-btn.for-you:hover{background:var(--accent);color:var(--cream)}
   .tr-action-btn{display:inline-flex;align-items:center;gap:10px;padding:14px 32px;border:none;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;cursor:pointer}
   .tr-action-btn.primary{background:#221516;color:#f4f4f1}
   .tr-action-btn.secondary{background:transparent;color:var(--deep);border:1px solid rgba(59,5,16,.2)}
@@ -445,6 +452,19 @@ export default function TrendReportDetail() {
             <p className="tr-body">{report.naiaVerdict}</p>
           </div>
         )}
+
+        {/* Lens navigation — appears after the nAia Reading, before how-to-wear */}
+        <div className="tr-lens-nav">
+          <div className="tr-lens-nav-label">Read this through a lens</div>
+          <div className="tr-lens-nav-row">
+            <Link to={`/trends/${report.slug}/edit`} className="tr-lens-btn for-you">For You</Link>
+            <Link to={`/trends/${report.slug}/lens/designer`} className="tr-lens-btn">Designer</Link>
+            <Link to={`/trends/${report.slug}/lens/buyer`} className="tr-lens-btn">Buyer</Link>
+            <Link to={`/trends/${report.slug}/lens/marketer`} className="tr-lens-btn">Marketer</Link>
+            <Link to={`/trends/${report.slug}/lens/creative-director`} className="tr-lens-btn">Creative Director</Link>
+            <Link to={`/trends/${report.slug}/lens/stylist`} className="tr-lens-btn">Stylist</Link>
+          </div>
+        </div>
 
         {/* How to wear */}
         {report.howToWear?.length ? (
