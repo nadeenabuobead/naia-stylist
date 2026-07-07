@@ -463,33 +463,33 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
   "spring-2026-soft-structure": {
     yourVersionPassport: {
       "clean-polished":
-        "Soft Structure works best for you through one precisely proportioned anchor — a wide trouser, a longline layer, a curved hem — while everything else stays quiet.",
+        "Soft Structure gives you a clearer, more intentional way to create presence without making the whole outfit feel formal.",
       "fluid-ease":
-        "Soft Structure works best for you close to movement rather than construction — one shaped piece that changes what the outfit says without changing how it sits.",
+        "Soft Structure gives you a way to add shape to a look without losing the ease that already works for you.",
       "expressive":
-        "Soft Structure gives you the anchor — one clearly shaped piece that earns all the attention while everything else composes itself around it.",
+        "Soft Structure gives you a composed anchor that allows a more expressive look to hold together without flattening it.",
       "neutral":
-        "Soft Structure works when one clearly proportioned piece changes the register of a quiet outfit without adding stiffness or decoration.",
+        "Soft Structure gives you a way to shift the register of a quiet outfit without adding stiffness or decoration.",
     },
     styleDnaSays: {
       "clean-polished":
-        "That is exactly where a proportioned anchor earns its keep — one clean piece, simply worn.",
+        "That is what Soft Structure is built on — one considered shape, with calm surrounding it.",
       "fluid-ease":
-        "That is why the version built on proportion rather than pressing is the right one.",
+        "That is why this direction works with what you already wear rather than asking you to replace it.",
       "expressive":
-        "That is the instinct Soft Structure rewards — one gesture, held back by everything around it.",
+        "That is the instinct Soft Structure rewards — one composed gesture with space around it to read.",
       "neutral":
-        "That is what a single anchor piece, correctly proportioned, delivers without effort.",
+        "That is what a single clearly chosen piece delivers — a shift in register, with no further adjustment needed.",
     },
     yourBestRouteIn: {
       "clean-polished":
-        "Start with one precisely shaped bottom — a clean wide-leg or midi — and keep the top contained. The contrast between the anchor proportion and the quieter top is the complete look.",
+        "Try a wide-leg trouser, longline blazer, or draped midi as the main piece — one clear shape is the whole starting point.",
       "fluid-ease":
-        "Start with one piece that has real proportion — a wide leg, a draped midi, a relaxed blazer — worn against something simple and familiar. The contrast creates the shape.",
+        "Try one shaped piece with genuine proportion — a wide leg, draped midi, or relaxed blazer — worn against something familiar.",
       "expressive":
-        "Start with one clearly proportioned anchor and build everything else around it in quieter, simpler pieces. The gesture reads when nothing else competes.",
+        "Try one clearly proportioned piece — a wide trouser, longline blazer, or draped midi — as the anchor of the look.",
       "neutral":
-        "Start with one piece that has a clear, clean proportion — a wide trouser or a longline layer. Keep the surrounding pieces simpler and calmer.",
+        "Try one piece with a clear, considered proportion — a wide trouser or longline layer — as the starting point.",
     },
     theBalanceToProtect: {
       "clean-polished":
@@ -503,7 +503,7 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
     },
     partToTake: [
       "One anchor piece — a wide trouser, a longline blazer, or a draped midi — that changes the proportion of the outfit without adding stiffness.",
-      "Fabric that holds shape softly: structured crepe, dry-hand twill, or fluid viscose. The material does the work so the cut doesn't have to press.",
+      "Fabric that holds shape softly: structured crepe, dry-hand twill, or fluid viscose. Choose a fabric with enough body to hold the line without stiffness.",
     ],
     leaveOutCandidates: [
       {
@@ -520,39 +520,39 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
       },
     ],
     lookToTryPassportOnly:
-      "Build this through one wide-leg trouser or longline blazer and a fine knit or clean top. One clear proportion; everything else simple.",
+      "Wear a longline blazer open over a fine knit and wide-leg trousers. Keep the shoe simple and accessories minimal so the shape carries.",
   },
 
   "modern-tailoring-spring-2026": {
     yourVersionPassport: {
       "clean-polished":
-        "Modern Tailoring works best for you as a separates question — one well-cut piece that unlocks combinations rather than completing a formal look.",
+        "Modern Tailoring gives you a separates approach — one well-cut piece that works across your wardrobe rather than completing a single look.",
       "fluid-ease":
-        "Modern Tailoring works for you when one well-cut piece provides the structure and everything else stays relaxed — the contrast between them is the whole look.",
+        "Modern Tailoring gives you one structural note alongside something relaxed — the contrast between them is the whole look, not a compromise.",
       "expressive":
-        "Modern Tailoring gives you a structured counterpoint — one composed piece that grounds a more expressive look without overriding it.",
+        "Modern Tailoring gives you a composed counterpoint — one structured piece that keeps a more expressive look from tipping into too much.",
       "neutral":
-        "Modern Tailoring works when one well-cut piece changes the register of a simple outfit without adding complication.",
+        "Modern Tailoring gives you a consistent route to a considered look without adding formal weight.",
     },
     styleDnaSays: {
       "clean-polished":
-        "That is where the separates approach earns its place — each piece working across different combinations, not just as part of a set.",
+        "That is where a well-cut separates piece earns its keep — one item doing more work than a full set.",
       "fluid-ease":
-        "That is why the contrast between the tailored piece and the relaxed counterpart is the whole method.",
+        "That is why the contrast between the tailored piece and its relaxed counterpart reads as a complete look.",
       "expressive":
-        "That is why one structured piece can ground a more expressive look without flattening it.",
+        "That is why one composed piece can hold a more expressive look together without flattening it.",
       "neutral":
-        "That is why one tailored anchor, worn against something softer, works more reliably than most other approaches.",
+        "That is why one tailored piece, worn against something softer, is the more reliable approach.",
     },
     yourBestRouteIn: {
       "clean-polished":
-        "Start with one well-cut separates piece — a blazer, waistcoat, or wide-leg trouser — worn against something simple. The tailored piece earns its place by working across at least three different combinations, not just one.",
+        "Try a well-cut blazer, waistcoat, or wide-leg trouser as a standalone separates piece.",
       "fluid-ease":
-        "Start with one tailored piece that can sit beside something relaxed. A wide-leg trouser with a fine knit, or a longline blazer over fluid denim — the contrast between them is the whole look.",
+        "Try one tailored piece — a blazer, wide-leg trouser, or longline jacket — alongside something visibly relaxed.",
       "expressive":
-        "Start with one tailored piece as the composed anchor, positioned against something more fluid or relaxed. The contrast between the two halves creates the effect.",
+        "Try one tailored piece as the composed anchor next to something more fluid or relaxed.",
       "neutral":
-        "Start with one well-cut piece worn against something simpler and softer. The proportion contrast between the two pieces does the styling.",
+        "Try a blazer or wide-leg trouser worn against something simpler and softer — the contrast between the two is the look.",
     },
     theBalanceToProtect: {
       "clean-polished":
@@ -583,39 +583,39 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
       },
     ],
     lookToTryPassportOnly:
-      "Build this through one tailored trouser or longline blazer worn with a soft knit or clean jersey. One structured piece; everything else relaxed.",
+      "Wear a tailored wide-leg trouser with a fine knit above. One structured piece alongside one relaxed counterpart — keep the shoe flat and accessories simple.",
   },
 
   "spring-2026-colour-direction": {
     yourVersionPassport: {
       "clean-polished":
-        "Colour Direction works as a method, not a new palette — your composed base gives one clear accent exactly the room it needs to register.",
+        "Colour Direction gives you a method, not a new palette — one clear accent that earns its place against the neutral base you already dress from.",
       "fluid-ease":
-        "Colour Direction works through one clear accent positioned against a calm, unfussy base — one note that changes the mood of a familiar outfit.",
+        "Colour Direction gives you one easy edit — a single accent that shifts the mood of a familiar, unfussy outfit.",
       "expressive":
-        "Colour Direction works when the single accent is genuinely deliberate — one note that earns its place against a quiet base.",
+        "Colour Direction rewards restraint — one genuinely considered accent that reads as intentional rather than decorated.",
       "neutral":
-        "Colour Direction works through one accent note introduced against a quiet base — it doesn't need to coordinate with everything, only to interrupt it.",
+        "Colour Direction gives you a simple method — one clear accent introduced against a quiet base you already own.",
     },
     styleDnaSays: {
       "clean-polished":
-        "That is the whole starting condition — the accent earns its place against calm ground you already have.",
+        "That composed base is already in place — the method builds on ground you already start from.",
       "fluid-ease":
-        "That is why the accent reads — the unfussy base is already there.",
+        "That is why the accent reads — the unfussy base is already the default.",
       "expressive":
-        "That is why one genuinely deliberate accent registers as intentional rather than decorated.",
+        "That deliberateness is what makes a single accent land as a decision rather than an accident.",
       "neutral":
-        "That is why this method works best as a single, repeatable accent across what you already own.",
+        "That is why one considered accent, consistently introduced, becomes a wardrobe method.",
     },
     yourBestRouteIn: {
       "clean-polished":
-        "Start through the lowest-commitment piece — a bag, flat, or scarf — against a neutral base you already own. One clear note is the complete introduction.",
+        "Start with one accent introduced through a bag, flat, or scarf against a neutral base you already own.",
       "fluid-ease":
-        "Start with one clear accent through a bag or flat worn against a calm, unfussy base. The accent reads most clearly when the base is already simple.",
+        "Try one accent piece — a bag, flat, or scarf — against the calm, unfussy base you already wear.",
       "expressive":
-        "Start with one genuinely intentional accent note against a quiet base. The restraint in the base is what gives the single colour its effect.",
+        "Try one genuinely intentional accent note against a quiet base — one piece, one clear colour.",
       "neutral":
-        "Start with one accent piece against a neutral base. One note is the whole method — it doesn't need to coordinate with everything, only to interrupt the base.",
+        "Introduce one accent piece — a bag, flat, or scarf — against a neutral base.",
     },
     theBalanceToProtect: {
       "clean-polished":
@@ -650,7 +650,7 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
       },
     ],
     lookToTryPassportOnly:
-      "Build this through a quiet base — cream, stone, or washed denim — with one clear accent through a bag, flat, or scarf. One considered note; everything else calm.",
+      "Wear cream trousers and a simple knit, or washed denim with a fine top — add one clear accent through a bag or flat. One considered note; everything else calm.",
   },
 };
 
@@ -709,20 +709,20 @@ const VERSION_PASSPORT_SUPPLEMENT: Partial<Record<string, Partial<Record<string,
     "midi-length":  "Midi lengths are one of the most natural expressions of this direction.",
     "effortless":   "It reads as deliberate without asking you to assemble something complicated.",
     "refined":      "The result is composed without being stiff — which is where polish actually registers.",
-    "put-together": "One clean anchor achieves more than most layered approaches.",
+    "put-together": "It is the most reliable route to a polished look without needing statement pieces.",
     "powerful":     "Presence here comes from proportion and cut, not from formal weight.",
     "confident":    "Presence here comes from proportion and cut, not from formal weight.",
     "interesting":  "One gesture, positioned correctly, reads more than multiple layers of interest.",
-    "creative":     "One clearly shaped anchor earns more attention than decoration across the whole look.",
+    "creative":     "One clearly shaped piece earns more attention than decoration spread across the whole look.",
     "feminine":     "Softened proportions and fluid fabrics keep the direction feeling soft rather than constructed.",
-    "elegant":      "Restraint in the surrounding pieces is what gives the anchor shape its effect.",
+    "elegant":      "Restraint in the surrounding pieces is what gives the silhouette its full effect.",
   },
   "modern-tailoring-spring-2026": {
     "relaxed-fits": "The contrast between the tailored piece and the relaxed counterpart is the whole method — not a compromise.",
     "structured":   "One precisely shaped separates piece earns more than a full matched suit.",
     "effortless":   "One tailored piece against something relaxed reads as considered without appearing dressed-up.",
     "refined":      "One well-cut piece lifts the whole look's register without needing anything else to work harder.",
-    "put-together": "A single tailored anchor is the most reliable route to a finished look without statement pieces.",
+    "put-together": "It is the most reliable route to a finished, considered look without statement pieces.",
     "powerful":     "The tailored anchor carries quiet authority without formal weight.",
     "confident":    "The tailored anchor carries quiet authority without formal weight.",
     "interesting":  "The proportion contrast between the two pieces is where the styling decision lives.",

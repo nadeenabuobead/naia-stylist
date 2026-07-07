@@ -10,4 +10,5 @@ export default [
   route("style-me", "./routes/style-me/_index.tsx"),
   route("style-me/result", "./routes/style-me/result.tsx"),
   route("full-style-profile", "./routes/full-style-profile/_index.tsx"),
+  route("trends/:slug/lens/:lens", "./routes/trends.$slug.lens.$lens.tsx"),
 ] satisfies RouteConfig;

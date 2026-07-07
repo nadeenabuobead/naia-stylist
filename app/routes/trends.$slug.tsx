@@ -453,19 +453,6 @@ export default function TrendReportDetail() {
           </div>
         )}
 
-        {/* Lens navigation — appears after the nAia Reading, before how-to-wear */}
-        <div className="tr-lens-nav">
-          <div className="tr-lens-nav-label">Read this through a lens</div>
-          <div className="tr-lens-nav-row">
-            <Link to={`/trends/${report.slug}/edit`} className="tr-lens-btn for-you">For You</Link>
-            <Link to={`/trends/${report.slug}/lens/designer`} className="tr-lens-btn">Designer</Link>
-            <Link to={`/trends/${report.slug}/lens/buyer`} className="tr-lens-btn">Buyer</Link>
-            <Link to={`/trends/${report.slug}/lens/marketer`} className="tr-lens-btn">Marketer</Link>
-            <Link to={`/trends/${report.slug}/lens/creative-director`} className="tr-lens-btn">Creative Director</Link>
-            <Link to={`/trends/${report.slug}/lens/stylist`} className="tr-lens-btn">Stylist</Link>
-          </div>
-        </div>
-
         {/* How to wear */}
         {report.howToWear?.length ? (
           <div style={{ marginBottom: "48px" }}>
@@ -506,32 +493,24 @@ export default function TrendReportDetail() {
           ))}
         </div>
 
-        {/* Bottom CTA */}
-        <div className="tr-cta-block">
-          <Link to={`/trends/${report.slug}/edit`} className="tr-cta-link">
-            SEE THIS TREND THROUGH YOUR STYLE →
-          </Link>
-          <p className="tr-cta-sub">
-            A personal reading of this direction through your preferences, lifestyle, and wardrobe.
-          </p>
+        {/* Lens navigation — final invitation after the full public report */}
+        <div className="tr-lens-nav">
+          <div className="tr-lens-nav-label">Read this through a lens</div>
+          <div className="tr-lens-nav-row">
+            <Link to={`/trends/${report.slug}/edit`} className="tr-lens-btn">For You</Link>
+            <Link to={`/trends/${report.slug}/lens/designer`} className="tr-lens-btn">Designer</Link>
+            <Link to={`/trends/${report.slug}/lens/buyer`} className="tr-lens-btn">Buyer</Link>
+            <Link to={`/trends/${report.slug}/lens/marketer`} className="tr-lens-btn">Marketer</Link>
+            <Link to={`/trends/${report.slug}/lens/creative-director`} className="tr-lens-btn">Creative Director</Link>
+            <Link to={`/trends/${report.slug}/lens/stylist`} className="tr-lens-btn">Stylist</Link>
+          </div>
         </div>
 
         {/* Footer */}
         <div style={{ textAlign: "center", paddingTop: "40px", borderTop: "1px solid rgba(59,5,16,.08)" }}>
-          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "24px" }}>
+          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a" }}>
             nAia Trend Reports · The nAia edit
           </div>
-          <div className="tr-actions">
-            <button onClick={copyLink} className="tr-action-btn secondary">
-              {copyStatus === "copied" ? "Link copied" : "Copy Link"}
-            </button>
-            <button onClick={downloadPdf} className="tr-action-btn primary">↓ Download PDF</button>
-          </div>
-          {copyStatus === "error" && (
-            <p style={{ marginTop: "12px", fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", color: "var(--muted)" }}>
-              Copy unavailable — copy the address from your browser.
-            </p>
-          )}
         </div>
       </div>
     </div>
