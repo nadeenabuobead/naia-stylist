@@ -295,6 +295,7 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
             { label: "ONE DECISION DRESSING", body: "One piece carries the look; everything else supports it. The outfit feels resolved before it starts." },
             { label: "PRESENCE WITHOUT PERFORMANCE", body: "Polish through proportion, not obvious styling. The garment does the work so the wearer does not have to." },
             { label: "THE FINISHED LOOK", body: "The piece that makes the outfit feel resolved — without adding more layers, accessories, or effort." },
+            { label: "WARDROBE UPGRADE", body: "Not a new persona. A cleaner way to make the wardrobe feel current." },
           ],
         },
         {
@@ -324,6 +325,7 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
             "ONE GESTURE. EVERYTHING ELSE QUIET.",
             "POLISHED, WITHOUT LOOKING PERFORMED",
             "THE NEW WAY TO LOOK CONSIDERED",
+            "THE OUTFIT DOES NOT NEED MORE. IT NEEDS ONE CLEAR DECISION.",
           ],
           closing: "Use these as social captions, email subject lines, or product description openers. Each one works alone.",
         },
