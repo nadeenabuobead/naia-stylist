@@ -353,16 +353,77 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
     "creative-director": {
       modules: [
         {
-          label: "THE WORLD-BUILDING MOVE",
-          body: "The report's internal logic: not about becoming plain, but about letting cut, proportion, and fabric carry the impression without embellishment or body-conscious cuts. nAia's read is that the world this builds is one where every element earns its place by doing structural work — decoration is not excluded because it is unwelcome, but because the structure does not need it.",
+          label: "THE CREATIVE READ",
+          body: "Soft Structure is not about drama. It is about controlled ease — clothes with enough shape to hold the frame, and enough softness to let the woman remain present.\n\nThe visual job is not to announce the trend. It is to show the woman wearing the decision she has already made.",
         },
         {
-          label: "THE ORIGINAL RESPONSE",
-          body: "The Givenchy and Victoria Beckham sources both arrive at the same cultural territory — presence without performance — from different aesthetic starting points. nAia's read is that the creative question is not 'how do we do Soft Structure' but 'what is our brand's original response to this specific tension?' That question has a different answer for every brand, and the difference is the authorship.",
+          label: "THE VISUAL WORLD",
+          body: "Quiet interiors. Negative space. Neutral architecture. Soft diffused daylight.\n\nClean surfaces, muted tones, controlled movement. The set earns its place by doing structural work — not by becoming the story. Fabric and proportion carry the image. Everything else is background.",
         },
         {
-          label: "THE DECISION",
-          body: "Identify whether your brand's world argues for effort or ease. If ease, determine whether the construction principle — structure through proportion — can be expressed in your brand's own aesthetic language rather than in this direction's specific visual vocabulary.",
+          type: "stacked-rows",
+          label: "IMAGE LANGUAGE",
+          rows: [
+            { label: "COMPOSITION", body: "One clear silhouette. Let space frame the garment. The eye should land on the line, not the styling." },
+            { label: "LIGHT", body: "Soft natural light or diffused studio. Avoid harsh contrast unless it sharpens the line." },
+            { label: "MOVEMENT", body: "Small gestures. Fabric caught mid-shift. The garment moves; the silhouette holds." },
+            { label: "DETAIL", body: "Shoulder, waist, hem, drape, closure, fabric handle. One detail at a time." },
+          ],
+        },
+        {
+          type: "avoid-chips",
+          label: "STYLING DIRECTION",
+          chips: [
+            "ONE PROPORTION DECISION AT A TIME",
+            "MINIMAL LAYERING",
+            "QUIET SUPPORTING PIECES",
+            "CLEAN FOOTWEAR",
+            "RESTRAINED ACCESSORIES",
+            "LET THE GARMENT CARRY THE VISUAL IDEA",
+          ],
+          closing: "Over-styling cancels the effect. Every extra element must earn its place or be removed.",
+        },
+        {
+          type: "stacked-rows",
+          label: "CASTING + ENERGY",
+          rows: [
+            { label: "COMPOSURE", body: "Self-possessed. Present but not performing. Confidence through stillness, not attitude." },
+            { label: "POSE", body: "Natural stance, small movements. Not overly directed, not stiff. Nothing that reads as power-suit acting." },
+            { label: "ENERGY", body: "The woman is aware of herself — not the clothes, not the camera." },
+          ],
+        },
+        {
+          type: "avoid-chips",
+          label: "SET + ATMOSPHERE",
+          chips: [
+            "NEUTRAL ROOM",
+            "GALLERY-LIKE INTERIOR",
+            "STONE / PLASTER / GLASS / WOOD",
+            "QUIET HALLWAY",
+            "CLEAN STUDIO",
+            "SOFT CITY BACKDROP",
+            "TRAVEL / INTERIOR TRANSITION SPACES",
+          ],
+          closing: "The set should support the silhouette. When the set becomes the story, the garment disappears.",
+        },
+        {
+          type: "avoid-chips",
+          label: "CREATIVE RISK",
+          chips: [
+            "TOO CORPORATE",
+            "TOO COLD OR EMPTY",
+            "OVERLY EDITORIAL POSING",
+            "STIFF POWER-SUIT REFERENCES",
+            "EXCESSIVE ACCESSORIES",
+            "RUNWAY-COPY STYLING",
+            "WOMAN DISAPPEARS BEHIND THE CONCEPT",
+          ],
+          closing: "The risk is making the clothes look like a uniform instead of a decision. Direction should create presence, not erase the person.",
+        },
+        {
+          type: "highlight",
+          label: "THE DIRECTION",
+          body: "Direct for restraint, not emptiness.\n\nLet the garment hold the frame while the woman holds the presence.",
         },
       ],
     },
