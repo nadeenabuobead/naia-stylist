@@ -17,6 +17,7 @@ export type ShopperProfileEvidence = {
   desiredImpression: string[];
   fitPreferences: string[];
   becoming: string[];
+  styleSupport: string[];
 };
 
 export type ShopperClosetItemEvidence = {
@@ -483,13 +484,13 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
     },
     yourBestRouteIn: {
       "clean-polished":
-        "Try a wide-leg trouser, longline blazer, or draped midi as the main piece — one clear shape is the whole starting point.",
+        "Based on your Style DNA, start with one clearly proportioned piece — a wide-leg trouser, longline blazer, or draped midi. Keep everything around it quieter.",
       "fluid-ease":
-        "Try one shaped piece with genuine proportion — a wide leg, draped midi, or relaxed blazer — worn against something familiar.",
+        "Based on your Style DNA, the easiest entry is one shaped piece with genuine proportion — a wide leg, draped midi, or relaxed blazer — worn against something familiar.",
       "expressive":
-        "Try one clearly proportioned piece — a wide trouser, longline blazer, or draped midi — as the anchor of the look.",
+        "Based on your Style DNA, try one clearly proportioned anchor — a wide trouser, longline blazer, or draped midi — and keep everything else composed around it.",
       "neutral":
-        "Try one piece with a clear, considered proportion — a wide trouser or longline layer — as the starting point.",
+        "Based on your Passport, start with one piece that has clear, considered proportion — a wide-leg trouser or longline layer is the cleanest entry.",
     },
     theBalanceToProtect: {
       "clean-polished":
@@ -546,13 +547,13 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
     },
     yourBestRouteIn: {
       "clean-polished":
-        "Try a well-cut blazer, waistcoat, or wide-leg trouser as a standalone separates piece.",
+        "Based on your Style DNA, try a well-cut blazer, waistcoat, or wide-leg trouser as a standalone separates piece.",
       "fluid-ease":
-        "Try one tailored piece — a blazer, wide-leg trouser, or longline jacket — alongside something visibly relaxed.",
+        "Based on your Style DNA, try one tailored piece — a blazer, wide-leg trouser, or longline jacket — alongside something visibly relaxed.",
       "expressive":
-        "Try one tailored piece as the composed anchor next to something more fluid or relaxed.",
+        "Based on your Style DNA, try one tailored piece as the composed anchor next to something more fluid or relaxed.",
       "neutral":
-        "Try a blazer or wide-leg trouser worn against something simpler and softer — the contrast between the two is the look.",
+        "Based on your Passport, try a blazer or wide-leg trouser worn against something simpler and softer — the contrast between the two is the look.",
     },
     theBalanceToProtect: {
       "clean-polished":
@@ -609,13 +610,13 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
     },
     yourBestRouteIn: {
       "clean-polished":
-        "Start with one accent introduced through a bag, flat, or scarf against a neutral base you already own.",
+        "Based on your Style DNA, start with one accent introduced through a bag, flat, or scarf against a neutral base you already own.",
       "fluid-ease":
-        "Try one accent piece — a bag, flat, or scarf — against the calm, unfussy base you already wear.",
+        "Based on your Style DNA, try one accent piece — a bag, flat, or scarf — against the calm, unfussy base you already wear.",
       "expressive":
-        "Try one genuinely intentional accent note against a quiet base — one piece, one clear colour.",
+        "Based on your Style DNA, try one genuinely intentional accent note against a quiet base — one piece, one clear colour.",
       "neutral":
-        "Introduce one accent piece — a bag, flat, or scarf — against a neutral base.",
+        "Based on your Passport, introduce one accent piece — a bag, flat, or scarf — against a neutral base.",
     },
     theBalanceToProtect: {
       "clean-polished":
@@ -699,10 +700,10 @@ const STYLE_DNA_SUPPLEMENT: Partial<Record<string, Partial<Record<string, string
   },
 };
 
-// Lifestyle and becoming signals → YOUR PASSPORT POINTS TO copy.
-// Uses DIFFERENT signal tiers from STYLE_DNA_SUPPLEMENT (lifestyle + becoming raw ids vs.
-// fitPreferences / desiredFeelings / desiredImpression / normalised becoming) so the two
-// evidence sub-blocks never repeat the same observation. First match wins.
+// Lifestyle, becoming, and aspiration signals → YOUR PASSPORT SAYS copy.
+// Priority: lifestyle context → becoming direction → desiredImpression → desiredFeelings.
+// Sentences are goal/context-angled ("where you're headed, what your day requires") — distinct
+// from STYLE_DNA_SUPPLEMENT which is behavioral ("you lean toward, you respond to").
 const PASSPORT_POINTS_TO_SUPPLEMENT: Partial<Record<string, Partial<Record<string, string>>>> = {
   "spring-2026-soft-structure": {
     "office":           "Your lifestyle includes professional settings — which is where one anchor piece without decoration earns its keep most clearly.",
@@ -710,10 +711,24 @@ const PASSPORT_POINTS_TO_SUPPLEMENT: Partial<Record<string, Partial<Record<strin
     "events":           "You dress for occasions that need composure without visible effort — one proportioned shape delivers that more reliably than a more assembled look.",
     "busy-mom":         "Your day covers a lot of ground without pause — one considered shape works because it requires nothing further once it is in place.",
     "on-the-go":        "Your days move quickly — which is why one considered shape works better here than pieces that need to resolve against each other.",
-    "more-confident":   "You are building toward more confident dressing — Soft Structure gives you that without asking you to work harder than you already do.",
-    "more-elegant":     "You are working toward a more elegant register — one clearly proportioned shape moves you in that direction without formality.",
-    "more-creative":    "You are drawn toward more creative expression — Soft Structure gives you one specific, considered gesture to work with.",
-    "more-interesting": "You want to look more interesting — which one clear, considered shape achieves more reliably than several competing ones.",
+    "more-confident":    "You are building toward more confident dressing — Soft Structure gives you that without asking you to work harder than you already do.",
+    "more-elegant":      "You are working toward a more elegant register — one clearly proportioned shape moves you in that direction without formality.",
+    "more-creative":     "You are drawn toward more creative expression — Soft Structure gives you one specific, considered gesture to work with.",
+    "more-interesting":  "You want to look more interesting — which one clear, considered shape achieves more reliably than several competing ones.",
+    "more-put-together": "You want to feel consistently put-together — one considered silhouette is the most reliable route to that.",
+    // desiredImpression / desiredFeelings — aspirational angle, different from STYLE DNA behavioral framing
+    "refined":        "Your style is moving toward a more refined register — this direction builds presence through restraint and proportion rather than visible effort.",
+    "elegant":        "You are working toward a more elegant way of dressing — one clearly proportioned shape moves you there without formality.",
+    "powerful":       "You want to feel powerful in what you wear — presence here comes from proportion and silhouette, not formal construction.",
+    "confident":      "You want to feel confident — this direction builds that through cut and proportion rather than formal weight.",
+    "effortless":     "You want to look effortless — a single considered shape, set up correctly, reads as deliberate without appearing assembled.",
+    "put-together":   "You want to feel consistently put-together — one clearly proportioned piece is the most reliable route to that without statement pieces.",
+    "interesting":    "You want to look more interesting — one clearly considered silhouette achieves that more reliably than layered effects.",
+    "comfortable":    "You want to feel comfortable without losing presence — ease here is built into the proportion, not negotiated around stiffness.",
+    "attractive":     "You want to look polished — a clean silhouette reads with more authority than most individual details can.",
+    "soft-confident": "You want to feel soft but confident — this direction holds both without asking you to choose between them.",
+    "feminine":       "You want to feel feminine — softened proportions and fluid fabric keep this direction feeling soft rather than constructed.",
+    "creative":       "You are working toward a more original way of dressing — one specific, considered shape is the clearest expression of that.",
   },
   "modern-tailoring-spring-2026": {
     "office":             "Your lifestyle includes professional settings — where the separates approach earns its place: one tailored piece that holds for work without locking you into a matched suit.",
@@ -721,10 +736,21 @@ const PASSPORT_POINTS_TO_SUPPLEMENT: Partial<Record<string, Partial<Record<strin
     "events":             "You dress for occasions — Modern Tailoring gives you a look that holds for events without the rigidity of formal suiting.",
     "busy-mom":           "Your day moves between contexts — one tailored piece that works across them is a more reliable investment than something built for a single occasion.",
     "on-the-go":          "Your lifestyle keeps moving — which is where one well-cut tailored piece earns more than a complete matched look.",
-    "more-confident":     "You are building toward more confident dressing — one well-cut tailored piece carries more authority than a more assembled look.",
-    "more-elegant":       "You are working toward a more elegant register — Modern Tailoring's separates approach gives you that without formal weight.",
-    "more-interesting":   "You want to look more interesting — the proportion contrast between a tailored piece and its counterpart is where that decision lives.",
-    "more-put-together":  "You want to feel more put-together consistently — one well-cut tailored piece is the most reliable route to that without statement pieces.",
+    "more-confident":    "You are building toward more confident dressing — one well-cut tailored piece carries more authority than a more assembled look.",
+    "more-elegant":      "You are working toward a more elegant register — Modern Tailoring's separates approach gives you that without formal weight.",
+    "more-interesting":  "You want to look more interesting — the proportion contrast between a tailored piece and its counterpart is where that decision lives.",
+    "more-put-together": "You want to feel more put-together consistently — one well-cut tailored piece is the most reliable route to that without statement pieces.",
+    // desiredImpression / desiredFeelings — aspirational angle, different from STYLE DNA behavioral framing
+    "refined":       "Your style is working toward a more refined register — one well-cut tailored piece achieves that more reliably than a matched set.",
+    "elegant":       "You are working toward a more elegant register — Modern Tailoring's separates approach gives you that without formal weight.",
+    "powerful":      "You want to feel powerful — the authority here comes from one well-cut piece, not from the formality of suiting.",
+    "confident":     "You want to feel confident — one well-cut tailored piece carries more authority than a more assembled look.",
+    "effortless":    "You want to look effortless — one tailored piece worn against something relaxed reads as considered without appearing dressed-up.",
+    "put-together":  "You want to feel consistently put-together — one well-cut tailored piece is the most reliable route to that.",
+    "interesting":   "You want to look more interesting — the proportion contrast between a tailored piece and its relaxed counterpart is where that decision lives.",
+    "comfortable":   "You want to feel comfortable — a tailored piece in fabric that holds its line without stiffness gives you composure without restriction.",
+    "creative":      "You are working toward a more original way of dressing — the proportion contrast between a structured piece and something relaxed is the most direct expression of that.",
+    "attractive":    "You want to look polished and considered — one well-cut separates piece achieves that more reliably than a full matched look.",
   },
   "spring-2026-colour-direction": {
     "office":           "Your lifestyle includes professional settings — one deliberate accent against a quiet base holds across them without requiring a separate work wardrobe.",
@@ -735,6 +761,17 @@ const PASSPORT_POINTS_TO_SUPPLEMENT: Partial<Record<string, Partial<Record<strin
     "more-confident":   "You are building toward more confident dressing — one clear, deliberate accent note makes a direct statement without requiring everything else to change.",
     "more-creative":    "You are drawn toward more creative expression — one genuinely deliberate colour note achieves that more directly than a more coloured approach.",
     "more-interesting": "You want to look more interesting — which is precisely what one considered accent against a quiet base achieves.",
+    // desiredImpression / desiredFeelings — aspirational angle, different from STYLE DNA behavioral framing
+    "refined":        "Your style is working toward a more refined register — restraint in colour, specifically one clear accent, is the expression of that.",
+    "elegant":        "You are working toward a more elegant register — one deliberate colour note against a quiet base is specifically how that reads.",
+    "creative":       "You are working toward a more original way of dressing — one genuinely deliberate colour note achieves that more directly than a fuller palette.",
+    "interesting":    "You want to look more interesting — one considered accent against a quiet base achieves that more reliably than multiple colour notes.",
+    "confident":      "You want to feel confident — one clear, deliberate accent note makes a direct statement without requiring everything else to change.",
+    "effortless":     "You want to look effortless — one accent introduced through a low-commitment piece, a bag, flat, or scarf, keeps the look intentional without demanding a re-edit.",
+    "put-together":   "You want to feel consistently put-together — a quiet base with one deliberate accent reads as composed rather than cautious.",
+    "comfortable":    "You want to feel comfortable — one considered note against a familiar base is the simplest version of this direction.",
+    "soft-confident": "You want to feel soft but confident — one clear accent against a quiet base achieves exactly that register.",
+    "attractive":     "You want to look polished — one clear accent against a quiet base reads as more deliberate than several competing notes.",
   },
 };
 
@@ -841,9 +878,9 @@ function buildStyleDnaBlock(
   };
 }
 
-// YOUR PASSPORT POINTS TO — lifestyle and becoming signals only.
-// Uses PASSPORT_POINTS_TO_SUPPLEMENT (different signal tiers from buildStyleDnaBlock)
-// so the two evidence sub-blocks never produce the same observation.
+// YOUR PASSPORT SAYS — lifestyle, becoming, and aspiration signals.
+// Priority: lifestyle context → becoming direction → desiredImpression → desiredFeelings.
+// Sentences use a goal/context angle distinct from STYLE DNA behavioral framing.
 function buildPassportPointsBlock(
   profile: ShopperProfileEvidence,
   lifestyleIds: string[],
@@ -856,6 +893,14 @@ function buildPassportPointsBlock(
     if (sentence) return sentence;
   }
   for (const id of profile.becoming) {
+    const sentence = table[id];
+    if (sentence) return sentence;
+  }
+  for (const id of profile.desiredImpression) {
+    const sentence = table[id];
+    if (sentence) return sentence;
+  }
+  for (const id of profile.desiredFeelings) {
     const sentence = table[id];
     if (sentence) return sentence;
   }
@@ -947,6 +992,7 @@ function buildALookToTry(
   // Context-appropriate suffix for a single-item look
   const singleNote = (): string => {
     if (workCtx === "none") return "";
+    if (top.category === "OUTERWEAR") return "";
     const phrase =
       workCtx === "events" ? "For the occasion"
       : workCtx === "work-meetings" ? "For work or meetings"
@@ -1136,9 +1182,10 @@ export type ShopperEdit = {
   yourVersion: string;
   // 2. YOUR nAia EVIDENCE — only render sub-blocks with genuine data
   evidenceStyleDna: string | null;           // YOUR STYLE DNA SAYS (fit/aspiration + register)
-  evidencePassportPoints: string | null;     // YOUR PASSPORT POINTS TO (lifestyle/becoming)
-  evidenceClosetItems: EvidenceClosetItem[]; // YOU ALREADY OWN (empty = omit block)
+  evidencePassportSays: string | null;       // YOUR PASSPORT SAYS (lifestyle/becoming/aspirations)
+  evidenceClosetItems: EvidenceClosetItem[]; // YOUR CLOSET SHOWS (empty = omit block)
   evidenceReviews: string | null;            // YOUR REVIEWS SUGGEST (≥3 reviews + didntWorkTags)
+  lowDataNotice: string | null;              // shown when only Style DNA/Passport is available
   // 3. YOUR BEST ROUTE IN — named Closet item path or Passport-only route
   yourBestRouteIn: string;
   // 4. A LOOK TO TRY
@@ -1279,7 +1326,7 @@ export function buildShopperEdit(
     : null;
   const evidenceStyleDna: string | null = styleDnaBlock?.text ?? null;
 
-  const evidencePassportPoints: string | null = (rules && profile)
+  const evidencePassportSays: string | null = (rules && profile)
     ? buildPassportPointsBlock(profile, lifestyleIds, slug)
     : null;
 
@@ -1361,13 +1408,28 @@ export function buildShopperEdit(
 
   const subTitle = `${shortTitle.toUpperCase()}, READ THROUGH YOUR STYLE`;
 
+  const lowDataNotice: string | null = (() => {
+    if (evidenceClosetItems.length > 0 || evidenceReviews !== null) return null;
+    if (evidenceStyleDna !== null && evidencePassportSays !== null) {
+      return "This edit is based on your Style DNA and Passport. Add your most-worn pieces, saved items, and purchases to give nAia more to work with.";
+    }
+    if (evidenceStyleDna !== null) {
+      return "This edit is based on your Style DNA. Add your most-worn pieces, saved items, and purchases to give nAia more to work with.";
+    }
+    if (evidencePassportSays !== null) {
+      return "This edit is based on your Passport. Add your most-worn pieces, saved items, and purchases to give nAia more to work with.";
+    }
+    return null;
+  })();
+
   return {
     subTitle,
     yourVersion,
     evidenceStyleDna,
-    evidencePassportPoints,
+    evidencePassportSays,
     evidenceClosetItems,
     evidenceReviews,
+    lowDataNotice,
     yourBestRouteIn,
     aLookToTry,
     theBalanceToProtect,

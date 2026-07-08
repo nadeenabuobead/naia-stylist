@@ -158,7 +158,7 @@ export default function TrendEdit() {
             <div className="tr-divider" />
 
             {/* 2. YOUR nAia EVIDENCE — only when at least one source is available */}
-            {(edit.evidenceStyleDna || edit.evidencePassportPoints || edit.evidenceClosetItems.length > 0 || edit.evidenceReviews) && (
+            {(edit.evidenceStyleDna || edit.evidencePassportSays || edit.evidenceClosetItems.length > 0 || edit.evidenceReviews) && (
               <>
                 <div className="tr-edit-section">
                   <div className="tr-section-label">YOUR nAia EVIDENCE</div>
@@ -169,15 +169,15 @@ export default function TrendEdit() {
                         <p className="tr-body" style={{ fontSize: "16px" }}>{edit.evidenceStyleDna}</p>
                       </div>
                     )}
-                    {edit.evidencePassportPoints && (
+                    {edit.evidencePassportSays && (
                       <div className="tr-evidence-panel-row">
-                        <div className="tr-evidence-label">YOUR PASSPORT POINTS TO</div>
-                        <p className="tr-body" style={{ fontSize: "16px" }}>{edit.evidencePassportPoints}</p>
+                        <div className="tr-evidence-label">YOUR PASSPORT SAYS</div>
+                        <p className="tr-body" style={{ fontSize: "16px" }}>{edit.evidencePassportSays}</p>
                       </div>
                     )}
                     {edit.evidenceClosetItems.length > 0 && (
                       <div className="tr-evidence-panel-row">
-                        <div className="tr-evidence-label">YOU ALREADY OWN</div>
+                        <div className="tr-evidence-label">YOUR CLOSET SHOWS</div>
                         <div className="tr-closet-cards">
                           {edit.evidenceClosetItems.map((item: EvidenceClosetItem, i: number) => (
                             <div key={i} className="tr-closet-card">
@@ -198,6 +198,11 @@ export default function TrendEdit() {
                       </div>
                     )}
                   </div>
+                  {edit.lowDataNotice && (
+                    <p style={{ fontFamily: "var(--ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--muted)", marginTop: "16px" }}>
+                      {edit.lowDataNotice}
+                    </p>
+                  )}
                 </div>
                 <div className="tr-divider" />
               </>
@@ -243,7 +248,7 @@ export default function TrendEdit() {
               <Link to="/closet" className="tr-cta-edit-btn">
                 OPEN MY CLOSET →
               </Link>
-              <p className="tr-cta-edit-sub">Add more of the pieces you wear most often, and nAia will build fuller looks around what you already own.</p>
+              <p className="tr-cta-edit-sub">Add your most-worn pieces, saved items, and purchases so nAia can build a sharper edit around your real style world.</p>
             </div>
           </>
         ) : null}
