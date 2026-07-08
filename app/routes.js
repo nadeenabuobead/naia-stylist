@@ -27,6 +27,7 @@ export default [
   route("trends", "routes/trends.jsx"),
   route("trends/:slug", "routes/trends.$slug.tsx"),
   route("trends/:slug/edit", "routes/trends.$slug.edit.tsx"),
+  route("trends/:slug/lens/:lens", "routes/trends.$slug.lens.$lens.tsx"),
   route("stylist", "routes/stylist.jsx"),
   route("stylist-popup", "routes/stylist-popup.jsx"),
   route("api/wardrobe-insights", "routes/api.wardrobe-insights.jsx"),

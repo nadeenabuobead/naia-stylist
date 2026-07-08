@@ -140,7 +140,7 @@ export const trendReports: TrendReportData[] = [
     sources: [
       {
         publisher: "Givenchy",
-        descriptor: "Official collection notes",
+        descriptor: "Brand collection page",
         title: "Spring Summer 2026 Womenswear Show",
         url: "https://www.givenchy.com/us/en-US/cm/explore/collections/spring-summer-26-womenswear-show",
       },
@@ -239,7 +239,7 @@ export const trendReports: TrendReportData[] = [
     sources: [
       {
         publisher: "Victoria Beckham",
-        descriptor: "Official collection notes",
+        descriptor: "Brand collection page",
         title: "Pre Spring Summer 2026",
         url: "https://www.victoriabeckham.com/collections/pre-spring-summer-2026",
       },

@@ -463,7 +463,7 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
   "spring-2026-soft-structure": {
     yourVersionPassport: {
       "clean-polished":
-        "Soft Structure gives you a clearer, more intentional way to create presence without making the whole outfit feel formal.",
+        "Soft Structure gives your style a clearer way to create presence without making the outfit feel formal or overworked.",
       "fluid-ease":
         "Soft Structure gives you a way to add shape to a look without losing the ease that already works for you.",
       "expressive":
@@ -699,6 +699,45 @@ const STYLE_DNA_SUPPLEMENT: Partial<Record<string, Partial<Record<string, string
   },
 };
 
+// Lifestyle and becoming signals → YOUR PASSPORT POINTS TO copy.
+// Uses DIFFERENT signal tiers from STYLE_DNA_SUPPLEMENT (lifestyle + becoming raw ids vs.
+// fitPreferences / desiredFeelings / desiredImpression / normalised becoming) so the two
+// evidence sub-blocks never repeat the same observation. First match wins.
+const PASSPORT_POINTS_TO_SUPPLEMENT: Partial<Record<string, Partial<Record<string, string>>>> = {
+  "spring-2026-soft-structure": {
+    "office":           "Your lifestyle includes professional settings — which is where one anchor piece without decoration earns its keep most clearly.",
+    "hybrid":           "Your lifestyle moves between settings — one anchor piece set up correctly holds across all of them without further adjustment.",
+    "events":           "You dress for occasions that need composure without visible effort — one proportioned shape delivers that more reliably than a more assembled look.",
+    "busy-mom":         "Your day covers a lot of ground without pause — one considered shape works because it requires nothing further once it is in place.",
+    "on-the-go":        "Your days move quickly — which is why one considered shape works better here than pieces that need to resolve against each other.",
+    "more-confident":   "You are building toward more confident dressing — Soft Structure gives you that without asking you to work harder than you already do.",
+    "more-elegant":     "You are working toward a more elegant register — one clearly proportioned shape moves you in that direction without formality.",
+    "more-creative":    "You are drawn toward more creative expression — Soft Structure gives you one specific, considered gesture to work with.",
+    "more-interesting": "You want to look more interesting — which one clear, considered shape achieves more reliably than several competing ones.",
+  },
+  "modern-tailoring-spring-2026": {
+    "office":             "Your lifestyle includes professional settings — where the separates approach earns its place: one tailored piece that holds for work without locking you into a matched suit.",
+    "hybrid":             "Your lifestyle moves between settings — one tailored separates piece is the most reliable investment for that range without needing to change the whole look.",
+    "events":             "You dress for occasions — Modern Tailoring gives you a look that holds for events without the rigidity of formal suiting.",
+    "busy-mom":           "Your day moves between contexts — one tailored piece that works across them is a more reliable investment than something built for a single occasion.",
+    "on-the-go":          "Your lifestyle keeps moving — which is where one well-cut tailored piece earns more than a complete matched look.",
+    "more-confident":     "You are building toward more confident dressing — one well-cut tailored piece carries more authority than a more assembled look.",
+    "more-elegant":       "You are working toward a more elegant register — Modern Tailoring's separates approach gives you that without formal weight.",
+    "more-interesting":   "You want to look more interesting — the proportion contrast between a tailored piece and its counterpart is where that decision lives.",
+    "more-put-together":  "You want to feel more put-together consistently — one well-cut tailored piece is the most reliable route to that without statement pieces.",
+  },
+  "spring-2026-colour-direction": {
+    "office":           "Your lifestyle includes professional settings — one deliberate accent against a quiet base holds across them without requiring a separate work wardrobe.",
+    "hybrid":           "Your lifestyle moves between settings — one considered accent against a neutral base works across all of them.",
+    "events":           "You dress for occasions — one deliberate accent against a quiet base gives a familiar outfit an occasion-appropriate register without a new look.",
+    "casual-days":      "Your day is casual by default — which is where one clear accent note against an unfussy base works best.",
+    "on-the-go":        "Your lifestyle keeps moving — which is why one considered accent note is the most you need. It shifts a familiar outfit without adding anything to think about.",
+    "more-confident":   "You are building toward more confident dressing — one clear, deliberate accent note makes a direct statement without requiring everything else to change.",
+    "more-creative":    "You are drawn toward more creative expression — one genuinely deliberate colour note achieves that more directly than a more coloured approach.",
+    "more-interesting": "You want to look more interesting — which is precisely what one considered accent against a quiet base achieves.",
+  },
+};
+
 // Passport-signal → second sentence appended to YOUR VERSION OF THIS TREND.
 // Draws from the same signal priority order as STYLE_DNA_SUPPLEMENT.
 // Only the strongest matching signal fires; never fires more than once per render.
@@ -737,6 +776,14 @@ const VERSION_PASSPORT_SUPPLEMENT: Partial<Record<string, Partial<Record<string,
     "creative":     "One considered colour note registers as intentional rather than decorated.",
     "elegant":      "Restraint in the base is what gives the single note its effect.",
   },
+};
+
+// Per-slug sentence for YOUR REVIEWS SUGGEST — fires when ≥3 reviews AND didntWorkTags
+// is non-empty. Never exposes review counts, tag names, or backend language.
+const REVIEW_EVIDENCE_SENTENCES: Partial<Record<string, string>> = {
+  "spring-2026-soft-structure":   "Your outfit history with nAia points in the same direction — the patterns that haven't worked tend toward the areas this edit sets aside.",
+  "modern-tailoring-spring-2026": "Your outfit history suggests the same approach — the patterns that haven't landed point toward keeping this edit focused rather than adding formal structure.",
+  "spring-2026-colour-direction": "Your outfit history suggests the same method — the patterns that haven't landed tend toward over-coordination rather than a single deliberate note.",
 };
 
 type StyleDnaBlock = {
@@ -792,6 +839,27 @@ function buildStyleDnaBlock(
     text: `${extra} ${base}`,
     reasons,
   };
+}
+
+// YOUR PASSPORT POINTS TO — lifestyle and becoming signals only.
+// Uses PASSPORT_POINTS_TO_SUPPLEMENT (different signal tiers from buildStyleDnaBlock)
+// so the two evidence sub-blocks never produce the same observation.
+function buildPassportPointsBlock(
+  profile: ShopperProfileEvidence,
+  lifestyleIds: string[],
+  slug: string,
+): string | null {
+  const table = PASSPORT_POINTS_TO_SUPPLEMENT[slug];
+  if (!table) return null;
+  for (const id of lifestyleIds) {
+    const sentence = table[id];
+    if (sentence) return sentence;
+  }
+  for (const id of profile.becoming) {
+    const sentence = table[id];
+    if (sentence) return sentence;
+  }
+  return null;
 }
 
 // Picks the single strongest Passport signal for YOUR VERSION OF THIS TREND.
@@ -1066,9 +1134,11 @@ export type ShopperEdit = {
   subTitle: string;
   // 1. YOUR VERSION OF THIS TREND — person-specific, evidence-led
   yourVersion: string;
-  // 2. YOUR nAia EVIDENCE — only render blocks with genuine data
-  evidenceStyleDna: string | null;           // YOUR STYLE DNA SAYS
+  // 2. YOUR nAia EVIDENCE — only render sub-blocks with genuine data
+  evidenceStyleDna: string | null;           // YOUR STYLE DNA SAYS (fit/aspiration + register)
+  evidencePassportPoints: string | null;     // YOUR PASSPORT POINTS TO (lifestyle/becoming)
   evidenceClosetItems: EvidenceClosetItem[]; // YOU ALREADY OWN (empty = omit block)
+  evidenceReviews: string | null;            // YOUR REVIEWS SUGGEST (≥3 reviews + didntWorkTags)
   // 3. YOUR BEST ROUTE IN — named Closet item path or Passport-only route
   yourBestRouteIn: string;
   // 4. A LOOK TO TRY
@@ -1209,6 +1279,10 @@ export function buildShopperEdit(
     : null;
   const evidenceStyleDna: string | null = styleDnaBlock?.text ?? null;
 
+  const evidencePassportPoints: string | null = (rules && profile)
+    ? buildPassportPointsBlock(profile, lifestyleIds, slug)
+    : null;
+
   const evidenceClosetItems: EvidenceClosetItem[] = namedMatches.map(({ item }) => ({
     name: item.name!,
     imageUrl: item.imageUrl,
@@ -1279,13 +1353,21 @@ export function buildShopperEdit(
   }
   const partToLeave = partToLeaveOrdered.slice(0, 2);
 
+  const evidenceReviews: string | null = (
+    styleEvidence.reviews.status === "available" &&
+    activeReviewSignal !== null &&
+    activeReviewSignal.didntWorkTags.length > 0
+  ) ? (REVIEW_EVIDENCE_SENTENCES[slug] ?? null) : null;
+
   const subTitle = `${shortTitle.toUpperCase()}, READ THROUGH YOUR STYLE`;
 
   return {
     subTitle,
     yourVersion,
     evidenceStyleDna,
+    evidencePassportPoints,
     evidenceClosetItems,
+    evidenceReviews,
     yourBestRouteIn,
     aLookToTry,
     theBalanceToProtect,

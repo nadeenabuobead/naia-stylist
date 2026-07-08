@@ -75,6 +75,8 @@ const css = `
   .tr-closet-card-img{width:100%;aspect-ratio:3/4;object-fit:cover;background:rgba(59,5,16,.04)}
   .tr-closet-card-name{font-family:var(--ff-mono);font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--accent);margin-top:10px;margin-bottom:4px}
   .tr-closet-card-note{font-family:var(--ff-body);font-size:15px;font-style:italic;color:var(--muted);line-height:1.5}
+  .tr-evidence-panel{padding:28px 32px;border:1px solid rgba(139,32,53,0.12);background:rgba(255,255,255,0.4);margin-top:16px}
+  .tr-evidence-panel-row+.tr-evidence-panel-row{border-top:1px solid rgba(59,5,16,.06);padding-top:20px;margin-top:20px}
   .tr-cta-edit{margin-top:60px;padding:32px 0;border-top:1px solid rgba(59,5,16,.1);text-align:center}
   .tr-cta-edit-btn{display:inline-block;padding:16px 40px;background:var(--deep);color:var(--cream);font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;text-decoration:none;cursor:pointer}
   .tr-cta-edit-sub{font-family:var(--ff-body);font-size:14px;font-style:italic;color:var(--muted);margin-top:12px}
@@ -147,53 +149,77 @@ export default function TrendEdit() {
           </div>
         ) : edit ? (
           <>
-            {/* 1. WHY THIS MATTERS TO YOU — Passport is the foundation */}
+            {/* 1. WHY THIS MATTERS TO YOU */}
             <div className="tr-reading-box">
               <div className="tr-section-label">WHY THIS MATTERS TO YOU</div>
               <p className="tr-body">{edit.yourVersion}</p>
-              {edit.evidenceStyleDna && (
-                <div style={{ marginTop: "20px", paddingTop: "20px", borderTop: "1px solid rgba(139,32,53,0.12)" }}>
-                  <div className="tr-evidence-label">YOUR STYLE DNA SAYS</div>
-                  <p className="tr-body" style={{ fontSize: "16px" }}>{edit.evidenceStyleDna}</p>
-                </div>
-              )}
             </div>
 
             <div className="tr-divider" />
 
-            {/* 2. WORTH TRYING — route in + look to try, Passport-led */}
-            <div className="tr-edit-section">
-              <div className="tr-section-label">WORTH TRYING</div>
-              <p className="tr-body">{edit.yourBestRouteIn}</p>
-              <div style={{ marginTop: "20px", paddingTop: "20px", borderTop: "1px solid rgba(59,5,16,.06)" }}>
-                <div className="tr-evidence-label">A LOOK TO TRY</div>
-                <p className="tr-body">{edit.aLookToTry}</p>
-              </div>
-            </div>
-
-            {/* 3. THIS WORKS WITH WHAT YOU OWN — Closet only when it qualifies */}
-            {edit.evidenceClosetItems.length > 0 && (
-              <div className="tr-edit-section">
-                <div className="tr-section-label">THIS WORKS WITH WHAT YOU OWN</div>
-                <div className="tr-closet-cards">
-                  {edit.evidenceClosetItems.map((item: EvidenceClosetItem, i: number) => (
-                    <div key={i} className="tr-closet-card">
-                      {item.imageUrl && (
-                        <img src={item.imageUrl} alt={item.name} className="tr-closet-card-img" />
-                      )}
-                      <div className="tr-closet-card-name">{item.name}</div>
-                      <p className="tr-closet-card-note">{item.roleNote}</p>
-                    </div>
-                  ))}
+            {/* 2. YOUR nAia EVIDENCE — only when at least one source is available */}
+            {(edit.evidenceStyleDna || edit.evidencePassportPoints || edit.evidenceClosetItems.length > 0 || edit.evidenceReviews) && (
+              <>
+                <div className="tr-edit-section">
+                  <div className="tr-section-label">YOUR nAia EVIDENCE</div>
+                  <div className="tr-evidence-panel">
+                    {edit.evidenceStyleDna && (
+                      <div className="tr-evidence-panel-row">
+                        <div className="tr-evidence-label">YOUR STYLE DNA SAYS</div>
+                        <p className="tr-body" style={{ fontSize: "16px" }}>{edit.evidenceStyleDna}</p>
+                      </div>
+                    )}
+                    {edit.evidencePassportPoints && (
+                      <div className="tr-evidence-panel-row">
+                        <div className="tr-evidence-label">YOUR PASSPORT POINTS TO</div>
+                        <p className="tr-body" style={{ fontSize: "16px" }}>{edit.evidencePassportPoints}</p>
+                      </div>
+                    )}
+                    {edit.evidenceClosetItems.length > 0 && (
+                      <div className="tr-evidence-panel-row">
+                        <div className="tr-evidence-label">YOU ALREADY OWN</div>
+                        <div className="tr-closet-cards">
+                          {edit.evidenceClosetItems.map((item: EvidenceClosetItem, i: number) => (
+                            <div key={i} className="tr-closet-card">
+                              {item.imageUrl && (
+                                <img src={item.imageUrl} alt={item.name} className="tr-closet-card-img" />
+                              )}
+                              <div className="tr-closet-card-name">{item.name}</div>
+                              <p className="tr-closet-card-note">{item.roleNote}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {edit.evidenceReviews && (
+                      <div className="tr-evidence-panel-row">
+                        <div className="tr-evidence-label">YOUR REVIEWS SUGGEST</div>
+                        <p className="tr-body" style={{ fontSize: "16px" }}>{edit.evidenceReviews}</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+                <div className="tr-divider" />
+              </>
             )}
 
+            {/* 3. YOUR ROUTE IN */}
+            <div className="tr-edit-section">
+              <div className="tr-section-label">YOUR ROUTE IN</div>
+              <p className="tr-body">{edit.yourBestRouteIn}</p>
+            </div>
+
+            {/* 4. A LOOK TO TRY */}
+            <div className="tr-edit-section">
+              <div className="tr-section-label">A LOOK TO TRY</div>
+              <p className="tr-body">{edit.aLookToTry}</p>
+            </div>
+
             <div className="tr-divider" />
 
-            {/* 4. THE INVESTMENT */}
+            {/* 5. WORTH INVESTING IN */}
             <div className="tr-edit-section">
-              <div className="tr-section-label">THE INVESTMENT</div>
+              <div className="tr-section-label">WORTH INVESTING IN</div>
               <ul className="tr-bullet-list">
                 {edit.partToTake.map((bullet: string, i: number) => (
                   <li key={i}>{bullet}</li>
@@ -201,7 +227,7 @@ export default function TrendEdit() {
               </ul>
             </div>
 
-            {/* 5. HOLD OFF ON — guardrail + specific leave-out items */}
+            {/* 6. HOLD OFF ON */}
             <div className="tr-edit-section">
               <div className="tr-section-label">HOLD OFF ON</div>
               <p className="tr-body" style={{ marginBottom: "16px" }}>{edit.theBalanceToProtect}</p>

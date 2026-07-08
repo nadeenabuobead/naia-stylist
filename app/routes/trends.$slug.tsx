@@ -496,8 +496,11 @@ export default function TrendReportDetail() {
         {/* Lens navigation — final invitation after the full public report */}
         <div className="tr-lens-nav">
           <div className="tr-lens-nav-label">Read this through a lens</div>
+          <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "var(--muted)", lineHeight: 1.6, marginBottom: "16px" }}>
+            One report, different decisions. Read this direction through the lens that matters to you.
+          </p>
           <div className="tr-lens-nav-row">
-            <Link to={`/trends/${report.slug}/edit`} className="tr-lens-btn">For You</Link>
+            <Link to={`/trends/${report.slug}/edit`} className="tr-lens-btn">My Edit</Link>
             <Link to={`/trends/${report.slug}/lens/designer`} className="tr-lens-btn">Designer</Link>
             <Link to={`/trends/${report.slug}/lens/buyer`} className="tr-lens-btn">Buyer</Link>
             <Link to={`/trends/${report.slug}/lens/marketer`} className="tr-lens-btn">Marketer</Link>
