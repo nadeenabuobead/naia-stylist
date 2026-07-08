@@ -354,11 +354,20 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
       modules: [
         {
           label: "THE CREATIVE READ",
-          body: "Soft Structure is not about drama. It is about controlled ease — clothes with enough shape to hold the frame, and enough softness to let the woman remain present.\n\nThe visual job is not to announce the trend. It is to show the woman wearing the decision she has already made.",
+          body: "Soft Structure is not about drama. It is about controlled ease — clothes with enough shape to hold the frame, and enough softness to let the woman stay present.\n\nThe visual job is not to announce the trend. It is to show the woman wearing the decision she has already made.",
         },
         {
           label: "THE VISUAL WORLD",
-          body: "Quiet interiors. Negative space. Neutral architecture. Soft diffused daylight.\n\nClean surfaces, muted tones, controlled movement. The set earns its place by doing structural work — not by becoming the story. Fabric and proportion carry the image. Everything else is background.",
+          body: "Quiet interiors. Negative space. Neutral architecture. Soft diffused daylight.\n\nThe set must earn its place by framing the structure. It should frame the garment, not compete with it. Fabric, proportion, and the woman's presence carry the image. Everything else is background.",
+        },
+        {
+          type: "stacked-rows",
+          label: "THE IMAGE MUST PROVE",
+          rows: [
+            { label: "THE GARMENT HOLDS THE FRAME", body: "The line, drape, and proportion must be clear before anything else." },
+            { label: "THE WOMAN HOLDS THE PRESENCE", body: "She should feel self-possessed, not styled into a concept." },
+            { label: "THE SET SUPPORTS THE STORY", body: "The environment frames the image, but never becomes the image." },
+          ],
         },
         {
           type: "stacked-rows",
