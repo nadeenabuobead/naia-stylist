@@ -11,10 +11,64 @@ export type LensKey =
   | "creative-director"
   | "stylist";
 
-export type LensModule = {
+// Plain body — used by all non-Designer modules (and THE PRODUCT TRANSLATION)
+type BodyModule = { label: string; body: string };
+
+// Designer brief — 3-card structured code block (Principle / Design Move / Avoid)
+type StructuredCodeModule = {
+  type: "structured-code";
+  label: string;
+  intro?: string;
+  principle: string;
+  designMove: string;
+  avoid: string;
+};
+
+// Designer brief — 2-column decision attribute grid
+type DecisionGridModule = {
+  type: "decision-grid";
+  label: string;
+  decisions: { label: string; body: string }[];
+};
+
+// Designer brief — avoid chips + closing editorial line
+type AvoidChipsModule = {
+  type: "avoid-chips";
+  label: string;
+  chips: string[];
+  closing: string;
+};
+
+// Designer brief — 2-column prototype item cards
+type PrototypeCardsModule = {
+  type: "prototype-cards";
+  label: string;
+  intro?: string;
+  cards: { label: string; body: string }[];
+};
+
+// Designer brief — numbered fit-test checklist
+type ChecklistModule = {
+  type: "checklist";
+  label: string;
+  items: string[];
+};
+
+// Final editorial statement — rendered in accent box
+type HighlightModule = {
+  type: "highlight";
   label: string;
   body: string;
 };
+
+export type LensModule =
+  | BodyModule
+  | StructuredCodeModule
+  | DecisionGridModule
+  | AvoidChipsModule
+  | PrototypeCardsModule
+  | ChecklistModule
+  | HighlightModule;
 
 export type LensContent = {
   modules: LensModule[]; // last entry is always THE DECISION
@@ -49,26 +103,65 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
     designer: {
       modules: [
         {
+          type: "structured-code",
           label: "THE DESIGN CODE",
-          body: "Givenchy's SS26 notes point to tailoring being peeled back toward lightness and ease.\n\nPrinciple:\nStructure comes from proportion, not stiffness.\n\nDesign move:\nUse one clear line: shoulder, hem, waist, seam, or trouser break.\n\nAvoid:\nHeavy interfacing, overbuilt shoulders, complicated drape, and silhouettes that only work on runway styling.",
+          intro: "Givenchy's SS26 notes point to tailoring being peeled back toward lightness and ease.",
+          principle: "Structure comes from proportion, not stiffness.",
+          designMove: "Use one clear line: shoulder, hem, waist, seam, or trouser break.",
+          avoid: "Heavy interfacing, overbuilt shoulders, complicated drape, and silhouettes that only work on runway styling.",
         },
         {
           label: "THE PRODUCT TRANSLATION",
           body: "The product categories worth translating are clear: longline blazer, wide-leg trouser, draped midi dress, and structured vest.\n\nEach should prove one thing: a clear silhouette that holds its line without feeling hard.\n\nUse fabric with either body or movement. Do not use limp fabric for a structured piece or stiff fabric for a fluid one.",
         },
         {
+          type: "decision-grid",
           label: "DESIGN DECISIONS",
-          body: "Shoulder:\nSoftened but present. Avoid hard padding unless the rest of the garment is fluid.\n\nHem:\nLong enough to create line. For trousers, test where the break elongates rather than widens.\n\nWaist:\nDefined through cut, seam, or proportion — not tightness.\n\nSeam:\nUse one controlled construction gesture. The seam should clarify the shape, not decorate it.\n\nFabric:\nChoose body or movement. Do not use limp fabric for a structured piece or stiff fabric for a fluid one.\n\nLength:\nLet length create authority. Cropped or short proportions need a clear reason.",
+          decisions: [
+            { label: "SHOULDER", body: "Softened but present. Avoid hard padding unless the rest of the garment is fluid." },
+            { label: "HEM", body: "Long enough to create line. For trousers, test where the break elongates rather than widens." },
+            { label: "WAIST", body: "Defined through cut, seam, or proportion — not tightness." },
+            { label: "SEAM", body: "Use one controlled construction gesture. The seam should clarify the shape, not decorate it." },
+            { label: "FABRIC", body: "Choose body or movement. Do not use limp fabric for a structured piece or stiff fabric for a fluid one." },
+            { label: "LENGTH", body: "Let length create authority. Cropped or short proportions need a clear reason." },
+          ],
         },
         {
+          type: "avoid-chips",
           label: "WHAT NOT TO COPY",
-          body: "Do not copy the literal runway silhouette.\n\nAvoid:\n- overbuilt shoulders;\n- heavy interfacing;\n- complicated drape;\n- styling-dependent shapes;\n- too many proportion gestures in one garment.\n\nThe value is not in recreating the reference. It is in extracting the construction principle.",
+          chips: [
+            "OVERBUILT SHOULDERS",
+            "HEAVY INTERFACING",
+            "COMPLICATED DRAPE",
+            "STYLING-DEPENDENT SHAPES",
+            "TOO MANY PROPORTION GESTURES",
+          ],
+          closing: "The value is not in recreating the reference. It is in extracting the construction principle.",
         },
         {
+          type: "prototype-cards",
           label: "PROTOTYPE BRIEF",
-          body: "Develop one piece that proves the direction without over-styling it:\n\n- longline blazer with softened shoulder;\n- wide-leg trouser with clean fall and controlled break;\n- draped midi with one controlled seam gesture;\n- structured vest that defines the body without stiffness.\n\nFit test:\n- Does the garment hold its line without feeling hard?\n- Does the fabric support the cut?\n- Does the silhouette still work without runway styling?\n- Can the customer rewear it across more than one occasion?\n- Is there one gesture, or are there too many competing ideas?",
+          intro: "Develop one piece that proves the direction without over-styling it.",
+          cards: [
+            { label: "LONGLINE BLAZER", body: "Softened shoulder. Clear vertical line. Works without heavy padding." },
+            { label: "WIDE-LEG TROUSER", body: "Clean fall. Controlled break. Elongates rather than widens." },
+            { label: "DRAPED MIDI", body: "One controlled seam gesture. Movement without collapse." },
+            { label: "STRUCTURED VEST", body: "Defines the body without tightness or stiffness." },
+          ],
         },
         {
+          type: "checklist",
+          label: "FIT TEST",
+          items: [
+            "Does the garment hold its line without feeling hard?",
+            "Does the fabric support the cut?",
+            "Does the silhouette still work without runway styling?",
+            "Can the customer rewear it across more than one occasion?",
+            "Is there one gesture, or are there too many competing ideas?",
+          ],
+        },
+        {
+          type: "highlight",
           label: "THE DECISION",
           body: "The reference is the question, not the answer.\n\nFor a designer, Soft Structure is not a silhouette to copy. It is a construction problem: how to create presence through proportion, fabric, and line without returning to stiffness.",
         },

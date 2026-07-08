@@ -72,7 +72,29 @@ const css = `
   .tr-decision{padding:28px 32px;border-left:3px solid var(--accent);background:rgba(139,32,53,0.04);margin-top:48px}
   .tr-footer{text-align:center;padding:40px 0;border-top:1px solid rgba(59,5,16,.08);margin-top:60px}
   .tr-footer-note{font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--muted)}
-  @media(max-width:600px){.tr-wrap{padding:40px 24px}.tr-topbar{padding:16px 24px}.tr-recap{padding:20px}}
+  .tr-struct-intro{font-family:var(--ff-body);font-size:16px;line-height:1.7;color:var(--muted);font-style:italic;margin-bottom:16px}
+  .tr-struct-grid{display:grid;gap:12px;margin-top:12px}
+  .tr-struct-card{padding:20px 24px;border:1px solid rgba(59,5,16,.1);background:rgba(255,255,255,.5)}
+  .tr-struct-label{font-family:var(--ff-mono);font-size:8px;letter-spacing:2.5px;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .tr-struct-body{font-family:var(--ff-body);font-size:16px;line-height:1.7;color:var(--deep)}
+  .tr-dec-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+  .tr-dec-card{padding:16px 20px;border:1px solid rgba(59,5,16,.1);background:rgba(255,255,255,.5)}
+  .tr-dec-label{font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+  .tr-dec-body{font-family:var(--ff-body);font-size:15px;line-height:1.6;color:var(--deep)}
+  .tr-avoid-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;margin-bottom:20px}
+  .tr-avoid-chip{padding:7px 14px;border:1px solid rgba(139,32,53,.3);font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--accent)}
+  .tr-avoid-close{font-family:var(--ff-body);font-size:16px;line-height:1.7;color:var(--muted);font-style:italic}
+  .tr-proto-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+  .tr-proto-card{padding:20px 24px;border-left:2px solid var(--accent);background:rgba(255,255,255,.5)}
+  .tr-proto-label{font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .tr-proto-body{font-family:var(--ff-body);font-size:15px;line-height:1.6;color:var(--deep)}
+  .tr-check-list{margin-top:12px}
+  .tr-check-row{display:flex;align-items:baseline;gap:14px;padding:12px 0;border-bottom:1px solid rgba(59,5,16,.06)}
+  .tr-check-row:last-child{border-bottom:none}
+  .tr-check-num{font-family:var(--ff-mono);font-size:9px;color:var(--accent);flex-shrink:0;width:20px}
+  .tr-check-text{font-family:var(--ff-body);font-size:16px;line-height:1.65;color:var(--deep)}
+  .tr-mod-divider{height:1px;background:rgba(59,5,16,.06);margin:32px 0 0}
+  @media(max-width:600px){.tr-wrap{padding:40px 24px}.tr-topbar{padding:16px 24px}.tr-recap{padding:20px}.tr-dec-grid{grid-template-columns:1fr}.tr-proto-grid{grid-template-columns:1fr}}
 `;
 
 export function ErrorBoundary() {
@@ -96,9 +118,7 @@ export default function TrendLens() {
   const { report, lens, modules } = useLoaderData() as LoaderData;
   const lensLabel = LENS_LABELS[lens];
 
-  // Separate THE DECISION from preceding analytical modules
-  const decisionModule = modules[modules.length - 1];
-  const analyticalModules = modules.slice(0, -1);
+  const hasTypedModules = modules.some((m) => "type" in m);
 
   return (
     <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
@@ -141,7 +161,7 @@ export default function TrendLens() {
               to={`/trends/${report.slug}/edit`}
               className="tr-lens-btn for-you"
             >
-              For You
+              My Edit
             </Link>
             {LENS_ORDER.map((key) => (
               <Link
@@ -157,22 +177,127 @@ export default function TrendLens() {
 
         <div className="tr-divider" />
 
-        {/* Analytical modules */}
-        {analyticalModules.map((mod: LensModule, i: number) => (
-          <div key={i} className="tr-module">
-            <div className="tr-section-label">{mod.label}</div>
-            <p className="tr-body">{mod.body}</p>
-            {i < analyticalModules.length - 1 && (
-              <div style={{ height: "1px", background: "rgba(59,5,16,.06)", margin: "32px 0 0" }} />
-            )}
-          </div>
-        ))}
-
-        {/* THE DECISION — always rendered last, with distinct treatment */}
-        <div className="tr-decision">
-          <div className="tr-section-label">{decisionModule.label}</div>
-          <p className="tr-body">{decisionModule.body}</p>
-        </div>
+        {hasTypedModules ? (
+          // Type-dispatched rendering — Designer lens
+          <>
+            {modules.map((mod: LensModule, i: number) => {
+              const isLast = i === modules.length - 1;
+              if ("type" in mod) {
+                switch (mod.type) {
+                  case "structured-code": return (
+                    <div key={i} className="tr-module">
+                      <div className="tr-section-label">{mod.label}</div>
+                      {mod.intro && <p className="tr-struct-intro">{mod.intro}</p>}
+                      <div className="tr-struct-grid">
+                        <div className="tr-struct-card">
+                          <div className="tr-struct-label">Principle</div>
+                          <p className="tr-struct-body">{mod.principle}</p>
+                        </div>
+                        <div className="tr-struct-card">
+                          <div className="tr-struct-label">Design Move</div>
+                          <p className="tr-struct-body">{mod.designMove}</p>
+                        </div>
+                        <div className="tr-struct-card">
+                          <div className="tr-struct-label">Avoid</div>
+                          <p className="tr-struct-body">{mod.avoid}</p>
+                        </div>
+                      </div>
+                      {!isLast && <div className="tr-mod-divider" />}
+                    </div>
+                  );
+                  case "decision-grid": return (
+                    <div key={i} className="tr-module">
+                      <div className="tr-section-label">{mod.label}</div>
+                      <div className="tr-dec-grid">
+                        {mod.decisions.map((d, j) => (
+                          <div key={j} className="tr-dec-card">
+                            <div className="tr-dec-label">{d.label}</div>
+                            <p className="tr-dec-body">{d.body}</p>
+                          </div>
+                        ))}
+                      </div>
+                      {!isLast && <div className="tr-mod-divider" />}
+                    </div>
+                  );
+                  case "avoid-chips": return (
+                    <div key={i} className="tr-module">
+                      <div className="tr-section-label">{mod.label}</div>
+                      <div className="tr-avoid-row">
+                        {mod.chips.map((chip, j) => (
+                          <span key={j} className="tr-avoid-chip">{chip}</span>
+                        ))}
+                      </div>
+                      <p className="tr-avoid-close">{mod.closing}</p>
+                      {!isLast && <div className="tr-mod-divider" />}
+                    </div>
+                  );
+                  case "prototype-cards": return (
+                    <div key={i} className="tr-module">
+                      <div className="tr-section-label">{mod.label}</div>
+                      {mod.intro && <p className="tr-struct-intro">{mod.intro}</p>}
+                      <div className="tr-proto-grid">
+                        {mod.cards.map((card, j) => (
+                          <div key={j} className="tr-proto-card">
+                            <div className="tr-proto-label">{card.label}</div>
+                            <p className="tr-proto-body">{card.body}</p>
+                          </div>
+                        ))}
+                      </div>
+                      {!isLast && <div className="tr-mod-divider" />}
+                    </div>
+                  );
+                  case "checklist": return (
+                    <div key={i} className="tr-module">
+                      <div className="tr-section-label">{mod.label}</div>
+                      <div className="tr-check-list">
+                        {mod.items.map((item, j) => (
+                          <div key={j} className="tr-check-row">
+                            <span className="tr-check-num">{String(j + 1).padStart(2, "0")}</span>
+                            <span className="tr-check-text">{item}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {!isLast && <div className="tr-mod-divider" />}
+                    </div>
+                  );
+                  case "highlight": return (
+                    <div key={i} className="tr-decision">
+                      <div className="tr-section-label">{mod.label}</div>
+                      <p className="tr-body">{mod.body}</p>
+                    </div>
+                  );
+                }
+              }
+              // BodyModule within typed lens (e.g. THE PRODUCT TRANSLATION)
+              return (
+                <div key={i} className="tr-module">
+                  <div className="tr-section-label">{mod.label}</div>
+                  {"body" in mod && <p className="tr-body">{mod.body}</p>}
+                  {!isLast && <div className="tr-mod-divider" />}
+                </div>
+              );
+            })}
+          </>
+        ) : (
+          // Legacy position-based rendering — all other lenses
+          <>
+            {modules.slice(0, -1).map((mod: LensModule, i: number) => (
+              <div key={i} className="tr-module">
+                <div className="tr-section-label">{mod.label}</div>
+                {"body" in mod && <p className="tr-body">{mod.body}</p>}
+                {i < modules.length - 2 && (
+                  <div style={{ height: "1px", background: "rgba(59,5,16,.06)", margin: "32px 0 0" }} />
+                )}
+              </div>
+            ))}
+            <div className="tr-decision">
+              <div className="tr-section-label">{modules[modules.length - 1].label}</div>
+              {"body" in modules[modules.length - 1] && (
+                <p className="tr-body">{modules[modules.length - 1].body}</p>
+              )}
+            </div>
+          </>
+        )}
 
         {/* Footer */}
         <div className="tr-footer">
