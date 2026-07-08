@@ -94,6 +94,11 @@ const css = `
   .tr-check-num{font-family:var(--ff-mono);font-size:9px;color:var(--accent);flex-shrink:0;width:20px}
   .tr-check-text{font-family:var(--ff-body);font-size:16px;line-height:1.65;color:var(--deep)}
   .tr-mod-divider{height:1px;background:rgba(59,5,16,.06);margin:32px 0 0}
+  .tr-stacked-rows{margin-top:12px}
+  .tr-stacked-row{display:grid;grid-template-columns:160px 1fr;gap:16px;padding:14px 0;border-bottom:1px solid rgba(59,5,16,.06);align-items:start}
+  .tr-stacked-row:last-child{border-bottom:none}
+  .tr-stacked-row-label{font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);padding-top:3px}
+  .tr-stacked-row-body{font-family:var(--ff-body);font-size:15px;line-height:1.6;color:var(--deep)}
   .tr-product-brief{margin-top:12px}
   .tr-product-row{padding:14px 0;border-bottom:1px solid rgba(59,5,16,.06)}
   .tr-product-row:last-of-type{border-bottom:none}
@@ -103,7 +108,7 @@ const css = `
   .tr-fabric-sub{font-family:var(--ff-mono);font-size:8px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);white-space:nowrap;flex-shrink:0}
   .tr-fabric-vals{font-family:var(--ff-body);font-size:15px;line-height:1.6;color:var(--deep)}
   .tr-product-proof{font-family:var(--ff-body);font-size:16px;line-height:1.7;color:var(--muted);font-style:italic;margin-top:18px}
-  @media(max-width:600px){.tr-wrap{padding:40px 24px}.tr-topbar{padding:16px 24px}.tr-recap{padding:20px}.tr-struct-grid{grid-template-columns:1fr}.tr-dec-grid{grid-template-columns:1fr}.tr-proto-grid{grid-template-columns:1fr}}
+  @media(max-width:600px){.tr-wrap{padding:40px 24px}.tr-topbar{padding:16px 24px}.tr-recap{padding:20px}.tr-struct-grid{grid-template-columns:1fr}.tr-dec-grid{grid-template-columns:1fr}.tr-proto-grid{grid-template-columns:1fr}.tr-stacked-row{grid-template-columns:1fr;gap:4px}}
 `;
 
 export function ErrorBoundary() {
@@ -290,6 +295,20 @@ export default function TrendLens() {
                         </div>
                       </div>
                       <p className="tr-product-proof">{mod.proofLine}</p>
+                      {!isLast && <div className="tr-mod-divider" />}
+                    </div>
+                  );
+                  case "stacked-rows": return (
+                    <div key={i} className="tr-module">
+                      <div className="tr-section-label">{mod.label}</div>
+                      <div className="tr-stacked-rows">
+                        {mod.rows.map((row, j) => (
+                          <div key={j} className="tr-stacked-row">
+                            <span className="tr-stacked-row-label">{row.label}</span>
+                            <p className="tr-stacked-row-body">{row.body}</p>
+                          </div>
+                        ))}
+                      </div>
                       {!isLast && <div className="tr-mod-divider" />}
                     </div>
                   );

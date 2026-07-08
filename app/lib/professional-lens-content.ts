@@ -64,6 +64,13 @@ type ProductBriefModule = {
   proofLine: string;
 };
 
+// Buying brief — stacked labeled rows (assortment role, depth recommendation)
+type StackedRowsModule = {
+  type: "stacked-rows";
+  label: string;
+  rows: { label: string; body: string }[];
+};
+
 // Final editorial statement — rendered in accent box
 type HighlightModule = {
   type: "highlight";
@@ -79,6 +86,7 @@ export type LensModule =
   | PrototypeCardsModule
   | ChecklistModule
   | ProductBriefModule
+  | StackedRowsModule
   | HighlightModule;
 
 export type LensContent = {
@@ -186,20 +194,55 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
     buyer: {
       modules: [
         {
-          label: "THE COMMERCIAL BET",
-          body: "Rising signals from this report: softened shoulders, long clean trouser lines, defined waist through cut, asymmetry used with restraint. nAia's read is that the commercial case for this direction is wardrobe utility over trend novelty — an anchor piece that changes the proportion of what a customer already owns is a different commercial proposition than a seasonal statement, and should be stocked and described accordingly.",
+          label: "THE COMMERCIAL READ",
+          body: "Soft Structure is not a loud trend. It is a wardrobe-upgrade trend.\n\nIts commercial value is in pieces that feel new enough to justify buying, but familiar enough to wear often: longline blazers, wide-leg trousers, structured vests, and draped midi dresses.",
         },
         {
+          type: "stacked-rows",
           label: "THE ASSORTMENT ROLE",
-          body: "The report's investment logic is specific: one longline blazer, draped midi dress, sharply cut wide-leg trouser, structured vest, or sculptural neutral bag. nAia would treat the longline blazer and wide-leg trouser as anchor depth, and the midi and vest as directional tests. The anchor's value is cross-wardrobe utility — it earns its place by working with what the customer already owns, not by completing a new look.",
+          rows: [
+            { label: "CORE WARDROBE", body: "Wide-leg trousers, longline blazers, soft tailoring separates." },
+            { label: "ELEVATED OCCASION", body: "Draped midi dresses, fluid suiting, structured vests." },
+            { label: "STATEMENT BUY", body: "One proportion-led piece only. Avoid overbuying exaggerated runway shapes." },
+          ],
         },
         {
-          label: "THE RISK",
-          body: "Fading signals translate directly to assortment risk: rigid suiting (the direction explicitly moves away from it), overly complicated drape (one-occasion use), and the save note is explicit — extreme sculptural constructions are single-season gestures. The safer interpretation is to avoid depth in any extreme structural gesture and focus investment on the independently functional anchor categories.",
+          type: "decision-grid",
+          label: "BUYING DECISIONS",
+          decisions: [
+            { label: "CATEGORY", body: "Prioritise trousers, blazers, vests, and midi dresses over novelty tops." },
+            { label: "PRICE TIER", body: "Best suited to mid-to-premium price points where fabric and cut can justify the trend." },
+            { label: "FABRIC", body: "Buy into fabrics that hold line without stiffness: structured crepe, dry-hand twill, ponte, fluid viscose." },
+            { label: "COLOUR", body: "Neutrals and grounded tones will carry the trend better than loud colourways." },
+            { label: "MERCHANDISING", body: "Style with quiet supporting pieces so the silhouette reads clearly." },
+            { label: "TIMING", body: "Works best as a transitional wardrobe update, not a peak-only seasonal statement." },
+          ],
         },
         {
+          type: "avoid-chips",
+          label: "RISK CHECK",
+          chips: [
+            "OVERBUYING OVERSIZED SHAPES",
+            "TOO MUCH STRUCTURED SUITING",
+            "LOW-QUALITY FABRIC",
+            "RUNWAY-ONLY SILHOUETTES",
+            "UNCLEAR USE CASE",
+          ],
+          closing: "The risk is not that the trend is too directional. The risk is buying versions that do not feel wearable enough to repeat.",
+        },
+        {
+          type: "stacked-rows",
+          label: "DEPTH RECOMMENDATION",
+          rows: [
+            { label: "BUY DEEPER", body: "Clean wide-leg trousers, longline blazers, soft tailoring separates." },
+            { label: "BUY LIGHT", body: "Draped midi dresses, structured vests, proportion-led statement pieces." },
+            { label: "HOLD OFF", body: "Overbuilt shoulders, extreme volume, stiff suiting, pieces that only work when heavily styled." },
+          ],
+        },
+        {
+          type: "highlight",
           label: "THE DECISION",
-          body: "Stock longline blazer and wide-leg trouser as depth anchors. Test extreme sculptural shapes minimally or avoid them. The category's argument is utility, not novelty — describe it that way.",
+          body: "Buy the principle, not the runway shape.\n\nFor a buyer, Soft Structure is a controlled commercial opportunity: strong enough to refresh the assortment, but safest when bought through wearable anchor pieces with clear styling use.",
         },
       ],
     },
