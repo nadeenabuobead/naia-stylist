@@ -50,19 +50,27 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
       modules: [
         {
           label: "THE DESIGN CODE",
-          body: "The verified Givenchy SS26 source note: peeling back tailoring structure toward lightness and ease. nAia's read is that this is a construction principle, not a trend gesture — structure relocates from fabric weight and interfacing into cut and proportion. The practical question for any designer is which decisions (hem length, shoulder line, seam placement) create the structural line without depending on the material to hold it.",
+          body: "Givenchy's SS26 notes point to tailoring being peeled back toward lightness and ease.\n\nPrinciple:\nStructure comes from proportion, not stiffness.\n\nDesign move:\nUse one clear line: shoulder, hem, waist, seam, or trouser break.\n\nAvoid:\nHeavy interfacing, overbuilt shoulders, complicated drape, and silhouettes that only work on runway styling.",
         },
         {
           label: "THE PRODUCT TRANSLATION",
-          body: "Verified spend categories from this report: longline blazer, wide-leg trouser, draped midi dress, structured vest. Fabrics divide into two functions — holds shape without pressing (structured crepe, ponte, dry-hand twill) or moves without clinging (fluid viscose, washed linen, lightweight silk). The construction challenge is the same across price tiers: at what hem length does a wide-leg trouser produce a vertical line rather than a volume statement? That question needs answering in the specific fabric and price context, not from the runway reference.",
+          body: "The product categories worth translating are clear: longline blazer, wide-leg trouser, draped midi dress, and structured vest.\n\nEach should prove one thing: a clear silhouette that holds its line without feeling hard.\n\nUse fabric with either body or movement. Do not use limp fabric for a structured piece or stiff fabric for a fluid one.",
+        },
+        {
+          label: "DESIGN DECISIONS",
+          body: "Shoulder:\nSoftened but present. Avoid hard padding unless the rest of the garment is fluid.\n\nHem:\nLong enough to create line. For trousers, test where the break elongates rather than widens.\n\nWaist:\nDefined through cut, seam, or proportion — not tightness.\n\nSeam:\nUse one controlled construction gesture. The seam should clarify the shape, not decorate it.\n\nFabric:\nChoose body or movement. Do not use limp fabric for a structured piece or stiff fabric for a fluid one.\n\nLength:\nLet length create authority. Cropped or short proportions need a clear reason.",
         },
         {
           label: "WHAT NOT TO COPY",
-          body: "Three fading signals from this report: rigid head-to-toe office suiting, overly complicated drape, statement pieces that only work once. The save note is explicit — heavily padded shoulders, oversized balloon sleeves, aggressively asymmetric construction are single-season gestures with no repeat value. The principle is structure through proportion. Specific silhouettes from any one reference are not the direction — they are the execution of a particular brand's interpretation of it.",
+          body: "Do not copy the literal runway silhouette.\n\nAvoid:\n- overbuilt shoulders;\n- heavy interfacing;\n- complicated drape;\n- styling-dependent shapes;\n- too many proportion gestures in one garment.\n\nThe value is not in recreating the reference. It is in extracting the construction principle.",
+        },
+        {
+          label: "PROTOTYPE BRIEF",
+          body: "Develop one piece that proves the direction without over-styling it:\n\n- longline blazer with softened shoulder;\n- wide-leg trouser with clean fall and controlled break;\n- draped midi with one controlled seam gesture;\n- structured vest that defines the body without stiffness.\n\nFit test:\n- Does the garment hold its line without feeling hard?\n- Does the fabric support the cut?\n- Does the silhouette still work without runway styling?\n- Can the customer rewear it across more than one occasion?\n- Is there one gesture, or are there too many competing ideas?",
         },
         {
           label: "THE DECISION",
-          body: "Identify one construction decision — one proportion relationship, one hem length — that the principle requires, and solve it in your specific fabric and price context. The reference is the question, not the answer.",
+          body: "The reference is the question, not the answer.\n\nFor a designer, Soft Structure is not a silhouette to copy. It is a construction problem: how to create presence through proportion, fabric, and line without returning to stiffness.",
         },
       ],
     },

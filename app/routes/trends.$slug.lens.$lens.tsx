@@ -54,7 +54,7 @@ const css = `
   .tr-topbar-link{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);text-decoration:none}
   .tr-wrap{max-width:900px;margin:0 auto;padding:60px 40px}
   .tr-section-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--accent);margin-bottom:16px}
-  .tr-body{font-family:var(--ff-body);font-size:18px;line-height:1.8;color:var(--deep)}
+  .tr-body{font-family:var(--ff-body);font-size:18px;line-height:1.8;color:var(--deep);white-space:pre-line}
   .tr-divider{height:1px;background:rgba(59,5,16,.08);margin:40px 0}
   .tr-recap{padding:24px;border:1px solid rgba(59,5,16,.08);background:rgba(255,255,255,0.5);margin-bottom:48px}
   .tr-recap-season{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
