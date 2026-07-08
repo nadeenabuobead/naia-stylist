@@ -280,15 +280,70 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
       modules: [
         {
           label: "THE CULTURAL TENSION",
-          body: "The tension Soft Structure resolves: presence and authority without visible effort. nAia's read is that this direction speaks to the need to register as considered without appearing to have tried — and the resolution is a garment that holds authority through cut and proportion rather than through embellishment, body-conscious silhouettes, or decorative detail.",
+          body: "Customers want to look considered without looking like they tried too hard. They want presence without performance, authority without stiffness, polish without decoration.\n\nSoft Structure resolves this. It gives clothing a clear visual authority — without requiring the customer to perform it.",
         },
         {
-          label: "THE BRAND APPLICATION",
-          body: "The Victoria Beckham SS26 source note offers the most transferable communication logic: one deliberate departure from a composed base, with everything else staying calm. nAia's read is that the brand application is specificity, not variety — showing one piece, one proportion decision, one fabric story communicates the same intelligence the garment is designed to demonstrate. Showing the direction across too many silhouettes in one communication dilutes the effect the direction is built on.",
+          type: "highlight",
+          label: "THE MESSAGE",
+          body: "Soft Structure is not about dressing up. It is about looking like the decision was already made.",
         },
         {
+          type: "prototype-cards",
+          label: "CAMPAIGN ANGLES",
+          cards: [
+            { label: "QUIET AUTHORITY", body: "For work, meetings, travel, and composed everyday dressing. Polish that does not announce itself." },
+            { label: "ONE DECISION DRESSING", body: "One piece carries the look; everything else supports it. The outfit feels resolved before it starts." },
+            { label: "PRESENCE WITHOUT PERFORMANCE", body: "Polish through proportion, not obvious styling. The garment does the work so the wearer does not have to." },
+            { label: "THE FINISHED LOOK", body: "The piece that makes the outfit feel resolved — without adding more layers, accessories, or effort." },
+          ],
+        },
+        {
+          type: "stacked-rows",
+          label: "VISUAL DIRECTION",
+          rows: [
+            { label: "COMPOSITION", body: "One garment, clearly shown. Avoid over-layered styling. Use negative space — let the silhouette breathe." },
+            { label: "POSE & SETTING", body: "Calm poses. Neutral settings. Nothing that competes with the line of the garment." },
+            { label: "DETAILS", body: "Close shots of cut, shoulder, hem, and drape. Fabric handle is part of the story — show it." },
+            { label: "COLOUR", body: "Neutral and grounded tones. Avoid colourways that pull focus from the silhouette." },
+          ],
+        },
+        {
+          type: "stacked-rows",
+          label: "COPY RULES",
+          rows: [
+            { label: "SAY", body: "Composed · considered · clean · proportion · presence · ease · softened tailoring · quiet confidence" },
+            { label: "AVOID", body: "Boss babe · power dressing · statement-making · dramatic · must-have trend · runway-inspired · officewear-only" },
+          ],
+        },
+        {
+          type: "avoid-chips",
+          label: "CONTENT HOOKS",
+          chips: [
+            "THE PIECE THAT MAKES THE OUTFIT FEEL FINISHED",
+            "STRUCTURE WITHOUT STIFFNESS",
+            "ONE GESTURE. EVERYTHING ELSE QUIET.",
+            "POLISHED, WITHOUT LOOKING PERFORMED",
+            "THE NEW WAY TO LOOK CONSIDERED",
+          ],
+          closing: "Use these as social captions, email subject lines, or product description openers. Each one works alone.",
+        },
+        {
+          type: "avoid-chips",
+          label: "WHAT NOT TO DO",
+          chips: [
+            "MARKET AS A LOUD TREND",
+            "MAKE IT A FULL OUTFIT FORMULA",
+            "MAKE IT LOOK LIKE A RUNWAY COPY",
+            "OVER-STYLE THE CAMPAIGN",
+            "OVER-EXPLAIN THE DIRECTION",
+            "FRAME AS OFFICEWEAR ONLY",
+          ],
+          closing: "The more you over-explain or over-style it, the less believable it becomes. The direction works because it feels effortless.",
+        },
+        {
+          type: "highlight",
           label: "THE DECISION",
-          body: "Brief from the feeling of having already made a considered decision — not the occasion, not the assembled outfit, but the single piece chosen with intelligence. One look, one garment, one reason for it.",
+          body: "Brief from the feeling of already having made a considered decision.\n\nOne look, one garment, one reason for it.",
         },
       ],
     },

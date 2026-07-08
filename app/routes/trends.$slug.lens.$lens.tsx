@@ -66,8 +66,7 @@ const css = `
   .tr-lens-btn{display:inline-block;padding:10px 20px;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;text-decoration:none;border:1px solid rgba(59,5,16,.2);color:var(--deep);transition:background .15s,color .15s,border-color .15s;white-space:nowrap;flex-shrink:0}
   .tr-lens-btn:hover{border-color:var(--accent);color:var(--accent)}
   .tr-lens-btn.active{background:var(--deep);color:var(--cream);border-color:var(--deep)}
-  .tr-lens-btn.for-you{border-color:var(--accent);color:var(--accent)}
-  .tr-lens-btn.for-you:hover{background:var(--accent);color:var(--cream)}
+  .tr-lens-btn.for-you:hover{border-color:var(--accent);color:var(--accent)}
   .tr-module{margin-bottom:40px}
   .tr-decision{padding:28px 32px;border-left:3px solid var(--accent);background:rgba(139,32,53,0.04);margin-top:48px}
   .tr-footer{text-align:center;padding:40px 0;border-top:1px solid rgba(59,5,16,.08);margin-top:60px}
