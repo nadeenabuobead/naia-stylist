@@ -74,7 +74,7 @@ const css = `
   .tr-footer-note{font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--muted)}
   .tr-struct-intro{font-family:var(--ff-body);font-size:16px;line-height:1.7;color:var(--muted);font-style:italic;margin-bottom:16px}
   .tr-struct-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px}
-  .tr-struct-card{padding:20px 24px;border:1px solid rgba(59,5,16,.1);background:rgba(255,255,255,.5)}
+  .tr-struct-card{padding:20px 24px;border:1px solid rgba(59,5,16,.1);background:rgba(255,255,255,.5);min-width:0;word-wrap:break-word}
   .tr-struct-label{font-family:var(--ff-mono);font-size:8px;letter-spacing:2.5px;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
   .tr-struct-body{font-family:var(--ff-body);font-size:16px;line-height:1.7;color:var(--deep)}
   .tr-dec-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
@@ -98,8 +98,10 @@ const css = `
   .tr-product-row{padding:14px 0;border-bottom:1px solid rgba(59,5,16,.06)}
   .tr-product-row:last-of-type{border-bottom:none}
   .tr-product-row-label{font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
-  .tr-product-row-val{font-family:var(--ff-body);font-size:16px;line-height:1.7;color:var(--deep)}
-  .tr-product-row-val+.tr-product-row-val{margin-top:4px}
+  .tr-product-cats-line{font-family:var(--ff-mono);font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--deep);line-height:2;margin-top:8px}
+  .tr-fabric-row{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:8px}
+  .tr-fabric-sub{font-family:var(--ff-mono);font-size:8px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);white-space:nowrap;flex-shrink:0}
+  .tr-fabric-vals{font-family:var(--ff-body);font-size:15px;line-height:1.6;color:var(--deep)}
   .tr-product-proof{font-family:var(--ff-body);font-size:16px;line-height:1.7;color:var(--muted);font-style:italic;margin-top:18px}
   @media(max-width:600px){.tr-wrap{padding:40px 24px}.tr-topbar{padding:16px 24px}.tr-recap{padding:20px}.tr-struct-grid{grid-template-columns:1fr}.tr-dec-grid{grid-template-columns:1fr}.tr-proto-grid{grid-template-columns:1fr}}
 `;
@@ -273,12 +275,18 @@ export default function TrendLens() {
                       <div className="tr-product-brief">
                         <div className="tr-product-row">
                           <div className="tr-product-row-label">Product Categories</div>
-                          <p className="tr-product-row-val">{mod.categories.join(" · ")}</p>
+                          <p className="tr-product-cats-line">{mod.categories.join(" · ")}</p>
                         </div>
                         <div className="tr-product-row">
                           <div className="tr-product-row-label">Fabric Logic</div>
-                          <p className="tr-product-row-val">Holds shape: {mod.fabricHolds.join(", ")}</p>
-                          <p className="tr-product-row-val">Moves cleanly: {mod.fabricMoves.join(", ")}</p>
+                          <div className="tr-fabric-row">
+                            <span className="tr-fabric-sub">Holds Shape:</span>
+                            <span className="tr-fabric-vals">{mod.fabricHolds.join(" · ")}</span>
+                          </div>
+                          <div className="tr-fabric-row">
+                            <span className="tr-fabric-sub">Moves Cleanly:</span>
+                            <span className="tr-fabric-vals">{mod.fabricMoves.join(" · ")}</span>
+                          </div>
                         </div>
                       </div>
                       <p className="tr-product-proof">{mod.proofLine}</p>
