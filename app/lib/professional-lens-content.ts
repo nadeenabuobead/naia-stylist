@@ -358,7 +358,7 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
         },
         {
           label: "THE VISUAL WORLD",
-          body: "Quiet interiors. Negative space. Neutral architecture. Soft diffused daylight.\n\nThe set must earn its place by framing the structure. It should frame the garment, not compete with it. Fabric, proportion, and the woman's presence carry the image. Everything else is background.",
+          body: "Quiet interiors. Negative space. Neutral architecture. Soft diffused daylight.\n\nThe set must earn its place by framing the garment, not competing with it. Fabric, proportion, and the woman's presence carry the image. Everything else is background.",
         },
         {
           type: "stacked-rows",
@@ -366,7 +366,7 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
           rows: [
             { label: "THE GARMENT HOLDS THE FRAME", body: "The line, drape, and proportion must be clear before anything else." },
             { label: "THE WOMAN HOLDS THE PRESENCE", body: "She should feel self-possessed, not styled into a concept." },
-            { label: "THE SET SUPPORTS THE STORY", body: "The environment frames the image, but never becomes the image." },
+            { label: "THE SET SUPPORTS THE SILHOUETTE", body: "The environment should frame the silhouette, not become the image." },
           ],
         },
         {
