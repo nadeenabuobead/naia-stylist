@@ -99,6 +99,11 @@ const css = `
   .tr-stacked-row:last-child{border-bottom:none}
   .tr-stacked-row-label{font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);padding-top:3px}
   .tr-stacked-row-body{font-family:var(--ff-body);font-size:15px;line-height:1.6;color:var(--deep)}
+  .tr-assortment-grid{display:flex;flex-direction:column;gap:12px;margin-top:16px}
+  .tr-assortment-card{padding:22px 24px;background:rgba(255,255,255,.5);border:1px solid rgba(59,5,16,.08)}
+  .tr-assortment-card-label{font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .tr-assortment-card-items{font-family:var(--ff-body);font-size:16px;line-height:1.5;color:var(--deep);margin-bottom:8px}
+  .tr-assortment-card-note{font-family:var(--ff-body);font-size:13px;line-height:1.55;color:var(--muted);font-style:italic}
   .tr-product-brief{margin-top:12px}
   .tr-product-row{padding:14px 0;border-bottom:1px solid rgba(59,5,16,.06)}
   .tr-product-row:last-of-type{border-bottom:none}
@@ -295,6 +300,21 @@ export default function TrendLens() {
                         </div>
                       </div>
                       <p className="tr-product-proof">{mod.proofLine}</p>
+                      {!isLast && <div className="tr-mod-divider" />}
+                    </div>
+                  );
+                  case "assortment-cards": return (
+                    <div key={i} className="tr-module">
+                      <div className="tr-section-label">{mod.label}</div>
+                      <div className="tr-assortment-grid">
+                        {mod.cards.map((card, j) => (
+                          <div key={j} className="tr-assortment-card">
+                            <div className="tr-assortment-card-label">{card.label}</div>
+                            <p className="tr-assortment-card-items">{card.items}</p>
+                            <p className="tr-assortment-card-note">{card.note}</p>
+                          </div>
+                        ))}
+                      </div>
                       {!isLast && <div className="tr-mod-divider" />}
                     </div>
                   );

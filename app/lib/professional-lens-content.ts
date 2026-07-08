@@ -71,6 +71,13 @@ type StackedRowsModule = {
   rows: { label: string; body: string }[];
 };
 
+// Buyer brief — premium assortment category cards with items line + commercial note
+type AssortmentCardsModule = {
+  type: "assortment-cards";
+  label: string;
+  cards: { label: string; items: string; note: string }[];
+};
+
 // Final editorial statement — rendered in accent box
 type HighlightModule = {
   type: "highlight";
@@ -87,6 +94,7 @@ export type LensModule =
   | ChecklistModule
   | ProductBriefModule
   | StackedRowsModule
+  | AssortmentCardsModule
   | HighlightModule;
 
 export type LensContent = {
@@ -198,12 +206,24 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
           body: "Soft Structure is not a loud trend. It is a wardrobe-upgrade trend.\n\nIts commercial value is in pieces that feel new enough to justify buying, but familiar enough to wear often: longline blazers, wide-leg trousers, structured vests, and draped midi dresses.",
         },
         {
-          type: "stacked-rows",
+          type: "assortment-cards",
           label: "THE ASSORTMENT ROLE",
-          rows: [
-            { label: "CORE WARDROBE", body: "Wide-leg trousers, longline blazers, soft tailoring separates." },
-            { label: "ELEVATED OCCASION", body: "Draped midi dresses, fluid suiting, structured vests." },
-            { label: "STATEMENT BUY", body: "One proportion-led piece only. Avoid overbuying exaggerated runway shapes." },
+          cards: [
+            {
+              label: "CORE WARDROBE",
+              items: "Wide-leg trousers · longline blazers · soft tailoring separates",
+              note: "High repeat value. Strongest depth opportunity.",
+            },
+            {
+              label: "ELEVATED OCCASION",
+              items: "Draped midi dresses · fluid suiting · structured vests",
+              note: "Buy selectively. Works best with strong styling context.",
+            },
+            {
+              label: "STATEMENT BUY",
+              items: "One proportion-led piece only",
+              note: "Use as a directional signal, not a volume play.",
+            },
           ],
         },
         {
@@ -232,10 +252,19 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
         },
         {
           type: "stacked-rows",
+          label: "COMMERCIAL CONFIDENCE",
+          rows: [
+            { label: "HIGH CONFIDENCE", body: "Wide-leg trousers, longline blazers, soft tailoring separates." },
+            { label: "MEDIUM CONFIDENCE", body: "Draped midi dresses, structured vests." },
+            { label: "LOW CONFIDENCE", body: "Extreme sculptural pieces, heavy padded shoulders, runway-only shapes." },
+          ],
+        },
+        {
+          type: "stacked-rows",
           label: "DEPTH RECOMMENDATION",
           rows: [
             { label: "BUY DEEPER", body: "Clean wide-leg trousers, longline blazers, soft tailoring separates." },
-            { label: "BUY LIGHT", body: "Draped midi dresses, structured vests, proportion-led statement pieces." },
+            { label: "BUY LIGHT", body: "Structured vests, proportion-led statement pieces, and draped midi dresses where the use case is occasion-specific." },
             { label: "HOLD OFF", body: "Overbuilt shoulders, extreme volume, stiff suiting, pieces that only work when heavily styled." },
           ],
         },
