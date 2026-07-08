@@ -73,7 +73,7 @@ const css = `
   .tr-footer{text-align:center;padding:40px 0;border-top:1px solid rgba(59,5,16,.08);margin-top:60px}
   .tr-footer-note{font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--muted)}
   .tr-struct-intro{font-family:var(--ff-body);font-size:16px;line-height:1.7;color:var(--muted);font-style:italic;margin-bottom:16px}
-  .tr-struct-grid{display:grid;gap:12px;margin-top:12px}
+  .tr-struct-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px}
   .tr-struct-card{padding:20px 24px;border:1px solid rgba(59,5,16,.1);background:rgba(255,255,255,.5)}
   .tr-struct-label{font-family:var(--ff-mono);font-size:8px;letter-spacing:2.5px;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
   .tr-struct-body{font-family:var(--ff-body);font-size:16px;line-height:1.7;color:var(--deep)}
@@ -94,7 +94,14 @@ const css = `
   .tr-check-num{font-family:var(--ff-mono);font-size:9px;color:var(--accent);flex-shrink:0;width:20px}
   .tr-check-text{font-family:var(--ff-body);font-size:16px;line-height:1.65;color:var(--deep)}
   .tr-mod-divider{height:1px;background:rgba(59,5,16,.06);margin:32px 0 0}
-  @media(max-width:600px){.tr-wrap{padding:40px 24px}.tr-topbar{padding:16px 24px}.tr-recap{padding:20px}.tr-dec-grid{grid-template-columns:1fr}.tr-proto-grid{grid-template-columns:1fr}}
+  .tr-product-brief{margin-top:12px}
+  .tr-product-row{padding:14px 0;border-bottom:1px solid rgba(59,5,16,.06)}
+  .tr-product-row:last-of-type{border-bottom:none}
+  .tr-product-row-label{font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+  .tr-product-row-val{font-family:var(--ff-body);font-size:16px;line-height:1.7;color:var(--deep)}
+  .tr-product-row-val+.tr-product-row-val{margin-top:4px}
+  .tr-product-proof{font-family:var(--ff-body);font-size:16px;line-height:1.7;color:var(--muted);font-style:italic;margin-top:18px}
+  @media(max-width:600px){.tr-wrap{padding:40px 24px}.tr-topbar{padding:16px 24px}.tr-recap{padding:20px}.tr-struct-grid{grid-template-columns:1fr}.tr-dec-grid{grid-template-columns:1fr}.tr-proto-grid{grid-template-columns:1fr}}
 `;
 
 export function ErrorBoundary() {
@@ -257,6 +264,24 @@ export default function TrendLens() {
                           </div>
                         ))}
                       </div>
+                      {!isLast && <div className="tr-mod-divider" />}
+                    </div>
+                  );
+                  case "product-brief": return (
+                    <div key={i} className="tr-module">
+                      <div className="tr-section-label">{mod.label}</div>
+                      <div className="tr-product-brief">
+                        <div className="tr-product-row">
+                          <div className="tr-product-row-label">Product Categories</div>
+                          <p className="tr-product-row-val">{mod.categories.join(" · ")}</p>
+                        </div>
+                        <div className="tr-product-row">
+                          <div className="tr-product-row-label">Fabric Logic</div>
+                          <p className="tr-product-row-val">Holds shape: {mod.fabricHolds.join(", ")}</p>
+                          <p className="tr-product-row-val">Moves cleanly: {mod.fabricMoves.join(", ")}</p>
+                        </div>
+                      </div>
+                      <p className="tr-product-proof">{mod.proofLine}</p>
                       {!isLast && <div className="tr-mod-divider" />}
                     </div>
                   );

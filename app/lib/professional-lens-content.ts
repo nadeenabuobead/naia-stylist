@@ -54,6 +54,16 @@ type ChecklistModule = {
   items: string[];
 };
 
+// Designer brief — product category list + fabric logic rows
+type ProductBriefModule = {
+  type: "product-brief";
+  label: string;
+  categories: string[];
+  fabricHolds: string[];
+  fabricMoves: string[];
+  proofLine: string;
+};
+
 // Final editorial statement — rendered in accent box
 type HighlightModule = {
   type: "highlight";
@@ -68,6 +78,7 @@ export type LensModule =
   | AvoidChipsModule
   | PrototypeCardsModule
   | ChecklistModule
+  | ProductBriefModule
   | HighlightModule;
 
 export type LensContent = {
@@ -108,11 +119,15 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
           intro: "Givenchy's SS26 notes point to tailoring being peeled back toward lightness and ease.",
           principle: "Structure comes from proportion, not stiffness.",
           designMove: "Use one clear line: shoulder, hem, waist, seam, or trouser break.",
-          avoid: "Heavy interfacing, overbuilt shoulders, complicated drape, and silhouettes that only work on runway styling.",
+          avoid: "Heavy interfacing, overbuilt shoulders, complicated drape.",
         },
         {
+          type: "product-brief",
           label: "THE PRODUCT TRANSLATION",
-          body: "The product categories worth translating are clear: longline blazer, wide-leg trouser, draped midi dress, and structured vest.\n\nEach should prove one thing: a clear silhouette that holds its line without feeling hard.\n\nUse fabric with either body or movement. Do not use limp fabric for a structured piece or stiff fabric for a fluid one.",
+          categories: ["Longline blazer", "Wide-leg trouser", "Draped midi dress", "Structured vest"],
+          fabricHolds: ["Structured crepe", "Ponte", "Dry-hand twill"],
+          fabricMoves: ["Fluid viscose", "Washed linen", "Lightweight silk"],
+          proofLine: "Each piece should prove one thing: a clear silhouette that holds its line without feeling hard.",
         },
         {
           type: "decision-grid",
