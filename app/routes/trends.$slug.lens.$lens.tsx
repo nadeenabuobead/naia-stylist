@@ -62,8 +62,8 @@ const css = `
   .tr-recap-link{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);text-decoration:none}
   .tr-lens-nav{margin-bottom:48px}
   .tr-lens-nav-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:16px}
-  .tr-lens-nav-row{display:flex;flex-wrap:wrap;gap:8px}
-  .tr-lens-btn{display:inline-block;padding:10px 20px;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;text-decoration:none;border:1px solid rgba(59,5,16,.2);color:var(--deep);transition:background .15s,color .15s,border-color .15s}
+  .tr-lens-nav-row{display:flex;flex-wrap:nowrap;gap:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+  .tr-lens-btn{display:inline-block;padding:10px 20px;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;text-decoration:none;border:1px solid rgba(59,5,16,.2);color:var(--deep);transition:background .15s,color .15s,border-color .15s;white-space:nowrap;flex-shrink:0}
   .tr-lens-btn:hover{border-color:var(--accent);color:var(--accent)}
   .tr-lens-btn.active{background:var(--deep);color:var(--cream);border-color:var(--deep)}
   .tr-lens-btn.for-you{border-color:var(--accent);color:var(--accent)}
@@ -99,6 +99,7 @@ const css = `
   .tr-stacked-row:last-child{border-bottom:none}
   .tr-stacked-row-label{font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);padding-top:3px}
   .tr-stacked-row-body{font-family:var(--ff-body);font-size:15px;line-height:1.6;color:var(--deep)}
+  .tr-stacked-row-sub{font-family:var(--ff-body);font-size:13px;line-height:1.55;color:var(--muted);font-style:italic;margin-top:4px}
   .tr-assortment-grid{display:flex;flex-direction:column;gap:12px;margin-top:16px}
   .tr-assortment-card{padding:22px 24px;background:rgba(255,255,255,.5);border:1px solid rgba(59,5,16,.08)}
   .tr-assortment-card-label{font-family:var(--ff-mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
@@ -325,7 +326,10 @@ export default function TrendLens() {
                         {mod.rows.map((row, j) => (
                           <div key={j} className="tr-stacked-row">
                             <span className="tr-stacked-row-label">{row.label}</span>
-                            <p className="tr-stacked-row-body">{row.body}</p>
+                            <div>
+                              <p className="tr-stacked-row-body">{row.body}</p>
+                              {row.sub && <p className="tr-stacked-row-sub">{row.sub}</p>}
+                            </div>
                           </div>
                         ))}
                       </div>

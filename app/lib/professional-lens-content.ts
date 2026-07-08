@@ -68,7 +68,7 @@ type ProductBriefModule = {
 type StackedRowsModule = {
   type: "stacked-rows";
   label: string;
-  rows: { label: string; body: string }[];
+  rows: { label: string; body: string; sub?: string }[];
 };
 
 // Buyer brief — premium assortment category cards with items line + commercial note
@@ -254,9 +254,9 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
           type: "stacked-rows",
           label: "COMMERCIAL CONFIDENCE",
           rows: [
-            { label: "HIGH CONFIDENCE", body: "Wide-leg trousers, longline blazers, soft tailoring separates." },
-            { label: "MEDIUM CONFIDENCE", body: "Draped midi dresses, structured vests." },
-            { label: "LOW CONFIDENCE", body: "Extreme sculptural pieces, heavy padded shoulders, runway-only shapes." },
+            { label: "HIGH CONFIDENCE", body: "Wide-leg trousers, longline blazers, soft tailoring separates.", sub: "High repeat value; easy wardrobe integration." },
+            { label: "MEDIUM CONFIDENCE", body: "Draped midi dresses, structured vests.", sub: "Commercially useful, but more dependent on customer lifestyle, styling context, and price point." },
+            { label: "LOW CONFIDENCE", body: "Extreme sculptural pieces, heavy padded shoulders, runway-only shapes.", sub: "Low repeat value; higher risk of looking over-designed or too occasion-specific." },
           ],
         },
         {
@@ -264,7 +264,7 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
           label: "DEPTH RECOMMENDATION",
           rows: [
             { label: "BUY DEEPER", body: "Clean wide-leg trousers, longline blazers, soft tailoring separates." },
-            { label: "BUY LIGHT", body: "Structured vests, proportion-led statement pieces, and draped midi dresses where the use case is occasion-specific." },
+            { label: "TEST LIGHTLY", body: "Structured vests, proportion-led statement pieces, and draped midi dresses where the use case is occasion-specific." },
             { label: "HOLD OFF", body: "Overbuilt shoulders, extreme volume, stiff suiting, pieces that only work when heavily styled." },
           ],
         },
