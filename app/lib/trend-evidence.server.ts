@@ -454,6 +454,8 @@ type PersonalEditRules = {
   // 5. THE PART TO TAKE — exactly 2 bullets
   partToTake: string[];
   partToTakeNeutralColour?: string[];
+  // Colour-matched first bullet: when colourEvidence.label matches a term, swap bullet 1
+  partToTakeColourHints?: Array<{ terms: string[]; bullet: string }>;
   // 6. THE PART TO LEAVE — candidates; top 2 shown, reviews may reorder
   leaveOutCandidates: LeaveOutCandidate[];
   // 7. A LOOK TO TRY — Passport-only fallback
@@ -636,6 +638,24 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
       "A quiet base — a neutral colour already easy to repeat — is the starting condition for this method.",
       "One clear accent, introduced through the lowest-commitment piece first — a bag, flat, or scarf — before committing to a full accent garment.",
     ],
+    partToTakeColourHints: [
+      {
+        terms: ["beige", "brown", "espresso", "tan", "camel", "chocolate"],
+        bullet: "An espresso anchor — warmer than black, more grounded than beige, and more likely to be the neutral gap your wardrobe has.",
+      },
+      {
+        terms: ["navy"],
+        bullet: "A deep navy anchor as the quiet base — the same authority as black with slightly more warmth at the foundation.",
+      },
+      {
+        terms: ["white", "cream", "ivory", "off-white", "stone", "ecru", "oatmeal", "sand"],
+        bullet: "A soft white or cream base — already your instinct, and the starting condition this direction is built on. The accent is what changes next.",
+      },
+      {
+        terms: ["black", "charcoal"],
+        bullet: "A washed-black or deep anchor as the base. The accent note is where the method adds something new — the base is already there.",
+      },
+    ],
     leaveOutCandidates: [
       {
         text: "Several accent pieces in the same seasonal colour — one note changes the wardrobe; three create a styling problem.",
@@ -711,6 +731,8 @@ const PASSPORT_POINTS_TO_SUPPLEMENT: Partial<Record<string, Partial<Record<strin
     "events":           "You dress for occasions that need composure without visible effort — one proportioned shape delivers that more reliably than a more assembled look.",
     "busy-mom":         "Your day covers a lot of ground without pause — one considered shape works because it requires nothing further once it is in place.",
     "on-the-go":        "Your days move quickly — which is why one considered shape works better here than pieces that need to resolve against each other.",
+    "casual-days":      "Your day is casual by default — which is where Soft Structure earns its place most naturally. One considered shape worn without effort reads as deliberate rather than dressed-up.",
+    "travel":           "You travel — where one considered shape outperforms a more assembled look. One proportioned piece covers the range of what you need without planning around it.",
     "more-confident":    "You are building toward more confident dressing — Soft Structure gives you that without asking you to work harder than you already do.",
     "more-elegant":      "You are working toward a more elegant register — one clearly proportioned shape moves you in that direction without formality.",
     "more-creative":     "You are drawn toward more creative expression — Soft Structure gives you one specific, considered gesture to work with.",
@@ -736,6 +758,8 @@ const PASSPORT_POINTS_TO_SUPPLEMENT: Partial<Record<string, Partial<Record<strin
     "events":             "You dress for occasions — Modern Tailoring gives you a look that holds for events without the rigidity of formal suiting.",
     "busy-mom":           "Your day moves between contexts — one tailored piece that works across them is a more reliable investment than something built for a single occasion.",
     "on-the-go":          "Your lifestyle keeps moving — which is where one well-cut tailored piece earns more than a complete matched look.",
+    "casual-days":        "Your day is casual by default — one tailored piece against something relaxed works best when the surrounding context is already informal. That is the contrast this direction depends on.",
+    "travel":             "You travel — where one well-cut tailored piece functions across arrival, meetings, and dinner without a change of look. That range is what makes the separates approach worth the investment.",
     "more-confident":    "You are building toward more confident dressing — one well-cut tailored piece carries more authority than a more assembled look.",
     "more-elegant":      "You are working toward a more elegant register — Modern Tailoring's separates approach gives you that without formal weight.",
     "more-interesting":  "You want to look more interesting — the proportion contrast between a tailored piece and its counterpart is where that decision lives.",
@@ -821,6 +845,54 @@ const REVIEW_EVIDENCE_SENTENCES: Partial<Record<string, string>> = {
   "spring-2026-soft-structure":   "Your outfit history with nAia points in the same direction — the patterns that haven't worked tend toward the areas this edit sets aside.",
   "modern-tailoring-spring-2026": "Your outfit history suggests the same approach — the patterns that haven't landed point toward keeping this edit focused rather than adding formal structure.",
   "spring-2026-colour-direction": "Your outfit history suggests the same method — the patterns that haven't landed tend toward over-coordination rather than a single deliberate note.",
+};
+
+// One supplementary sentence appended to REVIEW_EVIDENCE_SENTENCES when a specific
+// negative-tag pattern is identified. Vocabulary-matched against the didntWorkTags corpus.
+// Never exposes raw tag values — only pre-written editorial conclusions.
+const REVIEW_EVIDENCE_TAG_SUPPLEMENTS: Partial<Record<string, Array<{ vocab: string[]; supplement: string }>>> = {
+  "spring-2026-soft-structure": [
+    {
+      vocab: ["stiff", "rigid", "heavy", "structured"],
+      supplement: "The stiffness signals in your history point toward one anchor piece in a fabric with movement, not construction.",
+    },
+    {
+      vocab: ["oversized", "volume", "baggy", "big"],
+      supplement: "Your history with oversized pieces suggests one clearly proportioned shape rather than layered volume.",
+    },
+    {
+      vocab: ["formal", "dressed-up", "overdressed"],
+      supplement: "The over-dressed signals in your history point toward proportion over decoration as the route to a more considered look.",
+    },
+  ],
+  "modern-tailoring-spring-2026": [
+    {
+      vocab: ["stiff", "rigid", "formal", "suit", "dressed-up"],
+      supplement: "The formal signals in your history suggest the separates approach rather than a full tailored look.",
+    },
+    {
+      vocab: ["oversized", "relaxed", "casual"],
+      supplement: "Your history points toward keeping the relaxed counterpart genuinely relaxed — the tailored piece carries the register on its own.",
+    },
+    {
+      vocab: ["uncomfortable", "restrictive", "tight"],
+      supplement: "The comfort signals in your reviews suggest prioritising fabric with movement — the tailored piece should hold its line without pressing.",
+    },
+  ],
+  "spring-2026-colour-direction": [
+    {
+      vocab: ["clash", "colour", "color", "matching", "coordinate"],
+      supplement: "The colour signals in your history confirm one deliberate note works better than attempting to coordinate — the method agrees.",
+    },
+    {
+      vocab: ["busy", "overdone", "overdressed", "too much"],
+      supplement: "The over-styled signals in your history confirm restraint is the right instinct — one accent, everything else calm.",
+    },
+    {
+      vocab: ["boring", "flat", "plain", "dull"],
+      supplement: "The signals toward more interest in your history point toward one considered colour note rather than more pieces.",
+    },
+  ],
 };
 
 type StyleDnaBlock = {
@@ -931,10 +1003,60 @@ function pickVersionSupplement(
 
 // ---------------------------------------------------------------------------
 // Closet item role note — evidence block.
-// Grounded in item.category and slug only. Never infers from image or AI fields.
+// Grounded in item.category, primaryColor, material, and slug only.
 // ---------------------------------------------------------------------------
 
+// Appends a 1-sentence colour or material observation when the item carries that data.
+// Groups colours into neutral / dark-anchor / expressive to avoid literal repetition.
+function buildColorMaterialSuffix(item: ShopperClosetItemEvidence, slug: string): string {
+  const parts: string[] = [];
+
+  if (item.primaryColor) {
+    const c = item.primaryColor.toLowerCase();
+    const isNeutral = ["white", "cream", "beige", "stone", "ivory", "off-white", "sand", "ecru", "oatmeal"].some((t) => c.includes(t));
+    const isDarkAnchor = ["black", "navy", "charcoal", "espresso", "brown", "chocolate", "dark", "midnight"].some((t) => c.includes(t));
+
+    if (slug === "spring-2026-colour-direction") {
+      if (isNeutral) {
+        parts.push(`Its ${c} tone reads as the base — the quiet foundation this direction requires.`);
+      } else if (isDarkAnchor) {
+        parts.push(`Its ${c} depth works as the anchor in this direction — one of the warm neutrals the method is built on.`);
+      } else {
+        parts.push(`Its ${c} colour is a potential accent note — one considered colour against a quieter base.`);
+      }
+    } else {
+      if (isNeutral) {
+        parts.push(`Its ${c} tone sits cleanly — the proportion carries without the colour competing.`);
+      } else if (isDarkAnchor) {
+        parts.push(`Its ${c} depth gives the silhouette presence without adding decoration.`);
+      } else {
+        parts.push(`Pair it with quieter, neutral pieces so the silhouette reads on its own terms.`);
+      }
+    }
+  }
+
+  if (item.material) {
+    const m = item.material.toLowerCase();
+    const isFluid = ["silk", "viscose", "satin", "chiffon", "jersey", "crepe", "linen", "lyocell", "modal", "georgette"].some((t) => m.includes(t));
+    const isStructured = ["wool", "twill", "denim", "leather", "suede", "cashmere", "gabardine", "ponte"].some((t) => m.includes(t));
+
+    if (slug === "spring-2026-soft-structure") {
+      if (isFluid) parts.push(`Its ${m} carries the line without stiffness — that is what this direction is built on.`);
+      else if (isStructured) parts.push(`Its ${m} holds its shape well — pair with something softer so the look does not become heavy.`);
+    } else if (slug === "modern-tailoring-spring-2026") {
+      if (isFluid) parts.push(`Its ${m} provides movement — which is what keeps this as a separates play rather than formal suiting.`);
+      else if (isStructured) parts.push(`Its ${m} holds its structure cleanly — pair against something relaxed to create the contrast this direction needs.`);
+    } else if (slug === "spring-2026-colour-direction") {
+      if (isFluid) parts.push(`Its ${m} carries colour cleanly without adding texture noise.`);
+    }
+  }
+
+  return parts.length > 0 ? " " + parts.join(" ") : "";
+}
+
 function buildEvidenceItemRoleNote(item: ShopperClosetItemEvidence, slug: string): string {
+  const suffix = buildColorMaterialSuffix(item, slug);
+
   if (slug === "spring-2026-soft-structure") {
     const notes: Partial<Record<string, string>> = {
       OUTERWEAR: "The anchor silhouette in this direction. Keep everything underneath simple so the proportion carries.",
@@ -942,7 +1064,7 @@ function buildEvidenceItemRoleNote(item: ShopperClosetItemEvidence, slug: string
       TOPS:      "A useful starting point for this direction. Pair it with a cleaner, more structured bottom so the top remains the main point of interest.",
       DRESSES:   "One piece covers the whole direction. Add one structured layer only when the occasion needs more presence.",
     };
-    return notes[item.category] ?? "A starting point for this direction.";
+    return (notes[item.category] ?? "A starting point for this direction.") + suffix;
   }
   if (slug === "modern-tailoring-spring-2026") {
     const notes: Partial<Record<string, string>> = {
@@ -950,7 +1072,7 @@ function buildEvidenceItemRoleNote(item: ShopperClosetItemEvidence, slug: string
       BOTTOMS:   "The separates foundation. The styling question is which relaxed counterpart it works against.",
       TOPS:      "The structured element. Pair it against something relaxed — the contrast is the whole method.",
     };
-    return notes[item.category] ?? "A starting point for this direction.";
+    return (notes[item.category] ?? "A starting point for this direction.") + suffix;
   }
   if (slug === "spring-2026-colour-direction") {
     const notes: Partial<Record<string, string>> = {
@@ -959,7 +1081,7 @@ function buildEvidenceItemRoleNote(item: ShopperClosetItemEvidence, slug: string
       SHOES:       "The accent note at ground level. Keep the rest of the outfit quiet so one colour reads.",
       ACCESSORIES: "A low-commitment entry into this direction. One considered piece against a quiet base.",
     };
-    return notes[item.category] ?? "A starting point for this direction.";
+    return (notes[item.category] ?? "A starting point for this direction.") + suffix;
   }
   return "A starting point for this direction.";
 }
@@ -1371,7 +1493,23 @@ export function buildShopperEdit(
     (useNeutralColour && rules?.partToTakeNeutralColour)
       ? rules.partToTakeNeutralColour
       : (rules?.partToTake ?? report.keyTrends.map((t) => `${t.name}: ${t.description}`));
-  const partToTake = partToTakeSource.slice(0, 2);
+
+  // Swap first bullet with colour-matched variant when the customer's colour evidence
+  // identifies a specific anchor neutral (Colour Direction only).
+  const colourHints = rules?.partToTakeColourHints ?? [];
+  let colourMatchedBullet: string | null = null;
+  if (!useNeutralColour && colourEvidence.found && colourEvidence.label && colourHints.length > 0) {
+    const labelLower = colourEvidence.label.toLowerCase();
+    for (const hint of colourHints) {
+      if (hint.terms.some((t) => labelLower.includes(t))) {
+        colourMatchedBullet = hint.bullet;
+        break;
+      }
+    }
+  }
+  const partToTake = colourMatchedBullet
+    ? [colourMatchedBullet, ...partToTakeSource.slice(1)].slice(0, 2)
+    : partToTakeSource.slice(0, 2);
 
   // -------------------------------------------------------------------------
   // 7. THE PART TO LEAVE — exactly 2 bullets
@@ -1400,26 +1538,48 @@ export function buildShopperEdit(
   }
   const partToLeave = partToLeaveOrdered.slice(0, 2);
 
-  const evidenceReviews: string | null = (
-    styleEvidence.reviews.status === "available" &&
-    activeReviewSignal !== null &&
-    activeReviewSignal.didntWorkTags.length > 0
-  ) ? (REVIEW_EVIDENCE_SENTENCES[slug] ?? null) : null;
+  const evidenceReviews: string | null = (() => {
+    if (styleEvidence.reviews.status !== "available") return null;
+    if (!activeReviewSignal || activeReviewSignal.didntWorkTags.length === 0) return null;
+    const base = REVIEW_EVIDENCE_SENTENCES[slug];
+    if (!base) return null;
+    const tagSupplements = REVIEW_EVIDENCE_TAG_SUPPLEMENTS[slug] ?? [];
+    const tagCorpus = activeReviewSignal.didntWorkTags.join(" ").toLowerCase();
+    let supplement = "";
+    for (const s of tagSupplements) {
+      if (s.vocab.some((v) => tagCorpus.includes(v))) {
+        supplement = " " + s.supplement;
+        break;
+      }
+    }
+    return base + supplement;
+  })();
 
   const subTitle = `${shortTitle.toUpperCase()}, READ THROUGH YOUR STYLE`;
 
   const lowDataNotice: string | null = (() => {
-    if (evidenceClosetItems.length > 0 || evidenceReviews !== null) return null;
+    const hasCloset = evidenceClosetItems.length > 0;
+    const hasReviews = evidenceReviews !== null;
+
+    // Both closet items and reviews present — no notice needed
+    if (hasCloset && hasReviews) return null;
+
+    // Has closet items but no reviews — nudge toward rating outfits
+    if (hasCloset && !hasReviews) {
+      return "Rate your next outfit in nAia and it sharpens the Hold Off section of this edit — the more patterns you log, the more specific nAia can be.";
+    }
+
+    // No closet items — give a specific next action based on what Passport evidence is available
     if (evidenceStyleDna !== null && evidencePassportSays !== null) {
-      return "This edit is based on your Style DNA and Passport. Add your most-worn pieces, saved items, and purchases to give nAia more to work with.";
+      return "This edit is based on your Style DNA and Passport. Add 3 pieces from your current wardrobe and nAia will show you which already belong in this direction.";
     }
     if (evidenceStyleDna !== null) {
-      return "This edit is based on your Style DNA. Add your most-worn pieces, saved items, and purchases to give nAia more to work with.";
+      return "This edit is built from your Style DNA. Complete your Lifestyle and Goals in Passport and nAia can add context about where and how this direction works for you.";
     }
     if (evidencePassportSays !== null) {
-      return "This edit is based on your Passport. Add your most-worn pieces, saved items, and purchases to give nAia more to work with.";
+      return "This edit is based on your Passport. Add your Style Personalities to get a sharper reading of how this direction applies to the way you actually dress.";
     }
-    return null;
+    return "Complete your Style Passport to unlock your personal read of this direction — your Style DNA and Lifestyle are how nAia builds this edit for you.";
   })();
 
   return {
