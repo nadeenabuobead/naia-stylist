@@ -486,11 +486,11 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
     },
     yourBestRouteIn: {
       "clean-polished":
-        "Based on your Style DNA, start with one clearly proportioned piece — a wide-leg trouser, longline blazer, or draped midi. Keep everything around it quieter.",
+        "Based on your Style DNA, start with one clearly proportioned piece — a wide-leg trouser, longline blazer, or draped midi dress. Keep everything around it quieter.",
       "fluid-ease":
-        "Based on your Style DNA, the easiest entry is one shaped piece with genuine proportion — a wide leg, draped midi, or relaxed blazer — worn against something familiar.",
+        "Based on your Style DNA, the easiest entry is one shaped piece with genuine proportion — a wide leg, draped midi dress, or relaxed blazer — worn against something familiar.",
       "expressive":
-        "Based on your Style DNA, try one clearly proportioned anchor — a wide trouser, longline blazer, or draped midi — and keep everything else composed around it.",
+        "Based on your Style DNA, try one clearly proportioned anchor — a wide trouser, longline blazer, or draped midi dress — and keep everything else composed around it.",
       "neutral":
         "Based on your Passport, start with one piece that has clear, considered proportion — a wide-leg trouser or longline layer is the cleanest entry.",
     },
@@ -505,7 +505,7 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
         "One anchor per look. A second proportion statement in the same outfit competes with the first — keep the balance simple.",
     },
     partToTake: [
-      "One anchor piece — a wide trouser, a longline blazer, or a draped midi — that changes the proportion of the outfit without adding stiffness.",
+      "One anchor piece — a wide trouser, a longline blazer, or a draped midi dress — that changes the proportion of the outfit without adding stiffness.",
       "Fabric that holds shape softly: structured crepe, dry-hand twill, or fluid viscose. Choose a fabric with enough body to hold the line without stiffness.",
     ],
     leaveOutCandidates: [
@@ -514,7 +514,7 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
         vocab: ["suit", "stiff", "rigid", "suiting"],
       },
       {
-        text: "Two oversized or proportioned shapes in the same look — one generous piece works, two compete.",
+        text: "Two oversized or highly proportioned shapes in the same look — one generous piece works, two compete.",
         vocab: ["oversized", "volume", "balloon", "competing"],
       },
       {
@@ -563,7 +563,7 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
       "fluid-ease":
         "The tailored piece stays softer than structured suiting. Rigid fabric with no movement reduces the contrast the direction depends on — the anchor should hold its line without pressing.",
       "expressive":
-        "The structured piece composes the look; it doesn't complete it. Additional detail on the tailored piece itself competes with the contrast that makes the direction work.",
+        "The structured piece should anchor the look, not finish it on its own. Extra detailing on the tailored piece competes with the contrast that makes the direction work.",
       "neutral":
         "The tailored piece works against something relaxed. A matched tailored set removes the contrast that makes the direction work — keep the separates approach.",
     },
@@ -653,7 +653,7 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
       },
       {
         terms: ["black", "charcoal"],
-        bullet: "A washed-black or deep anchor as the base. The accent note is where the method adds something new — the base is already there.",
+        bullet: "A deep anchor neutral — espresso, brown, washed black, or navy — as the base. The accent note is where the method adds something new.",
       },
     ],
     leaveOutCandidates: [
@@ -1149,7 +1149,7 @@ function buildALookToTry(
     if (top.category === "ACCESSORIES") {
       return `Your ${name} as the one accent — keep the base quiet: cream, stone, or soft white. One considered note; everything else calm.`;
     }
-    return `Your ${name} as the base — add one clear accent through a bag or flat. Keep the rest neutral so the single accent reads.`;
+    return `Wear your ${name} with a soft white trouser or washed denim, then add one clear accent through a bag, flat, or scarf.`;
   }
 
   if (slug === "spring-2026-soft-structure") {
@@ -1246,7 +1246,7 @@ function buildBestRouteIn(
     if (top.category === "ACCESSORIES") {
       return `Your ${name} as the single accent against a quiet base — soft white, cream, or stone. One considered note; everything else calm.`;
     }
-    return `Your ${name} as the base, with one clear accent through a bag or flat. Keep the rest neutral so the single accent reads.`;
+    return `Use your ${name} as the anchor base. The colour move comes from one smaller piece — a bag, flat, or scarf — rather than adding another garment.`;
   }
 
   return rules.yourBestRouteIn[register];

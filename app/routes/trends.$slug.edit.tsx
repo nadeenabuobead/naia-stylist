@@ -248,7 +248,7 @@ export default function TrendEdit() {
               <Link to="/closet" className="tr-cta-edit-btn">
                 OPEN MY CLOSET →
               </Link>
-              <p className="tr-cta-edit-sub">Add your most-worn pieces, saved items, and purchases so nAia can build a sharper edit around your real style world.</p>
+              <p className="tr-cta-edit-sub">Add your most-worn pieces to your Closet and rate your outfits so nAia can build a sharper edit around your real style world.</p>
             </div>
           </>
         ) : null}
