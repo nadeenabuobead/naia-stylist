@@ -1222,3 +1222,97 @@ function getEmptyStats(totalUsers) {
     quotes: [],
   };
 }
+
+// ---------------------------------------------------------------------------
+// Additional KPIs — additive read-only aggregates.
+// Runs independently of getDesignerStats so failures here never break the
+// main dashboard. Each query is a COUNT or a narrow SELECT — no full includes.
+// ---------------------------------------------------------------------------
+export async function getAdditionalKPIs() {
+  try {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    // 1. Passport completion
+    const [totalProfiles, completedProfiles] = await Promise.all([
+      prisma.onboardingProfile.count(),
+      prisma.onboardingProfile.count({ where: { completed: true } }),
+    ]);
+
+    // 2. Closet adoption
+    const [totalCustomers, customersWithCloset, totalClosetItems] = await Promise.all([
+      prisma.customer.count(),
+      prisma.customer.count({ where: { closetItems: { some: {} } } }),
+      prisma.closetItem.count(),
+    ]);
+
+    // 3. Buy or Skip verdicts
+    const [totalBuyOrSkip, buyCount, skipCount, maybeCount] = await Promise.all([
+      prisma.buyOrSkipAnalysis.count(),
+      prisma.buyOrSkipAnalysis.count({ where: { verdict: "BUY" } }),
+      prisma.buyOrSkipAnalysis.count({ where: { verdict: "SKIP" } }),
+      prisma.buyOrSkipAnalysis.count({ where: { verdict: "MAYBE" } }),
+    ]);
+
+    // 4. Confidence delta — narrow select, filters for rows with both fields present
+    const reviewConfidence = await prisma.postOutfitReview.findMany({
+      where: {
+        confidenceBefore: { not: null },
+        confidenceAfter:  { not: null },
+      },
+      select: { confidenceBefore: true, confidenceAfter: true },
+    });
+    const n = reviewConfidence.length;
+    const avgBefore = n > 0
+      ? reviewConfidence.reduce((s, r) => s + r.confidenceBefore, 0) / n
+      : null;
+    const avgAfter = n > 0
+      ? reviewConfidence.reduce((s, r) => s + r.confidenceAfter, 0) / n
+      : null;
+
+    // 5. Recent activity — date-filtered counts only
+    const [recentSessions, recentReviews] = await Promise.all([
+      prisma.stylingSession.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
+      prisma.postOutfitReview.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
+    ]);
+
+    return {
+      passport: {
+        total: totalProfiles,
+        completed: completedProfiles,
+        completionRate: totalProfiles > 0 ? Math.round((completedProfiles / totalProfiles) * 100) : 0,
+      },
+      closet: {
+        totalCustomers,
+        customersWithCloset,
+        adoptionRate: totalCustomers > 0 ? Math.round((customersWithCloset / totalCustomers) * 100) : 0,
+        totalItems: totalClosetItems,
+        avgItems: customersWithCloset > 0
+          ? parseFloat((totalClosetItems / customersWithCloset).toFixed(1))
+          : 0,
+      },
+      buyOrSkip: {
+        total: totalBuyOrSkip,
+        buy: buyCount,
+        skip: skipCount,
+        maybe: maybeCount,
+        buyRate: totalBuyOrSkip > 0 ? Math.round((buyCount / totalBuyOrSkip) * 100) : 0,
+      },
+      confidence: n > 0
+        ? {
+            sampleSize: n,
+            avgBefore: parseFloat(avgBefore.toFixed(1)),
+            avgAfter:  parseFloat(avgAfter.toFixed(1)),
+            avgDelta:  parseFloat((avgAfter - avgBefore).toFixed(1)),
+          }
+        : null,
+      recentActivity: {
+        sessions: recentSessions,
+        reviews:  recentReviews,
+      },
+    };
+  } catch (error) {
+    console.error("Additional KPIs error:", error);
+    return { error: error.message };
+  }
+}

@@ -1,15 +1,18 @@
 // app/routes/app.designer-intelligence.jsx
 import { useLoaderData } from "react-router";
 import { requireStaffAccess } from "../lib/staff-auth.server";
-import { getDesignerStats } from "../lib/designer-stats.server";
+import { getDesignerStats, getAdditionalKPIs } from "../lib/designer-stats.server";
 
 export async function loader({ request }) {
   await requireStaffAccess(request);
-  const dashboard = await getDesignerStats();
+  const [dashboard, kpis] = await Promise.all([
+    getDesignerStats(),
+    getAdditionalKPIs(),
+  ]);
   if (dashboard.error) {
     throw new Response(dashboard.error, { status: 500 });
   }
-  return { dashboard };
+  return { dashboard, kpis };
 }
 
 export function ErrorBoundary() {
@@ -24,7 +27,7 @@ export function ErrorBoundary() {
 }
 
 export default function DesignerDashboard() {
-  const { dashboard: data } = useLoaderData();
+  const { dashboard: data, kpis } = useLoaderData();
 
   return (
     <div style={s.container}>
@@ -46,6 +49,54 @@ export default function DesignerDashboard() {
           <StatCard label="Would Wear Again" value={`${Math.round((data.avgRewear || 0) * 100)}%`} />
         </div>
       </Section>
+
+      {/* PLATFORM HEALTH */}
+      {kpis && !kpis.error && (
+        <>
+          <Section title="Platform Health" desc="Adoption and engagement across nAia features">
+            <div style={s.statsGrid}>
+              <StatCard label="Passport Started" value={kpis.passport.total} />
+              <StatCard label="Passport Completed" value={kpis.passport.completed} />
+              <StatCard label="Passport Completion" value={`${kpis.passport.completionRate}%`} />
+              <StatCard label="Closet Adoption" value={`${kpis.closet.adoptionRate}%`} />
+              <StatCard label="Avg Closet Items" value={kpis.closet.avgItems} />
+            </div>
+          </Section>
+
+          {kpis.buyOrSkip.total > 0 && (
+            <Section title="Buy or Skip Signals" desc="How customers assess new pieces against their wardrobe">
+              <div style={s.statsGrid}>
+                <StatCard label="Total Analyses" value={kpis.buyOrSkip.total} />
+                <StatCard label="Buy Rate" value={`${kpis.buyOrSkip.buyRate}%`} />
+                <StatCard label="Buy" value={kpis.buyOrSkip.buy} />
+                <StatCard label="Skip" value={kpis.buyOrSkip.skip} />
+                <StatCard label="Maybe" value={kpis.buyOrSkip.maybe} />
+              </div>
+            </Section>
+          )}
+
+          {kpis.confidence && (
+            <Section title="Confidence Impact" desc="How dressing with nAia shifts customer confidence (1–10 scale)">
+              <div style={s.statsGrid}>
+                <StatCard label="Reviews With Data" value={kpis.confidence.sampleSize} />
+                <StatCard label="Avg Before" value={kpis.confidence.avgBefore} suffix="/10" />
+                <StatCard label="Avg After" value={kpis.confidence.avgAfter} suffix="/10" />
+                <StatCard
+                  label="Confidence Lift"
+                  value={`${kpis.confidence.avgDelta >= 0 ? "+" : ""}${kpis.confidence.avgDelta}`}
+                />
+              </div>
+            </Section>
+          )}
+
+          <Section title="Recent Activity — Last 30 Days" desc="Style Me sessions and outfit ratings in the past month">
+            <div style={s.statsGrid}>
+              <StatCard label="Style Me Sessions" value={kpis.recentActivity.sessions} />
+              <StatCard label="Outfit Reviews" value={kpis.recentActivity.reviews} />
+            </div>
+          </Section>
+        </>
+      )}
 
       {/* ONBOARDING INSIGHTS - NEW */}
       {data.onboarding && data.onboarding.totalProfiles > 0 && (
