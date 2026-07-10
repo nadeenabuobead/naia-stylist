@@ -23,6 +23,15 @@ model Session {
   expires     DateTime?
   accessToken String?
   userId      BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean?  @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
 }
 // ============================================
 // USER & AUTHENTICATION
