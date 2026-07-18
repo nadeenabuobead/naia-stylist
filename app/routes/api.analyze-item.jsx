@@ -1,5 +1,5 @@
 import prisma from "../db.server";
-import { getCustomer } from "../lib/auth.server";
+import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 
 export async function action({ request }) {
   try {
@@ -9,7 +9,7 @@ export async function action({ request }) {
       return Response.json({ error: "Image required" }, { status: 400 });
     }
 
-    const customer = await getCustomer(request);
+    const customer = await getCurrentNaiaCustomer(request);
     const customerId = customer?.id || null;
 
     let styleProfile = null;
