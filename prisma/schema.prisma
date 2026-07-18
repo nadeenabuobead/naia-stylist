@@ -57,7 +57,8 @@ model Customer {
   confidenceScores    ConfidenceScore[]
   trendReportViews    TrendReportView[]
   stylingEvents       StylingEvent[]
-  sessions            NaiaSession[]
+  sessions               NaiaSession[]
+  recommendationFeedback RecommendationFeedback[]
 }
 
 // ============================================
@@ -161,7 +162,8 @@ model ClosetItem {
 
   // Relationships
   outfitItems   OutfitItem[]
-  savedLookItems SavedLookItem[]
+  savedLookItems         SavedLookItem[]
+  recommendationFeedback RecommendationFeedback[]
 }
 
 enum ClosetCategory {
@@ -212,7 +214,8 @@ model StylingSession {
   
   // Follow-up
   review          PostOutfitReview?
-  events              StylingEvent[]
+  events                 StylingEvent[]
+  recommendationFeedback RecommendationFeedback[]
 }
 
 enum StyleSource {
@@ -254,7 +257,8 @@ model OutfitSuggestion {
   
   // User Interaction
   selected          Boolean        @default(false)
-  savedAsLook       Boolean        @default(false)
+  savedAsLook            Boolean        @default(false)
+  recommendationFeedback RecommendationFeedback[]
 }
 
 model OutfitItem {
@@ -463,6 +467,13 @@ model PostOutfitReview {
   
   // Photo (optional)
   woreItPhotoUrl      String?
+
+  // Phase 4B1 — post-wear feedback fields
+  didWearIt        String?  // yes | not-yet | no
+  feelingAnswer    String?  // great | good | okay | not-great
+  fitFeedback      String?  // yes | mostly | no
+  coverageFeedback String?  // yes | mostly | no
+  colourFeedback   String?  // yes | mostly | no
 }
 
 // ============================================
@@ -566,4 +577,63 @@ model NaiaSession {
 
   @@index([customerId])
   @@index([expiresAt])
+}
+
+// ============================================
+// PHASE 4B1 — RECOMMENDATION FEEDBACK
+// ============================================
+
+model RecommendationFeedback {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Optional links — feedback may be on a whole suggestion, a single item, or a product
+  sessionId    String?
+  session      StylingSession?   @relation(fields: [sessionId],    references: [id], onDelete: SetNull)
+  suggestionId String?
+  suggestion   OutfitSuggestion? @relation(fields: [suggestionId], references: [id], onDelete: SetNull)
+  closetItemId String?
+  closetItem   ClosetItem?       @relation(fields: [closetItemId], references: [id], onDelete: SetNull)
+
+  // What was rated: complete-suggestion | closet-item | nadine-product | vto-preview
+  target           String
+  shopifyProductId String?  // set when target=nadine-product
+
+  // Rating: love | okay | not-for-me
+  rating String
+
+  // Reason codes (from FEEDBACK_REASONS allowlist — unknown codes dropped server-side)
+  reasonCodes String[] @default([])
+
+  // VTO-specific aspects (preview usefulness + garment fidelity; NOT physical fit accuracy)
+  vtoAspects String[] @default([])
+
+  note String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([sessionId])
+  @@index([suggestionId])
+}
+
+// ============================================
+// PHASE 4B3 — JOURNEY EVENT LOG
+// ============================================
+
+model JourneyEvent {
+  id             String   @id @default(cuid())
+  type           String   // JourneyEventType
+  occurredAt     DateTime
+  customerIdHash String   // SHA-256 prefix — never raw customerId; no FK to Customer
+  sessionId      String   // styling session id or sentinel ("product-page", "unknown")
+  payload        Json     // operational fields only — see journey-contract.ts
+
+  createdAt DateTime @default(now())
+
+  @@index([type])
+  @@index([customerIdHash])
+  @@index([occurredAt])
 }
