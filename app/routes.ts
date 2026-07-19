@@ -8,7 +8,11 @@ export default [
   route("onboarding/step/:step", "./routes/onboarding/step.$step.tsx"),
   route("onboarding/complete", "./routes/onboarding/complete.tsx"),
   route("style-me", "./routes/style-me/_index.tsx"),
+  route("style-me/comfort", "./routes/style-me/comfort.tsx"),
   route("style-me/result", "./routes/style-me/result.tsx"),
   route("full-style-profile", "./routes/full-style-profile/_index.tsx"),
   route("trends/:slug/lens/:lens", "./routes/trends.$slug.lens.$lens.tsx"),
+  route("api/recommendation-feedback", "./routes/api.recommendation-feedback.tsx"),
+  route("api/post-wear-review", "./routes/api.post-wear-review.tsx"),
+  route("post-wear-review", "./routes/post-wear-review.tsx"),
 ] satisfies RouteConfig;
