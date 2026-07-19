@@ -425,17 +425,19 @@ export async function action({ request }: ActionFunctionArgs) {
         return data({ error: "Session not found" }, { status: 404 });
       }
 
-      await prisma.postOutfitReview.create({
-        data: {
-          suggestionId: reviewSession.suggestions[0].id,
-          overallReaction,
-          feltLikeMe,
-          createdTheFeeling: createdFeeling,
-          wouldWearThis: wouldWear,
-          physicalComfort,
-          whatWorked,
-          whatDidnt,
-        },
+      const reviewFields = {
+        overallFeeling: overallReaction,
+        feltLikeHer: feltLikeMe ? "Yes" : "No",
+        desiredFeelingAchieved: createdFeeling ? "Yes" : "No",
+        wouldWearAgain: wouldWear ? "Definitely" : "Probably not",
+        physicallyComfortable: physicalComfort.toString(),
+        workedTags: whatWorked.length > 0 ? JSON.stringify(whatWorked) : null,
+        didntWorkTags: whatDidnt.length > 0 ? JSON.stringify(whatDidnt) : null,
+      };
+      await prisma.postOutfitReview.upsert({
+        where: { sessionId },
+        create: { customerId: reviewSession.customerId, sessionId, ...reviewFields },
+        update: reviewFields,
       });
 
       return data({ reviewSaved: true, error: null });
