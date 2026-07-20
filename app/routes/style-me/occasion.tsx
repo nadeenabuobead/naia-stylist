@@ -1,4 +1,4 @@
-import { Form } from "react-router";
+import { Form, Link } from "react-router";
 import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs, type LinksFunction } from "react-router";
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
@@ -11,15 +11,15 @@ export const links: LinksFunction = () => [
 ];
 
 const occasions = [
-  { id: "everyday", label: "Everyday / casual plans", emoji: "☕" },
-  { id: "work", label: "Work / meetings", emoji: "💼" },
-  { id: "dinner", label: "Dinner", emoji: "🍽️" },
-  { id: "date-night", label: "Date night", emoji: "🌹" },
-  { id: "girls-night", label: "Girls' night", emoji: "🥂" },
-  { id: "family", label: "Family gathering", emoji: "🏡" },
-  { id: "special-event", label: "Special event", emoji: "✨" },
-  { id: "travel", label: "Travel day", emoji: "✈️" },
-  { id: "not-sure", label: "I'm not sure yet", emoji: "🤔" },
+  { id: "everyday", label: "Everyday or casual plans" },
+  { id: "work", label: "Work or meetings" },
+  { id: "dinner", label: "Dinner" },
+  { id: "date-night", label: "Date night" },
+  { id: "girls-night", label: "Girls' night" },
+  { id: "family", label: "Family gathering" },
+  { id: "special-event", label: "Special event" },
+  { id: "travel", label: "Travel day" },
+  { id: "not-sure", label: "I'm not sure yet" },
 ];
 
 const VALID_OCCASION_IDS = new Set(occasions.map((o) => o.id));
@@ -57,27 +57,30 @@ export default function StyleMeOccasion() {
   const [selected, setSelected] = useState<string | null>(null);
 
   return (
-    <SmPage backTo="/style-me/comfort">
+    <SmPage backTo="/style-me/comfort" step={4}>
+      <p className="sm-step-label">Occasion</p>
       <h1 className="sm-heading">What does the outfit need to work for?</h1>
-      <p className="sm-sub" style={{ marginBottom: "40px" }}>Where you're going</p>
+      <p className="sm-sub">Choose your occasion.</p>
 
       <Form method="post">
-        <div className="sm-grid">
+        <div className="sm-pills">
           {occasions.map((occ) => (
             <button
               key={occ.id}
               type="button"
               onClick={() => setSelected(occ.id)}
-              className={`sm-chip${selected === occ.id ? " sm-chip--on" : ""}`}
+              className={`sm-pill${selected === occ.id ? " sm-pill--on" : ""}`}
             >
-              <span className="sm-chip-emoji">{occ.emoji}</span>
-              <span>{occ.label}</span>
+              {occ.label}
             </button>
           ))}
         </div>
 
         <input type="hidden" name="occasion" value={selected || ""} />
-        <SmContinue disabled={!selected} />
+        <div className="sm-step-buttons">
+          <Link to="/style-me/comfort" className="sm-btn-back">← Back</Link>
+          <SmContinue disabled={!selected} />
+        </div>
       </Form>
     </SmPage>
   );

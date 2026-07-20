@@ -1,4 +1,4 @@
-import { Form, useLoaderData } from "react-router";
+import { Form, Link } from "react-router";
 import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs, type LinksFunction } from "react-router";
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
@@ -12,15 +12,16 @@ export const links: LinksFunction = () => [
 ];
 
 const bodyNeedOptions = [
-  { id: "waist-definition", label: "Waist definition", emoji: "⏳" },
-  { id: "soft-and-forgiving-around-waist", label: "Soft and forgiving around my waist today", emoji: "🌸" },
-  { id: "more-coverage", label: "More coverage", emoji: "🧥" },
-  { id: "relaxed", label: "Something relaxed", emoji: "☁️" },
-  { id: "structured", label: "Something structured", emoji: "📐" },
-  { id: "elongates", label: "Something that elongates me", emoji: "👠" },
-  { id: "balances", label: "Something that balances my shape", emoji: "⚖️" },
-  { id: "comfortable-elevated", label: "Something comfortable but still elevated", emoji: "✨" },
-  { id: "nothing-specific", label: "Nothing specific", emoji: "💫" },
+  { id: "waist-definition", label: "Define my waist" },
+  { id: "soft-and-forgiving-around-waist", label: "Feel easy around my waist" },
+  { id: "more-coverage", label: "Give me more coverage" },
+  { id: "relaxed", label: "Feel relaxed" },
+  { id: "structured", label: "Feel structured" },
+  { id: "elongates", label: "Create a longer line" },
+  { id: "balances", label: "Balance my proportions" },
+  { id: "comfortable-elevated", label: "Comfortable but still polished" },
+  { id: "nothing-clingy", label: "Nothing clingy today" },
+  { id: "nothing-specific", label: "Nothing specific" },
 ];
 
 const VALID_BODY_NEED_IDS = new Set(bodyNeedOptions.map((n) => n.id));
@@ -71,13 +72,13 @@ export default function StyleMeComfort() {
   const canSubmit = selected.length > 0;
 
   return (
-    <SmPage backTo="/style-me/feeling">
-      <h1 className="sm-heading">Any body needs today?</h1>
-      <p className="sm-sub">Select all that apply</p>
-      <p className="sm-count">{selected.length > 0 ? `${selected.length} selected` : ""}</p>
+    <SmPage backTo="/style-me/feeling" step={3}>
+      <p className="sm-step-label">Body Needs</p>
+      <h1 className="sm-heading">What should the outfit do for you today?</h1>
+      <p className="sm-sub">Choose anything that matters.</p>
 
       <Form method="post">
-        <div className="sm-grid">
+        <div className="sm-pills">
           {bodyNeedOptions.map((opt) => {
             const isSelected = selected.includes(opt.id);
             return (
@@ -85,17 +86,19 @@ export default function StyleMeComfort() {
                 key={opt.id}
                 type="button"
                 onClick={() => toggle(opt.id)}
-                className={`sm-chip${isSelected ? " sm-chip--on" : ""}`}
+                className={`sm-pill${isSelected ? " sm-pill--on" : ""}`}
               >
-                <span className="sm-chip-emoji">{opt.emoji}</span>
-                <span>{opt.label}</span>
+                {opt.label}
               </button>
             );
           })}
         </div>
 
         <input type="hidden" name="bodyNeeds" value={JSON.stringify(selected)} />
-        <SmContinue disabled={!canSubmit} />
+        <div className="sm-step-buttons">
+          <Link to="/style-me/feeling" className="sm-btn-back">← Back</Link>
+          <SmContinue disabled={!canSubmit} />
+        </div>
       </Form>
     </SmPage>
   );

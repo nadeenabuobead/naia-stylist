@@ -1,4 +1,4 @@
-import { Form, useLoaderData } from "react-router";
+import { Form, Link } from "react-router";
 import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs, type LinksFunction } from "react-router";
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
@@ -11,15 +11,15 @@ export const links: LinksFunction = () => [
 ];
 
 const desiredFeelings = [
-  { id: "more-confident", label: "Make me feel more confident", emoji: "💪" },
-  { id: "more-put-together", label: "Make me feel more put together", emoji: "✨" },
-  { id: "softer", label: "Make me feel softer", emoji: "🌸" },
-  { id: "more-powerful", label: "Make me feel more powerful", emoji: "👑" },
-  { id: "more-feminine", label: "Make me feel more feminine", emoji: "💐" },
-  { id: "more-effortless", label: "Make me feel more effortless", emoji: "🌊" },
-  { id: "more-elevated", label: "Make me feel more elevated", emoji: "🎯" },
-  { id: "more-attractive", label: "Make me feel more attractive", emoji: "💫" },
-  { id: "like-myself", label: "Make me feel like myself again", emoji: "🌟" },
+  { id: "more-confident", label: "More confident" },
+  { id: "more-put-together", label: "More put together" },
+  { id: "softer", label: "Softer" },
+  { id: "more-powerful", label: "More powerful" },
+  { id: "more-feminine", label: "More feminine" },
+  { id: "more-effortless", label: "More effortless" },
+  { id: "more-elevated", label: "More elevated" },
+  { id: "more-attractive", label: "More attractive" },
+  { id: "like-myself", label: "Like myself again" },
 ];
 
 const VALID_FEELING_IDS = new Set(desiredFeelings.map((f) => f.id));
@@ -70,13 +70,13 @@ export default function StyleMeFeeling() {
   const atMax = selected.length === 2;
 
   return (
-    <SmPage backTo="/style-me/mood">
+    <SmPage backTo="/style-me/mood" step={2}>
+      <p className="sm-step-label">Desired Feeling</p>
       <h1 className="sm-heading">How do you want to feel?</h1>
-      <p className="sm-sub">Select up to two — or just one</p>
-      <p className="sm-count">{selected.length > 0 ? `${selected.length} selected` : ""}</p>
+      <p className="sm-sub">Choose up to two — or just one.</p>
 
       <Form method="post">
-        <div className="sm-grid">
+        <div className="sm-pills">
           {desiredFeelings.map((feeling) => {
             const isSelected = selected.includes(feeling.id);
             const isDisabled = !isSelected && atMax;
@@ -85,17 +85,19 @@ export default function StyleMeFeeling() {
                 key={feeling.id}
                 type="button"
                 onClick={() => toggle(feeling.id)}
-                className={`sm-chip${isSelected ? " sm-chip--on" : ""}${isDisabled ? " sm-chip--off" : ""}`}
+                className={`sm-pill${isSelected ? " sm-pill--on" : ""}${isDisabled ? " sm-pill--off" : ""}`}
               >
-                <span className="sm-chip-emoji">{feeling.emoji}</span>
-                <span>{feeling.label}</span>
+                {feeling.label}
               </button>
             );
           })}
         </div>
 
         <input type="hidden" name="feelings" value={JSON.stringify(selected)} />
-        <SmContinue disabled={!canSubmit} />
+        <div className="sm-step-buttons">
+          <Link to="/style-me/mood" className="sm-btn-back">← Back</Link>
+          <SmContinue disabled={!canSubmit} />
+        </div>
       </Form>
     </SmPage>
   );

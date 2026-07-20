@@ -843,12 +843,99 @@ a.mn-action:focus-visible,
 }
 .sm-tag-btn.sm-tag-btn--on { background: var(--naia-accent); color: var(--naia-bg); border-color: var(--naia-accent); }
 
+/* ── StyleMe QS: question-screen layout ────────────────────────── */
+.sm-page--qs { padding: 0; }
+.sm-page--qs .sm-inner { padding: 48px 40px 80px; }
+
+/* ── StyleMe QS: Topbar ─────────────────────────────────────────── */
+.sm-topbar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 20px 40px; border-bottom: 1px solid var(--naia-border);
+}
+.sm-topbar-wordmark {
+  font-family: var(--naia-ff-display); font-size: 20px; font-style: italic;
+  letter-spacing: 3px; color: var(--naia-ink); user-select: none;
+}
+.sm-topbar-exit {
+  font-family: var(--naia-ff-mono); font-size: 9px; letter-spacing: 2px;
+  text-transform: uppercase; color: var(--naia-muted); text-decoration: none;
+  transition: color 0.15s;
+}
+.sm-topbar-exit:hover { color: var(--naia-accent); }
+
+/* ── StyleMe QS: Progress ───────────────────────────────────────── */
+.sm-progress { padding: 24px 40px 0; max-width: 700px; margin: 0 auto; }
+.sm-progress-dots { display: flex; gap: 8px; justify-content: center; margin-bottom: 8px; }
+.sm-progress-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--naia-border-mid);
+  transition: width 0.3s, background 0.3s, border-radius 0.3s;
+}
+.sm-progress-dot--active { width: 28px; border-radius: 14px; background: var(--naia-ink); }
+.sm-progress-dot--done { background: var(--naia-accent); }
+.sm-progress-label {
+  text-align: center; font-family: var(--naia-ff-mono); font-size: 9px;
+  letter-spacing: 3px; text-transform: uppercase; color: var(--naia-muted);
+}
+
+/* ── StyleMe QS: Step label ─────────────────────────────────────── */
+.sm-step-label {
+  font-family: var(--naia-ff-mono); font-size: 10px; letter-spacing: 4px;
+  text-transform: uppercase; color: var(--naia-accent); margin-bottom: 12px;
+}
+
+/* ── StyleMe QS: Pills ──────────────────────────────────────────── */
+.sm-pills { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 32px; }
+.sm-pill {
+  padding: 12px 22px; border: 1px solid var(--naia-border-mid);
+  font-family: var(--naia-ff-mono); font-size: 10px; letter-spacing: 2px;
+  text-transform: uppercase; color: var(--naia-ink); cursor: pointer;
+  background: transparent; text-align: left;
+  transition: border-color 0.2s, background 0.2s, color 0.2s;
+}
+.sm-pill:hover { border-color: var(--naia-ink); }
+.sm-pill.sm-pill--on { background: var(--naia-accent); color: var(--naia-bg); border-color: var(--naia-accent); }
+.sm-pill.sm-pill--off { opacity: 0.38; pointer-events: none; }
+
+/* ── StyleMe QS: Step buttons ───────────────────────────────────── */
+.sm-step-buttons { display: flex; gap: 12px; margin-top: 8px; }
+.sm-btn-back {
+  padding: 14px 32px; border: 1px solid var(--naia-border-mid); background: transparent;
+  font-family: var(--naia-ff-mono); font-size: 10px; letter-spacing: 4px;
+  text-transform: uppercase; color: var(--naia-ink); cursor: pointer;
+  text-decoration: none; display: inline-flex; align-items: center;
+  transition: border-color 0.15s;
+}
+.sm-btn-back:hover { border-color: var(--naia-ink); }
+
+/* ── StyleMe QS: Source cards ───────────────────────────────────── */
+.sm-source-pills { display: flex; flex-direction: column; gap: 10px; margin-bottom: 32px; max-width: 440px; }
+.sm-source-pill {
+  padding: 16px 22px; border: 1px solid var(--naia-border-mid); background: transparent;
+  color: var(--naia-ink); cursor: pointer; text-align: left; width: 100%;
+  display: flex; flex-direction: column; gap: 4px;
+  transition: border-color 0.2s, background 0.2s, color 0.2s;
+}
+.sm-source-pill:hover { border-color: var(--naia-ink); }
+.sm-source-pill.sm-pill--on { background: var(--naia-accent); color: var(--naia-bg); border-color: var(--naia-accent); }
+.sm-source-pill-name {
+  font-family: var(--naia-ff-mono); font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+}
+.sm-source-pill-desc {
+  font-family: var(--naia-ff-body); font-size: 13px; font-style: italic;
+  color: var(--naia-muted); line-height: 1.4;
+}
+.sm-source-pill.sm-pill--on .sm-source-pill-desc { color: rgba(244,244,241,.72); }
+
 /* ── Focus visible ────────────────────────────────────────────────── */
 .sm-chip:focus-visible,
 .sm-chip-card:focus-visible,
 .sm-product-card:focus-visible,
 .sm-continue:focus-visible,
 .sm-back:focus-visible,
+.sm-pill:focus-visible,
+.sm-btn-back:focus-visible,
+.sm-source-pill:focus-visible,
 .sm-swatch:focus-visible,
 .sm-cta:focus-visible,
 .sm-result-action-btn:focus-visible,
@@ -864,6 +951,12 @@ a.mn-action:focus-visible,
 /* ── Responsive ───────────────────────────────────────────────────── */
 @media (max-width: 767px) {
   .sm-page { padding: 24px 16px; }
+  .sm-topbar { padding: 16px 20px; }
+  .sm-progress { padding: 20px 20px 0; }
+  .sm-page--qs .sm-inner { padding: 32px 20px 60px; }
+  .sm-step-buttons { flex-direction: column; }
+  .sm-step-buttons .sm-btn-back { order: 2; }
+  .sm-step-buttons .sm-continue { order: 1; }
   .sm-heading { font-size: clamp(26px, 8vw, 34px); }
   .sm-result-bar { padding: 16px 20px; }
   .sm-banner { flex-direction: column; align-items: flex-start; gap: 12px; padding: 16px 20px; }
@@ -879,5 +972,6 @@ a.mn-action:focus-visible,
   .sm-loading-bar { animation: none; left: 0; width: 100%; }
   .sm-chip, .sm-chip-card, .sm-swatch, .sm-continue, .sm-cta,
   .sm-back, .sm-result-action-btn, .sm-product-card,
-  .sm-source-btn, .sm-review-btn, .sm-star-btn, .sm-num-btn, .sm-tag-btn { transition: none; }
+  .sm-source-btn, .sm-review-btn, .sm-star-btn, .sm-num-btn, .sm-tag-btn,
+  .sm-progress-dot, .sm-pill, .sm-btn-back, .sm-source-pill, .sm-topbar-exit { transition: none; }
 }

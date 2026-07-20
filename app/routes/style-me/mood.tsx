@@ -1,4 +1,4 @@
-import { Form } from "react-router";
+import { Form, Link } from "react-router";
 import { data, redirect, type ActionFunctionArgs, type LinksFunction } from "react-router";
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
@@ -11,15 +11,14 @@ export const links: LinksFunction = () => [
 ];
 
 const moodOptions = [
-  { id: "confident", label: "I feel confident", emoji: "💪" },
-  { id: "tired", label: "I feel tired", emoji: "😴" },
-  { id: "bloated", label: "I feel bloated", emoji: "🌊" },
-  { id: "low-energy", label: "I feel low-energy", emoji: "🔋" },
-  { id: "playful", label: "I feel playful", emoji: "🎀" },
-  { id: "romantic", label: "I feel romantic", emoji: "🌹" },
-  { id: "powerful", label: "I feel powerful", emoji: "👑" },
-  { id: "need-reset", label: "I feel like I need a reset", emoji: "🔄" },
-  { id: "feel-good", label: "I feel good, I just need styling", emoji: "✨" },
+  { id: "confident", label: "I feel confident" },
+  { id: "tired", label: "Tired or low-energy" },
+  { id: "overwhelmed", label: "I feel overwhelmed" },
+  { id: "playful", label: "I feel playful" },
+  { id: "romantic", label: "I feel romantic" },
+  { id: "powerful", label: "I feel powerful" },
+  { id: "need-reset", label: "I need a reset" },
+  { id: "feel-good", label: "I feel good — just need styling" },
 ];
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -42,27 +41,30 @@ export default function StyleMeMood() {
   const [selected, setSelected] = useState<string | null>(null);
 
   return (
-    <SmPage backTo="/" backLabel="← Back to Dashboard">
-      <h1 className="sm-heading">How are you feeling?</h1>
-      <p className="sm-sub">Choose one</p>
+    <SmPage backTo="/" step={1}>
+      <p className="sm-step-label">Your Mood</p>
+      <h1 className="sm-heading">How are you feeling today?</h1>
+      <p className="sm-sub">Choose the one that feels closest.</p>
 
       <Form method="post">
-        <div className="sm-grid">
+        <div className="sm-pills">
           {moodOptions.map((m) => (
             <button
               key={m.id}
               type="button"
               onClick={() => setSelected(selected === m.id ? null : m.id)}
-              className={`sm-chip${selected === m.id ? " sm-chip--on" : ""}`}
+              className={`sm-pill${selected === m.id ? " sm-pill--on" : ""}`}
             >
-              <span className="sm-chip-emoji">{m.emoji}</span>
-              <span>{m.label}</span>
+              {m.label}
             </button>
           ))}
         </div>
 
         <input type="hidden" name="mood" value={selected || ""} />
-        <SmContinue disabled={!selected} />
+        <div className="sm-step-buttons">
+          <Link to="/" className="sm-btn-back">← Back</Link>
+          <SmContinue disabled={!selected} />
+        </div>
       </Form>
     </SmPage>
   );

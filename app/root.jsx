@@ -21,7 +21,7 @@ export default function App() {
           rel="stylesheet"
           href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400;1,600&family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400;1,700;1,900&display=swap"
         />
-        <style>{`
+        <style dangerouslySetInnerHTML={{ __html: `
           :root {
             --c-bg:       #F6EFE8;
             --c-surface:  #FAF6F1;
@@ -39,14 +39,14 @@ export default function App() {
             --ff-body:    'Cormorant Garamond', Garamond, serif;
             --ff-ui:      'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
           }
-        `}</style>
+        ` }} />
         <Meta />
         <Links />
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
       </head>
-      <script dangerouslySetInnerHTML={{ __html: `
+      <body>
+        <script dangerouslySetInnerHTML={{ __html: `
   if (window.self !== window.top) {
-    // We're in an iframe - intercept all link clicks
     document.addEventListener('click', function(e) {
       var a = e.target.closest('a');
       if (a && a.href && a.href.startsWith(window.location.origin)) {
@@ -56,18 +56,8 @@ export default function App() {
     });
   }
 ` }} />
-      <body>
         <Outlet />
-        <script dangerouslySetInnerHTML={{ __html: `
-  (function() {
-    var params = new URLSearchParams(window.location.search);
-    var token = params.get('naia_token');
-    if (token) {
-      sessionStorage.setItem('naia_token', token);
-      document.cookie = 'naia_customer_data=' + token + '; path=/; max-age=2592000; SameSite=Lax';
-    }
-  })();
-` }} />
+        <script dangerouslySetInnerHTML={{ __html: `(function(){document.cookie='naia_customer_data=; path=/; max-age=0; SameSite=Lax';try{sessionStorage.removeItem('naia_token');}catch(e){}})();` }} />
         <ScrollRestoration />
         <Scripts />
       </body>

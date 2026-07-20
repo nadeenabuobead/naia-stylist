@@ -341,10 +341,12 @@ export const BPE_ALIAS_MAP: Record<string, readonly string[]> = {
 // Legacy or shorthand answer IDs → canonical Body Need session IDs.
 // Routes apply this before writing session storage.
 // "bloated" is a legacy alias for the waist-ease need.
+// "nothing-clingy" normalises to "relaxed".
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const BODY_NEED_NORMALIZATION_MAP: Record<string, string> = {
   bloated: "soft-and-forgiving-around-waist",
+  "nothing-clingy": "relaxed",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -13,9 +13,21 @@ export const links: LinksFunction = () => [
 const VALID_SOURCE_IDS = new Set(["naia-piece", "my-closet", "both"]);
 
 const sourceOptions = [
-  { id: "naia-piece", label: "A nAia piece", description: "Style one of our pieces as the anchor" },
-  { id: "my-closet", label: "Something from my closet", description: "Build the look around what you own" },
-  { id: "both", label: "nAia + my closet", description: "Pair a nAia piece with something you already have" },
+  {
+    id: "naia-piece",
+    label: "The NADINE collection",
+    description: "Build the look around the NADINE piece nAia selects for me.",
+  },
+  {
+    id: "my-closet",
+    label: "My Closet",
+    description: "Create a look using something I already own.",
+  },
+  {
+    id: "both",
+    label: "NADINE + My Closet",
+    description: "Combine a NADINE piece selected by nAia with my existing wardrobe.",
+  },
 ];
 
 // ── Loader ────────────────────────────────────────────────────────────────────
@@ -143,10 +155,26 @@ export default function StyleMeSource() {
   const { step } = loaderData;
 
   return (
-    <div className="sm-page">
-      <div className="sm-inner sm-inner--wide">
-        <Link to="/style-me/occasion" className="sm-back">← Back</Link>
+    <div className="sm-page sm-page--qs">
+      <div className="sm-topbar">
+        <span className="sm-topbar-wordmark">nAia</span>
+        <Link to="/" className="sm-topbar-exit">Exit</Link>
+      </div>
+      <div className="sm-progress">
+        <div className="sm-progress-dots">
+          <div className="sm-progress-dot sm-progress-dot--done" />
+          <div className="sm-progress-dot sm-progress-dot--done" />
+          <div className="sm-progress-dot sm-progress-dot--done" />
+          <div className="sm-progress-dot sm-progress-dot--done" />
+          <div className="sm-progress-dot sm-progress-dot--active" />
+        </div>
+        <div className="sm-progress-label">Step 5 of 5</div>
+      </div>
 
+      <div className="sm-inner sm-inner--wide">
+        {step === "closet-anchor" && (
+          <Link to="/style-me/occasion" className="sm-back">← Back</Link>
+        )}
         {step === "source" && <SourceStep />}
         {step === "closet-anchor" && (
           <ClosetAnchorStep
@@ -168,33 +196,31 @@ function SourceStep() {
 
   return (
     <>
+      <p className="sm-step-label">Your Anchor</p>
       <h1 className="sm-heading">What are we building the look around?</h1>
-      <p className="sm-sub" style={{ marginBottom: "32px" }}>Choose your anchor for today</p>
+      <p className="sm-sub">Choose your anchor for today.</p>
       <Form method="post">
         <input type="hidden" name="_action" value="set-source" />
-        <div className="sm-grid sm-grid--card" style={{ marginBottom: "32px" }}>
+        <div className="sm-source-pills">
           {sourceOptions.map((option) => (
             <button
               key={option.id}
               type="button"
               onClick={() => setSelected(option.id)}
-              className={`sm-chip-card${selected === option.id ? " sm-chip--on" : ""}`}
+              className={`sm-source-pill${selected === option.id ? " sm-pill--on" : ""}`}
             >
-              <div className="sm-chip-body">
-                <span className="sm-chip-label">{option.label}</span>
-                <span className="sm-chip-desc">{option.description}</span>
-              </div>
+              <span className="sm-source-pill-name">{option.label}</span>
+              <span className="sm-source-pill-desc">{option.description}</span>
             </button>
           ))}
         </div>
         <input type="hidden" name="source" value={selected ?? ""} />
-        <button
-          type="submit"
-          disabled={!selected}
-          className="sm-continue"
-        >
-          Continue
-        </button>
+        <div className="sm-step-buttons">
+          <Link to="/style-me/occasion" className="sm-btn-back">← Back</Link>
+          <button type="submit" disabled={!selected} className="sm-continue">
+            Continue
+          </button>
+        </div>
       </Form>
     </>
   );
@@ -244,7 +270,7 @@ function ClosetAnchorStep({
   return (
     <>
       <p className="sm-eyebrow sm-eyebrow--muted" style={{ marginBottom: "8px" }}>
-        {source === "both" ? "nAia + My Closet" : "My Closet"}
+        {source === "both" ? "NADINE + My Closet" : "My Closet"}
       </p>
       <h1 className="sm-heading">Which piece are we building around?</h1>
       <p className="sm-sub" style={{ marginBottom: "28px" }}>Select an item from your closet to anchor the look.</p>
