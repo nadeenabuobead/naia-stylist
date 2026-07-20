@@ -171,7 +171,7 @@ export function emptyMigrationStatus(): MigrationStatus {
 const CLOTHING_CATEGORIES = new Set(["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"]);
 
 export function aggregateClosetSummary(
-  items: Array<{ category: string; tryOnEligibility: string | null }>,
+  items: Array<{ category: string; tryOnEligibility?: string | null }>,
 ): ClosetSummary {
   let eligibleForTryOn = 0;
   let pendingAssessment = 0;

@@ -45,7 +45,6 @@ export type FindSelfieAnalysisFn = (customerId: string) => Promise<{
 
 export type FindClosetItemsFn = (customerId: string) => Promise<Array<{
   category: string;
-  tryOnEligibility: string | null;
 }>>;
 
 export type FindFeedbackRecordsFn = (customerId: string) => Promise<Array<{
@@ -81,7 +80,7 @@ async function _findSelfieAnalysis(customerId: string) {
 async function _findClosetItems(customerId: string) {
   return prisma.closetItem.findMany({
     where: { customerId },
-    select: { category: true, tryOnEligibility: true },
+    select: { category: true },
   });
 }
 
@@ -142,7 +141,7 @@ export async function buildCustomerJourneyContext(
 
   // ── Always-live: closet items + naia model (parallel) ────────────────────
   const [rawClosetItems, rawModel] = await Promise.all([
-    findClosetItems(customerId).catch(() => [] as Array<{ category: string; tryOnEligibility: string | null }>),
+    findClosetItems(customerId).catch(() => [] as Array<{ category: string }>),
     findNaiaModel(customerId).catch(() => null),
   ]);
 
