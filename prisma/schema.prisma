@@ -58,6 +58,8 @@ model Customer {
   trendReportViews    TrendReportView[]
   stylingEvents       StylingEvent[]
   sessions               NaiaSession[]
+  naiaModel              NaiaModel?
+  tryOnJobs              VirtualTryOnJob[]
   recommendationFeedback RecommendationFeedback[]
 }
 
@@ -636,4 +638,92 @@ model JourneyEvent {
   @@index([type])
   @@index([customerIdHash])
   @@index([occurredAt])
+}
+
+// ============================================
+// MY NAIA MODEL — Virtual Try-On Identity
+// ============================================
+
+enum TryOnProvider {
+  FASHN
+}
+
+enum TryOnJobStatus {
+  CREATED
+  SUBMITTED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELED
+  TIMED_OUT
+}
+
+// One active model record per customer. Stores Cloudinary public IDs only —
+// never base64, raw bytes, or permanent delivery URLs.
+model NaiaModel {
+  id         String   @id @default(cuid())
+  customerId String   @unique
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Cloudinary public IDs — stored after validated upload; cleared on deletion.
+  // Delivery URLs are constructed server-side via private_download API; never stored here.
+  facePublicId String? // naia-wardrobe/${customerId}/... — face/upper-body
+  faceVersion  String? // Cloudinary resource version (retained for reference)
+  faceFormat   String? // Cloudinary file format (e.g. "jpg", "png") — needed for private_download URL
+  bodyPublicId String? // naia-wardrobe/${customerId}/... — full-body try-on model
+  bodyVersion  String? // Cloudinary resource version (retained for reference)
+  bodyFormat   String? // Cloudinary file format for body photo
+  // Delivery type used at upload time — needed for deletion signature and URL generation.
+  // Always "private" for new uploads; preserved so deletion uses the correct API parameters.
+  deliveryType String  @default("private")
+
+  // Consent timestamps — created only after explicit customer submission.
+  // Null means consent has not been granted (or has been withdrawn).
+  photoAnalysisConsentAt DateTime?
+  saveModelConsentAt     DateTime?
+  consentPolicyVersion   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tryOnJobs VirtualTryOnJob[]
+
+  @@index([customerId])
+}
+
+// Per-generation virtual try-on job. Records per-generation consent and
+// provides durable idempotency and cooldown across instances.
+model VirtualTryOnJob {
+  id          String     @id @default(cuid())
+  customerId  String
+  customer    Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  naiaModelId String?
+  naiaModel   NaiaModel? @relation(fields: [naiaModelId], references: [id], onDelete: SetNull)
+
+  productHandle String
+  provider      TryOnProvider @default(FASHN)
+  predictionId  String? // Set only after the provider accepts the submission
+
+  status TryOnJobStatus @default(CREATED)
+
+  // Per-generation consent — required for each new job; not inherited from model.
+  virtualTryOnConsentAt    DateTime
+  consentPolicyVersion     String
+  saveTryOnResultConsentAt DateTime? // Separate, optional
+
+  // Idempotency — unique constraint prevents duplicate chargeable submissions.
+  idempotencyKey     String  @unique
+  // SHA-256 fingerprint of (customerId + productHandle + bodyPublicId) for
+  // near-duplicate detection even across different idempotency keys.
+  requestFingerprint String?
+
+  errorCode String? // Safe provider/customer error code — never a stack trace
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  completedAt    DateTime?
+  lastActivityAt DateTime  @default(now()) // Drives durable per-customer cooldown
+
+  @@index([customerId])
+  @@index([customerId, status])
 }
