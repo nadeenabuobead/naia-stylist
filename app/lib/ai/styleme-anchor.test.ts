@@ -97,18 +97,18 @@ describe("resolveActionAnchor — naia-piece", () => {
     assert.ok(result.message.length > 0);
   });
 
-  it("CA.3 — missing handle (null) → ok=false, status=400", async () => {
+  it("CA.3 — missing handle (null) → ok=true, anchor=null (engine auto-selects)", async () => {
     const result = await resolveActionAnchor("naia-piece", "cust-1", null, null);
-    assert.equal(result.ok, false);
-    if (result.ok) throw new Error("unreachable");
-    assert.equal(result.status, 400);
+    assert.equal(result.ok, true);
+    if (!result.ok) throw new Error("unreachable");
+    assert.equal(result.anchor, null);
   });
 
-  it("CA.4 — empty-string handle → ok=false, status=400", async () => {
+  it("CA.4 — empty-string handle → ok=true, anchor=null (treated as absent)", async () => {
     const result = await resolveActionAnchor("naia-piece", "cust-1", "", null);
-    assert.equal(result.ok, false);
-    if (result.ok) throw new Error("unreachable");
-    assert.equal(result.status, 400);
+    assert.equal(result.ok, true);
+    if (!result.ok) throw new Error("unreachable");
+    assert.equal(result.anchor, null);
   });
 
   it("CA.5 — case-mismatched handle → ok=false, status=400", async () => {

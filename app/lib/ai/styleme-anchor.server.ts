@@ -52,8 +52,9 @@ export async function resolveClosetAnchor(
 
 // ── Typed result for action-level anchor resolution ──────────────────────────
 
-// anchor is always non-null on success — every source requires a resolved anchor.
-export type AnchorResolutionOk = { ok: true; anchor: AnchorInput };
+// anchor is null when source is "naia-piece" and no explicit handle was supplied:
+// the engine auto-selects the best NADINE product from session signals.
+export type AnchorResolutionOk = { ok: true; anchor: AnchorInput | null };
 export type AnchorResolutionErr = { ok: false; status: 400 | 403; message: string };
 export type AnchorResolution = AnchorResolutionOk | AnchorResolutionErr;
 
@@ -79,8 +80,10 @@ export async function resolveActionAnchor(
   ) => Promise<ClosetAnchorInput | null> = resolveClosetAnchor,
 ): Promise<AnchorResolution> {
   if (source === "naia-piece") {
+    // No handle supplied: engine auto-selects the best NADINE piece from session signals.
+    // An explicit handle (future "Style This Piece" entry points) is still resolved normally.
     if (!nadineHandle) {
-      return { ok: false, status: 400, message: "A product must be selected for naia-piece." };
+      return { ok: true, anchor: null };
     }
     const anchor = resolveNadineAnchor(nadineHandle);
     if (!anchor) {

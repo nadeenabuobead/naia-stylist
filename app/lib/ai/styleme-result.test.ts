@@ -1249,23 +1249,26 @@ describe("§16 Generation aborts after failed anchor resolution", () => {
     assert.equal(callCount(), 0, "runRecommendation must never be called after failed NADINE anchor resolution");
   });
 
-  it("EC.6 — missing NADINE handle: resolveActionAnchor returns 400, computeStyleMeResult not called", async () => {
+  it("EC.6 — absent NADINE handle: resolveActionAnchor ok=true, anchor=null, engine auto-selects", async () => {
     const { spy, callCount } = makeRunRecSpy();
 
     const anchorResult = await resolveActionAnchor("naia-piece", "cust-1", null, null);
-    assert.equal(anchorResult.ok, false, "anchor resolution must fail for missing handle");
+    assert.equal(anchorResult.ok, true, "null handle must resolve ok=true — engine auto-selects");
+    if (!anchorResult.ok) throw new Error("unreachable");
+    assert.equal(anchorResult.anchor, null, "anchor must be null when no handle is supplied");
 
-    if (anchorResult.ok) {
-      const engineInput = buildEngineInput({
-        moods: ["confident"], desiredFeelings: [], bodyNeeds: [],
-        coverageConditional: null, occasion: "everyday", formalityConditional: null,
-        todayColours: { preferred: [], avoid: [] }, practicalIds: [],
-        source: "naia-piece", anchor: anchorResult.anchor,
-      });
-      await computeStyleMeResult(engineInput, spy);
-    }
+    // Engine proceeds with anchor=null: scores all eligible products and picks the best one
+    const engineInput = buildEngineInput({
+      moods: ["confident"], desiredFeelings: [], bodyNeeds: [],
+      coverageConditional: null, occasion: "everyday", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [],
+      source: "naia-piece", anchor: anchorResult.anchor,
+    });
+    const result = await computeStyleMeResult(engineInput, spy);
 
-    assert.equal(callCount(), 0, "runRecommendation must never be called after missing NADINE handle");
+    assert.equal(callCount(), 1, "runRecommendation must be called once when anchor is null");
+    assert.equal(result.rawRecommendation.outcome, "nadine-recommendation", "engine must select a NADINE product");
+    assert.ok(result.rawRecommendation.primary !== null, "engine must produce a primary product recommendation");
   });
 
   it("EC.7 — missing closet ID: resolveActionAnchor returns 400, computeStyleMeResult not called", async () => {

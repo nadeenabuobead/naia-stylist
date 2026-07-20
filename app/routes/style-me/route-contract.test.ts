@@ -143,19 +143,20 @@ describe("Phase 4B3 recovery — route contract", () => {
     assert.ok(text.includes('session.set("styleMeSource", source)'), "sets styleMeSource");
   });
 
-  it("source has multi-step anchor selection (Phase 4B3 feature)", () => {
+  it("naia-piece source skips anchor step — no product picker rendered", () => {
     const text = src("source.tsx");
-    assert.ok(text.includes("getAllCatalogProducts"), "imports catalog products");
-    assert.ok(text.includes("getCurrentNaiaCustomer"), "resolves naiaCustomer");
-    assert.ok(text.includes("NadineAnchorStep"), "has nAia anchor step component");
-    assert.ok(text.includes("ClosetAnchorStep"), "has closet anchor step component");
-    assert.ok(text.includes("set-anchor"), "has set-anchor intent");
+    assert.ok(!text.includes("NadineAnchorStep"), "no NADINE product picker component");
+    assert.ok(!text.includes("getAllCatalogProducts"), "no catalog product import");
+    assert.ok(text.includes("ClosetAnchorStep"), "closet anchor step still present");
+    assert.ok(text.includes("set-anchor"), "closet set-anchor intent still present");
+    assert.ok(text.includes("getCurrentNaiaCustomer"), "resolves naiaCustomer for closet step");
   });
 
-  it("source anchor action stores styleMeNadineAnchorHandle or styleMeClosetAnchorId", () => {
+  it("source anchor action stores only styleMeClosetAnchorId; engine selects NADINE piece", () => {
     const text = src("source.tsx");
-    assert.ok(text.includes('session.set("styleMeNadineAnchorHandle"'), "sets nadine anchor handle");
+    assert.ok(!text.includes('session.set("styleMeNadineAnchorHandle"'), "does not set NADINE handle (engine auto-selects)");
     assert.ok(text.includes('session.set("styleMeClosetAnchorId"'), "sets closet anchor id");
+    assert.ok(text.includes('session.unset("styleMeNadineAnchorHandle"'), "clears stale NADINE handle on source change and closet anchor");
   });
 
   it("source redirects to /style-me/result after anchor selection", () => {
