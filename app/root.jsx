@@ -21,7 +21,7 @@ export default function App() {
           rel="stylesheet"
           href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400;1,600&family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400;1,700;1,900&display=swap"
         />
-        <style dangerouslySetInnerHTML={{ __html: `
+        <style suppressHydrationWarning>{`
           :root {
             --c-bg:       #F6EFE8;
             --c-surface:  #FAF6F1;
@@ -39,25 +39,14 @@ export default function App() {
             --ff-body:    'Cormorant Garamond', Garamond, serif;
             --ff-ui:      'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
           }
-        ` }} />
+        `}</style>
         <Meta />
         <Links />
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
       </head>
       <body>
-        <script dangerouslySetInnerHTML={{ __html: `
-  if (window.self !== window.top) {
-    document.addEventListener('click', function(e) {
-      var a = e.target.closest('a');
-      if (a && a.href && a.href.startsWith(window.location.origin)) {
-        e.preventDefault();
-        window.location.href = a.href;
-      }
-    });
-  }
-` }} />
+        <script dangerouslySetInnerHTML={{ __html: `(function(){document.cookie='naia_customer_data=; path=/; max-age=0; SameSite=Lax';try{sessionStorage.removeItem('naia_token');}catch(e){}if(window.self!==window.top){document.addEventListener('click',function(e){var a=e.target.closest('a');if(a&&a.href&&a.href.startsWith(window.location.origin)){e.preventDefault();window.location.href=a.href;}});}})();` }} />
         <Outlet />
-        <script dangerouslySetInnerHTML={{ __html: `(function(){document.cookie='naia_customer_data=; path=/; max-age=0; SameSite=Lax';try{sessionStorage.removeItem('naia_token');}catch(e){}})();` }} />
         <ScrollRestoration />
         <Scripts />
       </body>
