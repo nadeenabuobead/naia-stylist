@@ -84,51 +84,48 @@
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── Header ──────────────────────────────────────────────────────── */
-.mn-header {
+/* ── Mobile bar (mobile-only sticky strip with wordmark + hamburger) ── */
+.mn-mobile-bar {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--naia-gutter-sm);
+  height: 56px;
   position: sticky;
   top: 0;
   z-index: 200;
   background: var(--naia-bg);
   border-bottom: 1px solid var(--naia-border);
 }
-.mn-header-inner {
-  max-width: var(--naia-page-max);
-  margin: 0 auto;
-  padding: 0 var(--naia-gutter);
-  height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--naia-sp-4);
-}
+
+/* ── Wordmark ("MY nAia." — sidebar top on desktop, mobile bar on mobile) */
 .mn-wordmark {
+  display: block;
   font-family: var(--naia-ff-display);
-  font-style: italic;
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: 2px;
+  font-weight: 900;
+  font-size: 48px;
+  line-height: 1.1;
+  letter-spacing: -0.5px;
   color: var(--naia-ink);
   text-decoration: none;
-  flex-shrink: 0;
+  padding: var(--naia-sp-8) var(--naia-sp-5) var(--naia-sp-6);
 }
-.mn-wordmark-accent { color: var(--naia-accent); }
-.mn-header-right {
-  display: flex;
-  align-items: center;
-  gap: var(--naia-sp-4);
+.mn-wordmark em {
+  font-style: italic;
+  font-weight: 700;
+  font-size: 0.82em;
+  color: var(--naia-burg);
 }
-.mn-back-link {
-  font-family: var(--naia-ff-ui);
-  font-size: 10px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: var(--naia-muted);
-  text-decoration: none;
-  padding: var(--naia-sp-2) var(--naia-sp-3);
-  transition: color 0.15s;
+.mn-wordmark-accent { color: var(--naia-burg); }
+
+/* In the mobile bar, wordmark is smaller */
+.mn-mobile-bar .mn-wordmark {
+  display: inline;
+  font-size: 22px;
+  padding: 0;
+  letter-spacing: 1px;
 }
-.mn-back-link:hover { color: var(--naia-accent); }
+
 .mn-hamburger {
   display: none;
   width: 36px;
@@ -153,14 +150,13 @@
 
 /* ── Sidebar ─────────────────────────────────────────────────────── */
 .mn-sidebar {
-  width: var(--naia-sidebar-w);
+  width: 260px;
   flex-shrink: 0;
   position: sticky;
-  top: 56px;
-  height: calc(100vh - 56px);
+  top: 0;
+  height: 100vh;
   overflow-y: auto;
   border-right: 1px solid var(--naia-border);
-  padding: var(--naia-sp-8) 0;
 }
 
 /* ── Main content ────────────────────────────────────────────────── */
@@ -170,10 +166,13 @@
   padding: var(--naia-sp-10) var(--naia-sp-8) var(--naia-sp-20);
 }
 
-/* ── Nav list ────────────────────────────────────────────────────── */
-.mn-nav-eyebrow {
+/* ── Nav groups and list ─────────────────────────────────────────── */
+.mn-nav-group {
+  margin-bottom: var(--naia-sp-6);
+}
+.mn-nav-group-label {
   font-family: var(--naia-ff-ui);
-  font-size: 8px;
+  font-size: 7px;
   letter-spacing: 3px;
   text-transform: uppercase;
   color: var(--naia-muted);
@@ -185,44 +184,47 @@
   padding: 0;
   margin: 0;
 }
-.mn-nav-link {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--naia-sp-2);
-  padding: var(--naia-sp-3) var(--naia-sp-5);
-  font-family: var(--naia-ff-ui);
-  font-size: 10px;
-  letter-spacing: 1.8px;
-  text-transform: uppercase;
-  color: var(--naia-muted);
-  text-decoration: none;
-  transition: color 0.13s, background 0.13s;
-  line-height: 1.4;
-}
-.mn-nav-link:hover {
-  color: var(--naia-ink);
-  background: var(--naia-tint);
-}
-.mn-nav-link[aria-current="page"] {
-  color: var(--naia-accent);
-  font-weight: 600;
-  background: var(--naia-tint);
-  box-shadow: inset -2px 0 0 var(--naia-accent);
-}
+
+/* Top-level nav links — dash prefix via ::before */
+.mn-nav-link,
 .mn-nav-static {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--naia-sp-2);
   padding: var(--naia-sp-3) var(--naia-sp-5);
   font-family: var(--naia-ff-ui);
   font-size: 10px;
   letter-spacing: 1.8px;
   text-transform: uppercase;
-  color: rgba(122, 111, 106, 0.5);
   line-height: 1.4;
 }
+.mn-nav-link {
+  color: var(--naia-muted);
+  text-decoration: none;
+  transition: color 0.13s;
+}
+.mn-nav-link::before,
+.mn-nav-static::before {
+  content: "—";
+  flex-shrink: 0;
+  color: var(--naia-muted);
+  opacity: 0.55;
+}
+.mn-nav-link:hover { color: var(--naia-ink); }
+.mn-nav-link[aria-current="page"] {
+  color: var(--naia-burg);
+  font-weight: 600;
+}
+.mn-nav-link[aria-current="page"]::before {
+  color: var(--naia-burg);
+  opacity: 1;
+}
+.mn-nav-static {
+  color: rgba(122, 111, 106, 0.5);
+}
+.mn-nav-static::before { opacity: 0.35; }
+
+/* "soon" tag pushed to far right */
 .mn-nav-tag {
   font-size: 7px;
   letter-spacing: 1.5px;
@@ -231,11 +233,56 @@
   background: var(--naia-unavail-bg);
   color: var(--naia-unavail);
   white-space: nowrap;
+  margin-left: auto;
 }
 .mn-nav-tag--shopify {
   background: var(--naia-shopify-bg);
   color: var(--naia-shopify);
 }
+
+/* Sub-items (MY NAIA MODEL, PERSONAL STYLING ANALYSIS, WHAT NAIA IS NOTICING) */
+.mn-nav-sub-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.mn-nav-sub-link,
+.mn-nav-sub-static {
+  display: flex;
+  align-items: center;
+  gap: var(--naia-sp-2);
+  padding: var(--naia-sp-2) var(--naia-sp-5) var(--naia-sp-2) calc(var(--naia-sp-5) + 14px);
+  font-family: var(--naia-ff-ui);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+.mn-nav-sub-link {
+  color: var(--naia-muted);
+  text-decoration: none;
+  transition: color 0.13s;
+}
+.mn-nav-sub-link::before,
+.mn-nav-sub-static::before {
+  content: "–";
+  flex-shrink: 0;
+  color: var(--naia-muted);
+  opacity: 0.45;
+}
+.mn-nav-sub-link:hover { color: var(--naia-ink); }
+.mn-nav-sub-link[aria-current="page"] {
+  color: var(--naia-burg);
+  font-weight: 600;
+}
+.mn-nav-sub-link[aria-current="page"]::before {
+  color: var(--naia-burg);
+  opacity: 1;
+}
+.mn-nav-sub-static {
+  color: rgba(122, 111, 106, 0.4);
+}
+.mn-nav-sub-static::before { opacity: 0.3; }
 
 /* ── Mobile nav overlay ──────────────────────────────────────────── */
 .mn-overlay {
@@ -261,11 +308,16 @@
 }
 .mn-overlay-wordmark {
   font-family: var(--naia-ff-display);
-  font-style: italic;
+  font-weight: 900;
   font-size: 22px;
-  font-weight: 700;
-  letter-spacing: 2px;
+  letter-spacing: 1px;
   color: var(--naia-ink);
+}
+.mn-overlay-wordmark em {
+  font-style: italic;
+  font-weight: 700;
+  font-size: 0.85em;
+  color: var(--naia-burg);
 }
 .mn-overlay-close {
   width: 36px;
@@ -280,6 +332,27 @@
   justify-content: center;
 }
 .mn-overlay-nav { padding: var(--naia-sp-8) 0; }
+
+/* ── Back to overview link + divider (sub-page header pattern) ───── */
+.mn-back-to-overview {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--naia-sp-2);
+  font-family: var(--naia-ff-ui);
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--naia-muted);
+  text-decoration: none;
+  margin-bottom: var(--naia-sp-4);
+  transition: color 0.13s;
+}
+.mn-back-to-overview:hover { color: var(--naia-ink); }
+.mn-page-divider {
+  border: none;
+  border-top: 1px solid var(--naia-border);
+  margin: 0 0 var(--naia-sp-8);
+}
 
 /* ── Page intro ──────────────────────────────────────────────────── */
 .mn-page-intro { margin-bottom: var(--naia-sp-10); }
@@ -447,6 +520,18 @@ a.mn-action:hover .mn-action-arrow {
   margin: 0;
 }
 
+/* ── Overview placeholder (Package 2 will replace with full dashboard) */
+.mn-overview-placeholder { padding: var(--naia-sp-10) 0; }
+.mn-feature-note {
+  margin-top: var(--naia-sp-8);
+  font-family: var(--naia-ff-ui);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--naia-muted);
+  opacity: 0.7;
+}
+
 /* ── Dev fixture notice ──────────────────────────────────────────── */
 .mn-fixture-notice {
   background: rgba(107, 72, 0, 0.07);
@@ -462,22 +547,22 @@ a.mn-action:hover .mn-action-arrow {
 
 /* ── Focus visible ───────────────────────────────────────────────── */
 .mn-nav-link:focus-visible,
-.mn-back-link:focus-visible,
+.mn-nav-sub-link:focus-visible,
 .mn-hamburger:focus-visible,
 .mn-overlay-close:focus-visible,
 a.mn-action:focus-visible,
-.mn-wordmark:focus-visible {
+.mn-wordmark:focus-visible,
+.mn-back-to-overview:focus-visible {
   outline: 2px solid var(--naia-accent);
   outline-offset: 2px;
 }
 
 /* ── Responsive: mobile (max 767 px) ─────────────────────────────── */
 @media (max-width: 767px) {
-  .mn-hamburger   { display: flex; }
-  .mn-sidebar     { display: none; }
-  .mn-back-link   { display: none; }
-  .mn-content     { padding: var(--naia-sp-8) var(--naia-gutter-sm) var(--naia-sp-16); }
-  .mn-header-inner { padding: 0 var(--naia-gutter-sm); }
+  .mn-mobile-bar { display: flex; }
+  .mn-hamburger  { display: flex; }
+  .mn-sidebar    { display: none; }
+  .mn-content    { padding: var(--naia-sp-8) var(--naia-gutter-sm) var(--naia-sp-16); }
 }
 
 /* ═══════════════════════════════════════════════════════════════════
