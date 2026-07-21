@@ -9,6 +9,7 @@
   --naia-ink:        #221516;
   --naia-muted:      #7a6f6a;
   --naia-accent:     #8b2035;
+  --naia-burg:       #3b0510;
   --naia-border:     rgba(34, 21, 22, 0.09);
   --naia-border-mid: rgba(34, 21, 22, 0.16);
   --naia-tint:       rgba(139, 32, 53, 0.07);
@@ -55,12 +56,18 @@
   --naia-btn-h:    44px;
   --naia-btn-h-sm: 36px;
 
-  /* ── Monospace (StyleMe journey labels / buttons) ───────────── */
-  --naia-ff-mono: 'Courier New', Courier, monospace;
+  /* ── Monospace / handwritten (MY nAia portal labels) ─────────── */
+  --naia-ff-mono: 'Space Mono', 'Courier New', Courier, monospace;
+  --naia-ff-hand: 'Caveat', cursive;
 
   /* ── Breakpoint reference values (CSS vars cannot be used in
      @media rules — these document the scale only)
      Mobile: 375 px   Tablet: 768 px   Desktop: 1024 px            */
+}
+
+/* ── MY nAia portal overrides (scoped to avoid bleeding into other surfaces) */
+.mn-page {
+  --mn-btn-radius: 9999px;
 }
 
 /* ── Scoped reset ────────────────────────────────────────────────── */
