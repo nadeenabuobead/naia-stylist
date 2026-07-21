@@ -442,7 +442,7 @@ export async function computeStyleMeResult(
   let primaryProduct: StyleMePrimaryProduct | null = null;
   if (effectiveOutcome === "nadine-recommendation" && primaryHandle && catalogProduct) {
     const primaryMedia = _resolveMedia(primaryHandle);
-    const primaryImageUrl = _tryOnEnabled && primaryMedia?.eligibility === "ready" ? primaryMedia.resolvedUrl : null;
+    const primaryImageUrl = primaryMedia?.eligibility === "ready" ? primaryMedia.resolvedUrl : null;
     primaryProduct = {
       handle: primaryHandle,
       title: catalogProduct.parsed.identity.verifiedTitle,
@@ -450,6 +450,7 @@ export async function computeStyleMeResult(
       shopifyProductId: _tryOnEnabled && primaryMedia?.eligibility === "ready" ? (primaryMedia.shopifyProductGid ?? null) : null,
       productImageUrl: primaryImageUrl,
       liveUrl: catalogProduct.parsed.identity.liveUrl,
+      productUrl: primaryMedia?.shopifyHandle ? `https://naiabynadine.com/products/${primaryMedia.shopifyHandle}` : null,
       stylingNotes: styleMeExplanation ?? `Style the ${catalogProduct.parsed.identity.verifiedTitle} with intention.`,
     };
   }
@@ -485,6 +486,7 @@ export function buildDbPayload(result: StyleMeCustomerResult): StyleMeDbPayload 
       shopifyProductId: primaryProduct.shopifyProductId,
       closetItemId: null,
       stylingNotes: primaryProduct.stylingNotes,
+      productUrl: primaryProduct.productUrl,
     });
   }
 
@@ -497,6 +499,7 @@ export function buildDbPayload(result: StyleMeCustomerResult): StyleMeDbPayload 
       shopifyProductId: null,
       closetItemId: a.id,
       stylingNotes: result.pairingNote ?? `Style your ${a.label} with intention.`,
+      productUrl: null,
     });
   }
 
@@ -509,6 +512,7 @@ export function buildDbPayload(result: StyleMeCustomerResult): StyleMeDbPayload 
     shopifyProductId: null,
     closetItemId: null,
     stylingNotes: finishingLayer.shoes,
+    productUrl: null,
   });
   items.push({
     itemType: "BAG",
@@ -517,6 +521,7 @@ export function buildDbPayload(result: StyleMeCustomerResult): StyleMeDbPayload 
     shopifyProductId: null,
     closetItemId: null,
     stylingNotes: finishingLayer.bag,
+    productUrl: null,
   });
   items.push({
     itemType: "ACCESSORY",
@@ -525,6 +530,7 @@ export function buildDbPayload(result: StyleMeCustomerResult): StyleMeDbPayload 
     shopifyProductId: null,
     closetItemId: null,
     stylingNotes: finishingLayer.accessories,
+    productUrl: null,
   });
 
   return {

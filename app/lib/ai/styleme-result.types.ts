@@ -20,8 +20,9 @@ export interface StyleMePrimaryProduct {
   title: string;
   slot: string;               // lowercase OutfitSlot: "top" | "bottom" | "dress" | etc.
   shopifyProductId: string | null;   // null — not in generated catalog
-  productImageUrl: string | null;    // null — blank in V8 workbook
+  productImageUrl: string | null;
   liveUrl: string | null;            // product page URL from catalog
+  productUrl: string | null;         // derived from verified media shopifyHandle
   stylingNotes: string;              // catalog styleMeExplanation or fallback
 }
 
@@ -118,6 +119,7 @@ export interface StyleMeDbItem {
   shopifyProductId: string | null;
   closetItemId: string | null;
   stylingNotes: string | null;
+  productUrl: string | null;
 }
 
 export interface StyleMeDbPayload {

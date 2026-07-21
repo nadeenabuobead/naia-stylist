@@ -322,6 +322,7 @@ export async function action({ request }: ActionFunctionArgs) {
               shopifyProductId: item.shopifyProductId,
               closetItemId: item.closetItemId ?? undefined,
               stylingNotes: item.stylingNotes,
+              productUrl: item.productUrl ?? undefined,
             })),
           },
         },
@@ -706,6 +707,9 @@ export default function StyleMeResult() {
     (item: any) =>
       !["SHOES", "ACCESSORY", "BAG"].includes(item.itemType) && item.productImageUrl,
   );
+  const primaryNaiaItem = suggestion.items?.find(
+    (item: any) => !["SHOES", "ACCESSORY", "BAG"].includes(item.itemType),
+  );
   const showTryOnCta =
     loaderData.isAuthenticated &&
     loaderData.naiaModelIsReady &&
@@ -988,7 +992,7 @@ export default function StyleMeResult() {
           >
             Rate This Look
           </button>
-          <a href="https://naiabynadine.com" className="sm-result-action-btn">Shop nAia</a>
+          <a href={primaryNaiaItem?.productUrl || "https://naiabynadine.com"} className="sm-result-action-btn">Shop nAia</a>
           {showTryOnCta && (
             <Link to="/my-naia-model" className="sm-result-action-btn sm-result-action-btn--accent">
               See This Look On Me
