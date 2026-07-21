@@ -224,7 +224,7 @@ export default function Closet() {
 
       <div className="cl-topbar">
         <div className="cl-topbar-logo">nAia</div>
-        <Link to="/" className="cl-topbar-link">← Dashboard</Link>
+        <Link to="/my-naia" className="cl-topbar-link">← Dashboard</Link>
       </div>
 
       <div className="cl-wrap">

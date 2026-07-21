@@ -725,7 +725,7 @@ export default function StyleMeResult() {
 
       {/* ── Top bar ── */}
       <div className="sm-result-bar">
-        <Link to="/quick-style" className="sm-result-btn">Back</Link>
+        <Link to="/style-me" className="sm-result-btn">Back</Link>
         <span className="sm-result-wordmark">nAia</span>
         {isSaved ? (
           <span className="sm-result-btn sm-result-btn--accent">Saved</span>
@@ -746,7 +746,7 @@ export default function StyleMeResult() {
         <div className="sm-banner sm-banner-saved">
           <p className="sm-banner-text">Saved to your nAia Passport.</p>
           <div className="sm-banner-actions">
-            <Link to="/" className="sm-banner-cta">View My Dashboard →</Link>
+            <Link to="/my-naia" className="sm-banner-cta">View My Dashboard →</Link>
           </div>
         </div>
       )}
@@ -979,7 +979,7 @@ export default function StyleMeResult() {
 
         {/* Actions */}
         <div className="sm-result-actions">
-          <Link to="/apps/naia-stylist/quick-style" className="sm-result-action-btn">Start Over</Link>
+          <Link to="/style-me/mood" className="sm-result-action-btn">Start Over</Link>
           <button
             onClick={() => generateFetcher.submit({ intent: "regenerate", sessionId: loaderData.sessionId }, { method: "post" })}
             className="sm-result-action-btn sm-result-action-btn--primary"

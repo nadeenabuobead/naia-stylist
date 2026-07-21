@@ -41,7 +41,7 @@ export default function StyleMeMood() {
   const [selected, setSelected] = useState<string | null>(null);
 
   return (
-    <SmPage backTo="/" step={1}>
+    <SmPage backTo="/style-me" step={1}>
       <p className="sm-step-label">Your Mood</p>
       <h1 className="sm-heading">How are you feeling today?</h1>
       <p className="sm-sub">Choose the one that feels closest.</p>
@@ -62,7 +62,7 @@ export default function StyleMeMood() {
 
         <input type="hidden" name="mood" value={selected || ""} />
         <div className="sm-step-buttons">
-          <Link to="/" className="sm-btn-back">← Back</Link>
+          <Link to="/style-me" className="sm-btn-back">← Back</Link>
           <SmContinue disabled={!selected} />
         </div>
       </Form>

@@ -577,7 +577,7 @@ export default function PassportPage() {
 
       <div className="pp-topbar">
         <div className="pp-topbar-logo">nAia</div>
-        <Link to="/" className="pp-topbar-back">← Dashboard</Link>
+        <Link to="/my-naia" className="pp-topbar-back">← Dashboard</Link>
       </div>
 
       <main className="pp-main">

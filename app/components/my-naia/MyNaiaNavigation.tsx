@@ -39,8 +39,8 @@ const NAV: NavGroup[] = [
         label: "PERSONALISATION",
         tag: "soon",
         subItems: [
-          { label: "MY NAIA MODEL",            path: "/my-naia-model" },
-          { label: "PERSONAL STYLING ANALYSIS", path: "/passport/selfie" },
+          { label: "MY NAIA MODEL",            tag: "soon" },
+          { label: "PERSONAL STYLING ANALYSIS", tag: "soon" },
           { label: "WHAT NAIA IS NOTICING",     tag: "soon" },
         ],
       },

@@ -37,7 +37,7 @@ export default function MyNaiaLayout({ children, currentPath }: Props) {
 
       {/* Mobile-only sticky bar: wordmark + hamburger trigger */}
       <div className="mn-mobile-bar">
-        <a href="/" className="mn-wordmark" aria-label="nAia home">
+        <a href="/my-naia" className="mn-wordmark" aria-label="nAia home">
           MY <em>n<span className="mn-wordmark-accent">A</span>ia.</em>
         </a>
         <button
@@ -80,7 +80,7 @@ export default function MyNaiaLayout({ children, currentPath }: Props) {
       <div className="mn-body">
         <aside className="mn-sidebar" aria-label="My nAia navigation">
           {/* "MY nAia." wordmark — desktop only, at top of sidebar column */}
-          <a href="/" className="mn-wordmark" aria-label="nAia home">
+          <a href="/my-naia" className="mn-wordmark" aria-label="nAia home">
             MY <em>n<span className="mn-wordmark-accent">A</span>ia.</em>
           </a>
           <MyNaiaNavigation currentPath={currentPath} />
