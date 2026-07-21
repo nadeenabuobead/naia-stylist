@@ -52,6 +52,7 @@ export default [
   route("api/tryon", "routes/api.tryon.jsx"),
   route("api/body-scan", "routes/api.bodyscan.jsx"),
   route("account", "routes/account.jsx"),
+  route("my-naia", "routes/my-naia._index.tsx"),
   route("api/recommendation-feedback", "routes/api.recommendation-feedback.tsx"),
   route("api/post-wear-review", "routes/api.post-wear-review.tsx"),
   route("api/analyze-item", "routes/api.analyze-item.jsx"),
