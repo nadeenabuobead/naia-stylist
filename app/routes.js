@@ -64,5 +64,6 @@ export default [
   route("api/customer-account-identity", "routes/api.customer-account-identity.jsx"),
   route("api/designer-dashboard", "routes/api.designer-dashboard.jsx"),
   route("api/seed-staging", "routes/api.seed-staging.jsx"),
+  route("api/dev-login",    "routes/api.dev-login.tsx"),
   route("api/track_event", "routes/api.track_event.jsx"),
 ];
