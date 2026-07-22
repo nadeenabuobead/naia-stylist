@@ -55,8 +55,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
         take: 3,
         orderBy: { createdAt: "desc" },
         select: {
-          id: true, createdAt: true, currentMood: true, occasion: true,
-          suggestions: { take: 1, select: { id: true, heroImageUrl: true, outfitName: true } },
+          id: true, createdAt: true, currentMood: true, desiredFeeling: true, occasion: true, styleFrom: true,
+          suggestions: {
+            take: 1, select: { id: true, heroImageUrl: true, outfitName: true, savedAsLook: true,
+              items: { take: 1, select: { closetItemId: true, productTitle: true, closetItem: { select: { name: true } } } } }
+          },
           review: { select: { id: true } },
         },
       }),
@@ -136,10 +139,10 @@ export default function MyNaiaOverview() {
               Get a look based on your mood, plans, comfort needs and Style Passport.
             </p>
             <div className="mn-styleme-hero-actions">
-              <Link to="/style-me" className="mn-styleme-btn">
+              <Link to="/my-naia/style-me" className="mn-styleme-btn">
                 Start StyleMe
               </Link>
-              <Link to="/style-me" className="mn-styleme-link">
+              <Link to="/my-naia/style-me" className="mn-styleme-link">
                 How StyleMe Works
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M7 17 17 7M17 7H7M17 7v10" />
@@ -182,7 +185,7 @@ export default function MyNaiaOverview() {
             <div style={{ display: "grid", gap: "0.75rem" }}>
               <style>{`@media (min-width:640px){.mn-quick-grid{grid-template-columns:repeat(3,1fr)!important}}`}</style>
               <div className="mn-quick-grid" style={{ display: "grid", gap: "0.75rem" }}>
-                <Link to="/style-me" className="mn-quick-tool">
+                <Link to="/my-naia/style-me" className="mn-quick-tool">
                   <div className="mn-quick-tool-title">Start StyleMe</div>
                   <p className="mn-quick-tool-note">A look for your mood and your plans.</p>
                   <div className="mn-quick-tool-cta">Open <span aria-hidden>↗</span></div>
@@ -207,46 +210,74 @@ export default function MyNaiaOverview() {
           <section className="mn-section">
             <div className="mn-section-head">
               <div className="mn-eyebrow">Recent Looks</div>
-              <Link to="/style-me" className="mn-see-link">View All Looks</Link>
+              <Link to="/my-naia/styleme/looks" className="mn-see-link">View All Looks</Link>
             </div>
             <div className="mn-section-body">
               <style>{`@media (min-width:640px){.mn-looks-grid-inner{grid-template-columns:repeat(2,1fr)!important}}@media (min-width:1024px){.mn-looks-grid-inner{grid-template-columns:repeat(3,1fr)!important}}`}</style>
               <div className="mn-looks-grid-inner" style={{ display: "grid", gap: "1.5rem" }}>
                 {sessions.map((session) => {
                   const suggestion = session.suggestions[0];
+                  const items = suggestion?.items ?? [];
+                  const hasNadine = items.some((i) => !i.closetItemId && i.productTitle);
+                  const hasCloset = items.some((i) => !!i.closetItemId);
+                  const sourcing = hasNadine && hasCloset ? "NADINE + My Closet" : hasNadine ? "NADINE" : hasCloset ? "My Closet" : session.styleFrom === "OWN_WARDROBE" ? "My Closet" : "NADINE";
                   return (
-                    <article key={session.id} className="mn-look-card">
+                    <article key={session.id} style={{ display: "flex", flexDirection: "column" }}>
                       <Link
-                        to={`/style-me/result?sessionId=${session.id}`}
-                        className="mn-look-preview"
+                        to={`/my-naia/styleme/looks/${session.id}`}
+                        style={{
+                          display: "grid",
+                          placeItems: "center",
+                          aspectRatio: "4/5",
+                          border: "1px solid var(--fg-10)",
+                          background: "color-mix(in oklab, var(--bg) 92%, white)",
+                          position: "relative",
+                          overflow: "hidden",
+                          textDecoration: "none",
+                        }}
                         aria-label={`View look — ${suggestion?.outfitName ?? "nAia Look"}`}
                       >
                         {suggestion?.heroImageUrl ? (
                           <img src={suggestion.heroImageUrl} alt={suggestion.outfitName ?? ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                         ) : (
-                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.25 }} aria-hidden="true">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.25, color: "var(--fg)" }} aria-hidden="true">
                             <path d="M12 3 4.5 7.5v9L12 21l7.5-4.5v-9L12 3z" /><path d="m4.5 7.5 7.5 4.5 7.5-4.5M12 12v9" />
                           </svg>
                         )}
-                        {session.review && <span className="mn-look-badge">Reviewed</span>}
+                        {suggestion?.savedAsLook && (
+                          <span style={{ position: "absolute", left: "0.75rem", top: "0.75rem", fontSize: "0.55rem", textTransform: "uppercase", letterSpacing: "0.3em", background: "var(--bg)", padding: "0.25rem 0.5rem", color: "var(--fg-80)" }}>Saved</span>
+                        )}
                       </Link>
-                      <div className="mn-look-date">
+                      <div className="mn-look-date" style={{ marginTop: "0.75rem" }}>
                         {fmtDate(session.createdAt)}{session.occasion ? ` · ${session.occasion}` : ""}
                       </div>
-                      <Link to={`/style-me/result?sessionId=${session.id}`} className="mn-look-title">
+                      <Link to={`/my-naia/styleme/looks/${session.id}`} className="mn-look-title" style={{ marginTop: "0.375rem" }}>
                         {suggestion?.outfitName ?? "nAia Look"}
                       </Link>
-                      {session.currentMood && (
-                        <p className="mn-look-meta">
-                          <span style={{ color: "var(--fg-55)" }}>Mood ·</span> {session.currentMood}
+                      {(session.currentMood || session.desiredFeeling) && (
+                        <p className="mn-look-meta" style={{ marginTop: "0.375rem", fontSize: "0.82rem", color: "var(--fg-70)" }}>
+                          {session.currentMood && <><span style={{ color: "var(--fg-55)" }}>Mood ·</span> {session.currentMood}</>}
+                          {session.currentMood && session.desiredFeeling && <span style={{ color: "var(--fg-40)" }}> → </span>}
+                          {session.desiredFeeling && <><span style={{ color: "var(--fg-55)" }}>Feeling ·</span> {session.desiredFeeling}</>}
                         </p>
                       )}
-                      <div className="mn-look-actions">
-                        <Link to={`/style-me/result?sessionId=${session.id}`} className="mn-look-action-link">View Look</Link>
+                      <div style={{ marginTop: "0.375rem", fontSize: "0.66rem", textTransform: "uppercase", letterSpacing: "0.28em", color: "var(--fg-55)" }}>
+                        {sourcing}
+                      </div>
+                      <div className="mn-look-actions" style={{ marginTop: "0.75rem" }}>
+                        <Link to={`/my-naia/styleme/looks/${session.id}`} className="mn-look-action-link">View Look</Link>
+                        <span className="mn-look-dot" aria-hidden="true">·</span>
+                        <Link to={`/my-naia/styleme/looks/${session.id}/refine`} className="mn-look-action-link">Refine</Link>
                         {!session.review && (
                           <>
                             <span className="mn-look-dot" aria-hidden="true">·</span>
-                            <Link to={`/post-wear-review?sessionId=${session.id}`} className="mn-look-action-link">Give Feedback</Link>
+                            <Link to={`/my-naia/styleme/looks/${session.id}/feedback`} className="mn-look-action-link">Give Feedback</Link>
+                          </>
+                        )}
+                        {session.review && (
+                          <>
+                            <span className="mn-look-dot" aria-hidden="true">·</span>
+                            <Link to={`/my-naia/styleme/looks/${session.id}/feedback`} className="mn-look-action-link">View Feedback</Link>
                           </>
                         )}
                       </div>
@@ -359,9 +390,22 @@ export default function MyNaiaOverview() {
         <section className="mn-section">
           <div className="mn-section-head">
             <div className="mn-eyebrow">Latest Order</div>
+            <Link to="/my-naia/orders" className="mn-see-link">View All Orders</Link>
           </div>
           <div className="mn-section-body">
-            <p className="mn-state-note">Your NADINE order history will appear here. <span style={{ fontSize: "0.75rem", color: "var(--fg-55)" }}>Opens in Shopify</span></p>
+            <dl style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(7rem, 1fr))", gap: "1.5rem 2rem" }}>
+              {[
+                { label: "Order", value: "NAD-XXXXXX" },
+                { label: "Date", value: "—" },
+                { label: "Status", value: "—" },
+                { label: "Total", value: "AED —" },
+              ].map((c) => (
+                <div key={c.label}>
+                  <dt style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg-55)" }}>{c.label}</dt>
+                  <dd style={{ marginTop: "0.375rem", fontSize: "0.92rem", color: "var(--fg-85)" }}>{c.value}</dd>
+                </div>
+              ))}
+            </dl>
           </div>
         </section>
 
@@ -369,9 +413,24 @@ export default function MyNaiaOverview() {
         <section className="mn-section">
           <div className="mn-section-head">
             <div className="mn-eyebrow">Plan &amp; Usage</div>
+            <Link to="/my-naia/plan-usage" className="mn-see-link">Manage Plan</Link>
           </div>
           <div className="mn-section-body">
-            <p className="mn-state-note">Your plan and usage details will appear here.</p>
+            <div style={{ display: "grid", gap: "1.5rem", gridTemplateColumns: "repeat(auto-fill, minmax(10rem, 1fr))" }}>
+              {[
+                { label: "Current Plan", value: "The Atelier Plan" },
+                { label: "StyleMe", value: "5 sessions remaining" },
+                { label: "Buy or Skip", value: "3 checks remaining" },
+                { label: "Virtual Try-On", value: "3 try-ons remaining" },
+                { label: "My Closet", value: "45 of 100 spaces used" },
+                { label: "Personalised Trend Edit", value: "Available this month" },
+              ].map((c) => (
+                <div key={c.label}>
+                  <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg-55)" }}>{c.label}</div>
+                  <div style={{ marginTop: "0.5rem", fontFamily: "var(--ff-display)", fontWeight: 300, fontSize: "1.5rem", letterSpacing: "0.02em", textTransform: "uppercase", color: "var(--fg)" }}>{c.value}</div>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
 
