@@ -23,10 +23,10 @@ const NAV: NavGroup[] = [
     groupLabel: "MAIN",
     items: [
       { label: "OVERVIEW",      path: "/my-naia" },
-      { label: "STYLE PASSPORT", path: "/full-style-profile" },
-      { label: "MY CLOSET",      path: "/closet" },
+      { label: "STYLE PASSPORT", path: "/my-naia/style-passport" },
+      { label: "MY CLOSET",      path: "/my-naia/closet" },
       { label: "STYLEME",        path: "/style-me" },
-      { label: "BUY OR SKIP",    path: "/buyskip" },
+      { label: "BUY OR SKIP",    path: "/my-naia/buy-or-skip" },
       { label: "MY TREND EDITS", tag: "soon" },
     ],
   },

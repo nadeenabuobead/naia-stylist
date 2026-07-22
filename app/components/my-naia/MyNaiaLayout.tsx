@@ -77,12 +77,18 @@ export default function MyNaiaLayout({ children, currentPath }: Props) {
         </div>
       </div>
 
+      {/* Large editorial "MY nAia." heading — below mobile bar, above sidebar+content */}
+      <div className="mn-page-heading">
+        <div className="mn-page-heading-meta">
+          <span className="mn-page-heading-preview">Preview</span>
+        </div>
+        <h1 className="mn-page-heading-title">
+          MY <em>nAia.</em>
+        </h1>
+      </div>
+
       <div className="mn-body">
         <aside className="mn-sidebar" aria-label="My nAia navigation">
-          {/* "MY nAia." wordmark — desktop only, at top of sidebar column */}
-          <a href="/my-naia" className="mn-wordmark" aria-label="nAia home">
-            MY <em>n<span className="mn-wordmark-accent">A</span>ia.</em>
-          </a>
           <MyNaiaNavigation currentPath={currentPath} />
         </aside>
         <main className="mn-content">
