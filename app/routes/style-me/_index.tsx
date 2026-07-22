@@ -1,160 +1,183 @@
-// app/routes/style-me/_index.tsx
-import { Link, useLoaderData } from "react-router";
-import { data, type LoaderFunctionArgs, type LinksFunction } from "react-router";
+import { useLoaderData, Link } from "react-router";
+import type { LinksFunction, LoaderFunctionArgs } from "react-router";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { prisma } from "~/lib/prisma.server";
+import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
 ];
 
+function fmtDate(d: string | Date): string {
+  const date = new Date(d);
+  const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await getCurrentNaiaCustomer(request);
-  const customerId = customer?.id ?? null;
 
-  if (!customerId) {
-    return data({ hasProfile: false, hasClosetItems: false, recentSessions: [] });
+  if (!customer) {
+    return { authed: false as const, sessions: [], reviewCount: 0 };
   }
 
-  const [profile, closetCount, recentSessions] = await Promise.all([
-    prisma.onboardingProfile.findUnique({
-      where: { customerId },
-      select: { stylePersonalities: true }
-    }),
-    prisma.closetItem.count({ where: { customerId } }),
+  const customerId = customer.id;
+
+  const [sessions, reviewCount] = await Promise.all([
     prisma.stylingSession.findMany({
       where: { customerId },
-      take: 3,
+      take: 5,
       orderBy: { createdAt: "desc" },
-      include: {
+      select: {
+        id: true,
+        createdAt: true,
+        currentMood: true,
+        occasion: true,
         suggestions: {
           take: 1,
-          select: {
-            heroImageUrl: true,
-            outfitName: true
-          }
-        }
-      }
-    })
+          select: { id: true, heroImageUrl: true, outfitName: true },
+        },
+        review: { select: { id: true } },
+      },
+    }),
+    prisma.postOutfitReview.count({ where: { customerId } }),
   ]);
 
-  return data({
-    hasProfile: !!profile,
-    stylePersonalities: profile?.stylePersonality,
-    hasClosetItems: closetCount > 0,
-    closetCount,
-    recentSessions
-  });
+  return { authed: true as const, sessions, reviewCount };
 }
 
 export default function StyleMeIndex() {
-  const { hasProfile, stylePersonality, hasClosetItems, closetCount, recentSessions } =
-    useLoaderData<typeof loader>();
+  const data = useLoaderData<typeof loader>();
+  const { sessions, reviewCount } = data;
+  const authed = data.authed;
 
   return (
-    <div className="sm-page">
-      <div className="sm-inner">
+    <MyNaiaLayout currentPath="/style-me">
 
-        <div style={{ marginBottom: "40px" }}>
-          <p className="sm-eyebrow" style={{ marginBottom: "12px" }}>Style Me, nAia</p>
-          <h1 className="sm-heading">What are you wearing today?</h1>
-          <p className="sm-sub" style={{ marginBottom: "0" }}>Tell me how you're feeling and I'll create the perfect look for you.</p>
-        </div>
-
-        <div style={{ marginBottom: "32px" }}>
-          <div className="sm-status-card">
-            <div className={`sm-status-icon${hasProfile ? " sm-status-icon--ok" : ""}`}>
-              {hasProfile ? "✓" : "!"}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p className="sm-status-label">
-                {hasProfile ? "Style Profile Complete" : "Style Profile Incomplete"}
-              </p>
-              <p className="sm-status-desc">
-                {hasProfile
-                  ? `Your style: ${stylePersonality || "Discovering..."}`
-                  : "Help nAia understand your style better"}
-              </p>
-            </div>
-            {!hasProfile && (
-              <Link to="/apps/naia-stylist/onboarding/step/1" className="sm-status-link">
-                Start →
-              </Link>
-            )}
+      {/* Start a new session */}
+      <section className="mn-section-shell" style={{ borderTop: 0, paddingTop: 0 }}>
+        <div className="mn-section-shell-header">
+          <div>
+            <p className="mn-section-shell-eyebrow">nAia StyleMe</p>
+            <h1 className="mn-section-shell-title">The creative brief.</h1>
           </div>
+        </div>
+        <p className="mn-section-shell-desc">
+          Tell nAia your mood, the occasion, and how you want to feel — it will build the
+          complete look.
+        </p>
 
-          <div className="sm-status-card">
-            <div className={`sm-status-icon${hasClosetItems ? " sm-status-icon--ok" : ""}`}>
-              {hasClosetItems ? "👗" : "📸"}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p className="sm-status-label">
-                {hasClosetItems ? `${closetCount} items in closet` : "Wardrobe empty"}
-              </p>
-              <p className="sm-status-desc">
-                {hasClosetItems
-                  ? "Ready to create outfits from your pieces"
-                  : "Upload items to style from your own closet"}
-              </p>
-            </div>
-            <Link to="/closet/upload" className="sm-status-link">
-              {hasClosetItems ? "Add more →" : "Upload →"}
+        {authed ? (
+          <div className="mn-styleme-start-box" style={{ marginTop: "var(--naia-sp-8)" }}>
+            <p className="mn-detail-row-label" style={{ marginBottom: "var(--naia-sp-4)" }}>
+              New Session
+            </p>
+            <Link to="/style-me/mood" className="mn-btn-primary">
+              Start a New Session
             </Link>
           </div>
-        </div>
-
-        <Link to="/style-me/mood" className="sm-cta">
-          Let's Create Your Look
-        </Link>
-        <p className="sm-cta-note">Works best with your closet, but I can also suggest new pieces.</p>
-
-        {recentSessions.length > 0 && (
-          <div style={{ marginTop: "48px" }}>
-            <p className="sm-eyebrow" style={{ marginBottom: "16px" }}>Recent Looks</p>
-            <div className="sm-recent-grid">
-              {recentSessions.map((session: any) => (
-                <div key={session.id}>
-                  <Link
-                    to={`/style-me/result?sessionId=${session.id}`}
-                    className="sm-recent-card"
-                  >
-                    {session.suggestions[0]?.heroImageUrl ? (
-                      <img
-                        src={session.suggestions[0].heroImageUrl}
-                        alt={session.suggestions[0].outfitName || "Recent outfit"}
-                      />
-                    ) : (
-                      <span style={{ fontSize: "28px" }}>👗</span>
-                    )}
-                  </Link>
-                  <p className="sm-recent-label">
-                    {session.mood} · {session.occasion}
-                  </p>
-                </div>
-              ))}
-            </div>
+        ) : (
+          <div className="mn-styleme-start-box" style={{ marginTop: "var(--naia-sp-8)" }}>
+            <p className="mn-state-note" style={{ marginBottom: "var(--naia-sp-4)" }}>
+              Sign in to start a StyleMe session and access your full style history.
+            </p>
+            <Link to="/auth/shopify/login?return_to=/style-me" className="mn-btn-primary">
+              Sign In to Continue
+            </Link>
           </div>
         )}
+      </section>
 
-        <div className="sm-how-it-works">
-          <p className="sm-eyebrow" style={{ marginBottom: "20px" }}>How It Works</p>
-          {[
-            { step: "1", emoji: "🌸", text: "Tell me your mood" },
-            { step: "2", emoji: "💭", text: "Share how you want to feel" },
-            { step: "3", emoji: "🎯", text: "Pick the occasion" },
-            { step: "4", emoji: "👗", text: "Choose your source — closet, nAia, or both" },
-            { step: "5", emoji: "✨", text: "Get your complete look with styling tips" },
-          ].map(({ step, emoji, text }) => (
-            <div key={step} className="sm-how-step">
-              <div className="sm-how-step-num">{step}</div>
-              <span style={{ fontSize: "20px" }}>{emoji}</span>
-              <span className="sm-how-step-text">{text}</span>
-            </div>
-          ))}
-        </div>
+      {/* Recent feedback count */}
+      {reviewCount > 0 && (
+        <section className="mn-section-rule">
+          <div className="mn-section-rule-header">
+            <span className="mn-section-rule-eyebrow">Your Feedback</span>
+          </div>
+          <p className="mn-section-shell-desc" style={{ marginTop: 0 }}>
+            You&#8217;ve reviewed {reviewCount} {reviewCount === 1 ? "look" : "looks"}.
+            nAia uses your feedback to refine future sessions.
+          </p>
+        </section>
+      )}
 
-      </div>
-    </div>
+      {/* Previous looks */}
+      {sessions.length > 0 ? (
+        <section className="mn-section-rule">
+          <div className="mn-section-rule-header">
+            <span className="mn-section-rule-eyebrow">Previous Looks</span>
+          </div>
+          <div className="mn-styleme-look-grid">
+            {sessions.map((session) => {
+              const suggestion = session.suggestions[0];
+              return (
+                <div key={session.id} className="mn-styleme-look-item">
+                  <time
+                    className="mn-styleme-look-date"
+                    dateTime={new Date(session.createdAt).toISOString()}
+                  >
+                    {fmtDate(session.createdAt)}
+                  </time>
+                  <Link
+                    to={`/style-me/result?sessionId=${session.id}`}
+                    className="mn-styleme-look-title"
+                  >
+                    {suggestion?.outfitName ?? "nAia Look"}
+                  </Link>
+                  {session.occasion && (
+                    <p className="mn-styleme-look-occasion">{session.occasion}</p>
+                  )}
+                  {session.currentMood && (
+                    <div className="mn-styleme-look-tags">
+                      <span className="mn-styleme-look-tag">{session.currentMood}</span>
+                    </div>
+                  )}
+                  <div className="mn-styleme-look-actions">
+                    <Link
+                      to={`/style-me/result?sessionId=${session.id}`}
+                      className="mn-styleme-look-action"
+                    >
+                      View look
+                    </Link>
+                    {!session.review && (
+                      <Link
+                        to={`/post-wear-review?sessionId=${session.id}`}
+                        className="mn-styleme-look-action"
+                      >
+                        Leave feedback
+                      </Link>
+                    )}
+                    {session.review && (
+                      <span
+                        style={{
+                          fontFamily: "var(--naia-ff-ui)",
+                          fontSize: "0.68rem",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.28em",
+                          color: "var(--naia-ok)",
+                        }}
+                      >
+                        Reviewed
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : authed ? (
+        <section className="mn-section-rule">
+          <div className="mn-section-rule-header">
+            <span className="mn-section-rule-eyebrow">Previous Looks</span>
+          </div>
+          <p className="mn-state-note">
+            Your StyleMe looks will appear here after your first session.
+          </p>
+        </section>
+      ) : null}
+
+    </MyNaiaLayout>
   );
 }
