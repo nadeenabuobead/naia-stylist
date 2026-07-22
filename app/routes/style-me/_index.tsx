@@ -53,131 +53,170 @@ export default function StyleMeIndex() {
   const authed = data.authed;
 
   return (
-    <MyNaiaLayout currentPath="/style-me">
+    <MyNaiaLayout>
+      <div className="mn-page-sections">
 
-      {/* Start a new session */}
-      <section className="mn-section-shell" style={{ borderTop: 0, paddingTop: 0 }}>
-        <div className="mn-section-shell-header">
-          <div>
-            <p className="mn-section-shell-eyebrow">nAia StyleMe</p>
-            <h1 className="mn-section-shell-title">The creative brief.</h1>
+        {/* ── Dark StyleMe hero ── */}
+        <div className="mn-styleme-hero">
+          <div className="mn-styleme-hero-bg" aria-hidden="true" />
+          <div className="mn-styleme-hero-inner">
+            <div className="mn-styleme-hero-eyebrow">nAia StyleMe</div>
+            <h1 className="mn-styleme-hero-title">The Creative Brief.</h1>
+            <p className="mn-styleme-hero-sub">
+              Tell nAia your mood, the occasion, and how you want to feel — it builds the complete look.
+            </p>
+            <div className="mn-styleme-hero-actions">
+              {authed ? (
+                <Link to="/style-me/mood" className="mn-styleme-btn">
+                  Start a New Session
+                </Link>
+              ) : (
+                <>
+                  <Link to="/auth/shopify/login?return_to=/style-me" className="mn-styleme-btn">
+                    Sign In to Continue
+                  </Link>
+                  <span className="mn-styleme-link">
+                    Sign in to unlock personalised looks
+                  </span>
+                </>
+              )}
+            </div>
           </div>
         </div>
-        <p className="mn-section-shell-desc">
-          Tell nAia your mood, the occasion, and how you want to feel — it will build the
-          complete look.
-        </p>
 
-        {authed ? (
-          <div className="mn-styleme-start-box" style={{ marginTop: "var(--naia-sp-8)" }}>
-            <p className="mn-detail-row-label" style={{ marginBottom: "var(--naia-sp-4)" }}>
-              New Session
-            </p>
-            <Link to="/style-me/mood" className="mn-btn-primary">
-              Start a New Session
-            </Link>
-          </div>
-        ) : (
-          <div className="mn-styleme-start-box" style={{ marginTop: "var(--naia-sp-8)" }}>
-            <p className="mn-state-note" style={{ marginBottom: "var(--naia-sp-4)" }}>
-              Sign in to start a StyleMe session and access your full style history.
-            </p>
-            <Link to="/auth/shopify/login?return_to=/style-me" className="mn-btn-primary">
-              Sign In to Continue
-            </Link>
-          </div>
+        {/* ── Feedback count ── */}
+        {reviewCount > 0 && (
+          <section className="mn-section">
+            <div className="mn-section-head">
+              <div className="mn-eyebrow">Your Feedback</div>
+            </div>
+            <div className="mn-section-body">
+              <p style={{ fontSize: "0.9rem", lineHeight: 1.75, color: "var(--fg-75)", maxWidth: "36rem", margin: 0 }}>
+                You&#8217;ve reviewed {reviewCount} {reviewCount === 1 ? "look" : "looks"}.
+                nAia uses your feedback to refine future sessions.
+              </p>
+            </div>
+          </section>
         )}
-      </section>
 
-      {/* Recent feedback count */}
-      {reviewCount > 0 && (
-        <section className="mn-section-rule">
-          <div className="mn-section-rule-header">
-            <span className="mn-section-rule-eyebrow">Your Feedback</span>
-          </div>
-          <p className="mn-section-shell-desc" style={{ marginTop: 0 }}>
-            You&#8217;ve reviewed {reviewCount} {reviewCount === 1 ? "look" : "looks"}.
-            nAia uses your feedback to refine future sessions.
-          </p>
-        </section>
-      )}
-
-      {/* Previous looks */}
-      {sessions.length > 0 ? (
-        <section className="mn-section-rule">
-          <div className="mn-section-rule-header">
-            <span className="mn-section-rule-eyebrow">Previous Looks</span>
-          </div>
-          <div className="mn-styleme-look-grid">
-            {sessions.map((session) => {
-              const suggestion = session.suggestions[0];
-              return (
-                <div key={session.id} className="mn-styleme-look-item">
-                  <time
-                    className="mn-styleme-look-date"
-                    dateTime={new Date(session.createdAt).toISOString()}
-                  >
-                    {fmtDate(session.createdAt)}
-                  </time>
-                  <Link
-                    to={`/style-me/result?sessionId=${session.id}`}
-                    className="mn-styleme-look-title"
-                  >
-                    {suggestion?.outfitName ?? "nAia Look"}
-                  </Link>
-                  {session.occasion && (
-                    <p className="mn-styleme-look-occasion">{session.occasion}</p>
-                  )}
-                  {session.currentMood && (
-                    <div className="mn-styleme-look-tags">
-                      <span className="mn-styleme-look-tag">{session.currentMood}</span>
-                    </div>
-                  )}
-                  <div className="mn-styleme-look-actions">
-                    <Link
-                      to={`/style-me/result?sessionId=${session.id}`}
-                      className="mn-styleme-look-action"
-                    >
-                      View look
-                    </Link>
-                    {!session.review && (
+        {/* ── Previous looks ── */}
+        {sessions.length > 0 ? (
+          <section className="mn-section">
+            <div className="mn-section-head">
+              <div className="mn-eyebrow">Previous Looks</div>
+            </div>
+            <div className="mn-section-body">
+              <style>{`
+                .mn-styleme-looks {
+                  display: grid;
+                  grid-template-columns: 1fr 1fr;
+                  gap: 1.5rem;
+                }
+                @media (min-width: 640px) {
+                  .mn-styleme-looks {
+                    grid-template-columns: repeat(3, 1fr);
+                    gap: 2rem;
+                  }
+                }
+              `}</style>
+              <div className="mn-styleme-looks">
+                {sessions.map((session) => {
+                  const suggestion = session.suggestions[0];
+                  return (
+                    <div key={session.id} className="mn-look-card">
                       <Link
-                        to={`/post-wear-review?sessionId=${session.id}`}
-                        className="mn-styleme-look-action"
+                        to={`/style-me/result?sessionId=${session.id}`}
+                        className="mn-look-preview"
                       >
-                        Leave feedback
+                        {suggestion?.heroImageUrl ? (
+                          <img
+                            src={suggestion.heroImageUrl}
+                            alt={suggestion.outfitName ?? "StyleMe look"}
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          />
+                        ) : (
+                          <span style={{
+                            fontSize: "0.6rem",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.24em",
+                            color: "var(--fg-40)",
+                          }}>
+                            No Preview
+                          </span>
+                        )}
+                        <span className="mn-look-badge">Look</span>
                       </Link>
-                    )}
-                    {session.review && (
-                      <span
-                        style={{
-                          fontFamily: "var(--naia-ff-ui)",
-                          fontSize: "0.68rem",
-                          textTransform: "uppercase",
-                          letterSpacing: "0.28em",
-                          color: "var(--naia-ok)",
-                        }}
+                      <time
+                        className="mn-look-date"
+                        dateTime={new Date(session.createdAt).toISOString()}
                       >
-                        Reviewed
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      ) : authed ? (
-        <section className="mn-section-rule">
-          <div className="mn-section-rule-header">
-            <span className="mn-section-rule-eyebrow">Previous Looks</span>
-          </div>
-          <p className="mn-state-note">
-            Your StyleMe looks will appear here after your first session.
-          </p>
-        </section>
-      ) : null}
+                        {fmtDate(session.createdAt)}
+                      </time>
+                      <Link
+                        to={`/style-me/result?sessionId=${session.id}`}
+                        className="mn-look-title"
+                      >
+                        {suggestion?.outfitName ?? "nAia Look"}
+                      </Link>
+                      {session.occasion && (
+                        <p className="mn-look-meta">{session.occasion}</p>
+                      )}
+                      {session.currentMood && (
+                        <div className="mn-look-tags">
+                          <span className="mn-look-tag">{session.currentMood}</span>
+                        </div>
+                      )}
+                      <div className="mn-look-actions">
+                        <Link
+                          to={`/style-me/result?sessionId=${session.id}`}
+                          className="mn-look-action-link"
+                        >
+                          View look
+                        </Link>
+                        {!session.review ? (
+                          <>
+                            <span className="mn-look-dot">·</span>
+                            <Link
+                              to={`/post-wear-review?sessionId=${session.id}`}
+                              className="mn-look-action-link"
+                            >
+                              Leave feedback
+                            </Link>
+                          </>
+                        ) : (
+                          <>
+                            <span className="mn-look-dot">·</span>
+                            <span style={{
+                              fontSize: "0.62rem",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.24em",
+                              color: "oklch(0.4 0.12 155)",
+                            }}>
+                              Reviewed
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        ) : authed ? (
+          <section className="mn-section">
+            <div className="mn-section-head">
+              <div className="mn-eyebrow">Previous Looks</div>
+            </div>
+            <div className="mn-section-body">
+              <p className="mn-state-note">
+                Your StyleMe looks will appear here after your first session.
+              </p>
+            </div>
+          </section>
+        ) : null}
 
+      </div>
     </MyNaiaLayout>
   );
 }

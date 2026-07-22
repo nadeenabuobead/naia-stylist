@@ -1,7 +1,7 @@
 import { useLoaderData, Link } from "react-router";
 import type { LinksFunction, LoaderFunctionArgs } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
-import { prisma } from "~/lib/prisma.server";
+import prisma from "~/db.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
@@ -10,54 +10,18 @@ export const links: LinksFunction = () => [
 ];
 
 const QUOTES = [
-  {
-    text: "On a day when nothing feels right, a great fabric next to the skin changes something.",
-    attribution: "nAia Editorial Note",
-  },
-  {
-    text: "Dressing is a small, daily rehearsal for the person you are becoming.",
-    attribution: "nAia Editorial Note",
-  },
-  {
-    text: "Ease is not the absence of effort. It is effort placed where no one can see it.",
-    attribution: "nAia Editorial Note",
-  },
-  {
-    text: "A wardrobe is a quiet argument you have with yourself about who you are today.",
-    attribution: "nAia Editorial Note",
-  },
-  {
-    text: "The right piece rarely announces itself. It simply stops feeling like a decision.",
-    attribution: "nAia Editorial Note",
-  },
-  {
-    text: "Confidence often begins at the shoulder, the wrist, the hem — small places, worn well.",
-    attribution: "nAia Editorial Note",
-  },
-  {
-    text: "Clothes remember the days you wore them. Choose the ones you want to remember back.",
-    attribution: "nAia Editorial Note",
-  },
-  {
-    text: "Style is a way of being on good terms with the mirror.",
-    attribution: "nAia Editorial Note",
-  },
-  {
-    text: "A silhouette is a sentence. Keep yours short and true.",
-    attribution: "nAia Editorial Note",
-  },
-  {
-    text: "The most personal thing you can wear is what you already understand.",
-    attribution: "nAia Editorial Note",
-  },
-  {
-    text: "Some mornings, elegance is simply the courage to keep it plain.",
-    attribution: "nAia Editorial Note",
-  },
-  {
-    text: "A colour worn often becomes a kind of signature you did not know you were writing.",
-    attribution: "nAia Editorial Note",
-  },
+  { text: "On a day when nothing feels right, a great fabric next to the skin changes something.", attribution: "nAia Editorial Note" },
+  { text: "Dressing is a small, daily rehearsal for the person you are becoming.", attribution: "nAia Editorial Note" },
+  { text: "Ease is not the absence of effort. It is effort placed where no one can see it.", attribution: "nAia Editorial Note" },
+  { text: "A wardrobe is a quiet argument you have with yourself about who you are today.", attribution: "nAia Editorial Note" },
+  { text: "The right piece rarely announces itself. It simply stops feeling like a decision.", attribution: "nAia Editorial Note" },
+  { text: "Confidence often begins at the shoulder, the wrist, the hem — small places, worn well.", attribution: "nAia Editorial Note" },
+  { text: "Clothes remember the days you wore them. Choose the ones you want to remember back.", attribution: "nAia Editorial Note" },
+  { text: "Style is a way of being on good terms with the mirror.", attribution: "nAia Editorial Note" },
+  { text: "A silhouette is a sentence. Keep yours short and true.", attribution: "nAia Editorial Note" },
+  { text: "The most personal thing you can wear is what you already understand.", attribution: "nAia Editorial Note" },
+  { text: "Some mornings, elegance is simply the courage to keep it plain.", attribution: "nAia Editorial Note" },
+  { text: "A colour worn often becomes a kind of signature you did not know you were writing.", attribution: "nAia Editorial Note" },
 ];
 
 function getDailyQuote() {
@@ -75,9 +39,9 @@ function fmtDate(d: string | Date): string {
 }
 
 const VERDICT_LABELS: Record<string, string> = {
-  BUY: "Buy it",
+  BUY: "Buy — strong addition",
   SKIP: "Skip it",
-  MAYBE: "Maybe",
+  MAYBE: "Buy, but only if…",
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -91,14 +55,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         take: 3,
         orderBy: { createdAt: "desc" },
         select: {
-          id: true,
-          createdAt: true,
-          currentMood: true,
-          occasion: true,
-          suggestions: {
-            take: 1,
-            select: { id: true, heroImageUrl: true, outfitName: true },
-          },
+          id: true, createdAt: true, currentMood: true, occasion: true,
+          suggestions: { take: 1, select: { id: true, heroImageUrl: true, outfitName: true } },
           review: { select: { id: true } },
         },
       }),
@@ -120,11 +78,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return {
     firstName: customer.firstName ?? null,
     profile: customer.onboardingProfile,
-    sessions,
-    trendReport,
-    buyOrSkipHistory,
-    reviewCount,
-    closetCount,
+    sessions, trendReport, buyOrSkipHistory, reviewCount, closetCount,
   };
 }
 
@@ -134,338 +88,294 @@ export default function MyNaiaOverview() {
 
   const quote = getDailyQuote();
 
-  const attentionItems: Array<{ title: string; note: string; cta: string; href: string }> = [];
+  const attentionItems: Array<{ title: string; note: string; cta: string; to: string }> = [];
   if (!profile) {
-    attentionItems.push({
-      title: "Start your Style Passport",
-      note: "Your answers help nAia personalise every look it creates for you.",
-      cta: "Start",
-      href: "/full-style-profile",
-    });
+    attentionItems.push({ title: "Your Style Passport is incomplete", note: "A few details are still missing to refine your styling direction.", cta: "Continue", to: "/my-naia/style-passport" });
   } else if (!profile.completed) {
-    attentionItems.push({
-      title: "Continue your Style Passport",
-      note: "A few more answers help nAia refine its recommendations.",
-      cta: "Continue",
-      href: "/full-style-profile",
-    });
+    attentionItems.push({ title: "Your Style Passport is incomplete", note: "A few more answers help nAia refine its recommendations.", cta: "Continue", to: "/my-naia/style-passport" });
   }
   if (closetCount === 0) {
-    attentionItems.push({
-      title: "Add your first closet piece",
-      note: "Upload items so nAia can style you from your own wardrobe.",
-      cta: "Upload",
-      href: "/my-naia/closet",
-    });
+    attentionItems.push({ title: "Your closet is empty", note: "Upload pieces so nAia can style you from your own wardrobe.", cta: "Add a Piece", to: "/my-naia/closet" });
   }
 
   return (
-    <MyNaiaLayout currentPath="/my-naia">
+    <MyNaiaLayout>
+      <div className="mn-page-sections">
 
-      {/* 1 — Daily editorial quote */}
-      <section className="mn-section-rule">
-        <div className="mn-section-rule-header">
-          <span className="mn-section-rule-eyebrow">Today&#8217;s Note</span>
-        </div>
-        <blockquote className="mn-daily-quote">
-          <p className="mn-daily-quote-label">Editorial</p>
-          <p className="mn-daily-quote-text">&#8220;{quote.text}&#8221;</p>
-          <footer className="mn-daily-quote-attribution">&#8212; {quote.attribution}</footer>
-        </blockquote>
-      </section>
-
-      {/* 2 — StyleMe hero card */}
-      <div className="mn-hero-card">
-        <div className="mn-hero-card-bg" aria-hidden="true" />
-        <div className="mn-hero-card-inner">
-          <p className="mn-hero-card-eyebrow">nAia&#8217;s Eye</p>
-          <h2 className="mn-hero-card-title">
-            {firstName ? `Ready when you are, ${firstName}.` : "Ready when you are."}
+        {/* Welcome */}
+        <section>
+          <div className="mn-eyebrow">Welcome back</div>
+          <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "0.75rem", fontSize: "clamp(2.25rem,6vw,3.75rem)", lineHeight: 0.95, letterSpacing: "0.02em", textTransform: "uppercase" }}>
+            <span style={{ fontFamily: "var(--ff-editorial)", fontStyle: "italic", color: "var(--lipstick)", textTransform: "none", fontWeight: 400 }}>
+              {firstName ? `${firstName}.` : "Welcome."}
+            </span>
           </h2>
-          <p className="mn-hero-card-body">
-            Tell nAia your mood, occasion, and how you want to feel — and it will build the complete look.
-          </p>
-          <div className="mn-hero-card-actions">
-            <Link to="/style-me/mood" className="mn-hero-card-cta">
-              Start a New Session
-            </Link>
-            <Link to="/style-me" className="mn-hero-card-link">
-              Style Me overview &#8594;
-            </Link>
-          </div>
-        </div>
-      </div>
-
-      {/* 3 — Previous looks */}
-      {sessions.length > 0 && (
-        <section className="mn-section-rule" style={{ marginTop: "var(--naia-sp-10)" }}>
-          <div className="mn-section-rule-header">
-            <span className="mn-section-rule-eyebrow">My Looks</span>
-            <Link to="/style-me" className="mn-inline-link mn-section-rule-aside">
-              View all
-            </Link>
-          </div>
-          <div className="mn-looks-grid">
-            {sessions.map((session) => {
-              const suggestion = session.suggestions[0];
-              return (
-                <div key={session.id} className="mn-look-card">
-                  <Link
-                    to={`/style-me/result?sessionId=${session.id}`}
-                    className="mn-look-card-img"
-                    aria-label={`View look: ${suggestion?.outfitName ?? "nAia Look"}`}
-                  >
-                    {suggestion?.heroImageUrl ? (
-                      <img
-                        src={suggestion.heroImageUrl}
-                        alt={suggestion.outfitName ?? "nAia look"}
-                      />
-                    ) : (
-                      <span style={{ fontSize: "2rem", opacity: 0.3 }}>&#128247;</span>
-                    )}
-                    {session.review && (
-                      <span className="mn-look-card-badge">Reviewed</span>
-                    )}
-                  </Link>
-                  <time className="mn-look-card-date" dateTime={new Date(session.createdAt).toISOString()}>
-                    {fmtDate(session.createdAt)}
-                  </time>
-                  <Link
-                    to={`/style-me/result?sessionId=${session.id}`}
-                    className="mn-look-card-title"
-                  >
-                    {suggestion?.outfitName ?? "nAia Look"}
-                  </Link>
-                  {(session.currentMood || session.occasion) && (
-                    <p className="mn-look-card-meta">
-                      {[session.currentMood, session.occasion].filter(Boolean).join(" · ")}
-                    </p>
-                  )}
-                  <div className="mn-look-card-actions">
-                    <Link
-                      to={`/style-me/result?sessionId=${session.id}`}
-                      className="mn-look-card-action"
-                    >
-                      View look
-                    </Link>
-                    {!session.review && (
-                      <>
-                        <span className="mn-look-card-sep" aria-hidden="true">/</span>
-                        <Link
-                          to={`/post-wear-review?sessionId=${session.id}`}
-                          className="mn-look-card-action"
-                        >
-                          Leave feedback
-                        </Link>
-                      </>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
         </section>
-      )}
 
-      {/* 4 — Attention required */}
-      {attentionItems.length > 0 && (
-        <section className="mn-section-rule">
-          <div className="mn-section-rule-header">
-            <span className="mn-section-rule-eyebrow">Needs Attention</span>
-          </div>
-          <div className="mn-attention-list">
-            {attentionItems.map((item) => (
-              <div key={item.title} className="mn-attention-item">
-                <div>
-                  <p className="mn-attention-title">{item.title}</p>
-                  <p className="mn-attention-note">{item.note}</p>
-                </div>
-                <Link to={item.href} className="mn-attention-cta">
-                  {item.cta}
-                </Link>
-              </div>
-            ))}
-          </div>
+        {/* Daily quote */}
+        <section className="mn-daily-quote" aria-label="Today's Note">
+          <div className="mn-daily-quote-label">Today&#8217;s Note</div>
+          <blockquote className="mn-daily-quote-text">
+            &#8220;{quote.text}&#8221;
+          </blockquote>
+          <div className="mn-daily-quote-attr">&#8212; {quote.attribution}</div>
         </section>
-      )}
 
-      {/* 5 — Quick tools */}
-      <section className="mn-section-rule">
-        <div className="mn-section-rule-header">
-          <span className="mn-section-rule-eyebrow">Quick Tools</span>
-        </div>
-        <div className="mn-quick-tools-grid">
-          <Link to="/my-naia/closet" className="mn-quick-tool">
-            <p className="mn-quick-tool-title">My Closet</p>
-            <p className="mn-quick-tool-note">
-              {closetCount > 0
-                ? `${closetCount} ${closetCount === 1 ? "piece" : "pieces"} in your digital wardrobe.`
-                : "Upload your pieces so nAia can style from your own wardrobe."}
+        {/* StyleMe dark hero */}
+        <section className="mn-styleme-hero">
+          <div className="mn-styleme-hero-bg" aria-hidden="true" />
+          <div className="mn-styleme-hero-inner">
+            <div className="mn-styleme-hero-eyebrow">Your Personal Stylist</div>
+            <h3 className="mn-styleme-hero-title">
+              Style me{" "}
+              <span style={{ fontFamily: "var(--ff-editorial)", fontStyle: "italic", textTransform: "none", color: "oklch(0.955 0.012 70)" }}>
+                today.
+              </span>
+            </h3>
+            <p className="mn-styleme-hero-sub">
+              Get a look based on your mood, plans, comfort needs and Style Passport.
             </p>
-            <span className="mn-quick-tool-cta">Open closet &#8594;</span>
-          </Link>
-          <Link to="/my-naia/buy-or-skip" className="mn-quick-tool">
-            <p className="mn-quick-tool-title">Buy or Skip</p>
-            <p className="mn-quick-tool-note">
-              Unsure about a purchase? nAia checks it against your style and wardrobe.
-            </p>
-            <span className="mn-quick-tool-cta">Start a decision &#8594;</span>
-          </Link>
-          <div className="mn-quick-tool" style={{ opacity: 0.5, cursor: "not-allowed" }}>
-            <p className="mn-quick-tool-title">Trend Edits</p>
-            <p className="mn-quick-tool-note">
-              Curated seasonal edits filtered through your style profile.
-            </p>
-            <span className="mn-quick-tool-cta" style={{ fontStyle: "italic" }}>Coming soon</span>
-          </div>
-        </div>
-      </section>
-
-      {/* 6 — Trend Reports */}
-      <section className="mn-section-rule">
-        <div className="mn-section-rule-header">
-          <span className="mn-section-rule-eyebrow">Trend Reports</span>
-        </div>
-        {trendReport ? (
-          <div>
-            <p className="mn-detail-row-label" style={{ marginBottom: "var(--naia-sp-2)" }}>
-              Latest Report
-            </p>
-            <p className="mn-look-card-title" style={{ marginBottom: "var(--naia-sp-3)" }}>
-              {trendReport.title}
-            </p>
-            <p
-              className="mn-section-shell-desc"
-              style={{ marginTop: 0, marginBottom: "var(--naia-sp-5)" }}
-            >
-              {trendReport.summary}
-            </p>
-            <Link to={`/trends/${trendReport.slug}`} className="mn-inline-link">
-              Read report &#8594;
-            </Link>
-          </div>
-        ) : (
-          <p className="mn-state-note">
-            Trend reports will appear here once published. Check back soon.
-          </p>
-        )}
-      </section>
-
-      {/* 7 — Notices (only if >= 3 reviews) */}
-      {reviewCount >= 3 && (
-        <section className="mn-section-rule">
-          <div className="mn-section-rule-header">
-            <span className="mn-section-rule-eyebrow">nAia is Noticing</span>
-          </div>
-          <div className="mn-notice-list">
-            <div className="mn-notice-item">
-              <p className="mn-notice-label">Style Intelligence</p>
-              <p className="mn-notice-text">
-                Based on {reviewCount} reviews, nAia is building a clearer picture of what works for you.
-                Your feedback is being used to refine future looks.
-              </p>
+            <div className="mn-styleme-hero-actions">
+              <Link to="/style-me" className="mn-styleme-btn">
+                Start StyleMe
+              </Link>
+              <Link to="/style-me" className="mn-styleme-link">
+                How StyleMe Works
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M7 17 17 7M17 7H7M17 7v10" />
+                </svg>
+              </Link>
             </div>
           </div>
-          <p className="mn-notice-threshold-note">
-            Personalised pattern insights will appear once nAia has enough data to speak with confidence.
-          </p>
         </section>
-      )}
-      {reviewCount < 3 && sessions.length > 0 && (
-        <section className="mn-section-rule">
-          <div className="mn-section-rule-header">
-            <span className="mn-section-rule-eyebrow">nAia is Noticing</span>
-          </div>
-          <p className="mn-state-note">
-            Review {3 - reviewCount} more {3 - reviewCount === 1 ? "look" : "looks"} and nAia will begin
-            sharing what it&#8217;s observing about your style.
-          </p>
-        </section>
-      )}
 
-      {/* 8 — Buy or Skip history */}
-      <section className="mn-section-rule">
-        <div className="mn-section-rule-header">
-          <span className="mn-section-rule-eyebrow">Buy or Skip</span>
-          <Link to="/my-naia/buy-or-skip" className="mn-inline-link mn-section-rule-aside">
-            All decisions
-          </Link>
-        </div>
-        {buyOrSkipHistory.length > 0 ? (
-          <div className="mn-decision-list">
-            {buyOrSkipHistory.map((item) => (
-              <div key={item.id} className="mn-decision-row">
-                <p className="mn-decision-date">{fmtDate(item.createdAt)}</p>
-                <p className="mn-decision-product">{item.productName ?? "Unnamed item"}</p>
-                <p className="mn-decision-verdict">
-                  {VERDICT_LABELS[item.verdict] ?? item.verdict}
-                </p>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="mn-state-note">
-            No decisions yet.{" "}
-            <Link to="/buyskip" className="mn-inline-link mn-inline-link--muted">
-              Start your first Buy or Skip
-            </Link>
-          </p>
+        {/* What needs attention */}
+        {attentionItems.length > 0 && (
+          <section className="mn-section">
+            <div className="mn-section-head">
+              <div className="mn-eyebrow">What Needs Your Attention</div>
+            </div>
+            <div className="mn-section-body">
+              <ul className="mn-attention-list">
+                {attentionItems.map((a) => (
+                  <li key={a.to} className="mn-attention-item">
+                    <div className="mn-content" style={{ minWidth: 0 }}>
+                      <div className="mn-attention-title">{a.title}</div>
+                      <p className="mn-attention-note">{a.note}</p>
+                    </div>
+                    <Link to={a.to} className="mn-see-link" style={{ flexShrink: 0 }}>
+                      {a.cta}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </section>
         )}
-      </section>
 
-      {/* 9 — Orders (unavailable) */}
-      <section className="mn-section-rule">
-        <div className="mn-section-rule-header">
-          <span className="mn-section-rule-eyebrow">Orders</span>
-        </div>
-        <p className="mn-state-note">
-          Your NADINE order history will appear here once order integration is complete.
-        </p>
-      </section>
+        {/* Quick Tools */}
+        <section className="mn-section">
+          <div className="mn-section-head">
+            <div className="mn-eyebrow">Quick Tools</div>
+          </div>
+          <div className="mn-section-body" style={{ display: "grid", gap: "0.75rem" }}>
+            <div style={{ display: "grid", gap: "0.75rem" }}>
+              <style>{`@media (min-width:640px){.mn-quick-grid{grid-template-columns:repeat(3,1fr)!important}}`}</style>
+              <div className="mn-quick-grid" style={{ display: "grid", gap: "0.75rem" }}>
+                <Link to="/style-me" className="mn-quick-tool">
+                  <div className="mn-quick-tool-title">Start StyleMe</div>
+                  <p className="mn-quick-tool-note">A look for your mood and your plans.</p>
+                  <div className="mn-quick-tool-cta">Open <span aria-hidden>↗</span></div>
+                </Link>
+                <Link to="/my-naia/closet" className="mn-quick-tool">
+                  <div className="mn-quick-tool-title">Open My Closet</div>
+                  <p className="mn-quick-tool-note">Your saved wardrobe, ready to style.</p>
+                  <div className="mn-quick-tool-cta">Open <span aria-hidden>↗</span></div>
+                </Link>
+                <Link to="/my-naia/buy-or-skip" className="mn-quick-tool">
+                  <div className="mn-quick-tool-title">Buy or Skip</div>
+                  <p className="mn-quick-tool-note">Can&#8217;t decide whether to buy it? nAia will help you choose.</p>
+                  <div className="mn-quick-tool-cta">Get My Recommendation <span aria-hidden>↗</span></div>
+                </Link>
+              </div>
+            </div>
+          </div>
+        </section>
 
-      {/* 10 — Plan & Usage (unavailable) */}
-      <section className="mn-section-rule">
-        <div className="mn-section-rule-header">
-          <span className="mn-section-rule-eyebrow">Plan &amp; Usage</span>
-        </div>
-        <p className="mn-state-note">Your plan and usage details will appear here.</p>
-      </section>
+        {/* Recent Looks */}
+        {sessions.length > 0 && (
+          <section className="mn-section">
+            <div className="mn-section-head">
+              <div className="mn-eyebrow">Recent Looks</div>
+              <Link to="/style-me" className="mn-see-link">View All Looks</Link>
+            </div>
+            <div className="mn-section-body">
+              <style>{`@media (min-width:640px){.mn-looks-grid-inner{grid-template-columns:repeat(2,1fr)!important}}@media (min-width:1024px){.mn-looks-grid-inner{grid-template-columns:repeat(3,1fr)!important}}`}</style>
+              <div className="mn-looks-grid-inner" style={{ display: "grid", gap: "1.5rem" }}>
+                {sessions.map((session) => {
+                  const suggestion = session.suggestions[0];
+                  return (
+                    <article key={session.id} className="mn-look-card">
+                      <Link
+                        to={`/style-me/result?sessionId=${session.id}`}
+                        className="mn-look-preview"
+                        aria-label={`View look — ${suggestion?.outfitName ?? "nAia Look"}`}
+                      >
+                        {suggestion?.heroImageUrl ? (
+                          <img src={suggestion.heroImageUrl} alt={suggestion.outfitName ?? ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        ) : (
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.25 }} aria-hidden="true">
+                            <path d="M12 3 4.5 7.5v9L12 21l7.5-4.5v-9L12 3z" /><path d="m4.5 7.5 7.5 4.5 7.5-4.5M12 12v9" />
+                          </svg>
+                        )}
+                        {session.review && <span className="mn-look-badge">Reviewed</span>}
+                      </Link>
+                      <div className="mn-look-date">
+                        {fmtDate(session.createdAt)}{session.occasion ? ` · ${session.occasion}` : ""}
+                      </div>
+                      <Link to={`/style-me/result?sessionId=${session.id}`} className="mn-look-title">
+                        {suggestion?.outfitName ?? "nAia Look"}
+                      </Link>
+                      {session.currentMood && (
+                        <p className="mn-look-meta">
+                          <span style={{ color: "var(--fg-55)" }}>Mood ·</span> {session.currentMood}
+                        </p>
+                      )}
+                      <div className="mn-look-actions">
+                        <Link to={`/style-me/result?sessionId=${session.id}`} className="mn-look-action-link">View Look</Link>
+                        {!session.review && (
+                          <>
+                            <span className="mn-look-dot" aria-hidden="true">·</span>
+                            <Link to={`/post-wear-review?sessionId=${session.id}`} className="mn-look-action-link">Give Feedback</Link>
+                          </>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        )}
 
-      {/* 11 — Style Passport quick summary */}
-      <section className="mn-section-rule">
-        <div className="mn-section-rule-header">
-          <span className="mn-section-rule-eyebrow">Style Passport</span>
-          <Link to="/my-naia/style-passport" className="mn-inline-link mn-section-rule-aside">
-            View passport
-          </Link>
-        </div>
-        {profile ? (
-          <div>
-            {profile.stylePersonalities?.length > 0 && (
-              <p
-                className="mn-section-shell-desc"
-                style={{ marginTop: 0, marginBottom: "var(--naia-sp-4)" }}
-              >
-                {profile.stylePersonalities.join(", ")}
+        {/* What nAia Is Noticing */}
+        <section className="mn-section">
+          <div className="mn-section-head">
+            <div className="mn-eyebrow">What nAia Is Beginning To Notice</div>
+          </div>
+          <div className="mn-section-body">
+            {reviewCount >= 3 ? (
+              <>
+                <ul style={{ listStyle: "none", padding: 0, margin: 0, borderTop: "1px solid var(--fg-12)" }}>
+                  <li style={{ padding: "1.25rem 0", borderBottom: "1px solid var(--fg-12)" }}>
+                    <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--lipstick)" }}>Style Intelligence</div>
+                    <p style={{ marginTop: "0.5rem", fontSize: "0.95rem", lineHeight: 1.75, color: "var(--fg-85)" }}>
+                      Based on {reviewCount} post-wear reviews, nAia is building a picture of what consistently works for you.
+                    </p>
+                  </li>
+                </ul>
+                <p style={{ marginTop: "1.25rem", display: "flex", alignItems: "flex-start", gap: "0.5rem", fontSize: "0.78rem", lineHeight: 1.625, color: "var(--fg-55)" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: "0.125rem", flexShrink: 0 }} aria-hidden="true">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  </svg>
+                  nAia only shares what it is beginning to notice once there is enough gentle evidence.
+                </p>
+              </>
+            ) : (
+              <p className="mn-state-note">
+                Review {Math.max(0, 3 - reviewCount)} more {3 - reviewCount === 1 ? "look" : "looks"} and nAia will begin sharing what it&#8217;s observing about your style.
               </p>
             )}
-            <p className="mn-detail-row-label">
-              {profile.completed ? "Passport complete" : "Passport in progress"}
-            </p>
-            <Link to="/my-naia/style-passport" className="mn-inline-link" style={{ marginTop: "var(--naia-sp-5)", display: "inline-block" }}>
-              {profile.completed ? "Review passport" : "Continue passport"}
-            </Link>
           </div>
-        ) : (
-          <p className="mn-state-note">
-            Your Style Passport hasn&#8217;t been started yet.{" "}
-            <Link to="/full-style-profile" className="mn-inline-link mn-inline-link--muted">
-              Start now
-            </Link>
-          </p>
-        )}
-      </section>
+        </section>
 
+        {/* Latest Trend Edit */}
+        <section className="mn-section">
+          <div className="mn-section-head">
+            <div className="mn-eyebrow">Your Latest Trend Edit</div>
+            {trendReport && <Link to={`/trends/${trendReport.slug}`} className="mn-see-link">Open My Trend Edit</Link>}
+          </div>
+          <div className="mn-section-body">
+            {trendReport ? (
+              <div style={{ display: "grid", gap: "1.5rem" }}>
+                <style>{`@media(min-width:1024px){.mn-trend-grid{grid-template-columns:1.3fr 1fr!important;gap:2.5rem!important}}`}</style>
+                <div className="mn-trend-grid" style={{ display: "grid" }}>
+                  <div>
+                    <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg-55)" }}>Ready · Latest</div>
+                    <h3 style={{ fontFamily: "var(--ff-display)", fontWeight: 300, marginTop: "0.5rem", fontSize: "clamp(1.25rem,3vw,1.875rem)", lineHeight: 1.1, letterSpacing: "0.02em", textTransform: "uppercase" }}>{trendReport.title}</h3>
+                    {trendReport.summary && (
+                      <p style={{ marginTop: "0.75rem", maxWidth: "36rem", fontSize: "0.9rem", lineHeight: 1.75, color: "var(--fg-80)" }}>{trendReport.summary}</p>
+                    )}
+                  </div>
+                  <div style={{ aspectRatio: "4/5", background: "color-mix(in oklab, var(--bg) 92%, white)", border: "1px solid var(--fg-10)", display: "grid", placeItems: "center" }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.25 }} aria-hidden="true">
+                      <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="mn-state-note">Your personalised trend edit will appear here once published.</p>
+            )}
+          </div>
+        </section>
+
+        {/* Recent Buy or Skip */}
+        <section className="mn-section">
+          <div className="mn-section-head">
+            <div className="mn-eyebrow">Recent Buy Or Skip</div>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: "0.5rem 1.25rem" }}>
+              <Link to="/my-naia/buy-or-skip" className="mn-see-link">Start A New Decision</Link>
+            </div>
+          </div>
+          <div className="mn-section-body">
+            {buyOrSkipHistory.length > 0 ? (
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, borderTop: "1px solid var(--fg-12)" }}>
+                {buyOrSkipHistory.map((d) => (
+                  <li key={d.id} style={{ display: "grid", gap: "0.5rem", padding: "1.25rem 0", borderBottom: "1px solid var(--fg-12)" }}>
+                    <style>{`@media(min-width:640px){.mn-decision-row-inner{grid-template-columns:1.4fr 1fr!important;alignItems:baseline!important;gap:1.5rem!important}}`}</style>
+                    <div className="mn-decision-row-inner" style={{ display: "grid" }}>
+                      <div>
+                        <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.28em", color: "var(--fg-55)" }}>{fmtDate(d.createdAt)}</div>
+                        <div style={{ marginTop: "0.25rem", fontSize: "0.95rem", lineHeight: 1.625, color: "var(--fg-90, var(--fg))" }}>{d.productName ?? "Unnamed item"}</div>
+                      </div>
+                      <div style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.28em", color: "var(--lipstick)" }}>
+                        {VERDICT_LABELS[d.verdict] ?? d.verdict}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mn-state-note">
+                No decisions yet.{" "}
+                <Link to="/my-naia/buy-or-skip" style={{ color: "var(--lipstick)", textDecoration: "underline", textUnderlineOffset: "4px" }}>Start your first</Link>
+              </p>
+            )}
+          </div>
+        </section>
+
+        {/* Latest Order */}
+        <section className="mn-section">
+          <div className="mn-section-head">
+            <div className="mn-eyebrow">Latest Order</div>
+          </div>
+          <div className="mn-section-body">
+            <p className="mn-state-note">Your NADINE order history will appear here. <span style={{ fontSize: "0.75rem", color: "var(--fg-55)" }}>Opens in Shopify</span></p>
+          </div>
+        </section>
+
+        {/* Plan & Usage */}
+        <section className="mn-section">
+          <div className="mn-section-head">
+            <div className="mn-eyebrow">Plan &amp; Usage</div>
+          </div>
+          <div className="mn-section-body">
+            <p className="mn-state-note">Your plan and usage details will appear here.</p>
+          </div>
+        </section>
+
+      </div>
     </MyNaiaLayout>
   );
 }

@@ -15,6 +15,20 @@ const VERDICT_LABELS: Record<string, string> = {
   MAYBE: "Maybe",
 };
 
+const VERDICT_CSS: Record<string, string> = {
+  BUY: "mn-verdict-buy",
+  SKIP: "mn-verdict-skip",
+  MAYBE: "mn-verdict-maybe",
+};
+
+const EVIDENCE_ITEMS = [
+  "Style Passport",
+  "My Closet",
+  "Fit & Coverage Preferences",
+  "Previous Buy or Skip Decisions",
+  "Styling Feedback",
+];
+
 function fmtDate(d: string | Date): string {
   const date = new Date(d);
   const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -23,21 +37,12 @@ function fmtDate(d: string | Date): string {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
-
   const decisions = await prisma.buyOrSkipAnalysis.findMany({
     where: { customerId: customer.id },
     take: 10,
     orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      productName: true,
-      verdict: true,
-      createdAt: true,
-      fitsHerStyle: true,
-      styleNotes: true,
-    },
+    select: { id: true, productName: true, verdict: true, createdAt: true, fitsHerStyle: true, styleNotes: true },
   });
-
   return { decisions };
 }
 
@@ -45,111 +50,89 @@ export default function MyNaiaBuyOrSkip() {
   const { decisions } = useLoaderData<typeof loader>();
 
   return (
-    <MyNaiaLayout currentPath="/my-naia/buy-or-skip">
+    <MyNaiaLayout>
+      <div className="mn-page-sections">
 
-      <section className="mn-section-shell" style={{ borderTop: 0, paddingTop: 0 }}>
-        <div className="mn-section-shell-header">
-          <div>
-            <p className="mn-section-shell-eyebrow">Buy or Skip</p>
-            <h1 className="mn-section-shell-title">Your purchase decisions.</h1>
-          </div>
-          <Link to="/buyskip" className="mn-btn-primary">
-            Start a New Decision
-          </Link>
-        </div>
-        <p className="mn-section-shell-desc">
-          When you&#8217;re unsure about a piece, nAia checks it against your style profile,
-          wardrobe, and preferences — then tells you whether to buy it or walk away.
-        </p>
-      </section>
+        <Link to="/my-naia" className="mn-back-link">
+          <span aria-hidden="true">←</span> Back to Overview
+        </Link>
 
-      {decisions.length === 0 ? (
-        <div>
-          <p className="mn-state-note" style={{ marginBottom: "var(--naia-sp-6)" }}>
-            No decisions yet. The next time you&#8217;re unsure about a purchase, let
-            nAia weigh in.
-          </p>
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "var(--naia-sp-3)",
-              maxWidth: "32rem",
-            }}
-          >
-            <p
-              style={{
-                fontFamily: "var(--naia-ff-ui)",
-                fontSize: "0.65rem",
-                textTransform: "uppercase",
-                letterSpacing: "0.28em",
-                color: "rgba(34, 21, 22, 0.55)",
-                margin: 0,
-              }}
-            >
-              nAia weighs
-            </p>
-            {[
-              "Style Passport",
-              "My Closet",
-              "Fit & Coverage Preferences",
-              "Previous Buy or Skip Decisions",
-              "Styling Feedback",
-            ].map((item) => (
-              <span key={item} className="mn-bos-evidence-chip">
-                {item}
-              </span>
-            ))}
-            <div style={{ marginTop: "var(--naia-sp-2)" }}>
-              <Link to="/buyskip" className="mn-btn-primary">
-                Start a New Decision
-              </Link>
+        {/* Header */}
+        <section>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem" }}>
+            <div>
+              <div className="mn-eyebrow">Buy or Skip</div>
+              <h1 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "0.75rem", fontSize: "clamp(1.875rem,5vw,2.25rem)", lineHeight: 1, letterSpacing: "0.02em", textTransform: "uppercase" }}>
+                Your Purchase Decisions
+              </h1>
             </div>
-          </div>
-        </div>
-      ) : (
-        <>
-          <section className="mn-section-rule">
-            <div className="mn-section-rule-header">
-              <span className="mn-section-rule-eyebrow">
-                {decisions.length} {decisions.length === 1 ? "Decision" : "Decisions"}
-              </span>
-            </div>
-            <div className="mn-decision-list">
-              {decisions.map((item) => (
-                <div key={item.id} className="mn-decision-row">
-                  <p className="mn-decision-date">{fmtDate(item.createdAt)}</p>
-                  <p className="mn-decision-product">{item.productName ?? "Unnamed item"}</p>
-                  {item.styleNotes && (
-                    <p
-                      style={{
-                        fontFamily: "var(--naia-ff-body)",
-                        fontSize: "0.85rem",
-                        fontStyle: "italic",
-                        lineHeight: "1.6",
-                        color: "rgba(34, 21, 22, 0.65)",
-                        margin: 0,
-                      }}
-                    >
-                      {item.styleNotes}
-                    </p>
-                  )}
-                  <p className="mn-decision-verdict">
-                    {VERDICT_LABELS[item.verdict] ?? item.verdict}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <div style={{ marginTop: "var(--naia-sp-8)" }}>
-            <Link to="/buyskip" className="mn-btn-outline">
-              Start a New Decision
+            <Link to="/buyskip" className="mn-btn-primary" style={{ flexShrink: 0 }}>
+              New Decision
             </Link>
           </div>
-        </>
-      )}
+          <p style={{ marginTop: "1rem", maxWidth: "42rem", fontSize: "0.9rem", lineHeight: 1.75, color: "var(--fg-75)" }}>
+            When you&#8217;re unsure about a piece, nAia checks it against your style profile,
+            wardrobe, and preferences — then tells you whether to buy it or walk away.
+          </p>
+        </section>
 
+        {decisions.length === 0 ? (
+          <>
+            <p className="mn-state-note">
+              No decisions yet. The next time you&#8217;re unsure about a purchase, let nAia weigh in.
+            </p>
+
+            <section className="mn-section">
+              <div className="mn-section-head">
+                <div className="mn-eyebrow">nAia weighs</div>
+              </div>
+              <div className="mn-section-body">
+                <div className="mn-evidence-chips">
+                  {EVIDENCE_ITEMS.map((item) => (
+                    <div key={item} className="mn-evidence-chip">
+                      <span className="mn-evidence-chip-dot" aria-hidden="true" />
+                      {item}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: "2rem" }}>
+                  <Link to="/buyskip" className="mn-btn-primary">Start a New Decision</Link>
+                </div>
+              </div>
+            </section>
+          </>
+        ) : (
+          <section className="mn-section">
+            <div className="mn-section-head">
+              <div className="mn-eyebrow">
+                {decisions.length} {decisions.length === 1 ? "Decision" : "Decisions"}
+              </div>
+            </div>
+            <div className="mn-section-body">
+              <div className="mn-decision-list">
+                {decisions.map((item) => (
+                  <div key={item.id} className="mn-decision-row">
+                    <div className="mn-decision-info">
+                      <div className="mn-decision-date">{fmtDate(item.createdAt)}</div>
+                      <div className="mn-decision-product">{item.productName ?? "Unnamed item"}</div>
+                      {item.styleNotes && (
+                        <div className="mn-decision-notes">{item.styleNotes}</div>
+                      )}
+                    </div>
+                    <span className={`mn-verdict-pill ${VERDICT_CSS[item.verdict] ?? "mn-verdict-skip"}`}>
+                      {VERDICT_LABELS[item.verdict] ?? item.verdict}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: "2.5rem" }}>
+                <Link to="/buyskip" className="mn-btn-outline">Start a New Decision</Link>
+              </div>
+            </div>
+          </section>
+        )}
+
+      </div>
     </MyNaiaLayout>
   );
 }

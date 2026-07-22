@@ -10,172 +10,169 @@ export const links: LinksFunction = () => [
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
-  // onboardingProfile is included by resolveNaiaSession
   return { profile: customer.onboardingProfile };
 }
 
-function PassportRow({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | string[] | number | null | undefined;
-}) {
-  const displayValue = Array.isArray(value)
-    ? value.length > 0 ? value.join(", ") : null
+function DetailRow({ label, value }: { label: string; value: string | string[] | number | null | undefined }) {
+  const display = Array.isArray(value)
+    ? value.length > 0 ? value.join(" · ") : null
     : value != null && value !== "" ? String(value) : null;
 
   return (
     <div className="mn-detail-row">
-      <span className="mn-detail-row-label">{label}</span>
-      <span
-        className={`mn-detail-row-value${!displayValue ? " mn-detail-row-value--missing" : ""}`}
-      >
-        {displayValue ?? "Not yet answered"}
+      <span className="mn-detail-label">{label}</span>
+      <span className="mn-detail-value" style={!display ? { color: "var(--lipstick)" } : undefined}>
+        {display ?? "Missing — please complete"}
       </span>
     </div>
   );
 }
 
+const PASSPORT_SECTIONS = [
+  {
+    eyebrow: "Style Identity",
+    rows: [
+      { label: "Style Personalities", key: "stylePersonalities" },
+      { label: "Style Icons", key: "styleIcons" },
+      { label: "Favourite Colours", key: "favoriteColors" },
+      { label: "Colours to Avoid", key: "avoidColors" },
+    ],
+  },
+  {
+    eyebrow: "Lifestyle & Context",
+    rows: [
+      { label: "Lifestyle", key: "lifestyle" },
+      { label: "Dresses For", key: "dressesFor" },
+      { label: "Typical Day", key: "typicalDay" },
+    ],
+  },
+  {
+    eyebrow: "How You Want to Feel",
+    rows: [
+      { label: "Desired Feeling", key: "desiredFeeling" },
+      { label: "Desired Feelings (quiz)", key: "desiredFeelings" },
+      { label: "Who You're Becoming", key: "becoming" },
+      { label: "Desired Impression", key: "desiredImpression" },
+    ],
+  },
+  {
+    eyebrow: "Confidence & Challenges",
+    rows: [
+      { label: "Current Mood About Style", key: "currentMood" },
+      { label: "Confidence Blockers", key: "confidenceBlockers" },
+      { label: "Style Struggles", key: "styleStruggles" },
+      { label: "Style Support Needed", key: "styleSupport" },
+      { label: "Comfort Level (1–10)", key: "comfortLevel" },
+    ],
+  },
+  {
+    eyebrow: "Fit & Preferences",
+    rows: [
+      { label: "Fit Preferences", key: "fitPreferences" },
+      { label: "Areas to Highlight", key: "bodyFocusAreas" },
+      { label: "Areas to Minimise", key: "bodyAvoidAreas" },
+      { label: "Budget Range", key: "budgetRange" },
+      { label: "Shopping Habits", key: "shoppingHabits" },
+    ],
+  },
+  {
+    eyebrow: "Size Information",
+    rows: [
+      { label: "Top Size", key: "topSize" },
+      { label: "Bottom Size", key: "bottomSize" },
+      { label: "Dress Size", key: "dressSize" },
+      { label: "Shoe Size", key: "shoeSize" },
+    ],
+  },
+] as const;
+
 export default function MyNaiaStylePassport() {
   const { profile } = useLoaderData<typeof loader>();
 
-  if (!profile) {
-    return (
-      <MyNaiaLayout currentPath="/my-naia/style-passport">
-        <section className="mn-section-shell" style={{ borderTop: 0, paddingTop: 0 }}>
-          <div className="mn-section-shell-header">
-            <div>
-              <p className="mn-section-shell-eyebrow">Style Passport</p>
-              <h1 className="mn-section-shell-title">Your style, on record.</h1>
-            </div>
-          </div>
-          <p className="mn-section-shell-desc">
-            Your Style Passport hasn&#8217;t been started yet. Answer a few questions and
-            nAia will begin personalising every look it creates for you.
-          </p>
-          <div className="mn-passport-actions">
-            <Link to="/full-style-profile" className="mn-btn-primary">
-              Start Passport
-            </Link>
-          </div>
-        </section>
-      </MyNaiaLayout>
-    );
-  }
-
   return (
-    <MyNaiaLayout currentPath="/my-naia/style-passport">
+    <MyNaiaLayout>
+      <div className="mn-page-sections">
 
-      <section className="mn-section-shell" style={{ borderTop: 0, paddingTop: 0 }}>
-        <div className="mn-section-shell-header">
-          <div>
-            <p className="mn-section-shell-eyebrow">Style Passport</p>
-            <h1 className="mn-section-shell-title">Your style, on record.</h1>
-          </div>
-        </div>
-        {profile.completed ? (
-          <p className="mn-section-shell-desc">
-            Your passport is complete. Review and update your answers any time.
-          </p>
-        ) : (
-          <p className="mn-section-shell-desc">
-            Your passport is in progress. Continue answering to help nAia personalise further.
-          </p>
-        )}
-      </section>
-
-      {/* Section 1 — Style Identity */}
-      <section className="mn-section-rule">
-        <div className="mn-section-rule-header">
-          <span className="mn-section-rule-eyebrow">Style Identity</span>
-        </div>
-        <div className="mn-passport-rows">
-          <PassportRow label="Style Personalities" value={profile.stylePersonalities} />
-          <PassportRow label="Style Icons" value={profile.styleIcons} />
-          <PassportRow label="Favourite Colours" value={profile.favoriteColors} />
-          <PassportRow label="Colours to Avoid" value={profile.avoidColors} />
-        </div>
-      </section>
-
-      {/* Section 2 — Lifestyle */}
-      <section className="mn-section-rule">
-        <div className="mn-section-rule-header">
-          <span className="mn-section-rule-eyebrow">Lifestyle &amp; Context</span>
-        </div>
-        <div className="mn-passport-rows">
-          <PassportRow label="Lifestyle" value={profile.lifestyle} />
-          <PassportRow label="Dresses For" value={profile.dressesFor} />
-          <PassportRow label="Typical Day" value={profile.typicalDay} />
-        </div>
-      </section>
-
-      {/* Section 3 — How you want to feel */}
-      <section className="mn-section-rule">
-        <div className="mn-section-rule-header">
-          <span className="mn-section-rule-eyebrow">How You Want to Feel</span>
-        </div>
-        <div className="mn-passport-rows">
-          <PassportRow label="Desired Feeling" value={profile.desiredFeeling} />
-          <PassportRow label="Desired Feelings (quiz)" value={profile.desiredFeelings} />
-          <PassportRow label="Who You&#8217;re Becoming" value={profile.becoming} />
-          <PassportRow label="Desired Impression" value={profile.desiredImpression} />
-        </div>
-      </section>
-
-      {/* Section 4 — Confidence & Challenges */}
-      <section className="mn-section-rule">
-        <div className="mn-section-rule-header">
-          <span className="mn-section-rule-eyebrow">Confidence &amp; Challenges</span>
-        </div>
-        <div className="mn-passport-rows">
-          <PassportRow label="Current Mood About Style" value={profile.currentMood} />
-          <PassportRow label="Confidence Blockers" value={profile.confidenceBlockers} />
-          <PassportRow label="Style Struggles" value={profile.styleStruggles} />
-          <PassportRow label="Style Support Needed" value={profile.styleSupport} />
-          <PassportRow label="Comfort Level (1&#8211;10)" value={profile.comfortLevel} />
-        </div>
-      </section>
-
-      {/* Section 5 — Fit & Preferences */}
-      <section className="mn-section-rule">
-        <div className="mn-section-rule-header">
-          <span className="mn-section-rule-eyebrow">Fit &amp; Preferences</span>
-        </div>
-        <div className="mn-passport-rows">
-          <PassportRow label="Fit Preferences" value={profile.fitPreferences} />
-          <PassportRow label="Areas to Highlight" value={profile.bodyFocusAreas} />
-          <PassportRow label="Areas to Minimise" value={profile.bodyAvoidAreas} />
-          <PassportRow label="Budget Range" value={profile.budgetRange} />
-          <PassportRow label="Shopping Habits" value={profile.shoppingHabits} />
-        </div>
-      </section>
-
-      {/* Section 6 — Sizes */}
-      <section className="mn-section-rule">
-        <div className="mn-section-rule-header">
-          <span className="mn-section-rule-eyebrow">Size Information</span>
-        </div>
-        <div className="mn-passport-rows">
-          <PassportRow label="Top Size" value={profile.topSize} />
-          <PassportRow label="Bottom Size" value={profile.bottomSize} />
-          <PassportRow label="Dress Size" value={profile.dressSize} />
-          <PassportRow label="Shoe Size" value={profile.shoeSize} />
-        </div>
-      </section>
-
-      {/* CTAs */}
-      <div className="mn-passport-actions">
-        <Link to="/full-style-profile" className="mn-btn-primary">
-          {profile.completed ? "Update Answers" : "Continue Passport"}
+        <Link to="/my-naia" className="mn-back-link">
+          <span aria-hidden="true">←</span> Back to Overview
         </Link>
-        {profile.completed && (
-          <Link to="/my-naia" className="mn-btn-ghost">
-            Back to Overview
-          </Link>
-        )}
-      </div>
 
+        {/* Header section */}
+        <section>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", justifyContent: "space-between", gap: "1rem" }}>
+            <div>
+              <div className="mn-eyebrow">Style Passport</div>
+              <h1 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "0.75rem", fontSize: "clamp(1.875rem,5vw,2.25rem)", lineHeight: 1, letterSpacing: "0.02em", textTransform: "uppercase" }}>
+                Your Style Passport
+              </h1>
+            </div>
+            {/* Sample badge */}
+            <span className="mn-sample-badge">
+              <span className="mn-sample-dot" aria-hidden="true" />
+              Sample data
+            </span>
+          </div>
+          <p style={{ marginTop: "1rem", maxWidth: "42rem", fontSize: "0.9rem", lineHeight: 1.75, color: "var(--fg-75)" }}>
+            Your Style Passport guides every StyleMe recommendation. Update it whenever your
+            preferences evolve — changes flow through the rest of nAia immediately.
+          </p>
+        </section>
+
+        {/* Status */}
+        {profile && (
+          <div style={{ borderTop: "1px solid var(--fg-12)", paddingTop: "1.5rem" }}>
+            <div className="mn-eyebrow">Status</div>
+            <p style={{ marginTop: "0.5rem", fontSize: "0.95rem", color: "var(--fg-85)" }}>
+              {profile.completed ? "Your Style Passport is up to date." : "A few details are still missing."}
+            </p>
+          </div>
+        )}
+
+        {!profile ? (
+          <>
+            <p className="mn-state-note">
+              Your Style Passport hasn&#8217;t been started yet. Answer a few questions and
+              nAia will begin personalising every look it creates for you.
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
+              <Link to="/full-style-profile" className="mn-btn-primary">Start Passport</Link>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* All sections */}
+            {PASSPORT_SECTIONS.map((section) => (
+              <section key={section.eyebrow} className="mn-section">
+                <div className="mn-section-head">
+                  <div className="mn-eyebrow">{section.eyebrow}</div>
+                </div>
+                <div className="mn-section-body">
+                  {section.rows.map((row) => (
+                    <DetailRow
+                      key={row.key}
+                      label={row.label}
+                      value={(profile as Record<string, unknown>)[row.key] as string | string[] | number | null}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+
+            {/* Actions */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", alignItems: "center" }}>
+              <Link to="/full-style-profile" className="mn-btn-primary">
+                {profile.completed ? "Update Answers" : "Continue Passport"}
+              </Link>
+              {!profile.completed && (
+                <p className="mn-state-note" style={{ flex: "1 1 auto", margin: 0 }}>
+                  You&#8217;ll resume where you left off. All previous answers are preserved.
+                </p>
+              )}
+            </div>
+          </>
+        )}
+
+      </div>
     </MyNaiaLayout>
   );
 }
