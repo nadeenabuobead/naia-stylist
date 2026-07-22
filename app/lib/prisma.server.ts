@@ -1,18 +1,20 @@
-// app/lib/prisma.server.ts
 import { PrismaClient } from "@prisma/client";
+import { withAccelerate } from "@prisma/extension-accelerate";
 
-let prisma: PrismaClient;
+const makePrisma = () => new PrismaClient().$extends(withAccelerate());
+type ExtendedPrisma = ReturnType<typeof makePrisma>;
 
 declare global {
-  var __prisma: PrismaClient | undefined;
+  var __prisma: ExtendedPrisma | undefined;
 }
 
-// Prevent multiple instances during development hot reloads
+let prisma: ExtendedPrisma;
+
 if (process.env.NODE_ENV === "production") {
-  prisma = new PrismaClient();
+  prisma = makePrisma();
 } else {
   if (!global.__prisma) {
-    global.__prisma = new PrismaClient();
+    global.__prisma = makePrisma();
   }
   prisma = global.__prisma;
 }
