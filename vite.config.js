@@ -21,7 +21,11 @@ if (host === "localhost") {
 }
 
 export default defineConfig({
-  base: "/",
+  // ASSET_BASE_URL lets the build emit absolute asset URLs when this app is
+  // served through a path-based proxy (Lovable storefront → Remix rewrite).
+  // Without it, /assets/*.js references resolve against the proxy domain
+  // (Lovable) instead of this Remix deployment, causing 404s.
+  base: process.env.ASSET_BASE_URL || "/",
   server: {
     allowedHosts: [host],
     cors: { preflightContinue: true },
