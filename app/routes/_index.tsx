@@ -43,7 +43,7 @@ export default function HomePage() {
           height: "100svh",
           minHeight: "640px",
           overflow: "hidden",
-          backgroundImage: "url('/nadine/naia-hero.jpg')",
+          backgroundImage: "url('/nadine/naia-hero-dark.jpg')",
           backgroundPosition: "center",
           backgroundSize: "cover",
           color: "white",
@@ -119,6 +119,36 @@ export default function HomePage() {
               <span>{m}</span>
             </span>
           ))}
+        </div>
+      </section>
+
+      {/* ── EDITORIAL LOOKBOOK ── */}
+      <section style={{ background: "var(--bg)", overflow: "hidden" }}>
+        <div style={{ maxWidth: "100rem", margin: "0 auto", padding: "4rem 1.25rem 2rem" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "2rem" }}>
+            <div style={{ fontSize: "0.6rem", textTransform: "uppercase", letterSpacing: "0.34em", color: "var(--fg-55)" }}>fw'26 · chapter I</div>
+            <div style={{ fontStyle: "italic", color: "var(--lipstick)", fontSize: "0.85rem", fontFamily: "var(--ff-display)" }}>— becoming.</div>
+          </div>
+          {/* Three-column editorial grid */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(22rem, 100%), 1fr))", gap: "1.5rem", alignItems: "end" }}>
+            <figure style={{ margin: 0, aspectRatio: "3/4", overflow: "hidden", background: "#efeae0" }}>
+              <img src="/nadine/naia-look-01.jpg" alt="NADINE FW'26 — Look I" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center top" }} />
+            </figure>
+            <figure style={{ margin: 0, aspectRatio: "3/4", overflow: "hidden", background: "#e6dccb", marginTop: "3rem" }}>
+              <img src="/nadine/naia-look-02.jpg" alt="NADINE FW'26 — Look II" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center top" }} />
+            </figure>
+            <figure style={{ margin: 0, aspectRatio: "2/3", overflow: "hidden", background: "#d9c9b5" }}>
+              <img src="/nadine/naia-lookbook.jpg" alt="NADINE FW'26 — Lookbook" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            </figure>
+          </div>
+          <div style={{ marginTop: "2.5rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <p style={{ maxWidth: "28rem", fontSize: "0.9rem", lineHeight: 1.75, color: "var(--fg-75)" }}>
+              Eleven pieces shaped by original artwork, considered construction and the way clothing becomes personal.
+            </p>
+            <Link to="/naia-collection" style={{ fontSize: "0.65rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg)", textDecoration: "none", borderBottom: "1px solid var(--fg-45)", paddingBottom: "2px", fontFamily: "var(--ff-display)", whiteSpace: "nowrap" }}>
+              Shop Chapter I →
+            </Link>
+          </div>
         </div>
       </section>
 
