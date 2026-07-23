@@ -122,7 +122,7 @@ export async function requireCurrentNaiaCustomer(request: Request) {
   if (!customer) {
     const url      = new URL(request.url);
     const returnTo = encodeURIComponent(url.pathname);
-    throw redirect(`/auth/shopify/login?return_to=${returnTo}`);
+    throw redirect(`/dev/login?return_to=${returnTo}`);
   }
   return customer;
 }
