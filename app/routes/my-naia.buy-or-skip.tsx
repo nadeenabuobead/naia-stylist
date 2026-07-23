@@ -72,6 +72,9 @@ function Field({ label, placeholder }: { label: string; placeholder?: string }) 
         placeholder={placeholder}
         style={{
           width: "100%",
+          maxWidth: "100%",
+          minWidth: 0,
+          boxSizing: "border-box",
           border: "1px solid var(--fg-15)",
           background: "transparent",
           padding: "0.625rem 0.75rem",

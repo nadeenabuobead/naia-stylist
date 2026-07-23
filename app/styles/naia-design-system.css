@@ -1616,12 +1616,16 @@ body { font-family: var(--ff-ui); -webkit-font-smoothing: antialiased; }
 
 /* ── Responsive 2-column grids (Buy or Skip) ─────────────────────────── */
 /* sm: fixed 2-col — prevents auto-fill from creating 3+ columns at wide widths */
+/* min-width:0 on children prevents grid items defaulting to min-content, which
+   causes inputs to overflow and collide with the adjacent column. */
 .mn-grid-2col { display: grid; grid-template-columns: 1fr; }
-@media (min-width: 640px) { .mn-grid-2col { grid-template-columns: repeat(2, 1fr); } }
+.mn-grid-2col > * { min-width: 0; }
+@media (min-width: 640px) { .mn-grid-2col { grid-template-columns: repeat(2, 1fr); column-gap: 1.5rem; } }
 
 /* lg: fixed 2-col — for result blocks */
 .mn-grid-2col-lg { display: grid; grid-template-columns: 1fr; }
-@media (min-width: 1024px) { .mn-grid-2col-lg { grid-template-columns: repeat(2, 1fr); } }
+.mn-grid-2col-lg > * { min-width: 0; }
+@media (min-width: 1024px) { .mn-grid-2col-lg { grid-template-columns: repeat(2, 1fr); column-gap: 1.5rem; } }
 
 /* ── Digital Closet item row ──────────────────────────────────────────── */
 /* Stacks on mobile; 3-col [thumb | info | actions] at sm+ */

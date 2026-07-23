@@ -12,7 +12,7 @@ const SAMPLE = [
     total: "AED 3,940",
     items: "Silk Draped Blouse · Fluid Trouser",
     tracking: "In transit — Emirates Post",
-    returnable: false,
+    returnable: true,
   },
   {
     number: "NDN-1027",
