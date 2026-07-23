@@ -37,7 +37,7 @@ export default function App() {
             --c-tint-med: rgba(107,29,38,0.2);
             --ff-display:   "Oswald", "Arial Narrow", sans-serif;
             --ff-editorial: "Cormorant Garamond", Georgia, serif;
-            --ff-body:      "Cormorant Garamond", Georgia, serif;
+            --ff-body:      "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
             --ff-ui:        "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
           }
         `}</style>

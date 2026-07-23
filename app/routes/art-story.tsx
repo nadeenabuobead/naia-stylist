@@ -80,7 +80,7 @@ export default function ArtStoryPage() {
           <h1 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "1.5rem", fontSize: "clamp(3rem, 10vw, 9rem)", lineHeight: 0.88 }}>
             PAINTED, THEN
             <br />
-            <span style={{ fontStyle: "italic", color: "var(--lipstick)" }}>REBUILT.</span>
+            <span style={{ fontStyle: "italic", color: "var(--lipstick)", fontFamily: "var(--ff-editorial)" }}>REBUILT.</span>
           </h1>
         </div>
       </section>
@@ -118,7 +118,7 @@ export default function ArtStoryPage() {
         <div style={{ ...secNarrow, padding: "6rem 1.25rem" }}>
           <div style={{ fontSize: "0.65rem", textTransform: "uppercase", letterSpacing: "0.34em", color: "rgba(255,248,240,0.55)" }}>chapter 1</div>
           <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "1rem", fontSize: "clamp(2.5rem, 6vw, 4.5rem)", lineHeight: 0.95 }}>
-            FRAGMENTED <span style={{ fontStyle: "italic", color: "var(--lipstick)" }}>BECOMING.</span>
+            FRAGMENTED <span style={{ fontStyle: "italic", color: "var(--lipstick)", fontFamily: "var(--ff-editorial)" }}>BECOMING.</span>
           </h2>
           <div style={{ marginTop: "3rem", maxWidth: "42rem", display: "flex", flexDirection: "column", gap: "1.5rem", color: "rgba(255,248,240,0.75)", lineHeight: 1.75, fontSize: "1rem" }}>
             <p>Chapter I begins with a composition made from contrast: quiet ground, interrupted geometry, loose movement and controlled structure.</p>
@@ -136,7 +136,7 @@ export default function ArtStoryPage() {
           <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, fontSize: "clamp(2.5rem, 6vw, 4.5rem)", lineHeight: 0.95 }}>
             ONE ARTWORK.
             <br />
-            <span style={{ fontStyle: "italic", color: "var(--lipstick)" }}>eleven</span> INTERPRETATIONS.
+            <span style={{ fontStyle: "italic", color: "var(--lipstick)", fontFamily: "var(--ff-editorial)" }}>eleven</span> INTERPRETATIONS.
           </h2>
           <div style={{ marginTop: "2.5rem", maxWidth: "42rem", display: "flex", flexDirection: "column", gap: "1.5rem", color: "rgba(255,248,240,0.75)", lineHeight: 1.75, fontSize: "1rem" }}>
             <p>The artwork was scanned, separated, mirrored and rebuilt across cotton, chiffon, vegan leather and printed microsuede.</p>

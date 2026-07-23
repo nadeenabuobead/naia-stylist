@@ -33,11 +33,11 @@ export default function TrendReportsPage() {
             <div style={{ fontSize: "0.65rem", textTransform: "uppercase", letterSpacing: "0.34em", color: "var(--fg-55)" }}>current edit · fw'26</div>
             <h1 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "1.5rem", fontSize: "clamp(3.5rem, 10vw, 9rem)", lineHeight: 0.88 }}>
               trend<br />
-              <span style={{ fontStyle: "italic", color: "var(--lipstick)" }}>reports.</span>
+              <span style={{ fontStyle: "italic", color: "var(--lipstick)", fontFamily: "var(--ff-editorial)" }}>reports.</span>
             </h1>
           </div>
           <div style={{ maxWidth: "24rem" }}>
-            <p style={{ fontStyle: "italic", color: "var(--fg-75)", fontSize: "1.1rem", lineHeight: 1.65, fontFamily: "var(--ff-display)" }}>
+            <p style={{ fontStyle: "italic", color: "var(--fg-75)", fontSize: "1.1rem", lineHeight: 1.65, fontFamily: "var(--ff-editorial)" }}>
               Seasonal intelligence on the silhouettes, colours, materials and styling shifts worth paying attention to — and how to make them work in real life.
             </p>
             <div style={{ marginTop: "1.5rem", fontSize: "0.6rem", textTransform: "uppercase", letterSpacing: "0.32em", color: "var(--fg-55)" }}>
@@ -75,7 +75,7 @@ export default function TrendReportsPage() {
             <div style={{ position: "relative", minHeight: "22rem", background: "#d9c9b5" }}>
               <span style={{ position: "absolute", inset: "1.5rem", border: "1px solid rgba(42,30,23,0.1)" }} aria-hidden="true" />
               <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-end", padding: "2rem" }}>
-                <span style={{ fontStyle: "italic", color: "rgba(42,30,23,0.6)", fontSize: "0.875rem", fontFamily: "var(--ff-display)" }}>editorial artwork · fw'26</span>
+                <span style={{ fontStyle: "italic", color: "rgba(42,30,23,0.6)", fontSize: "0.875rem", fontFamily: "var(--ff-editorial)" }}>editorial artwork · fw'26</span>
               </div>
             </div>
           </div>
@@ -123,7 +123,7 @@ export default function TrendReportsPage() {
           <div style={{ fontSize: "0.6rem", textTransform: "uppercase", letterSpacing: "0.34em", color: "var(--fg-55)" }}>fashion intelligence</div>
           <div style={{ marginTop: "1.5rem", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(22rem, 100%), 1fr))", gap: "2.5rem", alignItems: "end" }}>
             <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, fontSize: "clamp(2rem, 5vw, 3.75rem)", lineHeight: 0.95 }}>
-              the new way<br />we get <span style={{ fontStyle: "italic", color: "var(--lipstick)" }}>dressed.</span>
+              the new way<br />we get <span style={{ fontStyle: "italic", color: "var(--lipstick)", fontFamily: "var(--ff-editorial)" }}>dressed.</span>
             </h2>
             <div>
               <p style={{ maxWidth: "30rem", fontSize: "1rem", lineHeight: 1.75, color: "var(--fg-75)" }}>
@@ -144,7 +144,7 @@ export default function TrendReportsPage() {
             <div>
               <div style={{ fontSize: "0.6rem", textTransform: "uppercase", letterSpacing: "0.34em", color: "rgba(255,248,240,0.55)" }}>personal trend edit</div>
               <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "1.5rem", fontSize: "clamp(2.5rem, 6vw, 4.5rem)", lineHeight: 0.9 }}>
-                make the<br />report <span style={{ fontStyle: "italic", color: "#e8c9a8" }}>yours.</span>
+                make the<br />report <span style={{ fontStyle: "italic", color: "#e8c9a8", fontFamily: "var(--ff-editorial)" }}>yours.</span>
               </h2>
               <p style={{ marginTop: "2rem", maxWidth: "30rem", fontSize: "1rem", lineHeight: 1.75, color: "rgba(255,248,240,0.75)" }}>
                 The public report explains the shift. Your Personal Trend Edit considers your Style Passport, Closet, saved pieces, previous choices and what you already own — then shows what is relevant to you, what to skip, and how to wear it.
@@ -167,7 +167,7 @@ export default function TrendReportsPage() {
               ].map((e) => (
                 <div key={e.k} style={{ background: "#2a1e17", padding: "1.5rem 2rem" }}>
                   <div style={{ fontSize: "0.55rem", textTransform: "uppercase", letterSpacing: "0.28em", color: "#e8c9a8" }}>{e.k}</div>
-                  <div style={{ marginTop: "0.75rem", fontStyle: "italic", color: "rgba(255,248,240,0.7)", fontFamily: "var(--ff-display)" }}>{e.v}</div>
+                  <div style={{ marginTop: "0.75rem", fontStyle: "italic", color: "rgba(255,248,240,0.7)", fontFamily: "var(--ff-editorial)" }}>{e.v}</div>
                 </div>
               ))}
             </div>

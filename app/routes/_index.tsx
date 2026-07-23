@@ -43,7 +43,7 @@ export default function HomePage() {
           height: "100svh",
           minHeight: "640px",
           overflow: "hidden",
-          backgroundImage: "url('/nadine/naia-hero-dark.jpg')",
+          backgroundImage: "url('/nadine/naia-hero.jpg')",
           backgroundPosition: "center",
           backgroundSize: "cover",
           color: "white",
@@ -122,36 +122,6 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ── EDITORIAL LOOKBOOK ── */}
-      <section style={{ background: "var(--bg)", overflow: "hidden" }}>
-        <div style={{ maxWidth: "100rem", margin: "0 auto", padding: "4rem 1.25rem 2rem" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "2rem" }}>
-            <div style={{ fontSize: "0.6rem", textTransform: "uppercase", letterSpacing: "0.34em", color: "var(--fg-55)" }}>fw'26 · chapter I</div>
-            <div style={{ fontStyle: "italic", color: "var(--lipstick)", fontSize: "0.85rem", fontFamily: "var(--ff-display)" }}>— becoming.</div>
-          </div>
-          {/* Three-column editorial grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(22rem, 100%), 1fr))", gap: "1.5rem", alignItems: "end" }}>
-            <figure style={{ margin: 0, aspectRatio: "3/4", overflow: "hidden", background: "#efeae0" }}>
-              <img src="/nadine/naia-look-01.jpg" alt="NADINE FW'26 — Look I" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center top" }} />
-            </figure>
-            <figure style={{ margin: 0, aspectRatio: "3/4", overflow: "hidden", background: "#e6dccb", marginTop: "3rem" }}>
-              <img src="/nadine/naia-look-02.jpg" alt="NADINE FW'26 — Look II" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center top" }} />
-            </figure>
-            <figure style={{ margin: 0, aspectRatio: "2/3", overflow: "hidden", background: "#d9c9b5" }}>
-              <img src="/nadine/naia-lookbook.jpg" alt="NADINE FW'26 — Lookbook" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-            </figure>
-          </div>
-          <div style={{ marginTop: "2.5rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <p style={{ maxWidth: "28rem", fontSize: "0.9rem", lineHeight: 1.75, color: "var(--fg-75)" }}>
-              Eleven pieces shaped by original artwork, considered construction and the way clothing becomes personal.
-            </p>
-            <Link to="/naia-collection" style={{ fontSize: "0.65rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg)", textDecoration: "none", borderBottom: "1px solid var(--fg-45)", paddingBottom: "2px", fontFamily: "var(--ff-display)", whiteSpace: "nowrap" }}>
-              Shop Chapter I →
-            </Link>
-          </div>
-        </div>
-      </section>
-
       {/* ── PRESS STRIP ── */}
       <section style={{ borderBottom: "1px solid var(--fg-10)" }}>
         <div style={{ maxWidth: "100rem", margin: "0 auto", padding: "2.5rem 1.25rem", display: "flex", flexDirection: "column", alignItems: "center", gap: "1.5rem" }}>
@@ -168,7 +138,7 @@ export default function HomePage() {
       <section style={{ background: "var(--bg)", overflow: "hidden" }}>
         <div style={{ maxWidth: "100rem", margin: "0 auto", padding: "4rem 1.25rem 2rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ fontSize: "0.65rem", textTransform: "uppercase", letterSpacing: "0.34em", color: "var(--fg-55)" }}>CHAPTER 01 / FW'26</div>
-          <div style={{ fontStyle: "italic", color: "var(--lipstick)", fontSize: "0.9rem", fontFamily: "var(--ff-display)" }}>— CHAPTER I COLLECTION</div>
+          <div style={{ fontStyle: "italic", color: "var(--lipstick)", fontSize: "0.9rem", fontFamily: "var(--ff-editorial)" }}>— CHAPTER I COLLECTION</div>
         </div>
 
         <div style={{ position: "relative" }}>
@@ -270,7 +240,7 @@ export default function HomePage() {
               <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "1.25rem", fontSize: "clamp(2.5rem, 7vw, 6rem)", lineHeight: 0.95 }}>
                 STYLED BY INTELLIGENCE.
                 <br />
-                <span style={{ fontStyle: "italic", color: "var(--lipstick)" }}>chosen for your life.</span>
+                <span style={{ fontStyle: "italic", color: "var(--lipstick)", fontFamily: "var(--ff-editorial)" }}>chosen for your life.</span>
               </h2>
             </div>
             <p style={{ maxWidth: "26rem", fontSize: "1rem", lineHeight: 1.75, color: "var(--fg-75)" }}>
@@ -316,7 +286,7 @@ export default function HomePage() {
           <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "1rem", fontSize: "clamp(2.5rem, 7vw, 6.5rem)", lineHeight: 0.95 }}>
             WE DO NOT BEGIN WITH A TREND.
             <br />
-            <span style={{ fontStyle: "italic", color: "var(--lipstick)" }}>we begin with a story.</span>
+            <span style={{ fontStyle: "italic", color: "var(--lipstick)", fontFamily: "var(--ff-editorial)" }}>we begin with a story.</span>
           </h2>
           <div style={{ marginTop: "3.5rem", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(18rem, 100%), 1fr))", gap: "2.5rem", fontSize: "1rem", lineHeight: 1.75, color: "var(--fg-75)" }}>
             <p>
@@ -344,7 +314,7 @@ export default function HomePage() {
               <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "0.75rem", fontSize: "clamp(2.5rem, 6vw, 4.5rem)" }}>FROM CANVAS TO CLOTH.</h2>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
-              <p style={{ maxWidth: "26rem", fontStyle: "italic", color: "rgba(255,248,240,0.8)", fontSize: "1.15rem", lineHeight: 1.65, fontFamily: "var(--ff-display)" }}>
+              <p style={{ maxWidth: "26rem", fontStyle: "italic", color: "rgba(255,248,240,0.8)", fontSize: "1.15rem", lineHeight: 1.65, fontFamily: "var(--ff-editorial)" }}>
                 Every chapter begins with an original work — painting, memory, texture — then moves through fabric, form and feeling until it becomes something made to be worn.
               </p>
               <Link to="/art-story" style={{ display: "inline-block", border: "1px solid rgba(255,248,240,0.8)", borderRadius: "9999px", padding: "0.875rem 2rem", fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--bg)", textDecoration: "none", fontFamily: "var(--ff-display)" }}>
@@ -376,7 +346,7 @@ export default function HomePage() {
           <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, fontSize: "clamp(2.5rem, 7vw, 7rem)", lineHeight: 0.95, color: "white", maxWidth: "60rem" }}>
             THE NEXT CHAPTER
             <br />
-            OF NADINE <span style={{ fontStyle: "italic", color: "rgba(255,255,255,0.9)" }}>begins here.</span>
+            OF NADINE <span style={{ fontStyle: "italic", color: "rgba(255,255,255,0.9)", fontFamily: "var(--ff-editorial)" }}>begins here.</span>
           </h2>
           <div style={{ marginTop: "2rem", display: "flex", flexWrap: "wrap", gap: "1rem" }}>
             <Link to="/naia-collection" style={pillStyle}>EXPLORE THE COLLECTION</Link>

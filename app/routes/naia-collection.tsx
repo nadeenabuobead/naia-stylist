@@ -28,7 +28,7 @@ const pieces: Piece[] = [
   { id: "belt-corset-skirt",     src: "/nadine/skirt.png",    n: "07", t: "Becoming Seen",         p: "AED —", note: "denim · corseted",       cat: "bottoms" },
   { id: "split-waist-denim",     src: "/nadine/denim.png",    n: "08", t: "Becoming Whole",        p: "AED —", note: "selvedge · rust wash",   cat: "bottoms" },
   { id: "chiffon-overlay-trouser", src: "/nadine/trouser.png",n: "09", t: "Becoming Clear",        p: "AED —", note: "wool + chiffon",         cat: "bottoms" },
-  { id: "corset-memory-gown",    src: "/nadine/print-memory.png", n: "10", t: "Becoming Her",     p: "AED —", note: "linen · printed sash",   cat: "dresses" },
+  { id: "corset-memory-gown",    src: "/nadine/look-morph-end.png", n: "10", t: "Becoming Her",     p: "AED —", note: "linen · printed sash",   cat: "dresses" },
 ];
 
 const tryOnEligible = new Set(["archive-crewneck", "asymmetric-blazer", "leather-drape-dress", "shawl-kimono", "corset-memory-gown"]);

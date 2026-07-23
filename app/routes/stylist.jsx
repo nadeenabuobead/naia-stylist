@@ -46,7 +46,7 @@ export default function StylistPage() {
             >
               STYLED BY
               <br />
-              <span style={{ fontStyle: "italic", color: "var(--lipstick)" }}>INTELLIGENCE.</span>
+              <span style={{ fontStyle: "italic", color: "var(--lipstick)", fontFamily: "var(--ff-editorial)" }}>INTELLIGENCE.</span>
             </h1>
             <div style={{ marginTop: "2rem", maxWidth: "42rem", display: "flex", flexDirection: "column", gap: "1.25rem", fontSize: "1rem", lineHeight: 1.75, color: "var(--fg-75)" }}>
               <p>A personal styling system for the way you actually live, dress and make decisions.</p>
@@ -65,7 +65,7 @@ export default function StylistPage() {
               <div style={{ fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.34em", color: "rgba(255,248,240,0.6)" }}>the system</div>
               <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "0.75rem", fontSize: "clamp(2.5rem, 6vw, 5rem)" }}>HOW IT WORKS</h2>
             </div>
-            <p style={{ maxWidth: "20rem", fontStyle: "italic", color: "rgba(255,248,240,0.75)", fontSize: "1.1rem", lineHeight: 1.6, fontFamily: "var(--ff-display)" }}>
+            <p style={{ maxWidth: "20rem", fontStyle: "italic", color: "rgba(255,248,240,0.75)", fontSize: "1.1rem", lineHeight: 1.6, fontFamily: "var(--ff-editorial)" }}>
               Five steps that turn preferences, wardrobe and daily life into clear styling guidance.
             </p>
           </div>
@@ -100,7 +100,7 @@ export default function StylistPage() {
           <div style={{ fontSize: "0.65rem", textTransform: "uppercase", letterSpacing: "0.34em", color: "var(--fg-55)" }}>your nAia</div>
           <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "1rem", fontSize: "clamp(2rem, 5vw, 4.5rem)", lineHeight: 0.95 }}>
             THE PARTS OF THE{" "}
-            <span style={{ fontStyle: "italic", color: "var(--lipstick)" }}>system.</span>
+            <span style={{ fontStyle: "italic", color: "var(--lipstick)", fontFamily: "var(--ff-editorial)" }}>system.</span>
           </h2>
           <div
             style={{
@@ -128,7 +128,7 @@ export default function StylistPage() {
               YOUR WARDROBE
               <br />
               COMES{" "}
-              <span style={{ fontStyle: "italic", color: "var(--lipstick)" }}>first.</span>
+              <span style={{ fontStyle: "italic", color: "var(--lipstick)", fontFamily: "var(--ff-editorial)" }}>first.</span>
             </h2>
             <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", fontSize: "1rem", lineHeight: 1.75, color: "var(--fg-75)" }}>
               <p>nAia does not begin by asking what else you should buy. It begins with what you already own, what you actually wear and what may genuinely be missing.</p>
@@ -148,7 +148,7 @@ export default function StylistPage() {
                 YOUR INFORMATION,
                 <br />
                 YOUR{" "}
-                <span style={{ fontStyle: "italic", color: "var(--lipstick)" }}>choice.</span>
+                <span style={{ fontStyle: "italic", color: "var(--lipstick)", fontFamily: "var(--ff-editorial)" }}>choice.</span>
               </h2>
             </div>
             <p style={{ fontSize: "1rem", lineHeight: 1.75, color: "var(--fg-75)", alignSelf: "center" }}>
@@ -165,7 +165,7 @@ export default function StylistPage() {
             READY TO MEET
             <br />
             YOUR{" "}
-            <span style={{ fontStyle: "italic", color: "var(--lipstick)" }}>nAia</span>?
+            <span style={{ fontStyle: "italic", color: "var(--lipstick)", fontFamily: "var(--ff-editorial)" }}>nAia</span>?
           </h2>
           <div style={{ marginTop: "3rem" }}>
             <Link

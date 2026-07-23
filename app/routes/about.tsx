@@ -60,7 +60,7 @@ export default function AboutPage() {
             <p>
               This is a new chapter, not a new beginning. NADINE returns with a clearer language: expressive pieces with a distinct point of view, designed to leave room for the woman wearing them.
             </p>
-            <p style={{ fontStyle: "italic", color: "var(--lipstick)", fontSize: "1.15rem", fontFamily: "var(--ff-display)" }}>
+            <p style={{ fontStyle: "italic", color: "var(--lipstick)", fontSize: "1.15rem", fontFamily: "var(--ff-editorial)" }}>
               Every body has a story to tell.
             </p>
           </div>
@@ -78,9 +78,6 @@ export default function AboutPage() {
                 <br />
                 <span style={{ fontStyle: "italic", color: "var(--lipstick)" }}>different</span> POINT OF VIEW
               </h2>
-              <figure style={{ margin: "2.5rem 0 0", aspectRatio: "3/4", overflow: "hidden", background: "#efeae0", maxWidth: "24rem", boxShadow: "0 20px 60px -10px rgba(60,30,15,0.3)" }}>
-                <img src="/nadine/naia-editorial-ref.webp" alt="NADINE — editorial" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              </figure>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", fontSize: "1rem", lineHeight: 1.75, color: "var(--fg-75)" }}>
               <p>
@@ -106,7 +103,7 @@ export default function AboutPage() {
               <p>
                 nAia extends the way NADINE thinks about clothing beyond the garment itself. It considers the customer's preferences, lifestyle, wardrobe and feedback to help her understand what works for her, style what she already owns and make more considered decisions.
               </p>
-              <p style={{ fontStyle: "italic", color: "var(--lipstick)", fontSize: "1.15rem", fontFamily: "var(--ff-display)" }}>
+              <p style={{ fontStyle: "italic", color: "var(--lipstick)", fontSize: "1.15rem", fontFamily: "var(--ff-editorial)" }}>
                 The technology remains in service of the fashion—not the other way around.
               </p>
             </div>
@@ -163,41 +160,16 @@ export default function AboutPage() {
       </section>
 
       {/* CLOSING CTA */}
-      <section
-        style={{
-          position: "relative",
-          height: "80svh",
-          minHeight: "32rem",
-          overflow: "hidden",
-          backgroundImage: "url('/nadine/naia-look-01.jpg')",
-          backgroundPosition: "center top",
-          backgroundSize: "cover",
-          color: "white",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "flex-end",
-        }}
-      >
-        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(0,0,0,0.15), rgba(0,0,0,0.1) 40%, rgba(0,0,0,0.7)" }} />
-        <div style={{ position: "relative", zIndex: 10, padding: "0 1.25rem 4rem", textAlign: "center" }}>
-          <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, fontSize: "clamp(2rem, 5vw, 4.5rem)", lineHeight: 0.95, color: "white" }}>
+      <section style={{ textAlign: "center" }}>
+        <div style={{ ...sec, padding: "6rem 1.25rem" }}>
+          <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, fontSize: "clamp(2rem, 5vw, 4.5rem)", lineHeight: 0.95 }}>
             DISCOVER NADINE IN
             <br />
-            YOUR <span style={{ fontStyle: "italic", color: "rgba(255,255,255,0.9)" }}>own</span> WAY.
+            YOUR <span style={{ fontStyle: "italic", color: "var(--lipstick)", fontFamily: "var(--ff-editorial)" }}>own</span> WAY.
           </h2>
-          <div style={{ marginTop: "2.5rem", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: "1rem" }}>
-            <Link
-              to="/naia-collection"
-              style={{ display: "inline-block", borderRadius: "9999px", padding: "1rem 2rem", background: "rgba(255,255,255,0.9)", color: "var(--fg)", fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.34em", textDecoration: "none", fontFamily: "var(--ff-display)" }}
-            >
-              Explore Chapter I
-            </Link>
-            <Link
-              to="/stylist"
-              style={{ display: "inline-block", borderRadius: "9999px", padding: "1rem 2rem", border: "1px solid rgba(255,255,255,0.7)", color: "white", fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.34em", textDecoration: "none", fontFamily: "var(--ff-display)" }}
-            >
-              Meet your nAia stylist
-            </Link>
+          <div style={{ marginTop: "3rem", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: "1rem" }}>
+            <Link to="/naia-collection" style={{ display: "inline-block", borderRadius: "9999px", padding: "1rem 2rem", background: "var(--fg)", color: "var(--bg)", fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.34em", textDecoration: "none", fontFamily: "var(--ff-display)" }}>Explore Chapter I</Link>
+            <Link to="/stylist" style={{ display: "inline-block", borderRadius: "9999px", padding: "1rem 2rem", border: "1px solid var(--fg)", color: "var(--fg)", fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.34em", textDecoration: "none", fontFamily: "var(--ff-display)" }}>Meet your nAia stylist</Link>
           </div>
         </div>
       </section>
