@@ -1,940 +1,361 @@
-import * as React from "react";
-import { useLoaderData, Link, redirect } from "react-router";
-import type { LoaderFunctionArgs } from "react-router";
-import { requireCurrentNaiaCustomer } from "../lib/naia-session.server";
-import prisma from "../db.server";
-import { quizQuestions } from "../lib/onboarding/quiz-data";
-import { dailyStyleNotes } from "../lib/daily-style-notes";
+import type { LinksFunction } from "react-router";
+import { Link } from "react-router";
+import naiaStyles from "~/styles/naia-design-system.css?url";
+import { PublicNav, PublicFooter } from "~/components/PublicLayout";
 
-// Option label and colour-hex lookups for the Passport Lite summary
-const PASSPORT_LABELS: Record<string, Record<string, string>> = {};
-const PASSPORT_COLOR_HEX: Record<string, string> = {};
-for (const q of quizQuestions) {
-  if (q.options) {
-    PASSPORT_LABELS[q.id] = Object.fromEntries(q.options.map(o => [o.id, o.label]));
-  }
-  if (q.colors) {
-    PASSPORT_LABELS[q.id] = Object.fromEntries(q.colors.map(c => [c.id, c.name]));
-    for (const c of q.colors) PASSPORT_COLOR_HEX[c.id] = c.hex;
-  }
-}
+export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
 
-function passportLabel(qId: string, oId: string): string {
-  return PASSPORT_LABELS[qId]?.[oId] ?? oId.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-}
+const marquee = [
+  "EVERY BODY HAS A STORY TO TELL",
+  "PAINTED BY INSTINCT",
+  "FROM CANVAS TO CLOTH",
+  "CUT WITH INTENTION",
+  "MADE TO BE REMEMBERED",
+];
 
-function getDubaiDayOfYear(): number {
-  const dubaiDate = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Dubai",
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-  }).formatToParts(new Date());
-  const year = Number(dubaiDate.find(p => p.type === "year")!.value);
-  const month = Number(dubaiDate.find(p => p.type === "month")!.value);
-  const day = Number(dubaiDate.find(p => p.type === "day")!.value);
-  const start = new Date(year, 0, 0);
-  const current = new Date(year, month - 1, day);
-  return Math.floor((current.getTime() - start.getTime()) / 86400000);
-}
+const pillStyle: React.CSSProperties = {
+  display: "inline-block",
+  border: "1px solid rgba(255,255,255,0.7)",
+  borderRadius: "9999px",
+  padding: "0.75rem 1.5rem",
+  fontSize: "0.65rem",
+  textTransform: "uppercase",
+  letterSpacing: "0.3em",
+  color: "white",
+  textDecoration: "none",
+  fontFamily: "var(--ff-display)",
+};
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  // Throws redirect to /auth/shopify/login if no valid nAia session
-  const sessionCustomer = await requireCurrentNaiaCustomer(request);
-
-  // Short-circuit before all profile-dependent queries.
-  // sessionCustomer.onboardingProfile is already loaded by resolveNaiaSession.
-  if (!sessionCustomer.onboardingProfile?.completed) {
-    return { profileCompleted: false as const };
-  }
-
-  // Full query — only runs for customers with a completed Passport
-  const customer = await prisma.customer.findFirst({
-    where: { id: sessionCustomer.id },
-    include: {
-      onboardingProfile: true,
-      stylingSessions: {
-        take: 10,
-        orderBy: { createdAt: "desc" },
-        include: { suggestions: true }
-      },
-      closetItems: { take: 20, orderBy: { createdAt: "desc" } },
-      postOutfitReviews: { include: { session: true } },
-      savedLooks: true
-    }
-  });
-
-  if (!customer) {
-    return redirect("/auth/shopify/login");
-  }
-
-  const avgRating = customer.postOutfitReviews.length > 0
-    ? (customer.postOutfitReviews.reduce((sum, r) => sum + (r.overallFeeling ?? 0), 0) / customer.postOutfitReviews.length).toFixed(1)
-    : "0";
-
-  const enabledNotes = dailyStyleNotes.filter(n => n.enabled);
-  const dailyNote = enabledNotes[(getDubaiDayOfYear() - 1) % enabledNotes.length];
-
-  const profile = customer.onboardingProfile;
-
-  // Today's style energy — based on today's session mood if exists
-  const today = new Date();
-  const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const todaySession = customer.stylingSessions.find((s: any) => new Date(s.createdAt) >= startOfDay);
-  const todayStyleEnergy = todaySession
-    ? [todaySession.currentMood, todaySession.desiredFeeling].filter(Boolean).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" → ")
-    : null;
-
-  // Style DNA - Show what they actually chose in onboarding
-  let styleDNA = [];
-  if (profile && profile.stylePersonalities && profile.stylePersonalities.length > 0) {
-    // Their actual style choices - format properly (handle hyphens)
-    styleDNA = profile.stylePersonalities.slice(0, 5).map((trait) => ({
-      trait: trait.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
-    }));
-  } else {
-    // Fallback if no onboarding
-    styleDNA = [
-      { trait: "Complete onboarding" }
-    ];
-  }
-
-  // Styling Identity - summary of their choices
-  let stylingIdentity = "Complete your style profile";
-  if (profile?.stylePersonalities && profile.stylePersonalities.length >= 2) {
-    const top = profile.stylePersonalities.slice(0, 2).map((s: string) => 
-      s.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
-    );
-    stylingIdentity = `${top[0]} ${top[1]}`;
-  } else if (profile?.stylePersonalities && profile.stylePersonalities.length === 1) {
-    stylingIdentity = profile.stylePersonalities[0].split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-  } else if (profile?.desiredFeeling) {
-    stylingIdentity = profile.desiredFeeling;
-  }
-
-
-  // Fetch outfit reviews to calculate Style Response Profile
-  const reviews = await prisma.postOutfitReview.findMany({
-    where: { 
-      session: { 
-        customerId: customer.id 
-      }
-    },
-    include: {
-      session: true
-    },
-    orderBy: { createdAt: 'desc' }
-  });
-
-  // Calculate style response metrics
-  const totalReviews = reviews.length;
-  const feltLikeMeCount = reviews.filter(r => r.feltLikeHer === true).length;
-  const wouldWearCount = reviews.filter(r => r.wouldWearAgain === true).length;
-  const createdFeelingCount = reviews.filter(r => r.desiredFeelingAchieved === true).length;
-  const styleAlignmentPercent = totalReviews > 0 ? Math.round((feltLikeMeCount / totalReviews) * 100) : 0;
-  const wouldWearPercent = totalReviews > 0 ? Math.round((wouldWearCount / totalReviews) * 100) : 0;
-  const feelingShiftPercent = totalReviews > 0 ? Math.round((createdFeelingCount / totalReviews) * 100) : 0;
-
-  // Average comfort score
-  const comfortScores = reviews.filter(r => r.physicallyComfortable).map(r => Number(r.physicallyComfortable));
-  const avgComfort = comfortScores.length > 0 ? Math.round(comfortScores.reduce((a,b) => a+b, 0) / comfortScores.length * 10) / 10 : 0;
-
-  // What works patterns
-  const allWorkedTags: string[] = [];
-  reviews.forEach(r => {
-    if (r.workedTags) {
-      try { const tags = JSON.parse(r.workedTags as string); allWorkedTags.push(...tags); } catch {}
-    }
-  });
-  const workedCounts: { [key: string]: number } = {};
-  allWorkedTags.forEach(tag => { workedCounts[tag] = (workedCounts[tag] || 0) + 1; });
-  const topWorked = Object.entries(workedCounts).sort((a,b) => b[1]-a[1]).slice(0,5).map(([tag]) => tag);
-
-  // What doesn't work patterns
-  const allDidntWorkTags: string[] = [];
-  reviews.forEach(r => {
-    if (r.didntWorkTags) {
-      try { const tags = JSON.parse(r.didntWorkTags as string); allDidntWorkTags.push(...tags); } catch {}
-    }
-  });
-  const didntWorkCounts: { [key: string]: number } = {};
-  allDidntWorkTags.forEach(tag => { didntWorkCounts[tag] = (didntWorkCounts[tag] || 0) + 1; });
-  const topDidntWork = Object.entries(didntWorkCounts).sort((a,b) => b[1]-a[1]).slice(0,4).map(([tag]) => tag);
-
-  // Mood patterns — what worked tags per mood
-  const moodWorkedTags: { [key: string]: { [key: string]: number } } = {};
-  const moodFeelings: { [key: string]: string[] } = {};
-  reviews.forEach(r => {
-    const mood = r.session?.currentMood;
-    if (!mood) return;
-    if (!moodWorkedTags[mood]) moodWorkedTags[mood] = {};
-    if (!moodFeelings[mood]) moodFeelings[mood] = [];
-    if (r.workedTags) {
-      try {
-        const tags = JSON.parse(r.workedTags as string);
-        tags.forEach((tag: string) => {
-          moodWorkedTags[mood][tag] = (moodWorkedTags[mood][tag] || 0) + 1;
-        });
-      } catch {}
-    }
-    if (r.session?.desiredFeeling && r.desiredFeelingAchieved === true) {
-      moodFeelings[mood].push(r.session.desiredFeeling);
-    }
-  });
-
-  const moodInsights = Object.entries(moodWorkedTags).map(([mood, tagCounts]) => {
-    const topTags = Object.entries(tagCounts).sort((a,b) => b[1]-a[1]).slice(0,3).map(([t]) => t);
-    const topFeeling = moodFeelings[mood]?.[0] || null;
-    return { mood, topTags, topFeeling };
-  }).filter(m => m.topTags.length > 0);
-
-  // Occasions where looks felt most like them
-  const occasionPerformance: { [key: string]: number } = {};
-  reviews.forEach(r => {
-    if (r.session?.occasion && r.feltLikeHer === true) {
-      occasionPerformance[r.session.occasion] = (occasionPerformance[r.session.occasion] || 0) + 1;
-    }
-  });
-  const topOccasions = Object.entries(occasionPerformance).sort((a,b) => b[1]-a[1]).slice(0,3).map(([o]) => o);
-
-  // Feeling shift patterns — which desired feelings were actually achieved
-  const feelingShifts: { [key: string]: number } = {};
-  reviews.forEach(r => {
-    if (r.session?.desiredFeeling && r.desiredFeelingAchieved === true) {
-      feelingShifts[r.session.desiredFeeling] = (feelingShifts[r.session.desiredFeeling] || 0) + 1;
-    }
-  });
-  const topFeelingShifts = Object.entries(feelingShifts).sort((a,b) => b[1]-a[1]).slice(0,3).map(([f]) => f);
-
-  // Style direction
-  let styleDirection = "Still learning your style";
-  if (totalReviews >= 3) {
-    if (topWorked.length > 0 && topFeelingShifts.length > 0) {
-      styleDirection = `${topFeelingShifts[0]} through ${topWorked[0].toLowerCase()}`;
-    } else if (profile?.desiredFeeling) {
-      const feeling = profile.desiredFeeling.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-      styleDirection = feeling;
-    }
-  }
-
-  // DEMO: inject dummy data if no reviews yet
-  const isDemoMode = totalReviews === 0;
-
-  const styleResponseProfile = isDemoMode ? {
-    totalReviews: 12,
-    styleAlignmentPercent: 83,
-    wouldWearPercent: 75,
-    feelingShiftPercent: 91,
-    avgComfort: 4.2,
-    styleDirection: "Confident through silhouette",
-    moodInsights: [
-      { mood: "tired", topTags: ["Silhouette", "Color palette", "Overall vibe"], topFeeling: "effortless" },
-      { mood: "confident", topTags: ["Styling approach", "Silhouette"], topFeeling: "powerful" },
-      { mood: "bloated", topTags: ["Overall vibe", "Color palette"], topFeeling: "comfortable" },
-      { mood: "low-energy", topTags: ["Color palette", "Accessories"], topFeeling: "elevated" },
-    ],
-    topOccasions: ["Dinner", "Work", "Date night"],
-    topWorked: ["Silhouette", "Color palette", "Overall vibe", "Styling approach"],
-    topDidntWork: ["Too casual", "Wrong colors"],
-    topFeelingShifts: ["Confident", "Powerful", "Effortless"],
-    unlocked: true
-  } : {
-    totalReviews,
-    styleAlignmentPercent,
-    wouldWearPercent,
-    feelingShiftPercent,
-    avgComfort,
-    styleDirection,
-    moodInsights,
-    topOccasions,
-    topWorked,
-    topDidntWork,
-    topFeelingShifts,
-    unlocked: true
-  };
-
-  return {
-    profileCompleted: true as const,
-    customer,
-    profile,
-    isDemoMode,
-    stats: {
-      looksStyled: customer.stylingSessions.length,
-      closetPieces: customer.closetItems.length,
-      avgRating,
-      styleAlignment: `${styleAlignmentPercent}%`
-    },
-    styleResponseProfile,
-    insights: {
-      dailyNote: { text: dailyNote.text, attribution: dailyNote.attribution },
-      stylingIdentity,
-      styleDNA,
-      todayStyleEnergy
-    }
-  };
-}
-
-
-function NoPassportDashboard() {
+export default function HomePage() {
   return (
-    <div style={{ minHeight: "100vh", background: "var(--c-bg)" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 40px", borderBottom: "1px solid var(--c-border)" }}>
-        <div style={{ fontFamily: "var(--ff-display)", fontSize: "22px", fontStyle: "italic", letterSpacing: "3px", color: "var(--c-ink)" }}>nAia</div>
-      </div>
-      <div style={{ maxWidth: "700px", margin: "0 auto", padding: "80px 40px" }}>
-        <div style={{ fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", color: "var(--c-burg)", marginBottom: "16px" }}>
-          YOUR nAia PASSPORT
-        </div>
-        <h1 style={{ fontFamily: "var(--ff-display)", fontSize: "clamp(28px,4vw,44px)", fontWeight: 900, fontStyle: "italic", color: "var(--c-ink)", letterSpacing: "-1px", marginBottom: "20px", lineHeight: 1.1 }}>
-          Create your nAia Passport
-        </h1>
-        <p style={{ fontFamily: "var(--ff-body)", fontSize: "19px", fontStyle: "italic", color: "var(--c-muted)", marginBottom: "40px", lineHeight: 1.6 }}>
-          Let nAia get to know you — your style, how you want to feel, your lifestyle and fit. Your answers become your personal styling memory.
-        </p>
-        <div style={{ display: "flex", alignItems: "center", gap: "32px", flexWrap: "wrap" }}>
-          <Link
-            to="/onboarding/step/1"
-            style={{ display: "inline-block", padding: "14px 32px", background: "var(--c-ink)", color: "var(--c-bg)", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "3px", textTransform: "uppercase", textDecoration: "none" }}
-          >
-            CREATE YOUR PASSPORT →
-          </Link>
-          <Link
-            to="/quick-style"
-            style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", textDecoration: "none" }}
-          >
-            Try Quick Style →
-          </Link>
-        </div>
-      </div>
-    </div>
-  );
-}
+    <main style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--fg)", overflow: "hidden" }}>
+      <style>{`
+        @keyframes pub-ticker {
+          from { transform: translateX(0); }
+          to { transform: translateX(-50%); }
+        }
+      `}</style>
 
-function BuySkipWidget() {
-  const [step, setStep] = React.useState("upload"); // upload | tag | result
-  const [imageUrl, setImageUrl] = React.useState("");
-  const [uploading, setUploading] = React.useState(false);
-  const [analyzing, setAnalyzing] = React.useState(false);
-  const [result, setResult] = React.useState(null);
+      {/* ── HERO ── */}
+      <section
+        style={{
+          position: "relative",
+          height: "100svh",
+          minHeight: "640px",
+          overflow: "hidden",
+          backgroundImage: "url('/nadine/naia-hero.jpg')",
+          backgroundPosition: "center",
+          backgroundSize: "cover",
+          color: "white",
+        }}
+      >
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(0,0,0,0.4), rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.55))" }} />
 
-  // Item tags
-  const [category, setCategory] = React.useState("");
-  const [color, setColor] = React.useState([]);
-  const [brand, setBrand] = React.useState("");
-  const [itemLink, setItemLink] = React.useState("");
-  const [linkError, setLinkError] = React.useState("");
+        {/* Nav sits inside hero (dark tone) */}
+        <PublicNav tone="dark" />
 
-  const CATEGORIES = ["Top", "Bottom", "Dress", "Outerwear", "Shoes", "Bag", "Accessory", "Jewelry"];
-  const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver"];
-
-  const handleUpload = async (file) => {
-    setUploading(true);
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("upload_preset", "kqfhwrpq");
-    try {
-      const res = await fetch("https://api.cloudinary.com/v1_1/diybves1z/image/upload", { method: "POST", body: formData });
-      const data = await res.json();
-      setImageUrl(data.secure_url);
-      setStep("tag");
-    } catch (err) {
-      console.error("Upload failed:", err);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleLinkSubmit = async () => {
-    if (!itemLink) return;
-    setUploading(true);
-    setLinkError("");
-    try {
-      const res = await fetch("/api/wishlist?action=scrape-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: itemLink })
-      });
-      const data = await res.json();
-      if (data.imageUrl) {
-        setImageUrl(data.imageUrl);
-        if (data.brand) setBrand(data.brand);
-        setStep("tag");
-      } else {
-        setLinkError("We couldn't load this product automatically. Upload a screenshot or photo instead, and nAia can still analyse it.");
-      }
-    } catch (err) {
-      console.error("Link scrape failed:", err);
-      setLinkError("We couldn't load this product automatically. Upload a screenshot or photo instead, and nAia can still analyse it.");
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleAnalyze = async () => {
-    setAnalyzing(true);
-    try {
-      const response = await fetch("/api/wishlist?action=analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl, category, color, brand, itemLink })
-      });
-      const data = await response.json();
-      if (data.success) {
-        const a = data.analysis;
-        setResult({
-          verdict: a.verdict,
-          confidence: a.confidence,
-          itemType: a.itemType,
-          styleAlignment: { yourDNA: a.styleDNAMatch || "Analysis complete", match: a.verdict === "BUY" ? "Strong match" : "Weak match", reasoning: a.styleDNAMatch },
-          details: a.detailedAnalysis,
-          closetIntegration: { pairsWell: a.closetPairings || [], fillsGap: a.fillsGap },
-          naiaMatch: a.naiaMatch || null,
-          occasions: a.occasions || [],
-          finalThought: a.finalThought
-        });
-        setStep("result");
-      } else {
-        setResult({ verdict: "ERROR", confidence: 0, finalThought: "Unable to analyze this image. Please try another photo." });
-        setStep("result");
-      }
-    } catch (err) {
-      console.error("Analysis failed:", err);
-      setResult({ verdict: "ERROR", confidence: 0, finalThought: "Analysis failed. Please try again." });
-      setStep("result");
-    } finally {
-      setAnalyzing(false);
-    }
-  };
-
-  const reset = () => {
-    setImageUrl(""); setResult(null); setCategory(""); setColor([]); setBrand(""); setItemLink("");
-    setLinkError("");
-    setStep("upload");
-  };
-
-  const pillStyle = (active) => ({
-    padding: "10px 18px",
-    border: active ? "none" : "1px solid rgba(59,5,16,.12)",
-    fontFamily: "'Space Mono',monospace",
-    fontSize: "9px",
-    letterSpacing: "2px",
-    textTransform: "uppercase",
-    color: active ? "#f4f4f1" : "#221516",
-    cursor: "pointer",
-    background: active ? "#8b2035" : "transparent",
-    transition: "all .2s",
-  });
-
-  const labelStyle = { fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px", display: "block" };
-  const inputStyle = { width: "100%", padding: "14px", border: "1px solid rgba(59,5,16,.1)", fontSize: "16px", fontFamily: "'Cormorant Garamond',serif", fontStyle: "italic", background: "rgba(255,255,255,0.7)", color: "#221516", outline: "none", boxSizing: "border-box" };
-
-  // STEP 1: Upload
-  if (step === "upload") return (
-    <div style={{ background: "rgba(255,255,255,0.8)", border: "1px solid rgba(59,5,16,0.06)", padding: "60px", textAlign: "center" }}>
-      <input type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} style={{ display: "none" }} id="buyskipInput" />
-      <label htmlFor="buyskipInput" style={{ display: "inline-block", padding: "16px 32px", background: "#8b2035", color: "#f4f4f1", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>
-        {uploading ? "UPLOADING..." : "CHOOSE PHOTO"}
-      </label>
-      <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#7a6f6a", marginTop: "16px" }}>
-        Upload a photo of the item you're thinking of buying
-      </p>
-      {linkError && (
-        <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", color: "#8b2035", marginTop: "12px", lineHeight: 1.6 }}>
-          {linkError}
-        </p>
-      )}
-    </div>
-  );
-
-    // STEP 2: Tag
-  if (step === "tag") return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "40px" }}>
-      <div>
-        <img src={imageUrl} alt="Item" style={{ width: "100%", border: "1px solid rgba(59,5,16,0.06)" }} />
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-        <div>
-          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "24px", fontWeight: 900, fontStyle: "italic", marginBottom: "8px" }}>Tell us about this piece</div>
-          <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#7a6f6a" }}>Help nAia understand what it is</p>
-        </div>
-
-        <div>
-          <span style={labelStyle}>Category *</span>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-            {CATEGORIES.map(c => <button key={c} onClick={() => setCategory(c)} style={pillStyle(category === c)}>{c}</button>)}
-          </div>
-        </div>
-
-        <div>
-          <span style={labelStyle}>Color *</span>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-            {COLORS.map(c => <button key={c} onClick={() => setColor(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])} style={pillStyle(color.includes(c))}>{c}</button>)}
-          </div>
-        </div>
-
-        <div>
-          <span style={labelStyle}>Brand (optional)</span>
-          <input style={inputStyle} type="text" placeholder="e.g. Zara, H&M, Mango" value={brand} onChange={e => setBrand(e.target.value)} />
-        </div>
-
-        <div>
-          <span style={labelStyle}>Product Link (optional)</span>
-          <input style={inputStyle} type="text" placeholder="e.g. https://zara.com/..." value={itemLink} onChange={e => setItemLink(e.target.value)} />
-          <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "13px", fontStyle: "italic", color: "#7a6f6a", marginTop: "6px" }}>Helps nAia understand the exact item</p>
-        </div>
-
-        <button
-          onClick={handleAnalyze}
-          disabled={!category || color.length === 0 || analyzing}
-          style={{ padding: "16px 32px", background: (!category || color.length === 0) ? "#d4cfc9" : "#8b2035", color: "#f4f4f1", border: "none", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", cursor: (!category || !color) ? "not-allowed" : "pointer" }}
+        {/* Giant wordmark */}
+        <h1
+          style={{
+            fontFamily: "var(--ff-display)",
+            fontWeight: 200,
+            position: "absolute",
+            inset: "auto 0 auto 0",
+            top: "16%",
+            zIndex: 20,
+            textAlign: "center",
+            fontSize: "clamp(5rem, 20vw, 15rem)",
+            letterSpacing: "0.04em",
+            color: "white",
+            lineHeight: 1,
+          }}
         >
-          {analyzing ? "ANALYZING..." : "ANALYZE →"}
-        </button>
-
-        <button onClick={reset} style={{ background: "none", border: "none", fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", cursor: "pointer" }}>
-          ← START OVER
-        </button>
-      </div>
-    </div>
-  );
-
-  // STEP 3: Result
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "40px" }}>
-      <div>
-        <img src={imageUrl} alt="Item" style={{ width: "100%", border: "1px solid rgba(59,5,16,0.06)", marginBottom: "16px" }} />
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-          {category && <span style={{ padding: "6px 12px", border: "1px solid rgba(59,5,16,.12)", fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#221516" }}>{category}</span>}
-          {color.map(c => <span key={c} style={{ padding: "6px 12px", border: "1px solid rgba(59,5,16,.12)", fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#221516" }}>{c}</span>)}
-          {brand && <span style={{ padding: "6px 12px", border: "1px solid rgba(59,5,16,.12)", fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#221516" }}>{brand}</span>}
-        </div>
-      </div>
-
-      <div style={{ background: "rgba(255,255,255,0.8)", padding: "40px", border: "1px solid rgba(59,5,16,0.06)" }}>
-        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "56px", fontWeight: 900, color: result.verdict === "BUY" ? "#8b2035" : "#7a6f6a", marginBottom: "8px" }}>
-          {result.verdict}
-        </div>
-        <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "11px", color: "#7a6f6a", marginBottom: "32px", letterSpacing: "1px" }}>
-          {result.confidence}% CONFIDENCE
-        </div>
-
-        {result.styleAlignment && (
-          <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>STYLE DNA MATCH</div>
-            <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#221516", lineHeight: 1.7 }}>
-              {result.styleAlignment.reasoning}
-            </div>
-          </div>
-        )}
-
-        {result.details && (
-          <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>DETAILED ANALYSIS</div>
-            <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", color: "#221516", lineHeight: 1.8 }}>
-              {result.details.silhouette && <div style={{ marginBottom: "8px" }}><strong>Silhouette:</strong> {result.details.silhouette}</div>}
-              {result.details.color && <div style={{ marginBottom: "8px" }}><strong>Color:</strong> {result.details.color}</div>}
-              {result.details.fabric && <div style={{ marginBottom: "8px" }}><strong>Fabric:</strong> {result.details.fabric}</div>}
-              {result.details.versatility && <div><strong>Versatility:</strong> {result.details.versatility}</div>}
-            </div>
-          </div>
-        )}
-
-        <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>PAIRS WITH YOUR CLOSET</div>
-          {result.closetIntegration?.pairsWell?.length > 0 ? (
-            <div>
-              <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", color: "#221516", lineHeight: 1.8 }}>
-                {result.closetIntegration.pairsWell.join(", ")}
-              </div>
-              {result.closetIntegration.fillsGap && <div style={{ color: "#8b2035", fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", marginTop: "8px" }}>✓ {result.closetIntegration.fillsGap}</div>}
-            </div>
-          ) : (
-            <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a", lineHeight: 1.7 }}>
-              No closet items saved yet.{" "}
-              <a href="/closet" style={{ color: "#8b2035", textDecoration: "none" }}>Add pieces to your wardrobe</a>
-              {" "}and nAia will tell you exactly what this pairs with.
-            </div>
-          )}
-        </div>
-
-        {result.naiaMatch && (
-          <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>PAIR IT WITH FROM NAIA</div>
-            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "18px", fontWeight: 700, color: "#221516", marginBottom: "8px" }}>
-              {typeof result.naiaMatch === "object" ? result.naiaMatch.title : result.naiaMatch}
-            </div>
-            {typeof result.naiaMatch === "object" && result.naiaMatch.reason && (
-              <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "12px", lineHeight: 1.6 }}>{result.naiaMatch.reason}</div>
-            )}
-            {typeof result.naiaMatch === "object" && result.naiaMatch.url && (
-              <a href={result.naiaMatch.url} target="_blank" rel="noreferrer" style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>SHOP THIS PIECE →</a>
-            )}
-          </div>
-        )}
-
-        {result.occasions?.length > 0 && (
-          <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>PERFECT FOR</div>
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-              {result.occasions.map((occ, i) => <span key={i} style={{ padding: "6px 12px", background: "rgba(139,32,53,0.1)", color: "#8b2035", fontSize: "12px", fontFamily: "'Space Mono',monospace" }}>{occ}</span>)}
-            </div>
-          </div>
-        )}
-
-        {result.finalThought && (
-          <div style={{ marginBottom: "32px" }}>
-            <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#221516", lineHeight: 1.7 }}>{result.finalThought}</div>
-          </div>
-        )}
-
-        <button onClick={reset} style={{ width: "100%", padding: "16px 24px", background: "transparent", border: "1px solid #8b2035", color: "#8b2035", fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>
-          TRY ANOTHER
-        </button>
-      </div>
-    </div>
-  );
-}
-
-
-
-const dbCss = `
-  .db-wrap{padding:60px 40px}
-  .db-cta{display:grid;grid-template-columns:1fr auto;align-items:center;gap:40px;padding:60px 48px}
-  .db-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
-  .db-recent{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
-  .db-tools{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
-  @media(max-width:640px){
-    .db-wrap{padding:60px 20px}
-    .db-cta{grid-template-columns:1fr;padding:40px 24px}
-    .db-stats{grid-template-columns:repeat(2,1fr)}
-    .db-recent{grid-template-columns:repeat(2,1fr)}
-    .db-tools{grid-template-columns:1fr}
-  }
-`;
-
-export default function Index() {
-  const data = useLoaderData<typeof loader>();
-
-  if (!data.profileCompleted) {
-    return <NoPassportDashboard />;
-  }
-
-  const { customer, stats, insights, profile, styleResponseProfile, isDemoMode } = data;
-
-  return (
-    <div style={{ minHeight: "100vh", background: "var(--c-bg)" }}>
-      <style>{dbCss}</style>
-      <div className="db-wrap" style={{ maxWidth: "1200px", margin: "0 auto" }}>
-
-        {/* Welcome */}
-        <h1 style={{ fontFamily: "var(--ff-display)", fontSize: "clamp(40px,5vw,64px)", fontWeight: 900, lineHeight: 1, marginBottom: "8px" }}>
-          Welcome back, <em style={{ fontStyle: "italic", color: "var(--c-burg)" }}>{customer.firstName || "there"}</em>.
+          NADINE
         </h1>
 
-        {/* 1. Daily Style Note / today's style energy */}
-        <div style={{ marginBottom: "48px", marginTop: "32px", padding: "24px 32px", borderLeft: "2px solid var(--c-tint-med)" }}>
-          <div style={{ fontFamily: "var(--ff-display)", fontSize: "20px", fontStyle: "italic", color: "var(--c-ink)", marginBottom: "8px" }}>
-            "{insights.dailyNote.text}"
-          </div>
-          <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "8px" }}>
-            — {insights.dailyNote.attribution}
-          </div>
-          <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--c-burg)", marginTop: "28px" }}>
-            Today's style energy: {insights.todayStyleEnergy || insights.stylingIdentity}
+        {/* Headline + CTAs */}
+        <div
+          style={{
+            position: "absolute",
+            bottom: "16%",
+            left: "1.25rem",
+            zIndex: 20,
+            maxWidth: "34rem",
+          }}
+        >
+          <p style={{ fontFamily: "var(--ff-display)", fontWeight: 200, fontSize: "clamp(1.5rem, 3.5vw, 2.25rem)", lineHeight: 1.2, color: "rgba(255,255,255,0.9)", letterSpacing: "0.02em" }}>
+            EVERY BODY HAS A STORY TO TELL.
+          </p>
+          <p style={{ marginTop: "1rem", fontSize: "1rem", lineHeight: 1.75, color: "rgba(255,255,255,0.7)" }}>
+            Founded in 2021 and featured in Vogue, Vanity Fair and Soul Arabia, NADINE translates original artwork, memory and emotion into pieces made to be lived in.
+          </p>
+          <div style={{ marginTop: "1.5rem", display: "flex", flexWrap: "wrap", gap: "1rem" }}>
+            <Link to="/naia-collection" style={pillStyle}>SHOP CHAPTER I</Link>
+            <Link to="/stylist" style={pillStyle}>MEET YOUR nAia STYLIST</Link>
           </div>
         </div>
 
-        {/* 2. Style Me CTA — hero */}
-        <div className="db-cta" style={{ background: "var(--c-ink)", color: "var(--c-bg)", marginBottom: "48px" }}>
-          <div>
-            <div style={{ fontFamily: "var(--ff-ui)", fontSize: "8px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--c-burg)", marginBottom: "16px" }}>YOUR PERSONAL STYLIST</div>
-            <h2 style={{ fontFamily: "var(--ff-display)", fontSize: "clamp(32px,4vw,48px)", fontWeight: 900, marginBottom: "16px", lineHeight: 1.1 }}>
-              Style me <em style={{ fontStyle: "italic", color: "var(--c-burg)" }}>today</em>
-            </h2>
-            <p style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--c-taupe)", lineHeight: 1.6 }}>
-              Get a look based on your mood, plans, comfort needs, and Style DNA.
+        <div style={{ position: "absolute", bottom: "1.5rem", right: "1.5rem", zIndex: 20, fontSize: "0.65rem", textTransform: "uppercase", letterSpacing: "0.34em", color: "rgba(255,255,255,0.6)" }}>
+          scroll ↓ chapter I
+        </div>
+      </section>
+
+      {/* ── MARQUEE STRIP ── */}
+      <section style={{ background: "var(--fg)", padding: "1rem 0", overflow: "hidden" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: "4rem",
+            width: "max-content",
+            animation: "pub-ticker 32s linear infinite",
+          }}
+        >
+          {[...marquee, ...marquee, ...marquee, ...marquee].map((m, i) => (
+            <span
+              key={i}
+              style={{ display: "flex", alignItems: "center", gap: "1.5rem", fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--bg)", whiteSpace: "nowrap" }}
+            >
+              <span>/</span>
+              <span>{m}</span>
+            </span>
+          ))}
+        </div>
+      </section>
+
+      {/* ── PRESS STRIP ── */}
+      <section style={{ borderBottom: "1px solid var(--fg-10)" }}>
+        <div style={{ maxWidth: "100rem", margin: "0 auto", padding: "2.5rem 1.25rem", display: "flex", flexDirection: "column", alignItems: "center", gap: "1.5rem" }}>
+          <div style={{ fontFamily: "var(--ff-display)", fontWeight: 200, fontSize: "0.65rem", textTransform: "uppercase", letterSpacing: "0.4em", color: "var(--fg-55)" }}>featured in</div>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: "3rem" }}>
+            <img src="/nadine/vogue-logo.png" alt="Vogue" style={{ height: "2.5rem", width: "auto", objectFit: "contain", opacity: 0.8 }} />
+            <img src="/nadine/vanity-fair-logo.png" alt="Vanity Fair" style={{ height: "2.5rem", width: "auto", objectFit: "contain", opacity: 0.8 }} />
+            <img src="/nadine/soul-arabia-logo.png" alt="Soul Arabia" style={{ height: "2.5rem", width: "auto", objectFit: "contain", opacity: 0.8 }} />
+          </div>
+        </div>
+      </section>
+
+      {/* ── DROP SHOWCASE ── */}
+      <section style={{ background: "var(--bg)", overflow: "hidden" }}>
+        <div style={{ maxWidth: "100rem", margin: "0 auto", padding: "4rem 1.25rem 2rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ fontSize: "0.65rem", textTransform: "uppercase", letterSpacing: "0.34em", color: "var(--fg-55)" }}>CHAPTER 01 / FW'26</div>
+          <div style={{ fontStyle: "italic", color: "var(--lipstick)", fontSize: "0.9rem", fontFamily: "var(--ff-display)" }}>— CHAPTER I COLLECTION</div>
+        </div>
+
+        <div style={{ position: "relative" }}>
+          {/* PRINT — outlined */}
+          <h2
+            style={{
+              fontFamily: "var(--ff-display)",
+              fontWeight: 200,
+              textAlign: "center",
+              lineHeight: 0.82,
+              fontSize: "clamp(5rem, 22vw, 22rem)",
+              letterSpacing: "0.02em",
+              WebkitTextStroke: "1px var(--fg)",
+              color: "transparent",
+              userSelect: "none",
+              position: "relative",
+              zIndex: 10,
+            }}
+          >
+            PRINT
+          </h2>
+
+          {/* Centre image */}
+          <figure
+            style={{
+              position: "relative",
+              zIndex: 20,
+              margin: "-6vw auto -6vw",
+              width: "min(72%, 760px)",
+              aspectRatio: "3/4",
+              overflow: "hidden",
+              background: "#efeae0",
+              boxShadow: "0 30px 80px -20px rgba(60,30,15,0.45)",
+            }}
+          >
+            <img
+              src="/nadine/print-memory.png"
+              alt="NADINE FW'26 — Chapter I print"
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
+          </figure>
+
+          {/* BECOMING. — solid */}
+          <h2
+            style={{
+              fontFamily: "var(--ff-display)",
+              fontWeight: 200,
+              textAlign: "center",
+              lineHeight: 0.82,
+              fontSize: "clamp(5rem, 22vw, 22rem)",
+              letterSpacing: "0.02em",
+              position: "relative",
+              zIndex: 30,
+              color: "var(--fg)",
+            }}
+          >
+            BECOMING<span style={{ color: "var(--lipstick)" }}>.</span>
+          </h2>
+        </div>
+
+        {/* Sub-headline */}
+        <div
+          style={{
+            maxWidth: "100rem",
+            margin: "0 auto",
+            padding: "3rem 1.25rem",
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(min(22rem, 100%), 1fr))",
+            gap: "2rem",
+            alignItems: "end",
+          }}
+        >
+          <div style={{ maxWidth: "28rem", fontSize: "0.9rem", lineHeight: 1.75, color: "var(--fg-75)" }}>
+            <p>A hand-painted canvas in rust, bone and ember becomes the starting point for Chapter I.</p>
+            <p style={{ marginTop: "1rem" }}>Its marks are translated into fabric, then shaped into pieces that move with the body: cut, sculpted, softened and made to be lived in.</p>
+            <p style={{ marginTop: "1rem" }}>Leather holds. Suede softens. Cotton grounds. Each material carries its own feeling — together forming a collection about return, transformation and becoming.</p>
+            <p style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "1.5rem", fontSize: "0.65rem", textTransform: "uppercase", letterSpacing: "0.34em", color: "var(--fg-60)" }}>FW'26 · CHAPTER I.</p>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "1rem" }}>
+            <p style={{ maxWidth: "28rem", fontSize: "0.9rem", lineHeight: 1.75, color: "var(--fg-75)", textAlign: "right" }}>
+              Every piece begins with a story. Discover the painting, fabric and construction behind Chapter I — then find the piece that becomes part of yours.
+            </p>
+            <Link
+              to="/naia-collection"
+              style={{ display: "inline-block", border: "1px solid var(--fg)", borderRadius: "9999px", padding: "0.875rem 2rem", fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg)", textDecoration: "none", fontFamily: "var(--ff-display)" }}
+            >
+              EXPLORE THE COLLECTION
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* ── nAia SECTION ── */}
+      <section style={{ borderTop: "1px solid var(--fg-10)", background: "var(--bg)" }}>
+        <div style={{ maxWidth: "100rem", margin: "0 auto", padding: "6rem 1.25rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(24rem, 100%), 1fr))", gap: "2.5rem", alignItems: "end" }}>
+            <div>
+              <div style={{ fontFamily: "var(--ff-display)", fontWeight: 200, fontSize: "0.65rem", textTransform: "uppercase", letterSpacing: "0.4em", color: "var(--fg-55)" }}>the nAia stylist</div>
+              <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "1.25rem", fontSize: "clamp(2.5rem, 7vw, 6rem)", lineHeight: 0.95 }}>
+                STYLED BY INTELLIGENCE.
+                <br />
+                <span style={{ fontStyle: "italic", color: "var(--lipstick)" }}>chosen for your life.</span>
+              </h2>
+            </div>
+            <p style={{ maxWidth: "26rem", fontSize: "1rem", lineHeight: 1.75, color: "var(--fg-75)" }}>
+              nAia looks beyond the piece — considering your preferences, your wardrobe and how you want to feel. Discover what works with what you already own, build a complete look and preview eligible pieces on you.
             </p>
           </div>
-          <Link to="/quick-style" style={{ display: "inline-block", padding: "20px 40px", border: "1px solid var(--c-bg)", color: "var(--c-bg)", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none", whiteSpace: "nowrap" }}>
-            START SESSION →
-          </Link>
-        </div>
 
-        {/* 3. Styling snapshot */}
-        <div style={{ marginBottom: "60px" }}>
-          <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "20px" }}>Your styling snapshot</div>
-          <div className="db-stats">
+          <div
+            style={{
+              marginTop: "4rem",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(min(18rem, 100%), 1fr))",
+              gap: "2.5rem 3.5rem",
+              borderTop: "1px solid var(--fg-15)",
+              paddingTop: "3.5rem",
+            }}
+          >
             {[
-              { num: stats.looksStyled, label: "Looks created" },
-              { num: stats.closetPieces, label: "Wardrobe pieces" },
-              { num: stats.avgRating || "—", label: "Avg confidence" },
-              { num: stats.styleAlignment, label: "Style alignment" },
-            ].map(({ num, label }) => (
-              <div key={label} style={{ background: "var(--c-surface)", padding: "24px", border: "1px solid var(--c-border)" }}>
-                <div style={{ fontFamily: "var(--ff-display)", fontSize: "40px", fontWeight: 900, color: "var(--c-ink)" }}>{num}</div>
-                <div style={{ fontFamily: "var(--ff-ui)", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)" }}>{label}</div>
+              { n: "I",   t: "UNDERSTAND YOUR STYLE", d: "Build a Style Passport shaped by your preferences, lifestyle and real feedback." },
+              { n: "II",  t: "STYLE WHAT YOU OWN",    d: "Combine NADINE with clothing, shoes and bags already in your Closet." },
+              { n: "III", t: "SEE THE LOOK ON YOU",   d: "Create a visual preview using your saved My nAia Model." },
+            ].map((c) => (
+              <div key={c.t}>
+                <span style={{ fontFamily: "var(--ff-display)", fontWeight: 200, display: "block", color: "var(--lipstick)", fontSize: "0.875rem", letterSpacing: "0.34em" }}>{c.n}</span>
+                <h3 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "1rem", fontSize: "1.25rem", letterSpacing: "0.12em" }}>{c.t}</h3>
+                <p style={{ marginTop: "1rem", fontSize: "0.9rem", lineHeight: 1.6, color: "var(--fg-70)" }}>{c.d}</p>
               </div>
             ))}
           </div>
-        </div>
 
-        {/* 4. Recent Looks */}
-        <div style={{ marginBottom: "60px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
-            <h2 style={{ fontFamily: "var(--ff-display)", fontSize: "32px", fontWeight: 900 }}>Your recent looks</h2>
-            <Link to="/quick-style" style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", textDecoration: "none" }}>STYLE AGAIN →</Link>
+          <div style={{ marginTop: "3.5rem" }}>
+            <Link to="/stylist" style={{ display: "inline-block", border: "1px solid var(--fg)", borderRadius: "9999px", padding: "0.875rem 2rem", fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg)", textDecoration: "none", fontFamily: "var(--ff-display)" }}>
+              MEET YOUR nAia STYLIST
+            </Link>
           </div>
-          {customer.stylingSessions.length === 0 ? (
-            <div style={{ padding: "60px", textAlign: "center", background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
-              <p style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--c-muted)", marginBottom: "24px" }}>No looks yet — start your first session</p>
-              <Link to="/quick-style" style={{ display: "inline-block", padding: "14px 32px", background: "var(--c-burg)", color: "var(--c-bg)", textDecoration: "none", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "3px", textTransform: "uppercase" }}>STYLE ME</Link>
-            </div>
-          ) : (
-            <div className="db-recent">
-              {customer.stylingSessions.slice(0,6).map((session: any) => (
-                <div key={session.id} style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)", padding: "24px" }}>
-                  <div style={{ fontFamily: "var(--ff-ui)", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "8px" }}>
-                    {new Date(session.createdAt).toLocaleDateString()}
-                  </div>
-                  <div style={{ fontFamily: "var(--ff-display)", fontSize: "18px", fontWeight: 700, marginBottom: "8px", color: "var(--c-ink)" }}>
-                    {session.suggestions[0]?.outfitName || "Untitled Look"}
-                  </div>
-                  <div style={{ fontFamily: "var(--ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--c-muted)", marginBottom: "16px" }}>
-                    {session.currentMood} → {session.desiredFeeling}
-                  </div>
-                  <div style={{ display: "flex", gap: "12px" }}>
-                    <Link to={`/apps/naia-stylist/style-me/result?sessionId=${session.id}`} style={{ fontFamily: "var(--ff-ui)", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", textDecoration: "none" }}>VIEW LOOK →</Link>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
+      </section>
 
-        {/* 5. What nAia is learning about you */}
-        <div style={{ marginBottom: "60px" }}>
-          <div style={{ marginBottom: "24px" }}>
-            <h2 style={{ fontFamily: "var(--ff-display)", fontSize: "32px", fontWeight: 900, marginBottom: "8px" }}>What nAia is learning about you</h2>
-            <p style={{ fontFamily: "var(--ff-body)", fontSize: "16px", fontStyle: "italic", color: "var(--c-muted)" }}>
-              {isDemoMode ? "This is a preview — rate your looks to build your real profile." : "Based on how you style, save, and rate looks."}
+      {/* ── MANIFESTO ── */}
+      <section style={{ background: "var(--bg)" }}>
+        <div style={{ maxWidth: "80rem", margin: "0 auto", padding: "6rem 1.25rem" }}>
+          <div style={{ fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.34em", color: "var(--fg-60)" }}>manifesto</div>
+          <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "1rem", fontSize: "clamp(2.5rem, 7vw, 6.5rem)", lineHeight: 0.95 }}>
+            WE DO NOT BEGIN WITH A TREND.
+            <br />
+            <span style={{ fontStyle: "italic", color: "var(--lipstick)" }}>we begin with a story.</span>
+          </h2>
+          <div style={{ marginTop: "3.5rem", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(18rem, 100%), 1fr))", gap: "2.5rem", fontSize: "1rem", lineHeight: 1.75, color: "var(--fg-75)" }}>
+            <p>
+              <span style={{ fontFamily: "var(--ff-display)", fontWeight: 200, display: "block", color: "var(--lipstick)", fontSize: "0.875rem", letterSpacing: "0.3em", marginBottom: "0.5rem" }}>01 / CANVAS</span>
+              Every collection begins with an original work. Paint, texture and memory become the starting point.
+            </p>
+            <p>
+              <span style={{ fontFamily: "var(--ff-display)", fontWeight: 200, display: "block", color: "var(--lipstick)", fontSize: "0.875rem", letterSpacing: "0.3em", marginBottom: "0.5rem" }}>02 / FORM</span>
+              The story is translated through silhouette, construction and movement — cut to meet the body, not overpower it.
+            </p>
+            <p>
+              <span style={{ fontFamily: "var(--ff-display)", fontWeight: 200, display: "block", color: "var(--lipstick)", fontSize: "0.875rem", letterSpacing: "0.3em", marginBottom: "0.5rem" }}>03 / FEELING</span>
+              Pieces are made to stay with you: expressive, personal, and open to becoming part of your own story.
             </p>
           </div>
-
-          {styleResponseProfile.unlocked ? (
-            <div style={{ background: "var(--c-surface)", padding: "40px", border: "1px solid var(--c-border)" }}>
-
-              {/* Style direction */}
-              <div style={{ background: "var(--c-tint)", padding: "24px", marginBottom: "40px", borderLeft: "3px solid var(--c-burg)" }}>
-                <div style={{ fontFamily: "var(--ff-ui)", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "8px" }}>YOUR STYLE DIRECTION</div>
-                <div style={{ fontFamily: "var(--ff-display)", fontSize: "28px", fontWeight: 700, fontStyle: "italic", color: "var(--c-burg)" }}>{styleResponseProfile.styleDirection}</div>
-              </div>
-
-              {/* What works */}
-              {styleResponseProfile.topWorked.length > 0 && (
-                <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid var(--c-border)" }}>
-                  <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-ink)", marginBottom: "12px" }}>YOU RESPOND MOST TO</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                    {styleResponseProfile.topWorked.map((tag: string) => (
-                      <span key={tag} style={{ padding: "8px 16px", background: "var(--c-tint)", fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "1px", textTransform: "uppercase", color: "var(--c-burg)" }}>{tag}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Feelings achieved */}
-              {styleResponseProfile.topFeelingShifts.length > 0 && (
-                <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid var(--c-border)" }}>
-                  <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-ink)", marginBottom: "12px" }}>YOUR OUTFITS OFTEN AIM FOR</div>
-                  <div style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--c-ink)", lineHeight: 1.7 }}>
-                    {styleResponseProfile.topFeelingShifts.join(" · ")}
-                  </div>
-                </div>
-              )}
-
-              {/* Mood insights */}
-              {styleResponseProfile.moodInsights.length > 0 && (
-                <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid var(--c-border)" }}>
-                  <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-ink)", marginBottom: "20px" }}>WHEN YOU FEEL...</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                    {styleResponseProfile.moodInsights.slice(0,4).map(({ mood, topTags, topFeeling }: any) => (
-                      <div key={mood} style={{ padding: "16px 20px", background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
-                        <span style={{ fontFamily: "var(--ff-display)", fontSize: "18px", fontWeight: 700, fontStyle: "italic", color: "var(--c-burg)", textTransform: "capitalize" }}>{mood}</span>
-                        <span style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)" }}>
-                          {" "}— you gravitate toward {topTags.slice(0,2).map((t: string) => t.toLowerCase()).join(" and ")}{topFeeling ? `, and tend to feel ${topFeeling}` : ""}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Best occasions */}
-              {styleResponseProfile.topOccasions.length > 0 && (
-                <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid var(--c-border)" }}>
-                  <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-ink)", marginBottom: "12px" }}>YOU OFTEN STYLE FOR</div>
-                  <div style={{ fontFamily: "var(--ff-body)", fontSize: "16px", lineHeight: 1.7, color: "var(--c-ink)" }}>{styleResponseProfile.topOccasions.join(" · ")}</div>
-                </div>
-              )}
-
-              {/* What doesn't work */}
-              {styleResponseProfile.topDidntWork.length > 0 && (
-                <div>
-                  <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-ink)", marginBottom: "12px" }}>WHAT DOESN'T WORK FOR YOU</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                    {styleResponseProfile.topDidntWork.map((tag: string) => (
-                      <span key={tag} style={{ padding: "8px 16px", border: "1px solid var(--c-border)", fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "1px", textTransform: "uppercase", color: "var(--c-muted)" }}>{tag}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div style={{ background: "var(--c-tint)", padding: "40px", border: "1px solid var(--c-tint-med)", textAlign: "center" }}>
-              <div style={{ fontFamily: "var(--ff-display)", fontSize: "48px", opacity: 0.2, marginBottom: "16px" }}>◇</div>
-              <h3 style={{ fontFamily: "var(--ff-display)", fontSize: "24px", fontWeight: 900, fontStyle: "italic", marginBottom: "12px" }}>nAia is still getting to know you</h3>
-              <p style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--c-muted)", marginBottom: "32px" }}>
-                Rate a few looks and nAia will start building a profile that's truly yours — your moods, your occasions, your feelings.
-              </p>
-              <Link to="/quick-style" style={{ display: "inline-block", padding: "16px 32px", background: "var(--c-burg)", color: "var(--c-bg)", textDecoration: "none", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase" }}>RATE A LOOK →</Link>
-            </div>
-          )}
         </div>
+      </section>
 
-        {/* 6. Passport Lite */}
-        <div style={{ marginBottom: "60px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
+      {/* ── THE MAKING ── */}
+      <section style={{ background: "var(--fg)", color: "var(--bg)" }}>
+        <div style={{ maxWidth: "90rem", margin: "0 auto", padding: "6rem 1.25rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(24rem, 100%), 1fr))", gap: "2.5rem", alignItems: "end" }}>
             <div>
-              <h2 style={{ fontFamily: "var(--ff-display)", fontSize: "32px", fontWeight: 900, marginBottom: "4px" }}>Your nAia Passport</h2>
-              <p style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)" }}>Your style identity, in full</p>
+              <div style={{ fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.34em", color: "rgba(255,248,240,0.6)" }}>the making</div>
+              <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "0.75rem", fontSize: "clamp(2.5rem, 6vw, 4.5rem)" }}>FROM CANVAS TO CLOTH.</h2>
             </div>
-            <Link to={profile?.completed ? "/passport" : "/onboarding/step/1"} style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", textDecoration: "none" }}>
-              {!profile?.completed ? "COMPLETE PROFILE" : "EDIT"}
-            </Link>
-          </div>
-
-          {profile?.completed ? (() => {
-            const p = profile;
-            const monoLabel: React.CSSProperties = { fontFamily: "var(--ff-ui)", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase" as const, color: "var(--c-muted)", marginBottom: "8px" };
-            const bodyText: React.CSSProperties = { fontFamily: "var(--ff-body)", fontSize: "16px", fontStyle: "italic", color: "var(--c-ink)" };
-            const rowStyle: React.CSSProperties = { paddingBottom: "20px", marginBottom: "20px", borderBottom: "1px solid var(--c-border)" };
-            const pillStyle: React.CSSProperties = { display: "inline-block", padding: "6px 14px", border: "1px solid var(--c-border)", fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "1px", textTransform: "uppercase" as const, color: "var(--c-ink)", marginRight: "8px", marginBottom: "6px" };
-
-            // Rehydrate lifestyle from comma-joined string
-            const lifestyleArr: string[] = p.lifestyle ? p.lifestyle.split(", ").filter(Boolean) : [];
-
-            const sections: Array<{ label: string; content: React.ReactNode } | null> = [
-              p.stylePersonalities?.length ? {
-                label: "Style energies",
-                content: <div>{p.stylePersonalities.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("style-personalities", id)}</span>)}</div>
-              } : null,
-              p.desiredImpression?.length ? {
-                label: "The impression you make",
-                content: <div>{p.desiredImpression.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("desired-impression", id)}</span>)}</div>
-              } : null,
-              p.desiredFeelings?.length ? {
-                label: "How you want to feel",
-                content: <div>{p.desiredFeelings.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("desired-feelings", id)}</span>)}</div>
-              } : null,
-              p.favoriteColors?.length ? {
-                label: "Colour palette",
-                content: (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                    {p.favoriteColors.map((id: string) => (
-                      <span key={id} style={{ ...pillStyle, display: "inline-flex", alignItems: "center", gap: "8px" }}>
-                        <span style={{ width: "12px", height: "12px", background: PASSPORT_COLOR_HEX[id] ?? "#ccc", border: "1px solid rgba(0,0,0,0.1)", flexShrink: 0 }} />
-                        {passportLabel("favorite-colors", id)}
-                      </span>
-                    ))}
-                  </div>
-                )
-              } : null,
-              p.avoidColors?.length ? {
-                label: "Colours to avoid",
-                content: (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", opacity: 0.7 }}>
-                    {p.avoidColors.map((id: string) => (
-                      <span key={id} style={{ ...pillStyle, display: "inline-flex", alignItems: "center", gap: "8px" }}>
-                        <span style={{ width: "12px", height: "12px", background: PASSPORT_COLOR_HEX[id] ?? "#ccc", border: "1px solid rgba(0,0,0,0.1)", flexShrink: 0 }} />
-                        {passportLabel("avoid-colors", id)}
-                      </span>
-                    ))}
-                  </div>
-                )
-              } : null,
-              lifestyleArr.length ? {
-                label: "Lifestyle",
-                content: <div>{lifestyleArr.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("lifestyle", id)}</span>)}</div>
-              } : null,
-              p.fitPreferences?.length ? {
-                label: "Fit preferences",
-                content: <div>{p.fitPreferences.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("fit-preferences", id)}</span>)}</div>
-              } : null,
-              p.becoming?.length ? {
-                label: "Who you're becoming",
-                content: <div>{p.becoming.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("becoming", id)}</span>)}</div>
-              } : null,
-              p.styleStruggles?.length ? {
-                label: "Wardrobe disconnects",
-                content: <div>{p.styleStruggles.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("wardrobe-disconnection", id)}</span>)}</div>
-              } : null,
-              p.styleSupport?.length ? {
-                label: "What would help most",
-                content: <div>{p.styleSupport.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("style-support", id)}</span>)}</div>
-              } : null,
-              p.finalNotes ? {
-                label: "Notes to nAia",
-                content: <div style={{ ...bodyText, fontStyle: "italic" }}>&ldquo;{p.finalNotes}&rdquo;</div>
-              } : null,
-            ];
-
-            const populated = sections.filter(Boolean) as Array<{ label: string; content: React.ReactNode }>;
-
-            return (
-              <div style={{ background: "var(--c-surface)", padding: "32px", border: "1px solid var(--c-border)" }}>
-                {populated.map(({ label, content }, i) => (
-                  <div key={label} style={i < populated.length - 1 ? rowStyle : { paddingBottom: "4px" }}>
-                    <div style={monoLabel}>{label.toUpperCase()}</div>
-                    {content}
-                  </div>
-                ))}
-              </div>
-            );
-          })() : (
-            <div style={{ background: "var(--c-tint)", padding: "40px", textAlign: "center", border: "1px solid var(--c-tint-med)" }}>
-              <p style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--c-muted)", marginBottom: "20px" }}>
-                Complete your style quiz so nAia truly knows you
+            <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
+              <p style={{ maxWidth: "26rem", fontStyle: "italic", color: "rgba(255,248,240,0.8)", fontSize: "1.15rem", lineHeight: 1.65, fontFamily: "var(--ff-display)" }}>
+                Every chapter begins with an original work — painting, memory, texture — then moves through fabric, form and feeling until it becomes something made to be worn.
               </p>
-              <Link to="/onboarding/step/1" style={{ display: "inline-block", padding: "14px 32px", background: "var(--c-burg)", color: "var(--c-bg)", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", textDecoration: "none" }}>
-                START QUIZ
+              <Link to="/art-story" style={{ display: "inline-block", border: "1px solid rgba(255,248,240,0.8)", borderRadius: "9999px", padding: "0.875rem 2rem", fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--bg)", textDecoration: "none", fontFamily: "var(--ff-display)" }}>
+                DISCOVER THE ART STORY
               </Link>
             </div>
-          )}
-        </div>
-
-        {/* 7. Style tools */}
-        <div style={{ marginBottom: "60px" }}>
-          <h2 style={{ fontFamily: "var(--ff-display)", fontSize: "32px", fontWeight: 900, marginBottom: "8px" }}>Style tools</h2>
-          <p style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)", marginBottom: "24px" }}>Everything you need in one place</p>
-          <div className="db-tools">
-            <Link to="/closet" style={{ background: "var(--c-surface)", padding: "32px", border: "1px solid var(--c-border)", textDecoration: "none", color: "inherit", display: "block" }}>
-              <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "12px" }}>WARDROBE</div>
-              <h3 style={{ fontFamily: "var(--ff-display)", fontSize: "22px", fontWeight: 700, marginBottom: "8px", color: "var(--c-ink)" }}>Digital Wardrobe</h3>
-              <p style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)" }}>Upload, save, and style your pieces with nAia.</p>
-            </Link>
-            <Link to="/quick-style" style={{ background: "var(--c-ink)", color: "var(--c-bg)", padding: "32px", textDecoration: "none", display: "block" }}>
-              <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", marginBottom: "12px" }}>STYLING SESSION</div>
-              <h3 style={{ fontFamily: "var(--ff-display)", fontSize: "22px", fontWeight: 900, marginBottom: "8px" }}>Style Me</h3>
-              <p style={{ fontFamily: "var(--ff-body)", fontSize: "14px", fontStyle: "italic", opacity: 0.8 }}>Get a personalized outfit based on your mood, occasion, and what feels right today.</p>
-            </Link>
-            <Link to="/buyskip" style={{ background: "var(--c-tint)", padding: "32px", border: "1px solid var(--c-tint-med)", textDecoration: "none", display: "block" }}>
-              <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", marginBottom: "12px" }}>SHOPPING TOOL</div>
-              <h3 style={{ fontFamily: "var(--ff-display)", fontSize: "22px", fontWeight: 700, marginBottom: "8px", color: "var(--c-ink)" }}>Buy or Skip?</h3>
-              <p style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)" }}>Thinking of buying something? Upload it and nAia will tell you if it fits your wardrobe, style, and lifestyle.</p>
-            </Link>
           </div>
         </div>
+      </section>
 
-      </div>
-    </div>
+      {/* ── CLOSING CTA ── */}
+      <section
+        style={{
+          position: "relative",
+          height: "90svh",
+          minHeight: "34rem",
+          overflow: "hidden",
+          backgroundImage: "url('/nadine/naia-wardrobe.jpg')",
+          backgroundPosition: "center",
+          backgroundSize: "cover",
+          color: "white",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "flex-end",
+        }}
+      >
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(0,0,0,0.3), rgba(0,0,0,0.2) 40%, rgba(0,0,0,0.65))" }} />
+        <div style={{ position: "relative", zIndex: 10, padding: "0 1.25rem 4rem" }}>
+          <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, fontSize: "clamp(2.5rem, 7vw, 7rem)", lineHeight: 0.95, color: "white", maxWidth: "60rem" }}>
+            THE NEXT CHAPTER
+            <br />
+            OF NADINE <span style={{ fontStyle: "italic", color: "rgba(255,255,255,0.9)" }}>begins here.</span>
+          </h2>
+          <div style={{ marginTop: "2rem", display: "flex", flexWrap: "wrap", gap: "1rem" }}>
+            <Link to="/naia-collection" style={pillStyle}>EXPLORE THE COLLECTION</Link>
+            <Link to="/stylist" style={pillStyle}>MEET YOUR nAia STYLIST</Link>
+          </div>
+        </div>
+      </section>
+
+      <PublicFooter />
+    </main>
   );
 }

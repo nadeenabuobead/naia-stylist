@@ -2,6 +2,9 @@ import { route, index } from "@react-router/dev/routes";
 
 export default [
   index("routes/_index.tsx"),
+  route("about",           "routes/about.tsx"),
+  route("naia-collection", "routes/naia-collection.tsx"),
+  route("art-story",       "routes/art-story.tsx"),
   route("onboarding/step/:step", "routes/onboarding/step.$step.tsx"),
   route("onboarding/complete", "routes/onboarding/complete.tsx"),
   route("passport",            "routes/passport.tsx"),
