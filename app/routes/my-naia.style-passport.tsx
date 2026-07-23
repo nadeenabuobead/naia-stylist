@@ -281,21 +281,11 @@ export default function StylePassportPage() {
                   <button
                     type="button"
                     onClick={() => editSection(s.key)}
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "0.25rem",
-                      width: "100%",
-                      padding: "1rem 0",
-                      textAlign: "left",
-                      background: "none",
-                      border: "none",
-                      borderBottom: "1px solid var(--fg-10)",
-                      cursor: "pointer",
-                    }}
+                    className="mn-detail-row"
+                    style={{ width: "100%", background: "none", border: "none", borderBottom: "1px solid var(--fg-10)", cursor: "pointer", textAlign: "left" }}
                   >
-                    <span style={{ fontSize: "0.65rem", textTransform: "uppercase", letterSpacing: "0.28em", color: "var(--fg-55)" }}>{s.label}</span>
-                    <span style={{ fontSize: "0.9rem", color: value.length > 0 ? "var(--fg-85)" : "var(--lipstick)" }}>
+                    <span className="mn-detail-label">{s.label}</span>
+                    <span className="mn-detail-value" style={{ color: value.length > 0 ? "var(--fg-85)" : "var(--lipstick)" }}>
                       {value.length > 0 ? value.join(" · ") : "Not yet answered"}
                     </span>
                   </button>
@@ -344,18 +334,9 @@ export default function StylePassportPage() {
           {SECTIONS.map((s) => {
             const value = answers[s.key];
             return (
-              <li
-                key={s.key}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "0.25rem",
-                  borderBottom: "1px solid var(--fg-10)",
-                  padding: "0.75rem 0",
-                }}
-              >
-                <span style={{ fontSize: "0.65rem", textTransform: "uppercase", letterSpacing: "0.28em", color: "var(--fg-55)" }}>{s.label}</span>
-                <span style={{ fontSize: "0.9rem", color: value.length > 0 ? "var(--fg-85)" : "var(--lipstick)" }}>
+              <li key={s.key} className="mn-detail-row">
+                <span className="mn-detail-label">{s.label}</span>
+                <span className="mn-detail-value" style={{ color: value.length > 0 ? "var(--fg-85)" : "var(--lipstick)" }}>
                   {value.length > 0 ? value.join(" · ") : "Missing — please complete"}
                 </span>
               </li>

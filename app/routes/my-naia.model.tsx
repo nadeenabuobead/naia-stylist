@@ -221,18 +221,8 @@ export default function NaiaModelPage() {
               <div style={statusTitle}>Ready For Virtual Try-On</div>
             </section>
 
-            <section
-              style={{
-                ...s,
-                display: "grid",
-                gap: "2rem",
-                gridTemplateColumns: "minmax(0,1fr)",
-              }}
-            >
+            <section className="mn-model-ready-grid" style={s}>
               <div
-                style={{
-                  maxWidth: "18rem",
-                }}
               >
                 <div
                   style={{

@@ -135,14 +135,7 @@ export default function BuyOrSkipPage() {
         {/* Step 1: Source */}
         <section style={{ borderTop: "1px solid var(--fg-12)", paddingTop: "2rem" }}>
           <div className="mn-eyebrow">Step 1 · Add the Piece</div>
-          <div
-            style={{
-              marginTop: "1.25rem",
-              display: "grid",
-              gap: "0.75rem",
-              gridTemplateColumns: "repeat(auto-fill, minmax(14rem, 1fr))",
-            }}
-          >
+          <div className="mn-grid-2col" style={{ marginTop: "1.25rem", gap: "0.75rem" }}>
             {SOURCE_OPTIONS.map((o) => {
               const active = source === o.id;
               return (
@@ -175,7 +168,7 @@ export default function BuyOrSkipPage() {
         {/* Step 2: Questions */}
         <section style={{ borderTop: "1px solid var(--fg-12)", paddingTop: "2rem" }}>
           <div className="mn-eyebrow">Step 2 · A Few Questions</div>
-          <div style={{ marginTop: "1.25rem", display: "grid", gap: "1rem", gridTemplateColumns: "repeat(auto-fill, minmax(14rem, 1fr))" }}>
+          <div className="mn-grid-2col" style={{ marginTop: "1.25rem", gap: "1rem" }}>
             <Field label="What are you considering it for?" placeholder="e.g. Evening dinners in Beirut" />
             <Field label="What do you like about it?" placeholder="e.g. The neckline and the drape" />
             <Field label="What are you unsure about?" placeholder="e.g. Whether it duplicates something I own" />
@@ -230,7 +223,7 @@ export default function BuyOrSkipPage() {
               {SAMPLE_VERDICT.summary}
             </p>
 
-            <div style={{ marginTop: "2rem", display: "grid", gap: "0", gridTemplateColumns: "repeat(auto-fill, minmax(18rem, 1fr))" }}>
+            <div className="mn-grid-2col-lg" style={{ marginTop: "2rem", gap: "1.5rem" }}>
               <ResultBlock label="Why It Does Or Does Not Work">
                 <ul style={{ listStyle: "none", padding: 0, display: "flex", flexDirection: "column", gap: "0.5rem", fontSize: "0.9rem", lineHeight: 1.5, color: "var(--fg-80)" }}>
                   {SAMPLE_VERDICT.reasons.map((r) => (

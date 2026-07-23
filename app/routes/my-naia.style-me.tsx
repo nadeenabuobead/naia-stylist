@@ -66,8 +66,11 @@ export default function MyNaiaStyleMe() {
               textTransform: "uppercase",
             }}
           >
-            Style Sessions
+            Style Me
           </h1>
+          <p style={{ marginTop: "1rem", maxWidth: "42rem", fontSize: "0.9rem", lineHeight: 1.75, color: "var(--fg-75)" }}>
+            Tell nAia about the occasion and receive a considered look built from NADINE pieces and/or your own Closet.
+          </p>
         </section>
 
         {/* Start a new session panel */}
@@ -78,31 +81,17 @@ export default function MyNaiaStyleMe() {
             padding: "2rem",
           }}
         >
-          <div className="mn-eyebrow">New Session</div>
-          <h2
-            style={{
-              fontFamily: "var(--ff-display)",
-              fontWeight: 200,
-              marginTop: "0.75rem",
-              fontSize: "1.875rem",
-              lineHeight: 1,
-              letterSpacing: "0.02em",
-              textTransform: "uppercase",
-            }}
-          >
-            The Creative Brief.
-          </h2>
+          <div className="mn-eyebrow">Start a New Session</div>
           <p
             style={{
-              marginTop: "1rem",
+              marginTop: "1.25rem",
               maxWidth: "36rem",
               fontSize: "0.9rem",
               lineHeight: 1.75,
               color: "var(--fg-75)",
             }}
           >
-            Tell nAia your mood, the occasion, and how you want to feel — it builds the complete
-            look.
+            Answer a few questions about how you feel, what you need and where you&apos;re going.
           </p>
           <div style={{ marginTop: "1.5rem" }}>
             {authed ? (

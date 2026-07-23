@@ -190,17 +190,7 @@ export default function MyNaiaCloset() {
               const { text: sText, lipstick: sLipstick } = statusLabel();
 
               return (
-                <li
-                  key={item.id}
-                  style={{
-                    display: "grid",
-                    gap: "1rem 1.5rem",
-                    padding: "1.25rem 0",
-                    borderBottom: "1px solid var(--fg-12)",
-                    gridTemplateColumns: "6rem minmax(0,1fr) auto",
-                    alignItems: "center",
-                  }}
-                >
+                <li key={item.id} className="mn-closet-item">
                   {/* Photo placeholder */}
                   <div
                     style={{

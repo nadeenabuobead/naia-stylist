@@ -206,13 +206,16 @@ export default function MyNaiaOverview() {
         </section>
 
         {/* Recent Looks */}
-        {sessions.length > 0 && (
-          <section className="mn-section">
-            <div className="mn-section-head">
-              <div className="mn-eyebrow">Recent Looks</div>
-              <Link to="/my-naia/styleme/looks" className="mn-see-link">View All Looks</Link>
-            </div>
-            <div className="mn-section-body">
+        <section className="mn-section">
+          <div className="mn-section-head">
+            <div className="mn-eyebrow">Recent Looks</div>
+            <Link to="/my-naia/styleme/looks" className="mn-see-link">View All Looks</Link>
+          </div>
+          <div className="mn-section-body">
+            {sessions.length === 0 ? (
+              <p className="mn-state-note">Your first StyleMe look will appear here after your first session.</p>
+            ) : (
+              <>
               <style>{`@media (min-width:640px){.mn-looks-grid-inner{grid-template-columns:repeat(2,1fr)!important}}@media (min-width:1024px){.mn-looks-grid-inner{grid-template-columns:repeat(3,1fr)!important}}`}</style>
               <div className="mn-looks-grid-inner" style={{ display: "grid", gap: "1.5rem" }}>
                 {sessions.map((session) => {
@@ -285,9 +288,10 @@ export default function MyNaiaOverview() {
                   );
                 })}
               </div>
-            </div>
-          </section>
-        )}
+              </>
+            )}
+          </div>
+        </section>
 
         {/* What nAia Is Noticing */}
         <section className="mn-section">

@@ -64,13 +64,7 @@ export default function PersonalisationPage() {
         </section>
 
         {/* Cards */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr",
-            gap: "1.25rem",
-          }}
-        >
+        <div className="mn-pers-grid">
           {CARDS.map((c) => (
             <Link key={c.to} to={c.to} className="mn-pers-card">
               <div>

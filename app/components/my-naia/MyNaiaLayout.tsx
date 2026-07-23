@@ -13,7 +13,6 @@ const MY_NAIA_NAV: NavGroup[] = [
       { to: "/my-naia/closet", label: "My Closet" },
       { to: "/my-naia/style-me", label: "StyleMe" },
       { to: "/my-naia/buy-or-skip", label: "Buy or Skip" },
-      { to: "/my-naia/buying-decisions", label: "Buying Decisions" },
       { to: "/my-naia/trend-edits", label: "My Trend Edits" },
     ],
   },
@@ -38,7 +37,9 @@ function isActive(pathname: string, item: NavItem) {
 
 const SITE_NAV_LINKS = [
   { label: "HOME", to: "/" },
-  { label: "THE COLLECTION", to: "/closet" },
+  { label: "THE HOUSE", to: "/about" },
+  { label: "THE COLLECTION", to: "/naia-collection" },
+  { label: "THE ART STORY", to: "/art-story" },
   { label: "nAia STYLIST", to: "/stylist" },
   { label: "TREND REPORTS", to: "/trends" },
 ];
@@ -46,11 +47,19 @@ const SITE_NAV_LINKS = [
 const FOOTER_COLS = [
   {
     title: "customer care",
-    links: [{ label: "Contact", href: "#" }],
+    links: [
+      { label: "Shipping & Delivery", href: "#" },
+      { label: "Returns & Refunds", href: "#" },
+      { label: "FAQ", href: "#" },
+      { label: "Contact", href: "#" },
+    ],
   },
   {
     title: "the house",
     links: [
+      { label: "The House", href: "/about" },
+      { label: "The Collection", href: "/naia-collection" },
+      { label: "The Art Story", href: "/art-story" },
       { label: "nAia Stylist", href: "/stylist" },
       { label: "Trend Reports", href: "/trends" },
     ],
@@ -59,7 +68,24 @@ const FOOTER_COLS = [
     title: "account",
     links: [
       { label: "My nAia", href: "/my-naia" },
-      { label: "Style Passport", href: "/my-naia/style-passport" },
+      { label: "Wishlist", href: "#" },
+    ],
+  },
+  {
+    title: "legal",
+    links: [
+      { label: "Privacy Policy", href: "#" },
+      { label: "Terms of Service", href: "#" },
+      { label: "Accessibility", href: "#" },
+      { label: "Cookie Preferences", href: "#" },
+    ],
+  },
+  {
+    title: "follow",
+    links: [
+      { label: "Instagram", href: "#" },
+      { label: "TikTok", href: "#" },
+      { label: "Press", href: "#" },
     ],
   },
 ];
@@ -92,13 +118,27 @@ export default function MyNaiaLayout({ children }: Props) {
           </Link>
 
           <div className="mn-sitenav-actions">
+            <button aria-label="search" className="mn-sitenav-icon-btn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+              </svg>
+            </button>
+            <button aria-label="wishlist" className="mn-sitenav-icon-btn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+              </svg>
+            </button>
             <Link to="/my-naia" aria-label="My nAia account" className="mn-sitenav-icon-link">
-              {/* account icon */}
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <circle cx="12" cy="8" r="4" />
                 <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
               </svg>
             </Link>
+            <button aria-label="bag" className="mn-sitenav-icon-btn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/>
+              </svg>
+            </button>
           </div>
         </div>
       </header>

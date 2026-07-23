@@ -55,16 +55,14 @@ function ControlRow({ specKey, onOpen, tone = "destructive" }: { specKey: Confir
   const spec = CONFIRMATIONS[specKey];
   const label = specKey === "download" ? "Request my data" : specKey === "delete-account" ? "Review account deletion" : "Continue";
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", border: "1px solid var(--fg-15)", background: "var(--bg-50)", padding: "1.25rem" }}>
+    <div className="mn-control-row">
       <div style={{ minWidth: 0 }}>
         <div style={{ fontFamily: "var(--ff-display)", fontWeight: 300, fontSize: "1.125rem", letterSpacing: "0.02em", textTransform: "uppercase", color: tone === "destructive" ? "var(--lipstick)" : "var(--fg)" }}>
           {spec.title}
         </div>
         <p style={{ marginTop: "0.25rem", fontSize: "0.85rem", lineHeight: 1.625, color: "var(--fg-75)" }}>{spec.removes}</p>
       </div>
-      <div>
-        <button type="button" className="mn-btn-outline" onClick={() => onOpen(specKey)}>{label}</button>
-      </div>
+      <button type="button" className="mn-btn-outline" style={{ flexShrink: 0 }} onClick={() => onOpen(specKey)}>{label}</button>
     </div>
   );
 }
