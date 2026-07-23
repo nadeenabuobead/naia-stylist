@@ -44,6 +44,14 @@
 }
 
 /* ── Base ─────────────────────────────────────────────────────────────── */
+/*
+  body rule here so that elements in routes that load this stylesheet but
+  do not use the .mn-page class (public marketing pages) still inherit Inter
+  rather than the browser default. MY nAia pages already set font-family via
+  .mn-page — this rule adds nothing new for them.
+*/
+body { font-family: var(--ff-ui); -webkit-font-smoothing: antialiased; }
+
 .mn-page {
   min-height: 100vh;
   color: var(--fg);
