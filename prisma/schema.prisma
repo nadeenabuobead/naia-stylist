@@ -162,6 +162,12 @@ model ClosetItem {
   aiDescription String?      // AI-generated description
   aiStyleNotes  String?      // AI notes about styling this piece
 
+  // Try-On Eligibility (Phase 4A6 — migration 20260717000000)
+  tryOnEligibility  String?   // ready-for-try-on | needs-clearer-photo | not-supported | pending-assessment | null
+  tryOnAssessedAt   DateTime?
+  tryOnCustomerHint String?
+  tryOnInternalNote String?
+
   // Relationships
   outfitItems   OutfitItem[]
   savedLookItems         SavedLookItem[]
