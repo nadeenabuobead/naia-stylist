@@ -25,7 +25,7 @@ export default defineConfig({
   // served through a path-based proxy (Lovable storefront → Remix rewrite).
   // Without it, /assets/*.js references resolve against the proxy domain
   // (Lovable) instead of this Remix deployment, causing 404s.
-  base: process.env.ASSET_BASE_URL || "/",
+  base: process.env.ASSET_BASE_URL ? process.env.ASSET_BASE_URL.replace(/\/?$/, "/") : "/",
   server: {
     allowedHosts: [host],
     cors: { preflightContinue: true },
