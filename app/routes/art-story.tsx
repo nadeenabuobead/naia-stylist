@@ -1,3 +1,4 @@
+// SUPERSEDED by Lovable/TanStack (nadine-storefront repo). Canonical version is live at /art-story. Held for rollback — do not delete.
 import { useState } from "react";
 import type { LinksFunction } from "react-router";
 import { Link } from "react-router";

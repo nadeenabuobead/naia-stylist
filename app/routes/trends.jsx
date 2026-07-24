@@ -1,3 +1,4 @@
+// SUPERSEDED by Lovable/TanStack (nadine-storefront repo). Redirected to /trend-reports. Held for rollback — do not delete.
 import { useState } from "react";
 import { Link } from "react-router";
 import naiaStyles from "../styles/naia-design-system.css?url";

@@ -1,3 +1,4 @@
+// SUPERSEDED by Lovable/TanStack (nadine-storefront repo). Redirected to /ai-stylist. Held for rollback — do not delete.
 import { Link } from "react-router";
 import naiaStyles from "../styles/naia-design-system.css?url";
 import { PublicNav, PublicFooter } from "../components/PublicLayout";

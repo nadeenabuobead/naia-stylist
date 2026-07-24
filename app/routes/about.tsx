@@ -1,3 +1,4 @@
+// SUPERSEDED by Lovable/TanStack (nadine-storefront repo). Canonical version is live at /about. Held for rollback — do not delete.
 import type { LinksFunction } from "react-router";
 import { Link } from "react-router";
 import naiaStyles from "~/styles/naia-design-system.css?url";
