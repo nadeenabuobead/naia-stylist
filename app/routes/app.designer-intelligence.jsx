@@ -32,11 +32,14 @@ export async function loader({ request }) {
   const rawDays = parseInt(url.searchParams.get("days") || "30", 10);
   const dateRangeDays = [7, 30, 90, 365].includes(rawDays) ? rawDays : 30;
 
-  // Sample Preview mode — staging/dev only. Never writes to DB.
-  const sampleMode = process.env.DESIGNER_SAMPLE_DATA_ENABLED === "true";
+  // Sample Preview — env var makes the toggle visible; query param activates it.
+  // Both conditions must be true. A lone ?preview=sample with no env var is silently ignored.
+  const samplePreviewAvailable = process.env.DESIGNER_SAMPLE_DATA_ENABLED === "true";
+  const sampleMode = samplePreviewAvailable && url.searchParams.get("preview") === "sample";
+
   if (sampleMode) {
     const sample = getDesignerSampleData();
-    return { ...sample, dateRangeDays, sampleMode: true };
+    return { ...sample, dateRangeDays, sampleMode: true, samplePreviewAvailable: true };
   }
 
   const [dashboard, kpis, phase4b2, advanced, rel] = await Promise.all([
@@ -48,7 +51,7 @@ export async function loader({ request }) {
   ]);
 
   if (dashboard.error) throw new Response(dashboard.error, { status: 500 });
-  return { dashboard, kpis, phase4b2, advanced, rel, dateRangeDays, sampleMode: false };
+  return { dashboard, kpis, phase4b2, advanced, rel, dateRangeDays, sampleMode: false, samplePreviewAvailable };
 }
 
 // ── Error boundary ─────────────────────────────────────────────────────────────
@@ -408,7 +411,7 @@ const TABS = [
 // ── Root component ─────────────────────────────────────────────────────────────
 
 export default function DesignerDashboard() {
-  const { dashboard: data, kpis, phase4b2, advanced, rel, dateRangeDays, sampleMode } = useLoaderData();
+  const { dashboard: data, kpis, phase4b2, advanced, rel, dateRangeDays, sampleMode, samplePreviewAvailable } = useLoaderData();
   const [activeTab, setActiveTab] = useState("overview");
   const [searchParams] = useSearchParams();
 
@@ -417,10 +420,10 @@ export default function DesignerDashboard() {
       <GFonts />
       <div style={s.inner}>
 
-        {/* ── Sample Preview banner ──────────────────────────────────────── */}
+        {/* ── Sample Preview banner — only visible while sample mode is active ─ */}
         {sampleMode && (
-          <div style={{ padding: "10px 20px", background: "#6b4800", color: "#fffbf0", fontFamily: "'Inter', sans-serif", fontSize: 12, letterSpacing: "1px", textAlign: "center", marginBottom: 0 }}>
-            ⚠ SAMPLE PREVIEW — All data shown is synthetic fixture data. No real customer records are loaded. Set <code style={{ background: "rgba(255,255,255,0.15)", padding: "1px 6px" }}>DESIGNER_SAMPLE_DATA_ENABLED=false</code> to return to Live Data.
+          <div style={{ padding: "8px 20px", background: "#6b4800", color: "#fffbf0", fontFamily: "'Inter', sans-serif", fontSize: 11, letterSpacing: "0.5px", textAlign: "center" }}>
+            SAMPLE PREVIEW ACTIVE — Synthetic fixture data only. No real customer records loaded.
           </div>
         )}
 
@@ -432,26 +435,47 @@ export default function DesignerDashboard() {
               <h1 style={s.h1}>nAia Designer Dashboard</h1>
               <p style={s.subtitle}>Collection intelligence · Customer insights · Design direction</p>
             </div>
-            {/* Date range selector */}
-            <Form method="get" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {searchParams.get("tab") && <input type="hidden" name="tab" value={searchParams.get("tab")} />}
-              <span style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontSize: 8, color: "#7a6f6a", textTransform: "uppercase", letterSpacing: "2px", fontWeight: 500 }}>Period</span>
-              {[7, 30, 90, 365].map((d) => (
-                <button
-                  key={d}
-                  type="submit"
-                  name="days"
-                  value={d}
-                  style={{
-                    ...s.periodBtn,
-                    background: dateRangeDays === d ? "#221516" : "transparent",
-                    color: dateRangeDays === d ? "#f4f4f1" : "#7a6f6a",
-                  }}
-                >
-                  {d === 365 ? "All" : `${d}d`}
-                </button>
-              ))}
-            </Form>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+              {/* Date range selector */}
+              <Form method="get" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {searchParams.get("tab") && <input type="hidden" name="tab" value={searchParams.get("tab")} />}
+                {sampleMode && <input type="hidden" name="preview" value="sample" />}
+                <span style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontSize: 8, color: "#7a6f6a", textTransform: "uppercase", letterSpacing: "2px", fontWeight: 500 }}>Period</span>
+                {[7, 30, 90, 365].map((d) => (
+                  <button
+                    key={d}
+                    type="submit"
+                    name="days"
+                    value={d}
+                    style={{
+                      ...s.periodBtn,
+                      background: dateRangeDays === d ? "#221516" : "transparent",
+                      color: dateRangeDays === d ? "#f4f4f1" : "#7a6f6a",
+                    }}
+                  >
+                    {d === 365 ? "All" : `${d}d`}
+                  </button>
+                ))}
+              </Form>
+              {/* Live / Sample Preview toggle — only shown when env var enables it */}
+              {samplePreviewAvailable && (
+                <div style={{ display: "flex", gap: 0, alignItems: "center", border: "1px solid rgba(34,21,22,0.14)", overflow: "hidden" }}>
+                  <Form method="get" style={{ display: "contents" }}>
+                    <input type="hidden" name="days" value={dateRangeDays} />
+                    <button type="submit" style={{ padding: "3px 10px", fontFamily: "'Inter', sans-serif", fontSize: 9, letterSpacing: "1px", textTransform: "uppercase", background: !sampleMode ? "#221516" : "transparent", color: !sampleMode ? "#f4f4f1" : "#7a6f6a", border: "none", cursor: "pointer" }}>
+                      Live Data
+                    </button>
+                  </Form>
+                  <Form method="get" style={{ display: "contents" }}>
+                    <input type="hidden" name="days" value={dateRangeDays} />
+                    <input type="hidden" name="preview" value="sample" />
+                    <button type="submit" style={{ padding: "3px 10px", fontFamily: "'Inter', sans-serif", fontSize: 9, letterSpacing: "1px", textTransform: "uppercase", background: sampleMode ? "#6b4800" : "transparent", color: sampleMode ? "#fffbf0" : "#7a6f6a", border: "none", cursor: "pointer" }}>
+                      Sample Preview
+                    </button>
+                  </Form>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -530,17 +554,8 @@ function TabOverview({ data, kpis, phase4b2, advanced, rel, dateRangeDays }) {
         </Section>
       )}
 
-      {/* Top signals */}
-      {data.onboarding && data.onboarding.totalProfiles > 0 && (
-        <Section title="Top Signals" desc="Leading answers across customer profiles and styling sessions" status="live">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
-            <SignalGroup title="Top Style Personalities" items={data.onboarding.styleDNADistribution.slice(0, 4)} keyField="style" valueField="count" />
-            <SignalGroup title="Top Desired Feelings" items={data.onboarding.desiredFeelings.slice(0, 4)} keyField="feeling" valueField="count" />
-            <SignalGroup title="Top Occasions" items={data.topOccasions?.slice(0, 4)} keyField="name" valueField="lookCount" />
-            <SignalGroup title="Top Preferred Colors" items={data.onboarding.colorDistribution.slice(0, 4)} keyField="color" valueField="count" />
-          </div>
-        </Section>
-      )}
+      {/* Top signals — dynamic, balanced selection */}
+      <TopSignalsSection data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} dateRangeDays={dateRangeDays} />
 
       {/* Collection Evolution summary */}
       {advanced?.collectionEvolution && (
@@ -615,6 +630,204 @@ function SignalGroup({ title, items, keyField, valueField }) {
         ))}
       </div>
     </div>
+  );
+}
+
+// ── Dynamic Top Signals ───────────────────────────────────────────────────────
+
+function buildTopSignals({ data, kpis, phase4b2, advanced, rel, dateRangeDays }) {
+  const candidates = [];
+  const totalProfiles = data?.onboarding?.totalProfiles || 0;
+  const totalReviews  = data?.totalLooks || 0;
+  const pLabel = dateRangeDays === 365 ? "All time" : `Last ${dateRangeDays} days`;
+  const LOG51 = Math.log(51);
+
+  function push(cat, title, value, denominator, source, period, n, strength) {
+    if (!value) return;
+    candidates.push({
+      cat, title, value, denominator, source, period,
+      conf: sampleConfidence(n),
+      score: (Math.log(Math.min(n, 50) + 1) / LOG51) * 0.5 + Math.min(strength, 1) * 0.5,
+    });
+  }
+
+  // identity
+  const topStyle = data?.onboarding?.styleDNADistribution?.[0];
+  if (topStyle && totalProfiles >= 3)
+    push("identity", "Top Style Personality",
+      normalizeLabel(topStyle.style) ?? topStyle.style,
+      `${topStyle.count} of ${totalProfiles} completed profiles`,
+      "Passport profiles", "All time",
+      totalProfiles, topStyle.count / totalProfiles);
+
+  // context: occasion
+  const topOcc = data?.topOccasions?.[0];
+  if (topOcc && totalReviews >= 3)
+    push("context", "Top Styled Occasion",
+      normalizeLabel(topOcc.name) ?? topOcc.name,
+      `${topOcc.lookCount} of ${totalReviews} reviewed looks`,
+      "Outfit reviews", "All time",
+      totalReviews, topOcc.lookCount / totalReviews);
+
+  // context: lifestyle
+  const topLifestyle = data?.onboarding?.lifestyleDistribution?.[0];
+  if (topLifestyle && totalProfiles >= 3)
+    push("context", "Top Lifestyle Context",
+      normalizeLabel(topLifestyle.lifestyle) ?? topLifestyle.lifestyle,
+      `${topLifestyle.count} of ${totalProfiles} completed profiles`,
+      "Passport profiles", "All time",
+      totalProfiles, topLifestyle.count / totalProfiles);
+
+  // garment: colour
+  const topColor = data?.onboarding?.colorDistribution?.[0];
+  if (topColor && totalProfiles >= 3)
+    push("garment", "Top Preferred Colour",
+      normalizeLabel(topColor.color) ?? topColor.color,
+      `${topColor.count} of ${totalProfiles} completed profiles`,
+      "Passport profiles", "All time",
+      totalProfiles, topColor.count / totalProfiles);
+
+  // garment: fit / silhouette
+  const topFit = data?.bodyPatterns?.[0];
+  if (topFit && topFit.userCount >= 3) {
+    const d = totalProfiles || topFit.userCount;
+    push("garment", "Top Fit Preference",
+      normalizeLabel(topFit.preference) ?? topFit.preference,
+      `${topFit.userCount} of ${d} customers`,
+      "Passport profiles", "All time",
+      topFit.userCount, topFit.userCount / Math.max(d, 1));
+  }
+
+  // emotional: desired feeling
+  const topFeeling = data?.onboarding?.desiredFeelings?.[0];
+  if (topFeeling && totalProfiles >= 3)
+    push("emotional", "Strongest Desired Feeling",
+      normalizeLabel(topFeeling.feeling) ?? topFeeling.feeling,
+      `${topFeeling.count} of ${totalProfiles} completed profiles`,
+      "Passport profiles", "All time",
+      totalProfiles, topFeeling.count / totalProfiles);
+
+  // emotional: confirmed shift (ONLY when achievedRate data is actually present)
+  if (rel?.status !== "insufficient-data") {
+    const withRate = (rel?.emotionalChain || []).filter(r => r.achievedRate != null && r.count >= 3);
+    const best = [...withRate].sort((a, b) => (b.achievedRate ?? 0) - (a.achievedRate ?? 0))[0];
+    if (best) {
+      const achieved = Math.round((best.achievedRate / 100) * best.count);
+      push("emotional", "Strongest Confirmed Emotional Shift",
+        `${best.currentMood} → ${best.desiredFeeling}`,
+        `${achieved} of ${best.count} sessions · ${best.achievedRate}% delivery`,
+        "Styling reviews", pLabel,
+        best.count, best.achievedRate / 100);
+    }
+  }
+
+  // emotional: post-wear
+  if (phase4b2?.postWearCompletion && !phase4b2.postWearCompletion.migrationPending) {
+    const d = phase4b2.postWearCompletion.totalWithPostWear;
+    if (d >= 3) {
+      const pct = phase4b2.postWearCompletion.positiveExperienceRate;
+      push("emotional", "Post-Wear Satisfaction",
+        `${pct}% felt great or good`,
+        `${phase4b2.postWearCompletion.feltPositive} of ${d} post-wear reviews`,
+        "Post-wear reviews", pLabel,
+        d, pct / 100);
+    }
+  }
+
+  // friction: objection
+  const topObj = data?.topObjections?.[0];
+  if (topObj && totalReviews >= 3)
+    push("friction", "Top Outfit Objection",
+      normalizeLabel(topObj.name) ?? topObj.name,
+      `${topObj.count} mentions across ${totalReviews} reviews`,
+      "Outfit reviews", "All time",
+      totalReviews, Math.min(topObj.count / Math.max(totalReviews, 1), 0.5) * 2);
+
+  // friction: styling struggle
+  const topStruggle = data?.onboarding?.commonStruggles?.[0];
+  if (topStruggle && totalProfiles >= 3)
+    push("friction", "Top Styling Struggle",
+      normalizeLabel(topStruggle.struggle) ?? topStruggle.struggle,
+      `${topStruggle.count} of ${totalProfiles} completed profiles`,
+      "Passport profiles", "All time",
+      totalProfiles, topStruggle.count / totalProfiles);
+
+  // nAia: recommendation love rate
+  if (advanced?.trustMetrics?.status !== "insufficient-data" && (advanced?.trustMetrics?.sampleSize ?? 0) >= 5) {
+    const n = advanced.trustMetrics.sampleSize;
+    const lr = advanced.trustMetrics.loveRate;
+    push("naia", "Recommendation Love Rate",
+      `${lr}% Love it`,
+      `${Math.round(lr / 100 * n)} of ${n} sessions with responses`,
+      "Recommendation feedback", pLabel,
+      n, lr / 100);
+  }
+
+  // nAia: confidence lift
+  if ((kpis?.confidence?.sampleSize ?? 0) >= 5) {
+    const n = kpis.confidence.sampleSize;
+    const lift = kpis.confidence.avgDelta;
+    push("naia", "Confidence Lift",
+      `+${lift} avg points`,
+      `${kpis.confidence.avgBefore} → ${kpis.confidence.avgAfter} /10 · ${n} sessions`,
+      "Post-outfit reviews", "All time",
+      n, Math.min(lift / 5, 1));
+  }
+
+  // Sort by score descending
+  candidates.sort((a, b) => b.score - a.score);
+
+  // Balance: one from each category first, then fill to 6
+  const ORDER = ["identity", "context", "garment", "emotional", "friction", "naia"];
+  const selected = [];
+  const used = new Set();
+  for (const cat of ORDER) {
+    if (selected.length >= 6) break;
+    const idx = candidates.findIndex((c, i) => c.cat === cat && !used.has(i));
+    if (idx !== -1) { selected.push(candidates[idx]); used.add(idx); }
+  }
+  for (let i = 0; i < candidates.length && selected.length < 6; i++) {
+    if (!used.has(i)) { selected.push(candidates[i]); used.add(i); }
+  }
+
+  return { selected, all: candidates };
+}
+
+function TopSignalCard({ signal }) {
+  const conf = signal.conf;
+  return (
+    <div style={{ ...s.card, borderLeft: `3px solid ${conf.color}` }}>
+      <div style={{ fontFamily: MONO, fontSize: 9, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginBottom: 6 }}>{signal.title}</div>
+      <div style={{ fontFamily: SERIF, fontSize: 16, color: "#221516", fontWeight: 600, marginBottom: 6, lineHeight: 1.3 }}>{signal.value}</div>
+      <div style={{ fontFamily: MONO, fontSize: 10, color: "#5c5350", lineHeight: 1.5 }}>{signal.denominator}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 4, marginTop: 8, paddingTop: 6, borderTop: "1px solid rgba(34,21,22,0.06)" }}>
+        <span style={{ fontFamily: MONO, fontSize: 9, color: "#9CA3AF" }}>{signal.source} · {signal.period}</span>
+        <span style={{ fontFamily: MONO, fontSize: 9, padding: "1px 5px", background: `${conf.color}18`, color: conf.color, border: `1px solid ${conf.color}40` }}>{conf.label}</span>
+      </div>
+    </div>
+  );
+}
+
+function TopSignalsSection({ data, kpis, phase4b2, advanced, rel, dateRangeDays }) {
+  const [showAll, setShowAll] = useState(false);
+  const { selected, all } = buildTopSignals({ data, kpis, phase4b2, advanced, rel, dateRangeDays });
+  if (all.length === 0) return null;
+  const display = showAll ? all : selected;
+  return (
+    <Section
+      title="Top Signals"
+      desc="Highest-confidence intelligence selected from all data sources — balanced across identity, context, garment, emotional need, friction, and nAia behaviour"
+      status="live"
+    >
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
+        {display.map((sig, i) => <TopSignalCard key={i} signal={sig} />)}
+      </div>
+      {all.length > 6 && (
+        <button onClick={() => setShowAll(o => !o)} style={{ ...s.linkBtn, marginTop: 14 }}>
+          {showAll ? "Show fewer signals ↑" : `View all ${all.length} signals ↓`}
+        </button>
+      )}
+    </Section>
   );
 }
 

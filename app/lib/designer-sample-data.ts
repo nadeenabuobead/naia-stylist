@@ -37,6 +37,11 @@ export function getDesignerSampleData() {
         { color: "camel", count: 12, percentage: 32 },
         { color: "white", count: 10, percentage: 26 },
       ],
+      commonStruggles: [
+        { struggle: "I struggle to style what I own", count: 16, percentage: 42 },
+        { struggle: "Getting dressed takes too long", count: 11, percentage: 29 },
+        { struggle: "Nothing feels right for occasions", count: 8, percentage: 21 },
+      ],
     },
     topOccasions: [
       { name: "Dressing for special events", lookCount: 31, avgRating: 4.3, rewear: 0.77, topPieces: ["The Velvet Blazer", "Silk Slip Dress"] },
