@@ -9,6 +9,7 @@ import { requireStaffAccess } from "../lib/staff-auth.server";
 import { getDesignerStats, getAdditionalKPIs } from "../lib/designer-stats.server";
 import { getPhase4B2KPIs } from "../lib/ai/designer-intelligence.server";
 import { getAdvancedKPIs } from "../lib/designer-advanced.server";
+import { getRelationshipKPIs } from "../lib/designer-relationship.server";
 
 // ── Loader ────────────────────────────────────────────────────────────────────
 
@@ -18,15 +19,16 @@ export async function loader({ request }) {
   const rawDays = parseInt(url.searchParams.get("days") || "30", 10);
   const dateRangeDays = [7, 30, 90, 365].includes(rawDays) ? rawDays : 30;
 
-  const [dashboard, kpis, phase4b2, advanced] = await Promise.all([
+  const [dashboard, kpis, phase4b2, advanced, rel] = await Promise.all([
     getDesignerStats(dateRangeDays),
     getAdditionalKPIs(),
     getPhase4B2KPIs(dateRangeDays),
     getAdvancedKPIs(dateRangeDays),
+    getRelationshipKPIs(dateRangeDays),
   ]);
 
   if (dashboard.error) throw new Response(dashboard.error, { status: 500 });
-  return { dashboard, kpis, phase4b2, advanced, dateRangeDays };
+  return { dashboard, kpis, phase4b2, advanced, rel, dateRangeDays };
 }
 
 // ── Error boundary ─────────────────────────────────────────────────────────────
@@ -48,20 +50,20 @@ export function ErrorBoundary() {
 // ── Status helpers ─────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG = {
-  live:                  { label: "LIVE",                 bg: "#14532d", color: "#dcfce7" },
-  "awaiting-integration":{ label: "AWAITING INTEGRATION", bg: "#3b0764", color: "#e9d5ff" },
-  "insufficient-data":   { label: "INSUFFICIENT DATA",    bg: "#78350f", color: "#fef3c7" },
-  experimental:          { label: "EXPERIMENTAL INSIGHT",  bg: "#1e3a5f", color: "#bae6fd" },
-  "not-implemented":     { label: "NOT IMPLEMENTED",       bg: "#374151", color: "#d1d5db" },
+  live:                  { label: "LIVE",                 bg: "rgba(42,94,66,0.10)",   color: "#2a5e42" },
+  "awaiting-integration":{ label: "AWAITING INTEGRATION", bg: "rgba(122,111,106,0.10)", color: "#5c5350" },
+  "insufficient-data":   { label: "INSUFFICIENT DATA",    bg: "rgba(107,72,0,0.09)",    color: "#6b4800" },
+  experimental:          { label: "EXPERIMENTAL",          bg: "rgba(34,21,22,0.06)",    color: "#4a3535" },
+  "not-implemented":     { label: "NOT IMPLEMENTED",       bg: "rgba(122,111,106,0.08)", color: "#9CA3AF" },
 };
 
 function StatusBadge({ status, style = {} }) {
   const cfg = STATUS_CONFIG[status] || STATUS_CONFIG["not-implemented"];
   return (
     <span style={{
-      display: "inline-block", padding: "3px 10px", borderRadius: "3px",
-      fontSize: "9px", fontFamily: "'Space Mono', monospace", fontWeight: 700,
-      textTransform: "uppercase", letterSpacing: "1.5px",
+      display: "inline-block", padding: "3px 8px",
+      fontSize: "7px", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: 700,
+      textTransform: "uppercase", letterSpacing: "2px",
       background: cfg.bg, color: cfg.color, ...style,
     }}>
       {cfg.label}
@@ -72,10 +74,10 @@ function StatusBadge({ status, style = {} }) {
 function AwaitingCard({ label, description, dataContract }) {
   const [open, setOpen] = useState(false);
   return (
-    <div style={{ ...s.card, borderLeft: "3px solid #6b21a8", opacity: 0.9 }}>
+    <div style={{ ...s.card, borderLeft: "3px solid #7a6f6a" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 12 }}>
         <div>
-          <div style={{ ...s.cardLabel, color: "#6b21a8" }}>{label}</div>
+          <div style={{ ...s.cardLabel, color: "#5c5350" }}>{label}</div>
           <p style={{ ...s.muted, marginTop: 6 }}>{description}</p>
         </div>
         <StatusBadge status="awaiting-integration" />
@@ -86,7 +88,7 @@ function AwaitingCard({ label, description, dataContract }) {
             {open ? "Hide" : "Show"} data contract ↓
           </button>
           {open && (
-            <div style={{ marginTop: 12, padding: "12px 14px", background: "#0f0a1e", borderRadius: 4, fontSize: 12, color: "#c4b5fd", fontFamily: "'Space Mono', monospace", lineHeight: 1.8, overflow: "auto" }}>
+            <div style={{ marginTop: 12, padding: "12px 14px", background: "#1c1211", fontSize: 11, color: "#b8aba8", fontFamily: MONO, lineHeight: 1.8, overflow: "auto", border: "1px solid rgba(34,21,22,0.2)" }}>
               <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{typeof dataContract === "string" ? dataContract : JSON.stringify(dataContract, null, 2)}</pre>
             </div>
           )}
@@ -98,10 +100,10 @@ function AwaitingCard({ label, description, dataContract }) {
 
 function InsufficientCard({ label, description, sampleSize }) {
   return (
-    <div style={{ ...s.card, borderLeft: "3px solid #b45309" }}>
+    <div style={{ ...s.card, borderLeft: "3px solid #6b4800" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 12 }}>
         <div>
-          <div style={{ ...s.cardLabel, color: "#b45309" }}>{label}</div>
+          <div style={{ ...s.cardLabel, color: "#6b4800" }}>{label}</div>
           <p style={{ ...s.muted, marginTop: 6 }}>{description}</p>
           {sampleSize !== undefined && (
             <p style={{ ...s.muted, marginTop: 4, fontSize: 11 }}>Current sample: {sampleSize} records — minimum 5 required.</p>
@@ -118,7 +120,7 @@ function InsufficientCard({ label, description, sampleSize }) {
 function GFonts() {
   return (
     <link
-      href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,400;1,600;1,700&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Inter:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
   );
@@ -154,7 +156,7 @@ function KpiCard({ label, value, suffix = "", tooltip, status }) {
             onMouseLeave={() => setTip(false)}
             style={{ marginLeft: 6, cursor: "help", color: "#9CA3AF", fontSize: 12 }}
           >ⓘ{tip && (
-            <span style={{ position: "absolute", zIndex: 10, background: "#1a1816", color: "#f4f4f1", padding: "6px 10px", borderRadius: 4, fontSize: 11, width: 200, marginTop: 4, lineHeight: 1.5, display: "block" }}>
+            <span style={{ position: "absolute", zIndex: 10, background: "#221516", color: "#f4f4f1", padding: "6px 10px", fontSize: 10, fontFamily: INTER, width: 200, marginTop: 4, lineHeight: 1.6, display: "block" }}>
               {tooltip}
             </span>
           )}
@@ -167,16 +169,18 @@ function KpiCard({ label, value, suffix = "", tooltip, status }) {
 
 function MigrationPendingNotice({ label }) {
   return (
-    <div style={{ padding: "12px 16px", background: "rgba(59,5,16,0.03)", border: "1px dashed rgba(59,5,16,0.12)", fontSize: 13, color: "#9CA3AF", fontStyle: "italic" }}>
-      {label} — migration pending. Data will appear after the Phase 4B1 database migration is applied.
+    <div style={{ padding: "10px 14px", background: "rgba(122,111,106,0.07)", border: "1px solid rgba(34,21,22,0.09)", fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 14, fontStyle: "italic", color: "#7a6f6a" }}>
+      {label} — migration pending. Data will appear after the database migration is applied.
     </div>
   );
 }
 
 function EmptyState({ message = "No data yet for this period." }) {
   return (
-    <div style={{ padding: "40px 20px", textAlign: "center", color: "#9CA3AF", fontStyle: "italic", fontSize: 14 }}>
-      {message}
+    <div style={{ padding: "32px 24px", border: "1px solid rgba(34,21,22,0.07)", textAlign: "center" }}>
+      <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 15, fontStyle: "italic", color: "#7a6f6a", lineHeight: 1.6 }}>
+        {message}
+      </div>
     </div>
   );
 }
@@ -184,8 +188,8 @@ function EmptyState({ message = "No data yet for this period." }) {
 function SampleSizeWarning({ n, min = 5 }) {
   if (n >= min) return null;
   return (
-    <div style={{ padding: "8px 14px", background: "#fef3c7", border: "1px solid #d97706", borderRadius: 4, fontSize: 12, color: "#92400e", marginBottom: 16 }}>
-      ⚠ Sample size is {n} — minimum {min} required for reliable signals. Treat this data as directional only.
+    <div style={{ padding: "8px 14px", background: "rgba(107,72,0,0.07)", border: "1px solid rgba(107,72,0,0.20)", fontFamily: "'Inter', -apple-system, sans-serif", fontSize: 11, color: "#6b4800", marginBottom: 16, letterSpacing: "0.3px" }}>
+      Sample size: {n} — minimum {min} required for reliable signals. Treat as directional only.
     </div>
   );
 }
@@ -222,7 +226,7 @@ function PieceCard({ piece, styleDNA }) {
         <div>Would wear again: <strong>{Math.round(piece.rewear * 100)}%</strong></div>
         {piece.helpedFeel?.length > 0 && <div style={{ marginTop: 8 }}><span style={s.muted}>Helped feel: </span><span style={s.helpedFeel}>{piece.helpedFeel.join(", ")}</span></div>}
         {piece.bestOccasions?.length > 0 && <div style={{ marginTop: 8 }}><span style={s.muted}>Best for: </span><span>{piece.bestOccasions.slice(0, 2).join(", ")}</span></div>}
-        {piece.positiveComments?.length > 0 && <div style={{ marginTop: 8 }}><span style={s.muted}>Top feedback: </span><span style={{ color: "#2a9d8f" }}>{piece.positiveComments.join(", ")}</span></div>}
+        {piece.positiveComments?.length > 0 && <div style={{ marginTop: 8 }}><span style={s.muted}>Top feedback: </span><span style={{ color: "#2a5e42" }}>{piece.positiveComments.join(", ")}</span></div>}
         <div style={{ marginTop: 8 }}><span style={s.muted}>Watch-outs: </span><span style={{ color: "#d97706" }}>{piece.negativeComments?.length > 0 ? piece.negativeComments.join(", ") : "None yet"}</span></div>
         <div style={{ marginTop: 8 }}><span style={s.muted}>Resonates with: </span><span style={s.dnaStyle}>{piece.topDNA?.length > 0 ? piece.topDNA.join(", ") : "More data needed"}</span></div>
       </div>
@@ -231,34 +235,34 @@ function PieceCard({ piece, styleDNA }) {
 }
 
 function FeedbackInsightCard({ insight }) {
-  const thresholdColor = insight.threshold === "strong" ? "#1a1816" : insight.threshold === "moderate" ? "#8B7355" : "#9CA3AF";
+  const thresholdColor = insight.threshold === "strong" ? "#221516" : insight.threshold === "moderate" ? "#6b4800" : "#7a6f6a";
   return (
-    <div style={{ padding: "16px 20px", border: `2px solid ${thresholdColor}`, borderRadius: 4, marginBottom: 12 }}>
+    <div style={{ padding: "16px 20px", border: `2px solid ${thresholdColor}`, marginBottom: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 8 }}>
-        <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 9, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a" }}>{insight.category}</div>
-        <span style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "1.3px", padding: "4px 10px", background: thresholdColor, color: "#faf9f7", borderRadius: 3, fontFamily: "'Space Mono', monospace" }}>{insight.threshold}</span>
+        <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", fontWeight: 600 }}>{insight.category}</div>
+        <span style={{ fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: thresholdColor, color: "#faf9f7", fontFamily: INTER, fontWeight: 600 }}>{insight.threshold}</span>
       </div>
-      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 15, color: "#221516", marginBottom: 8 }}>{insight.signal}</div>
-      <div style={{ fontSize: 13, color: "#8B7355" }}><strong>Suggestion:</strong> {insight.suggestion}</div>
+      <div style={{ fontFamily: SERIF, fontSize: 15, color: "#221516", marginBottom: 8 }}>{insight.signal}</div>
+      <div style={{ fontFamily: SERIF, fontSize: 13, color: "#5c5350", fontStyle: "italic" }}><strong>Suggestion:</strong> {insight.suggestion}</div>
     </div>
   );
 }
 
 function DesignActionCard({ action }) {
-  const getPriorityColor = (p) => p === "High Confidence" ? "#1a1816" : p === "Medium Confidence" ? "#8B7355" : p === "Early Signal" ? "#9CA3AF" : "#D4C4B0";
+  const getPriorityColor = (p) => p === "High Confidence" ? "#221516" : p === "Medium Confidence" ? "#6b4800" : p === "Early Signal" ? "#7a6f6a" : "#7a6f6a";
   const color = getPriorityColor(action.priority || action.confidenceBadge);
   return (
-    <div style={{ padding: 22, border: `2px solid ${color}`, borderRadius: 4, marginBottom: 18 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 14 }}>
-        <h4 style={{ margin: 0, fontFamily: "Cormorant Garamond", fontSize: 21, fontWeight: 600 }}>{action.piece}</h4>
-        <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "1.3px", padding: "6px 14px", background: color, color: "#faf9f7", borderRadius: 3, whiteSpace: "nowrap", fontWeight: 600 }}>{action.confidenceBadge || action.priority}</span>
+    <div style={{ padding: 22, border: `2px solid ${color}`, marginBottom: 18, background: "#fff" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 14, gap: 16 }}>
+        <h4 style={{ margin: 0, fontFamily: DISPLAY, fontSize: 20, fontWeight: 600, fontStyle: "italic", color: "#221516", lineHeight: 1.2 }}>{action.piece}</h4>
+        <span style={{ fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px", padding: "4px 10px", background: color, color: "#fafaf8", whiteSpace: "nowrap", fontFamily: INTER, fontWeight: 600, flexShrink: 0 }}>{action.confidenceBadge || action.priority}</span>
       </div>
-      <div style={{ fontSize: 14, color: "#8B7355", marginBottom: 14, fontWeight: 600 }}>{action.actionType}: {action.action}</div>
-      <div style={{ marginBottom: 10 }}><span style={{ fontSize: 12, fontWeight: 600, color: "#666", marginRight: 8 }}>Performance:</span><span style={{ fontSize: 13 }}>{action.performance}</span></div>
-      <div style={{ marginBottom: 10 }}><span style={{ fontSize: 12, fontWeight: 600, color: "#2a9d8f", marginRight: 8 }}>Liked:</span><span style={{ fontSize: 13 }}>{action.liked}</span></div>
-      <div style={{ marginBottom: 10 }}><span style={{ fontSize: 12, fontWeight: 600, color: "#d97706", marginRight: 8 }}>Watch:</span><span style={{ fontSize: 13, color: "#92400e" }}>{action.watch}</span></div>
-      <div style={{ marginBottom: 14 }}><span style={{ fontSize: 12, fontWeight: 600, marginRight: 8 }}>Next step:</span><span style={{ fontSize: 13 }}>{action.nextStep}</span></div>
-      <div style={{ fontSize: 12, color: "#999", paddingTop: 10, borderTop: "1px solid #f0f0f0" }}>{action.data}</div>
+      <div style={{ fontFamily: INTER, fontSize: 9, textTransform: "uppercase", letterSpacing: "2px", color: color, fontWeight: 600, marginBottom: 14 }}>{action.actionType}: {action.action}</div>
+      <div style={{ marginBottom: 9, fontFamily: SERIF, fontSize: 14, color: "#221516", lineHeight: 1.6 }}><span style={{ fontFamily: INTER, fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginRight: 8 }}>Performance</span>{action.performance}</div>
+      <div style={{ marginBottom: 9, fontFamily: SERIF, fontSize: 14, color: "#221516", lineHeight: 1.6 }}><span style={{ fontFamily: INTER, fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#2a5e42", marginRight: 8 }}>Liked</span>{action.liked}</div>
+      <div style={{ marginBottom: 9, fontFamily: SERIF, fontSize: 14, color: "#221516", lineHeight: 1.6 }}><span style={{ fontFamily: INTER, fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#6b4800", marginRight: 8 }}>Watch</span>{action.watch}</div>
+      <div style={{ marginBottom: 14, fontFamily: SERIF, fontSize: 14, color: "#221516", fontStyle: "italic", lineHeight: 1.6 }}><span style={{ fontFamily: INTER, fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#8b2035", marginRight: 8, fontStyle: "normal" }}>Next Step</span>{action.nextStep}</div>
+      <div style={{ fontFamily: MONO, fontSize: 10, color: "#7a6f6a", paddingTop: 10, borderTop: "1px solid rgba(34,21,22,0.06)" }}>{action.data}</div>
     </div>
   );
 }
@@ -279,7 +283,7 @@ const TABS = [
 // ── Root component ─────────────────────────────────────────────────────────────
 
 export default function DesignerDashboard() {
-  const { dashboard: data, kpis, phase4b2, advanced, dateRangeDays } = useLoaderData();
+  const { dashboard: data, kpis, phase4b2, advanced, rel, dateRangeDays } = useLoaderData();
   const [activeTab, setActiveTab] = useState("overview");
   const [searchParams] = useSearchParams();
 
@@ -292,14 +296,14 @@ export default function DesignerDashboard() {
         <div style={s.header}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16 }}>
             <div>
-              <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 9, textTransform: "uppercase", letterSpacing: "3px", color: "#9CA3AF", marginBottom: 12 }}>Private — Internal Only</div>
+              <div style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontSize: 8, textTransform: "uppercase", letterSpacing: "3px", color: "#8b2035", marginBottom: 10, fontWeight: 600 }}>NADINE — Private Intelligence Platform</div>
               <h1 style={s.h1}>nAia Designer Dashboard</h1>
               <p style={s.subtitle}>Collection intelligence · Customer insights · Design direction</p>
             </div>
             {/* Date range selector */}
             <Form method="get" style={{ display: "flex", gap: 8, alignItems: "center" }}>
               {searchParams.get("tab") && <input type="hidden" name="tab" value={searchParams.get("tab")} />}
-              <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#7a6f6a", textTransform: "uppercase", letterSpacing: "1px" }}>Period</span>
+              <span style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontSize: 8, color: "#7a6f6a", textTransform: "uppercase", letterSpacing: "2px", fontWeight: 500 }}>Period</span>
               {[7, 30, 90, 365].map((d) => (
                 <button
                   key={d}
@@ -339,14 +343,14 @@ export default function DesignerDashboard() {
 
         {/* ── Tab content ──────────────────────────────────────────────────── */}
         <div style={{ paddingTop: 8 }}>
-          {activeTab === "overview"       && <TabOverview        data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} dateRangeDays={dateRangeDays} />}
-          {activeTab === "customer"       && <TabCustomer        data={data} kpis={kpis} advanced={advanced} />}
-          {activeTab === "product"        && <TabProduct         data={data} phase4b2={phase4b2} />}
-          {activeTab === "recommendation" && <TabRecommendation  data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} />}
-          {activeTab === "collection"     && <TabCollection      data={data} kpis={kpis} advanced={advanced} dateRangeDays={dateRangeDays} />}
-          {activeTab === "commercial"     && <TabCommercial      data={data} advanced={advanced} />}
-          {activeTab === "ai-performance" && <TabAIPerformance   data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} />}
-          {activeTab === "opportunities"  && <TabOpportunities   data={data} phase4b2={phase4b2} advanced={advanced} />}
+          {activeTab === "overview"       && <TabOverview        data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} dateRangeDays={dateRangeDays} />}
+          {activeTab === "customer"       && <TabCustomer        data={data} kpis={kpis} advanced={advanced} rel={rel} />}
+          {activeTab === "product"        && <TabProduct         data={data} phase4b2={phase4b2} rel={rel} />}
+          {activeTab === "recommendation" && <TabRecommendation  data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} />}
+          {activeTab === "collection"     && <TabCollection      data={data} kpis={kpis} advanced={advanced} rel={rel} dateRangeDays={dateRangeDays} />}
+          {activeTab === "commercial"     && <TabCommercial      data={data} advanced={advanced} rel={rel} />}
+          {activeTab === "ai-performance" && <TabAIPerformance   data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} />}
+          {activeTab === "opportunities"  && <TabOpportunities   data={data} phase4b2={phase4b2} advanced={advanced} rel={rel} />}
         </div>
 
       </div>
@@ -358,7 +362,7 @@ export default function DesignerDashboard() {
 // TAB 1 — OVERVIEW
 // ══════════════════════════════════════════════════════════════════════════════
 
-function TabOverview({ data, kpis, phase4b2, advanced, dateRangeDays }) {
+function TabOverview({ data, kpis, phase4b2, advanced, rel, dateRangeDays }) {
   return (
     <>
       {/* Priority KPI grid */}
@@ -424,6 +428,43 @@ function TabOverview({ data, kpis, phase4b2, advanced, dateRangeDays }) {
           )}
         </Section>
       )}
+
+      {/* Fashion Intelligence Synthesis — who × context → product → outcome */}
+      {rel?.dnaMatrix?.length > 0 && (
+        <Section
+          title="Fashion Intelligence Synthesis"
+          desc="How customer personality, occasion, desired feeling, and nAia recommendation combine to drive outcomes"
+          status={rel.status}
+        >
+          {rel.status === "insufficient-data" ? (
+            <InsufficientCard label="Relationship synthesis" description="Not enough reviewed sessions to surface reliable patterns yet." sampleSize={rel.sampleSize} />
+          ) : (
+            <>
+              {/* Top patterns */}
+              {rel.dnaMatrix.slice(0, 3).map((row, i) => (
+                <RelationshipCard
+                  key={i}
+                  who={row.personality}
+                  context={row.topOccasions[0] || null}
+                  feature="Style Me"
+                  pattern={
+                    row.topProducts[0]
+                      ? `${row.personality} customers${row.topDesiredFeelings[0] ? ` wanting to feel ${row.topDesiredFeelings[0]}` : ""}${row.topOccasions[0] ? ` for ${row.topOccasions[0]}` : ""} converted best when Style Me recommended ${row.topProducts[0]}`
+                      : `${row.personality} customers (${row.sessionCount} session${row.sessionCount !== 1 ? "s" : ""})`
+                  }
+                  product={row.topProducts[0] || null}
+                  outcome={[
+                    row.avgRating != null && `★ ${row.avgRating}/5`,
+                    row.rewearRate != null && `${Math.round(row.rewearRate * 100)}% rewear`,
+                    row.avgConfidenceLift != null && `+${row.avgConfidenceLift} confidence`,
+                    row.feelingAchievedRate != null && `${row.feelingAchievedRate}% feeling achieved`,
+                  ].filter(Boolean).join(" · ")}
+                />
+              ))}
+            </>
+          )}
+        </Section>
+      )}
     </>
   );
 }
@@ -435,9 +476,9 @@ function SignalGroup({ title, items, keyField, valueField }) {
       <div style={s.cardLabel}>{title}</div>
       <div style={{ marginTop: 10 }}>
         {items.map((item, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: "space-between", paddingBottom: 6, marginBottom: 6, borderBottom: i < items.length - 1 ? "1px solid rgba(59,5,16,0.06)" : "none" }}>
-            <span style={{ fontSize: 13, color: "#221516" }}>{item[keyField]}</span>
-            <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#7a6f6a" }}>{item[valueField]}</span>
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", paddingBottom: 6, marginBottom: 6, borderBottom: i < items.length - 1 ? "1px solid rgba(34,21,22,0.06)" : "none" }}>
+            <span style={{ fontFamily: SERIF, fontSize: 13, color: "#221516" }}>{item[keyField]}</span>
+            <span style={{ fontFamily: MONO, fontSize: 11, color: "#7a6f6a" }}>{item[valueField]}</span>
           </div>
         ))}
       </div>
@@ -449,7 +490,7 @@ function PeriodCard({ period, label }) {
   return (
     <div style={s.card}>
       <div style={s.cardLabel}>{label}</div>
-      <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#9CA3AF", marginBottom: 12 }}>{period.label}</div>
+      <div style={{ fontFamily: MONO, fontSize: 10, color: "#7a6f6a", marginBottom: 12 }}>{period.label}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <Metric label="Sessions" value={period.sessions} />
         <Metric label="Reviews" value={period.reviews} />
@@ -461,12 +502,12 @@ function PeriodCard({ period, label }) {
 }
 
 function TrendPill({ label, trend }) {
-  const config = { improving: { icon: "↑", color: "#16a34a" }, growing: { icon: "↑", color: "#16a34a" }, stable: { icon: "→", color: "#6b7280" }, declining: { icon: "↓", color: "#dc2626" }, null: { icon: "—", color: "#9CA3AF" } };
+  const config = { improving: { icon: "↑", color: "#2a5e42" }, growing: { icon: "↑", color: "#2a5e42" }, stable: { icon: "→", color: "#7a6f6a" }, declining: { icon: "↓", color: "#8b2035" }, null: { icon: "—", color: "#9CA3AF" } };
   const cfg = config[trend] || config.null;
   return (
     <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
-      <span style={{ fontSize: 13, color: "#7a6f6a" }}>{label}</span>
-      <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 12, color: cfg.color, fontWeight: 700 }}>{cfg.icon} {trend || "—"}</span>
+      <span style={{ fontFamily: SERIF, fontSize: 13, color: "#7a6f6a" }}>{label}</span>
+      <span style={{ fontFamily: MONO, fontSize: 11, color: cfg.color, fontWeight: 700 }}>{cfg.icon} {trend || "—"}</span>
     </div>
   );
 }
@@ -474,8 +515,257 @@ function TrendPill({ label, trend }) {
 function Metric({ label, value }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between" }}>
-      <span style={{ fontSize: 12, color: "#7a6f6a" }}>{label}</span>
-      <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 12, color: "#221516" }}>{value}</span>
+      <span style={{ fontFamily: SERIF, fontSize: 13, color: "#7a6f6a" }}>{label}</span>
+      <span style={{ fontFamily: MONO, fontSize: 11, color: "#221516" }}>{value}</span>
+    </div>
+  );
+}
+
+// ── Relationship intelligence shared components ────────────────────────────────
+
+// Prescriptive recommendation block — shown at the bottom of each relevant section
+function PrescriptiveBlock({ recommendation, reason, confidence = "medium", sampleSize }) {
+  const borderColor = confidence === "high" ? "#2a5e42" : confidence === "medium" ? "#6b4800" : "#7a6f6a";
+  const bgColor = confidence === "high" ? "rgba(42,94,66,0.05)" : confidence === "medium" ? "rgba(107,72,0,0.04)" : "rgba(122,111,106,0.04)";
+  return (
+    <div style={{ marginTop: 20, padding: "16px 20px", background: bgColor, borderLeft: `3px solid ${borderColor}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
+        <div style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontSize: 7, textTransform: "uppercase", letterSpacing: "2.5px", color: borderColor, fontWeight: 600 }}>
+          Designer Recommendation
+        </div>
+        {sampleSize != null && (
+          <div style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: 10, color: "#9CA3AF" }}>
+            n={sampleSize}
+          </div>
+        )}
+      </div>
+      <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 17, fontWeight: 600, fontStyle: "italic", color: "#221516", marginBottom: 8, lineHeight: 1.5 }}>
+        {recommendation}
+      </div>
+      {reason && (
+        <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 14, color: "#7a6f6a", lineHeight: 1.6 }}>
+          <strong style={{ color: "#221516", fontStyle: "normal" }}>Why:</strong> {reason}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Relationship synthesis card — shows "who × what × when × feature → outcome" pattern
+function RelationshipCard({ pattern, who, context, feature, outcome, product }) {
+  return (
+    <div style={{ padding: "18px 20px", background: "#fafaf8", border: "1px solid rgba(34,21,22,0.07)", borderLeft: "3px solid #8b2035", marginBottom: 12 }}>
+      {who && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+          {who && <span style={{ fontSize: 9, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: 600, letterSpacing: "1.5px", textTransform: "uppercase", padding: "3px 8px", background: "#8b2035", color: "#fff" }}>{who}</span>}
+          {context && <span style={{ fontSize: 9, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", padding: "3px 8px", background: "rgba(34,21,22,0.07)", color: "#221516" }}>{context}</span>}
+          {feature && <span style={{ fontSize: 9, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", padding: "3px 8px", background: "rgba(42,94,66,0.10)", color: "#2a5e42" }}>{feature}</span>}
+        </div>
+      )}
+      <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 17, fontWeight: 600, fontStyle: "italic", color: "#221516", lineHeight: 1.5, marginBottom: product ? 8 : 0 }}>
+        {pattern}
+      </div>
+      {product && (
+        <div style={{ fontSize: 11, fontFamily: "'Courier New', Courier, monospace", color: "#8b2035", marginTop: 6, letterSpacing: "0.5px" }}>
+          → {product}
+        </div>
+      )}
+      {outcome && (
+        <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 14, color: "#7a6f6a", marginTop: 8 }}>
+          {outcome}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Executive product card with Opportunity Score and full narrative
+function ProductNarrativeCard({ narrative }) {
+  const scoreColor = narrative.opportunityScore >= 70 ? "#2a5e42" : narrative.opportunityScore >= 45 ? "#6b4800" : "#7a6f6a";
+  const scoreBg = narrative.opportunityScore >= 70 ? "rgba(42,94,66,0.08)" : narrative.opportunityScore >= 45 ? "rgba(107,72,0,0.07)" : "rgba(122,111,106,0.07)";
+  const EYEBROW = { fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontSize: 7, textTransform: "uppercase", letterSpacing: "2px", color: "#9CA3AF", fontWeight: 600, marginBottom: 3 };
+  return (
+    <div style={{ ...s.card, borderTop: `2px solid ${scoreColor}`, position: "relative" }}>
+      {/* Score badge — square, brand-aligned */}
+      <div style={{ position: "absolute", top: 16, right: 16, width: 44, height: 44, background: scoreBg, border: `1px solid ${scoreColor}`, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column" }}>
+        <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 16, fontWeight: 700, color: scoreColor, lineHeight: 1 }}>{narrative.opportunityScore}</div>
+        <div style={{ fontFamily: "'Inter', -apple-system, sans-serif", fontSize: 6, color: scoreColor, letterSpacing: "1px", textTransform: "uppercase", fontWeight: 600, opacity: 0.7 }}>score</div>
+      </div>
+
+      <div style={{ paddingRight: 60 }}>
+        <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 16, fontWeight: 700, fontStyle: "italic", color: "#221516", marginBottom: 6, lineHeight: 1.3 }}>{narrative.name}</div>
+
+        {/* Key stats row */}
+        <div style={{ display: "flex", gap: 14, marginBottom: 14, flexWrap: "wrap" }}>
+          <span style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: 11, color: "#7a6f6a" }}>★ {narrative.avgRating?.toFixed(1) ?? "—"}</span>
+          <span style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: 11, color: "#7a6f6a" }}>{Math.round((narrative.rewearRate ?? 0) * 100)}% rewear</span>
+          {narrative.avgConfidenceLift != null && (
+            <span style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: 11, color: "#8b2035" }}>+{narrative.avgConfidenceLift} confidence</span>
+          )}
+          <span style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: 11, color: "#9CA3AF" }}>n={narrative.sampleSize}</span>
+        </div>
+
+        {/* Relationship metadata */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px", marginBottom: 14 }}>
+          {narrative.strongestTransformation && (
+            <div>
+              <div style={EYEBROW}>Emotional Journey</div>
+              <div style={{ fontSize: 13, color: "#8b2035", fontStyle: "italic", fontFamily: "'Cormorant Garamond', Garamond, serif" }}>{narrative.strongestTransformation}</div>
+            </div>
+          )}
+          {narrative.bestPersonality && (
+            <div>
+              <div style={EYEBROW}>Best Audience</div>
+              <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 14, color: "#221516" }}>{narrative.bestPersonality}</div>
+            </div>
+          )}
+          {narrative.bestOccasion && (
+            <div>
+              <div style={EYEBROW}>Best Occasion</div>
+              <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 14, color: "#221516" }}>{narrative.bestOccasion}</div>
+            </div>
+          )}
+          {narrative.topDesiredFeelings?.length > 0 && (
+            <div>
+              <div style={EYEBROW}>Desired Feelings</div>
+              <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 14, color: "#221516" }}>{narrative.topDesiredFeelings.join(", ")}</div>
+            </div>
+          )}
+          {narrative.mostCommonObjection && (
+            <div>
+              <div style={EYEBROW}>Top Objection</div>
+              <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 14, color: "#8b2035" }}>{narrative.mostCommonObjection}</div>
+            </div>
+          )}
+        </div>
+
+        {/* Prescriptive recommendation */}
+        {narrative.recommendation && (
+          <div style={{ padding: "12px 14px", background: "rgba(34,21,22,0.02)", borderLeft: "2px solid #8b2035", marginTop: 4 }}>
+            <div style={{ fontFamily: "'Inter', -apple-system, sans-serif", fontSize: 7, color: "#8b2035", marginBottom: 5, textTransform: "uppercase", letterSpacing: "2px", fontWeight: 600 }}>Recommendation</div>
+            <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 14, fontStyle: "italic", color: "#221516", lineHeight: 1.6, marginBottom: 6 }}>{narrative.recommendation}</div>
+            {narrative.recommendationReason && (
+              <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 13, color: "#7a6f6a", lineHeight: 1.5 }}>
+                {narrative.recommendationReason}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Emotional flow row — shows currentMood → desiredFeeling → achieved rate → top product
+function EmotionalFlowRow({ chain }) {
+  const achievedColor = chain.achievedRate == null ? "#9CA3AF"
+    : chain.achievedRate >= 70 ? "#2a5e42"
+    : chain.achievedRate >= 40 ? "#6b4800"
+    : "#8b2035";
+  const LABEL = { fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontSize: 7, textTransform: "uppercase", letterSpacing: "2px", color: "#9CA3AF", fontWeight: 600, marginBottom: 4 };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "12px 0", borderBottom: "1px solid rgba(34,21,22,0.06)" }}>
+      <div style={{ textAlign: "center", minWidth: 80 }}>
+        <div style={LABEL}>Starting</div>
+        <div style={{ fontSize: 14, fontStyle: "italic", color: "#7a6f6a", fontFamily: "'Cormorant Garamond', Garamond, serif" }}>{chain.currentMood || "—"}</div>
+      </div>
+      <div style={{ color: "#8b2035", fontSize: 14, opacity: 0.5 }}>→</div>
+      <div style={{ textAlign: "center", minWidth: 80 }}>
+        <div style={LABEL}>Desired</div>
+        <div style={{ fontSize: 14, fontWeight: 600, fontStyle: "italic", color: "#8b2035", fontFamily: "'Cormorant Garamond', Garamond, serif" }}>{chain.desiredFeeling || "—"}</div>
+      </div>
+      <div style={{ color: "#8b2035", fontSize: 14, opacity: 0.5 }}>→</div>
+      <div style={{ textAlign: "center", minWidth: 60 }}>
+        <div style={LABEL}>Achieved</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: achievedColor, fontFamily: "'Courier New', Courier, monospace" }}>
+          {chain.achievedRate != null ? `${chain.achievedRate}%` : "—"}
+        </div>
+      </div>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", paddingLeft: 8 }}>
+        {chain.topProducts?.length > 0 && (
+          <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 13, fontStyle: "italic", color: "#7a6f6a" }}>
+            via {chain.topProducts.join(", ")}
+          </div>
+        )}
+        <div style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: 11, color: "#9CA3AF", marginLeft: "auto" }}>
+          {chain.count} session{chain.count !== 1 ? "s" : ""}
+          {chain.avgRating != null && ` · ★ ${chain.avgRating}`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// DNA intelligence row — shows personality × outcomes in a single line
+function DNAIntelligenceRow({ row }) {
+  const MONO = { fontFamily: "'Courier New', Courier, monospace", fontSize: 11 };
+  return (
+    <div style={{ padding: "14px 16px", background: "#fafaf8", border: "1px solid rgba(34,21,22,0.07)", marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 8 }}>
+        <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 15, fontWeight: 700, fontStyle: "italic", color: "#221516" }}>{row.personality}</div>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          {row.avgRating != null && <span style={{ ...MONO }}>★ {row.avgRating}</span>}
+          {row.rewearRate != null && <span style={{ ...MONO }}>{Math.round(row.rewearRate * 100)}% rewear</span>}
+          {row.avgConfidenceLift != null && <span style={{ ...MONO, color: "#8b2035" }}>{row.avgConfidenceLift >= 0 ? "+" : ""}{row.avgConfidenceLift} confidence</span>}
+          {row.feelingAchievedRate != null && (
+            <span style={{ ...MONO, color: row.feelingAchievedRate >= 70 ? "#2a5e42" : row.feelingAchievedRate >= 40 ? "#6b4800" : "#8b2035" }}>
+              {row.feelingAchievedRate}% feeling achieved
+            </span>
+          )}
+          <span style={{ ...MONO, color: "#9CA3AF" }}>n={row.sessionCount}</span>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: row.prescriptive ? 10 : 0, fontFamily: "'Cormorant Garamond', Garamond, serif", fontStyle: "italic", fontSize: 13, color: "#7a6f6a" }}>
+        {row.topOccasions?.length > 0 && <span>Occasions: {row.topOccasions.join(", ")}</span>}
+        {row.topDesiredFeelings?.length > 0 && <span>Wants to feel: {row.topDesiredFeelings.join(", ")}</span>}
+        {row.topProducts?.length > 0 && <span>Top pieces: {row.topProducts.join(", ")}</span>}
+      </div>
+      {row.prescriptive && (
+        <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontStyle: "italic", fontSize: 14, color: "#221516", padding: "10px 12px", background: "rgba(34,21,22,0.02)", borderLeft: "2px solid #8b2035", lineHeight: 1.6 }}>
+          {row.prescriptive}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Occasion intelligence card — shows occasion × product × personality
+function OccasionIntelCard({ row }) {
+  const MONO = { fontFamily: "'Courier New', Courier, monospace", fontSize: 11 };
+  const EYEBROW = { fontFamily: "'Inter', -apple-system, sans-serif", fontSize: 7, textTransform: "uppercase", letterSpacing: "2px", color: "#9CA3AF", fontWeight: 600, marginBottom: 6 };
+  return (
+    <div style={{ ...s.card, marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+        <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 15, fontWeight: 700, fontStyle: "italic", color: "#221516" }}>{row.occasion}</div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <span style={{ ...MONO, color: "#7a6f6a" }}>{row.count} session{row.count !== 1 ? "s" : ""}</span>
+          {row.successRate != null && (
+            <span style={{ ...MONO, color: row.successRate >= 70 ? "#2a5e42" : row.successRate >= 40 ? "#6b4800" : "#8b2035" }}>
+              {row.successRate}% success
+            </span>
+          )}
+        </div>
+      </div>
+      <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontStyle: "italic", fontSize: 13, color: "#7a6f6a", marginBottom: 10, display: "flex", gap: 16, flexWrap: "wrap" }}>
+        {row.topPersonalities?.length > 0 && <span>Who: {row.topPersonalities.join(", ")}</span>}
+        {row.topDesiredFeelings?.length > 0 && <span>Wants: {row.topDesiredFeelings.join(", ")}</span>}
+      </div>
+      {row.topProducts?.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={EYEBROW}>Top Pieces</div>
+          {row.topProducts.map((p, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 13, color: "#221516", paddingBottom: 4, marginBottom: 4, borderBottom: i < row.topProducts.length - 1 ? "1px solid rgba(34,21,22,0.05)" : "none" }}>
+              <span>{p.name}</span>
+              <span style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: 11, color: "#7a6f6a" }}>{p.avgRating != null ? `★ ${p.avgRating}` : ""}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {row.prescriptive && (
+        <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontStyle: "italic", fontSize: 14, color: "#221516", padding: "10px 12px", background: "rgba(34,21,22,0.02)", borderLeft: "2px solid #8b2035", lineHeight: 1.6 }}>
+          {row.prescriptive}
+        </div>
+      )}
     </div>
   );
 }
@@ -484,7 +774,7 @@ function Metric({ label, value }) {
 // TAB 2 — CUSTOMER INTELLIGENCE
 // ══════════════════════════════════════════════════════════════════════════════
 
-function TabCustomer({ data, kpis, advanced }) {
+function TabCustomer({ data, kpis, advanced, rel }) {
   return (
     <>
       {/* Style DNA */}
@@ -495,8 +785,8 @@ function TabCustomer({ data, kpis, advanced }) {
               <div key={i} style={s.card}>
                 <div style={s.cardLabel}>{item.style}</div>
                 <div style={{ ...s.cardValue, marginTop: 8 }}>{item.count} users · {item.percentage}%</div>
-                <div style={{ marginTop: 8, height: 6, background: "rgba(59,5,16,0.08)", borderRadius: 3 }}>
-                  <div style={{ height: "100%", width: `${item.percentage}%`, background: "#8b2035", borderRadius: 3 }} />
+                <div style={{ marginTop: 8, height: 4, background: "rgba(34,21,22,0.07)" }}>
+                  <div style={{ height: "100%", width: `${item.percentage}%`, background: "#8b2035" }} />
                 </div>
               </div>
             ))}
@@ -553,7 +843,7 @@ function TabCustomer({ data, kpis, advanced }) {
             {data.bodyPatterns.map((pattern, i) => (
               <div key={i} style={s.card}>
                 <div style={s.cardLabel}>{pattern.preference}</div>
-                <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#9CA3AF", marginBottom: 10 }}>{pattern.userCount} {pattern.userCount === 1 ? "user" : "users"}</div>
+                <div style={{ fontFamily: MONO, fontSize: 10, color: "#9CA3AF", marginBottom: 10 }}>{pattern.userCount} {pattern.userCount === 1 ? "user" : "users"}</div>
                 {pattern.bestPieces?.length > 0 && <div style={{ marginBottom: 8 }}><div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginBottom: 4 }}>Best pieces</div>{pattern.bestPieces.map((p, j) => <div key={j} style={{ fontSize: 13, color: "#221516" }}>• {typeof p === "string" ? p : p.name}</div>)}</div>}
                 {pattern.struggles?.length > 0 && pattern.struggles[0] !== "No repeated fit concerns yet" && <div><div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginBottom: 4 }}>Fit concerns</div>{pattern.struggles.map((str, j) => <div key={j} style={{ fontSize: 13, color: "#c5553a" }}>• {str}</div>)}</div>}
                 <div style={{ marginTop: 10, fontSize: 12, color: "#7a6f6a", fontStyle: "italic" }}>{pattern.implication}</div>
@@ -608,7 +898,7 @@ function TabCustomer({ data, kpis, advanced }) {
                         <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
                           <td style={s.td}>{t.startingMood}</td>
                           <td style={s.td}>{t.desiredFeeling}</td>
-                          <td style={s.td}><span style={{ color: t.achievedRate >= 70 ? "#16a34a" : t.achievedRate >= 40 ? "#d97706" : "#dc2626" }}>{t.achievedRate}%</span></td>
+                          <td style={s.td}><span style={{ color: t.achievedRate >= 70 ? "#2a5e42" : t.achievedRate >= 40 ? "#d97706" : "#8b2035" }}>{t.achievedRate}%</span></td>
                           <td style={s.td}>{t.count}</td>
                         </tr>
                       ))}
@@ -692,6 +982,57 @@ function TabCustomer({ data, kpis, advanced }) {
           </>
         )}
       </Section>
+
+      {/* Style DNA × Outcomes Intelligence */}
+      {rel?.dnaMatrix?.length > 0 && (
+        <Section
+          title="Style DNA × Outcomes Intelligence"
+          desc="How each personality type is served — rating, rewear, confidence lift, and desired feeling achievement"
+          status={rel.status}
+        >
+          {rel.status === "insufficient-data" ? (
+            <InsufficientCard label="DNA × outcomes matrix" description="Not enough reviewed sessions to compute per-personality patterns." sampleSize={rel.sampleSize} />
+          ) : (
+            <>
+              <SampleSizeWarning n={rel.sampleSize} min={10} />
+              {rel.dnaMatrix.map((row, i) => <DNAIntelligenceRow key={i} row={row} />)}
+            </>
+          )}
+        </Section>
+      )}
+
+      {/* Emotional Journey Flow */}
+      {rel?.emotionalChain?.length > 0 && (
+        <Section
+          title="Emotional Journey Flow"
+          desc="Starting mood → desired feeling → achieved rate — the complete emotional transformation chain"
+          status={rel.status}
+        >
+          {rel.status === "insufficient-data" ? (
+            <InsufficientCard label="Emotional journey flow" description="Not enough sessions with both current mood and desired feeling captured." sampleSize={rel.sampleSize} />
+          ) : (
+            <>
+              <div style={{ fontSize: 13, color: "#7a6f6a", marginBottom: 16, lineHeight: 1.6 }}>
+                Each row shows a mood-to-feeling pattern: how many customers started with a given feeling, what they wanted to feel, whether nAia delivered, and which pieces were recommended.
+              </div>
+              {rel.emotionalChain.map((row, i) => <EmotionalFlowRow key={i} chain={row} />)}
+              {rel.emotionalChain.some(r => r.achievedRate != null) && (
+                <PrescriptiveBlock
+                  recommendation={(() => {
+                    const best = rel.emotionalChain.filter(r => r.achievedRate != null).sort((a, b) => (b.achievedRate ?? 0) - (a.achievedRate ?? 0))[0];
+                    const worst = rel.emotionalChain.filter(r => r.achievedRate != null).sort((a, b) => (a.achievedRate ?? 0) - (b.achievedRate ?? 0))[0];
+                    if (!best) return "Continue monitoring emotional delivery rates.";
+                    return `Strongest delivery: ${best.currentMood} → ${best.desiredFeeling} (${best.achievedRate}%)${best.topProducts[0] ? ` via ${best.topProducts[0]}` : ""}. Focus product depth here.${worst && worst.achievedRate < 50 ? ` Weakest: ${worst.currentMood} → ${worst.desiredFeeling} (${worst.achievedRate}%) — review whether the collection serves this transformation.` : ""}`;
+                  })()}
+                  reason="Emotional delivery rate is the most direct measure of whether nAia is matching the right product to the right feeling at the right moment."
+                  confidence="medium"
+                  sampleSize={rel.sampleSize}
+                />
+              )}
+            </>
+          )}
+        </Section>
+      )}
     </>
   );
 }
@@ -700,7 +1041,7 @@ function TabCustomer({ data, kpis, advanced }) {
 // TAB 3 — PRODUCT INTELLIGENCE
 // ══════════════════════════════════════════════════════════════════════════════
 
-function TabProduct({ data, phase4b2 }) {
+function TabProduct({ data, phase4b2, rel }) {
   return (
     <>
       <Section title="Top-Performing Pieces" desc="High rating and rewear — nAia products only" status="live">
@@ -752,7 +1093,7 @@ function TabProduct({ data, phase4b2 }) {
           <div style={s.pieceGrid}>{data.piecesByDNA.map((p, i) => (
             <div key={i} style={s.pieceCard}>
               <div style={s.pieceName}>{p.name}</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>{p.topDNA?.map((dna, j) => <span key={j} style={{ padding: "5px 10px", background: "#8b2035", color: "#f4f4f1", borderRadius: 20, fontSize: 11, fontFamily: "'Space Mono', monospace" }}>{dna}</span>)}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>{p.topDNA?.map((dna, j) => <span key={j} style={{ padding: "3px 8px", background: "#8b2035", color: "#f4f4f1", fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px" }}>{dna}</span>)}</div>
             </div>
           ))}</div>
         ) : <EmptyState />}
@@ -775,7 +1116,7 @@ function TabProduct({ data, phase4b2 }) {
             {data.topOccasions.map((occ, i) => (
               <div key={i} style={s.card}>
                 <div style={s.cardLabel}>{occ.name}</div>
-                <div style={{ display: "flex", gap: 16, marginTop: 8, fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#7a6f6a" }}>
+                <div style={{ display: "flex", gap: 16, marginTop: 8, fontFamily: MONO, fontSize: 11, color: "#7a6f6a" }}>
                   <span>★ {occ.avgRating?.toFixed(1)}</span>
                   <span>{occ.lookCount} looks</span>
                   <span>{Math.round(occ.rewear * 100)}% rewear</span>
@@ -791,7 +1132,7 @@ function TabProduct({ data, phase4b2 }) {
         {data.productPairings?.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {data.productPairings.map((p, i) => (
-              <div key={i} style={{ padding: 16, background: "#fff", border: "1px solid #e5e5e5", borderRadius: 4 }}>
+              <div key={i} style={{ padding: 16, background: "#fff", border: "1px solid rgba(34,21,22,0.08)" }}>
                 <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 8 }}>{p.closetItem} + {p.naiaPiece}</div>
                 <div style={{ fontSize: 14, color: "#666" }}>{p.avgRating.toFixed(1)}/5 · {p.reviewCount} review{p.reviewCount !== 1 ? "s" : ""} · {Math.round(p.rewearRate * 100)}% would wear again</div>
               </div>
@@ -819,6 +1160,42 @@ function TabProduct({ data, phase4b2 }) {
         </div>
         {phase4b2?.vtoMetrics?.migrationPending && <MigrationPendingNotice label="VTO feedback breakdown" />}
       </Section>
+
+      {/* Product Intelligence Narratives */}
+      {rel?.productNarratives?.length > 0 && (
+        <Section
+          title="Product Intelligence Narratives"
+          desc="Every important piece — its opportunity score, emotional journey, best audience, top objection, and prescriptive recommendation"
+          status={rel.status}
+        >
+          {rel.status === "insufficient-data" ? (
+            <InsufficientCard label="Product narratives" description="Not enough reviewed sessions to build product-level relationship intelligence." sampleSize={rel.sampleSize} />
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(400px, 1fr))", gap: 20 }}>
+              {rel.productNarratives.map((narrative, i) => (
+                <ProductNarrativeCard key={i} narrative={narrative} />
+              ))}
+            </div>
+          )}
+        </Section>
+      )}
+
+      {/* Occasion × Product Intelligence */}
+      {rel?.occasionProductMatrix?.length > 0 && (
+        <Section
+          title="Occasion × Product Intelligence"
+          desc="Which pieces perform best for which occasions — with personality context and prescriptive next step"
+          status={rel.status}
+        >
+          {rel.status === "insufficient-data" ? (
+            <InsufficientCard label="Occasion × product matrix" description="Not enough occasion-tagged sessions to surface reliable occasion-product patterns." sampleSize={rel.sampleSize} />
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 16 }}>
+              {rel.occasionProductMatrix.map((row, i) => <OccasionIntelCard key={i} row={row} />)}
+            </div>
+          )}
+        </Section>
+      )}
     </>
   );
 }
@@ -827,7 +1204,7 @@ function TabProduct({ data, phase4b2 }) {
 // TAB 4 — RECOMMENDATION INTELLIGENCE
 // ══════════════════════════════════════════════════════════════════════════════
 
-function TabRecommendation({ data, kpis, phase4b2, advanced }) {
+function TabRecommendation({ data, kpis, phase4b2, advanced, rel }) {
   return (
     <>
       <Section title="Feedback Engagement" desc="How many styling sessions receive recommendation feedback" status={phase4b2?.feedbackEngagement?.migrationPending ? "awaiting-integration" : "live"}>
@@ -899,7 +1276,7 @@ function TabRecommendation({ data, kpis, phase4b2, advanced }) {
               data.positiveTags.map((tag, i) => (
                 <div key={i} style={{ ...s.card, borderLeft: "3px solid #2a9d8f", marginBottom: 12 }}>
                   <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 16, fontWeight: 600, marginBottom: 6 }}>{tag.name}</div>
-                  <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#7a6f6a", marginBottom: 8 }}>{tag.count} mentions</div>
+                  <div style={{ fontFamily: MONO, fontSize: 11, color: "#7a6f6a", marginBottom: 8 }}>{tag.count} mentions</div>
                   {tag.topPieces?.length > 0 && <div style={{ fontSize: 12, color: "#666" }}>Most linked: {tag.topPieces.join(", ")}</div>}
                 </div>
               ))
@@ -911,7 +1288,7 @@ function TabRecommendation({ data, kpis, phase4b2, advanced }) {
               data.negativeTags.map((tag, i) => (
                 <div key={i} style={{ ...s.card, borderLeft: "3px solid #c5553a", marginBottom: 12 }}>
                   <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 16, fontWeight: 600, marginBottom: 6 }}>{tag.name}</div>
-                  <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#7a6f6a", marginBottom: 8 }}>{tag.count} mentions</div>
+                  <div style={{ fontFamily: MONO, fontSize: 11, color: "#7a6f6a", marginBottom: 8 }}>{tag.count} mentions</div>
                   {tag.topPieces?.length > 0 && <div style={{ fontSize: 12, color: "#666" }}>Most linked: {tag.topPieces.join(", ")}</div>}
                 </div>
               ))
@@ -924,9 +1301,9 @@ function TabRecommendation({ data, kpis, phase4b2, advanced }) {
         {data.topObjections?.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {data.topObjections.slice(0, 8).map((obj, i) => (
-              <div key={i} style={{ padding: 16, background: "#fff", border: "1px solid #e5e5e5", borderRadius: 4, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <div key={i} style={{ padding: 16, background: "#fff", border: "1px solid rgba(34,21,22,0.08)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
                 <div style={{ fontSize: 15, fontWeight: 500 }}>{obj.name}</div>
-                <div style={{ fontSize: 13, color: "#fff", background: "#d97706", padding: "4px 12px", borderRadius: 12, whiteSpace: "nowrap" }}>{obj.count} mentions</div>
+                <div style={{ fontFamily: MONO, fontSize: 11, color: "#6b4800", whiteSpace: "nowrap" }}>{obj.count} mentions</div>
               </div>
             ))}
           </div>
@@ -948,6 +1325,41 @@ function TabRecommendation({ data, kpis, phase4b2, advanced }) {
           ))}
         </div>
       </Section>
+
+      {/* What makes recommendations succeed */}
+      {rel?.emotionalChain?.length > 0 && rel.status !== "insufficient-data" && (
+        <Section
+          title="What Makes Recommendations Succeed"
+          desc="The mood × feeling combinations where nAia delivers — and where it doesn't"
+          status={rel.status}
+        >
+          <div style={{ fontSize: 13, color: "#7a6f6a", marginBottom: 16, lineHeight: 1.6 }}>
+            Recommendation success is measured by whether the customer achieves their desired feeling.
+            High achievement rates indicate the right product was matched to the right emotional moment.
+          </div>
+          {rel.emotionalChain.filter(r => r.achievedRate != null).length > 0 ? (
+            <>
+              {rel.emotionalChain.filter(r => r.achievedRate != null).slice(0, 8).map((row, i) => <EmotionalFlowRow key={i} chain={row} />)}
+              <PrescriptiveBlock
+                recommendation={(() => {
+                  const high = rel.emotionalChain.filter(r => (r.achievedRate ?? 0) >= 70);
+                  const low = rel.emotionalChain.filter(r => r.achievedRate != null && (r.achievedRate ?? 100) < 50);
+                  if (high.length > 0 && low.length > 0) {
+                    return `nAia succeeds when customers want to feel ${high[0].desiredFeeling}${high[0].topProducts[0] ? ` (${high[0].topProducts[0]})` : ""}. It struggles when they want to feel ${low[0].desiredFeeling}. Prioritise expanding product options for the under-served feeling states.`;
+                  }
+                  if (high.length > 0) return `nAia is consistently delivering on desired feelings. Focus on expanding coverage to more mood-feeling combinations.`;
+                  return `Recommendation delivery rates are forming. Continue collecting post-wear data to identify success and failure patterns.`;
+                })()}
+                reason="The difference between a successful and failed recommendation is usually whether the product matched the emotional aspiration, not just the style. Desired feeling achievement is the leading indicator of recommendation quality."
+                confidence="medium"
+                sampleSize={rel.sampleSize}
+              />
+            </>
+          ) : (
+            <InsufficientCard label="Recommendation success patterns" description="Need desiredFeelingAchieved data from post-outfit reviews." sampleSize={rel.sampleSize} />
+          )}
+        </Section>
+      )}
     </>
   );
 }
@@ -956,7 +1368,7 @@ function TabRecommendation({ data, kpis, phase4b2, advanced }) {
 // TAB 5 — COLLECTION INTELLIGENCE
 // ══════════════════════════════════════════════════════════════════════════════
 
-function TabCollection({ data, kpis, advanced, dateRangeDays }) {
+function TabCollection({ data, kpis, advanced, rel, dateRangeDays }) {
   return (
     <>
       {/* Collection Health Score */}
@@ -967,14 +1379,14 @@ function TabCollection({ data, kpis, advanced, dateRangeDays }) {
             <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 72, fontWeight: 900, color: "#8b2035", lineHeight: 1 }}>
               {advanced?.collectionHealth?.score != null ? advanced.collectionHealth.score : "—"}
             </div>
-            <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#7a6f6a", textTransform: "uppercase", letterSpacing: "2px", marginTop: 8 }}>
+            <div style={{ fontFamily: MONO, fontSize: 10, color: "#7a6f6a", textTransform: "uppercase", letterSpacing: "2px", marginTop: 8 }}>
               {advanced?.collectionHealth?.factorsAvailable ?? 0} of {advanced?.collectionHealth?.factorsTotal ?? 8} factors available
             </div>
             {advanced?.collectionHealth?.largestWeakness && (
               <div style={{ marginTop: 16, fontSize: 12, color: "#d97706" }}>Largest weakness: {advanced.collectionHealth.largestWeakness.replace(/([A-Z])/g, " $1").trim()}</div>
             )}
             {advanced?.collectionHealth?.strongestArea && (
-              <div style={{ marginTop: 8, fontSize: 12, color: "#16a34a" }}>Strongest area: {advanced.collectionHealth.strongestArea.replace(/([A-Z])/g, " $1").trim()}</div>
+              <div style={{ marginTop: 8, fontSize: 12, color: "#2a5e42" }}>Strongest area: {advanced.collectionHealth.strongestArea.replace(/([A-Z])/g, " $1").trim()}</div>
             )}
           </div>
           {advanced?.collectionHealth?.factors && (
@@ -984,13 +1396,13 @@ function TabCollection({ data, kpis, advanced, dateRangeDays }) {
                 <div key={key} style={{ marginBottom: 12 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                     <span style={{ fontSize: 12, color: "#221516" }}>{key.replace(/([A-Z])/g, " $1").trim()}</span>
-                    <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: factor.score != null ? "#221516" : "#9CA3AF" }}>
+                    <span style={{ fontFamily: MONO, fontSize: 11, color: factor.score != null ? "#221516" : "#9CA3AF" }}>
                       {factor.score != null ? `${factor.score}/100` : factor.label}
                     </span>
                   </div>
                   {factor.score != null && (
-                    <div style={{ height: 4, background: "rgba(59,5,16,0.08)", borderRadius: 2 }}>
-                      <div style={{ height: "100%", width: `${Math.min(factor.score, 100)}%`, background: factor.score >= 60 ? "#16a34a" : factor.score >= 30 ? "#d97706" : "#dc2626", borderRadius: 2 }} />
+                    <div style={{ height: 3, background: "rgba(34,21,22,0.07)" }}>
+                      <div style={{ height: "100%", width: `${Math.min(factor.score, 100)}%`, background: factor.score >= 60 ? "#2a5e42" : factor.score >= 30 ? "#d97706" : "#8b2035" }} />
                     </div>
                   )}
                 </div>
@@ -1012,7 +1424,7 @@ function TabCollection({ data, kpis, advanced, dateRangeDays }) {
               <div style={s.cardLabel}>Trend Direction</div>
               <TrendPill label="Avg Rating" trend={advanced.collectionEvolution.ratingTrend} />
               <TrendPill label="Sessions" trend={advanced.collectionEvolution.sessionsTrend} />
-              <div style={{ marginTop: 16, padding: "10px 12px", background: "#faf9f7", borderRadius: 4, fontSize: 12, color: "#7a6f6a" }}>
+              <div style={{ marginTop: 16, padding: "10px 12px", background: "#fafaf8", borderLeft: "2px solid rgba(34,21,22,0.10)", fontFamily: SERIF, fontStyle: "italic", fontSize: 13, color: "#7a6f6a" }}>
                 Note: Full collection evolution (conversion, saves, returns, size coverage) requires commercial integration.
               </div>
             </div>
@@ -1026,7 +1438,7 @@ function TabCollection({ data, kpis, advanced, dateRangeDays }) {
           {data.topOccasions?.map((occ, i) => (
             <div key={i} style={s.card}>
               <div style={s.cardLabel}>{occ.name}</div>
-              <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#7a6f6a", marginTop: 6 }}>{occ.lookCount} looks · ★{occ.avgRating?.toFixed(1)}</div>
+              <div style={{ fontFamily: MONO, fontSize: 10, color: "#7a6f6a", marginTop: 6 }}>{occ.lookCount} looks · ★{occ.avgRating?.toFixed(1)}</div>
             </div>
           ))}
         </div>
@@ -1037,7 +1449,7 @@ function TabCollection({ data, kpis, advanced, dateRangeDays }) {
               {data.stylingNeeds.map((need, i) => (
                 <div key={i} style={s.card}>
                   <div style={{ fontSize: 14, color: "#221516" }}>{need.occasion || need.need}</div>
-                  <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#7a6f6a", marginTop: 4 }}>{need.count} requests</div>
+                  <div style={{ fontFamily: MONO, fontSize: 10, color: "#7a6f6a", marginTop: 4 }}>{need.count} requests</div>
                 </div>
               ))}
             </div>
@@ -1080,14 +1492,106 @@ function TabCollection({ data, kpis, advanced, dateRangeDays }) {
         {data.stylingNeeds?.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {data.stylingNeeds.slice(0, 8).map((need, i) => (
-              <div key={i} style={{ padding: 16, background: "#fff", border: "1px solid #e5e5e5", borderRadius: 4, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div key={i} style={{ padding: 16, background: "#fff", border: "1px solid rgba(34,21,22,0.08)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontSize: 15, color: "#221516" }}>{need.occasion || need.need}</span>
-                <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#7a6f6a" }}>{need.count} requests</span>
+                <span style={{ fontFamily: MONO, fontSize: 11, color: "#7a6f6a" }}>{need.count} requests</span>
               </div>
             ))}
           </div>
         ) : <EmptyState />}
       </Section>
+
+      {/* Collection Coverage × Customer Intelligence */}
+      {rel?.dnaMatrix?.length > 0 && (
+        <Section
+          title="Collection Coverage × Customer Intelligence"
+          desc="Which personality types are well-served by the current collection — and which have coverage gaps"
+          status={rel.status}
+        >
+          {rel.status === "insufficient-data" ? (
+            <InsufficientCard label="Coverage × personality analysis" description="Not enough reviewed sessions to assess per-personality collection coverage." sampleSize={rel.sampleSize} />
+          ) : (
+            <>
+              <SampleSizeWarning n={rel.sampleSize} min={10} />
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16, marginBottom: 24 }}>
+                {rel.dnaMatrix.map((row, i) => {
+                  const served = row.avgRating != null && row.avgRating >= 4 && row.rewearRate != null && row.rewearRate >= 0.6;
+                  const partial = !served && (row.avgRating != null || row.rewearRate != null);
+                  const borderColor = served ? "#2a5e42" : partial ? "#d97706" : "#9CA3AF";
+                  const label = served ? "Well Served" : partial ? "Partially Served" : "Insufficient Data";
+                  const labelColor = served ? "#2a5e42" : partial ? "#d97706" : "#7a6f6a";
+                  return (
+                    <div key={i} style={{ ...s.card, borderLeft: `3px solid ${borderColor}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, fontWeight: 700, color: "#221516" }}>{row.personality}</div>
+                        <span style={{ fontSize: 9, fontFamily: MONO, textTransform: "uppercase", letterSpacing: "1.5px", color: labelColor }}>{label}</span>
+                      </div>
+                      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11, fontFamily: MONO, color: "#7a6f6a", marginBottom: 8 }}>
+                        {row.avgRating != null && <span>★ {row.avgRating}</span>}
+                        {row.rewearRate != null && <span>{Math.round(row.rewearRate * 100)}% rewear</span>}
+                        {row.feelingAchievedRate != null && <span>{row.feelingAchievedRate}% feeling achieved</span>}
+                        <span>n={row.sessionCount}</span>
+                      </div>
+                      {row.topOccasions?.length > 0 && (
+                        <div style={{ fontSize: 12, color: "#7a6f6a" }}>Best occasions: {row.topOccasions.join(", ")}</div>
+                      )}
+                      {row.topProducts?.length > 0 && (
+                        <div style={{ fontSize: 12, color: "#8b2035", marginTop: 4 }}>Top pieces: {row.topProducts.join(", ")}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Occasion × Personality cross-coverage */}
+              {rel.occasionProductMatrix?.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={s.subHeader}>Occasion × Personality Coverage</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
+                    {rel.occasionProductMatrix.slice(0, 6).map((row, i) => (
+                      <div key={i} style={{ ...s.card, padding: "14px 16px" }}>
+                        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 15, fontWeight: 600, color: "#221516", marginBottom: 6 }}>{row.occasion}</div>
+                        <div style={{ fontSize: 11, fontFamily: MONO, color: "#7a6f6a", marginBottom: 4 }}>
+                          {row.count} session{row.count !== 1 ? "s" : ""}
+                          {row.successRate != null && ` · ${row.successRate}% success`}
+                        </div>
+                        {row.topPersonalities?.length > 0 && (
+                          <div style={{ fontSize: 11, color: "#8b2035" }}>{row.topPersonalities.join(", ")}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Prescriptive recommendation */}
+              {(() => {
+                const underserved = rel.dnaMatrix.filter(r =>
+                  r.sessionCount >= 2 && (r.avgRating == null || r.avgRating < 3.5 || r.rewearRate == null || r.rewearRate < 0.5)
+                );
+                const wellServed = rel.dnaMatrix.filter(r =>
+                  r.avgRating != null && r.avgRating >= 4 && r.rewearRate != null && r.rewearRate >= 0.6
+                );
+                if (underserved.length === 0 && wellServed.length === 0) return null;
+                const rec = underserved.length > 0
+                  ? `${underserved[0].personality} customers are showing below-threshold satisfaction${underserved[0].topOccasions[0] ? ` for ${underserved[0].topOccasions[0]}` : ""}. Review whether the collection has depth in pieces that address their desired feelings (${underserved[0].topDesiredFeelings.slice(0, 2).join(", ") || "see profiles"}).`
+                  : `Current collection is performing well across all personality types with sufficient data. Focus on expanding session volume to surface signals for personality types with fewer than 3 sessions.`;
+                const reason = underserved.length > 0
+                  ? `Low rewear rate or rating from a consistent personality segment is the earliest signal of a collection gap — before any conversion data is available.`
+                  : `Consistent performance across personality types suggests strong product-market fit within the current customer base.`;
+                return (
+                  <PrescriptiveBlock
+                    recommendation={rec}
+                    reason={reason}
+                    confidence={underserved.length > 0 ? "medium" : "high"}
+                    sampleSize={rel.sampleSize}
+                  />
+                );
+              })()}
+            </>
+          )}
+        </Section>
+      )}
     </>
   );
 }
@@ -1096,7 +1600,7 @@ function TabCollection({ data, kpis, advanced, dateRangeDays }) {
 // TAB 6 — COMMERCIAL INTELLIGENCE
 // ══════════════════════════════════════════════════════════════════════════════
 
-function TabCommercial({ data, advanced }) {
+function TabCommercial({ data, advanced, rel }) {
   return (
     <>
       <Section title="nAia-Assisted Revenue" status="awaiting-integration">
@@ -1115,7 +1619,7 @@ function TabCommercial({ data, advanced }) {
         {data.conversionStats?.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {data.conversionStats.map((product, i) => (
-              <div key={i} style={{ padding: 16, background: "#fff", border: "1px solid #e5e5e5", borderRadius: 4 }}>
+              <div key={i} style={{ padding: 16, background: "#fff", border: "1px solid rgba(34,21,22,0.08)" }}>
                 <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 12 }}>{product.productTitle}</div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 12, fontSize: 13 }}>
                   <div><div style={{ color: "#999" }}>Recommended</div><div style={{ fontSize: 18, fontWeight: 500 }}>{product.recommended}</div></div>
@@ -1133,7 +1637,7 @@ function TabCommercial({ data, advanced }) {
       <Section title="Commercial Opportunity Score" desc="Transparent per-product score from available signals (0–100 partial)" status={advanced?.opportunityScores?.length > 0 ? "experimental" : "insufficient-data"}>
         {advanced?.opportunityScores?.length > 0 ? (
           <>
-            <div style={{ padding: "8px 14px", background: "#eff6ff", border: "1px solid #3b82f6", borderRadius: 4, fontSize: 12, color: "#1d4ed8", marginBottom: 16 }}>
+            <div style={{ padding: "8px 14px", background: "rgba(34,21,22,0.04)", border: "1px solid rgba(34,21,22,0.12)", fontSize: 11, fontFamily: INTER, color: "#5c5350", marginBottom: 16, lineHeight: 1.6 }}>
               Score is partial — only available factors are included. Conversion and save-intent require commercial integration. Never act on score alone.
             </div>
             <div style={{ overflowX: "auto" }}>
@@ -1189,18 +1693,18 @@ function TabCommercial({ data, advanced }) {
       <Section title="Predictive Intelligence" desc="Evidence-based signals with explicit confidence levels — never speculation" status={advanced?.predictive?.status || "insufficient-data"}>
         {advanced?.predictive?.signals?.length > 0 ? (
           <>
-            <div style={{ padding: "8px 14px", background: "#eff6ff", border: "1px solid #3b82f6", borderRadius: 4, fontSize: 12, color: "#1d4ed8", marginBottom: 16 }}>
+            <div style={{ padding: "8px 14px", background: "rgba(34,21,22,0.04)", border: "1px solid rgba(34,21,22,0.12)", fontSize: 11, fontFamily: INTER, color: "#5c5350", marginBottom: 16, lineHeight: 1.6 }}>
               {advanced.predictive.disclaimer}
             </div>
             {advanced.predictive.signals.map((signal, i) => (
-              <div key={i} style={{ ...s.card, marginBottom: 12, borderLeft: "3px solid #1e3a5f" }}>
+              <div key={i} style={{ ...s.card, marginBottom: 12, borderLeft: "3px solid #8b2035" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 8 }}>
-                  <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 9, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a" }}>{signal.type}</div>
+                  <div style={{ fontFamily: MONO, fontSize: 9, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a" }}>{signal.type}</div>
                   <StatusBadge status="experimental" />
                 </div>
                 <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 17, color: "#221516", fontWeight: 600, marginBottom: 8 }}>{signal.label}</div>
                 <div style={{ fontSize: 13, color: "#7a6f6a", marginBottom: 8 }}>{signal.evidence}</div>
-                <div style={{ display: "flex", gap: 16, fontSize: 11, color: "#9CA3AF", fontFamily: "'Space Mono', monospace" }}>
+                <div style={{ display: "flex", gap: 16, fontSize: 11, color: "#9CA3AF", fontFamily: MONO }}>
                   <span>Confidence: {signal.confidence}</span>
                   <span>n={signal.sampleSize}</span>
                   <span>{signal.period}</span>
@@ -1210,13 +1714,13 @@ function TabCommercial({ data, advanced }) {
           </>
         ) : (
           <>
-            <div style={{ padding: "8px 14px", background: "#fef3c7", border: "1px solid #d97706", borderRadius: 4, fontSize: 12, color: "#92400e", marginBottom: 16 }}>
+            <div style={{ padding: "8px 14px", background: "rgba(107,72,0,0.05)", border: "1px solid rgba(107,72,0,0.18)", fontSize: 11, fontFamily: INTER, color: "#6b4800", marginBottom: 16, lineHeight: 1.6 }}>
               {advanced?.predictive?.disclaimer || "Insufficient data for predictive signals in this period. Need more sessions to detect trends."}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
               {["Likely Product Momentum", "Emerging Colour Demand", "Emerging Mood Demand", "Future Assortment Gaps", "Save-to-Purchase Potential", "Stock / Size Pressure"].map((label) => (
-                <div key={label} style={{ ...s.card, borderLeft: "3px solid #1e3a5f" }}>
-                  <div style={{ ...s.cardLabel, color: "#1e3a5f" }}>{label}</div>
+                <div key={label} style={{ ...s.card, borderLeft: "3px solid #8b2035" }}>
+                  <div style={{ ...s.cardLabel, color: "#8b2035" }}>{label}</div>
                   <StatusBadge status="experimental" style={{ marginTop: 8 }} />
                   <p style={{ ...s.muted, marginTop: 8, fontSize: 11 }}>Requires 20+ data points for reliable signals.</p>
                 </div>
@@ -1225,6 +1729,74 @@ function TabCommercial({ data, advanced }) {
           </>
         )}
       </Section>
+
+      {/* Product Investment Priority */}
+      {rel?.productNarratives?.length > 0 && (
+        <Section
+          title="Product Investment Priority"
+          desc="Which products deserve more depth — ranked by Opportunity Score from real customer relationships"
+          status={rel.status}
+        >
+          {rel.status === "insufficient-data" ? (
+            <InsufficientCard label="Investment priority ranking" description="Not enough reviewed sessions to rank products by opportunity." sampleSize={rel.sampleSize} />
+          ) : (
+            <>
+              <div style={{ padding: "8px 14px", background: "rgba(34,21,22,0.04)", border: "1px solid rgba(34,21,22,0.12)", fontFamily: INTER, fontSize: 11, color: "#5c5350", marginBottom: 20, lineHeight: 1.6 }}>
+                Opportunity Score combines rating (30%), rewear rate (25%), confidence lift (25%), and data quality (20%). Score is partial until conversion data is available.
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={s.table}>
+                  <thead>
+                    <tr>
+                      <th style={s.th}>Product</th>
+                      <th style={s.th}>Score</th>
+                      <th style={s.th}>Rating</th>
+                      <th style={s.th}>Rewear</th>
+                      <th style={s.th}>Best Audience</th>
+                      <th style={s.th}>Best Occasion</th>
+                      <th style={s.th}>Top Objection</th>
+                      <th style={s.th}>n</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rel.productNarratives.slice(0, 12).map((p, i) => {
+                      const scoreColor = p.opportunityScore >= 70 ? "#2a5e42" : p.opportunityScore >= 45 ? "#d97706" : "#7a6f6a";
+                      return (
+                        <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                          <td style={{ ...s.td, fontFamily: "'Cormorant Garamond', serif", fontWeight: 600, fontSize: 14 }}>{p.name}</td>
+                          <td style={{ ...s.td, fontWeight: 700, color: scoreColor, fontFamily: MONO }}>{p.opportunityScore}</td>
+                          <td style={s.td}>{p.avgRating?.toFixed(1) ?? "—"}</td>
+                          <td style={s.td}>{p.rewearRate != null ? `${Math.round(p.rewearRate * 100)}%` : "—"}</td>
+                          <td style={{ ...s.td, fontSize: 12, color: "#8b2035" }}>{p.bestPersonality ?? "—"}</td>
+                          <td style={{ ...s.td, fontSize: 12 }}>{p.bestOccasion ?? "—"}</td>
+                          <td style={{ ...s.td, fontSize: 12, color: "#c53030" }}>{p.mostCommonObjection ?? "—"}</td>
+                          <td style={{ ...s.td, fontFamily: MONO, fontSize: 11, color: "#9CA3AF" }}>{p.sampleSize}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Prescriptive investment recommendation */}
+              {(() => {
+                const top = rel.productNarratives.filter(p => p.opportunityScore >= 60).slice(0, 2);
+                const underutilised = rel.productNarratives.filter(p => p.opportunityScore < 40 && p.sampleSize >= 3).slice(0, 1);
+                if (top.length === 0) return null;
+                const rec = `${top[0].name} leads with an Opportunity Score of ${top[0].opportunityScore}${top[0].bestPersonality ? ` — strongest with ${top[0].bestPersonality} customers` : ""}${top[0].bestOccasion ? ` for ${top[0].bestOccasion}` : ""}. This is your highest-confidence investment direction from available data.${underutilised.length > 0 ? ` ${underutilised[0].name} (score ${underutilised[0].opportunityScore}) shows friction${underutilised[0].mostCommonObjection ? ` — top objection: ${underutilised[0].mostCommonObjection}` : ""} — investigate before increasing inventory.` : ""}`;
+                return (
+                  <PrescriptiveBlock
+                    recommendation={rec}
+                    reason="Opportunity Score is a leading indicator of product-market fit built from the 4 factors available before purchase data: emotional resonance, physical rewear, confidence delivery, and data maturity. Act on high-scoring products while commercial integration is pending."
+                    confidence={top[0].sampleSize >= 5 ? "high" : "medium"}
+                    sampleSize={rel.sampleSize}
+                  />
+                );
+              })()}
+            </>
+          )}
+        </Section>
+      )}
     </>
   );
 }
@@ -1233,7 +1805,7 @@ function TabCommercial({ data, advanced }) {
 // TAB 7 — AI PERFORMANCE
 // ══════════════════════════════════════════════════════════════════════════════
 
-function TabAIPerformance({ data, kpis, phase4b2, advanced }) {
+function TabAIPerformance({ data, kpis, phase4b2, advanced, rel }) {
   return (
     <>
       <Section title="Feature Adoption" desc="Selfie analysis and closet try-on readiness" status="live">
@@ -1291,6 +1863,81 @@ function TabAIPerformance({ data, kpis, phase4b2, advanced }) {
           <KpiCard label="Avg Rating All-Time" value={(data.avgRating || 0).toFixed(1)} suffix="/5" />
         </div>
       </Section>
+
+      {/* Recommendation Trust by Personality Type */}
+      {rel?.dnaMatrix?.length > 0 && (
+        <Section
+          title="Recommendation Trust by Personality Type"
+          desc="How well nAia delivers on desired feelings for each customer personality — the deepest available trust signal"
+          status={rel.status}
+        >
+          {rel.status === "insufficient-data" ? (
+            <InsufficientCard label="Trust by personality" description="Not enough reviewed sessions to measure per-personality delivery rates." sampleSize={rel.sampleSize} />
+          ) : (
+            <>
+              <div style={{ fontSize: 13, color: "#7a6f6a", marginBottom: 20, lineHeight: 1.6 }}>
+                Desired feeling achievement rate measures whether nAia's recommendation matched what the customer actually needed emotionally.
+                It is the most direct signal of AI trust that does not require purchase data.
+              </div>
+              <SampleSizeWarning n={rel.sampleSize} min={10} />
+              <div style={{ overflowX: "auto" }}>
+                <table style={s.table}>
+                  <thead>
+                    <tr>
+                      <th style={s.th}>Personality</th>
+                      <th style={s.th}>Feeling Achieved</th>
+                      <th style={s.th}>Avg Rating</th>
+                      <th style={s.th}>Rewear</th>
+                      <th style={s.th}>Confidence Lift</th>
+                      <th style={s.th}>Sessions</th>
+                      <th style={s.th}>Signal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rel.dnaMatrix.slice().sort((a, b) => (b.feelingAchievedRate ?? -1) - (a.feelingAchievedRate ?? -1)).map((row, i) => {
+                      const rate = row.feelingAchievedRate;
+                      const rateColor = rate == null ? "#9CA3AF" : rate >= 70 ? "#2a5e42" : rate >= 40 ? "#d97706" : "#8b2035";
+                      const signal = rate == null ? "—" : rate >= 70 ? "Strong" : rate >= 40 ? "Moderate" : "Weak";
+                      return (
+                        <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                          <td style={{ ...s.td, fontFamily: "'Cormorant Garamond', serif", fontWeight: 600, fontSize: 14 }}>{row.personality}</td>
+                          <td style={{ ...s.td, fontWeight: 700, color: rateColor, fontFamily: MONO }}>{rate != null ? `${rate}%` : "—"}</td>
+                          <td style={s.td}>{row.avgRating != null ? `★ ${row.avgRating}` : "—"}</td>
+                          <td style={s.td}>{row.rewearRate != null ? `${Math.round(row.rewearRate * 100)}%` : "—"}</td>
+                          <td style={{ ...s.td, color: row.avgConfidenceLift != null && row.avgConfidenceLift > 0 ? "#2a5e42" : "#7a6f6a" }}>
+                            {row.avgConfidenceLift != null ? `${row.avgConfidenceLift >= 0 ? "+" : ""}${row.avgConfidenceLift}` : "—"}
+                          </td>
+                          <td style={{ ...s.td, fontFamily: MONO, fontSize: 11 }}>{row.sessionCount}</td>
+                          <td style={{ ...s.td, fontSize: 11, fontFamily: MONO, color: rateColor }}>{signal}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Prescriptive: where AI trust is weakest */}
+              {(() => {
+                const withData = rel.dnaMatrix.filter(r => r.feelingAchievedRate != null && r.sessionCount >= 2);
+                if (withData.length === 0) return null;
+                const weakest = withData.sort((a, b) => (a.feelingAchievedRate ?? 100) - (b.feelingAchievedRate ?? 100))[0];
+                const strongest = withData.sort((a, b) => (b.feelingAchievedRate ?? 0) - (a.feelingAchievedRate ?? 0))[0];
+                const rec = weakest.feelingAchievedRate != null && weakest.feelingAchievedRate < 60
+                  ? `AI recommendation trust is weakest for ${weakest.personality} customers (${weakest.feelingAchievedRate}% feeling achieved). The collection may lack depth in pieces that serve their desired feelings (${weakest.topDesiredFeelings.slice(0, 2).join(", ") || "see profile"}).${strongest && strongest.feelingAchievedRate != null ? ` Strongest delivery: ${strongest.personality} at ${strongest.feelingAchievedRate}% — analyse what makes these recommendations land and apply that logic to weaker segments.` : ""}`
+                  : `nAia is delivering well on desired feelings across personality types. Focus on expanding session coverage for personality types with fewer than 3 data points.`;
+                return (
+                  <PrescriptiveBlock
+                    recommendation={rec}
+                    reason="Desired feeling achievement rate is the earliest available proxy for AI recommendation trust — it measures whether the system matched the emotional job, not just the style. Low rates signal a product gap, a calibration issue, or both."
+                    confidence={weakest.sessionCount >= 5 ? "high" : "medium"}
+                    sampleSize={rel.sampleSize}
+                  />
+                );
+              })()}
+            </>
+          )}
+        </Section>
+      )}
     </>
   );
 }
@@ -1299,7 +1946,7 @@ function TabAIPerformance({ data, kpis, phase4b2, advanced }) {
 // TAB 8 — DESIGN OPPORTUNITIES
 // ══════════════════════════════════════════════════════════════════════════════
 
-function TabOpportunities({ data, phase4b2, advanced }) {
+function TabOpportunities({ data, phase4b2, advanced, rel }) {
   return (
     <>
       {/* Designer Opportunity Feed */}
@@ -1311,16 +1958,16 @@ function TabOpportunities({ data, phase4b2, advanced }) {
           advanced.opportunityFeed.map((opp, i) => (
             <div key={i} style={{ ...s.card, marginBottom: 16, borderLeft: `4px solid ${opp.confidence === "high" ? "#221516" : opp.confidence === "medium" ? "#8B7355" : "#9CA3AF"}` }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-                <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 9, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a" }}>{opp.type ?? opp.id.split("-")[0]}</div>
+                <div style={{ fontFamily: MONO, fontSize: 9, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a" }}>{opp.type ?? opp.id.split("-")[0]}</div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <span style={{ fontSize: 9, fontFamily: "'Space Mono', monospace", padding: "3px 8px", background: opp.estimatedCommercialRelevance === "high" ? "#14532d" : opp.estimatedCommercialRelevance === "medium" ? "#78350f" : "#374151", color: "#fff", borderRadius: 3 }}>{opp.estimatedCommercialRelevance} relevance</span>
-                  <span style={{ fontSize: 9, fontFamily: "'Space Mono', monospace", padding: "3px 8px", background: "#1e3a5f", color: "#bae6fd", borderRadius: 3 }}>confidence: {opp.confidence}</span>
+                  <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: opp.estimatedCommercialRelevance === "high" ? "#2a5e42" : opp.estimatedCommercialRelevance === "medium" ? "#6b4800" : "#7a6f6a", color: "#fff" }}>{opp.estimatedCommercialRelevance} relevance</span>
+                  <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: "rgba(34,21,22,0.06)", color: "#5c5350" }}>confidence: {opp.confidence}</span>
                 </div>
               </div>
               <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 17, fontWeight: 600, color: "#221516", marginBottom: 6 }}>{opp.insight}</div>
               <div style={{ fontSize: 13, color: "#7a6f6a", marginBottom: 8 }}>Customer need: {opp.customerNeed}</div>
               <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 10 }}>Evidence: {opp.evidence} · {opp.timePeriod}</div>
-              <div style={{ padding: "10px 12px", background: "rgba(59,5,16,0.04)", borderRadius: 4, fontSize: 13, color: "#221516" }}>
+              <div style={{ padding: "10px 12px", background: "rgba(34,21,22,0.03)", fontSize: 13, fontFamily: SERIF, color: "#221516", borderTop: "1px solid rgba(34,21,22,0.06)", marginTop: 10 }}>
                 <strong>Suggested action:</strong> {opp.suggestedAction}
               </div>
             </div>
@@ -1332,8 +1979,8 @@ function TabOpportunities({ data, phase4b2, advanced }) {
 
       {/* Design Actions */}
       <Section title="Design Actions" desc="Piece-specific recommended next steps from customer feedback" status={data.designActions?.length > 0 ? "live" : "insufficient-data"}>
-        <div style={{ padding: "10px 14px", background: "#faf9f7", borderLeft: "3px solid #8B7355", marginBottom: 20, fontSize: 13, color: "#8B7355", lineHeight: 1.6 }}>
-          <strong>Note:</strong> Recommendations become more confident after 5+ reviews per piece. Early signals should guide testing and styling content, not final production decisions.
+        <div style={{ padding: "10px 14px", background: "#fafaf8", borderLeft: "3px solid rgba(34,21,22,0.14)", marginBottom: 20, fontFamily: SERIF, fontSize: 14, fontStyle: "italic", color: "#7a6f6a", lineHeight: 1.7 }}>
+          Recommendations become more confident after 5+ reviews per piece. Early signals should guide testing and styling content, not final production decisions.
         </div>
         {data.designActions?.length > 0 ? (
           data.designActions.map((action, i) => <DesignActionCard key={i} action={action} />)
@@ -1347,14 +1994,131 @@ function TabOpportunities({ data, phase4b2, advanced }) {
         {data.quotes?.length > 0 ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))", gap: 16 }}>
             {data.quotes.map((quote, i) => (
-              <div key={i} style={{ padding: 24, background: "rgba(255,255,255,0.8)", border: "1px solid rgba(59,5,16,0.06)", borderLeft: "3px solid #8b2035" }}>
+              <div key={i} style={{ padding: 24, background: "rgba(255,255,255,0.8)", border: "1px solid rgba(34,21,22,0.06)", borderLeft: "3px solid #8b2035" }}>
                 <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 16, fontStyle: "italic", color: "#221516", marginBottom: 12, lineHeight: 1.7 }}>"{quote.text}"</div>
-                {quote.piece && <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#7a6f6a", letterSpacing: "1px" }}>— about {quote.piece}</div>}
+                {quote.piece && <div style={{ fontFamily: MONO, fontSize: 10, color: "#7a6f6a", letterSpacing: "1px" }}>— about {quote.piece}</div>}
               </div>
             ))}
           </div>
         ) : <EmptyState />}
       </Section>
+
+      {/* Relationship Intelligence Opportunities */}
+      {rel?.productNarratives?.length > 0 && (
+        <Section
+          title="Relationship Intelligence Opportunities"
+          desc="Design actions derived from the full WHO × CONTEXT × PRODUCT → OUTCOME chain — evidence, confidence, and expected impact for each"
+          status={rel.status}
+        >
+          {rel.status === "insufficient-data" ? (
+            <InsufficientCard label="Relationship intelligence opportunities" description="Not enough reviewed sessions to derive relationship-based design opportunities." sampleSize={rel.sampleSize} />
+          ) : (
+            <>
+              <div style={{ padding: "10px 14px", background: "#faf9f7", borderLeft: "3px solid #8B7355", marginBottom: 20, fontSize: 13, color: "#8B7355", lineHeight: 1.6 }}>
+                <strong>Note:</strong> All opportunities are derived from real customer relationship data. High-confidence items (n≥5) warrant action. Low-confidence items (n=2–3) should inform testing and styling content, not final production decisions.
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                {rel.productNarratives.map((p, i) => {
+                  const confidenceLevel = p.sampleSize >= 5 ? "High Confidence" : p.sampleSize >= 3 ? "Medium Confidence" : "Early Signal";
+                  const impactLevel = p.opportunityScore >= 70 ? "High" : p.opportunityScore >= 45 ? "Medium" : "Low";
+                  const impactColor = impactLevel === "High" ? "#2a5e42" : impactLevel === "Medium" ? "#6b4800" : "#7a6f6a";
+                  const confColor = confidenceLevel === "High Confidence" ? "#221516" : confidenceLevel === "Medium Confidence" ? "#6b4800" : "#7a6f6a";
+                  const evidence = [
+                    p.avgRating != null && `★ ${p.avgRating.toFixed(1)} avg rating`,
+                    p.rewearRate != null && `${Math.round(p.rewearRate * 100)}% would wear again`,
+                    p.avgConfidenceLift != null && `${p.avgConfidenceLift >= 0 ? "+" : ""}${p.avgConfidenceLift} confidence lift`,
+                    p.strongestTransformation && `"${p.strongestTransformation}" transformation`,
+                    p.bestPersonality && `strongest with ${p.bestPersonality}`,
+                  ].filter(Boolean).join(" · ");
+                  return (
+                    <div key={i} style={{ padding: "22px 24px", border: `2px solid ${confColor}`, background: "#fff" }}>
+                      {/* Header */}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+                        <h4 style={{ margin: 0, fontFamily: DISPLAY, fontSize: 19, fontWeight: 700, fontStyle: "italic", color: "#221516" }}>{p.name}</h4>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "4px 10px", background: confColor, color: "#fafaf8", whiteSpace: "nowrap" }}>{confidenceLevel}</span>
+                          <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "4px 10px", background: impactColor, color: "#fafaf8", whiteSpace: "nowrap" }}>{impactLevel} Impact</span>
+                          <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "4px 10px", background: "#8b2035", color: "#fff", whiteSpace: "nowrap" }}>Score {p.opportunityScore}</span>
+                        </div>
+                      </div>
+
+                      {/* 6-field grid */}
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px 24px", marginBottom: 16 }}>
+                        <div>
+                          <div style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4 }}>Evidence</div>
+                          <div style={{ fontSize: 13, color: "#221516", lineHeight: 1.5 }}>{evidence || "Insufficient data — see sample size."}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4 }}>Sample Size</div>
+                          <div style={{ fontFamily: MONO, fontSize: 14, fontWeight: 700, color: confColor }}>{p.sampleSize} review{p.sampleSize !== 1 ? "s" : ""}</div>
+                        </div>
+                        {p.bestPersonality && (
+                          <div>
+                            <div style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4 }}>Best Audience</div>
+                            <div style={{ fontSize: 13, color: "#8b2035" }}>{p.bestPersonality}</div>
+                          </div>
+                        )}
+                        {p.bestOccasion && (
+                          <div>
+                            <div style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4 }}>Best Context</div>
+                            <div style={{ fontSize: 13, color: "#221516" }}>{p.bestOccasion}</div>
+                          </div>
+                        )}
+                        {p.mostCommonObjection && (
+                          <div>
+                            <div style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4 }}>Top Objection</div>
+                            <div style={{ fontSize: 13, color: "#c53030" }}>{p.mostCommonObjection}</div>
+                          </div>
+                        )}
+                        {p.strongestTransformation && (
+                          <div>
+                            <div style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4 }}>Emotional Journey</div>
+                            <div style={{ fontSize: 13, color: "#221516", fontStyle: "italic", fontFamily: "'Cormorant Garamond', serif" }}>{p.strongestTransformation}</div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Recommended Action + Expected Outcome */}
+                      {p.recommendation && (
+                        <div style={{ borderTop: "1px solid rgba(34,21,22,0.07)", paddingTop: 14 }}>
+                          <div style={{ marginBottom: 10 }}>
+                            <div style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4 }}>Recommended Action</div>
+                            <div style={{ fontSize: 14, color: "#221516", fontWeight: 600, lineHeight: 1.5 }}>{p.recommendation}</div>
+                          </div>
+                          {p.recommendationReason && (
+                            <div>
+                              <div style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4 }}>Expected Outcome</div>
+                              <div style={{ fontSize: 13, color: "#7a6f6a", lineHeight: 1.5 }}>{p.recommendationReason}</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Prescriptive summary */}
+              {(() => {
+                const highConf = rel.productNarratives.filter(p => p.sampleSize >= 5 && p.opportunityScore >= 60);
+                const needsWork = rel.productNarratives.filter(p => p.sampleSize >= 3 && p.opportunityScore < 40);
+                if (highConf.length === 0 && needsWork.length === 0) return null;
+                const rec = highConf.length > 0
+                  ? `${highConf.length} product${highConf.length > 1 ? "s have" : " has"} both High Confidence signal (n≥5) and strong Opportunity Score. ${highConf[0].name} is your highest-confidence opportunity — the customer relationship data supports investment here.${needsWork.length > 0 ? ` ${needsWork.length} product${needsWork.length > 1 ? "s are" : " is"} underperforming with sufficient data — review before expanding.` : ""}`
+                  : `No products yet have both 5+ reviews and a strong opportunity score. Continue collecting post-wear data to unlock high-confidence design signals.`;
+                return (
+                  <PrescriptiveBlock
+                    recommendation={rec}
+                    reason="Design decisions backed by both sufficient sample size and high opportunity score carry the least risk. Invest here first; use early-signal data to inform styling content and testing, not production."
+                    confidence={highConf.length > 0 ? "high" : "medium"}
+                    sampleSize={rel.sampleSize}
+                  />
+                );
+              })()}
+            </>
+          )}
+        </Section>
+      )}
 
       {/* Designer Experimentation */}
       <Section title="Designer Experimentation" desc="Structured experiments tracking design hypotheses against customer outcomes" status="awaiting-integration">
@@ -1387,7 +2151,7 @@ function TabOpportunities({ data, phase4b2, advanced }) {
                   ["status", "Enum", "active | complete | inconclusive | cancelled"],
                 ].map(([field, type, desc], i) => (
                   <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
-                    <td style={{ ...s.td, fontFamily: "'Space Mono', monospace", fontSize: 11 }}>{field}</td>
+                    <td style={{ ...s.td, fontFamily: MONO, fontSize: 11 }}>{field}</td>
                     <td style={{ ...s.td, color: "#7a6f6a", fontSize: 11 }}>{type}</td>
                     <td style={s.td}>{desc}</td>
                   </tr>
@@ -1402,38 +2166,56 @@ function TabOpportunities({ data, phase4b2, advanced }) {
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
+// Aligned with naia-design-system.css tokens (Inter UI, Courier New mono, sharp corners)
+
+const INTER = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
+const SERIF = "'Cormorant Garamond', Garamond, serif";
+const DISPLAY = "'Playfair Display', Georgia, serif";
+const MONO = "'Courier New', Courier, monospace";
+const BORDER = "1px solid rgba(34,21,22,0.09)";
+const BORDER_LIGHT = "1px solid rgba(34,21,22,0.06)";
 
 const s = {
-  wrap: { background: "#f4f4f1", minHeight: "100vh", paddingBottom: 80 },
-  inner: { maxWidth: 1500, margin: "0 auto", padding: "0 40px" },
-  header: { paddingTop: 48, paddingBottom: 32, borderBottom: "1px solid rgba(59,5,16,0.1)", marginBottom: 0 },
-  h1: { fontFamily: "'Playfair Display', serif", fontSize: "clamp(36px, 5vw, 60px)", fontWeight: 900, lineHeight: 1, margin: "0 0 12px", color: "#221516" },
-  subtitle: { fontFamily: "'Cormorant Garamond', serif", fontSize: 18, fontStyle: "italic", color: "#7a6f6a", margin: 0 },
-  tabBar: { display: "flex", gap: 0, overflowX: "auto", borderBottom: "1px solid rgba(59,5,16,0.1)", marginBottom: 32, paddingTop: 16 },
-  tabBtn: { background: "none", border: "none", cursor: "pointer", padding: "10px 18px", fontFamily: "'Space Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "1.5px", whiteSpace: "nowrap", transition: "color 0.15s" },
-  section: { marginBottom: 40, background: "rgba(255,255,255,0.6)", padding: "36px 40px", border: "1px solid rgba(59,5,16,0.06)", backdropFilter: "blur(10px)" },
-  h2: { fontFamily: "'Playfair Display', serif", fontSize: 26, fontWeight: 700, margin: "0 0 8px", color: "#221516" },
-  sectionDesc: { fontFamily: "'Cormorant Garamond', serif", fontSize: 15, color: "#7a6f6a", margin: "0 0 28px", fontStyle: "italic" },
-  subHeader: { fontFamily: "'Space Mono', monospace", fontSize: 9, textTransform: "uppercase", letterSpacing: "2.5px", color: "#7a6f6a", marginBottom: 14, marginTop: 8 },
-  kpiGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16 },
-  kpiCard: { padding: "20px 24px", background: "rgba(255,255,255,0.9)", border: "1px solid rgba(59,5,16,0.08)", position: "relative" },
-  kpiValue: { fontFamily: "'Playfair Display', serif", fontSize: 32, fontWeight: 700, color: "#8b2035", marginBottom: 8, marginTop: 6 },
-  kpiLabel: { fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#7a6f6a", textTransform: "uppercase", letterSpacing: "2px", lineHeight: 1.5 },
-  card: { padding: "20px 24px", background: "rgba(255,255,255,0.8)", border: "1px solid rgba(59,5,16,0.06)" },
-  cardLabel: { fontFamily: "'Cormorant Garamond', serif", fontSize: 17, fontWeight: 600, color: "#221516", marginBottom: 6 },
-  cardValue: { fontFamily: "'Space Mono', monospace", fontSize: 11, letterSpacing: "1px", color: "#7a6f6a" },
-  grid3: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 },
-  pieceGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16 },
-  pieceCard: { padding: 24, background: "rgba(255,255,255,0.8)", border: "1px solid rgba(59,5,16,0.06)" },
-  pieceName: { fontFamily: "'Playfair Display', serif", fontSize: 19, fontWeight: 600, marginBottom: 6, color: "#221516" },
-  pieceCategory: { fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#7a6f6a", textTransform: "uppercase", letterSpacing: "2px", marginBottom: 14 },
-  pieceStats: { fontFamily: "'Cormorant Garamond', serif", fontSize: 14, color: "#221516", lineHeight: 1.7 },
-  muted: { color: "#7a6f6a", fontSize: 13, fontFamily: "'Cormorant Garamond', serif" },
-  helpedFeel: { fontStyle: "italic", color: "#8b2035", fontFamily: "'Cormorant Garamond', serif" },
-  dnaStyle: { fontSize: 14, color: "#8b2035", fontFamily: "'Cormorant Garamond', serif", fontStyle: "italic" },
-  table: { width: "100%", borderCollapse: "collapse", fontSize: 13, fontFamily: "'Cormorant Garamond', serif", minWidth: 400 },
-  th: { textAlign: "left", padding: "8px 12px", fontFamily: "'Space Mono', monospace", fontSize: 9, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", borderBottom: "1px solid rgba(59,5,16,0.1)", background: "rgba(59,5,16,0.02)" },
-  td: { padding: "10px 12px", borderBottom: "1px solid rgba(59,5,16,0.05)", color: "#221516", fontSize: 13 },
-  linkBtn: { background: "none", border: "none", cursor: "pointer", padding: "4px 0", fontSize: 11, color: "#8b2035", fontFamily: "'Space Mono', monospace", textDecoration: "underline", marginTop: 10, display: "block" },
-  periodBtn: { padding: "6px 12px", border: "1px solid rgba(59,5,16,0.2)", cursor: "pointer", fontFamily: "'Space Mono', monospace", fontSize: 9, textTransform: "uppercase", letterSpacing: "1px", borderRadius: 3 },
+  wrap:     { background: "#f4f4f1", minHeight: "100vh", paddingBottom: 80 },
+  inner:    { maxWidth: 1500, margin: "0 auto", padding: "0 40px" },
+  header:   { paddingTop: 40, paddingBottom: 28, borderBottom: BORDER, marginBottom: 0 },
+
+  h1: { fontFamily: DISPLAY, fontSize: "clamp(30px, 4vw, 48px)", fontWeight: 900, fontStyle: "italic", lineHeight: 1.05, margin: "0 0 8px", color: "#221516" },
+  subtitle: { fontFamily: SERIF, fontSize: 16, fontStyle: "italic", color: "#7a6f6a", margin: 0 },
+
+  tabBar: { display: "flex", gap: 0, overflowX: "auto", borderBottom: BORDER, marginBottom: 32, paddingTop: 12 },
+  tabBtn: { background: "none", border: "none", cursor: "pointer", padding: "10px 16px", fontFamily: INTER, fontSize: 9, textTransform: "uppercase", letterSpacing: "2px", whiteSpace: "nowrap", transition: "color 0.15s", fontWeight: 500 },
+
+  section: { marginBottom: 2, background: "rgba(255,255,255,0.48)", padding: "30px 34px", borderBottom: BORDER_LIGHT },
+  h2: { fontFamily: DISPLAY, fontSize: 21, fontWeight: 600, fontStyle: "italic", margin: "0 0 6px", color: "#221516" },
+  sectionDesc: { fontFamily: SERIF, fontSize: 15, color: "#7a6f6a", margin: "0 0 22px", fontStyle: "italic" },
+  subHeader: { fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "3px", color: "#7a6f6a", fontWeight: 600, marginBottom: 14, marginTop: 8 },
+
+  kpiGrid:  { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 1, background: "rgba(34,21,22,0.07)" },
+  kpiCard:  { padding: "18px 20px", background: "#fff", position: "relative" },
+  kpiValue: { fontFamily: DISPLAY, fontSize: 28, fontWeight: 700, color: "#8b2035", marginBottom: 6, marginTop: 4 },
+  kpiLabel: { fontFamily: INTER, fontSize: 8, color: "#7a6f6a", textTransform: "uppercase", letterSpacing: "2px", lineHeight: 1.5, fontWeight: 500 },
+
+  card:       { padding: "18px 22px", background: "#fafaf8", border: BORDER_LIGHT },
+  cardLabel:  { fontFamily: SERIF, fontSize: 16, fontWeight: 600, color: "#221516", marginBottom: 5 },
+  cardValue:  { fontFamily: MONO, fontSize: 11, letterSpacing: "0.5px", color: "#7a6f6a" },
+
+  grid3:     { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 },
+  pieceGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 },
+  pieceCard: { padding: 20, background: "#fafaf8", border: BORDER_LIGHT },
+
+  pieceName:     { fontFamily: DISPLAY, fontSize: 17, fontWeight: 600, fontStyle: "italic", marginBottom: 4, color: "#221516" },
+  pieceCategory: { fontFamily: INTER, fontSize: 8, color: "#7a6f6a", textTransform: "uppercase", letterSpacing: "2px", marginBottom: 12, fontWeight: 500 },
+  pieceStats:    { fontFamily: SERIF, fontSize: 14, color: "#221516", lineHeight: 1.7 },
+
+  muted:     { color: "#7a6f6a", fontSize: 13, fontFamily: SERIF },
+  helpedFeel: { fontStyle: "italic", color: "#8b2035", fontFamily: SERIF },
+  dnaStyle:   { fontSize: 14, color: "#8b2035", fontFamily: SERIF, fontStyle: "italic" },
+
+  table: { width: "100%", borderCollapse: "collapse", fontSize: 13, fontFamily: SERIF, minWidth: 400 },
+  th:    { textAlign: "left", padding: "8px 12px", fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", fontWeight: 600, borderBottom: BORDER, background: "rgba(34,21,22,0.02)" },
+  td:    { padding: "9px 12px", borderBottom: "1px solid rgba(34,21,22,0.05)", color: "#221516", fontSize: 13 },
+
+  linkBtn:   { background: "none", border: "none", cursor: "pointer", padding: "4px 0", fontSize: 9, color: "#8b2035", fontFamily: INTER, letterSpacing: "1.5px", textTransform: "uppercase", fontWeight: 600, marginTop: 10, display: "block" },
+  periodBtn: { padding: "5px 10px", border: "1px solid rgba(34,21,22,0.16)", cursor: "pointer", fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px", fontWeight: 600 },
 };
