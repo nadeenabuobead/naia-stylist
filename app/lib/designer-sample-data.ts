@@ -14,10 +14,10 @@ export function getDesignerSampleData() {
     onboarding: {
       totalProfiles: 38,
       styleDNADistribution: [
-        { style: "classic", count: 14, percentage: 37 },
+        { style: "corporate-chic", count: 14, percentage: 37 },
         { style: "romantic", count: 11, percentage: 29 },
         { style: "minimal", count: 8, percentage: 21 },
-        { style: "bold", count: 5, percentage: 13 },
+        { style: "edgy", count: 5, percentage: 13 },
       ],
       desiredFeelings: [
         { feeling: "more-confident", count: 22, percentage: 58 },
@@ -26,7 +26,7 @@ export function getDesignerSampleData() {
         { feeling: "comfortable", count: 8, percentage: 21 },
       ],
       lifestyleDistribution: [
-        { lifestyle: "event", count: 18, percentage: 47 },
+        { lifestyle: "social", count: 18, percentage: 47 },
         { lifestyle: "work", count: 14, percentage: 37 },
         { lifestyle: "everyday", count: 12, percentage: 32 },
         { lifestyle: "weekend", count: 9, percentage: 24 },
@@ -257,7 +257,7 @@ export function getDesignerSampleData() {
     totalSessions: 67,
     dnaMatrix: [
       {
-        personality: "Classic",
+        personality: "Corporate Chic",
         sessionCount: 24,
         avgRating: 4.3,
         avgRewear: 0.79,
@@ -275,7 +275,7 @@ export function getDesignerSampleData() {
         avgConfidenceLift: 1.6,
         desiredFeelingAchievedRate: 67,
         topProducts: ["Silk Slip Dress", "Floral Wrap Dress"],
-        topDesiredFeelings: ["Feminine", "Confident"],
+        topDesiredFeelings: ["Elegant", "Confident"],
         topOccasions: ["Events", "Date night"],
       },
     ],
@@ -309,7 +309,7 @@ export function getDesignerSampleData() {
         opportunityScore: 82,
         avgRating: 4.4,
         rewearRate: 0.83,
-        bestPersonality: "Classic",
+        bestPersonality: "Corporate Chic",
         bestOccasion: "Events",
         mostCommonObjection: null,
         sampleSize: 18,
