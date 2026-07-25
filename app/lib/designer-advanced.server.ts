@@ -158,6 +158,7 @@ export interface CollectionHealthScore {
   largestWeakness: string | null;
   strongestArea: string | null;
   sampleSizeWarning: boolean;
+  reviewCount: number;
 }
 
 // ── K. Designer Opportunity Feed ───────────────────────────────────────────────
@@ -251,7 +252,8 @@ async function getEmotionalJourney(dateFrom: Date): Promise<EmotionalJourneyKPI>
     });
 
     const n = reviews.length;
-    if (n < 3) {
+    // Minimum 5 reviewed sessions required for emotional journey signals.
+    if (n < 5) {
       return {
         status: "insufficient-data",
         sampleSize: n,
@@ -892,9 +894,13 @@ async function getCollectionHealth(dateFrom: Date): Promise<CollectionHealthScor
     }
     const recCoverage = recommendedProducts.size > 0 ? Math.min(100, recommendedProducts.size * 10) : 0;
 
-    // Mood coverage: unique moods addressed in sessions
+    // Mood coverage: unique moods × session volume weight so that
+    // very few sessions cannot produce a misleadingly high score.
     const uniqueMoods = new Set(sessions.map((s) => s.currentMood).filter(Boolean));
-    const moodCoverage = uniqueMoods.size > 0 ? Math.min(100, uniqueMoods.size * 14) : 0;
+    const moodVolumeWeight = Math.min(sessions.length, 10) / 10; // 0.0–1.0
+    const moodCoverage = uniqueMoods.size > 0
+      ? Math.min(100, Math.round(uniqueMoods.size * 14 * moodVolumeWeight))
+      : 0;
 
     // Occasion coverage
     const uniqueOccasions = new Set(sessions.map((s) => s.occasion).filter(Boolean));
@@ -965,6 +971,7 @@ async function getCollectionHealth(dateFrom: Date): Promise<CollectionHealthScor
       largestWeakness,
       strongestArea,
       sampleSizeWarning,
+      reviewCount: reviews.length,
     };
   } catch (e) {
     console.error("AdvancedKPIs: collectionHealth failed", e);
