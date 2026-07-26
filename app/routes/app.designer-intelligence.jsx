@@ -38,7 +38,7 @@ export async function loader({ request }) {
   const sampleMode = samplePreviewAvailable && url.searchParams.get("preview") === "sample";
 
   if (sampleMode) {
-    const sample = getDesignerSampleData();
+    const sample = getDesignerSampleData(dateRangeDays);
     return { ...sample, dateRangeDays, sampleMode: true, samplePreviewAvailable: true };
   }
 
