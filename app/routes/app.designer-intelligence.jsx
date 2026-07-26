@@ -16,7 +16,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useCallback } from "react";
-import { useLoaderData, useSearchParams, Form } from "react-router";
+import { useLoaderData, useSearchParams, useNavigate } from "react-router";
 import { requireStaffAccess } from "../lib/staff-auth.server";
 import { getDesignerStats, getAdditionalKPIs } from "../lib/designer-stats.server";
 import { getPhase4B2KPIs } from "../lib/ai/designer-intelligence.server";
@@ -414,6 +414,19 @@ export default function DesignerDashboard() {
   const { dashboard: data, kpis, phase4b2, advanced, rel, dateRangeDays, sampleMode, samplePreviewAvailable } = useLoaderData();
   const [activeTab, setActiveTab] = useState("overview");
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  // Navigate preserving every existing search param; only change `key`.
+  // Keeps shop/host/embedded and all other Shopify params intact.
+  function navWith(key, value) {
+    const next = new URLSearchParams(searchParams);
+    if (value == null) {
+      next.delete(key);
+    } else {
+      next.set(key, String(value));
+    }
+    navigate(`?${next.toString()}`, { replace: true });
+  }
 
   return (
     <div style={s.wrap}>
@@ -436,17 +449,14 @@ export default function DesignerDashboard() {
               <p style={s.subtitle}>Collection intelligence · Customer insights · Design direction</p>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
-              {/* Date range selector */}
-              <Form method="get" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                {searchParams.get("tab") && <input type="hidden" name="tab" value={searchParams.get("tab")} />}
-                {sampleMode && <input type="hidden" name="preview" value="sample" />}
+              {/* Date range selector — navWith clones all params, changes only `days` */}
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <span style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontSize: 8, color: "#7a6f6a", textTransform: "uppercase", letterSpacing: "2px", fontWeight: 500 }}>Period</span>
                 {[7, 30, 90, 365].map((d) => (
                   <button
                     key={d}
-                    type="submit"
-                    name="days"
-                    value={d}
+                    type="button"
+                    onClick={() => navWith("days", d)}
                     style={{
                       ...s.periodBtn,
                       background: dateRangeDays === d ? "#221516" : "transparent",
@@ -456,23 +466,24 @@ export default function DesignerDashboard() {
                     {d === 365 ? "All" : `${d}d`}
                   </button>
                 ))}
-              </Form>
+              </div>
               {/* Live / Sample Preview toggle — only shown when env var enables it */}
               {samplePreviewAvailable && (
                 <div style={{ display: "flex", gap: 0, alignItems: "center", border: "1px solid rgba(34,21,22,0.14)", overflow: "hidden" }}>
-                  <Form method="get" style={{ display: "contents" }}>
-                    <input type="hidden" name="days" value={dateRangeDays} />
-                    <button type="submit" style={{ padding: "3px 10px", fontFamily: "'Inter', sans-serif", fontSize: 9, letterSpacing: "1px", textTransform: "uppercase", background: !sampleMode ? "#221516" : "transparent", color: !sampleMode ? "#f4f4f1" : "#7a6f6a", border: "none", cursor: "pointer" }}>
-                      Live Data
-                    </button>
-                  </Form>
-                  <Form method="get" style={{ display: "contents" }}>
-                    <input type="hidden" name="days" value={dateRangeDays} />
-                    <input type="hidden" name="preview" value="sample" />
-                    <button type="submit" style={{ padding: "3px 10px", fontFamily: "'Inter', sans-serif", fontSize: 9, letterSpacing: "1px", textTransform: "uppercase", background: sampleMode ? "#6b4800" : "transparent", color: sampleMode ? "#fffbf0" : "#7a6f6a", border: "none", cursor: "pointer" }}>
-                      Sample Preview
-                    </button>
-                  </Form>
+                  <button
+                    type="button"
+                    onClick={() => navWith("preview", null)}
+                    style={{ padding: "3px 10px", fontFamily: "'Inter', sans-serif", fontSize: 9, letterSpacing: "1px", textTransform: "uppercase", background: !sampleMode ? "#221516" : "transparent", color: !sampleMode ? "#f4f4f1" : "#7a6f6a", border: "none", cursor: "pointer" }}
+                  >
+                    Live Data
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navWith("preview", "sample")}
+                    style={{ padding: "3px 10px", fontFamily: "'Inter', sans-serif", fontSize: 9, letterSpacing: "1px", textTransform: "uppercase", background: sampleMode ? "#6b4800" : "transparent", color: sampleMode ? "#fffbf0" : "#7a6f6a", border: "none", cursor: "pointer" }}
+                  >
+                    Sample Preview
+                  </button>
                 </div>
               )}
             </div>
