@@ -19,7 +19,8 @@
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
     "typecheck": "react-router typegen && tsc --noEmit",
-    "generate:lenses": "tsx scripts/generate-lenses.ts"
+    "generate:lenses": "tsx scripts/generate-lenses.ts",
+    "test:dashboard": "node --test --import tsx/esm app/lib/designer-sample-data.validation.test.ts"
   },
   "type": "module",
   "engines": {

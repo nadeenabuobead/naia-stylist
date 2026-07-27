@@ -547,3 +547,119 @@ describe("canonical metric mapping", () => {
     }
   });
 });
+
+// ── Sample Preview never resolves to Live ─────────────────────────────────────
+
+describe("Sample Preview isolation", () => {
+  it("ltv.status is 'sample', not 'live', in sample data", () => {
+    for (const days of [30, 90, 365]) {
+      const d = getDesignerSampleData(days);
+      const ltv: any = (d.dashboard as any)?.ltv;
+      if (!ltv) continue;
+      assert.notEqual(ltv.status, "live", `ltv.status must not be "live" in sample data (days=${days})`);
+    }
+  });
+
+  it("sampleMode flag is not in getDesignerSampleData return value (loader sets it)", () => {
+    const d = getDesignerSampleData(90) as any;
+    assert.ok(!("sampleMode" in d), "getDesignerSampleData must not include sampleMode");
+  });
+
+  it("saveVsPurchase.status is not 'live' in sample data", () => {
+    for (const days of [30, 90, 365]) {
+      const d = getDesignerSampleData(days);
+      const svp: any = (d.advanced as any)?.saveVsPurchase;
+      if (svp?.status) {
+        assert.notEqual(svp.status, "live", `saveVsPurchase.status must not be "live" in sample data (days=${days})`);
+      }
+    }
+  });
+});
+
+// ── Emotional achievement independence from rewear ────────────────────────────
+
+describe("emotional achievement independence", () => {
+  it("classifyEmotionalOutcome distinguishes exact match from near match", () => {
+    const exact = classifyEmotionalOutcome("Powerful", "Powerful");
+    const near = classifyEmotionalOutcome("Powerful", "Confident");
+    assert.notEqual(exact, near, "exact match and near match must produce different outcomes");
+  });
+
+  it("feelingAchievedRate and rewearRate are not always equal (independent derivations)", () => {
+    for (const days of [90, 365]) {
+      const d = getDesignerSampleData(days);
+      const matrix: any[] = (d.rel as any)?.dnaMatrix ?? [];
+      const rowsWithBoth = matrix.filter((r: any) => r.feelingAchievedRate != null && r.rewearRate != null);
+      if (rowsWithBoth.length < 2) continue;
+      const allIdentical = rowsWithBoth.every((r: any) =>
+        Math.abs(r.feelingAchievedRate - Math.round(r.rewearRate * 100)) < 1
+      );
+      assert.ok(!allIdentical,
+        `feelingAchievedRate and rewearRate are identical for every row — values likely share the same source (days=${days})`);
+    }
+  });
+});
+
+// ── Opportunity score consistency ─────────────────────────────────────────────
+
+describe("opportunity score consistency", () => {
+  it("no opportunityScore exceeds 100", () => {
+    for (const days of [7, 30, 90, 365]) {
+      const d = getDesignerSampleData(days);
+      const narratives: any[] = (d.rel as any)?.productNarratives ?? [];
+      for (const n of narratives) {
+        if (n.opportunityScore == null) continue;
+        assert.ok(n.opportunityScore <= 100,
+          `opportunityScore ${n.opportunityScore} > 100 for "${n.name}" (days=${days})`);
+      }
+    }
+  });
+});
+
+// ── Date-scope propagation ────────────────────────────────────────────────────
+
+describe("date-scope propagation", () => {
+  it("shorter periods produce fewer or equal sessions than longer periods", () => {
+    const d30 = getDesignerSampleData(30);
+    const d365 = getDesignerSampleData(365);
+    const s30: number = (d30.dashboard as any)?.totalSessions ?? 0;
+    const s365: number = (d365.dashboard as any)?.totalSessions ?? 0;
+    assert.ok(s30 <= s365, `30d sessions (${s30}) must be ≤ 365d sessions (${s365})`);
+  });
+
+  it("ltv scopeLabel is 'All Time' for every period", () => {
+    for (const days of [7, 30, 90, 365]) {
+      const d = getDesignerSampleData(days);
+      const ltv: any = (d.dashboard as any)?.ltv;
+      if (!ltv) continue;
+      assert.equal(ltv.scopeLabel, "All Time", `ltv.scopeLabel must be "All Time" (days=${days})`);
+    }
+  });
+});
+
+// ── Confidence thresholds ─────────────────────────────────────────────────────
+
+describe("confidence threshold correctness", () => {
+  it("canonical 6-tier confidence ladder covers all node counts correctly", () => {
+    expectConfidenceTier("No Data",             0,  "n=0");
+    expectConfidenceTier("Single Observation",  1,  "n=1");
+    expectConfidenceTier("Early Signal",        4,  "n=4");
+    expectConfidenceTier("Emerging Pattern",    9,  "n=9");
+    expectConfidenceTier("Established Pattern", 19, "n=19");
+    expectConfidenceTier("Strong Pattern",      20, "n=20");
+  });
+
+  it("explainability confidence badges use canonical tier labels", () => {
+    const VALID = new Set([
+      "No Data", "Single Observation", "Early Signal",
+      "Emerging Pattern", "Established Pattern", "Strong Pattern",
+    ]);
+    const d = getDesignerSampleData(90);
+    const items: any[] = (d.advanced as any)?.explainability?.items ?? [];
+    for (const item of items) {
+      if (!item.confidenceBadge) continue;
+      assert.ok(VALID.has(item.confidenceBadge),
+        `Unknown confidence tier: "${item.confidenceBadge}"`);
+    }
+  });
+});

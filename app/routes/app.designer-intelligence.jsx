@@ -128,7 +128,7 @@ function RoadmapPanel({ title = "Integration Roadmap", items }) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <StatusBadge status="awaiting-integration" />
-          <button onClick={() => setOpen(o => !o)} style={{ ...s.linkBtn, marginTop: 0, flexShrink: 0 }}>{open ? "Hide ↑" : "Show items ↓"}</button>
+          <button type="button" onClick={() => setOpen(o => !o)} style={{ ...s.linkBtn, marginTop: 0, flexShrink: 0 }}>{open ? "Hide ↑" : "Show items ↓"}</button>
         </div>
       </div>
       {open && (
@@ -333,7 +333,7 @@ function ExportCSVButton({ data, filename }) {
     URL.revokeObjectURL(url);
   }, [data, filename, isSample]);
   return (
-    <button onClick={handleExport} style={s.linkBtn}>
+    <button type="button" onClick={handleExport} style={s.linkBtn}>
       {isSample ? "↓ SAMPLE CSV" : "↓ CSV"}
     </button>
   );
@@ -492,6 +492,7 @@ export default function DesignerDashboard() {
           {TABS.map((tab) => (
             <button
               key={tab.id}
+              type="button"
               onClick={() => setActiveTab(tab.id)}
               style={{
                 ...s.tabBtn,
@@ -675,7 +676,7 @@ function TabOverview({ data, kpis, phase4b2, advanced, rel, overview, sampleMode
           />
           <KpiCard
             label="Avg Outfit Rating"
-            value={sampleMode ? (fk?.avgOutfitRating?.toFixed(1) ?? "—") : ((data.avgRating || 0).toFixed(1))}
+            value={sampleMode ? (fk?.avgOutfitRating?.toFixed(1) ?? "—") : (data.avgRating != null ? data.avgRating.toFixed(1) : "—")}
             suffix="/5"
             status="live"
             tooltip="Average overall feeling rating across all outfit reviews, all time."
@@ -694,22 +695,7 @@ function TabOverview({ data, kpis, phase4b2, advanced, rel, overview, sampleMode
   );
 }
 
-function SignalGroup({ title, items, keyField, valueField }) {
-  if (!items || items.length === 0) return null;
-  return (
-    <div style={{ ...s.card }}>
-      <div style={s.cardLabel}>{title}</div>
-      <div style={{ marginTop: 10 }}>
-        {items.map((item, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: "space-between", paddingBottom: 6, marginBottom: 6, borderBottom: i < items.length - 1 ? "1px solid rgba(34,21,22,0.06)" : "none" }}>
-            <span style={{ fontFamily: SERIF, fontSize: 13, color: "#221516" }}>{normalizeLabel(item[keyField]) ?? item[keyField]}</span>
-            <span style={{ fontFamily: MONO, fontSize: 11, color: "#7a6f6a" }}>{item[valueField]}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+
 
 // ── Dynamic Top Signals ───────────────────────────────────────────────────────
 
@@ -901,7 +887,7 @@ function TopSignalsSection({ data, kpis, phase4b2, advanced, rel, dateRangeDays 
         {display.map((sig, i) => <TopSignalCard key={i} signal={sig} />)}
       </div>
       {all.length > 6 && (
-        <button onClick={() => setShowAll(o => !o)} style={{ ...s.linkBtn, marginTop: 14 }}>
+        <button type="button" onClick={() => setShowAll(o => !o)} style={{ ...s.linkBtn, marginTop: 14 }}>
           {showAll ? "Show fewer signals ↑" : `View all ${all.length} signals ↓`}
         </button>
       )}
@@ -1002,82 +988,7 @@ function RelationshipCard({ pattern, who, context, feature, outcome, product }) 
   );
 }
 
-// Executive product card with Opportunity Score and full narrative
-function ProductNarrativeCard({ narrative }) {
-  const scoreColor = narrative.opportunityScore >= 70 ? "#2a5e42" : narrative.opportunityScore >= 45 ? "#6b4800" : "#7a6f6a";
-  const scoreBg = narrative.opportunityScore >= 70 ? "rgba(42,94,66,0.08)" : narrative.opportunityScore >= 45 ? "rgba(107,72,0,0.07)" : "rgba(122,111,106,0.07)";
-  const EYEBROW = { fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontSize: 7, textTransform: "uppercase", letterSpacing: "2px", color: "#9CA3AF", fontWeight: 600, marginBottom: 3 };
-  return (
-    <div style={{ ...s.card, borderTop: `2px solid ${scoreColor}`, position: "relative" }}>
-      {/* Score badge — square, brand-aligned */}
-      <div style={{ position: "absolute", top: 16, right: 16, width: 44, height: 44, background: scoreBg, border: `1px solid ${scoreColor}`, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column" }}>
-        <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 16, fontWeight: 700, color: scoreColor, lineHeight: 1 }}>{narrative.opportunityScore}</div>
-        <div style={{ fontFamily: "'Inter', -apple-system, sans-serif", fontSize: 6, color: scoreColor, letterSpacing: "1px", textTransform: "uppercase", fontWeight: 600, opacity: 0.7 }}>score</div>
-      </div>
 
-      <div style={{ paddingRight: 60 }}>
-        <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 16, fontWeight: 700, fontStyle: "italic", color: "#221516", marginBottom: 6, lineHeight: 1.3 }}>{narrative.name}</div>
-
-        {/* Key stats row */}
-        <div style={{ display: "flex", gap: 14, marginBottom: 14, flexWrap: "wrap" }}>
-          <span style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: 11, color: "#7a6f6a" }}>★ {narrative.avgRating?.toFixed(1) ?? "—"}</span>
-          <span style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: 11, color: "#7a6f6a" }}>{Math.round((narrative.rewearRate ?? 0) * 100)}% rewear</span>
-          {narrative.avgConfidenceLift != null && (
-            <span style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: 11, color: "#8b2035" }}>+{narrative.avgConfidenceLift} confidence</span>
-          )}
-          <span style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: 11, color: "#9CA3AF" }}>n={narrative.sampleSize}</span>
-        </div>
-
-        {/* Relationship metadata */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px", marginBottom: 14 }}>
-          {narrative.strongestTransformation && (
-            <div>
-              <div style={EYEBROW}>Emotional Journey</div>
-              <div style={{ fontSize: 13, color: "#8b2035", fontStyle: "italic", fontFamily: "'Cormorant Garamond', Garamond, serif" }}>{narrative.strongestTransformation}</div>
-            </div>
-          )}
-          {narrative.bestPersonality && (
-            <div>
-              <div style={EYEBROW}>Best Audience</div>
-              <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 14, color: "#221516" }}>{narrative.bestPersonality}</div>
-            </div>
-          )}
-          {narrative.bestOccasion && (
-            <div>
-              <div style={EYEBROW}>Best Occasion</div>
-              <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 14, color: "#221516" }}>{narrative.bestOccasion}</div>
-            </div>
-          )}
-          {narrative.topDesiredFeelings?.length > 0 && (
-            <div>
-              <div style={EYEBROW}>Desired Feelings</div>
-              <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 14, color: "#221516" }}>{narrative.topDesiredFeelings.join(", ")}</div>
-            </div>
-          )}
-          {narrative.mostCommonObjection && (
-            <div>
-              <div style={EYEBROW}>Top Objection</div>
-              <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 14, color: "#8b2035" }}>{narrative.mostCommonObjection}</div>
-            </div>
-          )}
-        </div>
-
-        {/* Prescriptive recommendation */}
-        {narrative.recommendation && (
-          <div style={{ padding: "12px 14px", background: "rgba(34,21,22,0.02)", borderLeft: "2px solid #8b2035", marginTop: 4 }}>
-            <div style={{ fontFamily: "'Inter', -apple-system, sans-serif", fontSize: 7, color: "#8b2035", marginBottom: 5, textTransform: "uppercase", letterSpacing: "2px", fontWeight: 600 }}>Recommendation</div>
-            <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 14, fontStyle: "italic", color: "#221516", lineHeight: 1.6, marginBottom: 6 }}>{narrative.recommendation}</div>
-            {narrative.recommendationReason && (
-              <div style={{ fontFamily: "'Cormorant Garamond', Garamond, serif", fontSize: 13, color: "#7a6f6a", lineHeight: 1.5 }}>
-                {narrative.recommendationReason}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // Emotional flow row — shows currentMood → desiredFeeling → achieved rate → top product
 function EmotionalFlowRow({ chain }) {
@@ -1217,7 +1128,7 @@ function ProductDetailPanel({ narrative, saveVsPurchase, dateRangeDays }) {
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
           <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: confData.color, color: "#fff" }}>{confData.label}</span>
           <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: scoreColor, color: "#fff" }}>Score {narrative.opportunityScore}</span>
-          <button onClick={() => setOpen(o => !o)} style={{ ...s.linkBtn, marginTop: 0 }}>
+          <button type="button" onClick={() => setOpen(o => !o)} style={{ ...s.linkBtn, marginTop: 0 }}>
             {open ? "Hide ↑" : "View Detail ↓"}
           </button>
         </div>
@@ -1657,7 +1568,7 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays }
               <div style={s.pieceName}>{p.name}</div>
               <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 15, fontStyle: "italic", color: "#8b2035", marginBottom: 12 }}>{p.reason}</div>
               <div style={s.pieceStats}>
-                <div>★ {p.avgRating?.toFixed(1)} | Rewear: {Math.round(p.rewear * 100)}%</div>
+                <div>★ {p.avgRating?.toFixed(1) ?? "—"} | Rewear: {p.rewear != null ? `${Math.round(p.rewear * 100)}%` : "—"}</div>
                 {p.friction && <div style={{ color: "#8b2035", fontSize: 14, marginTop: 8 }}>⚠ {p.friction}</div>}
               </div>
             </div>
@@ -1734,7 +1645,7 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays }
             {data.productPairings.map((p, i) => (
               <div key={i} style={{ padding: 16, background: "#fff", border: "1px solid rgba(34,21,22,0.08)" }}>
                 <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 8 }}>{p.closetItem} + {p.naiaPiece}</div>
-                <div style={{ fontSize: 14, color: "#666" }}>{p.avgRating.toFixed(1)}/5 · {p.reviewCount} review{p.reviewCount !== 1 ? "s" : ""} · {Math.round(p.rewearRate * 100)}% would wear again</div>
+                <div style={{ fontSize: 14, color: "#666" }}>{p.avgRating != null ? `${p.avgRating.toFixed(1)}/5` : "—"} · {p.reviewCount} review{p.reviewCount !== 1 ? "s" : ""} · {p.rewearRate != null ? `${Math.round(p.rewearRate * 100)}% would wear again` : "—"}</div>
               </div>
             ))}
           </div>
@@ -2509,7 +2420,7 @@ function TabCommercial({ data, advanced, rel, sampleMode, dateRangeDays }) {
       <Section
         title="LTV Intelligence"
         desc={`Customer lifetime value patterns — ${data.ltv?.scopeLabel ?? "All Time"}`}
-        status={data.ltv?.status === "sample" || data.ltv?.status === "live" ? (sampleMode ? "sample" : data.ltv?.status) : "insufficient-data"}
+        status={data.ltv?.status === "sample" || data.ltv?.status === "live" ? (sampleMode ? "sample" : data.ltv?.status) : "awaiting-integration"}
       >
         {data.ltv?.sampleSize > 0 ? (
           <>
