@@ -6,7 +6,18 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getDesignerSampleData, classifyEmotionalOutcome } from "./designer-sample-data.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Helper to read the route file for contract tests
+function readRoute(): string {
+  return readFileSync(join(__dirname, "../routes/app.designer-intelligence.jsx"), "utf8");
+}
 
 // ── Confidence tier helper (mirrors evidenceConfidence in the fixture) ──────
 function expectConfidenceTier(label: string, n: number, context: string) {
@@ -771,4 +782,329 @@ test("emotional chain achievedRate is null (no fabricated rates)", () => {
       assert.strictEqual(chain.achievedRate, null, "emotionalChain.achievedRate must be null (session count != WR denominator)");
     }
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEW TESTS — Change 18 additions
+// ─────────────────────────────────────────────────────────────────────────────
+
+
+// ── 1. Route TABS constant now has 6 entries ──────────────────────────────────
+test("route TABS constant has exactly 6 entries", () => {
+  const route = readRoute();
+  // Extract TABS array — count { id: " entries
+  const matches = route.match(/\{\s*id:\s*["'][^"']+["']/g) ?? [];
+  // TABS const starts with overview and ends with commercial — exactly 6
+  const tabLine = route.match(/const TABS = \[([^\]]*)\]/s)?.[1] ?? "";
+  const tabIds = (tabLine.match(/id:\s*["']([^"']+)["']/g) ?? []).map(
+    m => m.replace(/id:\s*["']/, "").replace(/["']$/, ""),
+  );
+  assert.strictEqual(tabIds.length, 6, `TABS must have 6 entries, got ${tabIds.length}: ${tabIds.join(", ")}`);
+});
+
+// ── 2. Route uses "collection-opportunities" merged tab id ────────────────────
+test("route TABS includes collection-opportunities merged tab", () => {
+  const route = readRoute();
+  assert.ok(
+    route.includes("collection-opportunities"),
+    "route must include collection-opportunities merged tab id",
+  );
+});
+
+// ── 3. Route does NOT include legacy 7th tab "opportunities" ─────────────────
+test("route TABS does not contain standalone opportunities tab", () => {
+  const route = readRoute();
+  // The tab bar should not have standalone opportunities id (but collection-opportunities is ok)
+  const tabsBlock = route.match(/const TABS = \[([^\]]*)\]/s)?.[1] ?? "";
+  assert.ok(
+    !tabsBlock.includes('"opportunities"') && !tabsBlock.includes("'opportunities'"),
+    "TABS block must not contain standalone 'opportunities' id",
+  );
+});
+
+// ── 4. designActions all have canonical fields ─────────────────────────────────
+describe("designActions canonical schema", () => {
+  const CANONICAL_FIELDS = [
+    "id", "product", "observedEvidence", "interpretation",
+    "recommendedTest", "successMetric", "confidence",
+    "designImplication", "merchandisingImplication",
+  ];
+
+  for (const days of [30, 90]) {
+    it(`all designActions have canonical fields (days=${days})`, () => {
+      const d = getDesignerSampleData(days);
+      const actions: any[] = d.dashboard?.designActions ?? [];
+      assert.ok(actions.length > 0, "designActions must not be empty");
+      for (const action of actions) {
+        for (const field of CANONICAL_FIELDS) {
+          assert.ok(
+            action[field] !== undefined && action[field] !== null && action[field] !== "",
+            `designAction "${action.piece ?? action.id}" missing canonical field: ${field}`,
+          );
+        }
+      }
+    });
+  }
+});
+
+// ── 5. designActions backward-compat fields preserved (existing tests rely on these) ─
+test("designActions preserve backward-compat fields", () => {
+  const d = getDesignerSampleData(90);
+  const actions: any[] = d.dashboard?.designActions ?? [];
+  for (const action of actions) {
+    assert.ok(action.piece !== undefined, `designAction missing backward-compat field: piece`);
+    assert.ok(action.confidenceBadge !== undefined, `designAction missing backward-compat field: confidenceBadge`);
+    assert.ok(action.performance !== undefined, `designAction missing backward-compat field: performance`);
+  }
+});
+
+// ── 6. reasonsResonate are {label, count} objects ─────────────────────────────
+test("reasonsResonate contains {label, count} objects", () => {
+  for (const days of [30, 90]) {
+    const d = getDesignerSampleData(days);
+    const ex = d.advanced?.explainability as any;
+    if (!ex?.reasonsResonate?.length) continue;
+    for (const r of ex.reasonsResonate) {
+      assert.strictEqual(typeof r, "object", "reasonsResonate items must be objects");
+      assert.ok(typeof r.label === "string" && r.label.length > 0, "reasonsResonate item must have label string");
+      assert.ok(typeof r.count === "number" && r.count >= 0, `reasonsResonate item must have count ≥ 0, got ${r.count}`);
+    }
+  }
+});
+
+// ── 7. reasonsRejected are {label, count} objects ────────────────────────────
+test("reasonsRejected contains {label, count} objects", () => {
+  for (const days of [30, 90]) {
+    const d = getDesignerSampleData(days);
+    const ex = d.advanced?.explainability as any;
+    if (!ex?.reasonsRejected?.length) continue;
+    for (const r of ex.reasonsRejected) {
+      assert.strictEqual(typeof r, "object", "reasonsRejected items must be objects");
+      assert.ok(typeof r.label === "string" && r.label.length > 0, "reasonsRejected item must have label string");
+      assert.ok(typeof r.count === "number" && r.count >= 0, `reasonsRejected item must have count ≥ 0, got ${r.count}`);
+    }
+  }
+});
+
+// ── 8. opportunityFeed items have designImplication and merchandisingImplication ─
+test("opportunityFeed items have designImplication and merchandisingImplication", () => {
+  for (const days of [30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    const feed: any[] = d.advanced?.opportunityFeed ?? [];
+    assert.ok(feed.length > 0, `opportunityFeed must not be empty for days=${days}`);
+    for (const item of feed) {
+      assert.ok(
+        typeof item.designImplication === "string" && item.designImplication.length > 0,
+        `opportunityFeed item "${item.id}" missing designImplication`,
+      );
+      assert.ok(
+        typeof item.merchandisingImplication === "string" && item.merchandisingImplication.length > 0,
+        `opportunityFeed item "${item.id}" missing merchandisingImplication`,
+      );
+    }
+  }
+});
+
+// ── 9. ltv.status is not 'sample' (changed to awaiting-integration) ───────────
+test("ltv.status is awaiting-integration", () => {
+  for (const days of [30, 90]) {
+    const d = getDesignerSampleData(days);
+    const ltv = d.advanced?.ltv as any;
+    assert.strictEqual(
+      ltv?.status,
+      "awaiting-integration",
+      `ltv.status must be "awaiting-integration", got "${ltv?.status}"`,
+    );
+  }
+});
+
+// ── 10. No overconfident prescriptive language in prescriptiveInsights ─────────
+test("prescriptiveInsight for Edgy does not contain prescriptive 'Restrict to' language", () => {
+  const d = getDesignerSampleData(90);
+  const matrix: any[] = d.rel?.dnaMatrix ?? [];
+  const edgyRow = matrix.find(r => r?.personality === "Edgy");
+  if (edgyRow?.prescriptive) {
+    assert.ok(
+      !edgyRow.prescriptive.includes("Restrict to"),
+      `Edgy prescriptiveInsight must not use "Restrict to" language: "${edgyRow.prescriptive}"`,
+    );
+  }
+});
+
+// ── 11. No overconfident language in designActions ────────────────────────────
+test("designActions do not contain prescriptive 'Restrict' language", () => {
+  for (const days of [30, 90]) {
+    const d = getDesignerSampleData(days);
+    const actions: any[] = d.dashboard?.designActions ?? [];
+    for (const action of actions) {
+      const actionStr: string = action.action ?? "";
+      assert.ok(
+        !actionStr.toLowerCase().startsWith("restrict"),
+        `designAction "${action.piece}" action must not start with "restrict": "${actionStr}"`,
+      );
+    }
+  }
+});
+
+// ── 12. No overconfident "Increase recommendation frequency" prescriptions ────
+test("designActions do not prescribe 'Increase recommendation frequency' as a command", () => {
+  for (const days of [30, 90]) {
+    const d = getDesignerSampleData(days);
+    const actions: any[] = d.dashboard?.designActions ?? [];
+    for (const action of actions) {
+      const actionStr: string = action.action ?? "";
+      // "Increase..." as a direct command is not allowed; must be framed as a test
+      const isDirectCommand = /^Increase recommendation frequency/.test(actionStr.trim());
+      assert.ok(
+        !isDirectCommand,
+        `designAction "${action.piece}" must not use direct "Increase recommendation frequency" command: "${actionStr}"`,
+      );
+    }
+  }
+});
+
+// ── 13. unsureCount is present and ≥ 0 in wouldWearAgain ─────────────────────
+test("wouldWearAgain.unsureCount is present and non-negative", () => {
+  for (const days of [30, 90]) {
+    const d = getDesignerSampleData(days);
+    const wya = d.advanced?.emotionalJourney?.wouldWearAgain as any;
+    assert.ok(wya !== undefined, "wouldWearAgain must exist");
+    assert.ok(
+      typeof wya.unsureCount === "number" && wya.unsureCount >= 0,
+      `unsureCount must be a non-negative number, got ${wya.unsureCount}`,
+    );
+    assert.ok(
+      typeof wya.unsureRate === "number" && wya.unsureRate >= 0,
+      `unsureRate must be a non-negative number, got ${wya.unsureRate}`,
+    );
+  }
+});
+
+// ── 14. opportunityFeed has at most 7 items ───────────────────────────────────
+test("opportunityFeed has at most 7 items", () => {
+  for (const days of [7, 30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    const feed: any[] = d.advanced?.opportunityFeed ?? [];
+    assert.ok(feed.length <= 7, `opportunityFeed must have ≤ 7 items, got ${feed.length}`);
+  }
+});
+
+// ── 15. designActions.id values are all unique strings ────────────────────────
+test("designActions.id values are unique", () => {
+  const d = getDesignerSampleData(90);
+  const actions: any[] = d.dashboard?.designActions ?? [];
+  const ids = actions.map(a => a.id).filter(Boolean);
+  const unique = new Set(ids);
+  assert.strictEqual(unique.size, ids.length, `designActions.id values must be unique, got: ${ids.join(", ")}`);
+});
+
+// ── 16. designActions.impact and .effort use valid values ─────────────────────
+test("designActions impact and effort use valid enum values", () => {
+  const VALID_IMPACT = new Set(["high", "medium", "low"]);
+  const VALID_EFFORT = new Set(["high", "medium", "low"]);
+  const d = getDesignerSampleData(90);
+  const actions: any[] = d.dashboard?.designActions ?? [];
+  for (const action of actions) {
+    assert.ok(VALID_IMPACT.has(action.impact), `designAction "${action.id}" impact must be high/medium/low, got "${action.impact}"`);
+    assert.ok(VALID_EFFORT.has(action.effort), `designAction "${action.id}" effort must be high/medium/low, got "${action.effort}"`);
+  }
+});
+
+// ── 17. opportunityFeed items have all required core fields ───────────────────
+test("opportunityFeed items have all required core fields", () => {
+  const REQUIRED = ["id", "type", "confidence", "insight", "customerNeed", "evidence", "timePeriod", "suggestedAction"];
+  for (const days of [30, 90]) {
+    const d = getDesignerSampleData(days);
+    const feed: any[] = d.advanced?.opportunityFeed ?? [];
+    for (const item of feed) {
+      for (const field of REQUIRED) {
+        assert.ok(
+          item[field] !== undefined && item[field] !== null && item[field] !== "",
+          `opportunityFeed item "${item.id}" missing required field: ${field}`,
+        );
+      }
+    }
+  }
+});
+
+// ── 18. reasonsResonate counts are positive when feedback exists ──────────────
+test("reasonsResonate counts are positive when totalFeedback > 0", () => {
+  for (const days of [30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    const ex = d.advanced?.explainability as any;
+    const resonate: any[] = ex?.reasonsResonate ?? [];
+    if (resonate.length > 0) {
+      for (const r of resonate) {
+        assert.ok(r.count > 0, `reasonsResonate count must be > 0 when feedback exists, got ${r.count} for "${r.label}"`);
+      }
+    }
+  }
+});
+
+// ── 19. reasonsRejected counts are positive when feedback exists ──────────────
+test("reasonsRejected counts are positive when totalFeedback > 0", () => {
+  for (const days of [30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    const ex = d.advanced?.explainability as any;
+    const rejected: any[] = ex?.reasonsRejected ?? [];
+    if (rejected.length > 0) {
+      for (const r of rejected) {
+        assert.ok(r.count > 0, `reasonsRejected count must be > 0 when feedback exists, got ${r.count} for "${r.label}"`);
+      }
+    }
+  }
+});
+
+// ── 20. Route uses observational language ("Observed:" / "Test whether") ──────
+test("route TabCollectionOpportunities function is defined", () => {
+  const route = readRoute();
+  assert.ok(
+    route.includes("TabCollectionOpportunities"),
+    "route must define TabCollectionOpportunities function",
+  );
+});
+
+// ── 21. Route no longer has legacy section "Top-Performing Pieces" ────────────
+test("route does not render legacy Top-Performing Pieces section", () => {
+  const route = readRoute();
+  assert.ok(
+    !route.includes("Top-Performing Pieces"),
+    "route must not render legacy 'Top-Performing Pieces' section",
+  );
+});
+
+// ── 22. Route no longer has legacy section "Mixed-Signal Pieces" ──────────────
+test("route does not render legacy Mixed-Signal Pieces section", () => {
+  const route = readRoute();
+  assert.ok(
+    !route.includes("Mixed-Signal Pieces"),
+    "route must not render legacy 'Mixed-Signal Pieces' section",
+  );
+});
+
+// ── 23. Route no longer has legacy section "Style DNA by Piece" ──────────────
+test("route does not render legacy Style DNA by Piece section", () => {
+  const route = readRoute();
+  assert.ok(
+    !route.includes("Style DNA by Piece"),
+    "route must not render legacy 'Style DNA by Piece' section",
+  );
+});
+
+// ── 24. Route includes Data & AI panel ───────────────────────────────────────
+test("route includes Data & AI slide-over panel", () => {
+  const route = readRoute();
+  assert.ok(
+    route.includes("DataAiDefinitions") || route.includes("dataAiOpen"),
+    "route must include Data & AI panel logic",
+  );
+});
+
+// ── 25. Route includes roleLens state ────────────────────────────────────────
+test("route includes roleLens state for role lens selector", () => {
+  const route = readRoute();
+  assert.ok(
+    route.includes("roleLens"),
+    "route must include roleLens state for Combined/Design/Merchandising role lens selector",
+  );
 });

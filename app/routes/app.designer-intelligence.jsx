@@ -393,15 +393,15 @@ function DesignActionCard({ action }) {
 }
 
 // ── Tab definitions ────────────────────────────────────────────────────────────
+// 6 tabs: Overview · Customers · Products · Recommendations · Collection & Opportunities · Commercial
 
 const TABS = [
-  { id: "overview",        label: "Overview" },
-  { id: "customer",        label: "Customer Intelligence" },
-  { id: "product",         label: "Product Intelligence" },
-  { id: "recommendation",  label: "Recommendation Intelligence" },
-  { id: "collection",      label: "Collection Intelligence" },
-  { id: "commercial",      label: "Commercial Intelligence" },
-  { id: "opportunities",   label: "Design Opportunities" },
+  { id: "overview",                label: "Overview" },
+  { id: "customer",                label: "Customers" },
+  { id: "product",                 label: "Products" },
+  { id: "recommendation",          label: "Recommendations" },
+  { id: "collection-opportunities", label: "Collection & Opportunities" },
+  { id: "commercial",              label: "Commercial" },
 ];
 
 // ── Root component ─────────────────────────────────────────────────────────────
@@ -409,6 +409,9 @@ const TABS = [
 export default function DesignerDashboard() {
   const { dashboard: data, kpis, phase4b2, advanced, rel, overview, dateRangeDays, sampleMode, samplePreviewAvailable } = useLoaderData();
   const [activeTab, setActiveTab] = useState("overview");
+  const [roleLens, setRoleLens] = useState("combined"); // "combined" | "design" | "merchandising"
+  const [dataAiOpen, setDataAiOpen] = useState(false);
+  const [dataAiPanel, setDataAiPanel] = useState("definitions"); // "definitions" | "confidence" | "integration" | "roadmap" | "experiments"
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -442,8 +445,8 @@ export default function DesignerDashboard() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16 }}>
             <div>
               <div style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontSize: 8, textTransform: "uppercase", letterSpacing: "3px", color: "#8b2035", marginBottom: 10, fontWeight: 600 }}>NADINE — Private Intelligence Platform</div>
-              <h1 style={s.h1}>nAia Designer Dashboard</h1>
-              <p style={s.subtitle}>Collection intelligence · Customer insights · Design direction</p>
+              <h1 style={s.h1}>Design &amp; Merchandising Intelligence</h1>
+              <p style={s.subtitle}>Turn customer signals into product, assortment, styling and commercial decisions.</p>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
               {/* Date range selector — navWith clones all params, changes only `days` */}
@@ -464,6 +467,14 @@ export default function DesignerDashboard() {
                   </button>
                 ))}
               </div>
+              {/* Data & AI button */}
+              <button
+                type="button"
+                onClick={() => setDataAiOpen(true)}
+                style={{ padding: "3px 12px", fontFamily: "'Inter', sans-serif", fontSize: 9, letterSpacing: "1px", textTransform: "uppercase", background: "transparent", color: "#5c5350", border: "1px solid rgba(34,21,22,0.18)", cursor: "pointer" }}
+              >
+                Data &amp; AI ↗
+              </button>
               {/* Live / Sample Preview toggle — only shown when env var enables it */}
               {samplePreviewAvailable && (
                 <div style={{ display: "flex", gap: 0, alignItems: "center", border: "1px solid rgba(34,21,22,0.14)", overflow: "hidden" }}>
@@ -488,7 +499,7 @@ export default function DesignerDashboard() {
         </div>
 
         {/* ── Tab bar ──────────────────────────────────────────────────────── */}
-        <div style={{ position: "relative", marginBottom: 32 }}>
+        <div style={{ position: "relative", marginBottom: 8 }}>
           <div style={{ ...s.tabBar, marginBottom: 0 }}>
             {TABS.map((tab) => (
               <button
@@ -509,15 +520,74 @@ export default function DesignerDashboard() {
           <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 40, background: "linear-gradient(to right, transparent, #f4f4f1)", pointerEvents: "none" }} />
         </div>
 
+        {/* ── Role lens selector ────────────────────────────────────────────── */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 24, paddingTop: 8, borderTop: "1px solid rgba(34,21,22,0.06)" }}>
+          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", fontWeight: 500 }}>View as</span>
+          {[
+            { id: "combined",      label: "Combined" },
+            { id: "design",        label: "Design" },
+            { id: "merchandising", label: "Merchandising" },
+          ].map(lens => (
+            <button
+              key={lens.id}
+              type="button"
+              onClick={() => setRoleLens(lens.id)}
+              style={{
+                padding: "2px 10px", fontFamily: "'Inter', sans-serif", fontSize: 9,
+                letterSpacing: "1px", textTransform: "uppercase",
+                background: roleLens === lens.id ? "#221516" : "transparent",
+                color: roleLens === lens.id ? "#f4f4f1" : "#7a6f6a",
+                border: "1px solid rgba(34,21,22,0.14)", cursor: "pointer",
+              }}
+            >{lens.label}</button>
+          ))}
+          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 9, color: "#9CA3AF", marginLeft: 4 }}>
+            {roleLens === "design" ? "— showing design implications" : roleLens === "merchandising" ? "— showing merchandising implications" : "— showing all implications"}
+          </span>
+        </div>
+
+        {/* ── Data & AI slide-over ─────────────────────────────────────────── */}
+        {dataAiOpen && (
+          <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", justifyContent: "flex-end" }}>
+            <div style={{ position: "absolute", inset: 0, background: "rgba(34,21,22,0.45)" }} onClick={() => setDataAiOpen(false)} />
+            <div style={{ position: "relative", width: "min(600px, 92vw)", background: "#faf9f7", height: "100vh", overflowY: "auto", padding: 32, display: "flex", flexDirection: "column", gap: 24, borderLeft: "1px solid rgba(34,21,22,0.12)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 8, textTransform: "uppercase", letterSpacing: "3px", color: "#8b2035", marginBottom: 8, fontWeight: 600 }}>Data &amp; AI</div>
+                  <h2 style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: 22, fontWeight: 700, color: "#221516" }}>Intelligence Reference</h2>
+                </div>
+                <button type="button" onClick={() => setDataAiOpen(false)} style={{ background: "none", border: "1px solid rgba(34,21,22,0.14)", padding: "4px 10px", cursor: "pointer", fontFamily: "'Inter', sans-serif", fontSize: 10, color: "#5c5350" }}>Close ✕</button>
+              </div>
+              {/* Panel tabs */}
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                {[
+                  { id: "definitions",  label: "Metric Definitions" },
+                  { id: "confidence",   label: "Confidence Ladder" },
+                  { id: "integration",  label: "Integration Readiness" },
+                  { id: "roadmap",      label: "AI Learning Roadmap" },
+                  { id: "experiments",  label: "Experiment Builder" },
+                ].map(p => (
+                  <button key={p.id} type="button" onClick={() => setDataAiPanel(p.id)} style={{ padding: "3px 10px", fontFamily: "'Inter', sans-serif", fontSize: 9, letterSpacing: "1px", textTransform: "uppercase", background: dataAiPanel === p.id ? "#221516" : "transparent", color: dataAiPanel === p.id ? "#f4f4f1" : "#7a6f6a", border: "1px solid rgba(34,21,22,0.14)", cursor: "pointer" }}>{p.label}</button>
+                ))}
+              </div>
+              {/* Panel content */}
+              {dataAiPanel === "definitions" && <DataAiDefinitions />}
+              {dataAiPanel === "confidence" && <DataAiConfidenceLadder />}
+              {dataAiPanel === "integration" && <DataAiIntegrationReadiness />}
+              {dataAiPanel === "roadmap" && <DataAiLearningRoadmap />}
+              {dataAiPanel === "experiments" && <DataAiExperimentBuilder />}
+            </div>
+          </div>
+        )}
+
         {/* ── Tab content ──────────────────────────────────────────────────── */}
         <div style={{ paddingTop: 8 }}>
-          {activeTab === "overview"       && <TabOverview        data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} overview={overview} sampleMode={sampleMode} dateRangeDays={dateRangeDays} />}
-          {activeTab === "customer"       && <TabCustomer        data={data} kpis={kpis} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} />}
-          {activeTab === "product"        && <TabProduct         data={data} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} />}
-          {activeTab === "recommendation" && <TabRecommendation  data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} />}
-          {activeTab === "collection"     && <TabCollection      data={data} kpis={kpis} advanced={advanced} rel={rel} dateRangeDays={dateRangeDays} />}
-          {activeTab === "commercial"     && <TabCommercial      data={data} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} />}
-          {activeTab === "opportunities"  && <TabOpportunities   data={data} phase4b2={phase4b2} advanced={advanced} rel={rel} dateRangeDays={dateRangeDays} />}
+          {activeTab === "overview"                && <TabOverview        data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} overview={overview} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
+          {activeTab === "customer"                && <TabCustomer        data={data} kpis={kpis} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
+          {activeTab === "product"                 && <TabProduct         data={data} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
+          {activeTab === "recommendation"          && <TabRecommendation  data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
+          {activeTab === "collection-opportunities" && <TabCollectionOpportunities data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
+          {activeTab === "commercial"              && <TabCommercial      data={data} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
         </div>
 
       </div>
@@ -695,8 +765,10 @@ function TabOverview({ data, kpis, phase4b2, advanced, rel, overview, sampleMode
         </div>
       </Section>
 
-      {/* Methodology panel */}
-      <MethodologyPanel />
+      {/* Metric definitions — now in Data & AI panel */}
+      <div style={{ padding: "12px 20px", background: "rgba(34,21,22,0.02)", border: "1px solid rgba(34,21,22,0.07)", fontSize: 12, color: "#7a6f6a", fontFamily: SERIF, fontStyle: "italic" }}>
+        Metric Definitions and Confidence Ladder are available in <strong style={{ fontStyle: "normal" }}>Data &amp; AI</strong> — click the button in the header.
+      </div>
     </>
   );
 }
@@ -883,16 +955,16 @@ function buildTopSignals({ data, kpis, phase4b2, advanced, rel, dateRangeDays })
   // Sort by score descending
   candidates.sort((a, b) => b.score - a.score);
 
-  // Balance: one from each category first, then fill to 6
+  // Balance: one from each category first, then fill to 3 default (show up to 6 if expanded)
   const ORDER = ["identity", "context", "garment", "emotional", "friction", "naia"];
   const selected = [];
   const used = new Set();
   for (const cat of ORDER) {
-    if (selected.length >= 6) break;
+    if (selected.length >= 3) break;
     const idx = candidates.findIndex((c, i) => c.cat === cat && !used.has(i));
     if (idx !== -1) { selected.push(candidates[idx]); used.add(idx); }
   }
-  for (let i = 0; i < candidates.length && selected.length < 6; i++) {
+  for (let i = 0; i < candidates.length && selected.length < 3; i++) {
     if (!used.has(i)) { selected.push(candidates[i]); used.add(i); }
   }
 
@@ -1448,9 +1520,7 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays }) {
                 <div style={s.kpiGrid}>
                   <KpiCard label="Yes — Would Wear Again" value={`${advanced.emotionalJourney.wouldWearAgain.yesCount} · ${advanced.emotionalJourney.wouldWearAgain.yesRate}%`} tooltip={`${advanced.emotionalJourney.wouldWearAgain.yesCount} of ${advanced.emotionalJourney.wouldWearAgain.totalResponses} post-wear reviews`} />
                   <KpiCard label="No — Would Not Wear Again" value={`${advanced.emotionalJourney.wouldWearAgain.noCount} · ${advanced.emotionalJourney.wouldWearAgain.noRate}%`} tooltip={`${advanced.emotionalJourney.wouldWearAgain.noCount} of ${advanced.emotionalJourney.wouldWearAgain.totalResponses} post-wear reviews`} />
-                  {advanced.emotionalJourney.wouldWearAgain.unsureCount > 0 && (
-                    <KpiCard label="Unsure" value={`${advanced.emotionalJourney.wouldWearAgain.unsureCount} · ${advanced.emotionalJourney.wouldWearAgain.unsureRate}%`} />
-                  )}
+                  <KpiCard label="Unsure" value={`${advanced.emotionalJourney.wouldWearAgain.unsureCount ?? 0} · ${advanced.emotionalJourney.wouldWearAgain.unsureRate ?? 0}%`} />
                 </div>
               </div>
             )}
@@ -1600,76 +1670,88 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays }) {
 // TAB 3 — PRODUCT INTELLIGENCE
 // ══════════════════════════════════════════════════════════════════════════════
 
-function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays }) {
+function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, roleLens }) {
+  // Product summary from productNarratives — concise per-product snapshot
+  const narratives = rel?.productNarratives ?? [];
   return (
     <>
-      <Section title="Top-Performing Pieces" desc="High rating and rewear — nAia products only" status="live">
-        {data.topPieces?.length > 0 ? (
-          <div style={s.pieceGrid}>{data.topPieces.map((p, i) => <PieceCard key={i} piece={p} styleDNA={data.styleDNA} />)}</div>
-        ) : <EmptyState message="No pieces with 2+ ratings and ≥4.0 average yet." />}
+      {/* Product Summary — concise table from productNarratives */}
+      <Section
+        title="Product Summary"
+        desc="Every product in the current period — opportunity score, emotional outcome, best audience, top objection, and recommended next step."
+        status={narratives.length > 0 ? (rel.status ?? "live") : "insufficient-data"}
+      >
+        {narratives.length > 0 ? (
+          <div style={{ overflowX: "auto" }}>
+            <table style={s.table}>
+              <thead>
+                <tr>
+                  <th style={s.th}>Product</th>
+                  <th style={s.th}>Rating</th>
+                  <th style={s.th}>Rewear</th>
+                  <th style={s.th}>Opp. Score</th>
+                  <th style={s.th}>Best Audience</th>
+                  <th style={s.th}>Top Objection</th>
+                  <th style={s.th}>Confidence</th>
+                  {(roleLens === "design" || roleLens === "combined") && <th style={s.th}>Design Signal</th>}
+                  {(roleLens === "merchandising" || roleLens === "combined") && <th style={s.th}>Merch Signal</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {narratives.map((n, i) => (
+                  <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                    <td style={{ ...s.td, fontFamily: SERIF, fontWeight: 600, fontSize: 14 }}>{n.name ?? n.productTitle}</td>
+                    <td style={s.td}>{n.avgRating != null ? `★${n.avgRating.toFixed(1)}` : "—"}</td>
+                    <td style={s.td}>{n.rewearRate != null ? `${Math.round(n.rewearRate * 100)}%` : "—"}</td>
+                    <td style={{ ...s.td, color: (n.opportunityScore ?? 0) >= 60 ? "#2a5e42" : (n.opportunityScore ?? 0) >= 40 ? "#d97706" : "#8b2035", fontFamily: INTER, fontWeight: 600 }}>
+                      {n.opportunityScore ?? "—"}
+                    </td>
+                    <td style={{ ...s.td, fontSize: 11 }}>{n.bestPersonality ?? "—"}</td>
+                    <td style={{ ...s.td, color: n.mostCommonObjection ? "#8b2035" : "#7a6f6a", fontStyle: "italic", fontSize: 11 }}>{n.mostCommonObjection ?? "—"}</td>
+                    <td style={{ ...s.td, fontSize: 10, color: "#7a6f6a" }}>{n.confidenceBadge ?? n.statusLabel ?? "—"}</td>
+                    {(roleLens === "design" || roleLens === "combined") && (
+                      <td style={{ ...s.td, fontSize: 11, color: "#5c5350", maxWidth: 180 }}>{n.designImplication ?? "—"}</td>
+                    )}
+                    {(roleLens === "merchandising" || roleLens === "combined") && (
+                      <td style={{ ...s.td, fontSize: 11, color: "#5c5350", maxWidth: 180 }}>{n.recommendedAction ?? "—"}</td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <InsufficientCard
+            label="Product summary"
+            description="Post-wear data accumulates from reviewed styling sessions. Product-level signals appear when enough session data is available."
+            sampleSize={rel?.sampleSize ?? 0}
+          />
+        )}
       </Section>
 
-      <Section title="Mixed-Signal Pieces" desc="High potential with friction — high rating but low rewear, or vice versa" status="live">
-        {data.mixedPieces?.length > 0 ? (
-          <div style={s.pieceGrid}>{data.mixedPieces.map((p, i) => (
-            <div key={i} style={{ ...s.pieceCard, borderLeft: "3px solid #f4a261" }}>
-              <div style={s.pieceName}>{p.name}</div>
-              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 15, fontStyle: "italic", color: "#8b2035", marginBottom: 12 }}>{p.reason}</div>
-              <div style={s.pieceStats}>
-                <div>★ {p.avgRating?.toFixed(1) ?? "—"} | Rewear: {p.rewear != null ? `${Math.round(p.rewear * 100)}%` : "—"}</div>
-                {p.friction && <div style={{ color: "#8b2035", fontSize: 14, marginTop: 8 }}>⚠ {p.friction}</div>}
-              </div>
+      {/* Product detail — canonical profiles via ProductDetailPanel (progressive disclosure) */}
+      {narratives.length > 0 && (
+        <Section
+          title="Product Intelligence"
+          desc="Every NADINE product — opportunity score, emotional outcome, best audience, top objection, recommended action. Click View Detail for the full canonical profile."
+          status={rel.status}
+        >
+          {rel.status === "insufficient-data" ? (
+            <InsufficientCard label="Product intelligence" description="Not enough reviewed sessions to build product-level relationship intelligence." sampleSize={rel.sampleSize} />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {narratives.map((narrative, i) => (
+                <ProductDetailPanel
+                  key={i}
+                  narrative={narrative}
+                  saveVsPurchase={advanced?.saveVsPurchase}
+                  dateRangeDays={dateRangeDays}
+                />
+              ))}
             </div>
-          ))}</div>
-        ) : <EmptyState message="No mixed-signal pieces yet (need 2+ reviews with divergent rating/rewear signals)." />}
-      </Section>
-
-      <Section title="Underperforming Pieces" desc="Low rating or low rewear — nAia products only" status="live">
-        {data.underperformingPieces?.length > 0 ? (
-          <div style={s.pieceGrid}>{data.underperformingPieces.map((p, i) => (
-            <div key={i} style={{ ...s.pieceCard, borderLeft: "3px solid #c5553a" }}>
-              <div style={s.pieceName}>{p.name}</div>
-              <div style={{ fontSize: 14, color: "#8b2035", marginBottom: 12 }}>Weak signals: {p.weakSignals?.join(", ")}</div>
-              {p.rejectionReasons?.length > 0 && <div><div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginBottom: 6 }}>Common rejections</div>{p.rejectionReasons.map((r, j) => <div key={j} style={{ fontSize: 14, color: "#8b2035" }}>• {r}</div>)}</div>}
-            </div>
-          ))}</div>
-        ) : <EmptyState message="No underperforming pieces yet." />}
-      </Section>
-
-      <Section title="Pieces to Watch" desc="Early signals — fewer than 3 ratings" status="live">
-        {data.watchPieces?.length > 0 ? (
-          <div style={s.pieceGrid}>{data.watchPieces.map((p, i) => (
-            <div key={i} style={{ ...s.pieceCard, opacity: 0.75 }}>
-              <div style={s.pieceName}>{p.name}</div>
-              <div style={{ fontSize: 14, color: "#7a6f6a", fontStyle: "italic" }}>
-                ⏱ {p.ratingCount} review{p.ratingCount !== 1 ? "s" : ""} so far{p.ratingCount > 0 && p.avgRating != null ? ` · ★ ${p.avgRating.toFixed(1)}/5` : ""}
-              </div>
-            </div>
-          ))}</div>
-        ) : <EmptyState />}
-      </Section>
-
-      <Section title="Style DNA by Piece" desc="Which style personalities resonate with each piece" status="live">
-        {data.piecesByDNA?.length > 0 ? (
-          <div style={s.pieceGrid}>{data.piecesByDNA.map((p, i) => (
-            <div key={i} style={s.pieceCard}>
-              <div style={s.pieceName}>{p.name}</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>{p.topDNA?.map((dna, j) => <span key={j} style={{ padding: "3px 8px", background: "#8b2035", color: "#f4f4f1", fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px" }}>{dna}</span>)}</div>
-            </div>
-          ))}</div>
-        ) : <EmptyState />}
-      </Section>
-
-      <Section title="Emotional Outcomes by Piece" desc="How pieces make customers feel" status="live">
-        {data.emotionalOutcomes?.length > 0 ? (
-          <div style={s.pieceGrid}>{data.emotionalOutcomes.map((p, i) => (
-            <div key={i} style={s.pieceCard}>
-              <div style={s.pieceName}>{p.name}</div>
-              <div style={{ marginTop: 12 }}>{p.emotions?.map((e, j) => <div key={j} style={{ fontSize: 15, marginBottom: 6, color: "#8b2035", fontFamily: "'Cormorant Garamond', serif", fontStyle: "italic" }}>✨ {e}</div>)}</div>
-            </div>
-          ))}</div>
-        ) : <EmptyState />}
-      </Section>
+          )}
+        </Section>
+      )}
 
       <Section title="Best-Performing Occasions" desc="Where the collection shines" status="live" action={<ExportCSVButton data={data.topOccasions} filename="occasions.csv" />}>
         {data.topOccasions?.length > 0 ? (
@@ -1705,12 +1787,12 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays }
       {sampleMode && advanced?.saveVsPurchase?.status === "sample" ? (
         <Section title="Save vs Purchase Intelligence" desc={`SAMPLE PREVIEW — ${advanced.saveVsPurchase.scopeLabel} save/buy events. Becoming Whole is the anchor case.`} status="sample">
           <div style={s.kpiGrid}>
-            <KpiCard label="Total Saves" value={advanced.saveVsPurchase.totalSaves} status="sample" tooltip={`SAMPLE PREVIEW — Saves within the selected period (${advanced.saveVsPurchase.scopeLabel}).`} />
-            <KpiCard label="Total Purchases" value={advanced.saveVsPurchase.totalPurchases} status="sample" />
-            <KpiCard label="Save-to-Purchase Rate" value={`${advanced.saveVsPurchase.overallSaveToP}%`} status="sample" tooltip="SAMPLE PREVIEW — % of saved items that were eventually purchased." />
-            <KpiCard label="Most Saved" value={advanced.saveVsPurchase.mostSaved ?? "—"} status="sample" />
-            <KpiCard label="Most Purchased" value={advanced.saveVsPurchase.mostPurchased ?? "—"} status="sample" />
-            <KpiCard label="Purchases Without Prior Save" value={advanced.saveVsPurchase.purchasesWithoutSave} status="sample" tooltip="SAMPLE PREVIEW — Number of purchases where no prior save was recorded for the same product-customer pair." />
+            <KpiCard label="Total Saves" value={advanced.saveVsPurchase.totalSaves} tooltip={`Saves within the selected period (${advanced.saveVsPurchase.scopeLabel}).`} />
+            <KpiCard label="Total Purchases" value={advanced.saveVsPurchase.totalPurchases} />
+            <KpiCard label="Save-to-Purchase Rate" value={`${advanced.saveVsPurchase.overallSaveToP}%`} tooltip="% of saved items that were eventually purchased." />
+            <KpiCard label="Most Saved" value={advanced.saveVsPurchase.mostSaved ?? "—"} />
+            <KpiCard label="Most Purchased" value={advanced.saveVsPurchase.mostPurchased ?? "—"} />
+            <KpiCard label="Purchases Without Prior Save" value={advanced.saveVsPurchase.purchasesWithoutSave} tooltip="Number of purchases where no prior save was recorded for the same product-customer pair." />
           </div>
           {advanced.saveVsPurchase.highSaveLowBuyProducts?.length > 0 && (
             <div style={{ marginTop: 16, padding: "10px 14px", background: "rgba(139,32,53,0.04)", borderLeft: "3px solid #8b2035" }}>
@@ -1758,30 +1840,6 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays }
         label="Virtual Try-On Intelligence"
         description="VTO session counts, completion rates, and FASHN.ai fidelity metrics are pending FASHN.ai performance integration. Eligibility and readiness metrics are available in Feature Adoption."
       />
-
-      {/* Product Intelligence Narratives — canonical detail via ProductDetailPanel */}
-      {rel?.productNarratives?.length > 0 && (
-        <Section
-          title="Product Intelligence"
-          desc="Every NADINE product — opportunity score, emotional outcome, best audience, top objection, recommended action. Click View Detail for the full canonical profile."
-          status={rel.status}
-        >
-          {rel.status === "insufficient-data" ? (
-            <InsufficientCard label="Product intelligence" description="Not enough reviewed sessions to build product-level relationship intelligence." sampleSize={rel.sampleSize} />
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {rel.productNarratives.map((narrative, i) => (
-                <ProductDetailPanel
-                  key={i}
-                  narrative={narrative}
-                  saveVsPurchase={advanced?.saveVsPurchase}
-                  dateRangeDays={dateRangeDays}
-                />
-              ))}
-            </div>
-          )}
-        </Section>
-      )}
 
       {/* Occasion × Product Intelligence */}
       {rel?.occasionProductMatrix?.length > 0 && (
@@ -1930,25 +1988,39 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
             </div>
           )}
           <div style={s.kpiGrid}>
-            <KpiCard label="Explanation Agreement Rate" value={advanced.explainability.explanationAgreementRate != null ? `${advanced.explainability.explanationAgreementRate}%` : "—"} status="sample" tooltip="SAMPLE PREVIEW — % of recommendation feedback responses that were 'Love it'. Not enough evidence when n=0." />
-            <KpiCard label="→ Click Rate" value="—" status="not-implemented" tooltip="Not enough sample evidence — no click events captured in this period." />
-            <KpiCard label="→ Save Rate" value={`${advanced.explainability.saveRate}%`} status="sample" tooltip="SAMPLE PREVIEW — % of sessions that resulted in a save." />
-            <KpiCard label="→ Purchase Rate" value={`${advanced.explainability.purchaseRate}%`} status="sample" tooltip="SAMPLE PREVIEW — % of sessions that resulted in a purchase." />
+            <KpiCard label="Explanation Agreement Rate" value={advanced.explainability.explanationAgreementRate != null ? `${advanced.explainability.explanationAgreementRate}%` : "—"} tooltip="% of recommendation feedback responses that were 'Love it'. Not enough evidence when n=0." />
+            <KpiCard label="→ Click Rate" value="—" status="not-implemented" tooltip="No click events captured in this period." />
+            <KpiCard label="→ Save Rate" value={`${advanced.explainability.saveRate}%`} tooltip="% of sessions that resulted in a save." />
+            <KpiCard label="→ Purchase Rate" value={`${advanced.explainability.purchaseRate}%`} tooltip="% of sessions that resulted in a purchase." />
           </div>
           {advanced.explainability.reasonsResonate?.length > 0 && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
               <div style={s.card}>
                 <div style={{ ...s.cardLabel, color: "#2a5e42", marginBottom: 8 }}>Reasons That Resonate</div>
-                {advanced.explainability.reasonsResonate.map((r, i) => (
-                  <div key={i} style={{ fontSize: 13, color: "#221516", paddingBottom: 4, borderBottom: i < advanced.explainability.reasonsResonate.length - 1 ? "1px solid rgba(34,21,22,0.06)" : "none", marginBottom: 4 }}>✓ {r}</div>
-                ))}
+                {advanced.explainability.reasonsResonate.map((r, i) => {
+                  const label = typeof r === "object" ? r.label : r;
+                  const count = typeof r === "object" ? r.count : null;
+                  return (
+                    <div key={i} style={{ fontSize: 13, color: "#221516", paddingBottom: 4, borderBottom: i < advanced.explainability.reasonsResonate.length - 1 ? "1px solid rgba(34,21,22,0.06)" : "none", marginBottom: 4, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span>✓ {label}</span>
+                      {count != null && <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 10, color: "#7a6f6a", flexShrink: 0 }}>n={count}</span>}
+                    </div>
+                  );
+                })}
               </div>
               {advanced.explainability.reasonsRejected?.length > 0 && (
                 <div style={s.card}>
                   <div style={{ ...s.cardLabel, color: "#8b2035", marginBottom: 8 }}>Reasons Rejected</div>
-                  {advanced.explainability.reasonsRejected.map((r, i) => (
-                    <div key={i} style={{ fontSize: 13, color: "#221516", paddingBottom: 4, borderBottom: i < advanced.explainability.reasonsRejected.length - 1 ? "1px solid rgba(34,21,22,0.06)" : "none", marginBottom: 4 }}>✗ {r}</div>
-                  ))}
+                  {advanced.explainability.reasonsRejected.map((r, i) => {
+                    const label = typeof r === "object" ? r.label : r;
+                    const count = typeof r === "object" ? r.count : null;
+                    return (
+                      <div key={i} style={{ fontSize: 13, color: "#221516", paddingBottom: 4, borderBottom: i < advanced.explainability.reasonsRejected.length - 1 ? "1px solid rgba(34,21,22,0.06)" : "none", marginBottom: 4, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span>✗ {label}</span>
+                        {count != null && <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 10, color: "#7a6f6a", flexShrink: 0 }}>n={count}</span>}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -2096,15 +2168,10 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
         )}
       </Section>
 
-      {/* AI Learning Roadmap */}
-      <RoadmapPanel title="AI Learning Roadmap" items={[
-        { label: "Recommendation Accuracy Over Time", description: "Requires logging accepted and rejected recommendations with a match score." },
-        { label: "False Positives — high score, rejected", description: "Recommendations nAia was confident about that customers rejected — the most valuable calibration signal." },
-        { label: "False Negatives — moderate score, purchased", description: "Recommendations with a modest score that led to purchase — evidence of underweighted signals." },
-        { label: "Match Score Calibration", description: "How well nAia's confidence score predicts actual customer acceptance rate." },
-        { label: "Scoring Weight Performance", description: "Which scoring dimensions (personality, occasion, feeling, fit) most reliably predict purchase." },
-        { label: "Model Improvement by Period", description: "Whether nAia's recommendation quality is improving over successive periods." },
-      ]} />
+      {/* AI Learning Roadmap — now in Data & AI panel */}
+      <div style={{ padding: "12px 20px", background: "rgba(34,21,22,0.02)", border: "1px solid rgba(34,21,22,0.07)", fontSize: 12, color: "#7a6f6a", fontFamily: SERIF, fontStyle: "italic" }}>
+        AI Learning Roadmap has moved to <strong style={{ fontStyle: "normal" }}>Data &amp; AI</strong> — click the button in the header.
+      </div>
     </>
   );
 }
@@ -2594,7 +2661,8 @@ function TabCommercial({ data, advanced, rel, sampleMode, dateRangeDays }) {
 
 
 // ══════════════════════════════════════════════════════════════════════════════
-// TAB 7 — DESIGN OPPORTUNITIES
+// TAB 5 — COLLECTION & OPPORTUNITIES (merged)
+// Combines Collection Intelligence + Design Opportunities into one tab
 // ══════════════════════════════════════════════════════════════════════════════
 
 const TAXONOMY_COLORS = { Expand: "#2a5e42", Resolve: "#8b2035", Target: "#d97706", Adapt: "#6b4800", Unlock: "#9CA3AF" };
@@ -2637,7 +2705,18 @@ function ActionCard({ item }) {
   );
 }
 
-function TabOpportunities({ data, phase4b2, advanced, rel, dateRangeDays }) {
+function TabCollectionOpportunities({ data, kpis, phase4b2, advanced, rel, sampleMode, dateRangeDays, roleLens }) {
+  return (
+    <>
+      {/* ── COLLECTION DIRECTION ───────────────────────────────────── */}
+      <TabCollection data={data} kpis={kpis} advanced={advanced} rel={rel} dateRangeDays={dateRangeDays} />
+      {/* ── DESIGN & MERCHANDISING ACTION PLAN ─────────────────────── */}
+      <TabOpportunitiesContent data={data} phase4b2={phase4b2} advanced={advanced} rel={rel} dateRangeDays={dateRangeDays} roleLens={roleLens} />
+    </>
+  );
+}
+
+function TabOpportunitiesContent({ data, phase4b2, advanced, rel, dateRangeDays, roleLens }) {
   const sortOrder = { high: 0, medium: 1, low: 2 };
   const actionItems = [];
 
@@ -2661,14 +2740,15 @@ function TabOpportunities({ data, phase4b2, advanced, rel, dateRangeDays }) {
   (data?.designActions ?? []).forEach((action, i) => {
     actionItems.push({
       id: `da-${i}`,
-      taxonomy: "Adapt",
-      headline: action.productTitle ?? action.product ?? "Design Action",
-      detail: action.recommendation,
-      action: action.recommendation,
-      evidence: action.evidence,
-      period: null,
+      taxonomy: action.actionType ?? "Adapt",
+      headline: action.product ?? action.productTitle ?? action.piece ?? "Design Action",
+      detail: action.interpretation ?? action.recommendation ?? action.liked,
+      action: action.recommendedTest ?? action.nextStep ?? action.recommendation,
+      evidence: action.observedEvidence ?? action.performance ?? action.evidence,
+      period: action.period ?? null,
       confidence: action.confidence ?? "medium",
       relevance: action.impact ?? "medium",
+      expectedOutcome: action.successMetric,
       source: "design-actions",
     });
   });
@@ -2719,41 +2799,180 @@ function TabOpportunities({ data, phase4b2, advanced, rel, dateRangeDays }) {
         )}
       </Section>
 
-      {/* Experiment Builder */}
-      <Section title="Experiment Builder" desc="Define a structured design experiment — hypothesis, variants, and the metric that will resolve it" status="awaiting-integration">
-        <div style={{ padding: "10px 14px", background: "rgba(34,21,22,0.03)", border: "1px solid rgba(34,21,22,0.10)", fontSize: 12, color: "#5c5350", marginBottom: 20, lineHeight: 1.6 }}>
-          Experiment Builder is a future feature. The form below shows what a structured design experiment looks like — it will be wired to nAia's data pipeline when the integration is ready. For now, use this template as a planning guide.
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 20 }}>
-          <div style={s.card}>
-            <div style={s.cardLabel}>Hypothesis</div>
-            <div style={{ fontSize: 13, color: "#7a6f6a", marginTop: 6, fontStyle: "italic" }}>
-              "If I [design change], then [customer segment] will [expected behaviour change], because [reasoning from data]."
-            </div>
-            <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-              {["Design Change", "Target Segment", "Desired Outcome", "Reasoning from Data"].map(field => (
-                <div key={field} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: "#f4f4f1", fontSize: 12, color: "#9CA3AF" }}>
-                  <span style={{ fontFamily: INTER, fontSize: 9, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a" }}>{field}</span>
-                  <span style={{ fontFamily: MONO, fontSize: 10 }}>[ awaiting integration ]</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div style={s.card}>
-            <div style={s.cardLabel}>Variants &amp; Success Metric</div>
-            <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-              {["Variant A (Control)", "Variant B (Change)", "Primary Metric", "Secondary Metric", "Minimum Sample Size", "Decision Deadline"].map(field => (
-                <div key={field} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: "#f4f4f1", fontSize: 12, color: "#9CA3AF" }}>
-                  <span style={{ fontFamily: INTER, fontSize: 9, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a" }}>{field}</span>
-                  <span style={{ fontFamily: MONO, fontSize: 10 }}>[ awaiting integration ]</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-        <AwaitingCard label="Experiment persistence" description="Experiment persistence and result tracking will be available after the next integration phase." />
-      </Section>
+      {/* Experiment Builder — now in Data & AI panel */}
+      <div style={{ padding: "12px 20px", background: "rgba(34,21,22,0.02)", border: "1px solid rgba(34,21,22,0.07)", fontSize: 12, color: "#7a6f6a", fontFamily: SERIF, fontStyle: "italic" }}>
+        Experiment Builder and AI Learning Roadmap have moved to <strong style={{ fontStyle: "normal" }}>Data &amp; AI</strong> — click the button in the header.
+      </div>
     </>
+  );
+}
+
+// ── Data & AI slide-over panel components ────────────────────────────────────
+
+function DataAiDefinitions() {
+  const INTER_L = "'Inter', -apple-system, sans-serif";
+  const SERIF_L = "'Cormorant Garamond', Garamond, serif";
+  const DEFS = [
+    ["Rating", "Average score (1–5) from outfit reviews and post-wear reviews. Excludes sessions with no review."],
+    ["Rewear rate", "% of post-wear reviews where the customer said they would wear the look again."],
+    ["Emotional achievement", "Classified from desiredFeeling vs actualAfterFeeling. Achieved = exact match. Partly = same emotional family. Not achieved = different family or no response."],
+    ["Recommendation response", "Immediate Love it / Okay / Not for me tap on a recommendation card — separate from post-outfit reviews."],
+    ["Explanation agreement", "% of recommendation responses that were 'Love it'. Requires explanation logging."],
+    ["Product coverage", "Whether at least one product exists that has been recommended to a personality group in the period."],
+    ["Outcome quality", "Whether that group achieved their desired feeling: avgRating ≥ 4 AND rewearRate ≥ 60%."],
+    ["Opportunity score", "Directional partial score: rating (30%) + rewear rate (25%) + confidence lift (25%) + data quality (20%). Excludes conversion and LTV until integrated."],
+    ["Selected period vs All Time", "Period selector (7d / 30d / 90d / All) filters styling sessions and reviews. Passport profiles, registered users, and completed passports are always All Time."],
+    ["Pending integrations", "Shopify commerce, wishlist/save, FASHN.ai VTO performance, and LTV are not integrated. Sections requiring these show Awaiting Integration."],
+  ];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <p style={{ fontFamily: SERIF_L, fontSize: 14, color: "#7a6f6a", fontStyle: "italic", margin: 0 }}>
+        Transparent definitions for every metric in this dashboard.
+      </p>
+      {DEFS.map(([term, def], i) => (
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "clamp(140px, 30%, 180px) 1fr", gap: 16, paddingBottom: 10, borderBottom: i < DEFS.length - 1 ? "1px solid rgba(34,21,22,0.05)" : "none" }}>
+          <div style={{ fontFamily: INTER_L, fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#221516" }}>{term}</div>
+          <div style={{ fontFamily: SERIF_L, fontSize: 13, color: "#7a6f6a", lineHeight: 1.6 }}>{def}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DataAiConfidenceLadder() {
+  const INTER_L = "'Inter', -apple-system, sans-serif";
+  const SERIF_L = "'Cormorant Garamond', Garamond, serif";
+  const LEVELS = [
+    { n: "n = 0",    label: "No Data",             desc: "No events recorded for this metric in the selected period.",                                                  color: "#9CA3AF" },
+    { n: "n = 1",    label: "Single Observation",  desc: "One data point. Directional only — do not act. Use to notice and monitor.",                                   color: "#6b4800" },
+    { n: "n = 2–4",  label: "Early Signal",        desc: "A pattern is forming but not yet reliable. Use to inform content and exploration, not production decisions.", color: "#6b4800" },
+    { n: "n = 5–9",  label: "Emerging Pattern",    desc: "Enough data to generate a hypothesis worth testing. Suitable for low-risk experiments.",                      color: "#5c5350" },
+    { n: "n = 10–19", label: "Established Pattern", desc: "Reliable pattern for design and merchandising decisions. Suitable for direct testing with clear success metric.", color: "#2a5e42" },
+    { n: "n ≥ 20",   label: "Strong Pattern",      desc: "High confidence. Suitable for collection-level commitments.",                                                  color: "#2a5e42" },
+  ];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <p style={{ fontFamily: SERIF_L, fontSize: 14, color: "#7a6f6a", fontStyle: "italic", margin: 0 }}>
+        Six-tier evidence ladder used across all dashboard metrics. Every confidence badge maps to a tier below.
+      </p>
+      {LEVELS.map((l, i) => (
+        <div key={i} style={{ display: "flex", gap: 14, alignItems: "flex-start", padding: "10px 12px", borderLeft: `3px solid ${l.color}`, background: "rgba(255,255,255,0.6)" }}>
+          <div style={{ minWidth: 70, fontFamily: INTER_L, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", color: "#9CA3AF", paddingTop: 2 }}>{l.n}</div>
+          <div>
+            <div style={{ fontFamily: INTER_L, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", color: l.color, marginBottom: 4 }}>{l.label}</div>
+            <div style={{ fontFamily: SERIF_L, fontSize: 13, color: "#5c5350", lineHeight: 1.5 }}>{l.desc}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DataAiIntegrationReadiness() {
+  const INTER_L = "'Inter', -apple-system, sans-serif";
+  const SERIF_L = "'Cormorant Garamond', Garamond, serif";
+  const ITEMS = [
+    { label: "Shopify Order & Revenue", status: "awaiting-integration", desc: "Purchase attribution, revenue per session, and LTV require Shopify order_placed webhook and order line-item matching." },
+    { label: "Save / Wishlist Events",  status: "awaiting-integration", desc: "Save-to-purchase attribution requires SavedLook.shopifyProductId mapping." },
+    { label: "FASHN.ai VTO Metrics",    status: "awaiting-integration", desc: "Try-on session count, completion rate, and fidelity score require FASHN.ai performance data integration." },
+    { label: "LTV Intelligence",        status: "awaiting-integration", desc: "Repeat purchase rate, avg days between purchases, and LTV by personality all require order data." },
+    { label: "Cart & Checkout Events",  status: "awaiting-integration", desc: "Journey mapping (Passport → StyleMe → Cart → Purchase) requires cart and checkout Shopify webhooks." },
+    { label: "Explanation Logging",     status: "awaiting-integration", desc: "Explanation agreement rate requires logging explanationAgreed and explanationVersion on each feedback record." },
+    { label: "Styling Sessions",        status: "live",                 desc: "StyleMe sessions, recommendations, and post-outfit reviews are live." },
+    { label: "Post-Wear Reviews",       status: "live",                 desc: "Post-wear feedback, desired feeling achievement, and rewear signal are live." },
+    { label: "Closet Uploads",          status: "live",                 desc: "Closet item uploads and try-on readiness assessment are live." },
+    { label: "Selfie Analysis",         status: "live",                 desc: "Selfie-based body and style signal extraction is live." },
+  ];
+  const statusStyle = (st) => st === "live" ? { color: "#2a5e42", bg: "rgba(42,94,66,0.08)" } : { color: "#5c5350", bg: "rgba(122,111,106,0.08)" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <p style={{ fontFamily: SERIF_L, fontSize: 14, color: "#7a6f6a", fontStyle: "italic", margin: "0 0 8px" }}>
+        Current integration status for all data sources.
+      </p>
+      {ITEMS.map((item, i) => {
+        const ss = statusStyle(item.status);
+        return (
+          <div key={i} style={{ padding: "10px 14px", background: "rgba(255,255,255,0.6)", border: "1px solid rgba(34,21,22,0.07)", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+            <div>
+              <div style={{ fontFamily: INTER_L, fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#221516", marginBottom: 4 }}>{item.label}</div>
+              <div style={{ fontFamily: SERIF_L, fontSize: 12, color: "#7a6f6a", lineHeight: 1.5 }}>{item.desc}</div>
+            </div>
+            <span style={{ fontSize: 7, fontFamily: INTER_L, fontWeight: 700, textTransform: "uppercase", letterSpacing: "2px", padding: "3px 8px", background: ss.bg, color: ss.color, whiteSpace: "nowrap", flexShrink: 0 }}>
+              {item.status === "live" ? "Live" : "Awaiting"}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DataAiLearningRoadmap() {
+  const SERIF_L = "'Cormorant Garamond', Garamond, serif";
+  const INTER_L = "'Inter', -apple-system, sans-serif";
+  const ITEMS = [
+    { label: "Recommendation Accuracy Over Time", description: "Requires logging accepted and rejected recommendations with a match score." },
+    { label: "False Positives — high score, rejected", description: "Recommendations nAia was confident about that customers rejected — the most valuable calibration signal." },
+    { label: "False Negatives — moderate score, purchased", description: "Recommendations with a modest score that led to purchase — evidence of underweighted signals." },
+    { label: "Match Score Calibration", description: "How well nAia's confidence score predicts actual customer acceptance rate." },
+    { label: "Scoring Weight Performance", description: "Which scoring dimensions (personality, occasion, feeling, fit) most reliably predict purchase." },
+    { label: "Model Improvement by Period", description: "Whether nAia's recommendation quality is improving over successive periods." },
+  ];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <p style={{ fontFamily: SERIF_L, fontSize: 14, color: "#7a6f6a", fontStyle: "italic", margin: "0 0 8px" }}>
+        Metrics that become available as nAia accumulates more session data and integrations are completed.
+      </p>
+      {ITEMS.map((item, i) => (
+        <div key={i} style={{ padding: "10px 14px", background: "rgba(255,255,255,0.6)", borderLeft: "2px solid rgba(34,21,22,0.10)" }}>
+          <div style={{ fontFamily: INTER_L, fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#5c5350", marginBottom: 4 }}>{item.label}</div>
+          <div style={{ fontFamily: SERIF_L, fontSize: 12, color: "#7a6f6a", lineHeight: 1.5 }}>{item.description}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DataAiExperimentBuilder() {
+  const INTER_L = "'Inter', -apple-system, sans-serif";
+  const SERIF_L = "'Cormorant Garamond', Garamond, serif";
+  const MONO_L = "'Courier New', Courier, monospace";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <p style={{ fontFamily: SERIF_L, fontSize: 14, color: "#7a6f6a", fontStyle: "italic", margin: 0 }}>
+        Experiment Builder is a future feature. The template below shows what a structured design experiment looks like — it will be wired to nAia's data pipeline when the integration is ready.
+      </p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
+        <div style={{ padding: "18px 22px", background: "rgba(255,255,255,0.6)", border: "1px solid rgba(34,21,22,0.07)" }}>
+          <div style={{ fontFamily: SERIF_L, fontSize: 16, fontWeight: 600, color: "#221516", marginBottom: 12 }}>Hypothesis</div>
+          <div style={{ fontSize: 13, color: "#7a6f6a", fontStyle: "italic", fontFamily: SERIF_L, marginBottom: 14 }}>
+            "If I [design change], then [customer segment] will [expected behaviour change], because [reasoning from data]."
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {["Design Change", "Target Segment", "Desired Outcome", "Reasoning from Data"].map(field => (
+              <div key={field} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: "#f4f4f1" }}>
+                <span style={{ fontFamily: INTER_L, fontSize: 9, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a" }}>{field}</span>
+                <span style={{ fontFamily: MONO_L, fontSize: 10, color: "#9CA3AF" }}>[ awaiting integration ]</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ padding: "18px 22px", background: "rgba(255,255,255,0.6)", border: "1px solid rgba(34,21,22,0.07)" }}>
+          <div style={{ fontFamily: SERIF_L, fontSize: 16, fontWeight: 600, color: "#221516", marginBottom: 12 }}>Variants &amp; Success Metric</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {["Variant A (Control)", "Variant B (Change)", "Primary Metric", "Secondary Metric", "Minimum Sample Size", "Decision Deadline"].map(field => (
+              <div key={field} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: "#f4f4f1" }}>
+                <span style={{ fontFamily: INTER_L, fontSize: 9, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a" }}>{field}</span>
+                <span style={{ fontFamily: MONO_L, fontSize: 10, color: "#9CA3AF" }}>[ awaiting integration ]</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div style={{ padding: "10px 14px", background: "rgba(122,111,106,0.06)", border: "1px solid rgba(34,21,22,0.07)", fontSize: 12, color: "#5c5350", fontFamily: SERIF_L }}>
+        Experiment persistence and result tracking will be available after the next integration phase.
+      </div>
+    </div>
   );
 }
 
