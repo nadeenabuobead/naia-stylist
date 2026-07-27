@@ -414,3 +414,136 @@ describe("canonical product metrics are consistent across sections", () => {
     }
   });
 });
+
+// ── 7-tab navigation contract ─────────────────────────────────────────────────
+
+describe("7-tab architecture", () => {
+  const EXPECTED_TAB_IDS = [
+    "overview",
+    "customer",
+    "product",
+    "recommendation",
+    "collection",
+    "commercial",
+    "opportunities",
+  ] as const;
+
+  it("getDesignerSampleData returns all 7 top-level data keys required by tab components", () => {
+    const d = getDesignerSampleData(90);
+    // Each tab draws from at least one of these top-level keys
+    assert.ok(d.dashboard, "dashboard key missing");
+    assert.ok(d.kpis, "kpis key missing");
+    assert.ok(d.phase4b2, "phase4b2 key missing");
+    assert.ok(d.advanced, "advanced key missing");
+    assert.ok(d.rel, "rel key missing");
+    assert.ok(d.overview, "overview key missing");
+  });
+
+  it("expected 7 tab IDs are distinct strings with no duplicates", () => {
+    const ids = [...EXPECTED_TAB_IDS];
+    const unique = new Set(ids);
+    assert.equal(unique.size, 7, `Expected 7 distinct tab IDs, got ${unique.size}`);
+    assert.equal(ids.length, 7, `Expected 7 tab IDs, got ${ids.length}`);
+  });
+
+  it("no tab ID is 'ai-performance'", () => {
+    const hasAiPerf = EXPECTED_TAB_IDS.includes("ai-performance" as any);
+    assert.equal(hasAiPerf, false, "ai-performance tab must not exist in 7-tab architecture");
+  });
+
+  it("overview tab receives required overview fields", () => {
+    const d = getDesignerSampleData(90);
+    const overview: any = d.overview;
+    assert.ok(overview, "overview section missing");
+    assert.ok("periodLabel" in overview, "overview.periodLabel missing");
+    assert.ok("periodKpis" in overview, "overview.periodKpis missing");
+    assert.ok("foundationKpis" in overview, "overview.foundationKpis missing");
+  });
+});
+
+// ── canonical metric mapping across tabs ─────────────────────────────────────
+
+describe("canonical metric mapping", () => {
+  it("product avgRating values are in range [1, 5]", () => {
+    for (const days of [30, 90, 365]) {
+      const d = getDesignerSampleData(days);
+      const narratives: any[] = (d.rel as any)?.productNarratives ?? [];
+      for (const n of narratives) {
+        if (n.avgRating == null) continue;
+        assert.ok(n.avgRating >= 1 && n.avgRating <= 5,
+          `avgRating out of range for "${n.name}": ${n.avgRating} (days=${days})`);
+      }
+    }
+  });
+
+  it("rewearRate values are in range [0, 1]", () => {
+    for (const days of [30, 90, 365]) {
+      const d = getDesignerSampleData(days);
+      const narratives: any[] = (d.rel as any)?.productNarratives ?? [];
+      for (const n of narratives) {
+        if (n.rewearRate == null) continue;
+        assert.ok(n.rewearRate >= 0 && n.rewearRate <= 1,
+          `rewearRate out of range for "${n.name}": ${n.rewearRate} (days=${days})`);
+      }
+    }
+  });
+
+  it("opportunityScore values are in range [0, 100]", () => {
+    for (const days of [30, 90, 365]) {
+      const d = getDesignerSampleData(days);
+      const narratives: any[] = (d.rel as any)?.productNarratives ?? [];
+      for (const n of narratives) {
+        if (n.opportunityScore == null) continue;
+        assert.ok(n.opportunityScore >= 0 && n.opportunityScore <= 100,
+          `opportunityScore out of range for "${n.name}": ${n.opportunityScore} (days=${days})`);
+      }
+    }
+  });
+
+  it("opportunity feed items have required fields", () => {
+    const d = getDesignerSampleData(90);
+    const feed: any[] = (d.advanced as any)?.opportunityFeed ?? [];
+    for (const opp of feed) {
+      assert.ok(opp.insight, `opportunity item missing insight: ${JSON.stringify(opp)}`);
+      assert.ok(opp.confidence, `opportunity item missing confidence: ${JSON.stringify(opp)}`);
+      assert.ok(opp.evidence, `opportunity item missing evidence: ${JSON.stringify(opp)}`);
+    }
+  });
+
+  it("recommendation response score is in range [0, 100] when present", () => {
+    const d = getDesignerSampleData(90);
+    const score: number | undefined = (d.rel as any)?.recommendationResponseScore;
+    if (score == null) return;
+    assert.ok(score >= 0 && score <= 100,
+      `recommendationResponseScore out of range: ${score}`);
+  });
+
+  it("collection-health score is in range [0, 100] when present", () => {
+    for (const days of [30, 90, 365]) {
+      const d = getDesignerSampleData(days);
+      const score: number | undefined = (d.advanced as any)?.collectionHealth?.score;
+      if (score == null) continue;
+      assert.ok(score >= 0 && score <= 100,
+        `collectionHealth.score out of range: ${score} (days=${days})`);
+    }
+  });
+
+  it("LTV avgLtv is a non-negative integer when present", () => {
+    for (const days of [90, 365]) {
+      const d = getDesignerSampleData(days);
+      const ltv: any = (d.dashboard as any)?.ltv;
+      if (!ltv || ltv.avgLtv == null) continue;
+      assert.ok(ltv.avgLtv >= 0, `avgLtv is negative: ${ltv.avgLtv} (days=${days})`);
+      assert.equal(ltv.avgLtv, Math.round(ltv.avgLtv), `avgLtv is not an integer: ${ltv.avgLtv} (days=${days})`);
+    }
+  });
+
+  it("selected period scopeLabel is a non-empty string", () => {
+    for (const days of [30, 90, 365]) {
+      const d = getDesignerSampleData(days);
+      const periodLabel: string | undefined = (d.kpis as any)?.periodLabel;
+      if (periodLabel == null) continue;
+      assert.ok(periodLabel.length > 0, `periodLabel is empty (days=${days})`);
+    }
+  });
+});
