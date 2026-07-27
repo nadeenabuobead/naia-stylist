@@ -663,3 +663,112 @@ describe("confidence threshold correctness", () => {
     }
   });
 });
+
+// ── New suites ────────────────────────────────────────────────────────────────
+
+import { test } from "node:test";
+
+// Math consistency
+test("post-wear completion math reconciles", () => {
+  for (const days of [7, 30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    const pc = d.phase4b2.postWearCompletion;
+    if (pc.totalWithPostWear > 0) {
+      assert.ok(pc.didWearItYes <= pc.totalWithPostWear, `didWearItYes (${pc.didWearItYes}) must be ≤ totalWithPostWear (${pc.totalWithPostWear}) for ${days}d`);
+      assert.ok(pc.feltPositive <= pc.totalWithPostWear, `feltPositive must be ≤ totalWithPostWear for ${days}d`);
+      assert.strictEqual(pc.wearRate, Math.round(pc.didWearItYes / pc.totalWithPostWear * 100), `wearRate must equal didWearItYes/totalWithPostWear*100 for ${days}d`);
+      assert.strictEqual(pc.positiveExperienceRate, Math.round(pc.feltPositive / pc.totalWithPostWear * 100), `positiveExperienceRate must equal feltPositive/totalWithPostWear*100 for ${days}d`);
+    }
+  }
+});
+
+test("emotional transformation fractions reconcile with displayed rates", () => {
+  for (const days of [7, 30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    const transforms = d.advanced.emotionalJourney.emotionalTransformations;
+    for (const t of transforms) {
+      if (t.achievedOf > 0) {
+        const derivedRate = Math.round(t.achievedCount / t.achievedOf * 100);
+        assert.strictEqual(t.achievedRate, derivedRate, `achievedRate (${t.achievedRate}%) must equal achievedCount/achievedOf*100 = ${t.achievedCount}/${t.achievedOf} = ${derivedRate}% for ${days}d`);
+      }
+    }
+  }
+});
+
+test("no numerator exceeds denominator in any fraction", () => {
+  for (const days of [7, 30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    const pc = d.phase4b2.postWearCompletion;
+    assert.ok(pc.didWearItYes <= pc.totalWithPostWear, "didWearItYes must not exceed totalWithPostWear");
+    assert.ok(pc.feltPositive <= pc.totalWithPostWear, "feltPositive must not exceed totalWithPostWear");
+    const ej = d.advanced.emotionalJourney;
+    const ejSum = (ej.achievedCount ?? 0) + (ej.partlyCount ?? 0) + (ej.notAchievedCount ?? 0);
+    assert.ok(ejSum === ej.totalDenominator || ej.totalDenominator === 0, `emotional journey counts (${ejSum}) must sum to denominator (${ej.totalDenominator})`);
+  }
+});
+
+test("no product with 0 reviews shows a non-null avgRating", () => {
+  for (const days of [7, 30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    for (const p of d.rel.productNarratives) {
+      if (p.sampleSize === 0) {
+        assert.strictEqual(p.avgRating, null, `${p.name} has 0 reviews but non-null avgRating in ${days}d`);
+      }
+    }
+  }
+});
+
+test("save-vs-purchase status is awaiting-integration", () => {
+  for (const days of [7, 30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    assert.strictEqual(d.advanced.saveVsPurchase.status, "awaiting-integration", "saveVsPurchase must be awaiting-integration since the integration is pending");
+  }
+});
+
+test("buy/skip categories sum to total", () => {
+  for (const days of [7, 30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    const bo = d.kpis.buyOrSkip;
+    const sum = bo.buy + (bo.save ?? 0) + bo.skip + bo.maybe + (bo.noDecision ?? 0);
+    assert.strictEqual(sum, bo.total, `buy+save+skip+maybe+noDecision (${sum}) must equal total (${bo.total}) for ${days}d`);
+  }
+});
+
+test("no static hardcoded 4.1 rating for products with 0 reviews", () => {
+  for (const days of [7, 30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    for (const p of d.rel.productNarratives) {
+      if (p.sampleSize === 0) {
+        assert.notStrictEqual(p.avgRating, 4.1, `Product ${p.name} with 0 reviews should not show hardcoded 4.1 rating`);
+      }
+    }
+  }
+});
+
+test("conversionStats is empty (no fabricated VTO data)", () => {
+  for (const days of [7, 30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    assert.strictEqual(d.dashboard.conversionStats.length, 0, "conversionStats must be empty — VTO/click tracking awaiting integration");
+  }
+});
+
+test("no LTV language in opportunity feed", () => {
+  for (const days of [7, 30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    for (const opp of d.advanced.opportunityFeed) {
+      assert.ok(!opp.insight.includes("LTV"), `opportunityFeed insight must not reference LTV (pending integration): "${opp.insight}"`);
+      if (opp.suggestedAction) {
+        assert.ok(!opp.suggestedAction.includes("LTV"), `suggestedAction must not reference LTV: "${opp.suggestedAction}"`);
+      }
+    }
+  }
+});
+
+test("emotional chain achievedRate is null (no fabricated rates)", () => {
+  for (const days of [7, 30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    for (const chain of d.rel.emotionalChain) {
+      assert.strictEqual(chain.achievedRate, null, "emotionalChain.achievedRate must be null (session count != WR denominator)");
+    }
+  }
+});

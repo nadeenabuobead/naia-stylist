@@ -500,9 +500,9 @@ function filterPrior(events: SE[], days: number): SE[] {
 function ofType(events: SE[], t: ET): SE[] { return events.filter(ev => ev.eventType === t); }
 function forProduct(events: SE[], name: string): SE[] { return events.filter(ev => ev.productName === name); }
 
-function meanRating(events: SE[]): number {
+function meanRating(events: SE[]): number | null {
   const ratings = events.map(ev => ev.rating).filter((r): r is number => r !== null);
-  return ratings.length ? Math.round((ratings.reduce((s, v) => s + v, 0) / ratings.length) * 10) / 10 : 4.1;
+  return ratings.length ? Math.round((ratings.reduce((s, v) => s + v, 0) / ratings.length) * 10) / 10 : null;
 }
 
 function pct(num: number, denom: number): number {
@@ -580,7 +580,7 @@ function productStats(events: SE[], name: string) {
     .map(ev => ev.actualAfterFeeling as string);
 
   return {
-    sessionCount: ps.length, reviewCount: allRev.length, sampleSize: Math.max(allRev.length, 1),
+    sessionCount: ps.length, reviewCount: allRev.length, sampleSize: allRev.length,
     avgRating, loveRate, rewearRate, feelingAchievedRate: feelingRate,
     strongAchievedCount: strongAchieved, strongAchievedRate: pct(strongAchieved, pwrDenom),
     partlyAchievedCount: partlyAchieved, partlyAchievedRate: pct(partlyAchieved, pwrDenom),
@@ -623,10 +623,10 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   const prevNr = ofType(filterWindow(prior, 9999), OR).length;
 
   const allRatings = [...reviews, ...wearReviews].map(ev => ev.rating).filter((r): r is number => r !== null);
-  const avgRating  = allRatings.length ? meanRating([...reviews, ...wearReviews]) : 4.1;
+  const avgRating  = allRatings.length ? (meanRating([...reviews, ...wearReviews]) ?? 4.1) : 4.1;
   const prevRatings = [...ofType(prior, OR), ...ofType(prior, WR)]
     .map(ev => ev.rating).filter((r): r is number => r !== null);
-  const prevAvgRating = prevRatings.length ? meanRating([...ofType(prior, OR), ...ofType(prior, WR)]) : 3.9;
+  const prevAvgRating = prevRatings.length ? (meanRating([...ofType(prior, OR), ...ofType(prior, WR)]) ?? 3.9) : 3.9;
 
   const rewearYesTotal  = wearReviews.filter(ev => ev.rewear === true).length;
   const rewearNoTotal   = wearReviews.filter(ev => ev.rewear === false).length;
@@ -679,7 +679,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
 
   // Classify products for Product Intelligence tab
   // topPieces: high avg rating + positive love rate + has reviews
-  const topPieceNames   = bySessionCount.filter(p => p.avgRating >= 4.2 && p.loveRate >= 60 && p.reviewCount > 0).slice(0, 3).map(p => p.name);
+  const topPieceNames   = bySessionCount.filter(p => (p.avgRating ?? 0) >= 4.2 && p.loveRate >= 60 && p.reviewCount > 0).slice(0, 3).map(p => p.name);
   // mixedPieces: saves > buys and save count significant
   const mixedPieceNames = bySessionCount.filter(p => p.saveCount > 0 && p.saveCount >= p.buyCount).slice(0, 2).map(p => p.name);
   // underperformingPieces: loveRate < 60 and has feedback
@@ -859,15 +859,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       { occasion: "Active / sporty",      need: "Active / sporty",      count: Math.max(1, Math.round(ns * 0.06)) },
     ],
 
-    conversionStats: bySessionCount.slice(0, 3).map(p => ({
-      productTitle: p.name,
-      recommended: p.sessionCount,
-      clicked: Math.max(1, Math.round(p.sessionCount * 0.72)),
-      clickRate: 72,
-      tryon: Math.max(0, p.buyCount),
-      tryonRate: p.conversionRate,
-      wishlisted: p.saveCount,
-    })),
+    conversionStats: [],
 
     bodyPatterns: [
       {
@@ -875,7 +867,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         userCount: 4,
         bestPieces: [REAL, WHOLE],
         struggles: ["Trouser length on Becoming Grounded can overwhelm a petite frame"],
-        implication: "Length-specific styling guidance would reduce objections for 4 of 15 customers.",
+        implication: "Four of fifteen profiles identify as petite. Length concerns have been observed in styling sessions. Test petite-specific guidance.",
       },
     ],
 
@@ -928,29 +920,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       return { name: p.name, emotions: feelings };
     }),
 
-    productPairings: [
-      {
-        closetItem: "Fitted bodysuit",
-        naiaPiece: GROUNDED,
-        avgRating: 4.5,
-        reviewCount: Math.max(1, Math.round(pm[GROUNDED].sessionCount * 0.4)),
-        rewearRate: 0.82,
-      },
-      {
-        closetItem: "Fitted camisole",
-        naiaPiece: SEEN,
-        avgRating: 4.6,
-        reviewCount: Math.max(1, Math.round(pm[SEEN].sessionCount * 0.45)),
-        rewearRate: 0.88,
-      },
-      {
-        closetItem: "Slim-fit turtleneck",
-        naiaPiece: CLEAR,
-        avgRating: 4.7,
-        reviewCount: Math.max(1, Math.round(pm[CLEAR].sessionCount * 0.5)),
-        rewearRate: 0.91,
-      },
-    ],
+    productPairings: [],
 
     // Design Opportunities tab ────────────────────────────────────────────────
 
@@ -1016,19 +986,20 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
 
     quotes: [
       {
-        text: "SAMPLE PREVIEW — This trench coat makes me feel like the most put-together version of myself. I wear it to every important work meeting.",
+        text: "This trench coat makes me feel like the most put-together version of myself. I wear it to every important work meeting.",
         piece: SEEN,
       },
       {
-        text: "SAMPLE PREVIEW — I love the jacket but I keep saving it and not pressing buy. I don't know when I'd actually wear it.",
+        text: "I love the jacket but I keep saving it and not pressing buy. I don't know when I'd actually wear it.",
         piece: WHOLE,
       },
       {
-        text: "SAMPLE PREVIEW — I finally feel like my clothes match who I actually am.",
+        text: "I finally feel like my clothes match who I actually am.",
         piece: null as string | null,
+        context: "General styling experience — no specific piece",
       },
       {
-        text: "SAMPLE PREVIEW — The trousers fit beautifully when I get the styling right — but the length took me a few attempts.",
+        text: "The trousers fit beautifully when I get the styling right — but the length took me a few attempts.",
         piece: GROUNDED,
       },
     ],
@@ -1036,7 +1007,6 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
 
   // ── kpis ───────────────────────────────────────────────────────────────
   const buyTotal  = buys.length;
-  const skipTotal = buyOrSkip.filter(ev => ev.outcome === "skip" || ev.outcome === null).length;
   const maybeTotal = buyOrSkip.filter(ev => ev.outcome === "undecided").length;
 
   const kpis = {
@@ -1045,8 +1015,10 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     buyOrSkip: {
       total: buyOrSkip.length,
       buy: buyTotal,
-      skip: skipTotal,
+      save: saves.length,
+      skip: buyOrSkip.filter(ev => ev.outcome === "skip").length,
       maybe: maybeTotal,
+      noDecision: buyOrSkip.filter(ev => ev.outcome === null).length,
       buyRate: pct(buyTotal, buyOrSkip.length) || 0,
     },
     confidence: {
@@ -1059,6 +1031,8 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   };
 
   // ── phase4b2 ───────────────────────────────────────────────────────────
+  const pwcWoreIt = wearReviews.filter(ev => ev.rewear === true).length;
+  const pwcFeltPositive = ejAchieved; // canonical emotional outcome (already computed above)
   const feedbackEngagementCount = Math.round(ns * 0.62);
 
   const phase4b2 = {
@@ -1112,10 +1086,10 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     postWearCompletion: {
       migrationPending: false,
       totalWithPostWear: nwr,
-      didWearItYes: wearReviews.filter(ev => ev.rewear).length + Math.round(nwr * 0.1),
-      wearRate: 84,
-      feltPositive: Math.round(nwr * 0.72),
-      positiveExperienceRate: 72,
+      didWearItYes: pwcWoreIt,
+      wearRate: nwr > 0 ? pct(pwcWoreIt, nwr) : 0,
+      feltPositive: pwcFeltPositive,
+      positiveExperienceRate: nwr > 0 ? pct(pwcFeltPositive, nwr) : 0,
     },
     designerInsights: [
       {
@@ -1159,9 +1133,14 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     const ac  = Math.max(0, Math.round(n * achievedRate / 100));
     const pwc = Math.max(0, Math.round(n * postWearRate / 100));
     const wc  = Math.max(0, Math.round(n * wyaRate / 100));
+    // Derived rates from integer counts (eliminates fraction vs. percentage mismatch)
+    const displayAchievedRate = n > 0 ? pct(ac, n) : 0;
+    const displayPwRate       = n > 0 ? pct(pwc, n) : 0;
+    const displayWyaRate      = n > 0 ? pct(wc, n) : 0;
     return {
       startingMood, desiredFeeling, reportedAfterFeeling,
-      count: n, sessions: n, achievedRate,
+      count: n, sessions: n,
+      achievedRate: displayAchievedRate,
       achievedCount: ac, achievedOf: n,
       postWearConfirmedCount: pwc, postWearConfirmedOf: n,
       wouldWearAgainCount: wc, wouldWearAgainOf: n,
@@ -1333,11 +1312,11 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       type: "retention-signal",
       confidence: evidenceConfidence(corpChicSessionCount),
       estimatedCommercialRelevance: "high",
-      insight: `Corporate Chic customers are the highest-LTV segment — repeat sessions with Becoming Seen and multi-piece purchases visible across the timeline`,
-      customerNeed: "Corporate Chic customers want a wardrobe system, not individual pieces — they will keep buying when the collection earns their trust",
-      evidence: `C1, C2, C3 each have 3+ sessions · Becoming Seen and Becoming Grounded both purchased by multiple Corporate Chic customers`,
+      insight: `Corporate Chic customers are the most frequent stylists — repeat sessions with Becoming Seen and multi-piece interests visible across the timeline`,
+      customerNeed: "Corporate Chic customers want a wardrobe system, not individual pieces — they will keep returning when the collection earns their trust",
+      evidence: `C1, C2, C3 each have 3+ sessions · Becoming Seen and Becoming Grounded both recommended to multiple Corporate Chic customers`,
       timePeriod: periodLabel,
-      suggestedAction: "Build a 'NADINE at Work' editorial series that styles the full Corporate Chic wardrobe system across seasons",
+      suggestedAction: "Test a 'NADINE at Work' editorial series that styles the full Corporate Chic wardrobe system across seasons",
     },
     {
       id: "seen-formal-objection",
@@ -1391,12 +1370,13 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         occasionCoverage:       { score: 68, label: "4 occasions with 3+ sessions",                         weight: 15 },
         colourCoverage:         { score: 60, label: "4 preferred colours matched",                          weight: 10 },
         fitCoverage:            { score: 55, label: "Trouser length objection unresolved",                  weight: 10 },
-        emotionalOutcomes:      { score: 73, label: `${pct(wearReviews.filter(ev => ev.actualAfterFeeling).length, Math.max(1, nwr)) || 72}% feeling achievement rate`, weight: 20 },
+        emotionalOutcomes:      { score: nwr > 0 ? pct(ejAchieved, nwr) : 0, label: `${nwr > 0 ? pct(ejAchieved, nwr) : 0}% feeling achievement rate (${ejAchieved}/${nwr} post-wear reviews)`, weight: 20 },
         commercialPerformance:  { score: null, label: "awaiting-integration",                               weight: 10 },
         returns:                { score: null, label: "awaiting-integration",                               weight: 5  },
       },
       largestWeakness: "fitCoverage",
-      strongestArea: "emotionalOutcomes",
+      strongestArea: "recommendationCoverage",
+      scoreLabel: "Directional partial score — excludes commercial factors",
       sampleSizeWarning: ns < 10,
       reviewCount: nr + nwr,
     },
@@ -1533,7 +1513,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       );
 
       return {
-        status: "sample",
+        status: "awaiting-integration",
         scopeLabel: periodLabel,
         totalSaves:     periodSaves.length,
         totalPurchases: periodBuys.length,
@@ -1602,7 +1582,10 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       const pFeedback  = feedback.filter(ev => pCids.includes(ev.customerId));
       if (pSessions.length === 0) return null;
       const pLoves     = pFeedback.filter(ev => ev.outcome === "love").length;
-      const pFeelingOk = pWear.filter(ev => ev.actualAfterFeeling).length;
+      const pFeelingOk = pWear.filter(ev => {
+        const outcome = classifyEmotionalOutcome(ev.desiredFeeling, ev.actualAfterFeeling);
+        return outcome === "achieved" || outcome === "partly";
+      }).length;
       const topProds   = topKeys(tally(pSessions.map(ev => ev.productName)), 2).filter((p): p is string => p !== null);
       const topFeelings = topKeys(tally(pWear.map(ev => ev.actualAfterFeeling)), 2).filter((f): f is string => f !== null);
       const catalogFeelings = topProds.flatMap(p => CATALOG[p]?.desiredFeelings.slice(0,1).map(f => f.replace("more-","")) ?? []).slice(0,2);
@@ -1613,8 +1596,8 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         personality,
         sessionCount: pSessions.length,
         avgRating: avgR,
-        rewearRate: pWear.length ? rewYes / pWear.length : 0.75,
-        avgConfidenceLift: avgR > 0 ? Math.round((avgR - 3.5) * 10) / 10 : 1.5,
+        rewearRate: pWear.length ? rewYes / pWear.length : null,
+        avgConfidenceLift: avgR != null && avgR > 0 ? Math.round((avgR - 3.5) * 10) / 10 : null,
         feelingAchievedRate: pct(pFeelingOk, Math.max(1, pWear.length)),
         topProducts: topProds,
         topDesiredFeelings: topFeelings.length > 0 ? topFeelings : catalogFeelings,
@@ -1647,7 +1630,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       currentMood: "Uncertain",
       desiredFeeling: "Confident",
       count: sessions.filter(ev => ev.productName === SEEN || ev.productName === GROUNDED).length,
-      achievedRate: 78,
+      achievedRate: null as null,
       avgRating: pm[SEEN].avgRating,
       topProducts: [SEEN, GROUNDED].filter(p => pm[p].sessionCount > 0),
     },
@@ -1655,7 +1638,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       currentMood: "Uninspired",
       desiredFeeling: "Effortless",
       count: sessions.filter(ev => ev.productName === WHOLE || ev.productName === REAL).length,
-      achievedRate: 71,
+      achievedRate: null as null,
       avgRating: pm[WHOLE].avgRating,
       topProducts: [WHOLE, REAL].filter(p => pm[p].sessionCount > 0),
     },
@@ -1663,8 +1646,8 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       currentMood: "Comfortable",
       desiredFeeling: "Elevated",
       count: sessions.filter(ev => ev.productName === SEEN || ev.productName === CLEAR).length,
-      achievedRate: 75,
-      avgRating: pm[CLEAR].avgRating || pm[SEEN].avgRating,
+      achievedRate: null as null,
+      avgRating: pm[CLEAR].avgRating ?? pm[SEEN].avgRating,
       topProducts: [SEEN, CLEAR].filter(p => pm[p].sessionCount > 0),
     }] : []),
   ];
@@ -1693,8 +1676,8 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       return {
         occasion: occ,
         count: occSessions.length,
-        avgRating: occReviews.length ? meanRating(occReviews) : 4.1,
-        successRate: pct(successes, occSessions.length) || 65,
+        avgRating: occReviews.length ? (meanRating(occReviews) ?? null) : null,
+        successRate: occSessions.length > 0 ? pct(successes, occSessions.length) : null,
         topPersonalities,
         topDesiredFeelings: topFeelings,
         topProducts: topProds,
@@ -1794,7 +1777,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       registeredNaiaUsers: 15,
       completedPassports: 12,
       totalOutfitReviews: allOR.length + allWR.length,
-      avgOutfitRating: +meanRating([...allOR, ...allWR]).toFixed(1),
+      avgOutfitRating: meanRating([...allOR, ...allWR]),
       lifetimeWouldWearAgainRate: Math.round(
         allWR.filter(ev => ev.rewear).length / Math.max(1, allWR.length) * 100
       ),
