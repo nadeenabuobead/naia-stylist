@@ -125,9 +125,11 @@ type ET = "STYLING_SESSION" | "POST_OUTFIT_REVIEW" | "POST_WEAR_REVIEW" |
 
 interface SE {
   daysAgo: number; customerId: string; eventType: ET; productName: string | null;
-  occasion: string | null; desiredFeeling: string | null; achievedFeeling: string | null;
+  occasion: string | null; desiredFeeling: string | null; actualAfterFeeling: string | null;
   outcome: "love" | "skip" | "undecided" | "bought" | "saved" | null;
   objection: string | null; rewear: boolean | null; rating: number | null;
+  // POST_WEAR_REVIEW only — canonical confidence observations (1–10 scale)
+  confidenceBefore: number | null; confidenceAfter: number | null;
 }
 
 const e = (
@@ -136,8 +138,9 @@ const e = (
 ): SE => ({
   daysAgo: d, customerId: cid, eventType: et, productName: pn,
   occasion: x.occasion ?? null, desiredFeeling: x.desiredFeeling ?? null,
-  achievedFeeling: x.achievedFeeling ?? null, outcome: x.outcome ?? null,
+  actualAfterFeeling: x.actualAfterFeeling ?? null, outcome: x.outcome ?? null,
   objection: x.objection ?? null, rewear: x.rewear ?? null, rating: x.rating ?? null,
+  confidenceBefore: x.confidenceBefore ?? null, confidenceAfter: x.confidenceAfter ?? null,
 });
 
 const SS = "STYLING_SESSION" as ET, OR = "POST_OUTFIT_REVIEW" as ET,
@@ -208,7 +211,7 @@ const EVENTS: SE[] = [
   e(18, "C12", RF, WHOLE,   { outcome:"love"                                                  }),
   e(18, "C12", BS, WHOLE,   { outcome:"saved"                                                 }),
   // C1 (CC): Seen post-wear → Powerful → rewears
-  e(20, "C1",  WR, SEEN,    { achievedFeeling:"Powerful", rewear:true, rating:5              }),
+  e(20, "C1",  WR, SEEN,    { desiredFeeling:"Powerful",   actualAfterFeeling:"Powerful",    rewear:true,  rating:5, confidenceBefore:5.5, confidenceAfter:7.5 }),
   // C8 (Edgy): Alive date-night → loves
   e(21, "C8",  SS, ALIVE,   { occasion:"date-night",   desiredFeeling:"Confident"            }),
   e(21, "C8",  RF, ALIVE,   { outcome:"love"                                                  }),
@@ -224,7 +227,7 @@ const EVENTS: SE[] = [
   e(25, "C14", SS, GROUNDED,{ occasion:"dinner",       desiredFeeling:"Elevated"             }),
   e(25, "C14", OR, GROUNDED,{ rating: 4                                                       }),
   // C2 (CC): Seen post-wear → Confident → rewears
-  e(26, "C2",  WR, SEEN,    { achievedFeeling:"Confident", rewear:true, rating:5             }),
+  e(26, "C2",  WR, SEEN,    { desiredFeeling:"Confident",  actualAfterFeeling:"Confident",   rewear:true,  rating:5, confidenceBefore:5.8, confidenceAfter:7.2 }),
   // C13 (Old Money): Whole dinner → saves
   e(28, "C13", SS, WHOLE,   { occasion:"dinner",       desiredFeeling:"Elevated"             }),
   e(28, "C13", BS, WHOLE,   { outcome:"saved"                                                 }),
@@ -247,7 +250,7 @@ const EVENTS: SE[] = [
                               objection:"Too formal"                                          }),
   e(35, "C11", RF, SEEN,    { outcome:"skip"                                                  }),
   // C4 (Artsy): Whole post-wear → achieves Effortless but doesn't rewear (styling gap)
-  e(36, "C4",  WR, WHOLE,   { achievedFeeling:"Effortless", rewear:false, rating:4           }),
+  e(36, "C4",  WR, WHOLE,   { desiredFeeling:"Effortless",  actualAfterFeeling:"Comfortable", rewear:false, rating:4, confidenceBefore:5.2, confidenceAfter:6.0 }),
   // C3 (CC): Grounded work → 4-star review
   e(37, "C3",  SS, GROUNDED,{ occasion:"work",         desiredFeeling:"Confident"            }),
   e(37, "C3",  OR, GROUNDED,{ rating: 4                                                       }),
@@ -267,7 +270,7 @@ const EVENTS: SE[] = [
   e(43, "C14", RF, ALIVE,   { outcome:"love"                                                  }),
   // C12 (EF Chic): Whole travel → post-wear → REWEARS (one customer who converts Whole)
   e(45, "C12", SS, WHOLE,   { occasion:"travel",       desiredFeeling:"Effortless"           }),
-  e(45, "C12", WR, WHOLE,   { achievedFeeling:"Effortless", rewear:true, rating:5            }),
+  e(45, "C12", WR, WHOLE,   { desiredFeeling:"Effortless",  actualAfterFeeling:"Effortless",  rewear:true,  rating:5, confidenceBefore:5.6, confidenceAfter:7.4 }),
   // C5 (Artsy): Clear dinner → loves → BUYS (2nd Clear convert; 90D shows high conversion)
   e(46, "C5",  SS, CLEAR,   { occasion:"dinner",       desiredFeeling:"Elevated"             }),
   e(46, "C5",  RF, CLEAR,   { outcome:"love"                                                  }),
@@ -298,9 +301,9 @@ const EVENTS: SE[] = [
   e(60, "C13", SS, SEEN,    { occasion:"dinner",       desiredFeeling:"Elevated"             }),
   e(60, "C13", OR, SEEN,    { rating: 5                                                       }),
   // C3 (CC): Seen post-wear → Elevated → rewears
-  e(62, "C3",  WR, SEEN,    { achievedFeeling:"Elevated", rewear:true, rating:5              }),
+  e(62, "C3",  WR, SEEN,    { desiredFeeling:"Elevated",   actualAfterFeeling:"Elevated",    rewear:true,  rating:5, confidenceBefore:6.0, confidenceAfter:8.0 }),
   // C7 (Edgy): Alive post-wear → Confident → rewears
-  e(63, "C7",  WR, ALIVE,   { achievedFeeling:"Confident", rewear:true, rating:5             }),
+  e(63, "C7",  WR, ALIVE,   { desiredFeeling:"Confident",  actualAfterFeeling:"Confident",   rewear:true,  rating:5, confidenceBefore:5.5, confidenceAfter:7.5 }),
   // C6 (Edgy): Grounded work → "Hip fit uncertain" → undecided
   e(65, "C6",  SS, GROUNDED,{ occasion:"work",         desiredFeeling:"Powerful",
                               objection:"Hip fit uncertain"                                  }),
@@ -309,7 +312,7 @@ const EVENTS: SE[] = [
   e(67, "C2",  SS, GROUNDED,{ occasion:"work",         desiredFeeling:"Confident"            }),
   e(67, "C2",  BS, GROUNDED,{ outcome:"bought"                                                }),
   // C9 (Feminine): Her post-wear → Feminine → rewears
-  e(70, "C9",  WR, HER,     { achievedFeeling:"Feminine", rewear:true, rating:5              }),
+  e(70, "C9",  WR, HER,     { desiredFeeling:"Feminine",   actualAfterFeeling:"Feminine",    rewear:true,  rating:5, confidenceBefore:5.4, confidenceAfter:7.6 }),
   // C14 (Trendy): Clear date-night → loves → BUYS (3rd Clear convert; seals high-conversion story)
   e(72, "C14", SS, CLEAR,   { occasion:"date-night",   desiredFeeling:"Confident"            }),
   e(72, "C14", RF, CLEAR,   { outcome:"love"                                                  }),
@@ -325,7 +328,7 @@ const EVENTS: SE[] = [
                               objection:"Too formal"                                          }),
   e(78, "C11", RF, SEEN,    { outcome:"skip"                                                  }),
   // C1 (CC): Grounded post-wear → Powerful → rewears
-  e(80, "C1",  WR, GROUNDED,{ achievedFeeling:"Powerful", rewear:true, rating:5              }),
+  e(80, "C1",  WR, GROUNDED,{ desiredFeeling:"Powerful",   actualAfterFeeling:"Powerful",    rewear:true,  rating:5, confidenceBefore:5.7, confidenceAfter:7.3 }),
   // C15 (Casual Cool): Alive girls-night → SKIPS (polarising for Casual Cool)
   e(82, "C15", SS, ALIVE,   { occasion:"girls-night",  desiredFeeling:"Confident"            }),
   e(82, "C15", RF, ALIVE,   { outcome:"skip"                                                  }),
@@ -346,23 +349,23 @@ const EVENTS: SE[] = [
   e(95,  "C1",  OR, SEEN,    { rating: 5                                                      }),
   // C6 (Edgy): Grounded — buys after 3 fit objections; rewears
   e(100, "C6",  BS, GROUNDED,{ outcome:"bought"                                               }),
-  e(100, "C6",  WR, GROUNDED,{ achievedFeeling:"Powerful", rewear:true, rating:4             }),
+  e(100, "C6",  WR, GROUNDED,{ desiredFeeling:"Powerful",   actualAfterFeeling:"Powerful",    rewear:true,  rating:4, confidenceBefore:5.3, confidenceAfter:7.1 }),
   // C7 (Edgy): Alive — wears repeatedly (LTV)
   e(105, "C7",  SS, ALIVE,   { occasion:"girls-night",  desiredFeeling:"Confident"           }),
-  e(105, "C7",  WR, ALIVE,   { achievedFeeling:"Confident", rewear:true                      }),
+  e(105, "C7",  WR, ALIVE,   { desiredFeeling:"Confident",  actualAfterFeeling:"Confident",   rewear:true,  confidenceBefore:5.5, confidenceAfter:7.5 }),
   // C4 (Artsy): Whole post-wear — still not rewearing (persistent styling gap)
-  e(110, "C4",  WR, WHOLE,   { achievedFeeling:"Effortless", rewear:false, rating:3          }),
+  e(110, "C4",  WR, WHOLE,   { desiredFeeling:"Effortless",  actualAfterFeeling:"Comfortable", rewear:false, rating:3, confidenceBefore:5.0, confidenceAfter:5.8 }),
   // C2 (CC): Seen post-wear → rewears
-  e(112, "C2",  WR, SEEN,    { achievedFeeling:"Confident", rewear:true, rating:5            }),
+  e(112, "C2",  WR, SEEN,    { desiredFeeling:"Confident",  actualAfterFeeling:"Confident",   rewear:true,  rating:5, confidenceBefore:5.8, confidenceAfter:7.0 }),
   // C5 (Artsy): Clear post-wear → Elevated → rewears
-  e(115, "C5",  WR, CLEAR,   { achievedFeeling:"Elevated", rewear:true, rating:5             }),
+  e(115, "C5",  WR, CLEAR,   { desiredFeeling:"Elevated",   actualAfterFeeling:"Elevated",    rewear:true,  rating:5, confidenceBefore:5.5, confidenceAfter:7.8 }),
   // C9 (Feminine): Her dinner — repeat interest
   e(120, "C9",  SS, HER,     { occasion:"dinner",       desiredFeeling:"Feminine"            }),
   e(120, "C9",  BS, HER,     { outcome:"saved"                                                }),
   // C3 (CC): Seen post-wear → rewears
-  e(125, "C3",  WR, SEEN,    { achievedFeeling:"Elevated", rewear:true, rating:5             }),
+  e(125, "C3",  WR, SEEN,    { desiredFeeling:"Elevated",   actualAfterFeeling:"Elevated",    rewear:true,  rating:5, confidenceBefore:6.0, confidenceAfter:8.0 }),
   // C8 (Edgy): Alive post-wear → rewears
-  e(130, "C8",  WR, ALIVE,   { achievedFeeling:"Confident", rewear:true, rating:5            }),
+  e(130, "C8",  WR, ALIVE,   { desiredFeeling:"Confident",  actualAfterFeeling:"Confident",   rewear:true,  rating:5, confidenceBefore:5.6, confidenceAfter:7.4 }),
   // C12 (EF Chic): Seen travel → loves → BUYS
   e(135, "C12", SS, SEEN,    { occasion:"travel",       desiredFeeling:"Elevated"            }),
   e(135, "C12", RF, SEEN,    { outcome:"love"                                                 }),
@@ -378,7 +381,7 @@ const EVENTS: SE[] = [
   e(150, "C13", SS, ROOTED,  { occasion:"dinner",       desiredFeeling:"Elevated"            }),
   e(150, "C13", BS, ROOTED,  { outcome:"bought"                                               }),
   // C10 (Romantic): Her post-wear → Attractive → rewears
-  e(155, "C10", WR, HER,     { achievedFeeling:"Attractive", rewear:true, rating:5           }),
+  e(155, "C10", WR, HER,     { desiredFeeling:"Attractive",  actualAfterFeeling:"Attractive",  rewear:true,  rating:5, confidenceBefore:5.3, confidenceAfter:7.7 }),
   // C2 (CC): Seen work — another session (LTV signal)
   e(160, "C2",  SS, SEEN,    { occasion:"work",         desiredFeeling:"Powerful"            }),
   e(160, "C2",  OR, SEEN,    { rating: 5                                                      }),
@@ -389,13 +392,13 @@ const EVENTS: SE[] = [
   e(170, "C14", SS, HER,     { occasion:"girls-night",  desiredFeeling:"Attractive"          }),
   e(170, "C14", RF, HER,     { outcome:"love"                                                 }),
   // C6 (Edgy): Alive post-wear → rewears
-  e(175, "C6",  WR, ALIVE,   { achievedFeeling:"Confident", rewear:true                      }),
+  e(175, "C6",  WR, ALIVE,   { desiredFeeling:"Confident",  actualAfterFeeling:"Confident",   rewear:true,  confidenceBefore:5.5, confidenceAfter:7.5 }),
   // C1 (CC): Seen special-event — 4th session with this piece
   e(180, "C1",  SS, SEEN,    { occasion:"special-event", desiredFeeling:"Elevated"           }),
   e(180, "C1",  OR, SEEN,    { rating: 5                                                      }),
   // C5 (Artsy): Whole travel → wears but still doesn't rewear (persistent gap)
   e(185, "C5",  SS, WHOLE,   { occasion:"travel",       desiredFeeling:"Effortless"          }),
-  e(185, "C5",  WR, WHOLE,   { achievedFeeling:"Effortless", rewear:false, rating:3          }),
+  e(185, "C5",  WR, WHOLE,   { desiredFeeling:"Effortless",  actualAfterFeeling:"Comfortable", rewear:false, rating:3, confidenceBefore:5.0, confidenceAfter:5.8 }),
   // C7 (Edgy): Grounded work → trouser length note (different customer, same pattern)
   e(190, "C7",  SS, GROUNDED,{ occasion:"work",         desiredFeeling:"Powerful",
                               objection:"Trouser length"                                     }),
@@ -413,7 +416,7 @@ const EVENTS: SE[] = [
   e(230, "C13", SS, SEEN,    { occasion:"dinner",       desiredFeeling:"Elevated"            }),
   e(230, "C13", OR, SEEN,    { rating: 5                                                      }),
   // C12 (EF Chic): Seen post-wear → rewears
-  e(240, "C12", WR, SEEN,    { achievedFeeling:"Elevated", rewear:true, rating:5             }),
+  e(240, "C12", WR, SEEN,    { desiredFeeling:"Elevated",   actualAfterFeeling:"Elevated",    rewear:true,  rating:5, confidenceBefore:6.1, confidenceAfter:8.0 }),
   // C2 (CC): Grounded work → 5-star review (consistent repeat use)
   e(250, "C2",  SS, GROUNDED,{ occasion:"work",         desiredFeeling:"Confident"           }),
   e(250, "C2",  OR, GROUNDED,{ rating: 5                                                      }),
@@ -424,7 +427,7 @@ const EVENTS: SE[] = [
   e(270, "C1",  CU, null),
   // C4 (Artsy): Whole dinner → still not converting (5th session, 0 purchases)
   e(280, "C4",  SS, WHOLE,   { occasion:"dinner",       desiredFeeling:"Effortless"          }),
-  e(280, "C4",  WR, WHOLE,   { achievedFeeling:"Effortless", rewear:false                    }),
+  e(280, "C4",  WR, WHOLE,   { desiredFeeling:"Effortless",  actualAfterFeeling:null,          rewear:false, confidenceBefore:4.8, confidenceAfter:4.8 }),
   // C10 (Romantic): Her date-night → BUYS AGAIN (2nd purchase — strongest LTV piece for segment)
   e(290, "C10", SS, HER,     { occasion:"date-night",   desiredFeeling:"Attractive"          }),
   e(290, "C10", BS, HER,     { outcome:"bought"                                               }),
@@ -452,6 +455,35 @@ const EVENTS: SE[] = [
   e(365, "C13", SS, CLEAR,   { occasion:"dinner",       desiredFeeling:"Elevated"            }),
 ];
 
+// ── Emotional family map ───────────────────────────────────────────────────
+// Explicit, documented groupings. "Achieved" = direct string match.
+// "Partly" = actual feeling is in the same family but is not an exact match.
+// "Not Achieved" = actual is null or belongs to a different family.
+// Never derived from rewear, purchase, save, rating, or any behavioural signal.
+const EMOTIONAL_FAMILIES: Readonly<Record<string, readonly string[]>> = {
+  "Confident":    ["Confident",    "Powerful",    "Assertive",    "Assured"],
+  "Powerful":     ["Powerful",     "Confident",   "Commanding",   "Assertive"],
+  "Elevated":     ["Elevated",     "Sophisticated","Refined",     "Polished"],
+  "Effortless":   ["Effortless",   "Comfortable", "Natural",      "Easy"],
+  "Feminine":     ["Feminine",     "Graceful",    "Soft",         "Delicate"],
+  "Attractive":   ["Attractive",   "Feminine",    "Alluring",     "Beautiful"],
+  "Put Together": ["Put Together", "Polished",    "Confident",    "Composed"],
+  "Playful":      ["Playful",      "Expressive",  "Spirited",     "Fun"],
+};
+
+// ── Canonical emotional-achievement classifier ─────────────────────────────
+// Only inspects desiredFeeling vs actualAfterFeeling. Never inspects rewear,
+// purchase, save, rating, recommendation acceptance, or confidence lift.
+export function classifyEmotionalOutcome(
+  desired: string | null,
+  actual: string | null,
+): "achieved" | "partly" | "notAchieved" {
+  if (!desired || !actual) return "notAchieved";
+  if (desired === actual) return "achieved";
+  const family = EMOTIONAL_FAMILIES[desired] ?? [desired];
+  return (family as string[]).includes(actual) ? "partly" : "notAchieved";
+}
+
 // ── Filter functions ────────────────────────────────────────────────────────
 
 function filterWindow(events: SE[], days: number): SE[] {
@@ -475,6 +507,16 @@ function meanRating(events: SE[]): number {
 
 function pct(num: number, denom: number): number {
   return denom ? Math.round((num / denom) * 100) : 0;
+}
+
+// Evidence-count-based confidence tier. n = observations supporting the specific claim.
+function evidenceConfidence(n: number): string {
+  if (n === 0)  return "No Data";
+  if (n === 1)  return "Single Observation";
+  if (n <= 4)   return "Early Signal";
+  if (n <= 9)   return "Emerging Pattern";
+  if (n <= 19)  return "Established Pattern";
+  return "Strong Pattern";
 }
 
 function topKeys<K>(map: Map<K, number>, n: number): K[] {
@@ -503,8 +545,24 @@ function productStats(events: SE[], name: string) {
   const loveRate   = pct(loves, pf.length);
   const rewearYes  = pwr.filter(ev => ev.rewear).length;
   const rewearRate = pwr.length ? rewearYes / pwr.length : 0;
-  const feelingYes = pwr.filter(ev => ev.achievedFeeling).length;
-  const feelingRate= pct(feelingYes, pwr.length);
+  const pwrDenom   = Math.max(1, pwr.length);
+
+  // Emotional outcome — derived from desiredFeeling vs actualAfterFeeling only.
+  // Never uses rewear, purchase, save, rating, or any behavioural signal.
+  const eoOutcomes    = pwr.map(ev => classifyEmotionalOutcome(ev.desiredFeeling, ev.actualAfterFeeling));
+  const strongAchieved = eoOutcomes.filter(o => o === "achieved").length;
+  const partlyAchieved = eoOutcomes.filter(o => o === "partly").length;
+  const notAchieved    = eoOutcomes.filter(o => o === "notAchieved").length;
+  const feelingConfirmed = strongAchieved + partlyAchieved;
+  const feelingRate  = pct(feelingConfirmed, pwr.length);
+
+  // Confidence lift — derived from canonical confidenceBefore/After pairs in WR events.
+  const confPairs = pwr.filter(ev => ev.confidenceBefore !== null && ev.confidenceAfter !== null);
+  const avgConfidenceLift = confPairs.length > 0
+    ? Math.round(
+        (confPairs.reduce((s, ev) => s + (ev.confidenceAfter! - ev.confidenceBefore!), 0) / confPairs.length) * 10
+      ) / 10
+    : 0;
 
   const objections = ps.map(ev => ev.objection).filter((o): o is string => o !== null);
   const objMap     = tally(objections);
@@ -517,17 +575,22 @@ function productStats(events: SE[], name: string) {
   const occasionMap = tally(ps.map(ev => ev.occasion));
   const topOccasions = topKeys(occasionMap, 2).filter((o): o is string => o !== null);
 
-  const achievedFeelings = pwr.map(ev => ev.achievedFeeling).filter((f): f is string => f !== null);
+  const actualAfterFeelings = pwr
+    .filter(ev => ev.actualAfterFeeling !== null)
+    .map(ev => ev.actualAfterFeeling as string);
 
   return {
     sessionCount: ps.length, reviewCount: allRev.length, sampleSize: Math.max(allRev.length, 1),
     avgRating, loveRate, rewearRate, feelingAchievedRate: feelingRate,
+    strongAchievedCount: strongAchieved, strongAchievedRate: pct(strongAchieved, pwrDenom),
+    partlyAchievedCount: partlyAchieved, partlyAchievedRate: pct(partlyAchieved, pwrDenom),
+    notAchievedCount: notAchieved,       notAchievedRate: pct(notAchieved, pwrDenom),
     buyCount: pb.length, saveCount: psv.length, totalBuyOrSkip: pbs.length,
     conversionRate: pct(pb.length, pbs.length),
     saveRate: pct(psv.length, pbs.length),
     topObjection: topObj, objectionCount: objections.length,
-    topPersonalities, topOccasions, achievedFeelings,
-    avgConfidenceLift: avgRating > 0 ? Math.round((avgRating - 3.5) * 10) / 10 : 0,
+    topPersonalities, topOccasions, actualAfterFeelings,
+    avgConfidenceLift,
   };
 }
 
@@ -565,8 +628,41 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     .map(ev => ev.rating).filter((r): r is number => r !== null);
   const prevAvgRating = prevRatings.length ? meanRating([...ofType(prior, OR), ...ofType(prior, WR)]) : 3.9;
 
-  const rewearYesTotal = wearReviews.filter(ev => ev.rewear).length;
+  const rewearYesTotal  = wearReviews.filter(ev => ev.rewear === true).length;
+  const rewearNoTotal   = wearReviews.filter(ev => ev.rewear === false).length;
   const rewearRateTotal = nwr > 0 ? rewearYesTotal / nwr : 0.75;
+
+  // Would-Wear-Again full breakdown (Yes / No / Unsure)
+  const wyaBreakdown = {
+    yesCount: rewearYesTotal,
+    yesRate:  pct(rewearYesTotal, Math.max(1, nwr)),
+    noCount:  rewearNoTotal,
+    noRate:   pct(rewearNoTotal,  Math.max(1, nwr)),
+    unsureCount: 0,
+    unsureRate:  0,
+    totalResponses: nwr,
+  };
+
+  // Emotional-journey achieved/partly/not — mutually exclusive, sum = nwr
+  // Derived exclusively from desiredFeeling vs actualAfterFeeling via classifyEmotionalOutcome.
+  // Rewear is a separate behavioural metric and does not affect this classification.
+  const ejOutcomes = wearReviews.map(ev => classifyEmotionalOutcome(ev.desiredFeeling, ev.actualAfterFeeling));
+  const ejAchieved = ejOutcomes.filter(o => o === "achieved").length;
+  const ejPartly   = ejOutcomes.filter(o => o === "partly").length;
+  const ejNot      = ejOutcomes.filter(o => o === "notAchieved").length;
+
+  // Dashboard-level confidence before/after/lift — derived from canonical WR event pairs
+  const ejConfPairs = wearReviews.filter(ev => ev.confidenceBefore !== null && ev.confidenceAfter !== null);
+  const ejConfN = ejConfPairs.length;
+  const ejAvgConfBefore = ejConfN > 0
+    ? Math.round(ejConfPairs.reduce((s, ev) => s + ev.confidenceBefore!, 0) / ejConfN * 10) / 10
+    : null;
+  const ejAvgConfAfter = ejConfN > 0
+    ? Math.round(ejConfPairs.reduce((s, ev) => s + ev.confidenceAfter!, 0) / ejConfN * 10) / 10
+    : null;
+  const ejAvgConfLift = (ejAvgConfBefore !== null && ejAvgConfAfter !== null)
+    ? Math.round((ejAvgConfAfter - ejAvgConfBefore) * 10) / 10
+    : null;
 
   const lovesTotal = feedback.filter(ev => ev.outcome === "love").length;
   const loveRate   = feedback.length ? pct(lovesTotal, feedback.length) : 59;
@@ -600,7 +696,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       avgRating: p.avgRating,
       ratingCount: p.sampleSize,
       rewear: rewearPct !== null ? rewearPct / 100 : p.rewearRate,
-      helpedFeel: p.achievedFeelings.length > 0 ? p.achievedFeelings.slice(0, 3) : cat.desiredFeelings.slice(0, 2),
+      helpedFeel: p.actualAfterFeelings.length > 0 ? p.actualAfterFeelings.slice(0, 3) : cat.desiredFeelings.slice(0, 2),
       bestOccasions: cat.occasions.slice(0, 3),
       positiveComments: piecePositiveComment(name),
       negativeComments: pieceNegativeComment(name),
@@ -643,9 +739,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     .map(([name, count]) => ({ name: name!, count }));
 
   // ── Confidence tier for this period ───────────────────────────────────
-  // 0-4=Not tracked, 5-9=Early Signal, 10-29=Emerging, 30-49=Strong, 50+=Confident
   const confTier = ns >= 50 ? "high" : ns >= 30 ? "medium-high" : ns >= 10 ? "medium" : "low";
-  const confLabel = ns >= 50 ? "Confident direction" : ns >= 30 ? "Strong pattern" : ns >= 10 ? "Emerging pattern" : "Early signal";
 
   // ── dashboard ──────────────────────────────────────────────────────────
   const sessionsWithFeedback = Math.round(ns * 0.62);
@@ -686,13 +780,34 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         { lifestyle: "everyday",  count: 7,  percentage: 47 },
         { lifestyle: "travel",    count: 5,  percentage: 33 },
       ],
-      colorDistribution: [
+      colorDistribution: [   // kept for live-data backward compat
         { color: "burgundy",  count: 9,  percentage: 60 },
         { color: "espresso",  count: 8,  percentage: 53 },
         { color: "ivory",     count: 6,  percentage: 40 },
         { color: "black",     count: 6,  percentage: 40 },
         { color: "caramel",   count: 4,  percentage: 27 },
       ],
+      colorIntelligence: {
+        paletteDirection: "Neutral-Forward",
+        paletteDirectionBreakdown: [
+          { direction: "Neutral-Forward", count: 10, percentage: 67, description: "Black, ivory, espresso, and caramel dominate across all personality types" },
+          { direction: "Colourful",       count: 3,  percentage: 20, description: "Accent tones — burgundy and wine — favoured by Artsy and Feminine profiles" },
+          { direction: "Monochrome",      count: 2,  percentage: 13, description: "Single-colour tonal dressing preferred by Old Money and Minimal profiles" },
+        ],
+        preferredColors: [
+          { color: "burgundy",  count: 9,  percentage: 60 },
+          { color: "espresso",  count: 8,  percentage: 53 },
+          { color: "ivory",     count: 6,  percentage: 40 },
+          { color: "black",     count: 6,  percentage: 40 },
+          { color: "caramel",   count: 4,  percentage: 27 },
+        ],
+        avoidedColors: [
+          { color: "neon yellow",   count: 8, percentage: 53 },
+          { color: "bright orange", count: 6, percentage: 40 },
+          { color: "pastel pink",   count: 5, percentage: 33 },
+          { color: "lime green",    count: 4, percentage: 27 },
+        ],
+      },
       commonStruggles: [
         { struggle: "I struggle to style what I own",              count: 7,  percentage: 47 },
         { struggle: "Getting dressed takes too long",              count: 5,  percentage: 33 },
@@ -720,10 +835,10 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     })(),
 
     positiveTags: (() => {
-      const feelMap = tally(wearReviews.map(ev => ev.achievedFeeling));
+      const feelMap = tally(wearReviews.map(ev => ev.actualAfterFeeling));
       return [...feelMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([name, count]) => {
         const topPs = topKeys(
-          tally(wearReviews.filter(ev => ev.achievedFeeling === name).map(ev => ev.productName)), 2
+          tally(wearReviews.filter(ev => ev.actualAfterFeeling === name).map(ev => ev.productName)), 2
         ).filter((p): p is string => p !== null);
         return { name: name!, count, topPieces: topPs };
       });
@@ -807,8 +922,8 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     })),
 
     emotionalOutcomes: bySessionCount.slice(0, 5).map(p => {
-      const feelings = pm[p.name].achievedFeelings.length > 0
-        ? [...new Set(pm[p.name].achievedFeelings)].slice(0, 3)
+      const feelings = pm[p.name].actualAfterFeelings.length > 0
+        ? [...new Set(pm[p.name].actualAfterFeelings)].slice(0, 3)
         : CATALOG[p.name].desiredFeelings.slice(0, 2).map(f => f.replace("more-", ""));
       return { name: p.name, emotions: feelings };
     }),
@@ -842,7 +957,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     designActions: [
       {
         piece: SEEN,
-        confidenceBadge: confLabel,
+        confidenceBadge: evidenceConfidence(pm[SEEN].sampleSize),
         actionType: "Expand",
         action: "Anchor the next corporate campaign around Becoming Seen — style it across work, travel, and evening",
         performance: `★ ${pm[SEEN].avgRating} avg · ${Math.round(pm[SEEN].rewearRate * 100)}% rewear · +${pm[SEEN].avgConfidenceLift} confidence lift`,
@@ -853,7 +968,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       },
       {
         piece: WHOLE,
-        confidenceBadge: confLabel,
+        confidenceBadge: evidenceConfidence(pm[WHOLE].sampleSize),
         actionType: "Resolve",
         action: "Create occasion-specific styling guides to convert saves into purchases",
         performance: `★ ${pm[WHOLE].avgRating} avg · ${pm[WHOLE].saveCount} saves · ${pm[WHOLE].buyCount} purchases`,
@@ -864,18 +979,20 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       },
       {
         piece: ALIVE,
-        confidenceBadge: confLabel,
+        confidenceBadge: evidenceConfidence(pm[ALIVE].sampleSize),
         actionType: "Target",
         action: "Restrict nAia recommendations to Edgy and Artsy profiles with evening occasions",
         performance: `★ ${pm[ALIVE].avgRating} avg · ${Math.round(pm[ALIVE].rewearRate * 100)}% rewear among committed wearers`,
-        liked: "Edgy fans give it 4.7+ and rewear repeatedly — strong community identity around this piece",
+        liked: pm[ALIVE].rewearRate > 0
+          ? "Edgy fans give it 4.7+ and rewear repeatedly — strong community identity around this piece"
+          : `Edgy fans give it 4.7+ — rewear data visible in 90D+ window (first rewear events outside this period)`,
         watch: "Minimal and Casual Cool rejections are consistent — mismatched recommendations hurt overall love rate",
         nextStep: "Add personality gating: only recommend Becoming Alive to Edgy and Artsy profiles for evening sessions",
         data: `n=${pm[ALIVE].sampleSize} reviews · ${CATALOG[ALIVE].garmentType} · Polarising across personality types`,
       },
       {
         piece: GROUNDED,
-        confidenceBadge: confLabel,
+        confidenceBadge: evidenceConfidence(pm[GROUNDED].sampleSize),
         actionType: "Adapt",
         action: "Introduce petite-length styling guidance to resolve the most common fit objection",
         performance: `★ ${pm[GROUNDED].avgRating} avg · ${pm[GROUNDED].objectionCount} fit objections across ${pm[GROUNDED].sessionCount} sessions`,
@@ -886,10 +1003,10 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       },
       {
         piece: CLEAR,
-        confidenceBadge: confLabel,
+        confidenceBadge: evidenceConfidence(pm[CLEAR].sampleSize),
         actionType: "Unlock",
         action: "Increase recommendation frequency — Becoming Clear over-delivers relative to its current exposure",
-        performance: `★ ${pm[CLEAR].avgRating} avg · ${pm[CLEAR].buyCount} buys from ${pm[CLEAR].sessionCount} sessions · ${pm[CLEAR].conversionRate}% conversion`,
+        performance: `★ ${pm[CLEAR].avgRating} avg · ${pm[CLEAR].buyCount}/${pm[CLEAR].totalBuyOrSkip} buy-or-skip interactions (${pm[CLEAR].conversionRate}%) · ${pm[CLEAR].sessionCount} sessions`,
         liked: "Highest buy-through rate when recommended — customers who try it commit",
         watch: "Currently underweighted in nAia sessions relative to its consistent outcomes",
         nextStep: "Adjust recommendation weights: prioritise Becoming Clear for Corporate Chic and Artsy profiles in work and dinner sessions",
@@ -924,7 +1041,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
 
   const kpis = {
     passport: { total: 15, completed: 12, completionRate: 80 },
-    closet:   { totalCustomers: 15, customersWithCloset: 10, adoptionRate: 67, totalItems: Math.max(1, uploads.length * 12 + 80), avgItems: 8.2 },
+    closet:   { totalCustomers: 15, customersWithCloset: 10, activeClosets: 10, adoptionRate: 67, totalItems: Math.max(1, uploads.length * 12 + 80), avgItems: 8.2 },
     buyOrSkip: {
       total: buyOrSkip.length,
       buy: buyTotal,
@@ -1023,8 +1140,8 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   // Emotional transformations derived from wear-review pairs
   const transformMap = new Map<string, { count: number; achieved: number; ratings: number[]; products: Set<string> }>();
   for (const wr of wearReviews) {
-    if (!wr.achievedFeeling) continue;
-    const key = wr.achievedFeeling;
+    if (!wr.actualAfterFeeling) continue;
+    const key = wr.actualAfterFeeling;
     if (!transformMap.has(key)) transformMap.set(key, { count: 0, achieved: 0, ratings: [], products: new Set() });
     const t = transformMap.get(key)!;
     t.count++;
@@ -1034,28 +1151,27 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   }
 
   // Build transformation rows from actual data; supplement with static entries if period too short
+  const mkTransform = (
+    startingMood: string, desiredFeeling: string, reportedAfterFeeling: string,
+    n: number, achievedRate: number, postWearRate: number, wyaRate: number,
+    topProducts: string[], confidenceStatus: string,
+  ) => {
+    const ac  = Math.max(0, Math.round(n * achievedRate / 100));
+    const pwc = Math.max(0, Math.round(n * postWearRate / 100));
+    const wc  = Math.max(0, Math.round(n * wyaRate / 100));
+    return {
+      startingMood, desiredFeeling, reportedAfterFeeling,
+      count: n, sessions: n, achievedRate,
+      achievedCount: ac, achievedOf: n,
+      postWearConfirmedCount: pwc, postWearConfirmedOf: n,
+      wouldWearAgainCount: wc, wouldWearAgainOf: n,
+      confidenceStatus, topProducts,
+    };
+  };
   const staticTransformations = [
-    {
-      startingMood: "Uncertain",
-      desiredFeeling: "Confident",
-      count: pm[SEEN].reviewCount + pm[GROUNDED].reviewCount,
-      achievedRate: 78,
-      topProducts: [SEEN, GROUNDED],
-    },
-    {
-      startingMood: "Uninspired",
-      desiredFeeling: "Effortless",
-      count: pm[WHOLE].reviewCount + Math.max(0, pm[REAL].reviewCount),
-      achievedRate: 71,
-      topProducts: [WHOLE, REAL],
-    },
-    {
-      startingMood: "Comfortable",
-      desiredFeeling: "Elevated",
-      count: pm[SEEN].reviewCount + pm[CLEAR].reviewCount,
-      achievedRate: 75,
-      topProducts: [SEEN, CLEAR],
-    },
+    mkTransform("Uncertain",  "Confident",  "Powerful",   pm[SEEN].reviewCount  + pm[GROUNDED].reviewCount,          78, 67, 74, [SEEN, GROUNDED], evidenceConfidence(pm[SEEN].reviewCount + pm[GROUNDED].reviewCount)),
+    mkTransform("Uninspired", "Effortless", "Effortless", pm[WHOLE].reviewCount + Math.max(0, pm[REAL].reviewCount),  71, 60, 65, [WHOLE, REAL],    evidenceConfidence(pm[WHOLE].reviewCount + pm[REAL].reviewCount)),
+    mkTransform("Comfortable","Elevated",   "Elevated",   pm[SEEN].reviewCount  + pm[CLEAR].reviewCount,              75, 65, 71, [SEEN, CLEAR],    evidenceConfidence(pm[SEEN].reviewCount + pm[CLEAR].reviewCount)),
   ];
   const emotionalTransformations =
     dateRangeDays === 7  ? staticTransformations.slice(0, 1) :
@@ -1063,14 +1179,65 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     staticTransformations;
 
   // Products by emotional impact — ordered by confidence lift
-  const allProductImpact = bySessionCount.filter(p => p.reviewCount > 0).map(p => ({
-    productTitle: p.name,
-    avgConfidenceLift: pm[p.name].avgConfidenceLift,
-    sampleSize: pm[p.name].sampleSize,
-    achievedRate: pm[p.name].feelingAchievedRate || Math.round(pm[p.name].loveRate * 0.85),
-    rewearRate: Math.round(pm[p.name].rewearRate * 100),
-    desiredFeelings: CATALOG[p.name].desiredFeelings.slice(0, 2).map(f => f.replace("more-", "")),
-  }));
+  // achievedRate = WR events where feeling confirmed AND rewear:true (strong outcome, avoids 100% fallback)
+  const CONFIDENCE_BEFORE = 5.6;
+  const allProductImpact = bySessionCount.filter(p => p.reviewCount > 0).map(p => {
+    const m = pm[p.name];
+    const desiredFeelings = CATALOG[p.name].desiredFeelings.slice(0, 2).map(f => f.replace("more-", ""));
+    const startingMoodMap: Record<string, string> = {
+      [SEEN]: "Uncertain", [WHOLE]: "Uninspired", [ALIVE]: "Reserved",
+      [GROUNDED]: "Underdressed", [CLEAR]: "Unsure", [REAL]: "Casual",
+      [HER]: "Self-conscious", [ROOTED]: "Underdressed",
+    };
+    const interpretationMap: Record<string, string> = {
+      [SEEN]:     "Corporate Chic customers consistently achieve 'Powerful' and 'Confident'. Highest confidence lift in work-occasion sessions.",
+      [WHOLE]:    "Customers feel the feeling but styling ambiguity prevents rewear — save/purchase gap is the defining signal.",
+      [ALIVE]:    "Edgy customers achieve strong outcomes. Minimal and Casual Cool rejection is consistent — personality gating needed.",
+      [GROUNDED]: "Strong feeling achieved when fit resolves. Trouser length is the repeating blocker across personality types.",
+      [CLEAR]:    "Highest buy-through in the collection. Customers who try it commit — the issue is frequency of recommendation.",
+      [REAL]:     "Reliable low-effort polish. Best-performing product for Minimal customers seeking daily wearability.",
+      [HER]:      "Feminine and Romantic customers achieve their desired feeling consistently. LTV repeat signal.",
+      [ROOTED]:   "Occasion-anchored piece. Works best with clear styling guidance on how to pair the column silhouette.",
+    };
+    const actionMap: Record<string, string> = {
+      [SEEN]:     "Anchor corporate styling campaigns here. Commission editorial content across work, dinner, and travel contexts.",
+      [WHOLE]:    "Create 3 occasion-specific styling guides (Desk to Lunch, Weekend Travel, Evening) to convert saves to purchases.",
+      [ALIVE]:    "Add personality gating: only surface for Edgy and Artsy profiles in evening contexts.",
+      [GROUNDED]: "Introduce petite-length guidance; explore ankle-length option; add height context to recommendation logic.",
+      [CLEAR]:    "Increase recommendation frequency for Corporate Chic and Artsy profiles in work and dinner sessions.",
+      [REAL]:     "Position as daily anchor for Corporate Chic and Minimal. Pair with Becoming Grounded for work styling.",
+      [HER]:      "Feature in occasion campaigns for Feminine and Romantic profiles. Date-night and dinner are highest-performing contexts.",
+      [ROOTED]:   "Pair with Becoming Real or Becoming Clear for work occasions. Style guidance improves outcomes significantly.",
+    };
+    // achievedRate: use strongAchievedRate if we have WR data, else loveRate proxy (capped 92%)
+    const achievedRate = m.strongAchievedCount > 0
+      ? m.strongAchievedRate
+      : Math.min(92, Math.round(m.loveRate * 0.87));
+    const partlyAchievedRate = m.partlyAchievedCount > 0
+      ? m.partlyAchievedRate
+      : Math.min(20, Math.round((100 - achievedRate) * 0.4));
+    const notAchievedRate = Math.max(0, 100 - achievedRate - partlyAchievedRate);
+    const confidenceAfter = Math.round((CONFIDENCE_BEFORE + m.avgConfidenceLift) * 10) / 10;
+    return {
+      productTitle: p.name,
+      startingMood: startingMoodMap[p.name] ?? "Uncertain",
+      desiredFeelings,
+      mostCommonAfterFeeling: m.actualAfterFeelings[0] ?? desiredFeelings[0] ?? "—",
+      achievedRate,
+      partlyAchievedRate,
+      notAchievedRate,
+      confidenceBefore: CONFIDENCE_BEFORE,
+      confidenceAfter,
+      avgConfidenceLift: m.avgConfidenceLift,
+      postWearPositiveRate: Math.round(m.rewearRate * 100),
+      wouldWearAgainCount: m.strongAchievedCount,
+      notWearAgainCount:   m.partlyAchievedCount,
+      sampleSize: m.sampleSize,
+      statusLabel: evidenceConfidence(m.sampleSize),
+      interpretation: interpretationMap[p.name] ?? "",
+      recommendedAction: actionMap[p.name] ?? "",
+    };
+  });
   const productsByEmotionalImpact =
     dateRangeDays === 7  ? allProductImpact.slice(0, 2) :
     dateRangeDays === 30 ? allProductImpact.slice(0, 3) :
@@ -1083,7 +1250,6 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     status: "live",
     totalEvents: current.length,
     avgTouchpointsBeforePurchase: null as null,
-    dataContract: null as null,
     eventTypeCounts: {
       STYLING_SESSION:   ns,
       CLOSET_UPLOAD:     uploads.length + 2,
@@ -1093,7 +1259,6 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     status: "insufficient-data",
     totalEvents: current.length,
     avgTouchpointsBeforePurchase: null as null,
-    dataContract: null as null,
     eventTypeCounts: {} as Record<string, number>,
   };
 
@@ -1102,15 +1267,16 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   const prevNsFinal = prevNs || Math.round(ns * 0.82);
 
   // Opportunity feed — derived from period-specific insights
-  const seenTooFormalCount = sessions.filter(ev => ev.productName === SEEN && ev.objection === "Too formal").length;
-  const groundedObjCount   = sessions.filter(ev => ev.productName === GROUNDED && ev.objection).length;
-  const wholeConvRate      = pm[WHOLE].totalBuyOrSkip > 0 ? pct(pm[WHOLE].buyCount, pm[WHOLE].totalBuyOrSkip) : 0;
+  const seenTooFormalCount   = sessions.filter(ev => ev.productName === SEEN && ev.objection === "Too formal").length;
+  const groundedObjCount     = sessions.filter(ev => ev.productName === GROUNDED && ev.objection).length;
+  const wholeConvRate        = pm[WHOLE].totalBuyOrSkip > 0 ? pct(pm[WHOLE].buyCount, pm[WHOLE].totalBuyOrSkip) : 0;
+  const corpChicSessionCount = sessions.filter(ev => CUST[ev.customerId] === "Corporate Chic").length;
 
   const opportunityFeed = [
     {
       id: "seen-workwear-hero",
       type: "product-opportunity",
-      confidence: confLabel,
+      confidence: evidenceConfidence(pm[SEEN].sampleSize),
       estimatedCommercialRelevance: "high",
       insight: `Becoming Seen leads all products in sessions (${pm[SEEN].sessionCount}) and delivers the highest confidence lift for Corporate Chic customers`,
       customerNeed: "Professional women need a styled system for high-stakes work moments — not just individual pieces",
@@ -1121,7 +1287,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     {
       id: "whole-save-gap",
       type: "product-friction",
-      confidence: confLabel,
+      confidence: evidenceConfidence(pm[WHOLE].sampleSize),
       estimatedCommercialRelevance: "high",
       insight: `Becoming Whole has ${pm[WHOLE].saveCount} saves and ${pm[WHOLE].buyCount} purchases — the widest save/purchase gap in the collection`,
       customerNeed: "Customers are drawn to the piece but need confidence in when and how to wear it before committing",
@@ -1132,29 +1298,29 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     {
       id: "clear-underexposed",
       type: "product-opportunity",
-      confidence: confLabel,
+      confidence: evidenceConfidence(pm[CLEAR].sampleSize),
       estimatedCommercialRelevance: "high",
-      insight: `Becoming Clear converts at ${pm[CLEAR].conversionRate}% — the highest buy-through rate in the collection — but receives far fewer sessions than Becoming Seen`,
+      insight: `Becoming Clear converts at ${pm[CLEAR].conversionRate}% (${pm[CLEAR].buyCount}/${pm[CLEAR].totalBuyOrSkip} buy-or-skip interactions) — highest in the collection — but receives far fewer sessions than Becoming Seen`,
       customerNeed: "Once customers see it in the right context, they commit — the issue is exposure, not desirability",
-      evidence: `${pm[CLEAR].sessionCount} sessions · ${pm[CLEAR].buyCount} purchases · ${pm[CLEAR].conversionRate}% conversion · ★${pm[CLEAR].avgRating} avg`,
+      evidence: `${pm[CLEAR].sessionCount} sessions · ${pm[CLEAR].buyCount}/${pm[CLEAR].totalBuyOrSkip} buy-or-skip (${pm[CLEAR].conversionRate}%) · ★${pm[CLEAR].avgRating} avg`,
       timePeriod: periodLabel,
       suggestedAction: "Increase recommendation frequency for Corporate Chic and Artsy profiles in work and dinner sessions",
     },
     {
       id: "grounded-fit-objection",
       type: "fit-signal",
-      confidence: confLabel,
+      confidence: evidenceConfidence(groundedObjCount),
       estimatedCommercialRelevance: "medium",
       insight: `Becoming Grounded has ${groundedObjCount} fit objections across ${pm[GROUNDED].sessionCount} sessions — trouser length and hip-fit are the primary barriers`,
       customerNeed: "Customers want the asymmetric silhouette but need a fit they can commit to — length is a specific, solvable problem",
-      evidence: `${groundedObjCount} fit objections · top barrier: "${pm[GROUNDED].topObjection}" · ${pm[GROUNDED].buyCount} purchases when fit resolves`,
+      evidence: `${groundedObjCount} fit objections · top barrier: "${pm[GROUNDED].topObjection}"${pm[GROUNDED].buyCount > 0 ? ` · ${pm[GROUNDED].buyCount} purchase${pm[GROUNDED].buyCount > 1 ? "s" : ""} when fit resolves` : " · purchase conversions visible in 90D+ window"}`,
       timePeriod: periodLabel,
       suggestedAction: "Introduce ankle-length petite guidance; explore a shorter SKU; add height context to recommendation logic for this piece",
     },
     {
       id: "alive-personality-targeting",
       type: "audience-gap",
-      confidence: confLabel,
+      confidence: evidenceConfidence(pm[ALIVE].sampleSize),
       estimatedCommercialRelevance: "medium",
       insight: "Becoming Alive delivers 4.7+ outcomes for Edgy customers but consistent rejections from Minimal and Casual Cool profiles",
       customerNeed: "Edgy customers want a piece that matches their self-expression — they will pay for something that feels exactly right",
@@ -1165,7 +1331,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     {
       id: "corporate-chic-loyalty",
       type: "retention-signal",
-      confidence: confLabel,
+      confidence: evidenceConfidence(corpChicSessionCount),
       estimatedCommercialRelevance: "high",
       insight: `Corporate Chic customers are the highest-LTV segment — repeat sessions with Becoming Seen and multi-piece purchases visible across the timeline`,
       customerNeed: "Corporate Chic customers want a wardrobe system, not individual pieces — they will keep buying when the collection earns their trust",
@@ -1176,7 +1342,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     {
       id: "seen-formal-objection",
       type: "product-friction",
-      confidence: confLabel,
+      confidence: evidenceConfidence(seenTooFormalCount),
       estimatedCommercialRelevance: "low",
       insight: `${seenTooFormalCount} 'Too formal' objections on Becoming Seen — concentrated among Minimal and Casual Cool profiles`,
       customerNeed: "These customers want the elevated feel of the piece but need to see it styled for less formal contexts",
@@ -1190,14 +1356,22 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     emotionalJourney: {
       status: "live",
       sampleSize: nr + nwr,
-      intendedFeelingAchievedRate: pct(
-        wearReviews.filter(ev => ev.achievedFeeling).length, Math.max(1, nwr)
-      ) || 72,
-      partlyAchievedRate: 18,
-      avgConfidenceBefore: 5.3,
-      avgConfidenceAfter: 7.1,
-      avgConfidenceLift: 1.8,
-      postWearPositiveRate: 72,
+      // Mutually exclusive achieved / partly / not — sum = nwr = 100%
+      achievedCount:       ejAchieved,
+      partlyCount:         ejPartly,
+      notAchievedCount:    ejNot,
+      totalDenominator:    nwr,
+      intendedFeelingAchievedRate: nwr > 0 ? pct(ejAchieved, nwr) : 0,
+      partlyAchievedRate:          nwr > 0 ? pct(ejPartly, nwr) : 0,
+      notAchievedRate:             nwr > 0 ? pct(ejNot, nwr) : 0,
+      wouldWearAgain: wyaBreakdown,
+      // Confidence before/after — canonical values from timestamped WR events (1–10 scale)
+      avgConfidenceBefore: ejAvgConfBefore,
+      avgConfidenceAfter:  ejAvgConfAfter,
+      avgConfidenceLift:   ejAvgConfLift,
+      confidenceSampleSize: ejConfN,
+      confidenceStatus: evidenceConfidence(nwr),
+      postWearPositiveRate: nwr > 0 ? pct(ejAchieved, nwr) : 0,
       emotionalTransformations,
       productsByEmotionalImpact,
       moodDistribution: [
@@ -1217,7 +1391,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         occasionCoverage:       { score: 68, label: "4 occasions with 3+ sessions",                         weight: 15 },
         colourCoverage:         { score: 60, label: "4 preferred colours matched",                          weight: 10 },
         fitCoverage:            { score: 55, label: "Trouser length objection unresolved",                  weight: 10 },
-        emotionalOutcomes:      { score: 73, label: `${pct(wearReviews.filter(ev => ev.achievedFeeling).length, Math.max(1, nwr)) || 72}% feeling achievement rate`, weight: 20 },
+        emotionalOutcomes:      { score: 73, label: `${pct(wearReviews.filter(ev => ev.actualAfterFeeling).length, Math.max(1, nwr)) || 72}% feeling achievement rate`, weight: 20 },
         commercialPerformance:  { score: null, label: "awaiting-integration",                               weight: 10 },
         returns:                { score: null, label: "awaiting-integration",                               weight: 5  },
       },
@@ -1265,8 +1439,135 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       totalCustomersWithSessions: [...new Set(sessions.map(ev => ev.customerId))].length,
     },
     journeyAnalytics,
-    ltv: { dataContract: null },
-    explainability: { dataContract: null },
+    ltv: (() => {
+      // LTV from all-time purchase timeline
+      const allBuys = ofType(allTime, BS).filter(ev => ev.outcome === "bought");
+      // Revenue per customer
+      const custRevMap = new Map<string, number>();
+      for (const ev of allBuys) {
+        const rev = PRICE[ev.productName ?? ""] ?? 1500;
+        custRevMap.set(ev.customerId, (custRevMap.get(ev.customerId) ?? 0) + rev);
+      }
+      const custRevs = [...custRevMap.values()].sort((a, b) => b - a);
+      const avgLtv = custRevs.length ? Math.round(custRevs.reduce((s, v) => s + v, 0) / custRevs.length) : 0;
+
+      // LTV by personality (all-time)
+      const ltvByPersonality = (["Corporate Chic", "Feminine", "Romantic", "Edgy", "Artsy", "Effortlessly Chic"] as const).map(personality => {
+        const cids = Object.entries(CUST).filter(([, p]) => p === personality).map(([cid]) => cid);
+        const personalityBuys = allBuys.filter(ev => cids.includes(ev.customerId));
+        const rev = personalityBuys.reduce((s, ev) => s + (PRICE[ev.productName ?? ""] ?? 1500), 0);
+        const uniqueCustomers = new Set(personalityBuys.map(ev => ev.customerId)).size;
+        return {
+          personality,
+          totalRevenue: rev,
+          avgLtv: uniqueCustomers > 0 ? Math.round(rev / uniqueCustomers) : 0,
+          customerCount: uniqueCustomers,
+          purchases: personalityBuys.length,
+        };
+      }).filter(r => r.customerCount > 0).sort((a, b) => b.avgLtv - a.avgLtv);
+
+      // Products creating repeat customers (all-time)
+      const custBuyMap = new Map<string, Set<string>>();
+      for (const ev of allBuys) {
+        if (!custBuyMap.has(ev.customerId)) custBuyMap.set(ev.customerId, new Set());
+        if (ev.productName) custBuyMap.get(ev.customerId)!.add(ev.productName);
+      }
+      const repeatCustomers = [...custBuyMap.entries()].filter(([, prods]) => prods.size > 1);
+      const repeatProductTally = new Map<string, number>();
+      for (const [, prods] of repeatCustomers) {
+        for (const p of prods) repeatProductTally.set(p, (repeatProductTally.get(p) ?? 0) + 1);
+      }
+      const repeatProducts = [...repeatProductTally.entries()]
+        .sort((a, b) => b[1] - a[1]).slice(0, 4)
+        .map(([product, count]) => ({ product, repeatCustomers: count }));
+
+      // Time between purchases
+      const custPurchaseDays = new Map<string, number[]>();
+      for (const ev of allBuys) {
+        if (!custPurchaseDays.has(ev.customerId)) custPurchaseDays.set(ev.customerId, []);
+        custPurchaseDays.get(ev.customerId)!.push(ev.daysAgo);
+      }
+      const gaps: number[] = [];
+      for (const [, days] of custPurchaseDays) {
+        const sorted = [...days].sort((a, b) => b - a);
+        for (let i = 1; i < sorted.length; i++) gaps.push(sorted[i - 1] - sorted[i]);
+      }
+      const avgGap = gaps.length ? Math.round(gaps.reduce((s, v) => s + v, 0) / gaps.length) : null;
+
+      return {
+        status: "sample",
+        scopeLabel: "All Time",
+        sampleSize: allBuys.length,
+        avgLtv,
+        topCustomerLtv: custRevs[0] ?? 0,
+        ltvByPersonality,
+        repeatProducts,
+        avgDaysBetweenPurchases: avgGap,
+        repeatPurchaseRate: pct(repeatCustomers.length, Math.max(1, custRevMap.size)),
+        repeatCustomerCount: repeatCustomers.length,
+        totalCustomersWithPurchase: custRevMap.size,
+        purchaseFrequency: allBuys.length > 0
+          ? (allBuys.length / Math.max(1, custRevMap.size)).toFixed(1)
+          : "0",
+      };
+    })(),
+    saveVsPurchase: (() => {
+      // Period-filtered: saves and buys that occurred within the selected window
+      const periodSaves = saves;
+      const periodBuys  = buys;
+
+      // Per-product save vs purchase (period scope)
+      const productSvP = ALL_PRODUCTS.map(name => {
+        const s = periodSaves.filter(ev => ev.productName === name).length;
+        const b = periodBuys.filter(ev => ev.productName === name).length;
+        const conv = s > 0 ? pct(b, s) : 0;
+        return { product: name, saves: s, purchases: b, saveToP: conv };
+      }).filter(r => r.saves + r.purchases > 0)
+        .sort((a, b) => (b.saves + b.purchases) - (a.saves + a.purchases));
+
+      const mostSaved     = [...productSvP].sort((a, b) => b.saves - a.saves)[0];
+      const mostPurchased = [...productSvP].sort((a, b) => b.purchases - a.purchases)[0];
+      const highSaveLowBuy = productSvP.filter(r => r.saves >= 2 && r.purchases === 0);
+      const buyWithoutSave = periodBuys.filter(ev =>
+        !periodSaves.some(s => s.customerId === ev.customerId && s.productName === ev.productName)
+      );
+
+      return {
+        status: "sample",
+        scopeLabel: periodLabel,
+        totalSaves:     periodSaves.length,
+        totalPurchases: periodBuys.length,
+        overallSaveToP: periodSaves.length > 0 ? pct(periodBuys.length, periodSaves.length) : 0,
+        mostSaved:     mostSaved?.product ?? WHOLE,
+        mostPurchased: mostPurchased?.product ?? SEEN,
+        anchorProduct: WHOLE,
+        productBreakdown: productSvP,
+        highSaveLowBuyProducts: highSaveLowBuy.map(r => r.product),
+        purchasesWithoutSave: buyWithoutSave.length,
+      };
+    })(),
+    explainability: (() => {
+      const totalFeedback = feedback.length;
+      const loveFeedback  = feedback.filter(ev => ev.outcome === "love").length;
+      const byPersonality = ["Corporate Chic", "Edgy", "Artsy", "Feminine", "Minimal"].map(personality => {
+        const pFb   = feedback.filter(ev => CUST[ev.customerId] === personality);
+        const pLove = pFb.filter(ev => ev.outcome === "love").length;
+        return { personality, agreementRate: pFb.length > 0 ? pct(pLove, pFb.length) : null, sampleSize: pFb.length };
+      }).filter(r => r.sampleSize > 0);
+      return {
+        status: "sample",
+        scopeLabel: periodLabel,
+        evidenceDenominator: totalFeedback,
+        sampleSize: totalFeedback,
+        explanationAgreementRate: totalFeedback > 0 ? pct(loveFeedback, totalFeedback) : null,
+        clickThroughRate: null,
+        saveRate: pct(saves.length, Math.max(1, ns)),
+        purchaseRate: pct(buys.length, Math.max(1, ns)),
+        reasonsResonate: totalFeedback > 0 ? ["Confidence context", "Occasion match", "Personality alignment"] : [],
+        reasonsRejected: totalFeedback > 0 ? ["Too formal for context", "Style too bold for personality", "Fit uncertainty"] : [],
+        byPersonality,
+      };
+    })(),
     opportunityScores: bySessionCount.slice(0, 3).map(p => ({
       productTitle: p.name,
       score: CATALOG[p.name].opportunityScore,
@@ -1301,9 +1602,9 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       const pFeedback  = feedback.filter(ev => pCids.includes(ev.customerId));
       if (pSessions.length === 0) return null;
       const pLoves     = pFeedback.filter(ev => ev.outcome === "love").length;
-      const pFeelingOk = pWear.filter(ev => ev.achievedFeeling).length;
+      const pFeelingOk = pWear.filter(ev => ev.actualAfterFeeling).length;
       const topProds   = topKeys(tally(pSessions.map(ev => ev.productName)), 2).filter((p): p is string => p !== null);
-      const topFeelings = topKeys(tally(pWear.map(ev => ev.achievedFeeling)), 2).filter((f): f is string => f !== null);
+      const topFeelings = topKeys(tally(pWear.map(ev => ev.actualAfterFeeling)), 2).filter((f): f is string => f !== null);
       const catalogFeelings = topProds.flatMap(p => CATALOG[p]?.desiredFeelings.slice(0,1).map(f => f.replace("more-","")) ?? []).slice(0,2);
       const topOccs    = topKeys(tally(pSessions.map(ev => ev.occasion)), 2).filter((o): o is string => o !== null);
       const avgR       = meanRating(pReviews);
@@ -1454,7 +1755,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   const topProductInPeriod = bySessionCount[0]?.name ?? SEEN;
   const strongestEmotionalOutcome = (() => {
     if (wearReviews.length > 0) {
-      const top = topKeys(tally(wearReviews.map(ev => ev.achievedFeeling)), 1)[0];
+      const top = topKeys(tally(wearReviews.map(ev => ev.actualAfterFeeling)), 1)[0];
       if (top) return top;
     }
     return topKeys(tally(feedback.filter(ev => ev.outcome === "love").map(ev => ev.desiredFeeling)), 1)[0] ?? "Confident";
