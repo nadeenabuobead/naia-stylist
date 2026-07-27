@@ -97,6 +97,12 @@ const CATALOG: Record<string, ProductMeta> = {
 
 const ALL_PRODUCTS = [SEEN, WHOLE, ALIVE, GROUNDED, CLEAR, REAL, HER, ROOTED];
 
+// Synthetic piece prices (AED) — used for commercial sample KPI derivation only
+const PRICE: Record<string, number> = {
+  [SEEN]: 2800, [WHOLE]: 1950, [ALIVE]: 850,  [GROUNDED]: 1650,
+  [CLEAR]: 3200, [REAL]: 950,  [HER]: 1750,  [ROOTED]: 1350,
+};
+
 // ── Fictional customer profiles ────────────────────────────────────────────
 const CUST: Record<string, string> = {
   C1:  "Corporate Chic",    C2:  "Corporate Chic",    C3:  "Corporate Chic",
@@ -1440,5 +1446,60 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     productNarratives,
   };
 
-  return { dashboard, kpis, phase4b2, advanced, rel };
+  // ── overview (period KPIs + all-time foundation) ──────────────────────────
+  const naiaRevenue = buys.reduce((sum, ev) => sum + (PRICE[ev.productName ?? ""] ?? 1500), 0);
+  const naiaInfluenceRate = Math.min(82, Math.round(48 + buys.length * 2.2));
+  const naiaConversionRate = pct(buys.length, Math.max(1, ns));
+  const naiaAvgOrderValue = buys.length > 0 ? Math.round(naiaRevenue / buys.length) : 0;
+  const topProductInPeriod = bySessionCount[0]?.name ?? SEEN;
+  const strongestEmotionalOutcome = (() => {
+    if (wearReviews.length > 0) {
+      const top = topKeys(tally(wearReviews.map(ev => ev.achievedFeeling)), 1)[0];
+      if (top) return top;
+    }
+    return topKeys(tally(feedback.filter(ev => ev.outcome === "love").map(ev => ev.desiredFeeling)), 1)[0] ?? "Confident";
+  })();
+  const vtoCompletedJobs = Math.max(1, Math.round(ns * 0.34));
+
+  const allOR = ofType(allTime, OR);
+  const allWR = ofType(allTime, WR);
+
+  const overview = {
+    periodLabel,
+    periodKpis: {
+      styleMeRequests: ns,
+      outfitReviewsInPeriod: nr + nwr,
+      recommendationResponseRate: pct(feedback.length, Math.max(1, ns)),
+      purchaseConversion: naiaConversionRate,
+      naiaAssistedRevenue: naiaRevenue,
+      naiaInfluenceRate,
+      highestConvertingFeature: {
+        byRevenue: "Style Me",
+        byRate: "VTO",
+        styleMeDetails: `${buys.length} purchase${buys.length !== 1 ? "s" : ""} · ${naiaConversionRate}% session conversion`,
+        vtoDetails: `${vtoCompletedJobs} jobs · ~22% buy rate`,
+      },
+      topProductInPeriod,
+      topProductBuyCount: pm[topProductInPeriod]?.buyCount ?? 0,
+      strongestEmotionalOutcome,
+      naiaVsNonNaia: {
+        naiaConversionRate,
+        nonNaiaConversionRate: 5,
+        naiaAvgOrderValue,
+        sessionCount: ns,
+      },
+    },
+    foundationKpis: {
+      registeredNaiaUsers: 15,
+      completedPassports: 12,
+      totalOutfitReviews: allOR.length + allWR.length,
+      avgOutfitRating: +meanRating([...allOR, ...allWR]).toFixed(1),
+      lifetimeWouldWearAgainRate: Math.round(
+        allWR.filter(ev => ev.rewear).length / Math.max(1, allWR.length) * 100
+      ),
+      lifetimeConfidenceLift: 1.8,
+    },
+  };
+
+  return { dashboard, kpis, phase4b2, advanced, rel, overview };
 }

@@ -78,6 +78,7 @@ const STATUS_CONFIG = {
   "insufficient-data":   { label: "INSUFFICIENT DATA",    bg: "rgba(107,72,0,0.09)",    color: "#6b4800" },
   experimental:          { label: "EXPERIMENTAL",          bg: "rgba(34,21,22,0.06)",    color: "#4a3535" },
   "not-implemented":     { label: "NOT IMPLEMENTED",       bg: "rgba(122,111,106,0.08)", color: "#9CA3AF" },
+  sample:                { label: "SAMPLE PREVIEW",        bg: "rgba(107,72,0,0.10)",    color: "#6b4800" },
 };
 
 function StatusBadge({ status, style = {} }) {
@@ -411,7 +412,7 @@ const TABS = [
 // ── Root component ─────────────────────────────────────────────────────────────
 
 export default function DesignerDashboard() {
-  const { dashboard: data, kpis, phase4b2, advanced, rel, dateRangeDays, sampleMode, samplePreviewAvailable } = useLoaderData();
+  const { dashboard: data, kpis, phase4b2, advanced, rel, overview, dateRangeDays, sampleMode, samplePreviewAvailable } = useLoaderData();
   const [activeTab, setActiveTab] = useState("overview");
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -510,7 +511,7 @@ export default function DesignerDashboard() {
 
         {/* ── Tab content ──────────────────────────────────────────────────── */}
         <div style={{ paddingTop: 8 }}>
-          {activeTab === "overview"       && <TabOverview        data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} dateRangeDays={dateRangeDays} />}
+          {activeTab === "overview"       && <TabOverview        data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} overview={overview} sampleMode={sampleMode} dateRangeDays={dateRangeDays} />}
           {activeTab === "customer"       && <TabCustomer        data={data} kpis={kpis} advanced={advanced} rel={rel} dateRangeDays={dateRangeDays} />}
           {activeTab === "product"        && <TabProduct         data={data} phase4b2={phase4b2} rel={rel} dateRangeDays={dateRangeDays} />}
           {activeTab === "recommendation" && <TabRecommendation  data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} dateRangeDays={dateRangeDays} />}
@@ -529,24 +530,155 @@ export default function DesignerDashboard() {
 // TAB 1 — OVERVIEW
 // ══════════════════════════════════════════════════════════════════════════════
 
-function TabOverview({ data, kpis, phase4b2, advanced, rel, dateRangeDays }) {
+function TabOverview({ data, kpis, phase4b2, advanced, rel, overview, sampleMode, dateRangeDays }) {
+  const periodStr = dateRangeDays >= 365 ? "All Time" : `Last ${dateRangeDays} Days`;
+  const pk = overview?.periodKpis;
+  const fk = overview?.foundationKpis;
+
+  const subHead = (label, right) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, marginTop: 4 }}>
+      <span style={{ fontFamily: "'Inter', -apple-system, sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a" }}>{label}</span>
+      <div style={{ flex: 1, height: 1, background: "rgba(34,21,22,0.08)" }} />
+      {right && <span style={{ fontFamily: "'Courier New', monospace", fontSize: 9, letterSpacing: "1px", padding: "2px 7px", background: "rgba(34,21,22,0.05)", color: "#7a6f6a", border: "1px solid rgba(34,21,22,0.10)" }}>{right}</span>}
+    </div>
+  );
+
   return (
     <>
       {/* Priority KPI grid */}
-      <Section title="Collection at a Glance" desc="Key signals across all intelligence areas">
+      <Section title="Collection at a Glance" desc="Period-sensitive signals above · All-time foundation below">
+
+        {/* ── Selected Period ───────────────────────────────────── */}
+        {subHead("Selected Period", periodStr.toUpperCase())}
         <div style={s.kpiGrid}>
-          <KpiCard label="nAia-Assisted Revenue" value="—" status="awaiting-integration" tooltip="Requires Shopify Orders webhook integration. Will show total order value attributed to nAia styling sessions." />
-          <KpiCard label="nAia Influence Rate" value="—" status="awaiting-integration" tooltip="% of sales that touched at least one nAia feature before purchase." />
-          <KpiCard label="Highest-Converting Feature" value="—" status="awaiting-integration" tooltip="Which nAia feature (StyleMe, VTO, Buy or Skip) produces the highest purchase intent." />
-          <KpiCard label="Registered nAia Users" value={data.totalUsers || 0} status="live" tooltip="All-time count of registered customers — does not follow the period filter." />
-          <KpiCard label="Outfit Reviews (all-time)" value={data.totalLooks || 0} status="live" tooltip="Count of completed post-outfit reviews across all time. This metric does not follow the period filter — it reflects the full history." />
-          <KpiCard label="Avg Outfit Rating (all-time)" value={(data.avgRating || 0).toFixed(1)} suffix="/5" status="live" tooltip="Average overall feeling rating across all completed outfit reviews, all time." />
-          <KpiCard label="Would Wear Again (all-time)" value={pctOf(Math.round((data.avgRewear || 0) * (data.totalLooks || 0)), data.totalLooks || 0, "reviews")} status="live" tooltip="% of all-time outfit reviews where customer answered 'Definitely' to would wear again." />
-          <KpiCard label="Felt Like Her (all-time)" value={pctOf(Math.round((data.avgAlignment || 0) * (data.totalLooks || 0)), data.totalLooks || 0, "reviews")} status="live" tooltip="% of all-time reviews where customer felt the look reflected her personal style." />
-          {kpis && !kpis.error && kpis.confidence && (
-            <KpiCard label="Confidence Lift (all-time)" value={`${kpis.confidence.avgDelta >= 0 ? "+" : ""}${kpis.confidence.avgDelta}`} suffix="/10" status="live" tooltip={`Avg confidence before styling: ${kpis.confidence.avgBefore}/10. After: ${kpis.confidence.avgAfter}/10. Calculated from ${kpis.confidence.sampleSize} reviews across all time — does not follow the period filter.`} />
+          <KpiCard
+            label="Style Me Requests"
+            value={sampleMode ? (pk?.styleMeRequests ?? "—") : (kpis?.recentActivity?.sessions ?? "—")}
+            status="live"
+            tooltip={sampleMode
+              ? `SAMPLE PREVIEW — ${pk?.styleMeRequests} styling sessions in ${periodStr.toLowerCase()}.`
+              : "StyleMe sessions in the period."}
+          />
+          <KpiCard
+            label="Outfit Reviews"
+            value={sampleMode ? (pk?.outfitReviewsInPeriod ?? "—") : (kpis?.recentActivity?.reviews ?? "—")}
+            status="live"
+            tooltip={sampleMode
+              ? `SAMPLE PREVIEW — ${pk?.outfitReviewsInPeriod} outfit and post-wear reviews in ${periodStr.toLowerCase()}.`
+              : "Outfit reviews in the period."}
+          />
+          <KpiCard
+            label="Response Rate"
+            value={sampleMode ? `${pk?.recommendationResponseRate ?? "—"}%` : "—"}
+            status={sampleMode ? "live" : "awaiting-integration"}
+            tooltip={sampleMode
+              ? `SAMPLE PREVIEW — ${pk?.recommendationResponseRate}% of sessions received recommendation feedback in ${periodStr.toLowerCase()}.`
+              : "Requires recommendation feedback tracking."}
+          />
+          <KpiCard
+            label="Purchase Conversion"
+            value={sampleMode ? `${pk?.purchaseConversion ?? "—"}%` : "—"}
+            status={sampleMode ? "live" : "awaiting-integration"}
+            tooltip={sampleMode
+              ? `SAMPLE PREVIEW — ${pk?.purchaseConversion}% of styling sessions resulted in a purchase in ${periodStr.toLowerCase()}.`
+              : "Requires Shopify order integration."}
+          />
+          {sampleMode ? (
+            <>
+              <KpiCard
+                label="nAia-Assisted Revenue"
+                value={pk?.naiaAssistedRevenue != null ? `AED ${pk.naiaAssistedRevenue.toLocaleString()}` : "—"}
+                status="sample"
+                tooltip={`SAMPLE PREVIEW — Synthetic data only. AED ${pk?.naiaAssistedRevenue?.toLocaleString()} across ${pk?.styleMeRequests} sessions in ${periodStr.toLowerCase()}. Attribution: all sample purchases are nAia-session attributed. Live Data will show Awaiting Integration until the Shopify Orders webhook is connected.`}
+              />
+              <KpiCard
+                label="nAia Influence Rate"
+                value={pk?.naiaInfluenceRate != null ? `${pk.naiaInfluenceRate}%` : "—"}
+                status="sample"
+                tooltip={`SAMPLE PREVIEW — Synthetic data only. ${pk?.naiaInfluenceRate}% of NADINE sales in ${periodStr.toLowerCase()} touched at least one nAia session. Derived from buy count and session volume. Grows as more customers complete nAia-attributed purchases.`}
+              />
+              <KpiCard
+                label="Highest-Converting Feature"
+                value={pk?.highestConvertingFeature?.byRevenue ?? "—"}
+                status="sample"
+                tooltip={`SAMPLE PREVIEW — Style Me leads by assisted revenue (${pk?.highestConvertingFeature?.styleMeDetails}). VTO converts at a higher session rate (${pk?.highestConvertingFeature?.vtoDetails}) but at smaller volume. Live Data requires Shopify attribution.`}
+              />
+              <KpiCard
+                label="nAia vs Non-nAia Conversion"
+                value={pk?.naiaVsNonNaia != null ? `${pk.naiaVsNonNaia.naiaConversionRate}% vs ${pk.naiaVsNonNaia.nonNaiaConversionRate}%` : "—"}
+                status="sample"
+                tooltip={`SAMPLE PREVIEW — Synthetic data only. nAia customers: ${pk?.naiaVsNonNaia?.naiaConversionRate}% purchase conversion · AED ${pk?.naiaVsNonNaia?.naiaAvgOrderValue?.toLocaleString()} avg order value · ${pk?.naiaVsNonNaia?.sessionCount} sessions. Non-nAia benchmark: ~${pk?.naiaVsNonNaia?.nonNaiaConversionRate}% conversion. Live Data requires Shopify customer segmentation.`}
+              />
+            </>
+          ) : (
+            <>
+              <KpiCard label="nAia-Assisted Revenue" value="—" status="awaiting-integration" tooltip="Requires Shopify Orders webhook integration. Will show total order value attributed to nAia styling sessions." />
+              <KpiCard label="nAia Influence Rate" value="—" status="awaiting-integration" tooltip="% of sales that touched at least one nAia feature before purchase." />
+              <KpiCard label="Highest-Converting Feature" value="—" status="awaiting-integration" tooltip="Which nAia feature (StyleMe, VTO, Buy or Skip) produces the highest purchase intent." />
+              <KpiCard label="nAia Users vs Non-nAia Users" value="—" status="awaiting-integration" tooltip="Comparison of purchase behaviour between customers who used nAia vs those who didn't. Requires Shopify customer segmentation." />
+            </>
           )}
-          <KpiCard label="nAia Users vs Non-nAia Users" value="—" status="awaiting-integration" tooltip="Comparison of purchase behaviour between customers who used nAia vs those who didn't. Requires Shopify customer segmentation." />
+        </div>
+
+        {/* ── All-Time Foundation ───────────────────────────────── */}
+        <div style={{ marginTop: 20 }}>
+          {subHead("All-Time Foundation", "DOES NOT CHANGE WITH PERIOD FILTER")}
+          <div style={{ ...s.kpiGrid, opacity: 0.88 }}>
+            <KpiCard
+              label="Registered nAia Users"
+              value={sampleMode ? (fk?.registeredNaiaUsers ?? 0) : (data.totalUsers || 0)}
+              status="live"
+              tooltip="All-time count of registered customers. This figure does not change with the period filter."
+            />
+            <KpiCard
+              label="Completed Passports"
+              value={sampleMode ? (fk?.completedPassports ?? 0) : (kpis?.passport?.completed ?? "—")}
+              status="live"
+              tooltip="All-time count of customers who completed their nAia Passport."
+            />
+            <KpiCard
+              label="Total Outfit Reviews"
+              value={sampleMode ? (fk?.totalOutfitReviews ?? 0) : (data.totalLooks || 0)}
+              status="live"
+              tooltip="All outfit reviews across all time — does not change with the period filter."
+            />
+            <KpiCard
+              label="Avg Outfit Rating"
+              value={sampleMode
+                ? (fk?.avgOutfitRating?.toFixed(1) ?? "—")
+                : ((data.avgRating || 0).toFixed(1))}
+              suffix="/5"
+              status="live"
+              tooltip="Average overall feeling rating across all outfit reviews, all time."
+            />
+            <KpiCard
+              label="Would Wear Again"
+              value={sampleMode
+                ? `${fk?.lifetimeWouldWearAgainRate ?? "—"}%`
+                : pctOf(Math.round((data.avgRewear || 0) * (data.totalLooks || 0)), data.totalLooks || 0, "reviews")}
+              status="live"
+              tooltip="Lifetime rate of customers who said they would definitely wear the look again, all time."
+            />
+            {sampleMode ? (
+              <KpiCard
+                label="Lifetime Confidence Lift"
+                value={`+${fk?.lifetimeConfidenceLift ?? 1.8}`}
+                suffix="/10"
+                status="live"
+                tooltip="Average confidence before → after styling across all sessions, all time. +1.8/10 average lift."
+              />
+            ) : (
+              kpis && !kpis.error && kpis.confidence && (
+                <KpiCard
+                  label="Confidence Lift"
+                  value={`${kpis.confidence.avgDelta >= 0 ? "+" : ""}${kpis.confidence.avgDelta}`}
+                  suffix="/10"
+                  status="live"
+                  tooltip={`Avg confidence before styling: ${kpis.confidence.avgBefore}/10. After: ${kpis.confidence.avgAfter}/10. All time.`}
+                />
+              )
+            )}
+          </div>
         </div>
       </Section>
 
