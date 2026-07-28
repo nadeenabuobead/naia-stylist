@@ -1215,3 +1215,67 @@ test("advanced.opportunityScores items have both score and sampleSize", () => {
     }
   }
 });
+
+// ── 32–36. Interaction-blocker regression guards ──────────────────────────────
+// These tests verify structural properties of the route component to guard
+// against a class of bug where a position:fixed overlay intercepts pointer
+// events in the Shopify Admin embedded iframe.
+
+describe("Interaction-blocker regression guards", () => {
+  it("32. Data & AI drawer uses CSS visibility/pointer-events toggle, not React conditional mount", () => {
+    const route = readRoute();
+    // The old React-conditional pattern must be gone
+    assert.ok(
+      !route.includes('position: "fixed", inset: 0, zIndex: 200') ||
+        route.includes("visibility: dataAiOpen ?"),
+      'If a position:fixed inset:0 overlay exists, it must use "visibility: dataAiOpen ?" CSS toggle'
+    );
+    // The CSS toggle must be present
+    assert.ok(
+      route.includes("visibility: dataAiOpen ?"),
+      'Data & AI outer container must declare "visibility: dataAiOpen ?" for CSS-controlled visibility'
+    );
+    assert.ok(
+      route.includes("pointerEvents: dataAiOpen ?"),
+      'Data & AI outer container must declare "pointerEvents: dataAiOpen ?" for CSS-controlled interactivity'
+    );
+  });
+
+  it("33. Decorative nav gradient has pointerEvents: none — cannot block tab clicks", () => {
+    const route = readRoute();
+    assert.ok(
+      route.includes('pointerEvents: "none"'),
+      'Nav gradient overlay must declare pointerEvents: "none"'
+    );
+  });
+
+  it("34. At most one position:fixed element in the route", () => {
+    const route = readRoute();
+    const fixedCount = (route.match(/position: "fixed"/g) ?? []).length;
+    assert.ok(
+      fixedCount <= 1,
+      `Expected at most 1 position:fixed element in the route, found ${fixedCount}`
+    );
+  });
+
+  it("35. Data & AI drawer aria-hidden attribute present for accessibility", () => {
+    const route = readRoute();
+    assert.ok(
+      route.includes("aria-hidden={!dataAiOpen}"),
+      "Data & AI container must declare aria-hidden={!dataAiOpen}"
+    );
+  });
+
+  it("36. dataAiOpen initial state is false — drawer is closed on load", () => {
+    const route = readRoute();
+    assert.ok(
+      route.includes('useState(false)') || route.includes("useState(false)"),
+      "dataAiOpen must initialise to false so the drawer is closed on page load"
+    );
+    // Confirm the false literal is associated with dataAiOpen
+    assert.ok(
+      route.includes('const [dataAiOpen, setDataAiOpen] = useState(false)'),
+      "dataAiOpen state declaration must initialise to false"
+    );
+  });
+});

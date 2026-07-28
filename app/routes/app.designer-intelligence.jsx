@@ -546,39 +546,49 @@ export default function DesignerDashboard() {
           </span>
         </div>
 
-        {/* ── Data & AI slide-over ─────────────────────────────────────────── */}
-        {dataAiOpen && (
-          <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", justifyContent: "flex-end" }}>
-            <div style={{ position: "absolute", inset: 0, background: "rgba(34,21,22,0.45)" }} onClick={() => setDataAiOpen(false)} />
-            <div style={{ position: "relative", width: "min(600px, 92vw)", background: "#faf9f7", height: "100vh", overflowY: "auto", padding: 32, display: "flex", flexDirection: "column", gap: 24, borderLeft: "1px solid rgba(34,21,22,0.12)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
-                  <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 8, textTransform: "uppercase", letterSpacing: "3px", color: "#8b2035", marginBottom: 8, fontWeight: 600 }}>Data &amp; AI</div>
-                  <h2 style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: 22, fontWeight: 700, color: "#221516" }}>Intelligence Reference</h2>
+        {/* ── Data & AI slide-over — always in DOM; CSS toggle prevents backdrop from intercepting
+             clicks while closed, regardless of React hydration timing in Shopify Admin iframe */}
+        <div
+          aria-hidden={!dataAiOpen}
+          style={{
+            position: "fixed", inset: 0, zIndex: 200, display: "flex", justifyContent: "flex-end",
+            visibility: dataAiOpen ? "visible" : "hidden",
+            pointerEvents: dataAiOpen ? "auto" : "none",
+          }}
+        >
+          <div style={{ position: "absolute", inset: 0, background: "rgba(34,21,22,0.45)" }} onClick={() => setDataAiOpen(false)} />
+          <div style={{ position: "relative", width: "min(600px, 92vw)", background: "#faf9f7", height: "100vh", overflowY: "auto", padding: 32, display: "flex", flexDirection: "column", gap: 24, borderLeft: "1px solid rgba(34,21,22,0.12)" }}>
+            {dataAiOpen && (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div>
+                    <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 8, textTransform: "uppercase", letterSpacing: "3px", color: "#8b2035", marginBottom: 8, fontWeight: 600 }}>Data &amp; AI</div>
+                    <h2 style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: 22, fontWeight: 700, color: "#221516" }}>Intelligence Reference</h2>
+                  </div>
+                  <button type="button" onClick={() => setDataAiOpen(false)} style={{ background: "none", border: "1px solid rgba(34,21,22,0.14)", padding: "4px 10px", cursor: "pointer", fontFamily: "'Inter', sans-serif", fontSize: 10, color: "#5c5350" }}>Close ✕</button>
                 </div>
-                <button type="button" onClick={() => setDataAiOpen(false)} style={{ background: "none", border: "1px solid rgba(34,21,22,0.14)", padding: "4px 10px", cursor: "pointer", fontFamily: "'Inter', sans-serif", fontSize: 10, color: "#5c5350" }}>Close ✕</button>
-              </div>
-              {/* Panel tabs */}
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {[
-                  { id: "definitions",  label: "Metric Definitions" },
-                  { id: "confidence",   label: "Confidence Ladder" },
-                  { id: "integration",  label: "Integration Readiness" },
-                  { id: "roadmap",      label: "AI Learning Roadmap" },
-                  { id: "experiments",  label: "Experiment Builder" },
-                ].map(p => (
-                  <button key={p.id} type="button" onClick={() => setDataAiPanel(p.id)} style={{ padding: "3px 10px", fontFamily: "'Inter', sans-serif", fontSize: 9, letterSpacing: "1px", textTransform: "uppercase", background: dataAiPanel === p.id ? "#221516" : "transparent", color: dataAiPanel === p.id ? "#f4f4f1" : "#7a6f6a", border: "1px solid rgba(34,21,22,0.14)", cursor: "pointer" }}>{p.label}</button>
-                ))}
-              </div>
-              {/* Panel content */}
-              {dataAiPanel === "definitions" && <DataAiDefinitions />}
-              {dataAiPanel === "confidence" && <DataAiConfidenceLadder />}
-              {dataAiPanel === "integration" && <DataAiIntegrationReadiness />}
-              {dataAiPanel === "roadmap" && <DataAiLearningRoadmap />}
-              {dataAiPanel === "experiments" && <DataAiExperimentBuilder />}
-            </div>
+                {/* Panel tabs */}
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  {[
+                    { id: "definitions",  label: "Metric Definitions" },
+                    { id: "confidence",   label: "Confidence Ladder" },
+                    { id: "integration",  label: "Integration Readiness" },
+                    { id: "roadmap",      label: "AI Learning Roadmap" },
+                    { id: "experiments",  label: "Experiment Builder" },
+                  ].map(p => (
+                    <button key={p.id} type="button" onClick={() => setDataAiPanel(p.id)} style={{ padding: "3px 10px", fontFamily: "'Inter', sans-serif", fontSize: 9, letterSpacing: "1px", textTransform: "uppercase", background: dataAiPanel === p.id ? "#221516" : "transparent", color: dataAiPanel === p.id ? "#f4f4f1" : "#7a6f6a", border: "1px solid rgba(34,21,22,0.14)", cursor: "pointer" }}>{p.label}</button>
+                  ))}
+                </div>
+                {/* Panel content */}
+                {dataAiPanel === "definitions" && <DataAiDefinitions />}
+                {dataAiPanel === "confidence" && <DataAiConfidenceLadder />}
+                {dataAiPanel === "integration" && <DataAiIntegrationReadiness />}
+                {dataAiPanel === "roadmap" && <DataAiLearningRoadmap />}
+                {dataAiPanel === "experiments" && <DataAiExperimentBuilder />}
+              </>
+            )}
           </div>
-        )}
+        </div>
 
         {/* ── Tab content ──────────────────────────────────────────────────── */}
         <div style={{ paddingTop: 8 }}>
