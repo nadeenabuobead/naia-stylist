@@ -660,9 +660,11 @@ function TabOverview({ data, kpis, phase4b2, advanced, rel, overview, sampleMode
             <PeriodCard period={evolution.current} label="Current Period" />
             <PeriodCard period={evolution.previous} label="Prior Period" />
             <div style={s.card}>
-              <div style={s.cardLabel}>Trend Direction</div>
-              <TrendPill label="Ratings" trend={evolution.ratingTrend} />
-              <TrendPill label="Sessions" trend={evolution.sessionsTrend} />
+              <div style={s.cardLabel}>Period Delta</div>
+              <ChangeDeltaRow label="Avg Rating" prior={evolution.previous.avgRating} current={evolution.current.avgRating} decimals={1} />
+              <ChangeDeltaRow label="Sessions" prior={evolution.previous.sessions} current={evolution.current.sessions} />
+              <ChangeDeltaRow label="Reviews" prior={evolution.previous.reviews} current={evolution.current.reviews} />
+              <ChangeDeltaRow label="Rewear Rate" prior={evolution.previous.rewearRate} current={evolution.current.rewearRate} suffix="%" />
               <div style={{ marginTop: 14, fontSize: 12, color: "#7a6f6a", fontStyle: "italic", fontFamily: SERIF, lineHeight: 1.5 }}>
                 Full comparison — conversion, saves, returns — available after commercial integration.
               </div>
@@ -1035,6 +1037,35 @@ function TrendPill({ label, trend }) {
   );
 }
 
+function ChangeDeltaRow({ label, prior, current, decimals = 0, suffix = "" }) {
+  if (prior == null || current == null) {
+    return (
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
+        <span style={{ fontFamily: SERIF, fontSize: 13, color: "#7a6f6a" }}>{label}</span>
+        <span style={{ fontFamily: MONO, fontSize: 11, color: "#9CA3AF" }}>Not enough comparable evidence</span>
+      </div>
+    );
+  }
+  const prec = Math.pow(10, decimals);
+  const delta = Math.round((current - prior) * prec) / prec;
+  const pctDelta = decimals === 0 && prior > 0
+    ? Math.round(((current - prior) / prior) * 100)
+    : null;
+  const color = delta > 0 ? "#2a5e42" : delta < 0 ? "#8b2035" : "#7a6f6a";
+  const dSign = delta >= 0 ? "+" : "";
+  const dFmt = decimals > 0 ? delta.toFixed(decimals) : String(delta);
+  const pFmt = pctDelta != null ? ` (${pctDelta >= 0 ? "+" : ""}${pctDelta}%)` : "";
+  const fmtVal = (v) => decimals > 0 ? Number(v).toFixed(decimals) : v;
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, flexWrap: "wrap", gap: 4 }}>
+      <span style={{ fontFamily: SERIF, fontSize: 13, color: "#7a6f6a" }}>{label}</span>
+      <span style={{ fontFamily: MONO, fontSize: 11, color }}>
+        {fmtVal(prior)}{suffix} → {fmtVal(current)}{suffix} · <strong>{dSign}{dFmt}{pFmt}</strong>
+      </span>
+    </div>
+  );
+}
+
 function Metric({ label, value }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -1224,6 +1255,7 @@ function OccasionIntelCard({ row }) {
 
 function ProductDetailPanel({ narrative, saveVsPurchase, dateRangeDays }) {
   const [open, setOpen] = useState(false);
+  const [scoreOpen, setScoreOpen] = useState(false);
   if (!narrative) return null;
   const confData = sampleConfidence(narrative.sampleSize);
   const scoreColor = narrative.opportunityScore >= 70 ? "#2a5e42" : narrative.opportunityScore >= 45 ? "#d97706" : "#7a6f6a";
@@ -1245,11 +1277,33 @@ function ProductDetailPanel({ narrative, saveVsPurchase, dateRangeDays }) {
             <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: "rgba(107,72,0,0.12)", color: "#6b4800" }}>Directional</span>
           )}
           <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: scoreColor, color: "#fff" }}>Score {narrative.opportunityScore}</span>
+          <button type="button" onClick={() => setScoreOpen(o => !o)} style={{ ...s.linkBtn, marginTop: 0, fontSize: 9 }}>
+            How scored {scoreOpen ? "↑" : "↓"}
+          </button>
           <button type="button" onClick={() => setOpen(o => !o)} style={{ ...s.linkBtn, marginTop: 0 }}>
             {open ? "Hide ↑" : "View Detail ↓"}
           </button>
         </div>
       </div>
+
+      {/* Score disclosure — How this is calculated */}
+      {scoreOpen && (
+        <div style={{ borderTop: "1px solid rgba(34,21,22,0.07)", padding: "14px 20px", background: "#fafaf9", fontSize: 11, fontFamily: MONO, lineHeight: 1.7 }}>
+          <div style={{ color: "#221516", marginBottom: 8, fontWeight: 600 }}>
+            Directional score: {narrative.opportunityScore} · {confData.label}
+          </div>
+          <div style={{ color: "#5c5350", marginBottom: 6, fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", fontWeight: 600 }}>Available factors:</div>
+          <div style={{ color: "#221516", marginBottom: 2 }}>· Avg rating: 30% weight</div>
+          <div style={{ color: "#221516", marginBottom: 2 }}>· Rewear rate: 25% weight</div>
+          <div style={{ color: "#221516", marginBottom: 2 }}>· Confidence lift: 25% weight</div>
+          <div style={{ color: "#221516", marginBottom: 10 }}>· Data quality: 20% weight</div>
+          <div style={{ color: "#7a6f6a", marginBottom: 2 }}>Evidence: n={narrative.sampleSize} · {periodLabel(dateRangeDays)}</div>
+          <div style={{ color: "#7a6f6a", marginBottom: 8 }}>Pending (excluded): Shopify conversion · LTV · FASHN.ai fidelity</div>
+          <div style={{ color: "#7a6f6a", fontFamily: SERIF, fontStyle: "italic", fontSize: 11, lineHeight: 1.5 }}>
+            Scores reflect available evidence only. Treat as directional.
+          </div>
+        </div>
+      )}
 
       {/* Full canonical detail — expanded */}
       {open && (
@@ -2176,6 +2230,57 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
   );
 }
 
+function CollectionHealthScoreDisclosure({ health }) {
+  const [open, setOpen] = useState(false);
+  if (!health) return null;
+  const factors = health.factors ?? {};
+  const included = Object.entries(factors).filter(([, f]) => f.score !== null);
+  const excluded = Object.entries(factors).filter(([, f]) => f.score === null);
+  const humanise = k => k.replace(/([A-Z])/g, " $1").trim();
+  return (
+    <div style={{ marginTop: 10, textAlign: "left" }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{ ...s.linkBtn, marginTop: 0, fontSize: 9, letterSpacing: "0.5px" }}
+      >
+        How this is calculated {open ? "↑" : "↓"}
+      </button>
+      {open && (
+        <div style={{ marginTop: 10, padding: "12px 14px", background: "#fafaf9", border: "1px solid rgba(34,21,22,0.08)", fontSize: 11, fontFamily: MONO, lineHeight: 1.7 }}>
+          {included.length > 0 && (
+            <>
+              <div style={{ color: "#5c5350", marginBottom: 6, fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", fontWeight: 600 }}>
+                Included factors ({included.length} of {Object.keys(factors).length}):
+              </div>
+              {included.map(([key, f]) => (
+                <div key={key} style={{ color: "#221516", marginBottom: 3 }}>
+                  · {humanise(key)}: {f.weight}% weight — {f.label}
+                </div>
+              ))}
+            </>
+          )}
+          {excluded.length > 0 && (
+            <>
+              <div style={{ color: "#5c5350", marginTop: 10, marginBottom: 6, fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", fontWeight: 600 }}>
+                Excluded (pending integration — not zeroed):
+              </div>
+              {excluded.map(([key, f]) => (
+                <div key={key} style={{ color: "#7a6f6a", marginBottom: 3 }}>
+                  · {humanise(key)}: {f.weight}% weight — awaiting integration
+                </div>
+              ))}
+            </>
+          )}
+          <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid rgba(34,21,22,0.07)", color: "#7a6f6a", fontFamily: SERIF, fontStyle: "italic", fontSize: 11 }}>
+            Method: Directional partial score from available factors only. Unavailable factors are excluded, not treated as zero. Full score requires Shopify commercial integration.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // TAB 5 — COLLECTION INTELLIGENCE
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2248,6 +2353,7 @@ function TabCollection({ data, kpis, advanced, rel, dateRangeDays }) {
             {advanced?.collectionHealth?.strongestArea && (
               <div style={{ marginTop: 8, fontSize: 12, color: "#2a5e42" }}>Strongest area: {advanced.collectionHealth.strongestArea.replace(/([A-Z])/g, " $1").trim()}</div>
             )}
+            <CollectionHealthScoreDisclosure health={advanced?.collectionHealth} />
           </div>
           {advanced?.collectionHealth?.factors && (
             <div style={s.card}>
@@ -2503,74 +2609,11 @@ function TabCommercial({ data, advanced, rel, sampleMode, dateRangeDays }) {
         )}
       </Section>
 
-      {/* LTV Intelligence — moved from Customer Intelligence */}
-      <Section
-        title="LTV Intelligence"
-        desc={`Customer lifetime value patterns — ${data.ltv?.scopeLabel ?? "All Time"}`}
-        status={data.ltv?.status === "sample" || data.ltv?.status === "live" ? (sampleMode ? "sample" : data.ltv?.status) : "awaiting-integration"}
-      >
-        {data.ltv?.sampleSize > 0 ? (
-          <>
-            <div style={s.kpiGrid}>
-              <KpiCard label="Avg LTV" value={data.ltv.avgLtv != null ? `£${data.ltv.avgLtv.toLocaleString()}` : "—"} />
-              <KpiCard label="Top Customer LTV" value={data.ltv.topCustomerLtv != null ? `£${data.ltv.topCustomerLtv.toLocaleString()}` : "—"} />
-              <KpiCard label="Repeat Purchase Rate" value={data.ltv.repeatPurchaseRate != null ? `${data.ltv.repeatPurchaseRate}%` : "—"} />
-              <KpiCard label="Repeat Customers" value={data.ltv.repeatCustomerCount ?? "—"} suffix={data.ltv.totalCustomersWithPurchase != null ? ` / ${data.ltv.totalCustomersWithPurchase}` : ""} />
-              <KpiCard label="Avg Days Between Purchases" value={data.ltv.avgDaysBetweenPurchases != null ? `${data.ltv.avgDaysBetweenPurchases}d` : "—"} />
-              <KpiCard label="Purchases per Customer" value={data.ltv.purchaseFrequency ?? "—"} />
-            </div>
-
-            {data.ltv.ltvByPersonality?.length > 0 && (
-              <div style={{ marginTop: 20 }}>
-                <div style={s.subHeader}>LTV by Personality Type</div>
-                <div style={{ overflowX: "auto", marginTop: 12 }}>
-                  <table style={s.table}>
-                    <thead>
-                      <tr>
-                        <th style={s.th}>Personality</th>
-                        <th style={s.th}>Avg LTV</th>
-                        <th style={s.th}>Total Revenue</th>
-                        <th style={s.th}>Customers</th>
-                        <th style={s.th}>Purchases</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.ltv.ltvByPersonality.map((row, i) => (
-                        <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
-                          <td style={{ ...s.td, fontFamily: SERIF, fontWeight: 600, fontSize: 14 }}>{row.personality}</td>
-                          <td style={{ ...s.td, fontWeight: 700, color: "#8b2035", fontFamily: MONO }}>£{row.avgLtv.toLocaleString()}</td>
-                          <td style={{ ...s.td, fontFamily: MONO }}>£{row.totalRevenue.toLocaleString()}</td>
-                          <td style={{ ...s.td, fontFamily: MONO }}>{row.customerCount}</td>
-                          <td style={{ ...s.td, fontFamily: MONO }}>{row.purchases}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {data.ltv.repeatProducts?.length > 0 && (
-              <div style={{ marginTop: 20 }}>
-                <div style={s.subHeader}>Products Driving Repeat Customers</div>
-                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
-                  {data.ltv.repeatProducts.map((p, i) => (
-                    <div key={i} style={{ ...s.card, flex: "1 1 200px" }}>
-                      <div style={{ fontFamily: SERIF, fontWeight: 600, fontSize: 14, color: "#221516" }}>{p.product}</div>
-                      <div style={{ fontFamily: MONO, fontSize: 11, color: "#8b2035", marginTop: 6 }}>{p.repeatCustomers} repeat customer{p.repeatCustomers !== 1 ? "s" : ""}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-        ) : (
-          <AwaitingCard
-            label="LTV Intelligence"
-            description="LTV data is derived from purchase events. Add Shopify order integration to unlock full LTV segmentation by personality, occasion, and desired feeling."
-          />
-        )}
-      </Section>
+      {/* LTV Intelligence — awaiting integration */}
+      <AwaitingCard
+        label="LTV Intelligence"
+        description="Requires Shopify order history and customer purchase data. When integrated, will show: average LTV by personality type, repeat purchase patterns, and which products drive highest-value customers — supporting commercial prioritisation and assortment investment decisions."
+      />
 
       <RoadmapPanel title="Commercial Integration Roadmap" items={[
         { label: "nAia-Assisted Revenue", description: "Total order value attributed to nAia styling sessions. Requires Shopify order_placed webhook + session attribution window." },

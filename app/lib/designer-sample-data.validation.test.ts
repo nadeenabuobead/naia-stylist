@@ -1108,3 +1108,110 @@ test("route includes roleLens state for role lens selector", () => {
     "route must include roleLens state for Combined/Design/Merchandising role lens selector",
   );
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CLOSURE PATCH — Tests 26-31
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── 26. LTV status is awaiting-integration and sampleSize may be positive ─────
+test("advanced.ltv.status is awaiting-integration even when sampleSize is positive", () => {
+  for (const days of [30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    const ltv = (d.advanced as any)?.ltv;
+    assert.ok(ltv !== undefined, `advanced.ltv must exist (days=${days})`);
+    assert.strictEqual(
+      ltv.status,
+      "awaiting-integration",
+      `advanced.ltv.status must be "awaiting-integration" even when sampleSize=${ltv.sampleSize} (days=${days})`,
+    );
+    assert.ok(
+      typeof ltv.sampleSize === "number" && ltv.sampleSize >= 0,
+      `advanced.ltv.sampleSize must be a non-negative number (days=${days})`,
+    );
+  }
+});
+
+// ── 27. Route LTV section uses AwaitingCard with no sampleSize conditional ───
+test("route LTV section renders AwaitingCard unconditionally (no sampleSize check)", () => {
+  const route = readRoute();
+  assert.ok(
+    !route.includes("data.ltv?.sampleSize"),
+    "route must not conditionally check data.ltv?.sampleSize — LTV is fully inactive",
+  );
+  assert.ok(
+    route.includes("LTV Intelligence") && route.includes("AwaitingCard"),
+    "route must include LTV Intelligence AwaitingCard",
+  );
+});
+
+// ── 28. Collection evolution has current and previous periods with required fields ─
+test("advanced.collectionEvolution current and previous both have sessions and avgRating", () => {
+  for (const days of [30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    const evo = (d.advanced as any)?.collectionEvolution;
+    if (!evo || evo.status === "insufficient-data") continue;
+    for (const period of ["current", "previous"] as const) {
+      const p = evo[period];
+      assert.ok(p !== undefined, `collectionEvolution.${period} must exist (days=${days})`);
+      assert.ok(
+        typeof p.sessions === "number",
+        `collectionEvolution.${period}.sessions must be a number (days=${days})`,
+      );
+      assert.ok(
+        typeof p.avgRating === "number",
+        `collectionEvolution.${period}.avgRating must be a number (days=${days})`,
+      );
+    }
+  }
+});
+
+// ── 29. Collection evolution status is live or insufficient-data only ─────────
+test("advanced.collectionEvolution.status is live or insufficient-data", () => {
+  const validStatuses = new Set(["live", "insufficient-data"]);
+  for (const days of [7, 30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    const evo = (d.advanced as any)?.collectionEvolution;
+    if (!evo) continue;
+    assert.ok(
+      validStatuses.has(evo.status),
+      `collectionEvolution.status must be "live" or "insufficient-data", got "${evo.status}" (days=${days})`,
+    );
+  }
+});
+
+// ── 30. Collection health factors have weight and some are excluded (score null) ─
+test("advanced.collectionHealth factors have weight; at least one excluded with score null", () => {
+  for (const days of [30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    const ch = (d.advanced as any)?.collectionHealth;
+    if (!ch?.factors) continue;
+    const entries = Object.entries(ch.factors) as [string, any][];
+    assert.ok(entries.length > 0, `collectionHealth.factors must not be empty (days=${days})`);
+    assert.ok(
+      entries.every(([, f]) => typeof f.weight === "number"),
+      `every collectionHealth factor must have a numeric weight (days=${days})`,
+    );
+    assert.ok(
+      entries.some(([, f]) => f.score === null),
+      `at least one collectionHealth factor must have score=null (excluded, pending integration) (days=${days})`,
+    );
+  }
+});
+
+// ── 31. Opportunity scores have sampleSize alongside score for evidence context ─
+test("advanced.opportunityScores items have both score and sampleSize", () => {
+  for (const days of [30, 90, 365]) {
+    const d = getDesignerSampleData(days);
+    const scores = (d.advanced as any)?.opportunityScores ?? [];
+    for (const item of scores) {
+      assert.ok(
+        typeof item.score === "number",
+        `opportunityScore item must have numeric score (days=${days})`,
+      );
+      assert.ok(
+        typeof item.sampleSize === "number",
+        `opportunityScore item for "${item.productTitle}" must have numeric sampleSize (days=${days})`,
+      );
+    }
+  }
+});
