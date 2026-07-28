@@ -591,14 +591,27 @@ export default function DesignerDashboard() {
         </div>
 
         {/* ── Tab content ──────────────────────────────────────────────────── */}
+        {/* TEMP: tab components stubbed to isolate hydration root cause.
+            Restore after confirming header controls work in Shopify Admin. */}
         <div style={{ paddingTop: 8 }}>
+          <div style={{ padding: "40px 0", color: "#7a6f6a", fontFamily: "'Inter', sans-serif", fontSize: 12, textAlign: "center" }}>
+            {activeTab === "overview"                 ? "Overview" :
+             activeTab === "customer"                 ? "Customer Intelligence" :
+             activeTab === "product"                  ? "Product Intelligence" :
+             activeTab === "recommendation"           ? "Recommendation Intelligence" :
+             activeTab === "collection-opportunities" ? "Collection & Opportunities" :
+             activeTab === "commercial"               ? "Commercial Intelligence" : activeTab}
+            {" — content restoring…"}
+          </div>
+        </div>
+        {/* RESTORE BLOCK — uncomment once header interactions are confirmed working:
           {activeTab === "overview"                && <TabOverview        data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} overview={overview} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
           {activeTab === "customer"                && <TabCustomer        data={data} kpis={kpis} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
           {activeTab === "product"                 && <TabProduct         data={data} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
           {activeTab === "recommendation"          && <TabRecommendation  data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
           {activeTab === "collection-opportunities" && <TabCollectionOpportunities data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
           {activeTab === "commercial"              && <TabCommercial      data={data} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
-        </div>
+        */}
 
       </div>
     </div>

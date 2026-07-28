@@ -14,6 +14,5 @@ export default [
   route("trends/:slug/lens/:lens", "./routes/trends.$slug.lens.$lens.tsx"),
   route("api/recommendation-feedback", "./routes/api.recommendation-feedback.tsx"),
   route("api/post-wear-review", "./routes/api.post-wear-review.tsx"),
-  route("app/naia-hydration-test", "./routes/app.naia-hydration-test.tsx"),
-  route("diag", "./routes/diag.tsx"),
+
 ] satisfies RouteConfig;
