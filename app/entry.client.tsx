@@ -21,7 +21,7 @@ startTransition(() => {
       <HydratedRouter />
     </StrictMode>,
     {
-      onRecoverableError(error: unknown) {
+      onRecoverableError(error: unknown, info: { componentStack?: string | null }) {
         // Temporary — writes hydration errors visibly without DevTools.
         // Remove after root cause is confirmed.
         try {
@@ -29,8 +29,12 @@ startTransition(() => {
           bar.style.cssText =
             "position:fixed;top:0;left:0;right:0;z-index:99999;" +
             "background:#8b2035;color:#fff;padding:6px 12px;" +
-            "font-size:11px;font-family:monospace;word-break:break-all";
-          bar.textContent = "NAIA HYDRATION ERROR: " + String(error).slice(0, 300);
+            "font-size:11px;font-family:monospace;word-break:break-all;white-space:pre-wrap";
+          const cause = (error as any)?.cause;
+          bar.textContent =
+            "NAIA HYDRATION ERROR: " + String(error).slice(0, 200) +
+            (cause ? "\nCAUSE: " + String(cause).slice(0, 200) : "") +
+            (info?.componentStack ? "\nSTACK: " + info.componentStack.slice(0, 600) : "");
           document.body?.appendChild(bar);
         } catch (_) {}
       },
