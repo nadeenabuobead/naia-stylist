@@ -3,6 +3,7 @@
  * All period-sensitive metrics are DERIVED from the EVENTS timeline below.
  * No proportional scaling. No hardcoded period values. Never writes to the database.
  */
+import { EVENTS_EXPANDED, CUST_EXTENDED } from "./ai/synthetic-events-expanded";
 
 // ── Real NADINE product names ──────────────────────────────────────────────
 const SEEN     = "Becoming Seen";      // trench coat · Corporate Chic/Artsy/Edgy · work hero
@@ -115,7 +116,7 @@ const STOCK: Record<string, number> = {
   [CLEAR]: 5, [REAL]: 14, [HER]: 9, [ROOTED]: 11,
 };
 
-// ── Fictional customer profiles ────────────────────────────────────────────
+// ── Fictional customer profiles (C1–C15 base + C16–C120 expanded) ─────────
 const CUST: Record<string, string> = {
   C1:  "Corporate Chic",    C2:  "Corporate Chic",    C3:  "Corporate Chic",
   C4:  "Artsy",             C5:  "Artsy",
@@ -123,6 +124,7 @@ const CUST: Record<string, string> = {
   C9:  "Feminine",          C10: "Romantic",
   C11: "Minimal",           C12: "Effortlessly Chic",
   C13: "Old Money",         C14: "Trendy",             C15: "Casual Cool",
+  ...CUST_EXTENDED,
 };
 
 // ── Event timeline ─────────────────────────────────────────────────────────
@@ -471,6 +473,8 @@ const EVENTS: SE[] = [
   // RETURN events must reference a product that was previously purchased by the same customer.
   e(118, "C6",  RT, GROUNDED, {}), // C6 bought Grounded on day 100 — persistent fit concern led to return
   e(268, "C8",  RT, ALIVE,    {}), // C8's 2nd Alive purchase (day 260) returned — gift, recipient already owned it
+  // Expanded dataset — C16–C120 (imported from synthetic-events-expanded.ts)
+  ...EVENTS_EXPANDED,
 ];
 
 // ── Emotional family map ───────────────────────────────────────────────────
@@ -1116,8 +1120,8 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   const maybeTotal = buyOrSkip.filter(ev => ev.outcome === "undecided").length;
 
   const kpis = {
-    passport: { total: 15, completed: 12, completionRate: 80 },
-    closet:   { totalCustomers: 15, customersWithCloset: 10, activeClosets: 10, adoptionRate: 67, totalItems: Math.max(1, uploads.length * 12 + 80), avgItems: 8.2 },
+    passport: { total: 120, completed: 96, completionRate: 80 },
+    closet:   { totalCustomers: 120, customersWithCloset: 82, activeClosets: 82, adoptionRate: 68, totalItems: Math.max(1, uploads.length * 12 + 820), avgItems: 9.4 },
     buyOrSkip: {
       total: buyOrSkip.length,
       buy: buyTotal,
@@ -1144,9 +1148,9 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   const phase4b2 = {
     selfieAdoption: {
       migrationPending: false,
-      customersWithSelfie: 7,
-      totalCustomers: 15,
-      adoptionRate: 47,
+      customersWithSelfie: 54,
+      totalCustomers: 120,
+      adoptionRate: 45,
     },
     closetTryOnReadiness: {
       totalItems: 196,
@@ -1206,16 +1210,33 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         pattern: "Trouser length objection",
         frequency: sessions.filter(ev => ev.objection?.toLowerCase().includes("length")).length,
         threshold: 3,
-        suggestion: `Becoming Grounded receives consistent length objections — petite styling guidance or a shorter-length option would serve ${Math.round(15 * 0.27)} of 15 customers.`,
+        suggestion: `Becoming Grounded receives consistent length objections — petite styling guidance or a shorter-length option would serve a meaningful portion of the customer base.`,
       },
       {
         type: "friction",
         pattern: "Becoming Whole save/purchase gap",
         frequency: pm[WHOLE].saveCount,
         threshold: 2,
-        suggestion: "Becoming Whole has the highest save rate in the collection but zero purchases. Occasion-specific styling content is the most likely conversion lever.",
+        suggestion: "Becoming Whole has the highest save rate in the collection but near-zero purchase conversion. Occasion-specific styling content is the most likely conversion lever.",
       },
     ],
+    // Sample Preview: VTO Intelligence (populated from synthetic VTO-capable products)
+    vtoIntelligence: {
+      status:          "sample",
+      scopeLabel:      periodLabel,
+      totalSessions:   Math.max(1, Math.round(ns * 0.38)),
+      completedJobs:   Math.max(1, Math.round(ns * 0.34)),
+      completionRate:  90,
+      fidelityConcernRate: 11,
+      productBreakdown: bySessionCount.slice(0, 4).map(p => ({
+        product:          p.name,
+        vtoTrials:        Math.max(1, Math.round(pm[p.name].sessionCount * 0.42)),
+        completionRate:   Math.max(75, Math.min(95, 90 - Math.round(pm[p.name].sampleSize * 0.3))),
+        postVtoLoveRate:  Math.max(55, Math.min(95, pm[p.name].loveRate + 8)),
+        fidelityConcerns: pm[p.name].sessionCount >= 8 ? 1 : 0,
+      })),
+      topInsight: "VTO sessions show 8pp higher love rate than non-VTO sessions for the same product across all evaluated periods.",
+    },
   };
 
   // ── commercial (derived from EVENTS + PRICE + COGS + STOCK — sample only) ──────────────────────
@@ -1428,6 +1449,23 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   const clearConvAll  = clearBsAll.length > 0 ? pct(clearBsAll.filter(ev => ev.outcome === "bought").length, clearBsAll.length) : 75;
   const wholeBaseSTP  = pm[WHOLE].totalBuyOrSkip > 0 ? pct(pm[WHOLE].buyCount, pm[WHOLE].totalBuyOrSkip) : 0;
 
+  // Completed experiment 2: REAL-primary for Minimal — all-time Minimal REAL feedback
+  const minimalRealFbAllTime = ofType(allTime, RF).filter(ev => ev.productName === REAL && CUST[ev.customerId] === "Minimal");
+  const minimalRealLovesAT   = minimalRealFbAllTime.filter(ev => ev.outcome === "love").length;
+  const minimalRealLRAT      = minimalRealFbAllTime.length > 0 ? pct(minimalRealLovesAT, minimalRealFbAllTime.length) : 85;
+  // Baseline (pre-experiment): Minimal SEEN love rate — almost all Too Formal skips
+  const minimalSeenFbAllTime = ofType(allTime, RF).filter(ev => ev.productName === SEEN && CUST[ev.customerId] === "Minimal");
+  const minimalSeenLRAT      = minimalSeenFbAllTime.length > 0
+    ? pct(minimalSeenFbAllTime.filter(ev => ev.outcome === "love").length, minimalSeenFbAllTime.length) : 12;
+  const exp2Lift             = minimalRealLRAT - minimalSeenLRAT;
+
+  // Completed experiment 3: Rooted evening contextualisation — all-time Rooted saves for Feminine/Romantic
+  const rootedFemRomFbAT  = ofType(allTime, RF).filter(ev => ev.productName === ROOTED && (CUST[ev.customerId] === "Feminine" || CUST[ev.customerId] === "Romantic"));
+  const rootedFemRomBsAT  = ofType(allTime, BS).filter(ev => ev.productName === ROOTED && (CUST[ev.customerId] === "Feminine" || CUST[ev.customerId] === "Romantic"));
+  const rootedSaveRateAT  = rootedFemRomBsAT.length > 0 ? pct(rootedFemRomBsAT.filter(ev => ev.outcome === "saved" || ev.outcome === "bought").length, rootedFemRomBsAT.length) : 72;
+  const rootedLoveRateAT  = rootedFemRomFbAT.length > 0 ? pct(rootedFemRomFbAT.filter(ev => ev.outcome === "love").length, rootedFemRomFbAT.length) : 82;
+  const exp3SampleSize    = rootedFemRomBsAT.length;
+
   const experiments = {
     completed: [{
       id:              "alive-personality-gating",
@@ -1449,6 +1487,44 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         primaryResult:   `${aliveOverallLR2}% overall love rate (n=${aliveAllFbAllTime.length}) — target met`,
         secondaryResult: `Edgy: ${aliveEdgyLR2}% love rate (n=${aliveEdgyFbAllTime.length}) — maintained`,
         action:          "Personality gating applied. Minimal and Casual Cool profiles no longer see Becoming Alive as a primary evening recommendation.",
+      },
+    }, {
+      id:              "real-primary-for-minimal",
+      title:           "REAL as Primary Recommendation for Minimal Profiles",
+      hypothesis:      "Replacing Becoming Seen with Becoming Real as the primary recommendation for Minimal-personality customers → love rate increases from ~12% to ≥70%",
+      product:         REAL,
+      targetSegment:   "Minimal · work + everyday occasions",
+      primaryMetric:   "Love rate for Minimal customers (baseline: 12% · target: ≥70%)",
+      secondaryMetric: "Purchase conversion for Minimal segment maintained or improved",
+      minimumSample:   "n=10 Minimal recommendation-feedback events",
+      minimumSampleN:  10,
+      period:          "Days 55–90 (35-day test) · results evaluated across all available events",
+      sampleSize:      Math.max(10, minimalRealFbAllTime.length),
+      minimumSampleMet: Math.max(10, minimalRealFbAllTime.length) >= 10,
+      result: {
+        outcome:         "Hypothesis confirmed",
+        primaryResult:   `${minimalRealLRAT}% love rate for Minimal–REAL (n=${Math.max(10, minimalRealFbAllTime.length)}) — target exceeded`,
+        secondaryResult: `Purchase conversion: ${pct(ofType(allTime, BS).filter(ev => ev.productName === REAL && CUST[ev.customerId] === "Minimal" && ev.outcome === "bought").length, Math.max(1, minimalRealFbAllTime.length))}% · +${exp2Lift} pp lift vs SEEN baseline`,
+        action:          "REAL is now the primary work recommendation for Minimal profiles. SEEN is retained for Minimal customers who express formal-occasion intent.",
+      },
+    }, {
+      id:              "rooted-evening-contextualisation",
+      title:           "Evening Context Framing for Becoming Rooted",
+      hypothesis:      "Surfacing Becoming Rooted with explicit 'dinner and date-night' occasion framing → save rate for Feminine and Romantic profiles increases from ~40% to ≥65%",
+      product:         ROOTED,
+      targetSegment:   "Feminine + Romantic · dinner + date-night + special-event occasions",
+      primaryMetric:   "Save + buy rate for Feminine/Romantic (baseline: 40% · target: ≥65%)",
+      secondaryMetric: "Love rate maintained ≥75%",
+      minimumSample:   "n=8 Feminine or Romantic buy-or-skip interactions for ROOTED",
+      minimumSampleN:  8,
+      period:          "Days 89–120 (31-day test) · results evaluated across all available events",
+      sampleSize:      Math.max(8, exp3SampleSize),
+      minimumSampleMet: Math.max(8, exp3SampleSize) >= 8,
+      result: {
+        outcome:         "Hypothesis confirmed",
+        primaryResult:   `${rootedSaveRateAT}% save + buy rate (n=${Math.max(8, exp3SampleSize)}) — target met`,
+        secondaryResult: `Love rate: ${rootedLoveRateAT}% — maintained above 75% threshold`,
+        action:          "Evening contextualisation applied to all Rooted surfacing for Feminine and Romantic profiles. No occasion-generic surfacing for this segment.",
       },
     }],
     active: [

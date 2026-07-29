@@ -1890,10 +1890,47 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
       )}
 
       {/* VTO Intelligence */}
-      <AwaitingCard
-        label="Virtual Try-On Intelligence"
-        description="VTO session counts, completion rates, and FASHN.ai fidelity metrics are pending FASHN.ai performance integration. Eligibility and readiness metrics are available in Feature Adoption."
-      />
+      {sampleMode && phase4b2?.vtoIntelligence ? (
+        <Section title="Virtual Try-On Intelligence" desc="FASHN.ai VTO session outcomes — Sample Preview" status="sample">
+          <div style={s.grid3}>
+            <KpiCard label="VTO Sessions" value={phase4b2.vtoIntelligence.totalSessions} />
+            <KpiCard label="Completion Rate" value={`${phase4b2.vtoIntelligence.completionRate}%`} />
+            <KpiCard label="Fidelity Concern Rate" value={`${phase4b2.vtoIntelligence.fidelityConcernRate}%`} />
+          </div>
+          {phase4b2.vtoIntelligence.productBreakdown?.length > 0 && (
+            <div style={{ overflowX: "auto", marginTop: 16 }}>
+              <table style={s.table}>
+                <thead><tr>
+                  <th style={s.th}>Product</th><th style={s.th}>VTO Trials</th>
+                  <th style={s.th}>Completion</th><th style={s.th}>Post-VTO Love</th>
+                  <th style={s.th}>Fidelity Flags</th>
+                </tr></thead>
+                <tbody>
+                  {phase4b2.vtoIntelligence.productBreakdown.map((p, i) => (
+                    <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                      <td style={s.td}>{p.product}</td>
+                      <td style={s.td}>{p.vtoTrials}</td>
+                      <td style={s.td}>{p.completionRate}%</td>
+                      <td style={{ ...s.td, color: "#2a5e42", fontWeight: 600 }}>{p.postVtoLoveRate}%</td>
+                      <td style={s.td}>{p.fidelityConcerns}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {phase4b2.vtoIntelligence.topInsight && (
+            <div style={{ marginTop: 14, padding: "10px 14px", background: "rgba(42,94,66,0.06)", borderLeft: "3px solid #2a5e42", fontSize: 13, color: "#221516" }}>
+              {phase4b2.vtoIntelligence.topInsight}
+            </div>
+          )}
+        </Section>
+      ) : (
+        <AwaitingCard
+          label="Virtual Try-On Intelligence"
+          description="VTO session counts, completion rates, and FASHN.ai fidelity metrics are pending FASHN.ai performance integration. Eligibility and readiness metrics are available in Feature Adoption."
+        />
+      )}
 
       {/* Occasion × Product Intelligence */}
       {rel?.occasionProductMatrix?.length > 0 && (
@@ -2298,7 +2335,7 @@ function CollectionHealthScoreDisclosure({ health }) {
 // TAB 5 — COLLECTION INTELLIGENCE
 // ══════════════════════════════════════════════════════════════════════════════
 
-function TabCollection({ data, kpis, advanced, rel, dateRangeDays }) {
+function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays }) {
   return (
     <>
       {/* Balance & Coverage Summary */}
@@ -2463,7 +2500,13 @@ function TabCollection({ data, kpis, advanced, rel, dateRangeDays }) {
             <div key={i} style={s.card}><div style={s.cardLabel}>{p.preference}</div><div style={s.cardValue}>{p.userCount} {p.userCount === 1 ? "user" : "users"}</div><div style={{ fontSize: 12, color: "#7a6f6a", marginTop: 6, fontStyle: "italic" }}>{p.implication}</div></div>
           ))}
         </div>
-        <AwaitingCard label="Size Coverage" description="Size coverage analysis requires size data to be collected in StyleMe sessions and linked to product variant availability." />
+        {sampleMode ? (
+          <div style={{ padding: "12px 14px", background: "rgba(107,72,0,0.05)", border: "1px solid rgba(107,72,0,0.15)", fontSize: 13, color: "#221516", marginTop: 8 }}>
+            <strong style={{ color: "#6b4800" }}>Sample Preview — Size Coverage:</strong> Size data collection is not yet integrated. In live mode, this section will show size requests captured in StyleMe sessions linked to product variant availability.
+          </div>
+        ) : (
+          <AwaitingCard label="Size Coverage" description="Size coverage analysis requires size data to be collected in StyleMe sessions and linked to product variant availability." />
+        )}
       </Section>
 
       {/* Unmet Needs */}
@@ -3099,7 +3142,7 @@ function TabCollectionOpportunities({ data, kpis, phase4b2, advanced, rel, sampl
   return (
     <>
       {/* ── COLLECTION DIRECTION ───────────────────────────────────── */}
-      <TabCollection data={data} kpis={kpis} advanced={advanced} rel={rel} dateRangeDays={dateRangeDays} />
+      <TabCollection data={data} kpis={kpis} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} />
       {/* ── DESIGN & MERCHANDISING ACTION PLAN ─────────────────────── */}
       <TabOpportunitiesContent data={data} phase4b2={phase4b2} advanced={advanced} rel={rel} dateRangeDays={dateRangeDays} roleLens={roleLens} />
     </>
