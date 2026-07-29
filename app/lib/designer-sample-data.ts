@@ -103,6 +103,18 @@ const PRICE: Record<string, number> = {
   [CLEAR]: 3200, [REAL]: 950,  [HER]: 1750,  [ROOTED]: 1350,
 };
 
+// Synthetic COGS per piece (AED) — used for margin derivation only
+const COGS: Record<string, number> = {
+  [SEEN]: 980, [WHOLE]: 680, [ALIVE]: 285, [GROUNDED]: 560,
+  [CLEAR]: 1080, [REAL]: 315, [HER]: 595, [ROOTED]: 450,
+};
+
+// Synthetic stock on hand (units) — used for sell-through derivation only
+const STOCK: Record<string, number> = {
+  [SEEN]: 10, [WHOLE]: 16, [ALIVE]: 6, [GROUNDED]: 9,
+  [CLEAR]: 5, [REAL]: 14, [HER]: 9, [ROOTED]: 11,
+};
+
 // ── Fictional customer profiles ────────────────────────────────────────────
 const CUST: Record<string, string> = {
   C1:  "Corporate Chic",    C2:  "Corporate Chic",    C3:  "Corporate Chic",
@@ -121,7 +133,7 @@ const CUST: Record<string, string> = {
 // ALL story: Complete history, repeat customers, LTV, long-term rankings.
 
 type ET = "STYLING_SESSION" | "POST_OUTFIT_REVIEW" | "POST_WEAR_REVIEW" |
-          "RECOMMENDATION_FEEDBACK" | "BUY_OR_SKIP" | "CLOSET_UPLOAD";
+          "RECOMMENDATION_FEEDBACK" | "BUY_OR_SKIP" | "CLOSET_UPLOAD" | "RETURN";
 
 interface SE {
   daysAgo: number; customerId: string; eventType: ET; productName: string | null;
@@ -145,7 +157,8 @@ const e = (
 
 const SS = "STYLING_SESSION" as ET, OR = "POST_OUTFIT_REVIEW" as ET,
       WR = "POST_WEAR_REVIEW" as ET,  RF = "RECOMMENDATION_FEEDBACK" as ET,
-      BS = "BUY_OR_SKIP" as ET,       CU = "CLOSET_UPLOAD" as ET;
+      BS = "BUY_OR_SKIP" as ET,       CU = "CLOSET_UPLOAD" as ET,
+      RT = "RETURN" as ET;
 
 const EVENTS: SE[] = [
   // ── DAYS 0–7: Becoming Clear gaining momentum; Travel Day demand rising ──────
@@ -453,6 +466,11 @@ const EVENTS: SE[] = [
   e(360, "C12", RF, WHOLE,   { outcome:"love"                                                 }),
   // C13 (Old Money): Clear dinner (earliest recorded event — historical discovery)
   e(365, "C13", SS, CLEAR,   { occasion:"dinner",       desiredFeeling:"Elevated"            }),
+
+  // ── Return events ──────────────────────────────────────────────────────────────────────────────
+  // RETURN events must reference a product that was previously purchased by the same customer.
+  e(118, "C6",  RT, GROUNDED, {}), // C6 bought Grounded on day 100 — persistent fit concern led to return
+  e(268, "C8",  RT, ALIVE,    {}), // C8's 2nd Alive purchase (day 260) returned — gift, recipient already owned it
 ];
 
 // ── Emotional family map ───────────────────────────────────────────────────
@@ -1197,6 +1215,229 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     ],
   };
 
+  // ── commercial (derived from EVENTS + PRICE + COGS + STOCK — sample only) ──────────────────────
+  const allBuysAllTime       = ofType(allTime, BS).filter(ev => ev.outcome === "bought");
+  const allTimeReturnEvents  = ofType(allTime, RT);
+
+  const periodRevenue = buys.reduce((s, ev) => s + (PRICE[ev.productName ?? ""] ?? 1500), 0);
+  const allTimeRevenue = allBuysAllTime.reduce((s, ev) => s + (PRICE[ev.productName ?? ""] ?? 1500), 0);
+  const naiaAOV = buys.length > 0 ? Math.round(periodRevenue / buys.length) : 0;
+  const revenuePerSession = ns > 0 ? Math.round(periodRevenue / ns) : 0;
+  const sessionConvRate = pct(buys.length, Math.max(1, ns));
+
+  const periodGrossMarginAed = buys.reduce((s, ev) => {
+    const price = PRICE[ev.productName ?? ""] ?? 1500;
+    const cogs  = COGS[ev.productName ?? ""] ?? 500;
+    return s + price - cogs;
+  }, 0);
+  const periodGrossMarginPct = periodRevenue > 0 ? pct(periodGrossMarginAed, periodRevenue) : 0;
+
+  const byProductCommercial = ALL_PRODUCTS.map(name => {
+    const buysP    = allBuysAllTime.filter(ev => ev.productName === name);
+    const returnsP = allTimeReturnEvents.filter(ev => ev.productName === name);
+    const revenue  = buysP.reduce((s) => s + PRICE[name], 0);
+    const cogsT    = buysP.reduce((s) => s + COGS[name], 0);
+    const gross    = revenue - cogsT;
+    const grossPct = revenue > 0 ? pct(gross, revenue) : 0;
+    const unitsSold = buysP.length;
+    const returned  = returnsP.length;
+    const netSold   = unitsSold - returned;
+    const inStock   = STOCK[name] ?? 10;
+    const totalUnits = inStock + unitsSold;
+    const sellThrough = totalUnits > 0 ? pct(netSold, totalUnits) : 0;
+    return { product: name, unitsSold, returned, netSold, returnRate: unitsSold > 0 ? pct(returned, unitsSold) : 0, inStock, totalUnits, sellThrough, revenue, cogsT, gross, grossPct, price: PRICE[name], cogs: COGS[name] };
+  }).filter(r => r.unitsSold > 0 || r.inStock > 0);
+
+  const bySTSorted = [...byProductCommercial].sort((a, b) => b.sellThrough - a.sellThrough);
+  const avgSellThrough = byProductCommercial.length > 0
+    ? Math.round(byProductCommercial.reduce((s, r) => s + r.sellThrough, 0) / byProductCommercial.length) : 0;
+
+  const commercial = {
+    status: "sample" as const,
+    scopeLabel: periodLabel,
+    revenue: {
+      naiaAssisted:        periodRevenue,
+      naiaAssistedAllTime: allTimeRevenue,
+      avgOrderValue:       naiaAOV,
+      revenuePerSession,
+      sessionConversionRate: sessionConvRate,
+      naiaVsNonNaiaMultiplier: sessionConvRate > 0 ? Math.round(sessionConvRate / 5 * 10) / 10 : 1,
+      byProduct: byProductCommercial.filter(r => r.unitsSold > 0).sort((a, b) => b.revenue - a.revenue)
+        .map(r => ({ product: r.product, revenue: r.revenue, units: r.unitsSold })),
+    },
+    margin: {
+      grossMarginAed:    periodGrossMarginAed,
+      grossMarginPct:    periodGrossMarginPct,
+      allTimeGrossAed:   byProductCommercial.reduce((s, r) => s + r.gross, 0),
+      byProduct: byProductCommercial.filter(r => r.unitsSold > 0).sort((a, b) => b.grossPct - a.grossPct)
+        .map(r => ({ product: r.product, grossPct: r.grossPct, grossAed: r.gross, revenue: r.revenue })),
+      highestMarginProduct: [...byProductCommercial].filter(r => r.unitsSold > 0).sort((a, b) => b.grossPct - a.grossPct)[0]?.product ?? null,
+    },
+    returns: {
+      total: allTimeReturnEvents.length,
+      returnRate: pct(allTimeReturnEvents.length, Math.max(1, allBuysAllTime.length)),
+      returnRevenueLost: allTimeReturnEvents.reduce((s, ev) => s + (PRICE[ev.productName ?? ""] ?? 1500), 0),
+      byProduct: byProductCommercial.filter(r => r.returned > 0).map(r => ({
+        product: r.product, returned: r.returned, rate: r.returnRate,
+        revenueLost: PRICE[r.product] * r.returned,
+      })),
+      byReason: [
+        { reason: "Fit concern — trouser length",  count: 1, products: [GROUNDED] },
+        { reason: "Duplicate / gifting error",     count: 1, products: [ALIVE] },
+      ],
+    },
+    inventory: {
+      avgSellThrough,
+      fastestMoving: bySTSorted[0]?.product ?? null,
+      slowestMoving: bySTSorted[bySTSorted.length - 1]?.product ?? null,
+      atRisk: byProductCommercial.filter(r => r.sellThrough < 25 && r.inStock >= 8).map(r => r.product),
+      byProduct: bySTSorted.map(r => ({
+        product: r.product, inStock: r.inStock, unitsSold: r.unitsSold,
+        returned: r.returned, netSold: r.netSold, totalUnits: r.totalUnits,
+        sellThrough: r.sellThrough,
+      })),
+    },
+  };
+
+  // ── aiLearning (derived from feedback events + confidence tiers — sample only) ─────────────────
+  const lovesForAI     = feedback.filter(ev => ev.outcome === "love").length;
+  const skipsForAI     = feedback.filter(ev => ev.outcome === "skip").length;
+  const undecidedForAI = feedback.filter(ev => ev.outcome === "undecided").length;
+  const totalEvaluated = lovesForAI + skipsForAI + undecidedForAI;
+  const precisionPct   = (lovesForAI + skipsForAI) > 0 ? pct(lovesForAI, lovesForAI + skipsForAI) : 70;
+  const fpRatePct      = (lovesForAI + skipsForAI) > 0 ? pct(skipsForAI, lovesForAI + skipsForAI) : 28;
+  const fnCount        = Math.max(1, Math.round(undecidedForAI * 0.30));
+  const fnRatePct      = undecidedForAI > 0 ? pct(fnCount, undecidedForAI) : 12;
+
+  const highEvProds  = bySessionCount.filter(p => pm[p.name].sampleSize >= 10);
+  const medEvProds   = bySessionCount.filter(p => pm[p.name].sampleSize >= 5 && pm[p.name].sampleSize < 10);
+  const lowEvProds   = bySessionCount.filter(p => pm[p.name].sampleSize < 5);
+  const meanLR = (prods: typeof bySessionCount) =>
+    prods.length > 0 ? Math.round(prods.reduce((s, p) => s + pm[p.name].loveRate, 0) / prods.length) : 0;
+  const highTierLR = highEvProds.length > 0 ? meanLR(highEvProds) : 80;
+  const medTierLR  = medEvProds.length  > 0 ? meanLR(medEvProds)  : 65;
+  const lowTierLR  = lowEvProds.length  > 0 ? meanLR(lowEvProds)  : 45;
+  const avgCalibGap = (Math.abs(highTierLR - 80) + Math.abs(medTierLR - 60) + Math.abs(lowTierLR - 40)) / 3;
+  const calibrationScore = Math.max(40, Math.min(95, Math.round(85 - avgCalibGap)));
+
+  const w6p = precisionPct, w6f = fpRatePct, w6c = calibrationScore;
+  const aiLearningTrajectory = [
+    { week: "W1", precision: Math.max(42, w6p - 20), fpRate: Math.min(58, w6f + 24), calibration: Math.max(42, w6c - 24) },
+    { week: "W2", precision: Math.max(48, w6p - 15), fpRate: Math.min(52, w6f + 18), calibration: Math.max(48, w6c - 18) },
+    { week: "W3", precision: Math.max(54, w6p - 10), fpRate: Math.min(46, w6f + 12), calibration: Math.max(54, w6c - 12) },
+    { week: "W4", precision: Math.max(60, w6p - 6),  fpRate: Math.min(40, w6f + 8),  calibration: Math.max(60, w6c - 8)  },
+    { week: "W5", precision: Math.max(65, w6p - 3),  fpRate: Math.min(35, w6f + 4),  calibration: Math.max(65, w6c - 4)  },
+    { week: "W6", precision: w6p,                     fpRate: w6f,                     calibration: w6c                    },
+  ];
+
+  const aiLearning = {
+    status: "sample" as const,
+    modelVersion: "v2.1",
+    evaluationPeriod: periodLabel,
+    totalEvaluated,
+    precision: { value: precisionPct, count: lovesForAI, denominator: lovesForAI + skipsForAI },
+    falsePositiveRate: {
+      value: fpRatePct, count: skipsForAI, denominator: lovesForAI + skipsForAI,
+      targetRate: 15, trend: "improving" as const,
+      topCauses: [
+        { cause: "Formality mismatch for occasion",  count: sessions.filter(ev => ev.objection === "Too formal").length },
+        { cause: "Personality-product misalignment", count: Math.max(1, Math.round(skipsForAI * 0.45)) },
+        { cause: "Fit uncertainty (pre-purchase)",   count: sessions.filter(ev => (ev.objection ?? "").toLowerCase().includes("fit") || (ev.objection ?? "").toLowerCase().includes("length")).length },
+      ],
+    },
+    falseNegativeRate: {
+      value: fnRatePct, count: fnCount, denominator: undecidedForAI,
+      targetRate: 10, trend: "improving" as const,
+      topSignals: [
+        { signal: "Repeated session without decision", note: "Customer returned to same product 2+ times — positive intent underweighted" },
+        { signal: "Save without immediate buy",        note: "Save signal not weighted heavily enough in current model" },
+      ],
+    },
+    calibration: {
+      score: calibrationScore, trend: "improving" as const,
+      byTier: [
+        { tier: "High evidence (n≥10)",    predictedRate: 80, actualRate: highTierLR, sampleSize: highEvProds.length },
+        { tier: "Medium evidence (n 5–9)", predictedRate: 60, actualRate: medTierLR,  sampleSize: medEvProds.length },
+        { tier: "Low evidence (n<5)",      predictedRate: 40, actualRate: lowTierLR,  sampleSize: lowEvProds.length },
+      ],
+    },
+    trajectory: aiLearningTrajectory,
+    signalWeights: {
+      personality:    { weight: 0.35, accuracy: Math.min(95, highTierLR),                   trend: "stable" as const },
+      occasion:       { weight: 0.28, accuracy: Math.min(90, Math.round(loveRate * 1.05)),   trend: "improving" as const },
+      desiredFeeling: { weight: 0.22, accuracy: Math.min(85, loveRate),                      trend: "improving" as const },
+      fitProfile:     { weight: 0.15, accuracy: 61,                                          trend: "insufficient-data" as const },
+    },
+    testTrainInfo: {
+      testPct: 20, trainPct: 80, totalEvents: totalEvaluated,
+      minimumRecommended: 50,
+      currentStatus: (totalEvaluated >= 50 ? "sufficient" : "growing") as "sufficient" | "growing",
+    },
+  };
+
+  // ── experiments (derived from product metrics — sample only) ──────────────────────────────────
+  const aliveAllFb    = feedback.filter(ev => ev.productName === ALIVE);
+  const aliveEdgyFb   = aliveAllFb.filter(ev => CUST[ev.customerId] === "Edgy");
+  const aliveEdgyLR2  = aliveEdgyFb.length > 0 ? pct(aliveEdgyFb.filter(ev => ev.outcome === "love").length, aliveEdgyFb.length) : 100;
+  const aliveOverallLR2 = aliveAllFb.length > 0 ? pct(aliveAllFb.filter(ev => ev.outcome === "love").length, aliveAllFb.length) : 60;
+  const clearBsAll    = ofType(allTime, BS).filter(ev => ev.productName === CLEAR);
+  const clearConvAll  = clearBsAll.length > 0 ? pct(clearBsAll.filter(ev => ev.outcome === "bought").length, clearBsAll.length) : 75;
+  const wholeBaseSTP  = pm[WHOLE].totalBuyOrSkip > 0 ? pct(pm[WHOLE].buyCount, pm[WHOLE].totalBuyOrSkip) : 0;
+
+  const experiments = {
+    completed: [{
+      id:              "alive-personality-gating",
+      title:           "Personality-Based Recommendation Gating for Becoming Alive",
+      hypothesis:      "Surface Becoming Alive only for Edgy and Artsy profiles in evening contexts → overall love rate improves without reducing Edgy satisfaction",
+      product:         ALIVE,
+      targetSegment:   "Edgy + Artsy · evening + girls-night occasions",
+      primaryMetric:   "Overall love rate (target: ≥70%)",
+      secondaryMetric: "Edgy love rate maintained ≥85%",
+      minimumSample:   "n=8 feedback events post-gating",
+      period:          "Days 33–72 (39-day test)",
+      sampleSize:      aliveAllFb.length,
+      result: {
+        outcome:         "Hypothesis confirmed",
+        primaryResult:   `${aliveOverallLR2}% overall love rate — target met`,
+        secondaryResult: `Edgy: ${aliveEdgyLR2}% love rate — maintained`,
+        action:          "Personality gating applied. Minimal and Casual Cool profiles no longer see Becoming Alive as a primary evening recommendation.",
+      },
+    }],
+    active: [{
+      id:              "clear-exposure-frequency",
+      title:           "Increased Becoming Clear Frequency for Corporate Chic",
+      hypothesis:      "Doubling recommendation frequency for Becoming Clear with Corporate Chic profiles → conversion maintained or improved with higher session volume",
+      product:         CLEAR,
+      targetSegment:   "Corporate Chic + Artsy · work + dinner occasions",
+      primaryMetric:   "Conversion rate (target: ≥60%)",
+      secondaryMetric: "Session volume ×2 without love rate decrease",
+      minimumSample:   "n=10 buy-or-skip interactions",
+      period:          "Started 14 days ago · 60-day test",
+      daysRemaining:   46,
+      intermediate: {
+        sessionsToDate:   pm[CLEAR].sessionCount,
+        buysToDate:       pm[CLEAR].buyCount,
+        conversionToDate: pm[CLEAR].conversionRate,
+        sampleSize:       pm[CLEAR].totalBuyOrSkip,
+        status:           "promising" as const,
+        note:             `${pm[CLEAR].conversionRate}% conversion · n=${pm[CLEAR].totalBuyOrSkip} · above target — do not conclude early`,
+      },
+    }],
+    planned: [{
+      id:              "whole-styling-guides",
+      title:           "Occasion-Specific Styling Guides for Becoming Whole",
+      hypothesis:      `3 styling guides (Desk to Lunch, Weekend Travel, Evening) → save-to-purchase rate improves within 60 days of publication`,
+      product:         WHOLE,
+      targetSegment:   "All personality types · everyday + travel + dinner",
+      primaryMetric:   `Save-to-purchase rate (baseline: ${wholeBaseSTP}% · target: ≥25%)`,
+      secondaryMetric: "Session-to-save rate maintained",
+      minimumSample:   "n=8 buy-or-skip interactions post-publication",
+      period:          "Not yet started",
+      prerequisite:    "Creative brief: 3 guides × image + copy per platform",
+      evidence:        `${pm[WHOLE].saveCount} saves · ${pm[WHOLE].buyCount} purchases · top objection: "Not sure how to style it"`,
+    }],
+  };
+
   // ── advanced ───────────────────────────────────────────────────────────
 
   // Emotional transformations derived from wear-review pairs
@@ -1577,7 +1818,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       const avgGap = gaps.length ? Math.round(gaps.reduce((s, v) => s + v, 0) / gaps.length) : null;
 
       return {
-        status: "awaiting-integration",
+        status: "sample",
         scopeLabel: "All Time",
         sampleSize: allBuys.length,
         avgLtv,
@@ -1615,7 +1856,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       );
 
       return {
-        status: "awaiting-integration",
+        status: "sample",
         scopeLabel: periodLabel,
         totalSaves:     periodSaves.length,
         totalPurchases: periodBuys.length,
@@ -1676,6 +1917,8 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       disclaimer: "Sample Preview — predictive signals not shown in sample mode.",
     },
     opportunityFeed,
+    aiLearning,
+    experiments,
   };
 
   // ── rel ─────────────────────────────────────────────────────────────────
@@ -1895,5 +2138,5 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     },
   };
 
-  return { dashboard, kpis, phase4b2, advanced, rel, overview };
+  return { dashboard, kpis, phase4b2, advanced, rel, overview, commercial };
 }

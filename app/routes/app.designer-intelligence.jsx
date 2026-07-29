@@ -395,7 +395,7 @@ const TABS = [
   { id: "overview",                label: "Overview" },
   { id: "customer",                label: "Customers" },
   { id: "product",                 label: "Products" },
-  { id: "recommendation",          label: "Recommendations" },
+  { id: "recommendation",          label: "Features & Recommendations" },
   { id: "collection-opportunities", label: "Collection & Opportunities" },
   { id: "commercial",              label: "Commercial" },
 ];
@@ -403,9 +403,10 @@ const TABS = [
 // ── Root component ─────────────────────────────────────────────────────────────
 
 export default function DesignerDashboard() {
-  const { dashboard: data, kpis, phase4b2, advanced, rel, overview, dateRangeDays, sampleMode, samplePreviewAvailable } = useLoaderData();
+  const { dashboard: data, kpis, phase4b2, advanced, rel, overview, commercial, dateRangeDays, sampleMode, samplePreviewAvailable } = useLoaderData();
   const [activeTab, setActiveTab] = useState("overview");
-  const [roleLens, setRoleLens] = useState("combined"); // "combined" | "design" | "merchandising"
+  // Role lens: fields preserved in data model for future B2B use; fixed to "combined" in the Founder–Designer dashboard.
+  const roleLens = "combined";
   const [dataAiOpen, setDataAiOpen] = useState(false);
   const [dataAiPanel, setDataAiPanel] = useState("definitions"); // "definitions" | "confidence" | "integration" | "roadmap" | "experiments"
   const [searchParams] = useSearchParams();
@@ -431,7 +432,7 @@ export default function DesignerDashboard() {
         {/* ── Sample Preview banner — only visible while sample mode is active ─ */}
         {sampleMode && (
           <div style={{ padding: "8px 20px", background: "#6b4800", color: "#fffbf0", fontFamily: "'Inter', sans-serif", fontSize: 11, letterSpacing: "0.5px", textAlign: "center" }}>
-            SAMPLE PREVIEW ACTIVE — Synthetic fixture data only. No real customer records loaded.
+            Sample Preview — all figures, customers, orders and outcomes are illustrative synthetic data demonstrating the complete nAia intelligence experience.
           </div>
         )}
 
@@ -439,9 +440,9 @@ export default function DesignerDashboard() {
         <div style={s.header}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16 }}>
             <div>
-              <div style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontSize: 8, textTransform: "uppercase", letterSpacing: "3px", color: "#8b2035", marginBottom: 10, fontWeight: 600 }}>NADINE — Private Intelligence Platform</div>
-              <h1 style={s.h1}>Design &amp; Merchandising Intelligence</h1>
-              <p style={s.subtitle}>Turn customer signals into product, assortment, styling and commercial decisions.</p>
+              <div style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontSize: 8, textTransform: "uppercase", letterSpacing: "3px", color: "#8b2035", marginBottom: 10, fontWeight: 600 }}>NADINE — Founder–Designer Intelligence</div>
+              <h1 style={s.h1}>Intelligence Dashboard</h1>
+              <p style={s.subtitle}>Customer, product and commercial intelligence for better design and collection decisions.</p>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
               {/* Date range selector — navWith clones all params, changes only `days` */}
@@ -515,31 +516,6 @@ export default function DesignerDashboard() {
           <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 40, background: "linear-gradient(to right, transparent, #f4f4f1)", pointerEvents: "none" }} />
         </div>
 
-        {/* ── Role lens selector ────────────────────────────────────────────── */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 24, paddingTop: 8, borderTop: "1px solid rgba(34,21,22,0.06)" }}>
-          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", fontWeight: 500 }}>View as</span>
-          {[
-            { id: "combined",      label: "Combined" },
-            { id: "design",        label: "Design" },
-            { id: "merchandising", label: "Merchandising" },
-          ].map(lens => (
-            <button
-              key={lens.id}
-              type="button"
-              onClick={() => setRoleLens(lens.id)}
-              style={{
-                padding: "2px 10px", fontFamily: "'Inter', sans-serif", fontSize: 9,
-                letterSpacing: "1px", textTransform: "uppercase",
-                background: roleLens === lens.id ? "#221516" : "transparent",
-                color: roleLens === lens.id ? "#f4f4f1" : "#7a6f6a",
-                border: "1px solid rgba(34,21,22,0.14)", cursor: "pointer",
-              }}
-            >{lens.label}</button>
-          ))}
-          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 9, color: "#9CA3AF", marginLeft: 4 }}>
-            {roleLens === "design" ? "— showing design implications" : roleLens === "merchandising" ? "— showing merchandising implications" : "— showing all implications"}
-          </span>
-        </div>
 
         {/* ── Data & AI slide-over — always in DOM; CSS toggle prevents backdrop from intercepting
              clicks while closed, regardless of React hydration timing in Shopify Admin iframe */}
@@ -580,8 +556,8 @@ export default function DesignerDashboard() {
                   {dataAiPanel === "definitions" && <DataAiDefinitions />}
                   {dataAiPanel === "confidence" && <DataAiConfidenceLadder />}
                   {dataAiPanel === "integration" && <DataAiIntegrationReadiness />}
-                  {dataAiPanel === "roadmap" && <DataAiLearningRoadmap />}
-                  {dataAiPanel === "experiments" && <DataAiExperimentBuilder />}
+                  {dataAiPanel === "roadmap" && <DataAiLearningRoadmap advanced={advanced} sampleMode={sampleMode} />}
+                  {dataAiPanel === "experiments" && <DataAiExperimentBuilder advanced={advanced} sampleMode={sampleMode} />}
                 </div>
               </>
             )}
@@ -594,7 +570,7 @@ export default function DesignerDashboard() {
           {activeTab === "product"                 && <TabProduct         data={data} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
           {activeTab === "recommendation"          && <TabRecommendation  data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
           {activeTab === "collection-opportunities" && <TabCollectionOpportunities data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
-          {activeTab === "commercial"              && <TabCommercial      data={data} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
+          {activeTab === "commercial"              && <TabCommercial      data={data} advanced={advanced} rel={rel} commercial={commercial} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
 
       </div>
     </div>
@@ -1753,8 +1729,8 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
                   <th style={s.th}>Best Audience</th>
                   <th style={s.th}>Top Objection</th>
                   <th style={s.th}>Evidence Maturity</th>
-                  {(roleLens === "design" || roleLens === "combined") && <th style={s.th}>Design Signal</th>}
-                  {(roleLens === "merchandising" || roleLens === "combined") && <th style={s.th}>Merchandising Signal</th>}
+                  <th style={s.th}>Design Signal</th>
+                  <th style={s.th}>Commercial / Positioning Signal</th>
                 </tr>
               </thead>
               <tbody>
@@ -1789,12 +1765,8 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
                           {confData.label}
                         </span>
                       </td>
-                      {(roleLens === "design" || roleLens === "combined") && (
-                        <td style={{ ...s.td, fontSize: 11, color: "#5c5350", maxWidth: 200 }}>{n.designImplication ?? "—"}</td>
-                      )}
-                      {(roleLens === "merchandising" || roleLens === "combined") && (
-                        <td style={{ ...s.td, fontSize: 11, color: "#5c5350", maxWidth: 200 }}>{n.recommendedAction ?? "—"}</td>
-                      )}
+                      <td style={{ ...s.td, fontSize: 11, color: "#5c5350", maxWidth: 200 }}>{n.designImplication ?? "—"}</td>
+                      <td style={{ ...s.td, fontSize: 11, color: "#5c5350", maxWidth: 200 }}>{n.recommendedAction ?? "—"}</td>
                     </tr>
                   );
                 })}
@@ -2593,17 +2565,348 @@ function TabCollection({ data, kpis, advanced, rel, dateRangeDays }) {
 // TAB 6 — COMMERCIAL INTELLIGENCE
 // ══════════════════════════════════════════════════════════════════════════════
 
-function TabCommercial({ data, advanced, rel, sampleMode, dateRangeDays }) {
+function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeDays }) {
+  const ltv = advanced?.ltv;
+
+  // ── SAMPLE MODE: show computed commercial data ──────────────────────────────
+  if (sampleMode && commercial) {
+    const c = commercial;
+    const fmtAed = (n) => `AED ${n?.toLocaleString() ?? "—"}`;
+    const CLabel = ({ children }) => (
+      <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", fontWeight: 600, marginBottom: 4 }}>{children}</div>
+    );
+    const CValue = ({ children, color }) => (
+      <div style={{ fontFamily: DISPLAY, fontSize: 28, fontWeight: 700, color: color ?? "#8b2035", marginBottom: 4 }}>{children}</div>
+    );
+    const Row = ({ label, value, mono }) => (
+      <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid rgba(34,21,22,0.05)" }}>
+        <span style={{ fontFamily: SERIF, fontSize: 13, color: "#5c5350" }}>{label}</span>
+        <span style={{ fontFamily: mono ? MONO : SERIF, fontSize: 13, color: "#221516", fontWeight: 600 }}>{value}</span>
+      </div>
+    );
+
+    return (
+      <>
+        {/* Revenue Intelligence */}
+        <Section title="Revenue Attribution" desc={`nAia-assisted revenue — ${c.scopeLabel}`} status="sample">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px,1fr))", gap: 1, background: "rgba(34,21,22,0.07)", marginBottom: 24 }}>
+            {[
+              { label: "Period Revenue", value: fmtAed(c.revenue.naiaAssisted), color: "#8b2035" },
+              { label: "All-Time Revenue", value: fmtAed(c.revenue.naiaAssistedAllTime), color: "#8b2035" },
+              { label: "Avg Order Value", value: fmtAed(c.revenue.avgOrderValue), color: "#221516" },
+              { label: "Revenue / Session", value: fmtAed(c.revenue.revenuePerSession), color: "#221516" },
+              { label: "Session Conversion", value: `${c.revenue.sessionConversionRate}%`, color: "#2a5e42" },
+              { label: "vs Non-nAia", value: `${c.revenue.naiaVsNonNaiaMultiplier}× uplift`, color: "#2a5e42" },
+            ].map(({ label, value, color }) => (
+              <div key={label} style={{ padding: "18px 20px", background: "#fff" }}>
+                <CLabel>{label}</CLabel>
+                <CValue color={color}>{value}</CValue>
+              </div>
+            ))}
+          </div>
+          {c.revenue.byProduct?.length > 0 && (
+            <div style={{ overflowX: "auto" }}>
+              <table style={s.table}>
+                <thead><tr>
+                  <th style={s.th}>Product</th>
+                  <th style={s.th}>Units Sold</th>
+                  <th style={s.th}>Revenue (AED)</th>
+                </tr></thead>
+                <tbody>
+                  {c.revenue.byProduct.map((r, i) => (
+                    <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                      <td style={{ ...s.td, fontFamily: DISPLAY, fontStyle: "italic", fontSize: 14 }}>{r.product}</td>
+                      <td style={{ ...s.td, fontFamily: MONO }}>{r.units}</td>
+                      <td style={{ ...s.td, fontFamily: MONO, color: "#8b2035", fontWeight: 700 }}>{r.revenue.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Section>
+
+        {/* Margin */}
+        <Section title="Gross Margin" desc="Derived from synthetic COGS — illustrative ratios only" status="sample">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px,1fr))", gap: 1, background: "rgba(34,21,22,0.07)", marginBottom: 24 }}>
+            {[
+              { label: "Gross Margin %", value: `${c.margin.grossMarginPct}%`, color: "#2a5e42" },
+              { label: "Gross Margin AED", value: fmtAed(c.margin.grossMarginAed), color: "#2a5e42" },
+              { label: "All-Time Gross", value: fmtAed(c.margin.allTimeGrossAed), color: "#221516" },
+              { label: "Highest Margin", value: c.margin.highestMarginProduct ?? "—", color: "#221516" },
+            ].map(({ label, value, color }) => (
+              <div key={label} style={{ padding: "18px 20px", background: "#fff" }}>
+                <CLabel>{label}</CLabel>
+                <CValue color={color}>{value}</CValue>
+              </div>
+            ))}
+          </div>
+          {c.margin.byProduct?.length > 0 && (
+            <div style={{ overflowX: "auto" }}>
+              <table style={s.table}>
+                <thead><tr>
+                  <th style={s.th}>Product</th>
+                  <th style={s.th}>Gross Margin %</th>
+                  <th style={s.th}>Gross Margin AED</th>
+                  <th style={s.th}>Revenue AED</th>
+                </tr></thead>
+                <tbody>
+                  {c.margin.byProduct.map((r, i) => (
+                    <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                      <td style={{ ...s.td, fontFamily: DISPLAY, fontStyle: "italic", fontSize: 14 }}>{r.product}</td>
+                      <td style={{ ...s.td, fontFamily: MONO, color: "#2a5e42", fontWeight: 700 }}>{r.grossPct}%</td>
+                      <td style={{ ...s.td, fontFamily: MONO }}>{r.grossAed.toLocaleString()}</td>
+                      <td style={{ ...s.td, fontFamily: MONO }}>{r.revenue.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Section>
+
+        {/* Returns */}
+        <Section title="Returns" desc="All-time return rate from synthetic purchase history" status="sample">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px,1fr))", gap: 1, background: "rgba(34,21,22,0.07)", marginBottom: 24 }}>
+            {[
+              { label: "Total Returns", value: c.returns.total, color: c.returns.total > 3 ? "#8b2035" : "#2a5e42" },
+              { label: "Return Rate", value: `${c.returns.returnRate}%`, color: c.returns.returnRate < 15 ? "#2a5e42" : "#8b2035" },
+              { label: "Revenue Lost", value: fmtAed(c.returns.returnRevenueLost), color: "#d97706" },
+            ].map(({ label, value, color }) => (
+              <div key={label} style={{ padding: "18px 20px", background: "#fff" }}>
+                <CLabel>{label}</CLabel>
+                <CValue color={color}>{value}</CValue>
+              </div>
+            ))}
+          </div>
+          {c.returns.byProduct?.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              {c.returns.byProduct.map((r, i) => (
+                <div key={i} style={{ padding: "10px 14px", background: "rgba(255,255,255,0.6)", borderLeft: "3px solid #d97706", marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                    <span style={{ fontFamily: DISPLAY, fontSize: 14, fontStyle: "italic", color: "#221516" }}>{r.product}</span>
+                    <span style={{ fontFamily: MONO, fontSize: 11, color: "#d97706" }}>{r.returned} returned · {r.rate}% rate · {fmtAed(r.revenueLost)} lost</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {c.returns.byReason?.length > 0 && (
+            <div>
+              <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 10, fontWeight: 600 }}>Return Reasons</div>
+              {c.returns.byReason.map((r, i) => (
+                <Row key={i} label={r.reason} value={`${r.count} return${r.count !== 1 ? "s" : ""}`} mono />
+              ))}
+            </div>
+          )}
+        </Section>
+
+        {/* Inventory & Sell-Through */}
+        <Section title="Inventory & Sell-Through" desc="Synthetic stock positions — derived from all-time purchases and current stock on hand" status="sample">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px,1fr))", gap: 1, background: "rgba(34,21,22,0.07)", marginBottom: 24 }}>
+            {[
+              { label: "Avg Sell-Through", value: `${c.inventory.avgSellThrough}%`, color: "#221516" },
+              { label: "Fastest Moving", value: c.inventory.fastestMoving ?? "—", color: "#2a5e42" },
+              { label: "Slowest Moving", value: c.inventory.slowestMoving ?? "—", color: "#d97706" },
+              { label: "At-Risk Lines", value: c.inventory.atRisk?.length ?? 0, color: c.inventory.atRisk?.length > 0 ? "#8b2035" : "#2a5e42" },
+            ].map(({ label, value, color }) => (
+              <div key={label} style={{ padding: "18px 20px", background: "#fff" }}>
+                <CLabel>{label}</CLabel>
+                <CValue color={color}>{value}</CValue>
+              </div>
+            ))}
+          </div>
+          {c.inventory.byProduct?.length > 0 && (
+            <div style={{ overflowX: "auto" }}>
+              <table style={s.table}>
+                <thead><tr>
+                  <th style={s.th}>Product</th>
+                  <th style={s.th}>In Stock</th>
+                  <th style={s.th}>Sold</th>
+                  <th style={s.th}>Returned</th>
+                  <th style={s.th}>Net Sold</th>
+                  <th style={s.th}>Total Units</th>
+                  <th style={s.th}>Sell-Through</th>
+                </tr></thead>
+                <tbody>
+                  {c.inventory.byProduct.map((r, i) => {
+                    const stColor = r.sellThrough >= 50 ? "#2a5e42" : r.sellThrough >= 25 ? "#d97706" : "#8b2035";
+                    return (
+                      <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                        <td style={{ ...s.td, fontFamily: DISPLAY, fontStyle: "italic", fontSize: 14 }}>{r.product}</td>
+                        <td style={{ ...s.td, fontFamily: MONO }}>{r.inStock}</td>
+                        <td style={{ ...s.td, fontFamily: MONO }}>{r.unitsSold}</td>
+                        <td style={{ ...s.td, fontFamily: MONO, color: r.returned > 0 ? "#d97706" : "#9CA3AF" }}>{r.returned}</td>
+                        <td style={{ ...s.td, fontFamily: MONO, fontWeight: 600 }}>{r.netSold}</td>
+                        <td style={{ ...s.td, fontFamily: MONO }}>{r.totalUnits}</td>
+                        <td style={{ ...s.td, fontFamily: MONO, color: stColor, fontWeight: 700 }}>{r.sellThrough}%</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Section>
+
+        {/* LTV Intelligence — computed from sample data */}
+        {ltv && ltv.sampleSize > 0 && (
+          <Section title="LTV Intelligence" desc="Lifetime value by personality — derived from all-time synthetic purchase history" status="sample">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px,1fr))", gap: 1, background: "rgba(34,21,22,0.07)", marginBottom: 24 }}>
+              {[
+                { label: "Avg LTV / Customer", value: fmtAed(ltv.avgLtv), color: "#8b2035" },
+                { label: "Top Customer LTV", value: fmtAed(ltv.topCustomerLtv), color: "#221516" },
+                { label: "Repeat Purchase Rate", value: `${ltv.repeatPurchaseRate}%`, color: "#2a5e42" },
+                { label: "Avg Days Between Purchases", value: ltv.avgDaysBetweenPurchases != null ? `${ltv.avgDaysBetweenPurchases}d` : "—", color: "#221516" },
+                { label: "Purchase Frequency", value: `${ltv.purchaseFrequency}× avg`, color: "#221516" },
+                { label: "Customers with Purchases", value: ltv.totalCustomersWithPurchase, color: "#221516" },
+              ].map(({ label, value, color }) => (
+                <div key={label} style={{ padding: "18px 20px", background: "#fff" }}>
+                  <CLabel>{label}</CLabel>
+                  <CValue color={color}>{value}</CValue>
+                </div>
+              ))}
+            </div>
+            {ltv.ltvByPersonality?.length > 0 && (
+              <>
+                <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 12, fontWeight: 600 }}>LTV by Personality</div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={s.table}>
+                    <thead><tr>
+                      <th style={s.th}>Personality</th>
+                      <th style={s.th}>Customers</th>
+                      <th style={s.th}>Purchases</th>
+                      <th style={s.th}>Avg LTV (AED)</th>
+                      <th style={s.th}>Total Revenue (AED)</th>
+                    </tr></thead>
+                    <tbody>
+                      {ltv.ltvByPersonality.map((r, i) => (
+                        <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                          <td style={{ ...s.td, color: "#8b2035", fontStyle: "italic", fontFamily: SERIF }}>{r.personality}</td>
+                          <td style={{ ...s.td, fontFamily: MONO }}>{r.customerCount}</td>
+                          <td style={{ ...s.td, fontFamily: MONO }}>{r.purchases}</td>
+                          <td style={{ ...s.td, fontFamily: MONO, fontWeight: 700 }}>{r.avgLtv.toLocaleString()}</td>
+                          <td style={{ ...s.td, fontFamily: MONO }}>{r.totalRevenue.toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+            {ltv.repeatProducts?.length > 0 && (
+              <>
+                <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 10, marginTop: 20, fontWeight: 600 }}>Products Driving Repeat Customers</div>
+                {ltv.repeatProducts.map((r, i) => (
+                  <Row key={i} label={r.product} value={`${r.repeatCustomers} repeat customer${r.repeatCustomers !== 1 ? "s" : ""}`} mono />
+                ))}
+              </>
+            )}
+          </Section>
+        )}
+
+        {/* Opportunity Scores — same in both modes */}
+        <Section title="Directional/Pre-Commercial Product Opportunity Score" desc="Transparent per-product score from available signals (0–100 directional partial — conversion integrated in sample)" status={sampleMode ? "sample" : (advanced?.opportunityScores?.length > 0 ? "experimental" : "insufficient-data")}>
+          {advanced?.opportunityScores?.length > 0 ? (
+            <>
+              <div style={{ padding: "8px 14px", background: "rgba(34,21,22,0.04)", border: "1px solid rgba(34,21,22,0.12)", fontSize: 11, fontFamily: INTER, color: "#5c5350", marginBottom: 16, lineHeight: 1.6 }}>
+                Score is partial — only available factors are included. Never act on score alone.
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={s.table}>
+                  <thead><tr>
+                    <th style={s.th}>Product</th><th style={s.th}>Score</th><th style={s.th}>Emotional Impact</th>
+                    <th style={s.th}>Versatility</th><th style={s.th}>Repeat Wear</th><th style={s.th}>DNA Coverage</th>
+                    <th style={s.th}>Rec. Fit</th><th style={s.th}>Sample</th>
+                  </tr></thead>
+                  <tbody>
+                    {advanced.opportunityScores.map((p, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                        <td style={s.td}>{p.productTitle}</td>
+                        <td style={{ ...s.td, fontWeight: 700, color: "#8b2035" }}>{p.score ?? "—"}</td>
+                        <td style={s.td}>{p.breakdown.emotionalImpact ?? "—"}</td>
+                        <td style={s.td}>{p.breakdown.versatility ?? "—"}</td>
+                        <td style={s.td}>{p.breakdown.repeatWear ?? "—"}</td>
+                        <td style={s.td}>{p.breakdown.personalityCoverage ?? "—"}</td>
+                        <td style={s.td}>{p.breakdown.recommendationFit ?? "—"}</td>
+                        <td style={s.td}>{p.sampleSize}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <InsufficientCard label="Commercial Opportunity Score" description="Not enough product data to compute scores. Need 3+ reviews per product." />
+          )}
+        </Section>
+
+        {/* Product Opportunity Priority — same in both modes */}
+        {rel?.productNarratives?.length > 0 && (
+          <Section title="Product Opportunity Priority" desc="Ranked by Directional Opportunity Score from customer relationships" status={rel.status}>
+            {rel.status === "insufficient-data" ? (
+              <InsufficientCard label="Investment priority ranking" description="Not enough reviewed sessions to rank products by opportunity." sampleSize={rel.sampleSize} />
+            ) : (
+              <>
+                <div style={{ padding: "8px 14px", background: "rgba(34,21,22,0.04)", border: "1px solid rgba(34,21,22,0.12)", fontFamily: INTER, fontSize: 11, color: "#5c5350", marginBottom: 20, lineHeight: 1.6 }}>
+                  Opportunity Score combines rating (30%), rewear rate (25%), confidence lift (25%), and data quality (20%). Score is partial until conversion data is available.
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={s.table}>
+                    <thead><tr>
+                      <th style={s.th}>Product</th><th style={s.th}>Score</th><th style={s.th}>Rating</th>
+                      <th style={s.th}>Rewear</th><th style={s.th}>Best Audience</th><th style={s.th}>Best Occasion</th>
+                      <th style={s.th}>Top Objection</th><th style={s.th}>n</th>
+                    </tr></thead>
+                    <tbody>
+                      {rel.productNarratives.slice(0, 12).map((p, i) => {
+                        const scoreColor = p.opportunityScore >= 70 ? "#2a5e42" : p.opportunityScore >= 45 ? "#d97706" : "#7a6f6a";
+                        return (
+                          <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                            <td style={{ ...s.td, fontFamily: "'Cormorant Garamond', serif", fontWeight: 600, fontSize: 14 }}>{p.name}</td>
+                            <td style={{ ...s.td, fontWeight: 700, color: scoreColor, fontFamily: MONO }}>{p.opportunityScore}</td>
+                            <td style={s.td}>{p.avgRating?.toFixed(1) ?? "—"}</td>
+                            <td style={s.td}>{p.rewearRate != null ? `${Math.round(p.rewearRate * 100)}%` : "—"}</td>
+                            <td style={{ ...s.td, fontSize: 12, color: "#8b2035" }}>{p.bestPersonality ?? "—"}</td>
+                            <td style={{ ...s.td, fontSize: 12 }}>{p.bestOccasion ?? "—"}</td>
+                            <td style={{ ...s.td, fontSize: 12, color: "#c53030" }}>{p.mostCommonObjection ?? "—"}</td>
+                            <td style={{ ...s.td, fontFamily: MONO, fontSize: 11, color: "#9CA3AF" }}>{p.sampleSize}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {(() => {
+                  const top = rel.productNarratives.filter(p => p.opportunityScore >= 60).slice(0, 2);
+                  const underutilised = rel.productNarratives.filter(p => p.opportunityScore < 40 && p.sampleSize >= 3).slice(0, 1);
+                  if (top.length === 0) return null;
+                  const rec = `${top[0].name} leads with an Opportunity Score of ${top[0].opportunityScore}${top[0].bestPersonality ? ` — strongest with ${top[0].bestPersonality} customers` : ""}${top[0].bestOccasion ? ` for ${top[0].bestOccasion}` : ""}. This is the strongest current test candidate.${underutilised.length > 0 ? ` ${underutilised[0].name} (score ${underutilised[0].opportunityScore}) shows friction${underutilised[0].mostCommonObjection ? ` — top objection: ${underutilised[0].mostCommonObjection}` : ""} — investigate before increasing inventory.` : ""}`;
+                  return (
+                    <PrescriptiveBlock
+                      recommendation={rec}
+                      reason="Opportunity Score is a leading indicator of product-market fit built from the 4 factors available before purchase data: emotional resonance, physical rewear, confidence delivery, and data maturity."
+                      confidence={top[0].sampleSize >= 5 ? "high" : "medium"}
+                      sampleSize={rel.sampleSize}
+                    />
+                  );
+                })()}
+              </>
+            )}
+          </Section>
+        )}
+      </>
+    );
+  }
+
+  // ── LIVE MODE (no commercial data yet) ────────────────────────────────────────
   return (
     <>
-      {/* Revenue + LTV roadmap — both require Shopify order data */}
-
       <AwaitingCard
         label="Styling-to-Shopping Conversion"
         description="Click-through, try-on and wishlist events require product click tracking from Shopify storefront. Available after commerce integration."
       />
 
-      {/* Commercial Opportunity Scores */}
       <Section title="Directional/Pre-Commercial Product Opportunity Score" desc="Transparent per-product score from available signals (0–100 directional partial — conversion not yet integrated)" status={advanced?.opportunityScores?.length > 0 ? "experimental" : "insufficient-data"}>
         {advanced?.opportunityScores?.length > 0 ? (
           <>
@@ -2612,18 +2915,11 @@ function TabCommercial({ data, advanced, rel, sampleMode, dateRangeDays }) {
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={s.table}>
-                <thead>
-                  <tr>
-                    <th style={s.th}>Product</th>
-                    <th style={s.th}>Score</th>
-                    <th style={s.th}>Emotional Impact</th>
-                    <th style={s.th}>Versatility</th>
-                    <th style={s.th}>Repeat Wear</th>
-                    <th style={s.th}>DNA Coverage</th>
-                    <th style={s.th}>Rec. Fit</th>
-                    <th style={s.th}>Sample</th>
-                  </tr>
-                </thead>
+                <thead><tr>
+                  <th style={s.th}>Product</th><th style={s.th}>Score</th><th style={s.th}>Emotional Impact</th>
+                  <th style={s.th}>Versatility</th><th style={s.th}>Repeat Wear</th><th style={s.th}>DNA Coverage</th>
+                  <th style={s.th}>Rec. Fit</th><th style={s.th}>Sample</th>
+                </tr></thead>
                 <tbody>
                   {advanced.opportunityScores.map((p, i) => (
                     <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
@@ -2646,10 +2942,9 @@ function TabCommercial({ data, advanced, rel, sampleMode, dateRangeDays }) {
         )}
       </Section>
 
-      {/* LTV Intelligence — awaiting integration */}
       <AwaitingCard
         label="LTV Intelligence"
-        description="Requires Shopify order history and customer purchase data. When integrated, will show: average LTV by personality type, repeat purchase patterns, and which products drive highest-value customers — supporting commercial prioritisation and assortment investment decisions."
+        description="Requires Shopify order history and customer purchase data. When integrated, will show: average LTV by personality type, repeat purchase patterns, and which products drive highest-value customers."
       />
 
       <RoadmapPanel title="Commercial Integration Roadmap" items={[
@@ -2667,13 +2962,8 @@ function TabCommercial({ data, advanced, rel, sampleMode, dateRangeDays }) {
         { label: "Purchase Frequency by Segment", description: "How often each personality segment purchases after an nAia styling session." },
       ]} />
 
-      {/* Product Opportunity Priority */}
       {rel?.productNarratives?.length > 0 && (
-        <Section
-          title="Product Opportunity Priority"
-          desc="Which products deserve more depth — ranked by Directional Opportunity Score from real customer relationships"
-          status={rel.status}
-        >
+        <Section title="Product Opportunity Priority" desc="Which products deserve more depth — ranked by Directional Opportunity Score from real customer relationships" status={rel.status}>
           {rel.status === "insufficient-data" ? (
             <InsufficientCard label="Investment priority ranking" description="Not enough reviewed sessions to rank products by opportunity." sampleSize={rel.sampleSize} />
           ) : (
@@ -2683,18 +2973,11 @@ function TabCommercial({ data, advanced, rel, sampleMode, dateRangeDays }) {
               </div>
               <div style={{ overflowX: "auto" }}>
                 <table style={s.table}>
-                  <thead>
-                    <tr>
-                      <th style={s.th}>Product</th>
-                      <th style={s.th}>Score</th>
-                      <th style={s.th}>Rating</th>
-                      <th style={s.th}>Rewear</th>
-                      <th style={s.th}>Best Audience</th>
-                      <th style={s.th}>Best Occasion</th>
-                      <th style={s.th}>Top Objection</th>
-                      <th style={s.th}>n</th>
-                    </tr>
-                  </thead>
+                  <thead><tr>
+                    <th style={s.th}>Product</th><th style={s.th}>Score</th><th style={s.th}>Rating</th>
+                    <th style={s.th}>Rewear</th><th style={s.th}>Best Audience</th><th style={s.th}>Best Occasion</th>
+                    <th style={s.th}>Top Objection</th><th style={s.th}>n</th>
+                  </tr></thead>
                   <tbody>
                     {rel.productNarratives.slice(0, 12).map((p, i) => {
                       const scoreColor = p.opportunityScore >= 70 ? "#2a5e42" : p.opportunityScore >= 45 ? "#d97706" : "#7a6f6a";
@@ -2714,8 +2997,6 @@ function TabCommercial({ data, advanced, rel, sampleMode, dateRangeDays }) {
                   </tbody>
                 </table>
               </div>
-
-              {/* Prescriptive investment recommendation */}
               {(() => {
                 const top = rel.productNarratives.filter(p => p.opportunityScore >= 60).slice(0, 2);
                 const underutilised = rel.productNarratives.filter(p => p.opportunityScore < 40 && p.sampleSize >= 3).slice(0, 1);
@@ -2864,58 +3145,24 @@ function TabOpportunitiesContent({ data, phase4b2, advanced, rel, dateRangeDays,
 
   actionItems.sort((a, b) => (sortOrder[a.relevance] ?? 2) - (sortOrder[b.relevance] ?? 2) || (sortOrder[a.confidence] ?? 2) - (sortOrder[b.confidence] ?? 2));
 
-  // Combined lens: show the joined cross-functional Priority Board
-  if (roleLens === "combined") {
-    return (
-      <>
-        <CombinedPriorityBoard actionItems={actionItems} />
-        <div style={{ padding: "12px 20px", background: "rgba(34,21,22,0.02)", border: "1px solid rgba(34,21,22,0.07)", fontSize: 12, color: "#7a6f6a", fontFamily: SERIF, fontStyle: "italic" }}>
-          Experiment Builder and AI Learning Roadmap are in <strong style={{ fontStyle: "normal" }}>Data &amp; AI</strong> — click the button in the header.
-        </div>
-      </>
-    );
-  }
-
   return (
     <>
-      {/* Unified Design Action Plan (Design / Merchandising lens) */}
-      <Section
-        title="Design Action Plan"
-        desc="Consolidated action plan from all intelligence sources — ranked by relevance and confidence. Action taxonomy: Expand (do more of what works) · Resolve (fix a friction) · Target (audience/occasion gap) · Adapt (modify a piece) · Unlock (new capability needed)."
-        status={actionItems.length > 0 ? "live" : "insufficient-data"}
-      >
-        <div style={{ padding: "10px 14px", background: "#faf9f7", borderLeft: "3px solid #8B7355", marginBottom: 20, fontSize: 12, color: "#8B7355", lineHeight: 1.6 }}>
-          Actions ranked by evidence strength. Status tracking (Reviewing / Testing / Actioned / Dismissed) is a future capability. High-confidence items (n≥5) warrant direct testing; lower-confidence items should inform content and exploration, not final production decisions.
-          {" "}Switch to <strong>Combined</strong> lens for the full cross-functional view with joined Design and Merchandising conclusions.
-        </div>
-
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>
-          {Object.entries(TAXONOMY_COLORS).map(([label, color]) => (
-            <span key={label} style={{ fontSize: 8, fontFamily: INTER, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", padding: "4px 10px", background: color, color: "#fff" }}>{label}</span>
-          ))}
-        </div>
-
-        {actionItems.length > 0 ? (
-          actionItems.map(item => <ActionCard key={item.id} item={item} />)
-        ) : (
-          <EmptyState message="No actionable opportunities yet. Actions appear when patterns cross minimum data thresholds." />
-        )}
-      </Section>
-
-      {/* Experiment Builder — now in Data & AI panel */}
+      <CombinedPriorityBoard actionItems={actionItems} />
       <div style={{ padding: "12px 20px", background: "rgba(34,21,22,0.02)", border: "1px solid rgba(34,21,22,0.07)", fontSize: 12, color: "#7a6f6a", fontFamily: SERIF, fontStyle: "italic" }}>
-        Experiment Builder and AI Learning Roadmap have moved to <strong style={{ fontStyle: "normal" }}>Data &amp; AI</strong> — click the button in the header.
+        Experiment Builder and AI Learning Roadmap are in <strong style={{ fontStyle: "normal" }}>Data &amp; AI</strong> — click the button in the header.
       </div>
     </>
   );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// COMBINED LENS — Priority Board (shown when roleLens === "combined")
-// Master cross-functional view: every priority with joined conclusions,
-// design implication, merch implication, owners, test, metric, and maturity.
+// FOUNDER–DESIGNER PRIORITY BOARD
+// Every priority with design implication, commercial/positioning implication,
+// what to test next, success metric, evidence maturity, and decision status.
+// Role ownership fields are preserved in the data model for future B2B use.
 // ══════════════════════════════════════════════════════════════════════════════
 
+// Preserved for future B2B multi-role use; not displayed in the current interface.
 function inferOwnership(item) {
   const t = item.taxonomy?.toLowerCase() ?? "";
   if (t === "resolve" || t === "adapt") return { primary: "Design Lead", supporting: "Merchandising" };
@@ -2966,30 +3213,24 @@ function CombinedPriorityCard({ item }) {
       {/* Expanded joined conclusions */}
       {open && (
         <div style={{ borderTop: "1px solid rgba(34,21,22,0.07)", padding: "16px 18px", background: "#fafaf8" }}>
-          {/* Two-column design vs merch */}
+          {/* Design + Commercial/Positioning implications */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
             <div style={{ padding: "12px 14px", background: "rgba(42,94,66,0.04)", borderLeft: "3px solid #2a5e42" }}>
               <div style={{ fontFamily: INTER, fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#2a5e42", marginBottom: 6 }}>Design Implication</div>
               <div style={{ fontFamily: SERIF, fontSize: 13, color: "#221516", lineHeight: 1.5 }}>{designImpl ?? "—"}</div>
             </div>
             <div style={{ padding: "12px 14px", background: "rgba(107,72,0,0.04)", borderLeft: "3px solid #6b4800" }}>
-              <div style={{ fontFamily: INTER, fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#6b4800", marginBottom: 6 }}>Merchandising Implication</div>
+              <div style={{ fontFamily: INTER, fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#6b4800", marginBottom: 6 }}>Commercial / Positioning Implication</div>
               <div style={{ fontFamily: SERIF, fontSize: 13, color: "#221516", lineHeight: 1.5 }}>{merchImpl ?? "—"}</div>
             </div>
           </div>
 
-          {/* Ownership + dependency row */}
+          {/* Decision status + dependency + maturity */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 14 }}>
             <div>
-              <div style={{ fontFamily: INTER, fontSize: 7, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginBottom: 3 }}>Primary Owner</div>
-              <div style={{ fontFamily: INTER, fontSize: 11, fontWeight: 600, color: "#221516" }}>{owners.primary}</div>
+              <div style={{ fontFamily: INTER, fontSize: 7, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginBottom: 3 }}>Decision Status</div>
+              <div style={{ fontFamily: INTER, fontSize: 11, fontWeight: 600, color: "#221516" }}>{item.taxonomy ?? "Under review"}</div>
             </div>
-            {owners.supporting && (
-              <div>
-                <div style={{ fontFamily: INTER, fontSize: 7, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginBottom: 3 }}>Supporting</div>
-                <div style={{ fontFamily: INTER, fontSize: 11, color: "#5c5350" }}>{owners.supporting}</div>
-              </div>
-            )}
             <div>
               <div style={{ fontFamily: INTER, fontSize: 7, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginBottom: 3 }}>Dependency</div>
               <div style={{ fontFamily: SERIF, fontSize: 11, color: "#9CA3AF", fontStyle: "italic" }}>{item.dependency ?? "None"}</div>
@@ -3003,7 +3244,7 @@ function CombinedPriorityCard({ item }) {
           {/* Test + metric row */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div style={{ padding: "10px 12px", background: "rgba(34,21,22,0.02)", border: "1px solid rgba(34,21,22,0.06)" }}>
-              <div style={{ fontFamily: INTER, fontSize: 7, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginBottom: 4 }}>Recommended Test</div>
+              <div style={{ fontFamily: INTER, fontSize: 7, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginBottom: 4 }}>What to Test Next</div>
               <div style={{ fontFamily: SERIF, fontSize: 12, color: "#221516", lineHeight: 1.5 }}>{item.action ?? "—"}</div>
             </div>
             <div style={{ padding: "10px 12px", background: "rgba(34,21,22,0.02)", border: "1px solid rgba(34,21,22,0.06)" }}>
@@ -3027,8 +3268,8 @@ function CombinedPriorityBoard({ actionItems }) {
 
   return (
     <Section
-      title="Combined Intelligence Priority Board"
-      desc="Cross-functional priorities ranked by evidence strength — each with design implication, merchandising implication, ownership, recommended test, and success metric."
+      title="Founder–Designer Action Plan"
+      desc="Priorities ranked by evidence strength — design implication, commercial or positioning implication, recommended test, and success metric. Expand each priority to view the full interpretation."
       status={sorted.length > 0 ? "live" : "insufficient-data"}
     >
       {/* Legend */}
@@ -3037,13 +3278,8 @@ function CombinedPriorityBoard({ actionItems }) {
           <span key={label} style={{ fontSize: 7, fontFamily: INTER, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: color, color: "#fff" }}>{label}</span>
         ))}
         <span style={{ fontFamily: SERIF, fontSize: 11, color: "#7a6f6a", fontStyle: "italic", alignSelf: "center" }}>
-          Expand → more of what works · Resolve → fix friction · Target → audience/occasion gap · Adapt → modify a piece · Unlock → new capability needed
+          Expand → preserve and build on what works · Resolve → investigate friction · Target → validate an underserved audience or occasion · Adapt → prototype a change · Unlock → integration needed
         </span>
-      </div>
-
-      {/* Note on Combined mode */}
-      <div style={{ padding: "10px 14px", background: "#faf9f7", borderLeft: "3px solid #8B7355", marginBottom: 20, fontSize: 12, color: "#8B7355", fontFamily: SERIF, lineHeight: 1.6 }}>
-        Combined mode joins Design and Merchandising conclusions per priority. Click <em>View joined conclusions</em> to see the full cross-functional view. Switch to Design or Merchandising lens for a focused single-function read.
       </div>
 
       {sorted.length > 0 ? (
@@ -3285,9 +3521,144 @@ function DataAiIntegrationReadiness() {
   );
 }
 
-function DataAiLearningRoadmap() {
+function DataAiLearningRoadmap({ advanced, sampleMode }) {
   const SERIF_L = "'Cormorant Garamond', Garamond, serif";
   const INTER_L = "'Inter', -apple-system, sans-serif";
+  const MONO_L  = "'Courier New', Courier, monospace";
+
+  const al = advanced?.aiLearning;
+
+  if (sampleMode && al) {
+    const LLabel = ({ children }) => (
+      <div style={{ fontFamily: INTER_L, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", color: "#5c5350", marginBottom: 6 }}>{children}</div>
+    );
+    const Row = ({ label, value }) => (
+      <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid rgba(34,21,22,0.05)" }}>
+        <span style={{ fontFamily: SERIF_L, fontSize: 12, color: "#5c5350" }}>{label}</span>
+        <span style={{ fontFamily: MONO_L, fontSize: 12, color: "#221516", fontWeight: 600 }}>{value}</span>
+      </div>
+    );
+    const MetricCard = ({ label, value, subValue, accent, children }) => (
+      <div style={{ padding: "16px 18px", background: "rgba(255,255,255,0.7)", borderLeft: `3px solid ${accent ?? "#8b2035"}`, marginBottom: 10 }}>
+        <LLabel>{label}</LLabel>
+        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 700, color: accent ?? "#8b2035", marginBottom: 2 }}>{value}</div>
+        {subValue && <div style={{ fontFamily: SERIF_L, fontSize: 12, color: "#7a6f6a", marginBottom: 10 }}>{subValue}</div>}
+        {children}
+      </div>
+    );
+
+    const trendLabel = (t) => t === "improving" ? "↑ improving" : t === "declining" ? "↓ declining" : "→ stable";
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+        <p style={{ fontFamily: SERIF_L, fontSize: 13, color: "#7a6f6a", fontStyle: "italic", margin: "0 0 16px" }}>
+          Model v{al.modelVersion} · {al.totalEvaluated} evaluated events · {al.evaluationPeriod}
+        </p>
+
+        {/* Precision */}
+        <MetricCard label="Recommendation Precision" value={`${al.precision.value}%`} subValue={`${al.precision.count} loves of ${al.precision.denominator} decided events`} accent="#2a5e42">
+          <Row label="Love decisions" value={al.precision.count} />
+          <Row label="Skip decisions" value={al.falsePositiveRate.count} />
+          <Row label="Total decided" value={al.precision.denominator} />
+        </MetricCard>
+
+        {/* False Positives */}
+        <MetricCard label="False Positive Rate — High Score, Rejected" value={`${al.falsePositiveRate.value}%`} subValue={`Target: ≤${al.falsePositiveRate.targetRate}% · Trend: ${trendLabel(al.falsePositiveRate.trend)}`} accent="#d97706">
+          <LLabel>Top Causes</LLabel>
+          {al.falsePositiveRate.topCauses.map((c, i) => (
+            <Row key={i} label={c.cause} value={`${c.count} events`} />
+          ))}
+        </MetricCard>
+
+        {/* False Negatives */}
+        <MetricCard label="False Negative Rate — Moderate Score, Purchased" value={`${al.falseNegativeRate.value}%`} subValue={`${al.falseNegativeRate.count} of ${al.falseNegativeRate.denominator} undecided → likely purchase · Target: ≤${al.falseNegativeRate.targetRate}%`} accent="#d97706">
+          <LLabel>Top Underweighted Signals</LLabel>
+          {al.falseNegativeRate.topSignals.map((s, i) => (
+            <div key={i} style={{ padding: "6px 0", borderBottom: "1px solid rgba(34,21,22,0.05)" }}>
+              <div style={{ fontFamily: INTER_L, fontSize: 11, color: "#221516", fontWeight: 600 }}>{s.signal}</div>
+              <div style={{ fontFamily: SERIF_L, fontSize: 11, color: "#7a6f6a" }}>{s.note}</div>
+            </div>
+          ))}
+        </MetricCard>
+
+        {/* Calibration */}
+        <MetricCard label="Match Score Calibration" value={`${al.calibration.score}/100`} subValue={`Trend: ${trendLabel(al.calibration.trend)}`} accent="#221516">
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: MONO_L }}>
+              <thead><tr>
+                <th style={{ textAlign: "left", padding: "4px 6px", color: "#7a6f6a", fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px" }}>Tier</th>
+                <th style={{ padding: "4px 6px", color: "#7a6f6a", fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px" }}>Predicted</th>
+                <th style={{ padding: "4px 6px", color: "#7a6f6a", fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px" }}>Actual</th>
+                <th style={{ padding: "4px 6px", color: "#7a6f6a", fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px" }}>Gap</th>
+                <th style={{ padding: "4px 6px", color: "#7a6f6a", fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px" }}>n</th>
+              </tr></thead>
+              <tbody>
+                {al.calibration.byTier.map((t, i) => {
+                  const gap = t.actualRate - t.predictedRate;
+                  return (
+                    <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.5)" : "transparent" }}>
+                      <td style={{ padding: "5px 6px", fontFamily: SERIF_L, fontSize: 12 }}>{t.tier}</td>
+                      <td style={{ padding: "5px 6px", textAlign: "center" }}>{t.predictedRate}%</td>
+                      <td style={{ padding: "5px 6px", textAlign: "center", fontWeight: 700, color: "#221516" }}>{t.actualRate}%</td>
+                      <td style={{ padding: "5px 6px", textAlign: "center", color: Math.abs(gap) <= 5 ? "#2a5e42" : "#d97706", fontWeight: 700 }}>{gap > 0 ? `+${gap}` : gap}pp</td>
+                      <td style={{ padding: "5px 6px", textAlign: "center", color: "#9CA3AF" }}>{t.sampleSize}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </MetricCard>
+
+        {/* Trajectory */}
+        <MetricCard label="6-Week Model Improvement Trajectory" value={`${al.trajectory[5].precision}% → now`} subValue="Precision, FP rate, calibration — weekly trend" accent="#221516">
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: MONO_L }}>
+              <thead><tr>
+                {["Week", "Precision", "FP Rate", "Calibration"].map(h => (
+                  <th key={h} style={{ padding: "4px 8px", color: "#7a6f6a", fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px", textAlign: "center" }}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {al.trajectory.map((w, i) => (
+                  <tr key={i} style={{ background: i === al.trajectory.length - 1 ? "rgba(139,32,53,0.05)" : i % 2 === 0 ? "rgba(255,255,255,0.5)" : "transparent" }}>
+                    <td style={{ padding: "5px 8px", textAlign: "center", fontFamily: INTER_L, fontWeight: i === al.trajectory.length - 1 ? 700 : 400 }}>{w.week}{i === al.trajectory.length - 1 ? " ★" : ""}</td>
+                    <td style={{ padding: "5px 8px", textAlign: "center", color: "#2a5e42", fontWeight: 600 }}>{w.precision}%</td>
+                    <td style={{ padding: "5px 8px", textAlign: "center", color: "#d97706", fontWeight: 600 }}>{w.fpRate}%</td>
+                    <td style={{ padding: "5px 8px", textAlign: "center", color: "#221516", fontWeight: 600 }}>{w.calibration}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </MetricCard>
+
+        {/* Signal Weights */}
+        <MetricCard label="Scoring Weight Performance" value="" subValue="Which dimensions most reliably predict purchase" accent="#221516">
+          {Object.entries(al.signalWeights).map(([key, sw], i) => (
+            <div key={key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid rgba(34,21,22,0.05)" }}>
+              <span style={{ fontFamily: SERIF_L, fontSize: 13, color: "#221516", textTransform: "capitalize" }}>{key}</span>
+              <div style={{ display: "flex", gap: 16, fontFamily: MONO_L, fontSize: 11 }}>
+                <span style={{ color: "#7a6f6a" }}>weight: {Math.round(sw.weight * 100)}%</span>
+                <span style={{ color: "#2a5e42", fontWeight: 700 }}>accuracy: {sw.accuracy}%</span>
+                <span style={{ color: sw.trend === "improving" ? "#2a5e42" : sw.trend === "declining" ? "#8b2035" : "#7a6f6a" }}>{trendLabel(sw.trend)}</span>
+              </div>
+            </div>
+          ))}
+        </MetricCard>
+
+        {/* Test / Train */}
+        <div style={{ padding: "12px 16px", background: "rgba(34,21,22,0.03)", border: "1px solid rgba(34,21,22,0.08)", fontFamily: INTER_L, fontSize: 11, color: "#5c5350", lineHeight: 1.7 }}>
+          <strong>Test/Train split:</strong> {al.testTrainInfo.trainPct}% training / {al.testTrainInfo.testPct}% test ·{" "}
+          {al.testTrainInfo.totalEvents} total events ·{" "}
+          Status: <strong style={{ color: al.testTrainInfo.currentStatus === "sufficient" ? "#2a5e42" : "#d97706" }}>{al.testTrainInfo.currentStatus}</strong>
+          {al.testTrainInfo.currentStatus === "growing" && ` (minimum recommended: ${al.testTrainInfo.minimumRecommended})`}
+        </div>
+      </div>
+    );
+  }
+
+  // ── static roadmap (live mode) ─────────────────────────────────────────────
   const ITEMS = [
     { label: "Recommendation Accuracy Over Time", description: "Requires logging accepted and rejected recommendations with a match score." },
     { label: "False Positives — high score, rejected", description: "Recommendations nAia was confident about that customers rejected — the most valuable calibration signal." },
@@ -3311,17 +3682,136 @@ function DataAiLearningRoadmap() {
   );
 }
 
-function DataAiExperimentBuilder() {
+function DataAiExperimentBuilder({ advanced, sampleMode }) {
   const INTER_L = "'Inter', -apple-system, sans-serif";
   const SERIF_L = "'Cormorant Garamond', Garamond, serif";
   const MONO_L = "'Courier New', Courier, monospace";
+
+  const exps = advanced?.experiments;
+
+  if (sampleMode && exps) {
+    const Field = ({ label, value, mono }) => (
+      <div style={{ padding: "8px 12px", background: "rgba(255,255,255,0.7)", border: "1px solid rgba(34,21,22,0.07)" }}>
+        <div style={{ fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginBottom: 4 }}>{label}</div>
+        <div style={{ fontFamily: mono ? MONO_L : SERIF_L, fontSize: 12, color: "#221516", lineHeight: 1.5 }}>{value}</div>
+      </div>
+    );
+    const ExpCard = ({ exp, statusLabel, statusColor, headerNote, children }) => (
+      <div style={{ border: "1px solid rgba(34,21,22,0.12)", background: "#faf9f7" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "12px 18px 0", gap: 12 }}>
+          <div>
+            <div style={{ fontFamily: INTER_L, fontSize: 7, fontWeight: 700, textTransform: "uppercase", letterSpacing: "2px", color: "#9CA3AF", marginBottom: 6 }}>
+              {headerNote}
+            </div>
+            <div style={{ fontFamily: SERIF_L, fontSize: 16, fontWeight: 600, color: "#221516", marginBottom: 6, fontStyle: "italic" }}>
+              {exp.title}
+            </div>
+          </div>
+          <div style={{ padding: "4px 10px", background: statusColor + "22", border: `1px solid ${statusColor}44`, color: statusColor, fontFamily: INTER_L, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", whiteSpace: "nowrap", flexShrink: 0 }}>
+            {statusLabel}
+          </div>
+        </div>
+        <div style={{ fontFamily: SERIF_L, fontSize: 13, color: "#5c5350", fontStyle: "italic", margin: "0 18px 14px", lineHeight: 1.6 }}>
+          "{exp.hypothesis}"
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8, padding: "0 18px 14px" }}>
+          <Field label="Product" value={exp.product} />
+          <Field label="Target Segment" value={exp.targetSegment} />
+          <Field label="Primary Metric" value={exp.primaryMetric} />
+          <Field label="Secondary Metric" value={exp.secondaryMetric} />
+          <Field label="Minimum Sample" value={exp.minimumSample} />
+          <Field label="Period" value={exp.period} />
+        </div>
+        {children}
+      </div>
+    );
+
+    const completed = exps.completed?.[0];
+    const active    = exps.active?.[0];
+    const planned   = exps.planned?.[0];
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+
+        {/* Completed */}
+        {completed && (
+          <ExpCard exp={completed} statusLabel="Completed" statusColor="#2a5e42" headerNote="Completed experiment · hypothesis confirmed">
+            <div style={{ margin: "0 18px 18px", padding: "12px 14px", background: "#f0faf4", border: "1px solid #c6e8d2" }}>
+              <div style={{ fontFamily: INTER_L, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", color: "#2a5e42", marginBottom: 8 }}>
+                Outcome — {completed.result.outcome}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {[
+                  { label: "Primary", value: completed.result.primaryResult },
+                  { label: "Secondary", value: completed.result.secondaryResult },
+                  { label: "Action taken", value: completed.result.action },
+                ].map(({ label, value }) => (
+                  <div key={label} style={{ display: "flex", gap: 12, alignItems: "baseline" }}>
+                    <span style={{ fontFamily: INTER_L, fontSize: 9, textTransform: "uppercase", letterSpacing: "1px", color: "#2a5e42", minWidth: 72 }}>{label}</span>
+                    <span style={{ fontFamily: SERIF_L, fontSize: 13, color: "#221516" }}>{value}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontFamily: MONO_L, fontSize: 10, color: "#7a6f6a", marginTop: 8 }}>n={completed.sampleSize} feedback events</div>
+            </div>
+          </ExpCard>
+        )}
+
+        {/* Active */}
+        {active && (
+          <ExpCard exp={active} statusLabel="Active" statusColor="#d97706" headerNote={`Active experiment · ${active.daysRemaining} days remaining`}>
+            <div style={{ margin: "0 18px 18px", padding: "12px 14px", background: "#fffbeb", border: "1px solid #fde68a" }}>
+              <div style={{ fontFamily: INTER_L, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", color: "#d97706", marginBottom: 8 }}>
+                Intermediate Results — {active.intermediate.status}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px,1fr))", gap: 8, marginBottom: 10 }}>
+                {[
+                  { label: "Sessions to date", value: active.intermediate.sessionsToDate },
+                  { label: "Buys to date",     value: active.intermediate.buysToDate },
+                  { label: "Conversion",        value: `${active.intermediate.conversionToDate}%` },
+                  { label: "Sample (n)",        value: active.intermediate.sampleSize },
+                  { label: "Days remaining",    value: active.daysRemaining },
+                ].map(({ label, value }) => (
+                  <div key={label} style={{ padding: "8px 10px", background: "rgba(255,255,255,0.7)", border: "1px solid rgba(253,230,138,0.8)" }}>
+                    <div style={{ fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1px", color: "#92400e", marginBottom: 4 }}>{label}</div>
+                    <div style={{ fontFamily: MONO_L, fontSize: 16, fontWeight: 700, color: "#d97706" }}>{value}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontFamily: SERIF_L, fontSize: 12, color: "#78350f", fontStyle: "italic" }}>{active.intermediate.note}</div>
+            </div>
+          </ExpCard>
+        )}
+
+        {/* Planned */}
+        {planned && (
+          <ExpCard exp={planned} statusLabel="Planned" statusColor="#7a6f6a" headerNote="Planned experiment · not yet started">
+            <div style={{ margin: "0 18px 18px", padding: "12px 14px", background: "rgba(34,21,22,0.03)", border: "1px solid rgba(34,21,22,0.10)" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px,1fr))", gap: 8 }}>
+                {[
+                  { label: "Prerequisite", value: planned.prerequisite },
+                  { label: "Evidence from data", value: planned.evidence },
+                ].map(({ label, value }) => (
+                  <div key={label}>
+                    <div style={{ fontFamily: INTER_L, fontSize: 9, textTransform: "uppercase", letterSpacing: "1px", color: "#7a6f6a", fontWeight: 600, marginBottom: 4 }}>{label}</div>
+                    <div style={{ fontFamily: SERIF_L, fontSize: 13, color: "#221516" }}>{value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </ExpCard>
+        )}
+      </div>
+    );
+  }
+
+  // ── live mode: illustrative example ──────────────────────────────────────────
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <p style={{ fontFamily: SERIF_L, fontSize: 14, color: "#7a6f6a", fontStyle: "italic", margin: 0 }}>
         Experiment Builder will allow you to structure and track design tests directly from the dashboard. Below is an illustrative example of how a hypothesis will look when this feature ships.
       </p>
 
-      {/* Illustrative example — clearly labelled, non-interactive */}
       <div style={{ border: "2px dashed rgba(34,21,22,0.12)", padding: "20px 24px", background: "#faf9f7" }}>
         <div style={{ fontFamily: INTER_L, fontSize: 7, fontWeight: 700, textTransform: "uppercase", letterSpacing: "2px", color: "#9CA3AF", marginBottom: 14 }}>
           Illustrative example — not a live experiment
@@ -3331,12 +3821,12 @@ function DataAiExperimentBuilder() {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
           {[
-            { field: "Design change",        value: "Add relaxed linen silhouette to Becoming Whole range" },
-            { field: "Target segment",        value: "Becoming Whole · desired feeling: calm / grounded" },
-            { field: "Primary metric",        value: "Rewear rate (target: ≥70%)" },
-            { field: "Secondary metric",      value: "Objection: Too formal (target: <20%)" },
-            { field: "Minimum sample",        value: "n = 10 post-wear reviews" },
-            { field: "Reasoning from data",   value: "n=8, 37% rewear, top objection: Too Formal (5/8)" },
+            { field: "Design change",      value: "Add relaxed linen silhouette to Becoming Whole range" },
+            { field: "Target segment",     value: "Becoming Whole · desired feeling: calm / grounded" },
+            { field: "Primary metric",     value: "Rewear rate (target: ≥70%)" },
+            { field: "Secondary metric",   value: "Objection: Too formal (target: <20%)" },
+            { field: "Minimum sample",     value: "n = 10 post-wear reviews" },
+            { field: "Reasoning from data",value: "n=8, 37% rewear, top objection: Too Formal (5/8)" },
           ].map(({ field, value }) => (
             <div key={field} style={{ padding: "10px 12px", background: "rgba(255,255,255,0.7)", border: "1px solid rgba(34,21,22,0.07)" }}>
               <div style={{ fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginBottom: 4 }}>{field}</div>
@@ -3347,7 +3837,7 @@ function DataAiExperimentBuilder() {
       </div>
 
       <div style={{ padding: "10px 14px", background: "rgba(122,111,106,0.06)", border: "1px solid rgba(34,21,22,0.07)", fontSize: 12, color: "#5c5350", fontFamily: SERIF_L }}>
-        When Experiment Builder ships, hypotheses will be saved, linked to the opportunity they came from, and tracked against live post-wear data as results come in. Status tracking (Reviewing → Testing → Actioned) will be available at that point.
+        When Experiment Builder ships, hypotheses will be saved, linked to the opportunity they came from, and tracked against live post-wear data as results come in.
       </div>
     </div>
   );
