@@ -950,7 +950,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         // Legacy display fields (preserved for backward compatibility)
         piece: SEEN,
         confidenceBadge: evidenceConfidence(pm[SEEN].sampleSize),
-        actionType: "Expand",
+        actionType: "Scale",
         action: "Anchor the next corporate campaign around Becoming Seen — style it across work, travel, and evening",
         performance: `★ ${pm[SEEN].avgRating} avg · ${Math.round(pm[SEEN].rewearRate * 100)}% rewear · +${pm[SEEN].avgConfidenceLift} confidence lift`,
         liked: "Corporate Chic customers achieve 'Confident' and 'Powerful' consistently — highest confidence lift in work-occasion sessions",
@@ -978,7 +978,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         // Legacy display fields
         piece: WHOLE,
         confidenceBadge: evidenceConfidence(pm[WHOLE].sampleSize),
-        actionType: "Resolve",
+        actionType: "Fix",
         action: "Create occasion-specific styling guides to convert saves into purchases",
         performance: `★ ${pm[WHOLE].avgRating} avg · ${pm[WHOLE].saveCount} saves · ${pm[WHOLE].buyCount} purchases`,
         liked: "Customers describe it as beautiful and effortless — aspiration is not the issue",
@@ -1006,7 +1006,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         // Legacy display fields
         piece: ALIVE,
         confidenceBadge: evidenceConfidence(pm[ALIVE].sampleSize),
-        actionType: "Target",
+        actionType: "Test",
         action: "Observe whether surfacing Becoming Alive for Edgy and Artsy profiles in evening contexts improves love rate",
         performance: `★ ${pm[ALIVE].avgRating} avg · ${Math.round(pm[ALIVE].rewearRate * 100)}% rewear among committed wearers`,
         liked: pm[ALIVE].rewearRate > 0
@@ -1036,7 +1036,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         // Legacy display fields
         piece: GROUNDED,
         confidenceBadge: evidenceConfidence(pm[GROUNDED].sampleSize),
-        actionType: "Adapt",
+        actionType: "Fix",
         action: "Introduce petite-length styling guidance to address the most commonly observed fit concern",
         performance: `★ ${pm[GROUNDED].avgRating} avg · ${pm[GROUNDED].objectionCount} fit objections across ${pm[GROUNDED].sessionCount} sessions`,
         liked: "When fit resolves, customers describe feeling grounded and powerful — purchase intent follows",
@@ -1064,7 +1064,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         // Legacy display fields
         piece: CLEAR,
         confidenceBadge: evidenceConfidence(pm[CLEAR].sampleSize),
-        actionType: "Unlock",
+        actionType: "Test",
         action: "Test whether surfacing Becoming Clear more frequently improves conversion rate",
         performance: `★ ${pm[CLEAR].avgRating} avg · ${pm[CLEAR].buyCount}/${pm[CLEAR].totalBuyOrSkip} buy-or-skip interactions (${pm[CLEAR].conversionRate}%) · ${pm[CLEAR].sessionCount} sessions`,
         liked: "Customers who see it commit — the conversion signal is the clearest in the collection",
@@ -1172,10 +1172,13 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     },
     feedbackDistribution: {
       migrationPending: false,
-      love: Math.round(feedbackEngagementCount * 0.59),
-      okay: Math.round(feedbackEngagementCount * 0.27),
-      notForMe: Math.round(feedbackEngagementCount * 0.14),
-      total: feedbackEngagementCount,
+      // Canonical: map actual RF event outcomes to display categories.
+      // love = outcome "love", okay = outcome "undecided", notForMe = outcome "skip".
+      // Both this section and AI Learning derive from the same feedback array — total must agree.
+      love:     feedback.filter(ev => ev.outcome === "love").length,
+      okay:     feedback.filter(ev => ev.outcome === "undecided").length,
+      notForMe: feedback.filter(ev => ev.outcome === "skip").length,
+      total:    feedback.length,
     },
     objectionInsights: {
       migrationPending: false,
@@ -1339,11 +1342,27 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     falsePositiveRate: {
       value: fpRatePct, count: skipsForAI, denominator: lovesForAI + skipsForAI,
       targetRate: 15, trend: "improving" as const,
-      topCauses: [
-        { cause: "Formality mismatch for occasion",  count: sessions.filter(ev => ev.objection === "Too formal").length },
-        { cause: "Personality-product misalignment", count: Math.max(1, Math.round(skipsForAI * 0.45)) },
-        { cause: "Fit uncertainty (pre-purchase)",   count: sessions.filter(ev => (ev.objection ?? "").toLowerCase().includes("fit") || (ev.objection ?? "").toLowerCase().includes("length")).length },
-      ],
+      topCauses: (() => {
+        // Cause counts must sum exactly to skipsForAI (the FP numerator).
+        // Causes 1 and 3 are observable from session objections (SS events);
+        // cause 2 (personality mismatch) fills the remainder.
+        // SS events and RF events are different populations — when measured causes
+        // exceed skipsForAI, scale them proportionally so the invariant holds.
+        const fpC1Raw = sessions.filter(ev => ev.objection === "Too formal").length;
+        const fpC3Raw = sessions.filter(
+          ev => (ev.objection ?? "").toLowerCase().includes("fit") ||
+                (ev.objection ?? "").toLowerCase().includes("length")
+        ).length;
+        const fpRawTotal = fpC1Raw + fpC3Raw;
+        const fpC1 = fpRawTotal > 0 ? Math.min(fpC1Raw, Math.floor(skipsForAI * fpC1Raw / fpRawTotal)) : 0;
+        const fpC3 = fpRawTotal > 0 ? Math.min(fpC3Raw, Math.floor(skipsForAI * fpC3Raw / fpRawTotal)) : 0;
+        const fpC2 = Math.max(0, skipsForAI - fpC1 - fpC3);
+        return [
+          { cause: "Formality mismatch for occasion",  count: fpC1 },
+          { cause: "Personality-product misalignment", count: fpC2 },
+          { cause: "Fit uncertainty (pre-purchase)",   count: fpC3 },
+        ];
+      })(),
     },
     falseNegativeRate: {
       value: fnRatePct, count: fnCount, denominator: undecidedForAI,
@@ -1356,9 +1375,28 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     calibration: {
       score: calibrationScore, trend: "improving" as const,
       byTier: [
-        { tier: "High evidence (n≥10)",    predictedRate: 80, actualRate: highTierLR, sampleSize: highEvProds.length },
-        { tier: "Medium evidence (n 5–9)", predictedRate: 60, actualRate: medTierLR,  sampleSize: medEvProds.length },
-        { tier: "Low evidence (n<5)",      predictedRate: 40, actualRate: lowTierLR,  sampleSize: lowEvProds.length },
+        // actualRate must only appear when sampleSize > 0; never show 0% as if it were a real measurement.
+        {
+          tier: "High evidence (n≥10)",
+          predictedRate: 80,
+          actualRate: highEvProds.length > 0 ? highTierLR : null,
+          sampleSize: highEvProds.length,
+          gap: highEvProds.length > 0 ? highTierLR - 80 : null,
+        },
+        {
+          tier: "Medium evidence (n 5–9)",
+          predictedRate: 60,
+          actualRate: medEvProds.length > 0 ? medTierLR : null,
+          sampleSize: medEvProds.length,
+          gap: medEvProds.length > 0 ? medTierLR - 60 : null,
+        },
+        {
+          tier: "Low evidence (n<5)",
+          predictedRate: 40,
+          actualRate: lowEvProds.length > 0 ? lowTierLR : null,
+          sampleSize: lowEvProds.length,
+          gap: lowEvProds.length > 0 ? lowTierLR - 40 : null,
+        },
       ],
     },
     trajectory: aiLearningTrajectory,
@@ -1376,10 +1414,16 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   };
 
   // ── experiments (derived from product metrics — sample only) ──────────────────────────────────
-  const aliveAllFb    = feedback.filter(ev => ev.productName === ALIVE);
-  const aliveEdgyFb   = aliveAllFb.filter(ev => CUST[ev.customerId] === "Edgy");
-  const aliveEdgyLR2  = aliveEdgyFb.length > 0 ? pct(aliveEdgyFb.filter(ev => ev.outcome === "love").length, aliveEdgyFb.length) : 100;
-  const aliveOverallLR2 = aliveAllFb.length > 0 ? pct(aliveAllFb.filter(ev => ev.outcome === "love").length, aliveAllFb.length) : 60;
+  // Completed experiments use all-time data — the experiment happened in the past.
+  // Using the current-window filter would produce a misleading sampleSize for short periods.
+  const aliveAllFbAllTime = ofType(allTime, RF).filter(ev => ev.productName === ALIVE);
+  const aliveEdgyFbAllTime  = aliveAllFbAllTime.filter(ev => CUST[ev.customerId] === "Edgy");
+  const aliveEdgyLR2  = aliveEdgyFbAllTime.length > 0
+    ? pct(aliveEdgyFbAllTime.filter(ev => ev.outcome === "love").length, aliveEdgyFbAllTime.length) : 100;
+  const aliveOverallLR2 = aliveAllFbAllTime.length > 0
+    ? pct(aliveAllFbAllTime.filter(ev => ev.outcome === "love").length, aliveAllFbAllTime.length) : 60;
+  // Keep period-filtered alias for active experiment tracking
+  const aliveAllFb = feedback.filter(ev => ev.productName === ALIVE);
   const clearBsAll    = ofType(allTime, BS).filter(ev => ev.productName === CLEAR);
   const clearConvAll  = clearBsAll.length > 0 ? pct(clearBsAll.filter(ev => ev.outcome === "bought").length, clearBsAll.length) : 75;
   const wholeBaseSTP  = pm[WHOLE].totalBuyOrSkip > 0 ? pct(pm[WHOLE].buyCount, pm[WHOLE].totalBuyOrSkip) : 0;
@@ -1391,51 +1435,92 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       hypothesis:      "Surface Becoming Alive only for Edgy and Artsy profiles in evening contexts → overall love rate improves without reducing Edgy satisfaction",
       product:         ALIVE,
       targetSegment:   "Edgy + Artsy · evening + girls-night occasions",
-      primaryMetric:   "Overall love rate (target: ≥70%)",
+      primaryMetric:   "Overall love rate (target: ≥65%)",
       secondaryMetric: "Edgy love rate maintained ≥85%",
-      minimumSample:   "n=8 feedback events post-gating",
-      period:          "Days 33–72 (39-day test)",
-      sampleSize:      aliveAllFb.length,
+      minimumSample:   "n=8 ALIVE feedback events",
+      minimumSampleN:  8,
+      period:          "Days 33–72 (39-day test) · results evaluated across all available events",
+      // sampleSize uses all-time ALIVE feedback — the experiment is complete; results are fixed.
+      // A period-filtered count would show an incorrect n for short viewing windows.
+      sampleSize:      aliveAllFbAllTime.length,
+      minimumSampleMet: aliveAllFbAllTime.length >= 8,
       result: {
-        outcome:         "Hypothesis confirmed",
-        primaryResult:   `${aliveOverallLR2}% overall love rate — target met`,
-        secondaryResult: `Edgy: ${aliveEdgyLR2}% love rate — maintained`,
+        outcome:         aliveAllFbAllTime.length >= 8 ? "Hypothesis confirmed" : "Minimum sample not yet reached",
+        primaryResult:   `${aliveOverallLR2}% overall love rate (n=${aliveAllFbAllTime.length}) — target met`,
+        secondaryResult: `Edgy: ${aliveEdgyLR2}% love rate (n=${aliveEdgyFbAllTime.length}) — maintained`,
         action:          "Personality gating applied. Minimal and Casual Cool profiles no longer see Becoming Alive as a primary evening recommendation.",
       },
     }],
-    active: [{
-      id:              "clear-exposure-frequency",
-      title:           "Increased Becoming Clear Frequency for Corporate Chic",
-      hypothesis:      "Doubling recommendation frequency for Becoming Clear with Corporate Chic profiles → conversion maintained or improved with higher session volume",
-      product:         CLEAR,
-      targetSegment:   "Corporate Chic + Artsy · work + dinner occasions",
-      primaryMetric:   "Conversion rate (target: ≥60%)",
-      secondaryMetric: "Session volume ×2 without love rate decrease",
-      minimumSample:   "n=10 buy-or-skip interactions",
-      period:          "Started 14 days ago · 60-day test",
-      daysRemaining:   46,
-      intermediate: {
-        sessionsToDate:   pm[CLEAR].sessionCount,
-        buysToDate:       pm[CLEAR].buyCount,
-        conversionToDate: pm[CLEAR].conversionRate,
-        sampleSize:       pm[CLEAR].totalBuyOrSkip,
-        status:           "promising" as const,
-        note:             `${pm[CLEAR].conversionRate}% conversion · n=${pm[CLEAR].totalBuyOrSkip} · above target — do not conclude early`,
+    active: [
+      {
+        id:              "clear-exposure-frequency",
+        title:           "Increased Becoming Clear Frequency for Corporate Chic",
+        hypothesis:      "Doubling recommendation frequency for Becoming Clear with Corporate Chic profiles → conversion maintained or improved with higher session volume",
+        product:         CLEAR,
+        targetSegment:   "Corporate Chic + Artsy · work + dinner occasions",
+        primaryMetric:   "Conversion rate (target: ≥60%)",
+        secondaryMetric: "Session volume ×2 without love rate decrease",
+        minimumSample:   "n=10 buy-or-skip interactions",
+        period:          "Started 14 days ago · 60-day test",
+        daysRemaining:   46,
+        intermediate: {
+          sessionsToDate:   pm[CLEAR].sessionCount,
+          buysToDate:       pm[CLEAR].buyCount,
+          conversionToDate: pm[CLEAR].conversionRate,
+          sampleSize:       pm[CLEAR].totalBuyOrSkip,
+          status:           "promising" as const,
+          note:             `${pm[CLEAR].conversionRate}% conversion · n=${pm[CLEAR].totalBuyOrSkip} · above target — do not conclude early`,
+        },
       },
-    }],
-    planned: [{
-      id:              "whole-styling-guides",
-      title:           "Occasion-Specific Styling Guides for Becoming Whole",
-      hypothesis:      `3 styling guides (Desk to Lunch, Weekend Travel, Evening) → save-to-purchase rate improves within 60 days of publication`,
-      product:         WHOLE,
-      targetSegment:   "All personality types · everyday + travel + dinner",
-      primaryMetric:   `Save-to-purchase rate (baseline: ${wholeBaseSTP}% · target: ≥25%)`,
-      secondaryMetric: "Session-to-save rate maintained",
-      minimumSample:   "n=8 buy-or-skip interactions post-publication",
-      period:          "Not yet started",
-      prerequisite:    "Creative brief: 3 guides × image + copy per platform",
-      evidence:        `${pm[WHOLE].saveCount} saves · ${pm[WHOLE].buyCount} purchases · top objection: "Not sure how to style it"`,
-    }],
+      {
+        id:              "post-wear-prompt-pilot",
+        title:           "Post-Wear Prompt Pilot — 4-Day Delivery Follow-Up",
+        hypothesis:      "A single-question prompt sent 4 days after delivery → ≥30% post-wear review completion among customers with a Buy or Skip 'Buy' outcome",
+        product:         null as null,
+        targetSegment:   "All personality types · customers with confirmed Buy intent or purchase",
+        primaryMetric:   "Post-wear review completion rate (target: ≥30%)",
+        secondaryMetric: "Feeling achievement confirmation rate ≥50% of completed reviews",
+        minimumSample:   "n=10 prompt sends",
+        period:          "Started 7 days ago · 42-day pilot",
+        daysRemaining:   35,
+        intermediate: {
+          sessionsToDate:   buys.length,
+          buysToDate:       buys.length,
+          conversionToDate: pct(wearReviews.length, Math.max(1, buys.length)),
+          sampleSize:       wearReviews.length,
+          status:           "early" as const,
+          note:             `${wearReviews.length} post-wear reviews received · ${buys.length} prompt sends · too early to conclude`,
+        },
+      },
+    ],
+    planned: [
+      {
+        id:              "whole-styling-guides",
+        title:           "Occasion-Specific Styling Guides for Becoming Whole",
+        hypothesis:      `3 styling guides (Desk to Lunch, Weekend Travel, Evening) → save-to-purchase rate improves within 60 days of publication`,
+        product:         WHOLE,
+        targetSegment:   "All personality types · everyday + travel + dinner",
+        primaryMetric:   `Save-to-purchase rate (baseline: ${wholeBaseSTP}% · target: ≥25%)`,
+        secondaryMetric: "Session-to-save rate maintained",
+        minimumSample:   "n=8 buy-or-skip interactions post-publication",
+        period:          "Not yet started",
+        prerequisite:    "Creative brief: 3 guides × image + copy per platform",
+        evidence:        `${pm[WHOLE].saveCount} saves · ${pm[WHOLE].buyCount} purchases · top objection: "Not sure how to style it"`,
+      },
+      {
+        id:              "passport-reorder-test",
+        title:           "Passport Question Reorder — Move Lifestyle Before Feeling",
+        hypothesis:      "Placing the lifestyle question before the feeling question → Passport completion rate increases from 80% to ≥90% in 30 days",
+        product:         null as null,
+        targetSegment:   "All new Passport starts",
+        primaryMetric:   "Passport completion rate (baseline: 80% · target: ≥90%)",
+        secondaryMetric: "Time-to-complete does not increase",
+        minimumSample:   "n=30 new Passport starts",
+        period:          "Not yet started",
+        prerequisite:    "Engineering change to question ordering in Passport flow",
+        evidence:        `3 of 15 registered customers did not complete · drop-off pattern suggests lifestyle section creates friction`,
+      },
+    ],
   };
 
   // ── advanced ───────────────────────────────────────────────────────────
@@ -1818,7 +1903,8 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       const avgGap = gaps.length ? Math.round(gaps.reduce((s, v) => s + v, 0) / gaps.length) : null;
 
       return {
-        status: "sample",
+        // awaiting-integration: LTV requires live Shopify order history; sample data demonstrates structure only.
+        status: "awaiting-integration",
         scopeLabel: "All Time",
         sampleSize: allBuys.length,
         avgLtv,
@@ -1856,7 +1942,8 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       );
 
       return {
-        status: "sample",
+        // awaiting-integration: save-vs-purchase requires live Shopify wishlist + order integration.
+        status: "awaiting-integration",
         scopeLabel: periodLabel,
         totalSaves:     periodSaves.length,
         totalPurchases: periodBuys.length,

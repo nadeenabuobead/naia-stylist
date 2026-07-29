@@ -183,15 +183,16 @@ function periodLabel(days) {
   return `last ${days} days`;
 }
 
-// Map sample size for a specific claim to a confidence tier.
+// Map sample size for a specific claim to a canonical evidence maturity tier.
 // n = evidence count supporting this specific claim, not total dashboard sessions.
+// Labels match canonical-vocabulary.ts — never use the old "No Data" / "Early Signal" strings.
 function sampleConfidence(n) {
-  if (n === 0)  return { label: "No Data",              status: "not-implemented",   color: "#9CA3AF" };
-  if (n === 1)  return { label: "Single Observation",   status: "insufficient-data", color: "#6b4800" };
-  if (n <= 4)   return { label: "Early Signal",         status: "insufficient-data", color: "#6b4800" };
-  if (n <= 9)   return { label: "Emerging Pattern",     status: "experimental",      color: "#5c5350" };
-  if (n <= 19)  return { label: "Established Pattern",  status: "live",              color: "#2a5e42" };
-  return          { label: "Strong Pattern",            status: "live",              color: "#2a5e42" };
+  if (n === 0)  return { label: "Not measured",        status: "not-implemented",   color: "#9CA3AF" };
+  if (n === 1)  return { label: "Single observation",  status: "insufficient-data", color: "#6b4800" };
+  if (n <= 4)   return { label: "Directional signal",  status: "insufficient-data", color: "#6b4800" };
+  if (n <= 9)   return { label: "Emerging pattern",    status: "experimental",      color: "#5c5350" };
+  if (n <= 19)  return { label: "Established pattern", status: "live",              color: "#2a5e42" };
+  return          { label: "Strong pattern",           status: "live",              color: "#2a5e42" };
 }
 
 // Render a percentage with its denominator so "100%" without context never appears.
@@ -370,7 +371,7 @@ function FeedbackInsightCard({ insight }) {
 }
 
 function DesignActionCard({ action }) {
-  const getPriorityColor = (p) => (p === "Strong Pattern" || p === "Established Pattern") ? "#2a5e42" : p === "Emerging Pattern" ? "#5c5350" : (p === "Early Signal" || p === "Single Observation") ? "#6b4800" : "#9CA3AF";
+  const getPriorityColor = (p) => (p === "Strong pattern" || p === "Established pattern" || p === "Strong Pattern" || p === "Established Pattern") ? "#2a5e42" : (p === "Emerging pattern" || p === "Emerging Pattern") ? "#5c5350" : (p === "Directional signal" || p === "Single observation" || p === "Early Signal" || p === "Single Observation") ? "#6b4800" : "#9CA3AF";
   const color = getPriorityColor(action.priority || action.confidenceBadge);
   return (
     <div style={{ padding: 22, border: `2px solid ${color}`, marginBottom: 18, background: "#fff" }}>
@@ -769,7 +770,7 @@ function MethodologyPanel() {
     ["Outcome quality", "Whether that group achieved their desired feeling: avgRating ≥ 4 AND rewearRate ≥ 60%."],
     ["Opportunity score", "Directional partial score: rating (30%) + rewear rate (25%) + confidence lift (25%) + data quality (20%). Excludes conversion and LTV until integrated."],
     ["Selected period vs All Time", "Period selector (7d / 30d / 90d / All) filters styling sessions and reviews. Passport profiles, registered users, and completed passports are always All Time."],
-    ["Confidence ladder", "n=0: No Data · n=1: Single Observation · n=2–4: Early Signal · n=5–9: Emerging Pattern · n=10–19: Established Pattern · n≥20: Strong Pattern."],
+    ["Evidence maturity", "n=0: Not measured · n=1: Single observation · n=2–4: Directional signal · n=5–9: Emerging pattern · n=10–19: Established pattern · n≥20: Strong pattern."],
     ["Pending integrations", "Shopify commerce, wishlist/save, FASHN.ai VTO performance, and LTV are not integrated. Sections requiring these show Awaiting Integration."],
   ];
   return (
@@ -1966,16 +1967,29 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
 
       <Section title="Buy or Skip Signals" desc="How customers assess new pieces against their wardrobe — all-time counts, does not follow the period filter" status={kpis?.buyOrSkip?.total > 0 ? "live" : "insufficient-data"}>
         {kpis?.buyOrSkip?.total > 0 ? (
-          <div style={s.kpiGrid}>
-            <KpiCard label="Total Analyses" value={kpis.buyOrSkip.total} />
-            <KpiCard label="Buy Rate" value={`${kpis.buyOrSkip.buyRate}%`} />
-            <KpiCard label="Buy" value={kpis.buyOrSkip.buy} />
-            <KpiCard label="Skip" value={kpis.buyOrSkip.skip} />
-            <KpiCard label="Maybe" value={kpis.buyOrSkip.maybe} />
-            {kpis.buyOrSkip.noDecision > 0 && (
-              <KpiCard label="No Decision" value={kpis.buyOrSkip.noDecision} />
-            )}
-          </div>
+          <>
+            <div style={s.kpiGrid}>
+              <KpiCard label="Total Analyses" value={kpis.buyOrSkip.total} />
+              <KpiCard label="Buy Intent Rate" value={`${kpis.buyOrSkip.buyRate}%`} desc="Buy ÷ total analyses (intent, not confirmed purchase)" />
+              <KpiCard label="Buy Intent" value={kpis.buyOrSkip.buy} />
+              <KpiCard label="Saved for Later" value={kpis.buyOrSkip.save ?? 0} desc="Saved but not bought — latent demand" />
+              <KpiCard label="Skip" value={kpis.buyOrSkip.skip} />
+              <KpiCard label="Maybe" value={kpis.buyOrSkip.maybe} />
+              {kpis.buyOrSkip.noDecision > 0 && (
+                <KpiCard label="No Decision" value={kpis.buyOrSkip.noDecision} />
+              )}
+            </div>
+            {/* Reconciliation note — shows all categories sum to total */}
+            {(() => {
+              const { buy = 0, save: sv = 0, skip = 0, maybe = 0, noDecision = 0, total } = kpis.buyOrSkip;
+              const shown = buy + sv + skip + maybe + noDecision;
+              return shown === total ? null : (
+                <p style={{ ...s.muted, marginTop: 8, fontSize: 11 }}>
+                  Note: {total - shown} interaction{total - shown !== 1 ? "s" : ""} had an unclassified outcome.
+                </p>
+              );
+            })()}
+          </>
         ) : <EmptyState message="No Buy or Skip analyses recorded yet." />}
       </Section>
 
@@ -2314,7 +2328,7 @@ function TabCollection({ data, kpis, advanced, rel, dateRangeDays }) {
               <div>
                 <div style={s.cardLabel}>Personality coverage</div>
                 <div style={{ fontSize: 14, color: "#221516", fontWeight: 600, marginTop: 4 }}>
-                  {wellServedCount != null ? `${wellServedCount} of ${totalPersonalities} personality types well served` : "—"}
+                  {wellServedCount != null ? `${wellServedCount} of ${totalPersonalities} observed personality segments currently have sufficient positive evidence` : "—"}
                 </div>
               </div>
               <div>
@@ -2588,15 +2602,18 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
     return (
       <>
         {/* Revenue Intelligence */}
-        <Section title="Revenue Attribution" desc={`nAia-assisted revenue — ${c.scopeLabel}`} status="sample">
+        <Section title="nAia-Assisted Revenue" desc={`Orders linked to a nAia session within 7 days before checkout · observational · ${c.scopeLabel}`} status="sample">
+          <div style={{ padding: "8px 12px", background: "rgba(107,72,0,0.05)", border: "1px solid rgba(107,72,0,0.12)", marginBottom: 14, fontSize: 11, color: "#6b4800", fontFamily: "serif" }}>
+            Attribution rule: any qualifying touch (Style Me, Buy or Skip, Save, VTO) within <strong>7 days</strong> before checkout. This is observational correlation, not causal attribution. A purchase is counted once per attribution window regardless of touch count.
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px,1fr))", gap: 1, background: "rgba(34,21,22,0.07)", marginBottom: 24 }}>
             {[
-              { label: "Period Revenue", value: fmtAed(c.revenue.naiaAssisted), color: "#8b2035" },
-              { label: "All-Time Revenue", value: fmtAed(c.revenue.naiaAssistedAllTime), color: "#8b2035" },
+              { label: "nAia-Assisted Revenue", value: fmtAed(c.revenue.naiaAssisted), color: "#8b2035" },
+              { label: "All-Time Assisted Revenue", value: fmtAed(c.revenue.naiaAssistedAllTime), color: "#8b2035" },
               { label: "Avg Order Value", value: fmtAed(c.revenue.avgOrderValue), color: "#221516" },
               { label: "Revenue / Session", value: fmtAed(c.revenue.revenuePerSession), color: "#221516" },
-              { label: "Session Conversion", value: `${c.revenue.sessionConversionRate}%`, color: "#2a5e42" },
-              { label: "vs Non-nAia", value: `${c.revenue.naiaVsNonNaiaMultiplier}× uplift`, color: "#2a5e42" },
+              { label: "Session → Purchase Rate", value: `${c.revenue.sessionConversionRate}%`, color: "#2a5e42" },
+              { label: "Assisted vs Unassisted", value: `${c.revenue.naiaVsNonNaiaMultiplier}× (observational)`, color: "#2a5e42" },
             ].map(({ label, value, color }) => (
               <div key={label} style={{ padding: "18px 20px", background: "#fff" }}>
                 <CLabel>{label}</CLabel>
@@ -3026,26 +3043,38 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
 // Combines Collection Intelligence + Design Opportunities into one tab
 // ══════════════════════════════════════════════════════════════════════════════
 
-const TAXONOMY_COLORS = { Expand: "#2a5e42", Resolve: "#8b2035", Target: "#d97706", Adapt: "#6b4800", Unlock: "#9CA3AF" };
+// Canonical action taxonomy: Scale / Fix / Test / Build
+// Scale = increase what works · Fix = resolve a problem · Test = validate a hypothesis · Build = create missing capability
+const TAXONOMY_COLORS = { Scale: "#2a5e42", Fix: "#8b2035", Test: "#6b4800", Build: "#5c5350" };
+// Legacy aliases — preserve backward compat with any live-data taxonomy values
+const TAXONOMY_ALIAS = {
+  Expand: "Scale", Resolve: "Fix", Target: "Test", Adapt: "Fix", Unlock: "Build",
+};
+
+function normalizeActionType(raw) {
+  if (!raw) return "Test";
+  if (TAXONOMY_COLORS[raw]) return raw;
+  return TAXONOMY_ALIAS[raw] ?? "Test";
+}
 
 function oppTaxonomy(type) {
-  if (!type) return "Unlock";
+  if (!type) return "Build";
   const t = type.toLowerCase();
-  if (t.includes("expand") || t.includes("momentum")) return "Expand";
-  if (t.includes("resolve") || t.includes("gap") || t.includes("objection") || t.includes("friction")) return "Resolve";
-  if (t.includes("target") || t.includes("segment") || t.includes("audience")) return "Target";
-  if (t.includes("adapt") || t.includes("design") || t.includes("modify")) return "Adapt";
-  return "Unlock";
+  if (t.includes("opportunity") || t.includes("retention") || t.includes("momentum")) return "Scale";
+  if (t.includes("friction") || t.includes("objection") || t.includes("gap") || t.includes("fit-signal")) return "Fix";
+  if (t.includes("audience") || t.includes("segment") || t.includes("product-opportunity")) return "Test";
+  return "Build";
 }
 
 function ActionCard({ item }) {
-  const taxColor = TAXONOMY_COLORS[item.taxonomy] ?? "#9CA3AF";
+  const taxKey = normalizeActionType(item.taxonomy);
+  const taxColor = TAXONOMY_COLORS[taxKey] ?? "#9CA3AF";
   const confBg = item.confidence === "high" ? "#221516" : item.confidence === "medium" ? "#8B7355" : "#9CA3AF";
   return (
     <div style={{ ...s.card, marginBottom: 14, borderLeft: `4px solid ${taxColor}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 10px", background: taxColor, color: "#fff" }}>{item.taxonomy}</span>
+          <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 10px", background: taxColor, color: "#fff" }}>{taxKey}</span>
           <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: confBg, color: "#fff" }}>{item.confidence}</span>
           {item.relevance && <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: "rgba(34,21,22,0.06)", color: "#5c5350" }}>{item.relevance} relevance</span>}
         </div>
@@ -3105,7 +3134,8 @@ function TabOpportunitiesContent({ data, phase4b2, advanced, rel, dateRangeDays,
   (data?.designActions ?? []).forEach((action, i) => {
     actionItems.push({
       id: `da-${i}`,
-      taxonomy: action.actionType ?? "Adapt",
+      taxonomy: normalizeActionType(action.actionType),
+      decisionStatus: action.decisionStatus ?? "New",
       headline: action.product ?? action.productTitle ?? action.piece ?? "Design Action",
       detail: action.interpretation ?? action.recommendation ?? action.liked,
       designImplication: action.interpretation ?? action.recommendation,
@@ -3123,7 +3153,7 @@ function TabOpportunitiesContent({ data, phase4b2, advanced, rel, dateRangeDays,
   });
 
   (rel?.productNarratives ?? []).filter(p => p.sampleSize >= 3).forEach((p, i) => {
-    const taxonomy = p.opportunityScore >= 60 ? "Expand" : p.mostCommonObjection ? "Resolve" : "Target";
+    const taxonomy = p.opportunityScore >= 60 ? "Scale" : p.mostCommonObjection ? "Fix" : "Test";
     actionItems.push({
       id: `ri-${i}`,
       taxonomy,
@@ -3164,17 +3194,18 @@ function TabOpportunitiesContent({ data, phase4b2, advanced, rel, dateRangeDays,
 
 // Preserved for future B2B multi-role use; not displayed in the current interface.
 function inferOwnership(item) {
-  const t = item.taxonomy?.toLowerCase() ?? "";
-  if (t === "resolve" || t === "adapt") return { primary: "Design Lead", supporting: "Merchandising" };
-  if (t === "target")                   return { primary: "Merchandising", supporting: "Design Lead" };
-  if (t === "expand")                   return { primary: "Combined", supporting: null };
-  return                                       { primary: "Design Lead", supporting: "Merchandising" };
+  const t = normalizeActionType(item.taxonomy);
+  if (t === "Fix")   return { primary: "Design Lead", supporting: "Merchandising" };
+  if (t === "Test")  return { primary: "Merchandising", supporting: "Design Lead" };
+  if (t === "Scale") return { primary: "Combined", supporting: null };
+  return                    { primary: "Design Lead", supporting: "Merchandising" };
 }
 
 function CombinedPriorityCard({ item }) {
   const [open, setOpen] = useState(false);
   const owners = inferOwnership(item);
-  const taxColor = TAXONOMY_COLORS[item.taxonomy] ?? "#9CA3AF";
+  const taxKey = normalizeActionType(item.taxonomy);
+  const taxColor = TAXONOMY_COLORS[taxKey] ?? "#9CA3AF";
   const confBg = item.confidence === "high" ? "#221516" : item.confidence === "medium" ? "#8B7355" : "#9CA3AF";
   const confData = sampleConfidence(item.sampleSizeHint ?? 1);
 
@@ -3189,7 +3220,7 @@ function CombinedPriorityCard({ item }) {
       <div style={{ padding: "14px 18px", borderLeft: `4px solid ${taxColor}` }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ fontSize: 7, fontFamily: INTER, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", padding: "2px 8px", background: taxColor, color: "#fff" }}>{item.taxonomy}</span>
+            <span style={{ fontSize: 7, fontFamily: INTER, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", padding: "2px 8px", background: taxColor, color: "#fff" }}>{taxKey}</span>
             <span style={{ fontSize: 7, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", padding: "2px 6px", background: confBg, color: "#fff" }}>{item.confidence}</span>
             <span style={{ fontSize: 7, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", padding: "2px 6px", background: confData.color, color: "#fff" }}>{confData.label}</span>
           </div>
@@ -3206,7 +3237,7 @@ function CombinedPriorityCard({ item }) {
           onClick={() => setOpen(o => !o)}
           style={{ ...s.linkBtn, marginTop: 8, fontSize: 8 }}
         >
-          {open ? "Hide joined conclusions ↑" : "View joined conclusions ↓"}
+          {open ? "Hide evidence and recommended action ↑" : "View complete decision ↓"}
         </button>
       </div>
 
@@ -3229,7 +3260,7 @@ function CombinedPriorityCard({ item }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 14 }}>
             <div>
               <div style={{ fontFamily: INTER, fontSize: 7, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginBottom: 3 }}>Decision Status</div>
-              <div style={{ fontFamily: INTER, fontSize: 11, fontWeight: 600, color: "#221516" }}>{item.taxonomy ?? "Under review"}</div>
+              <div style={{ fontFamily: INTER, fontSize: 11, fontWeight: 600, color: "#221516" }}>{item.decisionStatus ?? "New"}</div>
             </div>
             <div>
               <div style={{ fontFamily: INTER, fontSize: 7, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginBottom: 3 }}>Dependency</div>
@@ -3269,7 +3300,7 @@ function CombinedPriorityBoard({ actionItems }) {
   return (
     <Section
       title="Founder–Designer Action Plan"
-      desc="Priorities ranked by evidence strength — design implication, commercial or positioning implication, recommended test, and success metric. Expand each priority to view the full interpretation."
+      desc="One card per actionable issue. Ranked by evidence strength. Click 'View complete decision' to see design implication, commercial implication, recommended test, and success metric."
       status={sorted.length > 0 ? "live" : "insufficient-data"}
     >
       {/* Legend */}
@@ -3278,7 +3309,7 @@ function CombinedPriorityBoard({ actionItems }) {
           <span key={label} style={{ fontSize: 7, fontFamily: INTER, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: color, color: "#fff" }}>{label}</span>
         ))}
         <span style={{ fontFamily: SERIF, fontSize: 11, color: "#7a6f6a", fontStyle: "italic", alignSelf: "center" }}>
-          Expand → preserve and build on what works · Resolve → investigate friction · Target → validate an underserved audience or occasion · Adapt → prototype a change · Unlock → integration needed
+          Scale → increase what works · Fix → resolve a problem · Test → validate a hypothesis · Build → create missing capability
         </span>
       </div>
 
@@ -3376,12 +3407,12 @@ function DataAiConfidenceLadder() {
   const INTER_L = "'Inter', -apple-system, sans-serif";
   const SERIF_L = "'Cormorant Garamond', Garamond, serif";
   const LEVELS = [
-    { n: "n = 0",    label: "No Data",             desc: "No events recorded for this metric in the selected period.",                                                  color: "#9CA3AF" },
-    { n: "n = 1",    label: "Single Observation",  desc: "One data point. Directional only — do not act. Use to notice and monitor.",                                   color: "#6b4800" },
-    { n: "n = 2–4",  label: "Early Signal",        desc: "A pattern is forming but not yet reliable. Use to inform content and exploration, not production decisions.", color: "#6b4800" },
-    { n: "n = 5–9",  label: "Emerging Pattern",    desc: "Enough data to generate a hypothesis worth testing. Suitable for low-risk experiments.",                      color: "#5c5350" },
-    { n: "n = 10–19", label: "Established Pattern", desc: "Reliable pattern for design and merchandising decisions. Suitable for direct testing with clear success metric.", color: "#2a5e42" },
-    { n: "n ≥ 20",   label: "Strong Pattern",      desc: "High confidence. Suitable for collection-level commitments.",                                                  color: "#2a5e42" },
+    { n: "n = 0",     label: "Not measured",        desc: "No events recorded for this metric in the selected period. Do not show 0% — use '—' or 'Not measured'.",    color: "#9CA3AF" },
+    { n: "n = 1",     label: "Single observation",  desc: "One data point. Directional only — do not act. Use to notice and monitor.",                                   color: "#6b4800" },
+    { n: "n = 2–4",   label: "Directional signal",  desc: "A pattern is forming but not yet reliable. Use to inform content and exploration, not production decisions.", color: "#6b4800" },
+    { n: "n = 5–9",   label: "Emerging pattern",    desc: "Enough data to generate a hypothesis worth testing. Suitable for low-risk experiments.",                      color: "#5c5350" },
+    { n: "n = 10–19", label: "Established pattern", desc: "Reliable pattern for design and merchandising decisions. Suitable for direct testing with clear success metric.", color: "#2a5e42" },
+    { n: "n ≥ 20",    label: "Strong pattern",      desc: "High confidence. Suitable for collection-level commitments.",                                                  color: "#2a5e42" },
   ];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -3564,10 +3595,20 @@ function DataAiLearningRoadmap({ advanced, sampleMode }) {
 
         {/* False Positives */}
         <MetricCard label="False Positive Rate — High Score, Rejected" value={`${al.falsePositiveRate.value}%`} subValue={`Target: ≤${al.falsePositiveRate.targetRate}% · Trend: ${trendLabel(al.falsePositiveRate.trend)}`} accent="#d97706">
-          <LLabel>Top Causes</LLabel>
+          <LLabel>
+            Top Causes (must sum to {al.falsePositiveRate.count} FP events)
+          </LLabel>
           {al.falsePositiveRate.topCauses.map((c, i) => (
-            <Row key={i} label={c.cause} value={`${c.count} events`} />
+            <Row key={i} label={c.cause} value={c.count > 0 ? `${c.count} event${c.count !== 1 ? "s" : ""}` : "—"} />
           ))}
+          {(() => {
+            const causeSum = al.falsePositiveRate.topCauses.reduce((s, c) => s + c.count, 0);
+            const fp = al.falsePositiveRate.count;
+            if (causeSum !== fp) {
+              return <div style={{ fontSize: 10, color: "#d97706", marginTop: 4 }}>⚠ Cause sum ({causeSum}) ≠ FP count ({fp})</div>;
+            }
+            return null;
+          })()}
         </MetricCard>
 
         {/* False Negatives */}
@@ -3594,14 +3635,22 @@ function DataAiLearningRoadmap({ advanced, sampleMode }) {
               </tr></thead>
               <tbody>
                 {al.calibration.byTier.map((t, i) => {
-                  const gap = t.actualRate - t.predictedRate;
+                  // actualRate and gap are null when sampleSize === 0 — never show 0% as if measured.
+                  const hasData = t.sampleSize > 0 && t.actualRate != null;
+                  const gap = hasData ? (t.gap ?? (t.actualRate - t.predictedRate)) : null;
                   return (
                     <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.5)" : "transparent" }}>
                       <td style={{ padding: "5px 6px", fontFamily: SERIF_L, fontSize: 12 }}>{t.tier}</td>
                       <td style={{ padding: "5px 6px", textAlign: "center" }}>{t.predictedRate}%</td>
-                      <td style={{ padding: "5px 6px", textAlign: "center", fontWeight: 700, color: "#221516" }}>{t.actualRate}%</td>
-                      <td style={{ padding: "5px 6px", textAlign: "center", color: Math.abs(gap) <= 5 ? "#2a5e42" : "#d97706", fontWeight: 700 }}>{gap > 0 ? `+${gap}` : gap}pp</td>
-                      <td style={{ padding: "5px 6px", textAlign: "center", color: "#9CA3AF" }}>{t.sampleSize}</td>
+                      <td style={{ padding: "5px 6px", textAlign: "center", fontWeight: 700, color: hasData ? "#221516" : "#9CA3AF" }}>
+                        {hasData ? `${t.actualRate}%` : "—"}
+                      </td>
+                      <td style={{ padding: "5px 6px", textAlign: "center", color: !hasData ? "#9CA3AF" : Math.abs(gap) <= 5 ? "#2a5e42" : "#d97706", fontWeight: hasData ? 700 : 400 }}>
+                        {hasData ? (gap > 0 ? `+${gap}` : `${gap}`) + "pp" : "—"}
+                      </td>
+                      <td style={{ padding: "5px 6px", textAlign: "center", color: "#9CA3AF" }}>
+                        {t.sampleSize === 0 ? "No evaluated events" : t.sampleSize}
+                      </td>
                     </tr>
                   );
                 })}
@@ -3726,80 +3775,93 @@ function DataAiExperimentBuilder({ advanced, sampleMode }) {
       </div>
     );
 
-    const completed = exps.completed?.[0];
-    const active    = exps.active?.[0];
-    const planned   = exps.planned?.[0];
+    const completedList = exps.completed ?? [];
+    const activeList    = exps.active    ?? [];
+    const plannedList   = exps.planned   ?? [];
+
+    const renderCompleted = (completed) => (
+      <ExpCard key={completed.id} exp={completed} statusLabel="Completed" statusColor="#2a5e42"
+        headerNote={completed.minimumSampleMet === false
+          ? "⚠ Completed — minimum sample not reached; do not conclude"
+          : "Completed experiment · hypothesis confirmed"}>
+        {completed.minimumSampleMet === false && (
+          <div style={{ margin: "0 18px 8px", padding: "10px 14px", background: "#fff7ed", border: "1px solid #fed7aa", fontSize: 12, color: "#c2410c" }}>
+            Minimum sample ({completed.minimumSample}) not reached. n={completed.sampleSize} events. Do not treat as confirmed.
+          </div>
+        )}
+        <div style={{ margin: "0 18px 18px", padding: "12px 14px", background: "#f0faf4", border: "1px solid #c6e8d2" }}>
+          <div style={{ fontFamily: INTER_L, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", color: "#2a5e42", marginBottom: 8 }}>
+            Outcome — {completed.result.outcome}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {[
+              { label: "Primary",    value: completed.result.primaryResult },
+              { label: "Secondary",  value: completed.result.secondaryResult },
+              { label: "Action taken", value: completed.result.action },
+            ].map(({ label, value }) => (
+              <div key={label} style={{ display: "flex", gap: 12, alignItems: "baseline" }}>
+                <span style={{ fontFamily: INTER_L, fontSize: 9, textTransform: "uppercase", letterSpacing: "1px", color: "#2a5e42", minWidth: 72 }}>{label}</span>
+                <span style={{ fontFamily: SERIF_L, fontSize: 13, color: "#221516" }}>{value}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontFamily: MONO_L, fontSize: 10, color: "#7a6f6a", marginTop: 8 }}>
+            n={completed.sampleSize} events · minimum={completed.minimumSample}
+          </div>
+        </div>
+      </ExpCard>
+    );
+
+    const renderActive = (active) => (
+      <ExpCard key={active.id} exp={active} statusLabel="Active" statusColor="#d97706" headerNote={`Active experiment · ${active.daysRemaining} days remaining`}>
+        <div style={{ margin: "0 18px 18px", padding: "12px 14px", background: "#fffbeb", border: "1px solid #fde68a" }}>
+          <div style={{ fontFamily: INTER_L, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", color: "#d97706", marginBottom: 8 }}>
+            Intermediate Results — {active.intermediate.status}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px,1fr))", gap: 8, marginBottom: 10 }}>
+            {[
+              { label: "Sessions to date", value: active.intermediate.sessionsToDate },
+              { label: "Buys to date",     value: active.intermediate.buysToDate },
+              { label: "Conversion",       value: `${active.intermediate.conversionToDate}%` },
+              { label: "Sample (n)",       value: active.intermediate.sampleSize },
+              { label: "Days remaining",   value: active.daysRemaining },
+            ].map(({ label, value }) => (
+              <div key={label} style={{ padding: "8px 10px", background: "rgba(255,255,255,0.7)", border: "1px solid rgba(253,230,138,0.8)" }}>
+                <div style={{ fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1px", color: "#92400e", marginBottom: 4 }}>{label}</div>
+                <div style={{ fontFamily: MONO_L, fontSize: 16, fontWeight: 700, color: "#d97706" }}>{value}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontFamily: SERIF_L, fontSize: 12, color: "#78350f", fontStyle: "italic" }}>{active.intermediate.note}</div>
+        </div>
+      </ExpCard>
+    );
+
+    const renderPlanned = (planned) => (
+      <ExpCard key={planned.id} exp={planned} statusLabel="Planned" statusColor="#7a6f6a" headerNote="Planned experiment · not yet started">
+        <div style={{ margin: "0 18px 18px", padding: "12px 14px", background: "rgba(34,21,22,0.03)", border: "1px solid rgba(34,21,22,0.10)" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px,1fr))", gap: 8 }}>
+            {[
+              { label: "Prerequisite",      value: planned.prerequisite },
+              { label: "Evidence from data", value: planned.evidence },
+            ].filter(f => f.value).map(({ label, value }) => (
+              <div key={label}>
+                <div style={{ fontFamily: INTER_L, fontSize: 9, textTransform: "uppercase", letterSpacing: "1px", color: "#7a6f6a", fontWeight: 600, marginBottom: 4 }}>{label}</div>
+                <div style={{ fontFamily: SERIF_L, fontSize: 13, color: "#221516" }}>{value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </ExpCard>
+    );
 
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-
-        {/* Completed */}
-        {completed && (
-          <ExpCard exp={completed} statusLabel="Completed" statusColor="#2a5e42" headerNote="Completed experiment · hypothesis confirmed">
-            <div style={{ margin: "0 18px 18px", padding: "12px 14px", background: "#f0faf4", border: "1px solid #c6e8d2" }}>
-              <div style={{ fontFamily: INTER_L, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", color: "#2a5e42", marginBottom: 8 }}>
-                Outcome — {completed.result.outcome}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {[
-                  { label: "Primary", value: completed.result.primaryResult },
-                  { label: "Secondary", value: completed.result.secondaryResult },
-                  { label: "Action taken", value: completed.result.action },
-                ].map(({ label, value }) => (
-                  <div key={label} style={{ display: "flex", gap: 12, alignItems: "baseline" }}>
-                    <span style={{ fontFamily: INTER_L, fontSize: 9, textTransform: "uppercase", letterSpacing: "1px", color: "#2a5e42", minWidth: 72 }}>{label}</span>
-                    <span style={{ fontFamily: SERIF_L, fontSize: 13, color: "#221516" }}>{value}</span>
-                  </div>
-                ))}
-              </div>
-              <div style={{ fontFamily: MONO_L, fontSize: 10, color: "#7a6f6a", marginTop: 8 }}>n={completed.sampleSize} feedback events</div>
-            </div>
-          </ExpCard>
-        )}
-
-        {/* Active */}
-        {active && (
-          <ExpCard exp={active} statusLabel="Active" statusColor="#d97706" headerNote={`Active experiment · ${active.daysRemaining} days remaining`}>
-            <div style={{ margin: "0 18px 18px", padding: "12px 14px", background: "#fffbeb", border: "1px solid #fde68a" }}>
-              <div style={{ fontFamily: INTER_L, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", color: "#d97706", marginBottom: 8 }}>
-                Intermediate Results — {active.intermediate.status}
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px,1fr))", gap: 8, marginBottom: 10 }}>
-                {[
-                  { label: "Sessions to date", value: active.intermediate.sessionsToDate },
-                  { label: "Buys to date",     value: active.intermediate.buysToDate },
-                  { label: "Conversion",        value: `${active.intermediate.conversionToDate}%` },
-                  { label: "Sample (n)",        value: active.intermediate.sampleSize },
-                  { label: "Days remaining",    value: active.daysRemaining },
-                ].map(({ label, value }) => (
-                  <div key={label} style={{ padding: "8px 10px", background: "rgba(255,255,255,0.7)", border: "1px solid rgba(253,230,138,0.8)" }}>
-                    <div style={{ fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1px", color: "#92400e", marginBottom: 4 }}>{label}</div>
-                    <div style={{ fontFamily: MONO_L, fontSize: 16, fontWeight: 700, color: "#d97706" }}>{value}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{ fontFamily: SERIF_L, fontSize: 12, color: "#78350f", fontStyle: "italic" }}>{active.intermediate.note}</div>
-            </div>
-          </ExpCard>
-        )}
-
-        {/* Planned */}
-        {planned && (
-          <ExpCard exp={planned} statusLabel="Planned" statusColor="#7a6f6a" headerNote="Planned experiment · not yet started">
-            <div style={{ margin: "0 18px 18px", padding: "12px 14px", background: "rgba(34,21,22,0.03)", border: "1px solid rgba(34,21,22,0.10)" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px,1fr))", gap: 8 }}>
-                {[
-                  { label: "Prerequisite", value: planned.prerequisite },
-                  { label: "Evidence from data", value: planned.evidence },
-                ].map(({ label, value }) => (
-                  <div key={label}>
-                    <div style={{ fontFamily: INTER_L, fontSize: 9, textTransform: "uppercase", letterSpacing: "1px", color: "#7a6f6a", fontWeight: 600, marginBottom: 4 }}>{label}</div>
-                    <div style={{ fontFamily: SERIF_L, fontSize: 13, color: "#221516" }}>{value}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </ExpCard>
+        {completedList.map(renderCompleted)}
+        {activeList.map(renderActive)}
+        {plannedList.map(renderPlanned)}
+        {completedList.length === 0 && activeList.length === 0 && plannedList.length === 0 && (
+          <div style={{ fontFamily: SERIF_L, fontSize: 14, color: "#7a6f6a", fontStyle: "italic" }}>No experiments configured yet.</div>
         )}
       </div>
     );
