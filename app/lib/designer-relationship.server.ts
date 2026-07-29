@@ -557,13 +557,14 @@ export async function getRelationshipKPIs(dateRangeDays = 30): Promise<Relations
             ? liftList.reduce((sum, s) => sum + (s.confidenceLift ?? 0), 0) / liftList.length
             : null;
 
-        // Composite opportunity score (0–100)
-        const ratingScore = (avgRating / 5) * 30;
-        const rewearScore = rewearRate * 25;
+        // Composite opportunity score (0–100) — DEPRECATED, not used for decision ranking.
+        // dataScore removed: volume-based weighting inflated scores for frequently-seen products
+        // regardless of outcome quality. See DEPRECATED_COMPOSITE_SCORES in canonical-vocabulary.
+        const ratingScore    = (avgRating / 5) * 40;
+        const rewearScore    = rewearRate * 35;
         const confidenceScore =
           avgConfidenceLift != null ? Math.min(avgConfidenceLift / 5, 1) * 25 : 0;
-        const dataScore = Math.min(sampleSz / 5, 1) * 20;
-        const opportunityScore = Math.round(ratingScore + rewearScore + confidenceScore + dataScore);
+        const opportunityScore = Math.round(ratingScore + rewearScore + confidenceScore);
 
         // Strongest mood → feeling transformation
         const transMap: Record<string, number> = {};
@@ -611,7 +612,7 @@ export async function getRelationshipKPIs(dateRangeDays = 30): Promise<Relations
           recommendationReason: reason,
         };
       })
-      .sort((a, b) => b.opportunityScore - a.opportunityScore)
+      .sort((a, b) => (b.avgRating ?? 0) - (a.avgRating ?? 0))
       .slice(0, 12);
 
     return {

@@ -473,8 +473,11 @@ async function getCollectionEvolution(
 
     const avgRating = (rs: typeof currReviews) =>
       rs.length > 0 ? parseFloat((rs.reduce((s, r) => s + (r.overallFeeling ?? 0), 0) / rs.length).toFixed(2)) : null;
-    const rewearRate = (rs: typeof currReviews) =>
-      rs.length > 0 ? pct(rs.filter((r) => r.wouldWearAgain === "Definitely").length, rs.length) : null;
+    // Denominator: only reviews where the field was answered (stated rewear intent).
+    const rewearRate = (rs: typeof currReviews) => {
+      const answered = rs.filter((r) => r.wouldWearAgain !== null && r.wouldWearAgain !== undefined);
+      return answered.length > 0 ? pct(answered.filter((r) => r.wouldWearAgain === "Definitely").length, answered.length) : null;
+    };
 
     const currRating = avgRating(currReviews);
     const prevRating = avgRating(prevReviews);

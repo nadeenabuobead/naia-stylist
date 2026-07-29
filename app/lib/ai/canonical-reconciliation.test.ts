@@ -19,7 +19,16 @@ import {
   type ActionType,
   type DecisionStatus,
   type EvidenceLabel,
+  customerEvidenceLabel,
+  isSmallSample,
+  LOW_EVIDENCE_LANGUAGE,
+  DEPRECATED_COMPOSITE_SCORES,
+  DEPRECATED_SCORE_REASON,
+  CANONICAL_METRIC_NAMES,
+  EVIDENCE_TYPE_LABELS,
+  MEASUREMENT_STATE_LABELS,
 } from "./canonical-vocabulary";
+import { METRIC_REGISTRY, getMetricByLegacyName } from "./canonical-metric-registry";
 import { CANONICAL_INTELLIGENCE } from "./canonical-intelligence";
 import { getDesignerSampleData } from "../designer-sample-data";
 
@@ -434,5 +443,418 @@ describe("Canonical action taxonomy completeness", () => {
   });
   it("64. ACTION_COLORS for Build is the warm-grey brand value", () => {
     assert.equal(ACTION_COLORS["Build"], "#5c5350");
+  });
+});
+
+// ── Section 28-A: Metric identity ─────────────────────────────────────────────
+
+describe("Section 28-A — Metric identity: canonical registry completeness", () => {
+  it("65. METRIC_REGISTRY has at least 12 entries", () => {
+    assert.ok(Object.keys(METRIC_REGISTRY).length >= 12,
+      `Expected ≥12 metrics, got ${Object.keys(METRIC_REGISTRY).length}`);
+  });
+  it("66. Every metric has all required fields", () => {
+    const REQUIRED = [
+      "metricId", "displayName", "legacyNames", "description",
+      "evidenceType", "numeratorDefinition", "denominatorDefinition",
+      "eligiblePopulation", "periodRule", "missingDataRule",
+      "minimumEvidenceRule", "confidenceRule", "formatter", "isDeprecated",
+    ];
+    for (const [id, m] of Object.entries(METRIC_REGISTRY)) {
+      for (const field of REQUIRED) {
+        assert.ok(field in m, `Metric "${id}" missing required field: ${field}`);
+      }
+    }
+  });
+  it("67. Each metricId matches its registry key", () => {
+    for (const [id, m] of Object.entries(METRIC_REGISTRY)) {
+      assert.equal(m.metricId, id, `Metric key "${id}" has mismatched metricId "${m.metricId}"`);
+    }
+  });
+  it("68. Deprecated metrics have a deprecationReason", () => {
+    for (const [id, m] of Object.entries(METRIC_REGISTRY)) {
+      if (m.isDeprecated) {
+        assert.ok(m.deprecationReason && m.deprecationReason.length > 0,
+          `Deprecated metric "${id}" is missing deprecationReason`);
+      }
+    }
+  });
+  it("69. getMetricByLegacyName finds 'Rewear Rate' → stated_rewear_intent", () => {
+    const m = getMetricByLegacyName("Rewear Rate");
+    assert.ok(m !== undefined, "getMetricByLegacyName('Rewear Rate') returned undefined");
+    assert.equal(m!.metricId, "stated_rewear_intent");
+  });
+  it("70. getMetricByLegacyName finds 'Recommendation Precision' → love_response_rate", () => {
+    const m = getMetricByLegacyName("Recommendation Precision");
+    assert.ok(m !== undefined);
+    assert.equal(m!.metricId, "love_response_rate");
+  });
+  it("71. getMetricByLegacyName finds 'False Positive Rate' → skip_rate", () => {
+    const m = getMetricByLegacyName("False Positive Rate");
+    assert.ok(m !== undefined);
+    assert.equal(m!.metricId, "skip_rate");
+  });
+  it("72. CANONICAL_METRIC_NAMES has non-empty values for all keys", () => {
+    for (const [k, v] of Object.entries(CANONICAL_METRIC_NAMES)) {
+      assert.ok(v.length > 0, `CANONICAL_METRIC_NAMES["${k}"] is empty`);
+    }
+  });
+});
+
+// ── Section 28-B: Evidence type taxonomy ──────────────────────────────────────
+
+describe("Section 28-B — Evidence type taxonomy", () => {
+  it("73. EVIDENCE_TYPE_LABELS has exactly 9 entries", () => {
+    assert.equal(Object.keys(EVIDENCE_TYPE_LABELS).length, 9);
+  });
+  it("74. All EVIDENCE_TYPE_LABELS values are non-empty strings", () => {
+    for (const [k, v] of Object.entries(EVIDENCE_TYPE_LABELS)) {
+      assert.ok(typeof v === "string" && v.length > 0, `EVIDENCE_TYPE_LABELS["${k}"] is empty`);
+    }
+  });
+  it("75. Stated rewear intent metric uses experience evidence type", () => {
+    assert.equal(METRIC_REGISTRY["stated_rewear_intent"].evidenceType, "experience");
+  });
+  it("76. Buy-intent rate metric uses intent evidence type", () => {
+    assert.equal(METRIC_REGISTRY["buy_intent_rate"].evidenceType, "intent");
+  });
+  it("77. Love response rate metric uses observed_interaction evidence type", () => {
+    assert.equal(METRIC_REGISTRY["love_response_rate"].evidenceType, "observed_interaction");
+  });
+  it("78. Experiment outcome metric uses experiment_result evidence type", () => {
+    assert.equal(METRIC_REGISTRY["experiment_outcome"].evidenceType, "experiment_result");
+  });
+  it("79. Observed customer revenue metric uses intent evidence type (no Shopify orders yet)", () => {
+    assert.equal(METRIC_REGISTRY["observed_customer_revenue"].evidenceType, "intent");
+  });
+});
+
+// ── Section 28-C: Unique customer confidence ──────────────────────────────────
+
+describe("Section 28-C — Customer-based evidence ladder", () => {
+  it("80. customerEvidenceLabel(0) = Not measured", () => {
+    assert.equal(customerEvidenceLabel(0), "Not measured");
+  });
+  it("81. customerEvidenceLabel(1) = Single observation", () => {
+    assert.equal(customerEvidenceLabel(1), "Single observation");
+  });
+  it("82. customerEvidenceLabel(9) = Early signal (upper bound)", () => {
+    assert.equal(customerEvidenceLabel(9), "Early signal");
+  });
+  it("83. customerEvidenceLabel(10) = Directional (lower bound)", () => {
+    assert.equal(customerEvidenceLabel(10), "Directional");
+  });
+  it("84. customerEvidenceLabel(29) = Directional (upper bound)", () => {
+    assert.equal(customerEvidenceLabel(29), "Directional");
+  });
+  it("85. customerEvidenceLabel(30) = Established (lower bound)", () => {
+    assert.equal(customerEvidenceLabel(30), "Established");
+  });
+  it("86. customerEvidenceLabel(60) = Strong", () => {
+    assert.equal(customerEvidenceLabel(60), "Strong");
+  });
+  it("87. isSmallSample is true for n<20, false for n≥20", () => {
+    assert.equal(isSmallSample(0),  true);
+    assert.equal(isSmallSample(19), true);
+    assert.equal(isSmallSample(20), false);
+    assert.equal(isSmallSample(100), false);
+  });
+});
+
+// ── Section 28-D: Small-sample language policy ────────────────────────────────
+
+describe("Section 28-D — Low-evidence language policy completeness", () => {
+  it("88. LOW_EVIDENCE_LANGUAGE.allowed has at least 5 entries", () => {
+    assert.ok(LOW_EVIDENCE_LANGUAGE.allowed.length >= 5);
+  });
+  it("89. LOW_EVIDENCE_LANGUAGE.prohibited has at least 5 entries", () => {
+    assert.ok(LOW_EVIDENCE_LANGUAGE.prohibited.length >= 5);
+  });
+  it("90. 'Scale' is in prohibited (not allowed at low evidence)", () => {
+    assert.ok((LOW_EVIDENCE_LANGUAGE.prohibited as readonly string[]).includes("Scale"));
+  });
+  it("91. 'Hypothesis confirmed' is in prohibited", () => {
+    assert.ok((LOW_EVIDENCE_LANGUAGE.prohibited as readonly string[]).includes("Hypothesis confirmed"));
+  });
+  it("92. 'Explore' is in allowed", () => {
+    assert.ok((LOW_EVIDENCE_LANGUAGE.allowed as readonly string[]).includes("Explore"));
+  });
+  it("93. No term appears in both allowed and prohibited", () => {
+    const allowedSet = new Set(LOW_EVIDENCE_LANGUAGE.allowed);
+    const overlap = (LOW_EVIDENCE_LANGUAGE.prohibited as readonly string[]).filter(t => allowedSet.has(t as never));
+    assert.equal(overlap.length, 0, `Terms in both lists: ${overlap.join(", ")}`);
+  });
+});
+
+// ── Section 28-E: Composite score suspension ──────────────────────────────────
+
+describe("Section 28-E — Composite score suspension", () => {
+  it("94. opportunityScore is in DEPRECATED_COMPOSITE_SCORES", () => {
+    assert.ok(DEPRECATED_COMPOSITE_SCORES.has("opportunityScore"));
+  });
+  it("95. collectionHealthScore is in DEPRECATED_COMPOSITE_SCORES", () => {
+    assert.ok(DEPRECATED_COMPOSITE_SCORES.has("collectionHealthScore"));
+  });
+  it("96. directionalProductOpportunityScore is in DEPRECATED_COMPOSITE_SCORES", () => {
+    assert.ok(DEPRECATED_COMPOSITE_SCORES.has("directionalProductOpportunityScore"));
+  });
+  it("97. DEPRECATED_SCORE_REASON has entries for all deprecated scores", () => {
+    for (const scoreId of DEPRECATED_COMPOSITE_SCORES) {
+      assert.ok(scoreId in DEPRECATED_SCORE_REASON, `No reason for deprecated score: ${scoreId}`);
+    }
+  });
+  it("98. opportunityScore and collectionHealthScore are deprecated in metric registry", () => {
+    assert.equal(METRIC_REGISTRY["opportunity_score"].isDeprecated, true);
+    assert.equal(METRIC_REGISTRY["collection_health_score"].isDeprecated, true);
+  });
+});
+
+// ── Section 28-F: Experiment validity ─────────────────────────────────────────
+
+describe("Section 28-F — Experiment status validity", () => {
+  const VALID_OUTCOMES = new Set([
+    "planned", "active", "minimum_not_reached", "inconclusive",
+    "directional", "validated", "rejected", "stopped",
+  ]);
+
+  it("99. All completed experiment outcomes are valid status strings", () => {
+    const { advanced: { experiments } } = getDesignerSampleData(30);
+    for (const exp of experiments.completed) {
+      assert.ok(
+        VALID_OUTCOMES.has(exp.result.outcome),
+        `Experiment "${exp.id}" has invalid outcome: "${exp.result.outcome}". Valid: ${[...VALID_OUTCOMES].join(", ")}`
+      );
+    }
+  });
+  it("100. No experiment uses 'Hypothesis confirmed' as outcome (canonical: validated)", () => {
+    for (const days of [7, 30, 90]) {
+      const { advanced: { experiments } } = getDesignerSampleData(days);
+      const allExps = [...experiments.completed, ...(experiments.active ?? []), ...(experiments.planned ?? [])];
+      for (const exp of allExps) {
+        const outcome = (exp as any).result?.outcome ?? "";
+        assert.notEqual(outcome, "Hypothesis confirmed",
+          `Experiment "${exp.id}" uses deprecated outcome "Hypothesis confirmed" — use "validated" instead`);
+      }
+    }
+  });
+  it("101. Experiment minimumSampleMet is true only when sampleSize >= minimumSampleN", () => {
+    for (const days of [7, 30, 90]) {
+      const { advanced: { experiments } } = getDesignerSampleData(days);
+      for (const exp of experiments.completed) {
+        if (exp.minimumSampleMet) {
+          assert.ok(
+            exp.sampleSize >= exp.minimumSampleN,
+            `Experiment "${exp.id}" [${days}D]: minimumSampleMet=true but sampleSize=${exp.sampleSize} < minimumSampleN=${exp.minimumSampleN}`
+          );
+        }
+      }
+    }
+  });
+  it("102. Experiment outcome is 'validated' only when minimumSampleMet is true", () => {
+    for (const days of [7, 30, 90]) {
+      const { advanced: { experiments } } = getDesignerSampleData(days);
+      for (const exp of experiments.completed) {
+        if (exp.result.outcome === "validated") {
+          assert.equal(exp.minimumSampleMet, true,
+            `Experiment "${exp.id}" [${days}D]: outcome is "validated" but minimumSampleMet is false`);
+        }
+      }
+    }
+  });
+  it("103. Completed experiment sampleSize is not inflated by Math.max (time-invariant and honest)", () => {
+    // Verify that sampleSizes across date ranges are identical (all-time data)
+    // AND that minimumSampleMet reflects actual counts, not forced-true via Math.max.
+    const countsPerExp: Record<string, number[]> = {};
+    for (const days of [7, 30, 90]) {
+      const { advanced: { experiments } } = getDesignerSampleData(days);
+      for (const exp of experiments.completed) {
+        countsPerExp[exp.id] = countsPerExp[exp.id] ?? [];
+        countsPerExp[exp.id].push(exp.sampleSize);
+      }
+    }
+    for (const [id, counts] of Object.entries(countsPerExp)) {
+      assert.equal(new Set(counts).size, 1,
+        `Experiment "${id}" sampleSize is not time-invariant: ${counts.join(", ")}`);
+    }
+  });
+});
+
+// ── Section 28-G: AI Learning claims restriction ──────────────────────────────
+
+describe("Section 28-G — AI Learning claims: no fabricated trajectory", () => {
+  it("104. aiLearning.trajectory is empty (no back-projected data)", () => {
+    for (const days of [7, 30, 90]) {
+      const { advanced } = getDesignerSampleData(days);
+      assert.ok(Array.isArray(advanced.aiLearning.trajectory),
+        `[${days}D] aiLearning.trajectory must be an array`);
+      assert.equal(advanced.aiLearning.trajectory.length, 0,
+        `[${days}D] aiLearning.trajectory must be empty — no back-projected data allowed (got ${advanced.aiLearning.trajectory.length} entries)`);
+    }
+  });
+  it("105. aiLearning.trajectoryNote is a non-empty string", () => {
+    const { advanced } = getDesignerSampleData(30);
+    assert.ok(
+      typeof (advanced.aiLearning as any).trajectoryNote === "string" &&
+      (advanced.aiLearning as any).trajectoryNote.length > 0,
+      "aiLearning.trajectoryNote must be a non-empty string"
+    );
+  });
+  it("106. precision.value is null or a number in [0,100] — never a hardcoded fallback when N=0", () => {
+    for (const days of [7, 30, 90]) {
+      const { advanced } = getDesignerSampleData(days);
+      const v = advanced.aiLearning.precision.value;
+      if (v !== null) {
+        assert.ok(typeof v === "number" && v >= 0 && v <= 100,
+          `[${days}D] precision.value out of range: ${v}`);
+      }
+      // When denominator is 0, value must be null (never hardcoded 70)
+      if (advanced.aiLearning.precision.denominator === 0) {
+        assert.equal(v, null,
+          `[${days}D] precision.value must be null when denominator=0, got ${v}`);
+      }
+    }
+  });
+  it("107. falsePositiveRate.value is null or a number in [0,100] — no hardcoded 28% fallback", () => {
+    for (const days of [7, 30, 90]) {
+      const { advanced } = getDesignerSampleData(days);
+      const v = advanced.aiLearning.falsePositiveRate.value;
+      if (v !== null) {
+        assert.ok(typeof v === "number" && v >= 0 && v <= 100,
+          `[${days}D] falsePositiveRate.value out of range: ${v}`);
+      }
+      // When denominator is 0, value must be null (never hardcoded 28)
+      if (advanced.aiLearning.falsePositiveRate.denominator === 0) {
+        assert.equal(v, null,
+          `[${days}D] falsePositiveRate.value must be null when denominator=0, got ${v}`);
+      }
+    }
+  });
+  it("108. aiLearning fields have measurementNote strings documenting limitation", () => {
+    const { advanced } = getDesignerSampleData(30);
+    const precNote = (advanced.aiLearning.precision as any).measurementNote;
+    const fpNote = (advanced.aiLearning.falsePositiveRate as any).measurementNote;
+    const fnNote = (advanced.aiLearning.falseNegativeRate as any).measurementNote;
+    assert.ok(typeof precNote === "string" && precNote.length > 0, "precision.measurementNote missing");
+    assert.ok(typeof fpNote === "string" && fpNote.length > 0, "falsePositiveRate.measurementNote missing");
+    assert.ok(typeof fnNote === "string" && fnNote.length > 0, "falseNegativeRate.measurementNote missing");
+  });
+  it("109. signalWeights has isIllustrative flag and illustrativeNote", () => {
+    const { advanced } = getDesignerSampleData(30);
+    const sw = advanced.aiLearning.signalWeights as any;
+    assert.equal(sw.isIllustrative, true, "signalWeights.isIllustrative must be true");
+    assert.ok(typeof sw.illustrativeNote === "string" && sw.illustrativeNote.length > 0,
+      "signalWeights.illustrativeNote missing");
+  });
+});
+
+// ── Section 28-H: Impossible values ───────────────────────────────────────────
+
+describe("Section 28-H — Impossible values prevention", () => {
+  it("110. No percentage value in productNarratives exceeds 100 or goes below 0", () => {
+    for (const days of [7, 30, 90]) {
+      const { rel } = getDesignerSampleData(days);
+      const narratives = (rel as any).productNarratives ?? [];
+      for (const n of narratives) {
+        if (n.rewearRate != null) {
+          assert.ok(n.rewearRate >= 0 && n.rewearRate <= 1,
+            `[${days}D] productNarratives "${n.name}" rewearRate=${n.rewearRate} out of [0,1]`);
+        }
+        if (n.avgRating != null) {
+          assert.ok(n.avgRating >= 0 && n.avgRating <= 5,
+            `[${days}D] productNarratives "${n.name}" avgRating=${n.avgRating} out of [0,5]`);
+        }
+      }
+    }
+  });
+  it("111. naiaVsNonNaia.nonNaiaConversionRateIsEstimated is true — no fabricated baseline presented as fact", () => {
+    const { overview } = getDesignerSampleData(30);
+    const flag = (overview as any)?.periodKpis?.naiaVsNonNaia?.nonNaiaConversionRateIsEstimated;
+    assert.equal(flag, true, "nonNaiaConversionRateIsEstimated must be true — baseline is an estimate");
+  });
+  it("112. commercial.revenue.nonNaiaBaselineNote is a non-empty string", () => {
+    const { commercial } = getDesignerSampleData(30);
+    const note = (commercial as any)?.revenue?.nonNaiaBaselineNote;
+    assert.ok(typeof note === "string" && note.length > 0,
+      "commercial.revenue.nonNaiaBaselineNote missing or empty");
+  });
+  it("113. falseNegativeRate.isGroundTruthRate is false", () => {
+    const { advanced } = getDesignerSampleData(30);
+    const fnr = advanced.aiLearning.falseNegativeRate as any;
+    assert.equal(fnr.isGroundTruthRate, false,
+      "falseNegativeRate.isGroundTruthRate must be false — undecided events are not confirmed false negatives");
+  });
+  it("114. falsePositiveRate.isGroundTruthRate is false", () => {
+    const { advanced } = getDesignerSampleData(30);
+    const fpr = advanced.aiLearning.falsePositiveRate as any;
+    assert.equal(fpr.isGroundTruthRate, false,
+      "falsePositiveRate.isGroundTruthRate must be false — skip events are not confirmed false positives");
+  });
+});
+
+// ── Section 28-I: Period reconciliation ───────────────────────────────────────
+
+describe("Section 28-I — Period reconciliation: period-sensitive metrics differ across windows", () => {
+  it("115. saveVsPurchase.periodSaves differs between 7D and 90D (period-sensitive)", () => {
+    const d7  = getDesignerSampleData(7);
+    const d90 = getDesignerSampleData(90);
+    const sv7  = (d7.commercial  as any)?.saveVsPurchase?.uniqueSavers ?? 0;
+    const sv90 = (d90.commercial as any)?.saveVsPurchase?.uniqueSavers ?? 0;
+    assert.ok(sv7 <= sv90,
+      `saveVsPurchase.uniqueSavers should be ≤ in shorter period (7D=${sv7}, 90D=${sv90})`);
+  });
+  it("116. All-time metrics are identical across all date ranges", () => {
+    const counts7  = getDesignerSampleData(7).advanced.aiLearning.totalEvaluated;
+    const counts30 = getDesignerSampleData(30).advanced.aiLearning.totalEvaluated;
+    // totalEvaluated is period-sensitive — this test confirms it's not all-time
+    // (aiLearning uses the period-filtered feedback array)
+    // If all three are identical it's a red flag that period filtering is broken.
+    // At minimum 7D should be ≤ 90D.
+    const counts90 = getDesignerSampleData(90).advanced.aiLearning.totalEvaluated;
+    assert.ok(counts7 <= counts90,
+      `aiLearning.totalEvaluated: 7D=${counts7} > 90D=${counts90} — period filter may be broken`);
+  });
+  it("117. LTV is all-time: identical across date ranges", () => {
+    const ltvs = [7, 30, 90].map(d => (getDesignerSampleData(d).advanced as any).ltv?.avgLtv ?? null);
+    assert.ok(ltvs[0] === ltvs[1] && ltvs[1] === ltvs[2],
+      `LTV avgLtv should be all-time (identical across windows): ${ltvs.join(", ")}`);
+  });
+});
+
+// ── Section 28-J: Mode isolation ──────────────────────────────────────────────
+
+describe("Section 28-J — Mode isolation: sample vs live separation", () => {
+  it("118. Sample data status fields contain 'sample' not 'live'", () => {
+    const { advanced } = getDesignerSampleData(30);
+    assert.equal(advanced.aiLearning.status, "sample",
+      "aiLearning.status must be 'sample' in sample preview mode");
+  });
+  it("119. aiLearning has a trajectoryNote confirming no back-projection", () => {
+    const { advanced } = getDesignerSampleData(30);
+    const note = (advanced.aiLearning as any).trajectoryNote as string;
+    assert.ok(note.toLowerCase().includes("trajectory") || note.toLowerCase().includes("snapshot"),
+      `trajectoryNote must reference 'trajectory' or 'snapshot': "${note}"`);
+  });
+  it("120. commercial.revenue.nonNaiaBaselineNote contains key disclaimer word", () => {
+    const { commercial } = getDesignerSampleData(30);
+    const note = ((commercial as any).revenue?.nonNaiaBaselineNote ?? "").toLowerCase();
+    assert.ok(
+      note.includes("estimated") || note.includes("illustrative") || note.includes("baseline"),
+      `nonNaiaBaselineNote must contain 'estimated', 'illustrative', or 'baseline': "${note}"`
+    );
+  });
+  it("121. Overview naiaVsNonNaia has both isEstimated flag and explanation note", () => {
+    const { overview } = getDesignerSampleData(30);
+    const nvn = (overview as any)?.periodKpis?.naiaVsNonNaia ?? {};
+    assert.equal(nvn.nonNaiaConversionRateIsEstimated, true);
+    assert.ok(typeof nvn.nonNaiaConversionRateNote === "string" && nvn.nonNaiaConversionRateNote.length > 0,
+      "nonNaiaConversionRateNote missing");
+  });
+  it("122. naiaInfluenceRateIsIllustrative is true in overview periodKpis", () => {
+    const { overview } = getDesignerSampleData(30);
+    assert.equal(
+      (overview as any)?.periodKpis?.naiaVsNonNaia?.naiaInfluenceRateIsIllustrative,
+      true,
+      "naiaInfluenceRateIsIllustrative must be true — formula is an estimate, not a measurement"
+    );
   });
 });

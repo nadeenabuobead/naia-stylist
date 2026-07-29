@@ -146,3 +146,150 @@ export const CONFIDENCE_GLOSSARY = {
   customerConfidenceLift: "Change in a customer's self-reported confidence score (before/after, 1–10 scale).",
   founderPriority:        "The founder's working priority assessment for a given action.",
 } as const;
+
+// ── Canonical evidence types ───────────────────────────────────────────────────
+// Every metric must declare its primary evidence type.
+export type EvidenceType =
+  | "declared_preference"   // Explicit answer from customer (Passport, onboarding)
+  | "observed_interaction"  // System-recorded behaviour (click, session, skip, love)
+  | "intent"                // Stated intention without confirmed outcome (buy intent, save)
+  | "transaction"           // Confirmed completed Shopify order or payment
+  | "experience"            // Self-reported post-experience (post-wear review field)
+  | "verified_wear"         // Confirmed physical wear event with outcome
+  | "product_metadata"      // Product catalogue attributes (category, price, fabric)
+  | "model_output"          // AI/model-generated score or label
+  | "experiment_result";    // Outcome from a defined experiment with a decision rule
+
+export const EVIDENCE_TYPE_LABELS: Record<EvidenceType, string> = {
+  declared_preference:  "Declared preference",
+  observed_interaction: "Observed interaction",
+  intent:               "Intent (unconfirmed)",
+  transaction:          "Confirmed transaction",
+  experience:           "Self-reported experience",
+  verified_wear:        "Verified wear event",
+  product_metadata:     "Product metadata",
+  model_output:         "Model output",
+  experiment_result:    "Experiment result",
+};
+
+// ── Canonical measurement states ───────────────────────────────────────────────
+// Replace all free-form status strings with these six states.
+// Never render a metric with a state outside this set.
+export type MeasurementState =
+  | "awaiting_integration"      // Data source not yet connected — cannot compute
+  | "no_eligible_observations"  // Connected, zero events in period for eligible population
+  | "observed_zero"             // Metric computed and result is genuinely zero
+  | "insufficient_evidence"     // Some data exists but below minimum threshold
+  | "measured"                  // Metric computed with sufficient evidence
+  | "not_applicable";           // Metric definition does not apply to this context
+
+export const MEASUREMENT_STATE_LABELS: Record<MeasurementState, string> = {
+  awaiting_integration:     "Awaiting Integration",
+  no_eligible_observations: "No Observations",
+  observed_zero:            "Observed Zero",
+  insufficient_evidence:    "Insufficient Evidence",
+  measured:                 "Measured",
+  not_applicable:           "Not Applicable",
+};
+
+export function measurementStateToStatusKey(state: MeasurementState): string {
+  switch (state) {
+    case "awaiting_integration":     return "not-implemented";
+    case "no_eligible_observations": return "insufficient-data";
+    case "observed_zero":            return "live";
+    case "insufficient_evidence":    return "insufficient-data";
+    case "measured":                 return "live";
+    case "not_applicable":           return "not-implemented";
+  }
+}
+
+// ── Customer-based evidence ladder ────────────────────────────────────────────
+// n = unique customers (not raw events).
+// Use this for all metrics where the claim is about customer behaviour.
+// Use evidenceLabel() for raw event counts only when unique customers are unavailable.
+export type CustomerEvidenceLabel =
+  | "Not measured"
+  | "Single observation"
+  | "Early signal"
+  | "Directional"
+  | "Established"
+  | "Strong";
+
+export function customerEvidenceLabel(uniqueCustomers: number): CustomerEvidenceLabel {
+  if (uniqueCustomers === 0) return "Not measured";
+  if (uniqueCustomers === 1) return "Single observation";
+  if (uniqueCustomers <= 9)  return "Early signal";
+  if (uniqueCustomers <= 29) return "Directional";
+  if (uniqueCustomers <= 59) return "Established";
+  return "Strong";
+}
+
+export function isSmallSample(uniqueCustomers: number): boolean {
+  return uniqueCustomers < 20;
+}
+
+// ── Low-evidence language policy ──────────────────────────────────────────────
+// For metrics with fewer than 20 unique customers:
+//   - Lead with counts ("4 of 9 customers"), show % secondary
+//   - Never use prohibited language
+// For metrics with 20+ unique customers, replicated across periods: stronger language allowed.
+export const LOW_EVIDENCE_LANGUAGE = {
+  allowed: [
+    "Explore", "Investigate", "Run a low-cost test",
+    "Collect more evidence", "Directional signal", "Early indication",
+    "Possible friction", "Candidate hypothesis", "Consider", "Worth monitoring",
+  ],
+  prohibited: [
+    "Scale", "Hero product", "Anchor campaign", "Hypothesis confirmed",
+    "Customers commit", "Strong pattern", "Proven", "Best-performing",
+    "Expand production", "Discontinue", "Winner", "Strongest",
+    "Convert",  // for intent-only signals without confirmed purchase
+  ],
+} as const;
+
+// ── Deprecated composite scores ────────────────────────────────────────────────
+// These scores must not be used for decision ranking.
+// Underlying component metrics remain available; only the composite is deprecated.
+export const DEPRECATED_COMPOSITE_SCORES = new Set([
+  "opportunityScore",
+  "collectionHealthScore",
+  "directionalProductOpportunityScore",
+]);
+
+export const DEPRECATED_SCORE_REASON: Record<string, string> = {
+  opportunityScore:
+    "Volume-based data weighting inflated scores for frequently-seen products regardless of outcome quality. Not used for decisions.",
+  collectionHealthScore:
+    "Session volume weight in mood coverage inflated scores from repeat single-customer interactions. Not used for decisions.",
+  directionalProductOpportunityScore:
+    "Two implementations with different weight normalisation; composite is unreliable. Not used for decisions.",
+};
+
+// ── Experiment status vocabulary ───────────────────────────────────────────────
+// The only valid experiment outcome strings. "Hypothesis confirmed" is not valid.
+// Use "validated" only when all four conditions are met (see below).
+export type ExperimentStatus =
+  | "planned"
+  | "active"
+  | "minimum_not_reached"
+  | "inconclusive"
+  | "directional"
+  | "validated"     // minimum sample met + primary metric evaluated + guardrail acceptable + decision rule satisfied
+  | "rejected"
+  | "stopped";
+
+// ── Canonical metric renames ───────────────────────────────────────────────────
+// Old label → canonical label. Used in display and in audit trail.
+export const CANONICAL_METRIC_NAMES: Record<string, string> = {
+  "Rewear Rate":                        "Stated Rewear Intent",
+  "Buy Rate":                           "Buy-Intent Rate",
+  "Recommendation Precision":           "Love Response Rate",
+  "Recommendation Trust":               "Desired-Outcome Success by Personality",
+  "Explanation Agreement Rate":         "Love Response Rate (by personality)",
+  "Gross Margin AED":                   "Gross Profit (AED)",
+  "LTV":                                "Observed Customer Revenue to Date",
+  "nAia Uplift":                        "Observed Difference vs Non-nAia Cohort",
+  "False Positive Rate":                "Skip Rate (Decided Feedback Events)",
+  "False Negative Rate":                "Undecided Event Rate",
+  "Recommendation Success":             "Desired-Feeling Achievement Rate",
+};

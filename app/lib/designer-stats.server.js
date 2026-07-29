@@ -36,7 +36,11 @@ export async function getDesignerStats(dateRangeDays = 30) {
     // 1. Overview Stats
     const avgRating = reviews.reduce((sum, r) => sum + (r.overallFeeling || 0), 0) / totalLooks;
     const avgAlignment = reviews.filter(r => r.feltLikeHer === "Yes").length / totalLooks;
-    const avgRewear = reviews.filter(r => r.wouldWearAgain === "Definitely").length / totalLooks;
+    // Denominator: only reviews where the field was actually answered (stated rewear intent).
+    const reviewsWithWearAnswer = reviews.filter(r => r.wouldWearAgain !== null && r.wouldWearAgain !== undefined);
+    const avgRewear = reviewsWithWearAnswer.length > 0
+      ? reviewsWithWearAnswer.filter(r => r.wouldWearAgain === "Definitely").length / reviewsWithWearAnswer.length
+      : 0;
 
     // 2. Piece Performance Analysis
     const pieceStats = {};

@@ -1285,7 +1285,9 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       avgOrderValue:       naiaAOV,
       revenuePerSession,
       sessionConversionRate: sessionConvRate,
+      // naiaVsNonNaiaMultiplier: divides by 5 (estimated non-nAia baseline) — illustrative.
       naiaVsNonNaiaMultiplier: sessionConvRate > 0 ? Math.round(sessionConvRate / 5 * 10) / 10 : 1,
+      nonNaiaBaselineNote: "Comparison baseline (5%) is an estimated market rate — no unassisted cohort is tracked. Ratio is illustrative until a real control group is established.",
       byProduct: byProductCommercial.filter(r => r.unitsSold > 0).sort((a, b) => b.revenue - a.revenue)
         .map(r => ({ product: r.product, revenue: r.revenue, units: r.unitsSold })),
     },
@@ -1328,10 +1330,12 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   const skipsForAI     = feedback.filter(ev => ev.outcome === "skip").length;
   const undecidedForAI = feedback.filter(ev => ev.outcome === "undecided").length;
   const totalEvaluated = lovesForAI + skipsForAI + undecidedForAI;
-  const precisionPct   = (lovesForAI + skipsForAI) > 0 ? pct(lovesForAI, lovesForAI + skipsForAI) : 70;
-  const fpRatePct      = (lovesForAI + skipsForAI) > 0 ? pct(skipsForAI, lovesForAI + skipsForAI) : 28;
-  const fnCount        = Math.max(1, Math.round(undecidedForAI * 0.30));
-  const fnRatePct      = undecidedForAI > 0 ? pct(fnCount, undecidedForAI) : 12;
+  // Null when no decided events — no hardcoded fallback (that would be fabricated).
+  const decidedForAI   = lovesForAI + skipsForAI;
+  const precisionPct   = decidedForAI > 0 ? pct(lovesForAI, decidedForAI) : null;
+  const fpRatePct      = decidedForAI > 0 ? pct(skipsForAI, decidedForAI) : null;
+  // Undecided rate: raw count over all evaluated — not a false negative rate (requires ground truth).
+  const undecidedRate  = totalEvaluated > 0 ? pct(undecidedForAI, totalEvaluated) : null;
 
   const highEvProds  = bySessionCount.filter(p => pm[p.name].sampleSize >= 10);
   const medEvProds   = bySessionCount.filter(p => pm[p.name].sampleSize >= 5 && pm[p.name].sampleSize < 10);
@@ -1344,25 +1348,33 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   const avgCalibGap = (Math.abs(highTierLR - 80) + Math.abs(medTierLR - 60) + Math.abs(lowTierLR - 40)) / 3;
   const calibrationScore = Math.max(40, Math.min(95, Math.round(85 - avgCalibGap)));
 
-  const w6p = precisionPct, w6f = fpRatePct, w6c = calibrationScore;
-  const aiLearningTrajectory = [
-    { week: "W1", precision: Math.max(42, w6p - 20), fpRate: Math.min(58, w6f + 24), calibration: Math.max(42, w6c - 24) },
-    { week: "W2", precision: Math.max(48, w6p - 15), fpRate: Math.min(52, w6f + 18), calibration: Math.max(48, w6c - 18) },
-    { week: "W3", precision: Math.max(54, w6p - 10), fpRate: Math.min(46, w6f + 12), calibration: Math.max(54, w6c - 12) },
-    { week: "W4", precision: Math.max(60, w6p - 6),  fpRate: Math.min(40, w6f + 8),  calibration: Math.max(60, w6c - 8)  },
-    { week: "W5", precision: Math.max(65, w6p - 3),  fpRate: Math.min(35, w6f + 4),  calibration: Math.max(65, w6c - 4)  },
-    { week: "W6", precision: w6p,                     fpRate: w6f,                     calibration: w6c                    },
-  ];
+  // Trajectory: empty — W1-W5 back-projection from current values was fabricated.
+  // Historical performance snapshots are logged from evaluation event inception forward;
+  // they are not available in this synthetic dataset.
+  const aiLearningTrajectory: Array<{ week: string; precision: number | null; fpRate: number | null; calibration: number }> = [];
 
   const aiLearning = {
     status: "sample" as const,
     modelVersion: "v2.1",
     evaluationPeriod: periodLabel,
     totalEvaluated,
-    precision: { value: precisionPct, count: lovesForAI, denominator: lovesForAI + skipsForAI },
+    precision: {
+      value: precisionPct,  // null when no decided events — never hardcode a fallback
+      count: lovesForAI,
+      denominator: decidedForAI,
+      // This is love rate from decided feedback, not model precision (which requires ground-truth purchases).
+      measurementNote: "Love rate from decided feedback events. Not equivalent to AI model precision, which requires ground-truth purchase outcomes.",
+    },
     falsePositiveRate: {
-      value: fpRatePct, count: skipsForAI, denominator: lovesForAI + skipsForAI,
+      // Renamed: skip rate from decided feedback — not a true false positive rate.
+      // "False positive" requires knowing the model assigned a high score AND the customer would not have purchased.
+      // Skipping a recommendation does not confirm the recommendation was wrong.
+      value: fpRatePct,  // null when no decided events
+      count: skipsForAI,
+      denominator: decidedForAI,
       targetRate: 15, trend: "improving" as const,
+      isGroundTruthRate: false,
+      measurementNote: "Skip rate from decided feedback events. Not a true false positive rate — ground-truth purchase outcome is required for that measurement.",
       topCauses: (() => {
         // Cause counts must sum exactly to skipsForAI (the FP numerator).
         // Causes 1 and 3 are observable from session objections (SS events);
@@ -1386,11 +1398,17 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       })(),
     },
     falseNegativeRate: {
-      value: fnRatePct, count: fnCount, denominator: undecidedForAI,
-      targetRate: 10, trend: "improving" as const,
+      // Renamed: undecided event rate — not a true false negative rate.
+      // False negatives require knowing the model assigned a LOW score AND the customer would have purchased.
+      // Undecided events are events where the customer did not provide love/skip feedback — not confirmed errors.
+      value: undecidedRate,   // pct of all evaluated events; null when totalEvaluated = 0
+      count: undecidedForAI,
+      denominator: totalEvaluated,
+      isGroundTruthRate: false,
+      measurementNote: "Undecided event rate — not a true false negative rate. Ground-truth purchase outcomes required to measure false negatives.",
       topSignals: [
-        { signal: "Repeated session without decision", note: "Customer returned to same product 2+ times — positive intent underweighted" },
-        { signal: "Save without immediate buy",        note: "Save signal not weighted heavily enough in current model" },
+        { signal: "Repeated session without decision", note: "Customer returned to same product 2+ times — intent signal not yet resolved" },
+        { signal: "Save without immediate buy",        note: "Save signal indicates interest that has not yet converted to a buy-or-skip decision" },
       ],
     },
     calibration: {
@@ -1421,7 +1439,12 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       ],
     },
     trajectory: aiLearningTrajectory,
+    trajectoryNote: "Historical performance snapshots are logged from the first evaluation event forward. No back-projected data is generated. Trajectory will populate as weekly snapshots accumulate.",
     signalWeights: {
+      // Accuracy values derived from love rates by evidence tier — not measured model accuracy.
+      // These represent directional proxies, not ground-truth performance measurements.
+      isIllustrative: true,
+      illustrativeNote: "Signal weight accuracy is derived from period love rates by evidence tier, not from measured model predictions against confirmed purchase outcomes.",
       personality:    { weight: 0.35, accuracy: Math.min(95, highTierLR),                   trend: "stable" as const },
       occasion:       { weight: 0.28, accuracy: Math.min(90, Math.round(loveRate * 1.05)),   trend: "improving" as const },
       desiredFeeling: { weight: 0.22, accuracy: Math.min(85, loveRate),                      trend: "improving" as const },
@@ -1483,7 +1506,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       sampleSize:      aliveAllFbAllTime.length,
       minimumSampleMet: aliveAllFbAllTime.length >= 8,
       result: {
-        outcome:         aliveAllFbAllTime.length >= 8 ? "Hypothesis confirmed" : "Minimum sample not yet reached",
+        outcome:         aliveAllFbAllTime.length >= 8 ? "validated" : "minimum_not_reached",
         primaryResult:   `${aliveOverallLR2}% overall love rate (n=${aliveAllFbAllTime.length}) — target met`,
         secondaryResult: `Edgy: ${aliveEdgyLR2}% love rate (n=${aliveEdgyFbAllTime.length}) — maintained`,
         action:          "Personality gating applied. Minimal and Casual Cool profiles no longer see Becoming Alive as a primary evening recommendation.",
@@ -1499,11 +1522,11 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       minimumSample:   "n=10 Minimal recommendation-feedback events",
       minimumSampleN:  10,
       period:          "Days 55–90 (35-day test) · results evaluated across all available events",
-      sampleSize:      Math.max(10, minimalRealFbAllTime.length),
-      minimumSampleMet: Math.max(10, minimalRealFbAllTime.length) >= 10,
+      sampleSize:      minimalRealFbAllTime.length,
+      minimumSampleMet: minimalRealFbAllTime.length >= 10,
       result: {
-        outcome:         "Hypothesis confirmed",
-        primaryResult:   `${minimalRealLRAT}% love rate for Minimal–REAL (n=${Math.max(10, minimalRealFbAllTime.length)}) — target exceeded`,
+        outcome:         minimalRealFbAllTime.length >= 10 ? "validated" : "minimum_not_reached",
+        primaryResult:   `${minimalRealLRAT}% love rate for Minimal–REAL (n=${minimalRealFbAllTime.length}) — target exceeded`,
         secondaryResult: `Purchase conversion: ${pct(ofType(allTime, BS).filter(ev => ev.productName === REAL && CUST[ev.customerId] === "Minimal" && ev.outcome === "bought").length, Math.max(1, minimalRealFbAllTime.length))}% · +${exp2Lift} pp lift vs SEEN baseline`,
         action:          "REAL is now the primary work recommendation for Minimal profiles. SEEN is retained for Minimal customers who express formal-occasion intent.",
       },
@@ -1518,11 +1541,11 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       minimumSample:   "n=8 Feminine or Romantic buy-or-skip interactions for ROOTED",
       minimumSampleN:  8,
       period:          "Days 89–120 (31-day test) · results evaluated across all available events",
-      sampleSize:      Math.max(8, exp3SampleSize),
-      minimumSampleMet: Math.max(8, exp3SampleSize) >= 8,
+      sampleSize:      exp3SampleSize,
+      minimumSampleMet: exp3SampleSize >= 8,
       result: {
-        outcome:         "Hypothesis confirmed",
-        primaryResult:   `${rootedSaveRateAT}% save + buy rate (n=${Math.max(8, exp3SampleSize)}) — target met`,
+        outcome:         exp3SampleSize >= 8 ? "validated" : "minimum_not_reached",
+        primaryResult:   `${rootedSaveRateAT}% save + buy rate (n=${exp3SampleSize}) — target met`,
         secondaryResult: `Love rate: ${rootedLoveRateAT}% — maintained above 75% threshold`,
         action:          "Evening contextualisation applied to all Rooted surfacing for Feminine and Romantic profiles. No occasion-generic surfacing for this segment.",
       },
@@ -2541,7 +2564,10 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
 
   // ── overview (period KPIs + all-time foundation) ──────────────────────────
   const naiaRevenue = buys.reduce((sum, ev) => sum + (PRICE[ev.productName ?? ""] ?? 1500), 0);
+  // naiaInfluenceRate is an illustrative estimate — not measured from a controlled attribution study.
+  // Formula is session-volume-scaled; a real influence rate requires a causal experiment or cohort comparison.
   const naiaInfluenceRate = Math.min(82, Math.round(48 + buys.length * 2.2));
+  const naiaInfluenceRateIsIllustrative = true;
   const naiaConversionRate = pct(buys.length, Math.max(1, ns));
   const naiaAvgOrderValue = buys.length > 0 ? Math.round(naiaRevenue / buys.length) : 0;
   const topProductInPeriod = bySessionCount[0]?.name ?? SEEN;
@@ -2577,9 +2603,15 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       strongestEmotionalOutcome,
       naiaVsNonNaia: {
         naiaConversionRate,
+        // nonNaiaConversionRate is an estimate — no tracked unassisted cohort exists.
+        // 5% is an assumed market baseline for unlanded fashion e-commerce, not measured data.
         nonNaiaConversionRate: 5,
+        nonNaiaConversionRateIsEstimated: true,
+        nonNaiaConversionRateNote: "Estimated market baseline — no unassisted cohort tracked. Comparison is illustrative until a real control group is established.",
         naiaAvgOrderValue,
         sessionCount: ns,
+        naiaInfluenceRate,
+        naiaInfluenceRateIsIllustrative,
       },
     },
     foundationKpis: {

@@ -2789,7 +2789,7 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
               { label: "Avg Order Value", value: fmtAed(c.revenue.avgOrderValue), color: "#221516" },
               { label: "Revenue / Session", value: fmtAed(c.revenue.revenuePerSession), color: "#221516" },
               { label: "Session → Purchase Rate", value: `${c.revenue.sessionConversionRate}%`, color: "#2a5e42" },
-              { label: "Assisted vs Unassisted", value: `${c.revenue.naiaVsNonNaiaMultiplier}× (observational)`, color: "#2a5e42" },
+              { label: "Assisted vs Unassisted (estimated)", value: `${c.revenue.naiaVsNonNaiaMultiplier}× (baseline estimated)`, color: "#5c5350" },
             ].map(({ label, value, color }) => (
               <div key={label} style={{ padding: "18px 20px", background: "#fff" }}>
                 <CLabel>{label}</CLabel>
@@ -2797,6 +2797,11 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
               </div>
             ))}
           </div>
+          {c.revenue?.nonNaiaBaselineNote && (
+            <div style={{ padding: "8px 12px", background: "rgba(107,72,0,0.05)", border: "1px solid rgba(107,72,0,0.12)", marginBottom: 14, fontSize: 11, color: "#6b4800", fontFamily: "serif" }}>
+              <strong>Comparison note:</strong> {c.revenue.nonNaiaBaselineNote}
+            </div>
+          )}
           {c.revenue.byProduct?.length > 0 && (
             <div style={{ overflowX: "auto" }}>
               <table style={s.table}>
@@ -3792,17 +3797,27 @@ function DataAiLearningRoadmap({ advanced, sampleMode }) {
           Model v{al.modelVersion} · {al.totalEvaluated} evaluated events · {al.evaluationPeriod}
         </p>
 
-        {/* Precision */}
-        <MetricCard label="Recommendation Precision" value={`${al.precision.value}%`} subValue={`${al.precision.count} loves of ${al.precision.denominator} decided events`} accent="#2a5e42">
+        {/* Love Response Rate (was: Recommendation Precision) */}
+        <MetricCard label="Love Response Rate" value={al.precision.value != null ? `${al.precision.value}%` : "—"} subValue={al.precision.value != null ? `${al.precision.count} loves of ${al.precision.denominator} decided events` : `Insufficient evidence — ${al.precision.denominator} decided event${al.precision.denominator !== 1 ? "s" : ""} in period`} accent="#2a5e42">
           <Row label="Love decisions" value={al.precision.count} />
           <Row label="Skip decisions" value={al.falsePositiveRate.count} />
           <Row label="Total decided" value={al.precision.denominator} />
+          {al.precision.measurementNote && (
+            <div style={{ marginTop: 8, padding: "6px 8px", background: "rgba(107,72,0,0.05)", borderLeft: "2px solid rgba(107,72,0,0.3)", fontSize: 10, color: "#6b4800", fontFamily: SERIF_L }}>
+              {al.precision.measurementNote}
+            </div>
+          )}
         </MetricCard>
 
-        {/* False Positives */}
-        <MetricCard label="False Positive Rate — High Score, Rejected" value={`${al.falsePositiveRate.value}%`} subValue={`Target: ≤${al.falsePositiveRate.targetRate}% · Trend: ${trendLabel(al.falsePositiveRate.trend)}`} accent="#d97706">
+        {/* Skip Rate (was: False Positive Rate — High Score, Rejected) */}
+        <MetricCard label="Skip Rate (Decided Feedback Events)" value={al.falsePositiveRate.value != null ? `${al.falsePositiveRate.value}%` : "—"} subValue={al.falsePositiveRate.value != null ? `Target: ≤${al.falsePositiveRate.targetRate}% · Trend: ${trendLabel(al.falsePositiveRate.trend)}` : "Insufficient evidence in period"} accent="#d97706">
+          {al.falsePositiveRate.measurementNote && (
+            <div style={{ marginBottom: 8, padding: "6px 8px", background: "rgba(107,72,0,0.05)", borderLeft: "2px solid rgba(107,72,0,0.3)", fontSize: 10, color: "#6b4800", fontFamily: SERIF_L }}>
+              {al.falsePositiveRate.measurementNote}
+            </div>
+          )}
           <LLabel>
-            Top Causes (must sum to {al.falsePositiveRate.count} FP events)
+            Top Skip Signals (must sum to {al.falsePositiveRate.count} skip events)
           </LLabel>
           {al.falsePositiveRate.topCauses.map((c, i) => (
             <Row key={i} label={c.cause} value={c.count > 0 ? `${c.count} event${c.count !== 1 ? "s" : ""}` : "—"} />
@@ -3811,15 +3826,20 @@ function DataAiLearningRoadmap({ advanced, sampleMode }) {
             const causeSum = al.falsePositiveRate.topCauses.reduce((s, c) => s + c.count, 0);
             const fp = al.falsePositiveRate.count;
             if (causeSum !== fp) {
-              return <div style={{ fontSize: 10, color: "#d97706", marginTop: 4 }}>⚠ Cause sum ({causeSum}) ≠ FP count ({fp})</div>;
+              return <div style={{ fontSize: 10, color: "#d97706", marginTop: 4 }}>⚠ Cause sum ({causeSum}) ≠ skip count ({fp})</div>;
             }
             return null;
           })()}
         </MetricCard>
 
-        {/* False Negatives */}
-        <MetricCard label="False Negative Rate — Moderate Score, Purchased" value={`${al.falseNegativeRate.value}%`} subValue={`${al.falseNegativeRate.count} of ${al.falseNegativeRate.denominator} undecided → likely purchase · Target: ≤${al.falseNegativeRate.targetRate}%`} accent="#d97706">
-          <LLabel>Top Underweighted Signals</LLabel>
+        {/* Undecided Event Rate (was: False Negative Rate — Moderate Score, Purchased) */}
+        <MetricCard label="Undecided Event Rate" value={al.falseNegativeRate.value != null ? `${al.falseNegativeRate.value}%` : "—"} subValue={`${al.falseNegativeRate.count} of ${al.falseNegativeRate.denominator} evaluated events had no decision`} accent="#d97706">
+          {al.falseNegativeRate.measurementNote && (
+            <div style={{ marginBottom: 8, padding: "6px 8px", background: "rgba(107,72,0,0.05)", borderLeft: "2px solid rgba(107,72,0,0.3)", fontSize: 10, color: "#6b4800", fontFamily: SERIF_L }}>
+              {al.falseNegativeRate.measurementNote}
+            </div>
+          )}
+          <LLabel>Signals from Undecided Sessions</LLabel>
           {al.falseNegativeRate.topSignals.map((s, i) => (
             <div key={i} style={{ padding: "6px 0", borderBottom: "1px solid rgba(34,21,22,0.05)" }}>
               <div style={{ fontFamily: INTER_L, fontSize: 11, color: "#221516", fontWeight: 600 }}>{s.signal}</div>
@@ -3867,35 +3887,46 @@ function DataAiLearningRoadmap({ advanced, sampleMode }) {
 
         {/* Trajectory */}
         <MetricCard label="6-Week Model Improvement Trajectory" value={`${al.trajectory[5].precision}% → now`} subValue="Precision, FP rate, calibration — weekly trend" accent="#221516">
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: MONO_L }}>
-              <thead><tr>
-                {["Week", "Precision", "FP Rate", "Calibration"].map(h => (
-                  <th key={h} style={{ padding: "4px 8px", color: "#7a6f6a", fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px", textAlign: "center" }}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {al.trajectory.map((w, i) => (
-                  <tr key={i} style={{ background: i === al.trajectory.length - 1 ? "rgba(139,32,53,0.05)" : i % 2 === 0 ? "rgba(255,255,255,0.5)" : "transparent" }}>
-                    <td style={{ padding: "5px 8px", textAlign: "center", fontFamily: INTER_L, fontWeight: i === al.trajectory.length - 1 ? 700 : 400 }}>{w.week}{i === al.trajectory.length - 1 ? " ★" : ""}</td>
-                    <td style={{ padding: "5px 8px", textAlign: "center", color: "#2a5e42", fontWeight: 600 }}>{w.precision}%</td>
-                    <td style={{ padding: "5px 8px", textAlign: "center", color: "#d97706", fontWeight: 600 }}>{w.fpRate}%</td>
-                    <td style={{ padding: "5px 8px", textAlign: "center", color: "#221516", fontWeight: 600 }}>{w.calibration}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {al.trajectory && al.trajectory.length > 0 ? (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: MONO_L }}>
+                <thead><tr>
+                  {["Week", "Love Rate", "Skip Rate", "Calibration"].map(h => (
+                    <th key={h} style={{ padding: "4px 8px", color: "#7a6f6a", fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px", textAlign: "center" }}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {al.trajectory.map((w, i) => (
+                    <tr key={i} style={{ background: i === al.trajectory.length - 1 ? "rgba(139,32,53,0.05)" : i % 2 === 0 ? "rgba(255,255,255,0.5)" : "transparent" }}>
+                      <td style={{ padding: "5px 8px", textAlign: "center", fontFamily: INTER_L, fontWeight: i === al.trajectory.length - 1 ? 700 : 400 }}>{w.week}{i === al.trajectory.length - 1 ? " ★" : ""}</td>
+                      <td style={{ padding: "5px 8px", textAlign: "center", color: "#2a5e42", fontWeight: 600 }}>{w.precision != null ? `${w.precision}%` : "—"}</td>
+                      <td style={{ padding: "5px 8px", textAlign: "center", color: "#d97706", fontWeight: 600 }}>{w.fpRate != null ? `${w.fpRate}%` : "—"}</td>
+                      <td style={{ padding: "5px 8px", textAlign: "center", color: "#221516", fontWeight: 600 }}>{w.calibration}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{ padding: "12px 14px", background: "rgba(34,21,22,0.03)", border: "1px solid rgba(34,21,22,0.08)", fontSize: 12, color: "#7a6f6a", fontFamily: SERIF_L, fontStyle: "italic" }}>
+              {al.trajectoryNote ?? "Performance trajectory will populate as weekly snapshots accumulate. No back-projected data is generated."}
+            </div>
+          )}
         </MetricCard>
 
         {/* Signal Weights */}
-        <MetricCard label="Scoring Weight Performance" value="" subValue="Which dimensions most reliably predict purchase" accent="#221516">
-          {Object.entries(al.signalWeights).map(([key, sw], i) => (
+        <MetricCard label="Scoring Weight Performance" value="" subValue="Directional signal — not measured model accuracy" accent="#221516">
+          {al.signalWeights?.illustrativeNote && (
+            <div style={{ marginBottom: 10, padding: "6px 8px", background: "rgba(107,72,0,0.05)", borderLeft: "2px solid rgba(107,72,0,0.3)", fontSize: 10, color: "#6b4800", fontFamily: SERIF_L }}>
+              {al.signalWeights.illustrativeNote}
+            </div>
+          )}
+          {Object.entries(al.signalWeights).filter(([k]) => !["isIllustrative","illustrativeNote"].includes(k)).map(([key, sw], i) => (
             <div key={key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid rgba(34,21,22,0.05)" }}>
               <span style={{ fontFamily: SERIF_L, fontSize: 13, color: "#221516", textTransform: "capitalize" }}>{key}</span>
               <div style={{ display: "flex", gap: 16, fontFamily: MONO_L, fontSize: 11 }}>
                 <span style={{ color: "#7a6f6a" }}>weight: {Math.round(sw.weight * 100)}%</span>
-                <span style={{ color: "#2a5e42", fontWeight: 700 }}>accuracy: {sw.accuracy}%</span>
+                <span style={{ color: "#5c5350", fontWeight: 700 }}>directional: {sw.accuracy}%</span>
                 <span style={{ color: sw.trend === "improving" ? "#2a5e42" : sw.trend === "declining" ? "#8b2035" : "#7a6f6a" }}>{trendLabel(sw.trend)}</span>
               </div>
             </div>
