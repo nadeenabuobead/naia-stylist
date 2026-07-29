@@ -546,18 +546,19 @@ export default function DesignerDashboard() {
           }}
         >
           <div style={{ position: "absolute", inset: 0, background: "rgba(34,21,22,0.45)" }} onClick={() => setDataAiOpen(false)} />
-          <div style={{ position: "relative", width: "min(600px, 92vw)", background: "#faf9f7", height: "100vh", overflowY: "auto", padding: 32, display: "flex", flexDirection: "column", gap: 24, borderLeft: "1px solid rgba(34,21,22,0.12)" }}>
+          <div style={{ position: "relative", width: "min(600px, 92vw)", background: "#faf9f7", height: "100dvh", display: "flex", flexDirection: "column", borderLeft: "1px solid rgba(34,21,22,0.12)" }}>
             {dataAiOpen && (
               <>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                {/* Pinned header — title + close button */}
+                <div style={{ flexShrink: 0, padding: "32px 32px 0", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
                     <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 8, textTransform: "uppercase", letterSpacing: "3px", color: "#8b2035", marginBottom: 8, fontWeight: 600 }}>Data &amp; AI</div>
                     <h2 style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: 22, fontWeight: 700, color: "#221516" }}>Intelligence Reference</h2>
                   </div>
                   <button type="button" onClick={() => setDataAiOpen(false)} style={{ background: "none", border: "1px solid rgba(34,21,22,0.14)", padding: "4px 10px", cursor: "pointer", fontFamily: "'Inter', sans-serif", fontSize: 10, color: "#5c5350" }}>Close ✕</button>
                 </div>
-                {/* Panel tabs */}
-                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                {/* Pinned panel tabs */}
+                <div style={{ flexShrink: 0, padding: "16px 32px 0", display: "flex", gap: 4, flexWrap: "wrap" }}>
                   {[
                     { id: "definitions",  label: "Metric Definitions" },
                     { id: "confidence",   label: "Confidence Ladder" },
@@ -568,12 +569,14 @@ export default function DesignerDashboard() {
                     <button key={p.id} type="button" onClick={() => setDataAiPanel(p.id)} style={{ padding: "3px 10px", fontFamily: "'Inter', sans-serif", fontSize: 9, letterSpacing: "1px", textTransform: "uppercase", background: dataAiPanel === p.id ? "#221516" : "transparent", color: dataAiPanel === p.id ? "#f4f4f1" : "#7a6f6a", border: "1px solid rgba(34,21,22,0.14)", cursor: "pointer" }}>{p.label}</button>
                   ))}
                 </div>
-                {/* Panel content */}
-                {dataAiPanel === "definitions" && <DataAiDefinitions />}
-                {dataAiPanel === "confidence" && <DataAiConfidenceLadder />}
-                {dataAiPanel === "integration" && <DataAiIntegrationReadiness />}
-                {dataAiPanel === "roadmap" && <DataAiLearningRoadmap />}
-                {dataAiPanel === "experiments" && <DataAiExperimentBuilder />}
+                {/* Scrollable content region */}
+                <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch", padding: "24px 32px 32px" }}>
+                  {dataAiPanel === "definitions" && <DataAiDefinitions />}
+                  {dataAiPanel === "confidence" && <DataAiConfidenceLadder />}
+                  {dataAiPanel === "integration" && <DataAiIntegrationReadiness />}
+                  {dataAiPanel === "roadmap" && <DataAiLearningRoadmap />}
+                  {dataAiPanel === "experiments" && <DataAiExperimentBuilder />}
+                </div>
               </>
             )}
           </div>
