@@ -778,11 +778,21 @@ test("no LTV language in opportunity feed", () => {
   }
 });
 
-test("emotional chain achievedRate is null (no fabricated rates)", () => {
+test("emotional chain achievedRate is computed from all-time WR events (not null, not session-based)", () => {
+  // achievedRate is now computed from allTimeWR events — always has data from the full synthetic dataset.
+  // It should be a number 0-100 (or null only when no WR events match that desiredFeeling).
   for (const days of [7, 30, 90, 365]) {
     const d = getDesignerSampleData(days);
-    for (const chain of d.rel.emotionalChain) {
-      assert.strictEqual(chain.achievedRate, null, "emotionalChain.achievedRate must be null (session count != WR denominator)");
+    for (const chain of d.rel.emotionalChain as any[]) {
+      assert.ok(
+        chain.achievedRate === null || (typeof chain.achievedRate === "number" && chain.achievedRate >= 0 && chain.achievedRate <= 100),
+        `emotionalChain achievedRate must be null or 0-100 number (got ${chain.achievedRate})`
+      );
+    }
+    // For 365-day range (all-time), at least one chain entry should have a non-null achievedRate
+    if (days === 365) {
+      const hasRate = (d.rel.emotionalChain as any[]).some(c => c.achievedRate !== null);
+      assert.ok(hasRate, "At least one emotionalChain entry should have achievedRate computed from all-time WR data");
     }
   }
 });

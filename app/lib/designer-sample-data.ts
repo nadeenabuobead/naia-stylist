@@ -2422,13 +2422,24 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     return map[personality] ?? `${sessionCount} sessions · ${loveRate}% love rate · top products: ${topProds.join(", ")}`;
   }
 
-  // Emotional chain
+  // Emotional chain — achievedRate from all-time WR events (period-filtered WR has zero events for short windows)
+  const allTimeWR = ofType(allTime, WR);
+  const chainAchievedRate = (desired: string): number | null => {
+    const relevant = allTimeWR.filter(ev => ev.desiredFeeling === desired);
+    if (relevant.length === 0) return null;
+    const achieved = relevant.filter(ev => {
+      const outcome = classifyEmotionalOutcome(ev.desiredFeeling, ev.actualAfterFeeling);
+      return outcome === "achieved" || outcome === "partly";
+    }).length;
+    return pct(achieved, relevant.length);
+  };
+
   const emotionalChain = [
     {
       currentMood: "Uncertain",
       desiredFeeling: "Confident",
       count: sessions.filter(ev => ev.productName === SEEN || ev.productName === GROUNDED).length,
-      achievedRate: null as null,
+      achievedRate: chainAchievedRate("Confident"),
       avgRating: pm[SEEN].avgRating,
       topProducts: [SEEN, GROUNDED].filter(p => pm[p].sessionCount > 0),
     },
@@ -2436,7 +2447,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       currentMood: "Uninspired",
       desiredFeeling: "Effortless",
       count: sessions.filter(ev => ev.productName === WHOLE || ev.productName === REAL).length,
-      achievedRate: null as null,
+      achievedRate: chainAchievedRate("Effortless"),
       avgRating: pm[WHOLE].avgRating,
       topProducts: [WHOLE, REAL].filter(p => pm[p].sessionCount > 0),
     },
@@ -2444,7 +2455,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       currentMood: "Comfortable",
       desiredFeeling: "Elevated",
       count: sessions.filter(ev => ev.productName === SEEN || ev.productName === CLEAR).length,
-      achievedRate: null as null,
+      achievedRate: chainAchievedRate("Elevated"),
       avgRating: pm[CLEAR].avgRating ?? pm[SEEN].avgRating,
       topProducts: [SEEN, CLEAR].filter(p => pm[p].sessionCount > 0),
     }] : []),
