@@ -2242,9 +2242,9 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
                   const high = rel.emotionalChain.filter(r => (r.achievedRate ?? 0) >= 70);
                   const low = rel.emotionalChain.filter(r => r.achievedRate != null && (r.achievedRate ?? 100) < 50);
                   if (high.length > 0 && low.length > 0) {
-                    return `nAia succeeds when customers want to feel ${high[0].desiredFeeling}${high[0].topProducts[0] ? ` (${high[0].topProducts[0]})` : ""}. It struggles when they want to feel ${low[0].desiredFeeling}. Prioritise expanding product options for the under-served feeling states.`;
+                    return `nAia succeeds when customers want to feel ${high[0].desiredFeeling}${high[0].topProducts[0] ? ` (${high[0].topProducts[0]})` : ""}. It struggles when they want to feel ${low[0].desiredFeeling}. Investigate product options for the under-served feeling states.`;
                   }
-                  if (high.length > 0) return `nAia is consistently delivering on desired feelings. Focus on expanding coverage to more mood-feeling combinations.`;
+                  if (high.length > 0) return `nAia is consistently delivering on desired feelings. Continue observing to surface patterns across more mood-feeling combinations.`;
                   return `Recommendation delivery rates are forming. Continue collecting post-wear data to identify success and failure patterns.`;
                 })()}
                 reason="The difference between a successful and failed recommendation is usually whether the product matched the emotional aspiration, not just the style. Desired feeling achievement is the leading indicator of recommendation quality."
@@ -2337,7 +2337,7 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
         {phase4b2?.designerInsights?.length > 0 ? (
           phase4b2.designerInsights.map((insight, i) => <FeedbackInsightCard key={i} insight={insight} />)
         ) : (
-          <EmptyState message="No feedback patterns strong enough to surface yet. Signals appear when objections reach threshold levels." />
+          <EmptyState message="No feedback patterns at threshold yet. Signals surface when objections reach minimum count levels." />
         )}
       </Section>
 
@@ -2456,7 +2456,10 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays })
       })()}
 
       {/* Collection Health Score */}
-      <Section title="Collection Health Score" desc="Transparent partial score from available data factors (full score requires commercial integration)" status={advanced?.collectionHealth?.score != null ? "live" : "insufficient-data"}>
+      <Section title="Collection Health Score" desc="Deprecated — not used for decisions. Retained for reference only." status={advanced?.collectionHealth?.score != null ? "live" : "insufficient-data"}>
+        <div style={{ padding: "8px 14px", background: "rgba(139,32,53,0.04)", border: "1px solid rgba(139,32,53,0.15)", fontFamily: INTER, fontSize: 11, color: "#8b2035", marginBottom: 16, lineHeight: 1.6 }}>
+          <strong>Deprecated — not used for decisions.</strong> This composite score is not used for sorting, ranking, or action generation. Factor breakdown is shown for reference only.
+        </div>
         {advanced?.collectionHealth?.sampleSizeWarning && <SampleSizeWarning n={advanced.collectionHealth.reviewCount ?? 0} min={10} />}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 20 }}>
           <div style={{ ...s.card, textAlign: "center" }}>
@@ -2477,10 +2480,10 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays })
               );
             })()}
             {advanced?.collectionHealth?.largestWeakness && (
-              <div style={{ marginTop: 16, fontSize: 12, color: "#d97706" }}>Largest weakness: {advanced.collectionHealth.largestWeakness.replace(/([A-Z])/g, " $1").trim()}</div>
+              <div style={{ marginTop: 16, fontSize: 12, color: "#d97706" }}>Area with lowest score: {advanced.collectionHealth.largestWeakness.replace(/([A-Z])/g, " $1").trim()}</div>
             )}
             {advanced?.collectionHealth?.strongestArea && (
-              <div style={{ marginTop: 8, fontSize: 12, color: "#2a5e42" }}>Strongest area: {advanced.collectionHealth.strongestArea.replace(/([A-Z])/g, " $1").trim()}</div>
+              <div style={{ marginTop: 8, fontSize: 12, color: "#2a5e42" }}>Area with highest score: {advanced.collectionHealth.strongestArea.replace(/([A-Z])/g, " $1").trim()}</div>
             )}
             <CollectionHealthScoreDisclosure health={advanced?.collectionHealth} />
           </div>
@@ -2730,10 +2733,10 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays })
                 if (underserved.length === 0 && wellServed.length === 0) return null;
                 const rec = underserved.length > 0
                   ? `${underserved[0].personality} customers are showing below-threshold satisfaction${underserved[0].topOccasions[0] ? ` for ${underserved[0].topOccasions[0]}` : ""}. Review whether the collection has depth in pieces that address their desired feelings (${underserved[0].topDesiredFeelings.slice(0, 2).join(", ") || "see profiles"}).`
-                  : `Current collection is performing well across all personality types with sufficient data. Focus on expanding session volume to surface signals for personality types with fewer than 3 sessions.`;
+                  : `Current collection is performing consistently across all personality types with sufficient data. Increase session volume to surface signals for personality types with fewer than 3 sessions.`;
                 const reason = underserved.length > 0
                   ? `Low rewear rate or rating from a consistent personality segment is the earliest signal of a collection gap — before any conversion data is available.`
-                  : `Consistent performance across personality types suggests strong product-market fit within the current customer base.`;
+                  : `Consistent performance across personality types within the current customer base — no clear gap signal in available observations.`;
                 return (
                   <PrescriptiveBlock
                     recommendation={rec}
@@ -2949,11 +2952,14 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
 
         {/* LTV Intelligence — computed from sample data */}
         {ltv && ltv.sampleSize > 0 && (
-          <Section title="LTV Intelligence" desc={`SAMPLE PREVIEW — ${ltv.scopeLabel} · ${ltv.totalCustomersWithPurchase} customers · ${ltv.evidenceMaturity ?? ""}`} status="sample">
+          <Section title="Observed Customer Revenue to Date" desc={`SAMPLE PREVIEW — ${ltv.scopeLabel} · ${ltv.totalCustomersWithPurchase} customers · ${ltv.evidenceMaturity ?? ""}`} status="sample">
+            <div style={{ padding: "6px 14px", background: "rgba(34,21,22,0.04)", border: "1px solid rgba(34,21,22,0.1)", fontSize: 11, fontFamily: INTER, color: "#5c5350", marginBottom: 16, lineHeight: 1.6 }}>
+              Revenue figures are buy-intent events from nAia sessions — not confirmed Shopify orders. Figures become revenue when Shopify commerce integration is live.
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px,1fr))", gap: 1, background: "rgba(34,21,22,0.07)", marginBottom: 24 }}>
               {[
-                { label: "Avg LTV / Customer", value: fmtAed(ltv.avgLtv), color: "#8b2035" },
-                { label: "Top Customer LTV", value: fmtAed(ltv.topCustomerLtv), color: "#221516" },
+                { label: "Avg Observed Revenue / Customer", value: fmtAed(ltv.avgLtv), color: "#8b2035" },
+                { label: "Top Customer Revenue (Observed)", value: fmtAed(ltv.topCustomerLtv), color: "#221516" },
                 { label: "Avg Order Value", value: fmtAed(ltv.avgOrderValue), color: "#221516" },
                 { label: "Avg Gross Profit / Customer", value: fmtAed(ltv.avgGrossProfit), color: "#2a5e42" },
                 { label: "Repeat Purchase Rate", value: `${ltv.repeatPurchaseRate}%`, color: "#2a5e42" },
@@ -2970,14 +2976,14 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
             </div>
             {ltv.ltvByPersonality?.length > 0 && (
               <>
-                <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 12, fontWeight: 600 }}>LTV by Personality</div>
+                <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 12, fontWeight: 600 }}>Observed Revenue by Personality</div>
                 <div style={{ overflowX: "auto" }}>
                   <table style={s.table}>
                     <thead><tr>
                       <th style={s.th}>Personality</th>
                       <th style={s.th}>Customers</th>
                       <th style={s.th}>Purchases</th>
-                      <th style={s.th}>Avg LTV (AED)</th>
+                      <th style={s.th}>Avg Revenue (AED)</th>
                       <th style={s.th}>Total Revenue (AED)</th>
                     </tr></thead>
                     <tbody>
@@ -2997,14 +3003,14 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
             )}
             {ltv.ltvBySegment?.length > 0 && (
               <>
-                <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 12, marginTop: 20, fontWeight: 600 }}>LTV by Occasion Segment</div>
+                <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 12, marginTop: 20, fontWeight: 600 }}>Revenue by Occasion Segment</div>
                 <div style={{ overflowX: "auto" }}>
                   <table style={s.table}>
                     <thead><tr>
                       <th style={s.th}>Segment</th>
                       <th style={s.th}>Customers</th>
                       <th style={s.th}>Purchases</th>
-                      <th style={s.th}>Avg LTV (AED)</th>
+                      <th style={s.th}>Avg Revenue (AED)</th>
                       <th style={s.th}>Total Revenue (AED)</th>
                     </tr></thead>
                     <tbody>
@@ -3034,11 +3040,11 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
         )}
 
         {/* Opportunity Scores — same in both modes */}
-        <Section title="Directional/Pre-Commercial Product Opportunity Score" desc="Transparent per-product score from available signals (0–100 directional partial — conversion integrated in sample)" status={sampleMode ? "sample" : (advanced?.opportunityScores?.length > 0 ? "experimental" : "insufficient-data")}>
+        <Section title="Directional/Pre-Commercial Product Opportunity Score" desc="Deprecated — not used for decisions. Shown for reference only." status={sampleMode ? "sample" : (advanced?.opportunityScores?.length > 0 ? "experimental" : "insufficient-data")}>
           {advanced?.opportunityScores?.length > 0 ? (
             <>
-              <div style={{ padding: "8px 14px", background: "rgba(34,21,22,0.04)", border: "1px solid rgba(34,21,22,0.12)", fontSize: 11, fontFamily: INTER, color: "#5c5350", marginBottom: 16, lineHeight: 1.6 }}>
-                Score is partial — only available factors are included. Never act on score alone.
+              <div style={{ padding: "8px 14px", background: "rgba(139,32,53,0.04)", border: "1px solid rgba(139,32,53,0.15)", fontSize: 11, fontFamily: INTER, color: "#8b2035", marginBottom: 16, lineHeight: 1.6 }}>
+                <strong>Deprecated — not used for decisions.</strong> Score is not used for sorting, ranking, or action generation. Factor breakdown shown for reference only.
               </div>
               <div style={{ overflowX: "auto" }}>
                 <table style={s.table}>
@@ -3071,13 +3077,13 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
 
         {/* Product Opportunity Priority — same in both modes */}
         {rel?.productNarratives?.length > 0 && (
-          <Section title="Product Opportunity Priority" desc="Ranked by Directional Opportunity Score from customer relationships" status={rel.status}>
+          <Section title="Product Opportunity Priority" desc="Sorted by average rating — Opportunity Score deprecated and not used for ranking" status={rel.status}>
             {rel.status === "insufficient-data" ? (
               <InsufficientCard label="Investment priority ranking" description="Not enough reviewed sessions to rank products by opportunity." sampleSize={rel.sampleSize} />
             ) : (
               <>
-                <div style={{ padding: "8px 14px", background: "rgba(34,21,22,0.04)", border: "1px solid rgba(34,21,22,0.12)", fontFamily: INTER, fontSize: 11, color: "#5c5350", marginBottom: 20, lineHeight: 1.6 }}>
-                  Opportunity Score combines rating (30%), rewear rate (25%), confidence lift (25%), and data quality (20%). Score is partial until conversion data is available.
+                <div style={{ padding: "8px 14px", background: "rgba(139,32,53,0.04)", border: "1px solid rgba(139,32,53,0.15)", fontFamily: INTER, fontSize: 11, color: "#8b2035", marginBottom: 20, lineHeight: 1.6 }}>
+                  <strong>Deprecated — not used for decisions.</strong> Score column is shown for reference only. Table is sorted by average rating. Do not use score for investment or ranking decisions.
                 </div>
                 <div style={{ overflowX: "auto" }}>
                   <table style={s.table}>
@@ -3105,20 +3111,9 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
                     </tbody>
                   </table>
                 </div>
-                {(() => {
-                  const top = rel.productNarratives.filter(p => p.opportunityScore >= 60).slice(0, 2);
-                  const underutilised = rel.productNarratives.filter(p => p.opportunityScore < 40 && p.sampleSize >= 3).slice(0, 1);
-                  if (top.length === 0) return null;
-                  const rec = `${top[0].name} leads with an Opportunity Score of ${top[0].opportunityScore}${top[0].bestPersonality ? ` — strongest with ${top[0].bestPersonality} customers` : ""}${top[0].bestOccasion ? ` for ${top[0].bestOccasion}` : ""}. This is the strongest current test candidate.${underutilised.length > 0 ? ` ${underutilised[0].name} (score ${underutilised[0].opportunityScore}) shows friction${underutilised[0].mostCommonObjection ? ` — top objection: ${underutilised[0].mostCommonObjection}` : ""} — investigate before increasing inventory.` : ""}`;
-                  return (
-                    <PrescriptiveBlock
-                      recommendation={rec}
-                      reason="Opportunity Score is a leading indicator of product-market fit built from the 4 factors available before purchase data: emotional resonance, physical rewear, confidence delivery, and data maturity."
-                      confidence={top[0].sampleSize >= 5 ? "high" : "medium"}
-                      sampleSize={rel.sampleSize}
-                    />
-                  );
-                })()}
+                <div style={{ padding: "10px 14px", background: "rgba(139,32,53,0.05)", border: "1px solid rgba(139,32,53,0.18)", fontSize: 11, fontFamily: INTER, color: "#8b2035", marginTop: 16, lineHeight: 1.6 }}>
+                  <strong>Opportunity Score — Deprecated</strong> · Not used for decisions, ranking, or action generation. Refer to average rating, rewear rate, and objection data above. Sort order is by average rating.
+                </div>
               </>
             )}
           </Section>
@@ -3135,11 +3130,11 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
         description="Click-through, try-on and wishlist events require product click tracking from Shopify storefront. Available after commerce integration."
       />
 
-      <Section title="Directional/Pre-Commercial Product Opportunity Score" desc="Transparent per-product score from available signals (0–100 directional partial — conversion not yet integrated)" status={advanced?.opportunityScores?.length > 0 ? "experimental" : "insufficient-data"}>
+      <Section title="Directional/Pre-Commercial Product Opportunity Score" desc="Deprecated — not used for decisions. Shown for reference only." status={advanced?.opportunityScores?.length > 0 ? "experimental" : "insufficient-data"}>
         {advanced?.opportunityScores?.length > 0 ? (
           <>
-            <div style={{ padding: "8px 14px", background: "rgba(34,21,22,0.04)", border: "1px solid rgba(34,21,22,0.12)", fontSize: 11, fontFamily: INTER, color: "#5c5350", marginBottom: 16, lineHeight: 1.6 }}>
-              Score is partial — only available factors are included. Conversion and save-intent require commercial integration. Never act on score alone.
+            <div style={{ padding: "8px 14px", background: "rgba(139,32,53,0.04)", border: "1px solid rgba(139,32,53,0.15)", fontSize: 11, fontFamily: INTER, color: "#8b2035", marginBottom: 16, lineHeight: 1.6 }}>
+              <strong>Deprecated — not used for decisions.</strong> Score is not used for sorting, ranking, or action generation. Factor breakdown shown for reference only.
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={s.table}>
@@ -4020,7 +4015,7 @@ function DataAiExperimentBuilder({ advanced, sampleMode }) {
       <ExpCard key={completed.id} exp={completed} statusLabel="Completed" statusColor="#2a5e42"
         headerNote={completed.minimumSampleMet === false
           ? "⚠ Completed — minimum sample not reached; do not conclude"
-          : "Completed experiment · hypothesis confirmed"}>
+          : `Completed · ${completed.result?.outcome === "validated" ? "outcome validated" : (completed.result?.outcome ?? "complete")}`}>
         {completed.minimumSampleMet === false && (
           <div style={{ margin: "0 18px 8px", padding: "10px 14px", background: "#fff7ed", border: "1px solid #fed7aa", fontSize: 12, color: "#c2410c" }}>
             Minimum sample ({completed.minimumSample}) not reached. n={completed.sampleSize} events. Do not treat as confirmed.

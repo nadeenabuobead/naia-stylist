@@ -858,3 +858,171 @@ describe("Section 28-J — Mode isolation: sample vs live separation", () => {
     );
   });
 });
+
+// ── Section 29: Trustworthiness pass verification ─────────────────────────────
+// Tests that enforce the changes made in the complete-and-verify pass:
+// prohibited language removal, denominator corrections, deprecation enforcement,
+// and experiment vocabulary discipline.
+
+const PROHIBITED_WORDS = ["hero", " anchor", " commit", " scale", " expand", "proven", "best-performing", "winner", "discontinue"];
+
+function collectNarrativeStrings(obj: unknown, keys: string[]): string[] {
+  if (!obj || typeof obj !== "object") return [];
+  const texts: string[] = [];
+  for (const key of keys) {
+    const val = (obj as Record<string, unknown>)[key];
+    if (typeof val === "string") texts.push(val);
+  }
+  return texts;
+}
+
+describe("Section 29-A — Prohibited language: narratives must not contain action-gated words", () => {
+  const NARRATIVE_KEYS = ["action", "liked", "watch", "nextStep", "interpretation", "merchandisingImplication", "designImplication", "customerNeed", "recommendedAction", "insight", "prescriptive", "recommendation", "recommendationReason"];
+
+  it("123. dashboard.designActions narratives are free of prohibited words", () => {
+    const { dashboard } = getDesignerSampleData(90);
+    const actions = (dashboard as any)?.designActions ?? [];
+    for (const item of actions) {
+      const texts = collectNarrativeStrings(item, NARRATIVE_KEYS);
+      for (const text of texts) {
+        const lower = text.toLowerCase();
+        for (const word of PROHIBITED_WORDS) {
+          assert.ok(!lower.includes(word.toLowerCase()),
+            `designActions contains prohibited word "${word.trim()}" in: "${text.slice(0, 80)}..."`);
+        }
+      }
+    }
+  });
+
+  it("124. advanced.opportunityFeed narratives are free of prohibited words", () => {
+    const { advanced } = getDesignerSampleData(90);
+    const feed = (advanced as any)?.opportunityFeed ?? [];
+    for (const item of feed) {
+      const texts = collectNarrativeStrings(item, NARRATIVE_KEYS);
+      for (const text of texts) {
+        const lower = text.toLowerCase();
+        for (const word of PROHIBITED_WORDS) {
+          assert.ok(!lower.includes(word.toLowerCase()),
+            `opportunityFeed contains prohibited word "${word.trim()}" in: "${text.slice(0, 80)}..."`);
+        }
+      }
+    }
+  });
+
+  it("125. rel.dnaMatrix prescriptive insights are free of prohibited words", () => {
+    const { rel } = getDesignerSampleData(90);
+    const dna = (rel as any)?.dnaMatrix ?? [];
+    for (const row of dna) {
+      const text = (row.prescriptive ?? "").toLowerCase();
+      for (const word of PROHIBITED_WORDS) {
+        assert.ok(!text.includes(word.toLowerCase()),
+          `dnaMatrix prescriptive contains prohibited word "${word.trim()}": "${(row.prescriptive ?? "").slice(0, 80)}..."`);
+      }
+    }
+  });
+
+  it("126. advanced.productsByEmotionalImpact interpretation strings are free of prohibited words", () => {
+    const { advanced } = getDesignerSampleData(90);
+    const products = (advanced as any)?.productsByEmotionalImpact ?? [];
+    for (const p of products) {
+      const texts = [p.interpretation ?? "", p.recommendedAction ?? ""];
+      for (const text of texts) {
+        const lower = text.toLowerCase();
+        for (const word of PROHIBITED_WORDS) {
+          assert.ok(!lower.includes(word.toLowerCase()),
+            `productsByEmotionalImpact contains prohibited word "${word.trim()}": "${text.slice(0, 80)}..."`);
+        }
+      }
+    }
+  });
+
+  it("127. rel.productNarratives interpretation strings have no 'LTV piece' or 'LTV signal' label", () => {
+    const { rel } = getDesignerSampleData(90);
+    const narratives = (rel as any)?.productNarratives ?? [];
+    for (const p of narratives) {
+      const text = (p.interpretation ?? "").toLowerCase();
+      assert.ok(!text.includes("ltv piece") && !text.includes("ltv signal"),
+        `productNarratives contains legacy 'LTV piece/signal' label: "${(p.interpretation ?? "").slice(0, 80)}"`);
+    }
+  });
+});
+
+describe("Section 29-B — Save-to-purchase denominator correctness", () => {
+  it("128. overallSaveToP equals saveToConvertRate — correct denominator applied", () => {
+    for (const days of [7, 30, 90]) {
+      const { advanced } = getDesignerSampleData(days);
+      const svp = (advanced as any)?.saveVsPurchase;
+      assert.ok(svp != null, `saveVsPurchase missing in advanced for ${days}D`);
+      assert.equal(
+        svp.overallSaveToP,
+        svp.saveToConvertRate,
+        `overallSaveToP must equal saveToConvertRate for ${days}D. Got overallSaveToP=${svp.overallSaveToP}, saveToConvertRate=${svp.saveToConvertRate}`
+      );
+    }
+  });
+
+  it("129. purchasesWithoutSave is tracked and ≥ 0", () => {
+    const { advanced } = getDesignerSampleData(90);
+    const svp = (advanced as any)?.saveVsPurchase;
+    assert.ok(svp != null, "saveVsPurchase missing in advanced for 90D");
+    assert.ok(
+      typeof svp.purchasesWithoutSave === "number" && svp.purchasesWithoutSave >= 0,
+      `purchasesWithoutSave must be a non-negative number, got: ${svp.purchasesWithoutSave}`
+    );
+  });
+
+  it("130. overallSaveToP is ≤ 100 — not inflated by buys without prior save", () => {
+    const { advanced } = getDesignerSampleData(90);
+    const rate = (advanced as any)?.saveVsPurchase?.overallSaveToP ?? 0;
+    assert.ok(rate <= 100, `overallSaveToP should be ≤ 100%, got: ${rate}`);
+  });
+});
+
+describe("Section 29-C — Experiment outcome vocabulary: no fabricated conclusions", () => {
+  const VALID_OUTCOMES = ["validated", "minimum_not_reached", "inconclusive", "directional", "rejected", "stopped"];
+
+  it("131. No experiment result.outcome contains 'hypothesis confirmed'", () => {
+    for (const days of [7, 30, 90]) {
+      const { advanced } = getDesignerSampleData(days);
+      const exps = (advanced as any)?.aiLearning?.experiments ?? {};
+      const allExp = [...(exps.completed ?? []), ...(exps.active ?? []), ...(exps.planned ?? [])];
+      for (const exp of allExp) {
+        const outcome = (exp.result?.outcome ?? "").toLowerCase();
+        assert.ok(!outcome.includes("hypothesis confirmed"),
+          `Experiment "${exp.id}" has 'hypothesis confirmed' outcome: "${outcome}"`);
+      }
+    }
+  });
+
+  it("132. Completed experiments use only canonical outcome vocabulary", () => {
+    const { advanced } = getDesignerSampleData(90);
+    const exps = (advanced as any)?.aiLearning?.experiments ?? {};
+    for (const exp of (exps.completed ?? [])) {
+      const outcome = exp.result?.outcome ?? "";
+      assert.ok(VALID_OUTCOMES.includes(outcome),
+        `Experiment "${exp.id}" has non-canonical outcome: "${outcome}" — must be one of: ${VALID_OUTCOMES.join(", ")}`);
+    }
+  });
+});
+
+describe("Section 29-D — Composite score deprecation: no score-based decision generation", () => {
+  it("133. opportunityFeed items do not reference opportunityScore in insight or action strings", () => {
+    const { advanced } = getDesignerSampleData(90);
+    const feed = (advanced as any)?.opportunityFeed ?? [];
+    for (const item of feed) {
+      const text = [(item.insight ?? ""), (item.suggestedAction ?? "")].join(" ").toLowerCase();
+      assert.ok(!text.includes("opportunity score"),
+        `opportunityFeed references deprecated 'opportunity score': "${text.slice(0, 80)}..."`);
+    }
+  });
+
+  it("134. productsByEmotionalImpact recommendedAction strings do not contain opportunityScore references", () => {
+    const { advanced } = getDesignerSampleData(90);
+    const products = (advanced as any)?.productsByEmotionalImpact ?? [];
+    for (const p of products) {
+      const text = (p.recommendedAction ?? "").toLowerCase();
+      assert.ok(!text.includes("opportunity score"),
+        `productsByEmotionalImpact recommendedAction references deprecated score: "${text.slice(0, 80)}..."`);
+    }
+  });
+});
