@@ -11,3 +11,7 @@ export async function loader() {
     deploymentUrl: process.env.VERCEL_URL ?? "unknown",
   });
 }
+
+export default function NaiaBuildCheck() {
+  return null;
+}

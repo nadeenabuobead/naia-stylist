@@ -61,4 +61,5 @@ export default [
   route("api/designer-dashboard", "routes/api.designer-dashboard.jsx"),
   route("api/seed-staging", "routes/api.seed-staging.jsx"),
   route("api/track_event", "routes/api.track_event.jsx"),
+  route("naia-build-check", "routes/naia-build-check.tsx"),
 ];
