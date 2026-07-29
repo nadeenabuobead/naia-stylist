@@ -590,7 +590,8 @@ export default function DesignerDashboard() {
         </div>
 
         {/* ── Tab content ──────────────────────────────────────────────────── */}
-          {activeTab === "overview"                && <TabOverview        data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} overview={overview} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
+          {/* DIAG STEP 1: TabOverview stubbed — binary search for hydration mismatch */}
+          {activeTab === "overview"                && <div style={{ padding: "32px 34px", color: "#7a6f6a", fontFamily: "monospace", fontSize: 12 }}>[diag] overview stub — step 1</div>}
           {activeTab === "customer"                && <TabCustomer        data={data} kpis={kpis} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
           {activeTab === "product"                 && <TabProduct         data={data} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
           {activeTab === "recommendation"          && <TabRecommendation  data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
