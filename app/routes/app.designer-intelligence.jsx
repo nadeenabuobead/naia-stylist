@@ -570,7 +570,7 @@ export default function DesignerDashboard() {
                   ))}
                 </div>
                 {/* Scrollable content region */}
-                <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch", padding: "24px 32px 32px" }}>
+                <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch", padding: "24px 32px 80px", boxSizing: "border-box" }}>
                   {dataAiPanel === "definitions" && <DataAiDefinitions />}
                   {dataAiPanel === "confidence" && <DataAiConfidenceLadder />}
                   {dataAiPanel === "integration" && <DataAiIntegrationReadiness />}
