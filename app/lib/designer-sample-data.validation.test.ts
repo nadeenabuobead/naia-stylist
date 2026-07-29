@@ -729,10 +729,13 @@ test("no product with 0 reviews shows a non-null avgRating", () => {
   }
 });
 
-test("save-vs-purchase status is awaiting-integration", () => {
+test("save-vs-purchase status is sample in sample preview mode", () => {
   for (const days of [7, 30, 90, 365]) {
     const d = getDesignerSampleData(days);
-    assert.strictEqual(d.advanced.saveVsPurchase.status, "awaiting-integration", "saveVsPurchase must be awaiting-integration since the integration is pending");
+    const svp = d.advanced.saveVsPurchase as any;
+    assert.strictEqual(svp.status, "sample", `saveVsPurchase.status must be "sample" in sample preview (days=${days})`);
+    assert.ok(typeof svp.uniqueSavers === "number", `saveVsPurchase.uniqueSavers must be present (days=${days})`);
+    assert.ok(svp.evidenceMaturity, `saveVsPurchase.evidenceMaturity must be present (days=${days})`);
   }
 });
 
@@ -905,16 +908,23 @@ test("opportunityFeed items have designImplication and merchandisingImplication"
   }
 });
 
-// ── 9. ltv.status is not 'sample' (changed to awaiting-integration) ───────────
-test("ltv.status is awaiting-integration", () => {
+// ── 9. ltv.status is "sample" in sample mode (populated from synthetic orders) ──
+test("ltv.status is sample in sample preview mode", () => {
   for (const days of [30, 90]) {
     const d = getDesignerSampleData(days);
     const ltv = d.advanced?.ltv as any;
     assert.strictEqual(
       ltv?.status,
-      "awaiting-integration",
-      `ltv.status must be "awaiting-integration", got "${ltv?.status}"`,
+      "sample",
+      `ltv.status must be "sample" in sample preview, got "${ltv?.status}"`,
     );
+    assert.ok(
+      typeof ltv?.sampleSize === "number" && ltv.sampleSize > 0,
+      `ltv.sampleSize must be > 0 in sample mode (days=${days})`,
+    );
+    assert.ok(ltv?.avgLtv > 0, `ltv.avgLtv must be > 0 (days=${days})`);
+    assert.ok(ltv?.avgOrderValue > 0, `ltv.avgOrderValue must be present and > 0 (days=${days})`);
+    assert.ok(ltv?.ltvByPersonality?.length > 0, `ltv.ltvByPersonality must be populated (days=${days})`);
   }
 });
 
@@ -1113,34 +1123,32 @@ test("route includes roleLens state for role lens selector", () => {
 // CLOSURE PATCH — Tests 26-31
 // ══════════════════════════════════════════════════════════════════════════════
 
-// ── 26. LTV status is awaiting-integration and sampleSize may be positive ─────
-test("advanced.ltv.status is awaiting-integration even when sampleSize is positive", () => {
+// ── 26. LTV is populated in Sample Preview ─────────────────────────────────────
+test("advanced.ltv is populated in sample preview with status sample", () => {
   for (const days of [30, 90, 365]) {
     const d = getDesignerSampleData(days);
     const ltv = (d.advanced as any)?.ltv;
     assert.ok(ltv !== undefined, `advanced.ltv must exist (days=${days})`);
-    assert.strictEqual(
-      ltv.status,
-      "awaiting-integration",
-      `advanced.ltv.status must be "awaiting-integration" even when sampleSize=${ltv.sampleSize} (days=${days})`,
-    );
-    assert.ok(
-      typeof ltv.sampleSize === "number" && ltv.sampleSize >= 0,
-      `advanced.ltv.sampleSize must be a non-negative number (days=${days})`,
-    );
+    assert.strictEqual(ltv.status, "sample", `advanced.ltv.status must be "sample" in sample preview (days=${days})`);
+    assert.ok(typeof ltv.sampleSize === "number" && ltv.sampleSize > 0, `advanced.ltv.sampleSize must be > 0 (days=${days})`);
+    assert.ok(ltv.avgOrderValue > 0, `advanced.ltv.avgOrderValue must be > 0 (days=${days})`);
+    assert.ok(ltv.avgGrossProfit > 0, `advanced.ltv.avgGrossProfit must be > 0 (days=${days})`);
+    assert.ok(Array.isArray(ltv.ltvByPersonality) && ltv.ltvByPersonality.length > 0, `advanced.ltv.ltvByPersonality must be populated (days=${days})`);
+    assert.ok(Array.isArray(ltv.ltvBySegment) && ltv.ltvBySegment.length > 0, `advanced.ltv.ltvBySegment must be populated (days=${days})`);
+    assert.ok(ltv.evidenceMaturity, `advanced.ltv.evidenceMaturity must be present (days=${days})`);
   }
 });
 
-// ── 27. Route LTV section uses AwaitingCard with no sampleSize conditional ───
-test("route LTV section renders AwaitingCard unconditionally (no sampleSize check)", () => {
+// ── 27. Route includes LTV section (sample mode shows data, live mode shows AwaitingCard) ──
+test("route LTV section renders AwaitingCard in live mode and data in sample mode", () => {
   const route = readRoute();
   assert.ok(
-    !route.includes("data.ltv?.sampleSize"),
-    "route must not conditionally check data.ltv?.sampleSize — LTV is fully inactive",
+    route.includes("LTV Intelligence") && route.includes("AwaitingCard"),
+    "route must include LTV Intelligence AwaitingCard (shown in live mode)",
   );
   assert.ok(
-    route.includes("LTV Intelligence") && route.includes("AwaitingCard"),
-    "route must include LTV Intelligence AwaitingCard",
+    route.includes("ltv.sampleSize"),
+    "route must conditionally check ltv.sampleSize to show LTV in sample mode",
   );
 });
 

@@ -284,19 +284,49 @@ describe("Experiment Builder invariants", () => {
   });
 });
 
-// ── Section 26-H: Awaiting-integration status correctness ────────────────────
+// ── Section 26-H: Sample Preview status correctness ──────────────────────────
 
-describe("Awaiting-integration status fields", () => {
+describe("Sample Preview status fields", () => {
   for (const days of ALL_DATE_RANGES) {
-    it(`46. [${days}D] advanced.ltv.status is awaiting-integration`, () => {
+    it(`46. [${days}D] advanced.ltv.status is "sample" in sample preview`, () => {
       const { advanced } = getDesignerSampleData(days);
-      assert.equal(advanced.ltv.status, "awaiting-integration",
-        `[${days}D] advanced.ltv.status=${advanced.ltv.status}`);
+      assert.equal(advanced.ltv.status, "sample",
+        `[${days}D] advanced.ltv.status=${advanced.ltv.status} — must be "sample" in sample preview`);
     });
-    it(`47. [${days}D] advanced.saveVsPurchase.status is awaiting-integration`, () => {
+    it(`47. [${days}D] advanced.saveVsPurchase.status is "sample" in sample preview`, () => {
       const { advanced } = getDesignerSampleData(days);
-      assert.equal(advanced.saveVsPurchase.status, "awaiting-integration",
-        `[${days}D] advanced.saveVsPurchase.status=${advanced.saveVsPurchase.status}`);
+      assert.equal(advanced.saveVsPurchase.status, "sample",
+        `[${days}D] advanced.saveVsPurchase.status=${advanced.saveVsPurchase.status} — must be "sample" in sample preview`);
+    });
+    it(`47b. [${days}D] advanced.journeyFunnel exists and has populated stages`, () => {
+      const { advanced } = getDesignerSampleData(days) as any;
+      assert.ok(advanced.journeyFunnel, `[${days}D] advanced.journeyFunnel must exist`);
+      assert.equal(advanced.journeyFunnel.status, "sample");
+      assert.ok(Array.isArray(advanced.journeyFunnel.stages) && advanced.journeyFunnel.stages.length >= 10,
+        `[${days}D] journeyFunnel.stages must have ≥10 entries`);
+      assert.ok(advanced.journeyFunnel.totalCustomers > 0, `[${days}D] journeyFunnel.totalCustomers must be > 0`);
+    });
+    it(`47c. [${days}D] advanced.sizeIntelligence exists and has calculated metrics`, () => {
+      const { advanced } = getDesignerSampleData(days) as any;
+      assert.ok(advanced.sizeIntelligence, `[${days}D] advanced.sizeIntelligence must exist`);
+      assert.equal(advanced.sizeIntelligence.status, "sample");
+      assert.ok(Array.isArray(advanced.sizeIntelligence.sizeGroups) && advanced.sizeIntelligence.sizeGroups.length > 0,
+        `[${days}D] sizeIntelligence.sizeGroups must be populated`);
+      assert.ok(advanced.sizeIntelligence.sizeGroups.every((g: any) => g.customerCount > 0),
+        `[${days}D] every size group must have customerCount > 0`);
+      assert.ok(advanced.sizeIntelligence.evidenceMaturity, `[${days}D] sizeIntelligence.evidenceMaturity must be present`);
+    });
+    it(`47d. [${days}D] advanced.productPairing exists and has pairs`, () => {
+      const { advanced } = getDesignerSampleData(days) as any;
+      assert.ok(advanced.productPairing, `[${days}D] advanced.productPairing must exist`);
+      assert.equal(advanced.productPairing.status, "sample");
+      assert.ok(Array.isArray(advanced.productPairing.pairs) && advanced.productPairing.pairs.length > 0,
+        `[${days}D] productPairing.pairs must be populated`);
+      for (const pair of advanced.productPairing.pairs) {
+        assert.ok(pair.product1 && pair.product2, `[${days}D] every pair must have product1 and product2`);
+        assert.ok(typeof pair.recommended === "number", `[${days}D] pair.recommended must be a number`);
+        assert.ok(typeof pair.total === "number" && pair.total > 0, `[${days}D] pair.total must be > 0`);
+      }
     });
   }
 });

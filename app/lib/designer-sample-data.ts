@@ -1978,14 +1978,58 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       }
       const avgGap = gaps.length ? Math.round(gaps.reduce((s, v) => s + v, 0) / gaps.length) : null;
 
+      // Per-customer gross profit
+      const custGPMap = new Map<string, number>();
+      for (const ev of allBuys) {
+        const gp = (PRICE[ev.productName ?? ""] ?? 1500) - (COGS[ev.productName ?? ""] ?? 600);
+        custGPMap.set(ev.customerId, (custGPMap.get(ev.customerId) ?? 0) + gp);
+      }
+      const avgGrossProfit = custGPMap.size > 0
+        ? Math.round([...custGPMap.values()].reduce((s, v) => s + v, 0) / custGPMap.size) : 0;
+
+      // Observed customer lifetime (days from first to last purchase per customer)
+      const lifetimeDays: number[] = [];
+      for (const [, days] of custPurchaseDays) {
+        if (days.length >= 2) {
+          const sorted = [...days].sort((a, b) => b - a);
+          lifetimeDays.push(sorted[0] - sorted[sorted.length - 1]);
+        }
+      }
+      const medianLifetime = lifetimeDays.length > 0
+        ? lifetimeDays.sort((a, b) => a - b)[Math.floor(lifetimeDays.length / 2)] : null;
+
+      // AOV = total revenue / total purchases
+      const totalRevenue = [...custRevMap.values()].reduce((s, v) => s + v, 0);
+      const avgOrderValue = allBuys.length > 0 ? Math.round(totalRevenue / allBuys.length) : 0;
+
+      // LTV by occasion segment (derived from personality → occasion affinity)
+      const occasionSegments = [
+        { segment: "Work-occasion customers", personalities: ["Corporate Chic", "Minimal"] },
+        { segment: "Evening-occasion customers", personalities: ["Feminine", "Romantic", "Edgy"] },
+        { segment: "Everyday customers", personalities: ["Effortlessly Chic", "Artsy", "Casual Cool"] },
+      ] as const;
+      const ltvBySegment = occasionSegments.map(({ segment, personalities }) => {
+        const cids = Object.entries(CUST)
+          .filter(([, p]) => (personalities as readonly string[]).includes(p))
+          .map(([cid]) => cid);
+        const segBuys = allBuys.filter(ev => cids.includes(ev.customerId));
+        const segRev = segBuys.reduce((s, ev) => s + (PRICE[ev.productName ?? ""] ?? 1500), 0);
+        const uniqueC = new Set(segBuys.map(ev => ev.customerId)).size;
+        return { segment, customerCount: uniqueC, avgLtv: uniqueC > 0 ? Math.round(segRev / uniqueC) : 0, totalRevenue: segRev };
+      }).filter(r => r.customerCount > 0);
+
       return {
-        // awaiting-integration: LTV requires live Shopify order history; sample data demonstrates structure only.
-        status: "awaiting-integration",
+        status: "sample" as const,
         scopeLabel: "All Time",
         sampleSize: allBuys.length,
+        totalRevenue,
         avgLtv,
+        avgOrderValue,
+        avgGrossProfit,
         topCustomerLtv: custRevs[0] ?? 0,
+        observedCustomerLifetimeDays: medianLifetime,
         ltvByPersonality,
+        ltvBySegment,
         repeatProducts,
         avgDaysBetweenPurchases: avgGap,
         repeatPurchaseRate: pct(repeatCustomers.length, Math.max(1, custRevMap.size)),
@@ -1994,6 +2038,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         purchaseFrequency: allBuys.length > 0
           ? (allBuys.length / Math.max(1, custRevMap.size)).toFixed(1)
           : "0",
+        evidenceMaturity: evidenceConfidence(allBuys.length),
       };
     })(),
     saveVsPurchase: (() => {
@@ -2017,19 +2062,55 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         !periodSaves.some(s => s.customerId === ev.customerId && s.productName === ev.productName)
       );
 
+      // Unique customers who saved at least one item in this period
+      const uniqueSavers = new Set(periodSaves.map(ev => ev.customerId)).size;
+
+      // Customers who saved then later bought the same product (all-time window for conversion)
+      const allTimeSavesForConv = ofType(allTime, BS).filter(ev => ev.outcome === "saved");
+      const allTimeBuysForConv  = ofType(allTime, BS).filter(ev => ev.outcome === "bought");
+      const conversionPairs: number[] = []; // days-to-convert
+      for (const sv of allTimeSavesForConv) {
+        const later = allTimeBuysForConv.find(b =>
+          b.customerId === sv.customerId && b.productName === sv.productName && b.daysAgo < sv.daysAgo
+        );
+        if (later) conversionPairs.push(sv.daysAgo - later.daysAgo);
+      }
+      const medianDaysToConvert = conversionPairs.length > 0
+        ? conversionPairs.sort((a, b) => a - b)[Math.floor(conversionPairs.length / 2)] : null;
+
+      // Save-to-convert rate (how often a save leads to eventual purchase, all-time)
+      const allSavedCustProd = allTimeSavesForConv.map(sv => `${sv.customerId}:${sv.productName}`);
+      const convertedSaves = allSavedCustProd.filter(key => {
+        const [cid, pn] = key.split(":");
+        const sv = allTimeSavesForConv.find(s => s.customerId === cid && s.productName === pn)!;
+        return allTimeBuysForConv.some(b => b.customerId === cid && b.productName === pn && b.daysAgo < sv.daysAgo);
+      });
+      const saveToConvertRate = allSavedCustProd.length > 0
+        ? pct(convertedSaves.length, allSavedCustProd.length) : 0;
+
+      // Highest save-to-purchase product (by conversion rate)
+      const highestSvp = [...productSvP].sort((a, b) => b.saveToP - a.saveToP).find(r => r.saves > 0);
+      // Largest save-without-purchase gap product
+      const largestSaveGap = highSaveLowBuy.sort((a, b) => b.saves - a.saves)[0];
+
       return {
-        // awaiting-integration: save-vs-purchase requires live Shopify wishlist + order integration.
-        status: "awaiting-integration",
+        status: "sample" as const,
         scopeLabel: periodLabel,
-        totalSaves:     periodSaves.length,
-        totalPurchases: periodBuys.length,
-        overallSaveToP: periodSaves.length > 0 ? pct(periodBuys.length, periodSaves.length) : 0,
-        mostSaved:     mostSaved?.product ?? WHOLE,
-        mostPurchased: mostPurchased?.product ?? SEEN,
-        anchorProduct: WHOLE,
-        productBreakdown: productSvP,
+        totalSaves:         periodSaves.length,
+        totalPurchases:     periodBuys.length,
+        uniqueSavers,
+        overallSaveToP:     periodSaves.length > 0 ? pct(periodBuys.length, periodSaves.length) : 0,
+        saveToConvertRate,
+        medianDaysToConvert,
+        mostSaved:          mostSaved?.product ?? WHOLE,
+        mostPurchased:      mostPurchased?.product ?? SEEN,
+        highestSvpProduct:  highestSvp?.product ?? null,
+        largestSaveGapProduct: largestSaveGap?.product ?? null,
+        anchorProduct:      WHOLE,
+        productBreakdown:   productSvP,
         highSaveLowBuyProducts: highSaveLowBuy.map(r => r.product),
         purchasesWithoutSave: buyWithoutSave.length,
+        evidenceMaturity:   evidenceConfidence(periodSaves.length + periodBuys.length),
       };
     })(),
     explainability: (() => {
@@ -2082,6 +2163,207 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     opportunityFeed,
     aiLearning,
     experiments,
+
+    // ── Full Journey Funnel — derived from linked synthetic events ──────────
+    journeyFunnel: (() => {
+      const atSessions = ofType(allTime, SS);
+      const atRF       = ofType(allTime, RF);
+      const atBS       = ofType(allTime, BS);
+      const atSaves    = atBS.filter(ev => ev.outcome === "saved");
+      const atBuys     = atBS.filter(ev => ev.outcome === "bought");
+      const atWR       = ofType(allTime, WR);
+
+      const uniqueSessionCids = new Set(atSessions.map(ev => ev.customerId)).size;
+      const uniqueRFCids      = new Set(atRF.map(ev => ev.customerId)).size;
+      const loveRFCids        = new Set(atRF.filter(ev => ev.outcome === "love").map(ev => ev.customerId));
+      const clickEst          = Math.round([...loveRFCids].length * 0.72);
+      const savedCids         = new Set(atSaves.map(ev => ev.customerId)).size;
+      const boughtCids        = new Set(atBuys.map(ev => ev.customerId)).size;
+      const wrCids            = new Set(atWR.map(ev => ev.customerId)).size;
+      const vtoTrialEst       = Math.max(1, Math.round(uniqueSessionCids * 0.38));
+      const bsTotal           = atBS.length;
+
+      const custBuyCountJF = new Map<string, number>();
+      for (const ev of atBuys) custBuyCountJF.set(ev.customerId, (custBuyCountJF.get(ev.customerId) ?? 0) + 1);
+      const repeatBuyerCount = [...custBuyCountJF.values()].filter(c => c >= 2).length;
+
+      // Conversion rate between consecutive funnel stages
+      const cr = (n: number, d: number) => d > 0 ? pct(n, d) : null;
+
+      const stages = [
+        { stage: "Passport Completed",      customerCount: 120,              sessionsOrEvents: null, convFromPrev: null,                      medianDaysFromPrev: null,  note: "All customers complete a Passport before using nAia" },
+        { stage: "StyleMe Session",          customerCount: uniqueSessionCids, sessionsOrEvents: atSessions.length, convFromPrev: cr(uniqueSessionCids, 120), medianDaysFromPrev: 3,   note: "Customer-initiated styling session" },
+        { stage: "Recommendation Shown",     customerCount: uniqueSessionCids, sessionsOrEvents: atSessions.length, convFromPrev: 100,                        medianDaysFromPrev: 0,   note: "Each StyleMe session shows ≥1 recommendation" },
+        { stage: "Recommendation Feedback",  customerCount: uniqueRFCids,      sessionsOrEvents: atRF.length,       convFromPrev: cr(atRF.length, atSessions.length), medianDaysFromPrev: 0, note: "Love / Skip / Undecided signal captured" },
+        { stage: "Product Click (est.)",     customerCount: clickEst,          sessionsOrEvents: clickEst,          convFromPrev: cr(clickEst, atRF.length),   medianDaysFromPrev: 1,   note: "Estimated from love-feedback events; exact click events require Shopify storefront integration" },
+        { stage: "Save Intent",              customerCount: savedCids,         sessionsOrEvents: atSaves.length,    convFromPrev: cr(atSaves.length, clickEst), medianDaysFromPrev: 2,  note: "Buy-or-Skip 'Saved' events" },
+        { stage: "VTO Trial (est.)",         customerCount: vtoTrialEst,       sessionsOrEvents: vtoTrialEst,       convFromPrev: cr(vtoTrialEst, savedCids),  medianDaysFromPrev: 4,   note: "Estimated from session volume; exact VTO events require FASHN.ai integration" },
+        { stage: "Buy Intent (BS events)",   customerCount: new Set(atBS.map(ev => ev.customerId)).size, sessionsOrEvents: bsTotal, convFromPrev: cr(bsTotal, atSaves.length), medianDaysFromPrev: 7, note: "All Buy-or-Skip decisions (saved + bought)" },
+        { stage: "Purchase",                 customerCount: boughtCids,        sessionsOrEvents: atBuys.length,     convFromPrev: cr(atBuys.length, bsTotal),  medianDaysFromPrev: 14,  note: "Buy-or-Skip 'Bought' events" },
+        { stage: "Post-Wear Review",         customerCount: wrCids,            sessionsOrEvents: atWR.length,       convFromPrev: cr(atWR.length, atBuys.length), medianDaysFromPrev: 21, note: "Post-wear review submitted" },
+        { stage: "Repeat Purchase",          customerCount: repeatBuyerCount,  sessionsOrEvents: repeatBuyerCount,  convFromPrev: cr(repeatBuyerCount, boughtCids), medianDaysFromPrev: 45, note: "Customers with ≥2 Buy-or-Skip 'Bought' events" },
+      ];
+
+      return {
+        status: "sample" as const,
+        scopeLabel: "All Time",
+        totalCustomers: 120,
+        stages,
+        endToEndRate: cr(repeatBuyerCount, 120),
+        dropoffStage: "Product Click → Save Intent",
+        topSegments: ["Corporate Chic", "Edgy", "Artsy"],
+        topProducts: [SEEN, ALIVE, CLEAR],
+        note: "Product Click, VTO Trial, and cart/checkout stages are estimated from available session data. Exact counts require Shopify storefront + FASHN.ai integration.",
+      };
+    })(),
+
+    // ── Size Intelligence — derived from personality distribution + fit objection events ──
+    sizeIntelligence: (() => {
+      const fitKeywords = ["trouser", "hip", "fit", "length", "size", "waist", "width"];
+      const fitObjEvents = sessions.filter(ev =>
+        ev.objection && fitKeywords.some(kw => ev.objection!.toLowerCase().includes(kw))
+      );
+      const allReturns = ofType(allTime, RT);
+
+      const sizeGroups = [
+        { size: "XS / 34", customerCount: 10,  preferencePersonalities: ["Feminine", "Artsy"],          fitObjCount: fitObjEvents.filter(ev => CUST[ev.customerId] === "Feminine" || CUST[ev.customerId] === "Artsy").length,   returnCount: 0, purchaseConvRate: 82 },
+        { size: "S / 36",  customerCount: 27,  preferencePersonalities: ["Feminine", "Minimal", "Edgy"], fitObjCount: fitObjEvents.filter(ev => CUST[ev.customerId] === "Minimal").length,                                       returnCount: 0, purchaseConvRate: 79 },
+        { size: "M / 38",  customerCount: 37,  preferencePersonalities: ["Corporate Chic", "Artsy", "Romantic"], fitObjCount: Math.round(fitObjEvents.length * 0.35),                                                          returnCount: 1, purchaseConvRate: 75 },
+        { size: "L / 40",  customerCount: 29,  preferencePersonalities: ["Effortlessly Chic", "Corporate Chic", "Old Money"], fitObjCount: Math.round(fitObjEvents.length * 0.40),                                            returnCount: 2, purchaseConvRate: 68 },
+        { size: "XL / 42", customerCount: 12,  preferencePersonalities: ["Casual Cool", "Trendy"],       fitObjCount: 1,                                                                                                       returnCount: 0, purchaseConvRate: 71 },
+        { size: "XXL / 44",customerCount: 5,   preferencePersonalities: ["Casual Cool"],                 fitObjCount: 0,                                                                                                       returnCount: 0, purchaseConvRate: 74 },
+      ];
+
+      const fitObjByProduct = ALL_PRODUCTS.map(name => ({
+        product: name,
+        fitObjCount: sessions.filter(ev => ev.productName === name && ev.objection).length,
+        returnCount: allReturns.filter(ev => ev.productName === name).length,
+        topObjection: sessions.filter(ev => ev.productName === name && ev.objection)
+          .reduce((acc: Record<string, number>, ev) => {
+            const o = ev.objection!; acc[o] = (acc[o] ?? 0) + 1; return acc;
+          }, {} as Record<string, number>),
+      })).map(r => ({
+        ...r,
+        topObjection: Object.entries(r.topObjection).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
+        stockOutRisk: r.product === GROUNDED ? "Medium" : r.product === ALIVE ? "Low" : "Low",
+      })).filter(r => r.fitObjCount + r.returnCount > 0)
+        .sort((a, b) => (b.fitObjCount + b.returnCount) - (a.fitObjCount + a.returnCount));
+
+      const returnsByReason = [
+        { reason: "Fit — trouser length", count: fitObjEvents.filter(ev => ev.objection?.includes("trouser")).length + 1, products: [GROUNDED] },
+        { reason: "Fit — hip width",      count: fitObjEvents.filter(ev => ev.objection?.includes("hip")).length + 1,     products: [GROUNDED] },
+        { reason: "Style mismatch",       count: 1,                                                                        products: [ALIVE] },
+      ];
+
+      const underservedSizes = sizeGroups
+        .filter(g => g.fitObjCount >= 2 || g.returnCount >= 1 || g.purchaseConvRate < 72)
+        .map(g => ({ size: g.size, issue: g.returnCount >= 2 ? "Elevated return rate" : g.fitObjCount >= 2 ? "High fit objection rate" : "Below-average purchase conversion" }));
+
+      return {
+        status: "sample" as const,
+        scopeLabel: periodLabel,
+        totalCustomers: 120,
+        sizeGroups,
+        fitObjByProduct,
+        returnsByReason,
+        underservedSizes,
+        totalFitObjections: fitObjEvents.length,
+        totalReturns: allReturns.length,
+        evidenceMaturity: evidenceConfidence(fitObjEvents.length + allReturns.length),
+        recommendation: `Becoming Grounded shows the highest fit objection rate (primarily trouser length and hip fit) with ${allReturns.filter(ev => ev.productName === GROUNDED).length + 1} confirmed returns. Size L and M account for the highest objection volume. Consider a petite-length variant and a clearer size chart. Size Coverage data will improve significantly once garment-size fields are captured in StyleMe sessions.`,
+      };
+    })(),
+
+    // ── Product Pairing Intelligence — derived from co-session + sequential events ──
+    productPairing: (() => {
+      // Co-session pairings: same customer + same daysAgo = same session, different products
+      const sessionMap = new Map<string, Set<string>>();
+      for (const ev of allTime) {
+        if (!ev.productName) continue;
+        const key = `${ev.customerId}:${ev.daysAgo}`;
+        if (!sessionMap.has(key)) sessionMap.set(key, new Set());
+        sessionMap.get(key)!.add(ev.productName);
+      }
+
+      const pairTally = new Map<string, { recommended: number; saved: number; purchased: number; reviewed: number }>();
+
+      const addPair = (p1: string, p2: string, field: keyof typeof pairTally extends never ? never : "recommended" | "saved" | "purchased" | "reviewed") => {
+        const key = [p1, p2].sort().join(" × ");
+        const e = pairTally.get(key) ?? { recommended: 0, saved: 0, purchased: 0, reviewed: 0 };
+        e[field]++;
+        pairTally.set(key, e);
+      };
+
+      // Recommended together: same session
+      for (const [, prods] of sessionMap) {
+        const pl = [...prods];
+        for (let i = 0; i < pl.length; i++)
+          for (let j = i + 1; j < pl.length; j++) addPair(pl[i], pl[j], "recommended");
+      }
+
+      // Saved together: same customer, both saved within 14 days
+      const svEvents = ofType(allTime, BS).filter(ev => ev.outcome === "saved" && ev.productName);
+      const custSvMap = new Map<string, { product: string; daysAgo: number }[]>();
+      for (const ev of svEvents) {
+        if (!custSvMap.has(ev.customerId)) custSvMap.set(ev.customerId, []);
+        custSvMap.get(ev.customerId)!.push({ product: ev.productName!, daysAgo: ev.daysAgo });
+      }
+      for (const [, sv] of custSvMap) {
+        for (let i = 0; i < sv.length; i++)
+          for (let j = i + 1; j < sv.length; j++)
+            if (sv[i].product !== sv[j].product && Math.abs(sv[i].daysAgo - sv[j].daysAgo) <= 14)
+              addPair(sv[i].product, sv[j].product, "saved");
+      }
+
+      // Purchased together: same customer, both bought within 60 days
+      const byEvents = ofType(allTime, BS).filter(ev => ev.outcome === "bought" && ev.productName);
+      const custByMap = new Map<string, { product: string; daysAgo: number }[]>();
+      for (const ev of byEvents) {
+        if (!custByMap.has(ev.customerId)) custByMap.set(ev.customerId, []);
+        custByMap.get(ev.customerId)!.push({ product: ev.productName!, daysAgo: ev.daysAgo });
+      }
+      for (const [, by] of custByMap) {
+        for (let i = 0; i < by.length; i++)
+          for (let j = i + 1; j < by.length; j++)
+            if (by[i].product !== by[j].product && Math.abs(by[i].daysAgo - by[j].daysAgo) <= 60)
+              addPair(by[i].product, by[j].product, "purchased");
+      }
+
+      // Positively reviewed together: same customer, love RF for both products on same or adjacent days
+      const loveEvents = ofType(allTime, RF).filter(ev => ev.outcome === "love" && ev.productName);
+      const custLvMap = new Map<string, { product: string; daysAgo: number }[]>();
+      for (const ev of loveEvents) {
+        if (!custLvMap.has(ev.customerId)) custLvMap.set(ev.customerId, []);
+        custLvMap.get(ev.customerId)!.push({ product: ev.productName!, daysAgo: ev.daysAgo });
+      }
+      for (const [, lv] of custLvMap) {
+        for (let i = 0; i < lv.length; i++)
+          for (let j = i + 1; j < lv.length; j++)
+            if (lv[i].product !== lv[j].product && Math.abs(lv[i].daysAgo - lv[j].daysAgo) <= 7)
+              addPair(lv[i].product, lv[j].product, "reviewed");
+      }
+
+      const pairs = [...pairTally.entries()]
+        .map(([key, counts]) => {
+          const [product1, product2] = key.split(" × ");
+          const total = counts.recommended + counts.saved + counts.purchased + counts.reviewed;
+          return { product1, product2, ...counts, total };
+        })
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 10);
+
+      const totalSignals = pairs.reduce((s, p) => s + p.total, 0);
+
+      return {
+        status: "sample" as const,
+        scopeLabel: "All Time",
+        pairs,
+        topPair: pairs[0] ?? null,
+        totalSignals,
+        evidenceMaturity: evidenceConfidence(totalSignals),
+        note: "Recommended together = same StyleMe session · Saved together = both saved within 14 days · Purchased together = both bought within 60 days · Positively reviewed together = love feedback within 7 days.",
+      };
+    })(),
   };
 
   // ── rel ─────────────────────────────────────────────────────────────────

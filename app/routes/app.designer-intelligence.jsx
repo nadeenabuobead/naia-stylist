@@ -1646,27 +1646,61 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays }) {
       </Section>
 
       {/* Customer Journey Analytics */}
-      <Section title="Customer Journey Analytics" desc="Multi-session journey mapping from first touch to repeat wear" status={advanced?.journeyAnalytics?.status || "awaiting-integration"}>
-        {advanced?.journeyAnalytics?.status === "live" ? (
-          <>
+      {sampleMode && advanced?.journeyFunnel?.stages?.length > 0 ? (
+        <Section title="Full Journey Mapping" desc={`SAMPLE PREVIEW — linked journey funnel · ${advanced.journeyFunnel.scopeLabel} · ${advanced.journeyFunnel.totalCustomers} customers`} status="sample">
+          <div style={s.kpiGrid}>
+            <KpiCard label="Total Customers" value={advanced.journeyFunnel.totalCustomers} />
+            <KpiCard label="End-to-End Rate" value={`${advanced.journeyFunnel.endToEndRate ?? "—"}%`} tooltip="% of customers completing Passport through Repeat Purchase" />
+            <KpiCard label="Main Drop-off" value={advanced.journeyFunnel.dropoffStage} />
+            <KpiCard label="Top Segments" value={advanced.journeyFunnel.topSegments?.join(", ")} />
+          </div>
+          <div style={{ overflowX: "auto", marginTop: 20 }}>
+            <table style={s.table}>
+              <thead><tr>
+                <th style={s.th}>Stage</th>
+                <th style={s.th}>Customers</th>
+                <th style={s.th}>Events / Count</th>
+                <th style={s.th}>Conv. from Prev</th>
+                <th style={s.th}>Median Days from Prev</th>
+              </tr></thead>
+              <tbody>
+                {advanced.journeyFunnel.stages.map((stage, i) => (
+                  <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                    <td style={{ ...s.td, fontFamily: SERIF, fontWeight: 600, fontSize: 13 }}>{stage.stage}</td>
+                    <td style={{ ...s.td, fontFamily: MONO, fontWeight: 700 }}>{stage.customerCount}</td>
+                    <td style={{ ...s.td, fontFamily: MONO, color: "#7a6f6a" }}>{stage.sessionsOrEvents ?? "—"}</td>
+                    <td style={{ ...s.td, fontFamily: MONO, color: stage.convFromPrev != null && stage.convFromPrev < 50 ? "#8b2035" : "#2a5e42", fontWeight: 600 }}>
+                      {stage.convFromPrev != null ? `${stage.convFromPrev}%` : "—"}
+                    </td>
+                    <td style={{ ...s.td, fontFamily: MONO, color: "#7a6f6a" }}>{stage.medianDaysFromPrev != null ? `${stage.medianDaysFromPrev}d` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {advanced.journeyFunnel.note && (
+            <div style={{ marginTop: 12, padding: "8px 12px", background: "rgba(34,21,22,0.04)", borderLeft: "2px solid rgba(34,21,22,0.15)", fontSize: 11, color: "#7a6f6a", fontStyle: "italic" }}>
+              {advanced.journeyFunnel.note}
+            </div>
+          )}
+        </Section>
+      ) : (
+        <Section title="Customer Journey Analytics" desc="Multi-session journey mapping from first touch to repeat wear" status={advanced?.journeyAnalytics?.status || "awaiting-integration"}>
+          {advanced?.journeyAnalytics?.status === "live" ? (
             <div style={s.kpiGrid}>
               <KpiCard label="Total Journey Events" value={advanced.journeyAnalytics.totalEvents} />
               {Object.entries(advanced.journeyAnalytics.eventTypeCounts).map(([type, count]) => (
                 <KpiCard key={type} label={type.replace(/_/g, " ")} value={count} />
               ))}
             </div>
+          ) : (
             <AwaitingCard
-              label="Full Journey Mapping"
-              description="Complete multi-session journeys (Passport → StyleMe → Saved Look → Return → Purchase → Repeat) require cart, checkout, and order events."
+              label="Customer Journey Analytics"
+              description="Highest-converting journeys, abandonment points, time-to-purchase, same-session / 24h / 7d / 30d attribution. Requires cart and checkout events from Shopify."
             />
-          </>
-        ) : (
-          <AwaitingCard
-            label="Customer Journey Analytics"
-            description="Highest-converting journeys, abandonment points, time-to-purchase, same-session / 24h / 7d / 30d attribution. Requires cart and checkout events from Shopify."
-          />
-        )}
-      </Section>
+          )}
+        </Section>
+      )}
 
       {/* Style DNA × Outcomes Intelligence */}
       {rel?.dnaMatrix?.length > 0 && (
@@ -1825,27 +1859,62 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
         ) : <EmptyState />}
       </Section>
 
-      <Section title="Product Pairing Intelligence" desc="Best closet + nAia combinations" status="live">
-        {data.productPairings?.length > 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {data.productPairings.map((p, i) => (
-              <div key={i} style={{ padding: 16, background: "#fff", border: "1px solid rgba(34,21,22,0.08)" }}>
-                <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 8 }}>{p.closetItem} + {p.naiaPiece}</div>
-                <div style={{ fontSize: 14, color: "#666" }}>{p.avgRating != null ? `${p.avgRating.toFixed(1)}/5` : "—"} · {p.reviewCount} review{p.reviewCount !== 1 ? "s" : ""} · {p.rewearRate != null ? `${Math.round(p.rewearRate * 100)}% would wear again` : "—"}</div>
-              </div>
-            ))}
+      {sampleMode && advanced?.productPairing?.pairs?.length > 0 ? (
+        <Section title="Product Pairing Intelligence" desc={`SAMPLE PREVIEW — co-session + sequential pairing signals · ${advanced.productPairing.scopeLabel} · ${advanced.productPairing.evidenceMaturity}`} status="sample">
+          <div style={s.kpiGrid}>
+            <KpiCard label="Top Pair" value={advanced.productPairing.topPair ? `${advanced.productPairing.topPair.product1.replace("Becoming ", "")} × ${advanced.productPairing.topPair.product2.replace("Becoming ", "")}` : "—"} />
+            <KpiCard label="Total Pairing Signals" value={advanced.productPairing.totalSignals} />
+            <KpiCard label="Evidence Maturity" value={advanced.productPairing.evidenceMaturity} />
           </div>
-        ) : <EmptyState message="No pairing data yet. Pairings appear when outfit reviews include both closet items and nAia pieces." />}
-      </Section>
+          <div style={{ overflowX: "auto", marginTop: 16 }}>
+            <table style={s.table}>
+              <thead><tr>
+                <th style={s.th}>Product 1</th><th style={s.th}>Product 2</th>
+                <th style={s.th}>Recommended Together</th><th style={s.th}>Saved Together</th>
+                <th style={s.th}>Purchased Together</th><th style={s.th}>Positively Reviewed</th>
+              </tr></thead>
+              <tbody>
+                {advanced.productPairing.pairs.map((p, i) => (
+                  <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                    <td style={{ ...s.td, fontFamily: SERIF, fontSize: 12 }}>{p.product1}</td>
+                    <td style={{ ...s.td, fontFamily: SERIF, fontSize: 12 }}>{p.product2}</td>
+                    <td style={{ ...s.td, fontFamily: MONO, fontWeight: p.recommended > 0 ? 600 : 400, color: p.recommended > 0 ? "#2a5e42" : "#9CA3AF" }}>{p.recommended || "—"}</td>
+                    <td style={{ ...s.td, fontFamily: MONO, color: p.saved > 0 ? "#221516" : "#9CA3AF" }}>{p.saved || "—"}</td>
+                    <td style={{ ...s.td, fontFamily: MONO, color: p.purchased > 0 ? "#8b2035" : "#9CA3AF" }}>{p.purchased || "—"}</td>
+                    <td style={{ ...s.td, fontFamily: MONO, color: p.reviewed > 0 ? "#6b4800" : "#9CA3AF" }}>{p.reviewed || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ marginTop: 10, fontSize: 11, color: "#7a6f6a", fontStyle: "italic" }}>{advanced.productPairing.note}</div>
+        </Section>
+      ) : (
+        <Section title="Product Pairing Intelligence" desc="Best closet + nAia combinations" status={data.productPairings?.length > 0 ? "live" : "insufficient-data"}>
+          {data.productPairings?.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {data.productPairings.map((p, i) => (
+                <div key={i} style={{ padding: 16, background: "#fff", border: "1px solid rgba(34,21,22,0.08)" }}>
+                  <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 8 }}>{p.closetItem} + {p.naiaPiece}</div>
+                  <div style={{ fontSize: 14, color: "#666" }}>{p.avgRating != null ? `${p.avgRating.toFixed(1)}/5` : "—"} · {p.reviewCount} review{p.reviewCount !== 1 ? "s" : ""}</div>
+                </div>
+              ))}
+            </div>
+          ) : <EmptyState message="No pairing data yet. Pairings appear when outfit reviews include both closet items and nAia pieces." />}
+        </Section>
+      )}
 
       {sampleMode && advanced?.saveVsPurchase?.status === "sample" ? (
-        <Section title="Save vs Purchase Intelligence" desc={`SAMPLE PREVIEW — ${advanced.saveVsPurchase.scopeLabel} save/buy events. Becoming Whole is the anchor case.`} status="sample">
+        <Section title="Save vs Purchase Intelligence" desc={`SAMPLE PREVIEW — ${advanced.saveVsPurchase.scopeLabel} save/buy events · ${advanced.saveVsPurchase.evidenceMaturity}`} status="sample">
           <div style={s.kpiGrid}>
             <KpiCard label="Total Saves" value={advanced.saveVsPurchase.totalSaves} tooltip={`Saves within the selected period (${advanced.saveVsPurchase.scopeLabel}).`} />
+            <KpiCard label="Unique Savers" value={advanced.saveVsPurchase.uniqueSavers} />
             <KpiCard label="Total Purchases" value={advanced.saveVsPurchase.totalPurchases} />
-            <KpiCard label="Save-to-Purchase Rate" value={`${advanced.saveVsPurchase.overallSaveToP}%`} tooltip="% of saved items that were eventually purchased." />
+            <KpiCard label="Save-to-Purchase Rate" value={`${advanced.saveVsPurchase.overallSaveToP}%`} tooltip="% of saved items purchased in the same period." />
+            <KpiCard label="Save-to-Convert Rate" value={advanced.saveVsPurchase.saveToConvertRate != null ? `${advanced.saveVsPurchase.saveToConvertRate}%` : "—"} tooltip="% of all-time saves that eventually led to a purchase of the same product." />
+            <KpiCard label="Median Days Save→Purchase" value={advanced.saveVsPurchase.medianDaysToConvert != null ? `${advanced.saveVsPurchase.medianDaysToConvert}d` : "—"} />
+            <KpiCard label="Highest SVP Product" value={advanced.saveVsPurchase.highestSvpProduct ?? "—"} tooltip="Product with the highest save-to-purchase conversion rate." />
             <KpiCard label="Most Saved" value={advanced.saveVsPurchase.mostSaved ?? "—"} />
-            <KpiCard label="Most Purchased" value={advanced.saveVsPurchase.mostPurchased ?? "—"} />
             <KpiCard label="Purchases Without Prior Save" value={advanced.saveVsPurchase.purchasesWithoutSave} tooltip="Number of purchases where no prior save was recorded for the same product-customer pair." />
           </div>
           {advanced.saveVsPurchase.highSaveLowBuyProducts?.length > 0 && (
@@ -2493,21 +2562,85 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays })
         </div>
       </Section>
 
-      {/* Fit Coverage */}
-      <Section title="Fit and Size Coverage" desc="Fit preferences addressed by the collection" status={data.bodyPatterns?.length > 0 ? "live" : "insufficient-data"}>
-        <div style={s.grid3}>
-          {data.bodyPatterns?.map((p, i) => (
-            <div key={i} style={s.card}><div style={s.cardLabel}>{p.preference}</div><div style={s.cardValue}>{p.userCount} {p.userCount === 1 ? "user" : "users"}</div><div style={{ fontSize: 12, color: "#7a6f6a", marginTop: 6, fontStyle: "italic" }}>{p.implication}</div></div>
-          ))}
-        </div>
-        {sampleMode ? (
-          <div style={{ padding: "12px 14px", background: "rgba(107,72,0,0.05)", border: "1px solid rgba(107,72,0,0.15)", fontSize: 13, color: "#221516", marginTop: 8 }}>
-            <strong style={{ color: "#6b4800" }}>Sample Preview — Size Coverage:</strong> Size data collection is not yet integrated. In live mode, this section will show size requests captured in StyleMe sessions linked to product variant availability.
+      {/* Fit and Size Coverage */}
+      {sampleMode && advanced?.sizeIntelligence?.sizeGroups?.length > 0 ? (
+        <Section title="Fit and Size Intelligence" desc={`SAMPLE PREVIEW — ${advanced.sizeIntelligence.scopeLabel} · ${advanced.sizeIntelligence.totalFitObjections} fit objections · ${advanced.sizeIntelligence.totalReturns} returns · ${advanced.sizeIntelligence.evidenceMaturity}`} status="sample">
+          <div style={s.kpiGrid}>
+            <KpiCard label="Total Customers" value={advanced.sizeIntelligence.totalCustomers} />
+            <KpiCard label="Fit Objections" value={advanced.sizeIntelligence.totalFitObjections} />
+            <KpiCard label="Returns" value={advanced.sizeIntelligence.totalReturns} />
+            <KpiCard label="Evidence Maturity" value={advanced.sizeIntelligence.evidenceMaturity} />
           </div>
-        ) : (
-          <AwaitingCard label="Size Coverage" description="Size coverage analysis requires size data to be collected in StyleMe sessions and linked to product variant availability." />
-        )}
-      </Section>
+          <div style={{ ...s.subHeader, marginTop: 20 }}>CUSTOMER DISTRIBUTION BY SIZE GROUP</div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={s.table}>
+              <thead><tr>
+                <th style={s.th}>Size</th><th style={s.th}>Customers</th>
+                <th style={s.th}>Main Personalities</th><th style={s.th}>Fit Objections</th>
+                <th style={s.th}>Returns</th><th style={s.th}>Purchase Conv.</th>
+              </tr></thead>
+              <tbody>
+                {advanced.sizeIntelligence.sizeGroups.map((g, i) => (
+                  <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                    <td style={{ ...s.td, fontFamily: MONO, fontWeight: 700 }}>{g.size}</td>
+                    <td style={{ ...s.td, fontFamily: MONO }}>{g.customerCount}</td>
+                    <td style={{ ...s.td, fontSize: 11 }}>{g.preferencePersonalities?.join(", ")}</td>
+                    <td style={{ ...s.td, fontFamily: MONO, color: g.fitObjCount > 2 ? "#8b2035" : "#221516" }}>{g.fitObjCount || "—"}</td>
+                    <td style={{ ...s.td, fontFamily: MONO, color: g.returnCount > 1 ? "#8b2035" : "#221516" }}>{g.returnCount || "—"}</td>
+                    <td style={{ ...s.td, fontFamily: MONO, color: g.purchaseConvRate < 72 ? "#d97706" : "#2a5e42", fontWeight: 600 }}>{g.purchaseConvRate}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {advanced.sizeIntelligence.fitObjByProduct?.length > 0 && (
+            <>
+              <div style={{ ...s.subHeader, marginTop: 20 }}>FIT OBJECTIONS BY PRODUCT</div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={s.table}>
+                  <thead><tr><th style={s.th}>Product</th><th style={s.th}>Fit Objections</th><th style={s.th}>Returns</th><th style={s.th}>Top Objection</th><th style={s.th}>Stock-Out Risk</th></tr></thead>
+                  <tbody>
+                    {advanced.sizeIntelligence.fitObjByProduct.map((r, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                        <td style={{ ...s.td, fontFamily: SERIF }}>{r.product}</td>
+                        <td style={{ ...s.td, fontFamily: MONO, color: r.fitObjCount > 1 ? "#8b2035" : "#221516" }}>{r.fitObjCount}</td>
+                        <td style={{ ...s.td, fontFamily: MONO }}>{r.returnCount || "—"}</td>
+                        <td style={{ ...s.td, fontSize: 11, color: "#5c5350", fontStyle: "italic" }}>{r.topObjection ?? "—"}</td>
+                        <td style={{ ...s.td, fontSize: 11, color: r.stockOutRisk === "Medium" ? "#d97706" : "#7a6f6a" }}>{r.stockOutRisk}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+          {advanced.sizeIntelligence.underservedSizes?.length > 0 && (
+            <div style={{ marginTop: 14, padding: "10px 14px", background: "rgba(139,32,53,0.04)", borderLeft: "3px solid #8b2035" }}>
+              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "1.5px", color: "#8b2035", marginBottom: 6, fontFamily: "'Inter', sans-serif" }}>Underserved Size Groups</div>
+              {advanced.sizeIntelligence.underservedSizes.map((u, i) => (
+                <div key={i} style={{ fontSize: 13, color: "#221516", marginBottom: 3 }}>{u.size} — {u.issue}</div>
+              ))}
+            </div>
+          )}
+          {advanced.sizeIntelligence.recommendation && (
+            <div style={{ marginTop: 14, padding: "10px 14px", background: "rgba(42,94,66,0.05)", borderLeft: "3px solid #2a5e42", fontSize: 13, color: "#221516" }}>
+              {advanced.sizeIntelligence.recommendation}
+            </div>
+          )}
+        </Section>
+      ) : (
+        <Section title="Fit and Size Coverage" desc="Fit preferences addressed by the collection" status={data.bodyPatterns?.length > 0 ? "live" : "awaiting-integration"}>
+          {data.bodyPatterns?.length > 0 ? (
+            <div style={s.grid3}>
+              {data.bodyPatterns.map((p, i) => (
+                <div key={i} style={s.card}><div style={s.cardLabel}>{p.preference}</div><div style={s.cardValue}>{p.userCount} {p.userCount === 1 ? "user" : "users"}</div><div style={{ fontSize: 12, color: "#7a6f6a", marginTop: 6, fontStyle: "italic" }}>{p.implication}</div></div>
+              ))}
+            </div>
+          ) : (
+            <AwaitingCard label="Size Coverage" description="Size coverage analysis requires size data to be collected in StyleMe sessions and linked to product variant availability." />
+          )}
+        </Section>
+      )}
 
       {/* Unmet Needs */}
       <Section title="Unmet Customer Needs" desc="Occasions and needs requested most with insufficient product coverage" status="live">
@@ -2811,14 +2944,17 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
 
         {/* LTV Intelligence — computed from sample data */}
         {ltv && ltv.sampleSize > 0 && (
-          <Section title="LTV Intelligence" desc="Lifetime value by personality — derived from all-time synthetic purchase history" status="sample">
+          <Section title="LTV Intelligence" desc={`SAMPLE PREVIEW — ${ltv.scopeLabel} · ${ltv.totalCustomersWithPurchase} customers · ${ltv.evidenceMaturity ?? ""}`} status="sample">
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px,1fr))", gap: 1, background: "rgba(34,21,22,0.07)", marginBottom: 24 }}>
               {[
                 { label: "Avg LTV / Customer", value: fmtAed(ltv.avgLtv), color: "#8b2035" },
                 { label: "Top Customer LTV", value: fmtAed(ltv.topCustomerLtv), color: "#221516" },
+                { label: "Avg Order Value", value: fmtAed(ltv.avgOrderValue), color: "#221516" },
+                { label: "Avg Gross Profit / Customer", value: fmtAed(ltv.avgGrossProfit), color: "#2a5e42" },
                 { label: "Repeat Purchase Rate", value: `${ltv.repeatPurchaseRate}%`, color: "#2a5e42" },
-                { label: "Avg Days Between Purchases", value: ltv.avgDaysBetweenPurchases != null ? `${ltv.avgDaysBetweenPurchases}d` : "—", color: "#221516" },
                 { label: "Purchase Frequency", value: `${ltv.purchaseFrequency}× avg`, color: "#221516" },
+                { label: "Avg Days Between Purchases", value: ltv.avgDaysBetweenPurchases != null ? `${ltv.avgDaysBetweenPurchases}d` : "—", color: "#221516" },
+                { label: "Observed Customer Lifetime", value: ltv.observedCustomerLifetimeDays != null ? `${ltv.observedCustomerLifetimeDays}d median` : "—", color: "#221516" },
                 { label: "Customers with Purchases", value: ltv.totalCustomersWithPurchase, color: "#221516" },
               ].map(({ label, value, color }) => (
                 <div key={label} style={{ padding: "18px 20px", background: "#fff" }}>
@@ -2847,6 +2983,33 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
                           <td style={{ ...s.td, fontFamily: MONO }}>{r.purchases}</td>
                           <td style={{ ...s.td, fontFamily: MONO, fontWeight: 700 }}>{r.avgLtv.toLocaleString()}</td>
                           <td style={{ ...s.td, fontFamily: MONO }}>{r.totalRevenue.toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+            {ltv.ltvBySegment?.length > 0 && (
+              <>
+                <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 12, marginTop: 20, fontWeight: 600 }}>LTV by Occasion Segment</div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={s.table}>
+                    <thead><tr>
+                      <th style={s.th}>Segment</th>
+                      <th style={s.th}>Customers</th>
+                      <th style={s.th}>Purchases</th>
+                      <th style={s.th}>Avg LTV (AED)</th>
+                      <th style={s.th}>Total Revenue (AED)</th>
+                    </tr></thead>
+                    <tbody>
+                      {ltv.ltvBySegment.map((r, i) => (
+                        <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                          <td style={{ ...s.td, fontFamily: SERIF, fontStyle: "italic" }}>{r.segment}</td>
+                          <td style={{ ...s.td, fontFamily: MONO }}>{r.customerCount}</td>
+                          <td style={{ ...s.td, fontFamily: MONO }}>{r.purchases}</td>
+                          <td style={{ ...s.td, fontFamily: MONO, fontWeight: 700, color: "#8b2035" }}>{(r.avgLtv ?? 0).toLocaleString()}</td>
+                          <td style={{ ...s.td, fontFamily: MONO }}>{(r.totalRevenue ?? 0).toLocaleString()}</td>
                         </tr>
                       ))}
                     </tbody>
