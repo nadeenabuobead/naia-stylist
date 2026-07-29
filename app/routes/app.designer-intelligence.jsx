@@ -40,7 +40,10 @@ export async function loader({ request }) {
 
   if (sampleMode) {
     const sample = getDesignerSampleData(dateRangeDays);
-    return { ...sample, dateRangeDays, sampleMode: true, samplePreviewAvailable: true };
+    return Response.json(
+      { ...sample, dateRangeDays, sampleMode: true, samplePreviewAvailable: true },
+      { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } },
+    );
   }
 
   const [dashboard, kpis, phase4b2, advanced, rel] = await Promise.all([
@@ -52,7 +55,10 @@ export async function loader({ request }) {
   ]);
 
   if (dashboard.error) throw new Response(dashboard.error, { status: 500 });
-  return { dashboard, kpis, phase4b2, advanced, rel, dateRangeDays, sampleMode: false, samplePreviewAvailable };
+  return Response.json(
+    { dashboard, kpis, phase4b2, advanced, rel, dateRangeDays, sampleMode: false, samplePreviewAvailable },
+    { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } },
+  );
 }
 
 // ── Error boundary ─────────────────────────────────────────────────────────────
@@ -434,6 +440,7 @@ export default function DesignerDashboard() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16 }}>
             <div>
               <div style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontSize: 8, textTransform: "uppercase", letterSpacing: "3px", color: "#8b2035", marginBottom: 10, fontWeight: 600 }}>NADINE — Private Intelligence Platform</div>
+              <div id="naia-build-marker" style={{ fontFamily: "'Inter', monospace", fontSize: 9, color: "#2a5e42", background: "rgba(42,94,66,0.08)", padding: "2px 8px", display: "inline-block", marginBottom: 4 }}>BUILD 63bee13-RUNTIME-CHECK</div>
               <h1 style={s.h1}>Design &amp; Merchandising Intelligence</h1>
               <p style={s.subtitle}>Turn customer signals into product, assortment, styling and commercial decisions.</p>
             </div>
