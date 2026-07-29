@@ -4,6 +4,14 @@
  * No proportional scaling. No hardcoded period values. Never writes to the database.
  */
 import { EVENTS_EXPANDED, CUST_EXTENDED } from "./ai/synthetic-events-expanded";
+import {
+  calcBuySkipDistribution,
+  calcSellThrough,
+  calcLoveResponseRate,
+  calcDesiredFeelingAchievement,
+  type BuySkipDistribution,
+} from "./ai/canonical-calculations";
+import type { MeasurementState } from "./ai/canonical-vocabulary";
 
 // ── Real NADINE product names ──────────────────────────────────────────────
 const SEEN     = "Becoming Seen";      // trench coat · Corporate Chic/Artsy/Edgy · work hero
@@ -1119,11 +1127,25 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   const buyTotal  = buys.length;
   const maybeTotal = buyOrSkip.filter(ev => ev.outcome === "undecided").length;
 
+  // Canonical 4-category Buy/Skip distribution (Req 6)
+  const bsDist: BuySkipDistribution = calcBuySkipDistribution(buyOrSkip, periodLabel);
+
   const kpis = {
     passport: { total: 120, completed: 96, completionRate: 80 },
     closet:   { totalCustomers: 120, customersWithCloset: 82, activeClosets: 82, adoptionRate: 68, totalItems: Math.max(1, uploads.length * 12 + 820), avgItems: 9.4 },
     buyOrSkip: {
-      total: buyOrSkip.length,
+      // Canonical 4-category distribution — use these for all rendering
+      buyIntentCount:  bsDist.buyIntentCount,
+      skipCount:       bsDist.skipCount,
+      undecidedCount:  bsDist.undecidedCount,
+      incompleteCount: bsDist.incompleteCount,
+      total:           bsDist.total,
+      decidedCount:    bsDist.decidedCount,
+      buyIntentRate:   bsDist.buyIntentRate,
+      uniqueCustomers: bsDist.uniqueCustomers,
+      evidence:        bsDist.evidence,
+      state:           bsDist.state,
+      // Legacy aliases preserved for backward compatibility
       buy: buyTotal,
       save: saves.length,
       skip: buyOrSkip.filter(ev => ev.outcome === "skip").length,
@@ -1273,8 +1295,10 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   }).filter(r => r.unitsSold > 0 || r.inStock > 0);
 
   const bySTSorted = [...byProductCommercial].sort((a, b) => b.sellThrough - a.sellThrough);
-  const avgSellThrough = byProductCommercial.length > 0
-    ? Math.round(byProductCommercial.reduce((s, r) => s + r.sellThrough, 0) / byProductCommercial.length) : 0;
+  // Canonical sell-through: weighted (for founder decisions) vs unweighted mean (per-product average)
+  const stResult = calcSellThrough(byProductCommercial);
+  const weightedSellThrough       = stResult.weightedSellThrough;
+  const avgSellThrough            = stResult.unweightedAvgSellThrough;
 
   const commercial = {
     status: "sample" as const,
@@ -1313,6 +1337,9 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       ],
     },
     inventory: {
+      // Weighted: total net units sold ÷ total starting units (correct for founder-level inventory decisions)
+      weightedSellThrough,
+      // Unweighted: mean of individual product sell-through rates (biased by product mix — show with label)
       avgSellThrough,
       fastestMoving: bySTSorted[0]?.product ?? null,
       slowestMoving: bySTSorted[bySTSorted.length - 1]?.product ?? null,
@@ -1330,9 +1357,10 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   const skipsForAI     = feedback.filter(ev => ev.outcome === "skip").length;
   const undecidedForAI = feedback.filter(ev => ev.outcome === "undecided").length;
   const totalEvaluated = lovesForAI + skipsForAI + undecidedForAI;
-  // Null when no decided events — no hardcoded fallback (that would be fabricated).
+  // Canonical calculation (Req 1): love response rate uses calcLoveResponseRate
+  const loveRateResult = calcLoveResponseRate(feedback, periodLabel);
   const decidedForAI   = lovesForAI + skipsForAI;
-  const precisionPct   = decidedForAI > 0 ? pct(lovesForAI, decidedForAI) : null;
+  const precisionPct   = loveRateResult.value;  // null when no decided events — canonical
   const fpRatePct      = decidedForAI > 0 ? pct(skipsForAI, decidedForAI) : null;
   // Undecided rate: raw count over all evaluated — not a false negative rate (requires ground truth).
   const undecidedRate  = totalEvaluated > 0 ? pct(undecidedForAI, totalEvaluated) : null;
@@ -1411,16 +1439,19 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         { signal: "Save without immediate buy",        note: "Save signal indicates interest that has not yet converted to a buy-or-skip decision" },
       ],
     },
+    canonicalEvidence: loveRateResult.evidence,
     calibration: {
       score: calibrationScore, trend: "improving" as const,
       byTier: [
         // actualRate must only appear when sampleSize > 0; never show 0% as if it were a real measurement.
+        // measurementState added for Req 2: each tier carries its canonical measurement state.
         {
           tier: "High evidence (n≥10)",
           predictedRate: 80,
           actualRate: highEvProds.length > 0 ? highTierLR : null,
           sampleSize: highEvProds.length,
           gap: highEvProds.length > 0 ? highTierLR - 80 : null,
+          measurementState: (highEvProds.length > 0 ? "measured" : "no_eligible_observations") as MeasurementState,
         },
         {
           tier: "Medium evidence (n 5–9)",
@@ -1428,6 +1459,9 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
           actualRate: medEvProds.length > 0 ? medTierLR : null,
           sampleSize: medEvProds.length,
           gap: medEvProds.length > 0 ? medTierLR - 60 : null,
+          measurementState: (medEvProds.length > 0
+            ? medEvProds.length >= 3 ? "measured" : "insufficient_evidence"
+            : "no_eligible_observations") as MeasurementState,
         },
         {
           tier: "Low evidence (n<5)",
@@ -1435,8 +1469,20 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
           actualRate: lowEvProds.length > 0 ? lowTierLR : null,
           sampleSize: lowEvProds.length,
           gap: lowEvProds.length > 0 ? lowTierLR - 40 : null,
+          measurementState: (lowEvProds.length > 0
+            ? "insufficient_evidence"
+            : "no_eligible_observations") as MeasurementState,
         },
       ],
+      // All 6 canonical measurement states illustrated (Req 2): used by renderer to show examples.
+      measurementStateExamples: {
+        measured:                 { metric: "Love Response Rate",             example: "Decided feedback events above threshold" },
+        insufficient_evidence:    { metric: "Low-evidence product tier",       example: "Fewer than 5 decided feedback events" },
+        no_eligible_observations: { metric: "No products in tier",             example: "No products in the qualifying evidence band" },
+        observed_zero:            { metric: "Save-to-purchase (0 conversions)",example: "Saves exist but zero progressed to buy" },
+        awaiting_integration:     { metric: "Fit profile accuracy",            example: "Physical fit data not yet integrated" },
+        not_applicable:           { metric: "Calibration in Live Data mode",   example: "Calibration tier not applicable in live mode" },
+      },
     },
     trajectory: aiLearningTrajectory,
     trajectoryNote: "Historical performance snapshots are logged from the first evaluation event forward. No back-projected data is generated. Trajectory will populate as weekly snapshots accumulate.",
@@ -1701,14 +1747,18 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       [HER]:      "Feature in occasion campaigns for Feminine and Romantic profiles. Date-night and dinner are highest-performing contexts.",
       [ROOTED]:   "Pair with Becoming Real or Becoming Clear for work occasions. Style guidance improves outcomes significantly.",
     };
-    // achievedRate: use strongAchievedRate if we have WR data, else loveRate proxy (capped 92%)
-    const achievedRate = m.strongAchievedCount > 0
-      ? m.strongAchievedRate
-      : Math.min(92, Math.round(m.loveRate * 0.87));
-    const partlyAchievedRate = m.partlyAchievedCount > 0
-      ? m.partlyAchievedRate
-      : Math.min(20, Math.round((100 - achievedRate) * 0.4));
-    const notAchievedRate = Math.max(0, 100 - achievedRate - partlyAchievedRate);
+    // achievedRate: null when no WR events exist — loveRate proxy permanently removed.
+    // "no_eligible_observations" is the correct state when strongAchievedCount === 0.
+    const achievedRate: number | null = m.strongAchievedCount > 0 ? m.strongAchievedRate : null;
+    const partlyAchievedRate: number | null = m.partlyAchievedCount > 0 ? m.partlyAchievedRate : null;
+    const notAchievedRate: number | null =
+      achievedRate !== null && partlyAchievedRate !== null
+        ? Math.max(0, 100 - achievedRate - partlyAchievedRate)
+        : null;
+    const achievedEvidenceState: MeasurementState =
+      m.strongAchievedCount === 0 ? "no_eligible_observations"
+      : m.strongAchievedCount < 3 ? "insufficient_evidence"
+      : "measured";
     const confidenceAfter = Math.round((CONFIDENCE_BEFORE + m.avgConfidenceLift) * 10) / 10;
     return {
       productTitle: p.name,
@@ -1718,6 +1768,11 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       achievedRate,
       partlyAchievedRate,
       notAchievedRate,
+      achievedEvidenceState,
+      eligibleWrCount:    m.strongAchievedCount + m.partlyAchievedCount,
+      achievedCount:      m.strongAchievedCount,
+      partlyAchievedCount: m.partlyAchievedCount,
+      unansweredCount:    0,
       confidenceBefore: CONFIDENCE_BEFORE,
       confidenceAfter,
       avgConfidenceLift: m.avgConfidenceLift,

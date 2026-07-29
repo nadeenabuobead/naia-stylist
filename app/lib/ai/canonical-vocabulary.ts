@@ -287,9 +287,57 @@ export const CANONICAL_METRIC_NAMES: Record<string, string> = {
   "Recommendation Trust":               "Desired-Outcome Success by Personality",
   "Explanation Agreement Rate":         "Love Response Rate (by personality)",
   "Gross Margin AED":                   "Gross Profit (AED)",
-  "LTV":                                "Observed Customer Revenue to Date",
+  "LTV":                                "Illustrative Buy-Intent Value",
+  "Observed Customer Revenue to Date":  "Illustrative Buy-Intent Value",
+  "LTV Intelligence":                   "Illustrative Buy-Intent Segments",
   "nAia Uplift":                        "Observed Difference vs Non-nAia Cohort",
   "False Positive Rate":                "Skip Rate (Decided Feedback Events)",
   "False Negative Rate":                "Undecided Event Rate",
   "Recommendation Success":             "Desired-Feeling Achievement Rate",
 };
+
+// ── Customer-based evidence object ────────────────────────────────────────────
+// Required on every founder-facing percentage. Never show a % without this.
+export interface EvidenceObject {
+  uniqueCustomerCount:       number;
+  eventCount:                number;
+  eligibleObservationCount:  number;
+  unansweredCount:           number;
+  customerConcentration:     number; // max events from one customer / total events (0–1)
+  period:                    string; // e.g. "last 30 days" | "All Time"
+  evidenceState:             MeasurementState;
+  confidenceLevel:           CustomerEvidenceLabel;
+}
+
+export function buildCustomerEvidenceLabel(evidence: EvidenceObject): string {
+  const { uniqueCustomerCount, eventCount, period } = evidence;
+  return `${uniqueCustomerCount} customer${uniqueCustomerCount !== 1 ? "s" : ""} · ${eventCount} events · ${period}`;
+}
+
+// ── Below-20 language permission ──────────────────────────────────────────────
+// Call before generating any action or decision language. Returns the permitted
+// language tier; action generation must respect this — it is enforced in rendering.
+export type LanguagePermissionLevel = "decisive" | "directional" | "exploratory";
+
+export function languagePermission(uniqueCustomers: number): LanguagePermissionLevel {
+  if (uniqueCustomers >= 20) return "decisive";
+  if (uniqueCustomers >= 5)  return "directional";
+  return "exploratory";
+}
+
+// Blocked terms below decisive threshold.
+// This list is enforced in rendering — never use these terms for metrics where
+// uniqueCustomers < 20. Each term here maps to a LOW_EVIDENCE_LANGUAGE.prohibited entry.
+export const BELOW_20_BLOCKED_TERMS: ReadonlyArray<string> = [
+  "scale",
+  "hero",
+  "anchor",
+  "commit",
+  "expand",
+  "proven",
+  "best-performing",
+  "winner",
+  "discontinue",
+  "validated pattern",
+  "strong pattern",
+] as const;

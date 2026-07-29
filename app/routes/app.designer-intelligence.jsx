@@ -1613,9 +1613,22 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays }) {
                         {p.statusLabel && <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", color: "#6b4800", background: "rgba(107,72,0,0.08)", padding: "2px 6px", flexShrink: 0 }}>{p.statusLabel}</span>}
                       </div>
                       {p.startingMood && <div style={{ fontSize: 11, color: "#7a6f6a", marginBottom: 10, fontStyle: "italic" }}>{p.startingMood} → {p.mostCommonAfterFeeling ?? p.desiredFeelings?.[0]}</div>}
-                      <Metric label="Feeling achieved (strong)" value={p.sampleSize > 0 && p.achievedRate != null ? `${p.achievedRate}%` : "No post-wear responses"} />
-                      {p.sampleSize > 0 && p.partlyAchievedRate != null && p.partlyAchievedRate > 0 && <Metric label="Partly achieved" value={`${p.partlyAchievedRate}%`} />}
-                      {p.sampleSize > 0 && p.notAchievedRate != null && p.notAchievedRate > 0 && <Metric label="Not achieved" value={`${p.notAchievedRate}%`} />}
+                      {/* Req 7: Proxy removed — show measurement state when no WR data */}
+                      {p.achievedEvidenceState && p.achievedEvidenceState !== "measured" ? (
+                        <div style={{ marginBottom: 8 }}>
+                          <MeasurementStatePill state={p.achievedEvidenceState} />
+                          <span style={{ fontSize: 9, color: "#7a6f6a", fontFamily: INTER, marginLeft: 6 }}>
+                            {p.eligibleWrCount === 0 ? "No post-wear reviews" : `${p.eligibleWrCount} WR event${p.eligibleWrCount !== 1 ? "s" : ""} — below minimum`}
+                          </span>
+                        </div>
+                      ) : (
+                        <>
+                          <Metric label="Feeling achieved (strong)" value={p.achievedRate != null ? `${p.achievedRate}% (${p.achievedCount ?? p.wouldWearAgainCount} of ${p.eligibleWrCount ?? p.sampleSize})` : "—"} />
+                          {p.partlyAchievedRate != null && p.partlyAchievedRate > 0 && <Metric label="Partly achieved" value={`${p.partlyAchievedRate}%`} />}
+                          {p.notAchievedRate != null && p.notAchievedRate > 0 && <Metric label="Not achieved" value={`${p.notAchievedRate}%`} />}
+                          {(p.unansweredCount ?? 0) > 0 && <Metric label="Unanswered" value={p.unansweredCount} />}
+                        </>
+                      )}
                       <div style={{ margin: "8px 0", borderTop: "1px solid rgba(34,21,22,0.07)" }} />
                       {p.confidenceBefore != null && (
                         <Metric
@@ -1918,7 +1931,7 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
             <KpiCard label="Purchases Without Prior Save" value={advanced.saveVsPurchase.purchasesWithoutSave} tooltip="Number of purchases where no prior save was recorded for the same product-customer pair." />
           </div>
           {advanced.saveVsPurchase.highSaveLowBuyProducts?.length > 0 && (
-            <div style={{ marginTop: 16, padding: "10px 14px", background: "rgba(139,32,53,0.04)", borderLeft: "3px solid #8b2035" }}>
+            <div style={{ marginTop: 16, padding: "10px 14px", background: "rgba(90,90,100,0.05)", borderLeft: "3px solid #8b2035" }}>
               <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "1.5px", color: "#8b2035", marginBottom: 6, fontFamily: "'Inter', sans-serif" }}>High-Save, Zero-Purchase Products</div>
               <div style={{ fontSize: 13, color: "#221516" }}>{advanced.saveVsPurchase.highSaveLowBuyProducts.join(" · ")}</div>
               <div style={{ fontSize: 12, color: "#7a6f6a", marginTop: 4 }}>These products generate strong save intent but no purchase commitment — styling ambiguity is the most likely barrier.</div>
@@ -2074,24 +2087,37 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
       <Section title="Buy or Skip Signals" desc="How customers assess new pieces against their wardrobe — all-time counts, does not follow the period filter" status={kpis?.buyOrSkip?.total > 0 ? "live" : "insufficient-data"}>
         {kpis?.buyOrSkip?.total > 0 ? (
           <>
+            {/* 4-category canonical distribution (Req 6): Buy, Skip, Undecided, Incomplete — must sum to total */}
             <div style={s.kpiGrid}>
               <KpiCard label="Total Analyses" value={kpis.buyOrSkip.total} />
-              <KpiCard label="Buy Intent Rate" value={`${kpis.buyOrSkip.buyRate}%`} desc="Buy ÷ total analyses (intent, not confirmed purchase)" />
-              <KpiCard label="Buy Intent" value={kpis.buyOrSkip.buy} />
-              <KpiCard label="Saved for Later" value={kpis.buyOrSkip.save ?? 0} desc="Saved but not bought — latent demand" />
-              <KpiCard label="Skip" value={kpis.buyOrSkip.skip} />
-              <KpiCard label="Maybe" value={kpis.buyOrSkip.maybe} />
-              {kpis.buyOrSkip.noDecision > 0 && (
-                <KpiCard label="No Decision" value={kpis.buyOrSkip.noDecision} />
-              )}
+              <KpiCard
+                label="Buy-Intent Rate"
+                value={kpis.buyOrSkip.buyIntentRate != null ? `${kpis.buyOrSkip.buyIntentRate}%` : "—"}
+                desc={`Buy ÷ decided (${kpis.buyOrSkip.buyIntentCount ?? kpis.buyOrSkip.buy} buy / ${kpis.buyOrSkip.decidedCount ?? (kpis.buyOrSkip.buy + kpis.buyOrSkip.skip)} decided) — intent, not confirmed purchase`}
+              />
+              <KpiCard label="Buy Intent" value={kpis.buyOrSkip.buyIntentCount ?? kpis.buyOrSkip.buy} />
+              <KpiCard label="Skip" value={kpis.buyOrSkip.skipCount ?? kpis.buyOrSkip.skip} />
+              <KpiCard label="Maybe / Undecided" value={kpis.buyOrSkip.undecidedCount ?? kpis.buyOrSkip.maybe} />
+              <KpiCard label="Incomplete / No Response" value={kpis.buyOrSkip.incompleteCount ?? kpis.buyOrSkip.noDecision ?? 0} />
             </div>
-            {/* Reconciliation note — shows all categories sum to total */}
+            {/* Customer evidence disclosure (Req 3) */}
+            {kpis.buyOrSkip.evidence && (
+              <div style={{ marginTop: 8, marginBottom: 12 }}>
+                <EvidenceDisclosure evidence={kpis.buyOrSkip.evidence} />
+              </div>
+            )}
+            {/* Reconciliation — all 4 categories must sum to total */}
             {(() => {
-              const { buy = 0, save: sv = 0, skip = 0, maybe = 0, noDecision = 0, total } = kpis.buyOrSkip;
-              const shown = buy + sv + skip + maybe + noDecision;
-              return shown === total ? null : (
-                <p style={{ ...s.muted, marginTop: 8, fontSize: 11 }}>
-                  Note: {total - shown} interaction{total - shown !== 1 ? "s" : ""} had an unclassified outcome.
+              const buy  = kpis.buyOrSkip.buyIntentCount ?? kpis.buyOrSkip.buy ?? 0;
+              const skip = kpis.buyOrSkip.skipCount ?? kpis.buyOrSkip.skip ?? 0;
+              const unk  = kpis.buyOrSkip.undecidedCount ?? kpis.buyOrSkip.maybe ?? 0;
+              const inc  = kpis.buyOrSkip.incompleteCount ?? kpis.buyOrSkip.noDecision ?? 0;
+              const total = kpis.buyOrSkip.total;
+              const sum   = buy + skip + unk + inc;
+              return (
+                <p style={{ fontSize: 10, color: sum === total ? "#2a5e42" : "#8b2035", fontFamily: INTER, marginTop: 4 }}>
+                  Reconciliation: {buy} buy + {skip} skip + {unk} undecided + {inc} incomplete = {sum} of {total} total
+                  {sum !== total ? ` — ⚠ ${Math.abs(total - sum)} unaccounted` : " ✓"}
                 </p>
               );
             })()}
@@ -2156,7 +2182,7 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
       {sampleMode && advanced?.explainability?.status === "sample" ? (
         <Section title="Explainability Analytics" desc={`SAMPLE PREVIEW — ${advanced.explainability.scopeLabel} · n=${advanced.explainability.evidenceDenominator} explanation-feedback events`} status="sample">
           {advanced.explainability.evidenceDenominator === 0 && (
-            <div style={{ padding: "10px 14px", background: "rgba(139,32,53,0.04)", borderLeft: "3px solid #8b2035", marginBottom: 16, fontSize: 13, color: "#8b2035" }}>
+            <div style={{ padding: "10px 14px", background: "rgba(90,90,100,0.05)", borderLeft: "3px solid #8b2035", marginBottom: 16, fontSize: 13, color: "#8b2035" }}>
               Not enough sample evidence for this period — no explanation-feedback events recorded.
             </div>
           )}
@@ -2457,7 +2483,7 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays })
 
       {/* Collection Health Score */}
       <Section title="Collection Health Score" desc="Deprecated — not used for decisions. Retained for reference only." status={advanced?.collectionHealth?.score != null ? "live" : "insufficient-data"}>
-        <div style={{ padding: "8px 14px", background: "rgba(139,32,53,0.04)", border: "1px solid rgba(139,32,53,0.15)", fontFamily: INTER, fontSize: 11, color: "#8b2035", marginBottom: 16, lineHeight: 1.6 }}>
+        <div style={{ padding: "8px 14px", background: "rgba(90,90,100,0.05)", border: "1px solid rgba(90,90,100,0.2)", fontFamily: INTER, fontSize: 11, color: "#5c5350", marginBottom: 16, lineHeight: 1.6 }}>
           <strong>Deprecated — not used for decisions.</strong> This composite score is not used for sorting, ranking, or action generation. Factor breakdown is shown for reference only.
         </div>
         {advanced?.collectionHealth?.sampleSizeWarning && <SampleSizeWarning n={advanced.collectionHealth.reviewCount ?? 0} min={10} />}
@@ -2618,7 +2644,7 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays })
             </>
           )}
           {advanced.sizeIntelligence.underservedSizes?.length > 0 && (
-            <div style={{ marginTop: 14, padding: "10px 14px", background: "rgba(139,32,53,0.04)", borderLeft: "3px solid #8b2035" }}>
+            <div style={{ marginTop: 14, padding: "10px 14px", background: "rgba(90,90,100,0.05)", borderLeft: "3px solid #8b2035" }}>
               <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "1.5px", color: "#8b2035", marginBottom: 6, fontFamily: "'Inter', sans-serif" }}>Underserved Size Groups</div>
               {advanced.sizeIntelligence.underservedSizes.map((u, i) => (
                 <div key={i} style={{ fontSize: 13, color: "#221516", marginBottom: 3 }}>{u.size} — {u.issue}</div>
@@ -2792,7 +2818,7 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
               { label: "Avg Order Value", value: fmtAed(c.revenue.avgOrderValue), color: "#221516" },
               { label: "Revenue / Session", value: fmtAed(c.revenue.revenuePerSession), color: "#221516" },
               { label: "Session → Purchase Rate", value: `${c.revenue.sessionConversionRate}%`, color: "#2a5e42" },
-              { label: "Assisted vs Unassisted (estimated)", value: `${c.revenue.naiaVsNonNaiaMultiplier}× (baseline estimated)`, color: "#5c5350" },
+              // naiaVsNonNaiaMultiplier removed from KPI tiles (Req 9) — illustrative assumption, shown in Data & AI only
             ].map(({ label, value, color }) => (
               <div key={label} style={{ padding: "18px 20px", background: "#fff" }}>
                 <CLabel>{label}</CLabel>
@@ -2802,7 +2828,7 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
           </div>
           {c.revenue?.nonNaiaBaselineNote && (
             <div style={{ padding: "8px 12px", background: "rgba(107,72,0,0.05)", border: "1px solid rgba(107,72,0,0.12)", marginBottom: 14, fontSize: 11, color: "#6b4800", fontFamily: "serif" }}>
-              <strong>Comparison note:</strong> {c.revenue.nonNaiaBaselineNote}
+              <strong>Illustrative assumption — not observed performance.</strong> nAia vs. non-nAia comparison: {c.revenue.naiaVsNonNaiaMultiplier}× (baseline estimated — {c.revenue.nonNaiaBaselineNote})
             </div>
           )}
           {c.revenue.byProduct?.length > 0 && (
@@ -2906,7 +2932,10 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
         <Section title="Inventory & Sell-Through" desc="Synthetic stock positions — derived from all-time purchases and current stock on hand" status="sample">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px,1fr))", gap: 1, background: "rgba(34,21,22,0.07)", marginBottom: 24 }}>
             {[
-              { label: "Avg Sell-Through", value: `${c.inventory.avgSellThrough}%`, color: "#221516" },
+              // Weighted sell-through (canonical for founder-level decisions): total net sold ÷ total starting units
+              { label: "Weighted Sell-Through (total net ÷ total starting)", value: `${c.inventory.weightedSellThrough ?? c.inventory.avgSellThrough}%`, color: "#221516" },
+              // Unweighted: mean of individual product rates — biased by product mix
+              { label: "Unweighted Avg Sell-Through (mean of product rates)", value: `${c.inventory.avgSellThrough}%`, color: "#5c5350" },
               { label: "Fastest Moving", value: c.inventory.fastestMoving ?? "—", color: "#2a5e42" },
               { label: "Slowest Moving", value: c.inventory.slowestMoving ?? "—", color: "#d97706" },
               { label: "At-Risk Lines", value: c.inventory.atRisk?.length ?? 0, color: c.inventory.atRisk?.length > 0 ? "#8b2035" : "#2a5e42" },
@@ -2952,21 +2981,21 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
 
         {/* LTV Intelligence — computed from sample data */}
         {ltv && ltv.sampleSize > 0 && (
-          <Section title="Observed Customer Revenue to Date" desc={`SAMPLE PREVIEW — ${ltv.scopeLabel} · ${ltv.totalCustomersWithPurchase} customers · ${ltv.evidenceMaturity ?? ""}`} status="sample">
-            <div style={{ padding: "6px 14px", background: "rgba(34,21,22,0.04)", border: "1px solid rgba(34,21,22,0.1)", fontSize: 11, fontFamily: INTER, color: "#5c5350", marginBottom: 16, lineHeight: 1.6 }}>
-              Revenue figures are buy-intent events from nAia sessions — not confirmed Shopify orders. Figures become revenue when Shopify commerce integration is live.
+          <Section title="Illustrative Buy-Intent Value" desc={`SAMPLE PREVIEW — ${ltv.scopeLabel} · ${ltv.totalCustomersWithPurchase} customers · ${ltv.evidenceMaturity ?? ""}`} status="sample">
+            <div style={{ padding: "8px 14px", background: "rgba(107,72,0,0.05)", border: "1px solid rgba(107,72,0,0.15)", fontSize: 11, fontFamily: INTER, color: "#6b4800", marginBottom: 16, lineHeight: 1.6 }}>
+              <strong>Synthetic demonstration derived from buy-intent events.</strong> This is not revenue and does not represent completed Shopify orders. Live revenue metrics remain Awaiting Integration until Shopify commerce is connected.
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px,1fr))", gap: 1, background: "rgba(34,21,22,0.07)", marginBottom: 24 }}>
               {[
-                { label: "Avg Observed Revenue / Customer", value: fmtAed(ltv.avgLtv), color: "#8b2035" },
-                { label: "Top Customer Revenue (Observed)", value: fmtAed(ltv.topCustomerLtv), color: "#221516" },
-                { label: "Avg Order Value", value: fmtAed(ltv.avgOrderValue), color: "#221516" },
-                { label: "Avg Gross Profit / Customer", value: fmtAed(ltv.avgGrossProfit), color: "#2a5e42" },
-                { label: "Repeat Purchase Rate", value: `${ltv.repeatPurchaseRate}%`, color: "#2a5e42" },
-                { label: "Purchase Frequency", value: `${ltv.purchaseFrequency}× avg`, color: "#221516" },
-                { label: "Avg Days Between Purchases", value: ltv.avgDaysBetweenPurchases != null ? `${ltv.avgDaysBetweenPurchases}d` : "—", color: "#221516" },
-                { label: "Observed Customer Lifetime", value: ltv.observedCustomerLifetimeDays != null ? `${ltv.observedCustomerLifetimeDays}d median` : "—", color: "#221516" },
-                { label: "Customers with Purchases", value: ltv.totalCustomersWithPurchase, color: "#221516" },
+                { label: "Avg Buy-Intent Value / Customer", value: fmtAed(ltv.avgLtv), color: "#8b2035" },
+                { label: "Top Customer Buy-Intent Value", value: fmtAed(ltv.topCustomerLtv), color: "#221516" },
+                { label: "Avg Buy-Intent Order Value", value: fmtAed(ltv.avgOrderValue), color: "#221516" },
+                { label: "Avg Illustrative Gross Profit / Customer", value: fmtAed(ltv.avgGrossProfit), color: "#2a5e42" },
+                { label: "Repeat Buy-Intent Rate", value: `${ltv.repeatPurchaseRate}%`, color: "#2a5e42" },
+                { label: "Buy-Intent Frequency", value: `${ltv.purchaseFrequency}× avg`, color: "#221516" },
+                { label: "Avg Days Between Buy-Intent Events", value: ltv.avgDaysBetweenPurchases != null ? `${ltv.avgDaysBetweenPurchases}d` : "—", color: "#221516" },
+                { label: "Observed Customer Engagement Duration", value: ltv.observedCustomerLifetimeDays != null ? `${ltv.observedCustomerLifetimeDays}d median` : "—", color: "#221516" },
+                { label: "Customers with Buy-Intent", value: ltv.totalCustomersWithPurchase, color: "#221516" },
               ].map(({ label, value, color }) => (
                 <div key={label} style={{ padding: "18px 20px", background: "#fff" }}>
                   <CLabel>{label}</CLabel>
@@ -3043,7 +3072,7 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
         <Section title="Directional/Pre-Commercial Product Opportunity Score" desc="Deprecated — not used for decisions. Shown for reference only." status={sampleMode ? "sample" : (advanced?.opportunityScores?.length > 0 ? "experimental" : "insufficient-data")}>
           {advanced?.opportunityScores?.length > 0 ? (
             <>
-              <div style={{ padding: "8px 14px", background: "rgba(139,32,53,0.04)", border: "1px solid rgba(139,32,53,0.15)", fontSize: 11, fontFamily: INTER, color: "#8b2035", marginBottom: 16, lineHeight: 1.6 }}>
+              <div style={{ padding: "8px 14px", background: "rgba(90,90,100,0.05)", border: "1px solid rgba(90,90,100,0.2)", fontSize: 11, fontFamily: INTER, color: "#5c5350", marginBottom: 16, lineHeight: 1.6 }}>
                 <strong>Deprecated — not used for decisions.</strong> Score is not used for sorting, ranking, or action generation. Factor breakdown shown for reference only.
               </div>
               <div style={{ overflowX: "auto" }}>
@@ -3082,7 +3111,7 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
               <InsufficientCard label="Investment priority ranking" description="Not enough reviewed sessions to rank products by opportunity." sampleSize={rel.sampleSize} />
             ) : (
               <>
-                <div style={{ padding: "8px 14px", background: "rgba(139,32,53,0.04)", border: "1px solid rgba(139,32,53,0.15)", fontFamily: INTER, fontSize: 11, color: "#8b2035", marginBottom: 20, lineHeight: 1.6 }}>
+                <div style={{ padding: "8px 14px", background: "rgba(90,90,100,0.05)", border: "1px solid rgba(90,90,100,0.2)", fontFamily: INTER, fontSize: 11, color: "#5c5350", marginBottom: 20, lineHeight: 1.6 }}>
                   <strong>Deprecated — not used for decisions.</strong> Score column is shown for reference only. Table is sorted by average rating. Do not use score for investment or ranking decisions.
                 </div>
                 <div style={{ overflowX: "auto" }}>
@@ -3133,7 +3162,7 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
       <Section title="Directional/Pre-Commercial Product Opportunity Score" desc="Deprecated — not used for decisions. Shown for reference only." status={advanced?.opportunityScores?.length > 0 ? "experimental" : "insufficient-data"}>
         {advanced?.opportunityScores?.length > 0 ? (
           <>
-            <div style={{ padding: "8px 14px", background: "rgba(139,32,53,0.04)", border: "1px solid rgba(139,32,53,0.15)", fontSize: 11, fontFamily: INTER, color: "#8b2035", marginBottom: 16, lineHeight: 1.6 }}>
+            <div style={{ padding: "8px 14px", background: "rgba(90,90,100,0.05)", border: "1px solid rgba(90,90,100,0.2)", fontSize: 11, fontFamily: INTER, color: "#5c5350", marginBottom: 16, lineHeight: 1.6 }}>
               <strong>Deprecated — not used for decisions.</strong> Score is not used for sorting, ranking, or action generation. Factor breakdown shown for reference only.
             </div>
             <div style={{ overflowX: "auto" }}>
@@ -3166,8 +3195,8 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
       </Section>
 
       <AwaitingCard
-        label="LTV Intelligence"
-        description="Requires Shopify order history and customer purchase data. When integrated, will show: average LTV by personality type, repeat purchase patterns, and which products drive highest-value customers."
+        label="Illustrative Buy-Intent Segments (Live Revenue Awaiting Integration)"
+        description="Live revenue segmentation requires Shopify order history and customer purchase data. When integrated, will show: average revenue by personality type, repeat purchase patterns, and which products drive highest-value customers."
       />
 
       <RoadmapPanel title="Commercial Integration Roadmap" items={[
@@ -3712,12 +3741,12 @@ function DataAiIntegrationReadiness() {
       metricsUnlocked: "Explanation agreement rate, reasons that resonate, reasons rejected, agreement by personality",
     },
     {
-      label: "LTV Intelligence", status: "awaiting-integration",
+      label: "Illustrative Buy-Intent Segments (Live Revenue Awaiting Integration)", status: "awaiting-integration",
       source: "Derived from Shopify order data (blocked on order webhook)",
-      desc: "Repeat purchase rate, avg days between purchases, and LTV by personality require order data.",
+      desc: "Live revenue segmentation by personality, repeat purchase rate, and avg days between purchases require Shopify order data.",
       blocker: "Depends on Shopify Order & Revenue integration above.",
       nextAction: "Complete Shopify order integration first.",
-      metricsUnlocked: "LTV by personality, LTV by desired feeling, repeat purchase patterns, products driving repeat",
+      metricsUnlocked: "Revenue by personality, revenue by desired feeling, repeat purchase patterns, products driving repeat",
     },
   ];
   const statusStyle = (st) => st === "live" ? { color: "#2a5e42", bg: "rgba(42,94,66,0.08)" } : { color: "#5c5350", bg: "rgba(122,111,106,0.08)" };
@@ -3797,6 +3826,12 @@ function DataAiLearningRoadmap({ advanced, sampleMode }) {
           <Row label="Love decisions" value={al.precision.count} />
           <Row label="Skip decisions" value={al.falsePositiveRate.count} />
           <Row label="Total decided" value={al.precision.denominator} />
+          {/* Canonical evidence disclosure (Req 3) */}
+          {al.canonicalEvidence && (
+            <div style={{ marginTop: 8 }}>
+              <EvidenceDisclosure evidence={al.canonicalEvidence} />
+            </div>
+          )}
           {al.precision.measurementNote && (
             <div style={{ marginTop: 8, padding: "6px 8px", background: "rgba(107,72,0,0.05)", borderLeft: "2px solid rgba(107,72,0,0.3)", fontSize: 10, color: "#6b4800", fontFamily: SERIF_L }}>
               {al.precision.measurementNote}
@@ -3843,12 +3878,13 @@ function DataAiLearningRoadmap({ advanced, sampleMode }) {
           ))}
         </MetricCard>
 
-        {/* Calibration */}
+        {/* Calibration — measurement states (Req 2): each tier shows its canonical state */}
         <MetricCard label="Match Score Calibration" value={`${al.calibration.score}/100`} subValue={`Trend: ${trendLabel(al.calibration.trend)}`} accent="#221516">
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: MONO_L }}>
               <thead><tr>
                 <th style={{ textAlign: "left", padding: "4px 6px", color: "#7a6f6a", fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px" }}>Tier</th>
+                <th style={{ padding: "4px 6px", color: "#7a6f6a", fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px" }}>State</th>
                 <th style={{ padding: "4px 6px", color: "#7a6f6a", fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px" }}>Predicted</th>
                 <th style={{ padding: "4px 6px", color: "#7a6f6a", fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px" }}>Actual</th>
                 <th style={{ padding: "4px 6px", color: "#7a6f6a", fontFamily: INTER_L, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px" }}>Gap</th>
@@ -3862,6 +3898,7 @@ function DataAiLearningRoadmap({ advanced, sampleMode }) {
                   return (
                     <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.5)" : "transparent" }}>
                       <td style={{ padding: "5px 6px", fontFamily: SERIF_L, fontSize: 12 }}>{t.tier}</td>
+                      <td style={{ padding: "5px 6px" }}>{t.measurementState ? <MeasurementStatePill state={t.measurementState} /> : null}</td>
                       <td style={{ padding: "5px 6px", textAlign: "center" }}>{t.predictedRate}%</td>
                       <td style={{ padding: "5px 6px", textAlign: "center", fontWeight: 700, color: hasData ? "#221516" : "#9CA3AF" }}>
                         {hasData ? `${t.actualRate}%` : "—"}
@@ -4191,3 +4228,34 @@ const s = {
   linkBtn:   { background: "none", border: "none", cursor: "pointer", padding: "4px 0", fontSize: 9, color: "#8b2035", fontFamily: INTER, letterSpacing: "1.5px", textTransform: "uppercase", fontWeight: 600, marginTop: 10, display: "block" },
   periodBtn: { padding: "5px 10px", border: "1px solid rgba(34,21,22,0.16)", cursor: "pointer", fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "1.5px", fontWeight: 600 },
 };
+
+// ── Req 2: Canonical measurement state pill — renders all 6 states ─────────────
+const MEASUREMENT_STATE_CONFIG = {
+  measured:                 { label: "Measured",              bg: "#e8f5e9", color: "#2a5e42", border: "rgba(42,94,66,0.2)" },
+  insufficient_evidence:    { label: "Insufficient Evidence", bg: "#fff8e1", color: "#6b4800", border: "rgba(107,72,0,0.2)" },
+  no_eligible_observations: { label: "No Observations",       bg: "#f5f5f5", color: "#5c5350", border: "rgba(92,83,80,0.2)" },
+  observed_zero:            { label: "Observed Zero",         bg: "#e8f5e9", color: "#2a5e42", border: "rgba(42,94,66,0.15)" },
+  awaiting_integration:     { label: "Awaiting Integration",  bg: "#f5f5f5", color: "#5c5350", border: "rgba(92,83,80,0.2)" },
+  not_applicable:           { label: "Not Applicable",        bg: "#f5f5f5", color: "#9ca3af", border: "rgba(156,163,175,0.2)" },
+};
+function MeasurementStatePill({ state }) {
+  const cfg = MEASUREMENT_STATE_CONFIG[state] ?? MEASUREMENT_STATE_CONFIG.not_applicable;
+  return (
+    <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 3, background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`, fontSize: 9, fontFamily: INTER, fontWeight: 600, letterSpacing: "0.5px", lineHeight: 1.6 }}>
+      {cfg.label}
+    </span>
+  );
+}
+
+// ── Req 3: Customer-based evidence disclosure ──────────────────────────────────
+function EvidenceDisclosure({ evidence, period }) {
+  if (!evidence) return null;
+  const { uniqueCustomerCount, eventCount, confidenceLevel } = evidence;
+  const p = period ?? evidence.period ?? "";
+  return (
+    <span style={{ fontSize: 9, color: "#7a6f6a", fontFamily: INTER, letterSpacing: "0.3px" }}>
+      {uniqueCustomerCount} customer{uniqueCustomerCount !== 1 ? "s" : ""} · {eventCount} events{p ? ` · ${p}` : ""}
+      {confidenceLevel ? <> · <strong style={{ fontWeight: 600 }}>{confidenceLevel}</strong></> : null}
+    </span>
+  );
+}
