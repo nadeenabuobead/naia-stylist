@@ -60,7 +60,6 @@ export async function loader({ request }) {
 export function ErrorBoundary() {
   return (
     <div style={s.wrap}>
-      <GFonts />
       <div style={s.inner}>
         <div style={{ ...s.section, borderLeft: "4px solid #8b2035" }}>
           <h2 style={{ ...s.h2, color: "#8b2035" }}>Dashboard unavailable</h2>
@@ -240,15 +239,6 @@ function normalizeArray(arr) {
 }
 
 // ── Shared components ─────────────────────────────────────────────────────────
-
-function GFonts() {
-  return (
-    <link
-      href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,400;1,600;1,700&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Inter:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
-  );
-}
 
 function Section({ title, desc, status, children, action }) {
   return (
@@ -430,7 +420,6 @@ export default function DesignerDashboard() {
   return (
     <SampleModeCtx.Provider value={sampleMode}>
     <div style={s.wrap}>
-      <GFonts />
       <div style={s.inner}>
 
         {/* ── Sample Preview banner — only visible while sample mode is active ─ */}
