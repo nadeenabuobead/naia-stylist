@@ -345,6 +345,84 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ suggestion, error: null });
     }
 
+    if (intent === "regenerate") {
+      // New Look, Same Vibe — generates another OutfitSuggestion on the same StylingSession.
+      // Reads all context from the session record so no extra form params are required.
+      const session = await prisma.stylingSession.findUnique({ where: { id: sessionId } });
+      if (!session) return data({ error: "Session not found" }, { status: 404 });
+      if (naiaCustomer && session.customerId !== naiaCustomer.id) {
+        return data({ error: "Not found" }, { status: 404 });
+      }
+
+      const sessionSource = styleSourceToSessionSource(session.styleFrom);
+      const anchorResult = await resolveActionAnchor(sessionSource, session.customerId, null, null);
+      if (!anchorResult.ok) {
+        return data({ error: anchorResult.message }, { status: anchorResult.status });
+      }
+
+      let journeyCtx = null;
+      if (naiaCustomer) {
+        try { journeyCtx = await buildCustomerJourneyContext(naiaCustomer.id); } catch { /* graceful */ }
+      }
+
+      const engineInput = buildEngineInput({
+        moods: session.currentMood ? [session.currentMood] : [],
+        desiredFeelings: session.desiredFeeling ? [session.desiredFeeling] : [],
+        bodyNeeds: [],
+        coverageConditional: null,
+        occasion: session.occasion ?? "everyday",
+        formalityConditional: null,
+        todayColours: { preferred: [], avoid: [] },
+        practicalIds: [],
+        source: sessionSource,
+        profile: buildEphemeralContextSignals(buildProfileSignals(naiaCustomer?.onboardingProfile), journeyCtx),
+        anchor: anchorResult.anchor,
+      });
+
+      const styleResult = await computeStyleMeResult(engineInput);
+      const dbPayload = buildDbPayload(styleResult);
+
+      const suggestion = await prisma.outfitSuggestion.create({
+        data: {
+          sessionId,
+          moodDescription: dbPayload.moodDescriptionJson,
+          outfitName: dbPayload.outfitName,
+          whyThisWorks: dbPayload.whyThisWorks,
+          confidenceBoost: dbPayload.confidenceBoost,
+          perfumeRec: dbPayload.perfumeRec,
+          hairstyleRec: dbPayload.hairstyleRec,
+          makeupVibeRec: dbPayload.makeupVibeRec,
+          songRec: dbPayload.songRec,
+          songArtist: dbPayload.songArtist,
+          items: {
+            create: dbPayload.items.map((item) => ({
+              itemType: item.itemType,
+              productTitle: item.productTitle,
+              productImageUrl: item.productImageUrl,
+              shopifyProductId: item.shopifyProductId,
+              closetItemId: item.closetItemId ?? undefined,
+              stylingNotes: item.stylingNotes,
+              productUrl: item.productUrl ?? undefined,
+            })),
+          },
+        },
+        include: { items: true },
+      });
+
+      try {
+        const meta = parseSuggestionMetadata(dbPayload.moodDescriptionJson);
+        recordJourneyEvent(emitRecommendationServed({
+          customerId: session.customerId,
+          sessionId,
+          outcome: (meta?.outcome as "nadine-recommendation" | "closet-led" | "no-eligible-product") ?? "nadine-recommendation",
+          primaryHandle: meta?.primaryHandle ?? null,
+          alternativeCount: meta?.alternatives?.length ?? 0,
+        }));
+      } catch { /* never block */ }
+
+      return data({ suggestion, error: null });
+    }
+
     if (intent === "save") {
       // Case 1: Completed-Passport customer — immediate save (C3.0 path preserved).
       if (naiaCustomer?.onboardingProfile?.completed) {
@@ -570,7 +648,7 @@ export function shouldRevalidate({
   // the cookie-path loader creates a new StylingSession on every invocation and returns
   // isLoading:true, which would put the result page back into the loading/generate state.
   const intent = formData?.get("intent");
-  if (intent === "generate" || intent === "save" || intent === "save-pending" || intent === "clear-pending" || intent === "review") return false;
+  if (intent === "generate" || intent === "regenerate" || intent === "save" || intent === "save-pending" || intent === "clear-pending" || intent === "review") return false;
   return defaultShouldRevalidate;
 }
 

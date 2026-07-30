@@ -1,5 +1,5 @@
-import type { LinksFunction, LoaderFunctionArgs } from "react-router";
-import { Link, useLoaderData } from "react-router";
+import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";
+import { Form, Link, useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -9,6 +9,21 @@ import MyNaiaPageIntro from "~/components/my-naia/MyNaiaPageIntro";
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
 ];
+
+export async function action({ request }: ActionFunctionArgs) {
+  const customer = await requireCurrentNaiaCustomer(request);
+  const formData = await request.formData();
+  const intent = formData.get("intent") as string;
+  const lookId = formData.get("lookId") as string;
+
+  if (intent === "delete" && lookId) {
+    await prisma.savedLook.deleteMany({
+      where: { id: lookId, customerId: customer.id },
+    });
+  }
+
+  return null;
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
@@ -23,6 +38,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
   });
 
+  // Resolve the original StylingSession ID for each saved look so the
+  // "View original session" link uses the correct ?sessionId= param.
+  const suggestionIds = savedLooks.map((l) => l.fromSuggestionId).filter(Boolean) as string[];
+  const suggestionSessionMap = new Map<string, string>();
+  if (suggestionIds.length > 0) {
+    const suggestions = await prisma.outfitSuggestion.findMany({
+      where: { id: { in: suggestionIds } },
+      select: { id: true, sessionId: true },
+    });
+    for (const s of suggestions) suggestionSessionMap.set(s.id, s.sessionId);
+  }
+
   return {
     looks: savedLooks.map((look) => ({
       id: look.id,
@@ -35,6 +62,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       timesWorn: look.timesWorn,
       lastWorn: look.lastWorn?.toISOString() ?? null,
       fromSuggestionId: look.fromSuggestionId,
+      originalSessionId: look.fromSuggestionId ? (suggestionSessionMap.get(look.fromSuggestionId) ?? null) : null,
       createdAt: look.createdAt.toISOString(),
       items: look.items.map((item) => ({
         id: item.id,
@@ -240,11 +268,11 @@ function LookCard({ look }: { look: Look }) {
         </p>
       )}
 
-      {/* Session link */}
-      {look.fromSuggestionId && (
-        <div style={{ marginTop: "16px", paddingTop: "16px", borderTop: "1px solid var(--c-border, #e5e0d8)" }}>
+      {/* Session link + delete */}
+      <div style={{ marginTop: "16px", paddingTop: "16px", borderTop: "1px solid var(--c-border, #e5e0d8)", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+        {look.originalSessionId ? (
           <Link
-            to={`/style-me/result?sessionId=${look.fromSuggestionId}`}
+            to={`/style-me/result?sessionId=${look.originalSessionId}`}
             style={{
               fontFamily: "var(--ff-ui, sans-serif)",
               fontSize: "11px",
@@ -255,8 +283,27 @@ function LookCard({ look }: { look: Look }) {
           >
             View original session →
           </Link>
-        </div>
-      )}
+        ) : <span />}
+        <Form method="post" style={{ margin: 0 }}>
+          <input type="hidden" name="intent" value="delete" />
+          <input type="hidden" name="lookId" value={look.id} />
+          <button
+            type="submit"
+            style={{
+              background: "none",
+              border: "none",
+              fontFamily: "var(--ff-ui, sans-serif)",
+              fontSize: "11px",
+              letterSpacing: "0.08em",
+              color: "var(--c-muted, #7a6f6a)",
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
+            Remove
+          </button>
+        </Form>
+      </div>
     </div>
   );
 }
