@@ -61,20 +61,51 @@ function hashForIndex(str) {
   return h;
 }
 
+// Idempotency policy: create a new analysis attempt per submission.
+// Guard: if the same customer submits the same imageUrl within 60 s (double-click /
+// network retry), skip the DB write and return the fresh analysis without a duplicate record.
+const IDEMPOTENCY_WINDOW_MS = 60_000;
+
 async function analyzeItem(request) {
+  // ── 1. Parse body ──────────────────────────────────────────────────────────
+  let body;
   try {
-    const { imageUrl, category, color, brand, itemLink } = await request.json();
-    
-    if (!imageUrl) {
-      return json({ error: "Image required" }, { status: 400 });
-    }
+    body = await request.json();
+  } catch {
+    return json({ error: "Invalid request body" }, { status: 400 });
+  }
 
-    const naiaCustomer = await getCurrentNaiaCustomer(request);
-    if (!naiaCustomer) {
-      return json({ error: "Not authenticated" }, { status: 401 });
-    }
+  const { imageUrl, category, color, brand, itemLink } = body;
 
-    const styleProfile = naiaCustomer.onboardingProfile;
+  if (!imageUrl) {
+    return json({ error: "Image required" }, { status: 400 });
+  }
+
+  // ── 2. Identity — NaiaSession only; guest record must never receive writes ─
+  const naiaCustomer = await getCurrentNaiaCustomer(request);
+  if (!naiaCustomer) {
+    return json({ error: "not_authenticated" }, { status: 401 });
+  }
+  // The shared guest customer (shopifyCustomerId: "guest") is a style-me session placeholder.
+  // It must never receive BuyOrSkipAnalysis writes.
+  if (naiaCustomer.shopifyCustomerId === "guest") {
+    return json({ error: "not_authenticated" }, { status: 401 });
+  }
+
+  // ── 3. Idempotency check ───────────────────────────────────────────────────
+  const windowStart = new Date(Date.now() - IDEMPOTENCY_WINDOW_MS);
+  const recentRecord = await prisma.buyOrSkipAnalysis.findFirst({
+    where: {
+      customerId: naiaCustomer.id,
+      imageUrl,
+      createdAt: { gte: windowStart },
+    },
+    select: { id: true },
+    orderBy: { createdAt: "desc" },
+  });
+  const isIdempotentRepeat = recentRecord !== null;
+
+  const styleProfile = naiaCustomer.onboardingProfile;
 
     const closetData = await prisma.customer.findUnique({
       where: { id: naiaCustomer.id },
@@ -96,23 +127,26 @@ async function analyzeItem(request) {
     const compatibleClosetCategories = CLOSET_COMPATIBLE_CATEGORIES[normalizedCategory] || ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"];
     const eligibleClosetItems = closetItems.filter(i => compatibleClosetCategories.includes(i.category));
 
-    const analysisResponse = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01"
-      },
-      body: JSON.stringify({
-        model: "claude-opus-4-5-20251101",
-        max_tokens: 2000,
-        messages: [{
-          role: "user",
-          content: [
-            { type: "image", source: { type: "url", url: imageUrl } },
-            {
-              type: "text",
-              text: `Analyze this clothing item.
+    // ── 5. Call Claude AI ──────────────────────────────────────────────────────
+    let analysisResponse;
+    try {
+      analysisResponse = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": process.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01"
+        },
+        body: JSON.stringify({
+          model: "claude-opus-4-5-20251101",
+          max_tokens: 2000,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "image", source: { type: "url", url: imageUrl } },
+              {
+                type: "text",
+                text: `Analyze this clothing item.
 
 Known details provided by user:
 - Category: ${category||"unknown"}
@@ -158,24 +192,32 @@ Respond ONLY with valid JSON, no markdown:
   "naiaMatch": { "title": "...", "reason": "..." },
   "finalThought": "..."
 }`
-            }
-          ]
-        }]
-      })
-    });
-
-    const data = await analysisResponse.json();
-    console.log("Claude response status:", analysisResponse.status);
-    console.log("Claude response:", JSON.stringify(data).slice(0, 500));
-    
-    if (!data.content || !data.content[0]) {
-      console.error('Unexpected API response:', data);
-      throw new Error('Invalid API response: ' + JSON.stringify(data));
+              }
+            ]
+          }]
+        })
+      });
+    } catch (fetchErr) {
+      console.error("[buy-skip] AI fetch failed:", fetchErr?.message?.slice(0, 80));
+      return json({ error: "Analysis service unavailable. Please try again." }, { status: 503 });
     }
-    
-    const text = data.content[0].text;
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    const analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(text);
+
+    // ── 6. Parse AI response ───────────────────────────────────────────────────
+    const aiData = await analysisResponse.json();
+    if (!aiData.content || !aiData.content[0]) {
+      console.error("[buy-skip] Unexpected AI response shape:", JSON.stringify(aiData).slice(0, 200));
+      return json({ error: "Analysis failed. Please try again." }, { status: 502 });
+    }
+
+    let analysis;
+    try {
+      const text = aiData.content[0].text;
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(text);
+    } catch {
+      console.error("[buy-skip] Could not parse AI response as JSON");
+      return json({ error: "Analysis failed. Please try again." }, { status: 502 });
+    }
 
     // Harden closetPairings: validate against eligible closet items only; all fields individually type-checked
     const eligibleClosetNameMap = new Map(
@@ -230,23 +272,39 @@ Respond ONLY with valid JSON, no markdown:
       analysis.naiaMatch = { title: fallback.title, url: fallback.url, reason: null };
     }
 
-    // Persist Buy/Skip analysis — verdict is stated intent, never a transaction signal
-    try {
+    // ── 8. Persist analysis (awaited; failure returns 503 — not swallowed) ────
+    // Verdict is stated intent only — never a transaction, purchase, or revenue signal.
+    // Skip the DB write when idempotency window detects a recent duplicate.
+    if (!isIdempotentRepeat) {
       const verdictMap = { BUY: "BUY", SKIP: "SKIP", MAYBE: "MAYBE" };
       const persistedVerdict = verdictMap[analysis.verdict] ?? "INCOMPLETE";
-      const analysisRecord = await prisma.buyOrSkipAnalysis.create({
-        data: {
-          customerId: naiaCustomer.id,
-          verdict: persistedVerdict,
-          reasoning: typeof analysis.finalThought === "string" && analysis.finalThought.trim() !== ""
-            ? analysis.finalThought.slice(0, 1000)
-            : "No reasoning provided.",
-          productName: null,
-          imageUrl,
-          source: "buy-or-skip",
-          schemaVersion: "1.0",
-        },
-      });
+
+      let analysisRecord;
+      try {
+        analysisRecord = await prisma.buyOrSkipAnalysis.create({
+          data: {
+            customerId: naiaCustomer.id,
+            verdict: persistedVerdict,
+            reasoning:
+              typeof analysis.finalThought === "string" && analysis.finalThought.trim() !== ""
+                ? analysis.finalThought.slice(0, 1000)
+                : "No reasoning provided.",
+            productName: null,
+            imageUrl,
+            source: "buy-or-skip",
+            schemaVersion: "1.0",
+          },
+        });
+      } catch (dbErr) {
+        // Log safely — no DB schema detail, no token, no customer identifiers
+        console.error("[buy-skip] persistence failed:", dbErr?.code ?? "unknown");
+        return json(
+          { error: "Analysis could not be saved. Please try again." },
+          { status: 503 },
+        );
+      }
+
+      // Event emitted only after confirmed DB write
       recordJourneyEvent(emitBuySkipSubmitted({
         customerId: naiaCustomer.id,
         sessionId: "buy-or-skip",
@@ -254,14 +312,15 @@ Respond ONLY with valid JSON, no markdown:
         verdict: persistedVerdict,
         category: normalizedCategory || null,
       }));
-    } catch { /* persistence failure must never block the analysis response */ }
+    }
 
-    return json({ success: true, analysis, closetItemCount: closetItems.length, eligibleClosetItemCount: eligibleClosetItems.length });
-
-  } catch (error) {
-    console.error("Analysis error:", error);
-    return json({ error: "Analysis failed" }, { status: 500 });
-  }
+    return json({
+      success: true,
+      analysis,
+      closetItemCount: closetItems.length,
+      eligibleClosetItemCount: eligibleClosetItems.length,
+      idempotentRepeat: isIdempotentRepeat,
+    });
 }
 
 

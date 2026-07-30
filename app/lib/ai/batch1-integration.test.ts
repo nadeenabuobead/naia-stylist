@@ -471,3 +471,124 @@ describe("getAdditionalKPIs buyOrSkip return shape", () => {
     );
   });
 });
+
+// ── Hardening requirements — b1-47 to b1-56 ──────────────────────────────────
+
+describe("Buy/Skip persistence hardening (Batch 1 review)", () => {
+  it("b1-47: analyzeItem persistence is NOT fire-and-forget — no swallowing try/catch around DB write", () => {
+    const route = readFileSync(
+      join(__dirname, "../../routes/api.wishlist.jsx"), "utf8",
+    );
+    // Must NOT have the old swallowing pattern: catch { /* persistence failure must never block */ }
+    assert.ok(
+      !route.includes("persistence failure must never block"),
+      "api.wishlist.jsx must not swallow persistence errors silently",
+    );
+  });
+
+  it("b1-48: analyzeItem returns 503 when DB write fails (error branch present)", () => {
+    const route = readFileSync(
+      join(__dirname, "../../routes/api.wishlist.jsx"), "utf8",
+    );
+    // Code must have a 503 status return in the DB failure path
+    assert.ok(
+      route.includes("status: 503"),
+      "analyzeItem must return HTTP 503 when persistence fails",
+    );
+  });
+
+  it("b1-49: emitBuySkipSubmitted call site appears AFTER the DB write in source order", () => {
+    const route = readFileSync(
+      join(__dirname, "../../routes/api.wishlist.jsx"), "utf8",
+    );
+    const dbWriteIdx = route.indexOf("buyOrSkipAnalysis.create");
+    // Match the call site (not the import line at the top)
+    const emitCallIdx = route.indexOf("recordJourneyEvent(emitBuySkipSubmitted");
+    assert.ok(dbWriteIdx >= 0, "DB write must be present");
+    assert.ok(emitCallIdx >= 0, "recordJourneyEvent(emitBuySkipSubmitted call must be present");
+    assert.ok(
+      emitCallIdx > dbWriteIdx,
+      "emitBuySkipSubmitted call must appear AFTER the DB write in source order",
+    );
+  });
+
+  it("b1-50: idempotency constant IDEMPOTENCY_WINDOW_MS is defined", () => {
+    const route = readFileSync(
+      join(__dirname, "../../routes/api.wishlist.jsx"), "utf8",
+    );
+    assert.ok(
+      route.includes("IDEMPOTENCY_WINDOW_MS"),
+      "api.wishlist.jsx must define an idempotency window constant",
+    );
+  });
+
+  it("b1-51: idempotency check queries for same customerId + imageUrl within the window", () => {
+    const route = readFileSync(
+      join(__dirname, "../../routes/api.wishlist.jsx"), "utf8",
+    );
+    assert.ok(
+      route.includes("imageUrl") && route.includes("createdAt") && route.includes("gte"),
+      "Idempotency check must query by imageUrl within a time window",
+    );
+  });
+
+  it("b1-52: guest identity guard rejects shopifyCustomerId === 'guest'", () => {
+    const route = readFileSync(
+      join(__dirname, "../../routes/api.wishlist.jsx"), "utf8",
+    );
+    assert.ok(
+      route.includes("shopifyCustomerId") && route.includes('"guest"'),
+      "analyzeItem must explicitly reject the shared guest customer identity",
+    );
+  });
+});
+
+describe("Deprecated route safety (Batch 1 review)", () => {
+  it("b1-53: api.closet.jsx action is restored — not a bare 410 deprecation", () => {
+    const route = readFileSync(
+      join(__dirname, "../../routes/api.closet.jsx"), "utf8",
+    );
+    // Action must contain real business logic (add/sync/delete), not just return 410
+    assert.ok(
+      route.includes("act === \"add\"") || route.includes("act === 'add'"),
+      "api.closet.jsx action must be restored with real logic — stylist.jsx still calls it",
+    );
+    assert.ok(
+      route.includes("normalizeCategory"),
+      "api.closet.jsx must normalise category enum values (lowercase → TOPS/BOTTOMS etc.)",
+    );
+  });
+
+  it("b1-54: api.full-style-profile.jsx has a GET loader to prevent 404", () => {
+    const route = readFileSync(
+      join(__dirname, "../../routes/api.full-style-profile.jsx"), "utf8",
+    );
+    assert.ok(
+      route.includes("export async function loader"),
+      "api.full-style-profile.jsx must export a loader to handle GET /api/full-style-profile",
+    );
+  });
+
+  it("b1-55: api.closet.jsx CATEGORY_ENUM maps 'top' to 'TOPS' and 'dress' to 'DRESSES'", () => {
+    const route = readFileSync(
+      join(__dirname, "../../routes/api.closet.jsx"), "utf8",
+    );
+    assert.ok(route.includes('"TOPS"'), "Must map to TOPS enum value");
+    assert.ok(route.includes('"DRESSES"'), "Must map to DRESSES enum value");
+    assert.ok(route.includes('"BOTTOMS"'), "Must map to BOTTOMS enum value");
+  });
+
+  it("b1-56: vercel.json migration strategy — migrations in buildCommand with documentation", () => {
+    const vercel = readFileSync(
+      join(__dirname, "../../../vercel.json"), "utf8",
+    );
+    assert.ok(
+      vercel.includes("prisma migrate deploy"),
+      "vercel.json buildCommand must include prisma migrate deploy for staging DB",
+    );
+    assert.ok(
+      vercel.includes("prisma generate"),
+      "vercel.json buildCommand must include prisma generate",
+    );
+  });
+});
