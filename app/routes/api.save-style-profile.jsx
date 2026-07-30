@@ -1,6 +1,7 @@
 import prisma from "../db.server";
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import { quizQuestions } from "../lib/onboarding/quiz-data";
+import { emitPassportSaved, recordJourneyEvent } from "../lib/ai/journey-events.server";
 
 const RECOGNISED_FIELDS = new Set([
   "stylePersonalities", "desiredImpression", "lifestyle", "desiredFeelings",
@@ -164,6 +165,17 @@ export async function action({ request }) {
     if (result.count !== 1) {
       return Response.json({ error: "profile_changed" }, { status: 409 });
     }
+    // Emit passport_updated — this is an edit to an existing profile
+    try {
+      const nonEmptyFields = Object.values(profileData).filter(v =>
+        Array.isArray(v) ? v.length > 0 : v != null && v !== ""
+      ).length;
+      recordJourneyEvent(emitPassportSaved({
+        customerId: customer.id,
+        isFirstCompletion: false,
+        fieldCount: nonEmptyFields,
+      }));
+    } catch { /* event emission never blocks the response */ }
   } else {
     // No existing profile — allow create only when draft was based on a clean slate
     if (baseProfileUpdatedAt !== null) {
@@ -181,6 +193,17 @@ export async function action({ request }) {
       }
       throw err;
     }
+    // Emit passport_completed — first time this customer finishes their passport
+    try {
+      const nonEmptyFields = Object.values(profileData).filter(v =>
+        Array.isArray(v) ? v.length > 0 : v != null && v !== ""
+      ).length;
+      recordJourneyEvent(emitPassportSaved({
+        customerId: customer.id,
+        isFirstCompletion: true,
+        fieldCount: nonEmptyFields,
+      }));
+    } catch { /* event emission never blocks the response */ }
   }
 
   return Response.json({ success: true });

@@ -20,7 +20,7 @@
     "vite": "vite",
     "typecheck": "react-router typegen && tsc --noEmit",
     "generate:lenses": "tsx scripts/generate-lenses.ts",
-    "test:dashboard": "node --test --import tsx/esm app/lib/designer-sample-data.validation.test.ts app/lib/ai/canonical-reconciliation.test.ts"
+    "test:dashboard": "node --test --import tsx/esm app/lib/designer-sample-data.validation.test.ts app/lib/ai/canonical-reconciliation.test.ts app/lib/ai/batch1-integration.test.ts"
   },
   "type": "module",
   "engines": {

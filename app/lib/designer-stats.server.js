@@ -396,13 +396,11 @@ export async function getDesignerStats(dateRangeDays = 30) {
 
     const dnaCount = {};
     customers.forEach(c => {
-      if (c.onboardingProfile?.styleDNA) {
-        try {
-          const dnas = JSON.parse(c.onboardingProfile.styleDNA);
-          dnas.forEach(dna => {
-            dnaCount[dna] = (dnaCount[dna] || 0) + 1;
-          });
-        } catch {}
+      const personalities = c.onboardingProfile?.stylePersonalities;
+      if (Array.isArray(personalities) && personalities.length > 0) {
+        personalities.forEach(dna => {
+          dnaCount[dna] = (dnaCount[dna] || 0) + 1;
+        });
       }
     });
 
@@ -1251,11 +1249,13 @@ export async function getAdditionalKPIs() {
     ]);
 
     // 3. Buy or Skip verdicts
-    const [totalBuyOrSkip, buyCount, skipCount, maybeCount] = await Promise.all([
+    const [totalBuyOrSkip, buyCount, skipCount, maybeCount, incompleteCount, uniqueBuySkipCustomers] = await Promise.all([
       prisma.buyOrSkipAnalysis.count(),
       prisma.buyOrSkipAnalysis.count({ where: { verdict: "BUY" } }),
       prisma.buyOrSkipAnalysis.count({ where: { verdict: "SKIP" } }),
       prisma.buyOrSkipAnalysis.count({ where: { verdict: "MAYBE" } }),
+      prisma.buyOrSkipAnalysis.count({ where: { verdict: "INCOMPLETE" } }),
+      prisma.customer.count({ where: { buyOrSkipAnalyses: { some: {} } } }),
     ]);
 
     // 4. Confidence delta — narrow select, filters for rows with both fields present
@@ -1300,6 +1300,8 @@ export async function getAdditionalKPIs() {
         buy: buyCount,
         skip: skipCount,
         maybe: maybeCount,
+        incomplete: incompleteCount,
+        uniqueCustomers: uniqueBuySkipCustomers,
         buyRate: totalBuyOrSkip > 0 ? Math.round((buyCount / totalBuyOrSkip) * 100) : 0,
       },
       confidence: n > 0

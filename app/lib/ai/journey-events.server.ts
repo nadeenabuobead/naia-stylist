@@ -25,13 +25,13 @@ export function recordJourneyEvent(event: JourneyEvent): void {
   // Outer try/catch covers synchronous errors (e.g. Prisma not initialised in test env).
   // Inner .catch covers async errors (DB unavailable, migration pending).
   try {
-    void (prisma as any).journeyEvent.create({
+    void prisma.journeyEvent.create({
       data: {
         type: event.type,
         occurredAt: new Date(event.occurredAt),
         customerIdHash: event.customerIdHash,
         sessionId: event.sessionId,
-        payload: event.payload as any,
+        payload: event.payload as object,
       },
     }).catch(() => {
       // JourneyEvent table unavailable (migration pending) or DB error — degrade to dev-log
@@ -256,6 +256,139 @@ export function emitProductIntelligenceViewed(params: {
       resolved: params.resolved,
       closetItemCount: params.closetItemCount,
       hasModel: params.hasModel,
+    },
+    params.nowFn,
+  );
+}
+
+// ── passport_completed / passport_updated ────────────────────────────────────
+// Emitted when a customer saves their Passport for the first time (completed)
+// or subsequently edits it (updated). Distinguish by `isFirstCompletion`.
+
+export function emitPassportSaved(params: {
+  customerId: string;
+  isFirstCompletion: boolean;
+  fieldCount: number;        // number of non-empty profile fields saved
+  nowFn?: () => string;
+}): JourneyEvent {
+  return makeEvent(
+    params.isFirstCompletion ? "passport_completed" : "passport_updated",
+    params.customerId,
+    "passport",              // sentinel — Passport has no StylingSession
+    {
+      isFirstCompletion: params.isFirstCompletion,
+      fieldCount: params.fieldCount,
+    },
+    params.nowFn,
+  );
+}
+
+// ── closet_item_added ─────────────────────────────────────────────────────────
+// Emitted after a ClosetItem is successfully written to the database.
+// Category and try-on eligibility only — no image URL, no signed assets.
+
+export function emitClosetItemAdded(params: {
+  customerId: string;
+  closetItemId: string;
+  category: string;
+  tryOnEligibility: string | null;
+  nowFn?: () => string;
+}): JourneyEvent {
+  return makeEvent(
+    "closet_item_added",
+    params.customerId,
+    "closet",                // sentinel — closet actions have no StylingSession
+    {
+      closetItemId: params.closetItemId,
+      category: params.category,
+      tryOnEligibility: params.tryOnEligibility ?? "unknown",
+    },
+    params.nowFn,
+  );
+}
+
+// ── look_saved ────────────────────────────────────────────────────────────────
+// Emitted after a SavedLook is successfully written.
+// Includes savedLookId and source suggestion/session; no product URLs or images.
+
+export function emitLookSaved(params: {
+  customerId: string;
+  sessionId: string;
+  savedLookId: string;
+  fromSuggestionId: string | null;
+  itemCount: number;
+  occasion: string | null;
+  nowFn?: () => string;
+}): JourneyEvent {
+  return makeEvent(
+    "look_saved",
+    params.customerId,
+    params.sessionId,
+    {
+      savedLookId: params.savedLookId,
+      fromSuggestionId: params.fromSuggestionId,
+      itemCount: params.itemCount,
+      occasion: params.occasion,
+    },
+    params.nowFn,
+  );
+}
+
+// ── in_session_review_submitted ───────────────────────────────────────────────
+// Emitted after a PostOutfitReview is written for the in-session (immediate) review.
+// Structured ratings only — no free-text tags or objection notes.
+
+export function emitInSessionReviewSubmitted(params: {
+  customerId: string;
+  sessionId: string;
+  overallFeeling: number | null;
+  confidenceBefore: number | null;
+  confidenceAfter: number | null;
+  feltLikeHer: string | null;
+  desiredFeelingAchieved: string | null;
+  wouldWearAgain: string | null;
+  nowFn?: () => string;
+}): JourneyEvent {
+  return makeEvent(
+    "in_session_review_submitted",
+    params.customerId,
+    params.sessionId,
+    {
+      overallFeeling: params.overallFeeling,
+      confidenceDelta:
+        params.confidenceBefore != null && params.confidenceAfter != null
+          ? params.confidenceAfter - params.confidenceBefore
+          : null,
+      feltLikeHer: params.feltLikeHer,
+      desiredFeelingAchieved: params.desiredFeelingAchieved,
+      wouldWearAgain: params.wouldWearAgain,
+    },
+    params.nowFn,
+  );
+}
+
+// ── buy_skip_submitted ────────────────────────────────────────────────────────
+// Emitted after a BuyOrSkipAnalysis is successfully written.
+// evidenceType = intent (NOT transaction — buy verdict is stated intent only).
+
+export function emitBuySkipSubmitted(params: {
+  customerId: string;
+  sessionId: string;         // use "buy-or-skip" sentinel when no StylingSession active
+  analysisId: string;
+  verdict: "BUY" | "SKIP" | "MAYBE" | "INCOMPLETE";
+  category: string | null;
+  nowFn?: () => string;
+}): JourneyEvent {
+  return makeEvent(
+    "buy_skip_submitted",
+    params.customerId,
+    params.sessionId,
+    {
+      analysisId: params.analysisId,
+      verdict: params.verdict,      // intent — never a transaction signal
+      category: params.category,
+      schemaVersion: "1.0",
+      source: "buy-or-skip",
     },
     params.nowFn,
   );

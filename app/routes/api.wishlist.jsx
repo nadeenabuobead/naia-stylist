@@ -2,6 +2,7 @@ import { authenticateCustomer } from "../customer-auth.server";
 import { data as json } from "react-router";
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import prisma from "../db.server";
+import { emitBuySkipSubmitted, recordJourneyEvent } from "../lib/ai/journey-events.server";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -229,6 +230,32 @@ Respond ONLY with valid JSON, no markdown:
       analysis.naiaMatch = { title: fallback.title, url: fallback.url, reason: null };
     }
 
+    // Persist Buy/Skip analysis — verdict is stated intent, never a transaction signal
+    try {
+      const verdictMap = { BUY: "BUY", SKIP: "SKIP", MAYBE: "MAYBE" };
+      const persistedVerdict = verdictMap[analysis.verdict] ?? "INCOMPLETE";
+      const analysisRecord = await prisma.buyOrSkipAnalysis.create({
+        data: {
+          customerId: naiaCustomer.id,
+          verdict: persistedVerdict,
+          reasoning: typeof analysis.finalThought === "string" && analysis.finalThought.trim() !== ""
+            ? analysis.finalThought.slice(0, 1000)
+            : "No reasoning provided.",
+          productName: null,
+          imageUrl,
+          source: "buy-or-skip",
+          schemaVersion: "1.0",
+        },
+      });
+      recordJourneyEvent(emitBuySkipSubmitted({
+        customerId: naiaCustomer.id,
+        sessionId: "buy-or-skip",
+        analysisId: analysisRecord.id,
+        verdict: persistedVerdict,
+        category: normalizedCategory || null,
+      }));
+    } catch { /* persistence failure must never block the analysis response */ }
+
     return json({ success: true, analysis, closetItemCount: closetItems.length, eligibleClosetItemCount: eligibleClosetItems.length });
 
   } catch (error) {
@@ -238,22 +265,14 @@ Respond ONLY with valid JSON, no markdown:
 }
 
 
+// DEPRECATED loader — Batch 1 (2026-07-29)
+// WishlistItem model does not exist in schema.prisma; this loader crashed with P2021.
+// Saved Looks (style-me/result.tsx intent=save) is the current nAia-owned save mechanism.
 export async function loader({ request }) {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS });
   }
-
-  const { customer } = await authenticateCustomer(request);
-  if (!customer) {
-    return Response.json({ items: [], authenticated: false }, { headers: CORS });
-  }
-
-  const items = await prisma.wishlistItem.findMany({
-    where: { customerId: customer.id },
-    orderBy: { createdAt: "desc" },
-  });
-
-  return Response.json({ items, authenticated: true }, { headers: CORS });
+  return Response.json({ items: [], authenticated: false, deprecated: true }, { headers: CORS });
 }
 
 /**
@@ -299,68 +318,16 @@ export async function action({ request }) {
   }
 
   // Track wishlist event if sessionId is provided
-  if (act === "add" && body.sessionId) {
-    try {
-      await prisma.stylingEvent.create({
-        data: {
-          customerId: customer.id,
-          sessionId: body.sessionId,
-          productId: body.naiaProductId,
-          productTitle: body.title || "Unknown",
-          eventType: "wishlisted",
-        },
-      });
-    } catch (err) {
-      console.error('Event tracking failed:', err);
-    }
-  }
-
+  // DEPRECATED: "add" wishlist action — Batch 1 (2026-07-29)
+  // WishlistItem model does not exist; crashes with P2021.
+  // Saved Looks is the current nAia-owned save mechanism.
   if (act === "add") {
-    const { naiaProductId, title, handle, image } = body;
-    if (!naiaProductId || !title) {
-      return Response.json({ error: "naiaProductId and title required" }, { status: 400, headers: CORS });
-    }
-
-    const item = await prisma.wishlistItem.upsert({
-      where: {
-        customerId_naiaProductId: {
-          customerId: customer.id,
-          naiaProductId: String(naiaProductId),
-        },
-      },
-      update: { title, handle: handle || "", image: image || null },
-      create: {
-        customerId: customer.id,
-        naiaProductId: String(naiaProductId),
-        title,
-        handle: handle || "",
-        image: image || null,
-      },
-    });
-
-    return Response.json({ item }, { headers: CORS });
+    return Response.json({ error: "deprecated", message: "Use Saved Looks." }, { status: 410, headers: CORS });
   }
 
+  // DEPRECATED: "remove" wishlist action — Batch 1 (2026-07-29)
   if (act === "remove") {
-    const { naiaProductId } = body;
-    if (!naiaProductId) {
-      return Response.json({ error: "naiaProductId required" }, { status: 400, headers: CORS });
-    }
-
-    try {
-      await prisma.wishlistItem.delete({
-        where: {
-          customerId_naiaProductId: {
-            customerId: customer.id,
-            naiaProductId: String(naiaProductId),
-          },
-        },
-      });
-    } catch {
-      // Already removed, that's fine
-    }
-
-    return Response.json({ removed: true }, { headers: CORS });
+    return Response.json({ error: "deprecated", message: "Use Saved Looks." }, { status: 410, headers: CORS });
   }
 
   return Response.json({ error: "Unknown action" }, { status: 400, headers: CORS });

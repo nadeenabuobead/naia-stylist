@@ -34,11 +34,21 @@ export async function loader({ request }) {
  *    or: { action: "sync", items: [{ name, category, image }] }  (merge localStorage → DB)
  *    or: { action: "delete", itemId }
  */
+// DEPRECATED write paths — Batch 1 (2026-07-29)
+// add/sync/delete passed lowercase category strings ("top") instead of the required
+// ClosetCategory enum values (TOPS, BOTTOMS, etc.) and crashed with Prisma P2009.
+// The canonical Closet write path is closet._index.tsx using NaiaSession auth.
 export async function action({ request }) {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS });
   }
 
+  return Response.json(
+    { error: "deprecated", message: "Use closet._index.tsx action." },
+    { status: 410, headers: CORS },
+  );
+
+  // Dead code below preserved for reference until JWT auth is retired.
   const { customer } = await authenticateCustomer(request);
   if (!customer) {
     return Response.json({ error: "Not authenticated" }, { status: 401, headers: CORS });

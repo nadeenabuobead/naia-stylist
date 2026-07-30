@@ -339,12 +339,19 @@ model BuyOrSkipAnalysis {
   
   // User Action
   userDecision        String?  // What she ended up doing
+
+  // Batch 1 — event lineage
+  sessionId     String?  // Optional link to active StylingSession at time of analysis
+  source        String   @default("buy-or-skip")
+  schemaVersion String   @default("1.0")
+  updatedAt     DateTime @updatedAt
 }
 
 enum BuySkipVerdict {
   BUY
   SKIP
   MAYBE
+  INCOMPLETE
 }
 
 // ============================================

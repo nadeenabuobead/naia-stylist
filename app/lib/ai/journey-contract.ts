@@ -367,7 +367,14 @@ export type JourneyEventType =
   | "vto_initiated"
   | "vto_feedback_given"
   | "post_wear_submitted"
-  | "product_intelligence_viewed";
+  | "product_intelligence_viewed"
+  // Batch 1 — missing core events
+  | "passport_completed"
+  | "passport_updated"
+  | "closet_item_added"
+  | "look_saved"
+  | "in_session_review_submitted"
+  | "buy_skip_submitted";
 
 export interface JourneyEvent {
   type: JourneyEventType;

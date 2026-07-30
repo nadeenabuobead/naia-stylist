@@ -41,7 +41,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return data({
     hasProfile: !!profile,
-    stylePersonalities: profile?.stylePersonality,
+    stylePersonalities: profile?.stylePersonalities ?? [],
     hasClosetItems: closetCount > 0,
     closetCount,
     recentSessions
@@ -49,7 +49,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export default function StyleMeIndex() {
-  const { hasProfile, stylePersonality, hasClosetItems, closetCount, recentSessions } =
+  const { hasProfile, stylePersonalities, hasClosetItems, closetCount, recentSessions } =
     useLoaderData<typeof loader>();
 
   return (
@@ -73,7 +73,7 @@ export default function StyleMeIndex() {
               </p>
               <p className="sm-status-desc">
                 {hasProfile
-                  ? `Your style: ${stylePersonality || "Discovering..."}`
+                  ? `Your style: ${stylePersonalities.length > 0 ? stylePersonalities.join(", ") : "Discovering..."}`
                   : "Help nAia understand your style better"}
               </p>
             </div>

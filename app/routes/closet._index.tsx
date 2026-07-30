@@ -3,12 +3,34 @@ import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from
 import { useState } from "react";
 import prisma from "../db.server";
 import { requireCurrentNaiaCustomer, getCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import { assessClosetEligibility, CLOSET_ELIGIBILITY_DISPLAY, type ClosetTryOnEligibility } from "~/lib/ai/closet-eligibility";
+import { runStageBAssessment } from "~/lib/ai/closet-eligibility.server";
+import { emitClosetItemAdded, recordJourneyEvent } from "~/lib/ai/journey-events.server";
 
 const CATEGORIES = ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS", "ACCESSORIES", "JEWELRY", "OTHER"];
 const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver", "Multicolor"];
 const OCCASIONS = ["Casual", "Work", "Dinner", "Party", "Formal", "Date", "Weekend", "Travel"];
 const SEASONS = ["Spring", "Summer", "Fall", "Winter", "All Season"];
 const PATTERNS = ["Solid", "Stripes", "Floral", "Plaid", "Animal Print", "Geometric", "Abstract", "Other"];
+
+const GENERAL_PHOTO_TIPS = [
+  "Photograph one item only",
+  "Use a plain, contrasting background",
+  "Use bright, even lighting",
+  "Keep the image sharp and in focus",
+  "Make sure the entire item is visible",
+  "Do not crop any important part",
+  "Avoid hands, people, clutter or other items covering it",
+];
+
+const CATEGORY_PHOTO_TIPS: Record<string, { title: string; tips: string[] }> = {
+  TOPS:      { title: "For clothing", tips: ["Lay it flat or hang it straight", "Show the full neckline, sleeves, waist and hem", "Do not fold or bunch the garment"] },
+  BOTTOMS:   { title: "For clothing", tips: ["Lay it flat or hang it straight", "Show the full waistband and hem", "Do not fold or bunch the garment"] },
+  DRESSES:   { title: "For clothing", tips: ["Hang or lay fully flat", "Show the full neckline, sleeves, waist and hem", "Do not fold or bunch the garment"] },
+  OUTERWEAR: { title: "For clothing", tips: ["Lay flat or hang straight", "Show the full collar, sleeves and hem", "Do not fold or bunch the garment"] },
+  SHOES:     { title: "For shoes", tips: ["Show the full pair", "Keep both shoes visible and unobstructed", "Do not photograph while worn", "Use a clear side or three-quarter view"] },
+  BAGS:      { title: "For bags", tips: ["Show the complete bag", "Keep handles and straps fully visible", "Use a front or three-quarter view", "Remove anything covering its shape"] },
+};
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const naiaCustomer = await requireCurrentNaiaCustomer(request);
@@ -42,8 +64,23 @@ export async function action({ request }: ActionFunctionArgs) {
     const brand = formData.get("brand") as string;
     const occasions = JSON.parse((formData.get("occasions") as string) || "[]");
     const seasons = JSON.parse((formData.get("seasons") as string) || "[]");
+    // Phase 4A6 — image metadata from Cloudinary upload response
+    const imageWidth = formData.get("imageWidth") ? Number(formData.get("imageWidth")) : undefined;
+    const imageHeight = formData.get("imageHeight") ? Number(formData.get("imageHeight")) : undefined;
+    const imageFormat = (formData.get("imageFormat") as string | null) ?? undefined;
+    const imageBytes = formData.get("imageBytes") ? Number(formData.get("imageBytes")) : undefined;
+
     if (!name || !category || !imageUrl) return data({ error: "Name and category required" }, { status: 400 });
-    await prisma.closetItem.create({
+
+    const stageA = assessClosetEligibility({
+      prismaCategory: category,
+      width: imageWidth,
+      height: imageHeight,
+      format: imageFormat,
+      bytes: imageBytes,
+    });
+
+    const newItem = await prisma.closetItem.create({
       data: {
         customerId: customer.id,
         name,
@@ -54,8 +91,35 @@ export async function action({ request }: ActionFunctionArgs) {
         brand: brand || null,
         occasions: occasions.length > 0 ? occasions : null,
         seasons: seasons.length > 0 ? seasons : null,
+        tryOnEligibility: stageA.eligible,
+        tryOnAssessedAt: new Date(stageA.assessedAt),
+        tryOnCustomerHint: stageA.customerHint,
+        tryOnInternalNote: stageA.internalNote,
       },
     });
+
+    // Emit closet_item_added event (fire-and-forget)
+    try {
+      recordJourneyEvent(emitClosetItemAdded({
+        customerId: customer.id,
+        closetItemId: newItem.id,
+        category: newItem.category,
+        tryOnEligibility: newItem.tryOnEligibility ?? null,
+      }));
+    } catch { /* never block the response */ }
+
+    // Stage B: awaited within the request — timeout preserves pending-assessment
+    if (stageA.eligible === "pending-assessment" && imageUrl) {
+      await runStageBAssessment(
+        newItem.id,
+        imageUrl,
+        stageA.category,
+        async (id, fields) => {
+          await prisma.closetItem.update({ where: { id }, data: fields });
+        },
+      );
+    }
+
     return data({ success: true });
   }
 
@@ -116,17 +180,40 @@ const css = `
   .cl-card-name{font-family:var(--ff-display);font-size:18px;font-weight:700;color:var(--c-ink);margin-bottom:6px}
   .cl-card-meta{font-family:var(--ff-ui);font-size:9px;letter-spacing:1px;color:var(--c-muted);text-transform:uppercase}
   .cl-delete{position:absolute;top:12px;right:12px;background:rgba(40,21,12,0.8);color:#FAF6F1;border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;line-height:1}
+  .cl-tryon-badge{display:inline-block;margin-top:8px;padding:4px 8px;font-family:var(--ff-ui);font-size:7px;letter-spacing:1.5px;text-transform:uppercase;border-radius:2px}
+  .cl-tryon-badge.ready{background:#e6f4ec;color:#1a7a3e}
+  .cl-tryon-badge.needs{background:#fef6e4;color:#8a6200}
+  .cl-tryon-badge.pending{background:#f0f4ff;color:#3464c0}
+  .cl-tryon-badge.unsupported{background:#f4f4f4;color:#888}
   .cl-empty{text-align:center;padding:80px 40px;background:var(--c-surface);border:1px solid var(--c-border)}
   .cl-empty-icon{font-family:var(--ff-display);font-size:64px;color:var(--c-ink);opacity:.2;margin-bottom:20px}
   .cl-empty-text{font-family:var(--ff-body);font-size:20px;font-style:italic;color:var(--c-muted);margin-bottom:32px}
   .cl-cta{margin-top:60px;text-align:center}
   .cl-cta a{display:inline-block;padding:16px 40px;background:var(--c-ink);color:#FAF6F1;text-decoration:none;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase}
+  .cl-guide{border:1px solid var(--c-border);padding:20px;margin-bottom:16px;background:var(--c-surface)}
+  .cl-guide-header{font-family:var(--ff-ui);font-size:7px;letter-spacing:3px;text-transform:uppercase;color:var(--c-muted);margin-bottom:14px}
+  .cl-guide-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px}
+  .cl-guide-col-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--c-burg);margin-bottom:8px}
+  .cl-guide-tips{list-style:none;padding:0;margin:0}
+  .cl-guide-tips li{font-family:var(--ff-body);font-size:13px;color:var(--c-ink);padding:2px 0 2px 14px;position:relative;line-height:1.4}
+  .cl-guide-tips li::before{content:"–";position:absolute;left:0;color:var(--c-muted)}
+  .cl-guide-examples{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  .cl-guide-ex{padding:10px 12px;display:flex;gap:8px;align-items:flex-start}
+  .cl-guide-ex.good{background:#e6f4ec;border:1px solid #c2dece}
+  .cl-guide-ex.avoid{background:#fef4f4;border:1px solid #ead8d8}
+  .cl-guide-ex-mark{font-family:var(--ff-display);font-size:13px;font-weight:900;flex-shrink:0;line-height:1.4}
+  .cl-guide-ex.good .cl-guide-ex-mark{color:#1a7a3e}
+  .cl-guide-ex.avoid .cl-guide-ex-mark{color:#b00020}
+  .cl-guide-ex-text{font-family:var(--ff-ui);font-size:8px;letter-spacing:0.5px;text-transform:uppercase;color:var(--c-ink);line-height:1.5}
+  .cl-tryon-hint{font-family:var(--ff-ui);font-size:8px;letter-spacing:0.5px;color:var(--c-muted);margin-top:4px;line-height:1.5}
   @media(max-width:640px){
     .cl-topbar{padding:16px 20px}
     .cl-wrap{padding:40px 20px}
     .cl-stats{grid-template-columns:1fr}
     .cl-stat{display:flex;align-items:center;gap:16px;padding:16px 20px}
     .cl-stat-num{font-size:32px}
+    .cl-guide-cols{grid-template-columns:1fr}
+    .cl-guide-examples{grid-template-columns:1fr}
   }
 `;
 
@@ -146,6 +233,8 @@ export default function Closet() {
   const [newBrand, setNewBrand] = useState("");
   const [newOccasions, setNewOccasions] = useState<string[]>([]);
   const [newSeasons, setNewSeasons] = useState<string[]>([]);
+  // Phase 4A6 — image metadata captured from Cloudinary upload response
+  const [imgMeta, setImgMeta] = useState<{ width?: number; height?: number; format?: string; bytes?: number }>({});
 
   const filtered = activeCategory === "ALL" ? items : items.filter((i: any) => i.category === activeCategory);
 
@@ -198,6 +287,13 @@ export default function Closet() {
       }
       const cloudData = await cloudRes.json() as any;
       setNewImageUrl(cloudData.secure_url);
+      // Phase 4A6 — capture metadata for server-side eligibility assessment
+      setImgMeta({
+        width: cloudData.width ?? undefined,
+        height: cloudData.height ?? undefined,
+        format: cloudData.format ?? undefined,
+        bytes: cloudData.bytes ?? undefined,
+      });
     } catch {
       setUploadError("Upload failed. Please check your connection and try again.");
     } finally {
@@ -211,10 +307,20 @@ export default function Closet() {
   const handleAdd = () => {
     if (!newName) return;
     fetcher.submit(
-      { intent: "add", name: newName, category: newCategory, imageUrl: newImageUrl, primaryColor: newColor, pattern: newPattern, brand: newBrand, occasions: JSON.stringify(newOccasions), seasons: JSON.stringify(newSeasons) },
+      {
+        intent: "add", name: newName, category: newCategory, imageUrl: newImageUrl,
+        primaryColor: newColor, pattern: newPattern, brand: newBrand,
+        occasions: JSON.stringify(newOccasions), seasons: JSON.stringify(newSeasons),
+        // Phase 4A6 — image metadata for server-side eligibility assessment
+        ...(imgMeta.width  !== undefined && { imageWidth:  String(imgMeta.width)  }),
+        ...(imgMeta.height !== undefined && { imageHeight: String(imgMeta.height) }),
+        ...(imgMeta.format !== undefined && { imageFormat: imgMeta.format         }),
+        ...(imgMeta.bytes  !== undefined && { imageBytes:  String(imgMeta.bytes)  }),
+      },
       { method: "post" }
     );
-    setNewName(""); setNewImageUrl(""); setNewColor(""); setNewPattern(""); setNewBrand(""); setNewOccasions([]); setNewSeasons([]);
+    setNewName(""); setNewImageUrl(""); setNewColor(""); setNewPattern(""); setNewBrand("");
+    setNewOccasions([]); setNewSeasons([]); setImgMeta({});
     setShowAddForm(false);
   };
 
@@ -255,6 +361,41 @@ export default function Closet() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
               <h3 className="cl-form-title">Add to Wardrobe</h3>
               <button onClick={() => setShowAddForm(false)} style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)" }}>Cancel</button>
+            </div>
+
+            {/* Photo guidance — shown before upload */}
+            <div className="cl-guide">
+              <div className="cl-guide-header">Photo guide</div>
+              <div className="cl-guide-cols">
+                <div>
+                  <div className="cl-guide-col-label">General</div>
+                  <ul className="cl-guide-tips">
+                    {GENERAL_PHOTO_TIPS.map((tip, i) => <li key={i}>{tip}</li>)}
+                  </ul>
+                </div>
+                {CATEGORY_PHOTO_TIPS[newCategory] && (
+                  <div>
+                    <div className="cl-guide-col-label">{CATEGORY_PHOTO_TIPS[newCategory].title}</div>
+                    <ul className="cl-guide-tips">
+                      {CATEGORY_PHOTO_TIPS[newCategory].tips.map((tip, i) => <li key={i}>{tip}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+              <div className="cl-guide-examples">
+                <div className="cl-guide-ex good">
+                  <div className="cl-guide-ex-mark">✓</div>
+                  <div className="cl-guide-ex-text">Single item · plain background · fully visible · well lit</div>
+                </div>
+                <div className="cl-guide-ex avoid">
+                  <div className="cl-guide-ex-mark">✗</div>
+                  <div className="cl-guide-ex-text">Multiple items or cluttered background</div>
+                </div>
+                <div className="cl-guide-ex avoid">
+                  <div className="cl-guide-ex-mark">✗</div>
+                  <div className="cl-guide-ex-text">Item cropped, blurry or poorly lit</div>
+                </div>
+              </div>
             </div>
 
             <div className="cl-label">Photo</div>
@@ -346,6 +487,21 @@ export default function Closet() {
                 )}
                 {item.brand && <div className="cl-card-meta" style={{ marginTop: "4px" }}>{item.brand}</div>}
                 {item.occasions?.length > 0 && <div className="cl-card-meta" style={{ marginTop: "4px" }}>{item.occasions.slice(0, 2).join(", ")}</div>}
+                {item.tryOnEligibility && (() => {
+                  const elig = item.tryOnEligibility as ClosetTryOnEligibility;
+                  const display = CLOSET_ELIGIBILITY_DISPLAY[elig];
+                  const cls = elig === "ready-for-try-on" ? "ready"
+                    : elig === "needs-clearer-photo" ? "needs"
+                    : elig === "pending-assessment" ? "pending"
+                    : "unsupported";
+                  const hint = (item as any).tryOnCustomerHint || display.fallbackHint;
+                  return (
+                    <div>
+                      <span className={`cl-tryon-badge ${cls}`}>{display.label}</span>
+                      {hint && <p className="cl-tryon-hint">{hint}</p>}
+                    </div>
+                  );
+                })()}
               </div>
               <button className="cl-delete" onClick={() => fetcher.submit({ intent: "delete", itemId: item.id }, { method: "post" })}>×</button>
             </div>
