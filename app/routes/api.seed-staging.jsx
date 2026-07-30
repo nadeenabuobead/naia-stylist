@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "crypto";
 import prisma from "../db.server";
+import { emitClosetItemAdded, recordJourneyEvent } from "../lib/ai/journey-events.server";
 
 // Staging-only fixture and diagnostic endpoint.
 // Requires STAGING_SEED_SECRET env var + matching x-seed-secret header.
@@ -132,6 +133,35 @@ export async function action({ request }) {
       journeyEvents: { total: jeTotal, byType: eventCounts },
       naiaSessions: { forCustomer: sessionCount },
     });
+  }
+
+  // ── createClosetItem ──────────────────────────────────────────────────────
+  // Creates a ClosetItem for the customer and emits closet_item_added event.
+  // Uses JEWELRY category (not-supported for try-on) to avoid Stage B Claude call.
+  if (act === "createClosetItem") {
+    const { customerId } = body ?? {};
+    if (!customerId) return Response.json({ error: "customerId required" }, { status: 400 });
+    const item = await prisma.closetItem.create({
+      data: {
+        customerId: String(customerId),
+        name: "Test Jewelry (Batch 1 verification)",
+        category: "JEWELRY",
+        imageUrl: "https://example.com/batch1-test-jewelry.jpg",
+        tryOnEligibility: "not-supported",
+        tryOnAssessedAt: new Date(),
+        tryOnCustomerHint: null,
+        tryOnInternalNote: "Category JEWELRY is not supported for try-on.",
+      },
+    });
+    try {
+      recordJourneyEvent(emitClosetItemAdded({
+        customerId: String(customerId),
+        closetItemId: item.id,
+        category: item.category,
+        tryOnEligibility: item.tryOnEligibility ?? null,
+      }));
+    } catch { /* never block */ }
+    return Response.json({ closetItemId: item.id, category: item.category });
   }
 
   // ── getCustomerData ───────────────────────────────────────────────────────
