@@ -24,6 +24,7 @@ import { getPhase4B2KPIs } from "../lib/ai/designer-intelligence.server";
 import { getAdvancedKPIs } from "../lib/designer-advanced.server";
 import { getRelationshipKPIs } from "../lib/designer-relationship.server";
 import { getDesignerSampleData } from "../lib/designer-sample-data";
+import { getLiveCustomerSignals } from "../lib/ai/live-customer-signals.server";
 
 // ── Loader ────────────────────────────────────────────────────────────────────
 
@@ -41,22 +42,23 @@ export async function loader({ request }) {
   if (sampleMode) {
     const sample = getDesignerSampleData(dateRangeDays);
     return Response.json(
-      { ...sample, dateRangeDays, sampleMode: true, samplePreviewAvailable: true },
+      { ...sample, dateRangeDays, sampleMode: true, samplePreviewAvailable: true, liveSignals: null },
       { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } },
     );
   }
 
-  const [dashboard, kpis, phase4b2, advanced, rel] = await Promise.all([
+  const [dashboard, kpis, phase4b2, advanced, rel, liveSignals] = await Promise.all([
     getDesignerStats(dateRangeDays),
     getAdditionalKPIs(),
     getPhase4B2KPIs(dateRangeDays),
     getAdvancedKPIs(dateRangeDays),
     getRelationshipKPIs(dateRangeDays),
+    getLiveCustomerSignals(dateRangeDays),
   ]);
 
   if (dashboard.error) throw new Response(dashboard.error, { status: 500 });
   return Response.json(
-    { dashboard, kpis, phase4b2, advanced, rel, dateRangeDays, sampleMode: false, samplePreviewAvailable },
+    { dashboard, kpis, phase4b2, advanced, rel, liveSignals, dateRangeDays, sampleMode: false, samplePreviewAvailable },
     { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } },
   );
 }
@@ -404,7 +406,7 @@ const TABS = [
 // ── Root component ─────────────────────────────────────────────────────────────
 
 export default function DesignerDashboard() {
-  const { dashboard: data, kpis, phase4b2, advanced, rel, overview, commercial, dateRangeDays, sampleMode, samplePreviewAvailable } = useLoaderData();
+  const { dashboard: data, kpis, phase4b2, advanced, rel, overview, commercial, liveSignals, dateRangeDays, sampleMode, samplePreviewAvailable } = useLoaderData();
   const [activeTab, setActiveTab] = useState("overview");
   // Role lens: fields preserved in data model for future B2B use; fixed to "combined" in the Founder–Designer dashboard.
   const roleLens = "combined";
@@ -566,11 +568,11 @@ export default function DesignerDashboard() {
         </div>
 
         {/* ── Tab content ──────────────────────────────────────────────────── */}
-          {activeTab === "overview"                && <TabOverview        data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} overview={overview} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
-          {activeTab === "customer"                && <TabCustomer        data={data} kpis={kpis} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
+          {activeTab === "overview"                && <TabOverview        data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} overview={overview} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} liveSignals={liveSignals} />}
+          {activeTab === "customer"                && <TabCustomer        data={data} kpis={kpis} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} liveSignals={liveSignals} />}
           {activeTab === "product"                 && <TabProduct         data={data} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
-          {activeTab === "recommendation"          && <TabRecommendation  data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
-          {activeTab === "collection-opportunities" && <TabCollectionOpportunities data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
+          {activeTab === "recommendation"          && <TabRecommendation  data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} liveSignals={liveSignals} />}
+          {activeTab === "collection-opportunities" && <TabCollectionOpportunities data={data} kpis={kpis} phase4b2={phase4b2} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} liveSignals={liveSignals} />}
           {activeTab === "commercial"              && <TabCommercial      data={data} advanced={advanced} rel={rel} commercial={commercial} sampleMode={sampleMode} dateRangeDays={dateRangeDays} roleLens={roleLens} />}
 
       </div>
@@ -580,10 +582,115 @@ export default function DesignerDashboard() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// LIVE SIGNAL HELPER COMPONENTS (Batch 2)
+// Render live customer data — only shown in Live mode (liveSignals != null)
+// ══════════════════════════════════════════════════════════════════════════════
+
+function LiveEvidencePill({ evidenceState }) {
+  const colors = {
+    measured:                { bg: "rgba(42,94,66,0.10)",   color: "#2a5e42" },
+    insufficient_evidence:   { bg: "rgba(107,72,0,0.09)",   color: "#6b4800" },
+    observed_zero:           { bg: "rgba(34,21,22,0.06)",   color: "#4a3535" },
+    no_eligible_observations:{ bg: "rgba(122,111,106,0.10)",color: "#7a6f6a" },
+    awaiting_integration:    { bg: "rgba(122,111,106,0.08)",color: "#9CA3AF" },
+    not_applicable:          { bg: "rgba(122,111,106,0.08)",color: "#9CA3AF" },
+  };
+  const labels = {
+    measured: "Measured", insufficient_evidence: "Early data", observed_zero: "Zero",
+    no_eligible_observations: "No observations", awaiting_integration: "Awaiting",
+    not_applicable: "N/A",
+  };
+  const cfg = colors[evidenceState] ?? colors.no_eligible_observations;
+  return (
+    <span style={{ display: "inline-block", padding: "2px 7px", fontSize: 9, fontFamily: "'Inter', sans-serif", fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", background: cfg.bg, color: cfg.color }}>
+      {labels[evidenceState] ?? evidenceState}
+    </span>
+  );
+}
+
+function LiveFeatureAdoptionTable({ rows }) {
+  if (!rows?.length) return null;
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={s.table}>
+        <thead>
+          <tr>
+            <th style={s.th}>Feature</th>
+            <th style={{ ...s.th, textAlign: "right" }}>Customers</th>
+            <th style={{ ...s.th, textAlign: "right" }}>Events</th>
+            <th style={{ ...s.th, textAlign: "right" }}>Latest activity</th>
+            <th style={{ ...s.th, textAlign: "right" }}>Evidence</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i} style={{ background: i % 2 === 0 ? "transparent" : "rgba(34,21,22,0.018)" }}>
+              <td style={s.td}>{row.feature}</td>
+              <td style={{ ...s.td, textAlign: "right", fontFamily: "'JetBrains Mono', 'Courier New', monospace" }}>{row.uniqueCustomers}</td>
+              <td style={{ ...s.td, textAlign: "right", fontFamily: "'JetBrains Mono', 'Courier New', monospace" }}>{row.eventCount}</td>
+              <td style={{ ...s.td, textAlign: "right", color: "#7a6f6a", fontSize: 10 }}>
+                {row.mostRecentActivity ? new Date(row.mostRecentActivity).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "—"}
+              </td>
+              <td style={{ ...s.td, textAlign: "right" }}><LiveEvidencePill evidenceState={row.evidenceState} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function LiveTopValues({ items, label }) {
+  if (!items?.length) return <div style={{ color: "#9CA3AF", fontFamily: "'Inter', sans-serif", fontSize: 11 }}>No data yet.</div>;
+  const max = items[0]?.count ?? 1;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {items.slice(0, 6).map((item, i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ flex: 1, fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#221516" }}>{item.value}</div>
+          <div style={{ width: 80, height: 4, background: "rgba(34,21,22,0.07)", flexShrink: 0 }}>
+            <div style={{ height: "100%", width: `${Math.round((item.count / max) * 100)}%`, background: "#8b2035" }} />
+          </div>
+          <div style={{ fontFamily: "'JetBrains Mono','Courier New',monospace", fontSize: 10, color: "#7a6f6a", minWidth: 24, textAlign: "right" }}>{item.count}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LiveJourneyFunnel({ journey }) {
+  if (!journey?.stages?.length) return null;
+  const stages = journey.stages;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+      {stages.map((stage, i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 14, padding: "8px 0", borderBottom: i < stages.length - 1 ? "1px solid rgba(34,21,22,0.06)" : "none" }}>
+          <div style={{ width: 26, height: 26, borderRadius: "50%", background: stage.uniqueCustomers > 0 ? "#8b2035" : "rgba(34,21,22,0.08)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <span style={{ fontFamily: "'JetBrains Mono','Courier New',monospace", fontSize: 9, color: stage.uniqueCustomers > 0 ? "#fff" : "#9CA3AF", fontWeight: 700 }}>{i + 1}</span>
+          </div>
+          <div style={{ flex: 1, fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#221516" }}>{stage.stage}</div>
+          <div style={{ fontFamily: "'JetBrains Mono','Courier New',monospace", fontSize: 11, color: stage.uniqueCustomers > 0 ? "#221516" : "#9CA3AF", fontWeight: stage.uniqueCustomers > 0 ? 600 : 400, minWidth: 60, textAlign: "right" }}>
+            {stage.uniqueCustomers} {stage.uniqueCustomers === 1 ? "customer" : "customers"}
+          </div>
+          {stage.progressionFromPrevious != null && (
+            <div style={{ fontFamily: "'JetBrains Mono','Courier New',monospace", fontSize: 10, color: "#7a6f6a", minWidth: 44, textAlign: "right" }}>
+              {stage.progressionFromPrevious}%
+            </div>
+          )}
+        </div>
+      ))}
+      <div style={{ marginTop: 8, fontFamily: "'Inter', sans-serif", fontSize: 9, color: "#9CA3AF", letterSpacing: "1px", textTransform: "uppercase" }}>
+        % = share of previous stage reaching this stage · not a commercial funnel
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // TAB 1 — OVERVIEW
 // ══════════════════════════════════════════════════════════════════════════════
 
-function TabOverview({ data, kpis, phase4b2, advanced, rel, overview, sampleMode, dateRangeDays }) {
+function TabOverview({ data, kpis, phase4b2, advanced, rel, overview, sampleMode, dateRangeDays, liveSignals }) {
   const periodStr = dateRangeDays >= 365 ? "All Time" : `Last ${dateRangeDays} Days`;
 
   // Top 3 priority actions from opportunityFeed
@@ -754,6 +861,13 @@ function TabOverview({ data, kpis, phase4b2, advanced, rel, overview, sampleMode
       <div style={{ padding: "12px 20px", background: "rgba(34,21,22,0.02)", border: "1px solid rgba(34,21,22,0.07)", fontSize: 12, color: "#7a6f6a", fontFamily: SERIF, fontStyle: "italic" }}>
         Metric Definitions and Confidence Ladder are available in <strong style={{ fontStyle: "normal" }}>Data &amp; AI</strong> — click the button in the header.
       </div>
+
+      {/* Live Feature Adoption — Batch 2 · hidden in sample mode */}
+      {liveSignals && !sampleMode && liveSignals.featureAdoption?.length > 0 && (
+        <Section title="Live Feature Adoption" desc={`Unique customers and events per nAia feature · ${liveSignals.period} · excludes test accounts`} status="live">
+          <LiveFeatureAdoptionTable rows={liveSignals.featureAdoption} />
+        </Section>
+      )}
     </>
   );
 }
@@ -1368,7 +1482,7 @@ function ProductDetailPanel({ narrative, saveVsPurchase, dateRangeDays }) {
 // TAB 2 — CUSTOMER INTELLIGENCE
 // ══════════════════════════════════════════════════════════════════════════════
 
-function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays }) {
+function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays, liveSignals }) {
   return (
     <>
       {/* Style DNA */}
@@ -1746,6 +1860,58 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays }) {
           </div>
         </Section>
       )}
+
+      {/* Live Passport Preferences — Batch 2 */}
+      {liveSignals && !sampleMode && liveSignals.passport?.evidenceState !== "no_eligible_observations" && (
+        <Section title="Live Passport Preferences" desc={`Completed nAia Passports · all-time · ${liveSignals.passport?.uniqueCustomersWithPassport ?? 0} customers · ${liveSignals.passport?.totalUpdatedInPeriod ?? 0} updated ${liveSignals.period}`} status={liveSignals.passport?.evidenceState === "measured" ? "live" : "insufficient-data"}>
+          <div style={{ fontFamily: MONO, fontSize: 10, color: "#9CA3AF", marginBottom: 14 }}>Multiple selections allowed — counts are per-customer responses, not percentages.</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
+            {liveSignals.passport?.topStylePersonalities?.length > 0 && (
+              <div style={s.card}>
+                <div style={s.cardLabel}>Style Personalities</div>
+                <div style={{ marginTop: 10 }}><LiveTopValues items={liveSignals.passport.topStylePersonalities} /></div>
+              </div>
+            )}
+            {liveSignals.passport?.topDesiredFeelings?.length > 0 && (
+              <div style={s.card}>
+                <div style={s.cardLabel}>Desired Feelings</div>
+                <div style={{ marginTop: 10 }}><LiveTopValues items={liveSignals.passport.topDesiredFeelings} /></div>
+              </div>
+            )}
+            {liveSignals.passport?.topOccasions?.length > 0 && (
+              <div style={s.card}>
+                <div style={s.cardLabel}>Occasions</div>
+                <div style={{ marginTop: 10 }}><LiveTopValues items={liveSignals.passport.topOccasions} /></div>
+              </div>
+            )}
+            {liveSignals.passport?.topFitPreferences?.length > 0 && (
+              <div style={s.card}>
+                <div style={s.cardLabel}>Fit Preferences</div>
+                <div style={{ marginTop: 10 }}><LiveTopValues items={liveSignals.passport.topFitPreferences} /></div>
+              </div>
+            )}
+            {liveSignals.passport?.topStyleStruggles?.length > 0 && (
+              <div style={s.card}>
+                <div style={s.cardLabel}>Style Struggles</div>
+                <div style={{ marginTop: 10 }}><LiveTopValues items={liveSignals.passport.topStyleStruggles} /></div>
+              </div>
+            )}
+            {liveSignals.passport?.topFavoriteColors?.length > 0 && (
+              <div style={s.card}>
+                <div style={s.cardLabel}>Favourite Colours</div>
+                <div style={{ marginTop: 10 }}><LiveTopValues items={liveSignals.passport.topFavoriteColors} /></div>
+              </div>
+            )}
+          </div>
+        </Section>
+      )}
+
+      {/* Live Customer Journey — Batch 2 */}
+      {liveSignals && !sampleMode && liveSignals.journey?.stages?.length > 0 && (
+        <Section title="Live Customer Journey" desc={`${liveSignals.period} · nAia-owned stages only · not a commercial conversion funnel`} status={liveSignals.journey.stages.some(s => s.uniqueCustomers > 0) ? "live" : "insufficient-data"}>
+          <LiveJourneyFunnel journey={liveSignals.journey} />
+        </Section>
+      )}
     </>
   );
 }
@@ -2038,7 +2204,7 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
 // TAB 4 — RECOMMENDATION INTELLIGENCE
 // ══════════════════════════════════════════════════════════════════════════════
 
-function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, dateRangeDays }) {
+function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, dateRangeDays, liveSignals }) {
   return (
     <>
       <Section title="Recommendation Response Engagement" desc="Immediate reactions to individual recommendation cards — separate from post-outfit reviews" status={phase4b2?.feedbackEngagement?.migrationPending ? "awaiting-integration" : "live"}>
@@ -2371,6 +2537,139 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
       <div style={{ padding: "12px 20px", background: "rgba(34,21,22,0.02)", border: "1px solid rgba(34,21,22,0.07)", fontSize: 12, color: "#7a6f6a", fontFamily: SERIF, fontStyle: "italic" }}>
         AI Learning Roadmap has moved to <strong style={{ fontStyle: "normal" }}>Data &amp; AI</strong> — click the button in the header.
       </div>
+
+      {/* Live Style Me Adoption — Batch 2 */}
+      {liveSignals && !sampleMode && liveSignals.styleMe && (
+        <Section title="Live Style Me Activity" desc={`${liveSignals.period} · nAia-owned activity only`} status={liveSignals.styleMe.evidenceState === "measured" ? "live" : "insufficient-data"}>
+          <div style={s.kpiGrid}>
+            <KpiCard label="Sessions Started" value={liveSignals.styleMe.sessionsStarted} />
+            <KpiCard label="Unique Customers" value={liveSignals.styleMe.uniqueCustomers} />
+            <KpiCard label="Recommendations Served" value={liveSignals.styleMe.recommendationsServed} />
+            <KpiCard label="With Feedback" value={liveSignals.styleMe.sessionsWithFeedback} tooltip="Sessions where at least one recommendation received a Love/Okay/Not-for-me response." />
+            <KpiCard label="With Saved Look" value={liveSignals.styleMe.sessionsWithSavedLook} tooltip="Sessions where at least one look was saved." />
+            <KpiCard label="With In-Session Review" value={liveSignals.styleMe.sessionsWithInSessionReview} tooltip="Sessions with an immediate post-session rating." />
+            <KpiCard label="With Post-Wear Review" value={liveSignals.styleMe.sessionsWithPostWearReview} tooltip="Sessions with a post-wear follow-up (did you wear it?)." />
+          </div>
+          {liveSignals.styleMe.topOccasions?.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={s.subHeader}>TOP OCCASIONS REQUESTED</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                {liveSignals.styleMe.topOccasions.slice(0, 6).map((o, i) => (
+                  <span key={i} style={{ padding: "4px 12px", background: "rgba(34,21,22,0.05)", fontFamily: INTER, fontSize: 11, color: "#221516" }}>{o.value} <span style={{ color: "#9CA3AF" }}>({o.count})</span></span>
+                ))}
+              </div>
+            </div>
+          )}
+        </Section>
+      )}
+
+      {/* Live Buy/Skip — Batch 2 */}
+      {liveSignals && !sampleMode && liveSignals.buySkip && (
+        <Section title="Live Buy/Skip Intent" desc={`${liveSignals.period} · Buy verdict = stated intent, not a purchase`} status={liveSignals.buySkip.evidenceState === "measured" ? "live" : "insufficient-data"}>
+          <div style={{ fontFamily: MONO, fontSize: 10, color: "#9CA3AF", marginBottom: 12 }}>
+            Buy/Skip verdict is stated intent only. Buy does not mean purchased. Data does not include Shopify orders.
+          </div>
+          <div style={s.kpiGrid}>
+            <KpiCard label="Total Assessments" value={liveSignals.buySkip.total} />
+            <KpiCard label="Unique Customers" value={liveSignals.buySkip.uniqueCustomers} />
+            <KpiCard label="Buy Intent" value={liveSignals.buySkip.buyCount} desc="Stated buy intent — not a purchase" />
+            <KpiCard label="Skip" value={liveSignals.buySkip.skipCount} />
+            <KpiCard label="Maybe / Undecided" value={liveSignals.buySkip.maybeCount} />
+            <KpiCard label="Incomplete" value={liveSignals.buySkip.incompleteCount} />
+            <KpiCard
+              label="Buy-Intent Rate"
+              value={liveSignals.buySkip.buyIntentRate != null ? `${liveSignals.buySkip.buyIntentRate}%` : "—"}
+              desc={`Buy ÷ decided (${liveSignals.buySkip.buyCount} buy / ${liveSignals.buySkip.decidedCount} decided)`}
+              tooltip="Buy ÷ (Buy + Skip) — excludes Maybe and Incomplete. Stated intent, not confirmed purchase."
+            />
+          </div>
+        </Section>
+      )}
+
+      {/* Live Feedback — Batch 2 */}
+      {liveSignals && !sampleMode && liveSignals.feedback && (
+        <Section title="Live Recommendation Feedback" desc={`${liveSignals.period} · Love it / Okay / Not for me responses`} status={liveSignals.feedback.evidenceState === "measured" ? "live" : "insufficient-data"}>
+          <div style={s.kpiGrid}>
+            <KpiCard label="Total Responses" value={liveSignals.feedback.totalFeedback} />
+            <KpiCard label="Unique Customers" value={liveSignals.feedback.uniqueCustomers} />
+            <KpiCard label="Love it" value={liveSignals.feedback.loveCount} />
+            <KpiCard label="Okay" value={liveSignals.feedback.okayCount} />
+            <KpiCard label="Not for me" value={liveSignals.feedback.notForMeCount} />
+            <KpiCard
+              label="Love Response Rate"
+              value={liveSignals.feedback.loveRate != null ? `${liveSignals.feedback.loveRate}%` : "—"}
+              desc="Love ÷ (Love + Not-for-me) · decided responses only"
+            />
+            <KpiCard label="With VTO Feedback" value={liveSignals.feedback.vtoFeedbackCount} tooltip="Responses that included virtual try-on aspect ratings." />
+          </div>
+          {liveSignals.feedback.topReasonCodes?.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={s.subHeader}>TOP REASON CODES</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                {liveSignals.feedback.topReasonCodes.slice(0, 8).map((r, i) => (
+                  <span key={i} style={{ padding: "4px 12px", background: "rgba(34,21,22,0.05)", fontFamily: INTER, fontSize: 11, color: "#221516" }}>{r.value} <span style={{ color: "#9CA3AF" }}>({r.count})</span></span>
+                ))}
+              </div>
+            </div>
+          )}
+        </Section>
+      )}
+
+      {/* Live In-Session Review — Batch 2 */}
+      {liveSignals && !sampleMode && liveSignals.sessionReview && (
+        <Section title="Live In-Session Review Outcomes" desc={`${liveSignals.period} · Immediate post-session response · ${liveSignals.sessionReview.totalReviews} reviews from ${liveSignals.sessionReview.uniqueCustomers} customers`} status={liveSignals.sessionReview.evidenceState === "measured" ? "live" : "insufficient-data"}>
+          <div style={s.kpiGrid}>
+            <KpiCard label="Total In-Session Reviews" value={liveSignals.sessionReview.totalReviews} />
+            <KpiCard label="Avg Overall Feeling" value={liveSignals.sessionReview.avgOverallFeeling != null ? `${liveSignals.sessionReview.avgOverallFeeling}/5` : "—"} />
+            <KpiCard label="Felt Like Her — Yes" value={liveSignals.sessionReview.feltLikeHerYes} />
+            <KpiCard label="Desired Feeling Achieved" value={liveSignals.sessionReview.desiredFeelingAchievedYes} tooltip="Customers who said their desired feeling was achieved." />
+            <KpiCard label="Would Wear Again — Definitely" value={liveSignals.sessionReview.wouldWearAgainDefinitely} tooltip="Stated intent — not verified repeat wear. 'Definitely' response to would-wear-again question." />
+          </div>
+        </Section>
+      )}
+
+      {/* Live Post-Wear Review — Batch 2 */}
+      {liveSignals && !sampleMode && liveSignals.postWear && (
+        <Section title="Live Post-Wear Follow-Up" desc={`${liveSignals.period} · Did you wear it? · Stated intent, not verified wear`} status={liveSignals.postWear.evidenceState === "measured" ? "live" : "insufficient-data"}>
+          <div style={{ fontFamily: MONO, fontSize: 10, color: "#9CA3AF", marginBottom: 12 }}>
+            "Would wear again" = stated intent only. This is not verified repeat wear. Post-wear data is self-reported.
+          </div>
+          <div style={s.kpiGrid}>
+            <KpiCard label="Total Post-Wear Reviews" value={liveSignals.postWear.totalReviews} />
+            <KpiCard label="Unique Customers" value={liveSignals.postWear.uniqueCustomers} />
+            <KpiCard label="Did wear it — Yes" value={liveSignals.postWear.didWearItYes} />
+            <KpiCard label="Not yet" value={liveSignals.postWear.didWearItNotYet} />
+            <KpiCard label="Did not wear" value={liveSignals.postWear.didWearItNo} />
+            <KpiCard label="Felt positive" value={liveSignals.postWear.feltPositive} desc="Great or Good feeling response" />
+            <KpiCard label="Fit — Yes" value={liveSignals.postWear.fitFeedbackYes} />
+            <KpiCard label="Coverage — Yes" value={liveSignals.postWear.coverageFeedbackYes} />
+            <KpiCard label="Colour — Yes" value={liveSignals.postWear.colourFeedbackYes} />
+            <KpiCard label="Stated Rewear Intent" value={liveSignals.postWear.statedRewearYes} tooltip="Customers who answered 'Definitely' to would-wear-again. Stated intent only — not verified repeat wear." />
+          </div>
+        </Section>
+      )}
+
+      {/* Live Saved Looks — Batch 2 */}
+      {liveSignals && !sampleMode && liveSignals.savedLooks && (
+        <Section title="Live Saved Looks" desc={`${liveSignals.period} · Looks saved from Style Me sessions`} status={liveSignals.savedLooks.evidenceState === "measured" ? "live" : "insufficient-data"}>
+          <div style={s.kpiGrid}>
+            <KpiCard label="Total Looks Saved" value={liveSignals.savedLooks.totalLooks} />
+            <KpiCard label="Unique Customers" value={liveSignals.savedLooks.uniqueCustomers} />
+            <KpiCard label="From a Recommendation" value={liveSignals.savedLooks.fromRecommendation} tooltip="Looks saved from a nAia styling recommendation, not custom." />
+            <KpiCard label="With Post-Wear Link" value={liveSignals.savedLooks.withPostWearLink} tooltip="Saved looks whose source session has a post-wear review." />
+          </div>
+          {liveSignals.savedLooks.topItemTypes?.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={s.subHeader}>ITEM TYPES IN SAVED LOOKS</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                {liveSignals.savedLooks.topItemTypes.slice(0, 8).map((t, i) => (
+                  <span key={i} style={{ padding: "4px 12px", background: "rgba(34,21,22,0.05)", fontFamily: INTER, fontSize: 11, color: "#221516" }}>{t.value} <span style={{ color: "#9CA3AF" }}>({t.count})</span></span>
+                ))}
+              </div>
+            </div>
+          )}
+        </Section>
+      )}
     </>
   );
 }
@@ -2430,7 +2729,7 @@ function CollectionHealthScoreDisclosure({ health }) {
 // TAB 5 — COLLECTION INTELLIGENCE
 // ══════════════════════════════════════════════════════════════════════════════
 
-function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays }) {
+function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, liveSignals }) {
   return (
     <>
       {/* Balance & Coverage Summary */}
@@ -2774,6 +3073,37 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays })
               })()}
             </>
           )}
+        </Section>
+      )}
+
+      {/* Live Closet Demand — Batch 2 */}
+      {liveSignals && !sampleMode && liveSignals.closet && (
+        <Section title="Live Closet Demand" desc={`${liveSignals.period} · Category and colour demand from customer closets`} status={liveSignals.closet.evidenceState === "measured" ? "live" : "insufficient-data"}>
+          <div style={s.kpiGrid}>
+            <KpiCard label="Total Items Added" value={liveSignals.closet.totalItems} />
+            <KpiCard label="Customers With Closet" value={liveSignals.closet.customersWithItems} />
+            <KpiCard label="Avg Items / Customer" value={liveSignals.closet.avgItemsPerCustomer} />
+            <KpiCard label="Try-On Eligible" value={liveSignals.closet.tryOnEligibleCount} tooltip="Items assessed as ready for virtual try-on." />
+            <KpiCard
+              label="Try-On Eligibility Rate"
+              value={liveSignals.closet.tryOnEligibleRate != null ? `${liveSignals.closet.tryOnEligibleRate}%` : "—"}
+              tooltip="% of closet items that pass try-on eligibility assessment."
+            />
+          </div>
+          <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
+            {liveSignals.closet.categoryDistribution?.length > 0 && (
+              <div style={s.card}>
+                <div style={s.cardLabel}>Category demand</div>
+                <div style={{ marginTop: 10 }}><LiveTopValues items={liveSignals.closet.categoryDistribution} /></div>
+              </div>
+            )}
+            {liveSignals.closet.colorDistribution?.length > 0 && (
+              <div style={s.card}>
+                <div style={s.cardLabel}>Colour demand</div>
+                <div style={{ marginTop: 10 }}><LiveTopValues items={liveSignals.closet.colorDistribution} /></div>
+              </div>
+            )}
+          </div>
         </Section>
       )}
     </>
@@ -3330,11 +3660,11 @@ function ActionCard({ item }) {
   );
 }
 
-function TabCollectionOpportunities({ data, kpis, phase4b2, advanced, rel, sampleMode, dateRangeDays, roleLens }) {
+function TabCollectionOpportunities({ data, kpis, phase4b2, advanced, rel, sampleMode, dateRangeDays, roleLens, liveSignals }) {
   return (
     <>
       {/* ── COLLECTION DIRECTION ───────────────────────────────────── */}
-      <TabCollection data={data} kpis={kpis} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} />
+      <TabCollection data={data} kpis={kpis} advanced={advanced} rel={rel} sampleMode={sampleMode} dateRangeDays={dateRangeDays} liveSignals={liveSignals} />
       {/* ── DESIGN & MERCHANDISING ACTION PLAN ─────────────────────── */}
       <TabOpportunitiesContent data={data} phase4b2={phase4b2} advanced={advanced} rel={rel} dateRangeDays={dateRangeDays} roleLens={roleLens} />
     </>

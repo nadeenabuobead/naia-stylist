@@ -21,7 +21,7 @@ import { isTryOnEligible } from "~/lib/ai/tryon-product-eligibility";
 import { TryOnPanel } from "~/components/TryOnPanel";
 import { RecommendationFeedbackWidget } from "~/components/RecommendationFeedbackWidget";
 import { buildCustomerJourneyContext, buildEphemeralContextSignals } from "~/lib/ai/journey-context.server";
-import { emitSessionStarted, emitRecommendationServed, emitLookSaved, emitInSessionReviewSubmitted, recordJourneyEvent } from "~/lib/ai/journey-events.server";
+import { emitSessionStarted, emitRecommendationServed, emitLookSaved, emitInSessionReviewSubmitted, recordJourneyEvent, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 export const links: LinksFunction = () => [
@@ -369,16 +369,20 @@ export async function action({ request }: ActionFunctionArgs) {
             },
           },
         });
+        // Awaited with idempotency key — prevents duplicate events under SSR revalidation
         try {
-          recordJourneyEvent(emitLookSaved({
-            customerId: naiaCustomer.id,
-            sessionId,
-            savedLookId: savedLook.id,
-            fromSuggestionId: suggestion.id,
-            itemCount: suggestion.items.length,
-            occasion: null,
-          }));
-        } catch { /* never block */ }
+          await recordJourneyEventAwaited(
+            emitLookSaved({
+              customerId: naiaCustomer.id,
+              sessionId,
+              savedLookId: savedLook.id,
+              fromSuggestionId: suggestion.id,
+              itemCount: suggestion.items.length,
+              occasion: null,
+            }),
+            `look_saved:${savedLook.id}:v1`,
+          );
+        } catch { /* event emission never blocks the response */ }
         return data({ saved: true, error: null });
       }
 
@@ -451,18 +455,22 @@ export async function action({ request }: ActionFunctionArgs) {
         update: reviewFields,
       });
 
+      // Awaited with idempotency key — one event per session review (upsert is idempotent)
       try {
-        recordJourneyEvent(emitInSessionReviewSubmitted({
-          customerId: reviewSession.customerId,
-          sessionId,
-          overallFeeling: isNaN(overallReaction) ? null : overallReaction,
-          confidenceBefore: null,
-          confidenceAfter: null,
-          feltLikeHer: reviewFields.feltLikeHer,
-          desiredFeelingAchieved: reviewFields.desiredFeelingAchieved,
-          wouldWearAgain: reviewFields.wouldWearAgain,
-        }));
-      } catch { /* never block */ }
+        await recordJourneyEventAwaited(
+          emitInSessionReviewSubmitted({
+            customerId: reviewSession.customerId,
+            sessionId,
+            overallFeeling: isNaN(overallReaction) ? null : overallReaction,
+            confidenceBefore: null,
+            confidenceAfter: null,
+            feltLikeHer: reviewFields.feltLikeHer,
+            desiredFeelingAchieved: reviewFields.desiredFeelingAchieved,
+            wouldWearAgain: reviewFields.wouldWearAgain,
+          }),
+          `in_session_review_submitted:${sessionId}:v1`,
+        );
+      } catch { /* event emission never blocks the response */ }
 
       return data({ reviewSaved: true, error: null });
     }
@@ -525,15 +533,18 @@ export async function action({ request }: ActionFunctionArgs) {
         },
       });
       try {
-        recordJourneyEvent(emitLookSaved({
-          customerId: naiaCustomer.id,
-          sessionId: suggestion.session.id,
-          savedLookId: savedLookPending.id,
-          fromSuggestionId: suggestion.id,
-          itemCount: suggestion.items.length,
-          occasion: null,
-        }));
-      } catch { /* never block */ }
+        await recordJourneyEventAwaited(
+          emitLookSaved({
+            customerId: naiaCustomer.id,
+            sessionId: suggestion.session.id,
+            savedLookId: savedLookPending.id,
+            fromSuggestionId: suggestion.id,
+            itemCount: suggestion.items.length,
+            occasion: null,
+          }),
+          `look_saved:${savedLookPending.id}:v1`,
+        );
+      } catch { /* event emission never blocks the response */ }
 
       const clearHeader = await clearPendingSave(request);
       return data({ saved: true }, { headers: { "Set-Cookie": clearHeader } });

@@ -1,7 +1,7 @@
 import prisma from "../db.server";
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import { quizQuestions } from "../lib/onboarding/quiz-data";
-import { emitPassportSaved, recordJourneyEvent } from "../lib/ai/journey-events.server";
+import { emitPassportSaved, recordJourneyEventAwaited } from "../lib/ai/journey-events.server";
 
 const RECOGNISED_FIELDS = new Set([
   "stylePersonalities", "desiredImpression", "lifestyle", "desiredFeelings",
@@ -165,16 +165,16 @@ export async function action({ request }) {
     if (result.count !== 1) {
       return Response.json({ error: "profile_changed" }, { status: 409 });
     }
-    // Emit passport_updated — this is an edit to an existing profile
+    // Awaited with idempotency key — one event per distinct profile update (CAS ensures uniqueness)
+    // Key includes baseProfileUpdatedAt so each successful update gets its own event.
     try {
       const nonEmptyFields = Object.values(profileData).filter(v =>
         Array.isArray(v) ? v.length > 0 : v != null && v !== ""
       ).length;
-      recordJourneyEvent(emitPassportSaved({
-        customerId: customer.id,
-        isFirstCompletion: false,
-        fieldCount: nonEmptyFields,
-      }));
+      await recordJourneyEventAwaited(
+        emitPassportSaved({ customerId: customer.id, isFirstCompletion: false, fieldCount: nonEmptyFields }),
+        `passport_updated:${op.id}:${baseProfileUpdatedAt}:v1`,
+      );
     } catch { /* event emission never blocks the response */ }
   } else {
     // No existing profile — allow create only when draft was based on a clean slate
@@ -182,9 +182,11 @@ export async function action({ request }) {
       return Response.json({ error: "profile_changed" }, { status: 409 });
     }
 
+    let newProfile;
     try {
-      await prisma.onboardingProfile.create({
+      newProfile = await prisma.onboardingProfile.create({
         data: { customerId: customer.id, ...profileData },
+        select: { id: true },
       });
     } catch (err) {
       // P2002 = unique-constraint violation: concurrent create for same customer
@@ -193,16 +195,15 @@ export async function action({ request }) {
       }
       throw err;
     }
-    // Emit passport_completed — first time this customer finishes their passport
+    // Awaited with idempotency key — one event per profile (keyed on profile id)
     try {
       const nonEmptyFields = Object.values(profileData).filter(v =>
         Array.isArray(v) ? v.length > 0 : v != null && v !== ""
       ).length;
-      recordJourneyEvent(emitPassportSaved({
-        customerId: customer.id,
-        isFirstCompletion: true,
-        fieldCount: nonEmptyFields,
-      }));
+      await recordJourneyEventAwaited(
+        emitPassportSaved({ customerId: customer.id, isFirstCompletion: true, fieldCount: nonEmptyFields }),
+        `passport_completed:${newProfile.id}:v1`,
+      );
     } catch { /* event emission never blocks the response */ }
   }
 

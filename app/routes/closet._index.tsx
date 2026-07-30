@@ -5,7 +5,7 @@ import prisma from "../db.server";
 import { requireCurrentNaiaCustomer, getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { assessClosetEligibility, CLOSET_ELIGIBILITY_DISPLAY, type ClosetTryOnEligibility } from "~/lib/ai/closet-eligibility";
 import { runStageBAssessment } from "~/lib/ai/closet-eligibility.server";
-import { emitClosetItemAdded, recordJourneyEvent } from "~/lib/ai/journey-events.server";
+import { emitClosetItemAdded, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
 
 const CATEGORIES = ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS", "ACCESSORIES", "JEWELRY", "OTHER"];
 const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver", "Multicolor"];
@@ -98,15 +98,18 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
 
-    // Emit closet_item_added event (fire-and-forget)
+    // Awaited with idempotency key — one event per closet item added
     try {
-      recordJourneyEvent(emitClosetItemAdded({
-        customerId: customer.id,
-        closetItemId: newItem.id,
-        category: newItem.category,
-        tryOnEligibility: newItem.tryOnEligibility ?? null,
-      }));
-    } catch { /* never block the response */ }
+      await recordJourneyEventAwaited(
+        emitClosetItemAdded({
+          customerId: customer.id,
+          closetItemId: newItem.id,
+          category: newItem.category,
+          tryOnEligibility: newItem.tryOnEligibility ?? null,
+        }),
+        `closet_item_added:${newItem.id}:v1`,
+      );
+    } catch { /* event emission never blocks the response */ }
 
     // Stage B: awaited within the request — timeout preserves pending-assessment
     if (stageA.eligible === "pending-assessment" && imageUrl) {

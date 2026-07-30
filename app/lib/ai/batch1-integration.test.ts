@@ -497,38 +497,52 @@ describe("Buy/Skip persistence hardening (Batch 1 review)", () => {
     );
   });
 
-  it("b1-49: emitBuySkipSubmitted call site appears AFTER the DB write in source order", () => {
+  it("b1-49: emitBuySkipSubmitted call site uses awaited emission AFTER DB write (Batch 2 upgrade)", () => {
+    // Batch 2 replaced fire-and-forget recordJourneyEvent with recordJourneyEventAwaited.
+    // The emit call must still appear after the DB write in source order.
     const route = readFileSync(
       join(__dirname, "../../routes/api.wishlist.jsx"), "utf8",
     );
     const dbWriteIdx = route.indexOf("buyOrSkipAnalysis.create");
-    // Match the call site (not the import line at the top)
-    const emitCallIdx = route.indexOf("recordJourneyEvent(emitBuySkipSubmitted");
+    // Search for the function call site (with opening paren), not the import declaration
+    const emitCallIdx = route.indexOf("recordJourneyEventAwaited(");
     assert.ok(dbWriteIdx >= 0, "DB write must be present");
-    assert.ok(emitCallIdx >= 0, "recordJourneyEvent(emitBuySkipSubmitted call must be present");
+    assert.ok(emitCallIdx >= 0, "recordJourneyEventAwaited( call must be present (Batch 2 upgrade)");
     assert.ok(
       emitCallIdx > dbWriteIdx,
-      "emitBuySkipSubmitted call must appear AFTER the DB write in source order",
+      "recordJourneyEventAwaited call must appear AFTER the DB write in source order",
     );
   });
 
-  it("b1-50: idempotency constant IDEMPOTENCY_WINDOW_MS is defined", () => {
+  it("b1-50: idempotency uses bucket-based window constant (Batch 2 upgrade: IDEMPOTENCY_WINDOW_SECONDS)", () => {
+    // Batch 2 replaced the old IDEMPOTENCY_WINDOW_MS time-based read-before-write
+    // with a bucket-based DB-unique-constraint approach (IDEMPOTENCY_WINDOW_SECONDS).
     const route = readFileSync(
       join(__dirname, "../../routes/api.wishlist.jsx"), "utf8",
     );
     assert.ok(
-      route.includes("IDEMPOTENCY_WINDOW_MS"),
-      "api.wishlist.jsx must define an idempotency window constant",
+      route.includes("IDEMPOTENCY_WINDOW_SECONDS"),
+      "api.wishlist.jsx must use IDEMPOTENCY_WINDOW_SECONDS (Batch 2 DB-backed idempotency)",
+    );
+    assert.ok(
+      !route.includes("IDEMPOTENCY_WINDOW_MS"),
+      "api.wishlist.jsx must not use old IDEMPOTENCY_WINDOW_MS (superseded by Batch 2)",
     );
   });
 
-  it("b1-51: idempotency check queries for same customerId + imageUrl within the window", () => {
+  it("b1-51: idempotency uses DB unique constraint + P2002 catch, not read-before-write (Batch 2 upgrade)", () => {
+    // Batch 2 replaced the old findFirst read-before-write idempotency check with
+    // a DB-level unique constraint on idempotencyKey. P2002 is caught on duplicate insert.
     const route = readFileSync(
       join(__dirname, "../../routes/api.wishlist.jsx"), "utf8",
     );
     assert.ok(
-      route.includes("imageUrl") && route.includes("createdAt") && route.includes("gte"),
-      "Idempotency check must query by imageUrl within a time window",
+      route.includes("P2002") && route.includes("isIdempotentRepeat"),
+      "Batch 2 idempotency must catch P2002 unique constraint violation",
+    );
+    assert.ok(
+      route.includes("idempotencyKey"),
+      "idempotencyKey must be included in the DB write",
     );
   });
 

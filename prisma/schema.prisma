@@ -345,6 +345,9 @@ model BuyOrSkipAnalysis {
   source        String   @default("buy-or-skip")
   schemaVersion String   @default("1.0")
   updatedAt     DateTime @updatedAt
+
+  // Batch 2 — DB-backed idempotency (null = pre-Batch-2 record)
+  idempotencyKey String? @unique
 }
 
 enum BuySkipVerdict {
@@ -645,6 +648,10 @@ model JourneyEvent {
   customerIdHash String   // SHA-256 prefix — never raw customerId; no FK to Customer
   sessionId      String   // styling session id or sentinel ("product-page", "unknown")
   payload        Json     // operational fields only — see journey-contract.ts
+
+  // Batch 2 — deduplication key (null = pre-Batch-2 record, fire-and-forget)
+  // Format: "<eventType>:<sourceRecordId>:v1" — unique per logical write
+  idempotencyKey String? @unique
 
   createdAt DateTime @default(now())
 

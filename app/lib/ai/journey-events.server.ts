@@ -16,14 +16,12 @@ import prisma from "../../db.server.js";
 
 export type { JourneyEvent };
 
-// ── Event recording hook ──────────────────────────────────────────────────────
-// Fire-and-forget DB write. If the JourneyEvent table is absent (migration not
-// yet applied) or any DB error occurs, degrades gracefully to dev-logging.
+// ── Event recording — fire-and-forget (legacy / non-analytics paths) ─────────
 // Returns void immediately — the DB write is async and never blocks the caller.
+// Use recordJourneyEventAwaited() for analytics-critical paths to prevent
+// duplicate emissions under serverless SSR revalidation.
 
 export function recordJourneyEvent(event: JourneyEvent): void {
-  // Outer try/catch covers synchronous errors (e.g. Prisma not initialised in test env).
-  // Inner .catch covers async errors (DB unavailable, migration pending).
   try {
     void prisma.journeyEvent.create({
       data: {
@@ -34,18 +32,48 @@ export function recordJourneyEvent(event: JourneyEvent): void {
         payload: event.payload as object,
       },
     }).catch(() => {
-      // JourneyEvent table unavailable (migration pending) or DB error — degrade to dev-log
       if (process.env.NODE_ENV !== "production") {
         // eslint-disable-next-line no-console
         console.log("[journey-event]", event.type, event.customerIdHash, event.sessionId);
       }
     });
   } catch {
-    // Synchronous init error (e.g. Prisma client not yet available) — degrade to dev-log
     if (process.env.NODE_ENV !== "production") {
       // eslint-disable-next-line no-console
       console.log("[journey-event]", event.type, event.customerIdHash, event.sessionId);
     }
+  }
+}
+
+// ── Event recording — awaited with idempotency key (analytics paths) ──────────
+// Awaited: the caller blocks until the DB write completes or an error is thrown.
+// idempotencyKey format: "<eventType>:<sourceRecordId>:v1"
+//   — at most one JourneyEvent per logical write, even across serverless retries.
+// Returns { created: true } on new write, { created: false } on idempotent repeat.
+// Throws on unexpected DB errors (caller should handle / return 503).
+
+export async function recordJourneyEventAwaited(
+  event: JourneyEvent,
+  idempotencyKey: string,
+): Promise<{ created: boolean }> {
+  try {
+    await prisma.journeyEvent.create({
+      data: {
+        type: event.type,
+        occurredAt: new Date(event.occurredAt),
+        customerIdHash: event.customerIdHash,
+        sessionId: event.sessionId,
+        payload: event.payload as object,
+        idempotencyKey,
+      },
+    });
+    return { created: true };
+  } catch (e: any) {
+    // P2002 = unique-constraint violation — idempotency key already exists.
+    // This is the expected path when SSR revalidation or a serverless retry
+    // triggers the action a second time for the same logical write.
+    if (e?.code === "P2002") return { created: false };
+    throw e;
   }
 }
 

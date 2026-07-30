@@ -1,8 +1,9 @@
+import { createHash } from "node:crypto";
 import { authenticateCustomer } from "../customer-auth.server";
 import { data as json } from "react-router";
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import prisma from "../db.server";
-import { emitBuySkipSubmitted, recordJourneyEvent } from "../lib/ai/journey-events.server";
+import { emitBuySkipSubmitted, recordJourneyEventAwaited } from "../lib/ai/journey-events.server";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -64,7 +65,10 @@ function hashForIndex(str) {
 // Idempotency policy: create a new analysis attempt per submission.
 // Guard: if the same customer submits the same imageUrl within 60 s (double-click /
 // network retry), skip the DB write and return the fresh analysis without a duplicate record.
-const IDEMPOTENCY_WINDOW_MS = 60_000;
+// DB-backed idempotency: 60-second bucket, keyed on customerId+imageUrl.
+// The idempotencyKey is stored in the DB with a unique constraint — duplicate
+// submissions within the same 60s window hit a P2002 and return the cached result.
+const IDEMPOTENCY_WINDOW_SECONDS = 60;
 
 async function analyzeItem(request) {
   // ── 1. Parse body ──────────────────────────────────────────────────────────
@@ -92,18 +96,14 @@ async function analyzeItem(request) {
     return json({ error: "not_authenticated" }, { status: 401 });
   }
 
-  // ── 3. Idempotency check ───────────────────────────────────────────────────
-  const windowStart = new Date(Date.now() - IDEMPOTENCY_WINDOW_MS);
-  const recentRecord = await prisma.buyOrSkipAnalysis.findFirst({
-    where: {
-      customerId: naiaCustomer.id,
-      imageUrl,
-      createdAt: { gte: windowStart },
-    },
-    select: { id: true },
-    orderBy: { createdAt: "desc" },
-  });
-  const isIdempotentRepeat = recentRecord !== null;
+  // ── 3. DB-backed idempotency key ────────────────────────────────────────────
+  // Bucket = floor(epoch seconds / 60) — same bucket for all requests within 60s window.
+  const bucket = Math.floor(Date.now() / (IDEMPOTENCY_WINDOW_SECONDS * 1000));
+  const idempotencyKey = "bos:" + createHash("sha256")
+    .update(`${naiaCustomer.id}:${imageUrl ?? ""}:${bucket}`)
+    .digest("hex")
+    .slice(0, 24);
+  let isIdempotentRepeat = false;
 
   const styleProfile = naiaCustomer.onboardingProfile;
 
@@ -272,10 +272,9 @@ Respond ONLY with valid JSON, no markdown:
       analysis.naiaMatch = { title: fallback.title, url: fallback.url, reason: null };
     }
 
-    // ── 8. Persist analysis (awaited; failure returns 503 — not swallowed) ────
+    // ── 8. Persist analysis (awaited; DB-backed idempotency via unique key) ───
     // Verdict is stated intent only — never a transaction, purchase, or revenue signal.
-    // Skip the DB write when idempotency window detects a recent duplicate.
-    if (!isIdempotentRepeat) {
+    {
       const verdictMap = { BUY: "BUY", SKIP: "SKIP", MAYBE: "MAYBE" };
       const persistedVerdict = verdictMap[analysis.verdict] ?? "INCOMPLETE";
 
@@ -293,25 +292,39 @@ Respond ONLY with valid JSON, no markdown:
             imageUrl,
             source: "buy-or-skip",
             schemaVersion: "1.0",
+            idempotencyKey,
           },
         });
       } catch (dbErr) {
-        // Log safely — no DB schema detail, no token, no customer identifiers
-        console.error("[buy-skip] persistence failed:", dbErr?.code ?? "unknown");
-        return json(
-          { error: "Analysis could not be saved. Please try again." },
-          { status: 503 },
-        );
+        if (dbErr?.code === "P2002") {
+          // Idempotent repeat — same bucket/customer/image hit a concurrent write.
+          isIdempotentRepeat = true;
+        } else {
+          console.error("[buy-skip] persistence failed:", dbErr?.code ?? "unknown");
+          return json(
+            { error: "Analysis could not be saved. Please try again." },
+            { status: 503 },
+          );
+        }
       }
 
-      // Event emitted only after confirmed DB write
-      recordJourneyEvent(emitBuySkipSubmitted({
-        customerId: naiaCustomer.id,
-        sessionId: "buy-or-skip",
-        analysisId: analysisRecord.id,
-        verdict: persistedVerdict,
-        category: normalizedCategory || null,
-      }));
+      // Event emitted only after confirmed new DB write — deduplicated by idempotency key
+      if (!isIdempotentRepeat && analysisRecord) {
+        try {
+          await recordJourneyEventAwaited(
+            emitBuySkipSubmitted({
+              customerId: naiaCustomer.id,
+              sessionId: "buy-or-skip",
+              analysisId: analysisRecord.id,
+              verdict: persistedVerdict,
+              category: normalizedCategory || null,
+            }),
+            `buy_skip_submitted:${analysisRecord.id}:v1`,
+          );
+        } catch {
+          // Event emission never blocks the response — analysis is already saved
+        }
+      }
     }
 
     return json({
