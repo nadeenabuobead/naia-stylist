@@ -590,6 +590,7 @@ export default function StyleMeResult() {
   );
   const [reviewSaved, setReviewSaved] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const reviewFetcher = useFetcher();
   const [reviewData, setReviewData] = useState({
     overallReaction: 0,
@@ -611,9 +612,10 @@ export default function StyleMeResult() {
 
   const submitReview = () => {
     if (!reviewData.overallReaction || reviewData.feltLikeMe === null || reviewData.createdFeeling === null || reviewData.wouldWear === null || !reviewData.physicalComfort) {
-      alert("Please answer all required questions");
+      setReviewError("Please answer all required questions before submitting.");
       return;
     }
+    setReviewError(null);
 
     const formData = new FormData();
     formData.append("intent", "review");
@@ -1116,8 +1118,13 @@ export default function StyleMeResult() {
               </div>
             </div>
 
-            <div className="sm-review-btns" style={{ marginTop: "32px" }}>
-              <button onClick={() => setShowReviewModal(false)} className="sm-review-btn" style={{ flex: 1 }}>Cancel</button>
+            {reviewError && (
+              <p style={{ fontFamily: "var(--naia-font-ui, sans-serif)", fontSize: "12px", color: "var(--naia-burg, #8b2035)", marginTop: "8px", marginBottom: "0" }}>
+                {reviewError}
+              </p>
+            )}
+            <div className="sm-review-btns" style={{ marginTop: "16px" }}>
+              <button onClick={() => { setShowReviewModal(false); setReviewError(null); }} className="sm-review-btn" style={{ flex: 1 }}>Cancel</button>
               <button onClick={submitReview} className="sm-review-btn sm-review-btn--on" style={{ flex: 1, background: "var(--naia-ink)", borderColor: "var(--naia-ink)" }}>Submit Review</button>
             </div>
           </div>

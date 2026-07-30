@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { authenticateCustomer } from "../customer-auth.server";
 import { data as json } from "react-router";
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import prisma from "../db.server";
@@ -358,7 +357,7 @@ export async function action({ request }) {
     return new Response(null, { status: 204, headers: CORS });
   }
 
-  const { customer } = await authenticateCustomer(request);
+  const customer = await getCurrentNaiaCustomer(request);
   if (!customer) {
     return Response.json({ error: "Not authenticated" }, { status: 401, headers: CORS });
   }
