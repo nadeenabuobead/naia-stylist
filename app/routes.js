@@ -36,6 +36,15 @@ export default [
     index("routes/app._index.jsx"),
     route("designer-intelligence", "routes/app.designer-intelligence.jsx"),
   ]),
+  // Customer account hub
+  route("my-naia",               "routes/my-naia._index.tsx"),
+  route("my-naia/saved",         "routes/my-naia.saved.tsx"),
+  route("my-naia-model",         "routes/my-naia-model.tsx"),
+  route("settings",              "routes/settings.tsx"),
+  route("post-wear-review",      "routes/post-wear-review.tsx"),
+  route("passport/selfie",       "routes/passport.selfie.tsx"),
+  route("style-session-new",     "routes/style-session-new/_index.tsx"),
+
   route("auth/login", "routes/auth.login/route.jsx"),
   route("auth/shopify/login",    "routes/auth.shopify.login.tsx"),
   route("auth/shopify/callback", "routes/auth.shopify.callback.tsx"),
