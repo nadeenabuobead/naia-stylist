@@ -77,7 +77,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
       const session = await prisma.stylingSession.findUnique({
         where: { id: sessionId },
-        include: { suggestions: { include: { items: true } } },
+        include: { suggestions: { include: { items: true }, orderBy: { createdAt: "desc" }, take: 1 } },
       });
       if (!session || session.customerId !== naiaCustomer.id) {
         return data(
