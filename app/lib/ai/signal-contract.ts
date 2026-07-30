@@ -392,13 +392,41 @@ export const PSM_SUPPLEMENTAL_PRODUCT_TOKENS = new Set<string>([
 
 export const PROFILE_DESIRED_FEELING_TRANSLATION: Record<string, string> = {
   confident: "more-confident",
-  comfortable: "relaxed",
+  comfortable: "relaxed",   // routes to styleMeComfortMatch, not desiredFeelingMatch
   "put-together": "more-put-together",
   elegant: "more-elevated",
   feminine: "more-feminine",
   powerful: "more-powerful",
   effortless: "more-effortless",
   attractive: "more-attractive",
+};
+
+// Maps fitPreference quiz answer IDs → styleMeComfortMatch catalog tokens.
+// RANK weight only — softer than session body-need STRONG_RANK.
+export const PROFILE_FIT_PREFERENCE_SMCM_MAP: Readonly<Record<string, string>> = {
+  "defined-waist": "waist-definition",
+  "relaxed-fits":  "relaxed",
+  "structured":    "structured",
+  "oversized":     "relaxed",
+  "flowy":         "relaxed",
+  "coverage":      "more-coverage",
+  "fitted":        "structured",
+  "simple":        "comfortable-elevated",
+};
+
+// Maps lifestyle quiz answer IDs → occasionTags catalog tokens.
+// Actual quiz IDs (from quiz-data.ts step 3): office, busy-mom, creative,
+// casual-days, events, on-the-go, travel, hybrid.
+// One quiz answer may map to multiple occasion tokens.
+export const PROFILE_LIFESTYLE_OCCASION_MAP: Readonly<Record<string, readonly string[]>> = {
+  "office":       ["work"],
+  "busy-mom":     ["everyday"],
+  "creative":     ["everyday"],
+  "casual-days":  ["everyday"],
+  "events":       ["dinner", "date-night", "girls-night"],
+  "on-the-go":    ["everyday", "travel"],
+  "travel":       ["travel"],
+  "hybrid":       ["work", "everyday"],
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

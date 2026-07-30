@@ -9,6 +9,9 @@ import {
   STYLE_PERSONALITY_STYLE_TAG_FALLBACK,
   STYLING_EFFORT_RULE,
   PROVISIONAL_EVIDENCE,
+  PROFILE_DESIRED_FEELING_TRANSLATION,
+  PROFILE_FIT_PREFERENCE_SMCM_MAP,
+  PROFILE_LIFESTYLE_OCCASION_MAP,
 } from "./signal-contract.js";
 import {
   getAllCatalogProducts,
@@ -181,6 +184,9 @@ export function buildSessionFingerprint(
     [...(profile?.stylePersonalities ?? [])].sort().join(","),
     [...(profile?.firmNoColors ?? [])].sort().join(","),
     [...(profile?.avoidColors ?? [])].sort().join(","),
+    [...(profile?.desiredFeelings ?? [])].sort().join(","),
+    [...(profile?.fitPreferences ?? [])].sort().join(","),
+    profile?.lifestyle ?? "",
     anchorToken,
     [...recentlyShownHandles].sort().join(","),
   ].join("|");
@@ -880,6 +886,44 @@ function scoreProduct(
     }
   }
 
+  // ── 7.5. Profile Desired Feelings (background signal) ───────────────────
+  // RANK weight — softer than session DFM STRONG_RANK.
+  // "comfortable" routes to SMCM "relaxed" (not desiredFeelingMatch).
+  // Only fires for feelings not already matched by the session's own desiredFeelings.
+  {
+    const sessionDfmTokens = new Set(dfmSignals);
+    for (const feelingId of (profile?.desiredFeelings ?? [])) {
+      const mappedToken = PROFILE_DESIRED_FEELING_TRANSLATION[feelingId];
+      if (!mappedToken) continue;
+      if (feelingId === "comfortable") {
+        // Routes to SMCM, not DFM — skip if session already has "relaxed" in bodyNeeds
+        if (!activeBodyNeeds.includes("relaxed") && rankings.styleMeComfortMatch.includes("relaxed")) {
+          addEntry(acc, makeEntry(
+            PRODUCT_TEMPLATE_FIELDS.STYLE_ME_COMFORT_MATCH,
+            "relaxed",
+            "profile-desired-feeling",
+            "RANK",
+            SCORING_WEIGHTS.RANK,
+            handle,
+          ));
+        }
+        continue;
+      }
+      if (sessionDfmTokens.has(mappedToken)) continue; // session already scored this token
+      if (rankings.desiredFeelingMatch.includes(mappedToken)) {
+        addEntry(acc, makeEntry(
+          PRODUCT_TEMPLATE_FIELDS.DESIRED_FEELING_MATCH,
+          mappedToken,
+          "profile-desired-feeling",
+          "RANK",
+          SCORING_WEIGHTS.RANK,
+          handle,
+        ));
+        hasDfmMatch = true;
+      }
+    }
+  }
+
   // ── 8. PSM / Practical Support ────────────────────────────────────────────
   const noSpecialConstraint = session.practicalIds.includes("no-special-constraint");
   let psmDirectMatches = 0;
@@ -1010,6 +1054,57 @@ function scoreProduct(
         SCORING_WEIGHTS.DEPRIORITISE,
         handle,
       ));
+    }
+  }
+
+  // ── 11.5. Profile Fit Preferences ────────────────────────────────────────
+  // RANK weight — softer than session body-need STRONG_RANK.
+  // Skips any SMCM token already matched by the session's bodyNeeds.
+  {
+    const seenSmcm = new Set<string>();
+    for (const prefId of (profile?.fitPreferences ?? [])) {
+      const smcmToken = PROFILE_FIT_PREFERENCE_SMCM_MAP[prefId];
+      if (!smcmToken) continue;
+      if (activeBodyNeeds.includes(smcmToken)) continue; // session already scored this
+      if (seenSmcm.has(smcmToken)) continue; // deduplicate (e.g. relaxed-fits + flowy both → relaxed)
+      if (rankings.styleMeComfortMatch.includes(smcmToken)) {
+        addEntry(acc, makeEntry(
+          PRODUCT_TEMPLATE_FIELDS.STYLE_ME_COMFORT_MATCH,
+          smcmToken,
+          "profile-fit-preference",
+          "RANK",
+          SCORING_WEIGHTS.RANK,
+          handle,
+        ));
+        seenSmcm.add(smcmToken);
+      }
+    }
+  }
+
+  // ── 11.6. Profile lifestyle → Occasion (background signal) ───────────────
+  // RANK weight — softer than session occasion STRONG_RANK.
+  // lifestyle is stored as a comma-separated string of quiz answer IDs.
+  // Skips tokens already matched by the session occasion.
+  if (profile?.lifestyle) {
+    const lifestyleIds = profile.lifestyle.split(",").map((s) => s.trim()).filter(Boolean);
+    const scoredTokens = new Set<string>();
+    for (const id of lifestyleIds) {
+      const tokens = PROFILE_LIFESTYLE_OCCASION_MAP[id] ?? [];
+      for (const token of tokens) {
+        if (token === session.occasion) continue; // session already scored this
+        if (scoredTokens.has(token)) continue;    // deduplicate across multiple IDs
+        if (rankings.occasionTags.includes(token)) {
+          addEntry(acc, makeEntry(
+            PRODUCT_TEMPLATE_FIELDS.OCCASION_TAGS,
+            token,
+            "profile-lifestyle",
+            "RANK",
+            SCORING_WEIGHTS.RANK,
+            handle,
+          ));
+          scoredTokens.add(token);
+        }
+      }
     }
   }
 

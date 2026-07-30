@@ -2085,3 +2085,215 @@ describe("§15  Valid representative matrix (≥120 valid sessions) — certific
     }
   });
 });
+
+// ─── §16  Profile signal influence tests ──────────────────────────────────────
+// These tests verify that forwarded Passport fields actually change recommendation
+// output (ranking / evidence). Each test isolates one profile field against a
+// controlled baseline session where that field is the only difference.
+//
+// Catalog facts used (from generated catalog, verified):
+//   collar-shirt:  desiredFeelingMatch includes "more-put-together"; occasionTags includes "work"
+//   straight-pants: styleMeComfortMatch includes "relaxed"; occasionTags "dinner,date-night,travel,special-event"
+//   kimono-jacket:  styleMeComfortMatch includes "relaxed"; occasionTags includes "everyday"
+//
+// Session baseline: occasion="dinner" (all 11 products match → +4 each); no mood/DFM/body signals.
+
+describe("§16  Profile signal influence tests", () => {
+  // Minimal session where all dinner products score identically (+4 occasion only).
+  const dinnerSession = makeSession({ occasion: "dinner", source: "naia-piece" });
+
+  function findEval(result: ReturnType<typeof run>, handle: string) {
+    const ev = result.evaluatedProducts.find((p) => p.handle === handle);
+    assert.ok(ev, `expected product "${handle}" in evaluatedProducts`);
+    return ev;
+  }
+
+  // ── 16.1  profile.desiredFeelings adds RANK to matching DFM token ────────────
+
+  it("16.1  profile.desiredFeelings=\"put-together\" adds RANK=2 to collar-shirt (has more-put-together)", () => {
+    const without = run(dinnerSession);
+    const withProfile = run(dinnerSession, { desiredFeelings: ["put-together"] });
+
+    const evWithout = findEval(without, "collar-shirt");
+    const evWith   = findEval(withProfile, "collar-shirt");
+
+    assert.equal(
+      evWith.totalScore - evWithout.totalScore,
+      SCORING_WEIGHTS.RANK,
+      "profile-desired-feeling should add exactly RANK=2 to collar-shirt",
+    );
+
+    const entry = evWith.positiveEvidence.find((e) => e.sessionSignal === "profile-desired-feeling");
+    assert.ok(entry, "positiveEvidence should contain a profile-desired-feeling entry");
+    assert.equal(entry.matchedToken, "more-put-together");
+    assert.equal(entry.points, SCORING_WEIGHTS.RANK);
+  });
+
+  it("16.1b  profile.desiredFeelings does not score asymmetrical-pants for \"put-together\" (no more-put-together)", () => {
+    // asymmetrical-pants has "more-put-together" in DFM — same as collar-shirt — this test
+    // ensures products WITHOUT the token get no bonus
+    const without = run(dinnerSession);
+    const withProfile = run(dinnerSession, { desiredFeelings: ["put-together"] });
+
+    // straight-pants has desiredFeelingMatch: "more-elevated, more-confident, more-effortless, more-attractive"
+    // — does NOT have "more-put-together"
+    const evWithout = findEval(without, "straight-pants");
+    const evWith   = findEval(withProfile, "straight-pants");
+
+    assert.equal(evWith.totalScore, evWithout.totalScore,
+      "straight-pants lacks more-put-together — score must not change");
+  });
+
+  // ── 16.2  profile.desiredFeelings does NOT double-score when session covers it ─
+
+  it("16.2  profile.desiredFeelings skips token already covered by session.desiredFeelings", () => {
+    const sessionWithDfm = makeSession({
+      desiredFeelings: ["more-put-together"], // session already scored this
+      occasion: "dinner",
+      source: "naia-piece",
+    });
+
+    const sessionOnly = run(sessionWithDfm);
+    const sessionAndProfile = run(sessionWithDfm, { desiredFeelings: ["put-together"] });
+
+    const scoreOnly  = findEval(sessionOnly,       "collar-shirt").totalScore;
+    const scoreBoth  = findEval(sessionAndProfile, "collar-shirt").totalScore;
+
+    assert.equal(scoreOnly, scoreBoth,
+      "profile-desired-feeling must not double-score when session already matched the same DFM token");
+  });
+
+  // ── 16.3  profile.fitPreferences adds RANK to matching SMCM token ────────────
+
+  it("16.3  profile.fitPreferences=\"relaxed-fits\" adds RANK=2 to straight-pants (has \"relaxed\" in SMCM)", () => {
+    const without = run(dinnerSession);
+    const withProfile = run(dinnerSession, { fitPreferences: ["relaxed-fits"] });
+
+    const evWithout = findEval(without,    "straight-pants");
+    const evWith   = findEval(withProfile, "straight-pants");
+
+    assert.equal(
+      evWith.totalScore - evWithout.totalScore,
+      SCORING_WEIGHTS.RANK,
+      "profile-fit-preference should add RANK=2 to straight-pants",
+    );
+
+    const entry = evWith.positiveEvidence.find((e) => e.sessionSignal === "profile-fit-preference");
+    assert.ok(entry, "positiveEvidence should contain a profile-fit-preference entry");
+    assert.equal(entry.matchedToken, "relaxed");
+    assert.equal(entry.points, SCORING_WEIGHTS.RANK);
+  });
+
+  it("16.3b  profile.fitPreferences does not score collar-shirt for \"relaxed-fits\" (no \"relaxed\" in SMCM)", () => {
+    // collar-shirt styleMeComfortMatch: "waist-definition, structured, balances" — no "relaxed"
+    const without = run(dinnerSession);
+    const withProfile = run(dinnerSession, { fitPreferences: ["relaxed-fits"] });
+
+    const evWithout = findEval(without,    "collar-shirt");
+    const evWith   = findEval(withProfile, "collar-shirt");
+
+    assert.equal(evWith.totalScore, evWithout.totalScore,
+      "collar-shirt lacks relaxed SMCM token — profile-fit-preference must not score it");
+  });
+
+  // ── 16.4  profile.fitPreferences does NOT double-score when session covers SMCM ─
+
+  it("16.4  profile.fitPreferences skips SMCM token already covered by session.bodyNeeds", () => {
+    const sessionWithBodyNeed = makeSession({
+      bodyNeeds: ["relaxed"], // session already covers this SMCM token
+      occasion: "dinner",
+      source: "naia-piece",
+    });
+
+    const sessionOnly = run(sessionWithBodyNeed);
+    const sessionAndProfile = run(sessionWithBodyNeed, { fitPreferences: ["relaxed-fits"] });
+
+    const scoreOnly = findEval(sessionOnly,       "straight-pants").totalScore;
+    const scoreBoth = findEval(sessionAndProfile, "straight-pants").totalScore;
+
+    assert.equal(scoreOnly, scoreBoth,
+      "profile-fit-preference must not double-score when session bodyNeeds already matched the same SMCM token");
+  });
+
+  // ── 16.5  fitPreferences deduplication (multiple IDs → same SMCM token) ──────
+
+  it("16.5  two fitPreferences mapping to the same SMCM token score it only once (deduplicated)", () => {
+    // "relaxed-fits" and "flowy" both map to "relaxed" SMCM token
+    const profileOne = run(dinnerSession, { fitPreferences: ["relaxed-fits"] });
+    const profileTwo = run(dinnerSession, { fitPreferences: ["relaxed-fits", "flowy"] });
+
+    const scoreOne = findEval(profileOne, "straight-pants").totalScore;
+    const scoreTwo = findEval(profileTwo, "straight-pants").totalScore;
+
+    assert.equal(scoreOne, scoreTwo,
+      "relaxed-fits + flowy both map to relaxed — must score exactly once (deduplicated)");
+
+    const fitEntries = findEval(profileTwo, "straight-pants")
+      .positiveEvidence.filter((e) => e.sessionSignal === "profile-fit-preference");
+    assert.equal(fitEntries.length, 1,
+      "exactly one profile-fit-preference entry for the deduplicated SMCM token");
+  });
+
+  // ── 16.6  profile.lifestyle adds RANK to matching occasionTag ─────────────────
+
+  it("16.6  profile.lifestyle=\"office\" adds RANK=2 to collar-shirt (has \"work\" tag) when session occasion is dinner", () => {
+    const without = run(dinnerSession);
+    const withProfile = run(dinnerSession, { lifestyle: "office" });
+
+    const evWithout = findEval(without,    "collar-shirt");
+    const evWith   = findEval(withProfile, "collar-shirt");
+
+    assert.equal(
+      evWith.totalScore - evWithout.totalScore,
+      SCORING_WEIGHTS.RANK,
+      "profile-lifestyle should add RANK=2 to collar-shirt (has work tag, session is dinner)",
+    );
+
+    const entry = evWith.positiveEvidence.find((e) => e.sessionSignal === "profile-lifestyle");
+    assert.ok(entry, "positiveEvidence should contain a profile-lifestyle entry");
+    assert.equal(entry.matchedToken, "work");
+    assert.equal(entry.points, SCORING_WEIGHTS.RANK);
+  });
+
+  it("16.6b  profile.lifestyle does not score straight-pants for \"office\" (no \"work\" tag)", () => {
+    // straight-pants occasionTags: "dinner, date-night, special-event, travel" — no "work"
+    const without = run(dinnerSession);
+    const withProfile = run(dinnerSession, { lifestyle: "office" });
+
+    const evWithout = findEval(without,    "straight-pants");
+    const evWith   = findEval(withProfile, "straight-pants");
+
+    assert.equal(evWith.totalScore, evWithout.totalScore,
+      "straight-pants lacks work tag — profile-lifestyle must not score it");
+  });
+
+  // ── 16.7  profile.lifestyle does NOT double-score when token equals session occasion ─
+
+  it("16.7  profile.lifestyle does not score \"work\" token when session occasion is also work", () => {
+    const workSession = makeSession({ occasion: "work", source: "naia-piece" });
+
+    const sessionOnly     = run(workSession);
+    const sessionAndProfile = run(workSession, { lifestyle: "office" });
+
+    const scoreOnly = findEval(sessionOnly,      "collar-shirt").totalScore;
+    const scoreBoth = findEval(sessionAndProfile, "collar-shirt").totalScore;
+
+    assert.equal(scoreOnly, scoreBoth,
+      "profile-lifestyle must not score the \"work\" token when session.occasion is already \"work\"");
+  });
+
+  // ── 16.8  buildSessionFingerprint reflects all three new profile fields ───────
+
+  it("16.8  buildSessionFingerprint differs for each distinct profile signal variant", () => {
+    const session = makeSession({ occasion: "dinner", source: "naia-piece" });
+    const fp0 = buildSessionFingerprint(session, undefined, null, []);
+    const fp1 = buildSessionFingerprint(session, { desiredFeelings: ["confident"] }, null, []);
+    const fp2 = buildSessionFingerprint(session, { fitPreferences: ["relaxed-fits"] }, null, []);
+    const fp3 = buildSessionFingerprint(session, { lifestyle: "office" }, null, []);
+
+    const all = [fp0, fp1, fp2, fp3];
+    const unique = new Set(all);
+    assert.equal(unique.size, all.length,
+      "each distinct profile signal combination must produce a distinct session fingerprint");
+  });
+});
