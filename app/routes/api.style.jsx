@@ -7,7 +7,6 @@ export async function action({ request }) {
   closetItem = null, closetItems = [],
   naiaPiece = null, closet = [],
 } = body || {};
-    console.log("API received - bodyPref:", bodyPref, "styleDNA:", styleDNA);
 
     const safeMood = String(mood || "").trim();
     const safeFeeling = String(feeling || "").trim();
@@ -109,8 +108,6 @@ try {
   console.error("Failed to fetch style intelligence:", err);
 }
 
-// Debug: log what intelligence was gathered
-console.log("Style Intelligence:", JSON.stringify(styleIntelligence, null, 2));
     const stylistPrompt = buildStylistPrompt({
   mode, outfit: finalOutfit, mood: safeMood, feeling: safeFeeling,
   event: safeEvent, styleWords, bodyPref, closetItem, closetItems,
@@ -174,8 +171,6 @@ try {
   
   if (customer) {
     // Create styling session
-    console.log("Saving styleDNA to session:", styleDNA);
-    console.log("Saving bodyPref to session:", bodyPref);
     const session = await prisma.stylingSession.create({
       data: {
         customerId: customer.id,
@@ -243,13 +238,13 @@ try {
       });
     }
 
-    return Response.json({ result: "TEST - Intelligence has " + (styleIntelligence ? styleIntelligence.totalReviews : "NO") + " reviews", sessionId: session.id });
+    return Response.json({ result, sessionId: session.id });
   }
 } catch (err) {
   console.error("DB save error:", err);
 }
 
-return Response.json({ result, debug_styleIntelligence: styleIntelligence });
+return Response.json({ result });
 
   } catch (error) {
     return Response.json({

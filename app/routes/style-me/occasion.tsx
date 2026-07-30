@@ -1,45 +1,55 @@
-import { Form, Link, useLoaderData } from "react-router";
-import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
+import { Form, Link } from "react-router";
+import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs, type LinksFunction } from "react-router";
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
+import { SmPage } from "~/components/style-me/SmPage";
+import { SmContinue } from "~/components/style-me/SmContinue";
+import naiaStyles from "~/styles/naia-design-system.css?url";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: naiaStyles },
+];
 
 const occasions = [
-  { id: "everyday", label: "Everyday / casual plans", emoji: "☕" },
-  { id: "work", label: "Work / meetings", emoji: "💼" },
-  { id: "dinner", label: "Dinner", emoji: "🍽️" },
-  { id: "date-night", label: "Date night", emoji: "🌹" },
-  { id: "girls-night", label: "Girls' night", emoji: "🥂" },
-  { id: "family", label: "Family gathering", emoji: "🏡" },
-  { id: "special-event", label: "Special event", emoji: "✨" },
-  { id: "travel", label: "Travel day", emoji: "✈️" },
-  { id: "not-sure", label: "I'm not sure yet", emoji: "🤔" },
+  { id: "everyday", label: "Everyday or casual plans" },
+  { id: "work", label: "Work or meetings" },
+  { id: "dinner", label: "Dinner" },
+  { id: "date-night", label: "Date night" },
+  { id: "girls-night", label: "Girls' night" },
+  { id: "family", label: "Family gathering" },
+  { id: "special-event", label: "Special event" },
+  { id: "travel", label: "Travel day" },
+  { id: "not-sure", label: "I'm not sure yet" },
 ];
+
+const VALID_OCCASION_IDS = new Set(occasions.map((o) => o.id));
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await getSession(request.headers.get("Cookie"));
   const mood = session.get("styleMeMood");
-  const feeling = session.get("styleMeFeeling");
-  
-  if (!mood || !feeling) {
+  const feelings = session.get("styleMeFeelings");
+  const bodyNeeds = session.get("styleMeBodyNeeds");
+
+  if (!mood || !feelings || !bodyNeeds) {
     return redirect("/style-me/mood");
   }
-  
-  return data({ mood, feeling });
+
+  return data({ mood, feelings, bodyNeeds });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
   const occasion = formData.get("occasion") as string;
-  
-  if (!occasion) {
+
+  if (!occasion || !VALID_OCCASION_IDS.has(occasion)) {
     return data({ error: "Please select an occasion" }, { status: 400 });
   }
-  
+
   const session = await getSession(request.headers.get("Cookie"));
   session.set("styleMeOccasion", occasion);
-  
-  return redirect("/style-me/comfort", {
-    headers: { "Set-Cookie": await commitSession(session) }
+
+  return redirect("/style-me/source", {
+    headers: { "Set-Cookie": await commitSession(session) },
   });
 }
 
@@ -47,67 +57,31 @@ export default function StyleMeOccasion() {
   const [selected, setSelected] = useState<string | null>(null);
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f4f4f1", padding: "40px 20px" }}>
-      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-      <div style={{ maxWidth: "600px", margin: "0 auto" }}>
-        <Link to="/style-me/feeling" style={{ display: "inline-block", marginBottom: "32px", color: "#7a6f6a", textDecoration: "none", fontSize: "11px", fontFamily: "'Space Mono',monospace", letterSpacing: "2px", textTransform: "uppercase" }}>← Back</Link>
-        
-        <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: "42px", fontWeight: 900, marginBottom: "12px", color: "#221516", letterSpacing: "-1px" }}>What does the outfit need to work for?</h1>
-        <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "40px" }}>Where you're going</p>
-        
-        <Form method="post">
-          <div style={{ display: "grid", gap: "12px", marginBottom: "40px" }}>
-            {occasions.map((occ) => (
-              <button
-                key={occ.id}
-                type="button"
-                onClick={() => setSelected(occ.id)}
-                style={{
-                  padding: "20px 24px",
-                  background: selected === occ.id ? "#8b2035" : "rgba(255,255,255,0.8)",
-                  color: selected === occ.id ? "#f4f4f1" : "#221516",
-                  border: selected === occ.id ? "2px solid #8b2035" : "1px solid rgba(59,5,16,0.1)",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  textAlign: "left",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "16px",
-                  fontFamily: "'Cormorant Garamond',serif",
-                  fontSize: "18px",
-                  transition: "all 0.3s",
-                }}
-              >
-                <span style={{ fontSize: "24px" }}>{occ.emoji}</span>
-                <span>{occ.label}</span>
-              </button>
-            ))}
-          </div>
+    <SmPage backTo="/style-me/comfort" step={4}>
+      <p className="sm-step-label">Occasion</p>
+      <h1 className="sm-heading">What does the outfit need to work for?</h1>
+      <p className="sm-sub">Choose your occasion.</p>
 
-          <input type="hidden" name="occasion" value={selected || ""} />
-          
-          <button
-            type="submit"
-            disabled={!selected}
-            style={{
-              width: "100%",
-              padding: "18px",
-              background: selected ? "#221516" : "#7a6f6a",
-              color: "#f4f4f1",
-              border: "none",
-              fontFamily: "'Space Mono',monospace",
-              fontSize: "10px",
-              letterSpacing: "4px",
-              textTransform: "uppercase",
-              cursor: selected ? "pointer" : "not-allowed",
-              borderRadius: "4px",
-              opacity: selected ? 1 : 0.6,
-            }}
-          >
-            Continue
-          </button>
-        </Form>
-      </div>
-    </div>
+      <Form method="post">
+        <div className="sm-pills">
+          {occasions.map((occ) => (
+            <button
+              key={occ.id}
+              type="button"
+              onClick={() => setSelected(occ.id)}
+              className={`sm-pill${selected === occ.id ? " sm-pill--on" : ""}`}
+            >
+              {occ.label}
+            </button>
+          ))}
+        </div>
+
+        <input type="hidden" name="occasion" value={selected || ""} />
+        <div className="sm-step-buttons">
+          <Link to="/style-me/comfort" className="sm-btn-back">← Back</Link>
+          <SmContinue disabled={!selected} />
+        </div>
+      </Form>
+    </SmPage>
   );
 }

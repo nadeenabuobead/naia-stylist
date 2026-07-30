@@ -1,16 +1,22 @@
 // app/routes/style-me/_index.tsx
 import { Link, useLoaderData } from "react-router";
-import { data, type LoaderFunctionArgs } from "react-router";
-import { getCustomerId } from "~/lib/auth.server";
+import { data, type LoaderFunctionArgs, type LinksFunction } from "react-router";
+import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { prisma } from "~/lib/prisma.server";
+import naiaStyles from "~/styles/naia-design-system.css?url";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: naiaStyles },
+];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const customerId = await getCustomerId(request);
-  
+  const customer = await getCurrentNaiaCustomer(request);
+  const customerId = customer?.id ?? null;
+
   if (!customerId) {
     return data({ hasProfile: false, hasClosetItems: false, recentSessions: [] });
   }
-  
+
   const [profile, closetCount, recentSessions] = await Promise.all([
     prisma.onboardingProfile.findUnique({
       where: { customerId },
@@ -32,10 +38,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
     })
   ]);
-  
+
   return data({
     hasProfile: !!profile,
-    stylePersonalities: profile?.stylePersonality,
+    stylePersonalities: profile?.stylePersonalities ?? [],
     hasClosetItems: closetCount > 0,
     closetCount,
     recentSessions
@@ -43,176 +49,112 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export default function StyleMeIndex() {
-  const { hasProfile, stylePersonality, hasClosetItems, closetCount, recentSessions } = 
+  const { hasProfile, stylePersonalities, hasClosetItems, closetCount, recentSessions } =
     useLoaderData<typeof loader>();
 
   return (
-    <div className="min-h-screen bg-[var(--naia-cream)]">
-      {/* Header */}
-      <header className="px-4 py-6 bg-white/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-lg mx-auto">
-          <Link to="/apps/naia-stylist/" className="text-[var(--naia-text-muted)] text-sm">
-            ← Back
-          </Link>
-        </div>
-      </header>
+    <div className="sm-page">
+      <div className="sm-inner">
 
-      <main className="px-4 py-8 max-w-lg mx-auto">
-        {/* Welcome Section */}
-        <div className="text-center mb-10">
-          <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-gradient-to-br from-[var(--naia-rose)] to-[var(--naia-rose-dark)] flex items-center justify-center">
-            <span className="text-4xl">✨</span>
-          </div>
-          <h1 className="font-display text-3xl font-medium text-[var(--naia-charcoal)] mb-2">
-            Style Me, nAia
-          </h1>
-          <p className="text-[var(--naia-text-muted)]">
-            Tell me how you're feeling and I'll create the perfect look for you
-          </p>
+        <div style={{ marginBottom: "40px" }}>
+          <p className="sm-eyebrow" style={{ marginBottom: "12px" }}>Style Me, nAia</p>
+          <h1 className="sm-heading">What are you wearing today?</h1>
+          <p className="sm-sub" style={{ marginBottom: "0" }}>Tell me how you're feeling and I'll create the perfect look for you.</p>
         </div>
 
-        {/* Status Cards */}
-        <div className="space-y-3 mb-8">
-          {/* Profile Status */}
-          <div className={`
-            p-4 rounded-xl flex items-center gap-4
-            ${hasProfile 
-              ? "bg-green-50 border border-green-200" 
-              : "bg-amber-50 border border-amber-200"
-            }
-          `}>
-            <div className={`
-              w-10 h-10 rounded-full flex items-center justify-center
-              ${hasProfile ? "bg-green-100" : "bg-amber-100"}
-            `}>
-              <span>{hasProfile ? "✓" : "!"}</span>
+        <div style={{ marginBottom: "32px" }}>
+          <div className="sm-status-card">
+            <div className={`sm-status-icon${hasProfile ? " sm-status-icon--ok" : ""}`}>
+              {hasProfile ? "✓" : "!"}
             </div>
-            <div className="flex-1">
-              <p className="font-medium text-[var(--naia-charcoal)]">
-                {hasProfile ? "Style Profile Complete" : "Complete Your Style Profile"}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p className="sm-status-label">
+                {hasProfile ? "Style Profile Complete" : "Style Profile Incomplete"}
               </p>
-              <p className="text-sm text-[var(--naia-text-muted)]">
-                {hasProfile 
-                  ? `Your style: ${stylePersonality || "Discovering..."}`
-                  : "Help nAia understand your style better"
-                }
+              <p className="sm-status-desc">
+                {hasProfile
+                  ? `Your style: ${stylePersonalities.length > 0 ? stylePersonalities.join(", ") : "Discovering..."}`
+                  : "Help nAia understand your style better"}
               </p>
             </div>
             {!hasProfile && (
-              <Link 
-                to="/apps/naia-stylist/onboarding/step/1"
-                className="text-sm text-[var(--naia-rose)] font-medium"
-              >
+              <Link to="/onboarding/step/1" className="sm-status-link">
                 Start →
               </Link>
             )}
           </div>
 
-          {/* Closet Status */}
-          <div className={`
-            p-4 rounded-xl flex items-center gap-4
-            ${hasClosetItems 
-              ? "bg-green-50 border border-green-200" 
-              : "bg-amber-50 border border-amber-200"
-            }
-          `}>
-            <div className={`
-              w-10 h-10 rounded-full flex items-center justify-center
-              ${hasClosetItems ? "bg-green-100" : "bg-amber-100"}
-            `}>
-              <span>{hasClosetItems ? "👗" : "📸"}</span>
+          <div className="sm-status-card">
+            <div className={`sm-status-icon${hasClosetItems ? " sm-status-icon--ok" : ""}`}>
+              {hasClosetItems ? "👗" : "📸"}
             </div>
-            <div className="flex-1">
-              <p className="font-medium text-[var(--naia-charcoal)]">
-                {hasClosetItems ? `${closetCount} items in closet` : "Add Your Wardrobe"}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p className="sm-status-label">
+                {hasClosetItems ? `${closetCount} items in closet` : "Wardrobe empty"}
               </p>
-              <p className="text-sm text-[var(--naia-text-muted)]">
-                {hasClosetItems 
+              <p className="sm-status-desc">
+                {hasClosetItems
                   ? "Ready to create outfits from your pieces"
-                  : "Upload items to style from your own closet"
-                }
+                  : "Upload items to style from your own closet"}
               </p>
             </div>
-            <Link 
-              to="/closet/upload"
-              className="text-sm text-[var(--naia-rose)] font-medium"
-            >
+            <Link to="/closet" className="sm-status-link">
               {hasClosetItems ? "Add more →" : "Upload →"}
             </Link>
           </div>
         </div>
 
-        {/* Start Styling Button */}
-        <Link
-          to="/style-me/mood"
-          className="block w-full py-4 px-6 bg-[var(--naia-rose)] text-white text-center font-medium rounded-full shadow-lg hover:bg-[var(--naia-rose-dark)] transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5"
-        >
-          Let's Create Your Look ✨
+        <Link to="/style-me/mood" className="sm-cta">
+          Let's Create Your Look
         </Link>
+        <p className="sm-cta-note">Works best with your closet, but I can also suggest new pieces.</p>
 
-        <p className="text-center text-sm text-[var(--naia-text-muted)] mt-4">
-          Works best with your closet items, but I can also suggest new pieces!
-        </p>
-
-        {/* Recent Sessions */}
         {recentSessions.length > 0 && (
-          <div className="mt-12">
-            <h2 className="font-display text-xl font-medium text-[var(--naia-charcoal)] mb-4">
-              Recent Looks
-            </h2>
-            <div className="grid grid-cols-3 gap-3">
-              {recentSessions.map((session) => (
-                <Link
-                  key={session.id}
-                  to={`/style-me/result?sessionId=${session.id}`}
-                  className="group"
-                >
-                  <div className="aspect-[3/4] rounded-xl overflow-hidden bg-[var(--naia-gray-100)]">
+          <div style={{ marginTop: "48px" }}>
+            <p className="sm-eyebrow" style={{ marginBottom: "16px" }}>Recent Looks</p>
+            <div className="sm-recent-grid">
+              {recentSessions.map((session: any) => (
+                <div key={session.id}>
+                  <Link
+                    to={`/style-me/result?sessionId=${session.id}`}
+                    className="sm-recent-card"
+                  >
                     {session.suggestions[0]?.heroImageUrl ? (
                       <img
                         src={session.suggestions[0].heroImageUrl}
                         alt={session.suggestions[0].outfitName || "Recent outfit"}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <span className="text-2xl">👗</span>
-                      </div>
+                      <span style={{ fontSize: "28px" }}>👗</span>
                     )}
-                  </div>
-                  <p className="mt-2 text-sm text-[var(--naia-charcoal)] line-clamp-1">
-                    {session.mood} • {session.occasion}
+                  </Link>
+                  <p className="sm-recent-label">
+                    {session.mood} · {session.occasion}
                   </p>
-                </Link>
+                </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* How It Works */}
-        <div className="mt-12 p-6 bg-white rounded-2xl">
-          <h2 className="font-display text-lg font-medium text-[var(--naia-charcoal)] mb-4">
-            How It Works
-          </h2>
-          <div className="space-y-4">
-            {[
-              { step: "1", emoji: "🌸", text: "Tell me your mood" },
-              { step: "2", emoji: "💭", text: "Share how you want to feel" },
-              { step: "3", emoji: "🎯", text: "Pick the occasion" },
-              { step: "4", emoji: "👗", text: "Choose your source (closet, nAia, or both)" },
-              { step: "5", emoji: "✨", text: "Get your complete look with styling tips" },
-            ].map(({ step, emoji, text }) => (
-              <div key={step} className="flex items-center gap-4">
-                <div className="w-8 h-8 rounded-full bg-[var(--naia-rose)]/10 flex items-center justify-center text-sm font-medium text-[var(--naia-rose)]">
-                  {step}
-                </div>
-                <span className="text-xl">{emoji}</span>
-                <p className="text-[var(--naia-charcoal)]">{text}</p>
-              </div>
-            ))}
-          </div>
+        <div className="sm-how-it-works">
+          <p className="sm-eyebrow" style={{ marginBottom: "20px" }}>How It Works</p>
+          {[
+            { step: "1", emoji: "🌸", text: "Tell me your mood" },
+            { step: "2", emoji: "💭", text: "Share how you want to feel" },
+            { step: "3", emoji: "🎯", text: "Pick the occasion" },
+            { step: "4", emoji: "👗", text: "Choose your source — closet, nAia, or both" },
+            { step: "5", emoji: "✨", text: "Get your complete look with styling tips" },
+          ].map(({ step, emoji, text }) => (
+            <div key={step} className="sm-how-step">
+              <div className="sm-how-step-num">{step}</div>
+              <span style={{ fontSize: "20px" }}>{emoji}</span>
+              <span className="sm-how-step-text">{text}</span>
+            </div>
+          ))}
         </div>
-      </main>
+
+      </div>
     </div>
   );
 }

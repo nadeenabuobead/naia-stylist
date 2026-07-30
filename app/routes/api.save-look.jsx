@@ -1,35 +1,11 @@
-import { authenticateCustomer } from "../customer-auth.server.js";
-
-export async function action({ request }) {
-  try {
-    const { customer } = await authenticateCustomer(request);
-    
-    if (!customer) {
-      return Response.json({ error: "Not authenticated" }, { status: 401 });
-    }
-
-    const body = await request.json();
-    const { result, session } = body;
-
-    const { prisma } = await import("../db.server.js");
-    
-    const savedLook = await prisma.savedLook.create({
-      data: {
-        customerId: customer.id,
-        resultText: result,
-        productsUsed: [],
-        wardrobeItemsUsed: [],
-        createdAt: new Date()
-      }
-    });
-
-    return Response.json({ 
-      success: true,
-      lookId: savedLook.id
-    });
-    
-  } catch (error) {
-    console.error("Save look error:", error);
-    return Response.json({ error: "Failed to save look" }, { status: 500 });
-  }
+// DEPRECATED — Batch 1 (2026-07-29)
+// This route referenced non-existent SavedLook schema fields (resultText, productsUsed,
+// wardrobeItemsUsed) and crashed at runtime with a Prisma P2009 unknown-field error.
+// The canonical Saved Look write path is style-me/result.tsx (intent=save).
+// Clients that call this endpoint should migrate to that path.
+export async function action() {
+  return Response.json(
+    { error: "deprecated", message: "Use the style-me result save action." },
+    { status: 410 },
+  );
 }

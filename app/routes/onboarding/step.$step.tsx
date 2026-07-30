@@ -1,19 +1,163 @@
 import { useState, useEffect } from "react";
 import { Link, useLoaderData, useNavigate } from "react-router";
-import { redirect, type LoaderFunctionArgs } from "react-router";
-import {
-  getQuestionByStep,
-  getTotalSteps,
-  type OnboardingAnswers,
-} from "~/lib/onboarding/quiz-data";
+import { data, redirect, type LoaderFunctionArgs } from "react-router";
+import type { OnboardingAnswers } from "~/lib/onboarding/quiz-data";
+import { getQuestionByStep, getTotalSteps, quizQuestions } from "~/lib/onboarding/quiz-data";
+import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import { prisma } from "~/lib/prisma.server";
+import { readPendingSave, clearPendingSave } from "~/lib/pending-save.server";
 
-export async function loader({ params }: LoaderFunctionArgs) {
+// Valid option IDs per draft key — derived from quiz data at module load time
+const VALID_DRAFT_IDS: Record<string, Set<string>> = {};
+for (const q of quizQuestions) {
+  if (q.options) VALID_DRAFT_IDS[q.id] = new Set(q.options.map(o => o.id));
+  if (q.colors)  VALID_DRAFT_IDS[q.id] = new Set(q.colors.map(c => c.id));
+}
+
+// ---------------------------------------------------------------------------
+// Versioned, customer-scoped, revision-bound session draft
+// ---------------------------------------------------------------------------
+
+interface NaiaOnboardingDraft {
+  __v: 2;
+  baseProfileUpdatedAt: string | null;
+  answers: OnboardingAnswers;
+}
+
+function arraysEqualAsSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort();
+  const sb = [...b].sort();
+  return sa.every((v, i) => v === sb[i]);
+}
+
+function sanitizeDraft(raw: OnboardingAnswers): OnboardingAnswers {
+  const out: OnboardingAnswers = {};
+  const arrayKeys = [
+    "style-personalities", "desired-impression", "lifestyle",
+    "desired-feelings", "becoming", "fit-preferences",
+    "wardrobe-disconnection", "favorite-colors", "avoid-colors", "style-support",
+  ] as const;
+  for (const key of arrayKeys) {
+    const v = raw[key];
+    if (Array.isArray(v) && v.every((i): i is string => typeof i === "string")) {
+      const validIds = VALID_DRAFT_IDS[key];
+      // Accept [] as intentional clear; reject entire field if any item is an unknown ID
+      if (v.length === 0 || (validIds && v.every(i => validIds.has(i)))) {
+        out[key] = v;
+      }
+    }
+  }
+  const fn = raw["final-notes"];
+  if (typeof fn === "string") out["final-notes"] = fn;
+  return out;
+}
+
+function readSessionDraft(
+  storageKey: string,
+  profileUpdatedAt: string | null,
+): OnboardingAnswers {
+  try {
+    localStorage.removeItem("naia_onboarding"); // always evict legacy key
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed) ||
+      (parsed as NaiaOnboardingDraft).__v !== 2 ||
+      (parsed as NaiaOnboardingDraft).answers === null ||
+      typeof (parsed as NaiaOnboardingDraft).answers !== "object" ||
+      Array.isArray((parsed as NaiaOnboardingDraft).answers) ||
+      (parsed as NaiaOnboardingDraft).baseProfileUpdatedAt !== profileUpdatedAt
+    ) {
+      localStorage.removeItem(storageKey);
+      return {};
+    }
+    return ((parsed as NaiaOnboardingDraft).answers ?? {}) as OnboardingAnswers;
+  } catch {
+    try { localStorage.removeItem(storageKey); } catch { /* ignore: removeItem is best-effort */ }
+    return {};
+  }
+}
+
+function writeSessionDraft(
+  storageKey: string,
+  profileUpdatedAt: string | null,
+  answers: OnboardingAnswers,
+): void {
+  if (Object.keys(answers).length === 0) {
+    localStorage.removeItem(storageKey);
+    return;
+  }
+  localStorage.setItem(
+    storageKey,
+    JSON.stringify({ __v: 2, baseProfileUpdatedAt: profileUpdatedAt, answers }),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Loader
+// ---------------------------------------------------------------------------
+
+export async function loader({ params, request }: LoaderFunctionArgs) {
   const step = parseInt(params.step || "1", 10);
   const totalSteps = getTotalSteps();
   if (isNaN(step) || step < 1 || step > totalSteps) return redirect("/onboarding/step/1");
   const question = getQuestionByStep(step);
   if (!question) return redirect("/onboarding/step/1");
-  return { step, totalSteps, question };
+
+  const customer = await requireCurrentNaiaCustomer(request);
+  const op = customer.onboardingProfile;
+  const existingAnswers: OnboardingAnswers = {};
+  if (op) {
+    if (op.stylePersonalities.length)  existingAnswers["style-personalities"]    = op.stylePersonalities;
+    if (op.desiredImpression.length)   existingAnswers["desired-impression"]     = op.desiredImpression;
+    if (op.lifestyle)                  existingAnswers["lifestyle"]              = op.lifestyle.split(", ").filter(Boolean);
+    if (op.desiredFeelings.length)     existingAnswers["desired-feelings"]       = op.desiredFeelings;
+    if (op.becoming.length)            existingAnswers["becoming"]               = op.becoming;
+    if (op.fitPreferences.length)      existingAnswers["fit-preferences"]        = op.fitPreferences;
+    if (op.styleStruggles.length)      existingAnswers["wardrobe-disconnection"] = op.styleStruggles;
+    if (op.favoriteColors.length)      existingAnswers["favorite-colors"]        = op.favoriteColors;
+    if (op.avoidColors.length)         existingAnswers["avoid-colors"]           = op.avoidColors;
+    if (op.styleSupport.length)        existingAnswers["style-support"]          = op.styleSupport;
+    if (op.finalNotes)                 existingAnswers["final-notes"]            = op.finalNotes;
+  }
+  const pendingSave = await readPendingSave(request);
+
+  let hasPendingLook = false;
+  let pendingClearHeader: string | undefined;
+
+  if (pendingSave.status === "invalid_or_expired") {
+    pendingClearHeader = await clearPendingSave(request);
+  } else if (pendingSave.status === "valid") {
+    const pendingSuggestion = await prisma.outfitSuggestion.findUnique({
+      where: { id: pendingSave.sid },
+      include: { session: { include: { customer: true } } },
+    });
+    const isOwned = pendingSuggestion?.session?.customerId === customer.id;
+    const isGuestClaimable =
+      pendingSuggestion?.session?.customer?.shopifyCustomerId === "guest";
+    if (!pendingSuggestion || (!isOwned && !isGuestClaimable)) {
+      pendingClearHeader = await clearPendingSave(request);
+    } else {
+      hasPendingLook = true;
+    }
+  }
+
+  const payload = {
+    step,
+    totalSteps,
+    question,
+    existingAnswers,
+    draftScope:       customer.id,
+    profileUpdatedAt: op?.updatedAt?.toISOString() ?? null,
+    hasPendingLook,
+  };
+  return pendingClearHeader
+    ? data(payload, { headers: { "Set-Cookie": pendingClearHeader } })
+    : payload;
 }
 
 const css = `
@@ -53,39 +197,69 @@ const css = `
 `;
 
 export default function OnboardingStep() {
-  const { step, totalSteps, question } = useLoaderData<typeof loader>();
+  const { step, totalSteps, question, existingAnswers, draftScope, profileUpdatedAt, hasPendingLook } =
+    useLoaderData<typeof loader>();
   const navigate = useNavigate();
 
-  const [allAnswers, setAllAnswers] = useState<OnboardingAnswers>({});
+  const storageKey = `naia_onboarding_v2:${draftScope}`;
+
   const [singleValue, setSingleValue] = useState<string | null>(null);
   const [multiValue, setMultiValue] = useState<string[]>([]);
   const [textValue, setTextValue] = useState<string>("");
 
-  // Load answers from localStorage on mount and when step changes
+  // Read sparse session draft; merge with DB base for display.
+  // Never writes to localStorage — that is done only in saveAndNavigate.
   useEffect(() => {
     try {
-      const stored = localStorage.getItem("naia_onboarding");
-      const parsed = stored ? JSON.parse(stored) : {};
-      setAllAnswers(parsed);
-      const prev = parsed[question.id];
-      if (Array.isArray(prev)) setMultiValue(prev);
+      const rawDraft = readSessionDraft(storageKey, profileUpdatedAt);
+      const sessionEdits = sanitizeDraft(rawDraft);
+      const merged: OnboardingAnswers = { ...existingAnswers, ...sessionEdits };
+      const prev = merged[question.id as keyof OnboardingAnswers];
+      if (Array.isArray(prev)) setMultiValue(prev as string[]);
       else if (typeof prev === "string") { setSingleValue(prev); setTextValue(prev); }
       else { setSingleValue(null); setMultiValue([]); setTextValue(""); }
     } catch {
       setSingleValue(null); setMultiValue([]); setTextValue("");
     }
-  }, [question.id]);
+  }, [question.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveAndNavigate = (direction: "next" | "back" | "skip") => {
     try {
-      const updated = { ...allAnswers };
+      const rawDraft = readSessionDraft(storageKey, profileUpdatedAt);
+      const sessionEdits = sanitizeDraft(rawDraft);
+
       if (direction !== "skip") {
-        if (question.type === "single") updated[question.id as keyof OnboardingAnswers] = singleValue as any;
-        else if (question.type === "multi" || question.type === "color") updated[question.id as keyof OnboardingAnswers] = multiValue as any;
-        else if (question.type === "text") updated[question.id as keyof OnboardingAnswers] = textValue as any;
+        const qid = question.id as keyof OnboardingAnswers;
+
+        if (question.type === "multi" || question.type === "color") {
+          // Compare as a set — order must not create a false edit
+          const dbBase = Array.isArray(existingAnswers[qid])
+            ? (existingAnswers[qid] as string[])
+            : [];
+          if (arraysEqualAsSet(multiValue, dbBase)) {
+            delete sessionEdits[qid];
+          } else {
+            (sessionEdits as Record<string, unknown>)[qid] = multiValue;
+          }
+        } else if (question.type === "single") {
+          const dbBase = (existingAnswers[qid] as string | undefined) ?? null;
+          if ((singleValue ?? null) === dbBase) {
+            delete sessionEdits[qid];
+          } else {
+            (sessionEdits as Record<string, unknown>)[qid] = singleValue;
+          }
+        } else if (question.type === "text") {
+          const dbBase = (existingAnswers[qid] as string | undefined) ?? "";
+          if (textValue === dbBase) {
+            delete sessionEdits[qid];
+          } else {
+            (sessionEdits as Record<string, unknown>)[qid] = textValue;
+          }
+        }
       }
-      localStorage.setItem("naia_onboarding", JSON.stringify(updated));
-    } catch {}
+
+      writeSessionDraft(storageKey, profileUpdatedAt, sessionEdits);
+    } catch { /* ignore: localStorage may be unavailable */ }
 
     if (direction === "back") navigate(`/onboarding/step/${step - 1}`);
     else if (step >= totalSteps) navigate("/onboarding/complete");
@@ -115,7 +289,7 @@ export default function OnboardingStep() {
 
       <div className="ob-topbar">
         <div className="ob-topbar-logo">nAia</div>
-        <Link to="/apps/naia-stylist/" className="ob-topbar-close">Exit Session</Link>
+        <Link to="/" className="ob-topbar-close">Exit Session</Link>
       </div>
 
       <div className="ob-progress">
@@ -127,6 +301,20 @@ export default function OnboardingStep() {
         </div>
         <div className="ob-progress-label">Step {step} of {totalSteps}</div>
       </div>
+
+      {hasPendingLook && step === 1 && (
+        <div style={{ background: "rgba(139,32,53,0.04)", borderBottom: "1px solid rgba(139,32,53,0.1)", padding: "20px 40px" }}>
+          <p style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "#8b2035", marginBottom: "8px" }}>
+            YOUR nAia PASSPORT
+          </p>
+          <p style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "20px", fontStyle: "italic", color: "#221516", marginBottom: "6px" }}>
+            Create your nAia Passport
+          </p>
+          <p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "16px", color: "#7a6f6a" }}>
+            Your Style Me look will be waiting for you once your Passport is complete.
+          </p>
+        </div>
+      )}
 
       <main className="ob-main">
         <div className="ob-step-label">Step {step} of {totalSteps}</div>

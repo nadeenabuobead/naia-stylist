@@ -1,0 +1,23 @@
+# Learn more about configuring your Customer account UI extension:
+# https://shopify.dev/api/customer-account-ui-extensions/unstable/configuration
+
+# The version of APIs your extension will receive. Learn more:
+# https://shopify.dev/docs/api/usage/versioning
+api_version = "2026-04"
+
+[[extensions]]
+name = "nAia Identity Proof"
+handle = "naia-identity-proof"
+type = "ui_extension"
+uid = "551b78f2-c065-3b82-17e8-ae79f66f976b9ddd22b4"
+
+# Controls where in Shopify your extension will be injected,
+# and the file that contains your extension’s source code. Learn more:
+# https://shopify.dev/docs/api/customer-account-ui-extensions/unstable/extension-targets-overview
+
+[[extensions.targeting]]
+module = "./src/ProfileBlock.jsx"
+target = "customer-account.profile.block.render"
+
+[extensions.capabilities]
+network_access = true

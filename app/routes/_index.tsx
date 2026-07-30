@@ -1,20 +1,59 @@
 import * as React from "react";
 import { useLoaderData, Link, redirect } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
-import { authenticateCustomer } from "../customer-auth.server";
+import { requireCurrentNaiaCustomer } from "../lib/naia-session.server";
 import prisma from "../db.server";
+import { quizQuestions } from "../lib/onboarding/quiz-data";
+import { dailyStyleNotes } from "../lib/daily-style-notes";
+
+// Option label and colour-hex lookups for the Passport Lite summary
+const PASSPORT_LABELS: Record<string, Record<string, string>> = {};
+const PASSPORT_COLOR_HEX: Record<string, string> = {};
+for (const q of quizQuestions) {
+  if (q.options) {
+    PASSPORT_LABELS[q.id] = Object.fromEntries(q.options.map(o => [o.id, o.label]));
+  }
+  if (q.colors) {
+    PASSPORT_LABELS[q.id] = Object.fromEntries(q.colors.map(c => [c.id, c.name]));
+    for (const c of q.colors) PASSPORT_COLOR_HEX[c.id] = c.hex;
+  }
+}
+
+function passportLabel(qId: string, oId: string): string {
+  return PASSPORT_LABELS[qId]?.[oId] ?? oId.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function getDubaiDayOfYear(): number {
+  const dubaiDate = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Dubai",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).formatToParts(new Date());
+  const year = Number(dubaiDate.find(p => p.type === "year")!.value);
+  const month = Number(dubaiDate.find(p => p.type === "month")!.value);
+  const day = Number(dubaiDate.find(p => p.type === "day")!.value);
+  const start = new Date(year, 0, 0);
+  const current = new Date(year, month - 1, day);
+  return Math.floor((current.getTime() - start.getTime()) / 86400000);
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  // Try to authenticate from Shopify cookie
-  const { customer: authCustomer } = await authenticateCustomer(request);
-  
-  // Get customer from DB (authenticated or guest)
-  const customerId = authCustomer?.shopifyCustomerId || "guest";
+  // Throws redirect to /auth/shopify/login if no valid nAia session
+  const sessionCustomer = await requireCurrentNaiaCustomer(request);
+
+  // Short-circuit before all profile-dependent queries.
+  // sessionCustomer.onboardingProfile is already loaded by resolveNaiaSession.
+  if (!sessionCustomer.onboardingProfile?.completed) {
+    return { profileCompleted: false as const };
+  }
+
+  // Full query — only runs for customers with a completed Passport
   const customer = await prisma.customer.findFirst({
-    where: { shopifyCustomerId: customerId },
+    where: { id: sessionCustomer.id },
     include: {
       onboardingProfile: true,
-      stylingSessions: { 
+      stylingSessions: {
         take: 10,
         orderBy: { createdAt: "desc" },
         include: { suggestions: true }
@@ -26,55 +65,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 
   if (!customer) {
-  return redirect("/quick-style");
-}
-
-if (customer.shopifyCustomerId !== "guest" && !customer.onboardingProfile?.completed) {
-  return redirect("/onboarding/step/1");
-}
-
-if (customer.stylingSessions.length === 0) {
-  return redirect("/quick-style");
-}
+    return redirect("/auth/shopify/login");
+  }
 
   const avgRating = customer.postOutfitReviews.length > 0
-    ? (customer.postOutfitReviews.reduce((sum, r) => sum + r.overallReaction, 0) / customer.postOutfitReviews.length).toFixed(1)
+    ? (customer.postOutfitReviews.reduce((sum, r) => sum + (r.overallFeeling ?? 0), 0) / customer.postOutfitReviews.length).toFixed(1)
     : "0";
 
-  const quotes = [
-    "Some days call for softness. Others for structure.",
-    "Dress for the version of yourself you're becoming.",
-    "Confidence begins in silhouette.",
-    "Today asks for ease, not effort.",
-    "Elegance is often restraint.",
-    "Power can be quiet.",
-    "A look can shift the way you move through the world.",
-    "What you wear is how you greet the world.",
-    "Style is the shape of your inner life.",
-    "Becoming is a matter of small choices.",
-    "The right outfit doesn't just cover you — it carries you.",
-    "Dressing well is a form of self-respect.",
-    "Your wardrobe is a conversation you have with yourself every morning.",
-    "Wear what makes you feel like the best version of today.",
-    "Style is not about what you own. It's about what you choose.",
-    "The most powerful thing you can wear is intention.",
-    "Effortless is the result of thought, not the absence of it.",
-    "A great outfit begins with knowing how you want to feel.",
-    "Fashion fades. The feeling you dress for stays.",
-    "You don't need more clothes. You need the right ones.",
-    "Dress for the energy you want to walk into the room with.",
-    "Every outfit is a decision about who you are today.",
-    "The way you dress is the first thing you say before you speak.",
-    "Softness is not weakness. It is its own kind of power.",
-    "The most elegant women dress for themselves first.",
-    "Your style is not a trend. It is a language.",
-    "Wear something today that makes you stand a little taller.",
-    "Getting dressed is an act of becoming.",
-    "A wardrobe built with intention never runs out of options.",
-    "Style is remembering who you are, even on hard days.",
-    "The best looks are the ones that feel like you — only more so."
-  ];
-  const dailyQuote = quotes[(new Date().getDate() - 1) % quotes.length];
+  const enabledNotes = dailyStyleNotes.filter(n => n.enabled);
+  const dailyNote = enabledNotes[(getDubaiDayOfYear() - 1) % enabledNotes.length];
 
   const profile = customer.onboardingProfile;
 
@@ -255,6 +254,7 @@ if (customer.stylingSessions.length === 0) {
   };
 
   return {
+    profileCompleted: true as const,
     customer,
     profile,
     isDemoMode,
@@ -266,7 +266,7 @@ if (customer.stylingSessions.length === 0) {
     },
     styleResponseProfile,
     insights: {
-      dailyQuote,
+      dailyNote: { text: dailyNote.text, attribution: dailyNote.attribution },
       stylingIdentity,
       styleDNA,
       todayStyleEnergy
@@ -274,6 +274,41 @@ if (customer.stylingSessions.length === 0) {
   };
 }
 
+
+function NoPassportDashboard() {
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--c-bg)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 40px", borderBottom: "1px solid var(--c-border)" }}>
+        <div style={{ fontFamily: "var(--ff-display)", fontSize: "22px", fontStyle: "italic", letterSpacing: "3px", color: "var(--c-ink)" }}>nAia</div>
+      </div>
+      <div style={{ maxWidth: "700px", margin: "0 auto", padding: "80px 40px" }}>
+        <div style={{ fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", color: "var(--c-burg)", marginBottom: "16px" }}>
+          YOUR nAia PASSPORT
+        </div>
+        <h1 style={{ fontFamily: "var(--ff-display)", fontSize: "clamp(28px,4vw,44px)", fontWeight: 900, fontStyle: "italic", color: "var(--c-ink)", letterSpacing: "-1px", marginBottom: "20px", lineHeight: 1.1 }}>
+          Create your nAia Passport
+        </h1>
+        <p style={{ fontFamily: "var(--ff-body)", fontSize: "19px", fontStyle: "italic", color: "var(--c-muted)", marginBottom: "40px", lineHeight: 1.6 }}>
+          Let nAia get to know you — your style, how you want to feel, your lifestyle and fit. Your answers become your personal styling memory.
+        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: "32px", flexWrap: "wrap" }}>
+          <Link
+            to="/onboarding/step/1"
+            style={{ display: "inline-block", padding: "14px 32px", background: "var(--c-ink)", color: "var(--c-bg)", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "3px", textTransform: "uppercase", textDecoration: "none" }}
+          >
+            CREATE YOUR PASSPORT →
+          </Link>
+          <Link
+            to="/style-me"
+            style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", textDecoration: "none" }}
+          >
+            Try Quick Style →
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function BuySkipWidget() {
   const [step, setStep] = React.useState("upload"); // upload | tag | result
@@ -287,6 +322,7 @@ function BuySkipWidget() {
   const [color, setColor] = React.useState([]);
   const [brand, setBrand] = React.useState("");
   const [itemLink, setItemLink] = React.useState("");
+  const [linkError, setLinkError] = React.useState("");
 
   const CATEGORIES = ["Top", "Bottom", "Dress", "Outerwear", "Shoes", "Bag", "Accessory", "Jewelry"];
   const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver"];
@@ -311,8 +347,8 @@ function BuySkipWidget() {
   const handleLinkSubmit = async () => {
     if (!itemLink) return;
     setUploading(true);
+    setLinkError("");
     try {
-      // Ask our server to scrape the image from the link
       const res = await fetch("/api/wishlist?action=scrape-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -324,13 +360,11 @@ function BuySkipWidget() {
         if (data.brand) setBrand(data.brand);
         setStep("tag");
       } else {
-        // No image found — go to tag step anyway, AI will use link details
-        setImageUrl("https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400");
-        setStep("tag");
+        setLinkError("We couldn't load this product automatically. Upload a screenshot or photo instead, and nAia can still analyse it.");
       }
     } catch (err) {
       console.error("Link scrape failed:", err);
-      setStep("tag");
+      setLinkError("We couldn't load this product automatically. Upload a screenshot or photo instead, and nAia can still analyse it.");
     } finally {
       setUploading(false);
     }
@@ -374,6 +408,7 @@ function BuySkipWidget() {
 
   const reset = () => {
     setImageUrl(""); setResult(null); setCategory(""); setColor([]); setBrand(""); setItemLink("");
+    setLinkError("");
     setStep("upload");
   };
 
@@ -403,6 +438,11 @@ function BuySkipWidget() {
       <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#7a6f6a", marginTop: "16px" }}>
         Upload a photo of the item you're thinking of buying
       </p>
+      {linkError && (
+        <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", color: "#8b2035", marginTop: "12px", lineHeight: 1.6 }}>
+          {linkError}
+        </p>
+      )}
     </div>
   );
 
@@ -557,57 +597,82 @@ function BuySkipWidget() {
 
 
 
+const dbCss = `
+  .db-wrap{padding:60px 40px}
+  .db-cta{display:grid;grid-template-columns:1fr auto;align-items:center;gap:40px;padding:60px 48px}
+  .db-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+  .db-recent{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+  .db-tools{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+  @media(max-width:640px){
+    .db-wrap{padding:60px 20px}
+    .db-cta{grid-template-columns:1fr;padding:40px 24px}
+    .db-stats{grid-template-columns:repeat(2,1fr)}
+    .db-recent{grid-template-columns:repeat(2,1fr)}
+    .db-tools{grid-template-columns:1fr}
+  }
+`;
+
 export default function Index() {
-  const { customer, stats, insights, profile, styleResponseProfile, isDemoMode } = useLoaderData<typeof loader>();
+  const data = useLoaderData<typeof loader>();
+
+  if (!data.profileCompleted) {
+    return <NoPassportDashboard />;
+  }
+
+  const { customer, stats, insights, profile, styleResponseProfile, isDemoMode } = data;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
-      <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "60px 40px" }}>
+    <div style={{ minHeight: "100vh", background: "var(--c-bg)" }}>
+      <style>{dbCss}</style>
+      <div className="db-wrap" style={{ maxWidth: "1200px", margin: "0 auto" }}>
 
         {/* Welcome */}
-        <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: "clamp(40px,5vw,64px)", fontWeight: 900, lineHeight: 1, marginBottom: "8px" }}>
-          Welcome back, <em style={{ fontStyle: "italic", color: "#8b2035" }}>{customer.firstName || "there"}</em>.
+        <h1 style={{ fontFamily: "var(--ff-display)", fontSize: "clamp(40px,5vw,64px)", fontWeight: 900, lineHeight: 1, marginBottom: "8px" }}>
+          Welcome back, <em style={{ fontStyle: "italic", color: "var(--c-burg)" }}>{customer.firstName || "there"}</em>.
         </h1>
 
-        {/* 1. Daily quote / today's style energy */}
-        <div style={{ marginBottom: "48px", marginTop: "32px", padding: "24px 32px", borderLeft: "2px solid rgba(139,32,53,0.2)" }}>
-          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "20px", fontStyle: "italic", color: "#221516", marginBottom: "8px" }}>
-            "{insights.dailyQuote}"
+        {/* 1. Daily Style Note / today's style energy */}
+        <div style={{ marginBottom: "48px", marginTop: "32px", padding: "24px 32px", borderLeft: "2px solid var(--c-tint-med)" }}>
+          <div style={{ fontFamily: "var(--ff-display)", fontSize: "20px", fontStyle: "italic", color: "var(--c-ink)", marginBottom: "8px" }}>
+            "{insights.dailyNote.text}"
           </div>
-          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "#8b2035" }}>
+          <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "8px" }}>
+            — {insights.dailyNote.attribution}
+          </div>
+          <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--c-burg)", marginTop: "28px" }}>
             Today's style energy: {insights.todayStyleEnergy || insights.stylingIdentity}
           </div>
         </div>
 
         {/* 2. Style Me CTA — hero */}
-        <div style={{ background: "#221516", color: "#f4f4f1", padding: "60px 48px", marginBottom: "48px", display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: "40px" }}>
+        <div className="db-cta" style={{ background: "var(--c-ink)", color: "var(--c-bg)", marginBottom: "48px" }}>
           <div>
-            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "8px", letterSpacing: "3px", textTransform: "uppercase", color: "#8b2035", marginBottom: "16px" }}>YOUR PERSONAL STYLIST</div>
-            <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "clamp(32px,4vw,48px)", fontWeight: 900, marginBottom: "16px", lineHeight: 1.1 }}>
-              Style me <em style={{ fontStyle: "italic", color: "#8b2035" }}>today</em>
+            <div style={{ fontFamily: "var(--ff-ui)", fontSize: "8px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--c-burg)", marginBottom: "16px" }}>YOUR PERSONAL STYLIST</div>
+            <h2 style={{ fontFamily: "var(--ff-display)", fontSize: "clamp(32px,4vw,48px)", fontWeight: 900, marginBottom: "16px", lineHeight: 1.1 }}>
+              Style me <em style={{ fontStyle: "italic", color: "var(--c-burg)" }}>today</em>
             </h2>
-            <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#e1dbd7", lineHeight: 1.6 }}>
+            <p style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--c-taupe)", lineHeight: 1.6 }}>
               Get a look based on your mood, plans, comfort needs, and Style DNA.
             </p>
           </div>
-          <Link to="/quick-style" style={{ display: "inline-block", padding: "20px 40px", border: "1px solid #f4f4f1", color: "#f4f4f1", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none", whiteSpace: "nowrap" }}>
+          <Link to="/style-me" style={{ display: "inline-block", padding: "20px 40px", border: "1px solid var(--c-bg)", color: "var(--c-bg)", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase", textDecoration: "none", whiteSpace: "nowrap" }}>
             START SESSION →
           </Link>
         </div>
 
         {/* 3. Styling snapshot */}
         <div style={{ marginBottom: "60px" }}>
-          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "20px" }}>Your styling snapshot</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "16px" }}>
+          <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "20px" }}>Your styling snapshot</div>
+          <div className="db-stats">
             {[
               { num: stats.looksStyled, label: "Looks created" },
               { num: stats.closetPieces, label: "Wardrobe pieces" },
               { num: stats.avgRating || "—", label: "Avg confidence" },
               { num: stats.styleAlignment, label: "Style alignment" },
             ].map(({ num, label }) => (
-              <div key={label} style={{ background: "rgba(255,255,255,0.5)", padding: "24px", border: "1px solid rgba(59,5,16,0.06)" }}>
-                <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "40px", fontWeight: 900, color: "#221516" }}>{num}</div>
-                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a" }}>{label}</div>
+              <div key={label} style={{ background: "var(--c-surface)", padding: "24px", border: "1px solid var(--c-border)" }}>
+                <div style={{ fontFamily: "var(--ff-display)", fontSize: "40px", fontWeight: 900, color: "var(--c-ink)" }}>{num}</div>
+                <div style={{ fontFamily: "var(--ff-ui)", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)" }}>{label}</div>
               </div>
             ))}
           </div>
@@ -616,29 +681,30 @@ export default function Index() {
         {/* 4. Recent Looks */}
         <div style={{ marginBottom: "60px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
-            <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "32px", fontWeight: 900 }}>Your recent looks</h2>
-            <Link to="/quick-style" style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>STYLE AGAIN →</Link>
+            <h2 style={{ fontFamily: "var(--ff-display)", fontSize: "32px", fontWeight: 900 }}>Your recent looks</h2>
+            <Link to="/style-me" style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", textDecoration: "none" }}>STYLE AGAIN →</Link>
           </div>
           {customer.stylingSessions.length === 0 ? (
-            <div style={{ padding: "60px", textAlign: "center", background: "rgba(255,255,255,0.3)", border: "1px solid rgba(59,5,16,0.06)" }}>
-              <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "24px" }}>No looks yet — start your first session</p>
-              <Link to="/quick-style" style={{ display: "inline-block", padding: "14px 32px", background: "#8b2035", color: "#f4f4f1", textDecoration: "none", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "3px", textTransform: "uppercase" }}>STYLE ME</Link>
+            <div style={{ padding: "60px", textAlign: "center", background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
+              <p style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--c-muted)", marginBottom: "24px" }}>No looks yet — start your first session</p>
+              <Link to="/style-me" style={{ display: "inline-block", padding: "14px 32px", background: "var(--c-burg)", color: "var(--c-bg)", textDecoration: "none", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "3px", textTransform: "uppercase" }}>STYLE ME</Link>
             </div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "24px" }}>
+            <div className="db-recent">
               {customer.stylingSessions.slice(0,6).map((session: any) => (
-                <div key={session.id} style={{ background: "rgba(255,255,255,0.5)", border: "1px solid rgba(59,5,16,0.06)", padding: "24px" }}>
-                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "8px" }}>
+                <div key={session.id} style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)", padding: "24px" }}>
+                  <div style={{ fontFamily: "var(--ff-ui)", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "8px" }}>
                     {new Date(session.createdAt).toLocaleDateString()}
                   </div>
-                  <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "18px", fontWeight: 700, marginBottom: "8px", color: "#221516" }}>
+                  <div style={{ fontFamily: "var(--ff-display)", fontSize: "18px", fontWeight: 700, marginBottom: "8px", color: "var(--c-ink)" }}>
                     {session.suggestions[0]?.outfitName || "Untitled Look"}
                   </div>
-                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "16px" }}>
+                  <div style={{ fontFamily: "var(--ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--c-muted)", marginBottom: "16px" }}>
                     {session.currentMood} → {session.desiredFeeling}
                   </div>
-                  <div style={{ display: "flex", gap: "12px" }}>
-                    <Link to={`/apps/naia-stylist/style-me/result?sessionId=${session.id}`} style={{ fontFamily: "'Space Mono',monospace", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>VIEW LOOK →</Link>
+                  <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+                    <Link to={`/style-me/result?sessionId=${session.id}`} style={{ fontFamily: "var(--ff-ui)", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", textDecoration: "none" }}>VIEW LOOK →</Link>
+                    <Link to={`/post-wear-review?sessionId=${session.id}`} style={{ fontFamily: "var(--ff-ui)", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)", textDecoration: "none" }}>HOW DID IT GO? →</Link>
                   </div>
                 </div>
               ))}
@@ -649,28 +715,28 @@ export default function Index() {
         {/* 5. What nAia is learning about you */}
         <div style={{ marginBottom: "60px" }}>
           <div style={{ marginBottom: "24px" }}>
-            <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "32px", fontWeight: 900, marginBottom: "8px" }}>What nAia is learning about you</h2>
-            <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#7a6f6a" }}>
+            <h2 style={{ fontFamily: "var(--ff-display)", fontSize: "32px", fontWeight: 900, marginBottom: "8px" }}>What nAia is learning about you</h2>
+            <p style={{ fontFamily: "var(--ff-body)", fontSize: "16px", fontStyle: "italic", color: "var(--c-muted)" }}>
               {isDemoMode ? "This is a preview — rate your looks to build your real profile." : "Based on how you style, save, and rate looks."}
             </p>
           </div>
 
           {styleResponseProfile.unlocked ? (
-            <div style={{ background: "rgba(255,255,255,0.6)", padding: "40px", border: "1px solid rgba(59,5,16,0.06)" }}>
+            <div style={{ background: "var(--c-surface)", padding: "40px", border: "1px solid var(--c-border)" }}>
 
               {/* Style direction */}
-              <div style={{ background: "rgba(139,32,53,0.04)", padding: "24px", marginBottom: "40px", borderLeft: "3px solid #8b2035" }}>
-                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "8px" }}>YOUR STYLE DIRECTION</div>
-                <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "28px", fontWeight: 700, fontStyle: "italic", color: "#8b2035" }}>{styleResponseProfile.styleDirection}</div>
+              <div style={{ background: "var(--c-tint)", padding: "24px", marginBottom: "40px", borderLeft: "3px solid var(--c-burg)" }}>
+                <div style={{ fontFamily: "var(--ff-ui)", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "8px" }}>YOUR STYLE DIRECTION</div>
+                <div style={{ fontFamily: "var(--ff-display)", fontSize: "28px", fontWeight: 700, fontStyle: "italic", color: "var(--c-burg)" }}>{styleResponseProfile.styleDirection}</div>
               </div>
 
               {/* What works */}
               {styleResponseProfile.topWorked.length > 0 && (
-                <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#221516", marginBottom: "12px" }}>YOU RESPOND MOST TO</div>
+                <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid var(--c-border)" }}>
+                  <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-ink)", marginBottom: "12px" }}>YOU RESPOND MOST TO</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
                     {styleResponseProfile.topWorked.map((tag: string) => (
-                      <span key={tag} style={{ padding: "8px 16px", background: "rgba(139,32,53,0.08)", fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "1px", textTransform: "uppercase", color: "#8b2035" }}>{tag}</span>
+                      <span key={tag} style={{ padding: "8px 16px", background: "var(--c-tint)", fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "1px", textTransform: "uppercase", color: "var(--c-burg)" }}>{tag}</span>
                     ))}
                   </div>
                 </div>
@@ -678,9 +744,9 @@ export default function Index() {
 
               {/* Feelings achieved */}
               {styleResponseProfile.topFeelingShifts.length > 0 && (
-                <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#221516", marginBottom: "12px" }}>YOUR OUTFITS OFTEN AIM FOR</div>
-                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#221516", lineHeight: 1.7 }}>
+                <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid var(--c-border)" }}>
+                  <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-ink)", marginBottom: "12px" }}>YOUR OUTFITS OFTEN AIM FOR</div>
+                  <div style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--c-ink)", lineHeight: 1.7 }}>
                     {styleResponseProfile.topFeelingShifts.join(" · ")}
                   </div>
                 </div>
@@ -688,13 +754,13 @@ export default function Index() {
 
               {/* Mood insights */}
               {styleResponseProfile.moodInsights.length > 0 && (
-                <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#221516", marginBottom: "20px" }}>WHEN YOU FEEL...</div>
+                <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid var(--c-border)" }}>
+                  <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-ink)", marginBottom: "20px" }}>WHEN YOU FEEL...</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                     {styleResponseProfile.moodInsights.slice(0,4).map(({ mood, topTags, topFeeling }: any) => (
-                      <div key={mood} style={{ padding: "16px 20px", background: "rgba(255,255,255,0.5)", border: "1px solid rgba(59,5,16,0.06)" }}>
-                        <span style={{ fontFamily: "'Playfair Display',serif", fontSize: "18px", fontWeight: 700, fontStyle: "italic", color: "#8b2035", textTransform: "capitalize" }}>{mood}</span>
-                        <span style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>
+                      <div key={mood} style={{ padding: "16px 20px", background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
+                        <span style={{ fontFamily: "var(--ff-display)", fontSize: "18px", fontWeight: 700, fontStyle: "italic", color: "var(--c-burg)", textTransform: "capitalize" }}>{mood}</span>
+                        <span style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)" }}>
                           {" "}— you gravitate toward {topTags.slice(0,2).map((t: string) => t.toLowerCase()).join(" and ")}{topFeeling ? `, and tend to feel ${topFeeling}` : ""}
                         </span>
                       </div>
@@ -705,68 +771,141 @@ export default function Index() {
 
               {/* Best occasions */}
               {styleResponseProfile.topOccasions.length > 0 && (
-                <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#221516", marginBottom: "12px" }}>YOU OFTEN STYLE FOR</div>
-                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", lineHeight: 1.7, color: "#221516" }}>{styleResponseProfile.topOccasions.join(" · ")}</div>
+                <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid var(--c-border)" }}>
+                  <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-ink)", marginBottom: "12px" }}>YOU OFTEN STYLE FOR</div>
+                  <div style={{ fontFamily: "var(--ff-body)", fontSize: "16px", lineHeight: 1.7, color: "var(--c-ink)" }}>{styleResponseProfile.topOccasions.join(" · ")}</div>
                 </div>
               )}
 
               {/* What doesn't work */}
               {styleResponseProfile.topDidntWork.length > 0 && (
                 <div>
-                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#221516", marginBottom: "12px" }}>WHAT DOESN'T WORK FOR YOU</div>
+                  <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-ink)", marginBottom: "12px" }}>WHAT DOESN'T WORK FOR YOU</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
                     {styleResponseProfile.topDidntWork.map((tag: string) => (
-                      <span key={tag} style={{ padding: "8px 16px", border: "1px solid rgba(59,5,16,0.12)", fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "1px", textTransform: "uppercase", color: "#7a6f6a" }}>{tag}</span>
+                      <span key={tag} style={{ padding: "8px 16px", border: "1px solid var(--c-border)", fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "1px", textTransform: "uppercase", color: "var(--c-muted)" }}>{tag}</span>
                     ))}
                   </div>
                 </div>
               )}
             </div>
           ) : (
-            <div style={{ background: "rgba(139,32,53,0.04)", padding: "40px", border: "1px solid rgba(139,32,53,0.15)", textAlign: "center" }}>
-              <div style={{ fontFamily: "'Playfair Display',serif", fontSize: "48px", opacity: 0.2, marginBottom: "16px" }}>◇</div>
-              <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: "24px", fontWeight: 900, fontStyle: "italic", marginBottom: "12px" }}>nAia is still getting to know you</h3>
-              <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "32px" }}>
+            <div style={{ background: "var(--c-tint)", padding: "40px", border: "1px solid var(--c-tint-med)", textAlign: "center" }}>
+              <div style={{ fontFamily: "var(--ff-display)", fontSize: "48px", opacity: 0.2, marginBottom: "16px" }}>◇</div>
+              <h3 style={{ fontFamily: "var(--ff-display)", fontSize: "24px", fontWeight: 900, fontStyle: "italic", marginBottom: "12px" }}>nAia is still getting to know you</h3>
+              <p style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--c-muted)", marginBottom: "32px" }}>
                 Rate a few looks and nAia will start building a profile that's truly yours — your moods, your occasions, your feelings.
               </p>
-              <Link to="/quick-style" style={{ display: "inline-block", padding: "16px 32px", background: "#8b2035", color: "#f4f4f1", textDecoration: "none", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase" }}>RATE A LOOK →</Link>
+              <Link to="/style-me" style={{ display: "inline-block", padding: "16px 32px", background: "var(--c-burg)", color: "var(--c-bg)", textDecoration: "none", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "4px", textTransform: "uppercase" }}>RATE A LOOK →</Link>
             </div>
           )}
         </div>
 
-        {/* 6. Style DNA */}
+        {/* 6. Passport Lite */}
         <div style={{ marginBottom: "60px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
             <div>
-              <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "32px", fontWeight: 900, marginBottom: "4px" }}>Your Style DNA</h2>
-              <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>Based on your onboarding quiz</p>
+              <h2 style={{ fontFamily: "var(--ff-display)", fontSize: "32px", fontWeight: 900, marginBottom: "4px" }}>Your nAia Passport</h2>
+              <p style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)" }}>Your style identity, in full</p>
             </div>
-            <Link to="/apps/naia-stylist/onboarding/step/1" style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", textDecoration: "none" }}>
+            <Link to={profile?.completed ? "/passport" : "/onboarding/step/1"} style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", textDecoration: "none" }}>
               {!profile?.completed ? "COMPLETE PROFILE" : "EDIT"}
             </Link>
           </div>
 
-          {profile?.completed ? (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px,1fr))", gap: "16px" }}>
-              {[
-                { label: "Style personalities", value: profile.stylePersonalities?.map((s: string) => s.split('-').map((w: string) => w.charAt(0).toUpperCase()+w.slice(1)).join(' ')).join(', ') },
-                { label: "Wants to feel", value: profile.desiredFeeling?.split('-').map((w: string) => w.charAt(0).toUpperCase()+w.slice(1)).join(' ') },
-                { label: "Lifestyle", value: profile.dressesFor?.map((l: string) => l.split('-').map((w: string) => w.charAt(0).toUpperCase()+w.slice(1)).join(' ')).join(', ') },
-                { label: "Favorite colors", value: profile.favoriteColors?.map((c: string) => c.split('-').map((w: string) => w.charAt(0).toUpperCase()+w.slice(1)).join(' ')).join(', ') },
-              ].filter(i => i.value).map(({ label, value }) => (
-                <div key={label} style={{ background: "rgba(255,255,255,0.5)", padding: "24px", border: "1px solid rgba(59,5,16,0.06)" }}>
-                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "8px" }}>{label}</div>
-                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "16px", fontStyle: "italic", color: "#221516" }}>{value}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ background: "rgba(139,32,53,0.05)", padding: "40px", textAlign: "center", border: "1px solid rgba(139,32,53,0.1)" }}>
-              <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "20px" }}>
+          {profile?.completed ? (() => {
+            const p = profile;
+            const monoLabel: React.CSSProperties = { fontFamily: "var(--ff-ui)", fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase" as const, color: "var(--c-muted)", marginBottom: "8px" };
+            const bodyText: React.CSSProperties = { fontFamily: "var(--ff-body)", fontSize: "16px", fontStyle: "italic", color: "var(--c-ink)" };
+            const rowStyle: React.CSSProperties = { paddingBottom: "20px", marginBottom: "20px", borderBottom: "1px solid var(--c-border)" };
+            const pillStyle: React.CSSProperties = { display: "inline-block", padding: "6px 14px", border: "1px solid var(--c-border)", fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "1px", textTransform: "uppercase" as const, color: "var(--c-ink)", marginRight: "8px", marginBottom: "6px" };
+
+            // Rehydrate lifestyle from comma-joined string
+            const lifestyleArr: string[] = p.lifestyle ? p.lifestyle.split(", ").filter(Boolean) : [];
+
+            const sections: Array<{ label: string; content: React.ReactNode } | null> = [
+              p.stylePersonalities?.length ? {
+                label: "Style energies",
+                content: <div>{p.stylePersonalities.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("style-personalities", id)}</span>)}</div>
+              } : null,
+              p.desiredImpression?.length ? {
+                label: "The impression you make",
+                content: <div>{p.desiredImpression.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("desired-impression", id)}</span>)}</div>
+              } : null,
+              p.desiredFeelings?.length ? {
+                label: "How you want to feel",
+                content: <div>{p.desiredFeelings.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("desired-feelings", id)}</span>)}</div>
+              } : null,
+              p.favoriteColors?.length ? {
+                label: "Colour palette",
+                content: (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                    {p.favoriteColors.map((id: string) => (
+                      <span key={id} style={{ ...pillStyle, display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ width: "12px", height: "12px", background: PASSPORT_COLOR_HEX[id] ?? "#ccc", border: "1px solid rgba(0,0,0,0.1)", flexShrink: 0 }} />
+                        {passportLabel("favorite-colors", id)}
+                      </span>
+                    ))}
+                  </div>
+                )
+              } : null,
+              p.avoidColors?.length ? {
+                label: "Colours to avoid",
+                content: (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", opacity: 0.7 }}>
+                    {p.avoidColors.map((id: string) => (
+                      <span key={id} style={{ ...pillStyle, display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ width: "12px", height: "12px", background: PASSPORT_COLOR_HEX[id] ?? "#ccc", border: "1px solid rgba(0,0,0,0.1)", flexShrink: 0 }} />
+                        {passportLabel("avoid-colors", id)}
+                      </span>
+                    ))}
+                  </div>
+                )
+              } : null,
+              lifestyleArr.length ? {
+                label: "Lifestyle",
+                content: <div>{lifestyleArr.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("lifestyle", id)}</span>)}</div>
+              } : null,
+              p.fitPreferences?.length ? {
+                label: "Fit preferences",
+                content: <div>{p.fitPreferences.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("fit-preferences", id)}</span>)}</div>
+              } : null,
+              p.becoming?.length ? {
+                label: "Who you're becoming",
+                content: <div>{p.becoming.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("becoming", id)}</span>)}</div>
+              } : null,
+              p.styleStruggles?.length ? {
+                label: "Wardrobe disconnects",
+                content: <div>{p.styleStruggles.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("wardrobe-disconnection", id)}</span>)}</div>
+              } : null,
+              p.styleSupport?.length ? {
+                label: "What would help most",
+                content: <div>{p.styleSupport.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("style-support", id)}</span>)}</div>
+              } : null,
+              p.finalNotes ? {
+                label: "Notes to nAia",
+                content: <div style={{ ...bodyText, fontStyle: "italic" }}>&ldquo;{p.finalNotes}&rdquo;</div>
+              } : null,
+            ];
+
+            const populated = sections.filter(Boolean) as Array<{ label: string; content: React.ReactNode }>;
+
+            return (
+              <div style={{ background: "var(--c-surface)", padding: "32px", border: "1px solid var(--c-border)" }}>
+                {populated.map(({ label, content }, i) => (
+                  <div key={label} style={i < populated.length - 1 ? rowStyle : { paddingBottom: "4px" }}>
+                    <div style={monoLabel}>{label.toUpperCase()}</div>
+                    {content}
+                  </div>
+                ))}
+              </div>
+            );
+          })() : (
+            <div style={{ background: "var(--c-tint)", padding: "40px", textAlign: "center", border: "1px solid var(--c-tint-med)" }}>
+              <p style={{ fontFamily: "var(--ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--c-muted)", marginBottom: "20px" }}>
                 Complete your style quiz so nAia truly knows you
               </p>
-              <Link to="/apps/naia-stylist/onboarding/step/1" style={{ display: "inline-block", padding: "14px 32px", background: "#8b2035", color: "#f4f4f1", fontFamily: "'Space Mono',monospace", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", textDecoration: "none" }}>
+              <Link to="/onboarding/step/1" style={{ display: "inline-block", padding: "14px 32px", background: "var(--c-burg)", color: "var(--c-bg)", fontFamily: "var(--ff-ui)", fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase", textDecoration: "none" }}>
                 START QUIZ
               </Link>
             </div>
@@ -775,23 +914,23 @@ export default function Index() {
 
         {/* 7. Style tools */}
         <div style={{ marginBottom: "60px" }}>
-          <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: "32px", fontWeight: 900, marginBottom: "8px" }}>Style tools</h2>
-          <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "24px" }}>Everything you need in one place</p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "20px" }}>
-            <Link to="/closet" style={{ background: "rgba(255,255,255,0.5)", padding: "32px", border: "1px solid rgba(59,5,16,0.06)", textDecoration: "none", color: "inherit", display: "block" }}>
-              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>WARDROBE</div>
-              <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: "22px", fontWeight: 700, marginBottom: "8px", color: "#221516" }}>Digital Wardrobe</h3>
-              <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>Upload, save, and style your pieces with nAia.</p>
+          <h2 style={{ fontFamily: "var(--ff-display)", fontSize: "32px", fontWeight: 900, marginBottom: "8px" }}>Style tools</h2>
+          <p style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)", marginBottom: "24px" }}>Everything you need in one place</p>
+          <div className="db-tools">
+            <Link to="/closet" style={{ background: "var(--c-surface)", padding: "32px", border: "1px solid var(--c-border)", textDecoration: "none", color: "inherit", display: "block" }}>
+              <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "12px" }}>WARDROBE</div>
+              <h3 style={{ fontFamily: "var(--ff-display)", fontSize: "22px", fontWeight: 700, marginBottom: "8px", color: "var(--c-ink)" }}>Digital Wardrobe</h3>
+              <p style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)" }}>Upload, save, and style your pieces with nAia.</p>
             </Link>
-            <Link to="/quick-style" style={{ background: "#221516", color: "#f4f4f1", padding: "32px", textDecoration: "none", display: "block" }}>
-              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>STYLING SESSION</div>
-              <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: "22px", fontWeight: 900, marginBottom: "8px" }}>Style Me</h3>
-              <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "14px", fontStyle: "italic", opacity: 0.8 }}>Get a personalized outfit based on your mood and occasion.</p>
+            <Link to="/style-me" style={{ background: "var(--c-ink)", color: "var(--c-bg)", padding: "32px", textDecoration: "none", display: "block" }}>
+              <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", marginBottom: "12px" }}>STYLING SESSION</div>
+              <h3 style={{ fontFamily: "var(--ff-display)", fontSize: "22px", fontWeight: 900, marginBottom: "8px" }}>Style Me</h3>
+              <p style={{ fontFamily: "var(--ff-body)", fontSize: "14px", fontStyle: "italic", opacity: 0.8 }}>Get a personalized outfit based on your mood, occasion, and what feels right today.</p>
             </Link>
-            <Link to="/buyskip" style={{ background: "rgba(139,32,53,0.06)", padding: "32px", border: "1px solid rgba(139,32,53,0.12)", textDecoration: "none", display: "block" }}>
-              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>SHOPPING TOOL</div>
-              <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: "22px", fontWeight: 700, marginBottom: "8px", color: "#221516" }}>Buy or Skip?</h3>
-              <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "15px", fontStyle: "italic", color: "#7a6f6a" }}>Thinking of buying something? Upload it and nAia will tell you if it fits your wardrobe, style, and lifestyle.</p>
+            <Link to="/buyskip" style={{ background: "var(--c-tint)", padding: "32px", border: "1px solid var(--c-tint-med)", textDecoration: "none", display: "block" }}>
+              <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", marginBottom: "12px" }}>SHOPPING TOOL</div>
+              <h3 style={{ fontFamily: "var(--ff-display)", fontSize: "22px", fontWeight: 700, marginBottom: "8px", color: "var(--c-ink)" }}>Buy or Skip?</h3>
+              <p style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)" }}>Thinking of buying something? Upload it and nAia will tell you if it fits your wardrobe, style, and lifestyle.</p>
             </Link>
           </div>
         </div>

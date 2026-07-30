@@ -1,13 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { useLoaderData } from "react-router";
-import { authenticateCustomer } from "../../customer-auth.server";
+import { useLoaderData, redirect } from "react-router";
+import { requireCurrentNaiaCustomer } from "../../lib/naia-session.server";
 import QRCode from "qrcode";
 
 export async function loader({ request }) {
-  const { customer } = await authenticateCustomer(request);
-  if (!customer) {
-    return Response.json({ customerId: "dev-test-customer-123", isDev: true });
-  }
+  const customer = await requireCurrentNaiaCustomer(request);
   return Response.json({ customerId: customer.id, isDev: false });
 }
 

@@ -1,0 +1,6 @@
+{
+  "loading": "Connecting your nAia account…",
+  "connected": "Your nAia account is securely connected.",
+  "unavailable": "We could not confirm your customer identity.",
+  "error": "We could not securely connect your nAia account. Please try again."
+}

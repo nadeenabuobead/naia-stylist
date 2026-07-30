@@ -1,112 +1,104 @@
-import { Form, Link, useLoaderData } from "react-router";
-import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
+import { Form, Link } from "react-router";
+import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs, type LinksFunction } from "react-router";
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
+import { SmPage } from "~/components/style-me/SmPage";
+import { SmContinue } from "~/components/style-me/SmContinue";
+import naiaStyles from "~/styles/naia-design-system.css?url";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: naiaStyles },
+];
 
 const desiredFeelings = [
-  { id: "more-confident", label: "Make me feel more confident", emoji: "💪" },
-  { id: "more-put-together", label: "Make me feel more put together", emoji: "✨" },
-  { id: "softer", label: "Make me feel softer", emoji: "🌸" },
-  { id: "more-powerful", label: "Make me feel more powerful", emoji: "👑" },
-  { id: "more-feminine", label: "Make me feel more feminine", emoji: "💐" },
-  { id: "more-effortless", label: "Make me feel more effortless", emoji: "🌊" },
-  { id: "more-elevated", label: "Make me feel more elevated", emoji: "🎯" },
-  { id: "more-attractive", label: "Make me feel more attractive", emoji: "💫" },
-  { id: "like-myself", label: "Make me feel like myself again", emoji: "🌟" },
+  { id: "more-confident", label: "More confident" },
+  { id: "more-put-together", label: "More put together" },
+  { id: "softer", label: "Softer" },
+  { id: "more-powerful", label: "More powerful" },
+  { id: "more-feminine", label: "More feminine" },
+  { id: "more-effortless", label: "More effortless" },
+  { id: "more-elevated", label: "More elevated" },
+  { id: "more-attractive", label: "More attractive" },
+  { id: "like-myself", label: "Like myself again" },
 ];
+
+const VALID_FEELING_IDS = new Set(desiredFeelings.map((f) => f.id));
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await getSession(request.headers.get("Cookie"));
   const mood = session.get("styleMeMood");
-  
+
   if (!mood) {
     return redirect("/style-me/mood");
   }
-  
+
   return data({ mood });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
-  const feeling = formData.get("feeling") as string;
-  
-  if (!feeling) {
+  const feelingsRaw = formData.get("feelings") as string;
+
+  let feelings: string[] = [];
+  try { feelings = JSON.parse(feelingsRaw || "[]"); } catch { /* invalid JSON */ }
+
+  const valid = feelings.filter((id) => VALID_FEELING_IDS.has(id)).slice(0, 2);
+  if (!valid.length) {
     return data({ error: "Please select how you want to feel" }, { status: 400 });
   }
-  
+
   const session = await getSession(request.headers.get("Cookie"));
-  session.set("styleMeFeeling", feeling);
-  
-  return redirect("/style-me/occasion", {
-    headers: { "Set-Cookie": await commitSession(session) }
+  session.set("styleMeFeelings", valid);
+
+  return redirect("/style-me/comfort", {
+    headers: { "Set-Cookie": await commitSession(session) },
   });
 }
 
 export default function StyleMeFeeling() {
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+
+  const toggle = (id: string) => {
+    setSelected((prev) => {
+      if (prev.includes(id)) return prev.filter((s) => s !== id);
+      if (prev.length < 2) return [...prev, id];
+      return prev;
+    });
+  };
+
+  const canSubmit = selected.length > 0;
+  const atMax = selected.length === 2;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f4f4f1", padding: "40px 20px" }}>
-      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-      <div style={{ maxWidth: "600px", margin: "0 auto" }}>
-        <Link to="/style-me/mood" style={{ display: "inline-block", marginBottom: "32px", color: "#7a6f6a", textDecoration: "none", fontSize: "11px", fontFamily: "'Space Mono',monospace", letterSpacing: "2px", textTransform: "uppercase" }}>← Back</Link>
-        
-        <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: "42px", fontWeight: 900, marginBottom: "12px", color: "#221516", letterSpacing: "-1px" }}>How do you want to feel?</h1>
-        <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "40px" }}>The transformation you're seeking</p>
-        
-        <Form method="post">
-          <div style={{ display: "grid", gap: "12px", marginBottom: "40px" }}>
-            {desiredFeelings.map((feeling) => (
+    <SmPage backTo="/style-me/mood" step={2}>
+      <p className="sm-step-label">Desired Feeling</p>
+      <h1 className="sm-heading">How do you want to feel?</h1>
+      <p className="sm-sub">Choose up to two — or just one.</p>
+
+      <Form method="post">
+        <div className="sm-pills">
+          {desiredFeelings.map((feeling) => {
+            const isSelected = selected.includes(feeling.id);
+            const isDisabled = !isSelected && atMax;
+            return (
               <button
                 key={feeling.id}
                 type="button"
-                onClick={() => setSelected(feeling.id)}
-                style={{
-                  padding: "20px 24px",
-                  background: selected === feeling.id ? "#8b2035" : "rgba(255,255,255,0.8)",
-                  color: selected === feeling.id ? "#f4f4f1" : "#221516",
-                  border: selected === feeling.id ? "2px solid #8b2035" : "1px solid rgba(59,5,16,0.1)",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  textAlign: "left",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "16px",
-                  fontFamily: "'Cormorant Garamond',serif",
-                  fontSize: "18px",
-                  transition: "all 0.3s",
-                }}
+                onClick={() => toggle(feeling.id)}
+                className={`sm-pill${isSelected ? " sm-pill--on" : ""}${isDisabled ? " sm-pill--off" : ""}`}
               >
-                <span style={{ fontSize: "24px" }}>{feeling.emoji}</span>
-                <span>{feeling.label}</span>
+                {feeling.label}
               </button>
-            ))}
-          </div>
+            );
+          })}
+        </div>
 
-          <input type="hidden" name="feeling" value={selected || ""} />
-          
-          <button
-            type="submit"
-            disabled={!selected}
-            style={{
-              width: "100%",
-              padding: "18px",
-              background: selected ? "#221516" : "#7a6f6a",
-              color: "#f4f4f1",
-              border: "none",
-              fontFamily: "'Space Mono',monospace",
-              fontSize: "10px",
-              letterSpacing: "4px",
-              textTransform: "uppercase",
-              cursor: selected ? "pointer" : "not-allowed",
-              borderRadius: "4px",
-              opacity: selected ? 1 : 0.6,
-            }}
-          >
-            Continue
-          </button>
-        </Form>
-      </div>
-    </div>
+        <input type="hidden" name="feelings" value={JSON.stringify(selected)} />
+        <div className="sm-step-buttons">
+          <Link to="/style-me/mood" className="sm-btn-back">← Back</Link>
+          <SmContinue disabled={!canSubmit} />
+        </div>
+      </Form>
+    </SmPage>
   );
 }

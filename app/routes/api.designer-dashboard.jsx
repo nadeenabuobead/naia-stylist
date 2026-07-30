@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { requireStaffAccess } from "../lib/staff-auth.server";
 export const config = { runtime: 'nodejs' };
 
 const CORS = {
@@ -12,8 +13,7 @@ export async function loader({ request }) {
     return new Response(null, { status: 204, headers: CORS });
   }
 
-  // TODO: Add admin authentication here
-  // For now, this is open - you should add a password or admin check
+  await requireStaffAccess(request);
 
   try {
     // Get all reviews

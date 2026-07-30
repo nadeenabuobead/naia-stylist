@@ -2,7 +2,8 @@
 // nAia Style Intelligence Platform - Complete Database Schema
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-arm64-openssl-3.0.x", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
@@ -22,6 +23,15 @@ model Session {
   expires     DateTime?
   accessToken String?
   userId      BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean?  @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
 }
 // ============================================
 // USER & AUTHENTICATION
@@ -30,7 +40,7 @@ model Session {
 model Customer {
   id                String   @id @default(cuid())
   shopifyCustomerId String   @unique
-  email             String   @unique
+  email             String?  @unique
   firstName         String?
   lastName          String?
   createdAt         DateTime @default(now())
@@ -47,6 +57,10 @@ model Customer {
   confidenceScores    ConfidenceScore[]
   trendReportViews    TrendReportView[]
   stylingEvents       StylingEvent[]
+  sessions               NaiaSession[]
+  naiaModel              NaiaModel?
+  tryOnJobs              VirtualTryOnJob[]
+  recommendationFeedback RecommendationFeedback[]
 }
 
 // ============================================
@@ -94,6 +108,13 @@ model OnboardingProfile {
   bottomSize          String?
   dressSize           String?
   shoeSize            String?
+
+  // Passport Lite v1 — quiz answers
+  desiredImpression   String[]  @default([])
+  desiredFeelings     String[]  @default([])
+  becoming            String[]  @default([])
+  styleSupport        String[]  @default([])
+  finalNotes          String?
 }
 
 // ============================================
@@ -141,9 +162,16 @@ model ClosetItem {
   aiDescription String?      // AI-generated description
   aiStyleNotes  String?      // AI notes about styling this piece
 
+  // Try-On Eligibility (Phase 4A6 — migration 20260717000000)
+  tryOnEligibility  String?   // ready-for-try-on | needs-clearer-photo | not-supported | pending-assessment | null
+  tryOnAssessedAt   DateTime?
+  tryOnCustomerHint String?
+  tryOnInternalNote String?
+
   // Relationships
   outfitItems   OutfitItem[]
-  savedLookItems SavedLookItem[]
+  savedLookItems         SavedLookItem[]
+  recommendationFeedback RecommendationFeedback[]
 }
 
 enum ClosetCategory {
@@ -194,7 +222,8 @@ model StylingSession {
   
   // Follow-up
   review          PostOutfitReview?
-  events              StylingEvent[]
+  events                 StylingEvent[]
+  recommendationFeedback RecommendationFeedback[]
 }
 
 enum StyleSource {
@@ -236,7 +265,8 @@ model OutfitSuggestion {
   
   // User Interaction
   selected          Boolean        @default(false)
-  savedAsLook       Boolean        @default(false)
+  savedAsLook            Boolean        @default(false)
+  recommendationFeedback RecommendationFeedback[]
 }
 
 model OutfitItem {
@@ -309,12 +339,22 @@ model BuyOrSkipAnalysis {
   
   // User Action
   userDecision        String?  // What she ended up doing
+
+  // Batch 1 — event lineage
+  sessionId     String?  // Optional link to active StylingSession at time of analysis
+  source        String   @default("buy-or-skip")
+  schemaVersion String   @default("1.0")
+  updatedAt     DateTime @updatedAt
+
+  // Batch 2 — DB-backed idempotency (null = pre-Batch-2 record)
+  idempotencyKey String? @unique
 }
 
 enum BuySkipVerdict {
   BUY
   SKIP
   MAYBE
+  INCOMPLETE
 }
 
 // ============================================
@@ -445,6 +485,13 @@ model PostOutfitReview {
   
   // Photo (optional)
   woreItPhotoUrl      String?
+
+  // Phase 4B1 — post-wear feedback fields
+  didWearIt        String?  // yes | not-yet | no
+  feelingAnswer    String?  // great | good | okay | not-great
+  fitFeedback      String?  // yes | mostly | no
+  coverageFeedback String?  // yes | mostly | no
+  colourFeedback   String?  // yes | mostly | no
 }
 
 // ============================================
@@ -530,4 +577,173 @@ model StylingEvent {
   @@index([sessionId])
   @@index([productId])
   @@index([eventType])
+}
+
+// ============================================
+// NAIA CUSTOMER SESSIONS
+// ============================================
+
+model NaiaSession {
+  id          String   @id @default(cuid())
+  tokenHash   String   @unique                // SHA-256(rawToken) — raw token never stored
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  expiresAt   DateTime
+  userAgent   String?
+
+  @@index([customerId])
+  @@index([expiresAt])
+}
+
+// ============================================
+// PHASE 4B1 — RECOMMENDATION FEEDBACK
+// ============================================
+
+model RecommendationFeedback {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Optional links — feedback may be on a whole suggestion, a single item, or a product
+  sessionId    String?
+  session      StylingSession?   @relation(fields: [sessionId],    references: [id], onDelete: SetNull)
+  suggestionId String?
+  suggestion   OutfitSuggestion? @relation(fields: [suggestionId], references: [id], onDelete: SetNull)
+  closetItemId String?
+  closetItem   ClosetItem?       @relation(fields: [closetItemId], references: [id], onDelete: SetNull)
+
+  // What was rated: complete-suggestion | closet-item | nadine-product | vto-preview
+  target           String
+  shopifyProductId String?  // set when target=nadine-product
+
+  // Rating: love | okay | not-for-me
+  rating String
+
+  // Reason codes (from FEEDBACK_REASONS allowlist — unknown codes dropped server-side)
+  reasonCodes String[] @default([])
+
+  // VTO-specific aspects (preview usefulness + garment fidelity; NOT physical fit accuracy)
+  vtoAspects String[] @default([])
+
+  note String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([sessionId])
+  @@index([suggestionId])
+}
+
+// ============================================
+// PHASE 4B3 — JOURNEY EVENT LOG
+// ============================================
+
+model JourneyEvent {
+  id             String   @id @default(cuid())
+  type           String   // JourneyEventType
+  occurredAt     DateTime
+  customerIdHash String   // SHA-256 prefix — never raw customerId; no FK to Customer
+  sessionId      String   // styling session id or sentinel ("product-page", "unknown")
+  payload        Json     // operational fields only — see journey-contract.ts
+
+  // Batch 2 — deduplication key (null = pre-Batch-2 record, fire-and-forget)
+  // Format: "<eventType>:<sourceRecordId>:v1" — unique per logical write
+  idempotencyKey String? @unique
+
+  createdAt DateTime @default(now())
+
+  @@index([type])
+  @@index([customerIdHash])
+  @@index([occurredAt])
+}
+
+// ============================================
+// MY NAIA MODEL — Virtual Try-On Identity
+// ============================================
+
+enum TryOnProvider {
+  FASHN
+}
+
+enum TryOnJobStatus {
+  CREATED
+  SUBMITTED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELED
+  TIMED_OUT
+}
+
+// One active model record per customer. Stores Cloudinary public IDs only —
+// never base64, raw bytes, or permanent delivery URLs.
+model NaiaModel {
+  id         String   @id @default(cuid())
+  customerId String   @unique
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Cloudinary public IDs — stored after validated upload; cleared on deletion.
+  // Delivery URLs are constructed server-side via private_download API; never stored here.
+  facePublicId String? // naia-wardrobe/${customerId}/... — face/upper-body
+  faceVersion  String? // Cloudinary resource version (retained for reference)
+  faceFormat   String? // Cloudinary file format (e.g. "jpg", "png") — needed for private_download URL
+  bodyPublicId String? // naia-wardrobe/${customerId}/... — full-body try-on model
+  bodyVersion  String? // Cloudinary resource version (retained for reference)
+  bodyFormat   String? // Cloudinary file format for body photo
+  // Delivery type used at upload time — needed for deletion signature and URL generation.
+  // Always "private" for new uploads; preserved so deletion uses the correct API parameters.
+  deliveryType String  @default("private")
+
+  // Consent timestamps — created only after explicit customer submission.
+  // Null means consent has not been granted (or has been withdrawn).
+  photoAnalysisConsentAt DateTime?
+  saveModelConsentAt     DateTime?
+  consentPolicyVersion   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tryOnJobs VirtualTryOnJob[]
+
+  @@index([customerId])
+}
+
+// Per-generation virtual try-on job. Records per-generation consent and
+// provides durable idempotency and cooldown across instances.
+model VirtualTryOnJob {
+  id          String     @id @default(cuid())
+  customerId  String
+  customer    Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  naiaModelId String?
+  naiaModel   NaiaModel? @relation(fields: [naiaModelId], references: [id], onDelete: SetNull)
+
+  productHandle String
+  provider      TryOnProvider @default(FASHN)
+  predictionId  String? // Set only after the provider accepts the submission
+
+  status TryOnJobStatus @default(CREATED)
+
+  // Per-generation consent — required for each new job; not inherited from model.
+  virtualTryOnConsentAt    DateTime
+  consentPolicyVersion     String
+  saveTryOnResultConsentAt DateTime? // Separate, optional
+
+  // Idempotency — unique constraint prevents duplicate chargeable submissions.
+  idempotencyKey     String  @unique
+  // SHA-256 fingerprint of (customerId + productHandle + bodyPublicId) for
+  // near-duplicate detection even across different idempotency keys.
+  requestFingerprint String?
+
+  errorCode String? // Safe provider/customer error code — never a stack trace
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  completedAt    DateTime?
+  lastActivityAt DateTime  @default(now()) // Drives durable per-customer cooldown
+
+  @@index([customerId])
+  @@index([customerId, status])
 }
