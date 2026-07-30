@@ -78,7 +78,7 @@ export default function StyleMeIndex() {
               </p>
             </div>
             {!hasProfile && (
-              <Link to="/apps/naia-stylist/onboarding/step/1" className="sm-status-link">
+              <Link to="/onboarding/step/1" className="sm-status-link">
                 Start →
               </Link>
             )}
@@ -98,7 +98,7 @@ export default function StyleMeIndex() {
                   : "Upload items to style from your own closet"}
               </p>
             </div>
-            <Link to="/closet/upload" className="sm-status-link">
+            <Link to="/closet" className="sm-status-link">
               {hasClosetItems ? "Add more →" : "Upload →"}
             </Link>
           </div>

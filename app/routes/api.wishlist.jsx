@@ -4,6 +4,7 @@ import { data as json } from "react-router";
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import prisma from "../db.server";
 import { emitBuySkipSubmitted, recordJourneyEventAwaited } from "../lib/ai/journey-events.server";
+import { getAllCatalogProducts } from "../lib/ai/naia-catalog";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -17,19 +18,14 @@ const CORS = {
 
 // ANALYZE ITEM ACTION (for Buy/Skip)
 
-
-const NAIA_PRODUCTS = [
-  { title: "Sculptural Hybrid Coat", category: "Outerwear", handle: "trench-coat", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/b7af3725-7048-4ead-8d04-d6fb42556eac.png", url: "https://naia-9417.myshopify.com/products/trench-coat" },
-  { title: "Art Blouse", category: "Top", handle: "silk-top", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32674461-cac7-4699-aff1-74c435289333.png", url: "https://naia-9417.myshopify.com/products/silk-top" },
-  { title: "Art Panel Tailored Blazer", category: "Outerwear", handle: "blazer", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/a7b908bb-3079-4f39-93b8-e1a89435249a.png", url: "https://naia-9417.myshopify.com/products/blazer" },
-  { title: "Textured Art Maxi Skirt", category: "Bottom", handle: "skirt", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/6992350d-5695-4f28-8674-7747dfd1e680.png", url: "https://naia-9417.myshopify.com/products/skirt" },
-  { title: "Wrap Cropped Top", category: "Top", handle: "top", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3614927b-4685-4df3-aeff-b3d5a950cbd2.png", url: "https://naia-9417.myshopify.com/products/top" },
-  { title: "Printed Wrap Kimono Jacket", category: "Outerwear", handle: "kimono", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/77d61b97-37da-4e57-8297-aa5207b35d07.png", url: "https://naia-9417.myshopify.com/products/kimono" },
-  { title: "Art Collar Shirt", category: "Top", handle: "shirt-1", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/32fe2afb-b8ef-46d2-ae2c-b1adc81a1b0f.png", url: "https://naia-9417.myshopify.com/products/shirt-1" },
-  { title: "Leather Midi Dress", category: "Dress", handle: "shirt", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/8a855f15-e5e9-4ef5-a7db-a7253e83a542.png", url: "https://naia-9417.myshopify.com/products/shirt" },
-  { title: "Asymmetrical Waist Pants", category: "Bottom", handle: "pants", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/7d5d1e05-796a-45d9-b74a-4ddb0c9da3cf.png", url: "https://naia-9417.myshopify.com/products/pants" },
-  { title: "Printed Straight Pants", category: "Bottom", handle: "trousers", image: "https://cdn.shopify.com/s/files/1/0705/6962/3594/files/3b14fe8b-2c19-492e-82b1-44baaf3a3cc9.png", url: "https://naia-9417.myshopify.com/products/trousers" },
-];
+// Build NAIA_PRODUCTS from canonical catalog — single source of truth.
+const ITEM_TYPE_TO_CATEGORY = { TOP: "Top", BOTTOM: "Bottom", OUTERWEAR: "Outerwear", DRESS: "Dress", SET: "Dress" };
+const NAIA_PRODUCTS = getAllCatalogProducts().map(p => ({
+  title: p.parsed.identity.verifiedTitle,
+  category: ITEM_TYPE_TO_CATEGORY[p.parsed.identity.itemType] ?? "Top",
+  handle: p.handle,
+  url: p.parsed.identity.liveUrl ?? `https://naiabynadine.com/products/${p.handle}`,
+}));
 
 const COMPLEMENTARY_CATEGORIES = {
   "Top":       ["Bottom", "Outerwear"],

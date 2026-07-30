@@ -103,19 +103,15 @@ Keep the tone warm, emotionally intelligent, and personal. Be specific with prod
     const result = anthropicData.content[0].text.trim();
 
     if (!isGuest && customerId) {
-      const { prisma } = await import("../db.server.js");
-      
-      await prisma.quickStyleSession.create({
+      const prisma = (await import("../db.server.js")).default;
+      await prisma.stylingSession.create({
         data: {
-          customerId: customerId,
-          currentMood,
-          desiredMood,
-          occasion,
-          bodyComfortToday: bodyComfortToday.join(", "),
-          stylingSource,
-          result,
-          isGuest: false,
-          createdAt: new Date()
+          customerId,
+          currentMood: currentMood || "",
+          desiredFeeling: desiredMood || "",
+          occasion: occasion || "",
+          styleFrom: "BOTH",
+          specificNeeds: result,
         }
       });
     }

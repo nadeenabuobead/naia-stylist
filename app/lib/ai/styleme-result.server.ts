@@ -41,6 +41,13 @@ export function buildProfileSignals(
     avoidColors?: string[] | null;
     styleSupport?: string[] | null;
     desiredImpression?: string[] | null;
+    desiredFeelings?: string[] | null;
+    becoming?: string[] | null;
+    lifestyle?: string | null;
+    dressesFor?: string[] | null;
+    bodyFocusAreas?: string[] | null;
+    bodyAvoidAreas?: string[] | null;
+    fitPreferences?: string[] | null;
   } | null | undefined,
 ): StyleMeProfileSignals | undefined {
   if (!profile) return undefined;
@@ -50,6 +57,13 @@ export function buildProfileSignals(
   if (profile.avoidColors?.length) signals.avoidColors = profile.avoidColors;
   if (profile.styleSupport?.length) signals.styleSupport = profile.styleSupport;
   if (profile.desiredImpression?.length) signals.desiredImpression = profile.desiredImpression;
+  if (profile.desiredFeelings?.length) signals.desiredFeelings = profile.desiredFeelings;
+  if (profile.becoming?.length) signals.becoming = profile.becoming;
+  if (profile.lifestyle) signals.lifestyle = profile.lifestyle;
+  if (profile.dressesFor?.length) signals.dressesFor = profile.dressesFor;
+  if (profile.bodyFocusAreas?.length) signals.bodyFocusAreas = profile.bodyFocusAreas;
+  if (profile.bodyAvoidAreas?.length) signals.bodyAvoidAreas = profile.bodyAvoidAreas;
+  if (profile.fitPreferences?.length) signals.fitPreferences = profile.fitPreferences;
   return Object.keys(signals).length > 0 ? signals : undefined;
 }
 

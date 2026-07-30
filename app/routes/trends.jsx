@@ -39,7 +39,7 @@ export default function TrendReports() {
 
       <div className="tr-topbar">
         <div className="tr-topbar-logo">nAia</div>
-        <Link to="/apps/naia-stylist/" className="tr-topbar-link">← Dashboard</Link>
+        <Link to="/my-naia" className="tr-topbar-link">← My nAia</Link>
       </div>
 
       <div className="tr-wrap">

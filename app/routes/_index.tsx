@@ -703,7 +703,7 @@ export default function Index() {
                     {session.currentMood} → {session.desiredFeeling}
                   </div>
                   <div style={{ display: "flex", gap: "12px" }}>
-                    <Link to={`/apps/naia-stylist/style-me/result?sessionId=${session.id}`} style={{ fontFamily: "var(--ff-ui)", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", textDecoration: "none" }}>VIEW LOOK →</Link>
+                    <Link to={`/style-me/result?sessionId=${session.id}`} style={{ fontFamily: "var(--ff-ui)", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-burg)", textDecoration: "none" }}>VIEW LOOK →</Link>
                   </div>
                 </div>
               ))}

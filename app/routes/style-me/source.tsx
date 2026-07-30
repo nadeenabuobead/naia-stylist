@@ -250,7 +250,7 @@ function ClosetAnchorStep({
         <p className="sm-sub" style={{ marginBottom: "28px" }}>
           Your closet is stored in your nAia account. Sign in to choose an item to build your look around.
         </p>
-        <Link to="/login" className="sm-source-btn">Sign In</Link>
+        <Link to="/auth/shopify/login" className="sm-source-btn">Sign In</Link>
       </>
     );
   }

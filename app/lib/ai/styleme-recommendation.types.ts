@@ -63,12 +63,22 @@ export interface StyleMeSessionInput {
 // ─── Profile signals ──────────────────────────────────────────────────────────
 
 export interface StyleMeProfileSignals {
+  // Core identity
   stylePersonalities?: string[];
   favoriteColors?: string[];
   avoidColors?: string[];
   firmNoColors?: string[];
   styleSupport?: string[];
   desiredImpression?: string[];
+  // Passport Lite — aspirational & contextual
+  desiredFeelings?: string[];
+  becoming?: string[];
+  lifestyle?: string;
+  dressesFor?: string[];
+  // Body & fit
+  bodyFocusAreas?: string[];
+  bodyAvoidAreas?: string[];
+  fitPreferences?: string[];
 }
 
 // ─── Anchor inputs ────────────────────────────────────────────────────────────
