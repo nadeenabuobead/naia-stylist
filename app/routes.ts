@@ -14,5 +14,14 @@ export default [
   route("trends/:slug/lens/:lens", "./routes/trends.$slug.lens.$lens.tsx"),
   route("api/recommendation-feedback", "./routes/api.recommendation-feedback.tsx"),
   route("api/post-wear-review", "./routes/api.post-wear-review.tsx"),
+  // These routes are skipped by flatRoutes() due to implicit parent collision between
+  // my-naia._index.tsx and my-naia.saved.tsx (no my-naia.tsx layout file exists).
+  // Registering them explicitly guarantees they appear in the route manifest.
+  route("my-naia", "./routes/my-naia._index.tsx"),
+  route("my-naia/saved", "./routes/my-naia.saved.tsx"),
+  route("my-naia-model", "./routes/my-naia-model.tsx"),
+  route("settings", "./routes/settings.tsx"),
+  route("post-wear-review", "./routes/post-wear-review.tsx"),
+  route("passport/selfie", "./routes/passport.selfie.tsx"),
 
 ] satisfies RouteConfig;
