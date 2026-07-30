@@ -22,7 +22,8 @@
     "generate:lenses": "tsx scripts/generate-lenses.ts",
     "test:dashboard": "node --test --import tsx/esm app/lib/designer-sample-data.validation.test.ts app/lib/ai/canonical-reconciliation.test.ts app/lib/ai/batch1-integration.test.ts app/lib/ai/batch2-integration.test.ts",
     "test:customer": "node --test --import tsx/esm app/routes/customer-routes.test.ts app/routes/customer-loaders.test.ts app/lib/ai/selfie-upload.test.ts",
-    "test": "node --test --import tsx/esm app/lib/designer-sample-data.validation.test.ts app/lib/ai/canonical-reconciliation.test.ts app/lib/ai/batch1-integration.test.ts app/lib/ai/batch2-integration.test.ts app/lib/ai/styleme-recommendation.test.ts app/routes/customer-routes.test.ts app/routes/customer-loaders.test.ts app/lib/ai/selfie-upload.test.ts"
+    "test:security": "npx vitest run app/routes/api.seed-staging.test.ts app/routes/naia-identity-security.test.ts",
+    "test": "node --test --import tsx/esm app/lib/designer-sample-data.validation.test.ts app/lib/ai/canonical-reconciliation.test.ts app/lib/ai/batch1-integration.test.ts app/lib/ai/batch2-integration.test.ts app/lib/ai/styleme-recommendation.test.ts app/routes/customer-routes.test.ts app/routes/customer-loaders.test.ts app/lib/ai/selfie-upload.test.ts && npm run test:security"
   },
   "type": "module",
   "engines": {
