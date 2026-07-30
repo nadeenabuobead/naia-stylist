@@ -8,6 +8,7 @@ import { emitClosetItemAdded, recordJourneyEvent } from "../lib/ai/journey-event
 // Supported _action values:
 //   "createCustomer"     — create Customer record (idempotent on shopifyCustomerId)
 //   "createSession"      — create Customer + NaiaSession, returns rawToken
+//   "loginRedirect"      — create Customer + NaiaSession, set HttpOnly cookie, redirect to `to`
 //   "createStylingSession" — create StylingSession for an existing customer
 //   "countRecords"       — return event/analysis counts scoped to a customerId
 //   "cleanup"            — delete all test records for a shopifyCustomerId
@@ -22,8 +23,48 @@ function generateRawToken() {
   return randomBytes(32).toString("base64url");
 }
 
-export async function loader() {
-  return new Response("Method Not Allowed", { status: 405 });
+// Staging GET login helper: /api/seed-staging?secret=…&id=…&email=…&to=…
+// Sets the __naia_tok cookie and redirects — allows browser-based test login.
+export async function loader({ request }) {
+  const url = new URL(request.url);
+  const secret = url.searchParams.get("secret");
+  if (!process.env.STAGING_SEED_SECRET || secret !== process.env.STAGING_SEED_SECRET) {
+    return new Response("Method Not Allowed", { status: 405 });
+  }
+
+  const shopifyCustomerId = url.searchParams.get("id");
+  const email             = url.searchParams.get("email");
+  const to                = url.searchParams.get("to") ?? "/my-naia";
+  if (!shopifyCustomerId || !email) {
+    return new Response("id and email required", { status: 400 });
+  }
+  if (!to.startsWith("/")) {
+    return new Response("to must be a relative path", { status: 400 });
+  }
+
+  let customer = await prisma.customer.findUnique({
+    where: { shopifyCustomerId },
+    select: { id: true },
+  });
+  if (!customer) {
+    customer = await prisma.customer.create({
+      data: { shopifyCustomerId, email },
+      select: { id: true },
+    });
+  }
+
+  const rawToken = generateRawToken();
+  const tokenHash = hashToken(rawToken);
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  await prisma.naiaSession.create({
+    data: { tokenHash, customerId: customer.id, expiresAt },
+  });
+
+  const cookieHeader = `__naia_tok=${rawToken}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${30 * 24 * 60 * 60}`;
+  return new Response(null, {
+    status: 302,
+    headers: { "Set-Cookie": cookieHeader, Location: to },
+  });
 }
 
 export async function action({ request }) {
@@ -87,6 +128,42 @@ export async function action({ request }) {
     });
 
     return Response.json({ rawToken, customerId: customer.id });
+  }
+
+  // ── loginRedirect ─────────────────────────────────────────────────────────
+  // Creates Customer + NaiaSession, sets the __naia_tok HttpOnly cookie, and
+  // redirects the browser to `to` (default: /my-naia).
+  // Use this from a browser form POST so the cookie lands correctly.
+  if (act === "loginRedirect") {
+    const { shopifyCustomerId, email, to } = body ?? {};
+    if (!shopifyCustomerId || !email) {
+      return Response.json({ error: "shopifyCustomerId and email required" }, { status: 400 });
+    }
+    const destination = typeof to === "string" && to.startsWith("/") ? to : "/my-naia";
+
+    let customer = await prisma.customer.findUnique({
+      where: { shopifyCustomerId: String(shopifyCustomerId) },
+      select: { id: true },
+    });
+    if (!customer) {
+      customer = await prisma.customer.create({
+        data: { shopifyCustomerId: String(shopifyCustomerId), email: String(email) },
+        select: { id: true },
+      });
+    }
+
+    const rawToken = generateRawToken();
+    const tokenHash = hashToken(rawToken);
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await prisma.naiaSession.create({
+      data: { tokenHash, customerId: customer.id, expiresAt },
+    });
+
+    const cookieHeader = `__naia_tok=${rawToken}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${30 * 24 * 60 * 60}`;
+    return new Response(null, {
+      status: 302,
+      headers: { "Set-Cookie": cookieHeader, Location: destination },
+    });
   }
 
   // ── createStylingSession ──────────────────────────────────────────────────
