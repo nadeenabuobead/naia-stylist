@@ -123,11 +123,31 @@ export async function action({ request }) {
 
     const eventCounts = Object.fromEntries(jeByType.map((r) => [r.type, r._count.type]));
 
+    const sessionCount = await prisma.naiaSession.count({ where: { customerId: String(customerId) } });
+
     return Response.json({
       buyOrSkip: { total: buyOrSkipTotal, forCustomer: buyOrSkipForCustomer },
       recommendationFeedback: { total: rfTotal, forCustomer: rfForCustomer },
       postOutfitReview: { forCustomer: porTotal },
       journeyEvents: { total: jeTotal, byType: eventCounts },
+      naiaSessions: { forCustomer: sessionCount },
+    });
+  }
+
+  // ── verifySession ─────────────────────────────────────────────────────────
+  // Check whether a rawToken maps to a valid (non-expired) naiaSession in the DB.
+  if (act === "verifySession") {
+    const { rawToken: raw } = body ?? {};
+    if (!raw) return Response.json({ error: "rawToken required" }, { status: 400 });
+    const tokenHash = createHash("sha256").update(String(raw)).digest("hex");
+    const session = await prisma.naiaSession.findUnique({
+      where: { tokenHash },
+      select: { id: true, customerId: true, expiresAt: true },
+    });
+    return Response.json({
+      found: session !== null,
+      expired: session ? session.expiresAt < new Date() : null,
+      tokenHashPrefix: tokenHash.slice(0, 8),
     });
   }
 
