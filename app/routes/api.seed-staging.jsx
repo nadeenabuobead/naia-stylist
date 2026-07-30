@@ -134,6 +134,49 @@ export async function action({ request }) {
     });
   }
 
+  // ── getCustomerData ───────────────────────────────────────────────────────
+  // Returns OnboardingProfile updatedAt (for CAS in passport update tests) and
+  // recent StylingSession IDs for the customer.
+  if (act === "getCustomerData") {
+    const { customerId } = body ?? {};
+    if (!customerId) return Response.json({ error: "customerId required" }, { status: 400 });
+    const profile = await prisma.onboardingProfile.findUnique({
+      where: { customerId: String(customerId) },
+      select: { id: true, updatedAt: true, completed: true },
+    });
+    const sessions = await prisma.stylingSession.findMany({
+      where: { customerId: String(customerId) },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+      select: {
+        id: true,
+        suggestions: { select: { id: true }, take: 1 },
+      },
+    });
+    return Response.json({
+      profile: profile
+        ? { id: profile.id, updatedAt: profile.updatedAt.toISOString(), completed: profile.completed }
+        : null,
+      sessions: sessions.map((s) => ({
+        id: s.id,
+        suggestionIds: s.suggestions.map((sg) => sg.id),
+      })),
+    });
+  }
+
+  // ── createSuggestion ──────────────────────────────────────────────────────
+  // Creates a minimal OutfitSuggestion for a StylingSession so that look_saved
+  // and in_session_review_submitted tests can run.
+  if (act === "createSuggestion") {
+    const { sessionId } = body ?? {};
+    if (!sessionId) return Response.json({ error: "sessionId required" }, { status: 400 });
+    const suggestion = await prisma.outfitSuggestion.create({
+      data: { sessionId: String(sessionId) },
+      select: { id: true },
+    });
+    return Response.json({ suggestionId: suggestion.id });
+  }
+
   // ── verifySession ─────────────────────────────────────────────────────────
   // Check whether a rawToken maps to a valid (non-expired) naiaSession in the DB.
   if (act === "verifySession") {
