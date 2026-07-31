@@ -1994,3 +1994,23 @@ a.mn-action:focus-visible,
   .bos-fields-grid { grid-template-columns: 1fr; }
   .bos-result-blocks { grid-template-columns: 1fr; }
 }
+
+/* ── Settings (set-*) ────────────────────────────────────────────────────── */
+.set-section-eyebrow { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.34em; text-transform: uppercase; color: var(--naia-muted); margin-bottom: 8px; }
+.set-section-title { font-family: var(--naia-ff-display); font-weight: 200; font-size: clamp(22px, 4vw, 28px); line-height: 1.05; color: var(--naia-ink); margin-bottom: 20px; }
+.set-address-box { padding: 20px 24px; background: var(--naia-surface); border: 1px solid var(--naia-border); }
+.set-comm-list { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--naia-border); border-bottom: 1px solid var(--naia-border); }
+.set-comm-row { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--naia-border); font-family: var(--naia-ff-body); font-size: 15px; color: rgba(34, 21, 22, 0.85); }
+.set-comm-row:last-child { border-bottom: none; }
+.set-comm-toggle { display: flex; align-items: center; gap: 8px; font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--naia-muted); cursor: pointer; flex-shrink: 0; }
+.set-comm-check { width: 14px; height: 14px; accent-color: var(--naia-ink); cursor: pointer; }
+.set-controls { display: flex; flex-direction: column; gap: 12px; }
+.set-control-row { display: flex; flex-direction: column; gap: 12px; border: 1px solid var(--naia-border-mid); padding: 20px; }
+.set-control-title { font-family: var(--naia-ff-display); font-weight: 300; font-size: 18px; line-height: 1.2; margin-bottom: 4px; }
+.set-control-title--destructive { color: var(--naia-accent); }
+.set-control-desc { font-family: var(--naia-ff-body); font-size: 14px; font-style: italic; line-height: 1.7; color: rgba(34, 21, 22, 0.75); }
+@media (min-width: 480px) {
+  .set-control-row { flex-direction: row; align-items: center; justify-content: space-between; gap: 24px; }
+  .set-control-row > div { min-width: 0; flex: 1; }
+  .set-control-row > button { flex-shrink: 0; }
+}
