@@ -66,7 +66,7 @@ export default function StyleMeMood() {
 
         <input type="hidden" name="mood" value={selected || ""} />
         <div className="sm-step-buttons">
-          <Link to="/" className="sm-btn-back">← Back</Link>
+          <Link to="/style-me" className="sm-btn-back">← Back</Link>
           <SmContinue disabled={!selected} />
         </div>
       </Form>

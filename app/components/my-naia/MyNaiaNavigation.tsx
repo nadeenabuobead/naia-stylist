@@ -8,16 +8,16 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { label: "OVERVIEW",                   path: "/my-naia" },
-  { label: "STYLE PASSPORT",             path: "/full-style-profile" },
+  { label: "STYLE PASSPORT",             path: "/passport" },
   { label: "DIGITAL CLOSET",             path: "/closet" },
   { label: "STYLEME",                    path: "/style-me" },
   { label: "BUY OR SKIP",               path: "/buyskip" },
   { label: "MY nAia MODEL",             path: "/my-naia-model" },
   { label: "PERSONAL STYLING ANALYSIS", path: "/passport/selfie" },
   { label: "MY TREND EDITS",            path: "/trends" },
-  { label: "SAVED",                      path: null, tag: "soon" },
-  { label: "ORDERS",                     path: null, tag: "soon" },
-  { label: "SETTINGS & PRIVACY",        path: null, tag: "soon" },
+  { label: "SAVED",                      path: "/my-naia/saved" },
+  { label: "ORDERS",                     path: null, tag: "shopify" },
+  { label: "SETTINGS & PRIVACY",        path: "/settings" },
 ];
 
 interface Props {

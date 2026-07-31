@@ -573,15 +573,9 @@ export default function PassportPage() {
   return (
     <div>
       <style>{css}</style>
-      {/* eslint-disable-next-line react/no-unknown-property */}
-      <link
-        href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap"
-        rel="stylesheet"
-      />
-
       <div className="pp-topbar">
         <div className="pp-topbar-logo">nAia</div>
-        <Link to="/" className="pp-topbar-back">← Dashboard</Link>
+        <Link to="/my-naia" className="pp-topbar-back">← Overview</Link>
       </div>
 
       <main className="pp-main">

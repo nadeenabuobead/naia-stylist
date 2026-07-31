@@ -175,7 +175,7 @@ export default function BuyOrSkip() {
 
       <div className="bs-topbar">
         <div className="bs-topbar-logo">nAia</div>
-        <Link to="/" className="bs-topbar-link">← Dashboard</Link>
+        <Link to="/my-naia" className="bs-topbar-link">← Overview</Link>
       </div>
 
       <div className="bs-wrap">

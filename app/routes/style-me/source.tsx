@@ -162,7 +162,7 @@ export default function StyleMeSource() {
     <div className="sm-page sm-page--qs">
       <div className="sm-topbar">
         <span className="sm-topbar-wordmark">nAia</span>
-        <Link to="/" className="sm-topbar-exit">Exit</Link>
+        <Link to="/style-me" className="sm-topbar-exit">Exit</Link>
       </div>
       <div className="sm-progress">
         <div className="sm-progress-dots">
