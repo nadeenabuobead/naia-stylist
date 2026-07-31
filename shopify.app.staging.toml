@@ -24,7 +24,14 @@ prefix = "apps"
 
 [customer_authentication]
 redirect_uris = [
-  "https://naia-stylist-staging.vercel.app/auth/shopify/callback"
+  "https://naia-stylist-staging.vercel.app/auth/shopify/callback",
+  "https://naia-stylist-staging-nadeenabuobeads-projects.vercel.app/auth/shopify/callback"
 ]
-logout_urls = [ "https://naia-stylist-staging.vercel.app/auth/logout" ]
-javascript_origins = [ "https://naia-stylist-staging.vercel.app" ]
+logout_urls = [
+  "https://naia-stylist-staging.vercel.app/auth/logout",
+  "https://naia-stylist-staging-nadeenabuobeads-projects.vercel.app/auth/logout"
+]
+javascript_origins = [
+  "https://naia-stylist-staging.vercel.app",
+  "https://naia-stylist-staging-nadeenabuobeads-projects.vercel.app"
+]
