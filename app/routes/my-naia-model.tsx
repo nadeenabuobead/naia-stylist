@@ -11,6 +11,7 @@
 import { data, type LinksFunction, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
 import { useLoaderData, Link } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import {
   loadNaiaModel,
   saveNaiaModelPhoto,
@@ -139,36 +140,22 @@ export default function MyNaiaModelRoute() {
   const loaderData = useLoaderData<typeof loader>();
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--naia-bg, #f4f4f1)" }}>
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 40px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-        <Link
-          to="/my-naia"
-          style={{ fontFamily: "var(--naia-ff-mono, 'Courier New', monospace)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--naia-muted, #7a6f6a)", textDecoration: "none" }}
-        >
-          ← Overview
-        </Link>
-        <div style={{ fontFamily: "var(--naia-ff-display, 'Playfair Display', Georgia, serif)", fontSize: "22px", fontStyle: "italic", letterSpacing: "3px", color: "var(--naia-ink, #221516)" }}>
-          nAia
-        </div>
-        <span style={{ width: "42px" }} />
+    <MyNaiaLayout currentPath="/my-naia-model">
+      <Link to="/my-naia" className="sp-back">← Overview</Link>
+
+      <div className="sp-shell">
+        <div className="sp-shell-eyebrow">Personalisation · Virtual Try-On</div>
+        <h1 className="sp-shell-title">My nAia Model</h1>
+        <p className="sp-shell-desc">
+          Your saved full-body photograph for Virtual Try-On. Used privately to preview eligible
+          pieces on your own silhouette. This is separate from your Personal Styling Analysis selfie.
+        </p>
+        <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", marginTop: "8px" }}>
+          Virtual previews show styling direction and silhouette rather than exact physical fit.
+        </p>
       </div>
 
-      <main style={{ maxWidth: "720px", margin: "0 auto", padding: "48px 40px 80px" }}>
-        <div style={{ marginBottom: "40px" }}>
-          <div style={{ fontFamily: "var(--naia-ff-mono, 'Courier New', monospace)", fontSize: "9px", letterSpacing: "4px", textTransform: "uppercase", color: "var(--naia-accent, #8b2035)", marginBottom: "12px" }}>
-            Your Profile
-          </div>
-          <h1 style={{ fontFamily: "var(--naia-ff-display, 'Playfair Display', Georgia, serif)", fontSize: "clamp(28px,4vw,40px)", fontWeight: 900, color: "var(--naia-ink, #221516)", letterSpacing: "-1px", marginBottom: "8px" }}>
-            My nAia Model
-          </h1>
-          <p style={{ fontFamily: "var(--naia-ff-body, 'Cormorant Garamond', Garamond, serif)", fontSize: "18px", fontStyle: "italic", color: "var(--naia-muted, #7a6f6a)" }}>
-            Your reusable virtual try-on identity. Upload once, preview any nAia piece on you.
-          </p>
-        </div>
-
-        <NaiaModelPhotoUpload {...loaderData} />
-      </main>
-    </div>
+      <NaiaModelPhotoUpload {...loaderData} />
+    </MyNaiaLayout>
   );
 }
