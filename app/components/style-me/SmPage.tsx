@@ -18,7 +18,7 @@ export function SmPage({ backTo, backLabel = "← Back", children, wide, step, t
         <>
           <div className="sm-topbar">
             <span className="sm-topbar-wordmark">nAia</span>
-            <Link to="/" className="sm-topbar-exit">Exit</Link>
+            <Link to="/style-me" className="sm-topbar-exit">Exit</Link>
           </div>
           <div className="sm-progress">
             <div className="sm-progress-dots">
