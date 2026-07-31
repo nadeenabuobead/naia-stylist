@@ -41,6 +41,17 @@ export default function MyNaiaLayout({ children, currentPath }: Props) {
         hamburgerRef={hamburgerRef}
       />
 
+      {/* Editorial heading — "MY nAia." */}
+      <div className="mn-editorial-head">
+        <div className="mn-editorial-badge"
+          title="Preview using sample information. Will be removed when real data is connected.">
+          Preview · Sample Information
+        </div>
+        <h1 className="mn-editorial-title">
+          MY <span className="mn-editorial-accent">nAia.</span>
+        </h1>
+      </div>
+
       {/* Mobile nav overlay */}
       <div
         id="mn-nav-overlay"

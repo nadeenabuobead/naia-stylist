@@ -19,16 +19,24 @@ vi.mock("react-router", async (importOriginal) => {
     to,
     children,
     className,
+    style,
     onClick,
+    onMouseOver,
+    onMouseOut,
     "aria-current": ariaCurrent,
+    "aria-label": ariaLabel,
   }: {
     to: string;
     children: unknown;
     className?: string;
+    style?: object;
     onClick?: () => void;
+    onMouseOver?: () => void;
+    onMouseOut?: () => void;
     "aria-current"?: string;
+    "aria-label"?: string;
   }) =>
-    createElement("a", { href: to, className, onClick, "aria-current": ariaCurrent }, children as any);
+    createElement("a", { href: to, className, style, onClick, onMouseOver, onMouseOut, "aria-current": ariaCurrent, "aria-label": ariaLabel }, children as any);
   const mockForm = ({ children, method: _m, action: _a, ...rest }: any) =>
     createElement("form", rest, children);
   const mockUseLoaderData = vi.fn(() => ({ isDev: false }));
@@ -144,7 +152,7 @@ describe("my-naia component — static structure", () => {
     }
   });
 
-  it("renders all expected action section labels", () => {
+  it("renders all expected page links in the Your nAia section", () => {
     const html = render();
     const labels = [
       "StyleMe", "Style Passport", "Personal Styling Analysis", "My nAia Model",
@@ -152,31 +160,55 @@ describe("my-naia component — static structure", () => {
       "Saved", "Orders", "Settings &amp; Privacy",  // HTML-encoded by React
     ];
     for (const label of labels) {
-      expect(html, `expected action label "${label}" in output`).toContain(label);
+      expect(html, `expected label "${label}" in output`).toContain(label);
     }
   });
 
   it("inactive nav items (Orders only) render as static spans, not links", () => {
     const html = render();
     // Nav is rendered twice (sidebar + mobile overlay): 1 static item (ORDERS) × 2 = 2
-    // SAVED → /my-naia/saved and SETTINGS & PRIVACY → /settings are now active links
     const staticCount = (html.match(/mn-nav-static/g) ?? []).length;
     expect(staticCount).toBe(2);
   });
 
-  it("inactive action items (Orders only) render as div.mn-action--inactive, not anchor", () => {
+  it("Orders in the Your nAia list renders as a span with shopify badge, not an anchor", () => {
     const html = render();
-    // SAVED and SETTINGS & PRIVACY are now active nav links; only Orders stays inactive
-    const inactiveCount = (html.match(/mn-action--inactive/g) ?? []).length;
-    expect(inactiveCount).toBe(1);
+    // The Orders item in the link list should NOT have an href
+    // — it's a <span> with a shopify badge
+    expect(html).toContain("shopify");
+    // Verify no href="/orders" or href for orders
+    expect(html).not.toContain('href="/orders"');
   });
 
   it("active navigation item (/my-naia — OVERVIEW) carries aria-current='page'", () => {
     const html = render();
-    // The OVERVIEW link should be the one with both href="/my-naia" and aria-current="page"
     expect(html).toMatch(
       /aria-current="page"[^>]*href="\/my-naia"|href="\/my-naia"[^>]*aria-current="page"/
     );
+  });
+
+  it("StyleMe hero card links to /style-me", () => {
+    const html = render();
+    expect(html).toContain('href="/style-me"');
+    expect(html).toContain("Start StyleMe");
+  });
+
+  it("Quick Tools section contains links to StyleMe, Closet, and Buy or Skip", () => {
+    const html = render();
+    expect(html).toContain("Quick Tools");
+    expect(html).toContain("Open My Closet");
+    expect(html).toContain("Buy or Skip");
+  });
+
+  it("editorial MY nAia. heading is in the layout", () => {
+    const html = render();
+    expect(html).toContain("mn-editorial-title");
+    expect(html).toContain("nAia.");
+  });
+
+  it("daily quote section is present", () => {
+    const html = render();
+    expect(html).toContain("Today&#x27;s Note");
   });
 
   it("dev fixture notice appears when isDev is true", () => {
@@ -189,9 +221,8 @@ describe("my-naia component — static structure", () => {
     expect(html).not.toContain("Development build");
   });
 
-  it("working action items are anchor elements with valid href paths", () => {
+  it("working page links have valid href paths", () => {
     const html = render();
-    // Working routes that should have href attributes in action area
     const workingPaths = [
       "/style-me",
       "/passport",
