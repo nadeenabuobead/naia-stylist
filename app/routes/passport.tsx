@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link, useLoaderData, useRevalidator } from "react-router";
 import { redirect, type LinksFunction, type LoaderFunctionArgs } from "react-router";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -9,6 +9,7 @@ export const links: LinksFunction = () => [
 import type { OnboardingAnswers, QuizQuestion } from "~/lib/onboarding/quiz-data";
 import { quizQuestions } from "~/lib/onboarding/quiz-data";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Data tables derived from quiz data at module load time
@@ -42,16 +43,18 @@ type FieldKind = "array" | "color" | "text";
 type DraftKey = keyof OnboardingAnswers;
 
 interface SubField {
-  draftKey: DraftKey;
-  apiKey:   string;
-  subLabel: string;
-  kind:     FieldKind;
+  draftKey:   DraftKey;
+  apiKey:     string;
+  subLabel:   string;
+  kind:       FieldKind;
   questionId: string;
 }
 
 interface SectionDef {
   id:        SectionId;
   label:     string;
+  question:  string;
+  helper:    string;
   subFields: SubField[];
 }
 
@@ -59,6 +62,8 @@ const SECTIONS: SectionDef[] = [
   {
     id: "identity",
     label: "Your style identity",
+    question: "Which style energies feel closest to you right now?",
+    helper: "Select what resonates. nAia blends these into the aesthetic of every recommendation.",
     subFields: [
       { draftKey: "style-personalities", apiKey: "stylePersonalities", subLabel: "Style energies",          kind: "array", questionId: "style-personalities" },
       { draftKey: "desired-impression",  apiKey: "desiredImpression",  subLabel: "The impression you make", kind: "array", questionId: "desired-impression"  },
@@ -67,14 +72,18 @@ const SECTIONS: SectionDef[] = [
   {
     id: "feelings",
     label: "How you want to feel",
+    question: "How do you want to feel in what you wear?",
+    helper: "This shapes the emotional register of your StyleMe recommendations.",
     subFields: [
-      { draftKey: "desired-feelings", apiKey: "desiredFeelings", subLabel: "How you want to feel",  kind: "array", questionId: "desired-feelings" },
-      { draftKey: "becoming",         apiKey: "becoming",        subLabel: "Who you're becoming",      kind: "array", questionId: "becoming"         },
+      { draftKey: "desired-feelings", apiKey: "desiredFeelings", subLabel: "How you want to feel", kind: "array", questionId: "desired-feelings" },
+      { draftKey: "becoming",         apiKey: "becoming",        subLabel: "Who you're becoming",  kind: "array", questionId: "becoming"         },
     ],
   },
   {
     id: "life",
     label: "Your life and fit",
+    question: "Where does your wardrobe need to show up most often?",
+    helper: "Choose the settings and silhouettes that work best for your week.",
     subFields: [
       { draftKey: "lifestyle",       apiKey: "lifestyle",      subLabel: "Your lifestyle",           kind: "array", questionId: "lifestyle"       },
       { draftKey: "fit-preferences", apiKey: "fitPreferences", subLabel: "What makes you feel best", kind: "array", questionId: "fit-preferences" },
@@ -83,6 +92,8 @@ const SECTIONS: SectionDef[] = [
   {
     id: "wardrobe",
     label: "Your wardrobe context",
+    question: "What does your wardrobe need most right now?",
+    helper: "Knowing where you feel disconnected helps nAia focus on the right solutions.",
     subFields: [
       { draftKey: "wardrobe-disconnection", apiKey: "styleStruggles", subLabel: "When you feel most disconnected",        kind: "array", questionId: "wardrobe-disconnection" },
       { draftKey: "style-support",          apiKey: "styleSupport",   subLabel: "What would make getting dressed easier", kind: "array", questionId: "style-support"          },
@@ -91,14 +102,18 @@ const SECTIONS: SectionDef[] = [
   {
     id: "colours",
     label: "Your colour direction",
+    question: "Which palette should nAia lean into for you?",
+    helper: "Pick the tones you want to see returning across your looks.",
     subFields: [
       { draftKey: "favorite-colors", apiKey: "favoriteColors", subLabel: "Your colour palette", kind: "color", questionId: "favorite-colors" },
-      { draftKey: "avoid-colors",    apiKey: "avoidColors",    subLabel: "Colours to avoid",     kind: "color", questionId: "avoid-colors"    },
+      { draftKey: "avoid-colors",    apiKey: "avoidColors",    subLabel: "Colours to avoid",    kind: "color", questionId: "avoid-colors"    },
     ],
   },
   {
     id: "notes",
     label: "Notes to nAia",
+    question: "Anything nAia should always keep in mind?",
+    helper: "Share context that wouldn't come through in selections — life changes, occasions, or specific things to avoid.",
     subFields: [
       { draftKey: "final-notes", apiKey: "finalNotes", subLabel: "Your notes to nAia", kind: "text", questionId: "final-notes" },
     ],
@@ -106,7 +121,7 @@ const SECTIONS: SectionDef[] = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Diff helpers
+// Diff helper
 // ─────────────────────────────────────────────────────────────────────────────
 
 function arraysEqualAsSet(a: string[], b: string[]): boolean {
@@ -116,11 +131,10 @@ function arraysEqualAsSet(a: string[], b: string[]): boolean {
   return sa.every((v, i) => v === sb[i]);
 }
 
-// Returns the API patch (only genuinely changed fields) or null if nothing changed.
 function computeSectionPatch(
-  section:  SectionDef,
-  edits:    OnboardingAnswers,
-  saved:    OnboardingAnswers,
+  section: SectionDef,
+  edits:   OnboardingAnswers,
+  saved:   OnboardingAnswers,
 ): Record<string, unknown> | null {
   const patch: Record<string, unknown> = {};
   let hasChange = false;
@@ -132,17 +146,11 @@ function computeSectionPatch(
     if (kind === "text") {
       const edited  = (typeof editedRaw === "string" && editedRaw.trim() !== "") ? editedRaw  : null;
       const current = (typeof savedRaw  === "string" && savedRaw.trim()  !== "") ? savedRaw   : null;
-      if (edited !== current) {
-        patch[apiKey] = edited; // null = intentional clear
-        hasChange = true;
-      }
+      if (edited !== current) { patch[apiKey] = edited; hasChange = true; }
     } else {
       const edited  = (Array.isArray(editedRaw) ? editedRaw : []) as string[];
       const current = (Array.isArray(savedRaw)  ? savedRaw  : []) as string[];
-      if (!arraysEqualAsSet(edited, current)) {
-        patch[apiKey] = edited; // [] = intentional clear
-        hasChange = true;
-      }
+      if (!arraysEqualAsSet(edited, current)) { patch[apiKey] = edited; hasChange = true; }
     }
   }
 
@@ -150,19 +158,15 @@ function computeSectionPatch(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+
 export function meta() {
   return [{ title: "Style Passport | nAia" }];
 }
-
-// Loader
-// ─────────────────────────────────────────────────────────────────────────────
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
   const op = customer.onboardingProfile;
 
-  // Passport edit is only available for completed profiles.
-  // New and incomplete customers go through the quiz first.
   if (!op || !op.completed) {
     throw redirect("/onboarding/step/1");
   }
@@ -187,160 +191,144 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CSS
+// Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-const css = `
-  :root{
-    --cream:var(--naia-bg,#f4f4f1);--warm:var(--naia-border,#e1dbd7);
-    --burg:var(--naia-accent,#8b2035);--deep:var(--naia-ink,#221516);
-    --accent:var(--naia-accent,#8b2035);--muted:var(--naia-muted,#7a6f6a);
-    --ff-display:var(--naia-ff-display,'Playfair Display',Georgia,serif);
-    --ff-body:var(--naia-ff-body,'Cormorant Garamond',Garamond,serif);
-    --ff-mono:var(--naia-ff-mono,'Courier New',monospace);
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+}
+
+function getSectionSummary(def: SectionDef, answers: OnboardingAnswers): React.ReactNode {
+  for (const sf of def.subFields) {
+    const v = (answers as Record<string, unknown>)[sf.draftKey];
+    if (sf.kind === "text") {
+      if (v && typeof v === "string" && v.trim()) return "Notes added";
+    } else {
+      const ids = (Array.isArray(v) ? v : []) as string[];
+      if (ids.length > 0) {
+        const labels = ids.map(id => lbl(sf.questionId, id));
+        return labels.slice(0, 3).join(" · ") + (labels.length > 3 ? "…" : "");
+      }
+    }
   }
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{background:var(--cream);color:var(--deep);font-family:var(--ff-body);-webkit-font-smoothing:antialiased}
-  .pp-topbar{display:flex;justify-content:space-between;align-items:center;padding:20px 40px;border-bottom:1px solid rgba(59,5,16,.06)}
-  .pp-topbar-logo{font-family:var(--ff-display);font-size:22px;font-style:italic;letter-spacing:3px;color:var(--deep)}
-  .pp-topbar-back{font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);text-decoration:none}
-  .pp-main{max-width:700px;margin:0 auto;padding:48px 40px 80px}
-  .pp-eyebrow{font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--accent);margin-bottom:12px}
-  .pp-headline{font-family:var(--ff-display);font-size:clamp(24px,3.5vw,36px);font-weight:900;font-style:italic;color:var(--deep);letter-spacing:-1px;margin-bottom:8px}
-  .pp-desc{font-family:var(--ff-body);font-size:17px;font-style:italic;color:var(--muted);margin-bottom:40px;line-height:1.5}
-  .pp-section{border:1px solid rgba(59,5,16,.08);margin-bottom:10px}
-  .pp-section-header{display:flex;justify-content:space-between;align-items:center;padding:18px 24px}
-  .pp-section-title{font-family:var(--ff-mono);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--deep)}
-  .pp-edit-btn{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);background:none;border:none;cursor:pointer;padding:4px 0}
-  .pp-edit-btn:disabled{opacity:.4;cursor:not-allowed}
-  .pp-section-body{padding:0 24px 24px}
-  .pp-sub-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-top:18px;margin-bottom:10px}
-  .pp-pills{display:flex;flex-wrap:wrap;gap:8px}
-  .pp-pill{padding:8px 16px;border:1px solid rgba(59,5,16,.12);font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--deep)}
-  .pp-color-row{display:flex;flex-wrap:wrap;gap:8px}
-  .pp-color-chip{display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid rgba(59,5,16,.12);font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--deep)}
-  .pp-color-dot{width:16px;height:16px;border:1px solid rgba(0,0,0,.12);border-radius:1px;flex-shrink:0}
-  .pp-empty{font-family:var(--ff-body);font-size:16px;font-style:italic;color:var(--muted)}
-  .pp-edit-area{background:rgba(59,5,16,.015);border-top:1px solid rgba(59,5,16,.06);padding:20px 24px 24px}
-  .pp-cap-hint{font-family:var(--ff-mono);font-size:9px;letter-spacing:1px;color:var(--muted);margin-bottom:10px}
-  .pp-option-grid{display:flex;flex-wrap:wrap;gap:8px}
-  .pp-option{padding:8px 16px;border:1px solid rgba(59,5,16,.15);font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;background:transparent;color:var(--deep);transition:all .15s}
-  .pp-option:hover{border-color:var(--deep)}
-  .pp-option--selected{background:var(--deep);color:var(--cream);border-color:var(--deep)}
-  .pp-option--disabled{opacity:.3;cursor:not-allowed;pointer-events:none}
-  .pp-color-option{display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid rgba(59,5,16,.15);font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;background:transparent;color:var(--deep);transition:all .15s}
-  .pp-color-option:hover{border-color:var(--deep)}
-  .pp-color-option--selected{background:var(--deep);color:var(--cream);border-color:var(--deep)}
-  .pp-color-option--disabled{opacity:.3;cursor:not-allowed;pointer-events:none}
-  .pp-textarea{width:100%;min-height:100px;padding:14px;font-family:var(--ff-body);font-size:17px;font-style:italic;color:var(--deep);background:transparent;border:1px solid rgba(59,5,16,.15);resize:vertical;outline:none;margin-bottom:6px}
-  .pp-textarea:focus{border-color:var(--deep)}
-  .pp-charcount{font-family:var(--ff-mono);font-size:9px;letter-spacing:1px;color:var(--muted);margin-bottom:16px}
-  .pp-actions{display:flex;align-items:center;gap:16px;margin-top:20px;flex-wrap:wrap}
-  .pp-save-btn{padding:10px 24px;background:var(--deep);color:var(--cream);font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;border:none;cursor:pointer}
-  .pp-save-btn:disabled{opacity:.5;cursor:not-allowed}
-  .pp-cancel-btn{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);background:none;border:none;cursor:pointer;padding:0}
-  .pp-inline-btn{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;background:none;border:none;cursor:pointer;padding:0}
-  .pp-status-error{color:var(--accent)}
-  .pp-status-conflict{color:#7a4a00}
-  .pp-discard-bar{background:rgba(139,32,53,.04);border-top:1px solid rgba(139,32,53,.12);padding:14px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
-  .pp-discard-text{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--deep);flex:1;min-width:160px}
-  .pp-discard-keep{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--deep);background:none;border:1px solid rgba(59,5,16,.2);padding:6px 14px;cursor:pointer}
-  .pp-discard-go{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);background:none;border:none;cursor:pointer;padding:0}
-  .pp-notes-read{font-family:var(--ff-body);font-size:17px;font-style:italic;color:var(--muted);line-height:1.6}
-`;
+  return <span className="sp-detail-missing">Not yet completed</span>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+type Mode =
+  | { kind: "overview" }
+  | { kind: "flow"; queue: SectionId[]; index: number; done?: boolean }
+  | { kind: "picker" };
+
+type SaveStatus = "idle" | "saving" | "error" | "conflict";
+type PendingNext = "next" | "exit" | null;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-type SaveStatus = "idle" | "saving" | "error" | "conflict";
-
 export default function PassportPage() {
   const { savedAnswers, profileUpdatedAt } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
 
-  const [activeSection,       setActiveSection]       = useState<SectionId | null>(null);
-  const [sectionEdits,        setSectionEdits]        = useState<OnboardingAnswers>({});
-  const [saveStatus,          setSaveStatus]          = useState<SaveStatus>("idle");
+  const [mode,                 setMode]                 = useState<Mode>({ kind: "overview" });
+  const [flowEdits,            setFlowEdits]            = useState<OnboardingAnswers>({});
+  const [saveStatus,           setSaveStatus]           = useState<SaveStatus>("idle");
   const [awaitingRevalidation, setAwaitingRevalidation] = useState(false);
-  const [pendingSection,      setPendingSection]      = useState<SectionId | null>(null);
+  const [pendingNext,          setPendingNext]          = useState<PendingNext>(null);
 
-  // Close the section once revalidation settles after a successful save.
+  const missingSections = useMemo(() =>
+    SECTIONS.filter(s => {
+      const primary = s.subFields[0];
+      const v = (savedAnswers as Record<string, unknown>)[primary.draftKey];
+      return primary.kind === "text"
+        ? !v || (typeof v === "string" && !v.trim())
+        : !Array.isArray(v) || (v as string[]).length === 0;
+    }),
+    [savedAnswers]
+  );
+  const isComplete = missingSections.length === 0;
+
+  // Settle after revalidation
   useEffect(() => {
-    if (awaitingRevalidation && revalidator.state === "idle") {
-      setAwaitingRevalidation(false);
-      setActiveSection(null);
-      setSectionEdits({});
-      setSaveStatus("idle");
-    }
-  }, [awaitingRevalidation, revalidator.state]);
+    if (!awaitingRevalidation || revalidator.state !== "idle") return;
+    setAwaitingRevalidation(false);
+    setSaveStatus("idle");
 
-  const openSection = useCallback((id: SectionId) => {
-    const def = SECTIONS.find(s => s.id === id)!;
-    const initialEdits: OnboardingAnswers = {};
+    if (pendingNext === "exit") {
+      setPendingNext(null);
+      setMode({ kind: "overview" });
+    } else if (pendingNext === "next" && mode.kind === "flow") {
+      setPendingNext(null);
+      if (mode.index + 1 >= mode.queue.length) {
+        setMode({ ...mode, done: true });
+      } else {
+        const nextId = mode.queue[mode.index + 1];
+        initEdits(nextId);
+        setMode({ ...mode, index: mode.index + 1 });
+      }
+    }
+  }, [awaitingRevalidation, revalidator.state, pendingNext, mode]); // eslint-disable-line
+
+  function initEdits(sectionId: SectionId) {
+    const def = SECTIONS.find(s => s.id === sectionId)!;
+    const edits: OnboardingAnswers = {};
     for (const { draftKey, kind } of def.subFields) {
       const v = (savedAnswers as Record<string, unknown>)[draftKey];
-      if (kind === "text") {
-        (initialEdits as Record<string, unknown>)[draftKey] = typeof v === "string" ? v : "";
-      } else {
-        (initialEdits as Record<string, unknown>)[draftKey] = Array.isArray(v) ? [...v] : [];
-      }
+      (edits as Record<string, unknown>)[draftKey] =
+        kind === "text"
+          ? (typeof v === "string" ? v : "")
+          : (Array.isArray(v) ? [...v] : []);
     }
-    setActiveSection(id);
-    setSectionEdits(initialEdits);
-    setSaveStatus("idle");
-    setPendingSection(null);
-  }, [savedAnswers]);
+    setFlowEdits(edits);
+  }
 
-  const handleEditClick = useCallback((id: SectionId) => {
-    if (activeSection === id) return;
+  function startContinue() {
+    if (!missingSections.length) return;
+    initEdits(missingSections[0].id);
+    setMode({ kind: "flow", queue: missingSections.map(s => s.id), index: 0 });
+  }
 
-    if (activeSection !== null) {
-      const activeDef = SECTIONS.find(s => s.id === activeSection)!;
-      if (computeSectionPatch(activeDef, sectionEdits, savedAnswers) !== null) {
-        // Unsaved changes in the open section — ask for confirmation before leaving
-        setPendingSection(id);
-        return;
-      }
-    }
+  function startUpdate() { setMode({ kind: "picker" }); }
 
-    openSection(id);
-  }, [activeSection, sectionEdits, savedAnswers, openSection]);
-
-  const handleCancel = useCallback(() => {
-    setActiveSection(null);
-    setSectionEdits({});
-    setSaveStatus("idle");
-    setPendingSection(null);
-  }, []);
+  function editSection(id: SectionId) {
+    initEdits(id);
+    setMode({ kind: "flow", queue: [id], index: 0 });
+  }
 
   const handleToggle = useCallback((draftKey: DraftKey, optId: string, maxSel: number) => {
-    setSectionEdits(prev => {
+    setFlowEdits(prev => {
       const current = ((prev as Record<string, unknown>)[draftKey] as string[] | undefined) ?? [];
-      if (current.includes(optId)) {
-        return { ...prev, [draftKey]: current.filter(id => id !== optId) };
-      }
-      if (current.length < maxSel) {
-        return { ...prev, [draftKey]: [...current, optId] };
-      }
-      return prev; // at cap, ignore
+      if (current.includes(optId)) return { ...prev, [draftKey]: current.filter(id => id !== optId) };
+      if (current.length < maxSel) return { ...prev, [draftKey]: [...current, optId] };
+      return prev;
     });
   }, []);
 
   const handleTextChange = useCallback((draftKey: DraftKey, value: string) => {
-    setSectionEdits(prev => ({ ...prev, [draftKey]: value }));
+    setFlowEdits(prev => ({ ...prev, [draftKey]: value }));
   }, []);
 
-  const handleSave = useCallback(async () => {
-    if (!activeSection) return;
-    const def = SECTIONS.find(s => s.id === activeSection)!;
-    const patch = computeSectionPatch(def, sectionEdits, savedAnswers);
+  async function saveSection(sectionId: SectionId, intent: PendingNext) {
+    const def = SECTIONS.find(s => s.id === sectionId)!;
+    const patch = computeSectionPatch(def, flowEdits, savedAnswers);
 
     if (patch === null) {
-      // Nothing genuinely changed — close silently, no API call
-      setActiveSection(null);
-      setSectionEdits({});
-      setSaveStatus("idle");
+      // Nothing changed — navigate immediately without an API call
+      if (intent === "exit") {
+        setMode({ kind: "overview" });
+      } else if (mode.kind === "flow") {
+        if (mode.index + 1 >= mode.queue.length) {
+          setMode({ ...mode, done: true });
+        } else {
+          const nextId = mode.queue[mode.index + 1];
+          initEdits(nextId);
+          setMode({ ...mode, index: mode.index + 1 });
+        }
+      }
       return;
     }
 
@@ -351,88 +339,57 @@ export default function PassportPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...patch, baseProfileUpdatedAt: profileUpdatedAt }),
       });
-
       if (res.status === 409) { setSaveStatus("conflict"); return; }
-      if (!res.ok)             { setSaveStatus("error");    return; }
+      if (!res.ok)            { setSaveStatus("error");    return; }
 
-      // Keep "saving" indicator visible until the loader re-runs with fresh data
+      setPendingNext(intent);
       setAwaitingRevalidation(true);
       revalidator.revalidate();
     } catch {
       setSaveStatus("error");
     }
-  }, [activeSection, sectionEdits, savedAnswers, profileUpdatedAt, revalidator]);
-
-  // ── render helpers ──────────────────────────────────────────────────────────
-
-  function renderReadField(sf: SubField) {
-    const v = (savedAnswers as Record<string, unknown>)[sf.draftKey];
-
-    if (sf.kind === "text") {
-      if (!v || typeof v !== "string") return <span className="pp-empty">—</span>;
-      return <p className="pp-notes-read">&ldquo;{v}&rdquo;</p>;
-    }
-
-    const ids = (Array.isArray(v) ? v : []) as string[];
-    if (ids.length === 0) return <span className="pp-empty">—</span>;
-
-    if (sf.kind === "color") {
-      return (
-        <div className="pp-color-row">
-          {ids.map(id => (
-            <div key={id} className="pp-color-chip">
-              <span className="pp-color-dot" style={{ background: COLOR_HEX[id] ?? "#ccc" }} />
-              {lbl(sf.questionId, id)}
-            </div>
-          ))}
-        </div>
-      );
-    }
-
-    return (
-      <div className="pp-pills">
-        {ids.map(id => <span key={id} className="pp-pill">{lbl(sf.questionId, id)}</span>)}
-      </div>
-    );
   }
 
-  function renderEditField(sf: SubField) {
-    const q = QUESTION_BY_ID[sf.questionId];
-    const selected = ((sectionEdits as Record<string, unknown>)[sf.draftKey] as string[] | undefined) ?? [];
-    const max = MAX_SELECTIONS[sf.questionId] ?? 99;
-    const atCap = selected.length >= max;
+  const isBusy = saveStatus === "saving" || awaitingRevalidation;
+
+  // ── Sub-field editor (used in flow mode) ────────────────────────────────────
+
+  function renderSubField(sf: SubField) {
+    const q     = QUESTION_BY_ID[sf.questionId];
+    const sel   = ((flowEdits as Record<string, unknown>)[sf.draftKey] as string[] | undefined) ?? [];
+    const max   = MAX_SELECTIONS[sf.questionId] ?? 99;
+    const atCap = sel.length >= max;
 
     if (sf.kind === "text") {
-      const val = ((sectionEdits as Record<string, unknown>)[sf.draftKey] as string) ?? "";
+      const val = ((flowEdits as Record<string, unknown>)[sf.draftKey] as string) ?? "";
       return (
         <>
           <textarea
-            className="pp-textarea"
+            className="sp-textarea"
             value={val}
             maxLength={500}
-            placeholder="e.g. I'm trying to dress more professionally, I just had a baby..."
+            placeholder="e.g. I'm dressing more professionally, I just had a baby, I need versatile pieces…"
             onChange={e => handleTextChange(sf.draftKey, e.target.value)}
           />
-          <div className="pp-charcount">{val.length} / 500</div>
+          <div className="sp-charcount">{val.length} / 500</div>
         </>
       );
     }
 
     if (sf.kind === "color") {
-      const colors = q.colors ?? [];
       return (
-        <div className="pp-option-grid">
-          {colors.map(c => {
-            const isSel = selected.includes(c.id);
+        <div className="sp-option-grid">
+          {(q.colors ?? []).map(c => {
+            const isSel = sel.includes(c.id);
             return (
               <button
                 key={c.id}
                 type="button"
-                className={`pp-color-option${isSel ? " pp-color-option--selected" : ""}${!isSel && atCap ? " pp-color-option--disabled" : ""}`}
+                className={`sp-color-option${isSel ? " sp-color-option--active" : ""}${!isSel && atCap ? " sp-color-option--disabled" : ""}`}
                 onClick={() => handleToggle(sf.draftKey, c.id, max)}
               >
                 <span
-                  className="pp-color-dot"
+                  className="sp-color-dot"
                   style={{
                     background: c.hex,
                     border: isSel ? "1px solid rgba(244,244,241,.4)" : "1px solid rgba(0,0,0,.12)",
@@ -446,17 +403,15 @@ export default function PassportPage() {
       );
     }
 
-    // "array" — standard multi-select options
-    const options = q.options ?? [];
     return (
-      <div className="pp-option-grid">
-        {options.map(o => {
-          const isSel = selected.includes(o.id);
+      <div className="sp-option-grid">
+        {(q.options ?? []).map(o => {
+          const isSel = sel.includes(o.id);
           return (
             <button
               key={o.id}
               type="button"
-              className={`pp-option${isSel ? " pp-option--selected" : ""}${!isSel && atCap ? " pp-option--disabled" : ""}`}
+              className={`sp-option${isSel ? " sp-option--active" : ""}${!isSel && atCap ? " sp-option--disabled" : ""}`}
               onClick={() => handleToggle(sf.draftKey, o.id, max)}
             >
               {o.label}
@@ -467,136 +422,223 @@ export default function PassportPage() {
     );
   }
 
-  function renderSection(def: SectionDef) {
-    const isActive = activeSection === def.id;
-    const isBusy   = saveStatus === "saving" || awaitingRevalidation;
+  // ── OVERVIEW ─────────────────────────────────────────────────────────────────
 
+  if (mode.kind === "overview") {
     return (
-      <div key={def.id} className="pp-section">
-        <div className="pp-section-header">
-          <span className="pp-section-title">{def.label}</span>
-          {isActive ? (
-            <button type="button" className="pp-edit-btn" onClick={handleCancel} disabled={isBusy}>
-              Cancel
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="pp-edit-btn"
-              onClick={() => handleEditClick(def.id)}
-              disabled={isBusy}
-            >
-              Edit →
-            </button>
-          )}
+      <MyNaiaLayout currentPath="/passport">
+        <Link to="/my-naia" className="sp-back">← Overview</Link>
+
+        <div className="sp-shell">
+          <div className="sp-shell-eyebrow">Style Passport</div>
+          <h1 className="sp-shell-title">Your Style Passport</h1>
+          <p className="sp-shell-desc">
+            Your Style Passport guides every StyleMe recommendation. Update it whenever your
+            preferences evolve — changes flow through the rest of nAia immediately.
+          </p>
         </div>
 
-        {/* Discard confirmation — rendered inside the active section */}
-        {isActive && pendingSection && (
-          <div className="pp-discard-bar">
-            <span className="pp-discard-text">Discard unsaved changes?</span>
-            <button
-              type="button"
-              className="pp-discard-keep"
-              onClick={() => setPendingSection(null)}
-            >
-              Keep editing
-            </button>
-            <button
-              type="button"
-              className="pp-discard-go"
-              onClick={() => openSection(pendingSection)}
-            >
-              Discard changes
-            </button>
-          </div>
-        )}
+        <div className="sp-status-block">
+          <div className="sp-status-label">Status</div>
+          <p className="sp-status-text">
+            {isComplete ? "Your Style Passport is up to date." : "A few details are still missing."}
+          </p>
+          <div className="sp-status-date">Last updated · {formatDate(profileUpdatedAt)}</div>
+        </div>
 
-        {/* Read view */}
-        {!isActive && (
-          <div className="pp-section-body">
-            {def.subFields.map(sf => (
-              <div key={String(sf.draftKey)}>
-                <div className="pp-sub-label">{sf.subLabel}</div>
-                {renderReadField(sf)}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Edit view */}
-        {isActive && (
-          <div className="pp-edit-area">
-            {def.subFields.map(sf => (
-              <div key={String(sf.draftKey)}>
-                <div className="pp-sub-label">{sf.subLabel}</div>
-                {sf.kind !== "text" && (
-                  <div className="pp-cap-hint">Choose up to {MAX_SELECTIONS[sf.questionId] ?? "—"}</div>
-                )}
-                {renderEditField(sf)}
-              </div>
-            ))}
-
-            <div className="pp-actions">
-              <button
-                type="button"
-                className="pp-save-btn"
-                disabled={isBusy}
-                onClick={handleSave}
-              >
-                {isBusy ? "Saving…" : "Save section"}
-              </button>
-              {!isBusy && saveStatus === "idle" && (
-                <button type="button" className="pp-cancel-btn" onClick={handleCancel}>
-                  Cancel
-                </button>
-              )}
-              {saveStatus === "error" && (
-                <span className="pp-status-error" style={{ fontFamily: "var(--ff-mono)", fontSize: "9px", letterSpacing: "1px" }}>
-                  Could not save —{" "}
-                  <button
-                    type="button"
-                    className="pp-inline-btn pp-status-error"
-                    onClick={handleSave}
-                  >
-                    Retry
-                  </button>
-                </span>
-              )}
-              {saveStatus === "conflict" && (
-                <span className="pp-status-conflict" style={{ fontFamily: "var(--ff-mono)", fontSize: "9px", letterSpacing: "1px" }}>
-                  Updated elsewhere —{" "}
-                  <button
-                    type="button"
-                    className="pp-inline-btn pp-status-conflict"
-                    onClick={() => window.location.reload()}
-                  >
-                    Reload
-                  </button>
-                </span>
-              )}
+        <div className="sp-detail-list">
+          {SECTIONS.map(def => (
+            <div key={def.id} className="sp-detail-row">
+              <span className="sp-detail-label">{def.label}</span>
+              <span className="sp-detail-value">{getSectionSummary(def, savedAnswers)}</span>
             </div>
+          ))}
+        </div>
+
+        <div className="sp-actions">
+          {!isComplete && (
+            <button type="button" className="sp-btn-primary" onClick={startContinue}>
+              Continue Passport
+            </button>
+          )}
+          <button type="button" className="sp-btn-outline" onClick={startUpdate}>
+            Update Answers
+          </button>
+        </div>
+
+        {!isComplete && missingSections[0] && (
+          <div className="sp-state-note">
+            You'll resume at <strong>{missingSections[0].label}</strong>. All previous answers are preserved.
           </div>
         )}
-      </div>
+      </MyNaiaLayout>
     );
   }
 
+  // ── PICKER ───────────────────────────────────────────────────────────────────
+
+  if (mode.kind === "picker") {
+    return (
+      <MyNaiaLayout currentPath="/passport">
+        <button type="button" className="sp-back" onClick={() => setMode({ kind: "overview" })}>
+          ← Back to Passport
+        </button>
+
+        <div className="sp-shell">
+          <div className="sp-shell-eyebrow">Update Answers</div>
+          <h2 className="sp-shell-title">Which section would you like to edit?</h2>
+          <p className="sp-shell-desc">
+            Choose any section below. All other answers stay exactly as they are.
+          </p>
+        </div>
+
+        <div className="sp-picker-list">
+          {SECTIONS.map(def => (
+            <button
+              key={def.id}
+              type="button"
+              className="sp-picker-btn"
+              onClick={() => editSection(def.id)}
+            >
+              <span className="sp-picker-label">{def.label}</span>
+              <span className="sp-picker-value">{getSectionSummary(def, savedAnswers)}</span>
+            </button>
+          ))}
+        </div>
+      </MyNaiaLayout>
+    );
+  }
+
+  // ── COMPLETION ───────────────────────────────────────────────────────────────
+
+  if (mode.kind === "flow" && mode.done) {
+    return (
+      <MyNaiaLayout currentPath="/passport">
+        <button type="button" className="sp-back" onClick={() => setMode({ kind: "overview" })}>
+          ← Style Passport
+        </button>
+
+        <div className="sp-shell">
+          <div className="sp-shell-eyebrow">Style Passport</div>
+          <h1 className="sp-shell-title">Your Style Passport is up to date</h1>
+          <p className="sp-shell-desc">
+            nAia has your latest preferences. You can revisit any answer at any time.
+          </p>
+        </div>
+
+        <div className="sp-actions">
+          <button type="button" className="sp-btn-primary" onClick={() => setMode({ kind: "overview" })}>
+            Return to Passport
+          </button>
+        </div>
+      </MyNaiaLayout>
+    );
+  }
+
+  // ── FLOW STEP ────────────────────────────────────────────────────────────────
+
+  if (mode.kind !== "flow") return null;
+
+  const currentDef  = SECTIONS.find(s => s.id === mode.queue[mode.index])!;
+  const stepNum     = mode.index + 1;
+  const stepTotal   = mode.queue.length;
+  const isLastStep  = mode.index + 1 >= mode.queue.length;
+  const currentId   = mode.queue[mode.index];
+
   return (
-    <div>
-      <style>{css}</style>
-      <div className="pp-topbar">
-        <div className="pp-topbar-logo">nAia</div>
-        <Link to="/my-naia" className="pp-topbar-back">← Overview</Link>
+    <MyNaiaLayout currentPath="/passport">
+      <button
+        type="button"
+        className="sp-back"
+        disabled={isBusy}
+        onClick={() => saveSection(currentId, "exit")}
+      >
+        ← Save and exit
+      </button>
+
+      <div className="sp-flow-header">
+        <div className="sp-flow-meta">
+          Step {stepNum} of {stepTotal} · {currentDef.label}
+        </div>
+        <h2 className="sp-flow-question">{currentDef.question}</h2>
+        <p className="sp-flow-helper">{currentDef.helper}</p>
       </div>
 
-      <main className="pp-main">
-        <div className="pp-eyebrow">Your nAia Passport</div>
-        <h1 className="pp-headline">Your style, your way.</h1>
-        <p className="pp-desc">Update one section at a time. Save when you&apos;re ready.</p>
+      {currentDef.subFields.map(sf => (
+        <div key={String(sf.draftKey)}>
+          {currentDef.subFields.length > 1 && (
+            <div className="sp-sub-label">{sf.subLabel}</div>
+          )}
+          {sf.kind !== "text" && MAX_SELECTIONS[sf.questionId] && (
+            <div className="sp-cap-hint">Choose up to {MAX_SELECTIONS[sf.questionId]}</div>
+          )}
+          {renderSubField(sf)}
+        </div>
+      ))}
 
-        {SECTIONS.map(def => renderSection(def))}
-      </main>
-    </div>
+      <div className="sp-flow-actions">
+        <button
+          type="button"
+          className="sp-btn-outline"
+          disabled={isBusy}
+          onClick={() => {
+            if (mode.index === 0) {
+              setMode({ kind: "overview" });
+            } else {
+              const prevId = mode.queue[mode.index - 1];
+              initEdits(prevId);
+              setMode({ ...mode, index: mode.index - 1 });
+            }
+          }}
+        >
+          Back
+        </button>
+
+        <button
+          type="button"
+          className="sp-btn-primary"
+          disabled={isBusy}
+          onClick={() => saveSection(currentId, "next")}
+        >
+          {isBusy ? "Saving…" : isLastStep ? "Finish" : "Continue"}
+        </button>
+
+        {!isBusy && (
+          <button
+            type="button"
+            className="sp-btn-ghost"
+            onClick={() => saveSection(currentId, "exit")}
+          >
+            Save and exit
+          </button>
+        )}
+
+        {saveStatus === "error" && (
+          <span className="sp-save-error">
+            Could not save —{" "}
+            <button
+              type="button"
+              className="sp-save-inline-btn"
+              onClick={() => saveSection(currentId, pendingNext)}
+            >
+              Retry
+            </button>
+          </span>
+        )}
+
+        {saveStatus === "conflict" && (
+          <span className="sp-save-conflict">
+            Updated elsewhere —{" "}
+            <button
+              type="button"
+              className="sp-save-inline-btn"
+              onClick={() => window.location.reload()}
+            >
+              Reload
+            </button>
+          </span>
+        )}
+      </div>
+    </MyNaiaLayout>
   );
 }
