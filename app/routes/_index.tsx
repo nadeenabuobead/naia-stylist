@@ -38,6 +38,10 @@ function getDubaiDayOfYear(): number {
   return Math.floor((current.getTime() - start.getTime()) / 86400000);
 }
 
+export function meta() {
+  return [{ title: "Home | nAia" }];
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   // Throws redirect to /auth/shopify/login if no valid nAia session
   const sessionCustomer = await requireCurrentNaiaCustomer(request);

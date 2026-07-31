@@ -34,7 +34,7 @@ export interface ClosetItem {
 }
 
 // Category configuration
-export const categoryConfig: Record
+export const categoryConfig: Record<
   ClosetCategory,
   { label: string; icon: string; color: string }
 > = {

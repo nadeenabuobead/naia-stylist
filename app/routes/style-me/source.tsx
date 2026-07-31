@@ -1,5 +1,9 @@
 import { Form, Link, useLoaderData } from "react-router";
 import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs, type LinksFunction } from "react-router";
+
+export function meta() {
+  return [{ title: "Build the look around | nAia Style Me" }];
+}
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";

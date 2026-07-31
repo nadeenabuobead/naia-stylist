@@ -24,6 +24,10 @@ import {
 } from "~/lib/ai/my-naia-model.server";
 import NaiaModelPhotoUpload from "~/components/NaiaModelPhotoUpload";
 
+export function meta() {
+  return [{ title: "My nAia Model | nAia" }];
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
   const model = await loadNaiaModel(customer.id);

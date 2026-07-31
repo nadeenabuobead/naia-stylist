@@ -13,6 +13,10 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
 ];
 
+export function meta() {
+  return [{ title: "My nAia | Your style space" }];
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireCurrentNaiaCustomer(request);
   return { isDev: process.env.NODE_ENV !== "production" };

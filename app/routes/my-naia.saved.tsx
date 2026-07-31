@@ -10,6 +10,10 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
 ];
 
+export function meta() {
+  return [{ title: "Saved Looks | nAia" }];
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
   const formData = await request.formData();

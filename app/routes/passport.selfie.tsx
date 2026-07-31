@@ -49,6 +49,10 @@ import {
   buildNaiaUsageExplanation,
 } from "~/lib/ai/selfie-styling-signals";
 
+export function meta() {
+  return [{ title: "Personal Style Analysis | nAia" }];
+}
+
 // ── Loader ────────────────────────────────────────────────────────────────────
 
 export async function loader({ request }: LoaderFunctionArgs) {

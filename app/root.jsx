@@ -1,5 +1,9 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
 
+export function meta() {
+  return [{ title: "nAia" }];
+}
+
 export default function App() {
   return (
     <html lang="en">

@@ -1,5 +1,9 @@
 import { Form, Link } from "react-router";
 import { data, redirect, type ActionFunctionArgs, type LinksFunction } from "react-router";
+
+export function meta() {
+  return [{ title: "How are you feeling? | nAia Style Me" }];
+}
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 import { SmPage } from "~/components/style-me/SmPage";

@@ -32,6 +32,10 @@ const CATEGORY_PHOTO_TIPS: Record<string, { title: string; tips: string[] }> = {
   BAGS:      { title: "For bags", tips: ["Show the complete bag", "Keep handles and straps fully visible", "Use a front or three-quarter view", "Remove anything covering its shape"] },
 };
 
+export function meta() {
+  return [{ title: "Digital Closet | nAia" }];
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const naiaCustomer = await requireCurrentNaiaCustomer(request);
   const customer = await prisma.customer.findUnique({

@@ -9,6 +9,21 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
 ];
 
+export function meta() {
+  return [{ title: "Style Me | nAia" }];
+}
+
+const MOOD_LABELS: Record<string, string> = {
+  "confident": "Confident", "tired": "Low-energy", "overwhelmed": "Overwhelmed",
+  "playful": "Playful", "romantic": "Romantic", "powerful": "Powerful",
+  "need-reset": "Need a reset", "feel-good": "Feel good",
+};
+const OCCASION_LABELS: Record<string, string> = {
+  "everyday": "Everyday", "work": "Work", "dinner": "Dinner", "date-night": "Date night",
+  "girls-night": "Girls' night", "family": "Family", "special-event": "Special event",
+  "travel": "Travel", "not-sure": "Not sure yet",
+};
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await getCurrentNaiaCustomer(request);
   const customerId = customer?.id ?? null;
@@ -129,7 +144,7 @@ export default function StyleMeIndex() {
                     )}
                   </Link>
                   <p className="sm-recent-label">
-                    {session.mood} · {session.occasion}
+                    {MOOD_LABELS[session.mood] ?? session.mood} · {OCCASION_LABELS[session.occasion] ?? session.occasion}
                   </p>
                 </div>
               ))}

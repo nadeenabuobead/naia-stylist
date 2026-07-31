@@ -64,6 +64,10 @@ interface SessionSummary {
   occasion: string | null;
 }
 
+export function meta() {
+  return [{ title: "Post-Wear Review | nAia" }];
+}
+
 // ── Loader ────────────────────────────────────────────────────────────────────
 
 export async function loader({ request }: LoaderFunctionArgs) {

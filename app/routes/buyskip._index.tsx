@@ -2,6 +2,10 @@ import * as React from "react";
 import { Link, type LoaderFunctionArgs } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 
+export function meta() {
+  return [{ title: "Buy or Skip | nAia" }];
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireCurrentNaiaCustomer(request);
   return {};

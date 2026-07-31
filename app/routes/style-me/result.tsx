@@ -28,6 +28,10 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
 ];
 
+export function meta() {
+  return [{ title: "Your Styling | nAia" }];
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const devTryOnEnabled = process.env.DEV_TRYON_UI_ENABLED === 'true';
   try {
@@ -655,6 +659,23 @@ export function shouldRevalidate({
 const MIN_LOADING_MS = 4800;
 const loadingMessages = ["Reading the runways...", "Consulting your mood...", "Matching textures and fabrics...", "Finalizing your look..."];
 
+const MOOD_LABELS: Record<string, string> = {
+  "confident": "Confident", "tired": "Low-energy", "overwhelmed": "Overwhelmed",
+  "playful": "Playful", "romantic": "Romantic", "powerful": "Powerful",
+  "need-reset": "Need a reset", "feel-good": "Feel good",
+};
+const FEELING_LABELS: Record<string, string> = {
+  "more-confident": "More confident", "more-put-together": "More put together",
+  "softer": "Softer", "more-powerful": "More powerful", "more-feminine": "More feminine",
+  "more-effortless": "More effortless", "more-elevated": "More elevated",
+  "more-attractive": "More attractive", "like-myself": "Like myself again",
+};
+const OCCASION_LABELS: Record<string, string> = {
+  "everyday": "Everyday", "work": "Work", "dinner": "Dinner", "date-night": "Date night",
+  "girls-night": "Girls' night", "family": "Family", "special-event": "Special event",
+  "travel": "Travel", "not-sure": "Not sure yet",
+};
+
 export default function StyleMeResult() {
   const loaderData = useLoaderData<typeof loader>();
   const generateFetcher = useFetcher<{ suggestion?: any; error?: string }>();
@@ -933,15 +954,15 @@ export default function StyleMeResult() {
         <div className="sm-result-context-grid">
           <div>
             <p className="sm-result-context-label">You're Feeling</p>
-            <p className="sm-result-context-value">{loaderData.currentMood}</p>
+            <p className="sm-result-context-value">{MOOD_LABELS[loaderData.currentMood ?? ""] ?? loaderData.currentMood}</p>
           </div>
           <div>
             <p className="sm-result-context-label">You Want to Feel</p>
-            <p className="sm-result-context-value">{loaderData.desiredFeeling}</p>
+            <p className="sm-result-context-value">{FEELING_LABELS[loaderData.desiredFeeling ?? ""] ?? loaderData.desiredFeeling}</p>
           </div>
           <div>
             <p className="sm-result-context-label">Dressing For</p>
-            <p className="sm-result-context-value">{loaderData.occasion}</p>
+            <p className="sm-result-context-value">{OCCASION_LABELS[loaderData.occasion ?? ""] ?? loaderData.occasion}</p>
           </div>
         </div>
 
@@ -1103,7 +1124,7 @@ export default function StyleMeResult() {
 
         {/* Actions */}
         <div className="sm-result-actions">
-          <Link to="/apps/naia-stylist/quick-style" className="sm-result-action-btn">Start Over</Link>
+          <Link to="/quick-style" className="sm-result-action-btn">Start Over</Link>
           <button
             onClick={() => generateFetcher.submit({ intent: "regenerate", sessionId: loaderData.sessionId }, { method: "post" })}
             className="sm-result-action-btn sm-result-action-btn--primary"

@@ -7,6 +7,10 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
 ];
 
+export function meta() {
+  return [{ title: "Settings & Privacy | nAia" }];
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
   return {
