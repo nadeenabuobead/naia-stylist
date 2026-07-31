@@ -2014,3 +2014,21 @@ a.mn-action:focus-visible,
   .set-control-row > div { min-width: 0; flex: 1; }
   .set-control-row > button { flex-shrink: 0; }
 }
+
+/* ── Personal Styling Analysis (psa-*) ───────────────────────────────────── */
+.psa-status-val { font-family: var(--naia-ff-display); font-weight: 300; font-size: clamp(20px, 3.5vw, 26px); color: var(--naia-accent); margin-top: 8px; line-height: 1.1; }
+.psa-progress-track { height: 3px; background: rgba(34, 21, 22, 0.08); max-width: 360px; overflow: hidden; margin-bottom: 24px; }
+.psa-progress-fill { height: 100%; width: 35%; background: var(--naia-accent); animation: psa-pulse 1.8s ease-in-out infinite; }
+@keyframes psa-pulse { 0%, 100% { opacity: 0.4; transform: translateX(-100%); } 50% { opacity: 1; transform: translateX(200%); } }
+.psa-guidance-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.psa-guidance-list li { font-family: var(--naia-ff-body); font-size: 15px; line-height: 1.7; color: rgba(34, 21, 22, 0.85); }
+.psa-upload-tile { border: 1px dashed rgba(34, 21, 22, 0.3); padding: 20px; }
+.psa-upload-tile--disabled { border-color: rgba(34, 21, 22, 0.12); opacity: 0.6; }
+.psa-upload-tile-label { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--naia-ink); margin-bottom: 16px; }
+.psa-consent-row { display: flex; align-items: flex-start; gap: 12px; font-family: var(--naia-ff-body); font-size: 14px; line-height: 1.7; color: rgba(34, 21, 22, 0.85); }
+.psa-consent-check { width: 14px; height: 14px; flex-shrink: 0; margin-top: 4px; accent-color: var(--naia-ink); cursor: pointer; }
+.psa-outcome-box { padding: 20px 24px; background: rgba(139, 32, 53, 0.04); border: 1px solid rgba(139, 32, 53, 0.15); margin-bottom: 8px; }
+.psa-outcome-title { font-family: var(--naia-ff-display); font-size: 17px; font-style: italic; color: var(--naia-accent); margin-bottom: 8px; }
+.psa-outcome-body { font-family: var(--naia-ff-body); font-size: 14px; line-height: 1.7; color: rgba(34, 21, 22, 0.8); }
+.psa-upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+@media (max-width: 480px) { .psa-upload-grid { grid-template-columns: 1fr; } }
