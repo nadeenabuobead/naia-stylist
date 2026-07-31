@@ -20,7 +20,7 @@
 //   prisma/migrations/20260717100000_add_selfie_analysis/migration.sql
 
 import { useState, useRef } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";
 import { redirect, useActionData, useLoaderData, useNavigation, Form } from "react-router";
 import { data } from "react-router";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
@@ -48,6 +48,11 @@ import {
   buildAccessoriesSummary,
   buildNaiaUsageExplanation,
 } from "~/lib/ai/selfie-styling-signals";
+import naiaStyles from "~/styles/naia-design-system.css?url";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: naiaStyles },
+];
 
 export function meta() {
   return [{ title: "Personal Style Analysis | nAia" }];
@@ -223,17 +228,17 @@ export default function SelfieUploadPage() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f4f4f1", fontFamily: "'Cormorant Garamond', Garamond, serif" }}>
+    <div style={{ minHeight: "100vh", background: "var(--naia-bg, #f4f4f1)", fontFamily: "var(--naia-ff-body, 'Cormorant Garamond', Garamond, serif)" }}>
       <div style={{ maxWidth: "560px", margin: "0 auto", padding: "48px 24px 80px" }}>
 
         <div style={{ marginBottom: "40px" }}>
-          <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "9px", letterSpacing: "4px", textTransform: "uppercase", color: "#8b2035", marginBottom: "10px" }}>
+          <div style={{ fontFamily: "var(--naia-ff-mono, 'Courier New', monospace)", fontSize: "9px", letterSpacing: "4px", textTransform: "uppercase", color: "var(--naia-accent, #8b2035)", marginBottom: "10px" }}>
             Personal Style
           </div>
-          <h1 style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "clamp(24px,4vw,36px)", fontWeight: 900, color: "#221516", letterSpacing: "-0.5px", marginBottom: "12px" }}>
+          <h1 style={{ fontFamily: "var(--naia-ff-display, 'Playfair Display', Georgia, serif)", fontSize: "clamp(24px,4vw,36px)", fontWeight: 900, color: "var(--naia-ink, #221516)", letterSpacing: "-0.5px", marginBottom: "12px" }}>
             Your Styling Photo
           </h1>
-          <p style={{ fontSize: "16px", fontStyle: "italic", color: "#7a6f6a", lineHeight: 1.6 }}>
+          <p style={{ fontSize: "16px", fontStyle: "italic", color: "var(--naia-muted, #7a6f6a)", lineHeight: 1.6 }}>
             Share a clear photo of your face and nAia will offer gentle styling observations —
             colour directions, necklines, and hair guidance that may suit you.
           </p>
@@ -242,7 +247,7 @@ export default function SelfieUploadPage() {
         {/* Analysis in progress */}
         {existing?.analysisStatus === "pending" && !outcome && (
           <div style={{ padding: "20px 24px", background: "rgba(59,5,16,0.03)", border: "1px solid rgba(59,5,16,0.08)", marginBottom: "24px" }}>
-            <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a" }}>
+            <div style={{ fontFamily: "var(--naia-ff-mono, 'Courier New', monospace)", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--naia-muted, #7a6f6a)" }}>
               Analysis in progress — please wait
             </div>
           </div>
@@ -256,10 +261,10 @@ export default function SelfieUploadPage() {
         {/* Completed results */}
         {showResults && displaySignals && (
           <div>
-            <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "9px", letterSpacing: "4px", textTransform: "uppercase", color: "#8b2035", marginBottom: "8px" }}>
+            <div style={{ fontFamily: "var(--naia-ff-mono, 'Courier New', monospace)", fontSize: "9px", letterSpacing: "4px", textTransform: "uppercase", color: "var(--naia-accent, #8b2035)", marginBottom: "8px" }}>
               {analysisIntent === "replace" ? "Updated observations" : "Your styling observations"}
             </div>
-            <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "22px", fontStyle: "italic", color: "#221516", marginBottom: "32px" }}>
+            <div style={{ fontFamily: "var(--naia-ff-display, 'Playfair Display', Georgia, serif)", fontSize: "22px", fontStyle: "italic", color: "var(--naia-ink, #221516)", marginBottom: "32px" }}>
               Here&apos;s what nAia noticed.
             </div>
 
@@ -299,7 +304,7 @@ export default function SelfieUploadPage() {
 
             {/* Replace photo section */}
             <div style={{ marginTop: "40px", paddingTop: "32px", borderTop: "1px solid rgba(59,5,16,0.07)" }}>
-              <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "16px" }}>
+              <div style={{ fontFamily: "var(--naia-ff-mono, 'Courier New', monospace)", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--naia-muted, #7a6f6a)", marginBottom: "16px" }}>
                 Update photo
               </div>
               <UploadForm
@@ -336,7 +341,7 @@ export default function SelfieUploadPage() {
 function PhotoRequirements() {
   return (
     <div style={{ background: "rgba(59,5,16,0.03)", border: "1px solid rgba(59,5,16,0.08)", padding: "20px 24px", marginBottom: "32px" }}>
-      <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>
+      <div style={{ fontFamily: "var(--naia-ff-mono, 'Courier New', monospace)", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--naia-muted, #7a6f6a)", marginBottom: "12px" }}>
         For the best results
       </div>
       <ul style={{ margin: 0, paddingLeft: "18px", color: "#4a3f3a", fontSize: "14px", lineHeight: 2 }}>
@@ -384,7 +389,7 @@ function UploadForm({
           onChange={onFileChange}
           style={{ display: "block", width: "100%", marginBottom: "8px" }}
         />
-        <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "7px", letterSpacing: "1px", color: "#7a6f6a" }}>
+        <div style={{ fontFamily: "var(--naia-ff-mono, 'Courier New', monospace)", fontSize: "7px", letterSpacing: "1px", color: "var(--naia-muted, #7a6f6a)" }}>
           JPG, PNG, WEBP, HEIC — max 5 MB
         </div>
       </div>
@@ -401,7 +406,7 @@ function UploadForm({
       <button
         type="submit"
         disabled={isSubmitting}
-        style={{ width: "100%", padding: "14px", background: isSubmitting ? "rgba(59,5,16,0.2)" : "#221516", color: "#f4f4f1", fontFamily: "'Space Mono', monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", border: "none", cursor: isSubmitting ? "not-allowed" : "pointer" }}
+        style={{ width: "100%", padding: "14px", background: isSubmitting ? "rgba(59,5,16,0.2)" : "#221516", color: "#f4f4f1", fontFamily: "var(--naia-ff-mono, 'Courier New', monospace)", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", border: "none", cursor: isSubmitting ? "not-allowed" : "pointer" }}
       >
         {isSubmitting ? "Analysing…" : submitLabel}
       </button>
@@ -426,7 +431,7 @@ function OutcomeFeedback({ outcome }: { outcome: SelfieAnalysisOutcome }) {
   if (!title) return null;
   return (
     <div style={{ padding: "20px 24px", background: "rgba(139,32,53,0.04)", border: "1px solid rgba(139,32,53,0.15)", marginBottom: "28px" }}>
-      <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "17px", fontStyle: "italic", color: "#8b2035", marginBottom: "8px" }}>{title}</div>
+      <div style={{ fontFamily: "var(--naia-ff-display, 'Playfair Display', Georgia, serif)", fontSize: "17px", fontStyle: "italic", color: "var(--naia-accent, #8b2035)", marginBottom: "8px" }}>{title}</div>
       <p style={{ color: "#4a3f3a", fontSize: "14px", lineHeight: 1.7, margin: 0 }}>{message}</p>
     </div>
   );
@@ -435,7 +440,7 @@ function OutcomeFeedback({ outcome }: { outcome: SelfieAnalysisOutcome }) {
 function SignalSection({ label, children, subtle }: { label: string; children: React.ReactNode; subtle?: boolean }) {
   return (
     <div style={{ marginBottom: "28px", paddingBottom: "28px", borderBottom: "1px solid rgba(59,5,16,0.07)" }}>
-      <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: subtle ? "#7a6f6a" : "#8b2035", marginBottom: "8px" }}>{label}</div>
+      <div style={{ fontFamily: "var(--naia-ff-mono, 'Courier New', monospace)", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: subtle ? "#7a6f6a" : "#8b2035", marginBottom: "8px" }}>{label}</div>
       <div style={{ color: "#4a3f3a", fontSize: "15px", lineHeight: 1.7 }}>{children}</div>
     </div>
   );
@@ -443,12 +448,12 @@ function SignalSection({ label, children, subtle }: { label: string; children: R
 
 const dangerButtonStyle: React.CSSProperties = {
   padding: "10px 18px", background: "none", border: "1px solid rgba(139,32,53,0.4)",
-  color: "#8b2035", fontFamily: "'Space Mono', monospace", fontSize: "7px",
+  color: "var(--naia-accent, #8b2035)", fontFamily: "var(--naia-ff-mono, 'Courier New', monospace)", fontSize: "7px",
   letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer",
 };
 
 const quietButtonStyle: React.CSSProperties = {
   padding: "10px 18px", background: "none", border: "1px solid rgba(59,5,16,0.2)",
-  color: "#7a6f6a", fontFamily: "'Space Mono', monospace", fontSize: "7px",
+  color: "var(--naia-muted, #7a6f6a)", fontFamily: "var(--naia-ff-mono, 'Courier New', monospace)", fontSize: "7px",
   letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer",
 };

@@ -7,15 +7,16 @@
 //   renders with migrationPending=true and shows a "not yet available" notice.
 //   No data is lost; the page is safe to expose before the migration runs.
 
+import { useState, useEffect } from "react";
 import {
   useLoaderData,
   useFetcher,
   redirect,
   data,
+  type LinksFunction,
   type LoaderFunctionArgs,
   type ActionFunctionArgs,
 } from "react-router";
-import { useState, useEffect } from "react";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { prisma } from "~/lib/prisma.server";
 import {
@@ -30,6 +31,11 @@ import type {
   ComfortAnswer,
   WearAgainAnswer,
 } from "~/lib/ai/feedback-contract";
+import naiaStyles from "~/styles/naia-design-system.css?url";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: naiaStyles },
+];
 
 // ── Answer sets (must match feedback-contract types) ──────────────────────────
 
@@ -176,9 +182,9 @@ export async function action({ request }: ActionFunctionArgs) {
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
-const MONO = "'Space Mono','Courier New',monospace";
-const SERIF_DISPLAY = "'Playfair Display',Georgia,serif";
-const SERIF_BODY = "'Cormorant Garamond',Garamond,serif";
+const MONO = "var(--naia-ff-mono, 'Courier New', monospace)";
+const SERIF_DISPLAY = "var(--naia-ff-display, 'Playfair Display', Georgia, serif)";
+const SERIF_BODY = "var(--naia-ff-body, 'Cormorant Garamond', Garamond, serif)";
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -263,7 +269,7 @@ export default function PostWearReviewPage() {
     onChange: (v: string) => void;
   }) => (
     <div style={{ marginBottom: "24px" }}>
-      <div style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#8b2035", marginBottom: "10px" }}>
+      <div style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--naia-accent, #8b2035)", marginBottom: "10px" }}>
         {label}
       </div>
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
@@ -275,7 +281,7 @@ export default function PostWearReviewPage() {
               padding: "8px 18px",
               border: value === o.value ? "1px solid #8b2035" : "1px solid rgba(59,5,16,0.12)",
               background: value === o.value ? "rgba(139,32,53,0.08)" : "transparent",
-              color: value === o.value ? "#8b2035" : "#221516",
+              color: value === o.value ? "var(--naia-accent, #8b2035)" : "var(--naia-ink, #221516)",
               fontFamily: SERIF_BODY,
               fontSize: "16px",
               cursor: "pointer",
@@ -292,11 +298,11 @@ export default function PostWearReviewPage() {
 
   if (error || !session) {
     return (
-      <div style={{ minHeight: "100vh", background: "#f4f4f1", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px" }}>
+      <div style={{ minHeight: "100vh", background: "var(--naia-bg, #f4f4f1)", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px" }}>
         <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
         <div style={{ textAlign: "center", maxWidth: "480px" }}>
-          <h1 style={{ fontFamily: SERIF_DISPLAY, fontSize: "28px", fontWeight: 900, color: "#221516", marginBottom: "12px" }}>Look not found</h1>
-          <p style={{ fontFamily: SERIF_BODY, fontSize: "17px", fontStyle: "italic", color: "#7a6f6a" }}>
+          <h1 style={{ fontFamily: SERIF_DISPLAY, fontSize: "28px", fontWeight: 900, color: "var(--naia-ink, #221516)", marginBottom: "12px" }}>Look not found</h1>
+          <p style={{ fontFamily: SERIF_BODY, fontSize: "17px", fontStyle: "italic", color: "var(--naia-muted, #7a6f6a)" }}>
             {error === "sessionId required" ? "No styling session was provided." : "This look couldn't be found."}
           </p>
         </div>
@@ -308,11 +314,11 @@ export default function PostWearReviewPage() {
 
   if (migrationPending) {
     return (
-      <div style={{ minHeight: "100vh", background: "#f4f4f1", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px" }}>
+      <div style={{ minHeight: "100vh", background: "var(--naia-bg, #f4f4f1)", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px" }}>
         <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
         <div style={{ textAlign: "center", maxWidth: "480px" }}>
-          <h1 style={{ fontFamily: SERIF_DISPLAY, fontSize: "28px", fontWeight: 900, color: "#221516", marginBottom: "12px" }}>Coming soon</h1>
-          <p style={{ fontFamily: SERIF_BODY, fontSize: "17px", fontStyle: "italic", color: "#7a6f6a" }}>
+          <h1 style={{ fontFamily: SERIF_DISPLAY, fontSize: "28px", fontWeight: 900, color: "var(--naia-ink, #221516)", marginBottom: "12px" }}>Coming soon</h1>
+          <p style={{ fontFamily: SERIF_BODY, fontSize: "17px", fontStyle: "italic", color: "var(--naia-muted, #7a6f6a)" }}>
             Post-wear feedback will be available shortly. Come back after wearing your look.
           </p>
         </div>
@@ -324,11 +330,11 @@ export default function PostWearReviewPage() {
 
   if (phase === "deleted") {
     return (
-      <div style={{ minHeight: "100vh", background: "#f4f4f1", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px" }}>
+      <div style={{ minHeight: "100vh", background: "var(--naia-bg, #f4f4f1)", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px" }}>
         <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
         <div style={{ textAlign: "center", maxWidth: "480px" }}>
-          <div style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "3px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "16px" }}>Feedback removed</div>
-          <p style={{ fontFamily: SERIF_BODY, fontSize: "17px", fontStyle: "italic", color: "#7a6f6a" }}>Your review has been deleted.</p>
+          <div style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--naia-muted, #7a6f6a)", marginBottom: "16px" }}>Feedback removed</div>
+          <p style={{ fontFamily: SERIF_BODY, fontSize: "17px", fontStyle: "italic", color: "var(--naia-muted, #7a6f6a)" }}>Your review has been deleted.</p>
         </div>
       </div>
     );
@@ -345,11 +351,11 @@ export default function PostWearReviewPage() {
     const againOpts = [{ value: "definitely", label: "Definitely" }, { value: "maybe", label: "Maybe" }, { value: "probably-not", label: "Probably not" }];
 
     return (
-      <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
+      <div style={{ minHeight: "100vh", background: "var(--naia-bg, #f4f4f1)" }}>
         <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
         <div style={{ maxWidth: "600px", margin: "0 auto", padding: "48px 40px 80px" }}>
-          <div style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "3px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>Post-wear review</div>
-          <h1 style={{ fontFamily: SERIF_DISPLAY, fontSize: "28px", fontWeight: 900, color: "#221516", marginBottom: "32px" }}>
+          <div style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--naia-accent, #8b2035)", marginBottom: "12px" }}>Post-wear review</div>
+          <h1 style={{ fontFamily: SERIF_DISPLAY, fontSize: "28px", fontWeight: 900, color: "var(--naia-ink, #221516)", marginBottom: "32px" }}>
             {session.outfitName ?? "Your look"}
           </h1>
 
@@ -363,33 +369,33 @@ export default function PostWearReviewPage() {
             { label: "Would you wear it again?", val: labelOf(wearAgain, againOpts) },
           ].map(({ label, val }) => (
             <div key={label} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
-              <span style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "1px", textTransform: "uppercase", color: "#7a6f6a" }}>{label}</span>
-              <span style={{ fontFamily: SERIF_BODY, fontSize: "16px", color: "#221516" }}>{val}</span>
+              <span style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "1px", textTransform: "uppercase", color: "var(--naia-muted, #7a6f6a)" }}>{label}</span>
+              <span style={{ fontFamily: SERIF_BODY, fontSize: "16px", color: "var(--naia-ink, #221516)" }}>{val}</span>
             </div>
           ))}
 
           {note && (
             <div style={{ marginTop: "16px", padding: "14px 16px", background: "rgba(59,5,16,0.02)" }}>
-              <div style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "1px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "6px" }}>Note</div>
-              <p style={{ fontFamily: SERIF_BODY, fontSize: "16px", color: "#7a6f6a", margin: 0 }}>{note}</p>
+              <div style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "1px", textTransform: "uppercase", color: "var(--naia-muted, #7a6f6a)", marginBottom: "6px" }}>Note</div>
+              <p style={{ fontFamily: SERIF_BODY, fontSize: "16px", color: "var(--naia-muted, #7a6f6a)", margin: 0 }}>{note}</p>
             </div>
           )}
 
           {apiError && (
-            <div style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "1px", color: "#8b2035", marginTop: "16px" }}>{apiError}</div>
+            <div style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "1px", color: "var(--naia-accent, #8b2035)", marginTop: "16px" }}>{apiError}</div>
           )}
 
           <div style={{ display: "flex", gap: "12px", marginTop: "32px" }}>
             <button
               onClick={() => setPhase("editing")}
-              style={{ padding: "10px 24px", border: "1px solid rgba(59,5,16,0.12)", background: "transparent", fontFamily: MONO, fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", color: "#221516" }}
+              style={{ padding: "10px 24px", border: "1px solid rgba(59,5,16,0.12)", background: "transparent", fontFamily: MONO, fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", color: "var(--naia-ink, #221516)" }}
             >
               Edit
             </button>
             <button
               onClick={handleDelete}
               disabled={isSubmitting}
-              style={{ padding: "10px 24px", border: "none", background: "transparent", fontFamily: MONO, fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", color: "#7a6f6a" }}
+              style={{ padding: "10px 24px", border: "none", background: "transparent", fontFamily: MONO, fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", color: "var(--naia-muted, #7a6f6a)" }}
             >
               Delete
             </button>
@@ -407,15 +413,15 @@ export default function PostWearReviewPage() {
   const againOptions    = [{ value: "definitely", label: "Definitely" }, { value: "maybe", label: "Maybe" }, { value: "probably-not", label: "Probably not" }];
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
+    <div style={{ minHeight: "100vh", background: "var(--naia-bg, #f4f4f1)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
       <div style={{ maxWidth: "600px", margin: "0 auto", padding: "48px 40px 80px" }}>
-        <div style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "3px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>Post-wear review</div>
-        <h1 style={{ fontFamily: SERIF_DISPLAY, fontSize: "28px", fontWeight: 900, color: "#221516", marginBottom: "8px" }}>
+        <div style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "3px", textTransform: "uppercase", color: "var(--naia-accent, #8b2035)", marginBottom: "12px" }}>Post-wear review</div>
+        <h1 style={{ fontFamily: SERIF_DISPLAY, fontSize: "28px", fontWeight: 900, color: "var(--naia-ink, #221516)", marginBottom: "8px" }}>
           {session.outfitName ?? "Your look"}
         </h1>
         {session.currentMood && (
-          <p style={{ fontFamily: SERIF_BODY, fontSize: "17px", fontStyle: "italic", color: "#7a6f6a", marginBottom: "36px" }}>
+          <p style={{ fontFamily: SERIF_BODY, fontSize: "17px", fontStyle: "italic", color: "var(--naia-muted, #7a6f6a)", marginBottom: "36px" }}>
             {session.currentMood}{session.occasion ? ` · ${session.occasion}` : ""}
           </p>
         )}
@@ -429,7 +435,7 @@ export default function PostWearReviewPage() {
         <RadioRow label="Would you wear it again?" options={againOptions}  value={wearAgain}    onChange={setWearAgain} />
 
         <div style={{ marginBottom: "28px" }}>
-          <div style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "10px" }}>
+          <div style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--naia-muted, #7a6f6a)", marginBottom: "10px" }}>
             Notes <span style={{ color: "#c5bdb9" }}>optional</span>
           </div>
           <textarea
@@ -438,26 +444,26 @@ export default function PostWearReviewPage() {
             maxLength={500}
             placeholder="Anything else you'd like to share…"
             rows={3}
-            style={{ width: "100%", padding: "10px 12px", border: "1px solid rgba(59,5,16,0.12)", background: "transparent", fontFamily: SERIF_BODY, fontSize: "16px", color: "#221516", resize: "vertical", boxSizing: "border-box" }}
+            style={{ width: "100%", padding: "10px 12px", border: "1px solid rgba(59,5,16,0.12)", background: "transparent", fontFamily: SERIF_BODY, fontSize: "16px", color: "var(--naia-ink, #221516)", resize: "vertical", boxSizing: "border-box" }}
           />
         </div>
 
         {apiError && (
-          <div style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "1px", color: "#8b2035", marginBottom: "16px" }}>{apiError}</div>
+          <div style={{ fontFamily: MONO, fontSize: "7px", letterSpacing: "1px", color: "var(--naia-accent, #8b2035)", marginBottom: "16px" }}>{apiError}</div>
         )}
 
         <div style={{ display: "flex", gap: "12px" }}>
           <button
             onClick={handleSubmit}
             disabled={isSubmitting}
-            style={{ padding: "12px 28px", background: "#221516", color: "#f4f4f1", border: "none", fontFamily: MONO, fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", cursor: "pointer" }}
+            style={{ padding: "12px 28px", background: "var(--naia-ink, #221516)", color: "var(--naia-bg, #f4f4f1)", border: "none", fontFamily: MONO, fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", cursor: "pointer" }}
           >
             {isSubmitting ? "Saving…" : phase === "editing" ? "Update" : "Save review"}
           </button>
           {phase === "editing" && (
             <button
               onClick={() => setPhase("submitted")}
-              style={{ padding: "12px 24px", background: "transparent", color: "#7a6f6a", border: "1px solid rgba(59,5,16,0.12)", fontFamily: MONO, fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}
+              style={{ padding: "12px 24px", background: "transparent", color: "var(--naia-muted, #7a6f6a)", border: "1px solid rgba(59,5,16,0.12)", fontFamily: MONO, fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}
             >
               Cancel
             </button>

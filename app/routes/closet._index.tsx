@@ -1,5 +1,10 @@
 import { useLoaderData, useFetcher, Link } from "react-router";
-import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
+import { data, redirect, type LinksFunction, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
+import naiaStyles from "~/styles/naia-design-system.css?url";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: naiaStyles },
+];
 import { useState } from "react";
 import prisma from "../db.server";
 import { requireCurrentNaiaCustomer, getCurrentNaiaCustomer } from "~/lib/naia-session.server";
@@ -146,6 +151,12 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 const css = `
+  :root{
+    --c-bg:var(--naia-bg);--c-surface:var(--naia-surface);--c-ink:var(--naia-ink);
+    --c-muted:var(--naia-muted);--c-burg:var(--naia-accent);--c-border:var(--naia-border);
+    --c-panel:var(--naia-surface);--c-muted-bg:rgba(122,111,106,0.09);
+    --ff-display:var(--naia-ff-display);--ff-body:var(--naia-ff-body);--ff-ui:var(--naia-ff-ui);
+  }
   *{margin:0;padding:0;box-sizing:border-box}
   body{background:var(--c-bg);color:var(--c-ink);font-family:var(--ff-body);-webkit-font-smoothing:antialiased}
   .cl-wrap{max-width:1200px;margin:0 auto;padding:60px 40px}

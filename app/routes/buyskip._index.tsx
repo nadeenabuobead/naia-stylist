@@ -1,6 +1,11 @@
 import * as React from "react";
-import { Link, type LoaderFunctionArgs } from "react-router";
+import { Link, type LinksFunction, type LoaderFunctionArgs } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import naiaStyles from "~/styles/naia-design-system.css?url";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: naiaStyles },
+];
 
 export function meta() {
   return [{ title: "Buy or Skip | nAia" }];
@@ -12,6 +17,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 const css = `
+  :root{
+    --c-bg:var(--naia-bg);--c-surface:var(--naia-surface);--c-ink:var(--naia-ink);
+    --c-muted:var(--naia-muted);--c-burg:var(--naia-accent);--c-border:var(--naia-border);
+    --c-panel:var(--naia-surface);--c-muted-bg:rgba(122,111,106,0.09);
+    --ff-display:var(--naia-ff-display);--ff-body:var(--naia-ff-body);--ff-ui:var(--naia-ff-ui);
+  }
   *{margin:0;padding:0;box-sizing:border-box}
   body{background:var(--c-bg);color:var(--c-ink);font-family:var(--ff-body);-webkit-font-smoothing:antialiased}
   .bs-topbar{display:flex;justify-content:space-between;align-items:center;padding:20px 40px;border-bottom:1px solid var(--c-border)}

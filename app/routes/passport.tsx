@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link, useLoaderData, useRevalidator } from "react-router";
-import { redirect, type LoaderFunctionArgs } from "react-router";
+import { redirect, type LinksFunction, type LoaderFunctionArgs } from "react-router";
+import naiaStyles from "~/styles/naia-design-system.css?url";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: naiaStyles },
+];
 import type { OnboardingAnswers, QuizQuestion } from "~/lib/onboarding/quiz-data";
 import { quizQuestions } from "~/lib/onboarding/quiz-data";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
@@ -186,7 +191,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const css = `
-  :root{--cream:#f4f4f1;--warm:#e1dbd7;--burg:#3b0510;--deep:#221516;--accent:#8b2035;--muted:#7a6f6a;--ff-display:'Playfair Display',Georgia,serif;--ff-body:'Cormorant Garamond',Garamond,serif;--ff-mono:'Space Mono','Courier New',monospace}
+  :root{
+    --cream:var(--naia-bg,#f4f4f1);--warm:var(--naia-border,#e1dbd7);
+    --burg:var(--naia-accent,#8b2035);--deep:var(--naia-ink,#221516);
+    --accent:var(--naia-accent,#8b2035);--muted:var(--naia-muted,#7a6f6a);
+    --ff-display:var(--naia-ff-display,'Playfair Display',Georgia,serif);
+    --ff-body:var(--naia-ff-body,'Cormorant Garamond',Garamond,serif);
+    --ff-mono:var(--naia-ff-mono,'Courier New',monospace);
+  }
   *{margin:0;padding:0;box-sizing:border-box}
   body{background:var(--cream);color:var(--deep);font-family:var(--ff-body);-webkit-font-smoothing:antialiased}
   .pp-topbar{display:flex;justify-content:space-between;align-items:center;padding:20px 40px;border-bottom:1px solid rgba(59,5,16,.06)}

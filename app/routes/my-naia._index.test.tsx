@@ -12,24 +12,32 @@ import { renderToString } from "react-dom/server";
 
 // ── Module mocks — hoisted before imports ─────────────────────────────────────
 
-vi.mock("react-router", async () => {
+vi.mock("react-router", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router")>();
   const { createElement } = await import("react");
+  const mockLink = ({
+    to,
+    children,
+    className,
+    onClick,
+    "aria-current": ariaCurrent,
+  }: {
+    to: string;
+    children: unknown;
+    className?: string;
+    onClick?: () => void;
+    "aria-current"?: string;
+  }) =>
+    createElement("a", { href: to, className, onClick, "aria-current": ariaCurrent }, children as any);
+  const mockForm = ({ children, method: _m, action: _a, ...rest }: any) =>
+    createElement("form", rest, children);
+  const mockUseLoaderData = vi.fn(() => ({ isDev: false }));
   return {
-    Link: ({
-      to,
-      children,
-      className,
-      onClick,
-      "aria-current": ariaCurrent,
-    }: {
-      to: string;
-      children: unknown;
-      className?: string;
-      onClick?: () => void;
-      "aria-current"?: string;
-    }) =>
-      createElement("a", { href: to, className, onClick, "aria-current": ariaCurrent }, children as any),
-    useLoaderData: vi.fn(() => ({ isDev: false })),
+    ...actual,
+    Link: mockLink,
+    Form: mockForm,
+    useLoaderData: mockUseLoaderData,
+    UNSAFE_withComponentProps: (Component: any) => Component,
   };
 });
 
@@ -148,17 +156,19 @@ describe("my-naia component — static structure", () => {
     }
   });
 
-  it("inactive nav items (Saved, Orders, Settings & Privacy) render as static spans, not links", () => {
+  it("inactive nav items (Orders only) render as static spans, not links", () => {
     const html = render();
-    // Nav is rendered twice (sidebar + mobile overlay), so 3 static items × 2 = 6
+    // Nav is rendered twice (sidebar + mobile overlay): 1 static item (ORDERS) × 2 = 2
+    // SAVED → /my-naia/saved and SETTINGS & PRIVACY → /settings are now active links
     const staticCount = (html.match(/mn-nav-static/g) ?? []).length;
-    expect(staticCount).toBe(6);
+    expect(staticCount).toBe(2);
   });
 
-  it("inactive action items (Saved, Orders, Settings & Privacy) render as div.mn-action--inactive, not anchor", () => {
+  it("inactive action items (Orders only) render as div.mn-action--inactive, not anchor", () => {
     const html = render();
+    // SAVED and SETTINGS & PRIVACY are now active nav links; only Orders stays inactive
     const inactiveCount = (html.match(/mn-action--inactive/g) ?? []).length;
-    expect(inactiveCount).toBe(3);
+    expect(inactiveCount).toBe(1);
   });
 
   it("active navigation item (/my-naia — OVERVIEW) carries aria-current='page'", () => {
@@ -184,12 +194,14 @@ describe("my-naia component — static structure", () => {
     // Working routes that should have href attributes in action area
     const workingPaths = [
       "/style-me",
-      "/full-style-profile",
+      "/passport",
       "/passport/selfie",
       "/my-naia-model",
       "/closet",
       "/buyskip",
       "/trends",
+      "/my-naia/saved",
+      "/settings",
     ];
     for (const path of workingPaths) {
       expect(html, `expected href="${path}" in output`).toContain(`href="${path}"`);

@@ -425,17 +425,20 @@ describe("GS — global try-on gate", () => {
     assert.equal(VIRTUAL_TRY_ON_ENABLED, false);
   });
 
-  it("GS.2 — computeStyleMeResult with a ready entry returns null productImageUrl when gate is false (default)", async () => {
+  it("GS.2 — computeStyleMeResult with a ready entry exposes productImageUrl regardless of VTO gate, but gates shopifyProductId", async () => {
     const input = makeMinimalEngineInput("naia-piece");
     const mockRec = (_: unknown) => makeMinimalNadineRec("collar-shirt");
     const mockMedia = (h: string) => (h === "collar-shirt" ? READY_ENTRY : undefined);
     // No 4th arg — uses default VIRTUAL_TRY_ON_ENABLED = false
     const result = await computeStyleMeResult(input, mockRec as never, mockMedia);
+    // productImageUrl is always populated for ready entries — it drives the inline product photo
+    // in the result, independent of the VTO CTA gate.
     assert.equal(
       result.primaryProduct?.productImageUrl,
-      null,
-      "ready entry must not expose URL when VIRTUAL_TRY_ON_ENABLED is false",
+      READY_ENTRY.resolvedUrl,
+      "ready entry must expose productImageUrl for inline product photo display",
     );
+    // shopifyProductId remains gated on VIRTUAL_TRY_ON_ENABLED — it is only needed for the try-on flow.
     assert.equal(
       result.primaryProduct?.shopifyProductId,
       null,

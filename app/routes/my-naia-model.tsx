@@ -8,7 +8,7 @@
 //   - save-photo returns a signed previewUrl for immediate client display.
 //   - Deletion is Cloudinary-first (see deleteNaiaModelPhoto).
 
-import { data, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
+import { data, type LinksFunction, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
 import { useLoaderData, Link } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import {
@@ -23,6 +23,11 @@ import {
   POLICY_VERSION,
 } from "~/lib/ai/my-naia-model.server";
 import NaiaModelPhotoUpload from "~/components/NaiaModelPhotoUpload";
+import naiaStyles from "~/styles/naia-design-system.css?url";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: naiaStyles },
+];
 
 export function meta() {
   return [{ title: "My nAia Model | nAia" }];
@@ -134,16 +139,16 @@ export default function MyNaiaModelRoute() {
   const loaderData = useLoaderData<typeof loader>();
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
+    <div style={{ minHeight: "100vh", background: "var(--naia-bg, #f4f4f1)" }}>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 40px", borderBottom: "1px solid rgba(59,5,16,0.06)" }}>
         <Link
           to="/my-naia"
-          style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", textDecoration: "none" }}
+          style={{ fontFamily: "var(--naia-ff-mono, 'Courier New', monospace)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--naia-muted, #7a6f6a)", textDecoration: "none" }}
         >
           ← Overview
         </Link>
-        <div style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "22px", fontStyle: "italic", letterSpacing: "3px", color: "#221516" }}>
+        <div style={{ fontFamily: "var(--naia-ff-display, 'Playfair Display', Georgia, serif)", fontSize: "22px", fontStyle: "italic", letterSpacing: "3px", color: "var(--naia-ink, #221516)" }}>
           nAia
         </div>
         <span style={{ width: "42px" }} />
@@ -151,13 +156,13 @@ export default function MyNaiaModelRoute() {
 
       <main style={{ maxWidth: "720px", margin: "0 auto", padding: "48px 40px 80px" }}>
         <div style={{ marginBottom: "40px" }}>
-          <div style={{ fontFamily: "'Space Mono','Courier New',monospace", fontSize: "9px", letterSpacing: "4px", textTransform: "uppercase", color: "#8b2035", marginBottom: "12px" }}>
+          <div style={{ fontFamily: "var(--naia-ff-mono, 'Courier New', monospace)", fontSize: "9px", letterSpacing: "4px", textTransform: "uppercase", color: "var(--naia-accent, #8b2035)", marginBottom: "12px" }}>
             Your Profile
           </div>
-          <h1 style={{ fontFamily: "'Playfair Display',Georgia,serif", fontSize: "clamp(28px,4vw,40px)", fontWeight: 900, color: "#221516", letterSpacing: "-1px", marginBottom: "8px" }}>
+          <h1 style={{ fontFamily: "var(--naia-ff-display, 'Playfair Display', Georgia, serif)", fontSize: "clamp(28px,4vw,40px)", fontWeight: 900, color: "var(--naia-ink, #221516)", letterSpacing: "-1px", marginBottom: "8px" }}>
             My nAia Model
           </h1>
-          <p style={{ fontFamily: "'Cormorant Garamond',Garamond,serif", fontSize: "18px", fontStyle: "italic", color: "#7a6f6a" }}>
+          <p style={{ fontFamily: "var(--naia-ff-body, 'Cormorant Garamond', Garamond, serif)", fontSize: "18px", fontStyle: "italic", color: "var(--naia-muted, #7a6f6a)" }}>
             Your reusable virtual try-on identity. Upload once, preview any nAia piece on you.
           </p>
         </div>
