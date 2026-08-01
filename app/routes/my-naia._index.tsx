@@ -29,17 +29,16 @@ const QUOTES = [
 ];
 
 function getDailyQuote() {
-  const start = new Date(2026, 0, 1).getTime();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const dayIndex = Math.floor((today.getTime() - start) / (1000 * 60 * 60 * 24));
-  return QUOTES[Math.abs(dayIndex) % QUOTES.length];
+  const dayMs = 1000 * 60 * 60 * 24;
+  const startDay = Math.floor(Date.UTC(2026, 0, 1) / dayMs);
+  const todayDay = Math.floor(Date.now() / dayMs);
+  return QUOTES[Math.abs(todayDay - startDay) % QUOTES.length];
 }
 
 function fmtDate(d: string | Date): string {
   const date = new Date(d);
   const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  return `${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
+  return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
 }
 
 const VERDICT_LABELS: Record<string, string> = {
