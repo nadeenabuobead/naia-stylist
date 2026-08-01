@@ -855,11 +855,14 @@ export default function StyleMeResult() {
   const primaryNaiaItem = suggestion.items?.find(
     (item: any) => !["SHOES", "ACCESSORY", "BAG"].includes(item.itemType),
   );
-  const showTryOnCta =
+  // "See This Look On Me" section visibility:
+  // Shown for authenticated NADINE results that have a product image, regardless of model readiness.
+  // When model is not ready, a setup-required state is shown instead of hiding the section entirely.
+  const showTryOnSection =
     loaderData.isAuthenticated &&
-    loaderData.naiaModelIsReady &&
     suggestionMeta?.outcome === "nadine-recommendation" &&
     !!primaryNaiaItemWithImage;
+  const tryOnModelReady = showTryOnSection && loaderData.naiaModelIsReady;
 
   const isNoMatch = suggestionMeta
     ? suggestionMeta.outcome === "no-eligible-product"
@@ -990,6 +993,9 @@ export default function StyleMeResult() {
               )}
               {suggestion.items?.filter((item: any) => item.itemType !== "SHOES" && item.itemType !== "ACCESSORY" && item.itemType !== "BAG").map((item: any) => (
                 <div key={item.id} className="sm-item-card">
+                  {item.closetItemId && (
+                    <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "10px", letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--naia-accent)", marginBottom: "8px" }}>From Your Closet</p>
+                  )}
                   {item.productImageUrl && (
                     <img src={item.productImageUrl} alt={item.productTitle} style={{ width: "140px", height: "180px", objectFit: "contain", marginBottom: "12px" }} />
                   )}
@@ -1025,6 +1031,13 @@ export default function StyleMeResult() {
         {!isNoMatch && suggestionMeta?.anchorSummary && (
           <div className="sm-anchor-card">
             <p className="sm-eyebrow sm-eyebrow--sm sm-eyebrow--muted" style={{ marginBottom: "6px" }}>Anchor Piece</p>
+            {suggestionMeta.anchorImageUrl && (
+              <img
+                src={suggestionMeta.anchorImageUrl}
+                alt={suggestionMeta.anchorSummary}
+                style={{ width: "100%", maxWidth: "180px", aspectRatio: "2/3", objectFit: "cover", borderRadius: "4px", marginBottom: "10px" }}
+              />
+            )}
             <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "16px", color: "var(--naia-ink)" }}>{suggestionMeta.anchorSummary}</p>
             {suggestionMeta.pairingNote && (
               <p className="sm-anchor-note">{suggestionMeta.pairingNote}</p>
@@ -1111,14 +1124,29 @@ export default function StyleMeResult() {
           </div>
         )}
 
-        {/* Overall look feedback */}
-        {loaderData.isAuthenticated && suggestion?.id && loaderData.sessionId && (
-          <div style={{ marginBottom: "28px" }}>
-            <RecommendationFeedbackWidget
-              sessionId={loaderData.sessionId}
-              suggestionId={suggestion.id}
-              target="complete-suggestion"
-            />
+        {/* "See This Look On Me" section — always shown for eligible NADINE results */}
+        {showTryOnSection && (
+          <div className="sm-result-section" style={{ borderTop: "1px solid rgba(34,21,22,0.12)", paddingTop: "24px" }}>
+            <p className="sm-result-section-head" style={{ borderBottom: "none", marginBottom: "12px" }}>See This Look On Me</p>
+            {tryOnModelReady ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--naia-muted)" }}>
+                  Your nAia Model is ready. Virtual try-on will be available in a future update.
+                </p>
+                <Link to="/my-naia-model" className="sm-result-action-btn" style={{ alignSelf: "flex-start" }}>
+                  View My nAia Model
+                </Link>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--naia-muted)" }}>
+                  Set up your nAia Model to preview eligible NADINE pieces on your own silhouette. This is not a generated try-on — it requires uploading your own photograph first.
+                </p>
+                <Link to="/my-naia-model" className="sm-result-action-btn" style={{ alignSelf: "flex-start" }}>
+                  Set Up nAia Model
+                </Link>
+              </div>
+            )}
           </div>
         )}
 
@@ -1138,11 +1166,6 @@ export default function StyleMeResult() {
             Rate This Look
           </button>
           <a href={primaryNaiaItem?.productUrl || "https://naiabynadine.com"} className="sm-result-action-btn">Shop nAia</a>
-          {showTryOnCta && (
-            <Link to="/my-naia-model" className="sm-result-action-btn sm-result-action-btn--accent">
-              See This Look On Me
-            </Link>
-          )}
         </div>
 
         {/* Review saved toast */}

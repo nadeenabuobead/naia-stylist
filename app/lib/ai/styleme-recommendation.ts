@@ -464,6 +464,7 @@ export function resolveClosetAnchor(
     material: input.material,
     hasStrongEvidence: slot !== "unknown",
     evidenceFields,
+    imageUrl: input.imageUrl ?? null,
   };
 }
 

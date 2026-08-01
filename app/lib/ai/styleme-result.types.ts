@@ -56,6 +56,7 @@ export interface StyleMeCustomerResult {
   primaryProduct: StyleMePrimaryProduct | null;
   alternatives: StyleMePrimaryProduct[];
   closetAnchorLabel: string | null;
+  closetAnchorImageUrl: string | null;
   pairingNote: string | null;
   finishingLayer: StyleMeFinishingLayer;
   songReason: string;
@@ -77,6 +78,7 @@ export interface StyleMeMetadata {
   }>;
   anchor: { type: "nadine"; handle: string } | { type: "closet"; id: string } | null;
   anchorSummary: string | null;
+  anchorImageUrl?: string | null;
   pairingNote: string | null;
   colourDirection: string;
   songReason: string;

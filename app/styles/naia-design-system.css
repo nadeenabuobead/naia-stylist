@@ -4,7 +4,7 @@
 
 :root {
   /* ── Palette ─────────────────────────────────────────────────── */
-  --naia-bg:         #f4f4f1;
+  --naia-bg:         oklch(0.955 0.012 70); /* warm nude paper — Lovable source of truth */
   --naia-surface:    #fafaf8;
   --naia-ink:        #221516;
   --naia-muted:      #7a6f6a;

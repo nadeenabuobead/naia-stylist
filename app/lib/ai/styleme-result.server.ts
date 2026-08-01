@@ -237,6 +237,7 @@ function buildMetadataJson(result: StyleMeCustomerResult): string {
     })),
     anchor: anchorMeta,
     anchorSummary: result.closetAnchorLabel,
+    anchorImageUrl: result.closetAnchorImageUrl,
     pairingNote: result.pairingNote,
     colourDirection: result.finishingLayer.colourDirection,
     songReason: result.songReason,
@@ -387,10 +388,12 @@ export async function computeStyleMeResult(
   // Finishing layer from catalog prose
   const finishingLayer = buildFinishingLayer(primaryHandle);
 
-  // Closet anchor label (used for both closet-led and nadine anchors)
+  // Closet anchor label and image (used for both closet-led and nadine anchors)
   let closetAnchorLabel: string | null = null;
+  let closetAnchorImageUrl: string | null = null;
   if (anchor?.type === "closet") {
     closetAnchorLabel = (anchor as NormalizedClosetAnchor).label;
+    closetAnchorImageUrl = (anchor as NormalizedClosetAnchor).imageUrl;
   } else if (anchor?.type === "nadine") {
     closetAnchorLabel = (anchor as NormalizedNadineAnchor).title ?? null;
   }
@@ -478,6 +481,7 @@ export async function computeStyleMeResult(
     primaryProduct,
     alternatives,
     closetAnchorLabel,
+    closetAnchorImageUrl,
     pairingNote,
     finishingLayer,
     songReason,
@@ -509,7 +513,7 @@ export function buildDbPayload(result: StyleMeCustomerResult): StyleMeDbPayload 
     items.push({
       itemType: slotToItemType(a.slot),
       productTitle: a.label,
-      productImageUrl: null,
+      productImageUrl: a.imageUrl ?? null,
       shopifyProductId: null,
       closetItemId: a.id,
       stylingNotes: result.pairingNote ?? `Style your ${a.label} with intention.`,

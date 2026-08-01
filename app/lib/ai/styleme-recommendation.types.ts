@@ -140,6 +140,7 @@ export interface NormalizedClosetAnchor {
   material: string | null;
   hasStrongEvidence: boolean;
   evidenceFields: string[];
+  imageUrl: string | null;
 }
 
 export type NormalizedStyleAnchor = NormalizedNadineAnchor | NormalizedClosetAnchor;
