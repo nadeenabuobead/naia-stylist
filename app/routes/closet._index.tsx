@@ -82,6 +82,20 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (!name || !category || !imageUrl) return data({ error: "Name and category required" }, { status: 400 });
 
+    // Server-side: reject imageUrl values that are not genuine Cloudinary delivery URLs.
+    // The client uploads directly to Cloudinary and receives the URL; this prevents an
+    // attacker from bypassing the client and submitting an arbitrary URL via raw POST.
+    const allowedHosts = ["res.cloudinary.com", "res-4.cloudinary.com"];
+    let imageUrlHost: string;
+    try {
+      imageUrlHost = new URL(imageUrl).hostname;
+    } catch {
+      return data({ error: "Invalid image URL" }, { status: 400 });
+    }
+    if (!allowedHosts.some(h => imageUrlHost === h || imageUrlHost.endsWith(`.${h}`))) {
+      return data({ error: "Image must be uploaded via the app" }, { status: 400 });
+    }
+
     const stageA = assessClosetEligibility({
       prismaCategory: category, width: imageWidth, height: imageHeight, format: imageFormat, bytes: imageBytes,
     });
