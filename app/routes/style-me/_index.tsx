@@ -78,7 +78,7 @@ export default function StyleMeIndex() {
   const { recentSessions } = useLoaderData<typeof loader>();
 
   return (
-    <MyNaiaLayout currentPath="/style-me">
+    <MyNaiaLayout>
       <Link to="/my-naia" className="sp-back">← Overview</Link>
 
       <div className="sp-shell">

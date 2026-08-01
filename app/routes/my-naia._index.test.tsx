@@ -1,11 +1,11 @@
-// Focused tests for the /my-naia shell.
+// Focused tests for the /my-naia shell (Lovable verbatim port).
 //
 // Static structure and loader tests run in Vitest node environment using
 // renderToString from react-dom/server (no DOM required).
 //
 // Interactive tests (mobile menu click / Escape / focus return) are marked
 // it.todo — they require jsdom or happy-dom. Verify those behaviours manually
-// via the dev-my-naia-fixture route at /dev-my-naia-fixture.
+// at /dev-my-naia-fixture.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderToString } from "react-dom/server";
@@ -21,8 +21,6 @@ vi.mock("react-router", async (importOriginal) => {
     className,
     style,
     onClick,
-    onMouseOver,
-    onMouseOut,
     "aria-current": ariaCurrent,
     "aria-label": ariaLabel,
   }: {
@@ -31,26 +29,40 @@ vi.mock("react-router", async (importOriginal) => {
     className?: string;
     style?: object;
     onClick?: () => void;
-    onMouseOver?: () => void;
-    onMouseOut?: () => void;
     "aria-current"?: string;
     "aria-label"?: string;
   }) =>
-    createElement("a", { href: to, className, style, onClick, onMouseOver, onMouseOut, "aria-current": ariaCurrent, "aria-label": ariaLabel }, children as any);
-  const mockForm = ({ children, method: _m, action: _a, ...rest }: any) =>
-    createElement("form", rest, children);
-  const mockUseLoaderData = vi.fn(() => ({ isDev: false }));
+    createElement("a", { href: to, className, style, onClick, "aria-current": ariaCurrent, "aria-label": ariaLabel }, children as any);
+  const mockUseLoaderData = vi.fn(() => ({
+    firstName: null,
+    profile: null,
+    sessions: [],
+    trendReport: null,
+    buyOrSkipHistory: [],
+    reviewCount: 0,
+    closetCount: 0,
+  }));
   return {
     ...actual,
     Link: mockLink,
-    Form: mockForm,
     useLoaderData: mockUseLoaderData,
+    useLocation: vi.fn(() => ({ pathname: "/my-naia" })),
     UNSAFE_withComponentProps: (Component: any) => Component,
   };
 });
 
 vi.mock("~/lib/naia-session.server", () => ({
   requireCurrentNaiaCustomer: vi.fn(),
+}));
+
+vi.mock("~/db.server", () => ({
+  default: {
+    stylingSession: { findMany: vi.fn().mockResolvedValue([]) },
+    trendReport:    { findFirst: vi.fn().mockResolvedValue(null) },
+    buyOrSkipAnalysis: { findMany: vi.fn().mockResolvedValue([]) },
+    postOutfitReview: { count: vi.fn().mockResolvedValue(0) },
+    closetItem:     { count: vi.fn().mockResolvedValue(0) },
+  },
 }));
 
 vi.mock("~/styles/naia-design-system.css?url", () => ({ default: "/styles.css" }));
@@ -92,23 +104,27 @@ describe("my-naia loader — authentication gate", () => {
     ).rejects.toBeInstanceOf(Response);
   });
 
-  it("returns isDev flag when session is valid", async () => {
-    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "c1" } as any);
+  it("returns session data fields when authenticated", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({
+      id: "c1", firstName: "Alia", onboardingProfile: null,
+    } as any);
     const result = await loader({
       request: new Request("http://localhost/my-naia"),
       params: {},
       context: {},
     } as any);
-    expect(result).toHaveProperty("isDev");
-    expect(typeof (result as any).isDev).toBe("boolean");
+    expect(result).toHaveProperty("sessions");
+    expect(result).toHaveProperty("closetCount");
+    expect(result).toHaveProperty("reviewCount");
   });
 
-  it("does not include customer name, email, or id in loader return value", async () => {
+  it("does not include customer email or raw id in loader return value", async () => {
     vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({
       id: "c-secret",
       shopifyCustomerId: "gid://1",
       email: "private@example.com",
-      firstName: "SecretName",
+      firstName: "Alia",
+      onboardingProfile: null,
     } as any);
     const result = await loader({
       request: new Request("http://localhost/my-naia"),
@@ -118,79 +134,75 @@ describe("my-naia loader — authentication gate", () => {
     const serialised = JSON.stringify(result);
     expect(serialised).not.toContain("c-secret");
     expect(serialised).not.toContain("private@example.com");
-    expect(serialised).not.toContain("SecretName");
   });
 });
 
 // ── Component structure tests ─────────────────────────────────────────────────
 
+type LoaderShape = {
+  firstName: string | null;
+  profile: unknown;
+  sessions: unknown[];
+  trendReport: unknown;
+  buyOrSkipHistory: unknown[];
+  reviewCount: number;
+  closetCount: number;
+};
+
 describe("my-naia component — static structure", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  function render(isDev = false): string {
-    vi.mocked(useLoaderData).mockReturnValue({ isDev });
+  function render(overrides: Partial<LoaderShape> = {}): string {
+    vi.mocked(useLoaderData).mockReturnValue({
+      firstName: null,
+      profile: null,
+      sessions: [],
+      trendReport: null,
+      buyOrSkipHistory: [],
+      reviewCount: 0,
+      closetCount: 0,
+      ...overrides,
+    });
     return renderToString(<MyNaiaOverview />);
   }
 
-  it("renders all eleven navigation labels", () => {
+  it("renders the MY nAia. heading in the layout", () => {
     const html = render();
-    const labels = [
-      "OVERVIEW",
-      "STYLE PASSPORT",
-      "DIGITAL CLOSET",
-      "STYLEME",
-      "BUY OR SKIP",
-      "MY nAia MODEL",
-      "PERSONAL STYLING ANALYSIS",
-      "MY TREND EDITS",
-      "SAVED",
-      "ORDERS",
-      "SETTINGS &amp; PRIVACY",  // HTML-encoded by React
-    ];
-    for (const label of labels) {
-      expect(html, `expected nav label "${label}" in output`).toContain(label);
-    }
+    expect(html).toContain("mn-page-head-title");
+    expect(html).toContain("nAia.");
   });
 
-  it("renders all expected page links in the Your nAia section", () => {
+  it("renders the mn-title-accent span for the italic nAia.", () => {
     const html = render();
-    const labels = [
-      "StyleMe", "Style Passport", "Personal Styling Analysis", "My nAia Model",
-      "Digital Closet", "Buy or Skip", "My Trend Edits",
-      "Saved", "Orders", "Settings &amp; Privacy",  // HTML-encoded by React
-    ];
-    for (const label of labels) {
-      expect(html, `expected label "${label}" in output`).toContain(label);
-    }
+    expect(html).toContain("mn-title-accent");
   });
 
-  it("inactive nav items (Orders only) render as static spans, not links", () => {
+  it("renders the NADINE brand wordmark", () => {
     const html = render();
-    // Nav is rendered twice (sidebar + mobile overlay): 1 static item (ORDERS) × 2 = 2
-    const staticCount = (html.match(/mn-nav-static/g) ?? []).length;
-    expect(staticCount).toBe(2);
+    expect(html).toContain("NADINE");
   });
 
-  it("Orders in the Your nAia list renders as a span with shopify badge, not an anchor", () => {
+  it("renders sidebar navigation with Main section links", () => {
     const html = render();
-    // The Orders item in the link list should NOT have an href
-    // — it's a <span> with a shopify badge
-    expect(html).toContain("shopify");
-    // Verify no href="/orders" or href for orders
-    expect(html).not.toContain('href="/orders"');
+    expect(html).toContain("Overview");
+    expect(html).toContain("My Closet");
+    expect(html).toContain("StyleMe");
+    expect(html).toContain("Buy or Skip");
   });
 
-  it("active navigation item (/my-naia — OVERVIEW) carries aria-current='page'", () => {
+  it("renders account navigation items", () => {
     const html = render();
-    expect(html).toMatch(
-      /aria-current="page"[^>]*href="\/my-naia"|href="\/my-naia"[^>]*aria-current="page"/
-    );
+    expect(html).toContain("Saved");
+    expect(html).toContain("Settings &amp; Privacy");
+    expect(html).toContain("My nAia Model");
+    expect(html).toContain("Personal Styling Analysis");
   });
 
-  it("StyleMe hero card links to /style-me", () => {
+  it("StyleMe hero card is present with correct link", () => {
     const html = render();
-    expect(html).toContain('href="/style-me"');
+    expect(html).toContain("mn-styleme-hero");
     expect(html).toContain("Start StyleMe");
+    expect(html).toContain('href="/style-me"');
   });
 
   it("Quick Tools section contains links to StyleMe, Closet, and Buy or Skip", () => {
@@ -200,56 +212,78 @@ describe("my-naia component — static structure", () => {
     expect(html).toContain("Buy or Skip");
   });
 
-  it("editorial MY nAia. heading is in the layout", () => {
-    const html = render();
-    expect(html).toContain("mn-editorial-title");
-    expect(html).toContain("nAia.");
-  });
-
   it("daily quote section is present", () => {
     const html = render();
-    expect(html).toContain("Today&#x27;s Note");
+    expect(html).toContain("mn-daily-quote");
+    expect(html).toContain("Today");
+    expect(html).toContain("Note");
   });
 
-  it("dev fixture notice appears when isDev is true", () => {
-    const html = render(true);
-    expect(html).toContain("Development build");
+  it("welcome back eyebrow is present", () => {
+    const html = render();
+    expect(html).toContain("Welcome back");
   });
 
-  it("dev fixture notice is absent when isDev is false", () => {
-    const html = render(false);
-    expect(html).not.toContain("Development build");
+  it("renders first name when provided", () => {
+    const html = render({ firstName: "Alia" });
+    expect(html).toContain("Alia.");
+  });
+
+  it("renders Welcome. when no first name", () => {
+    const html = render({ firstName: null });
+    expect(html).toContain("Welcome.");
+  });
+
+  it("shows attention item when profile is null", () => {
+    const html = render({ profile: null });
+    expect(html).toContain("What Needs Your Attention");
+    expect(html).toContain("Style Passport is incomplete");
+  });
+
+  it("shows empty closet attention when closetCount is 0 and profile is complete", () => {
+    const html = render({ profile: { completed: true }, closetCount: 0 });
+    expect(html).toContain("closet is empty");
+  });
+
+  it("renders empty state for Recent Looks when no sessions", () => {
+    const html = render({ sessions: [] });
+    expect(html).toContain("first StyleMe look will appear here");
+  });
+
+  it("renders empty state for Buy or Skip when no history", () => {
+    const html = render({ buyOrSkipHistory: [] });
+    expect(html).toContain("No decisions yet");
+  });
+
+  it("footer is rendered with NADINE brand bar", () => {
+    const html = render();
+    expect(html).toContain("mn-footer");
+    expect(html).toContain("NADINE");
+    expect(html).toContain("Fashion that reads you");
   });
 
   it("working page links have valid href paths", () => {
     const html = render();
-    const workingPaths = [
-      "/style-me",
-      "/passport",
-      "/passport/selfie",
-      "/my-naia-model",
-      "/closet",
-      "/buyskip",
-      "/trends",
-      "/my-naia/saved",
-      "/settings",
-    ];
+    const workingPaths = ["/style-me", "/closet", "/buyskip", "/my-naia/saved"];
     for (const path of workingPaths) {
       expect(html, `expected href="${path}" in output`).toContain(`href="${path}"`);
     }
   });
+
+  it("Plan & Usage section shows closet count", () => {
+    const html = render({ closetCount: 12 });
+    expect(html).toContain("12 of 100 spaces used");
+  });
 });
 
 // ── Interactive behaviour — requires DOM environment ──────────────────────────
-// These tests need jsdom or happy-dom.
 // Verify manually at: GET /dev-my-naia-fixture
 
 describe("my-naia component — interactive behaviour (dom required)", () => {
   it.todo("hamburger button has aria-expanded=false initially");
-  it.todo("clicking hamburger opens the mobile overlay (aria-expanded=true, mn-overlay--open class)");
-  it.todo("clicking the overlay close button closes the menu");
-  it.todo("pressing Escape while the overlay is open closes the menu");
-  it.todo("focus returns to the hamburger button after the overlay closes");
-  it.todo("sidebar navigation is visible without a menu button on desktop viewport (≥768px)");
-  it.todo("hamburger is hidden on desktop viewport (≥768px)");
+  it.todo("clicking hamburger opens the mobile nav panel");
+  it.todo("clicking a mobile nav link closes the menu");
+  it.todo("sidebar navigation is visible on desktop viewport (≥1024px)");
+  it.todo("mobile nav trigger is hidden on desktop viewport (≥1024px)");
+  it.todo("footer accordion opens/closes on mobile");
 });

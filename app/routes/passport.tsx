@@ -426,7 +426,7 @@ export default function PassportPage() {
 
   if (mode.kind === "overview") {
     return (
-      <MyNaiaLayout currentPath="/passport">
+      <MyNaiaLayout>
         <Link to="/my-naia" className="sp-back">← Overview</Link>
 
         <div className="sp-shell">
@@ -479,7 +479,7 @@ export default function PassportPage() {
 
   if (mode.kind === "picker") {
     return (
-      <MyNaiaLayout currentPath="/passport">
+      <MyNaiaLayout>
         <button type="button" className="sp-back" onClick={() => setMode({ kind: "overview" })}>
           ← Back to Passport
         </button>
@@ -513,7 +513,7 @@ export default function PassportPage() {
 
   if (mode.kind === "flow" && mode.done) {
     return (
-      <MyNaiaLayout currentPath="/passport">
+      <MyNaiaLayout>
         <button type="button" className="sp-back" onClick={() => setMode({ kind: "overview" })}>
           ← Style Passport
         </button>
@@ -546,7 +546,7 @@ export default function PassportPage() {
   const currentId   = mode.queue[mode.index];
 
   return (
-    <MyNaiaLayout currentPath="/passport">
+    <MyNaiaLayout>
       <button
         type="button"
         className="sp-back"

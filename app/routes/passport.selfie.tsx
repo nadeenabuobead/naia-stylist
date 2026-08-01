@@ -237,7 +237,7 @@ export default function SelfieUploadPage() {
   }
 
   return (
-    <MyNaiaLayout currentPath="/passport/selfie">
+    <MyNaiaLayout>
       <Link to="/my-naia" className="sp-back">← Overview</Link>
 
       {/* Section shell */}

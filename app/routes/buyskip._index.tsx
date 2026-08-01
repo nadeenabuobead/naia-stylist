@@ -217,7 +217,7 @@ export default function BuyOrSkip() {
   const canAnalyze = imageUrl && category && color.length > 0 && !analyzing;
 
   return (
-    <MyNaiaLayout currentPath="/buyskip">
+    <MyNaiaLayout>
       <Link to="/my-naia" className="sp-back">← Overview</Link>
 
       {/* Section shell */}

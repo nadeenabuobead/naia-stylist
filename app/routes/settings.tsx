@@ -102,7 +102,7 @@ export default function Settings() {
   }
 
   return (
-    <MyNaiaLayout currentPath="/settings">
+    <MyNaiaLayout>
       <Link to="/my-naia" className="sp-back">← Overview</Link>
 
       <div className="sp-shell">

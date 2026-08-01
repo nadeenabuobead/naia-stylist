@@ -92,7 +92,7 @@ export default function SavedLooks() {
   const [tab, setTab] = useState<Tab>("looks");
 
   return (
-    <MyNaiaLayout currentPath="/my-naia/saved">
+    <MyNaiaLayout>
       <Link to="/my-naia" className="sp-back">← Overview</Link>
 
       <div className="sp-shell">

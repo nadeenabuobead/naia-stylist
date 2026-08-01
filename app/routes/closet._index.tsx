@@ -280,7 +280,7 @@ export default function Closet() {
   const editingItem = editingId ? items.find((i: any) => i.id === editingId) : null;
 
   return (
-    <MyNaiaLayout currentPath="/closet">
+    <MyNaiaLayout>
       <Link to="/my-naia" className="sp-back">← Overview</Link>
 
       {/* Section shell */}

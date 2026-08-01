@@ -140,7 +140,7 @@ export default function MyNaiaModelRoute() {
   const loaderData = useLoaderData<typeof loader>();
 
   return (
-    <MyNaiaLayout currentPath="/my-naia-model">
+    <MyNaiaLayout>
       <Link to="/my-naia" className="sp-back">← Overview</Link>
 
       <div className="sp-shell">
