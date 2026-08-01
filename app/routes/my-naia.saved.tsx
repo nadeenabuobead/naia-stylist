@@ -46,6 +46,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     include: {
       items: {
         orderBy: { id: "asc" },
+        include: {
+          closetItem: { select: { imageUrl: true } },
+        },
       },
     },
   });
@@ -77,7 +80,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       items: look.items.map((item) => ({
         id: item.id,
         itemType: item.itemType,
-        productImageUrl: item.productImageUrl,
+        productImageUrl: item.productImageUrl ?? item.closetItem?.imageUrl ?? null,
         shopifyProductId: item.shopifyProductId,
       })),
     })),

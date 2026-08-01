@@ -82,19 +82,52 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (!name || !category || !imageUrl) return data({ error: "Name and category required" }, { status: 400 });
 
-    // Server-side: reject imageUrl values that are not genuine Cloudinary delivery URLs.
-    // The client uploads directly to Cloudinary and receives the URL; this prevents an
-    // attacker from bypassing the client and submitting an arbitrary URL via raw POST.
+    // ── Server-side upload validation ─────────────────────────────────────────
+    // All checks run BEFORE any DB write. A failing check returns 400 and exits.
+
+    // 1. Cloudinary URL hostname — prevents raw-POST bypass with arbitrary URLs.
     const allowedHosts = ["res.cloudinary.com", "res-4.cloudinary.com"];
     let imageUrlHost: string;
     try {
       imageUrlHost = new URL(imageUrl).hostname;
     } catch {
-      return data({ error: "Invalid image URL" }, { status: 400 });
+      return data({ error: "Invalid image URL." }, { status: 400 });
     }
     if (!allowedHosts.some(h => imageUrlHost === h || imageUrlHost.endsWith(`.${h}`))) {
-      return data({ error: "Image must be uploaded via the app" }, { status: 400 });
+      return data({ error: "Image must be uploaded via the app." }, { status: 400 });
     }
+
+    // 2. Format allowlist — Cloudinary reports the detected format after upload.
+    //    This catches any format Cloudinary accepted that we do not want to persist.
+    const ALLOWED_FORMATS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"]);
+    if (imageFormat && !ALLOWED_FORMATS.has(imageFormat.toLowerCase())) {
+      return data({ error: `File type "${imageFormat}" is not supported. Use JPG, PNG, WEBP, or HEIC.` }, { status: 400 });
+    }
+
+    // 3. File-size cap — enforced by Cloudinary during upload, but double-checked
+    //    here against the bytes value Cloudinary reports back.
+    const SERVER_MAX_BYTES = 5 * 1024 * 1024;
+    if (imageBytes !== undefined && imageBytes > SERVER_MAX_BYTES) {
+      return data({ error: `Image is too large (${(imageBytes / 1024 / 1024).toFixed(1)} MB). Maximum is 5 MB.` }, { status: 400 });
+    }
+
+    // 4. Dimension bounds — minimum prevents illegibly small images from reaching
+    //    the try-on pipeline; maximum prevents abnormally large images.
+    const MIN_DIM = 200;
+    const MAX_DIM = 8000;
+    if (imageWidth !== undefined && imageWidth < MIN_DIM) {
+      return data({ error: `Image width (${imageWidth} px) is below the minimum of ${MIN_DIM} px.` }, { status: 400 });
+    }
+    if (imageHeight !== undefined && imageHeight < MIN_DIM) {
+      return data({ error: `Image height (${imageHeight} px) is below the minimum of ${MIN_DIM} px.` }, { status: 400 });
+    }
+    if (imageWidth !== undefined && imageWidth > MAX_DIM) {
+      return data({ error: `Image width (${imageWidth} px) exceeds the maximum of ${MAX_DIM} px.` }, { status: 400 });
+    }
+    if (imageHeight !== undefined && imageHeight > MAX_DIM) {
+      return data({ error: `Image height (${imageHeight} px) exceeds the maximum of ${MAX_DIM} px.` }, { status: 400 });
+    }
+    // ──────────────────────────────────────────────────────────────────────────
 
     const stageA = assessClosetEligibility({
       prismaCategory: category, width: imageWidth, height: imageHeight, format: imageFormat, bytes: imageBytes,
@@ -139,73 +172,115 @@ export async function action({ request }: ActionFunctionArgs) {
   return data({ error: "Unknown intent" }, { status: 400 });
 }
 
-// ── Option A cl-* inline design system (page content only — no topbar/wrap) ──
+// ── cl-* inline design system calibrated for the 880 px content column
+//    inside MyNaiaLayout (sidebar 256 px + gap 64 px = 320 px consumed at 1280 px).
+//    Lovable Option A reference used standalone cl-wrap = 1120 px inner width.
+//    Proportions are scaled accordingly.
+//
+// Shell-level overrides (mn-page-head, mn-body, mn-page-sections) are scoped to
+// this route's injected <style> tag — they only apply while this page is loaded.
 const css = `
-  .cl-headline{font-family:var(--ff-display);font-size:clamp(40px,5vw,64px);font-weight:900;line-height:1;margin-bottom:12px}
-  .cl-sub{font-family:var(--ff-ui);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:40px}
-  .cl-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:40px}
-  .cl-stat{background:var(--bg-50, var(--c-surface));padding:24px;border:1px solid var(--fg-10, var(--c-border))}
-  .cl-stat-num{font-family:var(--ff-display);font-size:48px;font-weight:900;color:var(--fg, var(--c-ink))}
+  /* ── Shell calibration for Digital Wardrobe density ── */
+  /* Reduce page-head top padding: Lovable's is generous but the closet page
+     is content-dense — 2 rem top feels proportional without cropping the heading */
+  .mn-page-head{padding-top:2rem}
+  @media(min-width:640px){.mn-page-head{padding-top:2.5rem}}
+  /* MY nAia. heading: 5.5 rem in the global sheet is correct for the overview.
+     On the closet page (sidebar+content layout) 3.5 rem matches the visual weight
+     of the Lovable 64 px cl-headline that anchors the page below it. */
+  @media(min-width:1024px){.mn-page-head-title{font-size:3.5rem}}
+  /* Reduce body top padding so the sidebar+content column starts sooner */
+  .mn-body{padding-top:1.5rem}
+  @media(min-width:640px){.mn-body{padding-top:2rem}}
+  @media(min-width:1024px){.mn-body{padding-top:2rem}}
+  /* mn-page-sections gap: the global value is 4 rem (64 px) — right for the overview
+     page's distinct sections. Here cl-* elements own their own margin-bottom spacing,
+     so the section gap must be collapsed to zero. */
+  .mn-page-sections{gap:0}
+  .mn-page-sections>.mn-back-link{display:block;margin-bottom:1.75rem}
+
+  /* ── Option A cl-* page content — calibrated for 880 px column ── */
+  /* Title: clamp(32px,3.5vw,48px) scales correctly in an 880 px column.
+     At 1280 px viewport: 3.5vw = 44.8 px → within range. */
+  .cl-headline{font-family:var(--ff-display);font-size:clamp(32px,3.5vw,48px);font-weight:900;line-height:1;margin-bottom:10px}
+  /* Subtitle */
+  .cl-sub{font-family:var(--ff-ui);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:28px}
+  /* Stats — 3-col grid. Padding 20px (was 24px) to tighten card density. */
+  .cl-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:28px}
+  .cl-stat{background:var(--bg-50, var(--c-surface));padding:20px;border:1px solid var(--fg-10, var(--c-border))}
+  .cl-stat-num{font-family:var(--ff-display);font-size:40px;font-weight:900;color:var(--fg, var(--c-ink))}
   .cl-stat-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted))}
-  .cl-add-btn{width:100%;padding:18px;background:var(--lipstick, var(--c-burg));color:#FAF6F1;border:none;margin-bottom:40px;cursor:pointer;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase}
-  .cl-form{background:var(--bg-50, var(--c-panel));padding:40px;margin-bottom:40px;border:1px solid var(--fg-10, var(--c-border))}
-  .cl-form-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
-  .cl-form-title{font-family:var(--ff-display);font-size:28px;font-weight:900;font-style:italic;color:var(--fg, var(--c-ink))}
+  /* Add a Piece button — full width matching Lovable. Margin-bottom reduced for density. */
+  .cl-add-btn{width:100%;padding:16px;background:var(--lipstick, var(--c-burg));color:#FAF6F1;border:none;margin-bottom:28px;cursor:pointer;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase}
+  /* Add to Wardrobe form */
+  .cl-form{background:var(--bg-50, var(--c-panel));padding:32px;margin-bottom:28px;border:1px solid var(--fg-10, var(--c-border))}
+  .cl-form-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+  .cl-form-title{font-family:var(--ff-display);font-size:24px;font-weight:900;font-style:italic;color:var(--fg, var(--c-ink))}
   .cl-form-cancel{background:none;border:none;cursor:pointer;font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted))}
-  .cl-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:12px}
-  .cl-input{width:100%;padding:14px;border:1px solid var(--fg-10, var(--c-border));font-size:16px;font-family:var(--ff-ui);background:var(--bg, var(--c-surface));color:var(--fg, var(--c-ink));outline:none;margin-bottom:24px}
+  .cl-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:10px}
+  .cl-input{width:100%;padding:12px;border:1px solid var(--fg-10, var(--c-border));font-size:15px;font-family:var(--ff-ui);background:var(--bg, var(--c-surface));color:var(--fg, var(--c-ink));outline:none;margin-bottom:20px}
   .cl-input:focus{border-color:var(--fg, var(--c-ink))}
-  .cl-pills{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px}
-  .cl-pill{padding:10px 18px;border:1px solid var(--fg-10, var(--c-border));font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--fg, var(--c-ink));cursor:pointer;background:transparent;transition:all .2s}
+  .cl-pills{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:20px}
+  .cl-pill{padding:8px 14px;border:1px solid var(--fg-10, var(--c-border));font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--fg, var(--c-ink));cursor:pointer;background:transparent;transition:all .2s}
   .cl-pill:hover{border-color:var(--fg, var(--c-ink))}
   .cl-pill.on{background:var(--lipstick, var(--c-burg));color:#FAF6F1}
-  .cl-upload-box{border:1px dashed var(--fg-10, var(--c-border));padding:40px;text-align:center;cursor:pointer;background:var(--bg, var(--c-surface));margin-bottom:8px;display:block}
-  .cl-upload-hint{font-family:var(--ff-body);font-size:16px;font-style:italic;color:var(--fg-60, var(--c-muted))}
-  .cl-upload-notice{font-family:var(--ff-ui);font-size:8px;letter-spacing:1px;line-height:1.6;color:var(--fg-60, var(--c-muted));margin-bottom:16px}
-  .cl-upload-error{font-family:var(--ff-ui);font-size:9px;letter-spacing:1px;color:var(--lipstick, var(--c-burg));margin-bottom:16px}
-  .cl-guide{background:var(--bg, var(--c-surface));border:1px solid var(--fg-10, var(--c-border));padding:20px;margin-bottom:24px}
-  .cl-guide-header{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:12px}
-  .cl-guide-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px}
+  .cl-upload-box{border:1px dashed var(--fg-10, var(--c-border));padding:32px;text-align:center;cursor:pointer;background:var(--bg, var(--c-surface));margin-bottom:8px;display:block}
+  .cl-upload-hint{font-family:var(--ff-body);font-size:15px;font-style:italic;color:var(--fg-60, var(--c-muted))}
+  .cl-upload-notice{font-family:var(--ff-ui);font-size:8px;letter-spacing:1px;line-height:1.6;color:var(--fg-60, var(--c-muted));margin-bottom:14px}
+  .cl-upload-error{font-family:var(--ff-ui);font-size:9px;letter-spacing:1px;color:var(--lipstick, var(--c-burg));margin-bottom:14px}
+  .cl-guide{background:var(--bg, var(--c-surface));border:1px solid var(--fg-10, var(--c-border));padding:16px;margin-bottom:20px}
+  .cl-guide-header{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:10px}
+  .cl-guide-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:10px}
   .cl-guide-col-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:1px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:6px}
   .cl-guide-tips{list-style:none;padding:0}
-  .cl-guide-tips li{font-family:var(--ff-body);font-size:13px;color:var(--fg, var(--c-ink));padding:2px 0 2px 14px;position:relative}
+  .cl-guide-tips li{font-family:var(--ff-body);font-size:12px;color:var(--fg, var(--c-ink));padding:2px 0 2px 14px;position:relative}
   .cl-guide-tips li::before{content:"–";position:absolute;left:0;color:var(--fg-60, var(--c-muted))}
-  .cl-guide-ex{display:flex;gap:8px;padding:6px 10px;font-size:12px;font-family:var(--ff-body);margin-top:4px}
+  .cl-guide-ex{display:flex;gap:8px;padding:5px 8px;font-size:11px;font-family:var(--ff-body);margin-top:4px}
   .cl-guide-ex.good{background:rgba(76,175,80,.08);border-left:2px solid #4caf50}
   .cl-guide-ex.avoid{background:rgba(107,29,38,.06);border-left:2px solid var(--lipstick, var(--c-burg))}
   .cl-guide-ex-mark{font-weight:700;flex-shrink:0}
-  .cl-submit{width:100%;padding:16px;background:var(--lipstick, var(--c-burg));color:#FAF6F1;border:none;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase;cursor:pointer}
+  .cl-submit{width:100%;padding:14px;background:var(--lipstick, var(--c-burg));color:#FAF6F1;border:none;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase;cursor:pointer}
   .cl-submit:disabled{opacity:.3;cursor:not-allowed}
-  .cl-filter-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;border-top:1px solid var(--fg-12, var(--c-border));padding-top:1.5rem;margin-bottom:24px}
-  .cl-filters{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;flex:1;min-width:0}
-  .cl-filter{padding:10px 18px;border:1px solid var(--fg-10, var(--c-border));font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--fg, var(--c-ink));cursor:pointer;background:transparent;white-space:nowrap;transition:all .2s;flex-shrink:0}
+  /* Filter row — constrain search width so the row doesn't sprawl across 880 px */
+  .cl-filter-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:0.75rem;border-top:1px solid var(--fg-12, var(--c-border));padding-top:1.25rem;margin-bottom:20px}
+  .cl-filters{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;flex:1;min-width:0}
+  .cl-filter{padding:8px 14px;border:1px solid var(--fg-10, var(--c-border));font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--fg, var(--c-ink));cursor:pointer;background:transparent;white-space:nowrap;transition:all .2s;flex-shrink:0}
   .cl-filter.on{background:var(--lipstick, var(--c-burg));color:#FAF6F1}
   .cl-search-label{display:flex;align-items:center;gap:0.5rem;font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));flex-shrink:0}
-  .cl-search-input{border-top:none;border-left:none;border-right:none;border-bottom:1px solid var(--fg-25, var(--c-border));background:transparent;padding:0.25rem;font-size:13px;letter-spacing:normal;text-transform:none;color:var(--fg, var(--c-ink));outline:none;font-family:var(--ff-ui);width:140px}
-  .cl-count{font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:24px}
-  .cl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:24px}
+  /* Search width: 120 px is proportional to the 880 px column */
+  .cl-search-input{border-top:none;border-left:none;border-right:none;border-bottom:1px solid var(--fg-25, var(--c-border));background:transparent;padding:0.25rem;font-size:13px;letter-spacing:normal;text-transform:none;color:var(--fg, var(--c-ink));outline:none;font-family:var(--ff-ui);width:120px}
+  .cl-count{font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:20px}
+  /* Product grid: minmax(200px,1fr) fits 4 cards in 880 px (4×200+3×16=848 px).
+     Matches Lovable's minmax(250px,1fr) in its wider 1120 px column (4×250+3×24=1072 px). */
+  .cl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px}
   .cl-card{background:var(--bg-50, var(--c-surface));border:1px solid var(--fg-10, var(--c-border));overflow:hidden;position:relative}
+  /* Card image: square aspect ratio matching Lovable */
   .cl-card-img{aspect-ratio:1;background:var(--bg-75, var(--c-muted-bg));display:flex;align-items:center;justify-content:center;overflow:hidden}
   .cl-card-img img{width:100%;height:100%;object-fit:cover}
-  .cl-card-body{padding:20px}
-  .cl-card-cat{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:8px}
-  .cl-card-name{font-family:var(--ff-display);font-size:18px;font-weight:700;color:var(--fg, var(--c-ink));margin-bottom:6px}
+  .cl-card-body{padding:16px}
+  .cl-card-cat{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:6px}
+  .cl-card-name{font-family:var(--ff-display);font-size:16px;font-weight:700;color:var(--fg, var(--c-ink));margin-bottom:4px}
   .cl-card-meta{font-family:var(--ff-ui);font-size:9px;letter-spacing:1px;color:var(--fg-60, var(--c-muted));text-transform:uppercase}
-  .cl-card-elig--needs{font-family:var(--ff-ui);font-size:8px;letter-spacing:1px;color:var(--lipstick, var(--c-burg));text-transform:uppercase;margin-top:8px;display:block}
-  .cl-card-elig--ok{font-family:var(--ff-ui);font-size:8px;letter-spacing:1px;color:var(--fg-60, var(--c-muted));text-transform:uppercase;margin-top:8px;display:block}
-  .cl-delete{position:absolute;top:12px;right:12px;background:rgba(40,21,12,0.8);color:#FAF6F1;border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;line-height:1}
-  .cl-empty{text-align:center;padding:80px 40px;background:var(--bg-50, var(--c-surface));border:1px solid var(--fg-10, var(--c-border))}
-  .cl-empty-icon{font-family:var(--ff-display);font-size:64px;color:var(--fg, var(--c-ink));opacity:.2;margin-bottom:20px}
-  .cl-empty-text{font-family:var(--ff-body);font-size:20px;font-style:italic;color:var(--fg-60, var(--c-muted));margin-bottom:32px}
-  .cl-cta{margin-top:60px;text-align:center}
-  .cl-cta a{display:inline-block;padding:16px 40px;background:var(--fg, var(--c-ink));color:#FAF6F1;text-decoration:none;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase}
+  .cl-card-elig--needs{font-family:var(--ff-ui);font-size:8px;letter-spacing:1px;color:var(--lipstick, var(--c-burg));text-transform:uppercase;margin-top:6px;display:block}
+  .cl-card-elig--ok{font-family:var(--ff-ui);font-size:8px;letter-spacing:1px;color:var(--fg-60, var(--c-muted));text-transform:uppercase;margin-top:6px;display:block}
+  .cl-delete{position:absolute;top:10px;right:10px;background:rgba(40,21,12,0.8);color:#FAF6F1;border:none;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;line-height:1}
+  .cl-empty{text-align:center;padding:60px 32px;background:var(--bg-50, var(--c-surface));border:1px solid var(--fg-10, var(--c-border))}
+  .cl-empty-icon{font-family:var(--ff-display);font-size:52px;color:var(--fg, var(--c-ink));opacity:.2;margin-bottom:16px}
+  .cl-empty-text{font-family:var(--ff-body);font-size:18px;font-style:italic;color:var(--fg-60, var(--c-muted));margin-bottom:28px}
+  .cl-cta{margin-top:48px;text-align:center}
+  .cl-cta a{display:inline-block;padding:14px 36px;background:var(--fg, var(--c-ink));color:#FAF6F1;text-decoration:none;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase}
+  @media(max-width:1023px){
+    .mn-page-head{padding-top:2rem}
+    .mn-page-sections>.mn-back-link{margin-bottom:1.25rem}
+  }
   @media(max-width:640px){
     .cl-stats{grid-template-columns:1fr}
-    .cl-stat{display:flex;align-items:center;gap:16px;padding:16px 20px}
-    .cl-stat-num{font-size:32px}
+    .cl-stat{display:flex;align-items:center;gap:14px;padding:14px 18px}
+    .cl-stat-num{font-size:28px}
     .cl-guide-cols{grid-template-columns:1fr}
     .cl-filter-row{flex-direction:column;align-items:flex-start}
     .cl-search-input{width:100%}
+    .cl-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
   }
 `;
 
@@ -253,17 +328,84 @@ export default function Closet() {
     return () => document.removeEventListener("keydown", handler);
   }, [showAddForm]);
 
+  // Known image magic bytes (file signatures). Checked before upload to catch
+  // spoofed extensions and files that are not real images.
+  const IMAGE_SIGNATURES: Array<{ mime: string; bytes: number[]; offset?: number }> = [
+    { mime: "image/jpeg",  bytes: [0xFF, 0xD8, 0xFF] },
+    { mime: "image/png",   bytes: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] },
+    { mime: "image/gif",   bytes: [0x47, 0x49, 0x46, 0x38] },
+    { mime: "image/webp",  bytes: [0x52, 0x49, 0x46, 0x46], offset: 0 },  // RIFF then WEBP at 8
+    { mime: "image/heic",  bytes: [0x66, 0x74, 0x79, 0x70], offset: 4 },  // ftyp box
+    { mime: "image/heif",  bytes: [0x66, 0x74, 0x79, 0x70], offset: 4 },
+  ];
+
+  const MIN_DIMENSION = 200;   // px
+  const MAX_DIMENSION = 8000;  // px
+  const MAX_FILE_BYTES = 5 * 1024 * 1024;
+
+  async function validateImageFile(file: File): Promise<string | null> {
+    // 1. MIME type claim (fast check — can be spoofed, magic bytes confirm later)
+    if (!file.type.startsWith("image/")) {
+      return "Only image files are accepted (JPG, PNG, WEBP, HEIC).";
+    }
+
+    // 2. File size
+    if (file.size > MAX_FILE_BYTES) {
+      return `Image must be smaller than 5 MB. This file is ${(file.size / 1024 / 1024).toFixed(1)} MB.`;
+    }
+    if (file.size === 0) {
+      return "The file appears to be empty.";
+    }
+
+    // 3. Magic-byte / file-signature check
+    const headerBytes = await file.slice(0, 12).arrayBuffer();
+    const header = new Uint8Array(headerBytes);
+    const signatureMatch = IMAGE_SIGNATURES.some(({ bytes, offset = 0 }) =>
+      bytes.every((b, i) => header[offset + i] === b)
+    );
+    // WEBP: bytes 8-11 must be "WEBP" (0x57 0x45 0x42 0x50)
+    const isWebp = header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46
+                && header[8] === 0x57 && header[9] === 0x45 && header[10] === 0x42 && header[11] === 0x50;
+    if (!signatureMatch && !isWebp) {
+      return "This file does not appear to be a valid image. Please use a JPG, PNG, WEBP, or HEIC photo.";
+    }
+
+    // 4. Decode check + dimension validation (also catches corrupted images)
+    const dimensionError = await new Promise<string | null>((resolve) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const { naturalWidth: w, naturalHeight: h } = img;
+        if (w === 0 || h === 0) {
+          resolve("The image could not be decoded. Please try a different file.");
+        } else if (w < MIN_DIMENSION || h < MIN_DIMENSION) {
+          resolve(`Image is too small (${w} × ${h} px). Minimum size is ${MIN_DIMENSION} × ${MIN_DIMENSION} px.`);
+        } else if (w > MAX_DIMENSION || h > MAX_DIMENSION) {
+          resolve(`Image is too large (${w} × ${h} px). Maximum size is ${MAX_DIMENSION} × ${MAX_DIMENSION} px.`);
+        } else {
+          resolve(null);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve("The image could not be decoded. It may be corrupted or not a supported format.");
+      };
+      img.src = url;
+    });
+    if (dimensionError) return dimensionError;
+
+    return null;
+  }
+
   async function uploadToCloudinary(file: File) {
     setUploading(true);
     setUploadError(null);
 
-    if (!file.type.startsWith("image/")) {
-      setUploadError("Please upload an image file (JPG, PNG, WEBP, etc.).");
-      setUploading(false);
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setUploadError("Image must be smaller than 5 MB.");
+    // Client-side validation: MIME, size, magic bytes, decode, dimensions
+    const validationError = await validateImageFile(file);
+    if (validationError) {
+      setUploadError(validationError);
       setUploading(false);
       return;
     }

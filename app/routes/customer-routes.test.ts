@@ -459,3 +459,140 @@ describe("H — Digital Wardrobe: composed shell + content invariants", () => {
     assert.ok(src.includes('to="/my-naia"') || src.includes("to='/my-naia'"), "links to /my-naia");
   });
 });
+
+describe("I — BUG-5: closet-sourced saved look items carry imageUrl from closetItem join", () => {
+  it("my-naia.saved.tsx loader joins closetItem.imageUrl on SavedLookItem records", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(src.includes("closetItem"), "loader includes closetItem relation");
+    assert.ok(src.includes("select: { imageUrl: true }"), "selects imageUrl from closetItem");
+  });
+
+  it("my-naia.saved.tsx mapper falls back to closetItem.imageUrl when productImageUrl is null", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(
+      src.includes("item.productImageUrl ?? item.closetItem?.imageUrl ?? null"),
+      "mapper coalesces productImageUrl → closetItem.imageUrl → null"
+    );
+  });
+
+  it("my-naia.saved.tsx LookCard filters to items with productImageUrl (now non-null for closet items)", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(src.includes("productImageUrl"), "LookCard uses productImageUrl for thumbnails");
+  });
+
+  it("my-naia._index.tsx loader selects productImageUrl and closetItem.imageUrl on SavedLook items", () => {
+    const src = route("my-naia._index.tsx");
+    assert.ok(src.includes("productImageUrl: true"), "selects productImageUrl from SavedLookItem");
+    assert.ok(
+      src.includes("closetItem: { select: { name: true, imageUrl: true } }"),
+      "joins closetItem with imageUrl for overview thumbnails"
+    );
+  });
+
+  it("my-naia._index.tsx overview thumbnail waterfall includes closetItem.imageUrl as final fallback", () => {
+    const src = route("my-naia._index.tsx");
+    assert.ok(
+      src.includes("closetItem?.imageUrl"),
+      "thumbnail rendering includes closetItem?.imageUrl fallback"
+    );
+  });
+});
+
+describe("J — upload security: magic-byte validation, image decode, and server-side guards", () => {
+  it("closet._index.tsx defines IMAGE_SIGNATURES with magic bytes for JPEG PNG GIF WEBP HEIC", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("IMAGE_SIGNATURES"), "has IMAGE_SIGNATURES constant");
+    assert.ok(src.includes("0xFF, 0xD8, 0xFF"), "JPEG magic bytes present");
+    assert.ok(src.includes("0x89, 0x50, 0x4E, 0x47"), "PNG magic bytes present");
+    assert.ok(src.includes("0x47, 0x49, 0x46, 0x38"), "GIF magic bytes present");
+    assert.ok(src.includes("0x52, 0x49, 0x46, 0x46"), "WEBP/RIFF magic bytes present");
+    assert.ok(src.includes("0x66, 0x74, 0x79, 0x70"), "HEIC ftyp magic bytes present");
+  });
+
+  it("closet._index.tsx reads 12-byte file header for magic-byte signature check", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("file.slice(0, 12).arrayBuffer()"), "reads first 12 bytes for signature check");
+    assert.ok(src.includes("new Uint8Array"), "wraps buffer as Uint8Array for byte comparison");
+  });
+
+  it("closet._index.tsx checks WEBP magic at both RIFF offset 0 and WEBP offset 8", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("isWebp"), "WEBP-specific check present");
+    assert.ok(src.includes("header[8] === 0x57"), "checks byte 8 == W (0x57) for WEBP marker");
+  });
+
+  it("closet._index.tsx rejects files whose magic bytes do not match any supported signature", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(
+      src.includes("does not appear to be a valid image"),
+      "returns user-facing error when signature check fails"
+    );
+  });
+
+  it("closet._index.tsx uses Image.decode + createObjectURL to catch corrupted images", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("createObjectURL"), "uses createObjectURL for image decode test");
+    assert.ok(src.includes("new Image()"), "decodes via HTMLImageElement");
+    assert.ok(src.includes("img.onerror"), "catches decode failures via onerror handler");
+    assert.ok(
+      src.includes("could not be decoded"),
+      "user-facing error message for corrupted/undecodable files"
+    );
+  });
+
+  it("closet._index.tsx enforces MIN_DIMENSION and MAX_DIMENSION on decoded image", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("MIN_DIMENSION"), "defines MIN_DIMENSION constant");
+    assert.ok(src.includes("MAX_DIMENSION"), "defines MAX_DIMENSION constant");
+    assert.ok(src.includes("too small"), "error message for images below minimum dimensions");
+    assert.ok(src.includes("too large"), "error message for images above maximum dimensions");
+  });
+
+  it("closet._index.tsx rejects empty files before any upload attempt", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("file.size === 0"), "checks for zero-byte file");
+    assert.ok(src.includes("appears to be empty"), "user-facing error for empty file");
+  });
+
+  it("closet._index.tsx server action has ALLOWED_FORMATS allowlist checked before prisma.closetItem.create", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("ALLOWED_FORMATS"), "defines ALLOWED_FORMATS set");
+    assert.ok(src.includes('"jpg"'), "allowlist includes jpg");
+    assert.ok(src.includes('"webp"'), "allowlist includes webp");
+    assert.ok(src.includes('"heic"'), "allowlist includes heic");
+    assert.ok(
+      src.indexOf("ALLOWED_FORMATS") < src.indexOf("prisma.closetItem.create"),
+      "format check precedes DB write"
+    );
+  });
+
+  it("closet._index.tsx server action enforces file-size cap before prisma.closetItem.create", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("SERVER_MAX_BYTES"), "defines SERVER_MAX_BYTES server-side limit");
+    assert.ok(
+      src.indexOf("SERVER_MAX_BYTES") < src.indexOf("prisma.closetItem.create"),
+      "size check precedes DB write"
+    );
+  });
+
+  it("closet._index.tsx server action enforces dimension bounds before prisma.closetItem.create", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("imageWidth"), "reads imageWidth from submitted form data");
+    assert.ok(src.includes("imageHeight"), "reads imageHeight from submitted form data");
+    const dimCheck = src.includes("MIN_DIM") && src.includes("MAX_DIM");
+    assert.ok(dimCheck, "defines both MIN_DIM and MAX_DIM server-side constants");
+    assert.ok(
+      src.indexOf("MIN_DIM") < src.indexOf("prisma.closetItem.create"),
+      "dimension check precedes DB write"
+    );
+  });
+
+  it("closet._index.tsx server validation failures return 400 — rejected uploads never create DB records", () => {
+    const src = route("closet._index.tsx");
+    const status400Count = (src.match(/status: 400/g) ?? []).length;
+    assert.ok(
+      status400Count >= 4,
+      `expected at least 4 server-side 400 rejections (format, size, width, height); found ${status400Count}`
+    );
+  });
+});
