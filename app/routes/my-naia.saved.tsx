@@ -10,6 +10,14 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
 ];
 
+const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const MONTHS_LONG  = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+function fmtUtcDate(d: string | Date, short = false): string {
+  const dt = new Date(d);
+  const months = short ? MONTHS_SHORT : MONTHS_LONG;
+  return `${dt.getUTCDate()} ${months[dt.getUTCMonth()]}${short ? "" : ` ${dt.getUTCFullYear()}`}`;
+}
+
 export function meta() {
   return [{ title: "Saved Looks | nAia" }];
 }
@@ -162,11 +170,7 @@ function LookCard({ look }: { look: Look }) {
   const imagedItems = look.items.filter((i) => i.productImageUrl);
   const thumbItems = imagedItems.slice(0, 3);
 
-  const formattedDate = new Date(look.createdAt).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  const formattedDate = fmtUtcDate(look.createdAt);
 
   const metaParts = [look.occasion, formattedDate].filter(Boolean).join(" · ");
 
@@ -222,7 +226,7 @@ function LookCard({ look }: { look: Look }) {
         <p className="sv-card-wear">
           Worn {look.timesWorn} time{look.timesWorn !== 1 ? "s" : ""}
           {look.lastWorn
-            ? ` · Last worn ${new Date(look.lastWorn).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`
+            ? ` · Last worn ${fmtUtcDate(look.lastWorn!, true)}`
             : ""}
         </p>
       )}
