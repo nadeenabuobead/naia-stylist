@@ -1,11 +1,16 @@
-import { useLoaderData, useFetcher, Link } from "react-router";
-import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
 import { useState, useEffect } from "react";
+import { useLoaderData, useFetcher, Link } from "react-router";
+import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type LinksFunction } from "react-router";
 import prisma from "../db.server";
 import { requireCurrentNaiaCustomer, getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { assessClosetEligibility, CLOSET_ELIGIBILITY_DISPLAY, type ClosetTryOnEligibility } from "~/lib/ai/closet-eligibility";
 import { runStageBAssessment } from "~/lib/ai/closet-eligibility.server";
 import { emitClosetItemAdded, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
+import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
+import naiaStyles from "~/styles/naia-design-system.css?url";
+
+// Option B shell: MyNaiaLayout + naiaStyles (NADINE header, My nAia navigation)
+export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
 
 const CATEGORIES = ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS", "ACCESSORIES", "JEWELRY", "OTHER"];
 const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver", "Multicolor"];
@@ -39,7 +44,7 @@ function eligibilityStatus(elig: ClosetTryOnEligibility | null, hint: string | n
 }
 
 export function meta() {
-  return [{ title: "Digital Closet | nAia" }];
+  return [{ title: "Digital Wardrobe | nAia" }];
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -120,79 +125,82 @@ export async function action({ request }: ActionFunctionArgs) {
   return data({ error: "Unknown intent" }, { status: 400 });
 }
 
-// ── Lovable cl-* inline design system ────────────────────────────────────────
-
+// ── Option A cl-* inline design system (page content only — no topbar/wrap) ──
 const css = `
-  .cl-wrap{max-width:1200px;margin:0 auto;padding:60px 40px}
-  .cl-topbar{display:flex;justify-content:space-between;align-items:center;padding:20px 40px;border-bottom:1px solid var(--c-border)}
-  .cl-topbar-logo{font-family:var(--ff-display);font-size:22px;font-style:italic;letter-spacing:3px;color:var(--c-ink)}
-  .cl-topbar-link{font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--c-burg);text-decoration:none}
   .cl-headline{font-family:var(--ff-display);font-size:clamp(40px,5vw,64px);font-weight:900;line-height:1;margin-bottom:12px}
-  .cl-sub{font-family:var(--ff-ui);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--c-muted);margin-bottom:40px}
+  .cl-sub{font-family:var(--ff-ui);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:40px}
   .cl-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:40px}
-  .cl-stat{background:var(--c-surface);padding:24px;border:1px solid var(--c-border)}
-  .cl-stat-num{font-family:var(--ff-display);font-size:48px;font-weight:900;color:var(--c-ink)}
-  .cl-stat-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--c-muted)}
-  .cl-add-btn{width:100%;padding:18px;background:var(--c-burg);color:#FAF6F1;border:none;margin-bottom:40px;cursor:pointer;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase}
-  .cl-form{background:var(--c-panel);padding:40px;margin-bottom:40px;border:1px solid var(--c-border)}
+  .cl-stat{background:var(--bg-50, var(--c-surface));padding:24px;border:1px solid var(--fg-10, var(--c-border))}
+  .cl-stat-num{font-family:var(--ff-display);font-size:48px;font-weight:900;color:var(--fg, var(--c-ink))}
+  .cl-stat-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted))}
+  .cl-add-btn{width:100%;padding:18px;background:var(--lipstick, var(--c-burg));color:#FAF6F1;border:none;margin-bottom:40px;cursor:pointer;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase}
+  .cl-form{background:var(--bg-50, var(--c-panel));padding:40px;margin-bottom:40px;border:1px solid var(--fg-10, var(--c-border))}
   .cl-form-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
-  .cl-form-title{font-family:var(--ff-display);font-size:28px;font-weight:900;font-style:italic}
-  .cl-form-cancel{background:none;border:none;cursor:pointer;font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--c-muted)}
-  .cl-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--c-muted);margin-bottom:12px}
-  .cl-input{width:100%;padding:14px;border:1px solid var(--c-border);font-size:16px;font-family:var(--ff-ui);background:var(--c-surface);color:var(--c-ink);outline:none;margin-bottom:24px}
-  .cl-input:focus{border-color:var(--c-ink)}
+  .cl-form-title{font-family:var(--ff-display);font-size:28px;font-weight:900;font-style:italic;color:var(--fg, var(--c-ink))}
+  .cl-form-cancel{background:none;border:none;cursor:pointer;font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted))}
+  .cl-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:12px}
+  .cl-input{width:100%;padding:14px;border:1px solid var(--fg-10, var(--c-border));font-size:16px;font-family:var(--ff-ui);background:var(--bg, var(--c-surface));color:var(--fg, var(--c-ink));outline:none;margin-bottom:24px}
+  .cl-input:focus{border-color:var(--fg, var(--c-ink))}
   .cl-pills{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px}
-  .cl-pill{padding:10px 18px;border:1px solid var(--c-border);font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--c-ink);cursor:pointer;background:transparent;transition:all .2s}
-  .cl-pill:hover{border-color:var(--c-ink)}
-  .cl-pill.on{background:var(--c-burg);color:#FAF6F1}
-  .cl-upload-box{border:1px dashed var(--c-border);padding:40px;text-align:center;cursor:pointer;background:var(--c-surface);margin-bottom:8px;display:block}
-  .cl-upload-hint{font-family:var(--ff-body);font-size:16px;font-style:italic;color:var(--c-muted)}
-  .cl-upload-notice{font-family:var(--ff-ui);font-size:8px;letter-spacing:1px;line-height:1.6;color:var(--c-muted);margin-bottom:16px}
-  .cl-upload-error{font-family:var(--ff-ui);font-size:9px;letter-spacing:1px;color:var(--c-burg);margin-bottom:16px}
-  .cl-guide{background:var(--c-surface);border:1px solid var(--c-border);padding:20px;margin-bottom:24px}
-  .cl-guide-header{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--c-muted);margin-bottom:12px}
+  .cl-pill{padding:10px 18px;border:1px solid var(--fg-10, var(--c-border));font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--fg, var(--c-ink));cursor:pointer;background:transparent;transition:all .2s}
+  .cl-pill:hover{border-color:var(--fg, var(--c-ink))}
+  .cl-pill.on{background:var(--lipstick, var(--c-burg));color:#FAF6F1}
+  .cl-upload-box{border:1px dashed var(--fg-10, var(--c-border));padding:40px;text-align:center;cursor:pointer;background:var(--bg, var(--c-surface));margin-bottom:8px;display:block}
+  .cl-upload-hint{font-family:var(--ff-body);font-size:16px;font-style:italic;color:var(--fg-60, var(--c-muted))}
+  .cl-upload-notice{font-family:var(--ff-ui);font-size:8px;letter-spacing:1px;line-height:1.6;color:var(--fg-60, var(--c-muted));margin-bottom:16px}
+  .cl-upload-error{font-family:var(--ff-ui);font-size:9px;letter-spacing:1px;color:var(--lipstick, var(--c-burg));margin-bottom:16px}
+  .cl-guide{background:var(--bg, var(--c-surface));border:1px solid var(--fg-10, var(--c-border));padding:20px;margin-bottom:24px}
+  .cl-guide-header{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:12px}
   .cl-guide-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px}
-  .cl-guide-col-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:1px;text-transform:uppercase;color:var(--c-muted);margin-bottom:6px}
+  .cl-guide-col-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:1px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:6px}
   .cl-guide-tips{list-style:none;padding:0}
-  .cl-guide-tips li{font-family:var(--ff-body);font-size:13px;color:var(--c-ink);padding:2px 0 2px 14px;position:relative}
-  .cl-guide-tips li::before{content:"–";position:absolute;left:0;color:var(--c-muted)}
+  .cl-guide-tips li{font-family:var(--ff-body);font-size:13px;color:var(--fg, var(--c-ink));padding:2px 0 2px 14px;position:relative}
+  .cl-guide-tips li::before{content:"–";position:absolute;left:0;color:var(--fg-60, var(--c-muted))}
   .cl-guide-ex{display:flex;gap:8px;padding:6px 10px;font-size:12px;font-family:var(--ff-body);margin-top:4px}
   .cl-guide-ex.good{background:rgba(76,175,80,.08);border-left:2px solid #4caf50}
-  .cl-guide-ex.avoid{background:rgba(107,29,38,.06);border-left:2px solid var(--c-burg)}
+  .cl-guide-ex.avoid{background:rgba(107,29,38,.06);border-left:2px solid var(--lipstick, var(--c-burg))}
   .cl-guide-ex-mark{font-weight:700;flex-shrink:0}
-  .cl-submit{width:100%;padding:16px;background:var(--c-burg);color:#FAF6F1;border:none;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase;cursor:pointer}
+  .cl-submit{width:100%;padding:16px;background:var(--lipstick, var(--c-burg));color:#FAF6F1;border:none;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase;cursor:pointer}
   .cl-submit:disabled{opacity:.3;cursor:not-allowed}
-  .cl-filters{display:flex;gap:8px;overflow-x:auto;padding-bottom:12px;margin-bottom:24px}
-  .cl-filter{padding:10px 18px;border:1px solid var(--c-border);font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--c-ink);cursor:pointer;background:transparent;white-space:nowrap;transition:all .2s;flex-shrink:0}
-  .cl-filter.on{background:var(--c-burg);color:#FAF6F1}
-  .cl-count{font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--c-muted);margin-bottom:24px}
+  .cl-filter-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;border-top:1px solid var(--fg-12, var(--c-border));padding-top:1.5rem;margin-bottom:24px}
+  .cl-filters{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;flex:1;min-width:0}
+  .cl-filter{padding:10px 18px;border:1px solid var(--fg-10, var(--c-border));font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--fg, var(--c-ink));cursor:pointer;background:transparent;white-space:nowrap;transition:all .2s;flex-shrink:0}
+  .cl-filter.on{background:var(--lipstick, var(--c-burg));color:#FAF6F1}
+  .cl-search-label{display:flex;align-items:center;gap:0.5rem;font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));flex-shrink:0}
+  .cl-search-input{border-top:none;border-left:none;border-right:none;border-bottom:1px solid var(--fg-25, var(--c-border));background:transparent;padding:0.25rem;font-size:13px;letter-spacing:normal;text-transform:none;color:var(--fg, var(--c-ink));outline:none;font-family:var(--ff-ui);width:140px}
+  .cl-count{font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:24px}
   .cl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:24px}
-  .cl-card{background:var(--c-surface);border:1px solid var(--c-border);overflow:hidden;position:relative}
-  .cl-card-img{aspect-ratio:1;background:var(--c-muted-bg);display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .cl-card{background:var(--bg-50, var(--c-surface));border:1px solid var(--fg-10, var(--c-border));overflow:hidden;position:relative}
+  .cl-card-img{aspect-ratio:1;background:var(--bg-75, var(--c-muted-bg));display:flex;align-items:center;justify-content:center;overflow:hidden}
   .cl-card-img img{width:100%;height:100%;object-fit:cover}
   .cl-card-body{padding:20px}
-  .cl-card-cat{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--c-muted);margin-bottom:8px}
-  .cl-card-name{font-family:var(--ff-display);font-size:18px;font-weight:700;color:var(--c-ink);margin-bottom:6px}
-  .cl-card-meta{font-family:var(--ff-ui);font-size:9px;letter-spacing:1px;color:var(--c-muted);text-transform:uppercase}
-  .cl-card-elig--needs{font-family:var(--ff-ui);font-size:8px;letter-spacing:1px;color:var(--c-burg);text-transform:uppercase;margin-top:8px;display:block}
-  .cl-card-elig--ok{font-family:var(--ff-ui);font-size:8px;letter-spacing:1px;color:var(--c-muted);text-transform:uppercase;margin-top:8px;display:block}
+  .cl-card-cat{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:8px}
+  .cl-card-name{font-family:var(--ff-display);font-size:18px;font-weight:700;color:var(--fg, var(--c-ink));margin-bottom:6px}
+  .cl-card-meta{font-family:var(--ff-ui);font-size:9px;letter-spacing:1px;color:var(--fg-60, var(--c-muted));text-transform:uppercase}
+  .cl-card-elig--needs{font-family:var(--ff-ui);font-size:8px;letter-spacing:1px;color:var(--lipstick, var(--c-burg));text-transform:uppercase;margin-top:8px;display:block}
+  .cl-card-elig--ok{font-family:var(--ff-ui);font-size:8px;letter-spacing:1px;color:var(--fg-60, var(--c-muted));text-transform:uppercase;margin-top:8px;display:block}
   .cl-delete{position:absolute;top:12px;right:12px;background:rgba(40,21,12,0.8);color:#FAF6F1;border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;line-height:1}
-  .cl-empty{text-align:center;padding:80px 40px;background:var(--c-surface);border:1px solid var(--c-border)}
-  .cl-empty-icon{font-family:var(--ff-display);font-size:64px;color:var(--c-ink);opacity:.2;margin-bottom:20px}
-  .cl-empty-text{font-family:var(--ff-body);font-size:20px;font-style:italic;color:var(--c-muted);margin-bottom:32px}
+  .cl-empty{text-align:center;padding:80px 40px;background:var(--bg-50, var(--c-surface));border:1px solid var(--fg-10, var(--c-border))}
+  .cl-empty-icon{font-family:var(--ff-display);font-size:64px;color:var(--fg, var(--c-ink));opacity:.2;margin-bottom:20px}
+  .cl-empty-text{font-family:var(--ff-body);font-size:20px;font-style:italic;color:var(--fg-60, var(--c-muted));margin-bottom:32px}
   .cl-cta{margin-top:60px;text-align:center}
-  .cl-cta a{display:inline-block;padding:16px 40px;background:var(--c-ink);color:#FAF6F1;text-decoration:none;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase}
+  .cl-cta a{display:inline-block;padding:16px 40px;background:var(--fg, var(--c-ink));color:#FAF6F1;text-decoration:none;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase}
   @media(max-width:640px){
-    .cl-topbar{padding:16px 20px}
-    .cl-wrap{padding:40px 20px}
     .cl-stats{grid-template-columns:1fr}
     .cl-stat{display:flex;align-items:center;gap:16px;padding:16px 20px}
     .cl-stat-num{font-size:32px}
     .cl-guide-cols{grid-template-columns:1fr}
+    .cl-filter-row{flex-direction:column;align-items:flex-start}
+    .cl-search-input{width:100%}
   }
 `;
 
 // ── Component ─────────────────────────────────────────────────────────────────
+// Composed implementation:
+//   Shell  → Option B (my-naia.closet.tsx): MyNaiaLayout, NADINE header, My nAia navigation
+//   Content → Option A (closet._index.tsx): Digital Wardrobe title, stats, Add to Wardrobe
+//             form, filters, card grid, Style Me CTA
+//   Logic  → existing staging: Cloudinary, eligibility, journey events, delete, validation
 
 export default function Closet() {
   const { items } = useLoaderData<typeof loader>();
@@ -200,6 +208,7 @@ export default function Closet() {
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [activeCategory, setActiveCategory] = useState("ALL");
+  const [query, setQuery] = useState("");
 
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -213,9 +222,16 @@ export default function Closet() {
   const [newSeasons, setNewSeasons] = useState<string[]>([]);
   const [imgMeta, setImgMeta] = useState<{ width?: number; height?: number; format?: string; bytes?: number }>({});
 
-  const filtered = activeCategory === "ALL" ? items : items.filter((i: any) => i.category === activeCategory);
+  const filtered = items.filter((item: any) => {
+    const matchesCat = activeCategory === "ALL" || item.category === activeCategory;
+    const q = query.trim().toLowerCase();
+    const matchesSearch = !q ||
+      (item.name ?? "").toLowerCase().includes(q) ||
+      item.category.toLowerCase().includes(q) ||
+      (item.brand ?? "").toLowerCase().includes(q);
+    return matchesCat && matchesSearch;
+  });
 
-  // Escape key closes the inline add form
   useEffect(() => {
     if (!showAddForm) return;
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setShowAddForm(false); };
@@ -227,7 +243,6 @@ export default function Closet() {
     setUploading(true);
     setUploadError(null);
 
-    // MIME validation — must be an image
     if (!file.type.startsWith("image/")) {
       setUploadError("Please upload an image file (JPG, PNG, WEBP, etc.).");
       setUploading(false);
@@ -310,19 +325,21 @@ export default function Closet() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--c-bg)" }}>
+    // Option B shell: NADINE global header + My nAia navigation
+    <MyNaiaLayout>
       <style>{css}</style>
 
-      <div className="cl-topbar">
-        <div className="cl-topbar-logo">nAia</div>
-        <Link to="/my-naia" className="cl-topbar-link">← Dashboard</Link>
-      </div>
+      <div className="mn-page-sections">
+        {/* Option B navigation: back to My nAia Overview */}
+        <Link to="/my-naia" className="mn-back-link">
+          <span aria-hidden="true">←</span> Back to Overview
+        </Link>
 
-      <div className="cl-wrap">
+        {/* Option A page header */}
         <h1 className="cl-headline">Digital Wardrobe</h1>
         <p className="cl-sub">Upload, save, and style your pieces</p>
 
-        {/* Stats row */}
+        {/* Option A: Total Pieces / Categories / Brands */}
         <div className="cl-stats">
           <div className="cl-stat">
             <div className="cl-stat-num">{items.length}</div>
@@ -338,11 +355,14 @@ export default function Closet() {
           </div>
         </div>
 
-        {/* Add CTA / inline form */}
+        {/* Option A: + Add a Piece CTA */}
         {!showAddForm && (
-          <button className="cl-add-btn" onClick={() => setShowAddForm(true)}>+ Add a Piece</button>
+          <button type="button" className="cl-add-btn" onClick={() => setShowAddForm(true)}>
+            + Add a Piece
+          </button>
         )}
 
+        {/* Option A: Add to Wardrobe inline form */}
         {showAddForm && (
           <div className="cl-form">
             <div className="cl-form-header">
@@ -350,7 +370,7 @@ export default function Closet() {
               <button type="button" className="cl-form-cancel" onClick={() => setShowAddForm(false)}>Cancel</button>
             </div>
 
-            {/* Photo guide */}
+            {/* Photo guide integrated inside Add to Wardrobe panel */}
             <div className="cl-guide">
               <div className="cl-guide-header">Photo guide</div>
               <div className="cl-guide-cols">
@@ -406,7 +426,13 @@ export default function Closet() {
             {uploadError && <p className="cl-upload-error">{uploadError}</p>}
 
             <div className="cl-label">Name *</div>
-            <input className="cl-input" type="text" placeholder="e.g. Black silk blazer" value={newName} onChange={e => setNewName(e.target.value)} />
+            <input
+              className="cl-input"
+              type="text"
+              placeholder="e.g. Black silk blazer"
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+            />
 
             <div className="cl-label">Category *</div>
             <div className="cl-pills">
@@ -446,35 +472,70 @@ export default function Closet() {
             </div>
 
             <div className="cl-label">Brand (optional)</div>
-            <input className="cl-input" type="text" placeholder="Brand name" value={newBrand} onChange={e => setNewBrand(e.target.value)} />
+            <input
+              className="cl-input"
+              type="text"
+              placeholder="Brand name"
+              value={newBrand}
+              onChange={e => setNewBrand(e.target.value)}
+            />
 
-            <button className="cl-submit" onClick={handleAdd} disabled={!newName || !newImageUrl || uploading}>
+            <button
+              type="button"
+              className="cl-submit"
+              onClick={handleAdd}
+              disabled={!newName || !newImageUrl || uploading}
+            >
               {uploading ? "Uploading…" : "Add to Wardrobe"}
             </button>
           </div>
         )}
 
-        {/* Filters */}
-        <div className="cl-filters">
-          {["ALL", ...CATEGORIES].map(cat => (
-            <button key={cat} type="button" onClick={() => setActiveCategory(cat)} className={`cl-filter${activeCategory === cat ? " on" : ""}`}>
-              {cat === "ALL" ? "All" : cat.charAt(0) + cat.slice(1).toLowerCase()}
-            </button>
-          ))}
+        {/* Option A: category filters + Option B: search — combined row */}
+        <div className="cl-filter-row">
+          <div className="cl-filters">
+            {["ALL", ...CATEGORIES].map(cat => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setActiveCategory(cat)}
+                className={`cl-filter${activeCategory === cat ? " on" : ""}`}
+              >
+                {cat === "ALL" ? "All" : cat.charAt(0) + cat.slice(1).toLowerCase()}
+              </button>
+            ))}
+          </div>
+          <label className="cl-search-label">
+            <span>Search</span>
+            <input
+              type="text"
+              className="cl-search-input"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Ivory trouser…"
+            />
+          </label>
         </div>
 
         {/* Item count */}
         <p className="cl-count">{filtered.length} {filtered.length === 1 ? "piece" : "pieces"}</p>
 
-        {/* Card grid */}
+        {/* Option A: card grid */}
         {filtered.length === 0 ? (
           <div className="cl-empty">
             <div className="cl-empty-icon">◇</div>
             <p className="cl-empty-text">
-              {items.length === 0 ? "No pieces yet. Add your first to get started." : "No pieces in this category."}
+              {items.length === 0
+                ? "No pieces yet. Add your first to get started."
+                : "No pieces match this view."}
             </p>
             {items.length === 0 && (
-              <button className="cl-add-btn" style={{ width: "auto", display: "inline-block", marginBottom: 0 }} onClick={() => setShowAddForm(true)}>
+              <button
+                type="button"
+                className="cl-add-btn"
+                style={{ width: "auto", display: "inline-block", marginBottom: 0 }}
+                onClick={() => setShowAddForm(true)}
+              >
                 Add Your First Piece
               </button>
             )}
@@ -518,11 +579,11 @@ export default function Closet() {
           </div>
         )}
 
-        {/* Bottom CTA */}
+        {/* Option A: Style Me CTA → canonical /style-me route */}
         <div className="cl-cta">
-          <Link to="/quick-style">Style Me →</Link>
+          <Link to="/style-me">Style Me →</Link>
         </div>
       </div>
-    </div>
+    </MyNaiaLayout>
   );
 }
