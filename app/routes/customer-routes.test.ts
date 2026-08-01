@@ -365,4 +365,97 @@ describe("G — dashboard hygiene: no /quick-style links in main dashboard", () 
       "has post-wear review entry point"
     );
   });
+
+  it("my-naia._index.tsx has no broken /my-naia/styleme/looks links", () => {
+    const src = route("my-naia._index.tsx");
+    assert.ok(!src.includes("/my-naia/styleme/looks"), "no /my-naia/styleme/looks hrefs");
+  });
+
+  it("my-naia._index.tsx has no /quick-style links", () => {
+    const src = route("my-naia._index.tsx");
+    assert.ok(!src.includes("/quick-style"), "no /quick-style links");
+  });
+
+  it("my-naia._index.tsx feedback path is single: only /post-wear-review", () => {
+    const src = route("my-naia._index.tsx");
+    assert.ok(src.includes("/post-wear-review"), "has /post-wear-review link");
+    assert.ok(!src.includes("/my-naia/styleme/looks"), "no broken feedback links");
+  });
+});
+
+// ── H. Digital Wardrobe (closet) — composed-shell invariants ────────────────
+//   Enforces the approved composition: Option B shell (MyNaiaLayout) +
+//   Option A page content (Digital Wardrobe title, stats, Add to Wardrobe,
+//   filters, card grid, Style Me → /style-me).
+
+describe("H — Digital Wardrobe: composed shell + content invariants", () => {
+  it("closet._index.tsx uses MyNaiaLayout (NADINE global header)", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("MyNaiaLayout"), "imports MyNaiaLayout");
+    assert.ok(src.includes("~/components/my-naia/MyNaiaLayout"), "from correct path");
+  });
+
+  it("closet._index.tsx loads naiaStyles (My nAia design system CSS)", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("naiaStyles"), "imports naiaStyles");
+    assert.ok(src.includes("naia-design-system.css"), "from naia-design-system.css");
+  });
+
+  it("closet._index.tsx has no standalone cl-topbar (removed in favour of MyNaiaLayout)", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(!src.includes("cl-topbar"), "no cl-topbar class");
+    assert.ok(!src.includes("cl-topbar-logo"), "no cl-topbar-logo");
+    assert.ok(!src.includes("cl-topbar-link"), "no cl-topbar-link");
+  });
+
+  it("closet._index.tsx uses Digital Wardrobe title from Option A", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("Digital Wardrobe"), "cl-headline says Digital Wardrobe");
+    assert.ok(src.includes("cl-headline"), "uses cl-headline class");
+  });
+
+  it("closet._index.tsx has Total Pieces / Categories / Brands stats from Option A", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("Total Pieces"), "has Total Pieces stat");
+    assert.ok(src.includes("Categories"), "has Categories stat");
+    assert.ok(src.includes("Brands"), "has Brands stat");
+    assert.ok(src.includes("cl-stats"), "uses cl-stats grid");
+  });
+
+  it("closet._index.tsx Add to Wardrobe form is from Option A (inline panel, not overlay)", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("Add to Wardrobe"), "has Add to Wardrobe panel title");
+    assert.ok(src.includes("cl-form"), "uses cl-form class");
+    assert.ok(src.includes("+ Add a Piece"), "has + Add a Piece CTA");
+  });
+
+  it("closet._index.tsx Style Me CTA links to /style-me (not deprecated /quick-style)", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes('to="/style-me"') || src.includes("to='/style-me'") || src.includes('"/style-me"'), "Style Me links to /style-me");
+    assert.ok(!src.includes("/quick-style"), "no /quick-style links");
+  });
+
+  it("closet._index.tsx server action rejects imageUrl values not from Cloudinary", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("res.cloudinary.com"), "validates Cloudinary hostname");
+    assert.ok(src.includes("Image must be uploaded via the app"), "returns rejection error message");
+  });
+
+  it("closet._index.tsx client-side MIME validation rejects non-image files", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("file.type.startsWith(\"image/\")"), "MIME type guard");
+    assert.ok(src.includes("5 * 1024 * 1024"), "5 MB size guard");
+  });
+
+  it("closet._index.tsx has search filter (query state from Option B)", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("query"), "has query state");
+    assert.ok(src.includes("Ivory trouser"), "has search placeholder text");
+  });
+
+  it("closet._index.tsx Back to Overview link goes to /my-naia", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("Back to Overview"), "has Back to Overview link text");
+    assert.ok(src.includes('to="/my-naia"') || src.includes("to='/my-naia'"), "links to /my-naia");
+  });
 });

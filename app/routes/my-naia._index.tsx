@@ -228,7 +228,7 @@ export default function MyNaiaOverview() {
                     return (
                       <article key={session.id} style={{ display: "flex", flexDirection: "column" }}>
                         <Link
-                          to={`/my-naia/styleme/looks/${session.id}`}
+                          to={`/style-me/result?sessionId=${session.id}`}
                           style={{
                             display: "grid", placeItems: "center", aspectRatio: "4/5",
                             border: "1px solid var(--fg-10)",
@@ -251,7 +251,7 @@ export default function MyNaiaOverview() {
                         <div className="mn-look-date" style={{ marginTop: "0.75rem" }}>
                           {fmtDate(session.createdAt)}{session.occasion ? ` · ${session.occasion}` : ""}
                         </div>
-                        <Link to={`/my-naia/styleme/looks/${session.id}`} className="mn-look-title" style={{ marginTop: "0.375rem" }}>
+                        <Link to={`/style-me/result?sessionId=${session.id}`} className="mn-look-title" style={{ marginTop: "0.375rem" }}>
                           {suggestion?.outfitName ?? "nAia Look"}
                         </Link>
                         {(session.currentMood || session.desiredFeeling) && (
