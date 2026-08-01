@@ -8,6 +8,7 @@ import { runStageBAssessment } from "~/lib/ai/closet-eligibility.server";
 import { emitClosetItemAdded, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
+import { verifyCloudinaryAsset, deleteCloudinaryAsset, buildPrivateDownloadUrl, getCloudinaryConfig, validatePublicIdOwnership } from "~/lib/cloudinary-admin.server";
 
 // Option B shell: MyNaiaLayout + naiaStyles (NADINE header, My nAia navigation)
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
@@ -43,6 +44,36 @@ function eligibilityStatus(elig: ClosetTryOnEligibility | null, hint: string | n
   return { label: display.label, hint: hint || display.fallbackHint, isNeeds: elig === "needs-clearer-photo" };
 }
 
+// ── Server-side upload validation helpers ─────────────────────────────────────
+
+function extractCloudinaryPublicId(url: string): string | null {
+  try {
+    const pathname = new URL(url).pathname;
+    // Path: /{cloud}/image/{deliveryType}/[v{version}/]{public_id}.{ext}
+    const match = pathname.match(
+      /\/image\/(?:private|upload|authenticated)\/(?:v\d+\/)?(.+)\.[a-z0-9]+$/i,
+    );
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Checks first 12 bytes of a fetched buffer for known image file signatures.
+function detectImageFormatFromBytes(header: Uint8Array): string | null {
+  if (header.length < 4) return null;
+  if (header[0] === 0xFF && header[1] === 0xD8 && header[2] === 0xFF) return "jpeg";
+  if (header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47) return "png";
+  if (header[0] === 0x47 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x38) return "gif";
+  if (
+    header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46 &&
+    header.length >= 12 &&
+    header[8] === 0x57 && header[9] === 0x45 && header[10] === 0x42 && header[11] === 0x50
+  ) return "webp";
+  if (header.length >= 8 && header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70) return "heic";
+  return null;
+}
+
 export function meta() {
   return [{ title: "Digital Wardrobe | nAia" }];
 }
@@ -75,15 +106,11 @@ export async function action({ request }: ActionFunctionArgs) {
     const brand = formData.get("brand") as string;
     const occasions = JSON.parse((formData.get("occasions") as string) || "[]");
     const seasons = JSON.parse((formData.get("seasons") as string) || "[]");
-    const imageWidth  = formData.get("imageWidth")  ? Number(formData.get("imageWidth"))  : undefined;
-    const imageHeight = formData.get("imageHeight") ? Number(formData.get("imageHeight")) : undefined;
-    const imageFormat = (formData.get("imageFormat") as string | null) ?? undefined;
-    const imageBytes  = formData.get("imageBytes")  ? Number(formData.get("imageBytes"))  : undefined;
-
     if (!name || !category || !imageUrl) return data({ error: "Name and category required" }, { status: 400 });
 
     // ── Server-side upload validation ─────────────────────────────────────────
-    // All checks run BEFORE any DB write. A failing check returns 400 and exits.
+    // All checks run BEFORE any DB write. Rejected uploads have their Cloudinary
+    // asset deleted so orphaned assets do not accumulate in storage.
 
     // 1. Cloudinary URL hostname — prevents raw-POST bypass with arbitrary URLs.
     const allowedHosts = ["res.cloudinary.com", "res-4.cloudinary.com"];
@@ -97,40 +124,96 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ error: "Image must be uploaded via the app." }, { status: 400 });
     }
 
-    // 2. Format allowlist — Cloudinary reports the detected format after upload.
-    //    This catches any format Cloudinary accepted that we do not want to persist.
+    // 2. Extract public_id and validate it belongs to this customer's folder.
+    const publicId = extractCloudinaryPublicId(imageUrl);
+    if (!publicId) {
+      return data({ error: "Invalid image URL format." }, { status: 400 });
+    }
+    const ownership = validatePublicIdOwnership(publicId, customer.id);
+    if (!ownership.ok) {
+      return data({ error: ownership.error }, { status: 400 });
+    }
+
+    // 3. Verify via Cloudinary Admin API — authoritative format/bytes/dimensions
+    //    (never trusted from client-provided form data).
+    const verify = await verifyCloudinaryAsset(publicId, "private");
+    if (!verify.ok) {
+      await deleteCloudinaryAsset(publicId, "private");
+      return data({ error: "Image could not be verified. Please upload again." }, { status: 400 });
+    }
+
+    const serverFormat = verify.asset.format.toLowerCase();
+    const serverBytes  = verify.asset.bytes;
+    const serverWidth  = verify.asset.width;
+    const serverHeight = verify.asset.height;
+
+    // 4. Format allowlist — derived from Admin API, not client-provided value.
     const ALLOWED_FORMATS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"]);
-    if (imageFormat && !ALLOWED_FORMATS.has(imageFormat.toLowerCase())) {
-      return data({ error: `File type "${imageFormat}" is not supported. Use JPG, PNG, WEBP, or HEIC.` }, { status: 400 });
+    if (!ALLOWED_FORMATS.has(serverFormat)) {
+      await deleteCloudinaryAsset(publicId, "private");
+      return data({ error: `File type "${serverFormat}" is not accepted. Use JPG, PNG, WEBP, or HEIC.` }, { status: 400 });
     }
 
-    // 3. File-size cap — enforced by Cloudinary during upload, but double-checked
-    //    here against the bytes value Cloudinary reports back.
+    // 5. File-size cap — from Admin API, not client-reported bytes.
     const SERVER_MAX_BYTES = 5 * 1024 * 1024;
-    if (imageBytes !== undefined && imageBytes > SERVER_MAX_BYTES) {
-      return data({ error: `Image is too large (${(imageBytes / 1024 / 1024).toFixed(1)} MB). Maximum is 5 MB.` }, { status: 400 });
+    if (serverBytes > SERVER_MAX_BYTES) {
+      await deleteCloudinaryAsset(publicId, "private");
+      return data({ error: `Image is too large (${(serverBytes / 1024 / 1024).toFixed(1)} MB). Maximum is 5 MB.` }, { status: 400 });
     }
 
-    // 4. Dimension bounds — minimum prevents illegibly small images from reaching
-    //    the try-on pipeline; maximum prevents abnormally large images.
+    // 6. Dimension bounds — serverWidth / serverHeight from Admin API, not client form data.
     const MIN_DIM = 200;
     const MAX_DIM = 8000;
-    if (imageWidth !== undefined && imageWidth < MIN_DIM) {
-      return data({ error: `Image width (${imageWidth} px) is below the minimum of ${MIN_DIM} px.` }, { status: 400 });
+    if (serverWidth !== null && serverWidth < MIN_DIM) {
+      await deleteCloudinaryAsset(publicId, "private");
+      return data({ error: `Image width (${serverWidth} px) is below the minimum of ${MIN_DIM} px.` }, { status: 400 });
     }
-    if (imageHeight !== undefined && imageHeight < MIN_DIM) {
-      return data({ error: `Image height (${imageHeight} px) is below the minimum of ${MIN_DIM} px.` }, { status: 400 });
+    if (serverHeight !== null && serverHeight < MIN_DIM) {
+      await deleteCloudinaryAsset(publicId, "private");
+      return data({ error: `Image height (${serverHeight} px) is below the minimum of ${MIN_DIM} px.` }, { status: 400 });
     }
-    if (imageWidth !== undefined && imageWidth > MAX_DIM) {
-      return data({ error: `Image width (${imageWidth} px) exceeds the maximum of ${MAX_DIM} px.` }, { status: 400 });
+    if (serverWidth !== null && serverWidth > MAX_DIM) {
+      await deleteCloudinaryAsset(publicId, "private");
+      return data({ error: `Image width (${serverWidth} px) exceeds the maximum of ${MAX_DIM} px.` }, { status: 400 });
     }
-    if (imageHeight !== undefined && imageHeight > MAX_DIM) {
-      return data({ error: `Image height (${imageHeight} px) exceeds the maximum of ${MAX_DIM} px.` }, { status: 400 });
+    if (serverHeight !== null && serverHeight > MAX_DIM) {
+      await deleteCloudinaryAsset(publicId, "private");
+      return data({ error: `Image height (${serverHeight} px) exceeds the maximum of ${MAX_DIM} px.` }, { status: 400 });
+    }
+
+    // 7. Server-side magic-byte check — fetch the first 12 bytes from Cloudinary
+    //    via a signed download URL (Range: bytes=0-11) and verify the file signature.
+    //    This confirms the actual stored bytes match a supported image format,
+    //    independent of any client-reported format string.
+    const cfg = getCloudinaryConfig();
+    if (cfg) {
+      const downloadUrl = buildPrivateDownloadUrl(cfg, publicId, serverFormat, "private");
+      try {
+        const byteRes = await fetch(downloadUrl, {
+          headers: { Range: "bytes=0-11" },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (byteRes.ok) {
+          const buf = await byteRes.arrayBuffer();
+          const header = new Uint8Array(buf);
+          if (!detectImageFormatFromBytes(header)) {
+            await deleteCloudinaryAsset(publicId, "private");
+            return data({ error: "File signature does not match a supported image format." }, { status: 400 });
+          }
+        }
+      } catch {
+        await deleteCloudinaryAsset(publicId, "private");
+        return data({ error: "Image verification timed out. Please try again." }, { status: 400 });
+      }
     }
     // ──────────────────────────────────────────────────────────────────────────
 
     const stageA = assessClosetEligibility({
-      prismaCategory: category, width: imageWidth, height: imageHeight, format: imageFormat, bytes: imageBytes,
+      prismaCategory: category,
+      width: serverWidth ?? undefined,
+      height: serverHeight ?? undefined,
+      format: serverFormat,
+      bytes: serverBytes,
     });
 
     const newItem = await prisma.closetItem.create({
@@ -180,22 +263,8 @@ export async function action({ request }: ActionFunctionArgs) {
 // Shell-level overrides (mn-page-head, mn-body, mn-page-sections) are scoped to
 // this route's injected <style> tag — they only apply while this page is loaded.
 const css = `
-  /* ── Shell calibration for Digital Wardrobe density ── */
-  /* Reduce page-head top padding: Lovable's is generous but the closet page
-     is content-dense — 2 rem top feels proportional without cropping the heading */
-  .mn-page-head{padding-top:2rem}
-  @media(min-width:640px){.mn-page-head{padding-top:2.5rem}}
-  /* MY nAia. heading: 5.5 rem in the global sheet is correct for the overview.
-     On the closet page (sidebar+content layout) 3.5 rem matches the visual weight
-     of the Lovable 64 px cl-headline that anchors the page below it. */
-  @media(min-width:1024px){.mn-page-head-title{font-size:3.5rem}}
-  /* Reduce body top padding so the sidebar+content column starts sooner */
-  .mn-body{padding-top:1.5rem}
-  @media(min-width:640px){.mn-body{padding-top:2rem}}
-  @media(min-width:1024px){.mn-body{padding-top:2rem}}
-  /* mn-page-sections gap: the global value is 4 rem (64 px) — right for the overview
-     page's distinct sections. Here cl-* elements own their own margin-bottom spacing,
-     so the section gap must be collapsed to zero. */
+  /* ── Shell calibration: mn-body--compact handles top offset via naia-design-system.css.
+     mn-page-sections gap collapses to zero — cl-* elements own their own spacing. */
   .mn-page-sections{gap:0}
   .mn-page-sections>.mn-back-link{display:block;margin-bottom:1.75rem}
 
@@ -270,7 +339,6 @@ const css = `
   .cl-cta{margin-top:48px;text-align:center}
   .cl-cta a{display:inline-block;padding:14px 36px;background:var(--fg, var(--c-ink));color:#FAF6F1;text-decoration:none;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase}
   @media(max-width:1023px){
-    .mn-page-head{padding-top:2rem}
     .mn-page-sections>.mn-back-link{margin-bottom:1.25rem}
   }
   @media(max-width:640px){
@@ -481,8 +549,8 @@ export default function Closet() {
   }
 
   return (
-    // Option B shell: NADINE global header + My nAia navigation
-    <MyNaiaLayout>
+    // Option B shell: compact variant — NADINE header + sidebar, no MY nAia. masthead
+    <MyNaiaLayout compact>
       <style>{css}</style>
 
       <div className="mn-page-sections">

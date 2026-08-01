@@ -107,6 +107,9 @@ export interface CloudinaryAssetInfo {
   type: string;         // "private" | "upload" | "authenticated"
   version: string;
   format: string;
+  bytes: number;         // server-verified file size in bytes
+  width: number | null;  // server-verified image width (null for non-image or unavailable)
+  height: number | null; // server-verified image height
 }
 
 export type VerifyAssetFn = (
@@ -140,6 +143,9 @@ export async function verifyCloudinaryAsset(
       type?: string;
       version?: number;
       format?: string;
+      bytes?: number;
+      width?: number;
+      height?: number;
     };
 
     return {
@@ -150,6 +156,9 @@ export async function verifyCloudinaryAsset(
         type: json.type ?? "",
         version: json.version != null ? String(json.version) : "",
         format: json.format ?? "",
+        bytes: json.bytes ?? 0,
+        width: json.width ?? null,
+        height: json.height ?? null,
       },
     };
   } catch {

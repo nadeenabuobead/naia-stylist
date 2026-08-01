@@ -498,7 +498,7 @@ describe("I — BUG-5: closet-sourced saved look items carry imageUrl from close
   });
 });
 
-describe("J — upload security: magic-byte validation, image decode, and server-side guards", () => {
+describe("J — upload security: client magic-byte validation + server-side Admin API + byte fetch + deletion", () => {
   it("closet._index.tsx defines IMAGE_SIGNATURES with magic bytes for JPEG PNG GIF WEBP HEIC", () => {
     const src = route("closet._index.tsx");
     assert.ok(src.includes("IMAGE_SIGNATURES"), "has IMAGE_SIGNATURES constant");
@@ -509,7 +509,7 @@ describe("J — upload security: magic-byte validation, image decode, and server
     assert.ok(src.includes("0x66, 0x74, 0x79, 0x70"), "HEIC ftyp magic bytes present");
   });
 
-  it("closet._index.tsx reads 12-byte file header for magic-byte signature check", () => {
+  it("closet._index.tsx reads 12-byte file header for client-side magic-byte signature check", () => {
     const src = route("closet._index.tsx");
     assert.ok(src.includes("file.slice(0, 12).arrayBuffer()"), "reads first 12 bytes for signature check");
     assert.ok(src.includes("new Uint8Array"), "wraps buffer as Uint8Array for byte comparison");
@@ -525,7 +525,7 @@ describe("J — upload security: magic-byte validation, image decode, and server
     const src = route("closet._index.tsx");
     assert.ok(
       src.includes("does not appear to be a valid image"),
-      "returns user-facing error when signature check fails"
+      "returns user-facing error when client-side signature check fails"
     );
   });
 
@@ -554,7 +554,36 @@ describe("J — upload security: magic-byte validation, image decode, and server
     assert.ok(src.includes("appears to be empty"), "user-facing error for empty file");
   });
 
-  it("closet._index.tsx server action has ALLOWED_FORMATS allowlist checked before prisma.closetItem.create", () => {
+  it("closet._index.tsx server action verifies asset via Cloudinary Admin API before any DB write", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("verifyCloudinaryAsset"), "calls verifyCloudinaryAsset");
+    assert.ok(
+      src.indexOf("verifyCloudinaryAsset") < src.indexOf("prisma.closetItem.create"),
+      "Admin API verification precedes DB write"
+    );
+  });
+
+  it("closet._index.tsx server action deletes Cloudinary asset on any validation failure", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("deleteCloudinaryAsset"), "calls deleteCloudinaryAsset on rejection");
+    const deleteCount = (src.match(/deleteCloudinaryAsset/g) ?? []).length;
+    assert.ok(
+      deleteCount >= 2,
+      `expected deleteCloudinaryAsset on multiple rejection paths; found ${deleteCount}`
+    );
+  });
+
+  it("closet._index.tsx server action extracts publicId from Cloudinary URL and validates ownership", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("extractCloudinaryPublicId"), "calls extractCloudinaryPublicId helper");
+    assert.ok(src.includes("validatePublicIdOwnership"), "calls validatePublicIdOwnership");
+    assert.ok(
+      src.indexOf("extractCloudinaryPublicId") < src.indexOf("prisma.closetItem.create"),
+      "publicId extraction precedes DB write"
+    );
+  });
+
+  it("closet._index.tsx server action has ALLOWED_FORMATS allowlist from Admin API before prisma.closetItem.create", () => {
     const src = route("closet._index.tsx");
     assert.ok(src.includes("ALLOWED_FORMATS"), "defines ALLOWED_FORMATS set");
     assert.ok(src.includes('"jpg"'), "allowlist includes jpg");
@@ -566,19 +595,20 @@ describe("J — upload security: magic-byte validation, image decode, and server
     );
   });
 
-  it("closet._index.tsx server action enforces file-size cap before prisma.closetItem.create", () => {
+  it("closet._index.tsx server action enforces file-size cap (Admin API serverBytes) before prisma.closetItem.create", () => {
     const src = route("closet._index.tsx");
     assert.ok(src.includes("SERVER_MAX_BYTES"), "defines SERVER_MAX_BYTES server-side limit");
+    assert.ok(src.includes("serverBytes"), "uses serverBytes from Admin API, not client form data");
     assert.ok(
       src.indexOf("SERVER_MAX_BYTES") < src.indexOf("prisma.closetItem.create"),
       "size check precedes DB write"
     );
   });
 
-  it("closet._index.tsx server action enforces dimension bounds before prisma.closetItem.create", () => {
+  it("closet._index.tsx server action enforces dimension bounds (Admin API serverWidth/serverHeight) before prisma.closetItem.create", () => {
     const src = route("closet._index.tsx");
-    assert.ok(src.includes("imageWidth"), "reads imageWidth from submitted form data");
-    assert.ok(src.includes("imageHeight"), "reads imageHeight from submitted form data");
+    assert.ok(src.includes("serverWidth"), "uses serverWidth from Admin API, not client form data");
+    assert.ok(src.includes("serverHeight"), "uses serverHeight from Admin API, not client form data");
     const dimCheck = src.includes("MIN_DIM") && src.includes("MAX_DIM");
     assert.ok(dimCheck, "defines both MIN_DIM and MAX_DIM server-side constants");
     assert.ok(
@@ -587,12 +617,23 @@ describe("J — upload security: magic-byte validation, image decode, and server
     );
   });
 
+  it("closet._index.tsx server action fetches first 12 bytes via buildPrivateDownloadUrl for magic-byte check", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("buildPrivateDownloadUrl"), "uses buildPrivateDownloadUrl for server-side download");
+    assert.ok(src.includes("bytes=0-11"), "requests only first 12 bytes via Range header");
+    assert.ok(src.includes("detectImageFormatFromBytes"), "checks server-fetched magic bytes");
+    assert.ok(
+      src.indexOf("buildPrivateDownloadUrl") < src.indexOf("prisma.closetItem.create"),
+      "server magic-byte fetch precedes DB write"
+    );
+  });
+
   it("closet._index.tsx server validation failures return 400 — rejected uploads never create DB records", () => {
     const src = route("closet._index.tsx");
     const status400Count = (src.match(/status: 400/g) ?? []).length;
     assert.ok(
-      status400Count >= 4,
-      `expected at least 4 server-side 400 rejections (format, size, width, height); found ${status400Count}`
+      status400Count >= 8,
+      `expected at least 8 server-side 400 rejections (hostname, publicId, ownership, Admin API, format, size, dimensions, magic bytes); found ${status400Count}`
     );
   });
 });

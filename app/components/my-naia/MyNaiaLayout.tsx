@@ -92,9 +92,10 @@ const FOOTER_COLS = [
 
 interface Props {
   children: React.ReactNode;
+  compact?: boolean;
 }
 
-export default function MyNaiaLayout({ children }: Props) {
+export default function MyNaiaLayout({ children, compact = false }: Props) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [footerOpen, setFooterOpen] = useState<string | null>("customer care");
   const { pathname } = useLocation();
@@ -142,17 +143,19 @@ export default function MyNaiaLayout({ children }: Props) {
         </div>
       </header>
 
-      {/* ── MY nAia. heading ── */}
-      <section className="mn-page-head">
-        <div className="mn-page-head-meta">
-          <div />
-          <span className="mn-page-head-badge">Preview · Sample Information</span>
-        </div>
-        <h1 className="mn-page-head-title">
-          MY{" "}
-          <span className="mn-title-accent">nAia.</span>
-        </h1>
-      </section>
+      {/* ── MY nAia. heading — suppressed in compact (feature-page) mode ── */}
+      {!compact && (
+        <section className="mn-page-head">
+          <div className="mn-page-head-meta">
+            <div />
+            <span className="mn-page-head-badge">Preview · Sample Information</span>
+          </div>
+          <h1 className="mn-page-head-title">
+            MY{" "}
+            <span className="mn-title-accent">nAia.</span>
+          </h1>
+        </section>
+      )}
 
       {/* ── Mobile nav trigger (< lg) ── */}
       <div className="mn-mobile-trigger">
@@ -207,7 +210,7 @@ export default function MyNaiaLayout({ children }: Props) {
       )}
 
       {/* ── Two-column body ── */}
-      <section className="mn-body">
+      <section className={compact ? "mn-body mn-body--compact" : "mn-body"}>
         {/* Desktop sidebar (≥ lg) */}
         <aside className="mn-sidebar" aria-label="My nAia navigation">
           <div className="mn-sidebar-inner">
