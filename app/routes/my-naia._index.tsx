@@ -265,19 +265,19 @@ export default function MyNaiaOverview() {
                           {sourcing}
                         </div>
                         <div className="mn-look-actions" style={{ marginTop: "0.75rem" }}>
-                          <Link to={`/my-naia/styleme/looks/${session.id}`} className="mn-look-action-link">View Look</Link>
+                          <Link to={`/style-me/result?sessionId=${session.id}`} className="mn-look-action-link">View Look</Link>
                           <span className="mn-look-dot" aria-hidden="true">·</span>
-                          <Link to={`/my-naia/styleme/looks/${session.id}/refine`} className="mn-look-action-link">Refine</Link>
+                          <Link to={`/style-me?refine=${session.id}`} className="mn-look-action-link">Refine</Link>
                           {!session.review && (
                             <>
                               <span className="mn-look-dot" aria-hidden="true">·</span>
-                              <Link to={`/my-naia/styleme/looks/${session.id}/feedback`} className="mn-look-action-link">Give Feedback</Link>
+                              <Link to={`/post-wear-review?sessionId=${session.id}`} className="mn-look-action-link">Give Feedback</Link>
                             </>
                           )}
                           {session.review && (
                             <>
                               <span className="mn-look-dot" aria-hidden="true">·</span>
-                              <Link to={`/my-naia/styleme/looks/${session.id}/feedback`} className="mn-look-action-link">View Feedback</Link>
+                              <Link to={`/post-wear-review?sessionId=${session.id}`} className="mn-look-action-link">View Feedback</Link>
                             </>
                           )}
                         </div>
