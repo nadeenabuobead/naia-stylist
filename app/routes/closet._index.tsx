@@ -1,17 +1,11 @@
-import { useState, useMemo } from "react";
-import { useLoaderData, useFetcher, Link, useSearchParams } from "react-router";
-import { data, redirect, type LinksFunction, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
-import naiaStyles from "~/styles/naia-design-system.css?url";
+import { useLoaderData, useFetcher, Link } from "react-router";
+import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
+import { useState, useEffect } from "react";
 import prisma from "../db.server";
 import { requireCurrentNaiaCustomer, getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { assessClosetEligibility, CLOSET_ELIGIBILITY_DISPLAY, type ClosetTryOnEligibility } from "~/lib/ai/closet-eligibility";
 import { runStageBAssessment } from "~/lib/ai/closet-eligibility.server";
 import { emitClosetItemAdded, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
-import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
-
-export const links: LinksFunction = () => [
-  { rel: "stylesheet", href: naiaStyles },
-];
 
 const CATEGORIES = ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS", "ACCESSORIES", "JEWELRY", "OTHER"];
 const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver", "Multicolor"];
@@ -34,20 +28,15 @@ const CATEGORY_PHOTO_TIPS: Record<string, { title: string; tips: string[] }> = {
   BOTTOMS:   { title: "For clothing", tips: ["Lay it flat or hang it straight", "Show the full waistband and hem", "Do not fold or bunch the garment"] },
   DRESSES:   { title: "For clothing", tips: ["Hang or lay fully flat", "Show the full neckline, sleeves, waist and hem", "Do not fold or bunch the garment"] },
   OUTERWEAR: { title: "For clothing", tips: ["Lay flat or hang straight", "Show the full collar, sleeves and hem", "Do not fold or bunch the garment"] },
-  SHOES:     { title: "For shoes", tips: ["Show the full pair", "Keep both shoes visible and unobstructed", "Do not photograph while worn", "Use a clear side or three-quarter view"] },
-  BAGS:      { title: "For bags", tips: ["Show the complete bag", "Keep handles and straps fully visible", "Use a front or three-quarter view", "Remove anything covering its shape"] },
+  SHOES:     { title: "For shoes",    tips: ["Show the full pair", "Keep both shoes visible and unobstructed", "Do not photograph while worn", "Use a clear side or three-quarter view"] },
+  BAGS:      { title: "For bags",     tips: ["Show the complete bag", "Keep handles and straps fully visible", "Use a front or three-quarter view", "Remove anything covering its shape"] },
 };
-
-// ── Eligibility status label / hint ────────────────────────────────────────
 
 function eligibilityStatus(elig: ClosetTryOnEligibility | null, hint: string | null) {
   if (!elig) return null;
   const display = CLOSET_ELIGIBILITY_DISPLAY[elig];
-  const isNeeds = elig === "needs-clearer-photo";
-  return { label: display.label, hint: hint || display.fallbackHint, isNeeds };
+  return { label: display.label, hint: hint || display.fallbackHint, isNeeds: elig === "needs-clearer-photo" };
 }
-
-// ── Meta / loader / action (unchanged from prior implementation) ─────────────
 
 export function meta() {
   return [{ title: "Digital Closet | nAia" }];
@@ -65,13 +54,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export async function action({ request }: ActionFunctionArgs) {
   const naiaCustomer = await getCurrentNaiaCustomer(request);
-  if (!naiaCustomer) {
-    return data({ error: "Not authenticated" }, { status: 401 });
-  }
+  if (!naiaCustomer) return data({ error: "Not authenticated" }, { status: 401 });
   const customer = await prisma.customer.findUnique({ where: { id: naiaCustomer.id } });
-  if (!customer) {
-    return data({ error: "Not authenticated" }, { status: 401 });
-  }
+  if (!customer) return data({ error: "Not authenticated" }, { status: 401 });
 
   const formData = await request.formData();
   const intent = formData.get("intent") as string;
@@ -93,22 +78,13 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!name || !category || !imageUrl) return data({ error: "Name and category required" }, { status: 400 });
 
     const stageA = assessClosetEligibility({
-      prismaCategory: category,
-      width: imageWidth,
-      height: imageHeight,
-      format: imageFormat,
-      bytes: imageBytes,
+      prismaCategory: category, width: imageWidth, height: imageHeight, format: imageFormat, bytes: imageBytes,
     });
 
     const newItem = await prisma.closetItem.create({
       data: {
-        customerId: customer.id,
-        name,
-        category,
-        imageUrl,
-        primaryColor: primaryColor || null,
-        pattern: pattern || null,
-        brand: brand || null,
+        customerId: customer.id, name, category, imageUrl,
+        primaryColor: primaryColor || null, pattern: pattern || null, brand: brand || null,
         occasions: occasions.length > 0 ? occasions : null,
         seasons: seasons.length > 0 ? seasons : null,
         tryOnEligibility: stageA.eligible,
@@ -120,25 +96,15 @@ export async function action({ request }: ActionFunctionArgs) {
 
     try {
       await recordJourneyEventAwaited(
-        emitClosetItemAdded({
-          customerId: customer.id,
-          closetItemId: newItem.id,
-          category: newItem.category,
-          tryOnEligibility: newItem.tryOnEligibility ?? null,
-        }),
+        emitClosetItemAdded({ customerId: customer.id, closetItemId: newItem.id, category: newItem.category, tryOnEligibility: newItem.tryOnEligibility ?? null }),
         `closet_item_added:${newItem.id}:v1`,
       );
     } catch { /* event emission never blocks the response */ }
 
     if (stageA.eligible === "pending-assessment" && imageUrl) {
-      await runStageBAssessment(
-        newItem.id,
-        imageUrl,
-        stageA.category,
-        async (id, fields) => {
-          await prisma.closetItem.update({ where: { id }, data: fields });
-        },
-      );
+      await runStageBAssessment(newItem.id, imageUrl, stageA.category, async (id, fields) => {
+        await prisma.closetItem.update({ where: { id }, data: fields });
+      });
     }
 
     return data({ success: true });
@@ -146,31 +112,95 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === "delete") {
     const itemId = formData.get("itemId") as string;
-    const deleted = await prisma.closetItem.deleteMany({
-      where: { id: itemId, customerId: customer.id },
-    });
-    if (deleted.count === 0) {
-      return data({ error: "Item not found" }, { status: 403 });
-    }
+    const deleted = await prisma.closetItem.deleteMany({ where: { id: itemId, customerId: customer.id } });
+    if (deleted.count === 0) return data({ error: "Item not found" }, { status: 403 });
     return data({ success: true });
   }
 
   return data({ error: "Unknown intent" }, { status: 400 });
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
+// ── Lovable cl-* inline design system ────────────────────────────────────────
+
+const css = `
+  .cl-wrap{max-width:1200px;margin:0 auto;padding:60px 40px}
+  .cl-topbar{display:flex;justify-content:space-between;align-items:center;padding:20px 40px;border-bottom:1px solid var(--c-border)}
+  .cl-topbar-logo{font-family:var(--ff-display);font-size:22px;font-style:italic;letter-spacing:3px;color:var(--c-ink)}
+  .cl-topbar-link{font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--c-burg);text-decoration:none}
+  .cl-headline{font-family:var(--ff-display);font-size:clamp(40px,5vw,64px);font-weight:900;line-height:1;margin-bottom:12px}
+  .cl-sub{font-family:var(--ff-ui);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--c-muted);margin-bottom:40px}
+  .cl-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:40px}
+  .cl-stat{background:var(--c-surface);padding:24px;border:1px solid var(--c-border)}
+  .cl-stat-num{font-family:var(--ff-display);font-size:48px;font-weight:900;color:var(--c-ink)}
+  .cl-stat-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--c-muted)}
+  .cl-add-btn{width:100%;padding:18px;background:var(--c-burg);color:#FAF6F1;border:none;margin-bottom:40px;cursor:pointer;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase}
+  .cl-form{background:var(--c-panel);padding:40px;margin-bottom:40px;border:1px solid var(--c-border)}
+  .cl-form-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
+  .cl-form-title{font-family:var(--ff-display);font-size:28px;font-weight:900;font-style:italic}
+  .cl-form-cancel{background:none;border:none;cursor:pointer;font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--c-muted)}
+  .cl-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--c-muted);margin-bottom:12px}
+  .cl-input{width:100%;padding:14px;border:1px solid var(--c-border);font-size:16px;font-family:var(--ff-ui);background:var(--c-surface);color:var(--c-ink);outline:none;margin-bottom:24px}
+  .cl-input:focus{border-color:var(--c-ink)}
+  .cl-pills{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px}
+  .cl-pill{padding:10px 18px;border:1px solid var(--c-border);font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--c-ink);cursor:pointer;background:transparent;transition:all .2s}
+  .cl-pill:hover{border-color:var(--c-ink)}
+  .cl-pill.on{background:var(--c-burg);color:#FAF6F1}
+  .cl-upload-box{border:1px dashed var(--c-border);padding:40px;text-align:center;cursor:pointer;background:var(--c-surface);margin-bottom:8px;display:block}
+  .cl-upload-hint{font-family:var(--ff-body);font-size:16px;font-style:italic;color:var(--c-muted)}
+  .cl-upload-notice{font-family:var(--ff-ui);font-size:8px;letter-spacing:1px;line-height:1.6;color:var(--c-muted);margin-bottom:16px}
+  .cl-upload-error{font-family:var(--ff-ui);font-size:9px;letter-spacing:1px;color:var(--c-burg);margin-bottom:16px}
+  .cl-guide{background:var(--c-surface);border:1px solid var(--c-border);padding:20px;margin-bottom:24px}
+  .cl-guide-header{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--c-muted);margin-bottom:12px}
+  .cl-guide-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px}
+  .cl-guide-col-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:1px;text-transform:uppercase;color:var(--c-muted);margin-bottom:6px}
+  .cl-guide-tips{list-style:none;padding:0}
+  .cl-guide-tips li{font-family:var(--ff-body);font-size:13px;color:var(--c-ink);padding:2px 0 2px 14px;position:relative}
+  .cl-guide-tips li::before{content:"–";position:absolute;left:0;color:var(--c-muted)}
+  .cl-guide-ex{display:flex;gap:8px;padding:6px 10px;font-size:12px;font-family:var(--ff-body);margin-top:4px}
+  .cl-guide-ex.good{background:rgba(76,175,80,.08);border-left:2px solid #4caf50}
+  .cl-guide-ex.avoid{background:rgba(107,29,38,.06);border-left:2px solid var(--c-burg)}
+  .cl-guide-ex-mark{font-weight:700;flex-shrink:0}
+  .cl-submit{width:100%;padding:16px;background:var(--c-burg);color:#FAF6F1;border:none;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase;cursor:pointer}
+  .cl-submit:disabled{opacity:.3;cursor:not-allowed}
+  .cl-filters{display:flex;gap:8px;overflow-x:auto;padding-bottom:12px;margin-bottom:24px}
+  .cl-filter{padding:10px 18px;border:1px solid var(--c-border);font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--c-ink);cursor:pointer;background:transparent;white-space:nowrap;transition:all .2s;flex-shrink:0}
+  .cl-filter.on{background:var(--c-burg);color:#FAF6F1}
+  .cl-count{font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--c-muted);margin-bottom:24px}
+  .cl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:24px}
+  .cl-card{background:var(--c-surface);border:1px solid var(--c-border);overflow:hidden;position:relative}
+  .cl-card-img{aspect-ratio:1;background:var(--c-muted-bg);display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .cl-card-img img{width:100%;height:100%;object-fit:cover}
+  .cl-card-body{padding:20px}
+  .cl-card-cat{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--c-muted);margin-bottom:8px}
+  .cl-card-name{font-family:var(--ff-display);font-size:18px;font-weight:700;color:var(--c-ink);margin-bottom:6px}
+  .cl-card-meta{font-family:var(--ff-ui);font-size:9px;letter-spacing:1px;color:var(--c-muted);text-transform:uppercase}
+  .cl-card-elig--needs{font-family:var(--ff-ui);font-size:8px;letter-spacing:1px;color:var(--c-burg);text-transform:uppercase;margin-top:8px;display:block}
+  .cl-card-elig--ok{font-family:var(--ff-ui);font-size:8px;letter-spacing:1px;color:var(--c-muted);text-transform:uppercase;margin-top:8px;display:block}
+  .cl-delete{position:absolute;top:12px;right:12px;background:rgba(40,21,12,0.8);color:#FAF6F1;border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;line-height:1}
+  .cl-empty{text-align:center;padding:80px 40px;background:var(--c-surface);border:1px solid var(--c-border)}
+  .cl-empty-icon{font-family:var(--ff-display);font-size:64px;color:var(--c-ink);opacity:.2;margin-bottom:20px}
+  .cl-empty-text{font-family:var(--ff-body);font-size:20px;font-style:italic;color:var(--c-muted);margin-bottom:32px}
+  .cl-cta{margin-top:60px;text-align:center}
+  .cl-cta a{display:inline-block;padding:16px 40px;background:var(--c-ink);color:#FAF6F1;text-decoration:none;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase}
+  @media(max-width:640px){
+    .cl-topbar{padding:16px 20px}
+    .cl-wrap{padding:40px 20px}
+    .cl-stats{grid-template-columns:1fr}
+    .cl-stat{display:flex;align-items:center;gap:16px;padding:16px 20px}
+    .cl-stat-num{font-size:32px}
+    .cl-guide-cols{grid-template-columns:1fr}
+  }
+`;
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Closet() {
   const { items } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
-  const [searchParams] = useSearchParams();
 
   const [showAddForm, setShowAddForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState("ALL");
-  const [searchQuery, setSearchQuery] = useState("");
 
-  // Upload form state
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
@@ -183,24 +213,26 @@ export default function Closet() {
   const [newSeasons, setNewSeasons] = useState<string[]>([]);
   const [imgMeta, setImgMeta] = useState<{ width?: number; height?: number; format?: string; bytes?: number }>({});
 
-  // URL-based filter (filter=needs-photo)
-  const urlFilter = searchParams.get("filter");
-  const needsPhotoOnly = urlFilter === "needs-photo";
+  const filtered = activeCategory === "ALL" ? items : items.filter((i: any) => i.category === activeCategory);
 
-  // Filtered items
-  const filtered = useMemo(() => {
-    return items.filter((i: any) => {
-      if (needsPhotoOnly && i.tryOnEligibility !== "needs-clearer-photo") return false;
-      if (activeCategory !== "ALL" && i.category !== activeCategory) return false;
-      if (searchQuery && !((i.name ?? "").toLowerCase().includes(searchQuery.toLowerCase()))) return false;
-      return true;
-    });
-  }, [items, needsPhotoOnly, activeCategory, searchQuery]);
+  // Escape key closes the inline add form
+  useEffect(() => {
+    if (!showAddForm) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setShowAddForm(false); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [showAddForm]);
 
   async function uploadToCloudinary(file: File) {
     setUploading(true);
     setUploadError(null);
 
+    // MIME validation — must be an image
+    if (!file.type.startsWith("image/")) {
+      setUploadError("Please upload an image file (JPG, PNG, WEBP, etc.).");
+      setUploading(false);
+      return;
+    }
     if (file.size > 5 * 1024 * 1024) {
       setUploadError("Image must be smaller than 5 MB.");
       setUploading(false);
@@ -277,327 +309,220 @@ export default function Closet() {
     setShowAddForm(false);
   }
 
-  const editingItem = editingId ? items.find((i: any) => i.id === editingId) : null;
-
   return (
-    <MyNaiaLayout>
-      <Link to="/my-naia" className="sp-back">← Overview</Link>
+    <div style={{ minHeight: "100vh", background: "var(--c-bg)" }}>
+      <style>{css}</style>
 
-      {/* Section shell */}
-      <div className="sp-shell">
-        <div className="sp-shell-eyebrow">Digital Closet</div>
-        <h1 className="sp-shell-title">Your Digital Closet</h1>
-        <p className="sp-shell-desc">
-          A private inventory of the pieces you already own — used to style new nAia picks with your
-          existing wardrobe. Add one clothing item, shoe pair or bag at a time.
-        </p>
+      <div className="cl-topbar">
+        <div className="cl-topbar-logo">nAia</div>
+        <Link to="/my-naia" className="cl-topbar-link">← Dashboard</Link>
       </div>
 
-      {/* State note for needs-photo filter */}
-      {needsPhotoOnly && (
-        <div className="dc-state-note" style={{ marginBottom: "24px" }}>
-          Showing items with a clearer-photo request.{" "}
-          <Link to="/closet">Show all items</Link>.
+      <div className="cl-wrap">
+        <h1 className="cl-headline">Digital Wardrobe</h1>
+        <p className="cl-sub">Upload, save, and style your pieces</p>
+
+        {/* Stats row */}
+        <div className="cl-stats">
+          <div className="cl-stat">
+            <div className="cl-stat-num">{items.length}</div>
+            <div className="cl-stat-label">Total Pieces</div>
+          </div>
+          <div className="cl-stat">
+            <div className="cl-stat-num">{new Set(items.map((i: any) => i.category)).size}</div>
+            <div className="cl-stat-label">Categories</div>
+          </div>
+          <div className="cl-stat">
+            <div className="cl-stat-num">{new Set(items.map((i: any) => i.brand).filter(Boolean)).size}</div>
+            <div className="cl-stat-label">Brands</div>
+          </div>
         </div>
-      )}
 
-      {/* Upload CTAs */}
-      <div className="sp-actions" style={{ marginBottom: "32px" }}>
-        <button type="button" className="sp-btn-primary" onClick={() => setShowAddForm(true)}>
-          Upload Item
-        </button>
-        <button type="button" className="sp-btn-outline" onClick={() => setShowAddForm(true)}>
-          Take a Photo
-        </button>
-      </div>
+        {/* Add CTA / inline form */}
+        {!showAddForm && (
+          <button className="cl-add-btn" onClick={() => setShowAddForm(true)}>+ Add a Piece</button>
+        )}
 
-      {/* Filter + search row */}
-      <div className="dc-filter-row" style={{ marginBottom: "24px" }}>
-        <div className="dc-filter-pills">
+        {showAddForm && (
+          <div className="cl-form">
+            <div className="cl-form-header">
+              <h3 className="cl-form-title">Add to Wardrobe</h3>
+              <button type="button" className="cl-form-cancel" onClick={() => setShowAddForm(false)}>Cancel</button>
+            </div>
+
+            {/* Photo guide */}
+            <div className="cl-guide">
+              <div className="cl-guide-header">Photo guide</div>
+              <div className="cl-guide-cols">
+                <div>
+                  <div className="cl-guide-col-label">General</div>
+                  <ul className="cl-guide-tips">
+                    {GENERAL_PHOTO_TIPS.map((tip, i) => <li key={i}>{tip}</li>)}
+                  </ul>
+                </div>
+                {CATEGORY_PHOTO_TIPS[newCategory] && (
+                  <div>
+                    <div className="cl-guide-col-label">{CATEGORY_PHOTO_TIPS[newCategory].title}</div>
+                    <ul className="cl-guide-tips">
+                      {CATEGORY_PHOTO_TIPS[newCategory].tips.map((tip, i) => <li key={i}>{tip}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="cl-guide-ex good">
+                  <span className="cl-guide-ex-mark">✓</span>
+                  <span>Single item · plain background · fully visible · well lit</span>
+                </div>
+                <div className="cl-guide-ex avoid">
+                  <span className="cl-guide-ex-mark">✗</span>
+                  <span>Multiple items or cluttered background</span>
+                </div>
+                <div className="cl-guide-ex avoid">
+                  <span className="cl-guide-ex-mark">✗</span>
+                  <span>Item cropped, blurry or poorly lit</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="cl-label">Photo</div>
+            <label className="cl-upload-box">
+              {newImageUrl
+                ? <img src={newImageUrl} alt="preview" style={{ maxHeight: "200px", objectFit: "cover" }} />
+                : uploading
+                  ? <span className="cl-upload-hint">Uploading…</span>
+                  : <span className="cl-upload-hint">Click to upload photo</span>
+              }
+              <input
+                type="file"
+                accept="image/*"
+                onChange={e => e.target.files?.[0] && uploadToCloudinary(e.target.files[0])}
+                style={{ display: "none" }}
+              />
+            </label>
+            <p className="cl-upload-notice">
+              Upload photos of clothing items only. Do not upload selfies, face photos, mirror photos, body scans, or personal images.
+            </p>
+            {uploadError && <p className="cl-upload-error">{uploadError}</p>}
+
+            <div className="cl-label">Name *</div>
+            <input className="cl-input" type="text" placeholder="e.g. Black silk blazer" value={newName} onChange={e => setNewName(e.target.value)} />
+
+            <div className="cl-label">Category *</div>
+            <div className="cl-pills">
+              {CATEGORIES.map(c => (
+                <button key={c} type="button" onClick={() => setNewCategory(c)} className={`cl-pill${newCategory === c ? " on" : ""}`}>
+                  {c.charAt(0) + c.slice(1).toLowerCase()}
+                </button>
+              ))}
+            </div>
+
+            <div className="cl-label">Color</div>
+            <div className="cl-pills">
+              {COLORS.map(c => (
+                <button key={c} type="button" onClick={() => setNewColor(c)} className={`cl-pill${newColor === c ? " on" : ""}`}>{c}</button>
+              ))}
+            </div>
+
+            <div className="cl-label">Pattern</div>
+            <div className="cl-pills">
+              {PATTERNS.map(p => (
+                <button key={p} type="button" onClick={() => setNewPattern(p)} className={`cl-pill${newPattern === p ? " on" : ""}`}>{p}</button>
+              ))}
+            </div>
+
+            <div className="cl-label">Occasions</div>
+            <div className="cl-pills">
+              {OCCASIONS.map(o => (
+                <button key={o} type="button" onClick={() => toggleOccasion(o)} className={`cl-pill${newOccasions.includes(o) ? " on" : ""}`}>{o}</button>
+              ))}
+            </div>
+
+            <div className="cl-label">Season</div>
+            <div className="cl-pills">
+              {SEASONS.map(s => (
+                <button key={s} type="button" onClick={() => toggleSeason(s)} className={`cl-pill${newSeasons.includes(s) ? " on" : ""}`}>{s}</button>
+              ))}
+            </div>
+
+            <div className="cl-label">Brand (optional)</div>
+            <input className="cl-input" type="text" placeholder="Brand name" value={newBrand} onChange={e => setNewBrand(e.target.value)} />
+
+            <button className="cl-submit" onClick={handleAdd} disabled={!newName || !newImageUrl || uploading}>
+              {uploading ? "Uploading…" : "Add to Wardrobe"}
+            </button>
+          </div>
+        )}
+
+        {/* Filters */}
+        <div className="cl-filters">
           {["ALL", ...CATEGORIES].map(cat => (
-            <button
-              key={cat}
-              type="button"
-              className={`dc-filter-pill${activeCategory === cat ? " dc-filter-pill--active" : ""}`}
-              onClick={() => setActiveCategory(cat)}
-            >
+            <button key={cat} type="button" onClick={() => setActiveCategory(cat)} className={`cl-filter${activeCategory === cat ? " on" : ""}`}>
               {cat === "ALL" ? "All" : cat.charAt(0) + cat.slice(1).toLowerCase()}
             </button>
           ))}
         </div>
-        <label className="dc-search-wrap">
-          <span>Search</span>
-          <input
-            type="text"
-            className="dc-search-input"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Ivory trouser…"
-          />
-        </label>
-      </div>
 
-      {/* Item list */}
-      {filtered.length === 0 ? (
-        <div className="dc-empty">
-          <p className="dc-empty-text">
-            {items.length === 0
-              ? "Your closet is empty. Upload your first piece to get started."
-              : "No items match this view."}
-          </p>
-          {items.length === 0 && (
-            <button type="button" className="sp-btn-primary" onClick={() => setShowAddForm(true)}>
-              Upload Your First Piece
-            </button>
-          )}
-        </div>
-      ) : (
-        <ul className="dc-list">
-          {filtered.map((item: any) => {
-            const elig = eligibilityStatus(item.tryOnEligibility, item.tryOnCustomerHint);
-            return (
-              <li key={item.id} className="dc-item">
-                {/* Thumbnail */}
-                <div className="dc-thumb">
-                  {item.imageUrl
-                    ? <img src={item.imageUrl} alt={item.name} />
-                    : <span aria-hidden style={{ fontSize: "32px", opacity: 0.18, display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>◇</span>
-                  }
-                </div>
+        {/* Item count */}
+        <p className="cl-count">{filtered.length} {filtered.length === 1 ? "piece" : "pieces"}</p>
 
-                {/* Details */}
-                <div className="dc-item-body">
-                  <div className="dc-item-cat">{item.category.charAt(0) + item.category.slice(1).toLowerCase()}</div>
-                  <div className="dc-item-name">{item.name}</div>
-                  {elig && (
-                    <>
-                      <div className={`dc-item-status${elig.isNeeds ? " dc-item-status--needs" : ""}`}>
+        {/* Card grid */}
+        {filtered.length === 0 ? (
+          <div className="cl-empty">
+            <div className="cl-empty-icon">◇</div>
+            <p className="cl-empty-text">
+              {items.length === 0 ? "No pieces yet. Add your first to get started." : "No pieces in this category."}
+            </p>
+            {items.length === 0 && (
+              <button className="cl-add-btn" style={{ width: "auto", display: "inline-block", marginBottom: 0 }} onClick={() => setShowAddForm(true)}>
+                Add Your First Piece
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="cl-grid">
+            {filtered.map((item: any) => {
+              const elig = eligibilityStatus(item.tryOnEligibility, item.tryOnCustomerHint);
+              return (
+                <div key={item.id} className="cl-card">
+                  <div className="cl-card-img">
+                    {item.imageUrl
+                      ? <img src={item.imageUrl} alt={item.name} />
+                      : <span style={{ fontSize: "64px", opacity: 0.2 }}>◇</span>
+                    }
+                  </div>
+                  <div className="cl-card-body">
+                    <div className="cl-card-cat">{item.category}</div>
+                    <div className="cl-card-name">{item.name}</div>
+                    {(item.primaryColor || item.pattern) && (
+                      <div className="cl-card-meta">{[item.primaryColor, item.pattern].filter(Boolean).join(" · ")}</div>
+                    )}
+                    {item.brand && <div className="cl-card-meta" style={{ marginTop: "4px" }}>{item.brand}</div>}
+                    {elig && (
+                      <span className={elig.isNeeds ? "cl-card-elig--needs" : "cl-card-elig--ok"}>
                         {elig.label}
-                      </div>
-                      {elig.isNeeds && elig.hint && (
-                        <p className="dc-item-reason">{elig.hint}</p>
-                      )}
-                    </>
-                  )}
-                </div>
-
-                {/* Actions */}
-                <div className="dc-item-actions">
-                  {elig?.isNeeds && (
-                    <button type="button" className="dc-action dc-action--accent" onClick={() => setShowAddForm(true)}>
-                      Retake Photo
-                    </button>
-                  )}
-                  <button type="button" className="dc-action" onClick={() => setEditingId(item.id)}>
-                    Edit
-                  </button>
+                      </span>
+                    )}
+                  </div>
                   <button
                     type="button"
-                    className="dc-action"
+                    className="cl-delete"
+                    aria-label={`Remove ${item.name}`}
                     onClick={() => fetcher.submit({ intent: "delete", itemId: item.id }, { method: "post" })}
                   >
-                    Delete
+                    ×
                   </button>
                 </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {/* ── Add Item modal ─────────────────────────────────────────────────── */}
-      {showAddForm && (
-        <div className="dc-modal-overlay" role="dialog" aria-modal="true" aria-label="Add item to closet">
-          <div className="dc-modal">
-            <div className="dc-modal-eyebrow">Digital Closet</div>
-            <h2 className="dc-modal-title">Add to Your Closet</h2>
-
-            <div style={{ marginTop: "24px" }}>
-              {/* Photo guide */}
-              <div className="dc-guide">
-                <div className="dc-guide-header">Photo guide</div>
-                <div className="dc-guide-cols">
-                  <div>
-                    <div className="dc-guide-col-label">General</div>
-                    <ul className="dc-guide-tips">
-                      {GENERAL_PHOTO_TIPS.map((tip, i) => <li key={i}>{tip}</li>)}
-                    </ul>
-                  </div>
-                  {CATEGORY_PHOTO_TIPS[newCategory] && (
-                    <div>
-                      <div className="dc-guide-col-label">{CATEGORY_PHOTO_TIPS[newCategory].title}</div>
-                      <ul className="dc-guide-tips">
-                        {CATEGORY_PHOTO_TIPS[newCategory].tips.map((tip, i) => <li key={i}>{tip}</li>)}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-                <div className="dc-guide-examples">
-                  <div className="dc-guide-ex good">
-                    <div className="dc-guide-ex-mark">✓</div>
-                    <div className="dc-guide-ex-text">Single item · plain background · fully visible · well lit</div>
-                  </div>
-                  <div className="dc-guide-ex avoid">
-                    <div className="dc-guide-ex-mark">✗</div>
-                    <div className="dc-guide-ex-text">Multiple items or cluttered background</div>
-                  </div>
-                  <div className="dc-guide-ex avoid">
-                    <div className="dc-guide-ex-mark">✗</div>
-                    <div className="dc-guide-ex-text">Item cropped, blurry or poorly lit</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Photo upload */}
-              <div className="dc-form-row">
-                <label className="dc-form-label">Photo</label>
-                <label className="dc-upload-box">
-                  {newImageUrl
-                    ? <img src={newImageUrl} alt="preview" style={{ maxHeight: "180px", objectFit: "cover", margin: "0 auto", display: "block" }} />
-                    : uploading
-                      ? <span className="dc-upload-hint">Uploading…</span>
-                      : <span className="dc-upload-hint">Click to upload photo</span>
-                  }
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => e.target.files?.[0] && uploadToCloudinary(e.target.files[0])}
-                    style={{ display: "none" }}
-                  />
-                </label>
-                <p className="dc-upload-notice">
-                  Upload photos of clothing items only. Do not upload selfies, face photos, mirror photos, body scans, or personal images.
-                </p>
-                {uploadError && <p className="dc-upload-error">{uploadError}</p>}
-              </div>
-
-              {/* Name */}
-              <div className="dc-form-row">
-                <label className="dc-form-label">Name *</label>
-                <input
-                  className="dc-form-input"
-                  type="text"
-                  placeholder="e.g. Black silk blazer"
-                  value={newName}
-                  onChange={e => setNewName(e.target.value)}
-                />
-              </div>
-
-              {/* Category */}
-              <div className="dc-form-row">
-                <label className="dc-form-label">Category *</label>
-                <div className="dc-form-pills">
-                  {CATEGORIES.map(c => (
-                    <button key={c} type="button"
-                      className={`dc-form-pill${newCategory === c ? " dc-form-pill--on" : ""}`}
-                      onClick={() => setNewCategory(c)}>
-                      {c.charAt(0) + c.slice(1).toLowerCase()}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Color */}
-              <div className="dc-form-row">
-                <label className="dc-form-label">Color</label>
-                <div className="dc-form-pills">
-                  {COLORS.map(c => (
-                    <button key={c} type="button"
-                      className={`dc-form-pill${newColor === c ? " dc-form-pill--on" : ""}`}
-                      onClick={() => setNewColor(c)}>{c}</button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Pattern */}
-              <div className="dc-form-row">
-                <label className="dc-form-label">Pattern</label>
-                <div className="dc-form-pills">
-                  {PATTERNS.map(p => (
-                    <button key={p} type="button"
-                      className={`dc-form-pill${newPattern === p ? " dc-form-pill--on" : ""}`}
-                      onClick={() => setNewPattern(p)}>{p}</button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Occasions */}
-              <div className="dc-form-row">
-                <label className="dc-form-label">Occasions</label>
-                <div className="dc-form-pills">
-                  {OCCASIONS.map(o => (
-                    <button key={o} type="button"
-                      className={`dc-form-pill${newOccasions.includes(o) ? " dc-form-pill--on" : ""}`}
-                      onClick={() => toggleOccasion(o)}>{o}</button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Season */}
-              <div className="dc-form-row">
-                <label className="dc-form-label">Season</label>
-                <div className="dc-form-pills">
-                  {SEASONS.map(s => (
-                    <button key={s} type="button"
-                      className={`dc-form-pill${newSeasons.includes(s) ? " dc-form-pill--on" : ""}`}
-                      onClick={() => toggleSeason(s)}>{s}</button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Brand */}
-              <div className="dc-form-row">
-                <label className="dc-form-label">Brand (optional)</label>
-                <input
-                  className="dc-form-input"
-                  type="text"
-                  placeholder="Brand name"
-                  value={newBrand}
-                  onChange={e => setNewBrand(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="dc-modal-actions">
-              <button type="button" className="sp-btn-ghost" onClick={() => setShowAddForm(false)}>Cancel</button>
-              <button
-                type="button"
-                className="sp-btn-primary"
-                onClick={handleAdd}
-                disabled={!newName || !newImageUrl || uploading}
-              >
-                {uploading ? "Uploading…" : "Add to Closet"}
-              </button>
-            </div>
+              );
+            })}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ── Edit modal (UI-only — no edit endpoint yet) ─────────────────────── */}
-      {editingItem && (
-        <div className="dc-modal-overlay" role="dialog" aria-modal="true" aria-label="Edit closet item">
-          <div className="dc-modal">
-            <div className="dc-modal-eyebrow">Edit Item</div>
-            <h2 className="dc-modal-title">{editingItem.name}</h2>
-            <p className="dc-modal-desc">
-              To update this item, delete it and re-upload with the correct details.
-            </p>
-            <div className="dc-modal-actions">
-              <button type="button" className="sp-btn-ghost" onClick={() => setEditingId(null)}>Close</button>
-              <button
-                type="button"
-                className="sp-btn-outline"
-                onClick={() => {
-                  setEditingId(null);
-                  fetcher.submit({ intent: "delete", itemId: editingItem.id }, { method: "post" });
-                }}
-              >
-                Delete Item
-              </button>
-            </div>
-          </div>
+        {/* Bottom CTA */}
+        <div className="cl-cta">
+          <Link to="/quick-style">Style Me →</Link>
         </div>
-      )}
-    </MyNaiaLayout>
+      </div>
+    </div>
   );
 }
