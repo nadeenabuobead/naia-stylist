@@ -74,23 +74,34 @@ export default function BuyOrSkipResult() {
   const fa = analysis.fullAnalysis;
 
   // ── Derived display values ────────────────────────────────────────────────
+  // fullAnalysis.verdict preserves "SKIP FOR NOW"; DB verdict only stores BUY/SKIP/MAYBE/INCOMPLETE
   const verdict       = fa?.verdict        ?? analysis.verdict;
   const confidence    = fa?.confidence     ?? analysis.confidence;
   const finalThought  = fa?.finalThought   ?? analysis.reasoning;
   const details       = fa?.detailedAnalysis ?? null;
   const naiaMatch     = fa?.naiaMatch      ?? null;
+  // "alternative" is the safe default — only use "complement" when AI explicitly says so
+  const naiaRelationship: string = fa?.naiaMatchRelationship === "complement" ? "complement" : "alternative";
   const styleDNAMatch = fa?.styleDNAMatch  ?? null;
   const occasionFit   = fa?.occasionFit    ?? null;
   const whatLikeEval  = fa?.whatLikeEval   ?? null;
   const concernEval   = fa?.concernEval    ?? null;
+  const detectedColor: string | null = typeof fa?.detectedColor === "string" && fa.detectedColor.trim()
+    ? fa.detectedColor.trim() : null;
   const beforeYouBuy: string[] = Array.isArray(fa?.beforeYouBuy)
     ? fa.beforeYouBuy.filter((s: any) => typeof s === "string" && s.trim())
     : [];
   const buyIf  = typeof fa?.buyIf  === "string" && fa.buyIf.trim()  ? fa.buyIf.trim()  : null;
   const skipIf = typeof fa?.skipIf === "string" && fa.skipIf.trim() ? fa.skipIf.trim() : null;
 
-  // Specific item type (AI-detected) takes priority over saved category
   const displayType = fa?.itemType ?? analysis.category;
+
+  // Customer-selected colours from the form
+  const selectedColors: string[] = Array.isArray(analysis.colors) ? analysis.colors : [];
+  // Detected colour differs from selected when the AI read a different hue from the image
+  const showDetected = detectedColor
+    && selectedColors.length > 0
+    && !selectedColors.some(c => detectedColor.toLowerCase().includes(c.toLowerCase()));
 
   const renderablePairings: Array<{ name: string; reason: string | null }> = [];
   if (fa?.closetPairings && Array.isArray(fa.closetPairings)) {
@@ -104,6 +115,10 @@ export default function BuyOrSkipResult() {
       });
     }
   }
+
+  const concernSolutions: string[] = Array.isArray(concernEval?.solutions)
+    ? concernEval.solutions.filter((s: any) => typeof s === "string" && s.trim())
+    : [];
 
   const formattedDate = new Date(analysis.createdAt).toLocaleDateString("en-GB", {
     day: "numeric", month: "long", year: "numeric",
@@ -119,93 +134,117 @@ export default function BuyOrSkipResult() {
         <p className="sp-shell-desc">{formattedDate}</p>
       </div>
 
-      {/* Item image — larger, no letterboxing */}
-      {analysis.imageUrl && (
-        <div className="bos-result-item-wrap">
-          <img
-            src={analysis.imageUrl}
-            alt="Item assessed"
-            className="bos-result-item-img"
-          />
-          <div className="bos-result-item-meta">
-            {displayType && (
-              <span className="bos-result-item-tag">
-                {typeof displayType === "string" ? displayType.toUpperCase() : displayType}
-              </span>
-            )}
-            {analysis.colors?.length > 0 && (
-              <span className="bos-result-item-tag">{analysis.colors.join(", ")}</span>
-            )}
-            {analysis.itemSize && (
-              <span className="bos-result-item-tag">SIZE {analysis.itemSize}</span>
+      {/* ── Desktop hero: image left, verdict + summary right ──────────────── */}
+      <div className="bos-result-hero">
+        {/* Left: image + tags */}
+        {analysis.imageUrl && (
+          <div className="bos-result-hero-image">
+            <img
+              src={analysis.imageUrl}
+              alt="Item assessed"
+              className="bos-result-item-img"
+            />
+            <div className="bos-result-item-meta">
+              {displayType && (
+                <span className="bos-result-item-tag">
+                  {typeof displayType === "string" ? displayType.toUpperCase() : displayType}
+                </span>
+              )}
+              {selectedColors.length > 0 && (
+                <span className="bos-result-item-tag">{selectedColors.join(", ")}</span>
+              )}
+              {/* Detected colour — only shown when it differs from customer-selected */}
+              {showDetected && (
+                <span className="bos-result-item-tag bos-result-item-tag--detected">
+                  {detectedColor}
+                  <span className="bos-result-item-tag-sub">Image-detected colour</span>
+                </span>
+              )}
+              {analysis.itemSize && (
+                <span className="bos-result-item-tag">SIZE {analysis.itemSize}</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Right: verdict + match + summary */}
+        <div className="bos-result-hero-content">
+          <div className="bos-verdict">
+            {verdict}
+            {typeof confidence === "number" && confidence > 0 && (
+              <span className="bos-verdict-match"> — {confidence}% MATCH</span>
             )}
           </div>
+          {finalThought && (
+            <p className="bos-result-summary">{finalThought}</p>
+          )}
         </div>
-      )}
+      </div>
 
       <section className="bos-section bos-result">
 
-        {/* Verdict + match percentage on one line */}
-        <div className="bos-verdict">
-          {verdict}
-          {typeof confidence === "number" && confidence > 0 && (
-            <span className="bos-verdict-match"> — {confidence}% MATCH</span>
-          )}
-        </div>
-
-        {/* Strong practical sentence — style + occasion + main condition */}
-        {finalThought && (
-          <p className="bos-result-summary">{finalThought}</p>
-        )}
-
-        {/* ── Why It Works ─────────────────────────────────────────────── */}
+        {/* ── Why It Works ─────────────────────────────────────────────────── */}
         <div className="bos-result-section">
           <div className="bos-result-section-label">Why It Works</div>
           <div className="bos-result-section-body">
-            {/* Occasion evaluated first when customer entered one */}
+
+            {/* Occasion — "Occasion Match — Strong for Brunch with friends." */}
             {analysis.forOccasion && occasionFit && (
               <div className="bos-result-section-row">
-                <strong>For {cap(analysis.forOccasion)}</strong>
-                {" — "}
-                {occasionFit.fits ? "Yes." : "Not ideal."}{" "}
+                <strong>
+                  Occasion Match — {occasionFit.fits ? "Strong" : "Not Ideal"}{" for "}
+                  {cap(analysis.forOccasion)}
+                </strong>
+                {". "}
                 {occasionFit.explanation}
                 {occasionFit.stylingTip && (
                   <span>{" "}{occasionFit.stylingTip}</span>
                 )}
               </div>
             )}
+
             {styleDNAMatch && (
               <div className="bos-result-section-row">
                 <strong>Style match</strong>{" — "}{styleDNAMatch}
               </div>
             )}
+
             {details?.color && (
               <div className="bos-result-section-row">
                 <strong>Colour</strong>{" — "}{details.color}
               </div>
             )}
+
             {details?.silhouette && (
               <div className="bos-result-section-row">
                 <strong>Silhouette</strong>{" — "}{details.silhouette}
               </div>
             )}
+
+            {/* What you like — label adapts to agreement level */}
             {whatLikeEval && (
               <div className="bos-result-section-row">
                 <strong>
-                  What you like — {cap(whatLikeEval.aspect || analysis.whatLike || "")}
+                  {whatLikeEval.agreement === "disagree"
+                    ? `${cap(whatLikeEval.aspect || analysis.whatLike || "")} — Reality Check`
+                    : `What you like — ${cap(whatLikeEval.aspect || analysis.whatLike || "")}`
+                  }
                 </strong>
                 {" — "}
-                {cap(whatLikeEval.agreement)}.{" "}{whatLikeEval.explanation}
+                {whatLikeEval.agreement !== "disagree" && `${cap(whatLikeEval.agreement)}. `}
+                {whatLikeEval.explanation}
               </div>
             )}
           </div>
         </div>
 
-        {/* ── Before You Buy ───────────────────────────────────────────── */}
+        {/* ── Before You Buy ───────────────────────────────────────────────── */}
         {(concernEval || beforeYouBuy.length > 0) && (
           <div className="bos-result-section">
             <div className="bos-result-section-label">Before You Buy</div>
             <div className="bos-result-section-body">
+
+              {/* Your concern + practical solutions */}
               {concernEval && (
                 <div className="bos-result-section-row">
                   <strong>
@@ -213,8 +252,17 @@ export default function BuyOrSkipResult() {
                   </strong>
                   {" — "}
                   {cap(concernEval.justified)}.{" "}{concernEval.explanation}
+                  {concernSolutions.length > 0 && (
+                    <ul className="bos-concern-solutions">
+                      {concernSolutions.map((s: string, i: number) => (
+                        <li key={i}>{s}</li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
+
+              {/* Fit & Size + Wearability from AI */}
               {beforeYouBuy.map((point: string, i: number) => (
                 <div key={i} className="bos-result-section-row">{point}</div>
               ))}
@@ -222,7 +270,7 @@ export default function BuyOrSkipResult() {
           </div>
         )}
 
-        {/* ── Wear It With — only confirmed closet items, never invented ── */}
+        {/* ── Wear It With — confirmed closet items only ───────────────────── */}
         {renderablePairings.length > 0 && (
           <div className="bos-result-section">
             <div className="bos-result-section-label">Wear It With</div>
@@ -245,10 +293,12 @@ export default function BuyOrSkipResult() {
           </div>
         )}
 
-        {/* ── Pair It With NADINE — visually secondary ─────────────────── */}
+        {/* ── NADINE section — heading adapts: complement vs alternative ────── */}
         {naiaMatch && (
           <div className="bos-result-section bos-result-section--nadine">
-            <div className="bos-result-section-label">Pair It With NADINE</div>
+            <div className="bos-result-section-label">
+              {naiaRelationship === "complement" ? "Pair It With NADINE" : "A NADINE Alternative"}
+            </div>
             <div className="bos-naia-title">
               {typeof naiaMatch === "object" ? naiaMatch.title : naiaMatch}
             </div>
@@ -262,13 +312,13 @@ export default function BuyOrSkipResult() {
                 rel="noreferrer"
                 className="bos-naia-link"
               >
-                Shop This Piece →
+                {naiaRelationship === "complement" ? "Shop This Piece →" : "Consider Instead →"}
               </a>
             )}
           </div>
         )}
 
-        {/* ── Final Condition ───────────────────────────────────────────── */}
+        {/* ── Final Condition ───────────────────────────────────────────────── */}
         {(buyIf || skipIf) && (
           <div className="bos-result-section bos-final-condition">
             <div className="bos-result-section-label">Final Condition</div>

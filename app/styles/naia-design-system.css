@@ -2037,10 +2037,21 @@ a.mn-action:focus-visible,
 .bos-occasion-tag { padding: 4px 10px; background: var(--naia-tint); color: var(--naia-accent); font-size: 11px; font-family: var(--naia-ff-ui); }
 
 /* Result page — item image hero */
+/* Result page — desktop hero: image left, verdict+summary right */
+.bos-result-hero { display: grid; grid-template-columns: auto 1fr; gap: 40px; align-items: start; margin-bottom: 8px; }
+.bos-result-hero-image { flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; }
+.bos-result-hero-content { padding-top: 4px; }
+.bos-result-hero .bos-result-item-img { max-height: 300px; }
 .bos-result-item-wrap { margin-bottom: 24px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .bos-result-item-img { max-height: 380px; max-width: 100%; width: auto; height: auto; border: 1px solid var(--naia-border-mid); display: block; }
-.bos-result-item-meta { display: flex; flex-wrap: wrap; gap: 8px; }
+.bos-result-item-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
 .bos-result-item-tag { padding: 4px 10px; border: 1px solid var(--naia-border-mid); font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--naia-muted); }
+/* Detected colour tag — two-line: colour name + sub-label */
+.bos-result-item-tag--detected { display: flex; flex-direction: column; gap: 2px; padding: 5px 10px; }
+.bos-result-item-tag-sub { font-size: 7px; letter-spacing: 0.16em; opacity: 0.65; text-transform: uppercase; font-family: var(--naia-ff-ui); }
+/* Concern solutions list */
+.bos-concern-solutions { list-style: disc; padding-left: 18px; margin: 8px 0 0; display: flex; flex-direction: column; gap: 3px; }
+.bos-concern-solutions li { font-family: var(--naia-ff-body); font-size: 13px; line-height: 1.6; color: rgba(40, 21, 12, 0.72); }
 
 /* Result page — Step 2 inputs summary */
 .bos-result-inputs { border: 1px solid var(--naia-border); padding: 20px 24px; margin-bottom: 28px; display: flex; flex-direction: column; gap: 8px; background: var(--naia-surface); }
@@ -2103,6 +2114,9 @@ a.mn-action:focus-visible,
   .bos-result-input-row { grid-template-columns: 1fr; }
   .bos-decisions-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
   .bos-glance-row { grid-template-columns: 1fr; gap: 2px; }
+  /* Hero stacks vertically on mobile */
+  .bos-result-hero { grid-template-columns: 1fr; gap: 20px; }
+  .bos-result-hero .bos-result-item-img { max-height: 260px; }
 }
 
 /* ── Settings (set-*) ────────────────────────────────────────────────────── */

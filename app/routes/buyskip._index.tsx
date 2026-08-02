@@ -1,4 +1,5 @@
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { Link, useNavigate, type LinksFunction, type LoaderFunctionArgs } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -171,6 +172,8 @@ export default function BuyOrSkip() {
     if (analyzing) return;
     setAnalyzing(true);
     setAnalyzeError("");
+    // Track whether we initiated navigation — if so, keep overlay visible until unmount
+    let navigated = false;
     try {
       const response = await fetch("/api/wishlist?action=analyze", {
         method: "POST",
@@ -188,7 +191,9 @@ export default function BuyOrSkip() {
       }
       const data = await response.json();
       if (data.success && data.analysisId) {
+        navigated = true;
         navigate(`/buyskip/${data.analysisId}`);
+        return; // overlay stays visible until component unmounts on navigation
       } else if (data.success) {
         setAnalyzeError("Recommendation generated but could not be saved. Please try again.");
       } else {
@@ -197,17 +202,17 @@ export default function BuyOrSkip() {
     } catch {
       setAnalyzeError("Recommendation failed. Please check your connection and try again.");
     } finally {
-      setAnalyzing(false);
+      // Only reset state on non-navigation paths; on success the component unmounts
+      if (!navigated) setAnalyzing(false);
     }
   };
 
   const canAnalyze = imageUrl && category && color.length > 0 && !analyzing;
 
-  return (
-    <MyNaiaLayout>
-      {/* Floating analysis card — overlays form while analysing; reuses exact Style Me loading classes */}
-      {analyzing && (
-        <div className="bos-analyzing-overlay" role="status" aria-live="polite" aria-label={BOS_LOADING_MESSAGES[msgIndex]}>
+  // Portal overlay — rendered into document.body to bypass any CSS containment in the layout
+  const overlay = analyzing && typeof document !== "undefined"
+    ? createPortal(
+        <div className="bos-analyzing-overlay" role="status" aria-live="polite" aria-atomic="true">
           <div className="sm-loading-inner">
             <h2 style={{ fontFamily: "var(--naia-ff-display)", fontSize: "32px", fontWeight: 900, fontStyle: "italic", color: "var(--naia-ink)", marginBottom: "16px" }}>
               nAia is assessing your item...
@@ -220,8 +225,15 @@ export default function BuyOrSkip() {
             </div>
             <p className="sm-loading-msg">{BOS_LOADING_MESSAGES[msgIndex]}</p>
           </div>
-        </div>
-      )}
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <MyNaiaLayout>
+      {/* Portal overlay — appended to body, bypasses layout CSS containment */}
+      {overlay}
 
       {/* Form content — stays in DOM but non-interactive while analysing */}
       <div

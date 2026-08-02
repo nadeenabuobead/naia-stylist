@@ -148,86 +148,85 @@ async function analyzeItem(request) {
               { type: "image", source: { type: "url", url: imageUrl } },
               {
                 type: "text",
-                text: `You are assessing a clothing item. The customer needs an honest, specific recommendation based on their exact inputs below.
+                text: `You are assessing a clothing item for a specific customer. Be honest, concise and constructive. Every point must be stated ONCE only — never repeated across sections.
 
 ITEM DETAILS:
 - Category: ${category||"unknown"}
-- Color: ${Array.isArray(color) ? color.join(", ") : color||"unknown"}
+- Customer-selected colour: ${Array.isArray(color) ? color.join(", ") : color||"unknown"}
 - Brand: ${brand || "unknown"}
 ${safeSize ? `- Size the customer is considering: ${safeSize}` : ""}
-${itemLink ? `- Product link: ${itemLink}` : ""}
 
 ${styleProfile ? `CUSTOMER STYLE PROFILE:
 - Style personalities: ${styleProfile.stylePersonalities?.join(", ")}
-- Favorite colors: ${styleProfile.favoriteColors?.join(", ")}
+- Favourite colours: ${styleProfile.favoriteColors?.join(", ")}
 - Lifestyle: ${styleProfile.dressesFor?.join(", ")}
 - Desired feeling: ${styleProfile.desiredFeeling}
 
-CUSTOMER FIT DATA (use ONLY this data for the size check — do not invent measurements not listed here):
+COLOUR PREFERENCE RULE: Favourite colours are style preferences, not exclusions. Do not reject a neutral (beige, cream, grey, white) because the customer's palette differs. For each neutral, state specifically whether it complements their favourites, coordinates with their closet, and adds wardrobe variety.
+
+CUSTOMER FIT DATA (use ONLY this data — never invent measurements not listed):
 - Usual top size: ${styleProfile.topSize || "not on record"}
 - Usual bottom size: ${styleProfile.bottomSize || "not on record"}
 - Usual dress size: ${styleProfile.dressSize || "not on record"}
 - Fit preferences: ${styleProfile.fitPreferences?.length > 0 ? styleProfile.fitPreferences.join(", ") : "not on record"}
 - Areas to highlight: ${styleProfile.bodyFocusAreas?.length > 0 ? styleProfile.bodyFocusAreas.join(", ") : "not on record"}
-- Areas to minimize: ${styleProfile.bodyAvoidAreas?.length > 0 ? styleProfile.bodyAvoidAreas.join(", ") : "not on record"}
-Note: body shape, height, waist and hip measurements are not yet recorded in this Passport.` : "No style profile on record — give a general analysis."}
+- Areas to minimise: ${styleProfile.bodyAvoidAreas?.length > 0 ? styleProfile.bodyAvoidAreas.join(", ") : "not on record"}
+Note: body shape, height, waist and hip measurements are not yet in this Passport.` : "No style profile on record — give a general analysis."}
 
-CUSTOMER'S INPUTS — You MUST respond directly to every non-empty field below. Do not give generic answers. These are the real reasons the customer is considering this item.
+CUSTOMER'S INPUTS:
 
 OCCASION: ${safeOccasion || "(not provided)"}
-${safeOccasion ? `→ Does this item suit "${safeOccasion}"? State yes, partly, or no with a concrete reason referencing the item's actual formality level, design, and that occasion's dress code.
-→ If yes: how should they style it for "${safeOccasion}"?
-→ If no or partly: what would need to change, or what would work better?` : "→ Suggest the most suitable occasions for this item."}
+${safeOccasion ? `→ Does this item suit "${safeOccasion}"? One concrete reason referencing the item's formality and that occasion's dress code. If yes, one styling tip. If no, what adjustment would help.` : "→ Suggest the most suitable occasions for this item."}
 
 WHAT THEY LIKE: ${safeWhatLike || "(not provided)"}
-${safeWhatLike ? `→ Agree, partly agree, or disagree with their positive impression? Explain based on the item's actual construction — not simply restating what they said.` : ""}
+${safeWhatLike ? `→ Agree, partly agree, or disagree? One concrete reason based on the item's actual construction — do not restate what they said.` : ""}
 
 WHAT THEY ARE UNSURE ABOUT: ${safeUnsureAbout || "(not provided)"}
-${safeUnsureAbout ? `→ Is this concern justified, partly justified, or not supported? Be honest — if the concern is valid, say so directly rather than offering false reassurance.` : ""}
+${safeUnsureAbout ? `→ Justified, partly justified, or not supported? Be direct. If the concern is valid, say so. Then offer 2–3 specific practical solutions — e.g. for a strapless concern: supportive strapless bra, grip strips or fashion tape, tailoring the bodice, a styling layer (scarf or blazer), or trying on before committing. Do not recommend skipping without considering solutions first.` : ""}
 
-BEFORE YOU BUY — generate exactly 2 concise points (25–40 words each):
-1. SIZE CHECK — Using ONLY the Passport fit data listed above, explain how the item's silhouette, waist placement, volume, length and proportions are likely to work for this customer based on their fit preferences and size information. Do not make claims about how any brand runs its sizing. Do not invent body measurements. If the Passport lacks sufficient size or fit data, state exactly: "Fit cannot be confirmed from your current Passport. Check the garment measurements against your waist and hip measurements."
-2. WEARABILITY — Assess realistically how often this customer will wear this item given their lifestyle and the occasion they entered. State concretely how many genuinely different outfits can be built around it with what they own. Be honest if versatility is limited.
-Do not repeat colour, fabric, care, statement-level commentary, or anything already in Why It Works or Final Condition.
+BEFORE YOU BUY — exactly 2 points (25–40 words each):
+1. FIT & SIZE — Using ONLY the Passport fit data above, explain how the item's silhouette, waist placement, volume, length and neckline are likely to work for this customer's fit preferences and size. No brand-sizing claims. No invented measurements. If Passport fit data is insufficient, state exactly: "Fit cannot be confirmed from your current Passport. Compare the garment's bust, waist and hip measurements with your own before buying."
+2. WEARABILITY — Realistically assess wear frequency given their lifestyle and occasion. State concretely how many genuine different outfits can be built with what they own. Be honest if versatility is limited.
 
-${eligibleClosetItems.length > 0 ? `COMPATIBLE CLOSET CANDIDATES (pairings must come ONLY from this list — never invent items):
+REPETITION RULE: Each colour, concern or trait appears ONCE across the entire response. Never repeat Final Condition reasoning in any earlier section.
+
+${eligibleClosetItems.length > 0 ? `COMPATIBLE CLOSET CANDIDATES (pairings must come ONLY from this list):
 ${eligibleClosetItems.map(i => `- ${i.name} (${i.category}${i.primaryColor ? ", "+i.primaryColor : ""})`).join("\n")}` : "NO COMPATIBLE CLOSET ITEMS — leave closetPairings as an empty array."}
 
-NAIA COLLECTION (you MUST pick naiaMatch ONLY from this list, use exact title):
+NAIA COLLECTION (pick naiaMatch ONLY from this list, exact title):
 ${fallbackProducts.map(p => `- ${p.title}`).join("\n")}
 
 STRICT RULES:
-1. closetPairings: ONLY use items from the compatible Closet candidates list above
-   - When candidates are listed, select at least one unless it is genuinely impractical to wear together
-   - Never invent Closet items; only use items explicitly listed above
-   - If no candidates are listed, return []
-2. naiaMatch: ONLY pick from the nAia collection list above — return exact title only (no URL)
-3. occasions: ${safeOccasion ? `Include "${safeOccasion}" in the occasions array ONLY if the item genuinely suits it. Never include it if the item is unsuitable for that occasion.` : "Suggest appropriate occasions for this item."}
-4. Do not invent, hallucinate, or suggest items not in these lists
+1. closetPairings: ONLY use items from the compatible Closet candidates list above; never invent items; return [] when none listed
+2. naiaMatch: ONLY from the nAia collection list — exact title only (no URL)
+3. occasions: ${safeOccasion ? `Include "${safeOccasion}" ONLY if the item genuinely suits it.` : "Suggest appropriate occasions."}
+4. naiaMatchRelationship: set "complement" if the NADINE piece is worn WITH the uploaded item; set "alternative" if it is a better replacement instead
+5. Do not invent or hallucinate any items
 
 Respond ONLY with valid JSON, no markdown:
 {
   "itemType": "specific type e.g. Maxi Skirt, Blazer, Midi Dress",
-  "verdict": "BUY" or "SKIP",
+  "detectedColor": "AI colour read from the image e.g. BEIGE / CREAM — use ALL CAPS",
+  "verdict": "BUY" — item suits this customer well | "SKIP FOR NOW" — has potential but depends on fit confirmation, trying on, or specific styling (not definitively unsuitable) | "SKIP" — only when genuinely unsuitable with no realistic path to making it work,
   "confidence": 0-100,
-  "styleDNAMatch": "...",
+  "styleDNAMatch": "≤20 words — how this item fits or challenges their style DNA",
   "detailedAnalysis": {
-    "silhouette": "...",
-    "color": "...",
-    "fabric": "...",
-    "versatility": "..."
+    "silhouette": "≤15 words",
+    "color": "≤15 words — how the item colour works with their favourites and closet",
+    "versatility": "≤15 words"
   },
-  "occasionFit": ${safeOccasion ? `{ "occasion": "${safeOccasion}", "fits": true or false, "explanation": "specific reason this item suits or does not suit ${safeOccasion}", "stylingTip": "how to style it for ${safeOccasion} or what to adjust" }` : "null"},
-  "whatLikeEval": ${safeWhatLike ? `{ "aspect": "${safeWhatLike.slice(0,80)}", "agreement": "agree" or "partly agree" or "disagree", "explanation": "why, based on the item's actual properties" }` : "null"},
-  "concernEval": ${safeUnsureAbout ? `{ "concern": "${safeUnsureAbout.slice(0,80)}", "justified": "justified" or "partly justified" or "not supported", "explanation": "practical, honest assessment" }` : "null"},
-  "closetPairings": [{"name": "...", "reason": "..."}],
-  "fillsGap": null or "...",
+  "occasionFit": ${safeOccasion ? `{ "occasion": "${safeOccasion}", "fits": true or false, "explanation": "≤25 words — concrete reason", "stylingTip": "≤20 words" }` : "null"},
+  "whatLikeEval": ${safeWhatLike ? `{ "aspect": "${safeWhatLike.slice(0,80)}", "agreement": "agree" or "partly agree" or "disagree", "explanation": "≤20 words — based on item's actual properties" }` : "null"},
+  "concernEval": ${safeUnsureAbout ? `{ "concern": "${safeUnsureAbout.slice(0,80)}", "justified": "justified" or "partly justified" or "not supported", "explanation": "≤20 words — direct assessment", "solutions": ["specific practical solution 1", "specific practical solution 2"] }` : "null"},
+  "closetPairings": [{"name": "...", "reason": "≤15 words"}],
+  "fillsGap": null or "≤15 words",
   "occasions": [],
-  "naiaMatch": { "title": "...", "reason": "..." },
-  "beforeYouBuy": ["Size check: 25–40 words based only on Passport fit data above — or the exact missing-data statement when insufficient", "Wearability: 25–40 words on realistic wear frequency and genuine outfit versatility"],
-  "buyIf": "complete this sentence fragment: the one concrete realistic condition the customer must honestly meet to justify buying",
-  "skipIf": "complete this sentence fragment: the one concrete realistic condition that would make this purchase a mistake",
-  "finalThought": "ONE sentence — must include: (a) the customer's style type from their Passport, (b) their exact entered occasion if provided (use their exact words), (c) the main real-world condition or caveat. No filler phrases. Example: 'It suits your artsy style and works for a birthday dinner, but only buy it if you are comfortable owning a statement piece you may not wear frequently.'"
+  "naiaMatch": { "title": "...", "reason": "≤20 words" },
+  "naiaMatchRelationship": "complement" or "alternative",
+  "beforeYouBuy": ["Fit & Size: 25–40 words using only Passport fit data — or the exact missing-data statement", "Wearability: 25–40 words on realistic wear frequency and outfit versatility"],
+  "buyIf": "≤20 words — the one concrete condition that justifies buying",
+  "skipIf": "≤20 words — the one concrete condition that makes this a mistake",
+  "finalThought": "ONE sentence max 30 words — style type + entered occasion + main condition. No filler. Example: 'A strong match for your minimalist style and brunch occasions, but only buy it if you know strapless styles fit and feel secure on you.'"
 }`
               }
             ]
@@ -311,7 +310,8 @@ Respond ONLY with valid JSON, no markdown:
 
     // ── 8. Persist analysis (awaited; DB-backed idempotency via unique key) ───
     // Verdict is stated intent only — never a transaction, purchase, or revenue signal.
-    const verdictMap = { BUY: "BUY", SKIP: "SKIP", MAYBE: "MAYBE" };
+    // "SKIP FOR NOW" is a conditional skip — persisted as SKIP in the DB enum but preserved in fullAnalysis for display.
+    const verdictMap = { BUY: "BUY", "SKIP FOR NOW": "SKIP", SKIP: "SKIP", MAYBE: "MAYBE" };
     const persistedVerdict = verdictMap[analysis.verdict] ?? "INCOMPLETE";
     let analysisRecord;
     {
@@ -339,22 +339,24 @@ Respond ONLY with valid JSON, no markdown:
             colorNote:    typeof colorNote   === "string" && colorNote.trim()   ? colorNote.trim().slice(0, 200)   : null,
             itemSize:     typeof size        === "string" && size.trim()        ? size.trim().slice(0, 100)        : null,
             fullAnalysis: {
-              verdict:         analysis.verdict,
-              confidence:      analysis.confidence,
-              itemType:        analysis.itemType        ?? null,
-              styleDNAMatch:   analysis.styleDNAMatch   ?? null,
-              detailedAnalysis:analysis.detailedAnalysis ?? null,
-              occasionFit:     analysis.occasionFit    ?? null,
-              whatLikeEval:    analysis.whatLikeEval   ?? null,
-              concernEval:     analysis.concernEval    ?? null,
-              closetPairings:  analysis.closetPairings  ?? [],
-              fillsGap:        analysis.fillsGap         ?? null,
-              occasions:       analysis.occasions        ?? [],
-              naiaMatch:       analysis.naiaMatch        ?? null,
-              beforeYouBuy:    Array.isArray(analysis.beforeYouBuy) ? analysis.beforeYouBuy.filter(s => typeof s === "string" && s.trim()) : [],
-              buyIf:           typeof analysis.buyIf  === "string" && analysis.buyIf.trim()  ? analysis.buyIf.trim()  : null,
-              skipIf:          typeof analysis.skipIf === "string" && analysis.skipIf.trim() ? analysis.skipIf.trim() : null,
-              finalThought:    analysis.finalThought     ?? null,
+              verdict:               analysis.verdict,
+              confidence:            analysis.confidence,
+              itemType:              analysis.itemType             ?? null,
+              detectedColor:         typeof analysis.detectedColor === "string" && analysis.detectedColor.trim() ? analysis.detectedColor.trim() : null,
+              styleDNAMatch:         analysis.styleDNAMatch        ?? null,
+              detailedAnalysis:      analysis.detailedAnalysis     ?? null,
+              occasionFit:           analysis.occasionFit          ?? null,
+              whatLikeEval:          analysis.whatLikeEval         ?? null,
+              concernEval:           analysis.concernEval          ?? null,
+              closetPairings:        analysis.closetPairings       ?? [],
+              fillsGap:              analysis.fillsGap              ?? null,
+              occasions:             analysis.occasions             ?? [],
+              naiaMatch:             analysis.naiaMatch             ?? null,
+              naiaMatchRelationship: typeof analysis.naiaMatchRelationship === "string" ? analysis.naiaMatchRelationship : "alternative",
+              beforeYouBuy:          Array.isArray(analysis.beforeYouBuy) ? analysis.beforeYouBuy.filter(s => typeof s === "string" && s.trim()) : [],
+              buyIf:                 typeof analysis.buyIf  === "string" && analysis.buyIf.trim()  ? analysis.buyIf.trim()  : null,
+              skipIf:                typeof analysis.skipIf === "string" && analysis.skipIf.trim() ? analysis.skipIf.trim() : null,
+              finalThought:          analysis.finalThought          ?? null,
             },
           },
         });
