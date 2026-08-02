@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLoaderData, useFetcher, Link } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type LinksFunction } from "react-router";
 import prisma from "../db.server";
@@ -366,6 +366,7 @@ export default function Closet() {
   const fetcher = useFetcher();
 
   const [showAddForm, setShowAddForm] = useState(false);
+  const addBtnRef = useRef<HTMLButtonElement>(null);
   const [activeCategory, setActiveCategory] = useState("ALL");
   const [query, setQuery] = useState("");
 
@@ -393,7 +394,7 @@ export default function Closet() {
 
   useEffect(() => {
     if (!showAddForm) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setShowAddForm(false); };
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") { setShowAddForm(false); addBtnRef.current?.focus(); } };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [showAddForm]);
@@ -583,7 +584,7 @@ export default function Closet() {
 
         {/* Option A: + Add a Piece CTA */}
         {!showAddForm && (
-          <button type="button" className="cl-add-btn" onClick={() => setShowAddForm(true)}>
+          <button ref={addBtnRef} type="button" className="cl-add-btn" onClick={() => setShowAddForm(true)}>
             + Add a Piece
           </button>
         )}
@@ -593,7 +594,7 @@ export default function Closet() {
           <div className="cl-form">
             <div className="cl-form-header">
               <h3 className="cl-form-title">Add to Wardrobe</h3>
-              <button type="button" className="cl-form-cancel" onClick={() => setShowAddForm(false)}>Cancel</button>
+              <button type="button" className="cl-form-cancel" onClick={() => { setShowAddForm(false); addBtnRef.current?.focus(); }}>Cancel</button>
             </div>
 
             {/* Photo guide integrated inside Add to Wardrobe panel */}
