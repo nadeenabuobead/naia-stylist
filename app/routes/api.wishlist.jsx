@@ -176,6 +176,8 @@ ${safeWhatLike ? `→ Agree, partly agree, or disagree with their positive impre
 WHAT THEY ARE UNSURE ABOUT: ${safeUnsureAbout || "(not provided)"}
 ${safeUnsureAbout ? `→ Is this concern justified, partly justified, or not supported? Be honest — if the concern is valid, say so directly rather than offering false reassurance.` : ""}
 
+BEFORE YOU BUY — regardless of your verdict, generate 2–5 specific, honest concern points that challenge this purchase and help the customer make a realistic decision. Cover as many of these as apply: likely wear frequency given their lifestyle and closet, fit and size uncertainty, fabric and care requirements, whether a similar piece already exists in their closet, whether the item's statement level limits outfit combinations, and whether the ownership commitment is justified by expected use. Do not soften valid concerns or fabricate reassurance. Each point must be a complete sentence.
+
 ${eligibleClosetItems.length > 0 ? `COMPATIBLE CLOSET CANDIDATES (pairings must come ONLY from this list — never invent items):
 ${eligibleClosetItems.map(i => `- ${i.name} (${i.category}${i.primaryColor ? ", "+i.primaryColor : ""})`).join("\n")}` : "NO COMPATIBLE CLOSET ITEMS — leave closetPairings as an empty array."}
 
@@ -210,7 +212,10 @@ Respond ONLY with valid JSON, no markdown:
   "fillsGap": null or "...",
   "occasions": [],
   "naiaMatch": { "title": "...", "reason": "..." },
-  "finalThought": "..."
+  "beforeYouBuy": ["2–5 specific honest concern strings — each a distinct challenge — never empty, never generic"],
+  "buyIf": "complete this sentence fragment: the one concrete realistic condition the customer must honestly meet to justify buying",
+  "skipIf": "complete this sentence fragment: the one concrete realistic condition that would make this purchase a mistake",
+  "finalThought": "ONE sentence — must include: (a) the customer's style type from their Passport, (b) their exact entered occasion if provided (use their exact words), (c) the main real-world condition or caveat. No filler phrases. Example: 'It suits your artsy style and works for a birthday dinner, but only buy it if you are comfortable owning a statement piece you may not wear frequently.'"
 }`
               }
             ]
@@ -334,6 +339,9 @@ Respond ONLY with valid JSON, no markdown:
               fillsGap:        analysis.fillsGap         ?? null,
               occasions:       analysis.occasions        ?? [],
               naiaMatch:       analysis.naiaMatch        ?? null,
+              beforeYouBuy:    Array.isArray(analysis.beforeYouBuy) ? analysis.beforeYouBuy.filter(s => typeof s === "string" && s.trim()) : [],
+              buyIf:           typeof analysis.buyIf  === "string" && analysis.buyIf.trim()  ? analysis.buyIf.trim()  : null,
+              skipIf:          typeof analysis.skipIf === "string" && analysis.skipIf.trim() ? analysis.skipIf.trim() : null,
               finalThought:    analysis.finalThought     ?? null,
             },
           },

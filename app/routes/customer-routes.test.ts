@@ -786,40 +786,115 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     assert.ok(src.includes("Never include it if the item is unsuitable"), "occasions rule explicitly prevents false inclusion");
   });
 
-  it("buyskip.$id.tsx renders Occasion Fit in At a Glance from fullAnalysis.occasionFit", () => {
+  it("buyskip.$id.tsx renders occasion fit in Why It Works from fullAnalysis.occasionFit", () => {
     const src = route("buyskip.$id.tsx");
     assert.ok(src.includes("occasionFit"), "reads occasionFit from fullAnalysis");
-    assert.ok(src.includes("Occasion Fit"), "Occasion Fit label rendered in At a Glance");
     assert.ok(src.includes("occasionFit.fits"), "renders fits boolean to determine Yes/Not ideal");
     assert.ok(src.includes("occasionFit.explanation"), "renders explanation");
+    assert.ok(src.includes("occasionFit.stylingTip"), "renders stylingTip");
+    assert.ok(src.includes("analysis.forOccasion"), "uses customer's entered occasion name as label");
   });
 
-  it("buyskip.$id.tsx renders What You Like evaluation in At a Glance", () => {
+  it("buyskip.$id.tsx renders What You Like evaluation in Why It Works from fullAnalysis", () => {
     const src = route("buyskip.$id.tsx");
     assert.ok(src.includes("whatLikeEval"), "reads whatLikeEval from fullAnalysis");
-    assert.ok(src.includes("What You Like"), "What You Like label rendered");
-    assert.ok(src.includes("whatLikeEval.agreement"), "renders agreement value");
+    assert.ok(src.includes("whatLikeEval.agreement"), "renders agree/partly agree/disagree value");
     assert.ok(src.includes("whatLikeEval.explanation"), "renders explanation");
+    assert.ok(src.includes("whatLikeEval.aspect"), "renders aspect of what the customer liked");
   });
 
-  it("buyskip.$id.tsx renders Your Concern evaluation in At a Glance", () => {
+  it("buyskip.$id.tsx renders Your Concern evaluation in Before You Buy from fullAnalysis", () => {
     const src = route("buyskip.$id.tsx");
     assert.ok(src.includes("concernEval"), "reads concernEval from fullAnalysis");
-    assert.ok(src.includes("Your Concern"), "Your Concern label rendered");
-    assert.ok(src.includes("concernEval.justified"), "renders justified value");
+    assert.ok(src.includes("concernEval.justified"), "renders justified/partly justified/not supported value");
     assert.ok(src.includes("concernEval.explanation"), "renders explanation");
+    assert.ok(src.includes("concernEval.concern"), "renders concern text");
   });
 
-  it("buyskip.$id.tsx Best For uses occasionFit.fits to include the customer's stated occasion", () => {
+  it("buyskip.$id.tsx occasion fit uses entered occasion name directly in Why It Works label", () => {
     const src = route("buyskip.$id.tsx");
-    assert.ok(src.includes("occasionFit?.fits === true"), "Best For only includes occasion when AI confirmed it fits");
-    assert.ok(src.includes("analysis.forOccasion"), "Best For references the customer's stated occasion");
+    assert.ok(src.includes("analysis.forOccasion"), "occasion label uses customer's entered occasion name");
+    assert.ok(src.includes("occasionFit.fits"), "renders yes/not ideal based on fits boolean");
   });
 
-  it("buyskip.$id.tsx renders Occasion Fit block and Your Inputs block inside Read Full Analysis", () => {
+  it("buyskip.$id.tsx renders Before You Buy with concern eval and beforeYouBuy challenge points", () => {
     const src = route("buyskip.$id.tsx");
-    assert.ok(src.includes("Occasion Fit —"), "Occasion Fit subsection in full analysis");
-    assert.ok(src.includes("Your Inputs"), "Your Inputs block in full analysis");
-    assert.ok(src.includes("stylingTip"), "stylingTip rendered in full analysis");
+    assert.ok(src.includes("Before You Buy"), "Before You Buy section present");
+    assert.ok(src.includes("concernEval"), "concern evaluation rendered in Before You Buy");
+    assert.ok(src.includes("beforeYouBuy"), "beforeYouBuy array rendered");
+    assert.ok(src.includes("stylingTip"), "stylingTip rendered in occasionFit");
+  });
+
+  // ── K3. New content structure (Why It Works / Before You Buy / Final Condition) ─
+  it("buyskip.$id.tsx renders match percentage with 'MATCH' label — not 'confidence'", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("MATCH") || src.includes("Match"), "uses MATCH label for percentage");
+    assert.ok(src.includes("bos-verdict-match"), "uses bos-verdict-match class for the percentage span");
+    assert.ok(!src.includes("% confidence"), "does not render '% confidence' text");
+  });
+
+  it("buyskip.$id.tsx renders Why It Works section with style match and occasion", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("Why It Works"), "Why It Works section present");
+    assert.ok(src.includes("styleDNAMatch"), "style DNA match referenced in Why It Works");
+    assert.ok(src.includes("occasionFit"), "occasionFit referenced in Why It Works context");
+  });
+
+  it("buyskip.$id.tsx only renders Wear It With when confirmed closet pairings exist — section hidden when empty", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("Wear It With"), "Wear It With section present");
+    assert.ok(src.includes("renderablePairings.length > 0"), "Wear It With is conditional on real pairings");
+    assert.ok(!src.includes("No closet pairings were found"), "no fallback text when pairings empty — section hidden instead");
+  });
+
+  it("buyskip.$id.tsx renders Final Condition with buyIf and skipIf from fullAnalysis", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("Final Condition"), "Final Condition section present");
+    assert.ok(src.includes("Buy it if"), "Buy it if rendered");
+    assert.ok(src.includes("Skip it if"), "Skip it if rendered");
+    assert.ok(src.includes("buyIf"), "buyIf read from fullAnalysis");
+    assert.ok(src.includes("skipIf"), "skipIf read from fullAnalysis");
+  });
+
+  it("api.wishlist.jsx fullAnalysis blob persists buyIf, skipIf and beforeYouBuy — conditions survive refresh and reopen", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("beforeYouBuy:"), "fullAnalysis persists beforeYouBuy");
+    assert.ok(src.includes("buyIf:"), "fullAnalysis persists buyIf");
+    assert.ok(src.includes("skipIf:"), "fullAnalysis persists skipIf");
+  });
+
+  it("api.wishlist.jsx naiaMatch is stored separately from closetPairings in fullAnalysis", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("naiaMatch:"), "naiaMatch stored in fullAnalysis blob");
+    assert.ok(src.includes("closetPairings:"), "closetPairings stored in fullAnalysis blob");
+    // They must be at different character positions — confirming they are separate fields
+    const naiaIdx = src.indexOf("naiaMatch:");
+    const closetIdx = src.indexOf("closetPairings:");
+    assert.ok(naiaIdx !== closetIdx, "naiaMatch and closetPairings are distinct fields in the blob");
+  });
+
+  it("api.wishlist.jsx only uses eligible closet candidates — invented items are blocked server-side", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("ONLY use items from the compatible Closet candidates list"), "prompt enforces closet item restriction");
+    assert.ok(src.includes("Never invent Closet items"), "prompt explicitly prohibits invented items");
+    assert.ok(src.includes("eligibleClosetNameMap"), "server-side name validation against eligible items");
+  });
+
+  it("api.wishlist.jsx prompt instructs AI to include BEFORE YOU BUY challenge points", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("BEFORE YOU BUY"), "prompt has BEFORE YOU BUY section");
+    assert.ok(src.includes("beforeYouBuy"), "prompt schema includes beforeYouBuy field");
+    assert.ok(src.includes("buyIf"), "prompt schema includes buyIf condition");
+    assert.ok(src.includes("skipIf"), "prompt schema includes skipIf condition");
+  });
+
+  it("buyskip.$id.tsx reopens same stored analysis from View All Decisions — imageUrl and fullAnalysis from DB", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("prisma.buyOrSkipAnalysis.findUnique"), "loader fetches from DB on every load");
+    assert.ok(src.includes("analysis.imageUrl"), "imageUrl comes from DB record");
+    assert.ok(src.includes("analysis.fullAnalysis"), "fullAnalysis comes from DB record");
+    // View All Decisions cards link to individual result pages
+    const decisions = route("my-naia.buying-decisions.tsx");
+    assert.ok(decisions.includes('to={`/buyskip/${d.id}`}'), "decision cards link to result page for reopen");
   });
 });
