@@ -223,7 +223,7 @@ export default function BuyOrSkip() {
       {/* Section shell */}
       <div className="sp-shell">
         <div className="sp-shell-eyebrow">Should I Buy This?</div>
-        <h1 className="sp-shell-title">Should I Buy This?</h1>
+        <h1 className="sp-shell-title" style={{ fontSize: "clamp(36px, 4.5vw, 52px)" }}>Should I Buy This?</h1>
         <p className="sp-shell-desc">
           Considering a piece from another brand? Share it with nAia and receive an honest read based
           on your style, wardrobe, lifestyle and whether you already own something similar.
@@ -257,48 +257,46 @@ export default function BuyOrSkip() {
         </div>
       </section>
 
-      {/* Step 2 · A Few Questions (shown once image is uploaded) */}
-      {imageUrl && (
-        <section className="bos-section">
-          <div className="bos-step-label">Step 2 · A Few Questions</div>
-          <div className="bos-fields-grid">
-            <Field label="What are you considering it for?" value={forOccasion} onChange={setForOccasion} placeholder="e.g. Evening dinners in Beirut" />
-            <Field label="What do you like about it?" value={whatLike} onChange={setWhatLike} placeholder="e.g. The neckline and the drape" />
-            <Field label="What are you unsure about?" value={unsureAbout} onChange={setUnsureAbout} placeholder="e.g. Whether it duplicates something I own" />
-            <Field label="Which colour are you considering?" value={colorNote} onChange={setColorNote} placeholder="e.g. Ivory" />
-            <Field label="Which size are you considering?" value={size} onChange={setSize} placeholder="e.g. M" />
-          </div>
+      {/* Step 2 · A Few Questions */}
+      <section className="bos-section">
+        <div className="bos-step-label">Step 2 · A Few Questions</div>
+        <div className="bos-fields-grid">
+          <Field label="What are you considering it for?" value={forOccasion} onChange={setForOccasion} placeholder="e.g. Evening dinners in Beirut" />
+          <Field label="What do you like about it?" value={whatLike} onChange={setWhatLike} placeholder="e.g. The neckline and the drape" />
+          <Field label="What are you unsure about?" value={unsureAbout} onChange={setUnsureAbout} placeholder="e.g. Whether it duplicates something I own" />
+          <Field label="Which colour are you considering?" value={colorNote} onChange={setColorNote} placeholder="e.g. Ivory" />
+          <Field label="Which size are you considering?" value={size} onChange={setSize} placeholder="e.g. M" />
+        </div>
 
-          <div className="bos-field-row">
-            <label className="bos-field-label">Category *</label>
-            <div className="bos-pills">
-              {CATEGORIES.map(c => (
-                <button key={c} type="button"
-                  className={`bos-pill${category === c ? " bos-pill--on" : ""}`}
-                  onClick={() => setCategory(c)}>{c}</button>
-              ))}
-            </div>
+        <div className="bos-field-row">
+          <label className="bos-field-label">Category *</label>
+          <div className="bos-pills">
+            {CATEGORIES.map(c => (
+              <button key={c} type="button"
+                className={`bos-pill${category === c ? " bos-pill--on" : ""}`}
+                onClick={() => setCategory(c)}>{c}</button>
+            ))}
           </div>
+        </div>
 
-          <div className="bos-field-row">
-            <label className="bos-field-label">Color * (choose all that apply)</label>
-            <div className="bos-pills">
-              {COLORS.map(c => (
-                <button key={c} type="button"
-                  className={`bos-pill${color.includes(c) ? " bos-pill--on" : ""}`}
-                  onClick={() => setColor(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])}>
-                  {c}
-                </button>
-              ))}
-            </div>
+        <div className="bos-field-row">
+          <label className="bos-field-label">Color * (choose all that apply)</label>
+          <div className="bos-pills">
+            {COLORS.map(c => (
+              <button key={c} type="button"
+                className={`bos-pill${color.includes(c) ? " bos-pill--on" : ""}`}
+                onClick={() => setColor(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])}>
+                {c}
+              </button>
+            ))}
           </div>
+        </div>
 
-          <div className="bos-field-row">
-            <label className="bos-field-label">Brand (optional)</label>
-            <input className="bos-input" type="text" placeholder="e.g. Zara, H&M" value={brand} onChange={e => setBrand(e.target.value)} />
-          </div>
-        </section>
-      )}
+        <div className="bos-field-row">
+          <label className="bos-field-label">Brand (optional)</label>
+          <input className="bos-input" type="text" placeholder="e.g. Zara, H&M" value={brand} onChange={e => setBrand(e.target.value)} />
+        </div>
+      </section>
 
       {/* What nAia May Consider */}
       <section className="bos-section">
