@@ -279,7 +279,7 @@ const css = `
   .cl-stat-num{font-family:var(--ff-display);font-size:40px;font-weight:900;color:var(--fg, var(--c-ink))}
   .cl-stat-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted))}
   /* Add a Piece button — inline-flex, auto-width, dark ink bg. Matches sp-btn-primary from Lovable source (512ab5e). */
-  .cl-add-btn{display:inline-flex;align-items:center;width:auto;padding:12px 28px;background:var(--fg, var(--c-ink));color:var(--bg, #FAF6F1);border:none;margin-bottom:28px;cursor:pointer;font-family:var(--ff-ui);font-size:10px;letter-spacing:2.5px;text-transform:uppercase;transition:opacity .13s}
+  .cl-add-btn{display:inline-flex;align-items:center;align-self:flex-start;width:auto;padding:12px 28px;background:var(--fg, var(--c-ink));color:var(--bg, #FAF6F1);border:none;margin-bottom:28px;cursor:pointer;font-family:var(--ff-ui);font-size:10px;letter-spacing:2.5px;text-transform:uppercase;transition:opacity .13s}
   .cl-add-btn:hover{opacity:.8}
   .cl-add-btn:focus-visible{outline:2px solid var(--fg, var(--c-ink));outline-offset:2px}
   .cl-add-btn:disabled{opacity:.45;cursor:not-allowed}
