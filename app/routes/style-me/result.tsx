@@ -1012,7 +1012,7 @@ export default function StyleMeResult() {
                       Try this piece on
                     </button>
                   )}
-                  {loaderData.isAuthenticated && suggestion?.id && loaderData.sessionId && (item.closetItemId || item.shopifyProductId) && (
+                  {loaderData.isAuthenticated && suggestion?.id && loaderData.sessionId && item.shopifyProductId && !item.closetItemId && (
                     <RecommendationFeedbackWidget
                       sessionId={loaderData.sessionId}
                       suggestionId={suggestion.id}
