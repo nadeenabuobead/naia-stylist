@@ -70,6 +70,11 @@ function firstSentence(text: string | null | undefined): string | null {
   return m ? m[0].trim() : text.slice(0, 120).trim();
 }
 
+function cap(s: string | null | undefined): string {
+  if (!s) return "";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 function ResultBlock({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="bos-result-block">
@@ -91,6 +96,9 @@ export default function BuyOrSkipResult() {
   const naiaMatch     = fa?.naiaMatch      ?? null;
   const fillsGap      = fa?.fillsGap       ?? null;
   const styleDNAMatch = fa?.styleDNAMatch  ?? null;
+  const occasionFit   = fa?.occasionFit   ?? null;
+  const whatLikeEval  = fa?.whatLikeEval  ?? null;
+  const concernEval   = fa?.concernEval   ?? null;
 
   // Specific item type (AI-detected) takes priority over saved category
   const displayType   = fa?.itemType ?? analysis.category;
@@ -110,9 +118,19 @@ export default function BuyOrSkipResult() {
     : [];
 
   // ── At a Glance derivations ───────────────────────────────────────────────
-  const glanceBestFor: string | null = occasions.length > 0
-    ? occasions.slice(0, 2).join(", ")
-    : (analysis.forOccasion ?? null);
+  // Best For: if AI confirmed the entered occasion fits, prepend it to the list
+  const glanceBestFor: string | null = (() => {
+    let list = [...occasions];
+    if (
+      analysis.forOccasion &&
+      occasionFit?.fits === true &&
+      !list.some(o => o.toLowerCase().includes((analysis.forOccasion ?? "").toLowerCase()))
+    ) {
+      list = [analysis.forOccasion, ...list];
+    }
+    if (list.length > 0) return list.slice(0, 2).join(", ");
+    return analysis.forOccasion ?? null;
+  })();
 
   const glanceMainStrength: string | null = firstSentence(styleDNAMatch);
 
@@ -206,6 +224,46 @@ export default function BuyOrSkipResult() {
                   <span className="bos-glance-value">{glanceWatchOut}</span>
                 </div>
               )}
+
+              {/* Occasion Fit — shown when the customer entered an occasion */}
+              {analysis.forOccasion && occasionFit && (
+                <div className="bos-glance-row">
+                  <span className="bos-glance-label">Occasion Fit</span>
+                  <span className="bos-glance-value">
+                    <strong>{cap(analysis.forOccasion)}</strong>
+                    {": "}
+                    {occasionFit.fits ? "Yes." : "Not ideal."}{" "}
+                    {occasionFit.explanation}
+                    {occasionFit.stylingTip ? ` ${occasionFit.stylingTip}` : ""}
+                  </span>
+                </div>
+              )}
+
+              {/* What You Like — AI evaluation of the customer's stated positive */}
+              {analysis.whatLike && whatLikeEval && (
+                <div className="bos-glance-row">
+                  <span className="bos-glance-label">What You Like</span>
+                  <span className="bos-glance-value">
+                    <em>{cap(whatLikeEval.aspect || analysis.whatLike)}</em>
+                    {" — "}
+                    {cap(whatLikeEval.agreement)}.{" "}
+                    {whatLikeEval.explanation}
+                  </span>
+                </div>
+              )}
+
+              {/* Your Concern — AI evaluation of the customer's stated worry */}
+              {analysis.unsureAbout && concernEval && (
+                <div className="bos-glance-row">
+                  <span className="bos-glance-label">Your Concern</span>
+                  <span className="bos-glance-value">
+                    <em>{cap(concernEval.concern || analysis.unsureAbout)}</em>
+                    {" — "}
+                    {cap(concernEval.justified)}.{" "}
+                    {concernEval.explanation}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -230,6 +288,41 @@ export default function BuyOrSkipResult() {
             {styleDNAMatch && (
               <ResultBlock label="Style DNA Match">
                 <p>{styleDNAMatch}</p>
+              </ResultBlock>
+            )}
+
+            {/* Occasion Fit — detailed evaluation of the customer's stated occasion */}
+            {analysis.forOccasion && occasionFit && (
+              <ResultBlock label={`Occasion Fit — ${cap(analysis.forOccasion)}`}>
+                <div>
+                  <strong>{occasionFit.fits ? "Yes" : "Not ideal"}</strong>{" — "}
+                  {occasionFit.explanation}
+                </div>
+                {occasionFit.stylingTip && (
+                  <div style={{ marginTop: "8px", color: "var(--naia-muted)" }}>
+                    <strong>Styling tip</strong>{" — "}{occasionFit.stylingTip}
+                  </div>
+                )}
+              </ResultBlock>
+            )}
+
+            {/* Your Inputs — AI evaluation of what they like and what concerns them */}
+            {(whatLikeEval || concernEval) && (
+              <ResultBlock label="Your Inputs">
+                {whatLikeEval && (
+                  <div style={{ marginBottom: "10px" }}>
+                    <strong>What you like — {cap(whatLikeEval.aspect || analysis.whatLike || "")}</strong>
+                    <br />
+                    {cap(whatLikeEval.agreement)}.{" "}{whatLikeEval.explanation}
+                  </div>
+                )}
+                {concernEval && (
+                  <div>
+                    <strong>Your concern — {cap(concernEval.concern || analysis.unsureAbout || "")}</strong>
+                    <br />
+                    {cap(concernEval.justified)}.{" "}{concernEval.explanation}
+                  </div>
+                )}
               </ResultBlock>
             )}
 

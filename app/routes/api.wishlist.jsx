@@ -123,6 +123,13 @@ async function analyzeItem(request) {
     const eligibleClosetItems = closetItems.filter(i => compatibleClosetCategories.includes(i.category));
 
     // ── 5. Call Claude AI ──────────────────────────────────────────────────────
+    // Sanitize user-entered strings before embedding them in the prompt
+    const sanitize = s => typeof s === "string" ? s.replace(/"/g, "'").replace(/\n/g, " ").trim() : "";
+    const safeOccasion    = sanitize(forOccasion);
+    const safeWhatLike    = sanitize(whatLike);
+    const safeUnsureAbout = sanitize(unsureAbout);
+    const safeSize        = sanitize(size);
+
     let analysisResponse;
     try {
       analysisResponse = await fetch("https://api.anthropic.com/v1/messages", {
@@ -134,26 +141,40 @@ async function analyzeItem(request) {
         },
         body: JSON.stringify({
           model: "claude-opus-4-5-20251101",
-          max_tokens: 2000,
+          max_tokens: 3000,
           messages: [{
             role: "user",
             content: [
               { type: "image", source: { type: "url", url: imageUrl } },
               {
                 type: "text",
-                text: `Analyze this clothing item.
+                text: `You are assessing a clothing item. The customer needs an honest, specific recommendation based on their exact inputs below.
 
-Known details provided by user:
+ITEM DETAILS:
 - Category: ${category||"unknown"}
 - Color: ${Array.isArray(color) ? color.join(", ") : color||"unknown"}
 - Brand: ${brand || "unknown"}
-${itemLink ? `- Product link provided by customer: ${itemLink}` : ""}
+${safeSize ? `- Size the customer is considering: ${safeSize}` : ""}
+${itemLink ? `- Product link: ${itemLink}` : ""}
 
 ${styleProfile ? `CUSTOMER STYLE PROFILE:
 - Style personalities: ${styleProfile.stylePersonalities?.join(", ")}
 - Favorite colors: ${styleProfile.favoriteColors?.join(", ")}
 - Lifestyle: ${styleProfile.dressesFor?.join(", ")}
-- Desired feeling: ${styleProfile.desiredFeeling}` : "No style profile — give general analysis."}
+- Desired feeling: ${styleProfile.desiredFeeling}` : "No style profile on record — give a general analysis."}
+
+CUSTOMER'S INPUTS — You MUST respond directly to every non-empty field below. Do not give generic answers. These are the real reasons the customer is considering this item.
+
+OCCASION: ${safeOccasion || "(not provided)"}
+${safeOccasion ? `→ Does this item suit "${safeOccasion}"? State yes, partly, or no with a concrete reason referencing the item's actual formality level, design, and that occasion's dress code.
+→ If yes: how should they style it for "${safeOccasion}"?
+→ If no or partly: what would need to change, or what would work better?` : "→ Suggest the most suitable occasions for this item."}
+
+WHAT THEY LIKE: ${safeWhatLike || "(not provided)"}
+${safeWhatLike ? `→ Agree, partly agree, or disagree with their positive impression? Explain based on the item's actual construction — not simply restating what they said.` : ""}
+
+WHAT THEY ARE UNSURE ABOUT: ${safeUnsureAbout || "(not provided)"}
+${safeUnsureAbout ? `→ Is this concern justified, partly justified, or not supported? Be honest — if the concern is valid, say so directly rather than offering false reassurance.` : ""}
 
 ${eligibleClosetItems.length > 0 ? `COMPATIBLE CLOSET CANDIDATES (pairings must come ONLY from this list — never invent items):
 ${eligibleClosetItems.map(i => `- ${i.name} (${i.category}${i.primaryColor ? ", "+i.primaryColor : ""})`).join("\n")}` : "NO COMPATIBLE CLOSET ITEMS — leave closetPairings as an empty array."}
@@ -161,17 +182,18 @@ ${eligibleClosetItems.map(i => `- ${i.name} (${i.category}${i.primaryColor ? ", 
 NAIA COLLECTION (you MUST pick naiaMatch ONLY from this list, use exact title):
 ${fallbackProducts.map(p => `- ${p.title}`).join("\n")}
 
-STRICT STYLING RULES:
+STRICT RULES:
 1. closetPairings: ONLY use items from the compatible Closet candidates list above
    - When candidates are listed, select at least one unless it is genuinely impractical to wear together
    - Never invent Closet items; only use items explicitly listed above
    - If no candidates are listed, return []
 2. naiaMatch: ONLY pick from the nAia collection list above — return exact title only (no URL)
-3. Do not invent, hallucinate, or suggest items not in these lists
+3. occasions: ${safeOccasion ? `Include "${safeOccasion}" in the occasions array ONLY if the item genuinely suits it. Never include it if the item is unsuitable for that occasion.` : "Suggest appropriate occasions for this item."}
+4. Do not invent, hallucinate, or suggest items not in these lists
 
 Respond ONLY with valid JSON, no markdown:
 {
-  "itemType": "...",
+  "itemType": "specific type e.g. Maxi Skirt, Blazer, Midi Dress",
   "verdict": "BUY" or "SKIP",
   "confidence": 0-100,
   "styleDNAMatch": "...",
@@ -181,8 +203,11 @@ Respond ONLY with valid JSON, no markdown:
     "fabric": "...",
     "versatility": "..."
   },
+  "occasionFit": ${safeOccasion ? `{ "occasion": "${safeOccasion}", "fits": true or false, "explanation": "specific reason this item suits or does not suit ${safeOccasion}", "stylingTip": "how to style it for ${safeOccasion} or what to adjust" }` : "null"},
+  "whatLikeEval": ${safeWhatLike ? `{ "aspect": "${safeWhatLike.slice(0,80)}", "agreement": "agree" or "partly agree" or "disagree", "explanation": "why, based on the item's actual properties" }` : "null"},
+  "concernEval": ${safeUnsureAbout ? `{ "concern": "${safeUnsureAbout.slice(0,80)}", "justified": "justified" or "partly justified" or "not supported", "explanation": "practical, honest assessment" }` : "null"},
   "closetPairings": [{"name": "...", "reason": "..."}],
-  "fillsGap": null,
+  "fillsGap": null or "...",
   "occasions": [],
   "naiaMatch": { "title": "...", "reason": "..." },
   "finalThought": "..."
@@ -299,8 +324,12 @@ Respond ONLY with valid JSON, no markdown:
             fullAnalysis: {
               verdict:         analysis.verdict,
               confidence:      analysis.confidence,
+              itemType:        analysis.itemType        ?? null,
               styleDNAMatch:   analysis.styleDNAMatch   ?? null,
               detailedAnalysis:analysis.detailedAnalysis ?? null,
+              occasionFit:     analysis.occasionFit    ?? null,
+              whatLikeEval:    analysis.whatLikeEval   ?? null,
+              concernEval:     analysis.concernEval    ?? null,
               closetPairings:  analysis.closetPairings  ?? [],
               fillsGap:        analysis.fillsGap         ?? null,
               occasions:       analysis.occasions        ?? [],

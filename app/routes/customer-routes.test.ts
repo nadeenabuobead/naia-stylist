@@ -742,4 +742,84 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     const src = route("buyskip._index.tsx");
     assert.ok(src.includes('"/my-naia/buying-decisions"'), "View All Decisions link points to real route");
   });
+
+  // ── K2. Occasion / likes / concerns actively evaluated ───────────────────
+  it("api.wishlist.jsx prompt explicitly passes forOccasion to the AI for evaluation", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("safeOccasion"), "prompt uses sanitised forOccasion variable");
+    assert.ok(src.includes("OCCASION:"), "prompt has explicit OCCASION evaluation section");
+    assert.ok(src.includes("Does this item suit"), "prompt instructs AI to evaluate the occasion");
+  });
+
+  it("api.wishlist.jsx prompt passes whatLike and unsureAbout to the AI for evaluation", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("WHAT THEY LIKE:"), "prompt has WHAT THEY LIKE section");
+    assert.ok(src.includes("WHAT THEY ARE UNSURE ABOUT:"), "prompt has WHAT THEY ARE UNSURE ABOUT section");
+    assert.ok(src.includes("safeWhatLike"), "prompt uses sanitised whatLike");
+    assert.ok(src.includes("safeUnsureAbout"), "prompt uses sanitised unsureAbout");
+  });
+
+  it("api.wishlist.jsx prompt passes size and color to the AI", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("safeSize"), "prompt uses sanitised size");
+    assert.ok(src.includes("Size the customer is considering"), "size explicitly in prompt");
+  });
+
+  it("api.wishlist.jsx fullAnalysis blob persists occasionFit, whatLikeEval, concernEval — survives refresh and reopen", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("occasionFit:"), "fullAnalysis persists occasionFit");
+    assert.ok(src.includes("whatLikeEval:"), "fullAnalysis persists whatLikeEval");
+    assert.ok(src.includes("concernEval:"), "fullAnalysis persists concernEval");
+    assert.ok(src.includes("itemType:"), "fullAnalysis persists itemType");
+  });
+
+  it("api.wishlist.jsx fullAnalysis occasionFit includes fits, explanation and stylingTip fields", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes('"fits": true or false'), "prompt schema includes fits boolean");
+    assert.ok(src.includes('"explanation":'), "prompt schema includes explanation");
+    assert.ok(src.includes('"stylingTip":'), "prompt schema includes stylingTip");
+  });
+
+  it("api.wishlist.jsx occasions rule ensures entered occasion is only included when it genuinely fits", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("ONLY if the item genuinely suits it"), "occasions rule guards against forced inclusion");
+    assert.ok(src.includes("Never include it if the item is unsuitable"), "occasions rule explicitly prevents false inclusion");
+  });
+
+  it("buyskip.$id.tsx renders Occasion Fit in At a Glance from fullAnalysis.occasionFit", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("occasionFit"), "reads occasionFit from fullAnalysis");
+    assert.ok(src.includes("Occasion Fit"), "Occasion Fit label rendered in At a Glance");
+    assert.ok(src.includes("occasionFit.fits"), "renders fits boolean to determine Yes/Not ideal");
+    assert.ok(src.includes("occasionFit.explanation"), "renders explanation");
+  });
+
+  it("buyskip.$id.tsx renders What You Like evaluation in At a Glance", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("whatLikeEval"), "reads whatLikeEval from fullAnalysis");
+    assert.ok(src.includes("What You Like"), "What You Like label rendered");
+    assert.ok(src.includes("whatLikeEval.agreement"), "renders agreement value");
+    assert.ok(src.includes("whatLikeEval.explanation"), "renders explanation");
+  });
+
+  it("buyskip.$id.tsx renders Your Concern evaluation in At a Glance", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("concernEval"), "reads concernEval from fullAnalysis");
+    assert.ok(src.includes("Your Concern"), "Your Concern label rendered");
+    assert.ok(src.includes("concernEval.justified"), "renders justified value");
+    assert.ok(src.includes("concernEval.explanation"), "renders explanation");
+  });
+
+  it("buyskip.$id.tsx Best For uses occasionFit.fits to include the customer's stated occasion", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("occasionFit?.fits === true"), "Best For only includes occasion when AI confirmed it fits");
+    assert.ok(src.includes("analysis.forOccasion"), "Best For references the customer's stated occasion");
+  });
+
+  it("buyskip.$id.tsx renders Occasion Fit block and Your Inputs block inside Read Full Analysis", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("Occasion Fit —"), "Occasion Fit subsection in full analysis");
+    assert.ok(src.includes("Your Inputs"), "Your Inputs block in full analysis");
+    assert.ok(src.includes("stylingTip"), "stylingTip rendered in full analysis");
+  });
 });
