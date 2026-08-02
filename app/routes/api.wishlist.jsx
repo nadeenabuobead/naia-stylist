@@ -161,7 +161,16 @@ ${styleProfile ? `CUSTOMER STYLE PROFILE:
 - Style personalities: ${styleProfile.stylePersonalities?.join(", ")}
 - Favorite colors: ${styleProfile.favoriteColors?.join(", ")}
 - Lifestyle: ${styleProfile.dressesFor?.join(", ")}
-- Desired feeling: ${styleProfile.desiredFeeling}` : "No style profile on record — give a general analysis."}
+- Desired feeling: ${styleProfile.desiredFeeling}
+
+CUSTOMER FIT DATA (use ONLY this data for the size check — do not invent measurements not listed here):
+- Usual top size: ${styleProfile.topSize || "not on record"}
+- Usual bottom size: ${styleProfile.bottomSize || "not on record"}
+- Usual dress size: ${styleProfile.dressSize || "not on record"}
+- Fit preferences: ${styleProfile.fitPreferences?.length > 0 ? styleProfile.fitPreferences.join(", ") : "not on record"}
+- Areas to highlight: ${styleProfile.bodyFocusAreas?.length > 0 ? styleProfile.bodyFocusAreas.join(", ") : "not on record"}
+- Areas to minimize: ${styleProfile.bodyAvoidAreas?.length > 0 ? styleProfile.bodyAvoidAreas.join(", ") : "not on record"}
+Note: body shape, height, waist and hip measurements are not yet recorded in this Passport.` : "No style profile on record — give a general analysis."}
 
 CUSTOMER'S INPUTS — You MUST respond directly to every non-empty field below. Do not give generic answers. These are the real reasons the customer is considering this item.
 
@@ -176,7 +185,10 @@ ${safeWhatLike ? `→ Agree, partly agree, or disagree with their positive impre
 WHAT THEY ARE UNSURE ABOUT: ${safeUnsureAbout || "(not provided)"}
 ${safeUnsureAbout ? `→ Is this concern justified, partly justified, or not supported? Be honest — if the concern is valid, say so directly rather than offering false reassurance.` : ""}
 
-BEFORE YOU BUY — regardless of your verdict, generate 2–5 specific, honest concern points that challenge this purchase and help the customer make a realistic decision. Cover as many of these as apply: likely wear frequency given their lifestyle and closet, fit and size uncertainty, fabric and care requirements, whether a similar piece already exists in their closet, whether the item's statement level limits outfit combinations, and whether the ownership commitment is justified by expected use. Do not soften valid concerns or fabricate reassurance. Each point must be a complete sentence.
+BEFORE YOU BUY — generate exactly 2 concise points (25–40 words each):
+1. SIZE CHECK — Using ONLY the Passport fit data listed above, explain how the item's silhouette, waist placement, volume, length and proportions are likely to work for this customer based on their fit preferences and size information. Do not make claims about how any brand runs its sizing. Do not invent body measurements. If the Passport lacks sufficient size or fit data, state exactly: "Fit cannot be confirmed from your current Passport. Check the garment measurements against your waist and hip measurements."
+2. WEARABILITY — Assess realistically how often this customer will wear this item given their lifestyle and the occasion they entered. State concretely how many genuinely different outfits can be built around it with what they own. Be honest if versatility is limited.
+Do not repeat colour, fabric, care, statement-level commentary, or anything already in Why It Works or Final Condition.
 
 ${eligibleClosetItems.length > 0 ? `COMPATIBLE CLOSET CANDIDATES (pairings must come ONLY from this list — never invent items):
 ${eligibleClosetItems.map(i => `- ${i.name} (${i.category}${i.primaryColor ? ", "+i.primaryColor : ""})`).join("\n")}` : "NO COMPATIBLE CLOSET ITEMS — leave closetPairings as an empty array."}
@@ -212,7 +224,7 @@ Respond ONLY with valid JSON, no markdown:
   "fillsGap": null or "...",
   "occasions": [],
   "naiaMatch": { "title": "...", "reason": "..." },
-  "beforeYouBuy": ["2–5 specific honest concern strings — each a distinct challenge — never empty, never generic"],
+  "beforeYouBuy": ["Size check: 25–40 words based only on Passport fit data above — or the exact missing-data statement when insufficient", "Wearability: 25–40 words on realistic wear frequency and genuine outfit versatility"],
   "buyIf": "complete this sentence fragment: the one concrete realistic condition the customer must honestly meet to justify buying",
   "skipIf": "complete this sentence fragment: the one concrete realistic condition that would make this purchase a mistake",
   "finalThought": "ONE sentence — must include: (a) the customer's style type from their Passport, (b) their exact entered occasion if provided (use their exact words), (c) the main real-world condition or caveat. No filler phrases. Example: 'It suits your artsy style and works for a birthday dinner, but only buy it if you are comfortable owning a statement piece you may not wear frequently.'"

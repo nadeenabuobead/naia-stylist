@@ -897,4 +897,64 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     const decisions = route("my-naia.buying-decisions.tsx");
     assert.ok(decisions.includes('to={`/buyskip/${d.id}`}'), "decision cards link to result page for reopen");
   });
+
+  // ── K4. Loading overlay and Before You Buy (size check + wearability) ────────
+  it("buyskip._index.tsx defines BOS_LOADING_MESSAGES constant with rotation messages", () => {
+    const src = route("buyskip._index.tsx");
+    assert.ok(src.includes("BOS_LOADING_MESSAGES"), "BOS_LOADING_MESSAGES constant defined");
+    assert.ok(src.includes("Reading your item"), "first loading message present");
+    assert.ok(src.includes("Preparing your recommendation"), "final loading message present");
+  });
+
+  it("buyskip._index.tsx renders bos-analyzing-overlay when analyzing — reuses sm-loading-inner classes", () => {
+    const src = route("buyskip._index.tsx");
+    assert.ok(src.includes("bos-analyzing-overlay"), "overlay class used");
+    assert.ok(src.includes("sm-loading-inner"), "reuses Style Me loading inner class");
+    assert.ok(src.includes("sm-loading-track"), "reuses Style Me loading track class");
+    assert.ok(src.includes("sm-loading-bar"), "reuses Style Me loading bar class");
+    assert.ok(src.includes("sm-loading-msg"), "reuses Style Me loading message class");
+    assert.ok(src.includes("nAia is assessing your item"), "overlay heading uses BOS-specific copy");
+  });
+
+  it("buyskip._index.tsx overlay has role=status and aria-live for accessible live status", () => {
+    const src = route("buyskip._index.tsx");
+    assert.ok(src.includes('role="status"'), "overlay has role=status");
+    assert.ok(src.includes('aria-live="polite"'), "overlay has aria-live=polite");
+  });
+
+  it("buyskip._index.tsx wraps form content in aria-hidden and pointer-events:none while analyzing", () => {
+    const src = route("buyskip._index.tsx");
+    assert.ok(src.includes("aria-hidden={analyzing}"), "form wrapper uses aria-hidden when analyzing");
+    assert.ok(src.includes('pointerEvents: analyzing ? "none"'), "form wrapper disables pointer events when analyzing");
+  });
+
+  it("buyskip._index.tsx duplicate-submission guard prevents re-entry while analyzing", () => {
+    const src = route("buyskip._index.tsx");
+    assert.ok(src.includes("if (analyzing) return;"), "handleAnalyze returns early if already analyzing");
+  });
+
+  it("api.wishlist.jsx prompt includes CUSTOMER FIT DATA block from Passport for size check", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("CUSTOMER FIT DATA"), "fit data block present in prompt");
+    assert.ok(src.includes("topSize"), "topSize forwarded to AI");
+    assert.ok(src.includes("bottomSize"), "bottomSize forwarded to AI");
+    assert.ok(src.includes("dressSize"), "dressSize forwarded to AI");
+    assert.ok(src.includes("fitPreferences"), "fitPreferences forwarded to AI");
+    assert.ok(src.includes("bodyFocusAreas"), "bodyFocusAreas forwarded to AI");
+    assert.ok(src.includes("bodyAvoidAreas"), "bodyAvoidAreas forwarded to AI");
+  });
+
+  it("api.wishlist.jsx BEFORE YOU BUY prompt generates exactly 2 AI points — size check and wearability", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("SIZE CHECK"), "size check point in BEFORE YOU BUY prompt");
+    assert.ok(src.includes("WEARABILITY"), "wearability point in BEFORE YOU BUY prompt");
+    assert.ok(src.includes("Do not make claims about how any brand runs its sizing"), "no brand-sizing claims rule present");
+    assert.ok(src.includes("Fit cannot be confirmed from your current Passport"), "missing-data fallback statement in prompt");
+  });
+
+  it("api.wishlist.jsx beforeYouBuy schema is a 2-item array — size check and wearability only", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("Size check:") || src.includes("SIZE CHECK"), "size check referenced in schema/prompt");
+    assert.ok(src.includes("Wearability:") || src.includes("WEARABILITY"), "wearability referenced in schema/prompt");
+  });
 });

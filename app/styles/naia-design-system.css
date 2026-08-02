@@ -2012,6 +2012,7 @@ a.mn-action:focus-visible,
 .bos-pill--on { background: var(--naia-accent); color: #faf6f1; border-color: var(--naia-accent); }
 .bos-evidence-tags { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }
 .bos-evidence-tag { border: 1px solid var(--naia-border-mid); padding: 6px 12px; font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--naia-muted); }
+.bos-analyzing-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(246, 239, 232, 0.93); display: flex; align-items: center; justify-content: center; }
 .bos-cta-row { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; border-top: 1px solid var(--naia-border); padding-top: 32px; margin-bottom: 12px; }
 .bos-link { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.32em; text-transform: uppercase; text-decoration: underline; text-underline-offset: 3px; color: var(--naia-ink); transition: color 0.13s; }
 .bos-link:hover { color: var(--naia-accent); }

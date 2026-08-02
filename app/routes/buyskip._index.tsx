@@ -35,6 +35,18 @@ const EVIDENCE = [
 const CATEGORIES = ["Top", "Bottom", "Dress", "Outerwear", "Shoes", "Bag", "Accessory", "Jewelry"];
 const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver"];
 
+const BOS_LOADING_MESSAGES = [
+  "Reading your item…",
+  "Reviewing what you like…",
+  "Considering your concerns…",
+  "Checking the occasion…",
+  "Comparing with your Passport…",
+  "Looking through your Digital Closet…",
+  "Assessing colour, fit and size…",
+  "Weighing versatility and wear frequency…",
+  "Preparing your recommendation…",
+];
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function UploadRow({
@@ -92,6 +104,7 @@ export default function BuyOrSkip() {
   const [imageUrl, setImageUrl] = React.useState("");
   const [uploading, setUploading] = React.useState(false);
   const [analyzing, setAnalyzing] = React.useState(false);
+  const [msgIndex, setMsgIndex] = React.useState(0);
   const [category, setCategory] = React.useState("");
   const [color, setColor] = React.useState<string[]>([]);
   const [brand, setBrand] = React.useState("");
@@ -147,7 +160,15 @@ export default function BuyOrSkip() {
     }
   };
 
+  React.useEffect(() => {
+    if (!analyzing) return;
+    setMsgIndex(0);
+    const t = setInterval(() => setMsgIndex(i => (i + 1) % BOS_LOADING_MESSAGES.length), 1400);
+    return () => clearInterval(t);
+  }, [analyzing]);
+
   const handleAnalyze = async () => {
+    if (analyzing) return;
     setAnalyzing(true);
     setAnalyzeError("");
     try {
@@ -184,6 +205,29 @@ export default function BuyOrSkip() {
 
   return (
     <MyNaiaLayout>
+      {/* Floating analysis card — overlays form while analysing; reuses exact Style Me loading classes */}
+      {analyzing && (
+        <div className="bos-analyzing-overlay" role="status" aria-live="polite" aria-label={BOS_LOADING_MESSAGES[msgIndex]}>
+          <div className="sm-loading-inner">
+            <h2 style={{ fontFamily: "var(--naia-ff-display)", fontSize: "32px", fontWeight: 900, fontStyle: "italic", color: "var(--naia-ink)", marginBottom: "16px" }}>
+              nAia is assessing your item...
+            </h2>
+            <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--naia-muted)", marginBottom: "40px" }}>
+              Reviewing your item against your Passport, Closet and style.
+            </p>
+            <div className="sm-loading-track">
+              <div className="sm-loading-bar" />
+            </div>
+            <p className="sm-loading-msg">{BOS_LOADING_MESSAGES[msgIndex]}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Form content — stays in DOM but non-interactive while analysing */}
+      <div
+        aria-hidden={analyzing}
+        style={{ pointerEvents: analyzing ? "none" : undefined }}
+      >
       <Link to="/my-naia" className="sp-back">← Back to Overview</Link>
 
       {/* Section shell */}
@@ -291,6 +335,7 @@ export default function BuyOrSkip() {
           )}
         </p>
       )}
+      </div>{/* end form content wrapper */}
     </MyNaiaLayout>
   );
 }
