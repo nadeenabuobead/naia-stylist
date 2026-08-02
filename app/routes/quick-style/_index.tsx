@@ -222,11 +222,9 @@ export default function QuickStyle() {
   return (
     <div>
       <style>{css}</style>
-      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-
       <div className="topbar">
         <div className="topbar-logo">nAia</div>
-        <a href="/" className="topbar-close">Exit Session</a>
+        <a href="/style-me" className="topbar-close">Exit</a>
       </div>
 
       <div className="qs-hero">

@@ -1,0 +1,90 @@
+/* naia-collection-try-on.css — Phase 4A7 */
+/* Collection card try-on badge. Scoped via .naia-cc-root. */
+
+.naia-cc-root {
+  margin-top: 12px;
+}
+
+.naia-cc-tryon-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 10px 16px;
+  background: #221516;
+  color: #f4f4f1;
+  border: none;
+  cursor: pointer;
+  font-family: 'Space Mono', 'Courier New', monospace;
+  transition: opacity 0.15s;
+  width: 100%;
+}
+
+.naia-cc-tryon-btn:hover {
+  opacity: 0.85;
+}
+
+.naia-cc-tryon-label {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  line-height: 1.3;
+}
+
+.naia-cc-tryon-sub {
+  font-size: 8px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.65;
+  margin-top: 3px;
+}
+
+/* Panel body classes shared with product block */
+.naia-panel-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 22px;
+  font-weight: 900;
+  font-style: italic;
+  color: #221516;
+  margin: 0 0 20px;
+  line-height: 1.3;
+}
+
+.naia-panel-body {
+  font-family: 'Cormorant Garamond', Garamond, serif;
+  font-size: 16px;
+  line-height: 1.7;
+  color: #7a6f6a;
+  margin: 0 0 24px;
+}
+
+.naia-panel-img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  display: block;
+  background: #e8e3df;
+  margin-bottom: 16px;
+}
+
+.naia-panel-disclaimer {
+  font-family: 'Cormorant Garamond', Garamond, serif;
+  font-size: 13px;
+  font-style: italic;
+  color: #7a6f6a;
+  line-height: 1.6;
+  margin: 0 0 24px;
+}
+
+.naia-panel-cta {
+  display: inline-block;
+  padding: 13px 24px;
+  background: #221516;
+  color: #f4f4f1;
+  font-family: 'Space Mono', 'Courier New', monospace;
+  font-size: 9px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+}

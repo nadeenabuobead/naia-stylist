@@ -12,26 +12,8 @@ export async function loader({ request }) {
     return new Response(null, { status: 204, headers: CORS });
   }
 
-const url = new URL(request.url);
-const tokenParam = url.searchParams.get("naia_token");
-let customerId = null;
-
-if (tokenParam) {
-  try {
-    const decoded = JSON.parse(atob(decodeURIComponent(tokenParam)));
-    if (decoded.shopifyId) {
-      const customer = await prisma.customer.findFirst({
-        where: { shopifyCustomerId: String(decoded.shopifyId) },
-      });
-      customerId = customer?.id || null;
-    }
-  } catch {}
-}
-
-if (!customerId) {
   const { customer } = await authenticateCustomer(request);
-  customerId = customer?.id || null;
-}
+  const customerId = customer?.id || null;
 
 if (!customerId) return Response.json({ error: "Not authenticated" }, { status: 401, headers: CORS });
 

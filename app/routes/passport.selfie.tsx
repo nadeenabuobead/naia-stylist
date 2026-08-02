@@ -20,9 +20,10 @@
 //   prisma/migrations/20260717100000_add_selfie_analysis/migration.sql
 
 import { useState, useRef } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { redirect, useActionData, useLoaderData, useNavigation, Form } from "react-router";
+import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";
+import { redirect, useActionData, useLoaderData, useNavigation, Form, Link } from "react-router";
 import { data } from "react-router";
+import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { analyseSelfie, ANALYSIS_VERSION } from "~/lib/ai/selfie-analysis.server";
 import type { SelfieAnalysisOutcome } from "~/lib/ai/selfie-analysis";
@@ -48,6 +49,15 @@ import {
   buildAccessoriesSummary,
   buildNaiaUsageExplanation,
 } from "~/lib/ai/selfie-styling-signals";
+import naiaStyles from "~/styles/naia-design-system.css?url";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: naiaStyles },
+];
+
+export function meta() {
+  return [{ title: "Personal Style Analysis | nAia" }];
+}
 
 // ── Loader ────────────────────────────────────────────────────────────────────
 
@@ -196,6 +206,7 @@ export default function SelfieUploadPage() {
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const [preview, setPreview] = useState<string | null>(null);
+  const [pending, setPending] = useState<"delete-photo" | "delete-analysis" | "delete-both" | null>(null);
   const isSubmitting = navigation.state === "submitting";
 
   // Derive displayed outcome: action result takes precedence over loader state
@@ -204,11 +215,18 @@ export default function SelfieUploadPage() {
     actionData && "outcome" in actionData ? actionData.outcome : null;
 
   const showUploadForm = !outcome && (!existing || existing.analysisStatus === "failed");
+  const showProcessing = existing?.analysisStatus === "pending" && !outcome;
   const showResults = outcome?.status === "completed" ||
     (existing?.analysisStatus === "completed" && !outcome);
   const displaySignals = outcome?.status === "completed"
     ? outcome.signals
     : existing?.signals ?? null;
+
+  const statusLabel =
+    showResults   ? "Analysis complete" :
+    showProcessing ? "Analysis in progress" :
+    existing?.analysisStatus === "failed" ? "Analysis failed — please try again" :
+    "Not started";
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -219,132 +237,176 @@ export default function SelfieUploadPage() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f4f4f1", fontFamily: "'Cormorant Garamond', Garamond, serif" }}>
-      <div style={{ maxWidth: "560px", margin: "0 auto", padding: "48px 24px 80px" }}>
+    <MyNaiaLayout>
+      <Link to="/my-naia" className="sp-back">← Overview</Link>
 
-        <div style={{ marginBottom: "40px" }}>
-          <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "9px", letterSpacing: "4px", textTransform: "uppercase", color: "#8b2035", marginBottom: "10px" }}>
-            Personal Style
-          </div>
-          <h1 style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "clamp(24px,4vw,36px)", fontWeight: 900, color: "#221516", letterSpacing: "-0.5px", marginBottom: "12px" }}>
-            Your Styling Photo
-          </h1>
-          <p style={{ fontSize: "16px", fontStyle: "italic", color: "#7a6f6a", lineHeight: 1.6 }}>
-            Share a clear photo of your face and nAia will offer gentle styling observations —
-            colour directions, necklines, and hair guidance that may suit you.
-          </p>
-        </div>
+      {/* Section shell */}
+      <div className="sp-shell">
+        <div className="sp-shell-eyebrow">Personalisation · Optional</div>
+        <h1 className="sp-shell-title">Personal Styling Analysis</h1>
+        <p className="sp-shell-desc">
+          Optional selfie-based guidance for colours near your face, necklines, hair direction,
+          earrings, glasses and optional makeup direction. This feature is optional — StyleMe works
+          without it.
+        </p>
+        <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", marginTop: "8px" }}>
+          This selfie is separate from My nAia Model and from your Closet photographs.
+        </p>
+      </div>
 
-        {/* Analysis in progress */}
-        {existing?.analysisStatus === "pending" && !outcome && (
-          <div style={{ padding: "20px 24px", background: "rgba(59,5,16,0.03)", border: "1px solid rgba(59,5,16,0.08)", marginBottom: "24px" }}>
-            <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a" }}>
-              Analysis in progress — please wait
-            </div>
-          </div>
-        )}
+      {/* Current Status */}
+      <div className="bos-section">
+        <div className="bos-step-label">Current Status</div>
+        <div className="psa-status-val">{statusLabel}</div>
+      </div>
 
-        {/* Inline outcome feedback (errors, quality-fail) */}
-        {outcome && outcome.status !== "completed" && (
+      {/* Outcome error feedback */}
+      {outcome && outcome.status !== "completed" && (
+        <div className="bos-section">
           <OutcomeFeedback outcome={outcome} />
-        )}
+        </div>
+      )}
 
-        {/* Completed results */}
-        {showResults && displaySignals && (
-          <div>
-            <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "9px", letterSpacing: "4px", textTransform: "uppercase", color: "#8b2035", marginBottom: "8px" }}>
-              {analysisIntent === "replace" ? "Updated observations" : "Your styling observations"}
-            </div>
-            <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "22px", fontStyle: "italic", color: "#221516", marginBottom: "32px" }}>
-              Here&apos;s what nAia noticed.
-            </div>
+      {/* Not started — upload form */}
+      {showUploadForm && (
+        <>
+          <section className="bos-section">
+            <div className="bos-step-label">Selfie Guidance</div>
+            <ul className="psa-guidance-list">
+              <li>· Front-facing, in natural daylight, without filters.</li>
+              <li>· A neutral top and hair pulled back if possible.</li>
+              <li>· Only the head and shoulders need to be visible.</li>
+              <li>· Sharp, in focus, no heavy colour filters or flash.</li>
+              <li>· Only one person in the frame.</li>
+            </ul>
+          </section>
 
-            <SignalSection label="Your Colour Direction">
-              <p>{buildColourDirectionSummary(displaySignals)}</p>
-            </SignalSection>
-            <SignalSection label="Necklines That May Suit You">
-              <p>{buildNecklineSummary(displaySignals)}</p>
-            </SignalSection>
-            <SignalSection label="Hair Direction">
-              <p>{buildHairDirectionSummary(displaySignals)}</p>
-            </SignalSection>
-            <SignalSection label="Earrings and Glasses">
-              <p>{buildAccessoriesSummary(displaySignals)}</p>
-            </SignalSection>
-            <SignalSection label="How nAia Will Use This" subtle>
-              <p style={{ fontSize: "13px", fontStyle: "italic", lineHeight: 1.7 }}>
-                {buildNaiaUsageExplanation()}
-              </p>
-            </SignalSection>
-
-            {/* Management controls */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginTop: "32px" }}>
-              <Form method="post">
-                <input type="hidden" name="_intent" value="delete-both" />
-                <button type="submit" style={dangerButtonStyle}>
-                  Delete photo and analysis
-                </button>
-              </Form>
-              <Form method="post">
-                <input type="hidden" name="_intent" value="delete-analysis" />
-                <button type="submit" style={quietButtonStyle}>
-                  Remove analysis only
-                </button>
-              </Form>
-            </div>
-
-            {/* Replace photo section */}
-            <div style={{ marginTop: "40px", paddingTop: "32px", borderTop: "1px solid rgba(59,5,16,0.07)" }}>
-              <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "16px" }}>
-                Update photo
-              </div>
-              <UploadForm
-                intent="replace"
-                isSubmitting={isSubmitting}
-                preview={preview}
-                onFileChange={handleFileChange}
-                submitLabel="Replace and re-analyse"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Initial upload form */}
-        {showUploadForm && (
-          <>
-            <PhotoRequirements />
+          <section className="bos-section">
+            <div className="bos-step-label">Upload Your Selfie</div>
             <UploadForm
               intent="analyse"
               isSubmitting={isSubmitting}
               preview={preview}
               onFileChange={handleFileChange}
-              submitLabel="Analyse my photo"
+              submitLabel="Start My Analysis"
             />
-          </>
-        )}
+          </section>
+        </>
+      )}
+
+      {/* Processing */}
+      {showProcessing && (
+        <section className="bos-section">
+          <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", lineHeight: 1.75, color: "rgba(34,21,22,0.85)", maxWidth: "520px", marginBottom: "24px" }}>
+            nAia is analysing your selfie. This usually takes a few moments — you do not need to remain on this page.
+          </p>
+          <div className="psa-progress-track">
+            <div className="psa-progress-fill" />
+          </div>
+          <div style={{ marginTop: "24px" }}>
+            <Form method="post" style={{ display: "inline" }}>
+              <input type="hidden" name="_intent" value="delete-both" />
+              <button type="submit" className="sp-btn-outline">Cancel Analysis</button>
+            </Form>
+          </div>
+        </section>
+      )}
+
+      {/* Completed results */}
+      {showResults && displaySignals && (
+        <>
+          <section className="bos-section">
+            <div className="bos-step-label">
+              {analysisIntent === "replace" ? "Updated Observations" : "Your Analysis"}
+            </div>
+            <dl className="sp-detail-list">
+              <div className="sp-detail-row">
+                <dt className="sp-detail-label">Colour Direction</dt>
+                <dd className="sp-detail-value">{buildColourDirectionSummary(displaySignals)}</dd>
+              </div>
+              <div className="sp-detail-row">
+                <dt className="sp-detail-label">Necklines</dt>
+                <dd className="sp-detail-value">{buildNecklineSummary(displaySignals)}</dd>
+              </div>
+              <div className="sp-detail-row">
+                <dt className="sp-detail-label">Hair Direction</dt>
+                <dd className="sp-detail-value">{buildHairDirectionSummary(displaySignals)}</dd>
+              </div>
+              <div className="sp-detail-row">
+                <dt className="sp-detail-label">Earrings & Glasses</dt>
+                <dd className="sp-detail-value">{buildAccessoriesSummary(displaySignals)}</dd>
+              </div>
+              <div className="sp-detail-row">
+                <dt className="sp-detail-label">How nAia Uses This</dt>
+                <dd className="sp-detail-value" style={{ fontStyle: "italic", color: "var(--naia-muted)" }}>
+                  {buildNaiaUsageExplanation()}
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="bos-section">
+            <div className="bos-step-label">Manage</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+              <button type="button" className="sp-btn-outline" onClick={() => setPending("delete-photo")}>Delete Selfie Only</button>
+              <button type="button" className="sp-btn-outline" onClick={() => setPending("delete-analysis")}>Delete Analysis Only</button>
+              <button type="button" className="sp-btn-outline" onClick={() => setPending("delete-both")}>Delete Both</button>
+            </div>
+          </section>
+
+          <section className="bos-section">
+            <div className="bos-step-label">Update Photo</div>
+            <UploadForm
+              intent="replace"
+              isSubmitting={isSubmitting}
+              preview={preview}
+              onFileChange={handleFileChange}
+              submitLabel="Replace and Re-analyse"
+            />
+          </section>
+        </>
+      )}
+
+      {/* Privacy note */}
+      <div className="sp-state-note" style={{ marginTop: "32px" }}>
+        Selfies and analyses are stored privately and can be removed at any time from this page or
+        from Settings & Privacy.
       </div>
-    </div>
+
+      {/* Confirmation modal */}
+      {pending && (
+        <div className="dc-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="psa-confirm-title">
+          <div className="dc-modal">
+            <div className="dc-modal-eyebrow">Confirm Deletion</div>
+            <h3 id="psa-confirm-title" className="dc-modal-title">
+              {pending === "delete-photo"    ? "Delete Selfie Only" :
+               pending === "delete-analysis" ? "Delete Analysis Only" :
+               "Delete Selfie and Analysis"}
+            </h3>
+            <p className="dc-modal-desc">
+              {pending === "delete-photo"
+                ? "Your uploaded selfie will be removed. The previously generated analysis is still stored — you may delete it separately."
+                : pending === "delete-analysis"
+                ? "Your analysis will be removed. Your selfie remains private until you delete it or request a new analysis."
+                : "Your selfie and your analysis will both be removed. You can create them again at any time."}
+            </p>
+            <div className="dc-modal-actions">
+              <button type="button" className="sp-btn-ghost" onClick={() => setPending(null)}>Cancel</button>
+              <Form method="post" style={{ display: "inline" }}>
+                <input type="hidden" name="_intent" value={pending} />
+                <button type="submit" className="sp-btn-outline" onClick={() => setPending(null)}>
+                  Confirm
+                </button>
+              </Form>
+            </div>
+          </div>
+        </div>
+      )}
+    </MyNaiaLayout>
   );
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
-
-function PhotoRequirements() {
-  return (
-    <div style={{ background: "rgba(59,5,16,0.03)", border: "1px solid rgba(59,5,16,0.08)", padding: "20px 24px", marginBottom: "32px" }}>
-      <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "#7a6f6a", marginBottom: "12px" }}>
-        For the best results
-      </div>
-      <ul style={{ margin: 0, paddingLeft: "18px", color: "#4a3f3a", fontSize: "14px", lineHeight: 2 }}>
-        <li>Face clearly visible and facing the camera</li>
-        <li>Even, natural lighting — no heavy flash</li>
-        <li>Sharp and in focus</li>
-        <li>No heavy colour filters or strong shadows on face</li>
-        <li>Only one person in the frame</li>
-      </ul>
-    </div>
-  );
-}
 
 function UploadForm({
   intent,
@@ -371,33 +433,41 @@ function UploadForm({
       )}
 
       <div style={{ marginBottom: "20px" }}>
-        <input
-          ref={fileRef}
-          type="file"
-          name="photo"
-          accept="image/jpeg,image/png,image/webp,image/heic"
-          required
-          onChange={onFileChange}
-          style={{ display: "block", width: "100%", marginBottom: "8px" }}
-        />
-        <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "7px", letterSpacing: "1px", color: "#7a6f6a" }}>
-          JPG, PNG, WEBP, HEIC — max 5 MB
+        <div className={`psa-upload-tile${!preview ? "" : ""}`}>
+          <div className="psa-upload-tile-label">
+            {intent === "replace" ? "New Selfie" : "Your Selfie"}
+          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            name="photo"
+            accept="image/jpeg,image/png,image/webp,image/heic"
+            required
+            onChange={onFileChange}
+            style={{ display: "block", width: "100%", marginBottom: "6px" }}
+          />
+          <div style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "10px", letterSpacing: "0.3px", color: "var(--naia-muted)" }}>
+            JPG, PNG, WEBP, HEIC — max 5 MB
+          </div>
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: "12px", alignItems: "flex-start", marginBottom: "28px", padding: "16px", background: "rgba(59,5,16,0.03)", border: "1px solid rgba(59,5,16,0.08)" }}>
-        <input type="checkbox" name="consent" value="true" id={`selfie-consent-${intent}`} required style={{ marginTop: "3px", accentColor: "#8b2035", flexShrink: 0 }} />
-        <label htmlFor={`selfie-consent-${intent}`} style={{ fontSize: "13px", color: "#4a3f3a", lineHeight: 1.6, cursor: "pointer" }}>
-          I consent to nAia analysing this photo to offer me personal styling guidance.
-          I understand this is not a medical or diagnostic assessment. I can delete this
-          photo and remove my analysis at any time.
+      <div style={{ marginBottom: "24px", padding: "16px 20px", background: "rgba(34,21,22,0.03)", border: "1px solid var(--naia-border)" }}>
+        <label className="psa-consent-row">
+          <input type="checkbox" name="consent" value="true" id={`selfie-consent-${intent}`} required className="psa-consent-check" />
+          <span>
+            I consent to nAia analysing this photo to offer me personal styling guidance.
+            I understand this is not a medical or diagnostic assessment. I can delete this
+            photo and remove my analysis at any time.
+          </span>
         </label>
       </div>
 
       <button
         type="submit"
         disabled={isSubmitting}
-        style={{ width: "100%", padding: "14px", background: isSubmitting ? "rgba(59,5,16,0.2)" : "#221516", color: "#f4f4f1", fontFamily: "'Space Mono', monospace", fontSize: "9px", letterSpacing: "3px", textTransform: "uppercase", border: "none", cursor: isSubmitting ? "not-allowed" : "pointer" }}
+        className={isSubmitting ? "sp-btn-outline" : "sp-btn-primary"}
+        style={{ width: "100%", opacity: isSubmitting ? 0.65 : 1 }}
       >
         {isSubmitting ? "Analysing…" : submitLabel}
       </button>
@@ -421,30 +491,9 @@ function OutcomeFeedback({ outcome }: { outcome: SelfieAnalysisOutcome }) {
 
   if (!title) return null;
   return (
-    <div style={{ padding: "20px 24px", background: "rgba(139,32,53,0.04)", border: "1px solid rgba(139,32,53,0.15)", marginBottom: "28px" }}>
-      <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "17px", fontStyle: "italic", color: "#8b2035", marginBottom: "8px" }}>{title}</div>
-      <p style={{ color: "#4a3f3a", fontSize: "14px", lineHeight: 1.7, margin: 0 }}>{message}</p>
+    <div className="psa-outcome-box">
+      <div className="psa-outcome-title">{title}</div>
+      <p className="psa-outcome-body">{message}</p>
     </div>
   );
 }
-
-function SignalSection({ label, children, subtle }: { label: string; children: React.ReactNode; subtle?: boolean }) {
-  return (
-    <div style={{ marginBottom: "28px", paddingBottom: "28px", borderBottom: "1px solid rgba(59,5,16,0.07)" }}>
-      <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: subtle ? "#7a6f6a" : "#8b2035", marginBottom: "8px" }}>{label}</div>
-      <div style={{ color: "#4a3f3a", fontSize: "15px", lineHeight: 1.7 }}>{children}</div>
-    </div>
-  );
-}
-
-const dangerButtonStyle: React.CSSProperties = {
-  padding: "10px 18px", background: "none", border: "1px solid rgba(139,32,53,0.4)",
-  color: "#8b2035", fontFamily: "'Space Mono', monospace", fontSize: "7px",
-  letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer",
-};
-
-const quietButtonStyle: React.CSSProperties = {
-  padding: "10px 18px", background: "none", border: "1px solid rgba(59,5,16,0.2)",
-  color: "#7a6f6a", fontFamily: "'Space Mono', monospace", fontSize: "7px",
-  letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer",
-};

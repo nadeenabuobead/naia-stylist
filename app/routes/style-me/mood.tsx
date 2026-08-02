@@ -1,5 +1,9 @@
 import { Form, Link } from "react-router";
 import { data, redirect, type ActionFunctionArgs, type LinksFunction } from "react-router";
+
+export function meta() {
+  return [{ title: "How are you feeling? | nAia Style Me" }];
+}
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 import { SmPage } from "~/components/style-me/SmPage";
@@ -62,7 +66,7 @@ export default function StyleMeMood() {
 
         <input type="hidden" name="mood" value={selected || ""} />
         <div className="sm-step-buttons">
-          <Link to="/" className="sm-btn-back">← Back</Link>
+          <Link to="/style-me" className="sm-btn-back">← Back</Link>
           <SmContinue disabled={!selected} />
         </div>
       </Form>

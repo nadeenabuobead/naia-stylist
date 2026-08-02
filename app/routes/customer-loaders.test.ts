@@ -88,14 +88,14 @@ describe("loader auth gate — contract assertions", () => {
 // ── B. Response shape — loader output contract ────────────────────────────────
 
 describe("loader output contract — no PII in my-naia hub", () => {
-  it("my-naia._index.tsx loader: does not return customerId, email, or firstName in output", () => {
+  it("my-naia._index.tsx loader: does not return customerId or email in output", () => {
     const code = src("my-naia._index.tsx");
-    // The loader return value must not include customer PII
-    // Check that no customer fields are directly spread or returned
+    // The loader must not leak database identifiers or contact details.
+    // firstName (display name) is explicitly allowed for the personalised greeting.
     assert.ok(!code.includes("return { customerId"), "must not return customerId directly");
     assert.ok(!code.includes("return { email"), "must not return email directly");
     assert.ok(!code.includes("customer.email"), "must not pass customer.email to loader return");
-    assert.ok(!code.includes("customer.firstName"), "must not pass customer.firstName to loader return");
+    assert.ok(!code.includes("customer.id,"), "must not pass raw DB id to loader return");
   });
 
   it("settings.tsx loader: returns only name, email, shopifyCustomerId (minimum required)", () => {

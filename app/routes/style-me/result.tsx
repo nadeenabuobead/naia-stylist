@@ -28,6 +28,10 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
 ];
 
+export function meta() {
+  return [{ title: "Your Styling | nAia" }];
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const devTryOnEnabled = process.env.DEV_TRYON_UI_ENABLED === 'true';
   try {
@@ -655,6 +659,23 @@ export function shouldRevalidate({
 const MIN_LOADING_MS = 4800;
 const loadingMessages = ["Reading the runways...", "Consulting your mood...", "Matching textures and fabrics...", "Finalizing your look..."];
 
+const MOOD_LABELS: Record<string, string> = {
+  "confident": "Confident", "tired": "Low-energy", "overwhelmed": "Overwhelmed",
+  "playful": "Playful", "romantic": "Romantic", "powerful": "Powerful",
+  "need-reset": "Need a reset", "feel-good": "Feel good",
+};
+const FEELING_LABELS: Record<string, string> = {
+  "more-confident": "More confident", "more-put-together": "More put together",
+  "softer": "Softer", "more-powerful": "More powerful", "more-feminine": "More feminine",
+  "more-effortless": "More effortless", "more-elevated": "More elevated",
+  "more-attractive": "More attractive", "like-myself": "Like myself again",
+};
+const OCCASION_LABELS: Record<string, string> = {
+  "everyday": "Everyday", "work": "Work", "dinner": "Dinner", "date-night": "Date night",
+  "girls-night": "Girls' night", "family": "Family", "special-event": "Special event",
+  "travel": "Travel", "not-sure": "Not sure yet",
+};
+
 export default function StyleMeResult() {
   const loaderData = useLoaderData<typeof loader>();
   const generateFetcher = useFetcher<{ suggestion?: any; error?: string }>();
@@ -834,11 +855,14 @@ export default function StyleMeResult() {
   const primaryNaiaItem = suggestion.items?.find(
     (item: any) => !["SHOES", "ACCESSORY", "BAG"].includes(item.itemType),
   );
-  const showTryOnCta =
+  // "See This Look On Me" section visibility:
+  // Shown for authenticated NADINE results that have a product image, regardless of model readiness.
+  // When model is not ready, a setup-required state is shown instead of hiding the section entirely.
+  const showTryOnSection =
     loaderData.isAuthenticated &&
-    loaderData.naiaModelIsReady &&
     suggestionMeta?.outcome === "nadine-recommendation" &&
     !!primaryNaiaItemWithImage;
+  const tryOnModelReady = showTryOnSection && loaderData.naiaModelIsReady;
 
   const isNoMatch = suggestionMeta
     ? suggestionMeta.outcome === "no-eligible-product"
@@ -849,7 +873,7 @@ export default function StyleMeResult() {
 
       {/* ── Top bar ── */}
       <div className="sm-result-bar">
-        <Link to="/quick-style" className="sm-result-btn">Back</Link>
+        <Link to="/style-me" className="sm-result-btn">Back</Link>
         <span className="sm-result-wordmark">nAia</span>
         {isSaved ? (
           <span className="sm-result-btn sm-result-btn--accent">Saved</span>
@@ -870,7 +894,7 @@ export default function StyleMeResult() {
         <div className="sm-banner sm-banner-saved">
           <p className="sm-banner-text">Saved to your nAia Passport.</p>
           <div className="sm-banner-actions">
-            <Link to="/" className="sm-banner-cta">View My Dashboard →</Link>
+            <Link to="/my-naia" className="sm-banner-cta">← Overview</Link>
           </div>
         </div>
       )}
@@ -933,15 +957,15 @@ export default function StyleMeResult() {
         <div className="sm-result-context-grid">
           <div>
             <p className="sm-result-context-label">You're Feeling</p>
-            <p className="sm-result-context-value">{loaderData.currentMood}</p>
+            <p className="sm-result-context-value">{MOOD_LABELS[loaderData.currentMood ?? ""] ?? loaderData.currentMood}</p>
           </div>
           <div>
             <p className="sm-result-context-label">You Want to Feel</p>
-            <p className="sm-result-context-value">{loaderData.desiredFeeling}</p>
+            <p className="sm-result-context-value">{FEELING_LABELS[loaderData.desiredFeeling ?? ""] ?? loaderData.desiredFeeling}</p>
           </div>
           <div>
             <p className="sm-result-context-label">Dressing For</p>
-            <p className="sm-result-context-value">{loaderData.occasion}</p>
+            <p className="sm-result-context-value">{OCCASION_LABELS[loaderData.occasion ?? ""] ?? loaderData.occasion}</p>
           </div>
         </div>
 
@@ -969,6 +993,9 @@ export default function StyleMeResult() {
               )}
               {suggestion.items?.filter((item: any) => item.itemType !== "SHOES" && item.itemType !== "ACCESSORY" && item.itemType !== "BAG").map((item: any) => (
                 <div key={item.id} className="sm-item-card">
+                  {item.closetItemId && (
+                    <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "10px", letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--naia-accent)", marginBottom: "8px" }}>From Your Closet</p>
+                  )}
                   {item.productImageUrl && (
                     <img src={item.productImageUrl} alt={item.productTitle} style={{ width: "140px", height: "180px", objectFit: "contain", marginBottom: "12px" }} />
                   )}
@@ -985,7 +1012,7 @@ export default function StyleMeResult() {
                       Try this piece on
                     </button>
                   )}
-                  {loaderData.isAuthenticated && suggestion?.id && loaderData.sessionId && (item.closetItemId || item.shopifyProductId) && (
+                  {loaderData.isAuthenticated && suggestion?.id && loaderData.sessionId && item.shopifyProductId && !item.closetItemId && (
                     <RecommendationFeedbackWidget
                       sessionId={loaderData.sessionId}
                       suggestionId={suggestion.id}
@@ -1004,6 +1031,13 @@ export default function StyleMeResult() {
         {!isNoMatch && suggestionMeta?.anchorSummary && (
           <div className="sm-anchor-card">
             <p className="sm-eyebrow sm-eyebrow--sm sm-eyebrow--muted" style={{ marginBottom: "6px" }}>Anchor Piece</p>
+            {suggestionMeta.anchorImageUrl && (
+              <img
+                src={suggestionMeta.anchorImageUrl}
+                alt={suggestionMeta.anchorSummary}
+                style={{ width: "100%", maxWidth: "180px", aspectRatio: "2/3", objectFit: "cover", borderRadius: "4px", marginBottom: "10px" }}
+              />
+            )}
             <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "16px", color: "var(--naia-ink)" }}>{suggestionMeta.anchorSummary}</p>
             {suggestionMeta.pairingNote && (
               <p className="sm-anchor-note">{suggestionMeta.pairingNote}</p>
@@ -1090,20 +1124,35 @@ export default function StyleMeResult() {
           </div>
         )}
 
-        {/* Overall look feedback */}
-        {loaderData.isAuthenticated && suggestion?.id && loaderData.sessionId && (
-          <div style={{ marginBottom: "28px" }}>
-            <RecommendationFeedbackWidget
-              sessionId={loaderData.sessionId}
-              suggestionId={suggestion.id}
-              target="complete-suggestion"
-            />
+        {/* "See This Look On Me" section — always shown for eligible NADINE results */}
+        {showTryOnSection && (
+          <div className="sm-result-section" style={{ borderTop: "1px solid rgba(34,21,22,0.12)", paddingTop: "24px" }}>
+            <p className="sm-result-section-head" style={{ borderBottom: "none", marginBottom: "12px" }}>See This Look On Me</p>
+            {tryOnModelReady ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--naia-muted)" }}>
+                  Your nAia Model is ready. Virtual try-on will be available in a future update.
+                </p>
+                <Link to="/my-naia-model" className="sm-result-action-btn" style={{ alignSelf: "flex-start" }}>
+                  View My nAia Model
+                </Link>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--naia-muted)" }}>
+                  Set up your nAia Model to preview eligible NADINE pieces on your own silhouette. This is not a generated try-on — it requires uploading your own photograph first.
+                </p>
+                <Link to="/my-naia-model" className="sm-result-action-btn" style={{ alignSelf: "flex-start" }}>
+                  Set Up nAia Model
+                </Link>
+              </div>
+            )}
           </div>
         )}
 
         {/* Actions */}
         <div className="sm-result-actions">
-          <Link to="/apps/naia-stylist/quick-style" className="sm-result-action-btn">Start Over</Link>
+          <Link to="/style-me" className="sm-result-action-btn">Start Over</Link>
           <button
             onClick={() => generateFetcher.submit({ intent: "regenerate", sessionId: loaderData.sessionId }, { method: "post" })}
             className="sm-result-action-btn sm-result-action-btn--primary"
@@ -1117,11 +1166,6 @@ export default function StyleMeResult() {
             Rate This Look
           </button>
           <a href={primaryNaiaItem?.productUrl || "https://naiabynadine.com"} className="sm-result-action-btn">Shop nAia</a>
-          {showTryOnCta && (
-            <Link to="/my-naia-model" className="sm-result-action-btn sm-result-action-btn--accent">
-              See This Look On Me
-            </Link>
-          )}
         </div>
 
         {/* Review saved toast */}

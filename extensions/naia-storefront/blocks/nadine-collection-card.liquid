@@ -1,0 +1,26 @@
+{{ 'naia-collection-try-on.css' | asset_url | stylesheet_tag }}
+
+<div
+  id="naia-collection-tryon-{{ product.id }}"
+  class="naia-cc-root"
+  data-product-id="{{ product.id }}"
+  data-product-handle="{{ product.handle }}"
+  data-app-url="{{ block.settings.app_url }}"
+></div>
+
+<script src="{{ 'naia-collection-try-on.js' | asset_url }}" defer></script>
+
+{% schema %}
+{
+  "name": "nAia Collection Try-On",
+  "target": "section",
+  "settings": [
+    {
+      "type": "url",
+      "id": "app_url",
+      "label": "nAia App URL",
+      "info": "The nAia Stylist app base URL. Do not change unless instructed."
+    }
+  ]
+}
+{% endschema %}

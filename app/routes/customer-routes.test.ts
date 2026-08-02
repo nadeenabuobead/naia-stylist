@@ -365,4 +365,275 @@ describe("G — dashboard hygiene: no /quick-style links in main dashboard", () 
       "has post-wear review entry point"
     );
   });
+
+  it("my-naia._index.tsx has no broken /my-naia/styleme/looks links", () => {
+    const src = route("my-naia._index.tsx");
+    assert.ok(!src.includes("/my-naia/styleme/looks"), "no /my-naia/styleme/looks hrefs");
+  });
+
+  it("my-naia._index.tsx has no /quick-style links", () => {
+    const src = route("my-naia._index.tsx");
+    assert.ok(!src.includes("/quick-style"), "no /quick-style links");
+  });
+
+  it("my-naia._index.tsx feedback path is single: only /post-wear-review", () => {
+    const src = route("my-naia._index.tsx");
+    assert.ok(src.includes("/post-wear-review"), "has /post-wear-review link");
+    assert.ok(!src.includes("/my-naia/styleme/looks"), "no broken feedback links");
+  });
+});
+
+// ── H. Digital Wardrobe (closet) — composed-shell invariants ────────────────
+//   Enforces the approved composition: Option B shell (MyNaiaLayout) +
+//   Option A page content (Digital Wardrobe title, stats, Add to Wardrobe,
+//   filters, card grid, Style Me → /style-me).
+
+describe("H — Digital Wardrobe: composed shell + content invariants", () => {
+  it("closet._index.tsx uses MyNaiaLayout (NADINE global header)", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("MyNaiaLayout"), "imports MyNaiaLayout");
+    assert.ok(src.includes("~/components/my-naia/MyNaiaLayout"), "from correct path");
+  });
+
+  it("closet._index.tsx loads naiaStyles (My nAia design system CSS)", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("naiaStyles"), "imports naiaStyles");
+    assert.ok(src.includes("naia-design-system.css"), "from naia-design-system.css");
+  });
+
+  it("closet._index.tsx has no standalone cl-topbar (removed in favour of MyNaiaLayout)", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(!src.includes("cl-topbar"), "no cl-topbar class");
+    assert.ok(!src.includes("cl-topbar-logo"), "no cl-topbar-logo");
+    assert.ok(!src.includes("cl-topbar-link"), "no cl-topbar-link");
+  });
+
+  it("closet._index.tsx uses Digital Wardrobe title from Option A", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("Digital Wardrobe"), "cl-headline says Digital Wardrobe");
+    assert.ok(src.includes("cl-headline"), "uses cl-headline class");
+  });
+
+  it("closet._index.tsx has Total Pieces / Categories / Brands stats from Option A", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("Total Pieces"), "has Total Pieces stat");
+    assert.ok(src.includes("Categories"), "has Categories stat");
+    assert.ok(src.includes("Brands"), "has Brands stat");
+    assert.ok(src.includes("cl-stats"), "uses cl-stats grid");
+  });
+
+  it("closet._index.tsx Add to Wardrobe form is from Option A (inline panel, not overlay)", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("Add to Wardrobe"), "has Add to Wardrobe panel title");
+    assert.ok(src.includes("cl-form"), "uses cl-form class");
+    assert.ok(src.includes("+ Add a Piece"), "has + Add a Piece CTA");
+  });
+
+  it("closet._index.tsx Style Me CTA links to /style-me (not deprecated /quick-style)", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes('to="/style-me"') || src.includes("to='/style-me'") || src.includes('"/style-me"'), "Style Me links to /style-me");
+    assert.ok(!src.includes("/quick-style"), "no /quick-style links");
+  });
+
+  it("closet._index.tsx server action rejects imageUrl values not from Cloudinary", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("res.cloudinary.com"), "validates Cloudinary hostname");
+    assert.ok(src.includes("Image must be uploaded via the app"), "returns rejection error message");
+  });
+
+  it("closet._index.tsx client-side MIME validation rejects non-image files", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("file.type.startsWith(\"image/\")"), "MIME type guard");
+    assert.ok(src.includes("5 * 1024 * 1024"), "5 MB size guard");
+  });
+
+  it("closet._index.tsx has search filter (query state from Option B)", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("query"), "has query state");
+    assert.ok(src.includes("Ivory trouser"), "has search placeholder text");
+  });
+
+  it("closet._index.tsx Back to Overview link goes to /my-naia", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("Back to Overview"), "has Back to Overview link text");
+    assert.ok(src.includes('to="/my-naia"') || src.includes("to='/my-naia'"), "links to /my-naia");
+  });
+});
+
+describe("I — BUG-5: closet-sourced saved look items carry imageUrl from closetItem join", () => {
+  it("my-naia.saved.tsx loader joins closetItem.imageUrl on SavedLookItem records", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(src.includes("closetItem"), "loader includes closetItem relation");
+    assert.ok(src.includes("select: { imageUrl: true }"), "selects imageUrl from closetItem");
+  });
+
+  it("my-naia.saved.tsx mapper falls back to closetItem.imageUrl when productImageUrl is null", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(
+      src.includes("item.productImageUrl ?? item.closetItem?.imageUrl ?? null"),
+      "mapper coalesces productImageUrl → closetItem.imageUrl → null"
+    );
+  });
+
+  it("my-naia.saved.tsx LookCard filters to items with productImageUrl (now non-null for closet items)", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(src.includes("productImageUrl"), "LookCard uses productImageUrl for thumbnails");
+  });
+
+  it("my-naia._index.tsx loader selects productImageUrl and closetItem.imageUrl on SavedLook items", () => {
+    const src = route("my-naia._index.tsx");
+    assert.ok(src.includes("productImageUrl: true"), "selects productImageUrl from SavedLookItem");
+    assert.ok(
+      src.includes("closetItem: { select: { name: true, imageUrl: true } }"),
+      "joins closetItem with imageUrl for overview thumbnails"
+    );
+  });
+
+  it("my-naia._index.tsx overview thumbnail waterfall includes closetItem.imageUrl as final fallback", () => {
+    const src = route("my-naia._index.tsx");
+    assert.ok(
+      src.includes("closetItem?.imageUrl"),
+      "thumbnail rendering includes closetItem?.imageUrl fallback"
+    );
+  });
+});
+
+describe("J — upload security: client magic-byte validation + server-side Admin API + byte fetch + deletion", () => {
+  it("closet._index.tsx defines IMAGE_SIGNATURES with magic bytes for JPEG PNG GIF WEBP HEIC", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("IMAGE_SIGNATURES"), "has IMAGE_SIGNATURES constant");
+    assert.ok(src.includes("0xFF, 0xD8, 0xFF"), "JPEG magic bytes present");
+    assert.ok(src.includes("0x89, 0x50, 0x4E, 0x47"), "PNG magic bytes present");
+    assert.ok(src.includes("0x47, 0x49, 0x46, 0x38"), "GIF magic bytes present");
+    assert.ok(src.includes("0x52, 0x49, 0x46, 0x46"), "WEBP/RIFF magic bytes present");
+    assert.ok(src.includes("0x66, 0x74, 0x79, 0x70"), "HEIC ftyp magic bytes present");
+  });
+
+  it("closet._index.tsx reads 12-byte file header for client-side magic-byte signature check", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("file.slice(0, 12).arrayBuffer()"), "reads first 12 bytes for signature check");
+    assert.ok(src.includes("new Uint8Array"), "wraps buffer as Uint8Array for byte comparison");
+  });
+
+  it("closet._index.tsx checks WEBP magic at both RIFF offset 0 and WEBP offset 8", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("isWebp"), "WEBP-specific check present");
+    assert.ok(src.includes("header[8] === 0x57"), "checks byte 8 == W (0x57) for WEBP marker");
+  });
+
+  it("closet._index.tsx rejects files whose magic bytes do not match any supported signature", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(
+      src.includes("does not appear to be a valid image"),
+      "returns user-facing error when client-side signature check fails"
+    );
+  });
+
+  it("closet._index.tsx uses Image.decode + createObjectURL to catch corrupted images", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("createObjectURL"), "uses createObjectURL for image decode test");
+    assert.ok(src.includes("new Image()"), "decodes via HTMLImageElement");
+    assert.ok(src.includes("img.onerror"), "catches decode failures via onerror handler");
+    assert.ok(
+      src.includes("could not be decoded"),
+      "user-facing error message for corrupted/undecodable files"
+    );
+  });
+
+  it("closet._index.tsx enforces MIN_DIMENSION and MAX_DIMENSION on decoded image", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("MIN_DIMENSION"), "defines MIN_DIMENSION constant");
+    assert.ok(src.includes("MAX_DIMENSION"), "defines MAX_DIMENSION constant");
+    assert.ok(src.includes("too small"), "error message for images below minimum dimensions");
+    assert.ok(src.includes("too large"), "error message for images above maximum dimensions");
+  });
+
+  it("closet._index.tsx rejects empty files before any upload attempt", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("file.size === 0"), "checks for zero-byte file");
+    assert.ok(src.includes("appears to be empty"), "user-facing error for empty file");
+  });
+
+  it("closet._index.tsx server action verifies asset via Cloudinary Admin API before any DB write", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("verifyCloudinaryAsset"), "calls verifyCloudinaryAsset");
+    assert.ok(
+      src.indexOf("verifyCloudinaryAsset") < src.indexOf("prisma.closetItem.create"),
+      "Admin API verification precedes DB write"
+    );
+  });
+
+  it("closet._index.tsx server action deletes Cloudinary asset on any validation failure", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("deleteCloudinaryAsset"), "calls deleteCloudinaryAsset on rejection");
+    const deleteCount = (src.match(/deleteCloudinaryAsset/g) ?? []).length;
+    assert.ok(
+      deleteCount >= 2,
+      `expected deleteCloudinaryAsset on multiple rejection paths; found ${deleteCount}`
+    );
+  });
+
+  it("closet._index.tsx server action extracts publicId from Cloudinary URL and validates ownership", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("extractCloudinaryPublicId"), "calls extractCloudinaryPublicId helper");
+    assert.ok(src.includes("validatePublicIdOwnership"), "calls validatePublicIdOwnership");
+    assert.ok(
+      src.indexOf("extractCloudinaryPublicId") < src.indexOf("prisma.closetItem.create"),
+      "publicId extraction precedes DB write"
+    );
+  });
+
+  it("closet._index.tsx server action has ALLOWED_FORMATS allowlist from Admin API before prisma.closetItem.create", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("ALLOWED_FORMATS"), "defines ALLOWED_FORMATS set");
+    assert.ok(src.includes('"jpg"'), "allowlist includes jpg");
+    assert.ok(src.includes('"webp"'), "allowlist includes webp");
+    assert.ok(src.includes('"heic"'), "allowlist includes heic");
+    assert.ok(
+      src.indexOf("ALLOWED_FORMATS") < src.indexOf("prisma.closetItem.create"),
+      "format check precedes DB write"
+    );
+  });
+
+  it("closet._index.tsx server action enforces file-size cap (Admin API serverBytes) before prisma.closetItem.create", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("SERVER_MAX_BYTES"), "defines SERVER_MAX_BYTES server-side limit");
+    assert.ok(src.includes("serverBytes"), "uses serverBytes from Admin API, not client form data");
+    assert.ok(
+      src.indexOf("SERVER_MAX_BYTES") < src.indexOf("prisma.closetItem.create"),
+      "size check precedes DB write"
+    );
+  });
+
+  it("closet._index.tsx server action enforces dimension bounds (Admin API serverWidth/serverHeight) before prisma.closetItem.create", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("serverWidth"), "uses serverWidth from Admin API, not client form data");
+    assert.ok(src.includes("serverHeight"), "uses serverHeight from Admin API, not client form data");
+    const dimCheck = src.includes("MIN_DIM") && src.includes("MAX_DIM");
+    assert.ok(dimCheck, "defines both MIN_DIM and MAX_DIM server-side constants");
+    assert.ok(
+      src.indexOf("MIN_DIM") < src.indexOf("prisma.closetItem.create"),
+      "dimension check precedes DB write"
+    );
+  });
+
+  it("closet._index.tsx server action fetches first 12 bytes via buildPrivateDownloadUrl for magic-byte check", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes("buildPrivateDownloadUrl"), "uses buildPrivateDownloadUrl for server-side download");
+    assert.ok(src.includes("bytes=0-11"), "requests only first 12 bytes via Range header");
+    assert.ok(src.includes("detectImageFormatFromBytes"), "checks server-fetched magic bytes");
+    assert.ok(
+      src.indexOf("buildPrivateDownloadUrl") < src.indexOf("prisma.closetItem.create"),
+      "server magic-byte fetch precedes DB write"
+    );
+  });
+
+  it("closet._index.tsx server validation failures return 400 — rejected uploads never create DB records", () => {
+    const src = route("closet._index.tsx");
+    const status400Count = (src.match(/status: 400/g) ?? []).length;
+    assert.ok(
+      status400Count >= 8,
+      `expected at least 8 server-side 400 rejections (hostname, publicId, ownership, Admin API, format, size, dimensions, magic bytes); found ${status400Count}`
+    );
+  });
 });

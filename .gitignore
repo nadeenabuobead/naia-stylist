@@ -30,3 +30,9 @@ database.sqlite
 .react-router/
 .vercel
 .env*
+
+# Phase 4A5 dev-only call cap state (never commit)
+.dev-tryon-cap.json
+
+# Claude Code project files
+.claude/

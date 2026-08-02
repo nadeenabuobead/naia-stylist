@@ -149,6 +149,10 @@ function writeSessionDraft(
 }
 
 // ---------------------------------------------------------------------------
+export function meta() {
+  return [{ title: "Profile Complete | nAia" }];
+}
+
 // Loader
 // ---------------------------------------------------------------------------
 
@@ -521,7 +525,7 @@ export default function OnboardingComplete() {
         {/* CTAs */}
         <div className="cp-section-label">What would you like to do first?</div>
 
-        <a href="/quick-style" className="cp-action">
+        <a href="/style-me" className="cp-action">
           <div>
             <div className="cp-action-title">Style Me</div>
             <div className="cp-action-sub">Get outfit ideas based on your mood</div>
@@ -537,10 +541,10 @@ export default function OnboardingComplete() {
           <span className="cp-arrow">→</span>
         </a>
 
-        <a href="/" className="cp-action">
+        <a href="/my-naia" className="cp-action">
           <div>
             <div className="cp-action-title">
-              {saveStatus === "saved" ? "View your updated Style DNA" : "View Dashboard"}
+              {saveStatus === "saved" ? "View your updated Style DNA" : "Go to My nAia"}
             </div>
             <div className="cp-action-sub">
               {saveStatus === "saved" ? "Your nAia Passport has been saved" : "Explore all features"}

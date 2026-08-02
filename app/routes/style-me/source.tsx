@@ -1,5 +1,9 @@
 import { Form, Link, useLoaderData } from "react-router";
 import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs, type LinksFunction } from "react-router";
+
+export function meta() {
+  return [{ title: "Build the look around | nAia Style Me" }];
+}
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
@@ -158,7 +162,7 @@ export default function StyleMeSource() {
     <div className="sm-page sm-page--qs">
       <div className="sm-topbar">
         <span className="sm-topbar-wordmark">nAia</span>
-        <Link to="/" className="sm-topbar-exit">Exit</Link>
+        <Link to="/style-me" className="sm-topbar-exit">Exit</Link>
       </div>
       <div className="sm-progress">
         <div className="sm-progress-dots">

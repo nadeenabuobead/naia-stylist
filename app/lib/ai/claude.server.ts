@@ -95,7 +95,8 @@ export async function callClaudeJSON<T>({
 }
 
 /**
- * Analyze an image with Claude Vision (not yet implemented - use OpenAI for now)
+ * Analyze an image with Claude Vision.
+ * Provide either imageUrl (Cloudinary URL) or imageBase64 + mediaType.
  */
 export async function analyzeImage({
   imageUrl,
@@ -110,9 +111,41 @@ export async function analyzeImage({
   prompt: string;
   system?: string;
 }): Promise<string> {
-  // For image analysis, we'd need to use Claude's vision API
-  // For now, return placeholder
-  throw new Error("Image analysis not yet implemented with Claude");
+  if (!imageUrl && !imageBase64) {
+    throw new Error("analyzeImage requires imageUrl or imageBase64");
+  }
+
+  const imageContent = imageUrl
+    ? { type: "image", source: { type: "url", url: imageUrl } }
+    : { type: "image", source: { type: "base64", media_type: mediaType, data: imageBase64! } };
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": process.env.ANTHROPIC_API_KEY!,
+      "anthropic-version": "2023-06-01"
+    },
+    body: JSON.stringify({
+      model: "claude-opus-4-7",
+      max_tokens: 1024,
+      system: system || undefined,
+      messages: [{
+        role: "user",
+        content: [
+          imageContent,
+          { type: "text", text: prompt }
+        ]
+      }]
+    })
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    console.error("Claude Vision API Error:", data);
+    throw new Error(data.error?.message || "Claude Vision API failed");
+  }
+  return data.content[0]?.text || "";
 }
 
 /**
