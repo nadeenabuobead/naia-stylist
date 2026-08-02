@@ -218,7 +218,7 @@ export default function BuyOrSkip() {
 
   return (
     <MyNaiaLayout>
-      <Link to="/my-naia" className="sp-back">← Overview</Link>
+      <Link to="/my-naia" className="sp-back">← Back to Overview</Link>
 
       {/* Section shell */}
       <div className="sp-shell">

@@ -75,7 +75,7 @@ function detectImageFormatFromBytes(header: Uint8Array): string | null {
 }
 
 export function meta() {
-  return [{ title: "Digital Wardrobe | nAia" }];
+  return [{ title: "Digital Closet | nAia" }];
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -339,7 +339,10 @@ const css = `
   .cl-empty-icon{font-family:var(--ff-display);font-size:52px;color:var(--fg, var(--c-ink));opacity:.2;margin-bottom:16px}
   .cl-empty-text{font-family:var(--ff-body);font-size:18px;font-style:italic;color:var(--fg-60, var(--c-muted));margin-bottom:28px}
   .cl-cta{margin-top:48px;text-align:center}
-  .cl-cta a{display:inline-block;padding:14px 36px;background:var(--fg, var(--c-ink));color:#FAF6F1;text-decoration:none;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase}
+  .cl-cta-btn{display:inline-flex;align-items:center;padding:12px 28px;background:var(--naia-ink);color:var(--naia-bg);text-decoration:none;font-family:var(--naia-ff-ui);font-size:10px;letter-spacing:2.5px;text-transform:uppercase;border:none;border-radius:9999px;cursor:pointer;transition:opacity .13s}
+  .cl-cta-btn:hover{opacity:.8}
+  .cl-cta-btn:focus-visible{outline:2px solid var(--naia-ink);outline-offset:2px}
+  .cl-cta-btn:disabled{opacity:.45;cursor:not-allowed}
   @media(max-width:1023px){
     .mn-page-sections>.mn-back-link{margin-bottom:1.25rem}
   }
@@ -357,7 +360,7 @@ const css = `
 // ── Component ─────────────────────────────────────────────────────────────────
 // Composed implementation:
 //   Shell  → Option B (my-naia.closet.tsx): MyNaiaLayout, NADINE header, My nAia navigation
-//   Content → Option A (closet._index.tsx): Digital Wardrobe title, stats, Add to Wardrobe
+//   Content → Option A (closet._index.tsx): Digital Closet title, stats, Add to Wardrobe
 //             form, filters, card grid, Style Me CTA
 //   Logic  → existing staging: Cloudinary, eligibility, journey events, delete, validation
 
@@ -567,7 +570,7 @@ export default function Closet() {
         </Link>
 
         {/* Option A page header */}
-        <h1 className="cl-headline">Digital Wardrobe</h1>
+        <h1 className="cl-headline">Digital Closet</h1>
         <p className="cl-sub">Upload, save, and style your pieces</p>
 
         {/* Option A: Total Pieces / Categories / Brands */}
@@ -812,7 +815,7 @@ export default function Closet() {
 
         {/* Option A: Style Me CTA → canonical /style-me route */}
         <div className="cl-cta">
-          <Link to="/style-me">Style Me →</Link>
+          <Link to="/style-me" className="cl-cta-btn">Style Me →</Link>
         </div>
       </div>
     </MyNaiaLayout>

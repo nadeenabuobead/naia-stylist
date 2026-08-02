@@ -923,7 +923,7 @@ export default function Index() {
           <div className="db-tools">
             <Link to="/closet" style={{ background: "var(--c-surface)", padding: "32px", border: "1px solid var(--c-border)", textDecoration: "none", color: "inherit", display: "block" }}>
               <div style={{ fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "2px", textTransform: "uppercase", color: "var(--c-muted)", marginBottom: "12px" }}>WARDROBE</div>
-              <h3 style={{ fontFamily: "var(--ff-display)", fontSize: "22px", fontWeight: 700, marginBottom: "8px", color: "var(--c-ink)" }}>Digital Wardrobe</h3>
+              <h3 style={{ fontFamily: "var(--ff-display)", fontSize: "22px", fontWeight: 700, marginBottom: "8px", color: "var(--c-ink)" }}>Digital Closet</h3>
               <p style={{ fontFamily: "var(--ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--c-muted)" }}>Upload, save, and style your pieces with nAia.</p>
             </Link>
             <Link to="/style-me" style={{ background: "var(--c-ink)", color: "var(--c-bg)", padding: "32px", textDecoration: "none", display: "block" }}>

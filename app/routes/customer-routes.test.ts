@@ -383,12 +383,12 @@ describe("G — dashboard hygiene: no /quick-style links in main dashboard", () 
   });
 });
 
-// ── H. Digital Wardrobe (closet) — composed-shell invariants ────────────────
+// ── H. Digital Closet (closet) — composed-shell invariants ──────────────────
 //   Enforces the approved composition: Option B shell (MyNaiaLayout) +
-//   Option A page content (Digital Wardrobe title, stats, Add to Wardrobe,
+//   Option A page content (Digital Closet title, stats, Add to Wardrobe,
 //   filters, card grid, Style Me → /style-me).
 
-describe("H — Digital Wardrobe: composed shell + content invariants", () => {
+describe("H — Digital Closet: composed shell + content invariants", () => {
   it("closet._index.tsx uses MyNaiaLayout (NADINE global header)", () => {
     const src = route("closet._index.tsx");
     assert.ok(src.includes("MyNaiaLayout"), "imports MyNaiaLayout");
@@ -408,9 +408,9 @@ describe("H — Digital Wardrobe: composed shell + content invariants", () => {
     assert.ok(!src.includes("cl-topbar-link"), "no cl-topbar-link");
   });
 
-  it("closet._index.tsx uses Digital Wardrobe title from Option A", () => {
+  it("closet._index.tsx uses Digital Closet title from Option A", () => {
     const src = route("closet._index.tsx");
-    assert.ok(src.includes("Digital Wardrobe"), "cl-headline says Digital Wardrobe");
+    assert.ok(src.includes("Digital Closet"), "cl-headline says Digital Closet");
     assert.ok(src.includes("cl-headline"), "uses cl-headline class");
   });
 
