@@ -269,11 +269,10 @@ Respond ONLY with valid JSON, no markdown:
 
     // ── 8. Persist analysis (awaited; DB-backed idempotency via unique key) ───
     // Verdict is stated intent only — never a transaction, purchase, or revenue signal.
+    const verdictMap = { BUY: "BUY", SKIP: "SKIP", MAYBE: "MAYBE" };
+    const persistedVerdict = verdictMap[analysis.verdict] ?? "INCOMPLETE";
+    let analysisRecord;
     {
-      const verdictMap = { BUY: "BUY", SKIP: "SKIP", MAYBE: "MAYBE" };
-      const persistedVerdict = verdictMap[analysis.verdict] ?? "INCOMPLETE";
-
-      let analysisRecord;
       try {
         analysisRecord = await prisma.buyOrSkipAnalysis.create({
           data: {
