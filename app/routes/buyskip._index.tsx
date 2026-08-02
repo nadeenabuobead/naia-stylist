@@ -62,12 +62,12 @@ function UploadRow({
               <input id={inputId} type="file" accept="image/*"
                 onChange={e => e.target.files?.[0] && onFile(e.target.files[0])}
                 style={{ display: "none" }} />
-              <span className="bos-upload-btn">
+              <span className="sp-btn-upload">
                 {uploading ? "Uploading…" : "Choose File"}
               </span>
             </label>
           )
-          : <button type="button" className="bos-upload-btn" disabled>Choose File</button>
+          : <button type="button" className="sp-btn-upload" disabled>Choose File</button>
       }
     </div>
   );
@@ -223,7 +223,7 @@ export default function BuyOrSkip() {
       {/* Section shell */}
       <div className="sp-shell">
         <div className="sp-shell-eyebrow">Should I Buy This?</div>
-        <h1 className="sp-shell-title" style={{ fontSize: "clamp(36px, 4.5vw, 52px)" }}>Should I Buy This?</h1>
+        <h1 className="sp-shell-title">Should I Buy This?</h1>
         <p className="sp-shell-desc">
           Considering a piece from another brand? Share it with nAia and receive an honest read based
           on your style, wardrobe, lifestyle and whether you already own something similar.
