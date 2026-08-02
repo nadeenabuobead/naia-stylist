@@ -2063,6 +2063,26 @@ a.mn-action:focus-visible,
 .bos-decisions-empty { padding: 60px 0; display: flex; flex-direction: column; align-items: flex-start; gap: 24px; }
 .bos-decisions-empty-text { font-family: var(--naia-ff-body); font-size: 16px; font-style: italic; color: var(--naia-muted); }
 
+/* At a Glance */
+.bos-glance { border: 1px solid var(--naia-border); background: var(--naia-surface); padding: 20px 24px; margin-bottom: 28px; }
+.bos-glance-eyebrow { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--naia-muted); margin-bottom: 14px; }
+.bos-glance-rows { display: flex; flex-direction: column; gap: 10px; }
+.bos-glance-row { display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: baseline; }
+.bos-glance-label { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--naia-muted); }
+.bos-glance-value { font-family: var(--naia-ff-body); font-size: 14px; line-height: 1.55; color: rgba(40,21,12,.85); }
+
+/* Read Full Analysis */
+.bos-read-more { margin-bottom: 32px; }
+.bos-read-more > summary { list-style: none; display: inline-flex; align-items: center; gap: 8px; font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--naia-accent); cursor: pointer; padding-bottom: 2px; border-bottom: 1px solid var(--naia-accent); user-select: none; }
+.bos-read-more > summary::-webkit-details-marker { display: none; }
+.bos-read-more > summary::before { content: "+"; font-size: 13px; font-family: var(--naia-ff-ui); line-height: 1; }
+.bos-read-more[open] > summary::before { content: "−"; }
+.bos-read-more-body { margin-top: 24px; }
+
+/* Fit & Size Notes */
+.bos-fit-notes { font-family: var(--naia-ff-body); font-size: 14px; line-height: 1.7; color: rgba(40,21,12,.8); }
+.bos-fit-notes-row { margin-bottom: 6px; }
+
 @media (max-width: 640px) {
   .bos-source-grid { grid-template-columns: 1fr; }
   .bos-upload-row { grid-template-columns: 1fr; }
@@ -2070,6 +2090,7 @@ a.mn-action:focus-visible,
   .bos-result-blocks { grid-template-columns: 1fr; }
   .bos-result-input-row { grid-template-columns: 1fr; }
   .bos-decisions-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  .bos-glance-row { grid-template-columns: 1fr; gap: 2px; }
 }
 
 /* ── Settings (set-*) ────────────────────────────────────────────────────── */
