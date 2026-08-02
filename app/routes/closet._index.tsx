@@ -393,8 +393,12 @@ export default function Closet() {
   });
 
   useEffect(() => {
-    if (!showAddForm) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") { setShowAddForm(false); addBtnRef.current?.focus(); } };
+    if (!showAddForm) {
+      // Form just closed — restore focus after React commits the button to the DOM
+      addBtnRef.current?.focus();
+      return;
+    }
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setShowAddForm(false); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [showAddForm]);
@@ -594,7 +598,7 @@ export default function Closet() {
           <div className="cl-form">
             <div className="cl-form-header">
               <h3 className="cl-form-title">Add to Wardrobe</h3>
-              <button type="button" className="cl-form-cancel" onClick={() => { setShowAddForm(false); addBtnRef.current?.focus(); }}>Cancel</button>
+              <button type="button" className="cl-form-cancel" onClick={() => setShowAddForm(false)}>Cancel</button>
             </div>
 
             {/* Photo guide integrated inside Add to Wardrobe panel */}
