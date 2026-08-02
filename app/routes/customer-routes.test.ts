@@ -637,3 +637,109 @@ describe("J — upload security: client magic-byte validation + server-side Admi
     );
   });
 });
+
+// ── K. Buy or Skip — saving, ownership, persistence, navigation ──────────────
+//   Enforces that analysis is saved before the user sees a result, that the
+//   result and list pages are auth-gated, that only the owning customer can
+//   access a decision, and that the result survives a hard refresh.
+
+describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
+  it("api.wishlist.jsx analyzeItem returns analysisId so client can navigate to result page", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("analysisId"), "response includes analysisId field");
+    assert.ok(src.includes("analysisRecord?.id"), "analysisId sourced from DB record id");
+  });
+
+  it("api.wishlist.jsx saves confidence, category, colors, forOccasion, whatLike, unsureAbout, colorNote, itemSize, fullAnalysis", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("confidence:"), "saves confidence");
+    assert.ok(src.includes("category:"), "saves category");
+    assert.ok(src.includes("colors:"), "saves colors array");
+    assert.ok(src.includes("forOccasion:"), "saves forOccasion");
+    assert.ok(src.includes("whatLike:"), "saves whatLike");
+    assert.ok(src.includes("unsureAbout:"), "saves unsureAbout");
+    assert.ok(src.includes("colorNote:"), "saves colorNote");
+    assert.ok(src.includes("itemSize:"), "saves itemSize");
+    assert.ok(src.includes("fullAnalysis:"), "saves fullAnalysis blob");
+  });
+
+  it("api.wishlist.jsx fullAnalysis blob captures all result fields needed for the result page", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("closetPairings"), "fullAnalysis includes closetPairings");
+    assert.ok(src.includes("occasions"), "fullAnalysis includes occasions");
+    assert.ok(src.includes("naiaMatch"), "fullAnalysis includes naiaMatch");
+    assert.ok(src.includes("detailedAnalysis"), "fullAnalysis includes detailedAnalysis");
+    assert.ok(src.includes("styleDNAMatch"), "fullAnalysis includes styleDNAMatch");
+    assert.ok(src.includes("finalThought"), "fullAnalysis includes finalThought");
+  });
+
+  it("api.wishlist.jsx does not return success without a saved record — incomplete decisions cannot be displayed", () => {
+    const src = route("api.wishlist.jsx");
+    // On DB error the route returns 503, never success
+    assert.ok(src.includes("Analysis could not be saved. Please try again."), "DB failure returns error not success");
+    assert.ok(src.includes("status: 503") || src.includes("{ status: 503 }"), "DB failure returns 503");
+  });
+
+  it("buyskip._index.tsx navigates to /buyskip/:id on success — result never shown inline", () => {
+    const src = route("buyskip._index.tsx");
+    assert.ok(src.includes("useNavigate"), "imports useNavigate");
+    assert.ok(src.includes('navigate(`/buyskip/${data.analysisId}`)'), "navigates to result page on success");
+    assert.ok(!src.includes("setResult("), "no inline setResult — result shown on dedicated page only");
+  });
+
+  it("buyskip.$id.tsx uses requireCurrentNaiaCustomer — route is auth-gated", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("requireCurrentNaiaCustomer"), "loader uses requireCurrentNaiaCustomer");
+  });
+
+  it("buyskip.$id.tsx enforces ownership — redirects when customerId does not match", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("analysis.customerId !== naiaCustomer.id"), "ownership check present");
+    assert.ok(src.includes('redirect("/my-naia/buying-decisions")'), "non-owner gets redirect, not 403");
+  });
+
+  it("buyskip.$id.tsx reads fullAnalysis from DB — result survives hard refresh", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("fullAnalysis"), "loader selects fullAnalysis from DB");
+    assert.ok(src.includes("useLoaderData"), "page hydrates from server data, not client state");
+  });
+
+  it("buyskip.$id.tsx renders the uploaded image from imageUrl stored in DB", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("analysis.imageUrl"), "renders imageUrl from DB record");
+    assert.ok(src.includes("bos-result-item-img"), "uses bos-result-item-img class");
+  });
+
+  it("my-naia.buying-decisions.tsx uses requireCurrentNaiaCustomer — list is auth-gated", () => {
+    const src = route("my-naia.buying-decisions.tsx");
+    assert.ok(src.includes("requireCurrentNaiaCustomer"), "loader uses requireCurrentNaiaCustomer");
+  });
+
+  it("my-naia.buying-decisions.tsx scopes query to current customer — no cross-customer data", () => {
+    const src = route("my-naia.buying-decisions.tsx");
+    assert.ok(src.includes("customerId: naiaCustomer.id"), "findMany scoped to naiaCustomer.id");
+  });
+
+  it("my-naia.buying-decisions.tsx decision cards link to /buyskip/:id — reopening works", () => {
+    const src = route("my-naia.buying-decisions.tsx");
+    assert.ok(src.includes('to={`/buyskip/${d.id}`}'), "card links to individual result page");
+  });
+
+  it("my-naia.buying-decisions.tsx shows verdict, confidence and date on each card", () => {
+    const src = route("my-naia.buying-decisions.tsx");
+    assert.ok(src.includes("d.verdict"), "renders verdict");
+    assert.ok(src.includes("d.confidence"), "renders confidence");
+    assert.ok(src.includes("d.createdAt"), "renders date");
+  });
+
+  it("routes.js registers both new routes", () => {
+    const src = readFileSync(join(ROOT, "app/routes.js"), "utf8");
+    assert.ok(src.includes('"buyskip/:id"'), "buyskip/:id route registered");
+    assert.ok(src.includes('"my-naia/buying-decisions"'), "my-naia/buying-decisions route registered");
+  });
+
+  it("buyskip._index.tsx View All Decisions links to /my-naia/buying-decisions — no 404", () => {
+    const src = route("buyskip._index.tsx");
+    assert.ok(src.includes('"/my-naia/buying-decisions"'), "View All Decisions link points to real route");
+  });
+});

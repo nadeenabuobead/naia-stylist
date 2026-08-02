@@ -74,7 +74,7 @@ async function analyzeItem(request) {
     return json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { imageUrl, category, color, brand, itemLink } = body;
+  const { imageUrl, category, color, brand, itemLink, forOccasion, whatLike, unsureAbout, colorNote, size } = body;
 
   if (!imageUrl) {
     return json({ error: "Image required" }, { status: 400 });
@@ -286,8 +286,28 @@ Respond ONLY with valid JSON, no markdown:
             productName: null,
             imageUrl,
             source: "buy-or-skip",
-            schemaVersion: "1.0",
+            schemaVersion: "2.0",
             idempotencyKey,
+            // Batch 3 — rich fields
+            confidence:   typeof analysis.confidence === "number" ? analysis.confidence : null,
+            category:     normalizedCategory || null,
+            colors:       Array.isArray(color) ? color.filter(c => typeof c === "string") : [],
+            forOccasion:  typeof forOccasion === "string" && forOccasion.trim() ? forOccasion.trim().slice(0, 500) : null,
+            whatLike:     typeof whatLike    === "string" && whatLike.trim()    ? whatLike.trim().slice(0, 500)    : null,
+            unsureAbout:  typeof unsureAbout === "string" && unsureAbout.trim() ? unsureAbout.trim().slice(0, 500) : null,
+            colorNote:    typeof colorNote   === "string" && colorNote.trim()   ? colorNote.trim().slice(0, 200)   : null,
+            itemSize:     typeof size        === "string" && size.trim()        ? size.trim().slice(0, 100)        : null,
+            fullAnalysis: {
+              verdict:         analysis.verdict,
+              confidence:      analysis.confidence,
+              styleDNAMatch:   analysis.styleDNAMatch   ?? null,
+              detailedAnalysis:analysis.detailedAnalysis ?? null,
+              closetPairings:  analysis.closetPairings  ?? [],
+              fillsGap:        analysis.fillsGap         ?? null,
+              occasions:       analysis.occasions        ?? [],
+              naiaMatch:       analysis.naiaMatch        ?? null,
+              finalThought:    analysis.finalThought     ?? null,
+            },
           },
         });
       } catch (dbErr) {
@@ -325,6 +345,7 @@ Respond ONLY with valid JSON, no markdown:
     return json({
       success: true,
       analysis,
+      analysisId: analysisRecord?.id ?? null,
       closetItemCount: closetItems.length,
       eligibleClosetItemCount: eligibleClosetItems.length,
       idempotentRepeat: isIdempotentRepeat,

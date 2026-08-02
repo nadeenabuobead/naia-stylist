@@ -2034,11 +2034,42 @@ a.mn-action:focus-visible,
 .bos-occasions { display: flex; flex-wrap: wrap; gap: 8px; }
 .bos-occasion-tag { padding: 4px 10px; background: var(--naia-tint); color: var(--naia-accent); font-size: 11px; font-family: var(--naia-ff-ui); }
 
+/* Result page — item image hero */
+.bos-result-item-wrap { margin-bottom: 32px; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.bos-result-item-img { max-height: 360px; max-width: 100%; width: auto; object-fit: contain; border: 1px solid var(--naia-border-mid); background: var(--naia-surface); display: block; }
+.bos-result-item-meta { display: flex; flex-wrap: wrap; gap: 8px; }
+.bos-result-item-tag { padding: 4px 10px; border: 1px solid var(--naia-border-mid); font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--naia-muted); }
+
+/* Result page — Step 2 inputs summary */
+.bos-result-inputs { border: 1px solid var(--naia-border); padding: 20px 24px; margin-bottom: 28px; display: flex; flex-direction: column; gap: 8px; background: var(--naia-surface); }
+.bos-result-input-row { display: grid; grid-template-columns: 140px 1fr; gap: 12px; font-size: 13px; font-family: var(--naia-ff-body); color: rgba(40,21,12,.85); }
+.bos-result-input-label { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.26em; text-transform: uppercase; color: var(--naia-muted); align-self: center; }
+
+/* Decisions list */
+.bos-decisions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+.bos-decision-card { display: flex; flex-direction: column; border: 1px solid var(--naia-border-mid); text-decoration: none; color: inherit; transition: border-color 0.14s; }
+.bos-decision-card:hover { border-color: var(--naia-ink); }
+.bos-decision-thumb-wrap { aspect-ratio: 1; background: var(--naia-surface); overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.bos-decision-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bos-decision-thumb-placeholder { font-family: var(--naia-ff-display); font-size: 40px; color: var(--naia-ink); opacity: 0.15; }
+.bos-decision-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.bos-decision-verdict { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.32em; text-transform: uppercase; }
+.bos-decision-verdict--buy  { color: #2a5e42; }
+.bos-decision-verdict--skip { color: var(--naia-accent); }
+.bos-decision-verdict--maybe { color: rgba(40,21,12,.65); }
+.bos-decision-category { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--naia-muted); }
+.bos-decision-confidence { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.18em; color: var(--naia-muted); }
+.bos-decision-date { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.14em; color: var(--naia-muted); margin-top: 2px; }
+.bos-decisions-empty { padding: 60px 0; display: flex; flex-direction: column; align-items: flex-start; gap: 24px; }
+.bos-decisions-empty-text { font-family: var(--naia-ff-body); font-size: 16px; font-style: italic; color: var(--naia-muted); }
+
 @media (max-width: 640px) {
   .bos-source-grid { grid-template-columns: 1fr; }
   .bos-upload-row { grid-template-columns: 1fr; }
   .bos-fields-grid { grid-template-columns: 1fr; }
   .bos-result-blocks { grid-template-columns: 1fr; }
+  .bos-result-input-row { grid-template-columns: 1fr; }
+  .bos-decisions-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 }
 
 /* ── Settings (set-*) ────────────────────────────────────────────────────── */

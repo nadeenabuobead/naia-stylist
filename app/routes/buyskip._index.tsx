@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Link, type LinksFunction, type LoaderFunctionArgs } from "react-router";
+import { Link, useNavigate, type LinksFunction, type LoaderFunctionArgs } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
@@ -84,30 +84,19 @@ function Field({ label, value, onChange, placeholder }: {
   );
 }
 
-function ResultBlock({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="bos-result-block">
-      <div className="bos-result-block-label">{label}</div>
-      <div className="bos-result-block-body">{children}</div>
-    </div>
-  );
-}
-
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function BuyOrSkip() {
+  const navigate = useNavigate();
   const [source, setSource] = React.useState<Source>("upload");
   const [imageUrl, setImageUrl] = React.useState("");
   const [uploading, setUploading] = React.useState(false);
   const [analyzing, setAnalyzing] = React.useState(false);
-  const [result, setResult] = React.useState<any>(null);
   const [category, setCategory] = React.useState("");
   const [color, setColor] = React.useState<string[]>([]);
   const [brand, setBrand] = React.useState("");
   const [uploadError, setUploadError] = React.useState("");
   const [analyzeError, setAnalyzeError] = React.useState("");
-  const [closetItemCount, setClosetItemCount] = React.useState(0);
-  const [eligibleClosetItemCount, setEligibleClosetItemCount] = React.useState(0);
   const [forOccasion, setForOccasion] = React.useState("");
   const [whatLike, setWhatLike] = React.useState("");
   const [unsureAbout, setUnsureAbout] = React.useState("");
@@ -165,54 +154,31 @@ export default function BuyOrSkip() {
       const response = await fetch("/api/wishlist?action=analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl, category, color, brand }),
+        body: JSON.stringify({ imageUrl, category, color, brand, forOccasion, whatLike, unsureAbout, colorNote, size }),
       });
       if (response.status === 401) {
         setAnalyzeError("Your session has expired. Please sign in again.");
         return;
       }
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        setAnalyzeError((errData as any).error || "Recommendation failed. Please try again.");
+        return;
+      }
       const data = await response.json();
-      if (data.success) {
-        const a = data.analysis;
-        setClosetItemCount(typeof data.closetItemCount === "number" ? data.closetItemCount : 0);
-        setEligibleClosetItemCount(typeof data.eligibleClosetItemCount === "number" ? data.eligibleClosetItemCount : 0);
-        setResult({
-          verdict:        a.verdict,
-          confidence:     a.confidence,
-          styleAlignment: a.styleDNAMatch,
-          details:        a.detailedAnalysis,
-          closetPairings: a.closetPairings || [],
-          fillsGap:       a.fillsGap,
-          naiaMatch:      a.naiaMatch,
-          occasions:      a.occasions || [],
-          finalThought:   a.finalThought,
-        });
+      if (data.success && data.analysisId) {
+        navigate(`/buyskip/${data.analysisId}`);
+      } else if (data.success) {
+        setAnalyzeError("Recommendation generated but could not be saved. Please try again.");
       } else {
-        setResult({ verdict: "UNABLE TO ASSESS", confidence: 0, finalThought: "Unable to analyse. Please try another photo." });
+        setAnalyzeError((data as any).error || "Unable to generate recommendation. Please try again.");
       }
     } catch {
-      setResult({ verdict: "ERROR", confidence: 0, finalThought: "Analysis failed. Please try again." });
+      setAnalyzeError("Recommendation failed. Please check your connection and try again.");
     } finally {
       setAnalyzing(false);
     }
   };
-
-  const reset = () => {
-    setImageUrl(""); setResult(null); setCategory(""); setColor([]);
-    setBrand(""); setUploadError(""); setAnalyzeError("");
-    setForOccasion(""); setWhatLike(""); setUnsureAbout(""); setColorNote(""); setSize("");
-    setClosetItemCount(0); setEligibleClosetItemCount(0);
-  };
-
-  const renderablePairings: Array<{ name: string; reason: string | null }> = [];
-  if (result?.closetPairings && Array.isArray(result.closetPairings)) {
-    for (const p of result.closetPairings) {
-      if (!p || typeof p !== "object" || Array.isArray(p)) continue;
-      const name = typeof p.name === "string" && p.name.trim() ? p.name.trim() : null;
-      if (!name) continue;
-      renderablePairings.push({ name, reason: typeof p.reason === "string" && p.reason.trim() ? p.reason.trim() : null });
-    }
-  }
 
   const canAnalyze = imageUrl && category && color.length > 0 && !analyzing;
 
@@ -324,77 +290,6 @@ export default function BuyOrSkip() {
             <a href="/auth/shopify/login?return_to=/buyskip" style={{ color: "var(--naia-accent)", textDecoration: "underline" }}>Sign in →</a>
           )}
         </p>
-      )}
-
-      {/* Result */}
-      {result && (
-        <section className="bos-section bos-result">
-          <div className="bos-step-label">nAia's Recommendation</div>
-          <div className="bos-verdict">{result.verdict}</div>
-          {result.confidence > 0 && (
-            <div className="bos-confidence">{result.confidence}% confidence</div>
-          )}
-          {result.finalThought && (
-            <p className="bos-result-summary">{result.finalThought}</p>
-          )}
-
-          <div className="bos-result-blocks">
-            {result.styleAlignment && (
-              <ResultBlock label="Style DNA Match">
-                <p>{result.styleAlignment}</p>
-              </ResultBlock>
-            )}
-            {result.details && (
-              <ResultBlock label="Why It Does Or Does Not Work">
-                {result.details.silhouette && <div><strong>Silhouette:</strong> {result.details.silhouette}</div>}
-                {result.details.color && <div><strong>Color:</strong> {result.details.color}</div>}
-                {result.details.fabric && <div><strong>Fabric:</strong> {result.details.fabric}</div>}
-                {result.details.versatility && <div><strong>Versatility:</strong> {result.details.versatility}</div>}
-              </ResultBlock>
-            )}
-            <ResultBlock label="Pairs With Your Closet">
-              {renderablePairings.length > 0 ? (
-                <ul className="bos-result-reasons">
-                  {renderablePairings.map((p, i) => (
-                    <li key={i} className="bos-result-reason">
-                      <span className="bos-result-reason-dash" aria-hidden />
-                      <span><strong>{p.name}</strong>{p.reason && <span> — {p.reason}</span>}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : closetItemCount > 0 && eligibleClosetItemCount === 0 ? (
-                <p>You have pieces in your Closet, but nAia could not find a clear pairing for this item yet.</p>
-              ) : (
-                <p>No closet items yet.{" "}<Link to="/closet">Add pieces to your wardrobe</Link> and nAia will tell you what this pairs with.</p>
-              )}
-              {result.fillsGap && <p style={{ color: "var(--naia-accent)", marginTop: "8px" }}>✓ {result.fillsGap}</p>}
-            </ResultBlock>
-            {result.naiaMatch && (
-              <ResultBlock label="Pair It With From nAia">
-                <div className="bos-naia-title">{typeof result.naiaMatch === "object" ? result.naiaMatch.title : result.naiaMatch}</div>
-                {typeof result.naiaMatch === "object" && result.naiaMatch.reason && (
-                  <div className="bos-naia-reason">{result.naiaMatch.reason}</div>
-                )}
-                {typeof result.naiaMatch === "object" && result.naiaMatch.url && (
-                  <a href={result.naiaMatch.url} target="_blank" rel="noreferrer" className="bos-naia-link">Shop This Piece →</a>
-                )}
-              </ResultBlock>
-            )}
-            {result.occasions?.length > 0 && (
-              <ResultBlock label="Perfect For">
-                <div className="bos-occasions">
-                  {result.occasions.map((occ: string, i: number) => (
-                    <span key={i} className="bos-occasion-tag">{occ}</span>
-                  ))}
-                </div>
-              </ResultBlock>
-            )}
-          </div>
-
-          <div style={{ marginTop: "32px", display: "flex", gap: "16px", flexWrap: "wrap" }}>
-            <button type="button" className="sp-btn-outline" onClick={reset}>Assess Another Piece</button>
-          </div>
-        </section>
       )}
     </MyNaiaLayout>
   );
