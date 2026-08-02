@@ -2,7 +2,6 @@ import * as React from "react";
 import { Link, type LinksFunction, type LoaderFunctionArgs } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
-import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
@@ -19,100 +18,40 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-type Source = "upload" | "photograph";
-
-const SOURCE_OPTIONS: { id: Source; label: string; hint: string }[] = [
-  { id: "upload",    label: "Upload a Screenshot or Product Image", hint: "From a website, lookbook or saved image." },
-  { id: "photograph", label: "Take a Photograph in a Store",        hint: "Capture the piece on the rack or on you." },
-];
-
-const EVIDENCE = [
-  "Style Passport", "My Closet", "Lifestyle",
-  "Fit & Coverage Preferences", "Saved Products",
-  "Previous Purchases", "Previous Buy or Skip Decisions", "Styling Feedback",
-];
-
 const CATEGORIES = ["Top", "Bottom", "Dress", "Outerwear", "Shoes", "Bag", "Accessory", "Jewelry"];
 const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver"];
-
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-function UploadRow({
-  label, required, imageUrl, uploading, error, onFile,
-}: {
-  label: string; required?: boolean;
-  imageUrl?: string; uploading?: boolean; error?: string;
-  onFile?: (f: File) => void;
-}) {
-  const inputId = `bos-file-${label.replace(/\W+/g, "-").toLowerCase()}`;
-  return (
-    <div className="bos-upload-row">
-      <div className="bos-upload-row-inner">
-        <div className="bos-upload-row-label">
-          {label}{required && <span style={{ color: "var(--naia-accent)", marginLeft: "4px" }}>·</span>}
-        </div>
-        <div className="bos-upload-row-hint">JPG or PNG · high resolution preferred</div>
-        {error && <div className="bos-upload-row-error">{error}</div>}
-      </div>
-      {imageUrl
-        ? <img src={imageUrl} alt="Uploaded preview" className="bos-upload-row-preview" />
-        : onFile
-          ? (
-            <label htmlFor={inputId}>
-              <input id={inputId} type="file" accept="image/*"
-                onChange={e => e.target.files?.[0] && onFile(e.target.files[0])}
-                style={{ display: "none" }} />
-              <span className="bos-upload-btn">
-                {uploading ? "Uploading…" : "Choose File"}
-              </span>
-            </label>
-          )
-          : <button type="button" className="bos-upload-btn" disabled>Choose File</button>
-      }
-    </div>
-  );
-}
-
-function Field({ label, value, onChange, placeholder }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder?: string;
-}) {
-  return (
-    <div>
-      <label className="bos-field-label">{label}</label>
-      <input className="bos-input" type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} />
-    </div>
-  );
-}
-
-function ResultBlock({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="bos-result-block">
-      <div className="bos-result-block-label">{label}</div>
-      <div className="bos-result-block-body">{children}</div>
-    </div>
-  );
-}
 
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function BuyOrSkip() {
-  const [source, setSource] = React.useState<Source>("upload");
+  const [step, setStep] = React.useState<"upload" | "tag" | "result">("upload");
+
+  // Upload
   const [imageUrl, setImageUrl] = React.useState("");
   const [uploading, setUploading] = React.useState(false);
-  const [analyzing, setAnalyzing] = React.useState(false);
-  const [result, setResult] = React.useState<any>(null);
+  const [uploadError, setUploadError] = React.useState("");
+
+  // Tag form
   const [category, setCategory] = React.useState("");
   const [color, setColor] = React.useState<string[]>([]);
   const [brand, setBrand] = React.useState("");
-  const [uploadError, setUploadError] = React.useState("");
-  const [analyzeError, setAnalyzeError] = React.useState("");
-  const [closetItemCount, setClosetItemCount] = React.useState(0);
-  const [eligibleClosetItemCount, setEligibleClosetItemCount] = React.useState(0);
+  const [itemLink, setItemLink] = React.useState("");
   const [forOccasion, setForOccasion] = React.useState("");
   const [whatLike, setWhatLike] = React.useState("");
   const [unsureAbout, setUnsureAbout] = React.useState("");
   const [colorNote, setColorNote] = React.useState("");
   const [size, setSize] = React.useState("");
+
+  // Result
+  const [analyzing, setAnalyzing] = React.useState(false);
+  const [analyzeError, setAnalyzeError] = React.useState("");
+  const [result, setResult] = React.useState<{
+    verdict: string; confidence: number; styleAlignment?: string;
+    details?: { silhouette?: string; color?: string; fabric?: string; versatility?: string };
+    closetPairings?: Array<{ name?: string; reason?: string } | string>;
+    fillsGap?: string; naiaMatch?: string | { title: string; reason?: string; url?: string };
+    occasions?: string[]; finalThought?: string;
+  } | null>(null);
 
   const handleUpload = async (file: File) => {
     const mimeType = file.type.toLowerCase();
@@ -151,6 +90,7 @@ export default function BuyOrSkip() {
         return;
       }
       setImageUrl(uploadData.secure_url);
+      setStep("tag");
     } catch {
       setUploadError("Upload failed. Please check your connection and try again.");
     } finally {
@@ -165,7 +105,7 @@ export default function BuyOrSkip() {
       const response = await fetch("/api/wishlist?action=analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl, category, color, brand }),
+        body: JSON.stringify({ imageUrl, category, color, brand, itemLink, forOccasion, whatLike, unsureAbout, colorNote, size }),
       });
       if (response.status === 401) {
         setAnalyzeError("Your session has expired. Please sign in again.");
@@ -174,8 +114,6 @@ export default function BuyOrSkip() {
       const data = await response.json();
       if (data.success) {
         const a = data.analysis;
-        setClosetItemCount(typeof data.closetItemCount === "number" ? data.closetItemCount : 0);
-        setEligibleClosetItemCount(typeof data.eligibleClosetItemCount === "number" ? data.eligibleClosetItemCount : 0);
         setResult({
           verdict:        a.verdict,
           confidence:     a.confidence,
@@ -187,215 +125,269 @@ export default function BuyOrSkip() {
           occasions:      a.occasions || [],
           finalThought:   a.finalThought,
         });
+        setStep("result");
       } else {
         setResult({ verdict: "UNABLE TO ASSESS", confidence: 0, finalThought: "Unable to analyse. Please try another photo." });
+        setStep("result");
       }
     } catch {
       setResult({ verdict: "ERROR", confidence: 0, finalThought: "Analysis failed. Please try again." });
+      setStep("result");
     } finally {
       setAnalyzing(false);
     }
   };
 
   const reset = () => {
-    setImageUrl(""); setResult(null); setCategory(""); setColor([]);
-    setBrand(""); setUploadError(""); setAnalyzeError("");
+    setStep("upload");
+    setImageUrl(""); setUploading(false); setUploadError("");
+    setCategory(""); setColor([]); setBrand(""); setItemLink("");
     setForOccasion(""); setWhatLike(""); setUnsureAbout(""); setColorNote(""); setSize("");
-    setClosetItemCount(0); setEligibleClosetItemCount(0);
+    setAnalyzing(false); setAnalyzeError(""); setResult(null);
   };
+
+  const verdictClass = result?.verdict === "BUY"
+    ? "bos-verdict-big bos-verdict-big--buy"
+    : result?.verdict === "SKIP"
+    ? "bos-verdict-big bos-verdict-big--skip"
+    : "bos-verdict-big bos-verdict-big--other";
 
   const renderablePairings: Array<{ name: string; reason: string | null }> = [];
   if (result?.closetPairings && Array.isArray(result.closetPairings)) {
     for (const p of result.closetPairings) {
       if (!p || typeof p !== "object" || Array.isArray(p)) continue;
-      const name = typeof p.name === "string" && p.name.trim() ? p.name.trim() : null;
+      const name = typeof (p as { name?: string }).name === "string" && (p as { name?: string }).name!.trim()
+        ? (p as { name: string }).name.trim() : null;
       if (!name) continue;
-      renderablePairings.push({ name, reason: typeof p.reason === "string" && p.reason.trim() ? p.reason.trim() : null });
+      const reason = typeof (p as { reason?: string }).reason === "string" && (p as { reason?: string }).reason!.trim()
+        ? (p as { reason: string }).reason.trim() : null;
+      renderablePairings.push({ name, reason });
     }
   }
 
-  const canAnalyze = imageUrl && category && color.length > 0 && !analyzing;
+  const canAnalyze = category && color.length > 0 && !analyzing;
 
   return (
-    <MyNaiaLayout>
-      <Link to="/my-naia" className="sp-back">← Overview</Link>
-
-      {/* Section shell */}
-      <div className="sp-shell">
-        <div className="sp-shell-eyebrow">Should I Buy This?</div>
-        <h1 className="sp-shell-title">Should I Buy This?</h1>
-        <p className="sp-shell-desc">
-          Considering a piece from another brand? Share it with nAia and receive an honest read based
-          on your style, wardrobe, lifestyle and whether you already own something similar.
-        </p>
+    <div className="bos-page">
+      {/* Topbar */}
+      <div className="bos-topbar">
+        <span className="bos-topbar-logo">nAia</span>
+        <Link to="/my-naia" className="bos-topbar-link">← Overview</Link>
       </div>
 
-      {/* Step 1 · Add the Piece */}
-      <section className="bos-section">
-        <div className="bos-step-label">Step 1 · Add the Piece</div>
-        <div className="bos-source-grid">
-          {SOURCE_OPTIONS.map(o => (
-            <button key={o.id} type="button"
-              className={`bos-source-card${source === o.id ? " bos-source-card--active" : ""}`}
-              onClick={() => setSource(o.id)}>
-              <div className="bos-source-card-label">{o.label}</div>
-              <p className="bos-source-card-hint">{o.hint}</p>
-            </button>
-          ))}
-        </div>
-        <div className="bos-upload-rows">
-          <UploadRow
-            label={source === "upload" ? "Screenshot or Product Image" : "Photograph — Front View"}
-            required
-            imageUrl={imageUrl || undefined}
-            uploading={uploading}
-            error={uploadError || undefined}
-            onFile={handleUpload}
-          />
-          <UploadRow label="A Second Angle (optional)" />
-          <UploadRow label="Fabric or Detail (optional)" />
-        </div>
-      </section>
-
-      {/* Step 2 · A Few Questions (shown once image is uploaded) */}
-      {imageUrl && (
-        <section className="bos-section">
-          <div className="bos-step-label">Step 2 · A Few Questions</div>
-          <div className="bos-fields-grid">
-            <Field label="What are you considering it for?" value={forOccasion} onChange={setForOccasion} placeholder="e.g. Evening dinners in Beirut" />
-            <Field label="What do you like about it?" value={whatLike} onChange={setWhatLike} placeholder="e.g. The neckline and the drape" />
-            <Field label="What are you unsure about?" value={unsureAbout} onChange={setUnsureAbout} placeholder="e.g. Whether it duplicates something I own" />
-            <Field label="Which colour are you considering?" value={colorNote} onChange={setColorNote} placeholder="e.g. Ivory" />
-            <Field label="Which size are you considering?" value={size} onChange={setSize} placeholder="e.g. M" />
-          </div>
-
-          <div className="bos-field-row">
-            <label className="bos-field-label">Category *</label>
-            <div className="bos-pills">
-              {CATEGORIES.map(c => (
-                <button key={c} type="button"
-                  className={`bos-pill${category === c ? " bos-pill--on" : ""}`}
-                  onClick={() => setCategory(c)}>{c}</button>
-              ))}
-            </div>
-          </div>
-
-          <div className="bos-field-row">
-            <label className="bos-field-label">Color * (choose all that apply)</label>
-            <div className="bos-pills">
-              {COLORS.map(c => (
-                <button key={c} type="button"
-                  className={`bos-pill${color.includes(c) ? " bos-pill--on" : ""}`}
-                  onClick={() => setColor(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])}>
-                  {c}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="bos-field-row">
-            <label className="bos-field-label">Brand (optional)</label>
-            <input className="bos-input" type="text" placeholder="e.g. Zara, H&M" value={brand} onChange={e => setBrand(e.target.value)} />
-          </div>
-        </section>
-      )}
-
-      {/* What nAia May Consider */}
-      <section className="bos-section">
-        <div className="bos-step-label">What nAia May Consider</div>
-        <ul className="bos-evidence-tags">
-          {EVIDENCE.map(e => <li key={e} className="bos-evidence-tag">{e}</li>)}
-        </ul>
-      </section>
-
-      {/* CTA row */}
-      <div className="bos-cta-row">
-        <button type="button" className="sp-btn-primary"
-          disabled={!canAnalyze}
-          onClick={handleAnalyze}>
-          {analyzing ? "Analysing…" : "Get My Recommendation"}
-        </button>
-        <Link to="/my-naia/buying-decisions" className="bos-link">View All Decisions</Link>
-      </div>
-      {analyzeError && (
-        <p className="bos-error">
-          {analyzeError}{" "}
-          {analyzeError.includes("session") && (
-            <a href="/auth/shopify/login?return_to=/buyskip" style={{ color: "var(--naia-accent)", textDecoration: "underline" }}>Sign in →</a>
-          )}
+      <div className="bos-content">
+        <h1 className="bos-headline">Buy or Skip?</h1>
+        <p className="bos-sub">
+          Thinking of buying something? Upload it and nAia will tell you if it fits your
+          wardrobe, style, and lifestyle.
         </p>
-      )}
 
-      {/* Result */}
-      {result && (
-        <section className="bos-section bos-result">
-          <div className="bos-step-label">nAia's Recommendation</div>
-          <div className="bos-verdict">{result.verdict}</div>
-          {result.confidence > 0 && (
-            <div className="bos-confidence">{result.confidence}% confidence</div>
-          )}
-          {result.finalThought && (
-            <p className="bos-result-summary">{result.finalThought}</p>
-          )}
+        {/* ── Step 1 — Upload ──────────────────────────────────────────────── */}
+        {step === "upload" && (
+          <div className="bos-upload-zone">
+            <input
+              type="file"
+              accept="image/*"
+              id="bos-file"
+              onChange={e => e.target.files?.[0] && handleUpload(e.target.files[0])}
+            />
+            <label htmlFor="bos-file" className={`bos-upload-cta${uploading ? " bos-upload-cta--loading" : ""}`}>
+              {uploading ? "Uploading…" : "Choose Photo"}
+            </label>
+            <p className="bos-upload-hint">Upload a photo of the item you're thinking of buying</p>
+            {uploadError && <p className="bos-upload-error">{uploadError}</p>}
+          </div>
+        )}
 
-          <div className="bos-result-blocks">
-            {result.styleAlignment && (
-              <ResultBlock label="Style DNA Match">
-                <p>{result.styleAlignment}</p>
-              </ResultBlock>
-            )}
-            {result.details && (
-              <ResultBlock label="Why It Does Or Does Not Work">
-                {result.details.silhouette && <div><strong>Silhouette:</strong> {result.details.silhouette}</div>}
-                {result.details.color && <div><strong>Color:</strong> {result.details.color}</div>}
-                {result.details.fabric && <div><strong>Fabric:</strong> {result.details.fabric}</div>}
-                {result.details.versatility && <div><strong>Versatility:</strong> {result.details.versatility}</div>}
-              </ResultBlock>
-            )}
-            <ResultBlock label="Pairs With Your Closet">
-              {renderablePairings.length > 0 ? (
-                <ul className="bos-result-reasons">
-                  {renderablePairings.map((p, i) => (
-                    <li key={i} className="bos-result-reason">
-                      <span className="bos-result-reason-dash" aria-hidden />
-                      <span><strong>{p.name}</strong>{p.reason && <span> — {p.reason}</span>}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : closetItemCount > 0 && eligibleClosetItemCount === 0 ? (
-                <p>You have pieces in your Closet, but nAia could not find a clear pairing for this item yet.</p>
-              ) : (
-                <p>No closet items yet.{" "}<Link to="/closet">Add pieces to your wardrobe</Link> and nAia will tell you what this pairs with.</p>
-              )}
-              {result.fillsGap && <p style={{ color: "var(--naia-accent)", marginTop: "8px" }}>✓ {result.fillsGap}</p>}
-            </ResultBlock>
-            {result.naiaMatch && (
-              <ResultBlock label="Pair It With From nAia">
-                <div className="bos-naia-title">{typeof result.naiaMatch === "object" ? result.naiaMatch.title : result.naiaMatch}</div>
-                {typeof result.naiaMatch === "object" && result.naiaMatch.reason && (
-                  <div className="bos-naia-reason">{result.naiaMatch.reason}</div>
-                )}
-                {typeof result.naiaMatch === "object" && result.naiaMatch.url && (
-                  <a href={result.naiaMatch.url} target="_blank" rel="noreferrer" className="bos-naia-link">Shop This Piece →</a>
-                )}
-              </ResultBlock>
-            )}
-            {result.occasions?.length > 0 && (
-              <ResultBlock label="Perfect For">
-                <div className="bos-occasions">
-                  {result.occasions.map((occ: string, i: number) => (
-                    <span key={i} className="bos-occasion-tag">{occ}</span>
+        {/* ── Step 2 — Tag ─────────────────────────────────────────────────── */}
+        {step === "tag" && (
+          <div className="bos-split">
+            {/* Left — image preview */}
+            <div className="bos-split-image">
+              <img src={imageUrl} alt="Item to assess" />
+            </div>
+
+            {/* Right — form */}
+            <div className="bos-split-panel">
+              <div>
+                <div className="bos-panel-heading">Tell us about this piece</div>
+                <div className="bos-panel-sub">Help nAia understand what it is</div>
+              </div>
+
+              <div className="bos-panel-section">
+                <label className="bos-field-label">What are you considering it for?</label>
+                <input className="bos-input" type="text" value={forOccasion} onChange={e => setForOccasion(e.target.value)} placeholder="e.g. Evening dinners in Beirut" />
+              </div>
+
+              <div className="bos-panel-section">
+                <label className="bos-field-label">What do you like about it?</label>
+                <input className="bos-input" type="text" value={whatLike} onChange={e => setWhatLike(e.target.value)} placeholder="e.g. The neckline and the drape" />
+              </div>
+
+              <div className="bos-panel-section">
+                <label className="bos-field-label">What are you unsure about?</label>
+                <input className="bos-input" type="text" value={unsureAbout} onChange={e => setUnsureAbout(e.target.value)} placeholder="e.g. Whether it duplicates something I own" />
+              </div>
+
+              <div className="bos-panel-section">
+                <label className="bos-field-label">Which colour are you considering?</label>
+                <input className="bos-input" type="text" value={colorNote} onChange={e => setColorNote(e.target.value)} placeholder="e.g. Ivory" />
+              </div>
+
+              <div className="bos-panel-section">
+                <label className="bos-field-label">Which size?</label>
+                <input className="bos-input" type="text" value={size} onChange={e => setSize(e.target.value)} placeholder="e.g. M" />
+              </div>
+
+              <div className="bos-panel-section">
+                <label className="bos-field-label">Category *</label>
+                <div className="bos-pills">
+                  {CATEGORIES.map(c => (
+                    <button key={c} type="button"
+                      className={`bos-pill${category === c ? " bos-pill--on" : ""}`}
+                      onClick={() => setCategory(c)}>{c}
+                    </button>
                   ))}
                 </div>
-              </ResultBlock>
-            )}
-          </div>
+              </div>
 
-          <div style={{ marginTop: "32px", display: "flex", gap: "16px", flexWrap: "wrap" }}>
-            <button type="button" className="sp-btn-outline" onClick={reset}>Assess Another Piece</button>
+              <div className="bos-panel-section">
+                <label className="bos-field-label">Colour * (choose all that apply)</label>
+                <div className="bos-pills">
+                  {COLORS.map(c => (
+                    <button key={c} type="button"
+                      className={`bos-pill${color.includes(c) ? " bos-pill--on" : ""}`}
+                      onClick={() => setColor(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])}>{c}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bos-panel-section">
+                <label className="bos-field-label">Brand (optional)</label>
+                <input className="bos-input" type="text" value={brand} onChange={e => setBrand(e.target.value)} placeholder="e.g. Zara, H&M" />
+              </div>
+
+              <div className="bos-panel-section">
+                <label className="bos-field-label">Product Link (optional)</label>
+                <input className="bos-input" type="text" value={itemLink} onChange={e => setItemLink(e.target.value)} placeholder="e.g. https://zara.com/..." />
+              </div>
+
+              {analyzeError && <p className="bos-analyze-error">{analyzeError}</p>}
+
+              <div className="bos-panel-nav">
+                <button type="button" className="bos-btn-back" onClick={reset}>← Back</button>
+                <button type="button" className="bos-btn-analyze"
+                  disabled={!canAnalyze}
+                  onClick={handleAnalyze}>
+                  {analyzing ? "Analysing…" : "Analyse →"}
+                </button>
+              </div>
+            </div>
           </div>
-        </section>
-      )}
-    </MyNaiaLayout>
+        )}
+
+        {/* ── Step 3 — Result ──────────────────────────────────────────────── */}
+        {step === "result" && result && (
+          <div className="bos-split">
+            {/* Left — image + tag chips */}
+            <div className="bos-split-image">
+              <img src={imageUrl} alt="Assessed item" />
+              <div className="bos-tag-chips">
+                {category && <span className="bos-tag-chip-a">{category}</span>}
+                {color.map(c => <span key={c} className="bos-tag-chip-a">{c}</span>)}
+                {brand && <span className="bos-tag-chip-n">{brand}</span>}
+              </div>
+            </div>
+
+            {/* Right — verdict panel */}
+            <div className="bos-verdict-panel">
+              <div className={verdictClass}>{result.verdict}</div>
+              {result.confidence > 0 && (
+                <div className="bos-confidence-label">{result.confidence}% confidence</div>
+              )}
+
+              {result.finalThought && (
+                <div className="bos-analysis-block">
+                  <div className="bos-analysis-block-body" style={{ fontStyle: "normal" }}>
+                    {result.finalThought}
+                  </div>
+                </div>
+              )}
+
+              {result.styleAlignment && (
+                <div className="bos-analysis-block">
+                  <div className="bos-analysis-block-label">Style DNA Match</div>
+                  <div className="bos-analysis-block-body">{result.styleAlignment}</div>
+                </div>
+              )}
+
+              {result.details && (
+                <div className="bos-analysis-block">
+                  <div className="bos-analysis-block-label">Analysis</div>
+                  <div className="bos-analysis-block-body">
+                    {result.details.silhouette && <div><strong>Silhouette:</strong> {result.details.silhouette}</div>}
+                    {result.details.color && <div><strong>Colour:</strong> {result.details.color}</div>}
+                    {result.details.fabric && <div><strong>Fabric:</strong> {result.details.fabric}</div>}
+                    {result.details.versatility && <div><strong>Versatility:</strong> {result.details.versatility}</div>}
+                  </div>
+                </div>
+              )}
+
+              {(renderablePairings.length > 0 || result.fillsGap) && (
+                <div className="bos-analysis-block">
+                  <div className="bos-analysis-block-label">Pairs With Your Closet</div>
+                  <div className="bos-analysis-block-body">
+                    {renderablePairings.length > 0 ? (
+                      <ul className="bos-result-reasons">
+                        {renderablePairings.map((p, i) => (
+                          <li key={i} className="bos-result-reason">
+                            <span className="bos-result-reason-dash" aria-hidden />
+                            <span><strong>{p.name}</strong>{p.reason && <span> — {p.reason}</span>}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <span>No closet items yet. <Link to="/closet">Add pieces to your wardrobe</Link> and nAia will tell you what this pairs with.</span>
+                    )}
+                    {result.fillsGap && <p style={{ color: "var(--naia-accent)", marginTop: "8px" }}>✓ {result.fillsGap}</p>}
+                  </div>
+                </div>
+              )}
+
+              {result.naiaMatch && (
+                <div className="bos-analysis-block">
+                  <div className="bos-analysis-block-label">Pair It With From nAia</div>
+                  <div className="bos-naia-title">
+                    {typeof result.naiaMatch === "object" ? result.naiaMatch.title : result.naiaMatch}
+                  </div>
+                  {typeof result.naiaMatch === "object" && result.naiaMatch.reason && (
+                    <div className="bos-naia-reason">{result.naiaMatch.reason}</div>
+                  )}
+                  {typeof result.naiaMatch === "object" && result.naiaMatch.url && (
+                    <a href={result.naiaMatch.url} target="_blank" rel="noreferrer" className="bos-naia-link">Shop This Piece →</a>
+                  )}
+                </div>
+              )}
+
+              {result.occasions && result.occasions.length > 0 && (
+                <div className="bos-analysis-block">
+                  <div className="bos-analysis-block-label">Perfect For</div>
+                  <div className="bos-occasions">
+                    {result.occasions.map((occ, i) => (
+                      <span key={i} className="bos-occasion-tag">{occ}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <button type="button" className="bos-try-again" onClick={reset}>
+                Try Another
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

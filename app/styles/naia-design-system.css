@@ -2032,11 +2032,73 @@ a.mn-action:focus-visible,
 .bos-occasions { display: flex; flex-wrap: wrap; gap: 8px; }
 .bos-occasion-tag { padding: 4px 10px; background: var(--naia-tint); color: var(--naia-accent); font-size: 11px; font-family: var(--naia-ff-ui); }
 
+/* Buy or Skip — standalone page shell (Lovable 3-step layout) */
+.bos-page { min-height: 100vh; background: var(--naia-bg); }
+.bos-topbar { display: flex; justify-content: space-between; align-items: center; padding: 20px 40px; border-bottom: 1px solid var(--naia-border); }
+.bos-topbar-logo { font-family: var(--naia-ff-display); font-size: 22px; font-style: italic; letter-spacing: 0.12em; color: var(--naia-ink); text-decoration: none; }
+.bos-topbar-link { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--naia-accent); text-decoration: none; transition: opacity 0.15s; }
+.bos-topbar-link:hover { opacity: 0.7; }
+.bos-content { max-width: 900px; margin: 0 auto; padding: 60px 40px 80px; }
+.bos-headline { font-family: var(--naia-ff-display); font-size: clamp(36px, 5vw, 56px); font-weight: 700; color: var(--naia-ink); margin-bottom: 8px; line-height: 1.05; }
+.bos-sub { font-family: var(--naia-ff-body); font-size: 18px; font-style: italic; color: var(--naia-muted); margin-bottom: 48px; line-height: 1.6; }
+
+/* Step 1 — upload zone */
+.bos-upload-zone { background: rgba(250,246,241,0.8); border: 1px solid var(--naia-border); padding: 60px 40px; text-align: center; }
+.bos-upload-zone input[type="file"] { display: none; }
+.bos-upload-cta { display: inline-block; padding: 16px 40px; background: var(--naia-accent); color: #FAF6F1; font-family: var(--naia-ff-ui); font-size: 10px; letter-spacing: 0.28em; text-transform: uppercase; cursor: pointer; transition: opacity 0.15s; margin-bottom: 16px; }
+.bos-upload-cta:hover { opacity: 0.85; }
+.bos-upload-cta--loading { opacity: 0.7; cursor: wait; }
+.bos-upload-hint { font-family: var(--naia-ff-body); font-size: 16px; font-style: italic; color: var(--naia-muted); }
+.bos-upload-error { font-family: var(--naia-ff-ui); font-size: 11px; color: var(--naia-accent); margin-top: 16px; }
+
+/* Steps 2 & 3 — 2-column split */
+.bos-split { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; }
+.bos-split-image { display: flex; flex-direction: column; gap: 16px; }
+.bos-split-image img { width: 100%; border: 1px solid var(--naia-border); display: block; }
+.bos-split-panel { display: flex; flex-direction: column; gap: 24px; }
+.bos-panel-heading { font-family: var(--naia-ff-display); font-size: 22px; font-weight: 700; line-height: 1.2; color: var(--naia-ink); margin-bottom: 2px; }
+.bos-panel-sub { font-family: var(--naia-ff-body); font-size: 15px; font-style: italic; color: var(--naia-muted); }
+.bos-panel-section { display: flex; flex-direction: column; gap: 10px; }
+.bos-panel-nav { display: flex; gap: 12px; margin-top: 8px; }
+.bos-btn-back { padding: 14px 24px; border: 1px solid var(--naia-border-mid); background: transparent; font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--naia-ink); cursor: pointer; transition: border-color 0.14s; }
+.bos-btn-back:hover { border-color: var(--naia-ink); }
+.bos-btn-analyze { flex: 1; padding: 16px 24px; border: none; background: var(--naia-accent); color: #FAF6F1; font-family: var(--naia-ff-ui); font-size: 10px; letter-spacing: 0.28em; text-transform: uppercase; cursor: pointer; transition: opacity 0.15s; }
+.bos-btn-analyze:hover:not(:disabled) { opacity: 0.85; }
+.bos-btn-analyze:disabled { background: var(--naia-border); color: var(--naia-muted); cursor: not-allowed; }
+.bos-analyze-error { font-family: var(--naia-ff-ui); font-size: 11px; color: var(--naia-accent); margin-top: -12px; }
+
+/* Tag chips — left column of result step */
+.bos-tag-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.bos-tag-chip-a { padding: 8px 14px; background: var(--naia-accent); color: #faf6f1; font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.24em; text-transform: uppercase; }
+.bos-tag-chip-n { padding: 8px 14px; border: 1px solid var(--naia-border-mid); background: transparent; font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--naia-ink); }
+
+/* Result verdict panel */
+.bos-verdict-panel { background: rgba(250,246,241,0.8); padding: 40px; border: 1px solid var(--naia-border); display: flex; flex-direction: column; }
+.bos-verdict-big { font-family: var(--naia-ff-display); font-size: 64px; font-weight: 900; line-height: 1; margin-bottom: 4px; }
+.bos-verdict-big--buy { color: var(--naia-accent); }
+.bos-verdict-big--skip { color: var(--naia-muted); }
+.bos-verdict-big--other { color: var(--naia-muted); }
+.bos-confidence-label { font-family: var(--naia-ff-ui); font-size: 10px; letter-spacing: 0.2em; color: var(--naia-muted); margin-bottom: 32px; }
+.bos-analysis-block { padding-bottom: 24px; border-bottom: 1px solid var(--naia-border); margin-bottom: 0; }
+.bos-analysis-block + .bos-analysis-block { margin-top: 24px; }
+.bos-analysis-block-label { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--naia-muted); margin-bottom: 10px; }
+.bos-analysis-block-body { font-family: var(--naia-ff-body); font-size: 15px; font-style: italic; color: var(--naia-ink); line-height: 1.8; }
+.bos-analysis-block-body > div { margin-bottom: 6px; }
+.bos-analysis-block-body > div:last-child { margin-bottom: 0; }
+.bos-try-again { width: 100%; margin-top: 32px; padding: 14px; background: transparent; border: 1px solid var(--naia-accent); color: var(--naia-accent); font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.24em; text-transform: uppercase; cursor: pointer; transition: background 0.14s; }
+.bos-try-again:hover { background: var(--naia-tint); }
+
 @media (max-width: 640px) {
   .bos-source-grid { grid-template-columns: 1fr; }
   .bos-upload-row { grid-template-columns: 1fr; }
   .bos-fields-grid { grid-template-columns: 1fr; }
   .bos-result-blocks { grid-template-columns: 1fr; }
+  .bos-topbar { padding: 16px 20px; }
+  .bos-content { padding: 32px 20px 60px; }
+  .bos-split { grid-template-columns: 1fr; gap: 32px; }
+  .bos-upload-zone { padding: 40px 20px; }
+  .bos-verdict-big { font-size: 48px; }
+  .bos-verdict-panel { padding: 28px 20px; }
 }
 
 /* ── Settings (set-*) ────────────────────────────────────────────────────── */
