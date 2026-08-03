@@ -2041,11 +2041,11 @@ a.mn-action:focus-visible,
 .bos-occasion-tag { padding: 4px 10px; background: var(--naia-tint); color: var(--naia-accent); font-size: 11px; font-family: var(--naia-ff-ui); }
 
 /* Result page — item image hero */
-/* Result page — desktop hero: image left, verdict+summary right */
-.bos-result-hero { display: grid; grid-template-columns: auto 1fr; gap: 40px; align-items: start; margin-bottom: 8px; }
-.bos-result-hero-image { flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; }
-.bos-result-hero-content { padding-top: 4px; }
-.bos-result-hero .bos-result-item-img { max-height: 300px; }
+/* Result page — desktop hero: image left (capped 43%), verdict right, vertically centred */
+.bos-result-hero { display: grid; grid-template-columns: minmax(0, 43%) 1fr; gap: 40px; align-items: center; margin-bottom: 8px; }
+.bos-result-hero-image { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.bos-result-hero-content { padding-top: 0; align-self: center; }
+.bos-result-hero .bos-result-item-img { width: 100%; height: auto; max-height: 480px; object-fit: contain; object-position: center top; }
 .bos-result-item-wrap { margin-bottom: 24px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .bos-result-item-img { max-height: 380px; max-width: 100%; width: auto; height: auto; border: 1px solid var(--naia-border-mid); display: block; }
 .bos-result-item-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
@@ -2115,6 +2115,10 @@ a.mn-action:focus-visible,
 .bos-final-condition { background: var(--naia-surface); border: 1px solid var(--naia-border); padding: 20px 24px; margin-top: 4px; }
 .bos-final-condition-row { font-family: var(--naia-ff-body); font-size: 14px; line-height: 1.8; color: rgba(40,21,12,.85); margin-bottom: 8px; }
 .bos-final-condition-row:last-child { margin-bottom: 0; }
+/* A Better Direction — shown for SKIP / SKIP FOR NOW verdicts */
+.bos-better-direction-text { font-family: var(--naia-ff-body); font-size: 15px; line-height: 1.75; color: var(--naia-ink); margin: 0 0 20px; }
+.bos-better-direction-btn { display: inline-block; font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; padding: 12px 24px; border: 1px solid var(--naia-ink); color: var(--naia-ink); text-decoration: none; transition: background 0.18s, color 0.18s; }
+.bos-better-direction-btn:hover { background: var(--naia-ink); color: var(--naia-bg); }
 
 @media (max-width: 640px) {
   .bos-source-grid { grid-template-columns: 1fr; }
@@ -2125,8 +2129,8 @@ a.mn-action:focus-visible,
   .bos-decisions-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
   .bos-glance-row { grid-template-columns: 1fr; gap: 2px; }
   /* Hero stacks vertically on mobile */
-  .bos-result-hero { grid-template-columns: 1fr; gap: 20px; }
-  .bos-result-hero .bos-result-item-img { max-height: 260px; }
+  .bos-result-hero { grid-template-columns: 1fr; gap: 20px; align-items: start; }
+  .bos-result-hero .bos-result-item-img { max-height: min(70vw, 340px); }
 }
 
 /* ── Settings (set-*) ────────────────────────────────────────────────────── */

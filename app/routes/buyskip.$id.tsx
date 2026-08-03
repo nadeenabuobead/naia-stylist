@@ -80,8 +80,6 @@ export default function BuyOrSkipResult() {
   const finalThought  = fa?.finalThought   ?? analysis.reasoning;
   const details       = fa?.detailedAnalysis ?? null;
   const naiaMatch     = fa?.naiaMatch      ?? null;
-  // "alternative" is the safe default — only use "complement" when AI explicitly says so
-  const naiaRelationship: string = fa?.naiaMatchRelationship === "complement" ? "complement" : "alternative";
   const styleDNAMatch = fa?.styleDNAMatch  ?? null;
   const occasionFit   = fa?.occasionFit    ?? null;
   const whatLikeEval  = fa?.whatLikeEval   ?? null;
@@ -97,6 +95,15 @@ export default function BuyOrSkipResult() {
     : [];
   const buyIf  = typeof fa?.buyIf  === "string" && fa.buyIf.trim()  ? fa.buyIf.trim()  : null;
   const skipIf = typeof fa?.skipIf === "string" && fa.skipIf.trim() ? fa.skipIf.trim() : null;
+  const betterDirection: string | null = typeof fa?.betterDirection === "string" && fa.betterDirection.trim()
+    ? fa.betterDirection.trim() : null;
+
+  const verdictUpper = String(verdict ?? "").toUpperCase();
+  const analysisHeading = verdictUpper === "BUY"
+    ? "Why It Works"
+    : verdictUpper.includes("SKIP FOR NOW") || verdictUpper === "MAYBE"
+      ? "Why It May Not Work Yet"
+      : "Why It Doesn't Work";
 
   const displayType = fa?.itemType ?? analysis.category;
 
@@ -188,9 +195,9 @@ export default function BuyOrSkipResult() {
 
       <section className="bos-section bos-result">
 
-        {/* ── Why It Works ─────────────────────────────────────────────────── */}
+        {/* ── Why It Works / May Not Work Yet / Doesn't Work ───────────────── */}
         <div className="bos-result-section">
-          <div className="bos-result-section-label">Why It Works</div>
+          <div className="bos-result-section-label">{analysisHeading}</div>
           <div className="bos-result-section-body">
 
             {/* Occasion — use AI-normalized label when available, fall back to user input */}
@@ -314,12 +321,10 @@ export default function BuyOrSkipResult() {
           </div>
         )}
 
-        {/* ── NADINE section — heading adapts: complement vs alternative ────── */}
+        {/* ── NADINE section — only shown when AI returns a genuine complement ── */}
         {naiaMatch && (
           <div className="bos-result-section bos-result-section--nadine">
-            <div className="bos-result-section-label">
-              {naiaRelationship === "complement" ? "Pair It With NADINE" : "A NADINE Alternative"}
-            </div>
+            <div className="bos-result-section-label">Pair It With NADINE</div>
             <div className="bos-naia-inner">
               {typeof naiaMatch === "object" && naiaMatch.imageUrl && (
                 <a
@@ -350,7 +355,7 @@ export default function BuyOrSkipResult() {
                     rel="noreferrer"
                     className="bos-naia-link"
                   >
-                    {naiaRelationship === "complement" ? "Shop This Piece →" : "Consider Instead →"}
+                    Shop This Piece →
                   </a>
                 )}
               </div>
@@ -374,6 +379,15 @@ export default function BuyOrSkipResult() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* ── A Better Direction — only for SKIP / SKIP FOR NOW ───────────── */}
+        {betterDirection && (
+          <div className="bos-result-section">
+            <div className="bos-result-section-label">A Better Direction</div>
+            <p className="bos-better-direction-text">{betterDirection}</p>
+            <Link to="/buyskip" className="bos-better-direction-btn">Analyze a Better Option</Link>
           </div>
         )}
 

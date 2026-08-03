@@ -192,20 +192,25 @@ BEFORE YOU BUY — exactly 2 points (25–40 words each), no repeated colour/fit
 
 REPETITION RULE: Each colour, concern or trait appears ONCE across the entire response. Never repeat Final Condition reasoning in any earlier section.
 
+VERDICT-AWARE ANALYSIS RULE: The verdict drives every section's framing.
+- BUY: explain specifically what works — style match, occasion suitability, how it meets the customer's preferences. Honest and positive.
+- SKIP FOR NOW: focus on what blocks the purchase — specific fit unknowns, styling conditions not yet met, practical hurdles. Explain what could make it work and what the customer should confirm before buying. Do NOT open with praise or frame it like a BUY recommendation.
+- SKIP: be direct about what is clearly unsuitable. Do not soften to a conditional recommendation.
+The "betterDirection" field (SKIP / SKIP FOR NOW only) must reflect this same logic — describe what type of product would better serve the customer for this occasion, based on their style personality, Passport fit data, and Closet gaps.
+
 ${eligibleClosetItems.length > 0 ? `COMPATIBLE CLOSET CANDIDATES (pairings must come ONLY from this list):
 ${eligibleClosetItems.map(i => `- ${i.name} (${i.category}${i.primaryColor ? ", "+i.primaryColor : ""})`).join("\n")}` : "NO COMPATIBLE CLOSET ITEMS — leave closetPairings as an empty array."}
 
 NAIA COLLECTION (pick naiaMatch ONLY from this list, exact title):
 ${fallbackProducts.map(p => `- ${p.title}`).join("\n")}
 
-CONSISTENCY REQUIREMENT: All styling advice must point in the same direction across every section. If the analysis concludes the item needs a specific foundation piece (e.g. a fitted solid-colour top to balance a bold print), then: (a) closetPairings must only include pieces that fill that role; (b) the NADINE recommendation should be that foundation piece if available, or classified as "alternative"; (c) buyIf/skipIf must reflect the same logic. Never recommend a pairing that contradicts the Final Condition.
+CONSISTENCY REQUIREMENT: All styling advice must point in the same direction across every section. If the analysis concludes the item needs a specific foundation piece (e.g. a fitted solid-colour top to balance a bold print), then: (a) closetPairings must only include pieces that fill that role; (b) the NADINE recommendation must be a piece that fills the same role — if no NADINE product is a solid, neutral piece that complements the uploaded item when worn together, return naiaMatch as null; (c) buyIf/skipIf must reflect the same logic. Never recommend a NADINE piece that contradicts the advice given elsewhere.
 
 STRICT RULES:
 1. closetPairings: ONLY items from the compatible Closet candidates list above; never invent items. Before adding each pairing, apply both tests — include it ONLY if it passes BOTH: (a) OCCASION TEST: does the uploaded item + this Closet piece create an outfit genuinely appropriate for the labeled occasion? A black lace top with printed trousers is an evening look, not brunch. (b) BALANCE TEST: does this piece support the styling advice? If the analysis says the item needs solid colours to balance a bold print, include only solid-coloured pieces — not another printed or textured piece. If no Closet piece passes both tests, return [].
-2. naiaMatch: ONLY from the nAia collection list — exact title only (no URL)
+2. naiaMatch: ONLY from the nAia collection list — exact title only. Return null if no product from the list genuinely complements the uploaded item when worn together. A NADINE piece that shares the same dominant visual element (bold print, dramatic silhouette, heavy texture) competes rather than complements — return null in that case. Do not recommend alternatives or substitutes; this section is for pairings only.
 3. occasions: ${safeOccasion ? `Include "${safeOccasion}" ONLY if the item genuinely suits it.` : "Suggest appropriate occasions."}
-4. naiaMatchRelationship: set "complement" ONLY when the NADINE piece is worn TOGETHER with the uploaded item without visual competition. If the NADINE piece shares the same dominant visual element (bold print + bold print, dramatic volume + dramatic volume, strong texture + strong texture), it competes rather than complements — set "alternative". When uncertain, default to "alternative".
-5. Do not invent or hallucinate any items
+4. Do not invent or hallucinate any items
 
 Respond ONLY with valid JSON, no markdown:
 {
@@ -225,11 +230,11 @@ Respond ONLY with valid JSON, no markdown:
   "closetPairings": [{"occasion": "For [specific moment e.g. brunch, evening, work, weekends]", "name": "exact item name from the list above", "reason": "≤8 words — how it works with this specific item"}],
   "fillsGap": null — OR — if no Closet piece passes the balance and occasion tests, state the gap honestly in ≤20 words: e.g. "No fitted solid top confirmed in your Closet — this is the missing piece to make it work.",
   "occasions": [],
-  "naiaMatch": { "title": "...", "reason": "≤20 words — silhouette, colour, or proportion link to the uploaded item only. NOT mood/lifestyle/abstract ('celebrates being noticed', 'embodies confidence') — only physical styling facts: cut, colour coordination, length contrast, texture echo." },
-  "naiaMatchRelationship": "complement" or "alternative",
+  "naiaMatch": null — if no NADINE product genuinely complements the uploaded item when worn together | { "title": "exact title from NAIA COLLECTION list", "reason": "≤20 words — physical styling facts only: cut, colour coordination, length contrast, texture echo. No mood or lifestyle language." },
   "beforeYouBuy": ["25–40 words — silhouette and fit assessment + 1–2 concrete practical actions, or exact missing-data statement. Start directly with the content, no label prefix.", "25–40 words — occasion suitability, realistic wear frequency, lifestyle fit. Start directly with the content, no label prefix."],
   "buyIf": "≤20 words — the one concrete condition that justifies buying",
   "skipIf": "≤20 words — the one concrete condition that makes this a mistake",
+  "betterDirection": null for BUY | "1–3 sentences for SKIP or SKIP FOR NOW: describe the specific type of product (silhouette, fabric, fit profile) that would better serve this customer for this occasion — grounded in their occasion need, style personality, fit preferences, and any Closet gaps. No brand names, no prices. Write as a constructive redirect, not a rejection.",
   "finalThought": "ONE sentence max 30 words — style type + entered occasion + main condition. No filler. Example: 'A strong match for your minimalist style and brunch occasions, but only buy it if you know strapless styles fit and feel secure on you.'"
 }`
               }
@@ -304,14 +309,13 @@ Respond ONLY with valid JSON, no markdown:
       }
     }
 
-    // Validate naiaMatch title against eligible catalog; overwrite URL and imageUrl from server-side data
+    // Validate naiaMatch title against eligible catalog; overwrite URL and imageUrl from server-side data.
+    // If AI returned null (no genuine complement) or an unrecognised title, keep null — section is hidden.
     const matchedProduct = fallbackProducts.find(p => p.title === analysis.naiaMatch?.title);
     if (matchedProduct) {
       analysis.naiaMatch = { title: matchedProduct.title, url: matchedProduct.url, imageUrl: matchedProduct.imageUrl ?? null, reason: analysis.naiaMatch?.reason || null };
     } else {
-      const idx = hashForIndex((imageUrl || "") + normalizedCategory) % fallbackProducts.length;
-      const fallback = fallbackProducts[idx];
-      analysis.naiaMatch = { title: fallback.title, url: fallback.url, imageUrl: fallback.imageUrl ?? null, reason: null };
+      analysis.naiaMatch = null;
     }
 
     // ── 8. Persist analysis (awaited; DB-backed idempotency via unique key) ───
@@ -362,6 +366,7 @@ Respond ONLY with valid JSON, no markdown:
               beforeYouBuy:          Array.isArray(analysis.beforeYouBuy) ? analysis.beforeYouBuy.filter(s => typeof s === "string" && s.trim()) : [],
               buyIf:                 typeof analysis.buyIf  === "string" && analysis.buyIf.trim()  ? analysis.buyIf.trim()  : null,
               skipIf:                typeof analysis.skipIf === "string" && analysis.skipIf.trim() ? analysis.skipIf.trim() : null,
+              betterDirection:       typeof analysis.betterDirection === "string" && analysis.betterDirection.trim() ? analysis.betterDirection.trim() : null,
               finalThought:          analysis.finalThought          ?? null,
             },
           },
