@@ -69,9 +69,6 @@ function cap(s: string | null | undefined): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-// TEMP-DEPLOY-MARKER: remove before final merge — used to verify which JS bundle staging serves
-const DEPLOY_BUILD = "bos-fix-2026-08-03-v4";
-
 export default function BuyOrSkipResult() {
   const analysis = useLoaderData<typeof loader>();
   const fa = analysis.fullAnalysis;
@@ -156,10 +153,6 @@ export default function BuyOrSkipResult() {
         <div className="sp-shell-eyebrow">Should I Buy This?</div>
         <h1 className="sp-shell-title">nAia's Recommendation</h1>
         <p className="sp-shell-desc">{formattedDate}</p>
-        {/* TEMP-DEPLOY-MARKER: remove before final merge */}
-        <p style={{ fontSize: "10px", fontFamily: "monospace", color: "rgba(0,0,0,0.35)", marginTop: "4px", letterSpacing: "0.05em" }}>
-          {DEPLOY_BUILD} · {displayVerdict}
-        </p>
       </div>
 
       {/* ── Desktop hero: image left, verdict + summary right ──────────────── */}

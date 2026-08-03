@@ -50,11 +50,12 @@ const BOS_LOADING_MESSAGES = [
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function UploadRow({
-  label, required, imageUrl, uploading, error, onFile,
+  label, required, imageUrl, uploading, error, onFile, capture,
 }: {
   label: string; required?: boolean;
   imageUrl?: string; uploading?: boolean; error?: string;
   onFile?: (f: File) => void;
+  capture?: "environment" | "user";
 }) {
   const inputId = `bos-file-${label.replace(/\W+/g, "-").toLowerCase()}`;
   return (
@@ -72,6 +73,7 @@ function UploadRow({
           ? (
             <label htmlFor={inputId}>
               <input id={inputId} type="file" accept="image/*"
+                {...(capture ? { capture } : {})}
                 onChange={e => e.target.files?.[0] && onFile(e.target.files[0])}
                 style={{ display: "none" }} />
               <span className="bos-upload-btn">
@@ -264,6 +266,7 @@ export default function BuyOrSkip() {
             uploading={uploading}
             error={uploadError || undefined}
             onFile={handleUpload}
+            capture={source === "photograph" ? "environment" : undefined}
           />
           <UploadRow label="A Second Angle (optional)" />
           <UploadRow label="Fabric or Detail (optional)" />

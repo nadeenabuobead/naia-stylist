@@ -23,6 +23,8 @@ const ITEM_TYPE_TO_CATEGORY = { TOP: "Top", BOTTOM: "Bottom", OUTERWEAR: "Outerw
 const NAIA_PRODUCTS = getAllCatalogProducts().map(p => ({
   title: p.parsed.identity.verifiedTitle,
   category: ITEM_TYPE_TO_CATEGORY[p.parsed.identity.itemType] ?? "Top",
+  itemType: p.parsed.identity.itemType,
+  silhouette: p.parsed.identity.silhouette ?? null,
   handle: p.handle,
   url: p.parsed.identity.liveUrl ?? `https://naiabynadine.com/products/${p.handle}`,
   imageUrl: NAIA_VERIFIED_MEDIA_MAP.get(p.handle)?.resolvedUrl ?? null,
@@ -193,6 +195,11 @@ Note: body shape, height, and body measurements are not yet in this Passport.
   3. Size on record for this category → use it to reason about sizing for this item type.
   4. Measurement fallback ONLY for measurements genuinely absent. Never write "Fit cannot be confirmed from your current Passport" as the opening when fit preferences, size, or coverage data exist.
 
+→ FIT vs COVERAGE SEPARATION RULE — these are two distinct assessments and must never be conflated:
+  - FIT PREFERENCE (fitted/relaxed/oversized) = silhouette shape preference. Use only to evaluate whether the garment's cut and silhouette aligns with what the customer prefers.
+  - COVERAGE / COMFORT PREFERENCE = how much skin is exposed and how rigid the construction feels. Use only to evaluate sheerness, cutouts, exposed neckline/back/midriff, structured boning, or constraining construction.
+  Example of a WRONG conflation: "Your relaxed fit preference conflicts with the corset's boning." Correct: "Your fit preference leans relaxed — this structured corset silhouette is a direct contrast. Separately, the exposed midriff cutout conflicts with your coverage preference."
+
 PERSONALIZATION MANDATE
 - BUY: every positive claim must cite a Passport or form field. Name the style personality, reference the lifestyle occasions, apply fit preferences and colour palette. No praise that applies to any customer.
 - SKIP FOR NOW / SKIP: every blocker must cite a Passport or form field. "Your Passport shows you prefer… so this item…" is the required structure.` : "No style profile on record — give a general analysis."}
@@ -226,9 +233,15 @@ ${eligibleClosetItems.map(i => `- ${i.name} (${i.category}${i.primaryColor ? ", 
 CLOSET PAIRING RULE: For each pairing, state: (a) which of the customer's actual lifestyle occasions this combined outfit suits, (b) how the two pieces' colours coordinate, (c) how their proportions balance. Generic "both pieces share an aesthetic" is not acceptable.
 
 NAIA COLLECTION (pick naiaMatch ONLY from this list, exact title):
-${fallbackProducts.map(p => `- ${p.title}`).join("\n")}
+${fallbackProducts.map(p => `- ${p.title} [${p.category}${p.silhouette ? ` — ${p.silhouette}` : ""}]`).join("\n")}
 
-NADINE PAIRING RULE: State exactly how the NADINE piece is worn with the uploaded item (layers over, adds coverage, contrasts length) and one colour coordination fact between the two pieces. Physical facts only, no mood language. Return null if no product can realistically be worn with this item as a coherent outfit for this customer.
+NADINE PHYSICAL COMPATIBILITY RULES — apply before writing the reason:
+- OUTERWEAR pieces (e.g. trench coat, kimono jacket, zip jacket) are worn ON TOP of another garment, never tucked into or underneath it.
+- BOTTOM pieces (e.g. trousers, skirt) are worn on the lower body. A bottom cannot "layer over" a neckline, drape over shoulders, or be worn over the top half.
+- TOP pieces (e.g. peplum top, crew-neck, shirt) sit on the upper body. A top cannot be "paired beneath" a skirt in the sense of tucking — state "worn with" instead.
+- DRESS pieces replace the top+bottom combination entirely — do not describe pairing a dress as a top or bottom component.
+- Never describe a garment doing something physically impossible for its category.
+NADINE PAIRING RULE: State exactly how the NADINE piece is worn with the uploaded item given the categories above (e.g. "Wear the [NADINE top] under the [uploaded outerwear]", "Pair with [NADINE trousers] for the lower half") and add one colour coordination fact between the two pieces. Physical facts only, no mood language. Return null if no product can realistically be worn with this item as a coherent outfit for this customer.
 
 CONSISTENCY REQUIREMENT: All advice must point in the same direction. closetPairings, naiaMatch, and buyIf/skipIf must reflect the same logic. Never recommend a NADINE piece that contradicts advice given elsewhere.
 
