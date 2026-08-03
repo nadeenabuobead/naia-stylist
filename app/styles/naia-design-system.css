@@ -1035,6 +1035,15 @@ a.mn-action:focus-visible,
 @keyframes smSlide { 0% { left: -60%; } 100% { left: 100%; } }
 .sm-loading-msg { font-family: var(--naia-ff-body); font-style: italic; font-size: 18px; color: var(--naia-accent); opacity: 0.5; margin-top: 24px; }
 
+/* Dedicated class ensures display font wins regardless of ancestor cascade */
+.bos-loading-phrase {
+  font-family: var(--ff-display) !important;
+  font-style: normal !important;
+  font-weight: 200;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
 /* ── Result: top bar ──────────────────────────────────────────────── */
 .sm-result-bar {
   display: flex; justify-content: space-between; align-items: center;
