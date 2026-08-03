@@ -150,7 +150,7 @@ async function analyzeItem(request) {
               { type: "image", source: { type: "url", url: imageUrl } },
               {
                 type: "text",
-                text: `You are assessing a clothing item for a specific customer. Be honest, concise and constructive. Every point must be stated ONCE only — never repeated across sections.
+                text: `You are assessing a clothing item for a specific customer. Every verdict, match percentage, summary, and section must be grounded in this customer's actual Passport, Closet, and form inputs. Generic statements that could apply to any customer are not acceptable. Every point stated ONCE only — never repeated across sections.
 
 ITEM DETAILS:
 - Category: ${category||"unknown"}
@@ -158,84 +158,113 @@ ITEM DETAILS:
 - Brand: ${brand || "unknown"}
 ${safeSize ? `- Size the customer is considering: ${safeSize}` : ""}
 
-${styleProfile ? `CUSTOMER STYLE PROFILE:
+${styleProfile ? `CUSTOMER PASSPORT — use every available field across the entire recommendation:
+
+STYLE IDENTITY
 - Style personalities: ${styleProfile.stylePersonalities?.join(", ")}
+- Desired feeling when dressed: ${styleProfile.desiredFeeling}
+- Desired impression: ${styleProfile.desiredImpression?.length > 0 ? styleProfile.desiredImpression.join(", ") : "not specified"}
+- Fashion risk comfort (1–10): ${styleProfile.comfortLevel ?? "not specified"}
+
+LIFESTYLE & OCCASIONS
+- Primary lifestyle: ${styleProfile.lifestyle || "not specified"}
+- Typical occasions she dresses for: ${styleProfile.dressesFor?.join(", ")}
+- Typical day: ${styleProfile.typicalDay || "not specified"}
+→ LIFESTYLE RULE: The wearability conclusion must name these actual occasions and state whether the item suits them specifically. Never write "may have limited wear if you don't attend such events." State the real match or mismatch using the occasions listed above.
+
+COLOUR PALETTE
 - Favourite colours: ${styleProfile.favoriteColors?.join(", ")}
-- Lifestyle: ${styleProfile.dressesFor?.join(", ")}
-- Desired feeling: ${styleProfile.desiredFeeling}
+- Colours she avoids: ${styleProfile.avoidColors?.length > 0 ? styleProfile.avoidColors.join(", ") : "none specified"}
+→ COLOUR RULE: For the uploaded item's colour, explain specifically whether it complements her palette, usefully expands it, or conflicts with avoided colours. How does it coordinate with confirmed Closet pieces? Treat favourites as preferences, not exclusions. Never reject a neutral without naming how it works or clashes with this specific palette.
 
-COLOUR PREFERENCE RULE: Favourite colours are style preferences, not exclusions. Do not reject a neutral (beige, cream, grey, white) because the customer's palette differs. For each neutral, state specifically whether it complements their favourites, coordinates with their closet, and adds wardrobe variety.
-
-CUSTOMER FIT DATA (use ONLY this data — never invent measurements not listed):
+FIT & BODY
 - Usual top size: ${styleProfile.topSize || "not on record"}
 - Usual bottom size: ${styleProfile.bottomSize || "not on record"}
 - Usual dress size: ${styleProfile.dressSize || "not on record"}
 - Fit preferences: ${styleProfile.fitPreferences?.length > 0 ? styleProfile.fitPreferences.join(", ") : "not on record"}
 - Areas to highlight: ${styleProfile.bodyFocusAreas?.length > 0 ? styleProfile.bodyFocusAreas.join(", ") : "not on record"}
 - Areas to minimise: ${styleProfile.bodyAvoidAreas?.length > 0 ? styleProfile.bodyAvoidAreas.join(", ") : "not on record"}
-Note: body shape, height, waist and hip measurements are not yet in this Passport.` : "No style profile on record — give a general analysis."}
+- Style struggles: ${styleProfile.styleStruggles?.length > 0 ? styleProfile.styleStruggles.join(", ") : "not specified"}
+Note: body shape, height, and body measurements are not yet in this Passport.
+
+→ FIT RULE — use available signals in this priority order; never collapse them all into "fit cannot be confirmed":
+  1. Fit preferences on record → reference them by name: "Your Passport shows you prefer [preference], so this [item detail] may feel [more/less] secure/comfortable."
+  2. Highlight / minimise areas on record → apply them: "Your Passport shows you prefer greater [area] coverage — this [cut] is a direct conflict / strong match."
+  3. Size on record for this category → use it to reason about sizing for this item type.
+  4. Measurement fallback ONLY for measurements genuinely absent. Never write "Fit cannot be confirmed from your current Passport" as the opening when fit preferences, size, or coverage data exist.
+
+PERSONALIZATION MANDATE
+- BUY: every positive claim must cite a Passport or form field. Name the style personality, reference the lifestyle occasions, apply fit preferences and colour palette. No praise that applies to any customer.
+- SKIP FOR NOW / SKIP: every blocker must cite a Passport or form field. "Your Passport shows you prefer… so this item…" is the required structure.` : "No style profile on record — give a general analysis."}
 
 CUSTOMER'S INPUTS:
 
 OCCASION: ${safeOccasion || "(not provided)"}
-${safeOccasion ? `→ Does this item suit "${safeOccasion}"? One concrete reason referencing the item's formality and that occasion's dress code. If yes, one styling tip. If no, what adjustment would help.` : "→ Suggest the most suitable occasions for this item."}
+${safeOccasion ? `→ Does this item suit "${safeOccasion}"? One concrete reason referencing the item's formality and that occasion's dress code. If yes, one styling tip. If no, what adjustment would help.` : "→ Suggest the most suitable occasions given this customer's actual lifestyle contexts."}
 
 WHAT THEY LIKE: ${safeWhatLike || "(not provided)"}
 ${safeWhatLike ? `→ Agree, partly agree, or disagree? One concrete reason based on the item's actual construction — do not restate what they said.` : ""}
 
 WHAT THEY ARE UNSURE ABOUT: ${safeUnsureAbout || "(not provided)"}
-${safeUnsureAbout ? `→ Justified, partly justified, or not supported? Use "partly justified" — not "justified" — when the concern is about fit or sizing and no measurements are on the Passport (check: all sizes show "not on record"). The concern may be valid but cannot be confirmed without trying it on. Use "justified" only when the issue is clearly visible from the item itself (e.g. colour clash, obviously unsuitable construction). Be direct. Then offer 2–3 specific practical solutions — e.g. for a strapless concern: supportive strapless bra, grip strips or fashion tape, tailoring the bodice, a styling layer (scarf or blazer), or trying on before committing. Do not recommend skipping without considering solutions first.` : ""}
+${safeUnsureAbout ? `→ Justified, partly justified, or not supported? Use "partly justified" when the concern is about fit or sizing and measurements are not on the Passport. Use "justified" only when the issue is clearly visible from the item itself. Be direct. Then offer 2–3 specific practical solutions — e.g. for a strapless concern: supportive strapless bra, grip strips, tailoring the bodice, a styling layer, or trying on before committing.` : ""}
 
-BEFORE YOU BUY — exactly 2 points (25–40 words each), no repeated colour/fit warnings, no unsupported brand or care claims. IMPORTANT: do NOT begin either point with a label such as "Fit & Practical Solution:" or "Wearability:" — the card headings already show these labels:
-1. FIT & PRACTICAL SOLUTION — Using ONLY the Passport fit data above, explain in one sentence how the item's silhouette, waist placement and length may work for this customer. Then give 1–2 concrete practical actions: compare garment measurements with their own, try it on before committing, adjust the waistband, tailor the length, or style with a higher-coverage layer when relevant. No brand-sizing claims. No invented measurements. If Passport fit data is insufficient, state exactly: "Fit cannot be confirmed from your current Passport. Compare the garment's bust, waist and hip measurements with your own before buying."
-2. WEARABILITY — In 1–2 short sentences: whether the item suits the entered occasion, whether it can realistically be worn more than once, and whether it fits the customer's lifestyle. Be honest if versatility is limited. Do not repeat colour commentary.
+BEFORE YOU BUY — exactly 2 points (25–40 words each). Do NOT begin either point with a label — the card headings already show these:
+1. FIT & PRACTICAL SOLUTION — Open with what IS known from the Passport (fit preferences, coverage preferences, size for this category), referencing them by name. Example: "Your Passport shows you prefer [preference], so this [item detail] may feel [more/less] secure." Only then add what to verify with measurements if specific measurements are missing. Never open with "Fit cannot be confirmed."
+2. WEARABILITY — Name at least one of the customer's actual lifestyle occasions (${styleProfile?.dressesFor?.join(", ") || "lifestyle not specified"}) and state directly whether this item suits those occasions and how realistically frequent the wear would be. Never use language like "if your lifestyle includes such events."
 
-REPETITION RULE: Each colour, concern or trait appears ONCE across the entire response. Never repeat Final Condition reasoning in any earlier section.
+REPETITION RULE: Each colour, concern or trait appears ONCE. Never repeat Final Condition reasoning in any earlier section.
 
-VERDICT-AWARE ANALYSIS RULE: The verdict drives every section's framing.
-- BUY: explain specifically what works — style match, occasion suitability, how it meets the customer's preferences. Honest and positive.
-- SKIP FOR NOW: focus on what blocks the purchase — specific fit unknowns, styling conditions not yet met, practical hurdles. Explain what could make it work and what the customer should confirm before buying. Do NOT open with praise or frame it like a BUY recommendation.
-- SKIP: be direct about what is clearly unsuitable. Do not soften to a conditional recommendation.
-The "betterDirection" field (SKIP / SKIP FOR NOW only) must reflect this same logic — describe what type of product would better serve the customer for this occasion, based on their style personality, Passport fit data, and Closet gaps.
+VERDICT-AWARE PERSONALIZATION RULE:
+- BUY: every claim must cite a Passport or form field — name the style personality/personalities, reference the actual lifestyle occasions, apply fit preferences and palette. No generic praise.
+- SKIP FOR NOW: lead with specific blockers for THIS customer — cite fit preferences, lifestyle occasions, palette, or coverage needs by name. Structure: "Your Passport shows you prefer… so this item…"
+- SKIP: name the specific conflict with this customer's Passport or form data. No softening.
+The "betterDirection" field must describe a product type grounded in this customer's style personality, lifestyle occasions, fit preferences, and any identified Closet gap.
 
 ${eligibleClosetItems.length > 0 ? `COMPATIBLE CLOSET CANDIDATES (pairings must come ONLY from this list):
 ${eligibleClosetItems.map(i => `- ${i.name} (${i.category}${i.primaryColor ? ", "+i.primaryColor : ""})`).join("\n")}` : "NO COMPATIBLE CLOSET ITEMS — leave closetPairings as an empty array."}
 
+CLOSET PAIRING RULE: For each pairing, state: (a) which of the customer's actual lifestyle occasions this combined outfit suits, (b) how the two pieces' colours coordinate, (c) how their proportions balance. Generic "both pieces share an aesthetic" is not acceptable.
+
 NAIA COLLECTION (pick naiaMatch ONLY from this list, exact title):
 ${fallbackProducts.map(p => `- ${p.title}`).join("\n")}
 
-CONSISTENCY REQUIREMENT: All styling advice must point in the same direction across every section. If the analysis concludes the item needs a specific foundation piece (e.g. a fitted solid-colour top to balance a bold print), then: (a) closetPairings must only include pieces that fill that role; (b) the NADINE recommendation must be a piece that fills the same role — if no NADINE product is a solid, neutral piece that complements the uploaded item when worn together, return naiaMatch as null; (c) buyIf/skipIf must reflect the same logic. Never recommend a NADINE piece that contradicts the advice given elsewhere.
+NADINE PAIRING RULE: State exactly how the NADINE piece is worn with the uploaded item (layers over, adds coverage, contrasts length) and one colour coordination fact between the two pieces. Physical facts only, no mood language. Return null if no product can realistically be worn with this item as a coherent outfit for this customer.
+
+CONSISTENCY REQUIREMENT: All advice must point in the same direction. closetPairings, naiaMatch, and buyIf/skipIf must reflect the same logic. Never recommend a NADINE piece that contradicts advice given elsewhere.
 
 STRICT RULES:
-1. closetPairings: ONLY items from the compatible Closet candidates list above; never invent items. Before adding each pairing, apply both tests — include it ONLY if it passes BOTH: (a) OCCASION TEST: does the uploaded item + this Closet piece create an outfit genuinely appropriate for the labeled occasion? A black lace top with printed trousers is an evening look, not brunch. (b) BALANCE TEST: does this piece support the styling advice? If the analysis says the item needs solid colours to balance a bold print, include only solid-coloured pieces — not another printed or textured piece. If no Closet piece passes both tests, return [].
-2. naiaMatch: ONLY from the nAia collection list — exact title only. Return null if no product from the list genuinely complements the uploaded item when worn together. A NADINE piece that shares the same dominant visual element (bold print, dramatic silhouette, heavy texture) competes rather than complements — return null in that case. Do not recommend alternatives or substitutes; this section is for pairings only.
-3. occasions: ${safeOccasion ? `Include "${safeOccasion}" ONLY if the item genuinely suits it.` : "Suggest appropriate occasions."}
-4. Do not invent or hallucinate any items
+1. closetPairings: ONLY from the compatible Closet candidates list. Apply OCCASION TEST (does the combined outfit suit the labeled occasion?) and BALANCE TEST (does this piece support the styling advice?). Return [] if no piece passes both.
+2. naiaMatch: ONLY from the nAia collection list — exact title. A NADINE piece that shares the same dominant visual element (bold print, dramatic silhouette) competes rather than complements — return null. Do not recommend substitutes.
+3. occasions: ${safeOccasion ? `Include "${safeOccasion}" ONLY if the item genuinely suits it.` : "Suggest appropriate occasions given this customer's lifestyle."}
+4. Never invent or hallucinate Passport fields, body data, lifestyle habits, owned pieces, or measurements not listed above.
 
 Respond ONLY with valid JSON, no markdown:
 {
   "itemType": "specific type e.g. Maxi Skirt, Blazer, Midi Dress",
-  "detectedColor": "AI colour read from the image e.g. BEIGE / CREAM — use ALL CAPS",
-  "verdict": "BUY" — item suits this customer well | "SKIP FOR NOW" — has potential but depends on fit confirmation, trying on, or specific styling (not definitively unsuitable) | "SKIP" — only when genuinely unsuitable with no realistic path to making it work,
+  "detectedColor": "AI colour read from the image — ALL CAPS e.g. BEIGE / CREAM",
+  "verdict": "BUY" — item suits this customer well | "SKIP FOR NOW" — potential but blocked by fit confirmation, specific styling condition, or practical hurdle (not definitively unsuitable) | "SKIP" — genuinely unsuitable for this customer with no realistic path,
   "confidence": 0-100,
-  "styleDNAMatch": "≤20 words — how this item fits or challenges their style DNA",
+  "styleDNAMatch": "≤20 words — name at least one of their style personalities explicitly and state whether this item aligns or conflicts with it",
   "detailedAnalysis": {
-    "silhouette": "≤15 words",
-    "color": "≤15 words — how the item colour works with their favourites and closet",
-    "versatility": "≤15 words"
+    "silhouette": "≤20 words — relate this cut to the customer's fit preferences and highlight/minimise areas from their Passport",
+    "color": "≤20 words — how this colour works with their specific favourite colours and coordinates with confirmed Closet pieces",
+    "versatility": "≤15 words — realistic assessment given their actual lifestyle occasions"
   },
-  "occasionFit": ${safeOccasion ? `{ "occasion": "rewrite as a natural noun phrase — the activity only, no item category (e.g. 'evening dining', 'brunch', 'casual outings', 'work meetings')", "fits": true or false, "explanation": "≤20 words — one concrete reason referencing the item's formality", "stylingTip": "≤15 words — one specific action" }` : "null"},
-  "whatLikeEval": ${safeWhatLike ? `{ "aspect": "${safeWhatLike.slice(0,80)}", "agreement": "agree" or "partly agree" or "disagree", "explanation": "≤20 words — based on item's actual properties" }` : "null"},
-  "concernEval": ${safeUnsureAbout ? `{ "concern": "${safeUnsureAbout.slice(0,80)}", "justified": "justified" or "partly justified" or "not supported", "explanation": "≤20 words — direct assessment", "solutions": ["specific practical solution 1", "specific practical solution 2"] }` : "null"},
-  "closetPairings": [{"occasion": "For [specific moment e.g. brunch, evening, work, weekends]", "name": "exact item name from the list above", "reason": "≤8 words — how it works with this specific item"}],
-  "fillsGap": null — OR — if no Closet piece passes the balance and occasion tests, state the gap honestly in ≤20 words: e.g. "No fitted solid top confirmed in your Closet — this is the missing piece to make it work.",
+  "occasionFit": ${safeOccasion ? `{ "occasion": "natural noun phrase — activity only, no item category (e.g. 'evening dining', 'brunch', 'casual outings', 'work meetings')", "fits": true or false, "explanation": "≤20 words — concrete reason referencing the item's formality and this customer's lifestyle", "stylingTip": "≤15 words — one specific action" }` : "null"},
+  "whatLikeEval": ${safeWhatLike ? `{ "aspect": "${safeWhatLike.slice(0,80)}", "agreement": "agree" or "partly agree" or "disagree", "explanation": "≤20 words — based on item's actual construction" }` : "null"},
+  "concernEval": ${safeUnsureAbout ? `{ "concern": "${safeUnsureAbout.slice(0,80)}", "justified": "justified" or "partly justified" or "not supported", "explanation": "≤20 words — direct assessment referencing Passport data where available", "solutions": ["specific practical solution 1", "specific practical solution 2"] }` : "null"},
+  "closetPairings": [{ "occasion": "specific lifestyle occasion from this customer's Passport e.g. work meetings, date nights", "name": "exact item name from the candidate list above", "reason": "≤12 words — colour coordination fact + how proportions balance between the two pieces" }],
+  "fillsGap": null | "≤20 words — the specific wardrobe gap this item fills for this customer given their Closet and lifestyle occasions",
   "occasions": [],
-  "naiaMatch": null — if no NADINE product genuinely complements the uploaded item when worn together | { "title": "exact title from NAIA COLLECTION list", "reason": "≤25 words — explain exactly how the NADINE piece is worn with this item: does it layer over, add coverage, or contrast length? Include one specific colour coordination fact. Physical facts only, no mood language." },
-  "beforeYouBuy": ["25–40 words — silhouette and fit assessment + 1–2 concrete practical actions, or exact missing-data statement. Start directly with the content, no label prefix.", "25–40 words — occasion suitability, realistic wear frequency, lifestyle fit. Start directly with the content, no label prefix."],
-  "buyIf": "≤20 words — the one concrete condition that justifies buying",
-  "skipIf": "≤20 words — the one concrete condition that makes this a mistake",
-  "betterDirection": null for BUY | "1–3 sentences for SKIP or SKIP FOR NOW: describe the specific type of product (silhouette, fabric, fit profile) that would better serve this customer for this occasion — grounded in their occasion need, style personality, fit preferences, and any Closet gaps. No brand names, no prices. Write as a constructive redirect, not a rejection.",
-  "finalThought": "ONE sentence max 30 words — style type + entered occasion + main condition. No filler. Example: 'A strong match for your minimalist style and brunch occasions, but only buy it if you know strapless styles fit and feel secure on you.'"
+  "naiaMatch": null | { "title": "exact title from NAIA COLLECTION list", "reason": "≤25 words — how the NADINE piece is worn with this item (layers over / adds coverage / contrasts length) + one colour coordination fact. Physical facts only." },
+  "beforeYouBuy": [
+    "25–40 words — open with what fit data IS known (reference preferences, coverage, or size by name), then state what to verify if measurements are missing. No label prefix.",
+    "25–40 words — name at least one of the customer's actual lifestyle occasions and state directly whether this item suits those occasions and how realistic repeat wear is. No label prefix."
+  ],
+  "buyIf": "≤20 words — the one concrete condition specific to this customer that justifies buying",
+  "skipIf": "≤20 words — the one concrete condition specific to this customer that makes this a mistake",
+  "betterDirection": null for BUY | "1–3 sentences — describe the product type (silhouette, fabric, fit profile) that would serve this customer better for their lifestyle occasions, referencing their style personality and any identified Closet gap. No brand names. Constructive redirect.",
+  "finalThought": "ONE sentence ≤30 words — name their style personality or lifestyle context, include the entered occasion if provided, state the main condition. Example: 'A strong match for your minimalist style and brunch occasions, but only buy if strapless styles fit and feel secure on you.'"
 }`
               }
             ]
