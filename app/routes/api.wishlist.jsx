@@ -198,11 +198,13 @@ ${eligibleClosetItems.map(i => `- ${i.name} (${i.category}${i.primaryColor ? ", 
 NAIA COLLECTION (pick naiaMatch ONLY from this list, exact title):
 ${fallbackProducts.map(p => `- ${p.title}`).join("\n")}
 
+CONSISTENCY REQUIREMENT: All styling advice must point in the same direction across every section. If the analysis concludes the item needs a specific foundation piece (e.g. a fitted solid-colour top to balance a bold print), then: (a) closetPairings must only include pieces that fill that role; (b) the NADINE recommendation should be that foundation piece if available, or classified as "alternative"; (c) buyIf/skipIf must reflect the same logic. Never recommend a pairing that contradicts the Final Condition.
+
 STRICT RULES:
-1. closetPairings: ONLY items from the compatible Closet candidates list above; never invent items; return [] when none listed. Each entry must include a specific occasion context in the "occasion" field (e.g. "For brunch", "For evening", "For work", "For weekends").
+1. closetPairings: ONLY items from the compatible Closet candidates list above; never invent items. Before adding each pairing, apply both tests — include it ONLY if it passes BOTH: (a) OCCASION TEST: does the uploaded item + this Closet piece create an outfit genuinely appropriate for the labeled occasion? A black lace top with printed trousers is an evening look, not brunch. (b) BALANCE TEST: does this piece support the styling advice? If the analysis says the item needs solid colours to balance a bold print, include only solid-coloured pieces — not another printed or textured piece. If no Closet piece passes both tests, return [].
 2. naiaMatch: ONLY from the nAia collection list — exact title only (no URL)
 3. occasions: ${safeOccasion ? `Include "${safeOccasion}" ONLY if the item genuinely suits it.` : "Suggest appropriate occasions."}
-4. naiaMatchRelationship: set "complement" if the NADINE piece is worn WITH the uploaded item; set "alternative" if it is a better replacement instead
+4. naiaMatchRelationship: set "complement" ONLY when the NADINE piece is worn TOGETHER with the uploaded item without visual competition. If the NADINE piece shares the same dominant visual element (bold print + bold print, dramatic volume + dramatic volume, strong texture + strong texture), it competes rather than complements — set "alternative". When uncertain, default to "alternative".
 5. Do not invent or hallucinate any items
 
 Respond ONLY with valid JSON, no markdown:
@@ -221,7 +223,7 @@ Respond ONLY with valid JSON, no markdown:
   "whatLikeEval": ${safeWhatLike ? `{ "aspect": "${safeWhatLike.slice(0,80)}", "agreement": "agree" or "partly agree" or "disagree", "explanation": "≤20 words — based on item's actual properties" }` : "null"},
   "concernEval": ${safeUnsureAbout ? `{ "concern": "${safeUnsureAbout.slice(0,80)}", "justified": "justified" or "partly justified" or "not supported", "explanation": "≤20 words — direct assessment", "solutions": ["specific practical solution 1", "specific practical solution 2"] }` : "null"},
   "closetPairings": [{"occasion": "For [specific moment e.g. brunch, evening, work, weekends]", "name": "exact item name from the list above", "reason": "≤8 words — how it works with this specific item"}],
-  "fillsGap": null or "≤15 words",
+  "fillsGap": null — OR — if no Closet piece passes the balance and occasion tests, state the gap honestly in ≤20 words: e.g. "No fitted solid top confirmed in your Closet — this is the missing piece to make it work.",
   "occasions": [],
   "naiaMatch": { "title": "...", "reason": "≤20 words — silhouette, colour, or proportion link to the uploaded item only. NOT mood/lifestyle/abstract ('celebrates being noticed', 'embodies confidence') — only physical styling facts: cut, colour coordination, length contrast, texture echo." },
   "naiaMatchRelationship": "complement" or "alternative",
