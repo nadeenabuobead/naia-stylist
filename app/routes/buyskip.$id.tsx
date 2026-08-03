@@ -218,13 +218,28 @@ export default function BuyOrSkipResult() {
 
             {skipResult ? (
               <>
-                {/* SKIP / SKIP FOR NOW — blockers first ────────────────────────────
-                    1. Occasion mismatch (primary blocker if occasion doesn't fit)
-                    2. Reality check on what customer likes (if AI disagrees)
-                    3. Silhouette / colour as neutral context
-                    4. Brief positive note last (occasion if it does fit, style DNA)       */}
+                {/* SKIP / SKIP FOR NOW — fit blockers and practical reality first ──
+                    1. Fit & measurement uncertainty (beforeYouBuy[0])
+                    2. Wear frequency / lifestyle reality  (beforeYouBuy[1])
+                    3. Occasion mismatch — only when occasion does not fit
+                    4. Reality check — only when AI disagrees with what customer likes
+                    5. Brief positive — only when occasion fits (other factors block)  */}
 
-                {/* 1. Occasion blocker */}
+                {/* 1. Fit blocker */}
+                {beforeYouBuy[0] && (
+                  <div className="bos-result-section-row">
+                    <strong>Fit & Measurements</strong>{" — "}{beforeYouBuy[0]}
+                  </div>
+                )}
+
+                {/* 2. Wear frequency */}
+                {beforeYouBuy[1] && (
+                  <div className="bos-result-section-row">
+                    <strong>Wear Frequency</strong>{" — "}{beforeYouBuy[1]}
+                  </div>
+                )}
+
+                {/* 3. Occasion blocker */}
                 {(analysis.forOccasion || occasionFit?.occasion) && occasionFit && !occasionFit.fits && (
                   <div className="bos-result-section-row">
                     <strong>
@@ -241,7 +256,7 @@ export default function BuyOrSkipResult() {
                   </div>
                 )}
 
-                {/* 2. Reality check */}
+                {/* 4. Reality check */}
                 {whatLikeEval && (whatLikeEval.agreement === "disagree" || whatLikeEval.agreement === "partly agree") && (
                   <div className="bos-result-section-row">
                     <strong>
@@ -252,19 +267,7 @@ export default function BuyOrSkipResult() {
                   </div>
                 )}
 
-                {/* 3. Neutral context */}
-                {details?.silhouette && (
-                  <div className="bos-result-section-row">
-                    <strong>Silhouette</strong>{" — "}{details.silhouette}
-                  </div>
-                )}
-                {details?.color && (
-                  <div className="bos-result-section-row">
-                    <strong>Colour</strong>{" — "}{details.color}
-                  </div>
-                )}
-
-                {/* 4. Brief positive note — only if occasion actually fits */}
+                {/* 5. Brief positive — only when occasion fits (other factors block) */}
                 {(analysis.forOccasion || occasionFit?.occasion) && occasionFit && occasionFit.fits && (
                   <div className="bos-result-section-row">
                     <strong>
@@ -277,21 +280,6 @@ export default function BuyOrSkipResult() {
                     </strong>
                     {", though other factors block this purchase. "}
                     {occasionFit.explanation}
-                  </div>
-                )}
-
-                {/* Brief style DNA note last */}
-                {styleDNAMatch && (
-                  <div className="bos-result-section-row">
-                    <strong>Style note</strong>{" — "}{styleDNAMatch}
-                  </div>
-                )}
-
-                {/* What you like — only if AI agrees (brief positive last) */}
-                {whatLikeEval && whatLikeEval.agreement === "agree" && (
-                  <div className="bos-result-section-row">
-                    <strong>What you like — {cap(whatLikeEval.aspect || analysis.whatLike || "")}</strong>
-                    {" — "}Agreed. {whatLikeEval.explanation}
                   </div>
                 )}
               </>
@@ -352,14 +340,17 @@ export default function BuyOrSkipResult() {
           </div>
         </div>
 
-        {/* ── Before You Buy — three labeled compact blocks ───────────────── */}
-        {(concernEval || beforeYouBuy.length > 0) && (
+        {/* ── Before You Buy ──────────────────────────────────────────────────
+            SKIP / SKIP FOR NOW: only "Your Concern" when customer entered one.
+              Fit & Wearability are already shown as blockers above.
+            BUY: all three blocks (Concern + Fit + Wearability).             */}
+        {((concernEval && analysis.unsureAbout) || (!skipResult && beforeYouBuy.length > 0)) && (
           <div className="bos-result-section">
             <div className="bos-result-section-label">Before You Buy</div>
             <div className="bos-byb-blocks">
 
-              {/* Block 1: Your Concern */}
-              {concernEval && (
+              {/* Your Concern — only when customer entered a concern */}
+              {concernEval && analysis.unsureAbout && (
                 <div className="bos-byb-block">
                   <div className="bos-byb-block-label">Your Concern</div>
                   <div className="bos-byb-block-verdict">{cap(concernEval.justified)}</div>
@@ -374,16 +365,16 @@ export default function BuyOrSkipResult() {
                 </div>
               )}
 
-              {/* Block 2: Fit & Practical Solution */}
-              {beforeYouBuy[0] && (
+              {/* Fit & Practical Solution — BUY only (moved to analysis section for SKIP) */}
+              {!skipResult && beforeYouBuy[0] && (
                 <div className="bos-byb-block">
                   <div className="bos-byb-block-label">Fit & Practical Solution</div>
                   <div className="bos-byb-block-text">{beforeYouBuy[0]}</div>
                 </div>
               )}
 
-              {/* Block 3: Wearability */}
-              {beforeYouBuy[1] && (
+              {/* Wearability — BUY only (moved to analysis section for SKIP) */}
+              {!skipResult && beforeYouBuy[1] && (
                 <div className="bos-byb-block">
                   <div className="bos-byb-block-label">Wearability</div>
                   <div className="bos-byb-block-text">{beforeYouBuy[1]}</div>
@@ -480,11 +471,11 @@ export default function BuyOrSkipResult() {
           </div>
         )}
 
-        {/* ── A Better Direction — only for SKIP / SKIP FOR NOW ───────────── */}
-        {betterDirection && (
+        {/* ── A Better Direction — required for every SKIP / SKIP FOR NOW ───── */}
+        {skipResult && (
           <div className="bos-result-section">
             <div className="bos-result-section-label">A Better Direction</div>
-            <p className="bos-better-direction-text">{betterDirection}</p>
+            {betterDirection && <p className="bos-better-direction-text">{betterDirection}</p>}
             <Link to="/buyskip" className="bos-better-direction-btn">Analyze a Better Option</Link>
           </div>
         )}

@@ -230,7 +230,7 @@ Respond ONLY with valid JSON, no markdown:
   "closetPairings": [{"occasion": "For [specific moment e.g. brunch, evening, work, weekends]", "name": "exact item name from the list above", "reason": "≤8 words — how it works with this specific item"}],
   "fillsGap": null — OR — if no Closet piece passes the balance and occasion tests, state the gap honestly in ≤20 words: e.g. "No fitted solid top confirmed in your Closet — this is the missing piece to make it work.",
   "occasions": [],
-  "naiaMatch": null — if no NADINE product genuinely complements the uploaded item when worn together | { "title": "exact title from NAIA COLLECTION list", "reason": "≤20 words — physical styling facts only: cut, colour coordination, length contrast, texture echo. No mood or lifestyle language." },
+  "naiaMatch": null — if no NADINE product genuinely complements the uploaded item when worn together | { "title": "exact title from NAIA COLLECTION list", "reason": "≤25 words — explain exactly how the NADINE piece is worn with this item: does it layer over, add coverage, or contrast length? Include one specific colour coordination fact. Physical facts only, no mood language." },
   "beforeYouBuy": ["25–40 words — silhouette and fit assessment + 1–2 concrete practical actions, or exact missing-data statement. Start directly with the content, no label prefix.", "25–40 words — occasion suitability, realistic wear frequency, lifestyle fit. Start directly with the content, no label prefix."],
   "buyIf": "≤20 words — the one concrete condition that justifies buying",
   "skipIf": "≤20 words — the one concrete condition that makes this a mistake",
