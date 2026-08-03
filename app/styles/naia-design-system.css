@@ -2123,6 +2123,10 @@ a.mn-action:focus-visible,
 @media (max-width: 640px) {
   .bos-source-grid { grid-template-columns: 1fr; }
   .bos-upload-row { grid-template-columns: 1fr; }
+  /* Row 1 uses <label><span.bos-upload-btn> while rows 2–3 use <button.bos-upload-btn>.
+     The label/span combination shrinks to text width unless both are made block-level. */
+  .bos-upload-row label { display: block; width: 100%; }
+  .bos-upload-btn { display: block; width: 100%; text-align: center; box-sizing: border-box; }
   .bos-fields-grid { grid-template-columns: 1fr; }
   .bos-result-blocks { grid-template-columns: 1fr; }
   .bos-result-input-row { grid-template-columns: 1fr; }
