@@ -4,6 +4,7 @@ import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import prisma from "../db.server";
 import { emitBuySkipSubmitted, recordJourneyEventAwaited } from "../lib/ai/journey-events.server";
 import { getAllCatalogProducts } from "../lib/ai/naia-catalog";
+import { NAIA_VERIFIED_MEDIA_MAP } from "../lib/ai/naia-product-media";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -24,6 +25,7 @@ const NAIA_PRODUCTS = getAllCatalogProducts().map(p => ({
   category: ITEM_TYPE_TO_CATEGORY[p.parsed.identity.itemType] ?? "Top",
   handle: p.handle,
   url: p.parsed.identity.liveUrl ?? `https://naiabynadine.com/products/${p.handle}`,
+  imageUrl: NAIA_VERIFIED_MEDIA_MAP.get(p.handle)?.resolvedUrl ?? null,
 }));
 
 const COMPLEMENTARY_CATEGORIES = {
@@ -298,14 +300,14 @@ Respond ONLY with valid JSON, no markdown:
       }
     }
 
-    // Validate naiaMatch title against eligible catalog; overwrite URL from server-side data
+    // Validate naiaMatch title against eligible catalog; overwrite URL and imageUrl from server-side data
     const matchedProduct = fallbackProducts.find(p => p.title === analysis.naiaMatch?.title);
     if (matchedProduct) {
-      analysis.naiaMatch = { title: matchedProduct.title, url: matchedProduct.url, reason: analysis.naiaMatch?.reason || null };
+      analysis.naiaMatch = { title: matchedProduct.title, url: matchedProduct.url, imageUrl: matchedProduct.imageUrl ?? null, reason: analysis.naiaMatch?.reason || null };
     } else {
       const idx = hashForIndex((imageUrl || "") + normalizedCategory) % fallbackProducts.length;
       const fallback = fallbackProducts[idx];
-      analysis.naiaMatch = { title: fallback.title, url: fallback.url, reason: null };
+      analysis.naiaMatch = { title: fallback.title, url: fallback.url, imageUrl: fallback.imageUrl ?? null, reason: null };
     }
 
     // ── 8. Persist analysis (awaited; DB-backed idempotency via unique key) ───

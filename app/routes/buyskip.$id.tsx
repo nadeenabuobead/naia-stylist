@@ -308,22 +308,41 @@ export default function BuyOrSkipResult() {
             <div className="bos-result-section-label">
               {naiaRelationship === "complement" ? "Pair It With NADINE" : "A NADINE Alternative"}
             </div>
-            <div className="bos-naia-title">
-              {typeof naiaMatch === "object" ? naiaMatch.title : naiaMatch}
+            <div className="bos-naia-inner">
+              {typeof naiaMatch === "object" && naiaMatch.imageUrl && (
+                <a
+                  href={typeof naiaMatch === "object" && naiaMatch.url ? naiaMatch.url : undefined}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="bos-naia-img-link"
+                  aria-label={`Shop ${typeof naiaMatch === "object" ? naiaMatch.title : naiaMatch}`}
+                >
+                  <img
+                    src={naiaMatch.imageUrl}
+                    alt={typeof naiaMatch === "object" ? naiaMatch.title : String(naiaMatch)}
+                    className="bos-naia-img"
+                  />
+                </a>
+              )}
+              <div className="bos-naia-details">
+                <div className="bos-naia-title">
+                  {typeof naiaMatch === "object" ? naiaMatch.title : naiaMatch}
+                </div>
+                {typeof naiaMatch === "object" && naiaMatch.reason && (
+                  <div className="bos-naia-reason">{naiaMatch.reason}</div>
+                )}
+                {typeof naiaMatch === "object" && naiaMatch.url && (
+                  <a
+                    href={naiaMatch.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="bos-naia-link"
+                  >
+                    {naiaRelationship === "complement" ? "Shop This Piece →" : "Consider Instead →"}
+                  </a>
+                )}
+              </div>
             </div>
-            {typeof naiaMatch === "object" && naiaMatch.reason && (
-              <div className="bos-naia-reason">{naiaMatch.reason}</div>
-            )}
-            {typeof naiaMatch === "object" && naiaMatch.url && (
-              <a
-                href={naiaMatch.url}
-                target="_blank"
-                rel="noreferrer"
-                className="bos-naia-link"
-              >
-                {naiaRelationship === "complement" ? "Shop This Piece →" : "Consider Instead →"}
-              </a>
-            )}
           </div>
         )}
 

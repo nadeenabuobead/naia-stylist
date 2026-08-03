@@ -2030,6 +2030,10 @@ a.mn-action:focus-visible,
 .bos-result-reasons { list-style: none; padding: 0; margin: 0; }
 .bos-result-reason { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 8px; font-family: var(--naia-ff-body); font-size: 14px; line-height: 1.7; color: rgba(40, 21, 12, 0.8); }
 .bos-result-reason-dash { flex-shrink: 0; width: 16px; height: 1px; background: rgba(40, 21, 12, 0.4); margin-top: 11px; }
+.bos-naia-inner { display: flex; gap: 20px; align-items: flex-start; }
+.bos-naia-img-link { flex-shrink: 0; display: block; }
+.bos-naia-img { display: block; width: 120px; height: 160px; object-fit: cover; border-radius: 4px; }
+.bos-naia-details { flex: 1; min-width: 0; }
 .bos-naia-title { font-family: var(--naia-ff-display); font-size: 16px; color: var(--naia-ink); margin-bottom: 4px; }
 .bos-naia-reason { font-family: var(--naia-ff-body); font-size: 13px; font-style: italic; color: var(--naia-muted); margin-bottom: 10px; }
 .bos-naia-link { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--naia-accent); text-decoration: none; }
