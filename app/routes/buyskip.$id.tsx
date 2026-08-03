@@ -4,6 +4,7 @@ import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
+import { verdictHeading, isSkipVerdict } from "~/lib/buy-skip-utils";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
@@ -98,12 +99,10 @@ export default function BuyOrSkipResult() {
   const betterDirection: string | null = typeof fa?.betterDirection === "string" && fa.betterDirection.trim()
     ? fa.betterDirection.trim() : null;
 
-  const verdictUpper = String(verdict ?? "").toUpperCase();
-  const analysisHeading = verdictUpper === "BUY"
-    ? "Why It Works"
-    : verdictUpper.includes("SKIP FOR NOW") || verdictUpper === "MAYBE"
-      ? "Why It May Not Work Yet"
-      : "Why It Doesn't Work";
+  // Use the same raw AI verdict that populates the badge — normalised via utility so
+  // whitespace variations in AI output can't cause a mismatch between the badge and heading.
+  const analysisHeading = verdictHeading(verdict);
+  const skipResult      = isSkipVerdict(verdict);
 
   const displayType = fa?.itemType ?? analysis.category;
 
@@ -200,56 +199,138 @@ export default function BuyOrSkipResult() {
           <div className="bos-result-section-label">{analysisHeading}</div>
           <div className="bos-result-section-body">
 
-            {/* Occasion — use AI-normalized label when available, fall back to user input */}
-            {(analysis.forOccasion || occasionFit?.occasion) && occasionFit && (
-              <div className="bos-result-section-row">
-                <strong>
-                  Occasion Match — {occasionFit.fits ? "Strong" : "Not Ideal"}{" for "}
-                  {cap(
-                    typeof occasionFit.occasion === "string" && occasionFit.occasion.trim()
-                      ? occasionFit.occasion.trim()
-                      : analysis.forOccasion
-                  )}
-                </strong>
-                {". "}
-                {occasionFit.explanation}
-                {occasionFit.stylingTip && (
-                  <span>{" "}{occasionFit.stylingTip}</span>
+            {skipResult ? (
+              <>
+                {/* SKIP / SKIP FOR NOW — blockers first ────────────────────────────
+                    1. Occasion mismatch (primary blocker if occasion doesn't fit)
+                    2. Reality check on what customer likes (if AI disagrees)
+                    3. Silhouette / colour as neutral context
+                    4. Brief positive note last (occasion if it does fit, style DNA)       */}
+
+                {/* 1. Occasion blocker */}
+                {(analysis.forOccasion || occasionFit?.occasion) && occasionFit && !occasionFit.fits && (
+                  <div className="bos-result-section-row">
+                    <strong>
+                      Occasion — Not Ideal for{" "}
+                      {cap(
+                        typeof occasionFit.occasion === "string" && occasionFit.occasion.trim()
+                          ? occasionFit.occasion.trim()
+                          : analysis.forOccasion
+                      )}
+                    </strong>
+                    {". "}
+                    {occasionFit.explanation}
+                    {occasionFit.stylingTip && <span>{" "}{occasionFit.stylingTip}</span>}
+                  </div>
                 )}
-              </div>
-            )}
 
-            {styleDNAMatch && (
-              <div className="bos-result-section-row">
-                <strong>Style match</strong>{" — "}{styleDNAMatch}
-              </div>
-            )}
+                {/* 2. Reality check */}
+                {whatLikeEval && (whatLikeEval.agreement === "disagree" || whatLikeEval.agreement === "partly agree") && (
+                  <div className="bos-result-section-row">
+                    <strong>
+                      {cap(whatLikeEval.aspect || analysis.whatLike || "")} — Reality Check
+                    </strong>
+                    {" — "}
+                    {whatLikeEval.explanation}
+                  </div>
+                )}
 
-            {details?.color && (
-              <div className="bos-result-section-row">
-                <strong>Colour</strong>{" — "}{details.color}
-              </div>
-            )}
+                {/* 3. Neutral context */}
+                {details?.silhouette && (
+                  <div className="bos-result-section-row">
+                    <strong>Silhouette</strong>{" — "}{details.silhouette}
+                  </div>
+                )}
+                {details?.color && (
+                  <div className="bos-result-section-row">
+                    <strong>Colour</strong>{" — "}{details.color}
+                  </div>
+                )}
 
-            {details?.silhouette && (
-              <div className="bos-result-section-row">
-                <strong>Silhouette</strong>{" — "}{details.silhouette}
-              </div>
-            )}
+                {/* 4. Brief positive note — only if occasion actually fits */}
+                {(analysis.forOccasion || occasionFit?.occasion) && occasionFit && occasionFit.fits && (
+                  <div className="bos-result-section-row">
+                    <strong>
+                      Occasion — Works for{" "}
+                      {cap(
+                        typeof occasionFit.occasion === "string" && occasionFit.occasion.trim()
+                          ? occasionFit.occasion.trim()
+                          : analysis.forOccasion
+                      )}
+                    </strong>
+                    {", though other factors block this purchase. "}
+                    {occasionFit.explanation}
+                  </div>
+                )}
 
-            {/* What you like — label adapts to agreement level */}
-            {whatLikeEval && (
-              <div className="bos-result-section-row">
-                <strong>
-                  {whatLikeEval.agreement === "disagree"
-                    ? `${cap(whatLikeEval.aspect || analysis.whatLike || "")} — Reality Check`
-                    : `What you like — ${cap(whatLikeEval.aspect || analysis.whatLike || "")}`
-                  }
-                </strong>
-                {" — "}
-                {whatLikeEval.agreement !== "disagree" && `${cap(whatLikeEval.agreement)}. `}
-                {whatLikeEval.explanation}
-              </div>
+                {/* Brief style DNA note last */}
+                {styleDNAMatch && (
+                  <div className="bos-result-section-row">
+                    <strong>Style note</strong>{" — "}{styleDNAMatch}
+                  </div>
+                )}
+
+                {/* What you like — only if AI agrees (brief positive last) */}
+                {whatLikeEval && whatLikeEval.agreement === "agree" && (
+                  <div className="bos-result-section-row">
+                    <strong>What you like — {cap(whatLikeEval.aspect || analysis.whatLike || "")}</strong>
+                    {" — "}Agreed. {whatLikeEval.explanation}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                {/* BUY — positive framing, current order ──────────────────────── */}
+
+                {/* Occasion */}
+                {(analysis.forOccasion || occasionFit?.occasion) && occasionFit && (
+                  <div className="bos-result-section-row">
+                    <strong>
+                      Occasion Match — {occasionFit.fits ? "Strong" : "Not Ideal"}{" for "}
+                      {cap(
+                        typeof occasionFit.occasion === "string" && occasionFit.occasion.trim()
+                          ? occasionFit.occasion.trim()
+                          : analysis.forOccasion
+                      )}
+                    </strong>
+                    {". "}
+                    {occasionFit.explanation}
+                    {occasionFit.stylingTip && <span>{" "}{occasionFit.stylingTip}</span>}
+                  </div>
+                )}
+
+                {styleDNAMatch && (
+                  <div className="bos-result-section-row">
+                    <strong>Style match</strong>{" — "}{styleDNAMatch}
+                  </div>
+                )}
+
+                {details?.color && (
+                  <div className="bos-result-section-row">
+                    <strong>Colour</strong>{" — "}{details.color}
+                  </div>
+                )}
+
+                {details?.silhouette && (
+                  <div className="bos-result-section-row">
+                    <strong>Silhouette</strong>{" — "}{details.silhouette}
+                  </div>
+                )}
+
+                {whatLikeEval && (
+                  <div className="bos-result-section-row">
+                    <strong>
+                      {whatLikeEval.agreement === "disagree"
+                        ? `${cap(whatLikeEval.aspect || analysis.whatLike || "")} — Reality Check`
+                        : `What you like — ${cap(whatLikeEval.aspect || analysis.whatLike || "")}`
+                      }
+                    </strong>
+                    {" — "}
+                    {whatLikeEval.agreement !== "disagree" && `${cap(whatLikeEval.agreement)}. `}
+                    {whatLikeEval.explanation}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
