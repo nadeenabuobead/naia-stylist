@@ -383,12 +383,12 @@ describe("G — dashboard hygiene: no /quick-style links in main dashboard", () 
   });
 });
 
-// ── H. Digital Wardrobe (closet) — composed-shell invariants ────────────────
+// ── H. Digital Closet (closet) — composed-shell invariants ──────────────────
 //   Enforces the approved composition: Option B shell (MyNaiaLayout) +
-//   Option A page content (Digital Wardrobe title, stats, Add to Wardrobe,
+//   Option A page content (Digital Closet title, stats, Add to Wardrobe,
 //   filters, card grid, Style Me → /style-me).
 
-describe("H — Digital Wardrobe: composed shell + content invariants", () => {
+describe("H — Digital Closet: composed shell + content invariants", () => {
   it("closet._index.tsx uses MyNaiaLayout (NADINE global header)", () => {
     const src = route("closet._index.tsx");
     assert.ok(src.includes("MyNaiaLayout"), "imports MyNaiaLayout");
@@ -408,9 +408,9 @@ describe("H — Digital Wardrobe: composed shell + content invariants", () => {
     assert.ok(!src.includes("cl-topbar-link"), "no cl-topbar-link");
   });
 
-  it("closet._index.tsx uses Digital Wardrobe title from Option A", () => {
+  it("closet._index.tsx uses Digital Closet title from Option A", () => {
     const src = route("closet._index.tsx");
-    assert.ok(src.includes("Digital Wardrobe"), "cl-headline says Digital Wardrobe");
+    assert.ok(src.includes("Digital Closet"), "cl-headline says Digital Closet");
     assert.ok(src.includes("cl-headline"), "uses cl-headline class");
   });
 
@@ -635,5 +635,434 @@ describe("J — upload security: client magic-byte validation + server-side Admi
       status400Count >= 8,
       `expected at least 8 server-side 400 rejections (hostname, publicId, ownership, Admin API, format, size, dimensions, magic bytes); found ${status400Count}`
     );
+  });
+});
+
+// ── K. Buy or Skip — saving, ownership, persistence, navigation ──────────────
+//   Enforces that analysis is saved before the user sees a result, that the
+//   result and list pages are auth-gated, that only the owning customer can
+//   access a decision, and that the result survives a hard refresh.
+
+describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
+  it("api.wishlist.jsx analyzeItem returns analysisId so client can navigate to result page", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("analysisId"), "response includes analysisId field");
+    assert.ok(src.includes("analysisRecord?.id"), "analysisId sourced from DB record id");
+  });
+
+  it("api.wishlist.jsx saves confidence, category, colors, forOccasion, whatLike, unsureAbout, colorNote, itemSize, fullAnalysis", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("confidence:"), "saves confidence");
+    assert.ok(src.includes("category:"), "saves category");
+    assert.ok(src.includes("colors:"), "saves colors array");
+    assert.ok(src.includes("forOccasion:"), "saves forOccasion");
+    assert.ok(src.includes("whatLike:"), "saves whatLike");
+    assert.ok(src.includes("unsureAbout:"), "saves unsureAbout");
+    assert.ok(src.includes("colorNote:"), "saves colorNote");
+    assert.ok(src.includes("itemSize:"), "saves itemSize");
+    assert.ok(src.includes("fullAnalysis:"), "saves fullAnalysis blob");
+  });
+
+  it("api.wishlist.jsx fullAnalysis blob captures all result fields needed for the result page", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("closetPairings"), "fullAnalysis includes closetPairings");
+    assert.ok(src.includes("occasions"), "fullAnalysis includes occasions");
+    assert.ok(src.includes("naiaMatch"), "fullAnalysis includes naiaMatch");
+    assert.ok(src.includes("detailedAnalysis"), "fullAnalysis includes detailedAnalysis");
+    assert.ok(src.includes("styleDNAMatch"), "fullAnalysis includes styleDNAMatch");
+    assert.ok(src.includes("finalThought"), "fullAnalysis includes finalThought");
+  });
+
+  it("api.wishlist.jsx does not return success without a saved record — incomplete decisions cannot be displayed", () => {
+    const src = route("api.wishlist.jsx");
+    // On DB error the route returns 503, never success
+    assert.ok(src.includes("Analysis could not be saved. Please try again."), "DB failure returns error not success");
+    assert.ok(src.includes("status: 503") || src.includes("{ status: 503 }"), "DB failure returns 503");
+  });
+
+  it("buyskip._index.tsx navigates to /buyskip/:id on success — result never shown inline", () => {
+    const src = route("buyskip._index.tsx");
+    assert.ok(src.includes("useNavigate"), "imports useNavigate");
+    assert.ok(src.includes('navigate(`/buyskip/${data.analysisId}`)'), "navigates to result page on success");
+    assert.ok(!src.includes("setResult("), "no inline setResult — result shown on dedicated page only");
+  });
+
+  it("buyskip.$id.tsx uses requireCurrentNaiaCustomer — route is auth-gated", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("requireCurrentNaiaCustomer"), "loader uses requireCurrentNaiaCustomer");
+  });
+
+  it("buyskip.$id.tsx enforces ownership — redirects when customerId does not match", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("analysis.customerId !== naiaCustomer.id"), "ownership check present");
+    assert.ok(src.includes('redirect("/my-naia/buying-decisions")'), "non-owner gets redirect, not 403");
+  });
+
+  it("buyskip.$id.tsx reads fullAnalysis from DB — result survives hard refresh", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("fullAnalysis"), "loader selects fullAnalysis from DB");
+    assert.ok(src.includes("useLoaderData"), "page hydrates from server data, not client state");
+  });
+
+  it("buyskip.$id.tsx renders the uploaded image from imageUrl stored in DB", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("analysis.imageUrl"), "renders imageUrl from DB record");
+    assert.ok(src.includes("bos-result-item-img"), "uses bos-result-item-img class");
+  });
+
+  it("my-naia.buying-decisions.tsx uses requireCurrentNaiaCustomer — list is auth-gated", () => {
+    const src = route("my-naia.buying-decisions.tsx");
+    assert.ok(src.includes("requireCurrentNaiaCustomer"), "loader uses requireCurrentNaiaCustomer");
+  });
+
+  it("my-naia.buying-decisions.tsx scopes query to current customer — no cross-customer data", () => {
+    const src = route("my-naia.buying-decisions.tsx");
+    assert.ok(src.includes("customerId: naiaCustomer.id"), "findMany scoped to naiaCustomer.id");
+  });
+
+  it("my-naia.buying-decisions.tsx decision cards link to /buyskip/:id — reopening works", () => {
+    const src = route("my-naia.buying-decisions.tsx");
+    assert.ok(src.includes('to={`/buyskip/${d.id}`}'), "card links to individual result page");
+  });
+
+  it("my-naia.buying-decisions.tsx shows verdict, confidence and date on each card", () => {
+    const src = route("my-naia.buying-decisions.tsx");
+    assert.ok(src.includes("d.verdict"), "renders verdict");
+    assert.ok(src.includes("d.confidence"), "renders confidence");
+    assert.ok(src.includes("d.createdAt"), "renders date");
+  });
+
+  it("routes.js registers both new routes", () => {
+    const src = readFileSync(join(ROOT, "app/routes.js"), "utf8");
+    assert.ok(src.includes('"buyskip/:id"'), "buyskip/:id route registered");
+    assert.ok(src.includes('"my-naia/buying-decisions"'), "my-naia/buying-decisions route registered");
+  });
+
+  it("buyskip._index.tsx View All Decisions links to /my-naia/buying-decisions — no 404", () => {
+    const src = route("buyskip._index.tsx");
+    assert.ok(src.includes('"/my-naia/buying-decisions"'), "View All Decisions link points to real route");
+  });
+
+  // ── K2. Occasion / likes / concerns actively evaluated ───────────────────
+  it("api.wishlist.jsx prompt explicitly passes forOccasion to the AI for evaluation", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("safeOccasion"), "prompt uses sanitised forOccasion variable");
+    assert.ok(src.includes("OCCASION:"), "prompt has explicit OCCASION evaluation section");
+    assert.ok(src.includes("Does this item suit"), "prompt instructs AI to evaluate the occasion");
+  });
+
+  it("api.wishlist.jsx prompt passes whatLike and unsureAbout to the AI for evaluation", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("WHAT THEY LIKE:"), "prompt has WHAT THEY LIKE section");
+    assert.ok(src.includes("WHAT THEY ARE UNSURE ABOUT:"), "prompt has WHAT THEY ARE UNSURE ABOUT section");
+    assert.ok(src.includes("safeWhatLike"), "prompt uses sanitised whatLike");
+    assert.ok(src.includes("safeUnsureAbout"), "prompt uses sanitised unsureAbout");
+  });
+
+  it("api.wishlist.jsx prompt passes size and color to the AI", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("safeSize"), "prompt uses sanitised size");
+    assert.ok(src.includes("Size the customer is considering"), "size explicitly in prompt");
+  });
+
+  it("api.wishlist.jsx fullAnalysis blob persists occasionFit, whatLikeEval, concernEval — survives refresh and reopen", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("occasionFit:"), "fullAnalysis persists occasionFit");
+    assert.ok(src.includes("whatLikeEval:"), "fullAnalysis persists whatLikeEval");
+    assert.ok(src.includes("concernEval:"), "fullAnalysis persists concernEval");
+    assert.ok(src.includes("itemType:"), "fullAnalysis persists itemType");
+  });
+
+  it("api.wishlist.jsx fullAnalysis occasionFit includes fits, explanation and stylingTip fields", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes('"fits": true or false'), "prompt schema includes fits boolean");
+    assert.ok(src.includes('"explanation":'), "prompt schema includes explanation");
+    assert.ok(src.includes('"stylingTip":'), "prompt schema includes stylingTip");
+  });
+
+  it("api.wishlist.jsx occasions rule ensures entered occasion is only included when it genuinely fits", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("ONLY if the item genuinely suits it") || src.includes("ONLY if the item genuinely suits"), "occasions rule guards against forced inclusion");
+    assert.ok(src.includes("Never include it if the item is unsuitable") || src.includes("ONLY if the item genuinely suits"), "occasions rule explicitly prevents false inclusion");
+  });
+
+  it("buyskip.$id.tsx renders occasion fit in Why It Works from fullAnalysis.occasionFit", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("occasionFit"), "reads occasionFit from fullAnalysis");
+    assert.ok(src.includes("occasionFit.fits"), "renders fits boolean to determine Yes/Not ideal");
+    assert.ok(src.includes("occasionFit.explanation"), "renders explanation");
+    assert.ok(src.includes("occasionFit.stylingTip"), "renders stylingTip");
+    assert.ok(src.includes("analysis.forOccasion"), "uses customer's entered occasion name as label");
+  });
+
+  it("buyskip.$id.tsx renders What You Like evaluation in Why It Works from fullAnalysis", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("whatLikeEval"), "reads whatLikeEval from fullAnalysis");
+    assert.ok(src.includes("whatLikeEval.agreement"), "renders agree/partly agree/disagree value");
+    assert.ok(src.includes("whatLikeEval.explanation"), "renders explanation");
+    assert.ok(src.includes("whatLikeEval.aspect"), "renders aspect of what the customer liked");
+  });
+
+  it("buyskip.$id.tsx renders Your Concern evaluation in Before You Buy from fullAnalysis", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("concernEval"), "reads concernEval from fullAnalysis");
+    assert.ok(src.includes("concernEval.justified"), "renders justified/partly justified/not supported value");
+    assert.ok(src.includes("concernEval.explanation"), "renders explanation");
+    // concernEval.concern label replaced by static 'Your Concern' block label in new BYB layout
+    assert.ok(src.includes("Your Concern") || src.includes("concernEval.concern"), "concern block is labelled");
+  });
+
+  it("buyskip.$id.tsx occasion fit uses entered occasion name directly in Why It Works label", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("analysis.forOccasion"), "occasion label uses customer's entered occasion name");
+    assert.ok(src.includes("occasionFit.fits"), "renders yes/not ideal based on fits boolean");
+  });
+
+  it("buyskip.$id.tsx renders Before You Buy with concern eval and beforeYouBuy challenge points", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("Before You Buy"), "Before You Buy section present");
+    assert.ok(src.includes("concernEval"), "concern evaluation rendered in Before You Buy");
+    assert.ok(src.includes("beforeYouBuy"), "beforeYouBuy array rendered");
+    assert.ok(src.includes("stylingTip"), "stylingTip rendered in occasionFit");
+  });
+
+  // ── K3. New content structure (Why It Works / Before You Buy / Final Condition) ─
+  it("buyskip.$id.tsx renders match percentage with 'MATCH' label — not 'confidence'", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("MATCH") || src.includes("Match"), "uses MATCH label for percentage");
+    assert.ok(src.includes("bos-verdict-match"), "uses bos-verdict-match class for the percentage span");
+    assert.ok(!src.includes("% confidence"), "does not render '% confidence' text");
+  });
+
+  it("buyskip.$id.tsx renders Why It Works section with style match and occasion", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("Why It Works"), "Why It Works section present");
+    assert.ok(src.includes("styleDNAMatch"), "style DNA match referenced in Why It Works");
+    assert.ok(src.includes("occasionFit"), "occasionFit referenced in Why It Works context");
+  });
+
+  it("buyskip.$id.tsx only renders Wear It With when confirmed closet pairings exist — section hidden when empty", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("Wear It With"), "Wear It With section present");
+    assert.ok(src.includes("renderablePairings.length > 0"), "Wear It With is conditional on real pairings");
+    assert.ok(!src.includes("No closet pairings were found"), "no fallback text when pairings empty — section hidden instead");
+  });
+
+  it("buyskip.$id.tsx renders Final Condition with buyIf and skipIf from fullAnalysis", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("Final Condition"), "Final Condition section present");
+    assert.ok(src.includes("Buy it if"), "Buy it if rendered");
+    assert.ok(src.includes("Skip it if"), "Skip it if rendered");
+    assert.ok(src.includes("buyIf"), "buyIf read from fullAnalysis");
+    assert.ok(src.includes("skipIf"), "skipIf read from fullAnalysis");
+  });
+
+  it("api.wishlist.jsx fullAnalysis blob persists buyIf, skipIf and beforeYouBuy — conditions survive refresh and reopen", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("beforeYouBuy:"), "fullAnalysis persists beforeYouBuy");
+    assert.ok(src.includes("buyIf:"), "fullAnalysis persists buyIf");
+    assert.ok(src.includes("skipIf:"), "fullAnalysis persists skipIf");
+  });
+
+  it("api.wishlist.jsx naiaMatch is stored separately from closetPairings in fullAnalysis", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("naiaMatch:"), "naiaMatch stored in fullAnalysis blob");
+    assert.ok(src.includes("closetPairings:"), "closetPairings stored in fullAnalysis blob");
+    // They must be at different character positions — confirming they are separate fields
+    const naiaIdx = src.indexOf("naiaMatch:");
+    const closetIdx = src.indexOf("closetPairings:");
+    assert.ok(naiaIdx !== closetIdx, "naiaMatch and closetPairings are distinct fields in the blob");
+  });
+
+  it("api.wishlist.jsx only uses eligible closet candidates — invented items are blocked server-side", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("ONLY from the compatible Closet candidates list"), "prompt enforces closet item restriction");
+    assert.ok(src.includes("Never invent or hallucinate"), "prompt explicitly prohibits invented items");
+    assert.ok(src.includes("eligibleClosetNameMap"), "server-side name validation against eligible items");
+  });
+
+  it("api.wishlist.jsx prompt instructs AI to include BEFORE YOU BUY challenge points", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("BEFORE YOU BUY"), "prompt has BEFORE YOU BUY section");
+    assert.ok(src.includes("beforeYouBuy"), "prompt schema includes beforeYouBuy field");
+    assert.ok(src.includes("buyIf"), "prompt schema includes buyIf condition");
+    assert.ok(src.includes("skipIf"), "prompt schema includes skipIf condition");
+  });
+
+  it("buyskip.$id.tsx reopens same stored analysis from View All Decisions — imageUrl and fullAnalysis from DB", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("prisma.buyOrSkipAnalysis.findUnique"), "loader fetches from DB on every load");
+    assert.ok(src.includes("analysis.imageUrl"), "imageUrl comes from DB record");
+    assert.ok(src.includes("analysis.fullAnalysis"), "fullAnalysis comes from DB record");
+    // View All Decisions cards link to individual result pages
+    const decisions = route("my-naia.buying-decisions.tsx");
+    assert.ok(decisions.includes('to={`/buyskip/${d.id}`}'), "decision cards link to result page for reopen");
+  });
+
+  // ── K4. Loading overlay and Before You Buy (size check + wearability) ────────
+  it("buyskip._index.tsx defines BOS_LOADING_MESSAGES constant with rotation messages", () => {
+    const src = route("buyskip._index.tsx");
+    assert.ok(src.includes("BOS_LOADING_MESSAGES"), "BOS_LOADING_MESSAGES constant defined");
+    assert.ok(src.includes("Reading your item"), "first loading message present");
+    assert.ok(src.includes("Preparing your recommendation"), "final loading message present");
+  });
+
+  it("buyskip._index.tsx renders Style Me loading screen when analyzing — sm-loading-wrap and inner classes", () => {
+    const src = route("buyskip._index.tsx");
+    assert.ok(src.includes("sm-loading-wrap"), "uses sm-loading-wrap — exact Style Me pattern");
+    assert.ok(src.includes("sm-loading-inner"), "reuses sm-loading-inner class");
+    assert.ok(src.includes("sm-loading-track"), "reuses sm-loading-track class");
+    assert.ok(src.includes("sm-loading-bar"), "reuses sm-loading-bar class");
+    assert.ok(src.includes("sm-loading-msg"), "reuses sm-loading-msg class");
+    assert.ok(src.includes('"var(--ff-editorial)"'), "loading h2 uses editorial font for full sentence");
+    assert.ok(src.includes("is assessing your item"), "loading heading contains assessing phrase");
+    assert.ok(src.includes('"var(--ff-display)"'), "supporting line uses display font (Oswald)");
+  });
+
+  it("buyskip._index.tsx overlay has role=status and aria-live for accessible live status", () => {
+    const src = route("buyskip._index.tsx");
+    assert.ok(src.includes('role="status"'), "overlay has role=status");
+    assert.ok(src.includes('aria-live="polite"'), "overlay has aria-live=polite");
+  });
+
+  it("buyskip._index.tsx loading screen has role=status and aria-live for accessible announcement", () => {
+    const src = route("buyskip._index.tsx");
+    assert.ok(src.includes('role="status"'), "loading screen has role=status");
+    assert.ok(src.includes('aria-live="polite"'), "loading screen has aria-live=polite");
+  });
+
+  it("buyskip._index.tsx duplicate-submission guard prevents re-entry while analyzing", () => {
+    const src = route("buyskip._index.tsx");
+    assert.ok(src.includes("if (analyzing) return;"), "handleAnalyze returns early if already analyzing");
+  });
+
+  it("api.wishlist.jsx prompt includes CUSTOMER FIT DATA block from Passport for size check", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("FIT & BODY"), "fit data block present in prompt");
+    assert.ok(src.includes("topSize"), "topSize forwarded to AI");
+    assert.ok(src.includes("bottomSize"), "bottomSize forwarded to AI");
+    assert.ok(src.includes("dressSize"), "dressSize forwarded to AI");
+    assert.ok(src.includes("fitPreferences"), "fitPreferences forwarded to AI");
+    assert.ok(src.includes("bodyFocusAreas"), "bodyFocusAreas forwarded to AI");
+    assert.ok(src.includes("bodyAvoidAreas"), "bodyAvoidAreas forwarded to AI");
+  });
+
+  it("api.wishlist.jsx BEFORE YOU BUY prompt generates 2 AI points — fit+solution and wearability", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("FIT & PRACTICAL SOLUTION"), "fit & practical solution point in prompt");
+    assert.ok(src.includes("WEARABILITY"), "wearability point in BEFORE YOU BUY prompt");
+    assert.ok(src.includes("No brand-sizing claims"), "no brand-sizing claims rule present");
+    assert.ok(src.includes("Fit cannot be confirmed from your current Passport"), "missing-data fallback statement in prompt");
+  });
+
+  it("api.wishlist.jsx beforeYouBuy schema is a 2-item array — fit+solution and wearability", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("Fit & Practical Solution:") || src.includes("FIT & PRACTICAL SOLUTION"), "fit & practical solution in schema/prompt");
+    assert.ok(src.includes("Wearability:") || src.includes("WEARABILITY"), "wearability referenced in schema/prompt");
+  });
+
+  // ── K5. Result polish: verdict, layout, wording, colour, NADINE heading ──────
+  it("buyskip._index.tsx uses Style Me early-return pattern — loading screen replaces page when analyzing", () => {
+    const src = route("buyskip._index.tsx");
+    assert.ok(src.includes("if (analyzing)"), "early return when analyzing");
+    assert.ok(src.includes("sm-loading-wrap"), "uses sm-loading-wrap — exact Style Me loading class");
+    assert.ok(src.includes("sm-loading-inner"), "uses sm-loading-inner");
+    assert.ok(src.includes("sm-loading-track"), "uses sm-loading-track");
+    assert.ok(src.includes("sm-loading-bar"), "uses sm-loading-bar");
+    assert.ok(src.includes("sm-loading-msg"), "uses sm-loading-msg");
+  });
+
+  it("buyskip._index.tsx keeps loading visible until navigation completes — no premature reset", () => {
+    const src = route("buyskip._index.tsx");
+    assert.ok(src.includes("navigated = true"), "navigated flag set before navigate() call");
+    assert.ok(src.includes("if (!navigated) setAnalyzing(false)"), "analyzing only reset when not navigating");
+  });
+
+  it("api.wishlist.jsx verdict prompt defines SKIP FOR NOW as conditional — not same as definitive SKIP", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("SKIP FOR NOW"), "SKIP FOR NOW verdict defined in prompt");
+    assert.ok(src.includes("not definitively unsuitable"), "SKIP FOR NOW distinguished from definitive SKIP");
+  });
+
+  it("api.wishlist.jsx verdictMap maps SKIP FOR NOW to SKIP DB enum — no migration needed", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes('"SKIP FOR NOW": "SKIP"'), "SKIP FOR NOW persisted as SKIP in DB enum");
+  });
+
+  it("api.wishlist.jsx persists detectedColor and naiaMatchRelationship in fullAnalysis", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("detectedColor:"), "detectedColor stored in fullAnalysis");
+    assert.ok(src.includes("naiaMatchRelationship:"), "naiaMatchRelationship stored in fullAnalysis");
+  });
+
+  it("api.wishlist.jsx prompt includes COLOUR PREFERENCE RULE — neutrals not rejected for preference mismatch", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("COLOUR RULE"), "colour preference rule in prompt");
+    assert.ok(src.includes("not exclusions"), "rule states favourite colours are preferences not exclusions");
+  });
+
+  it("api.wishlist.jsx prompt includes REPETITION RULE — each point stated once only", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes("REPETITION RULE"), "repetition rule present in prompt");
+  });
+
+  it("api.wishlist.jsx concernEval schema includes solutions array for practical fit workarounds", () => {
+    const src = route("api.wishlist.jsx");
+    assert.ok(src.includes('"solutions"'), "solutions field in concernEval schema");
+    assert.ok(src.includes("practical solution"), "solutions described as practical");
+  });
+
+  it("buyskip.$id.tsx uses SKIP FOR NOW from fullAnalysis.verdict — conditional verdict preserved for display", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("fa?.verdict"), "display verdict reads from fullAnalysis first");
+    assert.ok(src.includes("SKIP FOR NOW"), "SKIP FOR NOW referenced in result page");
+  });
+
+  it("buyskip.$id.tsx renders two-column hero on desktop — image left, verdict right", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("bos-result-hero"), "hero container class present");
+    assert.ok(src.includes("bos-result-hero-image"), "hero image column class present");
+    assert.ok(src.includes("bos-result-hero-content"), "hero content column class present");
+  });
+
+  it("buyskip.$id.tsx occasion label uses 'Occasion Match — Strong/Not Ideal' — not 'For X — Yes.'", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("Occasion Match"), "uses Occasion Match label");
+    assert.ok(src.includes('occasionFit.fits ? "Strong" : "Not Ideal"'), "strong/not ideal text used");
+    assert.ok(!src.includes('"Yes."'), "does not render bare Yes. text");
+  });
+
+  it("buyskip.$id.tsx whatLikeEval renders 'Reality Check' label when agreement is disagree", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("Reality Check"), "Reality Check label present for disagree case");
+    assert.ok(src.includes('whatLikeEval.agreement === "disagree"'), "disagree condition checked");
+  });
+
+  it("buyskip.$id.tsx shows detected colour tag with Image-detected sub-label when it differs from selection", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("detectedColor"), "detectedColor read from fullAnalysis");
+    assert.ok(src.includes("Image-detected colour"), "sub-label shown on detected colour tag");
+    assert.ok(src.includes("bos-result-item-tag--detected"), "detected tag modifier class applied");
+  });
+
+  it("buyskip.$id.tsx NADINE section uses single 'Pair It With NADINE' heading for all pairings", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("Pair It With NADINE"), "NADINE heading present");
+  });
+
+  it("buyskip.$id.tsx renders concern solutions as a list below the concern evaluation", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("concernSolutions"), "concernSolutions derived from concernEval.solutions");
+    assert.ok(src.includes("bos-concern-solutions"), "concern solutions list class applied");
+  });
+
+  it("buyskip.$id.tsx Before You Buy renders three labeled blocks — not unlabelled paragraphs", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("bos-byb-blocks"), "byb blocks container class present");
+    assert.ok(src.includes("bos-byb-block-label"), "block label class present");
+    assert.ok(src.includes("Your Concern"), "Your Concern block label present");
+    assert.ok(src.includes("Fit & Practical Solution"), "Fit & Practical Solution block label present");
+    assert.ok(src.includes("Wearability"), "Wearability block label present");
+    assert.ok(src.includes("bos-byb-block-verdict"), "verdict class for justified/unsupported display");
   });
 });

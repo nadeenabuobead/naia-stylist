@@ -58,6 +58,8 @@ export default [
   route("api/full-style-profile", "routes/api.full-style-profile.jsx"),
   route("api/save-look", "routes/api.save-look.jsx"),
   route("buyskip", "routes/buyskip._index.tsx"),
+  route("buyskip/:id", "routes/buyskip.$id.tsx"),
+  route("my-naia/buying-decisions", "routes/my-naia.buying-decisions.tsx"),
   route("api/tryon", "routes/api.tryon.jsx"),
   route("api/body-scan", "routes/api.bodyscan.jsx"),
   route("account", "routes/account.jsx"),

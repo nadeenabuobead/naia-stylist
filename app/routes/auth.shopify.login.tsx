@@ -29,7 +29,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
   session.set("pkce_nonce",    pkce.nonce);
   session.set("return_to",     returnTo);
 
-  return redirect(authUrl, {
-    headers: { "Set-Cookie": await commitSession(session) },
-  });
+  // Return a 200 page with a JS redirect instead of a 302.
+  // Mobile Safari's bounce-tracking mitigation can drop cookies set in a
+  // 302 response that immediately redirects away; a 200 + script gives the
+  // browser time to commit the cookie before navigating to Shopify.
+  const safeUrl = JSON.stringify(authUrl);
+  return new Response(
+    `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">`
+    + `<meta name="viewport" content="width=device-width,initial-scale=1">`
+    + `<title>Signing in — nAia</title>`
+    + `<style>body{margin:0;display:flex;align-items:center;justify-content:center;`
+    + `min-height:100vh;font-family:-apple-system,sans-serif;background:#F6EFE8;color:#28150C;}`
+    + `p{opacity:.6;font-size:1rem;}a{color:#6B1D26;font-size:.875rem;margin-top:.5rem;display:block;}</style>`
+    + `</head><body><div><p>Signing in…</p><a id="l" href="">Continue →</a></div>`
+    + `<script>var u=${safeUrl};document.getElementById('l').href=u;window.location.replace(u);<\/script>`
+    + `</body></html>`,
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Set-Cookie": await commitSession(session),
+      },
+    }
+  );
 }

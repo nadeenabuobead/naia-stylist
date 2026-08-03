@@ -535,7 +535,7 @@ export default function OnboardingComplete() {
 
         <a href="/closet" className="cp-action">
           <div>
-            <div className="cp-action-title">Digital Wardrobe</div>
+            <div className="cp-action-title">Digital Closet</div>
             <div className="cp-action-sub">Upload your pieces for personalised styling</div>
           </div>
           <span className="cp-arrow">→</span>

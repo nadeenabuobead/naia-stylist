@@ -348,6 +348,17 @@ model BuyOrSkipAnalysis {
 
   // Batch 2 — DB-backed idempotency (null = pre-Batch-2 record)
   idempotencyKey String? @unique
+
+  // Batch 3 — rich persistence for dedicated result page
+  confidence    Int?     // AI confidence 0–100
+  category      String?  // Item category from Step 2
+  colors        String[] // Colors from Step 2
+  forOccasion   String?  // Step 2: what are you considering it for
+  whatLike      String?  // Step 2: what do you like about it
+  unsureAbout   String?  // Step 2: what are you unsure about
+  colorNote     String?  // Step 2: which colour
+  itemSize      String?  // Step 2: which size
+  fullAnalysis  Json?    // Complete AI result blob (pairings, occasions, naiaMatch, detailedAnalysis, styleDNAMatch, fillsGap)
 }
 
 enum BuySkipVerdict {

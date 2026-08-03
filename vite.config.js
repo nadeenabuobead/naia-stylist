@@ -33,5 +33,9 @@ export default defineConfig({
   },
   plugins: [reactRouter(), tsconfigPaths()],
   build: { assetsInlineLimit: 0 },
+  ssr: { external: ["canvas"] },
+  environments: {
+    ssr: { build: { rollupOptions: { external: ["canvas"] } } },
+  },
   optimizeDeps: { include: ["@shopify/app-bridge-react"] },
 });

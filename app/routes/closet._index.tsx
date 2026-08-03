@@ -75,7 +75,7 @@ function detectImageFormatFromBytes(header: Uint8Array): string | null {
 }
 
 export function meta() {
-  return [{ title: "Digital Wardrobe | nAia" }];
+  return [{ title: "Digital Closet | nAia" }];
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -269,8 +269,8 @@ const css = `
   .mn-page-sections>.mn-back-link{display:block;margin-bottom:1.75rem}
 
   /* ── Option A cl-* page content — calibrated for 880 px column ── */
-  /* Title: Oswald weight-200 at clamp(24px,3.5vw,36px) — matches sp-shell-title from Lovable source (512ab5e). */
-  .cl-headline{font-family:var(--ff-display);font-size:clamp(24px,3.5vw,36px);font-weight:200;line-height:1.05;margin-bottom:14px}
+  /* Title: matches sp-shell-title exactly (naia-design-system.css). */
+  .cl-headline{font-family:var(--naia-ff-display);font-size:clamp(24px,3.5vw,36px);font-weight:200;color:var(--naia-ink);line-height:1.05;margin-bottom:14px}
   /* Subtitle */
   .cl-sub{font-family:var(--ff-ui);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:28px}
   /* Stats — 3-col grid. Padding 20px (was 24px) to tighten card density. */
@@ -278,10 +278,10 @@ const css = `
   .cl-stat{background:var(--bg-50, var(--c-surface));padding:20px;border:1px solid var(--fg-10, var(--c-border))}
   .cl-stat-num{font-family:var(--ff-display);font-size:40px;font-weight:900;color:var(--fg, var(--c-ink))}
   .cl-stat-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted))}
-  /* Add a Piece button — inline-flex, auto-width, dark ink bg. Matches sp-btn-primary from Lovable source (512ab5e). */
-  .cl-add-btn{display:inline-flex;align-items:center;align-self:flex-start;width:auto;padding:12px 28px;background:var(--fg, var(--c-ink));color:var(--bg, #FAF6F1);border:none;margin-bottom:28px;cursor:pointer;font-family:var(--ff-ui);font-size:10px;letter-spacing:2.5px;text-transform:uppercase;transition:opacity .13s}
+  /* Add a Piece button — matches sp-btn-primary exactly (naia-design-system.css). */
+  .cl-add-btn{display:inline-flex;align-items:center;align-self:flex-start;width:auto;padding:12px 28px;background:var(--naia-ink);color:var(--naia-bg);border:none;border-radius:9999px;margin-bottom:28px;cursor:pointer;font-family:var(--naia-ff-ui);font-size:10px;letter-spacing:2.5px;text-transform:uppercase;transition:opacity .13s}
   .cl-add-btn:hover{opacity:.8}
-  .cl-add-btn:focus-visible{outline:2px solid var(--fg, var(--c-ink));outline-offset:2px}
+  .cl-add-btn:focus-visible{outline:2px solid var(--naia-ink);outline-offset:2px}
   .cl-add-btn:disabled{opacity:.45;cursor:not-allowed}
   /* Add to Wardrobe form */
   .cl-form{background:var(--bg-50, var(--c-panel));padding:32px;margin-bottom:28px;border:1px solid var(--fg-10, var(--c-border))}
@@ -339,7 +339,10 @@ const css = `
   .cl-empty-icon{font-family:var(--ff-display);font-size:52px;color:var(--fg, var(--c-ink));opacity:.2;margin-bottom:16px}
   .cl-empty-text{font-family:var(--ff-body);font-size:18px;font-style:italic;color:var(--fg-60, var(--c-muted));margin-bottom:28px}
   .cl-cta{margin-top:48px;text-align:center}
-  .cl-cta a{display:inline-block;padding:14px 36px;background:var(--fg, var(--c-ink));color:#FAF6F1;text-decoration:none;font-family:var(--ff-ui);font-size:10px;letter-spacing:4px;text-transform:uppercase}
+  .cl-cta-btn{display:inline-flex;align-items:center;padding:12px 28px;background:var(--naia-ink);color:var(--naia-bg);text-decoration:none;font-family:var(--naia-ff-ui);font-size:10px;letter-spacing:2.5px;text-transform:uppercase;border:none;border-radius:9999px;cursor:pointer;transition:opacity .13s}
+  .cl-cta-btn:hover{opacity:.8}
+  .cl-cta-btn:focus-visible{outline:2px solid var(--naia-ink);outline-offset:2px}
+  .cl-cta-btn:disabled{opacity:.45;cursor:not-allowed}
   @media(max-width:1023px){
     .mn-page-sections>.mn-back-link{margin-bottom:1.25rem}
   }
@@ -357,7 +360,7 @@ const css = `
 // ── Component ─────────────────────────────────────────────────────────────────
 // Composed implementation:
 //   Shell  → Option B (my-naia.closet.tsx): MyNaiaLayout, NADINE header, My nAia navigation
-//   Content → Option A (closet._index.tsx): Digital Wardrobe title, stats, Add to Wardrobe
+//   Content → Option A (closet._index.tsx): Digital Closet title, stats, Add to Wardrobe
 //             form, filters, card grid, Style Me CTA
 //   Logic  → existing staging: Cloudinary, eligibility, journey events, delete, validation
 
@@ -567,7 +570,7 @@ export default function Closet() {
         </Link>
 
         {/* Option A page header */}
-        <h1 className="cl-headline">Digital Wardrobe</h1>
+        <h1 className="cl-headline">Digital Closet</h1>
         <p className="cl-sub">Upload, save, and style your pieces</p>
 
         {/* Option A: Total Pieces / Categories / Brands */}
@@ -812,7 +815,7 @@ export default function Closet() {
 
         {/* Option A: Style Me CTA → canonical /style-me route */}
         <div className="cl-cta">
-          <Link to="/style-me">Style Me →</Link>
+          <Link to="/style-me" className="cl-cta-btn">Style Me →</Link>
         </div>
       </div>
     </MyNaiaLayout>
