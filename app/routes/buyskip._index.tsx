@@ -50,12 +50,13 @@ const BOS_LOADING_MESSAGES = [
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function UploadRow({
-  label, required, imageUrl, uploading, error, onFile, capture,
+  label, required, imageUrl, uploading, error, onFile, capture, buttonLabel = "Choose File",
 }: {
   label: string; required?: boolean;
   imageUrl?: string; uploading?: boolean; error?: string;
   onFile?: (f: File) => void;
   capture?: "environment" | "user";
+  buttonLabel?: string;
 }) {
   const inputId = `bos-file-${label.replace(/\W+/g, "-").toLowerCase()}`;
   return (
@@ -77,11 +78,11 @@ function UploadRow({
                 onChange={e => e.target.files?.[0] && onFile(e.target.files[0])}
                 style={{ display: "none" }} />
               <span className="bos-upload-btn">
-                {uploading ? "Uploading…" : "Choose File"}
+                {uploading ? "Uploading…" : buttonLabel}
               </span>
             </label>
           )
-          : <button type="button" className="bos-upload-btn" disabled>Choose File</button>
+          : <button type="button" className="bos-upload-btn" disabled>{buttonLabel}</button>
       }
     </div>
   );
@@ -268,9 +269,10 @@ export default function BuyOrSkip() {
             error={uploadError || undefined}
             onFile={handleUpload}
             capture={source === "photograph" ? "environment" : undefined}
+            buttonLabel={source === "photograph" ? "Take Photo" : "Choose File"}
           />
-          <UploadRow label="A Second Angle (optional)" />
-          <UploadRow label="Fabric or Detail (optional)" />
+          <UploadRow label="A Second Angle (optional)" buttonLabel={source === "photograph" ? "Take Photo" : "Choose File"} />
+          <UploadRow label="Fabric or Detail (optional)" buttonLabel={source === "photograph" ? "Take Photo" : "Choose File"} />
         </div>
       </section>
 
