@@ -218,6 +218,7 @@ ${safeUnsureAbout ? `→ Justified, partly justified, or not supported? Use "par
 BEFORE YOU BUY — exactly 2 points (25–40 words each). Do NOT begin either point with a label — the card headings already show these:
 1. FIT & PRACTICAL SOLUTION — Open with what IS known from the Passport (fit preferences, coverage preferences, size for this category), referencing them by name. Example: "Your Passport shows you prefer [preference], so this [item detail] may feel [more/less] secure." Only then add what to verify with measurements if specific measurements are missing. Never open with "Fit cannot be confirmed."
 2. WEARABILITY — Name at least one of the customer's actual lifestyle occasions (${styleProfile?.dressesFor?.join(", ") || "lifestyle not specified"}) and state directly whether this item suits those occasions and how realistically frequent the wear would be. Never use language like "if your lifestyle includes such events."
+No brand-sizing claims — do not state or imply how this brand sizes relative to others.
 
 REPETITION RULE: Each colour, concern or trait appears ONCE. Never repeat Final Condition reasoning in any earlier section.
 

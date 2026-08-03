@@ -876,8 +876,8 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
 
   it("api.wishlist.jsx only uses eligible closet candidates — invented items are blocked server-side", () => {
     const src = route("api.wishlist.jsx");
-    assert.ok(src.includes("ONLY use items from the compatible Closet candidates list"), "prompt enforces closet item restriction");
-    assert.ok(src.includes("Never invent Closet items") || src.includes("never invent items"), "prompt explicitly prohibits invented items");
+    assert.ok(src.includes("ONLY from the compatible Closet candidates list"), "prompt enforces closet item restriction");
+    assert.ok(src.includes("Never invent or hallucinate"), "prompt explicitly prohibits invented items");
     assert.ok(src.includes("eligibleClosetNameMap"), "server-side name validation against eligible items");
   });
 
@@ -914,7 +914,8 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     assert.ok(src.includes("sm-loading-track"), "reuses sm-loading-track class");
     assert.ok(src.includes("sm-loading-bar"), "reuses sm-loading-bar class");
     assert.ok(src.includes("sm-loading-msg"), "reuses sm-loading-msg class");
-    assert.ok(src.includes("nAia is assessing your item"), "loading screen uses BOS-specific heading");
+    assert.ok(src.includes("bos-loading-phrase"), "loading phrase uses bos-loading-phrase class");
+    assert.ok(src.includes("is assessing your item"), "loading heading contains assessing phrase");
   });
 
   it("buyskip._index.tsx overlay has role=status and aria-live for accessible live status", () => {
@@ -936,7 +937,7 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
 
   it("api.wishlist.jsx prompt includes CUSTOMER FIT DATA block from Passport for size check", () => {
     const src = route("api.wishlist.jsx");
-    assert.ok(src.includes("CUSTOMER FIT DATA"), "fit data block present in prompt");
+    assert.ok(src.includes("FIT & BODY"), "fit data block present in prompt");
     assert.ok(src.includes("topSize"), "topSize forwarded to AI");
     assert.ok(src.includes("bottomSize"), "bottomSize forwarded to AI");
     assert.ok(src.includes("dressSize"), "dressSize forwarded to AI");
@@ -995,7 +996,7 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
 
   it("api.wishlist.jsx prompt includes COLOUR PREFERENCE RULE — neutrals not rejected for preference mismatch", () => {
     const src = route("api.wishlist.jsx");
-    assert.ok(src.includes("COLOUR PREFERENCE RULE"), "colour preference rule in prompt");
+    assert.ok(src.includes("COLOUR RULE"), "colour preference rule in prompt");
     assert.ok(src.includes("not exclusions"), "rule states favourite colours are preferences not exclusions");
   });
 
@@ -1043,11 +1044,9 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     assert.ok(src.includes("bos-result-item-tag--detected"), "detected tag modifier class applied");
   });
 
-  it("buyskip.$id.tsx NADINE heading is 'A NADINE Alternative' by default — 'Pair It With NADINE' only for complement", () => {
+  it("buyskip.$id.tsx NADINE section uses single 'Pair It With NADINE' heading for all pairings", () => {
     const src = route("buyskip.$id.tsx");
-    assert.ok(src.includes("A NADINE Alternative"), "alternative heading present");
-    assert.ok(src.includes("Pair It With NADINE"), "complement heading present");
-    assert.ok(src.includes('naiaRelationship === "complement"'), "heading conditioned on naiaMatchRelationship");
+    assert.ok(src.includes("Pair It With NADINE"), "NADINE heading present");
   });
 
   it("buyskip.$id.tsx renders concern solutions as a list below the concern evaluation", () => {
