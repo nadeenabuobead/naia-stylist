@@ -808,7 +808,8 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     assert.ok(src.includes("concernEval"), "reads concernEval from fullAnalysis");
     assert.ok(src.includes("concernEval.justified"), "renders justified/partly justified/not supported value");
     assert.ok(src.includes("concernEval.explanation"), "renders explanation");
-    assert.ok(src.includes("concernEval.concern"), "renders concern text");
+    // concernEval.concern label replaced by static 'Your Concern' block label in new BYB layout
+    assert.ok(src.includes("Your Concern") || src.includes("concernEval.concern"), "concern block is labelled");
   });
 
   it("buyskip.$id.tsx occasion fit uses entered occasion name directly in Why It Works label", () => {
@@ -906,14 +907,14 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     assert.ok(src.includes("Preparing your recommendation"), "final loading message present");
   });
 
-  it("buyskip._index.tsx renders bos-analyzing-overlay when analyzing — reuses sm-loading-inner classes", () => {
+  it("buyskip._index.tsx renders Style Me loading screen when analyzing — sm-loading-wrap and inner classes", () => {
     const src = route("buyskip._index.tsx");
-    assert.ok(src.includes("bos-analyzing-overlay"), "overlay class used");
-    assert.ok(src.includes("sm-loading-inner"), "reuses Style Me loading inner class");
-    assert.ok(src.includes("sm-loading-track"), "reuses Style Me loading track class");
-    assert.ok(src.includes("sm-loading-bar"), "reuses Style Me loading bar class");
-    assert.ok(src.includes("sm-loading-msg"), "reuses Style Me loading message class");
-    assert.ok(src.includes("nAia is assessing your item"), "overlay heading uses BOS-specific copy");
+    assert.ok(src.includes("sm-loading-wrap"), "uses sm-loading-wrap — exact Style Me pattern");
+    assert.ok(src.includes("sm-loading-inner"), "reuses sm-loading-inner class");
+    assert.ok(src.includes("sm-loading-track"), "reuses sm-loading-track class");
+    assert.ok(src.includes("sm-loading-bar"), "reuses sm-loading-bar class");
+    assert.ok(src.includes("sm-loading-msg"), "reuses sm-loading-msg class");
+    assert.ok(src.includes("nAia is assessing your item"), "loading screen uses BOS-specific heading");
   });
 
   it("buyskip._index.tsx overlay has role=status and aria-live for accessible live status", () => {
@@ -922,10 +923,10 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     assert.ok(src.includes('aria-live="polite"'), "overlay has aria-live=polite");
   });
 
-  it("buyskip._index.tsx wraps form content in aria-hidden and pointer-events:none while analyzing", () => {
+  it("buyskip._index.tsx loading screen has role=status and aria-live for accessible announcement", () => {
     const src = route("buyskip._index.tsx");
-    assert.ok(src.includes("aria-hidden={analyzing}"), "form wrapper uses aria-hidden when analyzing");
-    assert.ok(src.includes('pointerEvents: analyzing ? "none"'), "form wrapper disables pointer events when analyzing");
+    assert.ok(src.includes('role="status"'), "loading screen has role=status");
+    assert.ok(src.includes('aria-live="polite"'), "loading screen has aria-live=polite");
   });
 
   it("buyskip._index.tsx duplicate-submission guard prevents re-entry while analyzing", () => {
@@ -944,28 +945,32 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     assert.ok(src.includes("bodyAvoidAreas"), "bodyAvoidAreas forwarded to AI");
   });
 
-  it("api.wishlist.jsx BEFORE YOU BUY prompt generates exactly 2 AI points — size check and wearability", () => {
+  it("api.wishlist.jsx BEFORE YOU BUY prompt generates 2 AI points — fit+solution and wearability", () => {
     const src = route("api.wishlist.jsx");
-    assert.ok(src.includes("FIT & SIZE"), "fit & size point in BEFORE YOU BUY prompt");
+    assert.ok(src.includes("FIT & PRACTICAL SOLUTION"), "fit & practical solution point in prompt");
     assert.ok(src.includes("WEARABILITY"), "wearability point in BEFORE YOU BUY prompt");
     assert.ok(src.includes("No brand-sizing claims"), "no brand-sizing claims rule present");
     assert.ok(src.includes("Fit cannot be confirmed from your current Passport"), "missing-data fallback statement in prompt");
   });
 
-  it("api.wishlist.jsx beforeYouBuy schema is a 2-item array — size check and wearability only", () => {
+  it("api.wishlist.jsx beforeYouBuy schema is a 2-item array — fit+solution and wearability", () => {
     const src = route("api.wishlist.jsx");
-    assert.ok(src.includes("Fit & Size:") || src.includes("FIT & SIZE"), "fit & size referenced in schema/prompt");
+    assert.ok(src.includes("Fit & Practical Solution:") || src.includes("FIT & PRACTICAL SOLUTION"), "fit & practical solution in schema/prompt");
     assert.ok(src.includes("Wearability:") || src.includes("WEARABILITY"), "wearability referenced in schema/prompt");
   });
 
   // ── K5. Result polish: verdict, layout, wording, colour, NADINE heading ──────
-  it("buyskip._index.tsx uses createPortal to render overlay into document.body — bypasses layout containment", () => {
+  it("buyskip._index.tsx uses Style Me early-return pattern — loading screen replaces page when analyzing", () => {
     const src = route("buyskip._index.tsx");
-    assert.ok(src.includes("createPortal"), "createPortal imported and used");
-    assert.ok(src.includes("document.body"), "overlay portalled into document.body");
+    assert.ok(src.includes("if (analyzing)"), "early return when analyzing");
+    assert.ok(src.includes("sm-loading-wrap"), "uses sm-loading-wrap — exact Style Me loading class");
+    assert.ok(src.includes("sm-loading-inner"), "uses sm-loading-inner");
+    assert.ok(src.includes("sm-loading-track"), "uses sm-loading-track");
+    assert.ok(src.includes("sm-loading-bar"), "uses sm-loading-bar");
+    assert.ok(src.includes("sm-loading-msg"), "uses sm-loading-msg");
   });
 
-  it("buyskip._index.tsx keeps overlay visible until navigation completes — no premature reset", () => {
+  it("buyskip._index.tsx keeps loading visible until navigation completes — no premature reset", () => {
     const src = route("buyskip._index.tsx");
     assert.ok(src.includes("navigated = true"), "navigated flag set before navigate() call");
     assert.ok(src.includes("if (!navigated) setAnalyzing(false)"), "analyzing only reset when not navigating");
@@ -1049,5 +1054,15 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     const src = route("buyskip.$id.tsx");
     assert.ok(src.includes("concernSolutions"), "concernSolutions derived from concernEval.solutions");
     assert.ok(src.includes("bos-concern-solutions"), "concern solutions list class applied");
+  });
+
+  it("buyskip.$id.tsx Before You Buy renders three labeled blocks — not unlabelled paragraphs", () => {
+    const src = route("buyskip.$id.tsx");
+    assert.ok(src.includes("bos-byb-blocks"), "byb blocks container class present");
+    assert.ok(src.includes("bos-byb-block-label"), "block label class present");
+    assert.ok(src.includes("Your Concern"), "Your Concern block label present");
+    assert.ok(src.includes("Fit & Practical Solution"), "Fit & Practical Solution block label present");
+    assert.ok(src.includes("Wearability"), "Wearability block label present");
+    assert.ok(src.includes("bos-byb-block-verdict"), "verdict class for justified/unsupported display");
   });
 });

@@ -1,5 +1,4 @@
 import * as React from "react";
-import { createPortal } from "react-dom";
 import { Link, useNavigate, type LinksFunction, type LoaderFunctionArgs } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -209,37 +208,29 @@ export default function BuyOrSkip() {
 
   const canAnalyze = imageUrl && category && color.length > 0 && !analyzing;
 
-  // Portal overlay — rendered into document.body to bypass any CSS containment in the layout
-  const overlay = analyzing && typeof document !== "undefined"
-    ? createPortal(
-        <div className="bos-analyzing-overlay" role="status" aria-live="polite" aria-atomic="true">
-          <div className="sm-loading-inner">
-            <h2 style={{ fontFamily: "var(--naia-ff-display)", fontSize: "32px", fontWeight: 900, fontStyle: "italic", color: "var(--naia-ink)", marginBottom: "16px" }}>
-              nAia is assessing your item...
-            </h2>
-            <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--naia-muted)", marginBottom: "40px" }}>
-              Reviewing your item against your Passport, Closet and style.
-            </p>
-            <div className="sm-loading-track">
-              <div className="sm-loading-bar" />
-            </div>
-            <p className="sm-loading-msg">{BOS_LOADING_MESSAGES[msgIndex]}</p>
+  // Loading screen — same pattern as Style Me result.tsx: return before MyNaiaLayout.
+  // sm-loading-wrap fills 100vh so no fixed/portal positioning needed.
+  if (analyzing) {
+    return (
+      <div className="sm-loading-wrap" role="status" aria-live="polite" aria-label={BOS_LOADING_MESSAGES[msgIndex]}>
+        <div className="sm-loading-inner">
+          <h2 style={{ fontFamily: "var(--naia-ff-display)", fontSize: "32px", fontWeight: 900, fontStyle: "italic", color: "var(--naia-ink)", marginBottom: "16px" }}>
+            nAia is assessing your item...
+          </h2>
+          <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--naia-muted)", marginBottom: "40px" }}>
+            Reviewing your item against your Passport, Closet and style.
+          </p>
+          <div className="sm-loading-track">
+            <div className="sm-loading-bar" />
           </div>
-        </div>,
-        document.body,
-      )
-    : null;
+          <p className="sm-loading-msg">{BOS_LOADING_MESSAGES[msgIndex]}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <MyNaiaLayout>
-      {/* Portal overlay — appended to body, bypasses layout CSS containment */}
-      {overlay}
-
-      {/* Form content — stays in DOM but non-interactive while analysing */}
-      <div
-        aria-hidden={analyzing}
-        style={{ pointerEvents: analyzing ? "none" : undefined }}
-      >
       <Link to="/my-naia" className="sp-back">← Back to Overview</Link>
 
       {/* Section shell */}
@@ -347,7 +338,6 @@ export default function BuyOrSkip() {
           )}
         </p>
       )}
-      </div>{/* end form content wrapper */}
     </MyNaiaLayout>
   );
 }

@@ -184,9 +184,9 @@ ${safeWhatLike ? `→ Agree, partly agree, or disagree? One concrete reason base
 WHAT THEY ARE UNSURE ABOUT: ${safeUnsureAbout || "(not provided)"}
 ${safeUnsureAbout ? `→ Justified, partly justified, or not supported? Be direct. If the concern is valid, say so. Then offer 2–3 specific practical solutions — e.g. for a strapless concern: supportive strapless bra, grip strips or fashion tape, tailoring the bodice, a styling layer (scarf or blazer), or trying on before committing. Do not recommend skipping without considering solutions first.` : ""}
 
-BEFORE YOU BUY — exactly 2 points (25–40 words each):
-1. FIT & SIZE — Using ONLY the Passport fit data above, explain how the item's silhouette, waist placement, volume, length and neckline are likely to work for this customer's fit preferences and size. No brand-sizing claims. No invented measurements. If Passport fit data is insufficient, state exactly: "Fit cannot be confirmed from your current Passport. Compare the garment's bust, waist and hip measurements with your own before buying."
-2. WEARABILITY — Realistically assess wear frequency given their lifestyle and occasion. State concretely how many genuine different outfits can be built with what they own. Be honest if versatility is limited.
+BEFORE YOU BUY — exactly 2 points (25–40 words each), no repeated colour/fit warnings, no unsupported brand or care claims:
+1. FIT & PRACTICAL SOLUTION — Using ONLY the Passport fit data above, explain in one sentence how the item's silhouette, waist placement and length may work for this customer. Then give 1–2 concrete practical actions: compare garment measurements with their own, try it on before committing, adjust the waistband, tailor the length, or style with a higher-coverage layer when relevant. No brand-sizing claims. No invented measurements. If Passport fit data is insufficient, state: "Fit cannot be confirmed from your current Passport. Compare the garment's bust, waist and hip measurements with your own before buying."
+2. WEARABILITY — In 1–2 short sentences: whether the item suits the entered occasion, whether it can realistically be worn more than once, and whether it fits the customer's lifestyle. Be honest if versatility is limited. Do not repeat colour commentary.
 
 REPETITION RULE: Each colour, concern or trait appears ONCE across the entire response. Never repeat Final Condition reasoning in any earlier section.
 
@@ -223,7 +223,7 @@ Respond ONLY with valid JSON, no markdown:
   "occasions": [],
   "naiaMatch": { "title": "...", "reason": "≤20 words" },
   "naiaMatchRelationship": "complement" or "alternative",
-  "beforeYouBuy": ["Fit & Size: 25–40 words using only Passport fit data — or the exact missing-data statement", "Wearability: 25–40 words on realistic wear frequency and outfit versatility"],
+  "beforeYouBuy": ["Fit & Practical Solution: 25–40 words — silhouette assessment + 1–2 concrete practical actions, or exact missing-data statement", "Wearability: 25–40 words — occasion suitability, realistic wear frequency, lifestyle fit"],
   "buyIf": "≤20 words — the one concrete condition that justifies buying",
   "skipIf": "≤20 words — the one concrete condition that makes this a mistake",
   "finalThought": "ONE sentence max 30 words — style type + entered occasion + main condition. No filler. Example: 'A strong match for your minimalist style and brunch occasions, but only buy it if you know strapless styles fit and feel secure on you.'"

@@ -238,20 +238,18 @@ export default function BuyOrSkipResult() {
           </div>
         </div>
 
-        {/* ── Before You Buy ───────────────────────────────────────────────── */}
+        {/* ── Before You Buy — three labeled compact blocks ───────────────── */}
         {(concernEval || beforeYouBuy.length > 0) && (
           <div className="bos-result-section">
             <div className="bos-result-section-label">Before You Buy</div>
-            <div className="bos-result-section-body">
+            <div className="bos-byb-blocks">
 
-              {/* Your concern + practical solutions */}
+              {/* Block 1: Your Concern */}
               {concernEval && (
-                <div className="bos-result-section-row">
-                  <strong>
-                    Your concern — {cap(concernEval.concern || analysis.unsureAbout || "")}
-                  </strong>
-                  {" — "}
-                  {cap(concernEval.justified)}.{" "}{concernEval.explanation}
+                <div className="bos-byb-block">
+                  <div className="bos-byb-block-label">Your Concern</div>
+                  <div className="bos-byb-block-verdict">{cap(concernEval.justified)}</div>
+                  <div className="bos-byb-block-text">{concernEval.explanation}</div>
                   {concernSolutions.length > 0 && (
                     <ul className="bos-concern-solutions">
                       {concernSolutions.map((s: string, i: number) => (
@@ -262,10 +260,21 @@ export default function BuyOrSkipResult() {
                 </div>
               )}
 
-              {/* Fit & Size + Wearability from AI */}
-              {beforeYouBuy.map((point: string, i: number) => (
-                <div key={i} className="bos-result-section-row">{point}</div>
-              ))}
+              {/* Block 2: Fit & Practical Solution */}
+              {beforeYouBuy[0] && (
+                <div className="bos-byb-block">
+                  <div className="bos-byb-block-label">Fit & Practical Solution</div>
+                  <div className="bos-byb-block-text">{beforeYouBuy[0]}</div>
+                </div>
+              )}
+
+              {/* Block 3: Wearability */}
+              {beforeYouBuy[1] && (
+                <div className="bos-byb-block">
+                  <div className="bos-byb-block-label">Wearability</div>
+                  <div className="bos-byb-block-text">{beforeYouBuy[1]}</div>
+                </div>
+              )}
             </div>
           </div>
         )}
