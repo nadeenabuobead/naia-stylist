@@ -88,8 +88,12 @@ export default function BuyOrSkipResult() {
   const concernEval   = fa?.concernEval    ?? null;
   const detectedColor: string | null = typeof fa?.detectedColor === "string" && fa.detectedColor.trim()
     ? fa.detectedColor.trim() : null;
+  const stripByBPrefix = (s: string) =>
+    s.replace(/^(Fit\s*(?:&|and)\s*Practical\s*Solution|Wearability)\s*:\s*/i, "");
   const beforeYouBuy: string[] = Array.isArray(fa?.beforeYouBuy)
-    ? fa.beforeYouBuy.filter((s: any) => typeof s === "string" && s.trim())
+    ? fa.beforeYouBuy
+        .filter((s: any) => typeof s === "string" && s.trim())
+        .map((s: string) => stripByBPrefix(s.trim()))
     : [];
   const buyIf  = typeof fa?.buyIf  === "string" && fa.buyIf.trim()  ? fa.buyIf.trim()  : null;
   const skipIf = typeof fa?.skipIf === "string" && fa.skipIf.trim() ? fa.skipIf.trim() : null;
@@ -103,13 +107,14 @@ export default function BuyOrSkipResult() {
     && selectedColors.length > 0
     && !selectedColors.some(c => detectedColor.toLowerCase().includes(c.toLowerCase()));
 
-  const renderablePairings: Array<{ name: string; reason: string | null }> = [];
+  const renderablePairings: Array<{ occasion: string | null; name: string; reason: string | null }> = [];
   if (fa?.closetPairings && Array.isArray(fa.closetPairings)) {
     for (const p of fa.closetPairings) {
       if (!p || typeof p !== "object") continue;
       const name = typeof p.name === "string" && p.name.trim() ? p.name.trim() : null;
       if (!name) continue;
       renderablePairings.push({
+        occasion: typeof p.occasion === "string" && p.occasion.trim() ? p.occasion.trim() : null,
         name,
         reason: typeof p.reason === "string" && p.reason.trim() ? p.reason.trim() : null,
       });
@@ -188,12 +193,16 @@ export default function BuyOrSkipResult() {
           <div className="bos-result-section-label">Why It Works</div>
           <div className="bos-result-section-body">
 
-            {/* Occasion — "Occasion Match — Strong for Brunch with friends." */}
-            {analysis.forOccasion && occasionFit && (
+            {/* Occasion — use AI-normalized label when available, fall back to user input */}
+            {(analysis.forOccasion || occasionFit?.occasion) && occasionFit && (
               <div className="bos-result-section-row">
                 <strong>
                   Occasion Match — {occasionFit.fits ? "Strong" : "Not Ideal"}{" for "}
-                  {cap(analysis.forOccasion)}
+                  {cap(
+                    typeof occasionFit.occasion === "string" && occasionFit.occasion.trim()
+                      ? occasionFit.occasion.trim()
+                      : analysis.forOccasion
+                  )}
                 </strong>
                 {". "}
                 {occasionFit.explanation}
@@ -288,8 +297,11 @@ export default function BuyOrSkipResult() {
                 <li key={i} className="bos-result-reason">
                   <span className="bos-result-reason-dash" aria-hidden />
                   <span>
-                    <strong>{p.name}</strong>
-                    {p.reason && <span> — {p.reason}</span>}
+                    {p.occasion
+                      ? <><strong>{p.occasion}</strong>{" — "}{p.name}</>
+                      : <strong>{p.name}</strong>
+                    }
+                    {!p.occasion && p.reason && <span> — {p.reason}</span>}
                   </span>
                 </li>
               ))}

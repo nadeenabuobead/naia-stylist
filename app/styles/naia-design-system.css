@@ -2018,7 +2018,7 @@ a.mn-action:focus-visible,
 .bos-link:hover { color: var(--naia-accent); }
 .bos-error { font-family: var(--naia-ff-ui); font-size: 11px; letter-spacing: 0.5px; color: var(--naia-accent); margin-top: 4px; }
 .bos-result { margin-top: 32px; }
-.bos-verdict { font-family: var(--naia-ff-display); font-size: 13px; letter-spacing: 0.32em; text-transform: uppercase; color: var(--naia-accent); margin-bottom: 16px; }
+.bos-verdict { font-family: var(--naia-ff-display); font-size: 13px; letter-spacing: 0.32em; text-transform: uppercase; color: var(--naia-accent); margin-bottom: 16px; white-space: nowrap; }
 .bos-verdict-match { font-family: var(--naia-ff-ui); font-size: 10px; letter-spacing: 0.18em; color: var(--naia-muted); text-transform: uppercase; }
 .bos-confidence { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.2em; color: var(--naia-muted); margin-bottom: 20px; }
 .bos-result-summary { font-family: var(--naia-ff-body); font-size: 16px; line-height: 1.75; color: rgba(40, 21, 12, 0.85); max-width: 680px; margin-bottom: 32px; }

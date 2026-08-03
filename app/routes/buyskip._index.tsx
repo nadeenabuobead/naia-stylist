@@ -214,7 +214,7 @@ export default function BuyOrSkip() {
     return (
       <div className="sm-loading-wrap" role="status" aria-live="polite" aria-label={BOS_LOADING_MESSAGES[msgIndex]}>
         <div className="sm-loading-inner">
-          <h2 style={{ fontFamily: "var(--naia-ff-display)", fontSize: "32px", fontWeight: 900, fontStyle: "italic", color: "var(--naia-ink)", marginBottom: "16px" }}>
+          <h2 style={{ fontFamily: "var(--ff-editorial)", fontSize: "36px", fontWeight: 400, fontStyle: "italic", color: "var(--naia-ink)", marginBottom: "16px" }}>
             nAia is assessing your item...
           </h2>
           <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--naia-muted)", marginBottom: "40px" }}>

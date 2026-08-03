@@ -184,10 +184,10 @@ WHAT THEY LIKE: ${safeWhatLike || "(not provided)"}
 ${safeWhatLike ? `→ Agree, partly agree, or disagree? One concrete reason based on the item's actual construction — do not restate what they said.` : ""}
 
 WHAT THEY ARE UNSURE ABOUT: ${safeUnsureAbout || "(not provided)"}
-${safeUnsureAbout ? `→ Justified, partly justified, or not supported? Be direct. If the concern is valid, say so. Then offer 2–3 specific practical solutions — e.g. for a strapless concern: supportive strapless bra, grip strips or fashion tape, tailoring the bodice, a styling layer (scarf or blazer), or trying on before committing. Do not recommend skipping without considering solutions first.` : ""}
+${safeUnsureAbout ? `→ Justified, partly justified, or not supported? Use "partly justified" — not "justified" — when the concern is about fit or sizing and no measurements are on the Passport (check: all sizes show "not on record"). The concern may be valid but cannot be confirmed without trying it on. Use "justified" only when the issue is clearly visible from the item itself (e.g. colour clash, obviously unsuitable construction). Be direct. Then offer 2–3 specific practical solutions — e.g. for a strapless concern: supportive strapless bra, grip strips or fashion tape, tailoring the bodice, a styling layer (scarf or blazer), or trying on before committing. Do not recommend skipping without considering solutions first.` : ""}
 
-BEFORE YOU BUY — exactly 2 points (25–40 words each), no repeated colour/fit warnings, no unsupported brand or care claims:
-1. FIT & PRACTICAL SOLUTION — Using ONLY the Passport fit data above, explain in one sentence how the item's silhouette, waist placement and length may work for this customer. Then give 1–2 concrete practical actions: compare garment measurements with their own, try it on before committing, adjust the waistband, tailor the length, or style with a higher-coverage layer when relevant. No brand-sizing claims. No invented measurements. If Passport fit data is insufficient, state: "Fit cannot be confirmed from your current Passport. Compare the garment's bust, waist and hip measurements with your own before buying."
+BEFORE YOU BUY — exactly 2 points (25–40 words each), no repeated colour/fit warnings, no unsupported brand or care claims. IMPORTANT: do NOT begin either point with a label such as "Fit & Practical Solution:" or "Wearability:" — the card headings already show these labels:
+1. FIT & PRACTICAL SOLUTION — Using ONLY the Passport fit data above, explain in one sentence how the item's silhouette, waist placement and length may work for this customer. Then give 1–2 concrete practical actions: compare garment measurements with their own, try it on before committing, adjust the waistband, tailor the length, or style with a higher-coverage layer when relevant. No brand-sizing claims. No invented measurements. If Passport fit data is insufficient, state exactly: "Fit cannot be confirmed from your current Passport. Compare the garment's bust, waist and hip measurements with your own before buying."
 2. WEARABILITY — In 1–2 short sentences: whether the item suits the entered occasion, whether it can realistically be worn more than once, and whether it fits the customer's lifestyle. Be honest if versatility is limited. Do not repeat colour commentary.
 
 REPETITION RULE: Each colour, concern or trait appears ONCE across the entire response. Never repeat Final Condition reasoning in any earlier section.
@@ -199,7 +199,7 @@ NAIA COLLECTION (pick naiaMatch ONLY from this list, exact title):
 ${fallbackProducts.map(p => `- ${p.title}`).join("\n")}
 
 STRICT RULES:
-1. closetPairings: ONLY use items from the compatible Closet candidates list above; never invent items; return [] when none listed
+1. closetPairings: ONLY items from the compatible Closet candidates list above; never invent items; return [] when none listed. Each entry must include a specific occasion context in the "occasion" field (e.g. "For brunch", "For evening", "For work", "For weekends").
 2. naiaMatch: ONLY from the nAia collection list — exact title only (no URL)
 3. occasions: ${safeOccasion ? `Include "${safeOccasion}" ONLY if the item genuinely suits it.` : "Suggest appropriate occasions."}
 4. naiaMatchRelationship: set "complement" if the NADINE piece is worn WITH the uploaded item; set "alternative" if it is a better replacement instead
@@ -217,15 +217,15 @@ Respond ONLY with valid JSON, no markdown:
     "color": "≤15 words — how the item colour works with their favourites and closet",
     "versatility": "≤15 words"
   },
-  "occasionFit": ${safeOccasion ? `{ "occasion": "${safeOccasion}", "fits": true or false, "explanation": "≤25 words — concrete reason", "stylingTip": "≤20 words" }` : "null"},
+  "occasionFit": ${safeOccasion ? `{ "occasion": "rewrite as a natural noun phrase — the activity only, no item category (e.g. 'evening dining', 'brunch', 'casual outings', 'work meetings')", "fits": true or false, "explanation": "≤20 words — one concrete reason referencing the item's formality", "stylingTip": "≤15 words — one specific action" }` : "null"},
   "whatLikeEval": ${safeWhatLike ? `{ "aspect": "${safeWhatLike.slice(0,80)}", "agreement": "agree" or "partly agree" or "disagree", "explanation": "≤20 words — based on item's actual properties" }` : "null"},
   "concernEval": ${safeUnsureAbout ? `{ "concern": "${safeUnsureAbout.slice(0,80)}", "justified": "justified" or "partly justified" or "not supported", "explanation": "≤20 words — direct assessment", "solutions": ["specific practical solution 1", "specific practical solution 2"] }` : "null"},
-  "closetPairings": [{"name": "...", "reason": "≤15 words"}],
+  "closetPairings": [{"occasion": "For [specific moment e.g. brunch, evening, work, weekends]", "name": "exact item name from the list above", "reason": "≤8 words — how it works with this specific item"}],
   "fillsGap": null or "≤15 words",
   "occasions": [],
-  "naiaMatch": { "title": "...", "reason": "≤20 words" },
+  "naiaMatch": { "title": "...", "reason": "≤20 words — silhouette, colour, or proportion link to the uploaded item only. NOT mood/lifestyle/abstract ('celebrates being noticed', 'embodies confidence') — only physical styling facts: cut, colour coordination, length contrast, texture echo." },
   "naiaMatchRelationship": "complement" or "alternative",
-  "beforeYouBuy": ["Fit & Practical Solution: 25–40 words — silhouette assessment + 1–2 concrete practical actions, or exact missing-data statement", "Wearability: 25–40 words — occasion suitability, realistic wear frequency, lifestyle fit"],
+  "beforeYouBuy": ["25–40 words — silhouette and fit assessment + 1–2 concrete practical actions, or exact missing-data statement. Start directly with the content, no label prefix.", "25–40 words — occasion suitability, realistic wear frequency, lifestyle fit. Start directly with the content, no label prefix."],
   "buyIf": "≤20 words — the one concrete condition that justifies buying",
   "skipIf": "≤20 words — the one concrete condition that makes this a mistake",
   "finalThought": "ONE sentence max 30 words — style type + entered occasion + main condition. No filler. Example: 'A strong match for your minimalist style and brunch occasions, but only buy it if you know strapless styles fit and feel secure on you.'"
@@ -269,6 +269,7 @@ Respond ONLY with valid JSON, no markdown:
       .map(p => {
         let rawName = null;
         let rawReason = null;
+        let rawOccasion = null;
         if (typeof p === "string") {
           rawName = p;
         } else if (p !== null && typeof p === "object" && !Array.isArray(p)) {
@@ -277,13 +278,14 @@ Respond ONLY with valid JSON, no markdown:
           const titleVal = typeof p.title === "string" && p.title.trim() !== "" ? p.title : null;
           rawName = nameVal ?? itemVal ?? titleVal;
           rawReason = typeof p.reason === "string" && p.reason.trim() !== "" ? p.reason.trim() : null;
+          rawOccasion = typeof p.occasion === "string" && p.occasion.trim() !== "" ? p.occasion.trim() : null;
         } else {
           return null;
         }
         if (typeof rawName !== "string" || rawName.trim() === "") return null;
         const canonical = eligibleClosetNameMap.get(rawName.toLowerCase().trim());
         if (!canonical) return null;
-        return { name: canonical, reason: rawReason };
+        return { occasion: rawOccasion, name: canonical, reason: rawReason };
       })
       .filter(p => p !== null && !seen.has(p.name) && seen.add(p.name));
 
