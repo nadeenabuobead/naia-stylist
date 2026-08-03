@@ -72,14 +72,12 @@ function UploadRow({
         ? <img src={imageUrl} alt="Uploaded preview" className="bos-upload-row-preview" />
         : onFile
           ? (
-            <label htmlFor={inputId}>
+            <label htmlFor={inputId} className="bos-upload-btn">
               <input id={inputId} type="file" accept="image/*"
                 {...(capture ? { capture } : {})}
                 onChange={e => e.target.files?.[0] && onFile(e.target.files[0])}
                 style={{ display: "none" }} />
-              <span className="bos-upload-btn">
-                {uploading ? "Uploading…" : buttonLabel}
-              </span>
+              {uploading ? "Uploading…" : buttonLabel}
             </label>
           )
           : <button type="button" className="bos-upload-btn" disabled>{buttonLabel}</button>
