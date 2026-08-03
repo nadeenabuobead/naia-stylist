@@ -4,7 +4,6 @@ import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
-import { verdictHeading, isSkipVerdict } from "~/lib/buy-skip-utils";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
@@ -75,8 +74,24 @@ export default function BuyOrSkipResult() {
   const fa = analysis.fullAnalysis;
 
   // ── Derived display values ────────────────────────────────────────────────
-  // fullAnalysis.verdict preserves "SKIP FOR NOW"; DB verdict only stores BUY/SKIP/MAYBE/INCOMPLETE
-  const verdict       = fa?.verdict        ?? analysis.verdict;
+  // displayVerdict is the single canonical verdict string used for BOTH the badge
+  // label and the section heading. Computed once from fullAnalysis.verdict (which
+  // preserves "SKIP FOR NOW"), normalised to remove any whitespace variation from
+  // AI output. Never re-derived from the DB field separately.
+  const displayVerdict = String(
+    (fa?.verdict ?? analysis.verdict) ?? ""
+  ).trim().replace(/\s+/g, " ").toUpperCase();
+
+  // Deterministic heading — inline mapping so there is no indirection layer
+  const analysisHeading =
+    displayVerdict === "BUY"
+      ? "Why It Works"
+      : displayVerdict === "SKIP FOR NOW" || displayVerdict === "MAYBE"
+        ? "Why It May Not Work Yet"
+        : "Why It Doesn't Work";
+
+  const skipResult = displayVerdict === "SKIP" || displayVerdict === "SKIP FOR NOW";
+
   const confidence    = fa?.confidence     ?? analysis.confidence;
   const finalThought  = fa?.finalThought   ?? analysis.reasoning;
   const details       = fa?.detailedAnalysis ?? null;
@@ -98,11 +113,6 @@ export default function BuyOrSkipResult() {
   const skipIf = typeof fa?.skipIf === "string" && fa.skipIf.trim() ? fa.skipIf.trim() : null;
   const betterDirection: string | null = typeof fa?.betterDirection === "string" && fa.betterDirection.trim()
     ? fa.betterDirection.trim() : null;
-
-  // Use the same raw AI verdict that populates the badge — normalised via utility so
-  // whitespace variations in AI output can't cause a mismatch between the badge and heading.
-  const analysisHeading = verdictHeading(verdict);
-  const skipResult      = isSkipVerdict(verdict);
 
   const displayType = fa?.itemType ?? analysis.category;
 
@@ -181,7 +191,7 @@ export default function BuyOrSkipResult() {
         {/* Right: verdict + match + summary */}
         <div className="bos-result-hero-content">
           <div className="bos-verdict">
-            {verdict}
+            {displayVerdict}
             {typeof confidence === "number" && confidence > 0 && (
               <span className="bos-verdict-match"> — {confidence}% MATCH</span>
             )}

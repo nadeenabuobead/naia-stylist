@@ -2041,11 +2041,11 @@ a.mn-action:focus-visible,
 .bos-occasion-tag { padding: 4px 10px; background: var(--naia-tint); color: var(--naia-accent); font-size: 11px; font-family: var(--naia-ff-ui); }
 
 /* Result page — item image hero */
-/* Result page — desktop hero: image left (capped 43%), verdict right, vertically centred */
-.bos-result-hero { display: grid; grid-template-columns: minmax(0, 43%) 1fr; gap: 40px; align-items: center; margin-bottom: 8px; }
-.bos-result-hero-image { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+/* Result page — desktop hero: image left (32-36%), verdict right, vertically centred */
+.bos-result-hero { display: grid; grid-template-columns: minmax(0, 34%) 1fr; gap: 32px; align-items: center; margin-bottom: 8px; }
+.bos-result-hero-image { min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .bos-result-hero-content { padding-top: 0; align-self: center; }
-.bos-result-hero .bos-result-item-img { width: 100%; height: auto; max-height: 480px; object-fit: contain; object-position: center top; }
+.bos-result-hero .bos-result-item-img { width: 100%; max-width: 360px; height: auto; max-height: 420px; object-fit: contain; object-position: center top; }
 .bos-result-item-wrap { margin-bottom: 24px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .bos-result-item-img { max-height: 380px; max-width: 100%; width: auto; height: auto; border: 1px solid var(--naia-border-mid); display: block; }
 .bos-result-item-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
@@ -2129,8 +2129,8 @@ a.mn-action:focus-visible,
   .bos-decisions-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
   .bos-glance-row { grid-template-columns: 1fr; gap: 2px; }
   /* Hero stacks vertically on mobile */
-  .bos-result-hero { grid-template-columns: 1fr; gap: 20px; align-items: start; }
-  .bos-result-hero .bos-result-item-img { max-height: min(70vw, 340px); }
+  .bos-result-hero { grid-template-columns: 1fr; gap: 16px; align-items: start; }
+  .bos-result-hero .bos-result-item-img { max-width: 100%; max-height: 300px; }
 }
 
 /* ── Settings (set-*) ────────────────────────────────────────────────────── */
