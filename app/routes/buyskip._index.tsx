@@ -216,12 +216,11 @@ export default function BuyOrSkip() {
     return (
       <div className="sm-loading-wrap" role="status" aria-live="polite" aria-label={BOS_LOADING_MESSAGES[msgIndex]}>
         <div className="sm-loading-inner">
-          <h2 style={{ fontSize: "36px", lineHeight: 1.1, marginBottom: "16px" }}>
-            <span style={{ fontFamily: "var(--ff-editorial)", fontStyle: "italic", fontWeight: 400, color: "var(--lipstick)" }}>nAia</span>
-            {" "}
-            <span className="bos-loading-phrase" style={{ fontFamily: "var(--ff-display)", fontStyle: "normal", fontWeight: 200, textTransform: "uppercase", letterSpacing: "0.02em", color: "var(--naia-ink)" }}>is assessing your item...</span>
+          <h2 style={{ fontSize: "36px", lineHeight: 1.1, marginBottom: "16px", fontFamily: "var(--ff-editorial)", fontStyle: "italic", fontWeight: 400, color: "var(--naia-ink)" }}>
+            <span style={{ color: "var(--lipstick)" }}>nAia</span>
+            {" is assessing your item..."}
           </h2>
-          <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--naia-muted)", marginBottom: "40px" }}>
+          <p style={{ fontFamily: "var(--ff-display)", fontSize: "18px", fontStyle: "normal", fontWeight: 200, letterSpacing: "0.05em", color: "var(--naia-muted)", marginBottom: "40px" }}>
             Reviewing your item against your Passport, Closet and style.
           </p>
           <div className="sm-loading-track">

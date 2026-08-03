@@ -914,8 +914,9 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     assert.ok(src.includes("sm-loading-track"), "reuses sm-loading-track class");
     assert.ok(src.includes("sm-loading-bar"), "reuses sm-loading-bar class");
     assert.ok(src.includes("sm-loading-msg"), "reuses sm-loading-msg class");
-    assert.ok(src.includes("bos-loading-phrase"), "loading phrase uses bos-loading-phrase class");
+    assert.ok(src.includes('"var(--ff-editorial)"'), "loading h2 uses editorial font for full sentence");
     assert.ok(src.includes("is assessing your item"), "loading heading contains assessing phrase");
+    assert.ok(src.includes('"var(--ff-display)"'), "supporting line uses display font (Oswald)");
   });
 
   it("buyskip._index.tsx overlay has role=status and aria-live for accessible live status", () => {
