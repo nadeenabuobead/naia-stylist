@@ -20,10 +20,21 @@ if (host === "localhost") {
   hmrConfig = { protocol: "wss", host: host, port: parseInt(process.env.FRONTEND_PORT) || 8002, clientPort: 443 };
 }
 
-export default defineConfig({
-  base: process.env.SHOPIFY_APP_URL
+// For Vercel preview branch deployments SHOPIFY_APP_URL points to the
+// main-branch auto-alias, which won't have new-hash assets from the feature
+// branch. Use the deployment-specific VERCEL_URL so the browser fetches
+// assets from the same build that served the HTML.
+const assetBase = (() => {
+  if (process.env.VERCEL_ENV === "preview" && process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}/`;
+  }
+  return process.env.SHOPIFY_APP_URL
     ? `${process.env.SHOPIFY_APP_URL}/`
-    : "/",
+    : "/";
+})();
+
+export default defineConfig({
+  base: assetBase,
   server: {
     allowedHosts: [host],
     cors: { preflightContinue: true },

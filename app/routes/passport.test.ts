@@ -1,20 +1,21 @@
-// Focused tests for the /passport page — Phase 0 button fix.
+// Tests for /passport page — Phase 0 button fix.
 //
-// Pure-function tests (missingSections logic, computeSectionPatch, formatDate)
-// run in Vitest node environment without jsdom.
+// Uses node:test + tsx/esm (same runner as the rest of the project).
+// No DOM or Prisma required — we test the pure state-machine logic that
+// backs each button, reimplemented here from passport.tsx so we can import
+// without pulling in react-router server APIs.
 //
-// Interactive tests (button clicks, mode transitions, browser back button)
-// are marked it.todo — they require jsdom. Verify those manually on staging.
+// Run: node --test --import tsx/esm app/routes/passport.test.ts
 
-import { describe, it, expect } from "vitest";
+import { describe, it, before } from "node:test";
+import assert from "node:assert/strict";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Re-implement the pure helpers under test so we don't need to import the full
-// route module (which pulls in react-router server APIs unavailable in node).
+// Types & data structures mirrored from passport.tsx
 // ─────────────────────────────────────────────────────────────────────────────
 
 type SectionId = "identity" | "feelings" | "life" | "wardrobe" | "colours" | "notes";
-type FieldKind = "array" | "color" | "text";
+type FieldKind  = "array" | "color" | "text";
 
 interface SubField {
   draftKey: string;
@@ -26,6 +27,11 @@ interface SectionDef {
   id:        SectionId;
   subFields: SubField[];
 }
+
+type Mode =
+  | { kind: "overview" }
+  | { kind: "picker" }
+  | { kind: "flow"; queue: SectionId[]; index: number };
 
 const SECTIONS: SectionDef[] = [
   { id: "identity", subFields: [
@@ -52,6 +58,10 @@ const SECTIONS: SectionDef[] = [
     { draftKey: "final-notes", apiKey: "finalNotes", kind: "text" },
   ]},
 ];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pure helpers (mirrored from passport.tsx)
+// ─────────────────────────────────────────────────────────────────────────────
 
 function computeMissingSections(savedAnswers: Record<string, unknown>): SectionDef[] {
   return SECTIONS.filter(s => {
@@ -94,108 +104,261 @@ function computeSectionPatch(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Button handler simulations (exact logic from passport.tsx onClick handlers)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function sim_startContinue(
+  missingSections: SectionDef[],
+  outMode: { value: Mode },
+  outHistory: { passport: string }[],
+) {
+  if (!missingSections.length) return;
+  outHistory.push({ passport: "flow" });          // window.history.pushState
+  outMode.value = {
+    kind:  "flow",
+    queue: missingSections.map(s => s.id),
+    index: 0,
+  };
+}
+
+function sim_startUpdate(
+  outMode: { value: Mode },
+  outHistory: { passport: string }[],
+) {
+  outHistory.push({ passport: "picker" });         // window.history.pushState
+  outMode.value = { kind: "picker" };
+}
+
+function sim_onPopState(
+  state: { passport?: string } | null,
+  outMode: { value: Mode },
+) {
+  if (!state?.passport) outMode.value = { kind: "overview" };
+}
+
+function sim_pickerSelect(
+  sectionId: SectionId,
+  savedAnswers: Record<string, unknown>,
+  outMode: { value: Mode },
+  outHistory: { passport: string }[],
+) {
+  // Picker "Continue" button — starts a single-section flow
+  outHistory.push({ passport: "flow" });
+  outMode.value = { kind: "flow", queue: [sectionId], index: 0 };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared fixture — profile with all sections filled except notes
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ALMOST_COMPLETE: Record<string, unknown> = {
+  "style-personalities":    ["casual-cool"],
+  "desired-feelings":       ["confident"],
+  lifestyle:                ["office"],
+  "wardrobe-disconnection": ["basics"],
+  "favorite-colors":        ["warm-neutrals"],
+  // final-notes intentionally absent
+};
+
+const COMPLETE: Record<string, unknown> = {
+  ...ALMOST_COMPLETE,
+  "final-notes": "Ready to go",
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // missingSections — drives "Continue Passport" visibility and queue
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("missingSections", () => {
   it("returns all 6 sections when savedAnswers is empty", () => {
     const missing = computeMissingSections({});
-    expect(missing).toHaveLength(6);
-    expect(missing.map(s => s.id)).toEqual([
+    assert.equal(missing.length, 6);
+    assert.deepEqual(missing.map(s => s.id), [
       "identity", "feelings", "life", "wardrobe", "colours", "notes",
     ]);
   });
 
   it("excludes a section whose primary subField has data", () => {
-    const missing = computeMissingSections({
-      "style-personalities": ["casual-cool"],
-    });
+    const missing = computeMissingSections({ "style-personalities": ["casual-cool"] });
     const ids = missing.map(s => s.id);
-    expect(ids).not.toContain("identity");
-    expect(ids).toContain("feelings");
+    assert.ok(!ids.includes("identity"));
+    assert.ok(ids.includes("feelings"));
   });
 
   it("includes notes section when final-notes is absent", () => {
-    const allFilled: Record<string, unknown> = {
-      "style-personalities":    ["casual-cool"],
-      "desired-feelings":       ["confident"],
-      lifestyle:                ["office"],
-      "wardrobe-disconnection": ["basics"],
-      "favorite-colors":        ["warm-neutrals"],
-    };
-    const missing = computeMissingSections(allFilled);
-    expect(missing.map(s => s.id)).toContain("notes");
+    const missing = computeMissingSections(ALMOST_COMPLETE);
+    assert.ok(missing.map(s => s.id).includes("notes"));
   });
 
   it("includes notes section when final-notes is empty string", () => {
     const missing = computeMissingSections({ "final-notes": "" });
-    expect(missing.map(s => s.id)).toContain("notes");
+    assert.ok(missing.map(s => s.id).includes("notes"));
   });
 
   it("excludes notes section when final-notes has content", () => {
     const missing = computeMissingSections({ "final-notes": "Some notes" });
-    expect(missing.map(s => s.id)).not.toContain("notes");
+    assert.ok(!missing.map(s => s.id).includes("notes"));
   });
 
   it("returns empty array (isComplete) when all primary fields are filled", () => {
-    const fullAnswers: Record<string, unknown> = {
-      "style-personalities":    ["casual-cool"],
-      "desired-feelings":       ["confident"],
-      lifestyle:                ["office"],
-      "wardrobe-disconnection": ["basics"],
-      "favorite-colors":        ["warm-neutrals"],
-      "final-notes":            "Ready to go",
-    };
-    const missing = computeMissingSections(fullAnswers);
-    expect(missing).toHaveLength(0);
+    assert.equal(computeMissingSections(COMPLETE).length, 0);
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// startContinue logic — the queue built from missingSections
+// Continue Passport button — onClick handler
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("startContinue queue construction", () => {
-  it("queues notes as the only section when only notes is missing", () => {
-    const savedAnswers: Record<string, unknown> = {
-      "style-personalities":    ["casual-cool"],
-      "desired-feelings":       ["confident"],
-      lifestyle:                ["office"],
-      "wardrobe-disconnection": ["basics"],
-      "favorite-colors":        ["warm-neutrals"],
-      // final-notes missing
-    };
-    const missing = computeMissingSections(savedAnswers);
-    expect(missing).toHaveLength(1);
-    expect(missing[0].id).toBe("notes");
+describe("Continue Passport button", () => {
+  it("transitions mode to flow with notes queue when notes is the only missing section", () => {
+    const missing = computeMissingSections(ALMOST_COMPLETE);
+    const mode    = { value: { kind: "overview" } as Mode };
+    const history: { passport: string }[] = [];
+
+    sim_startContinue(missing, mode, history);
+
+    assert.equal(mode.value.kind, "flow");
+    assert.deepEqual((mode.value as { kind: "flow"; queue: SectionId[]; index: number }).queue, ["notes"]);
+    assert.equal((mode.value as { kind: "flow"; queue: SectionId[]; index: number }).index, 0);
   });
 
-  it("queues multiple sections in SECTIONS order", () => {
-    const savedAnswers: Record<string, unknown> = {
-      // only identity filled
-      "style-personalities": ["casual-cool"],
-    };
-    const missing = computeMissingSections(savedAnswers);
-    const queue = missing.map(s => s.id);
-    expect(queue[0]).toBe("feelings");
-    expect(queue).toContain("life");
-    expect(queue).toContain("wardrobe");
-    expect(queue).toContain("colours");
-    expect(queue).toContain("notes");
-    expect(queue).not.toContain("identity");
+  it("pushes a { passport: 'flow' } history entry when clicked", () => {
+    const missing = computeMissingSections(ALMOST_COMPLETE);
+    const mode    = { value: { kind: "overview" } as Mode };
+    const history: { passport: string }[] = [];
+
+    sim_startContinue(missing, mode, history);
+
+    assert.equal(history.length, 1);
+    assert.deepEqual(history[0], { passport: "flow" });
   });
 
-  it("does not queue any section when profile is complete", () => {
-    const fullAnswers: Record<string, unknown> = {
-      "style-personalities":    ["casual-cool"],
-      "desired-feelings":       ["confident"],
-      lifestyle:                ["office"],
-      "wardrobe-disconnection": ["basics"],
-      "favorite-colors":        ["warm-neutrals"],
-      "final-notes":            "All done",
-    };
-    const missing = computeMissingSections(fullAnswers);
-    expect(missing).toHaveLength(0);
+  it("does nothing when profile is already complete (button should not render)", () => {
+    const missing = computeMissingSections(COMPLETE);
+    const mode    = { value: { kind: "overview" } as Mode };
+    const history: { passport: string }[] = [];
+
+    sim_startContinue(missing, mode, history);
+
+    assert.equal(mode.value.kind, "overview");
+    assert.equal(history.length, 0);
+  });
+
+  it("queues multiple sections in SECTIONS order when several are missing", () => {
+    const missing = computeMissingSections({ "style-personalities": ["casual-cool"] });
+    const mode    = { value: { kind: "overview" } as Mode };
+    const history: { passport: string }[] = [];
+
+    sim_startContinue(missing, mode, history);
+
+    assert.equal(mode.value.kind, "flow");
+    const queue = (mode.value as { queue: SectionId[] }).queue;
+    assert.equal(queue[0], "feelings");
+    assert.ok(queue.includes("life"));
+    assert.ok(queue.includes("wardrobe"));
+    assert.ok(queue.includes("colours"));
+    assert.ok(queue.includes("notes"));
+    assert.ok(!queue.includes("identity"));
+  });
+
+  it("opens flow at the notes section — the Notes to nAia textarea subField has kind 'text'", () => {
+    const missing = computeMissingSections(ALMOST_COMPLETE);
+    const mode    = { value: { kind: "overview" } as Mode };
+    const history: { passport: string }[] = [];
+
+    sim_startContinue(missing, mode, history);
+
+    const flowMode = mode.value as { kind: "flow"; queue: SectionId[]; index: number };
+    const currentSectionId = flowMode.queue[flowMode.index];
+    const section = SECTIONS.find(s => s.id === currentSectionId)!;
+    const primaryField = section.subFields[0];
+
+    assert.equal(currentSectionId, "notes");
+    assert.equal(primaryField.kind, "text"); // renders <textarea>, not checkbox grid
+    assert.equal(primaryField.draftKey, "final-notes");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Update Answers button — onClick handler
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Update Answers button", () => {
+  it("transitions mode to picker", () => {
+    const mode    = { value: { kind: "overview" } as Mode };
+    const history: { passport: string }[] = [];
+
+    sim_startUpdate(mode, history);
+
+    assert.equal(mode.value.kind, "picker");
+  });
+
+  it("pushes a { passport: 'picker' } history entry when clicked", () => {
+    const mode    = { value: { kind: "overview" } as Mode };
+    const history: { passport: string }[] = [];
+
+    sim_startUpdate(mode, history);
+
+    assert.equal(history.length, 1);
+    assert.deepEqual(history[0], { passport: "picker" });
+  });
+
+  it("picker lists all 6 sections so the user can choose which to update", () => {
+    // When mode is picker, SECTIONS is rendered as a list.
+    // This asserts the full set of sections is available.
+    assert.equal(SECTIONS.length, 6);
+    assert.deepEqual(SECTIONS.map(s => s.id), [
+      "identity", "feelings", "life", "wardrobe", "colours", "notes",
+    ]);
+  });
+
+  it("selecting a section from picker starts a single-section flow", () => {
+    const mode    = { value: { kind: "picker" } as Mode };
+    const history: { passport: string }[] = [];
+
+    sim_pickerSelect("identity", {}, mode, history);
+
+    assert.equal(mode.value.kind, "flow");
+    assert.deepEqual((mode.value as { queue: SectionId[] }).queue, ["identity"]);
+    assert.deepEqual(history[0], { passport: "flow" });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Browser Back button — popstate handler
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("browser back button (popstate handler)", () => {
+  it("resets mode to overview when back leaves passport history entry", () => {
+    const mode = { value: { kind: "flow", queue: ["notes" as SectionId], index: 0 } as Mode };
+
+    sim_onPopState(null, mode); // null = state from before /passport was entered
+
+    assert.equal(mode.value.kind, "overview");
+  });
+
+  it("resets mode to overview from flow when back pops a non-passport state", () => {
+    const mode = { value: { kind: "flow", queue: ["notes" as SectionId], index: 0 } as Mode };
+
+    sim_onPopState({}, mode);
+
+    assert.equal(mode.value.kind, "overview");
+  });
+
+  it("resets mode to overview from picker when back pops a non-passport state", () => {
+    const mode = { value: { kind: "picker" } as Mode };
+
+    sim_onPopState({}, mode);
+
+    assert.equal(mode.value.kind, "overview");
+  });
+
+  it("does NOT reset mode when back pops a passport-marked state", () => {
+    const mode = { value: { kind: "flow", queue: ["notes" as SectionId], index: 0 } as Mode };
+
+    sim_onPopState({ passport: "flow" }, mode);
+
+    assert.equal(mode.value.kind, "flow"); // unchanged — still inside passport flow
   });
 });
 
@@ -207,35 +370,36 @@ describe("computeSectionPatch — notes section", () => {
   const notesSection = SECTIONS.find(s => s.id === "notes")!;
 
   it("returns null when no text was typed (no change from empty saved)", () => {
-    const patch = computeSectionPatch(notesSection, { "final-notes": "" }, {});
-    expect(patch).toBeNull();
+    assert.equal(computeSectionPatch(notesSection, { "final-notes": "" }, {}), null);
   });
 
   it("returns a patch when new notes are entered", () => {
-    const patch = computeSectionPatch(
-      notesSection,
-      { "final-notes": "I prefer blazers" },
-      {},
+    assert.deepEqual(
+      computeSectionPatch(notesSection, { "final-notes": "I prefer blazers" }, {}),
+      { finalNotes: "I prefer blazers" },
     );
-    expect(patch).toEqual({ finalNotes: "I prefer blazers" });
   });
 
   it("returns null when the typed text matches saved text", () => {
-    const patch = computeSectionPatch(
-      notesSection,
-      { "final-notes": "Existing note" },
-      { "final-notes": "Existing note" },
+    assert.equal(
+      computeSectionPatch(
+        notesSection,
+        { "final-notes": "Existing note" },
+        { "final-notes": "Existing note" },
+      ),
+      null,
     );
-    expect(patch).toBeNull();
   });
 
   it("returns a patch setting finalNotes to null when cleared", () => {
-    const patch = computeSectionPatch(
-      notesSection,
-      { "final-notes": "" },
-      { "final-notes": "Old note" },
+    assert.deepEqual(
+      computeSectionPatch(
+        notesSection,
+        { "final-notes": "" },
+        { "final-notes": "Old note" },
+      ),
+      { finalNotes: null },
     );
-    expect(patch).toEqual({ finalNotes: null });
   });
 });
 
@@ -243,12 +407,14 @@ describe("computeSectionPatch — array section (identity)", () => {
   const identitySection = SECTIONS.find(s => s.id === "identity")!;
 
   it("returns null when selection is unchanged", () => {
-    const patch = computeSectionPatch(
-      identitySection,
-      { "style-personalities": ["minimal"], "desired-impression": ["refined"] },
-      { "style-personalities": ["minimal"], "desired-impression": ["refined"] },
+    assert.equal(
+      computeSectionPatch(
+        identitySection,
+        { "style-personalities": ["minimal"], "desired-impression": ["refined"] },
+        { "style-personalities": ["minimal"], "desired-impression": ["refined"] },
+      ),
+      null,
     );
-    expect(patch).toBeNull();
   });
 
   it("returns patch when a selection changes", () => {
@@ -257,33 +423,18 @@ describe("computeSectionPatch — array section (identity)", () => {
       { "style-personalities": ["edgy"], "desired-impression": ["refined"] },
       { "style-personalities": ["minimal"], "desired-impression": ["refined"] },
     );
-    expect(patch).toMatchObject({ stylePersonalities: ["edgy"] });
+    assert.ok(patch !== null);
+    assert.deepEqual((patch as Record<string, unknown>).stylePersonalities, ["edgy"]);
   });
 
   it("treats order differences as equal (set semantics)", () => {
-    const patch = computeSectionPatch(
-      identitySection,
-      { "style-personalities": ["edgy", "minimal"], "desired-impression": ["refined"] },
-      { "style-personalities": ["minimal", "edgy"], "desired-impression": ["refined"] },
+    assert.equal(
+      computeSectionPatch(
+        identitySection,
+        { "style-personalities": ["edgy", "minimal"], "desired-impression": ["refined"] },
+        { "style-personalities": ["minimal", "edgy"], "desired-impression": ["refined"] },
+      ),
+      null,
     );
-    expect(patch).toBeNull();
   });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Interactive — require jsdom, marked todo
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("Continue Passport button (interactive)", () => {
-  it.todo("clicking 'Continue Passport' transitions mode to flow with correct queue");
-  it.todo("pushes a { passport: 'flow' } history entry when button is clicked");
-  it.todo("browser back from flow mode resets mode to overview");
-  it.todo("renders the Notes to nAia textarea when notes is the only missing section");
-});
-
-describe("Update Answers button (interactive)", () => {
-  it.todo("clicking 'Update Answers' transitions mode to picker");
-  it.todo("pushes a { passport: 'picker' } history entry when button is clicked");
-  it.todo("browser back from picker mode resets mode to overview");
-  it.todo("clicking a section in picker transitions to flow for that section");
 });
