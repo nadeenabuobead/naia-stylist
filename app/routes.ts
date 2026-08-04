@@ -3,7 +3,12 @@ import { flatRoutes } from "@react-router/fs-routes";
 import { route } from "@react-router/dev/routes";
 
 export default [
-  ...await flatRoutes(),
+  // passport.tsx is the layout parent of passport.selfie.tsx in the flat-routes
+  // naming scheme. Explicit registration of passport/selfie as a standalone route
+  // (below) conflicts with the auto-nested version flatRoutes() would create.
+  // Excluding both files here and registering them explicitly below avoids the
+  // duplicate-route definition that causes React Router to 404 /passport.
+  ...await flatRoutes({ ignoredRouteFiles: ["**/passport.tsx", "**/passport.selfie.tsx"] }),
   route("quick-style", "./routes/quick-style/_index.tsx"),
   route("onboarding/step/:step", "./routes/onboarding/step.$step.tsx"),
   route("onboarding/complete", "./routes/onboarding/complete.tsx"),
