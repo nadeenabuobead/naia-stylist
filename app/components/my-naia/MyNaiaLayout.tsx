@@ -9,7 +9,7 @@ const MY_NAIA_NAV: NavGroup[] = [
     title: "Main",
     items: [
       { to: "/my-naia", label: "Overview", exact: true },
-      { to: "/my-naia/style-passport", label: "Style Passport" },
+      { to: "/passport", label: "Style Passport" },
       { to: "/closet", label: "My Closet" },
       { to: "/style-me", label: "StyleMe" },
       { to: "/buyskip", label: "Buy or Skip" },
