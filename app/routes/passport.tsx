@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Link, useLoaderData, useRevalidator } from "react-router";
+import { Link, useLoaderData, useRevalidator, useNavigate } from "react-router";
 import { redirect, type LinksFunction, type LoaderFunctionArgs } from "react-router";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
@@ -233,6 +233,7 @@ type PendingNext = "next" | "exit" | null;
 export default function PassportPage() {
   const { savedAnswers, profileUpdatedAt } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
+  const navigate = useNavigate();
 
   const [mode,                 setMode]                 = useState<Mode>({ kind: "overview" });
   const [flowEdits,            setFlowEdits]            = useState<OnboardingAnswers>({});
@@ -251,6 +252,17 @@ export default function PassportPage() {
     [savedAnswers]
   );
   const isComplete = missingSections.length === 0;
+
+  // Browser back-button support: when the user presses back from picker or flow,
+  // the history state loses the passport marker and we reset to overview.
+  useEffect(() => {
+    function onPopState(e: PopStateEvent) {
+      const state = e.state as { passport?: string } | null;
+      if (!state?.passport) setMode({ kind: "overview" });
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []); // eslint-disable-line
 
   // Settle after revalidation
   useEffect(() => {
@@ -288,11 +300,15 @@ export default function PassportPage() {
 
   function startContinue() {
     if (!missingSections.length) return;
+    window.history.pushState({ passport: "flow" }, "");
     initEdits(missingSections[0].id);
     setMode({ kind: "flow", queue: missingSections.map(s => s.id), index: 0 });
   }
 
-  function startUpdate() { setMode({ kind: "picker" }); }
+  function startUpdate() {
+    window.history.pushState({ passport: "picker" }, "");
+    setMode({ kind: "picker" });
+  }
 
   function editSection(id: SectionId) {
     initEdits(id);
@@ -443,7 +459,7 @@ export default function PassportPage() {
           <p className="sp-status-text">
             {isComplete ? "Your Style Passport is up to date." : "A few details are still missing."}
           </p>
-          <div className="sp-status-date">Last updated · {formatDate(profileUpdatedAt)}</div>
+          <div className="sp-status-date" suppressHydrationWarning>Last updated · {formatDate(profileUpdatedAt)}</div>
         </div>
 
         <div className="sp-detail-list">
@@ -480,7 +496,7 @@ export default function PassportPage() {
   if (mode.kind === "picker") {
     return (
       <MyNaiaLayout>
-        <button type="button" className="sp-back" onClick={() => setMode({ kind: "overview" })}>
+        <button type="button" className="sp-back" onClick={() => navigate(-1)}>
           ← Back to Passport
         </button>
 
@@ -583,7 +599,7 @@ export default function PassportPage() {
           disabled={isBusy}
           onClick={() => {
             if (mode.index === 0) {
-              setMode({ kind: "overview" });
+              navigate(-1);
             } else {
               const prevId = mode.queue[mode.index - 1];
               initEdits(prevId);
