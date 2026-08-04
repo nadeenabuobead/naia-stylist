@@ -22,6 +22,7 @@ export default [
   route("my-naia-model", "./routes/my-naia-model.tsx"),
   route("settings", "./routes/settings.tsx"),
   route("post-wear-review", "./routes/post-wear-review.tsx"),
+  route("passport", "./routes/passport.tsx"),
   route("passport/selfie", "./routes/passport.selfie.tsx"),
 
 ] satisfies RouteConfig;
