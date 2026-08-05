@@ -219,9 +219,9 @@ export const quizQuestions: QuizQuestion[] = [
   {
     id: "final-notes",
     type: "text",
-    title: "Anything else you want nAia to understand about your style?",
+    title: "Anything else nAia should know about your style right now?",
     subtitle: "Optional",
-    placeholder: "e.g., I'm trying to dress more professionally, I just had a baby, I want to feel more feminine again, I have a wedding coming up, I'm entering a new chapter...",
+    placeholder: "e.g. I'm trying to dress more professionally. I just had a baby. I'm entering a new chapter and want to feel more feminine. I have a wedding in three months.",
     maxLength: 500,
   },
 ];

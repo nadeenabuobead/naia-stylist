@@ -112,7 +112,7 @@ const SECTIONS: SectionDef[] = [
   {
     id: "notes",
     label: "Notes to nAia",
-    question: "Anything nAia should always keep in mind?",
+    question: "Anything else nAia should know about your style right now?",
     helper: "Share context that wouldn't come through in selections — life changes, occasions, or specific things to avoid.",
     subFields: [
       { draftKey: "final-notes", apiKey: "finalNotes", subLabel: "Your notes to nAia", kind: "text", questionId: "final-notes" },
@@ -384,7 +384,7 @@ export default function PassportPage() {
             className="sp-textarea"
             value={val}
             maxLength={500}
-            placeholder="e.g. I'm dressing more professionally, I just had a baby, I need versatile pieces…"
+            placeholder="e.g. I'm trying to dress more professionally. I just had a baby. I'm entering a new chapter and want to feel more feminine. I have a wedding in three months."
             onChange={e => handleTextChange(sf.draftKey, e.target.value)}
           />
           <div className="sp-charcount">{val.length} / 500</div>
