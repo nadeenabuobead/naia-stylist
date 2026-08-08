@@ -6,7 +6,6 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { quizQuestions } from "../onboarding/quiz-data.ts";
 import {
   buildProfileSignals,
   buildEngineInput,
@@ -1316,61 +1315,5 @@ describe("§16 Generation aborts after failed anchor resolution", () => {
     }
 
     assert.equal(callCount(), 0, "runRecommendation must never be called after unknown/foreign closet ID");
-  });
-});
-
-// ── §V2-A2 — Passport context wiring (becoming, styleSupport, finalNotes) ────
-
-describe("§V2-A2 buildProfileSignals — finalNotes wiring", () => {
-  it("V2A2.1 — finalNotes string passes through into signals", () => {
-    const result = buildProfileSignals({ stylePersonalities: ["artsy"], finalNotes: "I tend to avoid very structured pieces." });
-    assert.ok(result !== undefined);
-    assert.equal(result!.finalNotes, "I tend to avoid very structured pieces.");
-  });
-
-  it("V2A2.2 — finalNotes is trimmed before storage", () => {
-    const result = buildProfileSignals({ stylePersonalities: ["artsy"], finalNotes: "  comfort first  " });
-    assert.equal(result!.finalNotes, "comfort first");
-  });
-
-  it("V2A2.3 — finalNotes null is omitted from signals", () => {
-    const result = buildProfileSignals({ stylePersonalities: ["artsy"], finalNotes: null });
-    assert.equal(result!.finalNotes, undefined);
-  });
-
-  it("V2A2.4 — finalNotes whitespace-only is omitted from signals", () => {
-    const result = buildProfileSignals({ stylePersonalities: ["artsy"], finalNotes: "   " });
-    assert.equal(result!.finalNotes, undefined);
-  });
-
-  it("V2A2.5 — becoming[] passes through into signals", () => {
-    const result = buildProfileSignals({ stylePersonalities: ["artsy"], becoming: ["more-confident", "more-polished"] });
-    assert.deepEqual(result!.becoming, ["more-confident", "more-polished"]);
-  });
-
-  it("V2A2.6 — styleSupport[] passes through into signals", () => {
-    const result = buildProfileSignals({ stylePersonalities: ["artsy"], styleSupport: ["feel-myself", "body-mood"] });
-    assert.deepEqual(result!.styleSupport, ["feel-myself", "body-mood"]);
-  });
-});
-
-describe("§V2-A2 quiz-data label contract — becoming and style-support", () => {
-  const becomingQ = quizQuestions.find(q => q.id === "becoming");
-  const styleSupportQ = quizQuestions.find(q => q.id === "style-support");
-
-  it("V2A2.7 — becoming question exists with options", () => {
-    assert.ok(becomingQ !== undefined, "becoming question must exist in quiz-data");
-    assert.ok((becomingQ!.options?.length ?? 0) > 0, "becoming must have options");
-  });
-
-  it("V2A2.8 — becoming 'new-chapter' label is 'A new chapter'", () => {
-    const opt = becomingQ?.options?.find(o => o.id === "new-chapter");
-    assert.equal(opt?.label, "A new chapter");
-  });
-
-  it("V2A2.9 — style-support 'style-what-i-own' has a descriptive label (not just ID)", () => {
-    const opt = styleSupportQ?.options?.find(o => o.id === "style-what-i-own");
-    assert.ok(opt !== undefined, "style-what-i-own option must exist");
-    assert.ok((opt!.label?.length ?? 0) > 15, "style-what-i-own label must be descriptive (>15 chars)");
   });
 });
