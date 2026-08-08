@@ -40,6 +40,7 @@ import {
   isFirmNo,
   isCoverageNonNegotiable,
   getStylingEffortActivationMoods,
+  readLifestyle,
 } from "./signal-contract.ts";
 
 const PTF = PRODUCT_TEMPLATE_FIELDS;
@@ -1591,5 +1592,53 @@ describe("ANSWER_REGISTRY — structural integrity", () => {
     for (const sqId of sessionQIds) {
       assert.ok(registeredQIds.has(sqId), `No answers for session question: ${sqId}`);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// readLifestyle — V2-A1 canonical lifestyle field accessor
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("readLifestyle", () => {
+  it("null returns []", () => {
+    assert.deepEqual(readLifestyle(null), []);
+  });
+
+  it("undefined returns []", () => {
+    assert.deepEqual(readLifestyle(undefined), []);
+  });
+
+  it("empty string returns []", () => {
+    assert.deepEqual(readLifestyle(""), []);
+  });
+
+  it("single value returns single-element array", () => {
+    assert.deepEqual(readLifestyle("professional"), ["professional"]);
+  });
+
+  it("comma-joined string splits correctly", () => {
+    assert.deepEqual(readLifestyle("professional,casual,creative"), ["professional", "casual", "creative"]);
+  });
+
+  it("trims whitespace around entries", () => {
+    assert.deepEqual(readLifestyle("professional, casual ,  creative  "), ["professional", "casual", "creative"]);
+  });
+
+  it("filters out empty entries from double commas", () => {
+    assert.deepEqual(readLifestyle("professional,,casual"), ["professional", "casual"]);
+  });
+
+  it("preserves stored order — does not sort", () => {
+    assert.deepEqual(readLifestyle("casual,professional,student"), ["casual", "professional", "student"]);
+  });
+
+  it("existing >3 values are returned intact — no truncation", () => {
+    const result = readLifestyle("professional,casual,creative,student,travel");
+    assert.equal(result.length, 5);
+    assert.deepEqual(result, ["professional", "casual", "creative", "student", "travel"]);
+  });
+
+  it("whitespace-only entries are filtered out", () => {
+    assert.deepEqual(readLifestyle("professional, ,casual"), ["professional", "casual"]);
   });
 });

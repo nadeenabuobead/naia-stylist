@@ -1700,3 +1700,14 @@ export function isCoverageNonNegotiable(id: string): boolean {
 export function getStylingEffortActivationMoods(): readonly string[] {
   return STYLING_EFFORT_RULE.activationMoods;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lifestyle field accessor
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Parse the comma-joined lifestyle String? into a trimmed, non-empty string array.
+ *  Preserves stored order; never truncates existing values.  Returns [] for null/empty. */
+export function readLifestyle(lifestyle: string | null | undefined): string[] {
+  if (!lifestyle) return [];
+  return lifestyle.split(",").map((s) => s.trim()).filter(Boolean);
+}

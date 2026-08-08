@@ -161,7 +161,7 @@ export function computeTryOnStatus(
 function countSignalDimensions(profile: CustomerAssessmentProfile): number {
   let count = 0;
   if (profile.stylePersonalities.length > 0) count++;
-  if (profile.desiredFeeling) count++;
+  if (profile.desiredFeelings.length > 0) count++;
   if (profile.dressesFor.length > 0) count++;
   if (profile.favoriteColors.length > 0 || profile.avoidColors.length > 0) count++;
   if (profile.fitPreferences.length > 0) count++;
@@ -306,12 +306,8 @@ export function assessProduct(
   }
 
   // ── Desired feeling ─────────────────────────────────────────────────────────
-  if (profile.desiredFeeling && product.desiredFeelingMatch.length > 0) {
-    const wantedFeelings = profile.desiredFeeling
-      .toLowerCase()
-      .split(/[,;]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+  if (profile.desiredFeelings.length > 0 && product.desiredFeelingMatch.length > 0) {
+    const wantedFeelings = profile.desiredFeelings.map((s) => s.toLowerCase());
     const overlap = product.desiredFeelingMatch.filter((m) =>
       wantedFeelings.some(
         (w) => m.toLowerCase().includes(w) || w.includes(m.toLowerCase()),

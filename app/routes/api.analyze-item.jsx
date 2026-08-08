@@ -49,8 +49,8 @@ export async function action({ request }) {
               text: `Analyze this clothing item. Known details: category=${category||"unknown"}, color=${color||"unknown"}${brand ? ", brand="+brand : ""}${itemLink ? ", product link="+itemLink : ""}. ${styleProfile ? `
 Customer Style DNA: ${styleProfile.stylePersonalities?.join(", ")}
 Favorite Colors: ${styleProfile.favoriteColors?.join(", ")}
-Lifestyle: ${styleProfile.dressesFor?.join(", ")}
-Desired Feeling: ${styleProfile.desiredFeeling}
+Lifestyle: ${styleProfile.lifestyle || "not specified"}
+Desired Feelings: ${styleProfile.desiredFeelings?.join(", ") || "not specified"}
 ` : "No style profile — general analysis."}
 ${closetItems.length > 0 ? `Their closet:\n${closetItems.map(i => `- ${i.name} (${i.category}, ${i.primaryColor})`).join("\n")}` : ""}
 

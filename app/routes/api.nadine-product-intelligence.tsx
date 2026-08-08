@@ -90,7 +90,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       if (op) {
         profile = {
           stylePersonalities: op.stylePersonalities,
-          desiredFeeling: op.desiredFeeling ?? null,
+          desiredFeelings: op.desiredFeelings,
           lifestyle: op.lifestyle ?? null,
           dressesFor: op.dressesFor,
           favoriteColors: op.favoriteColors,

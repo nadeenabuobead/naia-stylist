@@ -112,8 +112,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     stylingIdentity = `${top[0]} ${top[1]}`;
   } else if (profile?.stylePersonalities && profile.stylePersonalities.length === 1) {
     stylingIdentity = profile.stylePersonalities[0].split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-  } else if (profile?.desiredFeeling) {
-    stylingIdentity = profile.desiredFeeling;
+  } else if (profile?.desiredFeelings?.[0]) {
+    stylingIdentity = profile.desiredFeelings[0];
   }
 
 
@@ -215,8 +215,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (totalReviews >= 3) {
     if (topWorked.length > 0 && topFeelingShifts.length > 0) {
       styleDirection = `${topFeelingShifts[0]} through ${topWorked[0].toLowerCase()}`;
-    } else if (profile?.desiredFeeling) {
-      const feeling = profile.desiredFeeling.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    } else if (profile?.desiredFeelings?.[0]) {
+      const feeling = profile.desiredFeelings[0].split("-").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
       styleDirection = feeling;
     }
   }

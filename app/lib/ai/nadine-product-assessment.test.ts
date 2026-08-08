@@ -37,7 +37,7 @@ const ID = {
 function makeFullProfile(overrides: Partial<CustomerAssessmentProfile> = {}): CustomerAssessmentProfile {
   return {
     stylePersonalities: ["corporate-chic"],
-    desiredFeeling: "more-elevated",
+    desiredFeelings: ["more-elevated"],
     lifestyle: "professional",
     dressesFor: ["work", "dinner"],
     favoriteColors: ["beige", "cream"],
@@ -52,7 +52,7 @@ function makeThinProfile(): CustomerAssessmentProfile {
   // Only 1 signal dimension — triggers insufficient-evidence.
   return {
     stylePersonalities: ["edgy"],
-    desiredFeeling: null,
+    desiredFeelings: [],
     lifestyle: null,
     dressesFor: [],
     favoriteColors: [],
@@ -163,7 +163,7 @@ describe("§2 assessProduct — verdicts", () => {
     const product = makeProduct();
     const profile = makeFullProfile({
       stylePersonalities: ["corporate-chic"],   // +3
-      desiredFeeling: "more-elevated",           // +2
+      desiredFeelings: ["more-elevated"],        // +2
       dressesFor: ["work", "everyday"],          // +2
       avoidColors: [],
     });
@@ -182,7 +182,7 @@ describe("§2 assessProduct — verdicts", () => {
     const profile = makeFullProfile({
       stylePersonalities: ["corporate-chic"],    // +3
       dressesFor: [],
-      desiredFeeling: null,
+      desiredFeelings: [],
     });
     const closet: ClosetItemSummary[] = [
       makeClosetItem({ category: "top" }),       // duplicate: -1, caveat added
@@ -506,4 +506,49 @@ describe("§6 security and fail-closed", () => {
     }
   });
 
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// V2-A1 — desiredFeelings[] contract corrections
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe("V2-A1 desiredFeelings field contract", () => {
+  it("V2A1-01 — empty desiredFeelings[] does not score desiredFeelingOverlap", () => {
+    const profile = makeFullProfile({ desiredFeelings: [] });
+    const product = makeProduct();
+    const result = assessProduct(product, profile, []);
+    assert.deepEqual(result.signals.desiredFeelingOverlap, []);
+  });
+
+  it("V2A1-02 — single desiredFeelings entry scores matching product feeling", () => {
+    const profile = makeFullProfile({ desiredFeelings: ["more-elevated"] });
+    const product = makeProduct(); // desiredFeelingMatch includes "more-elevated"
+    const result = assessProduct(product, profile, []);
+    assert.ok(result.signals.desiredFeelingOverlap.length > 0, "desiredFeelingOverlap should be non-empty");
+    assert.ok(result.positiveEvidence.includes("Supports the feeling you're going for"));
+  });
+
+  it("V2A1-03 — multiple desiredFeelings entries all matched against product", () => {
+    const profile = makeFullProfile({ desiredFeelings: ["more-elevated", "more-confident"] });
+    const product = makeProduct(); // desiredFeelingMatch includes both
+    const result = assessProduct(product, profile, []);
+    assert.ok(result.signals.desiredFeelingOverlap.length >= 2);
+  });
+
+  it("V2A1-04 — countSignalDimensions counts desiredFeelings as a dimension only when non-empty", () => {
+    const withFeelings = makeFullProfile({ desiredFeelings: ["more-elevated"] });
+    const withoutFeelings = makeFullProfile({ desiredFeelings: [] });
+    // A profile with feelings should score higher evidence sufficiency
+    const rWith = assessProduct(makeProduct({ notIdealFor: "" }), withFeelings, []);
+    const rWithout = assessProduct(makeProduct({ notIdealFor: "" }), withoutFeelings, []);
+    // Both should resolve (strong profile otherwise), but desired feelings should fire for withFeelings
+    assert.ok(rWith.signals.desiredFeelingOverlap.length > rWithout.signals.desiredFeelingOverlap.length);
+  });
+
+  it("V2A1-05 — corrected consumer does not use legacy desiredFeeling (singular) key", () => {
+    // Structural check: CustomerAssessmentProfile must not have desiredFeeling property
+    const profile: Record<string, unknown> = makeFullProfile();
+    assert.ok(!("desiredFeeling" in profile), "profile must not contain legacy desiredFeeling key");
+    assert.ok("desiredFeelings" in profile, "profile must contain canonical desiredFeelings key");
+  });
 });

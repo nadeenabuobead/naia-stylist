@@ -30,7 +30,7 @@ const LOCKED_HANDLES = new Set<string>(LOCKED_CATALOGUE_HANDLES);
 function makeProfile(overrides: Partial<CustomerAssessmentProfile> = {}): CustomerAssessmentProfile {
   return {
     stylePersonalities: ["corporate-chic"],
-    desiredFeeling: "more-elevated",
+    desiredFeelings: ["more-elevated"],
     lifestyle: "professional",
     dressesFor: ["work"],
     favoriteColors: [],
