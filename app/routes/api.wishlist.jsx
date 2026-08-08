@@ -5,6 +5,7 @@ import prisma from "../db.server";
 import { emitBuySkipSubmitted, recordJourneyEventAwaited } from "../lib/ai/journey-events.server";
 import { getAllCatalogProducts } from "../lib/ai/naia-catalog";
 import { NAIA_VERIFIED_MEDIA_MAP } from "../lib/ai/naia-product-media";
+import { quizQuestions } from "../lib/onboarding/quiz-data";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -52,6 +53,12 @@ const CLOSET_COMPATIBLE_CATEGORIES = {
   "Accessory": ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"],
   "Jewelry":   ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"],
 };
+
+function optionLabel(questionId, optionId) {
+  const q = quizQuestions.find(q => q.id === questionId);
+  const opt = q?.options?.find(o => o.id === optionId);
+  return opt?.label ?? optionId.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
 
 function hashForIndex(str) {
   let h = 0;
@@ -167,6 +174,8 @@ STYLE IDENTITY
 - Desired feelings when dressed: ${styleProfile.desiredFeelings?.join(", ") || "not specified"}
 - Desired impression: ${styleProfile.desiredImpression?.length > 0 ? styleProfile.desiredImpression.join(", ") : "not specified"}
 - Fashion risk comfort (1–10): ${styleProfile.comfortLevel ?? "not specified"}
+${styleProfile.becoming?.length > 0 ? `- Style aspiration: ${styleProfile.becoming.map(id => optionLabel("becoming", id)).join(", ")}` : ""}
+${styleProfile.styleSupport?.length > 0 ? `- Style support goals: ${styleProfile.styleSupport.map(id => optionLabel("style-support", id)).join(", ")}` : ""}
 
 LIFESTYLE & OCCASIONS
 - Primary lifestyle: ${styleProfile.lifestyle || "not specified"}
@@ -186,6 +195,7 @@ FIT & BODY
 - Areas to highlight: ${styleProfile.bodyFocusAreas?.length > 0 ? styleProfile.bodyFocusAreas.join(", ") : "not on record"}
 - Areas to minimise: ${styleProfile.bodyAvoidAreas?.length > 0 ? styleProfile.bodyAvoidAreas.join(", ") : "not on record"}
 - Style struggles: ${styleProfile.styleStruggles?.length > 0 ? styleProfile.styleStruggles.join(", ") : "not specified"}
+${styleProfile.finalNotes?.trim() ? `- Customer's personal note: ${sanitize(styleProfile.finalNotes)}` : ""}
 Note: body shape, height, and body measurements are not yet in this Passport.
 
 → FIT RULE — use available signals in this priority order; never collapse them all into "fit cannot be confirmed":

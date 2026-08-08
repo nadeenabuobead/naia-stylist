@@ -73,6 +73,7 @@ export interface StyleMeProfileSignals {
   // Passport Lite — aspirational & contextual
   desiredFeelings?: string[];
   becoming?: string[];
+  finalNotes?: string;
   lifestyle?: string;
   dressesFor?: string[];
   // Body & fit

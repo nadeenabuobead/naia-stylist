@@ -6,6 +6,7 @@
 // Song: deterministic from curated catalog via selectSong().
 // Finishing layer: catalog prose fields (shoeDirection, accessoriesDirection, etc.).
 
+import { quizQuestions } from "../onboarding/quiz-data.js";
 import { runRecommendation, buildSessionFingerprint } from "./styleme-recommendation.js";
 import type {
   StyleMeEngineInput,
@@ -32,6 +33,14 @@ import type {
   StyleMeOutcome,
 } from "./styleme-result.types.js";
 
+// ── Passport option label resolver ───────────────────────────────────────────
+
+function optionLabel(questionId: string, optionId: string): string {
+  const q = quizQuestions.find((q) => q.id === questionId);
+  const opt = q?.options?.find((o) => o.id === optionId);
+  return opt?.label ?? optionId.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 // ── Profile signal builder ────────────────────────────────────────────────────
 
 export function buildProfileSignals(
@@ -43,6 +52,7 @@ export function buildProfileSignals(
     desiredImpression?: string[] | null;
     desiredFeelings?: string[] | null;
     becoming?: string[] | null;
+    finalNotes?: string | null;
     lifestyle?: string | null;
     dressesFor?: string[] | null;
     bodyFocusAreas?: string[] | null;
@@ -59,6 +69,7 @@ export function buildProfileSignals(
   if (profile.desiredImpression?.length) signals.desiredImpression = profile.desiredImpression;
   if (profile.desiredFeelings?.length) signals.desiredFeelings = profile.desiredFeelings;
   if (profile.becoming?.length) signals.becoming = profile.becoming;
+  if (profile.finalNotes?.trim()) signals.finalNotes = profile.finalNotes.trim();
   if (profile.lifestyle) signals.lifestyle = profile.lifestyle;
   if (profile.dressesFor?.length) signals.dressesFor = profile.dressesFor;
   if (profile.bodyFocusAreas?.length) signals.bodyFocusAreas = profile.bodyFocusAreas;
@@ -285,10 +296,18 @@ async function callClaudeForWording(
   outcome: StyleMeOutcome,
   primaryTitle: string | null,
   styleMeExplanation: string | null,
+  becoming: string[],
+  styleSupport: string[],
+  finalNotes: string | null | undefined,
 ): Promise<StyleMeWording | null> {
   const occasionLabel = occasion.replace(/-/g, " ");
   const moodStr = moods.join(", ");
   const feelingStr = desiredFeelings.join(", ");
+  const becomingStr = becoming.map((id) => optionLabel("becoming", id)).join(", ");
+  const styleSupportStr = styleSupport.map((id) => optionLabel("style-support", id)).join(", ");
+  const safeFinalNotes = finalNotes
+    ? finalNotes.replace(/"/g, "'").replace(/\n/g, " ").trim()
+    : null;
 
   const context =
     outcome === "no-eligible-product"
@@ -296,6 +315,15 @@ async function callClaudeForWording(
       : primaryTitle
       ? `The selected piece is: ${primaryTitle}. Styling guidance: ${styleMeExplanation ?? "(none provided)"}`
       : "The customer is dressing from her own closet.";
+
+  const aspirationContext =
+    [
+      becomingStr ? `Style aspiration: ${becomingStr}.` : "",
+      styleSupportStr ? `Style support goal: ${styleSupportStr}.` : "",
+      safeFinalNotes ? `Customer's personal note: "${safeFinalNotes}".` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
 
   try {
     const result = await Promise.race<ClaudeWordingResponse | null>([
@@ -314,8 +342,9 @@ async function callClaudeForWording(
             role: "user",
             content:
               `Write wording for a styling result. The customer is feeling: ${moodStr}. ` +
-              `Desired feeling: ${feelingStr}. Occasion: ${occasionLabel}. ${context}\n\n` +
-              `Return a JSON object with exactly these fields:\n` +
+              `Desired feeling: ${feelingStr}. Occasion: ${occasionLabel}. ${context}` +
+              (aspirationContext ? ` ${aspirationContext}` : "") +
+              `\n\nReturn a JSON object with exactly these fields:\n` +
               `- outfitName: creative name for this look (≤8 words)\n` +
               `- whyThisWorks: 2–3 sentences explaining why this works for this customer\n` +
               `- confidenceBoost: 1 short affirming sentence about how she will feel\n` +
@@ -438,6 +467,9 @@ export async function computeStyleMeResult(
     effectiveOutcome,
     primaryTitle,
     styleMeExplanation,
+    engineInput.profile?.becoming ?? [],
+    engineInput.profile?.styleSupport ?? [],
+    engineInput.profile?.finalNotes ?? null,
   );
 
   const wording =
