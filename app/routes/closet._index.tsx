@@ -9,6 +9,7 @@ import { emitClosetItemAdded, recordJourneyEventAwaited } from "~/lib/ai/journey
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import { verifyCloudinaryAsset, deleteCloudinaryAsset, buildPrivateDownloadUrl, getCloudinaryConfig, validatePublicIdOwnership } from "~/lib/cloudinary-admin.server";
+import { computeClosetInsights, type ClosetInsightProfile } from "~/lib/ai/closet-insights";
 
 // Option B shell: MyNaiaLayout + naiaStyles (NADINE header, My nAia navigation)
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
@@ -82,10 +83,36 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const naiaCustomer = await requireCurrentNaiaCustomer(request);
   const customer = await prisma.customer.findUnique({
     where: { id: naiaCustomer.id },
-    include: { closetItems: { orderBy: { createdAt: "desc" } } },
+    include: {
+      closetItems: { orderBy: { createdAt: "desc" } },
+      onboardingProfile: true,
+    },
   });
   if (!customer) return redirect("/auth/shopify/login");
-  return data({ items: customer.closetItems });
+
+  const insightItems = customer.closetItems.map((item) => ({
+    id: item.id,
+    category: item.category as string,
+    primaryColor: item.primaryColor,
+    occasions: item.occasions.length > 0 ? item.occasions : null,
+    seasons: item.seasons.length > 0 ? item.seasons : null,
+  }));
+  const insightProfile: ClosetInsightProfile | null = customer.onboardingProfile
+    ? {
+        lifestyle: customer.onboardingProfile.lifestyle,
+        styleStruggles: customer.onboardingProfile.styleStruggles,
+        styleSupport: customer.onboardingProfile.styleSupport,
+        favoriteColors: customer.onboardingProfile.favoriteColors,
+        avoidColors: customer.onboardingProfile.avoidColors,
+        stylePersonalities: customer.onboardingProfile.stylePersonalities,
+        desiredImpression: customer.onboardingProfile.desiredImpression,
+        desiredFeelings: customer.onboardingProfile.desiredFeelings,
+        becoming: customer.onboardingProfile.becoming,
+      }
+    : null;
+  const closetInsights = computeClosetInsights(insightItems, insightProfile);
+
+  return data({ items: customer.closetItems, closetInsights });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -338,6 +365,12 @@ const css = `
   .cl-empty{text-align:center;padding:60px 32px;background:var(--bg-50, var(--c-surface));border:1px solid var(--fg-10, var(--c-border))}
   .cl-empty-icon{font-family:var(--ff-display);font-size:52px;color:var(--fg, var(--c-ink));opacity:.2;margin-bottom:16px}
   .cl-empty-text{font-family:var(--ff-body);font-size:18px;font-style:italic;color:var(--fg-60, var(--c-muted));margin-bottom:28px}
+  /* Closet Insights section */
+  .cl-insights{margin-bottom:28px;border:1px solid var(--fg-10, var(--c-border));padding:20px 24px}
+  .cl-insights-header{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:14px}
+  .cl-insight{padding:10px 0;border-bottom:1px solid var(--fg-06, var(--c-border))}
+  .cl-insight:last-child{border-bottom:none;padding-bottom:0}
+  .cl-insight-claim{font-family:var(--ff-body);font-size:14px;font-style:italic;color:var(--fg, var(--c-ink));margin:0;line-height:1.55}
   .cl-cta{margin-top:48px;text-align:center}
   .cl-cta-btn{display:inline-flex;align-items:center;padding:12px 28px;background:var(--naia-ink);color:var(--naia-bg);text-decoration:none;font-family:var(--naia-ff-ui);font-size:10px;letter-spacing:2.5px;text-transform:uppercase;border:none;border-radius:9999px;cursor:pointer;transition:opacity .13s}
   .cl-cta-btn:hover{opacity:.8}
@@ -365,7 +398,7 @@ const css = `
 //   Logic  → existing staging: Cloudinary, eligibility, journey events, delete, validation
 
 export default function Closet() {
-  const { items } = useLoaderData<typeof loader>();
+  const { items, closetInsights } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
 
   const [showAddForm, setShowAddForm] = useState(false);
@@ -588,6 +621,18 @@ export default function Closet() {
             <div className="cl-stat-label">Brands</div>
           </div>
         </div>
+
+        {/* Closet Insights — deterministic, on-demand, V2-A4 */}
+        {closetInsights.insights.length > 0 && (
+          <section className="cl-insights" aria-label="Closet Insights">
+            <div className="cl-insights-header">Closet Insights</div>
+            {closetInsights.insights.map((insight) => (
+              <div key={insight.id} className="cl-insight">
+                <p className="cl-insight-claim">{insight.claim}</p>
+              </div>
+            ))}
+          </section>
+        )}
 
         {/* Option A: + Add a Piece CTA */}
         {!showAddForm && (
