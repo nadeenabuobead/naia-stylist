@@ -2358,3 +2358,325 @@ describe("§V2-A2 quiz-data label contract — becoming and style-support", () =
     assert.ok((opt!.label?.length ?? 0) > 15, "style-what-i-own label must be descriptive (>15 chars)");
   });
 });
+
+// ─── §V2-A3  Profile Aspiration scoring — desiredImpression[] + becoming[] ───
+//
+// Catalog facts used across tests (from naia-catalog.generated.ts):
+//   collar-shirt      DFM: more-put-together, more-confident, more-elevated, more-powerful
+//                     SP:  corporate-chic, effortlessly-chic, artsy
+//                     ESS: confident, powerful, feel-good, tired, …
+//                     occasionTags: work, everyday, dinner, special-event
+//   double-top        DFM: more-confident, more-feminine, more-elevated, more-attractive
+//                     SP:  artsy, feminine, edgy
+//                     ESS: confident, powerful, feel-good, playful
+//                     occasionTags: dinner, date-night, girls-night, special-event
+//   straight-pants    DFM: more-elevated, more-confident, more-effortless, more-attractive
+//                     SP:  artsy, effortlessly-chic, edgy
+//                     occasionTags: dinner, date-night, special-event, travel
+//   kimono-jacket     DFM: more-effortless, more-elevated, more-feminine, more-confident
+//                     SP:  artsy, effortlessly-chic, feminine
+//                     occasionTags: everyday, dinner, travel, special-event
+//   dress-set         DFM: more-confident, more-powerful, more-feminine, more-elevated
+//                     SP:  feminine, artsy, trendy
+//
+// Session shape used across most aspiration tests:
+//   moods: ["confident"]        → gives ESS STRONG_RANK (+4) for all products;
+//                                 field = currentEmotionalStateSupport, not DFM/SP
+//                                 → does NOT add any concept to scoredConcepts
+//   occasion: non-matching      → no §5 score for the target product
+// This isolates the aspiration contribution as the only variable.
+
+describe("§V2-A3 Profile Aspiration — desiredImpression + becoming", () => {
+  function findEv(result: ReturnType<typeof run>, handle: string) {
+    const ev = result.evaluatedProducts.find((e) => e.handle === handle);
+    assert.ok(ev, `${handle} must appear in evaluatedProducts`);
+    return ev!;
+  }
+
+  // §11.7 aspiration evidence: LIGHT_RANK entries on the desiredFeelingMatch field.
+  // §2 uses STRONG_RANK and §7.5 uses RANK on desiredFeelingMatch, so this filter
+  // uniquely identifies §11.7 contributions.
+  function aspirationEvidence(ev: ProductEvaluation) {
+    return ev.positiveEvidence.filter(
+      (e) => e.effect === "LIGHT_RANK" && e.field === "desiredFeelingMatch",
+    );
+  }
+
+  it("V2A3.1 — desiredImpression direct match → +1", () => {
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { desiredImpression: ["powerful"] },
+    );
+    const ev = findEv(result, "collar-shirt");
+    const asp = aspirationEvidence(ev);
+    assert.equal(asp.length, 1, "one aspiration evidence entry");
+    assert.equal(asp[0].matchedToken, "more-powerful");
+    assert.equal(asp[0].sessionSignal, "powerful");
+    assert.equal(ev.totalScore, 5); // 4 ESS + 1 aspiration
+  });
+
+  it("V2A3.2 — becoming direct match → +1", () => {
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "work" }),
+      { becoming: ["more-feminine"] },
+    );
+    const ev = findEv(result, "double-top");
+    const asp = aspirationEvidence(ev);
+    assert.equal(asp.length, 1);
+    assert.equal(asp[0].matchedToken, "more-feminine");
+    assert.equal(asp[0].sessionSignal, "more-feminine");
+    assert.equal(ev.totalScore, 5); // 4 ESS + 1 aspiration
+  });
+
+  it("V2A3.3 — translation refined → more-elevated fires", () => {
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { desiredImpression: ["refined"] },
+    );
+    const ev = findEv(result, "collar-shirt");
+    const asp = aspirationEvidence(ev);
+    assert.equal(asp.length, 1);
+    assert.equal(asp[0].matchedToken, "more-elevated");
+    assert.equal(asp[0].sessionSignal, "refined");
+  });
+
+  it("V2A3.4 — translation more-polished → more-put-together fires", () => {
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { becoming: ["more-polished"] },
+    );
+    const ev = findEv(result, "collar-shirt");
+    const asp = aspirationEvidence(ev);
+    assert.equal(asp.length, 1);
+    assert.equal(asp[0].matchedToken, "more-put-together");
+    assert.equal(asp[0].sessionSignal, "more-polished");
+  });
+
+  it("V2A3.5 — product with zero non-aspiration positive evidence → aspiration contributes 0", () => {
+    // No moods (no ESS) + occasion that double-top lacks (no §5) → acc.positive empty
+    const result = run(
+      makeSession({ moods: [], occasion: "work" }),
+      { desiredImpression: ["feminine"] }, // double-top has more-feminine in DFM — would match
+    );
+    const ev = findEv(result, "double-top");
+    assert.equal(ev.positiveEvidence.length, 0, "no prior positive evidence");
+    assert.equal(aspirationEvidence(ev).length, 0, "aspiration guard must block contribution");
+    assert.equal(ev.totalScore, 0);
+  });
+
+  it("V2A3.6 — product with one non-aspiration positive + distinct aspiration match → aspiration adds +1", () => {
+    // ESS from mood gives the single non-aspiration positive signal
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { becoming: ["more-polished"] }, // more-polished → more-put-together; collar-shirt has it
+    );
+    const ev = findEv(result, "collar-shirt");
+    assert.equal(aspirationEvidence(ev).length, 1);
+    assert.equal(ev.totalScore, 5); // 4 ESS + 1 aspiration
+  });
+
+  it("V2A3.7 — SP feminine already matched + desiredImpression feminine → no extra aspiration point", () => {
+    // double-top has "feminine" in stylePersonalityMatch → §7 scores it → concept "feminine"
+    // enters scoredConcepts → §11.7 skips the same concept from desiredImpression
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "work" }),
+      { stylePersonalities: ["feminine"], desiredImpression: ["feminine"] },
+    );
+    const ev = findEv(result, "double-top");
+    assert.equal(aspirationEvidence(ev).length, 0, "feminine concept already scored via SP");
+    // Score breakdown: ESS +4, SP +4, aspiration 0
+    assert.equal(ev.totalScore, 8);
+  });
+
+  it("V2A3.8 — SP effortlessly-chic already matched + becoming more-effortless → no extra aspiration point", () => {
+    // straight-pants has "effortlessly-chic" in SP → §7 scores → concept "effortless" in scoredConcepts
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { stylePersonalities: ["effortlessly-chic"], becoming: ["more-effortless"] },
+    );
+    const ev = findEv(result, "straight-pants");
+    assert.equal(aspirationEvidence(ev).length, 0, "effortless concept already scored via SP");
+    assert.equal(ev.totalScore, 8); // 4 ESS + 4 SP + 0 aspiration
+  });
+
+  it("V2A3.9 — session more-feminine already scored (§2) + becoming more-feminine → no extra aspiration point", () => {
+    // Session DFM match adds desiredFeelingMatch entry → concept "feminine" in scoredConcepts
+    const result = run(
+      makeSession({ moods: ["confident"], desiredFeelings: ["more-feminine"], occasion: "work" }),
+      { becoming: ["more-feminine"] },
+    );
+    const ev = findEv(result, "double-top");
+    assert.equal(aspirationEvidence(ev).length, 0, "feminine concept already scored via session §2");
+  });
+
+  it("V2A3.10 — profile desiredFeelings feminine scored (§7.5) + desiredImpression feminine → no extra aspiration point", () => {
+    // profile desiredFeelings "feminine" → §7.5 translates to "more-feminine" → double-top has it
+    // → desiredFeelingMatch entry in acc.positive → concept "feminine" in scoredConcepts
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "work" }),
+      { desiredFeelings: ["feminine"], desiredImpression: ["feminine"] },
+    );
+    const ev = findEv(result, "double-top");
+    assert.equal(aspirationEvidence(ev).length, 0, "feminine concept already scored via profile §7.5");
+  });
+
+  it("V2A3.11 — same concept in both desiredImpression and becoming → only +1 (deduped)", () => {
+    // Both map to concept "powerful"; should count only once
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { desiredImpression: ["powerful"], becoming: ["more-powerful"] },
+    );
+    const ev = findEv(result, "collar-shirt");
+    const asp = aspirationEvidence(ev);
+    assert.equal(asp.length, 1, "dedup across fields: one unique concept → one evidence entry");
+    assert.equal(asp[0].matchedToken, "more-powerful");
+    assert.equal(ev.totalScore, 5); // 4 ESS + 1 aspiration
+  });
+
+  it("V2A3.12 — two distinct aspiration concepts → +2", () => {
+    // refined → elevated, powerful → powerful: two distinct concepts, both in collar-shirt DFM
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { desiredImpression: ["powerful", "refined"] },
+    );
+    const ev = findEv(result, "collar-shirt");
+    const asp = aspirationEvidence(ev);
+    assert.equal(asp.length, 2, "two distinct concepts → two evidence entries");
+    assert.equal(ev.totalScore, 6); // 4 ESS + 2 aspiration
+  });
+
+  it("V2A3.13 — three+ distinct aspiration concepts → still +2 (cap enforced)", () => {
+    // refined → elevated, powerful → powerful, put-together → put-together: 3 concepts, cap at 2
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { desiredImpression: ["powerful", "refined", "put-together"] },
+    );
+    const ev = findEv(result, "collar-shirt");
+    const asp = aspirationEvidence(ev);
+    assert.equal(asp.length, 2, "three eligible concepts → cap enforces max 2 evidence entries");
+    assert.equal(ev.totalScore, 6); // 4 ESS + 2 aspiration
+    // Stable alphabetical ordering picks "elevated" and "powerful" (e < p < p-t)
+    const tokens = asp.map((e) => e.matchedToken).sort();
+    assert.deepEqual(tokens, ["more-elevated", "more-powerful"]);
+  });
+
+  it("V2A3.14 — becoming scores +2 while desiredImpression has no DFM match; no field priority encoded", () => {
+    // desiredImpression: ["powerful"] → more-powerful NOT in kimono-jacket DFM → not eligible
+    // becoming: ["more-effortless", "more-feminine"] → both in kimono DFM → eligible
+    // Result: +2 solely from becoming — field priority would have blocked this
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { desiredImpression: ["powerful"], becoming: ["more-effortless", "more-feminine"] },
+    );
+    const ev = findEv(result, "kimono-jacket");
+    const asp = aspirationEvidence(ev);
+    assert.equal(asp.length, 2, "both becoming concepts score when desiredImpression has no match");
+    const tokens = asp.map((e) => e.matchedToken).sort();
+    assert.deepEqual(tokens, ["more-effortless", "more-feminine"]);
+    assert.equal(ev.totalScore, 6); // 4 ESS + 2 aspiration
+  });
+
+  it("V2A3.15 — creative → 0 (not in desiredImpression map)", () => {
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { desiredImpression: ["creative"] },
+    );
+    assert.equal(aspirationEvidence(findEv(result, "collar-shirt")).length, 0);
+  });
+
+  it("V2A3.16 — interesting → 0 (not in desiredImpression map)", () => {
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { desiredImpression: ["interesting"] },
+    );
+    assert.equal(aspirationEvidence(findEv(result, "collar-shirt")).length, 0);
+  });
+
+  it("V2A3.17 — more-visible → 0 (not in becoming map)", () => {
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { becoming: ["more-visible"] },
+    );
+    assert.equal(aspirationEvidence(findEv(result, "collar-shirt")).length, 0);
+  });
+
+  it("V2A3.18 — more-creative → 0 (not in becoming map)", () => {
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { becoming: ["more-creative"] },
+    );
+    assert.equal(aspirationEvidence(findEv(result, "collar-shirt")).length, 0);
+  });
+
+  it("V2A3.19 — new-chapter → 0 (not in becoming map)", () => {
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { becoming: ["new-chapter"] },
+    );
+    assert.equal(aspirationEvidence(findEv(result, "collar-shirt")).length, 0);
+  });
+
+  it("V2A3.20 — unknown IDs → 0", () => {
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { desiredImpression: ["not-a-real-id"], becoming: ["also-not-real"] },
+    );
+    assert.equal(aspirationEvidence(findEv(result, "collar-shirt")).length, 0);
+  });
+
+  it("V2A3.21 — both aspiration fields absent → existing totalScore exactly unchanged", () => {
+    const session = makeSession({ moods: ["confident"], occasion: "girls-night" });
+    const baseProfile: StyleMeProfileSignals = { stylePersonalities: ["artsy"] };
+    const withAspiration: StyleMeProfileSignals = {
+      ...baseProfile,
+      desiredImpression: [],
+      becoming: [],
+    };
+    const baseline = run(session, baseProfile);
+    const withEmpty = run(session, withAspiration);
+    for (const ev of baseline.evaluatedProducts) {
+      const other = withEmpty.evaluatedProducts.find((e) => e.handle === ev.handle)!;
+      assert.equal(other.totalScore, ev.totalScore,
+        `totalScore must be identical for ${ev.handle} when aspiration fields are empty`);
+    }
+  });
+
+  it("V2A3.22 — hard exclusion behaviour unchanged by aspiration scoring", () => {
+    // Slot conflict: anchor is a top (collar-shirt), so another top recommendation is excluded.
+    // Aspiration on the excluded product must not override the hard exclusion.
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night", source: "naia-piece" }),
+      { desiredImpression: ["powerful", "refined", "put-together", "soft-confident"] },
+      { anchor: { type: "nadine", handle: "collar-shirt" } },
+    );
+    // With collar-shirt as anchor (top slot), no other top can be the primary recommendation.
+    // At minimum, collar-shirt itself is self-excluded.
+    const collarEval = findEv(result, "collar-shirt");
+    assert.equal(collarEval.isHardExcluded, true, "self-exclusion must still fire");
+    assert.equal(collarEval.totalScore, 0, "hard-excluded product must keep score 0");
+    assert.equal(collarEval.positiveEvidence.length, 0, "hard-excluded product has no positive evidence");
+  });
+
+  it("V2A3.23 — SP in profile not matching product is product-specific: aspiration dedup clears when SP missed", () => {
+    // Call A: profile has SP ["feminine"] + desiredImpression ["feminine"]
+    //   double-top has "feminine" in SP → §7 scores → concept "feminine" in scoredConcepts
+    //   → desiredImpression "feminine" blocked by dedup → 0 aspiration
+    const sessionA = makeSession({ moods: ["confident"], occasion: "work" });
+    const resultA = run(sessionA, { stylePersonalities: ["feminine"], desiredImpression: ["feminine"] });
+    const evA = findEv(resultA, "double-top");
+    assert.equal(aspirationEvidence(evA).length, 0, "SP match deduped the aspiration concept");
+
+    // Call B: same product, same desiredImpression, but no stylePersonalities
+    //   §7 gives 0 → concept "feminine" NOT in scoredConcepts → aspiration may score
+    //   double-top has "more-feminine" in DFM → aspiration adds +1
+    const resultB = run(sessionA, { desiredImpression: ["feminine"] });
+    const evB = findEv(resultB, "double-top");
+    assert.equal(aspirationEvidence(evB).length, 1, "without SP match, aspiration concept is eligible");
+
+    // Score difference confirms dedup is product-specific:
+    // A: ESS(4) + SP(4) + aspiration(0) = 8
+    // B: ESS(4) + SP(0) + aspiration(1) = 5
+    // Δ = 3 = STRONG_RANK - LIGHT_RANK
+    assert.equal(evA.totalScore - evB.totalScore, 3);
+  });
+});

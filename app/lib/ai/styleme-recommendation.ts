@@ -12,6 +12,8 @@ import {
   PROFILE_DESIRED_FEELING_TRANSLATION,
   PROFILE_FIT_PREFERENCE_SMCM_MAP,
   PROFILE_LIFESTYLE_OCCASION_MAP,
+  PROFILE_DESIRED_IMPRESSION_DFM_MAP,
+  PROFILE_BECOMING_DFM_MAP,
 } from "./signal-contract.js";
 import {
   getAllCatalogProducts,
@@ -83,6 +85,25 @@ export const SLOT_EXCLUSIONS: Readonly<Record<OutfitSlot, readonly OutfitSlot[]>
   set: ["top", "bottom", "dress", "set"],
   outerwear: ["outerwear"],
   unknown: [],
+} as const;
+
+// ─── §11.7 Aspiration concept vocabulary (feature-local, not exported) ───────
+// Maps DFM tokens → canonical concept keys used for cross-field dedup in §11.7.
+// Covers only the 6 concepts reachable from the approved aspiration maps.
+const ASPIRATION_DFM_TO_CONCEPT: Readonly<Record<string, string>> = {
+  "more-confident":    "confident",
+  "more-effortless":   "effortless",
+  "more-elevated":     "elevated",
+  "more-feminine":     "feminine",
+  "more-powerful":     "powerful",
+  "more-put-together": "put-together",
+} as const;
+
+// Maps style personality IDs → canonical concept keys.
+// Limited to the two confirmed semantic equivalences; do not broaden.
+const ASPIRATION_SP_TO_CONCEPT: Readonly<Record<string, string>> = {
+  "feminine":          "feminine",
+  "effortlessly-chic": "effortless",
 } as const;
 
 // ─── Minimum thresholds ───────────────────────────────────────────────────────
@@ -1105,6 +1126,76 @@ function scoreProduct(
           ));
           scoredTokens.add(token);
         }
+      }
+    }
+  }
+
+  // ── 11.7. Profile Aspiration — desiredImpression[] + becoming[] ─────────────
+  // Ranking enhancer only; never standalone eligibility evidence.
+  // Requires at least one non-aspirational positive evidence item from §1–§11.6.
+  // Each unique eligible aspirational concept: LIGHT_RANK (+1).
+  // Combined cap across both fields: RANK (+2).
+  // Concepts already awarded by a stronger signal role (§2 session DFM, §7 SP,
+  // §7.5 profile DFM) are skipped via a feature-local canonical concept key.
+  {
+    const hasNonAspirationPositive = acc.positive.length > 0;
+
+    if (hasNonAspirationPositive && (
+      (profile?.desiredImpression?.length ?? 0) > 0 ||
+      (profile?.becoming?.length ?? 0) > 0
+    )) {
+      // Build concept-level dedup set from actual matches in acc.positive (product-specific).
+      const scoredConcepts = new Set<string>();
+      for (const entry of acc.positive) {
+        if (entry.field === PRODUCT_TEMPLATE_FIELDS.DESIRED_FEELING_MATCH) {
+          const c = ASPIRATION_DFM_TO_CONCEPT[entry.matchedToken];
+          if (c) scoredConcepts.add(c);
+        } else if (
+          entry.field === PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH ||
+          entry.field === PRODUCT_TEMPLATE_FIELDS.STYLE_TAGS
+        ) {
+          // matchedToken may be "feminine" or "feminine:like-myself-bonus" — strip suffix.
+          const base = entry.matchedToken.split(":")[0];
+          const c = ASPIRATION_SP_TO_CONCEPT[base];
+          if (c) scoredConcepts.add(c);
+        }
+      }
+
+      // Collect eligible concepts from both aspiration fields (no field priority).
+      // First occurrence of each concept wins the representative quiz ID for evidence traceability.
+      const eligibleByConcept = new Map<string, { dfmToken: string; quizId: string }>();
+      const aspirationSources: [string[], Readonly<Record<string, string>>][] = [
+        [profile?.desiredImpression ?? [], PROFILE_DESIRED_IMPRESSION_DFM_MAP],
+        [profile?.becoming ?? [],          PROFILE_BECOMING_DFM_MAP],
+      ];
+      for (const [ids, translationMap] of aspirationSources) {
+        for (const id of ids) {
+          const dfmToken = translationMap[id];
+          if (!dfmToken) continue;                                          // unmapped ID — skip
+          const concept = ASPIRATION_DFM_TO_CONCEPT[dfmToken];
+          if (!concept || scoredConcepts.has(concept)) continue;           // already awarded
+          if (!rankings.desiredFeelingMatch.includes(dfmToken)) continue;  // product lacks token
+          if (!eligibleByConcept.has(concept)) {
+            eligibleByConcept.set(concept, { dfmToken, quizId: id });
+          }
+        }
+      }
+
+      // Score: stable alphabetical ordering of concept keys selects which two emit
+      // evidence records when more than two candidates are eligible.
+      // This ordering is for deterministic output only — it does not represent
+      // product priority or field priority.
+      const toScore = [...eligibleByConcept.keys()].sort().slice(0, 2);
+      for (const concept of toScore) {
+        const { dfmToken, quizId } = eligibleByConcept.get(concept)!;
+        addEntry(acc, makeEntry(
+          PRODUCT_TEMPLATE_FIELDS.DESIRED_FEELING_MATCH,
+          dfmToken,
+          quizId,
+          "LIGHT_RANK",
+          SCORING_WEIGHTS.LIGHT_RANK,
+          handle,
+        ));
       }
     }
   }

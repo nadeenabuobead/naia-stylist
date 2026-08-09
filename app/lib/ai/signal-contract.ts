@@ -429,6 +429,34 @@ export const PROFILE_LIFESTYLE_OCCASION_MAP: Readonly<Record<string, readonly st
   "hybrid":       ["work", "everyday"],
 };
 
+// Maps profile desiredImpression quiz IDs → desiredFeelingMatch canonical tokens.
+// IDs without a clean DFM analog in the current catalog are intentionally omitted
+// ("creative", "interesting" — no product carries a matching DFM token).
+// Tech debt: ANSWER_REGISTRY desiredImpression entries use stale IDs and wrong target
+// field; those entries have no active runtime consumer and are left unchanged in V2-A3.
+export const PROFILE_DESIRED_IMPRESSION_DFM_MAP: Readonly<Record<string, string>> = {
+  "refined":        "more-elevated",
+  "powerful":       "more-powerful",
+  "soft-confident": "more-confident",
+  "effortless":     "more-effortless",
+  "feminine":       "more-feminine",
+  "put-together":   "more-put-together",
+};
+
+// Maps profile becoming quiz IDs → desiredFeelingMatch canonical tokens.
+// IDs without a clean DFM analog in the current catalog are intentionally omitted
+// ("more-creative", "more-visible", "new-chapter").
+// Tech debt: ANSWER_REGISTRY becoming entries use V0 IDs and are analytics-only;
+// those entries have no active runtime consumer and are left unchanged in V2-A3.
+export const PROFILE_BECOMING_DFM_MAP: Readonly<Record<string, string>> = {
+  "more-confident":  "more-confident",
+  "more-polished":   "more-put-together",
+  "more-feminine":   "more-feminine",
+  "more-powerful":   "more-powerful",
+  "more-effortless": "more-effortless",
+  "more-refined":    "more-elevated",
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Styling Effort Rule
 // Activated only when one of the activation moods is selected.
