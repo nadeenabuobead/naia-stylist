@@ -1161,23 +1161,36 @@ function scoreProduct(
         }
       }
 
-      // Collect eligible concepts from both aspiration fields (no field priority).
-      // First occurrence of each concept wins the representative quiz ID for evidence traceability.
-      const eligibleByConcept = new Map<string, { dfmToken: string; quizId: string }>();
-      const aspirationSources: [string[], Readonly<Record<string, string>>][] = [
-        [profile?.desiredImpression ?? [], PROFILE_DESIRED_IMPRESSION_DFM_MAP],
-        [profile?.becoming ?? [],          PROFILE_BECOMING_DFM_MAP],
+      // Collect all eligible candidates from both aspiration fields into a flat list,
+      // then sort by (concept, sourceField, optionId) — all lexicographic — before
+      // collapsing to one entry per concept.  This ordering is implementation
+      // determinism only; it does not encode any semantic priority between
+      // desiredImpression and becoming.
+      const aspirationSources: [string[], Readonly<Record<string, string>>, string][] = [
+        [profile?.desiredImpression ?? [], PROFILE_DESIRED_IMPRESSION_DFM_MAP, "desiredImpression"],
+        [profile?.becoming ?? [],          PROFILE_BECOMING_DFM_MAP,          "becoming"],
       ];
-      for (const [ids, translationMap] of aspirationSources) {
-        for (const id of ids) {
-          const dfmToken = translationMap[id];
+      const candidates: { concept: string; dfmToken: string; sourceField: string; optionId: string }[] = [];
+      for (const [ids, translationMap, sourceField] of aspirationSources) {
+        for (const optionId of ids) {
+          const dfmToken = translationMap[optionId];
           if (!dfmToken) continue;                                          // unmapped ID — skip
           const concept = ASPIRATION_DFM_TO_CONCEPT[dfmToken];
           if (!concept || scoredConcepts.has(concept)) continue;           // already awarded
           if (!rankings.desiredFeelingMatch.includes(dfmToken)) continue;  // product lacks token
-          if (!eligibleByConcept.has(concept)) {
-            eligibleByConcept.set(concept, { dfmToken, quizId: id });
-          }
+          candidates.push({ concept, dfmToken, sourceField, optionId });
+        }
+      }
+      candidates.sort(
+        (a, b) =>
+          a.concept.localeCompare(b.concept) ||
+          a.sourceField.localeCompare(b.sourceField) ||
+          a.optionId.localeCompare(b.optionId),
+      );
+      const eligibleByConcept = new Map<string, { dfmToken: string; quizId: string }>();
+      for (const { concept, dfmToken, optionId } of candidates) {
+        if (!eligibleByConcept.has(concept)) {
+          eligibleByConcept.set(concept, { dfmToken, quizId: optionId });
         }
       }
 

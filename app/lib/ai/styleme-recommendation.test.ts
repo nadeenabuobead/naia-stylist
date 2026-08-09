@@ -2679,4 +2679,59 @@ describe("§V2-A3 Profile Aspiration — desiredImpression + becoming", () => {
     // Δ = 3 = STRONG_RANK - LIGHT_RANK
     assert.equal(evA.totalScore - evB.totalScore, 3);
   });
+
+  it("V2A3.24 — deterministic provenance: when same concept appears in both fields, sourceField tie-break selects becoming (alphabetically first)", () => {
+    // desiredImpression "powerful" → concept "powerful", sourceField "desiredImpression"
+    // becoming "more-powerful" → concept "powerful", sourceField "becoming"
+    // Sort order: "becoming" < "desiredImpression" → becoming is chosen as provenance
+    // Evidence sessionSignal must be "more-powerful" (becoming's optionId), not "powerful" (desiredImpression's)
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { desiredImpression: ["powerful"], becoming: ["more-powerful"] },
+    );
+    const ev = findEv(result, "collar-shirt");
+    const asp = aspirationEvidence(ev);
+    assert.equal(asp.length, 1, "dedup: one unique concept → one evidence entry");
+    assert.equal(asp[0].sessionSignal, "more-powerful",
+      "provenance comes from becoming (sourceField 'becoming' < 'desiredImpression' alphabetically)");
+    assert.equal(ev.totalScore, 5);
+  });
+
+  it("V2A3.25 — input-array order within a field does not affect totalScore", () => {
+    // collar-shirt carries more-elevated and more-powerful in DFM
+    const session = makeSession({ moods: ["confident"], occasion: "girls-night" });
+    const resultA = run(session, { desiredImpression: ["refined", "powerful"] });
+    const resultB = run(session, { desiredImpression: ["powerful", "refined"] });
+    const scoreA = findEv(resultA, "collar-shirt").totalScore;
+    const scoreB = findEv(resultB, "collar-shirt").totalScore;
+    assert.equal(scoreA, scoreB, "reversing array order produces identical totalScore");
+    // Both should yield +2 aspiration (elevated + powerful)
+    assert.equal(aspirationEvidence(findEv(resultA, "collar-shirt")).length, 2);
+  });
+
+  it("V2A3.26 — swapping which field carries which concept does not change totalScore", () => {
+    // A: powerful in desiredImpression, elevated in becoming
+    // B: elevated in desiredImpression, powerful in becoming
+    // collar-shirt carries both DFM tokens; both scenarios must produce the same totalScore
+    const session = makeSession({ moods: ["confident"], occasion: "girls-night" });
+    const resultA = run(session, { desiredImpression: ["powerful"], becoming: ["more-refined"] });
+    const resultB = run(session, { desiredImpression: ["refined"],  becoming: ["more-powerful"] });
+    const evA = findEv(resultA, "collar-shirt");
+    const evB = findEv(resultB, "collar-shirt");
+    assert.equal(evA.totalScore, evB.totalScore,
+      "which field carries which concept does not affect totalScore");
+    assert.equal(aspirationEvidence(evA).length, 2);
+    assert.equal(aspirationEvidence(evB).length, 2);
+  });
+
+  it("V2A3.27 — two distinct concepts across both fields → +2", () => {
+    // One concept from each field, no overlap: should produce +2 regardless of field assignment
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "girls-night" }),
+      { desiredImpression: ["powerful"], becoming: ["more-refined"] },
+    );
+    const ev = findEv(result, "collar-shirt");
+    assert.equal(aspirationEvidence(ev).length, 2, "one concept per field → two evidence entries");
+    assert.equal(ev.totalScore, 6); // ESS(4) + aspiration(2)
+  });
 });
