@@ -2,18 +2,39 @@ import prisma from "../db.server";
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import { quizQuestions } from "../lib/onboarding/quiz-data";
 import { emitPassportSaved, recordJourneyEventAwaited } from "../lib/ai/journey-events.server";
+import {
+  LIFESTYLE_MAX,
+  TYPICAL_DAY_MAX,
+  isLifestyleCountValid,
+  resolveColourConflict,
+  deriveFitMigration,
+  normalizeTypicalDay,
+} from "../lib/passport/v2-b1-helpers";
 
 const RECOGNISED_FIELDS = new Set([
   "stylePersonalities", "desiredImpression", "lifestyle", "desiredFeelings",
   "becoming", "fitPreferences", "styleStruggles", "favoriteColors",
   "avoidColors", "styleSupport", "finalNotes",
+  // V2-B1
+  "silhouette", "structure", "coveragePreferences", "typicalDay",
+  "neutralVsColour", "colourIntensity", "printAppetite", "shoppingPriorities",
+  "trendAppetite",
 ]);
 
 const ARRAY_FIELDS = [
   "stylePersonalities", "desiredImpression", "lifestyle", "desiredFeelings",
   "becoming", "fitPreferences", "styleStruggles", "favoriteColors",
   "avoidColors", "styleSupport",
+  // V2-B1 array fields (no quiz-option validation yet — UI doesn't exist)
+  "silhouette", "coveragePreferences", "shoppingPriorities",
 ];
+
+// V2-B1 free-text fields (string | null); validated same pattern as finalNotes.
+const B1_TEXT_FIELDS = [
+  "structure", "neutralVsColour", "colourIntensity", "printAppetite", "trendAppetite",
+];
+// Character limits per field (trimmed length).
+const B1_TEXT_MAX = { structure: 200, neutralVsColour: 200, colourIntensity: 200, printAppetite: 200, trendAppetite: 200 };
 
 // Valid option IDs and max selection counts per field — derived from quiz data at module load time
 const VALID_OPTION_IDS = {};
@@ -114,6 +135,36 @@ export async function action({ request }) {
     }
   }
 
+  // V2-B1 text fields: string | null; each has a max character limit.
+  for (const field of B1_TEXT_FIELDS) {
+    if (Object.hasOwn(body, field)) {
+      const v = body[field];
+      if (v !== null && typeof v !== "string") {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
+      if (typeof v === "string" && v.length > B1_TEXT_MAX[field]) {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
+    }
+  }
+
+  // typicalDay: string | null, trimmed, max 500 chars.
+  if (Object.hasOwn(body, "typicalDay")) {
+    const v = body["typicalDay"];
+    if (v !== null && typeof v !== "string") {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+    if (typeof v === "string" && v.trim().length > TYPICAL_DAY_MAX) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+
+  // lifestyle max-3: submitted arrays with more than 3 IDs are rejected.
+  // Existing stored values with >3 IDs are not modified by reads or unrelated saves.
+  if (Object.hasOwn(body, "lifestyle") && !isLifestyleCountValid(body["lifestyle"])) {
+    return Response.json({ error: "lifestyle_too_many" }, { status: 400 });
+  }
+
   const op = customer.onboardingProfile;
 
   // All submitted values are validated. Absent keys fall back to the saved DB value
@@ -134,19 +185,44 @@ export async function action({ request }) {
     return v.length > 0 ? v.join(", ") : null;
   };
 
+  // Resolve favourite/avoid colour conflict: avoid wins.
+  const rawFavorites = pickArr("favoriteColors", op?.favoriteColors);
+  const rawAvoids    = pickArr("avoidColors",    op?.avoidColors);
+  const resolvedFavorites = resolveColourConflict(rawFavorites, rawAvoids);
+
+  // fitPreferences additive migration (idempotent — never overwrites set values).
+  const fitPrefsToSave = pickArr("fitPreferences", op?.fitPreferences);
+  const existingSilhouette = Object.hasOwn(body, "silhouette") ? body["silhouette"] : (op?.silhouette ?? []);
+  const existingStructure  = Object.hasOwn(body, "structure")  ? body["structure"]  : (op?.structure  ?? null);
+  const { silhouette: resolvedSilhouette, structure: resolvedStructure } = deriveFitMigration(
+    fitPrefsToSave,
+    existingSilhouette,
+    existingStructure,
+  );
+
   const profileData = {
-    stylePersonalities: pickArr("stylePersonalities", op?.stylePersonalities),
-    desiredImpression:  pickArr("desiredImpression",  op?.desiredImpression),
-    lifestyle:          pickLifestyle(op?.lifestyle),
-    desiredFeelings:    pickArr("desiredFeelings",    op?.desiredFeelings),
-    becoming:           pickArr("becoming",           op?.becoming),
-    fitPreferences:     pickArr("fitPreferences",     op?.fitPreferences),
-    styleStruggles:     pickArr("styleStruggles",     op?.styleStruggles),
-    favoriteColors:     pickArr("favoriteColors",     op?.favoriteColors),
-    avoidColors:        pickArr("avoidColors",        op?.avoidColors),
-    styleSupport:       pickArr("styleSupport",       op?.styleSupport),
-    finalNotes:         pickText("finalNotes",        op?.finalNotes),
-    completed:          true,
+    stylePersonalities:  pickArr("stylePersonalities",  op?.stylePersonalities),
+    desiredImpression:   pickArr("desiredImpression",   op?.desiredImpression),
+    lifestyle:           pickLifestyle(op?.lifestyle),
+    desiredFeelings:     pickArr("desiredFeelings",     op?.desiredFeelings),
+    becoming:            pickArr("becoming",            op?.becoming),
+    fitPreferences:      fitPrefsToSave,
+    styleStruggles:      pickArr("styleStruggles",      op?.styleStruggles),
+    favoriteColors:      resolvedFavorites,
+    avoidColors:         rawAvoids,
+    styleSupport:        pickArr("styleSupport",        op?.styleSupport),
+    finalNotes:          pickText("finalNotes",         op?.finalNotes),
+    // V2-B1 fields
+    silhouette:          resolvedSilhouette,
+    structure:           resolvedStructure,
+    coveragePreferences: pickArr("coveragePreferences", op?.coveragePreferences),
+    typicalDay:          normalizeTypicalDay(Object.hasOwn(body, "typicalDay") ? body["typicalDay"] : op?.typicalDay),
+    neutralVsColour:     pickText("neutralVsColour",    op?.neutralVsColour),
+    colourIntensity:     pickText("colourIntensity",    op?.colourIntensity),
+    printAppetite:       pickText("printAppetite",      op?.printAppetite),
+    shoppingPriorities:  pickArr("shoppingPriorities",  op?.shoppingPriorities),
+    trendAppetite:       pickText("trendAppetite",      op?.trendAppetite),
+    completed:           true,
   };
 
   if (op) {

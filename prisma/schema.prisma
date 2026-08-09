@@ -115,6 +115,16 @@ model OnboardingProfile {
   becoming            String[]  @default([])
   styleSupport        String[]  @default([])
   finalNotes          String?
+
+  // Passport V2-B1 — shape, colour & shopping context (persist-only in B1)
+  silhouette           String[]  @default([])
+  structure            String?
+  coveragePreferences  String[]  @default([])
+  neutralVsColour      String?
+  colourIntensity      String?
+  printAppetite        String?
+  shoppingPriorities   String[]  @default([])
+  trendAppetite        String?
 }
 
 // ============================================
