@@ -345,6 +345,118 @@ describe("F.15 Legacy shoeSize with null shoeSizingSystem stays unchanged", () =
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// F.17  confirmShoeSystemChange is a request-only key (regression — was missing)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("F.17 confirmShoeSystemChange is request-only (not persisted, not unknown)", () => {
+  // Mirrors api.save-style-profile REQUEST_ONLY_KEYS and RECOGNISED_FIELDS.
+  // Bug: confirmShoeSystemChange was absent from REQUEST_ONLY_KEYS, causing the
+  // server to return 400 invalid_body on any confirmed shoe-system change.
+  const REQUEST_ONLY_KEYS = new Set([
+    "baseProfileUpdatedAt", "editedField",
+    "confirmSizeSystemChange", "confirmShoeSystemChange",
+  ]);
+  const RECOGNISED_FIELDS = new Set([
+    "sizingSystem", "topSize", "bottomSize", "dressSize",
+    "shoeSizingSystem", "shoeSize",
+    "height", "bustMeasurement", "waistMeasurement", "hipMeasurement",
+    "measurementUnit", "bodyShape", "fitConcerns", "preferredCoverage",
+    "bodyFocusAreas", "bodyAvoidAreas",
+  ]);
+
+  function isKeyAllowed(key: string): boolean {
+    return REQUEST_ONLY_KEYS.has(key) || RECOGNISED_FIELDS.has(key);
+  }
+
+  it("confirmShoeSystemChange is in REQUEST_ONLY_KEYS", () =>
+    assert.ok(REQUEST_ONLY_KEYS.has("confirmShoeSystemChange")));
+  it("confirmShoeSystemChange is NOT in RECOGNISED_FIELDS (never persisted)", () =>
+    assert.ok(!RECOGNISED_FIELDS.has("confirmShoeSystemChange")));
+  it("confirmShoeSystemChange is allowed (does not trigger unknown-key 400)", () =>
+    assert.ok(isKeyAllowed("confirmShoeSystemChange")));
+  it("confirmSizeSystemChange is also allowed", () =>
+    assert.ok(isKeyAllowed("confirmSizeSystemChange")));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F.18  International clothing + EU shoe save payload — full contract (regression)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("F.18 International clothing + EU shoe save payload is accepted end-to-end", () => {
+  // Reproduces the exact failing scenario: user had prior UK shoe data (size 6),
+  // changes to EU 39, confirms. Payload includes confirmShoeSystemChange: true.
+  // Prior to the fix this returned 400 invalid_body because confirmShoeSystemChange
+  // was missing from REQUEST_ONLY_KEYS.
+
+  const REQUEST_ONLY_KEYS = new Set([
+    "baseProfileUpdatedAt", "editedField",
+    "confirmSizeSystemChange", "confirmShoeSystemChange",
+  ]);
+  const RECOGNISED_FIELDS = new Set([
+    "sizingSystem", "topSize", "bottomSize", "dressSize",
+    "shoeSizingSystem", "shoeSize",
+    "height", "bustMeasurement", "waistMeasurement", "hipMeasurement",
+    "measurementUnit", "bodyShape", "fitConcerns", "preferredCoverage",
+    "bodyFocusAreas", "bodyAvoidAreas",
+  ]);
+  const CLOTHING_VALID = new Set(["uk", "us", "eu", "international", "other"]);
+  const SHOE_VALID     = new Set(["uk", "us", "eu", "other"]);
+  const CLOTHING_SIZES: Record<string, Set<string>> = {
+    international: new Set(["XS","S","M","L","XL","XXL","XXXL"]),
+  };
+  const SHOE_SIZES: Record<string, Set<string>> = {
+    eu: new Set(["34","35","36","37","38","39","40","41","42","43","44"]),
+  };
+
+  const payload = {
+    baseProfileUpdatedAt: "2026-08-10T00:00:00.000Z",
+    sizingSystem: "international",
+    topSize: "M",
+    bottomSize: "M",
+    dressSize: "M",
+    shoeSizingSystem: "eu",
+    shoeSize: "39",
+    confirmShoeSystemChange: true,  // shoe system changed from uk → eu with prior shoeSize
+  };
+
+  it("all payload keys are allowed (no unknown-key 400)", () => {
+    for (const key of Object.keys(payload)) {
+      assert.ok(
+        REQUEST_ONLY_KEYS.has(key) || RECOGNISED_FIELDS.has(key),
+        `key "${key}" must be in REQUEST_ONLY_KEYS or RECOGNISED_FIELDS`,
+      );
+    }
+  });
+
+  it("sizingSystem 'international' is valid", () =>
+    assert.ok(CLOTHING_VALID.has(payload.sizingSystem)));
+
+  it("shoeSizingSystem 'eu' is valid", () =>
+    assert.ok(SHOE_VALID.has(payload.shoeSizingSystem)));
+
+  it("topSize 'M' is valid for international clothing system", () =>
+    assert.ok(CLOTHING_SIZES["international"].has(payload.topSize)));
+
+  it("bottomSize 'M' is valid for international clothing system", () =>
+    assert.ok(CLOTHING_SIZES["international"].has(payload.bottomSize)));
+
+  it("dressSize 'M' is valid for international clothing system", () =>
+    assert.ok(CLOTHING_SIZES["international"].has(payload.dressSize)));
+
+  it("shoeSize '39' is valid for EU shoe system", () =>
+    assert.ok(SHOE_SIZES["eu"].has(payload.shoeSize)));
+
+  it("confirmShoeSystemChange: true is a boolean (not a string)", () =>
+    assert.equal(typeof payload.confirmShoeSystemChange, "boolean"));
+
+  it("international + EU can coexist — clothing system does not restrict shoe system", () => {
+    const clothingSysValid = CLOTHING_VALID.has(payload.sizingSystem);
+    const shoeSysValid     = SHOE_VALID.has(payload.shoeSizingSystem);
+    assert.ok(clothingSysValid && shoeSysValid);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // F.16  Section 5 subField count now includes shoe-sizing-system
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -174,7 +174,7 @@ export async function action({ request }) {
   }
 
   // request-only keys (allowed but not in RECOGNISED_FIELDS, never persisted)
-  const REQUEST_ONLY_KEYS = new Set(["baseProfileUpdatedAt", "editedField", "confirmSizeSystemChange"]);
+  const REQUEST_ONLY_KEYS = new Set(["baseProfileUpdatedAt", "editedField", "confirmSizeSystemChange", "confirmShoeSystemChange"]);
   // Reject unknown top-level keys
   for (const key of Object.keys(body)) {
     if (!REQUEST_ONLY_KEYS.has(key) && !RECOGNISED_FIELDS.has(key)) {
