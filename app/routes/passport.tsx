@@ -188,12 +188,15 @@ const SECTIONS: SectionDef[] = [
   {
     id: "fit",
     label: "Your Fit, Coverage & Comfort",
-    question: "What silhouettes and construction details feel most like you?",
-    helper: "Save the silhouettes, construction and coverage details you naturally prefer.",
+    question: "Tell nAia how you like clothing to fit, cover and emphasise your body.",
+    helper: "Save your silhouette, construction and coverage preferences — including which areas you enjoy highlighting or prefer covered.",
     subFields: [
-      { draftKey: "silhouette",           apiKey: "silhouette",          subLabel: "My silhouettes",        kind: "array",  questionId: "silhouette"           },
-      { draftKey: "structure",            apiKey: "structure",           subLabel: "Construction",          kind: "single", questionId: "structure"            },
-      { draftKey: "coverage-preferences", apiKey: "coveragePreferences", subLabel: "Coverage preferences",  kind: "array",  questionId: "coverage-preferences" },
+      { draftKey: "silhouette",           apiKey: "silhouette",          subLabel: "My silhouettes",                                        kind: "array",  questionId: "silhouette"           },
+      { draftKey: "structure",            apiKey: "structure",           subLabel: "Construction",                                          kind: "single", questionId: "structure"            },
+      { draftKey: "coverage-preferences", apiKey: "coveragePreferences", subLabel: "Garment coverage preferences",                          kind: "array",  questionId: "coverage-preferences" },
+      { draftKey: "body-focus-areas"   as DraftKey, apiKey: "bodyFocusAreas",   subLabel: "Areas you enjoy highlighting",                   kind: "array"  as FieldKind, questionId: "body-focus-areas"    },
+      { draftKey: "body-avoid-areas"   as DraftKey, apiKey: "bodyAvoidAreas",   subLabel: "Areas you prefer more coverage or less emphasis", kind: "array"  as FieldKind, questionId: "body-avoid-areas"   },
+      { draftKey: "preferred-coverage" as DraftKey, apiKey: "preferredCoverage",subLabel: "Overall coverage preference",                    kind: "single" as FieldKind, questionId: "preferred-coverage"  },
     ],
   },
   {
@@ -202,9 +205,6 @@ const SECTIONS: SectionDef[] = [
     question: "Tell nAia about your sizes, measurements and body preferences.",
     helper: "All fields in this section are optional. Update any time.",
     subFields: [
-      // V2-C (preserved)
-      { draftKey: "body-focus-areas"   as DraftKey, apiKey: "bodyFocusAreas",   subLabel: "Which areas do you enjoy highlighting?",                              kind: "array"  as FieldKind, questionId: "body-focus-areas"    },
-      { draftKey: "body-avoid-areas"   as DraftKey, apiKey: "bodyAvoidAreas",   subLabel: "Where do you prefer more coverage or less emphasis?",                 kind: "array"  as FieldKind, questionId: "body-avoid-areas"   },
       // V2-D sizes
       { draftKey: "sizing-system"      as DraftKey, apiKey: "sizingSystem",     subLabel: "Which sizing system do you use?",                                     kind: "single" as FieldKind, questionId: "sizing-system"       },
       { draftKey: "top-size"           as DraftKey, apiKey: "topSize",          subLabel: "Top size",                                                            kind: "text"   as FieldKind, questionId: "top-size"           },
@@ -220,7 +220,6 @@ const SECTIONS: SectionDef[] = [
       // V2-D proportions & fit
       { draftKey: "body-shape"         as DraftKey, apiKey: "bodyShape",        subLabel: "How would you describe your proportions?",                            kind: "single" as FieldKind, questionId: "body-shape"          },
       { draftKey: "fit-concerns"       as DraftKey, apiKey: "fitConcerns",      subLabel: "Are there any fit considerations nAia should know about?",            kind: "array"  as FieldKind, questionId: "fit-concerns"        },
-      { draftKey: "preferred-coverage" as DraftKey, apiKey: "preferredCoverage",subLabel: "How much coverage do you generally prefer?",                          kind: "single" as FieldKind, questionId: "preferred-coverage"  },
     ],
     optional: true,
   },
@@ -303,6 +302,16 @@ const AVOID_TO_FOCUS: Record<string, string> = {
 };
 const FOCUS_LABELS: Record<string, string> = Object.fromEntries(FOCUS_OPTIONS.map(o => [o.id, o.label]));
 const AVOID_LABELS: Record<string, string> = Object.fromEntries(AVOID_OPTIONS.map(o => [o.id, o.label]));
+
+// Register body-area questions in lookup tables (defined here because they share *_OPTIONS constants)
+QUESTION_BY_ID["body-focus-areas"]   = { id: "body-focus-areas",   type: "multi",  title: "Which areas do you enjoy highlighting?",                             subtitle: "Optional. Choose up to 5.", maxSelections: 5, options: FOCUS_OPTIONS             };
+QUESTION_BY_ID["body-avoid-areas"]   = { id: "body-avoid-areas",   type: "multi",  title: "Where do you usually prefer more coverage or less emphasis?",        subtitle: "Optional. Choose up to 5.", maxSelections: 5, options: AVOID_OPTIONS            };
+QUESTION_BY_ID["preferred-coverage"] = { id: "preferred-coverage", type: "single", title: "How much coverage do you generally prefer?",                                                                             options: PREFERRED_COVERAGE_OPTIONS };
+MAX_SELECTIONS["body-focus-areas"]   = 5;
+MAX_SELECTIONS["body-avoid-areas"]   = 5;
+OPTION_LABELS["body-focus-areas"]    = FOCUS_LABELS;
+OPTION_LABELS["body-avoid-areas"]    = AVOID_LABELS;
+OPTION_LABELS["preferred-coverage"]  = Object.fromEntries(PREFERRED_COVERAGE_OPTIONS.map(o => [o.id, o.label]));
 
 // V2-D: sizing, body shape, fit options
 const SIZING_SYSTEM_OPTIONS = [
@@ -478,41 +487,54 @@ function formatDate(iso: string): string {
 }
 
 function getSectionSummary(def: SectionDef, answers: OnboardingAnswers): ReactNode {
-  // Section 5 — concise V2-D summary: sizing line + V2-C preference lines
-  if (def.id === "sizes") {
-    const a = answers as Record<string, unknown>;
-    const focus     = (a["body-focus-areas"]  as string[] | undefined) ?? [];
-    const avoid     = (a["body-avoid-areas"]  as string[] | undefined) ?? [];
-    const sysId     = a["sizing-system"]      as string | undefined;
-    const topSz     = a["top-size"]           as string | undefined;
-    const bottomSz  = a["bottom-size"]        as string | undefined;
-    const dressSz   = a["dress-size"]         as string | undefined;
-    const bodyShape = a["body-shape"]         as string | undefined;
-    const fitCons   = (a["fit-concerns"]      as string[] | undefined) ?? [];
+  const areaLine = (ids: string[], labels: Record<string, string>, prefix: string): string => {
+    const humanLabels = ids.map(id => labels[id] ?? id.replace(/-/g, " "));
+    const shown = humanLabels.slice(0, 2);
+    const rest  = humanLabels.length - 2;
+    return `${prefix}: ${shown.join(", ")}${rest > 0 ? ` +${rest} more` : ""}`;
+  };
 
-    const isEmpty = !sysId && !topSz && !bottomSz && !dressSz && !bodyShape &&
-                    focus.length === 0 && avoid.length === 0 && fitCons.length === 0;
+  // Section 4 — fit/coverage/highlight preferences
+  if (def.id === "fit") {
+    const a = answers as Record<string, unknown>;
+    const silhouette = (a["silhouette"]         as string[] | undefined) ?? [];
+    const structure  =  a["structure"]           as string | undefined;
+    const focus      = (a["body-focus-areas"]    as string[] | undefined) ?? [];
+    const avoid      = (a["body-avoid-areas"]    as string[] | undefined) ?? [];
+
+    const isEmpty = silhouette.length === 0 && !structure && focus.length === 0 && avoid.length === 0;
     if (isEmpty) return <span className="sp-detail-missing">Not yet completed</span>;
 
-    const areaLine = (ids: string[], labels: Record<string, string>, prefix: string): string => {
-      const humanLabels = ids.map(id => labels[id] ?? id.replace(/-/g, " "));
-      const shown = humanLabels.slice(0, 2);
-      const rest  = humanLabels.length - 2;
-      return `${prefix}: ${shown.join(", ")}${rest > 0 ? ` +${rest} more` : ""}`;
-    };
-
     const parts: string[] = [];
-    const sizeParts: string[] = [];
-    if (sysId) sizeParts.push(SIZING_SYSTEM_LABELS[sysId] ?? sysId.toUpperCase());
-    if (topSz) sizeParts.push(`Top ${topSz}`);
-    if (bottomSz && bottomSz !== topSz) sizeParts.push(`Bottom ${bottomSz}`);
-    if (dressSz) sizeParts.push(`Dress ${dressSz}`);
-    if (sizeParts.length > 0) parts.push(sizeParts.join(" · "));
-    if (focus.length > 0) parts.push(areaLine(focus, FOCUS_LABELS, "Highlights"));
-    if (avoid.length > 0) parts.push(areaLine(avoid, AVOID_LABELS, "Coverage"));
+    const fitParts: string[] = [];
+    if (structure)           fitParts.push(lbl("structure", structure));
+    if (silhouette.length > 0) fitParts.push(silhouette.slice(0, 2).map(id => lbl("silhouette", id)).join(", ") + (silhouette.length > 2 ? "…" : ""));
+    if (fitParts.length > 0) parts.push(fitParts.join(" · "));
+    if (focus.length > 0)    parts.push(areaLine(focus, FOCUS_LABELS, "Highlights"));
+    if (avoid.length > 0)    parts.push(areaLine(avoid, AVOID_LABELS, "Coverage"));
 
-    if (parts.length === 0) return <span className="sp-detail-missing">Not yet completed</span>;
     return <>{parts[0]}{parts.slice(1).map((p, i) => <span key={i}><br />{p}</span>)}</>;
+  }
+
+  // Section 5 — sizing only (body areas now in Section 4)
+  if (def.id === "sizes") {
+    const a = answers as Record<string, unknown>;
+    const sysId    = a["sizing-system"] as string | undefined;
+    const topSz    = a["top-size"]      as string | undefined;
+    const bottomSz = a["bottom-size"]   as string | undefined;
+    const dressSz  = a["dress-size"]    as string | undefined;
+
+    const isEmpty = !sysId && !topSz && !bottomSz && !dressSz;
+    if (isEmpty) return <span className="sp-detail-missing">Not yet completed</span>;
+
+    const sizeParts: string[] = [];
+    if (sysId)                           sizeParts.push(SIZING_SYSTEM_LABELS[sysId] ?? sysId.toUpperCase());
+    if (topSz)                           sizeParts.push(`Top ${topSz}`);
+    if (bottomSz && bottomSz !== topSz)  sizeParts.push(`Bottom ${bottomSz}`);
+    if (dressSz)                         sizeParts.push(`Dress ${dressSz}`);
+
+    if (sizeParts.length === 0) return <span className="sp-detail-missing">Not yet completed</span>;
+    return <>{sizeParts.join(" · ")}</>;
   }
   if (def.placeholder) {
     return <span className="sp-detail-coming">Coming soon</span>;
@@ -623,8 +645,10 @@ export default function PassportPage() {
   }, [awaitingRevalidation, revalidator.state, pendingNext, mode]); // eslint-disable-line
 
   function initEdits(sectionId: SectionId) {
-    if (sectionId === "sizes") {
+    if (sectionId === "fit") {
       setSizeEditedField(null);
+    }
+    if (sectionId === "sizes") {
       setPendingSizingSystem(null);
       setSizeSystemConfirmed(false);
       const savedH = (savedAnswers as Record<string, unknown>)["height"] as string | undefined;
@@ -802,8 +826,10 @@ export default function PassportPage() {
     setSaveStatus("saving");
     try {
       const requestBody: Record<string, unknown> = { ...patch, baseProfileUpdatedAt: profileUpdatedAt };
-      if (sectionId === "sizes") {
+      if (sectionId === "fit") {
         requestBody.editedField = sizeEditedField ?? "bodyFocusAreas";
+      }
+      if (sectionId === "sizes") {
         if (sizeSystemConfirmed) requestBody.confirmSizeSystemChange = true;
       }
       const res = await fetch("/api/save-style-profile", {
@@ -898,17 +924,21 @@ export default function PassportPage() {
       );
     }
 
-    // array (multi-select pills)
+    // array (multi-select pills) — body area keys use mutual-exclusion handler
     return (
       <div className="sp-option-grid">
         {(q?.options ?? []).map(o => {
           const isSel = sel.includes(o.id);
+          const handleClick =
+            sf.draftKey === "body-focus-areas" ? () => handleBodyAreaToggle("body-focus-areas", "bodyFocusAreas", o.id) :
+            sf.draftKey === "body-avoid-areas" ? () => handleBodyAreaToggle("body-avoid-areas", "bodyAvoidAreas", o.id) :
+            () => handleToggle(sf.draftKey, o.id, max);
           return (
             <button
               key={o.id}
               type="button"
               className={`sp-option${isSel ? " sp-option--active" : ""}${!isSel && atCap ? " sp-option--disabled" : ""}`}
-              onClick={() => handleToggle(sf.draftKey, o.id, max)}
+              onClick={handleClick}
             >
               {o.label}
             </button>
@@ -1100,8 +1130,6 @@ export default function PassportPage() {
         const fe = flowEdits as Record<string, unknown>;
         const curSys   = (fe["sizing-system"]     as string | undefined) || null;
         const measUnit = (fe["measurement-unit"]  as string | undefined) || null;
-        const focusSel = (fe["body-focus-areas"]  as string[] | undefined) ?? [];
-        const avoidSel = (fe["body-avoid-areas"]  as string[] | undefined) ?? [];
         const fitConSel = (fe["fit-concerns"]     as string[] | undefined) ?? [];
         const heightStr = (fe["height"]           as string | undefined) ?? "";
         const parsedH  = parseHeightForDisplay(heightStr, heightDisplayUnit);
@@ -1309,57 +1337,6 @@ export default function PassportPage() {
               </div>
             </div>
 
-            {/* ── Group 4: Your styling preferences ────────────────── */}
-            <div className="sp-section-group">
-              <div className="sp-section-group-title">Your styling preferences</div>
-
-              <div className="sp-sub-label">Which areas do you enjoy highlighting?</div>
-              <div className="sp-cap-hint">Optional. Choose up to 5.</div>
-              <div className="sp-option-grid">
-                {FOCUS_OPTIONS.map(o => {
-                  const isSel = focusSel.includes(o.id);
-                  const atCap = focusSel.length >= 5;
-                  return (
-                    <button key={o.id} type="button"
-                      className={`sp-option${isSel ? " sp-option--active" : ""}${!isSel && atCap ? " sp-option--disabled" : ""}`}
-                      onClick={() => handleBodyAreaToggle("body-focus-areas", "bodyFocusAreas", o.id)}>
-                      {o.label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="sp-sub-label" style={{ marginTop: "28px" }}>Where do you prefer more coverage or less emphasis?</div>
-              <div className="sp-cap-hint">Optional. Choose up to 5.</div>
-              <div className="sp-option-grid">
-                {AVOID_OPTIONS.map(o => {
-                  const isSel = avoidSel.includes(o.id);
-                  const atCap = avoidSel.length >= 5;
-                  return (
-                    <button key={o.id} type="button"
-                      className={`sp-option${isSel ? " sp-option--active" : ""}${!isSel && atCap ? " sp-option--disabled" : ""}`}
-                      onClick={() => handleBodyAreaToggle("body-avoid-areas", "bodyAvoidAreas", o.id)}>
-                      {o.label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="sp-sub-label" style={{ marginTop: "28px" }}>How much coverage do you generally prefer?</div>
-              <div className="sp-cap-hint">Optional.</div>
-              <div className="sp-option-grid">
-                {PREFERRED_COVERAGE_OPTIONS.map(o => {
-                  const isSel = (fe["preferred-coverage"] as string | undefined) === o.id;
-                  return (
-                    <button key={o.id} type="button"
-                      className={`sp-option${isSel ? " sp-option--active" : ""}`}
-                      onClick={() => handleSingleSelect("preferred-coverage" as DraftKey, o.id)}>
-                      {o.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
           </>
         );
       })()}

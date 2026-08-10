@@ -547,23 +547,32 @@ describe("D.21 Section 5 optional contract", () => {
 // D.22  Section 5 subFields — 15 fields defined
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("D.22 Section 5 — 15 subFields", () => {
+describe("D.22 Section 5 — 12 subFields after UX correction", () => {
+  // body-focus-areas, body-avoid-areas, preferred-coverage moved to Section 4
   const SIZES_SUBFIELDS = [
-    "body-focus-areas", "body-avoid-areas",
     "sizing-system", "top-size", "bottom-size", "dress-size", "shoe-size",
     "height", "measurement-unit", "bust-measurement", "waist-measurement", "hip-measurement",
-    "body-shape", "fit-concerns", "preferred-coverage",
+    "body-shape", "fit-concerns",
   ];
 
-  it("exactly 15 subFields", () => assert.equal(SIZES_SUBFIELDS.length, 15));
-  it("includes all V2-C fields", () => {
-    assert.ok(SIZES_SUBFIELDS.includes("body-focus-areas"));
-    assert.ok(SIZES_SUBFIELDS.includes("body-avoid-areas"));
+  it("exactly 12 subFields", () => assert.equal(SIZES_SUBFIELDS.length, 12));
+  it("does NOT include body-focus-areas (moved to Section 4)", () => {
+    assert.ok(!SIZES_SUBFIELDS.includes("body-focus-areas"));
   });
-  it("includes all new V2-D fields", () => {
-    for (const k of ["sizing-system","top-size","bottom-size","dress-size","shoe-size",
-                     "height","measurement-unit","bust-measurement","waist-measurement",
-                     "hip-measurement","body-shape","fit-concerns","preferred-coverage"]) {
+  it("does NOT include body-avoid-areas (moved to Section 4)", () => {
+    assert.ok(!SIZES_SUBFIELDS.includes("body-avoid-areas"));
+  });
+  it("does NOT include preferred-coverage (moved to Section 4)", () => {
+    assert.ok(!SIZES_SUBFIELDS.includes("preferred-coverage"));
+  });
+  it("includes all sizing fields", () => {
+    for (const k of ["sizing-system","top-size","bottom-size","dress-size","shoe-size"]) {
+      assert.ok(SIZES_SUBFIELDS.includes(k), `Missing: ${k}`);
+    }
+  });
+  it("includes all measurement/proportions fields", () => {
+    for (const k of ["height","measurement-unit","bust-measurement","waist-measurement",
+                     "hip-measurement","body-shape","fit-concerns"]) {
       assert.ok(SIZES_SUBFIELDS.includes(k), `Missing: ${k}`);
     }
   });
@@ -653,7 +662,7 @@ describe("D.25 Buy or Skip FIT CERTAINTY RULE", () => {
 // D.26  Section 5 overview summary includes sizing line
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("D.26 Section 5 overview summary — sizing line", () => {
+describe("D.26 Section 5 overview summary — sizing line only", () => {
   const SIZING_SYSTEM_LABELS: Record<string, string> = {
     "uk": "UK", "us": "US", "eu": "EU", "international": "International", "other": "Other",
   };
@@ -681,5 +690,224 @@ describe("D.26 Section 5 overview summary — sizing line", () => {
   });
   it("empty when nothing set", () => {
     assert.equal(buildSizingLine(undefined, undefined, undefined, undefined), "");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D.27  Field placement after UX correction — Section 4 vs Section 5
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("D.27 Field placement — Section 4 gains highlight/coverage fields; Section 5 loses them", () => {
+  const FIT_SUBFIELDS = [
+    "silhouette", "structure", "coverage-preferences",
+    "body-focus-areas", "body-avoid-areas", "preferred-coverage",
+  ];
+  const SIZES_SUBFIELDS = [
+    "sizing-system", "top-size", "bottom-size", "dress-size", "shoe-size",
+    "height", "measurement-unit", "bust-measurement", "waist-measurement", "hip-measurement",
+    "body-shape", "fit-concerns",
+  ];
+
+  it("body-focus-areas is in Section 4 (fit)", ()    => assert.ok(FIT_SUBFIELDS.includes("body-focus-areas")));
+  it("body-avoid-areas is in Section 4 (fit)", ()    => assert.ok(FIT_SUBFIELDS.includes("body-avoid-areas")));
+  it("preferred-coverage is in Section 4 (fit)", ()  => assert.ok(FIT_SUBFIELDS.includes("preferred-coverage")));
+
+  it("body-focus-areas is NOT in Section 5 (sizes)", ()   => assert.ok(!SIZES_SUBFIELDS.includes("body-focus-areas")));
+  it("body-avoid-areas is NOT in Section 5 (sizes)", ()   => assert.ok(!SIZES_SUBFIELDS.includes("body-avoid-areas")));
+  it("preferred-coverage is NOT in Section 5 (sizes)", () => assert.ok(!SIZES_SUBFIELDS.includes("preferred-coverage")));
+
+  it("Section 4 still contains silhouette", ()            => assert.ok(FIT_SUBFIELDS.includes("silhouette")));
+  it("Section 4 still contains structure", ()             => assert.ok(FIT_SUBFIELDS.includes("structure")));
+  it("Section 4 still contains coverage-preferences", ()  => assert.ok(FIT_SUBFIELDS.includes("coverage-preferences")));
+
+  it("Section 5 still contains sizing-system", ()         => assert.ok(SIZES_SUBFIELDS.includes("sizing-system")));
+  it("Section 5 still contains body-shape", ()            => assert.ok(SIZES_SUBFIELDS.includes("body-shape")));
+  it("Section 5 still contains fit-concerns", ()          => assert.ok(SIZES_SUBFIELDS.includes("fit-concerns")));
+  it("Section 5 still contains height", ()                => assert.ok(SIZES_SUBFIELDS.includes("height")));
+  it("Section 5 still contains bust-measurement", ()      => assert.ok(SIZES_SUBFIELDS.includes("bust-measurement")));
+
+  it("Section 4 has exactly 6 subFields",  () => assert.equal(FIT_SUBFIELDS.length, 6));
+  it("Section 5 has exactly 12 subFields", () => assert.equal(SIZES_SUBFIELDS.length, 12));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D.28  editedField injection: Section 4 save includes it; Section 5 does not
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("D.28 editedField sent with Section 4 save, not Section 5", () => {
+  function buildRequestBody(
+    sectionId: "fit" | "sizes",
+    patch: Record<string, unknown>,
+    sizeEditedField: "bodyFocusAreas" | "bodyAvoidAreas" | null,
+    sizeSystemConfirmed: boolean,
+  ): Record<string, unknown> {
+    const requestBody: Record<string, unknown> = { ...patch, baseProfileUpdatedAt: "2026-01-01T00:00:00Z" };
+    if (sectionId === "fit") {
+      requestBody.editedField = sizeEditedField ?? "bodyFocusAreas";
+    }
+    if (sectionId === "sizes") {
+      if (sizeSystemConfirmed) requestBody.confirmSizeSystemChange = true;
+    }
+    return requestBody;
+  }
+
+  it("Section 4 save includes editedField=bodyFocusAreas by default", () => {
+    const body = buildRequestBody("fit", {}, null, false);
+    assert.equal(body["editedField"], "bodyFocusAreas");
+  });
+
+  it("Section 4 save uses last-touched body area field", () => {
+    const body = buildRequestBody("fit", {}, "bodyAvoidAreas", false);
+    assert.equal(body["editedField"], "bodyAvoidAreas");
+  });
+
+  it("Section 5 save does NOT include editedField", () => {
+    const body = buildRequestBody("sizes", {}, "bodyFocusAreas", false);
+    assert.ok(!Object.hasOwn(body, "editedField"));
+  });
+
+  it("Section 5 save includes confirmSizeSystemChange when confirmed", () => {
+    const body = buildRequestBody("sizes", {}, null, true);
+    assert.equal(body["confirmSizeSystemChange"], true);
+  });
+
+  it("Section 4 save does NOT include confirmSizeSystemChange", () => {
+    const body = buildRequestBody("fit", {}, null, false);
+    assert.ok(!Object.hasOwn(body, "confirmSizeSystemChange"));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D.29  Section overview summaries after UX correction
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("D.29 Overview summaries after UX correction", () => {
+  const FOCUS_LABELS: Record<string, string> = {
+    "waist": "Waist", "arms-shoulders": "Arms & shoulders", "legs": "Legs",
+    "neckline": "Neckline", "back": "Back", "bust": "Bust", "hips-curves": "Hips & curves",
+  };
+  const AVOID_LABELS: Record<string, string> = {
+    "upper-arms": "Upper arms", "midriff": "Midriff", "bust": "Bust",
+    "hips-thighs": "Hips & thighs", "back": "Back", "legs": "Legs",
+    "waist": "Waist", "neckline": "Neckline",
+  };
+  const SIZING_SYSTEM_LABELS: Record<string, string> = {
+    "uk": "UK", "us": "US", "eu": "EU", "international": "International", "other": "Other",
+  };
+
+  function areaLine(ids: string[], labels: Record<string, string>, prefix: string): string {
+    const humanLabels = ids.map(id => labels[id] ?? id.replace(/-/g, " "));
+    const shown = humanLabels.slice(0, 2);
+    const rest  = humanLabels.length - 2;
+    return `${prefix}: ${shown.join(", ")}${rest > 0 ? ` +${rest} more` : ""}`;
+  }
+
+  function buildSection4Summary(answers: Record<string, unknown>): string {
+    const silhouette = (answers["silhouette"] as string[] | undefined) ?? [];
+    const focus      = (answers["body-focus-areas"] as string[] | undefined) ?? [];
+    const avoid      = (answers["body-avoid-areas"] as string[] | undefined) ?? [];
+
+    const isEmpty = silhouette.length === 0 && !answers["structure"] && focus.length === 0 && avoid.length === 0;
+    if (isEmpty) return "Not yet completed";
+
+    const parts: string[] = [];
+    const fitParts: string[] = [];
+    if (answers["structure"]) fitParts.push(answers["structure"] as string);
+    if (silhouette.length > 0) fitParts.push(silhouette.slice(0, 2).join(", ") + (silhouette.length > 2 ? "…" : ""));
+    if (fitParts.length > 0) parts.push(fitParts.join(" · "));
+    if (focus.length > 0) parts.push(areaLine(focus, FOCUS_LABELS, "Highlights"));
+    if (avoid.length > 0) parts.push(areaLine(avoid, AVOID_LABELS, "Coverage"));
+    return parts.join("\n");
+  }
+
+  function buildSection5Summary(answers: Record<string, unknown>): string {
+    const sysId    = answers["sizing-system"] as string | undefined;
+    const topSz    = answers["top-size"]      as string | undefined;
+    const bottomSz = answers["bottom-size"]   as string | undefined;
+    const dressSz  = answers["dress-size"]    as string | undefined;
+
+    const isEmpty = !sysId && !topSz && !bottomSz && !dressSz;
+    if (isEmpty) return "Not yet completed";
+
+    const sizeParts: string[] = [];
+    if (sysId)                           sizeParts.push(SIZING_SYSTEM_LABELS[sysId] ?? sysId.toUpperCase());
+    if (topSz)                           sizeParts.push(`Top ${topSz}`);
+    if (bottomSz && bottomSz !== topSz)  sizeParts.push(`Bottom ${bottomSz}`);
+    if (dressSz)                         sizeParts.push(`Dress ${dressSz}`);
+    return sizeParts.length > 0 ? sizeParts.join(" · ") : "Not yet completed";
+  }
+
+  it("Section 4 summary includes highlight areas", () => {
+    const s = buildSection4Summary({ "body-focus-areas": ["waist", "neckline"], "structure": "sharp-tailored" });
+    assert.ok(s.includes("Highlights: Waist, Neckline"), `Got: ${s}`);
+  });
+
+  it("Section 4 summary includes coverage/avoid areas", () => {
+    const s = buildSection4Summary({ "body-avoid-areas": ["upper-arms"], "structure": "balanced-structure" });
+    assert.ok(s.includes("Coverage: Upper arms"), `Got: ${s}`);
+  });
+
+  it("Section 4 summary shows structure and highlight on separate lines", () => {
+    const s = buildSection4Summary({ "structure": "sharp-tailored", "body-focus-areas": ["waist"] });
+    const lines = s.split("\n");
+    assert.ok(lines[0].includes("sharp-tailored"), `First line: ${lines[0]}`);
+    assert.ok(lines[1]?.includes("Highlights: Waist"), `Second line: ${lines[1]}`);
+  });
+
+  it("Section 4 summary: empty when no fields set", () => {
+    assert.equal(buildSection4Summary({}), "Not yet completed");
+  });
+
+  it("Section 5 summary does NOT mention focus/avoid areas", () => {
+    const s = buildSection5Summary({
+      "sizing-system": "uk", "top-size": "10",
+      "body-focus-areas": ["waist"],    // these fields are no longer part of Section 5
+      "body-avoid-areas": ["upper-arms"],
+    });
+    assert.ok(!s.includes("Highlights"), `Section 5 should not show highlights. Got: ${s}`);
+    assert.ok(!s.includes("Coverage"), `Section 5 should not show coverage areas. Got: ${s}`);
+  });
+
+  it("Section 5 summary shows sizing line only", () => {
+    const s = buildSection5Summary({ "sizing-system": "uk", "top-size": "10", "dress-size": "10" });
+    assert.equal(s, "UK · Top 10 · Dress 10");
+  });
+
+  it("Section 5 summary: empty when no sizing fields set (even with body area data)", () => {
+    const s = buildSection5Summary({ "body-focus-areas": ["waist"] });
+    assert.equal(s, "Not yet completed");
+  });
+
+  it("V2-C: focus/avoid values populated from DB appear in Section 4 draft", () => {
+    const savedAnswers: Record<string, unknown> = {
+      "body-focus-areas": ["waist", "neckline"],
+      "body-avoid-areas": ["upper-arms"],
+    };
+    // initEdits for Section 4 iterates its subFields including body-focus-areas and body-avoid-areas
+    const FIT_SUBFIELDS = ["silhouette", "structure", "coverage-preferences", "body-focus-areas", "body-avoid-areas", "preferred-coverage"];
+    const edits: Record<string, unknown> = {};
+    for (const draftKey of FIT_SUBFIELDS) {
+      const v = savedAnswers[draftKey];
+      edits[draftKey] = Array.isArray(v) ? [...v] : (typeof v === "string" ? v : "");
+    }
+    assert.deepEqual(edits["body-focus-areas"], ["waist", "neckline"]);
+    assert.deepEqual(edits["body-avoid-areas"], ["upper-arms"]);
+  });
+
+  it("Section 5 save body does not include body-focus-areas", () => {
+    // computeSectionPatch iterates only Section 5 subFields — which no longer include body areas
+    const SIZES_SUBFIELDS = [
+      "sizing-system", "top-size", "bottom-size", "dress-size", "shoe-size",
+      "height", "measurement-unit", "bust-measurement", "waist-measurement", "hip-measurement",
+      "body-shape", "fit-concerns",
+    ];
+    const savedAnswers: Record<string, unknown> = { "body-focus-areas": ["waist"], "top-size": "10" };
+    const flowEdits:    Record<string, unknown> = { "body-focus-areas": ["waist", "neckline"], "top-size": "10" };
+    const patch: Record<string, unknown> = {};
+    for (const key of SIZES_SUBFIELDS) {
+      if (JSON.stringify(savedAnswers[key]) !== JSON.stringify(flowEdits[key])) patch[key] = flowEdits[key];
+    }
+    assert.ok(!Object.hasOwn(patch, "body-focus-areas"), "Section 5 patch must not contain body-focus-areas");
+    assert.ok(!Object.hasOwn(patch, "bodyFocusAreas"),   "Section 5 patch must not contain bodyFocusAreas");
   });
 });
