@@ -490,47 +490,78 @@ describe("C.14 Section 5 never appears in missingSections", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// C.15 — Section 5 overview summary: count format
+// C.15 — Section 5 overview summary: label format (first 2 + "+N more")
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("C.15 Section 5 getSectionSummary count format", () => {
+describe("C.15 Section 5 getSectionSummary label format", () => {
+  const focusLabels = Object.fromEntries(FOCUS_OPTIONS.map(o => [o.id, o.label]));
+  const avoidLabels = Object.fromEntries(AVOID_OPTIONS.map(o => [o.id, o.label]));
+
+  function areaLine(ids: string[], labels: Record<string, string>, prefix: string): string {
+    const humanLabels = ids.map(id => labels[id] ?? id.replace(/-/g, " "));
+    const shown = humanLabels.slice(0, 2);
+    const rest = humanLabels.length - 2;
+    return `${prefix}: ${shown.join(", ")}${rest > 0 ? ` +${rest} more` : ""}`;
+  }
+
   function getSizesSummary(focusIds: string[], avoidIds: string[]): string | "missing" {
     if (focusIds.length === 0 && avoidIds.length === 0) return "missing";
-    const parts: string[] = [];
-    if (focusIds.length > 0) parts.push(`${focusIds.length} highlight${focusIds.length !== 1 ? "s" : ""}`);
-    if (avoidIds.length > 0) parts.push(`${avoidIds.length} coverage preference${avoidIds.length !== 1 ? "s" : ""}`);
-    return parts.join(" · ");
+    const hasFocus = focusIds.length > 0;
+    const hasAvoid = avoidIds.length > 0;
+    if (hasFocus && hasAvoid) {
+      return `${areaLine(focusIds, focusLabels, "Highlights")} | ${areaLine(avoidIds, avoidLabels, "Coverage")}`;
+    }
+    if (hasFocus) return areaLine(focusIds, focusLabels, "Highlights");
+    return areaLine(avoidIds, avoidLabels, "Coverage");
   }
 
   it("both empty → 'missing'", () => {
     assert.equal(getSizesSummary([], []), "missing");
   });
 
-  it("1 highlight → '1 highlight' (singular)", () => {
-    assert.equal(getSizesSummary(["waist"], []), "1 highlight");
+  it("1 focus → 'Highlights: <label>'", () => {
+    assert.equal(getSizesSummary(["waist"], []), "Highlights: Waist");
   });
 
-  it("3 highlights → '3 highlights'", () => {
-    assert.equal(getSizesSummary(["waist", "legs", "bust"], []), "3 highlights");
+  it("2 focus → 'Highlights: label1, label2'", () => {
+    assert.equal(getSizesSummary(["waist", "legs"], []), "Highlights: Waist, Legs");
   });
 
-  it("1 coverage preference → '1 coverage preference' (singular)", () => {
-    assert.equal(getSizesSummary([], ["midriff"]), "1 coverage preference");
+  it("3 focus → 'Highlights: label1, label2 +1 more'", () => {
+    assert.equal(getSizesSummary(["waist", "legs", "bust"], []), "Highlights: Waist, Legs +1 more");
   });
 
-  it("2 coverage preferences → '2 coverage preferences'", () => {
-    assert.equal(getSizesSummary([], ["midriff", "back"]), "2 coverage preferences");
+  it("5 focus → 'Highlights: label1, label2 +3 more'", () => {
+    const ids = FOCUS_OPTIONS.map(o => o.id); // all 7, capped at 5 in practice
+    const result = areaLine(ids.slice(0, 5), focusLabels, "Highlights");
+    assert.ok(result.startsWith("Highlights:"), result);
+    assert.ok(result.includes("+3 more"), result);
   });
 
-  it("focus and avoid both set → joined with ' · '", () => {
-    assert.equal(getSizesSummary(["waist"], ["midriff"]), "1 highlight · 1 coverage preference");
+  it("1 avoid → 'Coverage: <label>'", () => {
+    assert.equal(getSizesSummary([], ["midriff"]), "Coverage: Midriff");
   });
 
-  it("3 highlights · 2 coverage preferences", () => {
-    assert.equal(
-      getSizesSummary(["waist", "legs", "bust"], ["midriff", "back"]),
-      "3 highlights · 2 coverage preferences",
-    );
+  it("2 avoid → 'Coverage: label1, label2'", () => {
+    assert.equal(getSizesSummary([], ["upper-arms", "midriff"]), "Coverage: Upper arms, Midriff");
+  });
+
+  it("3 avoid → 'Coverage: label1, label2 +1 more'", () => {
+    assert.equal(getSizesSummary([], ["upper-arms", "midriff", "back"]), "Coverage: Upper arms, Midriff +1 more");
+  });
+
+  it("both set → shows Highlights and Coverage", () => {
+    const result = getSizesSummary(["waist"], ["midriff"]);
+    assert.ok(result.includes("Highlights: Waist"), `missing focus line: ${result}`);
+    assert.ok(result.includes("Coverage: Midriff"), `missing avoid line: ${result}`);
+  });
+
+  it("uses human-readable labels, never raw IDs", () => {
+    const result = getSizesSummary(["arms-shoulders"], ["hips-thighs"]);
+    assert.ok(!result.includes("arms-shoulders"), "raw ID leaked into summary");
+    assert.ok(!result.includes("hips-thighs"), "raw ID leaked into summary");
+    assert.ok(result.includes("Arms & shoulders"), `expected label not found: ${result}`);
+    assert.ok(result.includes("Hips & thighs"), `expected label not found: ${result}`);
   });
 });
 

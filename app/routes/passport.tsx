@@ -284,6 +284,8 @@ const AVOID_TO_FOCUS: Record<string, string> = {
   "waist": "waist", "legs": "legs", "neckline": "neckline", "back": "back",
   "bust": "bust", "upper-arms": "arms-shoulders", "hips-thighs": "hips-curves",
 };
+const FOCUS_LABELS: Record<string, string> = Object.fromEntries(FOCUS_OPTIONS.map(o => [o.id, o.label]));
+const AVOID_LABELS: Record<string, string> = Object.fromEntries(AVOID_OPTIONS.map(o => [o.id, o.label]));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Diff helper
@@ -381,17 +383,26 @@ function formatDate(iso: string): string {
 }
 
 function getSectionSummary(def: SectionDef, answers: OnboardingAnswers): ReactNode {
-  // Section 5 (body-area pickers) — count summary, not option labels
+  // Section 5 (body-area pickers) — label summary: first 2 labels + "+N more"
   if (def.id === "sizes") {
     const focus = ((answers as Record<string, unknown>)["body-focus-areas"] as string[] | undefined) ?? [];
     const avoid = ((answers as Record<string, unknown>)["body-avoid-areas"] as string[] | undefined) ?? [];
     if (focus.length === 0 && avoid.length === 0) {
       return <span className="sp-detail-missing">Not yet completed</span>;
     }
-    const parts: string[] = [];
-    if (focus.length > 0) parts.push(`${focus.length} highlight${focus.length !== 1 ? "s" : ""}`);
-    if (avoid.length > 0) parts.push(`${avoid.length} coverage preference${avoid.length !== 1 ? "s" : ""}`);
-    return parts.join(" · ");
+    const areaLine = (ids: string[], labels: Record<string, string>, prefix: string): string => {
+      const humanLabels = ids.map(id => labels[id] ?? id.replace(/-/g, " "));
+      const shown = humanLabels.slice(0, 2);
+      const rest = humanLabels.length - 2;
+      return `${prefix}: ${shown.join(", ")}${rest > 0 ? ` +${rest} more` : ""}`;
+    };
+    const hasFocus = focus.length > 0;
+    const hasAvoid = avoid.length > 0;
+    if (hasFocus && hasAvoid) {
+      return <>{areaLine(focus, FOCUS_LABELS, "Highlights")}<br />{areaLine(avoid, AVOID_LABELS, "Coverage")}</>;
+    }
+    if (hasFocus) return areaLine(focus, FOCUS_LABELS, "Highlights");
+    return areaLine(avoid, AVOID_LABELS, "Coverage");
   }
   if (def.placeholder) {
     return <span className="sp-detail-coming">Coming soon</span>;
