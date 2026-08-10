@@ -303,16 +303,6 @@ const AVOID_TO_FOCUS: Record<string, string> = {
 const FOCUS_LABELS: Record<string, string> = Object.fromEntries(FOCUS_OPTIONS.map(o => [o.id, o.label]));
 const AVOID_LABELS: Record<string, string> = Object.fromEntries(AVOID_OPTIONS.map(o => [o.id, o.label]));
 
-// Register body-area questions in lookup tables (defined here because they share *_OPTIONS constants)
-QUESTION_BY_ID["body-focus-areas"]   = { id: "body-focus-areas",   type: "multi",  title: "Which areas do you enjoy highlighting?",                             subtitle: "Optional. Choose up to 5.", maxSelections: 5, options: FOCUS_OPTIONS             };
-QUESTION_BY_ID["body-avoid-areas"]   = { id: "body-avoid-areas",   type: "multi",  title: "Where do you usually prefer more coverage or less emphasis?",        subtitle: "Optional. Choose up to 5.", maxSelections: 5, options: AVOID_OPTIONS            };
-QUESTION_BY_ID["preferred-coverage"] = { id: "preferred-coverage", type: "single", title: "How much coverage do you generally prefer?",                                                                             options: PREFERRED_COVERAGE_OPTIONS };
-MAX_SELECTIONS["body-focus-areas"]   = 5;
-MAX_SELECTIONS["body-avoid-areas"]   = 5;
-OPTION_LABELS["body-focus-areas"]    = FOCUS_LABELS;
-OPTION_LABELS["body-avoid-areas"]    = AVOID_LABELS;
-OPTION_LABELS["preferred-coverage"]  = Object.fromEntries(PREFERRED_COVERAGE_OPTIONS.map(o => [o.id, o.label]));
-
 // V2-D: sizing, body shape, fit options
 const SIZING_SYSTEM_OPTIONS = [
   { id: "uk",            label: "UK"            },
@@ -364,6 +354,16 @@ const PREFERRED_COVERAGE_OPTIONS = [
   { id: "varies",         label: "It varies by outfit and occasion"                  },
   { id: "more-open",      label: "Comfortable showing more skin when appropriate"    },
 ];
+
+// Register body-area questions in lookup tables (after all *_OPTIONS consts are defined)
+QUESTION_BY_ID["body-focus-areas"]   = { id: "body-focus-areas",   type: "multi",  title: "Which areas do you enjoy highlighting?",                             subtitle: "Optional. Choose up to 5.", maxSelections: 5, options: FOCUS_OPTIONS             };
+QUESTION_BY_ID["body-avoid-areas"]   = { id: "body-avoid-areas",   type: "multi",  title: "Where do you usually prefer more coverage or less emphasis?",        subtitle: "Optional. Choose up to 5.", maxSelections: 5, options: AVOID_OPTIONS            };
+QUESTION_BY_ID["preferred-coverage"] = { id: "preferred-coverage", type: "single", title: "How much coverage do you generally prefer?",                                                                             options: PREFERRED_COVERAGE_OPTIONS };
+MAX_SELECTIONS["body-focus-areas"]   = 5;
+MAX_SELECTIONS["body-avoid-areas"]   = 5;
+OPTION_LABELS["body-focus-areas"]    = FOCUS_LABELS;
+OPTION_LABELS["body-avoid-areas"]    = AVOID_LABELS;
+OPTION_LABELS["preferred-coverage"]  = Object.fromEntries(PREFERRED_COVERAGE_OPTIONS.map(o => [o.id, o.label]));
 
 function parseHeightForDisplay(height: string | undefined, unit: "cm" | "ft-in"): { cm?: string; ft?: string; in?: string } {
   if (!height || height.trim() === "") return {};
