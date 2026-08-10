@@ -284,6 +284,9 @@ export type OnboardingAnswers = {
   "neutral-vs-colour"?: string;
   "colour-intensity"?: string;
   "print-appetite"?: string;
+  // V2-C body-area pickers
+  "body-focus-areas"?: string[];
+  "body-avoid-areas"?: string[];
 };
 
 export function getQuestionByStep(step: number): QuizQuestion | undefined {

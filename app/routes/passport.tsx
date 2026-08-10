@@ -149,7 +149,8 @@ interface SectionDef {
   question:    string;
   helper:      string;
   subFields:   SubField[];
-  placeholder?: boolean; // Section 5 — V2-C/V2-D not yet implemented
+  placeholder?: boolean;
+  optional?:   boolean; // never "missing"; excluded from Continue Passport queue
 }
 
 // Exact section labels (names) as specified
@@ -198,10 +199,13 @@ const SECTIONS: SectionDef[] = [
   {
     id: "sizes",
     label: "Your Sizes & Fit",
-    question: "Your detailed fit profile",
-    helper: "",
-    subFields: [],
-    placeholder: true,
+    question: "Where do you like to draw attention, and where do you prefer more coverage?",
+    helper: "Both pickers are optional. Choose up to 5 for each.",
+    subFields: [
+      { draftKey: "body-focus-areas" as DraftKey, apiKey: "bodyFocusAreas", subLabel: "Which areas do you enjoy highlighting?",                         kind: "array" as FieldKind, questionId: "body-focus-areas"  },
+      { draftKey: "body-avoid-areas" as DraftKey, apiKey: "bodyAvoidAreas", subLabel: "Where do you usually prefer a little more coverage or less emphasis?", kind: "array" as FieldKind, questionId: "body-avoid-areas" },
+    ],
+    optional: true,
   },
   {
     id: "colours",
@@ -250,6 +254,36 @@ function getSectionDef(id: SectionId): SectionDef {
 
 // Legacy colour IDs that are stripped from favoriteColors on explicit Passport save
 const LEGACY_COLOUR_IDS = new Set(["prints", "colorful"]);
+
+// V2-C: body-area picker options
+const FOCUS_OPTIONS = [
+  { id: "waist",         label: "Waist"           },
+  { id: "arms-shoulders", label: "Arms & shoulders" },
+  { id: "legs",          label: "Legs"             },
+  { id: "neckline",      label: "Neckline"         },
+  { id: "back",          label: "Back"             },
+  { id: "bust",          label: "Bust"             },
+  { id: "hips-curves",   label: "Hips & curves"   },
+];
+const AVOID_OPTIONS = [
+  { id: "upper-arms",  label: "Upper arms"   },
+  { id: "midriff",     label: "Midriff"      },
+  { id: "bust",        label: "Bust"         },
+  { id: "hips-thighs", label: "Hips & thighs" },
+  { id: "back",        label: "Back"         },
+  { id: "legs",        label: "Legs"         },
+  { id: "waist",       label: "Waist"        },
+  { id: "neckline",    label: "Neckline"     },
+];
+// Selecting a focus area removes its paired avoid item (and vice versa)
+const FOCUS_TO_AVOID: Record<string, string> = {
+  "waist": "waist", "arms-shoulders": "upper-arms", "legs": "legs",
+  "neckline": "neckline", "back": "back", "bust": "bust", "hips-curves": "hips-thighs",
+};
+const AVOID_TO_FOCUS: Record<string, string> = {
+  "waist": "waist", "legs": "legs", "neckline": "neckline", "back": "back",
+  "bust": "bust", "upper-arms": "arms-shoulders", "hips-thighs": "hips-curves",
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Diff helper
@@ -328,6 +362,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if ((op as any).printAppetite)             savedAnswers["print-appetite"]         = (op as any).printAppetite;
   if ((op as any).shoppingPriorities?.length) savedAnswers["shopping-priorities"]   = (op as any).shoppingPriorities;
   if ((op as any).trendAppetite)             savedAnswers["trend-appetite"]         = (op as any).trendAppetite;
+  // V2-C
+  if ((op as any).bodyFocusAreas?.length)    savedAnswers["body-focus-areas"]       = (op as any).bodyFocusAreas;
+  if ((op as any).bodyAvoidAreas?.length)    savedAnswers["body-avoid-areas"]       = (op as any).bodyAvoidAreas;
 
   return {
     savedAnswers,
@@ -344,6 +381,18 @@ function formatDate(iso: string): string {
 }
 
 function getSectionSummary(def: SectionDef, answers: OnboardingAnswers): ReactNode {
+  // Section 5 (body-area pickers) — count summary, not option labels
+  if (def.id === "sizes") {
+    const focus = ((answers as Record<string, unknown>)["body-focus-areas"] as string[] | undefined) ?? [];
+    const avoid = ((answers as Record<string, unknown>)["body-avoid-areas"] as string[] | undefined) ?? [];
+    if (focus.length === 0 && avoid.length === 0) {
+      return <span className="sp-detail-missing">Not yet completed</span>;
+    }
+    const parts: string[] = [];
+    if (focus.length > 0) parts.push(`${focus.length} highlight${focus.length !== 1 ? "s" : ""}`);
+    if (avoid.length > 0) parts.push(`${avoid.length} coverage preference${avoid.length !== 1 ? "s" : ""}`);
+    return parts.join(" · ");
+  }
   if (def.placeholder) {
     return <span className="sp-detail-coming">Coming soon</span>;
   }
@@ -394,13 +443,14 @@ export default function PassportPage() {
   const [saveStatus,           setSaveStatus]           = useState<SaveStatus>("idle");
   const [awaitingRevalidation, setAwaitingRevalidation] = useState(false);
   const [pendingNext,          setPendingNext]          = useState<PendingNext>(null);
+  const [sizeEditedField,      setSizeEditedField]      = useState<"bodyFocusAreas" | "bodyAvoidAreas" | null>(null);
   const lastIntentRef = useRef<PendingNext>(null);
 
   // Missing sections excludes "sizes" (always placeholder) and "notes" (optional)
   // Notes is handled separately — it appears in the Continue queue if missing
   const missingSections = useMemo(() =>
     ALL_SECTIONS.filter(s => {
-      if (s.placeholder) return false; // sizes never triggers as "missing"
+      if (s.placeholder || s.optional) return false; // optional sections never trigger as "missing"
       const primary = s.subFields[0];
       if (!primary) return false;
       const v = (savedAnswers as Record<string, unknown>)[primary.draftKey];
@@ -449,6 +499,7 @@ export default function PassportPage() {
   }, [awaitingRevalidation, revalidator.state, pendingNext, mode]); // eslint-disable-line
 
   function initEdits(sectionId: SectionId) {
+    if (sectionId === "sizes") setSizeEditedField(null);
     const def = getSectionDef(sectionId);
     const edits: OnboardingAnswers = {};
     for (const { draftKey, kind } of def.subFields) {
@@ -501,6 +552,31 @@ export default function PassportPage() {
     });
   }, []);
 
+  const handleBodyAreaToggle = useCallback((
+    draftKey: "body-focus-areas" | "body-avoid-areas",
+    apiKey: "bodyFocusAreas" | "bodyAvoidAreas",
+    optId: string,
+  ) => {
+    setFlowEdits(prev => {
+      const p = prev as Record<string, unknown>;
+      const current = (p[draftKey] as string[] | undefined) ?? [];
+      if (current.includes(optId)) {
+        return { ...p, [draftKey]: current.filter(id => id !== optId) } as OnboardingAnswers;
+      }
+      if (current.length >= 5) return prev;
+      const next: Record<string, unknown> = { ...p, [draftKey]: [...current, optId] };
+      const pairKey = draftKey === "body-focus-areas" ? "body-avoid-areas" : "body-focus-areas";
+      const overlapMap = draftKey === "body-focus-areas" ? FOCUS_TO_AVOID : AVOID_TO_FOCUS;
+      const mappedId = overlapMap[optId];
+      if (mappedId) {
+        const prevPair = (p[pairKey] as string[] | undefined) ?? [];
+        next[pairKey] = prevPair.filter(id => id !== mappedId);
+      }
+      return next as OnboardingAnswers;
+    });
+    setSizeEditedField(apiKey);
+  }, []);
+
   const handleSingleSelect = useCallback((draftKey: DraftKey, optId: string) => {
     setFlowEdits(prev => {
       const current = (prev as Record<string, unknown>)[draftKey];
@@ -515,8 +591,7 @@ export default function PassportPage() {
   async function saveSection(sectionId: SectionId, intent: PendingNext) {
     const def = getSectionDef(sectionId);
 
-    // Placeholder sections (sizes) have no subFields — navigate without saving
-    if (def.placeholder || def.subFields.length === 0) {
+    if (def.subFields.length === 0) {
       if (intent === "exit") {
         setMode({ kind: "overview" });
       } else if (mode.kind === "flow") {
@@ -551,10 +626,12 @@ export default function PassportPage() {
     lastIntentRef.current = intent;
     setSaveStatus("saving");
     try {
+      const requestBody: Record<string, unknown> = { ...patch, baseProfileUpdatedAt: profileUpdatedAt };
+      if (sectionId === "sizes") requestBody.editedField = sizeEditedField ?? "bodyFocusAreas";
       const res = await fetch("/api/save-style-profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...patch, baseProfileUpdatedAt: profileUpdatedAt }),
+        body: JSON.stringify(requestBody),
       });
       if (res.status === 409) { setSaveStatus("conflict"); return; }
       if (!res.ok)            { setSaveStatus("error");    return; }
@@ -828,16 +905,6 @@ export default function PassportPage() {
         {currentDef.helper && <p className="sp-flow-helper">{currentDef.helper}</p>}
       </div>
 
-      {/* Section 5 placeholder shell */}
-      {currentDef.placeholder && (
-        <div className="sp-placeholder-shell">
-          <p className="sp-placeholder-text">
-            Your detailed fit profile — including sizing, body preferences, and fit concerns — will be
-            set up in the next update. Nothing is missing from your Passport right now.
-          </p>
-        </div>
-      )}
-
       {/* Legacy colour hints — read-only banners, never preselect anything */}
       {hasLegacyPrints && (
         <div className="sp-legacy-hint">
@@ -850,7 +917,56 @@ export default function PassportPage() {
         </div>
       )}
 
-      {currentDef.subFields.map(sf => {
+      {/* Section 5 — body-area pickers with mutual exclusion */}
+      {currentId === "sizes" && (
+        <>
+          <div>
+            <div className="sp-sub-label">Which areas do you enjoy highlighting?</div>
+            <div className="sp-cap-hint">Optional. Choose up to 5.</div>
+            <div className="sp-option-grid">
+              {FOCUS_OPTIONS.map(o => {
+                const sel = ((flowEdits as Record<string, unknown>)["body-focus-areas"] as string[] | undefined) ?? [];
+                const isSel = sel.includes(o.id);
+                const atCap = sel.length >= 5;
+                return (
+                  <button
+                    key={o.id}
+                    type="button"
+                    className={`sp-option${isSel ? " sp-option--active" : ""}${!isSel && atCap ? " sp-option--disabled" : ""}`}
+                    onClick={() => handleBodyAreaToggle("body-focus-areas", "bodyFocusAreas", o.id)}
+                  >
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <div className="sp-sub-label">Where do you usually prefer a little more coverage or less emphasis?</div>
+            <div className="sp-cap-hint">Optional. Choose up to 5.</div>
+            <div className="sp-option-grid">
+              {AVOID_OPTIONS.map(o => {
+                const sel = ((flowEdits as Record<string, unknown>)["body-avoid-areas"] as string[] | undefined) ?? [];
+                const isSel = sel.includes(o.id);
+                const atCap = sel.length >= 5;
+                return (
+                  <button
+                    key={o.id}
+                    type="button"
+                    className={`sp-option${isSel ? " sp-option--active" : ""}${!isSel && atCap ? " sp-option--disabled" : ""}`}
+                    onClick={() => handleBodyAreaToggle("body-avoid-areas", "bodyAvoidAreas", o.id)}
+                  >
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* All other sections — generic sub-field renderer */}
+      {currentId !== "sizes" && currentDef.subFields.map(sf => {
         const capHint = (sf.kind === "array" || sf.kind === "color") && MAX_SELECTIONS[sf.questionId]
           ? (QUESTION_BY_ID[sf.questionId]?.subtitle ?? `Choose up to ${MAX_SELECTIONS[sf.questionId]}`)
           : null;

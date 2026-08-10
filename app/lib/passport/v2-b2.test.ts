@@ -333,14 +333,15 @@ describe("B2.9 legacy hint detection", () => {
 // B2.10 — Section 5 placeholder contract
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("B2.10 Section 5 placeholder", () => {
-  // Mirrored from passport.tsx
+describe("B2.10 Section 5 (V2-C activated: optional body-area pickers)", () => {
+  // Mirrored from passport.tsx (updated for V2-C)
   type SectionId = "identity" | "direction" | "life" | "fit" | "sizes" | "colours" | "wardrobe" | "notes";
 
   interface SectionDef {
     id:          SectionId;
     subFields:   { draftKey: string }[];
     placeholder?: boolean;
+    optional?:   boolean;
   }
 
   const SECTIONS: SectionDef[] = [
@@ -348,29 +349,32 @@ describe("B2.10 Section 5 placeholder", () => {
     { id: "direction", subFields: [{ draftKey: "desired-feelings"    }] },
     { id: "life",      subFields: [{ draftKey: "lifestyle"           }] },
     { id: "fit",       subFields: [{ draftKey: "silhouette"          }] },
-    { id: "sizes",     subFields: [], placeholder: true                  },
+    { id: "sizes",     subFields: [{ draftKey: "body-focus-areas" }, { draftKey: "body-avoid-areas" }], optional: true },
     { id: "colours",   subFields: [{ draftKey: "favorite-colors"     }] },
     { id: "wardrobe",  subFields: [{ draftKey: "wardrobe-disconnection" }] },
   ];
 
   const sizesSection = SECTIONS.find(s => s.id === "sizes")!;
 
-  it("Section 5 label is 'sizes'", () => {
+  it("Section 5 id is 'sizes'", () => {
     assert.equal(sizesSection.id, "sizes");
   });
 
-  it("sizes section has placeholder: true", () => {
-    assert.ok(sizesSection.placeholder === true);
+  it("sizes section has optional: true (V2-C activated; no longer a placeholder)", () => {
+    assert.ok(sizesSection.optional === true);
+    assert.ok(sizesSection.placeholder !== true);
   });
 
-  it("sizes section has no subFields", () => {
-    assert.equal(sizesSection.subFields.length, 0);
+  it("sizes section has 2 subFields (body-focus-areas, body-avoid-areas)", () => {
+    assert.equal(sizesSection.subFields.length, 2);
+    assert.equal(sizesSection.subFields[0].draftKey, "body-focus-areas");
+    assert.equal(sizesSection.subFields[1].draftKey, "body-avoid-areas");
   });
 
-  it("sizes section is excluded from missingSections when placeholder: true", () => {
+  it("sizes section is excluded from missingSections when optional: true", () => {
     function computeMissing(sections: SectionDef[], savedAnswers: Record<string, unknown>): SectionDef[] {
       return sections.filter(s => {
-        if (s.placeholder) return false;
+        if (s.placeholder || s.optional) return false;
         const primary = s.subFields[0];
         if (!primary) return false;
         const v = savedAnswers[primary.draftKey];

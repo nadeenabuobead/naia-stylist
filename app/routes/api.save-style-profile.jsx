@@ -19,6 +19,8 @@ const RECOGNISED_FIELDS = new Set([
   "silhouette", "structure", "coveragePreferences", "typicalDay",
   "neutralVsColour", "colourIntensity", "printAppetite", "shoppingPriorities",
   "trendAppetite",
+  // V2-C
+  "bodyFocusAreas", "bodyAvoidAreas",
 ]);
 
 const ARRAY_FIELDS = [
@@ -27,6 +29,8 @@ const ARRAY_FIELDS = [
   "avoidColors", "styleSupport",
   // V2-B1 array fields (no quiz-option validation yet — UI doesn't exist)
   "silhouette", "coveragePreferences", "shoppingPriorities",
+  // V2-C
+  "bodyFocusAreas", "bodyAvoidAreas",
 ];
 
 // V2-B1 free-text fields (string | null); validated same pattern as finalNotes.
@@ -35,6 +39,21 @@ const B1_TEXT_FIELDS = [
 ];
 // Character limits per field (trimmed length).
 const B1_TEXT_MAX = { structure: 200, neutralVsColour: 200, colourIntensity: 200, printAppetite: 200, trendAppetite: 200 };
+
+// V2-C: body-area pickers
+const FOCUS_VALID_IDS = new Set(["waist", "arms-shoulders", "legs", "neckline", "back", "bust", "hips-curves"]);
+const AVOID_VALID_IDS = new Set(["upper-arms", "midriff", "bust", "hips-thighs", "back", "legs", "waist", "neckline"]);
+const MAX_BODY_AREAS  = 5;
+
+// Semantic overlap maps (server-side safety net; UI already enforces mutual exclusion)
+const FOCUS_TO_AVOID_NORM = {
+  "waist": "waist", "arms-shoulders": "upper-arms", "legs": "legs",
+  "neckline": "neckline", "back": "back", "bust": "bust", "hips-curves": "hips-thighs",
+};
+const AVOID_TO_FOCUS_NORM = {
+  "waist": "waist", "legs": "legs", "neckline": "neckline", "back": "back",
+  "bust": "bust", "upper-arms": "arms-shoulders", "hips-thighs": "hips-curves",
+};
 
 // Valid option IDs and max selection counts per field — derived from quiz data at module load time
 const VALID_OPTION_IDS = {};
@@ -83,9 +102,11 @@ export async function action({ request }) {
     return Response.json({ error: "invalid_body" }, { status: 400 });
   }
 
+  // "editedField" is request-only (never persisted) — allowed but not in RECOGNISED_FIELDS
+  const REQUEST_ONLY_KEYS = new Set(["baseProfileUpdatedAt", "editedField"]);
   // Reject unknown top-level keys
   for (const key of Object.keys(body)) {
-    if (key !== "baseProfileUpdatedAt" && !RECOGNISED_FIELDS.has(key)) {
+    if (!REQUEST_ONLY_KEYS.has(key) && !RECOGNISED_FIELDS.has(key)) {
       return Response.json({ error: "invalid_body" }, { status: 400 });
     }
   }
@@ -165,6 +186,22 @@ export async function action({ request }) {
     return Response.json({ error: "lifestyle_too_many" }, { status: 400 });
   }
 
+  // V2-C: body-area arrays — valid IDs, max 5, no duplicates
+  if (Object.hasOwn(body, "bodyFocusAreas")) {
+    const v = body["bodyFocusAreas"];
+    if (v.length > MAX_BODY_AREAS || new Set(v).size !== v.length ||
+        !v.every(id => FOCUS_VALID_IDS.has(id))) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+  if (Object.hasOwn(body, "bodyAvoidAreas")) {
+    const v = body["bodyAvoidAreas"];
+    if (v.length > MAX_BODY_AREAS || new Set(v).size !== v.length ||
+        !v.every(id => AVOID_VALID_IDS.has(id))) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+
   const op = customer.onboardingProfile;
 
   // All submitted values are validated. Absent keys fall back to the saved DB value
@@ -184,6 +221,21 @@ export async function action({ request }) {
     const v = body["lifestyle"];
     return v.length > 0 ? v.join(", ") : null;
   };
+
+  // V2-C: body-area mutual-exclusion normalization (server-side safety net)
+  // editedField determines which picker wins when a conflict reaches the server; missing/invalid → focus wins
+  const editedBodyField = body["editedField"] === "bodyAvoidAreas" ? "bodyAvoidAreas" : "bodyFocusAreas";
+  const rawFocusAreas = pickArr("bodyFocusAreas", op?.bodyFocusAreas).filter(id => FOCUS_VALID_IDS.has(id));
+  const rawAvoidAreas = pickArr("bodyAvoidAreas", op?.bodyAvoidAreas).filter(id => AVOID_VALID_IDS.has(id));
+  let normalizedFocusAreas = rawFocusAreas;
+  let normalizedAvoidAreas = rawAvoidAreas;
+  if (editedBodyField === "bodyFocusAreas") {
+    const avoidConflicts = new Set(normalizedFocusAreas.map(id => FOCUS_TO_AVOID_NORM[id]).filter(Boolean));
+    normalizedAvoidAreas = normalizedAvoidAreas.filter(id => !avoidConflicts.has(id));
+  } else {
+    const focusConflicts = new Set(normalizedAvoidAreas.map(id => AVOID_TO_FOCUS_NORM[id]).filter(Boolean));
+    normalizedFocusAreas = normalizedFocusAreas.filter(id => !focusConflicts.has(id));
+  }
 
   // Resolve favourite/avoid colour conflict: avoid wins.
   const rawFavorites = pickArr("favoriteColors", op?.favoriteColors);
@@ -222,6 +274,9 @@ export async function action({ request }) {
     printAppetite:       pickText("printAppetite",      op?.printAppetite),
     shoppingPriorities:  pickArr("shoppingPriorities",  op?.shoppingPriorities),
     trendAppetite:       pickText("trendAppetite",      op?.trendAppetite),
+    // V2-C
+    bodyFocusAreas:      normalizedFocusAreas,
+    bodyAvoidAreas:      normalizedAvoidAreas,
     completed:           true,
   };
 
