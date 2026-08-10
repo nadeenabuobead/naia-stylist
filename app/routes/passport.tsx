@@ -434,7 +434,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const savedAnswers: OnboardingAnswers = {};
   if (op.stylePersonalities.length)          savedAnswers["style-personalities"]    = op.stylePersonalities;
   if (op.desiredImpression.length)           savedAnswers["desired-impression"]     = op.desiredImpression;
-  if (op.lifestyle)                          savedAnswers["lifestyle"]              = op.lifestyle.split(", ").filter(Boolean);
+  if (op.lifestyle.length)                   savedAnswers["lifestyle"]              = op.lifestyle;
   if (op.desiredFeelings.length)             savedAnswers["desired-feelings"]       = op.desiredFeelings;
   if (op.becoming.length)                    savedAnswers["becoming"]               = op.becoming;
   if ((op as any).silhouette?.length)        savedAnswers["silhouette"]             = (op as any).silhouette;

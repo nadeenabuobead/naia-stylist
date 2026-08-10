@@ -82,7 +82,7 @@ model OnboardingProfile {
   avoidColors         String[]
 
   // Lifestyle & Context
-  lifestyle           String?   // e.g., "corporate", "creative", "mom life", "student"
+  lifestyle           String[]  @default([])
   dressesFor          String[]  // e.g., ["work meetings", "date nights", "school runs"]
   typicalDay          String?   // Description of her typical day
 

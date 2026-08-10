@@ -824,8 +824,7 @@ export default function Index() {
             const rowStyle: React.CSSProperties = { paddingBottom: "20px", marginBottom: "20px", borderBottom: "1px solid var(--c-border)" };
             const pillStyle: React.CSSProperties = { display: "inline-block", padding: "6px 14px", border: "1px solid var(--c-border)", fontFamily: "var(--ff-ui)", fontSize: "9px", letterSpacing: "1px", textTransform: "uppercase" as const, color: "var(--c-ink)", marginRight: "8px", marginBottom: "6px" };
 
-            // Rehydrate lifestyle from comma-joined string
-            const lifestyleArr: string[] = p.lifestyle ? p.lifestyle.split(", ").filter(Boolean) : [];
+            const lifestyleArr: string[] = p.lifestyle ?? [];
 
             const sections: Array<{ label: string; content: React.ReactNode } | null> = [
               p.stylePersonalities?.length ? {

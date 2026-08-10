@@ -54,7 +54,7 @@ export interface AssessmentResult {
 export interface CustomerAssessmentProfile {
   stylePersonalities: string[];
   desiredFeelings: string[];
-  lifestyle: string | null;
+  lifestyle: string[] | null;
   dressesFor: string[];
   favoriteColors: string[];
   avoidColors: string[];

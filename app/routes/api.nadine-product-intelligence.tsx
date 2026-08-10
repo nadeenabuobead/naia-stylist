@@ -91,7 +91,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         profile = {
           stylePersonalities: op.stylePersonalities,
           desiredFeelings: op.desiredFeelings,
-          lifestyle: op.lifestyle ?? null,
+          lifestyle: op.lifestyle.length ? op.lifestyle : null,
           dressesFor: op.dressesFor,
           favoriteColors: op.favoriteColors,
           avoidColors: op.avoidColors,

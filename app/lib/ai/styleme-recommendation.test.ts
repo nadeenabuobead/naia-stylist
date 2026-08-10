@@ -2240,7 +2240,7 @@ describe("§16  Profile signal influence tests", () => {
 
   it("16.6  profile.lifestyle=\"office\" adds RANK=2 to collar-shirt (has \"work\" tag) when session occasion is dinner", () => {
     const without = run(dinnerSession);
-    const withProfile = run(dinnerSession, { lifestyle: "office" });
+    const withProfile = run(dinnerSession, { lifestyle: ["office"] });
 
     const evWithout = findEval(without,    "collar-shirt");
     const evWith   = findEval(withProfile, "collar-shirt");
@@ -2260,7 +2260,7 @@ describe("§16  Profile signal influence tests", () => {
   it("16.6b  profile.lifestyle does not score straight-pants for \"office\" (no \"work\" tag)", () => {
     // straight-pants occasionTags: "dinner, date-night, special-event, travel" — no "work"
     const without = run(dinnerSession);
-    const withProfile = run(dinnerSession, { lifestyle: "office" });
+    const withProfile = run(dinnerSession, { lifestyle: ["office"] });
 
     const evWithout = findEval(without,    "straight-pants");
     const evWith   = findEval(withProfile, "straight-pants");
@@ -2275,7 +2275,7 @@ describe("§16  Profile signal influence tests", () => {
     const workSession = makeSession({ occasion: "work", source: "naia-piece" });
 
     const sessionOnly     = run(workSession);
-    const sessionAndProfile = run(workSession, { lifestyle: "office" });
+    const sessionAndProfile = run(workSession, { lifestyle: ["office"] });
 
     const scoreOnly = findEval(sessionOnly,      "collar-shirt").totalScore;
     const scoreBoth = findEval(sessionAndProfile, "collar-shirt").totalScore;
@@ -2291,7 +2291,7 @@ describe("§16  Profile signal influence tests", () => {
     const fp0 = buildSessionFingerprint(session, undefined, null, []);
     const fp1 = buildSessionFingerprint(session, { desiredFeelings: ["confident"] }, null, []);
     const fp2 = buildSessionFingerprint(session, { fitPreferences: ["relaxed-fits"] }, null, []);
-    const fp3 = buildSessionFingerprint(session, { lifestyle: "office" }, null, []);
+    const fp3 = buildSessionFingerprint(session, { lifestyle: ["office"] }, null, []);
 
     const all = [fp0, fp1, fp2, fp3];
     const unique = new Set(all);

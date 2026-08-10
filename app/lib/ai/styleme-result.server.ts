@@ -53,7 +53,7 @@ export function buildProfileSignals(
     desiredFeelings?: string[] | null;
     becoming?: string[] | null;
     finalNotes?: string | null;
-    lifestyle?: string | null;
+    lifestyle?: string[] | null;
     dressesFor?: string[] | null;
     bodyFocusAreas?: string[] | null;
     bodyAvoidAreas?: string[] | null;
@@ -70,7 +70,7 @@ export function buildProfileSignals(
   if (profile.desiredFeelings?.length) signals.desiredFeelings = profile.desiredFeelings;
   if (profile.becoming?.length) signals.becoming = profile.becoming;
   if (profile.finalNotes?.trim()) signals.finalNotes = profile.finalNotes.trim();
-  if (profile.lifestyle) signals.lifestyle = profile.lifestyle;
+  if (profile.lifestyle?.length) signals.lifestyle = profile.lifestyle;
   if (profile.dressesFor?.length) signals.dressesFor = profile.dressesFor;
   if (profile.bodyFocusAreas?.length) signals.bodyFocusAreas = profile.bodyFocusAreas;
   if (profile.bodyAvoidAreas?.length) signals.bodyAvoidAreas = profile.bodyAvoidAreas;

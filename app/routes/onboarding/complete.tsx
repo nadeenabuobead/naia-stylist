@@ -166,7 +166,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (op) {
     if (op.stylePersonalities.length)          existingAnswers["style-personalities"]    = op.stylePersonalities;
     if (op.desiredImpression.length)           existingAnswers["desired-impression"]     = op.desiredImpression;
-    if (op.lifestyle)                          existingAnswers["lifestyle"]              = op.lifestyle.split(", ").filter(Boolean);
+    if (op.lifestyle.length)                   existingAnswers["lifestyle"]              = op.lifestyle;
     if (op.desiredFeelings.length)             existingAnswers["desired-feelings"]       = op.desiredFeelings;
     if (op.becoming.length)                    existingAnswers["becoming"]               = op.becoming;
     if (op.fitPreferences.length)              existingAnswers["fit-preferences"]        = op.fitPreferences;

@@ -29,7 +29,7 @@ function makeItems(count: number, overrides: Partial<ClosetItemSnapshot> = {}): 
 }
 
 const emptyProfile: ClosetInsightProfile = {
-  lifestyle: null,
+  lifestyle: [],
   styleStruggles: [],
   styleSupport: [],
   favoriteColors: [],
@@ -352,7 +352,7 @@ describe("CI.15 — occasion coverage below threshold", () => {
       makeItem({ id: "4", occasions: null }),
       makeItem({ id: "5", occasions: null }),
     ];
-    const profile: ClosetInsightProfile = { ...emptyProfile, lifestyle: "events" };
+    const profile: ClosetInsightProfile = { ...emptyProfile, lifestyle: ["events"] };
     const result = computeClosetInsights(items, profile);
     assert.equal(result.dataQuality.occasionEligible, false);
     assert.equal(result.insights.find((i) => i.type === "occasion-coverage"), undefined);
@@ -371,7 +371,7 @@ describe("CI.16 — lifestyle events, zero relevant occasion items", () => {
     ];
     // lifestyle = events → Dinner, Party, Formal, Date
     // None of the items are tagged for those occasions
-    const profile: ClosetInsightProfile = { ...emptyProfile, lifestyle: "events" };
+    const profile: ClosetInsightProfile = { ...emptyProfile, lifestyle: ["events"] };
     const result = computeClosetInsights(items, profile);
     const occ = result.insights.find((i) => i.type === "occasion-coverage");
     assert.ok(occ, "should emit occasion insight");
@@ -396,7 +396,7 @@ describe("CI.17 — 1 relevant occasion item", () => {
       makeItem({ id: "4", occasions: ["Weekend"] }),
       makeItem({ id: "5", occasions: ["Work"] }),
     ];
-    const profile: ClosetInsightProfile = { ...emptyProfile, lifestyle: "events" };
+    const profile: ClosetInsightProfile = { ...emptyProfile, lifestyle: ["events"] };
     const result = computeClosetInsights(items, profile);
     const occ = result.insights.find((i) => i.type === "occasion-coverage");
     assert.ok(occ, "should emit occasion insight");
@@ -421,7 +421,7 @@ describe("CI.18 — 3 relevant occasion items", () => {
       makeItem({ id: "4", occasions: ["Work"] }),
       makeItem({ id: "5", occasions: ["Casual"] }),
     ];
-    const profile: ClosetInsightProfile = { ...emptyProfile, lifestyle: "events" };
+    const profile: ClosetInsightProfile = { ...emptyProfile, lifestyle: ["events"] };
     const result = computeClosetInsights(items, profile);
     const occ = result.insights.find((i) => i.type === "occasion-coverage");
     assert.ok(occ, "should emit occasion insight");
@@ -435,8 +435,8 @@ describe("CI.18 — 3 relevant occasion items", () => {
 
 // ── CI.19 — readLifestyle multi-value ────────────────────────────────────────
 describe("CI.19 — multi-value lifestyle", () => {
-  it("parses comma-joined lifestyle string and unions relevant occasions", () => {
-    // lifestyle = "events,office" → occasions: Dinner,Party,Formal,Date,Work
+  it("unions relevant occasions across multiple lifestyle IDs", () => {
+    // lifestyle = ["events","office"] → occasions: Dinner,Party,Formal,Date,Work
     const items = [
       makeItem({ id: "1", occasions: ["Dinner"] }),   // events
       makeItem({ id: "2", occasions: ["Work"] }),     // office
@@ -444,7 +444,7 @@ describe("CI.19 — multi-value lifestyle", () => {
       makeItem({ id: "4", occasions: ["Casual"] }),
       makeItem({ id: "5", occasions: ["Weekend"] }),
     ];
-    const profile: ClosetInsightProfile = { ...emptyProfile, lifestyle: "events,office" };
+    const profile: ClosetInsightProfile = { ...emptyProfile, lifestyle: ["events", "office"] };
     const result = computeClosetInsights(items, profile);
     const occ = result.insights.find((i) => i.type === "occasion-coverage");
     assert.ok(occ, "should emit occasion insight for multi-value lifestyle");
@@ -503,7 +503,7 @@ describe("CI.21 — event struggle passport effect", () => {
     const items = makeItems(5, { occasions: ["Dinner"] });
     const profile: ClosetInsightProfile = {
       ...emptyProfile,
-      lifestyle: "events",
+      lifestyle: ["events"],
       styleStruggles: ["event"],
     };
     const result = computeClosetInsights(items, profile);
@@ -528,7 +528,7 @@ describe("CI.21 — event struggle passport effect", () => {
     }));
     const profile: ClosetInsightProfile = {
       ...emptyProfile,
-      lifestyle: "events",
+      lifestyle: ["events"],
       styleStruggles: ["event"],
     };
     const result = computeClosetInsights(allItems, profile);
@@ -551,7 +551,7 @@ describe("CI.22 — event struggle with no occasion insight", () => {
     ];
     const profile: ClosetInsightProfile = {
       ...emptyProfile,
-      lifestyle: "events",
+      lifestyle: ["events"],
       styleStruggles: ["event"],
     };
     const result = computeClosetInsights(items, profile);
@@ -627,10 +627,10 @@ describe("CI.25 — style-what-i-own reframes category claim", () => {
 describe("CI.26 — event-outfits styleSupport framing", () => {
   it("changes occasion insight wording when event-outfits is in styleSupport", () => {
     const items = makeItems(5, { occasions: ["Dinner"] as string[] });
-    const without = computeClosetInsights(items, { ...emptyProfile, lifestyle: "events" });
+    const without = computeClosetInsights(items, { ...emptyProfile, lifestyle: ["events"] });
     const with_ = computeClosetInsights(items, {
       ...emptyProfile,
-      lifestyle: "events",
+      lifestyle: ["events"],
       styleSupport: ["event-outfits"],
     });
 
@@ -655,7 +655,7 @@ describe("CI.26 — event-outfits styleSupport framing", () => {
     const items = makeItems(5, { occasions: ["Work"] as string[] });
     const profile: ClosetInsightProfile = {
       ...emptyProfile,
-      lifestyle: "events",
+      lifestyle: ["events"],
       styleSupport: ["event-outfits"],
     };
     const result = computeClosetInsights(items, profile);
@@ -765,7 +765,7 @@ describe("CI.31 — prohibited inference strings", () => {
       makeItem({ id: "5", primaryColor: "Grey", occasions: ["Work"], seasons: ["Fall"] }),
     ];
     const profile: ClosetInsightProfile = {
-      lifestyle: "events,office",
+      lifestyle: ["events", "office"],
       styleStruggles: ["event", "rush"],
       styleSupport: ["style-what-i-own", "event-outfits"],
       favoriteColors: ["black", "grey"],

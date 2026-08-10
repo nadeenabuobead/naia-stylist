@@ -74,7 +74,7 @@ export interface StyleMeProfileSignals {
   desiredFeelings?: string[];
   becoming?: string[];
   finalNotes?: string;
-  lifestyle?: string;
+  lifestyle?: string[];
   dressesFor?: string[];
   // Body & fit
   bodyFocusAreas?: string[];

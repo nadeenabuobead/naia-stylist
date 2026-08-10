@@ -133,7 +133,7 @@ function buildStyleMePrompt(context: PromptContext): string {
   if (customerProfile) {
     prompt += `ABOUT THIS PERSON:
 - Style personality: ${customerProfile.stylePersonalities?.join(", ") || "Not specified"
-- Lifestyle: ${customerProfile.lifestyle || "Not specified"}
+- Lifestyle: ${customerProfile.lifestyle?.join(", ") || "Not specified"}
 - Favorite colors: ${customerProfile.favoriteColors?.join(", ") || "Not specified"}
 - Colors to avoid: ${customerProfile.avoidColors?.join(", ") || "None"}
 - Style struggles: ${customerProfile.styleStruggles?.join(", ") || "None mentioned"}

@@ -11,7 +11,7 @@ export type ShopperProfileEvidence = {
   stylePersonalities: string[];
   favoriteColors: string[];
   avoidColors: string[];
-  lifestyle: string | null;
+  lifestyle: string[] | null;
   desiredFeeling: string | null;
   desiredFeelings: string[];
   desiredImpression: string[];
@@ -128,7 +128,7 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
       stylePersonalities: profile.stylePersonalities ?? [],
       favoriteColors: profile.favoriteColors ?? [],
       avoidColors: profile.avoidColors ?? [],
-      lifestyle: profile.lifestyle ?? null,
+      lifestyle: profile.lifestyle?.length ? profile.lifestyle : null,
       desiredFeeling: profile.desiredFeeling ?? null,
       desiredFeelings: profile.desiredFeelings ?? [],
       desiredImpression: profile.desiredImpression ?? [],
@@ -1424,7 +1424,7 @@ export function buildShopperEdit(
 
   // Work/lifestyle context — three-way label, computed once, used across sections
   const lifestyleIds = profile
-    ? (profile.lifestyle ?? "").split(",").map((s) => s.trim()).filter(Boolean)
+    ? (profile.lifestyle ?? [])
     : [];
   const workCtx: WorkContextLabel = resolveWorkContext(lifestyleIds);
 

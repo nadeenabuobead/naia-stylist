@@ -204,7 +204,7 @@ function checkNotIdealFor(notIdealFor: string, profile: CustomerAssessmentProfil
 
   // Relaxed lifestyle vs structured/formal piece.
   const isRelaxed =
-    profile.lifestyle?.toLowerCase() === "casual" ||
+    profile.lifestyle?.some(l => l === "casual-days") ||
     profile.fitPreferences.some(
       (p) => p.toLowerCase().includes("loose") || p.toLowerCase().includes("oversized"),
     );

@@ -61,6 +61,9 @@ const AVOID_TO_FOCUS_NORM = {
   "bust": "bust", "upper-arms": "arms-shoulders", "hips-thighs": "hips-curves",
 };
 
+// V2-E: lifestyle valid IDs (matches quiz-data.ts question "lifestyle")
+const LIFESTYLE_VALID_IDS = new Set(["office", "busy-mom", "creative", "casual-days", "events", "always-on-the-go", "travel", "hybrid"]);
+
 // V2-D: validation constants
 const SIZING_SYSTEM_VALID    = new Set(["uk", "us", "eu", "international", "other"]);
 const BODY_SHAPE_VALID       = new Set(["hourglass", "pear", "apple", "rectangle", "inverted-triangle", "not-sure", "prefer-not-to-say"]);
@@ -245,10 +248,15 @@ export async function action({ request }) {
     }
   }
 
-  // lifestyle max-3: submitted arrays with more than 3 IDs are rejected.
-  // Existing stored values with >3 IDs are not modified by reads or unrelated saves.
-  if (Object.hasOwn(body, "lifestyle") && !isLifestyleCountValid(body["lifestyle"])) {
-    return Response.json({ error: "lifestyle_too_many" }, { status: 400 });
+  // lifestyle: max-3 and approved IDs only; legacy stored values with >3 IDs are untouched
+  if (Object.hasOwn(body, "lifestyle")) {
+    const ls = body["lifestyle"];
+    if (!isLifestyleCountValid(ls)) {
+      return Response.json({ error: "lifestyle_too_many" }, { status: 400 });
+    }
+    if (!ls.every(id => LIFESTYLE_VALID_IDS.has(id))) {
+      return Response.json({ error: "lifestyle_invalid_id" }, { status: 400 });
+    }
   }
 
   // V2-C: body-area arrays — valid IDs, max 5, no duplicates
@@ -351,13 +359,6 @@ export async function action({ request }) {
     return typeof v === "string" && v.trim() !== "" ? v : null;
   };
 
-  // lifestyle is stored as a comma-joined String? to avoid a schema migration.
-  const pickLifestyle = (fallback) => {
-    if (!Object.hasOwn(body, "lifestyle")) return fallback ?? null;
-    const v = body["lifestyle"];
-    return v.length > 0 ? v.join(", ") : null;
-  };
-
   // V2-C: body-area mutual-exclusion normalization (server-side safety net)
   // editedField determines which picker wins when a conflict reaches the server; missing/invalid → focus wins
   const editedBodyField = body["editedField"] === "bodyAvoidAreas" ? "bodyAvoidAreas" : "bodyFocusAreas";
@@ -391,7 +392,7 @@ export async function action({ request }) {
   const profileData = {
     stylePersonalities:  pickArr("stylePersonalities",  op?.stylePersonalities),
     desiredImpression:   pickArr("desiredImpression",   op?.desiredImpression),
-    lifestyle:           pickLifestyle(op?.lifestyle),
+    lifestyle:           pickArr("lifestyle",         op?.lifestyle ?? []),
     desiredFeelings:     pickArr("desiredFeelings",     op?.desiredFeelings),
     becoming:            pickArr("becoming",            op?.becoming),
     fitPreferences:      fitPrefsToSave,

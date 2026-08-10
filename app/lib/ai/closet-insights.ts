@@ -3,7 +3,7 @@
 // Pure function: no DB, no LLM, no side effects. Takes a snapshot of closet
 // items and a Passport profile, returns structured claims backed by Closet evidence.
 
-import { readLifestyle, PROFILE_LIFESTYLE_OCCASION_MAP } from "./signal-contract.js";
+import { PROFILE_LIFESTYLE_OCCASION_MAP } from "./signal-contract.js";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -19,7 +19,7 @@ export interface ClosetItemSnapshot {
 // Fields that V2-A4 does not act on (stylePersonalities, desiredImpression,
 // desiredFeelings, becoming) are carried as forward-compatibility stubs.
 export interface ClosetInsightProfile {
-  lifestyle: string | null;
+  lifestyle: string[];
   styleStruggles: string[];
   styleSupport: string[];
   favoriteColors: string[];
@@ -150,8 +150,8 @@ export function computeClosetInsights(
   const insights: ClosetInsight[] = [];
 
   // ── 1. Occasion coverage ───────────────────────────────────────────────────
-  if (occasionEligible && profile?.lifestyle) {
-    const lifestyleIds = readLifestyle(profile.lifestyle);
+  if (occasionEligible && profile?.lifestyle?.length) {
+    const lifestyleIds = profile.lifestyle;
     const relevantOccasions = new Set<string>();
     const mappedLifestyleIds: string[] = [];
 

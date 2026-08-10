@@ -1733,9 +1733,11 @@ export function getStylingEffortActivationMoods(): readonly string[] {
 // Lifestyle field accessor
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Parse the comma-joined lifestyle String? into a trimmed, non-empty string array.
+/** Normalise lifestyle to a string array.
+ *  Accepts the native String[] (V2-E) or a legacy comma-joined string (migration compat).
  *  Preserves stored order; never truncates existing values.  Returns [] for null/empty. */
-export function readLifestyle(lifestyle: string | null | undefined): string[] {
+export function readLifestyle(lifestyle: string[] | string | null | undefined): string[] {
   if (!lifestyle) return [];
+  if (Array.isArray(lifestyle)) return lifestyle.filter(Boolean);
   return lifestyle.split(",").map((s) => s.trim()).filter(Boolean);
 }

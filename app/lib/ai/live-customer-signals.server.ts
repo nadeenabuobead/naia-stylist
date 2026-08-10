@@ -341,7 +341,7 @@ export async function getLivePassportData(dateRangeDays: number): Promise<LivePa
 
   const allPersonalities = profiles.flatMap(p => p.stylePersonalities);
   const allFeelings      = profiles.flatMap(p => p.desiredFeelings);
-  const allLifestyles    = profiles.flatMap(p => p.lifestyle ? p.lifestyle.split(", ").filter(Boolean) : []);
+  const allLifestyles    = profiles.flatMap(p => p.lifestyle ?? []);
   const allOccasions     = profiles.flatMap(p => p.dressesFor);
   const allFitPrefs      = profiles.flatMap(p => p.fitPreferences);
   const allStruggles     = profiles.flatMap(p => p.styleStruggles);

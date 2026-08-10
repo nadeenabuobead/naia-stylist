@@ -207,7 +207,7 @@ export function buildSessionFingerprint(
     [...(profile?.avoidColors ?? [])].sort().join(","),
     [...(profile?.desiredFeelings ?? [])].sort().join(","),
     [...(profile?.fitPreferences ?? [])].sort().join(","),
-    profile?.lifestyle ?? "",
+    [...(profile?.lifestyle ?? [])].sort().join(","),
     anchorToken,
     [...recentlyShownHandles].sort().join(","),
   ].join("|");
@@ -1105,10 +1105,9 @@ function scoreProduct(
 
   // ── 11.6. Profile lifestyle → Occasion (background signal) ───────────────
   // RANK weight — softer than session occasion STRONG_RANK.
-  // lifestyle is stored as a comma-separated string of quiz answer IDs.
   // Skips tokens already matched by the session occasion.
-  if (profile?.lifestyle) {
-    const lifestyleIds = profile.lifestyle.split(",").map((s) => s.trim()).filter(Boolean);
+  if (profile?.lifestyle?.length) {
+    const lifestyleIds = profile.lifestyle;
     const scoredTokens = new Set<string>();
     for (const id of lifestyleIds) {
       const tokens = PROFILE_LIFESTYLE_OCCASION_MAP[id] ?? [];
