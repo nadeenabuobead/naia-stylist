@@ -2,6 +2,13 @@ import { createHash } from "node:crypto";
 import { data as json } from "react-router";
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import prisma from "../db.server";
+import {
+  verifyCloudinaryAsset,
+  validatePublicIdOwnership,
+  buildPrivateDownloadUrl,
+  deleteCloudinaryAsset,
+  getCloudinaryConfig,
+} from "../lib/cloudinary-admin.server";
 import { emitBuySkipSubmitted, recordJourneyEventAwaited } from "../lib/ai/journey-events.server";
 import { getAllCatalogProducts } from "../lib/ai/naia-catalog";
 import { NAIA_VERIFIED_MEDIA_MAP } from "../lib/ai/naia-product-media";
@@ -68,6 +75,17 @@ function hashForIndex(str) {
   return h;
 }
 
+// Magic-byte detection for server-side image format verification.
+// Mirrors the implementation in closet._index.tsx — both must stay in sync.
+function detectImageFormatFromBytes(header) {
+  if (header[0] === 0xFF && header[1] === 0xD8 && header[2] === 0xFF) return "jpeg";
+  if (header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47) return "png";
+  if (header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46 &&
+      header[8] === 0x57 && header[9] === 0x45 && header[10] === 0x42 && header[11] === 0x50) return "webp";
+  if (header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70) return "heic";
+  return null;
+}
+
 // Idempotency policy: create a new analysis attempt per submission.
 // Guard: if the same customer submits the same imageUrl within 60 s (double-click /
 // network retry), skip the DB write and return the fresh analysis without a duplicate record.
@@ -77,21 +95,7 @@ function hashForIndex(str) {
 const IDEMPOTENCY_WINDOW_SECONDS = 60;
 
 async function analyzeItem(request) {
-  // ── 1. Parse body ──────────────────────────────────────────────────────────
-  let body;
-  try {
-    body = await request.json();
-  } catch {
-    return json({ error: "Invalid request body" }, { status: 400 });
-  }
-
-  const { imageUrl, category, color, brand, itemLink, forOccasion, whatLike, unsureAbout, colorNote, size } = body;
-
-  if (!imageUrl) {
-    return json({ error: "Image required" }, { status: 400 });
-  }
-
-  // ── 2. Identity — NaiaSession only; guest record must never receive writes ─
+  // ── 1. Authentication — session only; never from body ─────────────────────
   const naiaCustomer = await getCurrentNaiaCustomer(request);
   if (!naiaCustomer) {
     return json({ error: "not_authenticated" }, { status: 401 });
@@ -102,14 +106,121 @@ async function analyzeItem(request) {
     return json({ error: "not_authenticated" }, { status: 401 });
   }
 
-  // ── 3. DB-backed idempotency key ────────────────────────────────────────────
-  // Bucket = floor(epoch seconds / 60) — same bucket for all requests within 60s window.
+  // ── 2. Parse body ──────────────────────────────────────────────────────────
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "Invalid request body" }, { status: 400 });
+  }
+
+  // Accept publicId (Cloudinary asset reference) — never a free-form imageUrl.
+  // Customer cannot make nAia analyse an arbitrary URL or another customer's asset.
+  const { publicId, category, color, brand, forOccasion, whatLike, unsureAbout, colorNote, size } = body;
+
+  if (!publicId || typeof publicId !== "string" || publicId.trim().length === 0) {
+    return json({ error: "image_required", message: "Image upload reference required." }, { status: 400 });
+  }
+
+  // ── 3. Cloudinary config — required before any verification or analysis ────
+  const cfg = getCloudinaryConfig();
+  if (!cfg) {
+    return json({ error: "service_unavailable", message: "Image service is not configured." }, { status: 503 });
+  }
+
+  // ── 4. Ownership check — publicId must belong to the authenticated customer's folder ─
+  // Customer ID comes from the authenticated session, never from the request body.
+  const ownership = validatePublicIdOwnership(publicId, naiaCustomer.id);
+  if (!ownership.ok) {
+    return json({ error: "asset_not_owned", message: "Photo does not belong to this account." }, { status: 403 });
+  }
+
+  // ── 5. Server-side asset verification via Cloudinary Admin API ─────────────
+  const verify = await verifyCloudinaryAsset(publicId, "private");
+  if (!verify.ok) {
+    return json({
+      error: verify.errorCode === "NOT_FOUND" ? "asset_not_found" : "verification_failed",
+      message: verify.errorCode === "NOT_FOUND"
+        ? "Image not found. Please upload again."
+        : "Image verification failed. Please upload again.",
+    }, { status: 400 });
+  }
+
+  const serverFormat = verify.asset.format.toLowerCase();
+  const serverBytes  = verify.asset.bytes;
+  const serverWidth  = verify.asset.width;
+  const serverHeight = verify.asset.height;
+
+  // Verify delivery type — asset must be private (not public upload)
+  if (verify.asset.type !== "private") {
+    return json({ error: "invalid_delivery_type", message: "Image must be uploaded via the app." }, { status: 400 });
+  }
+
+  // Verify resource type
+  if (verify.asset.resourceType !== "image") {
+    return json({ error: "invalid_resource_type", message: "Uploaded file must be an image." }, { status: 400 });
+  }
+
+  // Format allowlist — derived from Admin API, not client
+  const ALLOWED_FORMATS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]);
+  if (!ALLOWED_FORMATS.has(serverFormat)) {
+    return json({ error: "invalid_format", message: `File type "${serverFormat}" is not accepted. Use JPG, PNG, WEBP, or HEIC.` }, { status: 400 });
+  }
+
+  // File size — from Admin API
+  const SERVER_MAX_BYTES = 10 * 1024 * 1024; // 10 MB (product screenshots may be larger than model photos)
+  if (serverBytes > SERVER_MAX_BYTES) {
+    return json({ error: "file_too_large", message: `Image too large (${(serverBytes / 1024 / 1024).toFixed(1)} MB). Maximum is 10 MB.` }, { status: 400 });
+  }
+
+  // Dimension bounds — from Admin API
+  const MIN_DIM = 100;
+  const MAX_DIM = 8000;
+  if (serverWidth !== null && serverWidth < MIN_DIM) {
+    return json({ error: "invalid_dimensions", message: `Image width (${serverWidth}px) is below the minimum.` }, { status: 400 });
+  }
+  if (serverHeight !== null && serverHeight < MIN_DIM) {
+    return json({ error: "invalid_dimensions", message: `Image height (${serverHeight}px) is below the minimum.` }, { status: 400 });
+  }
+  if (serverWidth !== null && serverWidth > MAX_DIM) {
+    return json({ error: "invalid_dimensions", message: `Image width (${serverWidth}px) exceeds the maximum.` }, { status: 400 });
+  }
+  if (serverHeight !== null && serverHeight > MAX_DIM) {
+    return json({ error: "invalid_dimensions", message: `Image height (${serverHeight}px) exceeds the maximum.` }, { status: 400 });
+  }
+
+  // Magic-byte verification — fetch first 12 bytes via signed download URL
+  {
+    const downloadUrl = buildPrivateDownloadUrl(cfg, publicId, serverFormat, "private");
+    try {
+      const byteRes = await fetch(downloadUrl, {
+        headers: { Range: "bytes=0-11" },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (byteRes.ok) {
+        const buf = await byteRes.arrayBuffer();
+        const header = new Uint8Array(buf);
+        if (!detectImageFormatFromBytes(header)) {
+          await deleteCloudinaryAsset(publicId, "private");
+          return json({ error: "invalid_file", message: "File signature does not match a supported image format." }, { status: 400 });
+        }
+      }
+    } catch {
+      return json({ error: "verification_timeout", message: "Image verification timed out. Please try again." }, { status: 400 });
+    }
+  }
+
+  // ── 6. DB-backed idempotency key ────────────────────────────────────────────
   const bucket = Math.floor(Date.now() / (IDEMPOTENCY_WINDOW_SECONDS * 1000));
   const idempotencyKey = "bos:" + createHash("sha256")
-    .update(`${naiaCustomer.id}:${imageUrl ?? ""}:${bucket}`)
+    .update(`${naiaCustomer.id}:${publicId}:${bucket}`)
     .digest("hex")
     .slice(0, 24);
   let isIdempotentRepeat = false;
+
+  // ── 7. Generate a short-lived private download URL for Claude ──────────────
+  // Never persisted. Expires in 10 minutes (enforced by Cloudinary).
+  const privateImageUrl = buildPrivateDownloadUrl(cfg, publicId, serverFormat, "private");
 
   const styleProfile = naiaCustomer.onboardingProfile;
 
@@ -156,7 +267,9 @@ async function analyzeItem(request) {
           messages: [{
             role: "user",
             content: [
-              { type: "image", source: { type: "url", url: imageUrl } },
+              // privateImageUrl is a short-lived server-signed URL (10 min expiry).
+              // It is never stored — a fresh URL is generated for each analysis request.
+              { type: "image", source: { type: "url", url: privateImageUrl } },
               {
                 type: "text",
                 text: `You are assessing a clothing item for a specific customer. Every verdict, match percentage, summary, and section must be grounded in this customer's actual Passport, Closet, and form inputs. Generic statements that could apply to any customer are not acceptable. Every point stated ONCE only — never repeated across sections.
@@ -393,7 +506,11 @@ Respond ONLY with valid JSON, no markdown:
                 ? analysis.finalThought.slice(0, 1000)
                 : "No reasoning provided.",
             productName: null,
-            imageUrl,
+            // S0: store private asset reference, not a public CDN URL.
+            // imageUrl is kept null for new records; imagePublicId + imageFormat are the canonical refs.
+            imageUrl: null,
+            imagePublicId: publicId,
+            imageFormat: serverFormat,
             source: "buy-or-skip",
             schemaVersion: "2.0",
             idempotencyKey,

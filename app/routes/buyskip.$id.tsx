@@ -4,6 +4,11 @@ import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
+import {
+  getCloudinaryConfig,
+  validatePublicIdOwnership,
+  buildPrivateDownloadUrl,
+} from "~/lib/cloudinary-admin.server";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
@@ -27,6 +32,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       customerId: true,
       createdAt: true,
       imageUrl: true,
+      imagePublicId: true,
+      imageFormat: true,
       verdict: true,
       reasoning: true,
       confidence: true,
@@ -46,10 +53,29 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return redirect("/my-naia/buying-decisions");
   }
 
+  // Generate a short-lived signed URL for the item image.
+  // S0 records: use imagePublicId + imageFormat — never expose the raw private asset.
+  // Legacy records: fall back to imageUrl (public CDN URL stored at creation time).
+  let itemImageUrl: string | null = null;
+  if (analysis.imagePublicId && analysis.imageFormat) {
+    const cfg = getCloudinaryConfig();
+    if (cfg) {
+      // Re-verify ownership before generating the signed URL — prevents a DB-level
+      // corruption from leaking another customer's image.
+      const ownership = validatePublicIdOwnership(analysis.imagePublicId, naiaCustomer.id);
+      if (ownership.ok) {
+        itemImageUrl = buildPrivateDownloadUrl(cfg, analysis.imagePublicId, analysis.imageFormat, "private");
+      }
+    }
+  } else if (analysis.imageUrl) {
+    // Legacy record — imageUrl was persisted before S0; use it for backward compatibility.
+    itemImageUrl = analysis.imageUrl;
+  }
+
   return data({
     id: analysis.id,
     createdAt: analysis.createdAt.toISOString(),
-    imageUrl: analysis.imageUrl,
+    itemImageUrl,
     verdict: analysis.verdict,
     reasoning: analysis.reasoning,
     confidence: analysis.confidence,
@@ -158,10 +184,10 @@ export default function BuyOrSkipResult() {
       {/* ── Desktop hero: image left, verdict + summary right ──────────────── */}
       <div className="bos-result-hero">
         {/* Left: image + tags */}
-        {analysis.imageUrl && (
+        {analysis.itemImageUrl && (
           <div className="bos-result-hero-image">
             <img
-              src={analysis.imageUrl}
+              src={analysis.itemImageUrl}
               alt="Item assessed"
               className="bos-result-item-img"
             />

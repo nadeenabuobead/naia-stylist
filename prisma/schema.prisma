@@ -381,6 +381,10 @@ model BuyOrSkipAnalysis {
   colorNote     String?  // Step 2: which colour
   itemSize      String?  // Step 2: which size
   fullAnalysis  Json?    // Complete AI result blob (pairings, occasions, naiaMatch, detailedAnalysis, styleDNAMatch, fillsGap)
+
+  // S0 — private Cloudinary asset reference (replaces public imageUrl for new analyses)
+  imagePublicId String?  // Cloudinary public ID (naia-wardrobe/{customerId}/...)
+  imageFormat   String?  // Format stored for signed URL generation (jpg, png, webp, heic)
 }
 
 enum BuySkipVerdict {

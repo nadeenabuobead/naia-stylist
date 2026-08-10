@@ -102,7 +102,9 @@ function Field({ label, value, onChange, placeholder }: {
 export default function BuyOrSkip() {
   const navigate = useNavigate();
   const [source, setSource] = React.useState<Source>("upload");
-  const [imageUrl, setImageUrl] = React.useState("");
+  const [imageUrl, setImageUrl] = React.useState(""); // local blob URL for preview only (never sent to server)
+  const [imagePublicId, setImagePublicId] = React.useState(""); // Cloudinary public ID — sent to analyze API
+  const blobUrlRef = React.useRef<string | null>(null);
   const [uploading, setUploading] = React.useState(false);
   const [analyzing, setAnalyzing] = React.useState(false);
   const [msgIndex, setMsgIndex] = React.useState(0);
@@ -117,6 +119,13 @@ export default function BuyOrSkip() {
   const [colorNote, setColorNote] = React.useState("");
   const [size, setSize] = React.useState("");
 
+  // Revoke the blob preview URL when the component unmounts to avoid memory leaks.
+  React.useEffect(() => {
+    return () => {
+      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+    };
+  }, []);
+
   const handleUpload = async (file: File) => {
     const mimeType = file.type.toLowerCase();
     const ext = (file.name.split(".").pop() ?? "").toLowerCase();
@@ -127,17 +136,22 @@ export default function BuyOrSkip() {
       setUploadError("Unsupported format. Please upload a JPG, PNG, WEBP, or HEIC photo.");
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      setUploadError("Photo is too large. Please choose an image under 10 MB.");
-      return;
-    }
     setUploading(true);
     setUploadError("");
     try {
+      // Fetch server-signed upload credential. uploadUrl is the private-delivery endpoint —
+      // it must be used verbatim. The browser never constructs the Cloudinary upload URL itself.
       const sigRes = await fetch("/api/cloudinary-signature", { credentials: "same-origin" });
       if (sigRes.status === 401) { setUploadError("Your session has expired. Please sign in again."); return; }
       if (!sigRes.ok) { setUploadError("Upload service unavailable. Please try again."); return; }
-      const { signature, timestamp, apiKey, cloudName, assetFolder, uploadPreset, allowedFormats } = await sigRes.json();
+      const sigData = await sigRes.json();
+      const { signature, timestamp, apiKey, assetFolder, uploadPreset, allowedFormats, uploadUrl, maxFileSizeBytes } = sigData;
+
+      if (file.size > maxFileSizeBytes) {
+        setUploadError(`Photo is too large. Please choose an image under ${Math.round(maxFileSizeBytes / 1024 / 1024)} MB.`);
+        return;
+      }
+
       const fd = new FormData();
       fd.append("file", file);
       fd.append("upload_preset", uploadPreset);
@@ -146,14 +160,22 @@ export default function BuyOrSkip() {
       fd.append("signature", signature);
       fd.append("asset_folder", assetFolder);
       fd.append("allowed_formats", allowedFormats);
-      const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, { method: "POST", body: fd });
+      // uploadUrl is the server-provided private-delivery endpoint (/image/private).
+      // Delivery type is enforced by the URL path — no type form field needed.
+      const res = await fetch(uploadUrl, { method: "POST", body: fd });
       const uploadData = await res.json();
-      if (!uploadData.secure_url) {
+      if (!uploadData.public_id) {
         const msg = typeof uploadData?.error?.message === "string" ? uploadData.error.message : null;
         setUploadError(msg ? `Upload failed: ${msg}` : "Upload failed. Please try another photo.");
         return;
       }
-      setImageUrl(uploadData.secure_url);
+      // Private assets are not publicly accessible via secure_url — use a local blob URL for preview.
+      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+      const blobUrl = URL.createObjectURL(file);
+      blobUrlRef.current = blobUrl;
+      setImageUrl(blobUrl);
+      // Store the Cloudinary public ID — this is what the server receives for verification.
+      setImagePublicId(uploadData.public_id);
     } catch {
       setUploadError("Upload failed. Please check your connection and try again.");
     } finally {
@@ -175,10 +197,12 @@ export default function BuyOrSkip() {
     // Track whether we initiated navigation — if so, keep overlay visible until unmount
     let navigated = false;
     try {
+      // Send the Cloudinary public ID — not a URL. Server verifies ownership and delivery type
+      // before analysis starts. The browser never sends a raw image URL to the analysis API.
       const response = await fetch("/api/wishlist?action=analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl, category, color, brand, forOccasion, whatLike, unsureAbout, colorNote, size }),
+        body: JSON.stringify({ publicId: imagePublicId, category, color, brand, forOccasion, whatLike, unsureAbout, colorNote, size }),
       });
       if (response.status === 401) {
         setAnalyzeError("Your session has expired. Please sign in again.");
@@ -207,7 +231,7 @@ export default function BuyOrSkip() {
     }
   };
 
-  const canAnalyze = imageUrl && category && color.length > 0 && !analyzing;
+  const canAnalyze = imagePublicId && category && color.length > 0 && !analyzing;
 
   // Loading screen — same pattern as Style Me result.tsx: return before MyNaiaLayout.
   // sm-loading-wrap fills 100vh so no fixed/portal positioning needed.
