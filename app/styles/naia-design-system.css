@@ -1748,6 +1748,73 @@ a.mn-action:focus-visible,
   margin-top: 6px;
 }
 
+/* ── Passport overview — full detail view (sp-ov-*) ── */
+.sp-ov-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: 32px;
+}
+.sp-ov-section {
+  padding-bottom: 24px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid rgba(40, 21, 12, 0.12);
+}
+.sp-ov-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+.sp-ov-section-header {
+  font-family: var(--naia-ff-ui);
+  font-size: 9px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: rgba(40, 21, 12, 0.45);
+  margin-bottom: 12px;
+}
+.sp-ov-field {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 20px;
+  border-bottom: 1px solid rgba(40, 21, 12, 0.07);
+  padding: 10px 0;
+}
+.sp-ov-field:last-child {
+  border-bottom: none;
+}
+.sp-ov-field-label {
+  font-family: var(--naia-ff-ui);
+  font-size: 11px;
+  color: rgba(40, 21, 12, 0.5);
+  flex-shrink: 0;
+  max-width: 45%;
+}
+.sp-ov-field-value {
+  font-family: var(--naia-ff-body);
+  font-size: 14px;
+  color: var(--naia-ink);
+  text-align: right;
+  line-height: 1.5;
+}
+.sp-ov-notes-body {
+  font-family: var(--naia-ff-body);
+  font-size: 14px;
+  color: var(--naia-ink);
+  line-height: 1.65;
+  margin: 0;
+  white-space: pre-wrap;
+}
+@media (max-width: 480px) {
+  .sp-ov-field {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .sp-ov-field-label { max-width: 100%; }
+  .sp-ov-field-value { text-align: left; }
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    Digital Closet — dc-* prefix
    ═══════════════════════════════════════════════════════════════════ */

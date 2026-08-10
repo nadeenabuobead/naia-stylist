@@ -375,6 +375,26 @@ OPTION_LABELS["body-focus-areas"]    = FOCUS_LABELS;
 OPTION_LABELS["body-avoid-areas"]    = AVOID_LABELS;
 OPTION_LABELS["preferred-coverage"]  = Object.fromEntries(PREFERRED_COVERAGE_OPTIONS.map(o => [o.id, o.label]));
 
+const BODY_SHAPE_LABELS: Record<string, string> = Object.fromEntries(BODY_SHAPE_OPTIONS.map(o => [o.id, o.label]));
+const FIT_CONCERN_LABELS: Record<string, string> = Object.fromEntries(FIT_CONCERN_OPTIONS.map(o => [o.id, o.label]));
+
+// Short display labels for the overview (form subLabels are question-phrased)
+const OVERVIEW_FIELD_LABELS: Record<string, string> = {
+  "sizing-system":      "Clothing sizing system",
+  "shoe-sizing-system": "Shoe sizing system",
+  "height":             "Height",
+  "measurement-unit":   "Measurement unit",
+  "bust-measurement":   "Bust",
+  "waist-measurement":  "Waist",
+  "hip-measurement":    "Hips",
+  "body-shape":         "Proportions",
+  "fit-concerns":       "Fit considerations",
+  "typical-day":        "A typical week",
+  "body-focus-areas":   "Areas I enjoy highlighting",
+  "body-avoid-areas":   "Areas I prefer with more coverage",
+  "preferred-coverage": "Coverage preference",
+};
+
 function parseHeightForDisplay(height: string | undefined, unit: "cm" | "ft-in"): { cm?: string; ft?: string; in?: string } {
   if (!height || height.trim() === "") return {};
   if (unit === "cm") {
@@ -576,6 +596,72 @@ function getSectionSummary(def: SectionDef, answers: OnboardingAnswers): ReactNo
     }
   }
   return <span className="sp-detail-missing">Not yet completed</span>;
+}
+
+function getSectionDetail(def: SectionDef, answers: OnboardingAnswers): ReactNode {
+  if (def.placeholder) return null;
+
+  const a = answers as Record<string, unknown>;
+  const mUnit = (a["measurement-unit"] as string | undefined) ?? null;
+  const MEASUREMENT_KEYS = new Set<string>(["bust-measurement", "waist-measurement", "hip-measurement"]);
+
+  if (def.id === "notes") {
+    const text = a["final-notes"];
+    if (!text || typeof text !== "string" || !text.trim()) return null;
+    return <p className="sp-ov-notes-body">{text.trim()}</p>;
+  }
+
+  const fields: { key: string; label: string; value: string }[] = [];
+
+  for (const sf of def.subFields) {
+    const dKey = sf.draftKey as string;
+    const v = a[dKey];
+    const displayLabel: string = OVERVIEW_FIELD_LABELS[dKey] || sf.subLabel;
+
+    if (sf.kind === "text") {
+      if (!v || typeof v !== "string" || !v.trim()) continue;
+      let text = v.trim();
+      if (MEASUREMENT_KEYS.has(dKey) && mUnit) text += ` ${mUnit}`;
+      fields.push({ key: dKey, label: displayLabel, value: text });
+
+    } else if (sf.kind === "single") {
+      if (!v || typeof v !== "string" || !v.trim()) continue;
+      const raw = v.trim();
+      let human: string;
+      if (dKey === "sizing-system")       human = SIZING_SYSTEM_LABELS[raw] ?? raw;
+      else if (dKey === "shoe-sizing-system") human = SHOE_SIZING_SYSTEM_LABELS[raw] ?? raw;
+      else if (dKey === "body-shape")     human = BODY_SHAPE_LABELS[raw] ?? raw;
+      else if (dKey === "measurement-unit") human = raw === "cm" ? "Centimetres" : raw === "in" ? "Inches" : raw;
+      else human = lbl(sf.questionId, raw);
+      fields.push({ key: dKey, label: displayLabel, value: human });
+
+    } else {
+      const raw = (Array.isArray(v) ? v : []) as string[];
+      const ids = dKey === "favorite-colors"
+        ? raw.filter(id => !LEGACY_COLOUR_IDS.has(id))
+        : raw;
+      if (ids.length === 0) continue;
+      let labelled: string[];
+      if (dKey === "body-focus-areas")       labelled = ids.map(id => FOCUS_LABELS[id] ?? id);
+      else if (dKey === "body-avoid-areas")  labelled = ids.map(id => AVOID_LABELS[id] ?? id);
+      else if (dKey === "fit-concerns")      labelled = ids.map(id => FIT_CONCERN_LABELS[id] ?? id);
+      else labelled = ids.map(id => lbl(sf.questionId, id));
+      fields.push({ key: dKey, label: displayLabel, value: labelled.join(" · ") });
+    }
+  }
+
+  if (fields.length === 0) return null;
+
+  return (
+    <>
+      {fields.map(({ key, label, value }) => (
+        <div key={key} className="sp-ov-field">
+          <span className="sp-ov-field-label">{label}</span>
+          <span className="sp-ov-field-value">{value}</span>
+        </div>
+      ))}
+    </>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1031,21 +1117,17 @@ export default function PassportPage() {
           <div className="sp-status-date" suppressHydrationWarning>Last updated · {formatDate(profileUpdatedAt)}</div>
         </div>
 
-        {/* 7 named sections */}
-        <div className="sp-detail-list">
+        {/* Full detail — all 7 sections + Notes */}
+        <div className="sp-ov-sections">
           {SECTIONS.map(def => (
-            <div key={def.id} className="sp-detail-row">
-              <span className="sp-detail-label">{def.label}</span>
-              <span className="sp-detail-value">{getSectionSummary(def, savedAnswers)}</span>
+            <div key={def.id} className="sp-ov-section">
+              <div className="sp-ov-section-header">{def.label}</div>
+              {getSectionDetail(def, savedAnswers)}
             </div>
           ))}
-        </div>
-
-        {/* Notes — outside the 7 sections */}
-        <div className="sp-detail-list sp-detail-list--notes">
-          <div className="sp-detail-row">
-            <span className="sp-detail-label">{NOTES_SECTION.label}</span>
-            <span className="sp-detail-value">{getSectionSummary(NOTES_SECTION, savedAnswers)}</span>
+          <div className="sp-ov-section sp-ov-section--notes">
+            <div className="sp-ov-section-header">{NOTES_SECTION.label}</div>
+            {getSectionDetail(NOTES_SECTION, savedAnswers)}
           </div>
         </div>
 
