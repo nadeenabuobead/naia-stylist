@@ -128,6 +128,7 @@ model OnboardingProfile {
 
   // Passport V2-D — complete sizing, measurements, and body fit
   sizingSystem         String?
+  shoeSizingSystem     String?   // V2-F: independent shoe sizing (uk/us/eu/other)
   height               String?
   bodyShape            String?
   bustMeasurement      String?

@@ -372,6 +372,7 @@ describe("D.16 Shoe size validation per system", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("D.17 Sizing system change safety contract", () => {
+  // V2-F: shoeSize is independent — clothing system change only checks clothing sizes
   interface FakeProfile { sizingSystem: string | null; topSize: string | null; bottomSize: string | null; dressSize: string | null; shoeSize: string | null; }
 
   function checkNeedsConfirmation(
@@ -381,12 +382,13 @@ describe("D.17 Sizing system change safety contract", () => {
   ): "ok" | "needs_confirmation" {
     const savedSys = op.sizingSystem;
     const changing = newSys !== savedSys;
-    const hasSaved = !!(op.topSize || op.bottomSize || op.dressSize || op.shoeSize);
-    if (changing && hasSaved && !confirmed) return "needs_confirmation";
+    // V2-F: only clothing sizes trigger confirmation; shoeSize is independent
+    const hasSavedClothingSizes = !!(op.topSize || op.bottomSize || op.dressSize);
+    if (changing && hasSavedClothingSizes && !confirmed) return "needs_confirmation";
     return "ok";
   }
 
-  it("requires confirmation: system changing, saved system + saved sizes, no confirm", () => {
+  it("requires confirmation: system changing, saved system + saved clothing sizes, no confirm", () => {
     const op: FakeProfile = { sizingSystem: "uk", topSize: "10", bottomSize: null, dressSize: null, shoeSize: null };
     assert.equal(checkNeedsConfirmation(op, "us", false), "needs_confirmation");
   });
@@ -406,8 +408,8 @@ describe("D.17 Sizing system change safety contract", () => {
     assert.equal(checkNeedsConfirmation(op, "uk", false), "ok");
   });
 
-  it("no sizes in DB: no confirmation needed", () => {
-    const op: FakeProfile = { sizingSystem: "uk", topSize: null, bottomSize: null, dressSize: null, shoeSize: null };
+  it("no clothing sizes in DB: no confirmation needed (shoeSize alone does not trigger)", () => {
+    const op: FakeProfile = { sizingSystem: "uk", topSize: null, bottomSize: null, dressSize: null, shoeSize: "5" };
     assert.equal(checkNeedsConfirmation(op, "us", false), "ok");
   });
 
@@ -422,6 +424,7 @@ describe("D.17 Sizing system change safety contract", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("D.18 Size fields cleared when system changes with confirmation", () => {
+  // V2-F: clothing system change clears only top/bottom/dress — NOT shoeSize
   function buildProfileData(
     body: Record<string, unknown>,
     op: { sizingSystem: string | null; topSize: string | null; bottomSize: string | null; dressSize: string | null; shoeSize: string | null },
@@ -434,23 +437,24 @@ describe("D.18 Size fields cleared when system changes with confirmation", () =>
     const savedSys = op.sizingSystem;
     const newSys = Object.hasOwn(body, "sizingSystem") ? (body["sizingSystem"] as string | null) : savedSys;
     const changing = newSys !== savedSys;
-    const clearSizes = changing && body["confirmSizeSystemChange"] === true;
+    const clearClothingSizes = changing && body["confirmSizeSystemChange"] === true;
     return {
       sizingSystem: pickText("sizingSystem", op.sizingSystem),
-      topSize:     clearSizes ? null : pickText("topSize",    op.topSize),
-      bottomSize:  clearSizes ? null : pickText("bottomSize", op.bottomSize),
-      dressSize:   clearSizes ? null : pickText("dressSize",  op.dressSize),
-      shoeSize:    clearSizes ? null : pickText("shoeSize",   op.shoeSize),
+      topSize:     clearClothingSizes ? null : pickText("topSize",    op.topSize),
+      bottomSize:  clearClothingSizes ? null : pickText("bottomSize", op.bottomSize),
+      dressSize:   clearClothingSizes ? null : pickText("dressSize",  op.dressSize),
+      // V2-F: shoeSize is independent — never cleared by clothing system change
+      shoeSize:    pickText("shoeSize", op.shoeSize),
     };
   }
 
-  it("clears all four sizes on confirmed system change", () => {
+  it("clears only clothing sizes (not shoeSize) on confirmed clothing system change", () => {
     const op = { sizingSystem: "uk", topSize: "10", bottomSize: "12", dressSize: "10", shoeSize: "5" };
     const data = buildProfileData({ sizingSystem: "us", confirmSizeSystemChange: true }, op);
     assert.equal(data.topSize, null);
     assert.equal(data.bottomSize, null);
     assert.equal(data.dressSize, null);
-    assert.equal(data.shoeSize, null);
+    assert.equal(data.shoeSize, "5"); // V2-F: shoe size preserved
     assert.equal(data.sizingSystem, "us");
   });
 
@@ -473,9 +477,11 @@ describe("D.18 Size fields cleared when system changes with confirmation", () =>
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("D.19 confirmSizeSystemChange is request-only", () => {
-  const REQUEST_ONLY_KEYS = new Set(["baseProfileUpdatedAt", "editedField", "confirmSizeSystemChange"]);
+  // V2-F: also includes confirmShoeSystemChange and shoeSizingSystem
+  const REQUEST_ONLY_KEYS = new Set(["baseProfileUpdatedAt", "editedField", "confirmSizeSystemChange", "confirmShoeSystemChange"]);
   const RECOGNISED_FIELDS = new Set([
-    "sizingSystem", "topSize", "bottomSize", "dressSize", "shoeSize",
+    "sizingSystem", "topSize", "bottomSize", "dressSize",
+    "shoeSizingSystem", "shoeSize",
     "height", "bustMeasurement", "waistMeasurement", "hipMeasurement",
     "measurementUnit", "bodyShape", "fitConcerns", "preferredCoverage",
     "bodyFocusAreas", "bodyAvoidAreas",
@@ -486,6 +492,15 @@ describe("D.19 confirmSizeSystemChange is request-only", () => {
   });
   it("confirmSizeSystemChange is NOT in RECOGNISED_FIELDS", () => {
     assert.ok(!RECOGNISED_FIELDS.has("confirmSizeSystemChange"));
+  });
+  it("confirmShoeSystemChange is in REQUEST_ONLY_KEYS", () => {
+    assert.ok(REQUEST_ONLY_KEYS.has("confirmShoeSystemChange"));
+  });
+  it("confirmShoeSystemChange is NOT in RECOGNISED_FIELDS", () => {
+    assert.ok(!RECOGNISED_FIELDS.has("confirmShoeSystemChange"));
+  });
+  it("shoeSizingSystem IS in RECOGNISED_FIELDS (persisted DB column)", () => {
+    assert.ok(RECOGNISED_FIELDS.has("shoeSizingSystem"));
   });
 });
 
@@ -547,15 +562,18 @@ describe("D.21 Section 5 optional contract", () => {
 // D.22  Section 5 subFields — 15 fields defined
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("D.22 Section 5 — 12 subFields after UX correction", () => {
-  // body-focus-areas, body-avoid-areas, preferred-coverage moved to Section 4
+describe("D.22 Section 5 — 13 subFields after V2-F shoe-sizing-system addition", () => {
+  // body-focus-areas, body-avoid-areas, preferred-coverage moved to Section 4 (V2-D UX correction)
+  // shoe-sizing-system added in V2-F
   const SIZES_SUBFIELDS = [
-    "sizing-system", "top-size", "bottom-size", "dress-size", "shoe-size",
+    "sizing-system", "top-size", "bottom-size", "dress-size",
+    "shoe-sizing-system", "shoe-size",
     "height", "measurement-unit", "bust-measurement", "waist-measurement", "hip-measurement",
     "body-shape", "fit-concerns",
   ];
 
-  it("exactly 12 subFields", () => assert.equal(SIZES_SUBFIELDS.length, 12));
+  it("exactly 13 subFields", () => assert.equal(SIZES_SUBFIELDS.length, 13));
+  it("includes shoe-sizing-system", () => assert.ok(SIZES_SUBFIELDS.includes("shoe-sizing-system")));
   it("does NOT include body-focus-areas (moved to Section 4)", () => {
     assert.ok(!SIZES_SUBFIELDS.includes("body-focus-areas"));
   });
@@ -703,7 +721,8 @@ describe("D.27 Field placement — Section 4 gains highlight/coverage fields; Se
     "body-focus-areas", "body-avoid-areas", "preferred-coverage",
   ];
   const SIZES_SUBFIELDS = [
-    "sizing-system", "top-size", "bottom-size", "dress-size", "shoe-size",
+    "sizing-system", "top-size", "bottom-size", "dress-size",
+    "shoe-sizing-system", "shoe-size",
     "height", "measurement-unit", "bust-measurement", "waist-measurement", "hip-measurement",
     "body-shape", "fit-concerns",
   ];
@@ -716,18 +735,19 @@ describe("D.27 Field placement — Section 4 gains highlight/coverage fields; Se
   it("body-avoid-areas is NOT in Section 5 (sizes)", ()   => assert.ok(!SIZES_SUBFIELDS.includes("body-avoid-areas")));
   it("preferred-coverage is NOT in Section 5 (sizes)", () => assert.ok(!SIZES_SUBFIELDS.includes("preferred-coverage")));
 
-  it("Section 4 still contains silhouette", ()            => assert.ok(FIT_SUBFIELDS.includes("silhouette")));
-  it("Section 4 still contains structure", ()             => assert.ok(FIT_SUBFIELDS.includes("structure")));
-  it("Section 4 still contains coverage-preferences", ()  => assert.ok(FIT_SUBFIELDS.includes("coverage-preferences")));
+  it("Section 4 still contains silhouette", ()               => assert.ok(FIT_SUBFIELDS.includes("silhouette")));
+  it("Section 4 still contains structure", ()                => assert.ok(FIT_SUBFIELDS.includes("structure")));
+  it("Section 4 still contains coverage-preferences", ()     => assert.ok(FIT_SUBFIELDS.includes("coverage-preferences")));
 
-  it("Section 5 still contains sizing-system", ()         => assert.ok(SIZES_SUBFIELDS.includes("sizing-system")));
-  it("Section 5 still contains body-shape", ()            => assert.ok(SIZES_SUBFIELDS.includes("body-shape")));
-  it("Section 5 still contains fit-concerns", ()          => assert.ok(SIZES_SUBFIELDS.includes("fit-concerns")));
-  it("Section 5 still contains height", ()                => assert.ok(SIZES_SUBFIELDS.includes("height")));
-  it("Section 5 still contains bust-measurement", ()      => assert.ok(SIZES_SUBFIELDS.includes("bust-measurement")));
+  it("Section 5 still contains sizing-system", ()            => assert.ok(SIZES_SUBFIELDS.includes("sizing-system")));
+  it("Section 5 now contains shoe-sizing-system", ()         => assert.ok(SIZES_SUBFIELDS.includes("shoe-sizing-system")));
+  it("Section 5 still contains body-shape", ()               => assert.ok(SIZES_SUBFIELDS.includes("body-shape")));
+  it("Section 5 still contains fit-concerns", ()             => assert.ok(SIZES_SUBFIELDS.includes("fit-concerns")));
+  it("Section 5 still contains height", ()                   => assert.ok(SIZES_SUBFIELDS.includes("height")));
+  it("Section 5 still contains bust-measurement", ()         => assert.ok(SIZES_SUBFIELDS.includes("bust-measurement")));
 
   it("Section 4 has exactly 6 subFields",  () => assert.equal(FIT_SUBFIELDS.length, 6));
-  it("Section 5 has exactly 12 subFields", () => assert.equal(SIZES_SUBFIELDS.length, 12));
+  it("Section 5 has exactly 13 subFields", () => assert.equal(SIZES_SUBFIELDS.length, 13));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

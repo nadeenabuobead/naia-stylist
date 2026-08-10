@@ -206,10 +206,11 @@ const SECTIONS: SectionDef[] = [
     helper: "All fields in this section are optional. Update any time.",
     subFields: [
       // V2-D sizes
-      { draftKey: "sizing-system"      as DraftKey, apiKey: "sizingSystem",     subLabel: "Which sizing system do you use?",                                     kind: "single" as FieldKind, questionId: "sizing-system"       },
+      { draftKey: "sizing-system"      as DraftKey, apiKey: "sizingSystem",     subLabel: "Which clothing sizing system do you use?",                          kind: "single" as FieldKind, questionId: "sizing-system"       },
       { draftKey: "top-size"           as DraftKey, apiKey: "topSize",          subLabel: "Top size",                                                            kind: "text"   as FieldKind, questionId: "top-size"           },
       { draftKey: "bottom-size"        as DraftKey, apiKey: "bottomSize",       subLabel: "Bottom size",                                                         kind: "text"   as FieldKind, questionId: "bottom-size"        },
       { draftKey: "dress-size"         as DraftKey, apiKey: "dressSize",        subLabel: "Dress size",                                                          kind: "text"   as FieldKind, questionId: "dress-size"         },
+      { draftKey: "shoe-sizing-system" as DraftKey, apiKey: "shoeSizingSystem", subLabel: "Which shoe sizing system do you use?",                                kind: "single" as FieldKind, questionId: "shoe-sizing-system"  },
       { draftKey: "shoe-size"          as DraftKey, apiKey: "shoeSize",         subLabel: "Shoe size",                                                           kind: "text"   as FieldKind, questionId: "shoe-size"          },
       // V2-D measurements
       { draftKey: "height"             as DraftKey, apiKey: "height",           subLabel: "Your height",                                                         kind: "text"   as FieldKind, questionId: "height"             },
@@ -312,6 +313,15 @@ const SIZING_SYSTEM_OPTIONS = [
   { id: "other",         label: "Other"         },
 ];
 const SIZING_SYSTEM_LABELS: Record<string, string> = Object.fromEntries(SIZING_SYSTEM_OPTIONS.map(o => [o.id, o.label]));
+
+// V2-F: shoe sizing system — no International option
+const SHOE_SIZING_SYSTEM_OPTIONS = [
+  { id: "uk",    label: "UK"    },
+  { id: "us",    label: "US"    },
+  { id: "eu",    label: "EU"    },
+  { id: "other", label: "Other" },
+];
+const SHOE_SIZING_SYSTEM_LABELS: Record<string, string> = Object.fromEntries(SHOE_SIZING_SYSTEM_OPTIONS.map(o => [o.id, o.label]));
 
 const CLOTHING_SIZES: Record<string, string[]> = {
   uk:            ["4","6","8","10","12","14","16","18","20","22","24"],
@@ -460,6 +470,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if ((op as any).topSize)                   savedAnswers["top-size"]               = (op as any).topSize;
   if ((op as any).bottomSize)                savedAnswers["bottom-size"]            = (op as any).bottomSize;
   if ((op as any).dressSize)                 savedAnswers["dress-size"]             = (op as any).dressSize;
+  if ((op as any).shoeSizingSystem)          savedAnswers["shoe-sizing-system"]     = (op as any).shoeSizingSystem;
   if ((op as any).shoeSize)                  savedAnswers["shoe-size"]              = (op as any).shoeSize;
   // V2-D measurements
   if ((op as any).height)                    savedAnswers["height"]                 = (op as any).height;
@@ -516,25 +527,32 @@ function getSectionSummary(def: SectionDef, answers: OnboardingAnswers): ReactNo
     return <>{parts[0]}{parts.slice(1).map((p, i) => <span key={i}><br />{p}</span>)}</>;
   }
 
-  // Section 5 — sizing only (body areas now in Section 4)
+  // Section 5 — sizing (clothing + shoes independent)
   if (def.id === "sizes") {
     const a = answers as Record<string, unknown>;
-    const sysId    = a["sizing-system"] as string | undefined;
-    const topSz    = a["top-size"]      as string | undefined;
-    const bottomSz = a["bottom-size"]   as string | undefined;
-    const dressSz  = a["dress-size"]    as string | undefined;
+    const sysId      = a["sizing-system"]      as string | undefined;
+    const topSz      = a["top-size"]           as string | undefined;
+    const bottomSz   = a["bottom-size"]        as string | undefined;
+    const dressSz    = a["dress-size"]         as string | undefined;
+    const shoeSysId  = a["shoe-sizing-system"] as string | undefined;
+    const shoeSz     = a["shoe-size"]          as string | undefined;
 
-    const isEmpty = !sysId && !topSz && !bottomSz && !dressSz;
+    const isEmpty = !sysId && !topSz && !bottomSz && !dressSz && !shoeSysId && !shoeSz;
     if (isEmpty) return <span className="sp-detail-missing">Not yet completed</span>;
 
-    const sizeParts: string[] = [];
-    if (sysId)                           sizeParts.push(SIZING_SYSTEM_LABELS[sysId] ?? sysId.toUpperCase());
-    if (topSz)                           sizeParts.push(`Top ${topSz}`);
-    if (bottomSz && bottomSz !== topSz)  sizeParts.push(`Bottom ${bottomSz}`);
-    if (dressSz)                         sizeParts.push(`Dress ${dressSz}`);
+    const clothingParts: string[] = [];
+    if (sysId)                           clothingParts.push(SIZING_SYSTEM_LABELS[sysId] ?? sysId.toUpperCase());
+    if (topSz)                           clothingParts.push(`Top ${topSz}`);
+    if (bottomSz && bottomSz !== topSz)  clothingParts.push(`Bottom ${bottomSz}`);
+    if (dressSz)                         clothingParts.push(`Dress ${dressSz}`);
 
-    if (sizeParts.length === 0) return <span className="sp-detail-missing">Not yet completed</span>;
-    return <>{sizeParts.join(" · ")}</>;
+    const shoeParts: string[] = [];
+    if (shoeSysId && shoeSz) shoeParts.push(`Shoes ${SHOE_SIZING_SYSTEM_LABELS[shoeSysId] ?? shoeSysId.toUpperCase()} ${shoeSz}`);
+    else if (shoeSz)         shoeParts.push(`Shoes ${shoeSz}`);
+
+    const allParts = [...clothingParts, ...shoeParts];
+    if (allParts.length === 0) return <span className="sp-detail-missing">Not yet completed</span>;
+    return <>{allParts.join(" · ")}</>;
   }
   if (def.placeholder) {
     return <span className="sp-detail-coming">Coming soon</span>;
@@ -589,6 +607,8 @@ export default function PassportPage() {
   const [sizeEditedField,       setSizeEditedField]       = useState<"bodyFocusAreas" | "bodyAvoidAreas" | null>(null);
   const [pendingSizingSystem,   setPendingSizingSystem]   = useState<string | null>(null);
   const [sizeSystemConfirmed,   setSizeSystemConfirmed]   = useState(false);
+  const [pendingShoeSizingSystem, setPendingShoeSizingSystem] = useState<string | null>(null);
+  const [shoeSystemConfirmed,   setShoeSystemConfirmed]   = useState(false);
   const [heightDisplayUnit,     setHeightDisplayUnit]     = useState<"cm" | "ft-in">("cm");
   const lastIntentRef = useRef<PendingNext>(null);
 
@@ -651,6 +671,8 @@ export default function PassportPage() {
     if (sectionId === "sizes") {
       setPendingSizingSystem(null);
       setSizeSystemConfirmed(false);
+      setPendingShoeSizingSystem(null);
+      setShoeSystemConfirmed(false);
       const savedH = (savedAnswers as Record<string, unknown>)["height"] as string | undefined;
       setHeightDisplayUnit(savedH?.includes("ft") ? "ft-in" : "cm");
     }
@@ -733,27 +755,27 @@ export default function PassportPage() {
 
   const handleSizingSystemChange = useCallback((newSystem: string) => {
     const currentSystem = (flowEdits as Record<string, unknown>)["sizing-system"] as string | undefined;
-    // Deselect if same system clicked again
+    // Deselect if same system clicked again — reset clothing sizes only
     if (currentSystem === newSystem) {
       setFlowEdits(prev => ({
         ...(prev as Record<string, unknown>),
-        "sizing-system": "", "top-size": "", "bottom-size": "", "dress-size": "", "shoe-size": "",
+        "sizing-system": "", "top-size": "", "bottom-size": "", "dress-size": "",
       } as OnboardingAnswers));
       return;
     }
-    const hasSavedSizes = !!(
+    // Check clothing sizes only — shoe size is independent
+    const hasSavedClothingSizes = !!(
       (savedAnswers as Record<string, unknown>)["top-size"] ||
       (savedAnswers as Record<string, unknown>)["bottom-size"] ||
-      (savedAnswers as Record<string, unknown>)["dress-size"] ||
-      (savedAnswers as Record<string, unknown>)["shoe-size"]
+      (savedAnswers as Record<string, unknown>)["dress-size"]
     );
-    if (hasSavedSizes) {
+    if (hasSavedClothingSizes) {
       setPendingSizingSystem(newSystem);
       return;
     }
     setFlowEdits(prev => ({
       ...(prev as Record<string, unknown>),
-      "sizing-system": newSystem, "top-size": "", "bottom-size": "", "dress-size": "", "shoe-size": "",
+      "sizing-system": newSystem, "top-size": "", "bottom-size": "", "dress-size": "",
     } as OnboardingAnswers));
   }, [savedAnswers, flowEdits]);
 
@@ -762,13 +784,49 @@ export default function PassportPage() {
     const sys = pendingSizingSystem;
     setPendingSizingSystem(null);
     setSizeSystemConfirmed(true);
+    // Clear clothing sizes only — preserve shoe-sizing-system and shoe-size
     setFlowEdits(prev => ({
       ...(prev as Record<string, unknown>),
-      "sizing-system": sys, "top-size": "", "bottom-size": "", "dress-size": "", "shoe-size": "",
+      "sizing-system": sys, "top-size": "", "bottom-size": "", "dress-size": "",
     } as OnboardingAnswers));
   }, [pendingSizingSystem]);
 
   const cancelSizingSystemChange = useCallback(() => { setPendingSizingSystem(null); }, []);
+
+  // V2-F: shoe sizing system handlers (independent from clothing system)
+  const handleShoeSizingSystemChange = useCallback((newSys: string) => {
+    const currentSys = (flowEdits as Record<string, unknown>)["shoe-sizing-system"] as string | undefined;
+    // Deselect if same system clicked again
+    if (currentSys === newSys) {
+      setFlowEdits(prev => ({
+        ...(prev as Record<string, unknown>),
+        "shoe-sizing-system": "", "shoe-size": "",
+      } as OnboardingAnswers));
+      return;
+    }
+    const hasSavedShoeSize = !!(savedAnswers as Record<string, unknown>)["shoe-size"];
+    if (hasSavedShoeSize) {
+      setPendingShoeSizingSystem(newSys);
+      return;
+    }
+    setFlowEdits(prev => ({
+      ...(prev as Record<string, unknown>),
+      "shoe-sizing-system": newSys, "shoe-size": "",
+    } as OnboardingAnswers));
+  }, [savedAnswers, flowEdits]);
+
+  const confirmShoeSizingSystemChange = useCallback(() => {
+    if (!pendingShoeSizingSystem) return;
+    const sys = pendingShoeSizingSystem;
+    setPendingShoeSizingSystem(null);
+    setShoeSystemConfirmed(true);
+    setFlowEdits(prev => ({
+      ...(prev as Record<string, unknown>),
+      "shoe-sizing-system": sys, "shoe-size": "",
+    } as OnboardingAnswers));
+  }, [pendingShoeSizingSystem]);
+
+  const cancelShoeSizingSystemChange = useCallback(() => { setPendingShoeSizingSystem(null); }, []);
 
   const handleHeightUnitSwitch = useCallback((unit: "cm" | "ft-in") => {
     if (unit === heightDisplayUnit) return;
@@ -831,6 +889,7 @@ export default function PassportPage() {
       }
       if (sectionId === "sizes") {
         if (sizeSystemConfirmed) requestBody.confirmSizeSystemChange = true;
+        if (shoeSystemConfirmed) requestBody.confirmShoeSystemChange = true;
       }
       const res = await fetch("/api/save-style-profile", {
         method: "POST",
@@ -1133,18 +1192,19 @@ export default function PassportPage() {
         const fitConSel = (fe["fit-concerns"]     as string[] | undefined) ?? [];
         const heightStr = (fe["height"]           as string | undefined) ?? "";
         const parsedH  = parseHeightForDisplay(heightStr, heightDisplayUnit);
+        const curShoeSys    = (fe["shoe-sizing-system"] as string | undefined) || null;
         const clothingSizes = curSys && curSys !== "other" ? CLOTHING_SIZES[curSys] : null;
-        const shoeSizes     = curSys && curSys !== "other" && curSys !== "international" ? SHOE_SIZES[curSys] : null;
+        const shoeSizes     = curShoeSys && curShoeSys !== "other" ? SHOE_SIZES[curShoeSys] : null;
 
         return (
           <>
-            {/* Confirmation dialog when switching sizing system with saved sizes */}
+            {/* Confirmation dialog — clothing system change */}
             {pendingSizingSystem && (
               <div className="sp-confirm-overlay">
                 <div className="sp-confirm-box">
                   <p>
                     Switching to <strong>{SIZING_SYSTEM_LABELS[pendingSizingSystem] ?? pendingSizingSystem}</strong> will
-                    clear your saved sizes. This cannot be undone.
+                    clear your saved clothing sizes. This cannot be undone.
                   </p>
                   <div className="sp-confirm-actions">
                     <button type="button" className="sp-btn-outline" onClick={cancelSizingSystemChange}>Cancel</button>
@@ -1154,11 +1214,27 @@ export default function PassportPage() {
               </div>
             )}
 
-            {/* ── Group 1: Your sizes ───────────────────────────────── */}
+            {/* Confirmation dialog — shoe system change */}
+            {pendingShoeSizingSystem && (
+              <div className="sp-confirm-overlay">
+                <div className="sp-confirm-box">
+                  <p>
+                    Switching to <strong>{SHOE_SIZING_SYSTEM_LABELS[pendingShoeSizingSystem] ?? pendingShoeSizingSystem}</strong> shoe sizing will
+                    clear your saved shoe size. This cannot be undone.
+                  </p>
+                  <div className="sp-confirm-actions">
+                    <button type="button" className="sp-btn-outline" onClick={cancelShoeSizingSystemChange}>Cancel</button>
+                    <button type="button" className="sp-btn-primary" onClick={confirmShoeSizingSystemChange}>Confirm</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Group 1: Clothing sizes ───────────────────────────── */}
             <div className="sp-section-group">
               <div className="sp-section-group-title">Your sizes</div>
 
-              <div className="sp-sub-label">Which sizing system do you use?</div>
+              <div className="sp-sub-label">Which clothing sizing system do you use?</div>
               <div className="sp-cap-hint">Optional.</div>
               <div className="sp-option-grid">
                 {SIZING_SYSTEM_OPTIONS.map(o => {
@@ -1194,30 +1270,51 @@ export default function PassportPage() {
                       </div>
                     );
                   })}
-
-                  <div className="sp-field-row" style={{ marginTop: "20px" }}>
-                    <div className="sp-sub-label">Shoe size</div>
-                    {curSys === "international"
-                      ? <p className="sp-no-shoe-note">Shoe sizing requires UK, US, EU or Other selection.</p>
-                      : shoeSizes ? (
-                          <select className="sp-size-select"
-                            value={(fe["shoe-size"] as string | undefined) ?? ""}
-                            onChange={e => setFlowEdits(prev => ({ ...(prev as Record<string,unknown>), "shoe-size": e.target.value } as OnboardingAnswers))}>
-                            <option value="">— Select —</option>
-                            {shoeSizes.map(s => <option key={s} value={s}>{s}</option>)}
-                          </select>
-                        ) : (
-                          <input className="sp-text-input" type="text" placeholder="e.g. 5" value={(fe["shoe-size"] as string | undefined) ?? ""}
-                            onChange={e => handleTextChange("shoe-size" as DraftKey, e.target.value)} />
-                        )
-                    }
-                  </div>
                 </>
               ) : (
                 <p className="sp-cap-hint" style={{ marginTop: "16px" }}>
-                  Select a sizing system above to see size options.
+                  Select a clothing sizing system above to see size options.
                 </p>
               )}
+
+              {/* ── Shoe sizing (independent) ───────────────────────── */}
+              <div style={{ marginTop: "28px" }}>
+                <div className="sp-sub-label">Which shoe sizing system do you use?</div>
+                <div className="sp-cap-hint">Optional.</div>
+                <div className="sp-option-grid">
+                  {SHOE_SIZING_SYSTEM_OPTIONS.map(o => {
+                    const isSel = curShoeSys === o.id;
+                    return (
+                      <button key={o.id} type="button"
+                        className={`sp-option${isSel ? " sp-option--active" : ""}`}
+                        onClick={() => handleShoeSizingSystemChange(o.id)}>
+                        {o.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {curShoeSys ? (
+                  <div className="sp-field-row" style={{ marginTop: "20px" }}>
+                    <div className="sp-sub-label">Shoe size</div>
+                    {shoeSizes ? (
+                      <select className="sp-size-select"
+                        value={(fe["shoe-size"] as string | undefined) ?? ""}
+                        onChange={e => setFlowEdits(prev => ({ ...(prev as Record<string,unknown>), "shoe-size": e.target.value } as OnboardingAnswers))}>
+                        <option value="">— Select —</option>
+                        {shoeSizes.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    ) : (
+                      <input className="sp-text-input" type="text" placeholder="e.g. EU 39" value={(fe["shoe-size"] as string | undefined) ?? ""}
+                        onChange={e => handleTextChange("shoe-size" as DraftKey, e.target.value)} />
+                    )}
+                  </div>
+                ) : (
+                  <p className="sp-cap-hint" style={{ marginTop: "16px" }}>
+                    Select a shoe sizing system above to enter your shoe size.
+                  </p>
+                )}
+              </div>
             </div>
 
             {/* ── Group 2: Your measurements ───────────────────────── */}

@@ -21,8 +21,9 @@ const RECOGNISED_FIELDS = new Set([
   "trendAppetite",
   // V2-C
   "bodyFocusAreas", "bodyAvoidAreas",
-  // V2-D
-  "sizingSystem", "topSize", "bottomSize", "dressSize", "shoeSize",
+  // V2-D / V2-F
+  "sizingSystem", "topSize", "bottomSize", "dressSize",
+  "shoeSizingSystem", "shoeSize",
   "height", "bustMeasurement", "waistMeasurement", "hipMeasurement",
   "measurementUnit", "bodyShape", "fitConcerns", "preferredCoverage",
 ]);
@@ -66,6 +67,8 @@ const LIFESTYLE_VALID_IDS = new Set(["office", "busy-mom", "creative", "casual-d
 
 // V2-D: validation constants
 const SIZING_SYSTEM_VALID    = new Set(["uk", "us", "eu", "international", "other"]);
+// V2-F: shoe sizing system — no "international" option
+const SHOE_SIZING_SYSTEM_VALID = new Set(["uk", "us", "eu", "other"]);
 const BODY_SHAPE_VALID       = new Set(["hourglass", "pear", "apple", "rectangle", "inverted-triangle", "not-sure", "prefer-not-to-say"]);
 const FIT_CONCERN_VALID      = new Set(["petite", "tall", "short-torso", "long-torso", "broad-shoulders", "narrow-shoulders", "fuller-bust", "narrow-hips", "arm-fit", "thigh-fit"]);
 const PREFERRED_COVERAGE_VALID = new Set(["mostly-covered", "balanced", "varies", "more-open"]);
@@ -94,12 +97,12 @@ function validateClothingSize(value, system) {
   return true;
 }
 
-function validateShoeSize(value, system) {
+// shoeSystem is the independent shoeSizingSystem (uk/us/eu/other); never "international"
+function validateShoeSize(value, shoeSystem) {
   if (value == null || value === "") return true;
   if (typeof value !== "string" || value.length > 10) return false;
-  if (system === "international") return false; // no shoe size for International
-  if (system && system !== "other") {
-    const valid = SHOE_SIZES[system];
+  if (shoeSystem && shoeSystem !== "other") {
+    const valid = SHOE_SIZES[shoeSystem];
     if (valid && !valid.has(value.trim())) return false;
   }
   return true;
@@ -275,10 +278,16 @@ export async function action({ request }) {
     }
   }
 
-  // V2-D: single-value enum fields
+  // V2-D / V2-F: single-value enum fields
   if (Object.hasOwn(body, "sizingSystem")) {
     const v = body["sizingSystem"];
     if (v !== null && (typeof v !== "string" || !SIZING_SYSTEM_VALID.has(v))) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+  if (Object.hasOwn(body, "shoeSizingSystem")) {
+    const v = body["shoeSizingSystem"];
+    if (v !== null && (typeof v !== "string" || !SHOE_SIZING_SYSTEM_VALID.has(v))) {
       return Response.json({ error: "invalid_body" }, { status: 400 });
     }
   }
@@ -325,26 +334,40 @@ export async function action({ request }) {
 
   const op = customer.onboardingProfile;
 
-  // V2-D: sizing system change safety
+  // V2-D/V2-F: clothing sizing system change safety (affects topSize/bottomSize/dressSize only)
   const savedSizingSystem = op?.sizingSystem ?? null;
   const effectiveSizingSystem = Object.hasOwn(body, "sizingSystem")
     ? (typeof body["sizingSystem"] === "string" && body["sizingSystem"] !== "" ? body["sizingSystem"] : null)
     : savedSizingSystem;
   const sizingSystemChanging = effectiveSizingSystem !== savedSizingSystem;
-  const hasSavedSizes = op && (op.topSize || op.bottomSize || op.dressSize || op.shoeSize);
-  // Require confirmation whenever the sizing system is changing and sizes are already saved
-  if (sizingSystemChanging && hasSavedSizes && body["confirmSizeSystemChange"] !== true) {
+  const hasSavedClothingSizes = op && (op.topSize || op.bottomSize || op.dressSize);
+  // Require confirmation when clothing system changes and any clothing size is saved
+  if (sizingSystemChanging && hasSavedClothingSizes && body["confirmSizeSystemChange"] !== true) {
     return Response.json({ error: "size_system_change_requires_confirmation" }, { status: 409 });
   }
-  const clearSizesOnSystemChange = sizingSystemChanging && body["confirmSizeSystemChange"] === true;
+  const clearClothingOnSystemChange = sizingSystemChanging && body["confirmSizeSystemChange"] === true;
 
-  // V2-D: clothing sizes — validate against effective system
+  // V2-F: shoe sizing system change safety (independent from clothing system)
+  const savedShoeSizingSystem = op?.shoeSizingSystem ?? null;
+  const effectiveShoeSizingSystem = Object.hasOwn(body, "shoeSizingSystem")
+    ? (typeof body["shoeSizingSystem"] === "string" && body["shoeSizingSystem"] !== "" ? body["shoeSizingSystem"] : null)
+    : savedShoeSizingSystem;
+  const shoeSizingSystemChanging = effectiveShoeSizingSystem !== savedShoeSizingSystem;
+  const hasSavedShoeSize = op?.shoeSize;
+  // Require confirmation when shoe system changes and a shoe size is already saved
+  if (shoeSizingSystemChanging && hasSavedShoeSize && body["confirmShoeSystemChange"] !== true) {
+    return Response.json({ error: "shoe_system_change_requires_confirmation" }, { status: 409 });
+  }
+  const clearShoeOnSystemChange = shoeSizingSystemChanging && body["confirmShoeSystemChange"] === true;
+
+  // V2-D: clothing sizes — validate against effective clothing system
   for (const field of ["topSize", "bottomSize", "dressSize"]) {
     if (Object.hasOwn(body, field) && !validateClothingSize(body[field], effectiveSizingSystem)) {
       return Response.json({ error: "invalid_body" }, { status: 400 });
     }
   }
-  if (Object.hasOwn(body, "shoeSize") && !validateShoeSize(body["shoeSize"], effectiveSizingSystem)) {
+  // V2-F: shoe size — validate against effective shoe system (independent)
+  if (Object.hasOwn(body, "shoeSize") && !validateShoeSize(body["shoeSize"], effectiveShoeSizingSystem)) {
     return Response.json({ error: "invalid_body" }, { status: 400 });
   }
 
@@ -414,12 +437,15 @@ export async function action({ request }) {
     // V2-C
     bodyFocusAreas:      normalizedFocusAreas,
     bodyAvoidAreas:      normalizedAvoidAreas,
-    // V2-D sizes (sizes are cleared when sizingSystem changes with confirmation)
-    sizingSystem:        pickText("sizingSystem",     op?.sizingSystem),
-    topSize:             clearSizesOnSystemChange ? null : pickText("topSize",    op?.topSize),
-    bottomSize:          clearSizesOnSystemChange ? null : pickText("bottomSize", op?.bottomSize),
-    dressSize:           clearSizesOnSystemChange ? null : pickText("dressSize",  op?.dressSize),
-    shoeSize:            clearSizesOnSystemChange ? null : pickText("shoeSize",   op?.shoeSize),
+    // V2-D/V2-F sizes
+    // Clothing system change (confirmed) clears top/bottom/dress only — never shoe
+    sizingSystem:        pickText("sizingSystem",       op?.sizingSystem),
+    topSize:             clearClothingOnSystemChange ? null : pickText("topSize",    op?.topSize),
+    bottomSize:          clearClothingOnSystemChange ? null : pickText("bottomSize", op?.bottomSize),
+    dressSize:           clearClothingOnSystemChange ? null : pickText("dressSize",  op?.dressSize),
+    // Shoe system change (confirmed) clears shoeSize only — never clothing sizes
+    shoeSizingSystem:    pickText("shoeSizingSystem",   op?.shoeSizingSystem),
+    shoeSize:            clearShoeOnSystemChange ? null : pickText("shoeSize",       op?.shoeSize),
     // V2-D measurements
     height:              pickText("height",            op?.height),
     bustMeasurement:     pickText("bustMeasurement",   op?.bustMeasurement),

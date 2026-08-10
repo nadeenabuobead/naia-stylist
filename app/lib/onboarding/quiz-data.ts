@@ -292,6 +292,7 @@ export type OnboardingAnswers = {
   "top-size"?:           string;
   "bottom-size"?:        string;
   "dress-size"?:         string;
+  "shoe-sizing-system"?: string;  // V2-F: independent shoe system
   "shoe-size"?:          string;
   "height"?:             string;
   "measurement-unit"?:   string;
