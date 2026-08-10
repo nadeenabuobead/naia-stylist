@@ -7,11 +7,17 @@ import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { prisma } from "~/lib/prisma.server";
 import { readPendingSave, clearPendingSave } from "~/lib/pending-save.server";
 
-// Valid option IDs per draft key — derived from quiz data at module load time
+// Valid option IDs per draft key — built from onboarding quiz data at module load time
 const VALID_DRAFT_IDS: Record<string, Set<string>> = {};
 for (const q of quizQuestions) {
   if (q.options) VALID_DRAFT_IDS[q.id] = new Set(q.options.map(o => o.id));
   if (q.colors)  VALID_DRAFT_IDS[q.id] = new Set(q.colors.map(c => c.id));
+  // Also register the secondary question (avoid-colors on step 8)
+  if (q.secondaryQuestion) {
+    VALID_DRAFT_IDS[q.secondaryQuestion.id] = new Set(
+      q.secondaryQuestion.colors.map(c => c.id),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -33,23 +39,34 @@ function arraysEqualAsSet(a: string[], b: string[]): boolean {
 
 function sanitizeDraft(raw: OnboardingAnswers): OnboardingAnswers {
   const out: OnboardingAnswers = {};
-  const arrayKeys = [
+
+  const arrayKeys: Array<keyof OnboardingAnswers> = [
     "style-personalities", "desired-impression", "lifestyle",
     "desired-feelings", "becoming", "fit-preferences",
-    "wardrobe-disconnection", "favorite-colors", "avoid-colors", "style-support",
-  ] as const;
+    "silhouette", "wardrobe-disconnection",
+    "favorite-colors", "avoid-colors",
+    "style-support", "shopping-priorities",
+    "coverage-preferences",
+  ];
+
   for (const key of arrayKeys) {
-    const v = raw[key];
+    const v = (raw as Record<string, unknown>)[key as string];
     if (Array.isArray(v) && v.every((i): i is string => typeof i === "string")) {
-      const validIds = VALID_DRAFT_IDS[key];
-      // Accept [] as intentional clear; reject entire field if any item is an unknown ID
-      if (v.length === 0 || (validIds && v.every(i => validIds.has(i)))) {
-        out[key] = v;
+      const validIds = VALID_DRAFT_IDS[key as string];
+      if (v.length === 0 || !validIds || v.every(i => validIds.has(i))) {
+        (out as Record<string, unknown>)[key as string] = v;
       }
     }
   }
+
+  // String fields
   const fn = raw["final-notes"];
   if (typeof fn === "string") out["final-notes"] = fn;
+  const ta = raw["trend-appetite"];
+  if (typeof ta === "string") out["trend-appetite"] = ta;
+  const td = raw["typical-day"];
+  if (typeof td === "string") out["typical-day"] = td;
+
   return out;
 }
 
@@ -58,7 +75,7 @@ function readSessionDraft(
   profileUpdatedAt: string | null,
 ): OnboardingAnswers {
   try {
-    localStorage.removeItem("naia_onboarding"); // always evict legacy key
+    localStorage.removeItem("naia_onboarding");
     const raw = localStorage.getItem(storageKey);
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
@@ -77,7 +94,7 @@ function readSessionDraft(
     }
     return ((parsed as NaiaOnboardingDraft).answers ?? {}) as OnboardingAnswers;
   } catch {
-    try { localStorage.removeItem(storageKey); } catch { /* ignore: removeItem is best-effort */ }
+    try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
     return {};
   }
 }
@@ -122,10 +139,13 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     if (op.desiredFeelings.length)     existingAnswers["desired-feelings"]       = op.desiredFeelings;
     if (op.becoming.length)            existingAnswers["becoming"]               = op.becoming;
     if (op.fitPreferences.length)      existingAnswers["fit-preferences"]        = op.fitPreferences;
+    if ((op as any).silhouette?.length) existingAnswers["silhouette"]            = (op as any).silhouette;
     if (op.styleStruggles.length)      existingAnswers["wardrobe-disconnection"] = op.styleStruggles;
     if (op.favoriteColors.length)      existingAnswers["favorite-colors"]        = op.favoriteColors;
     if (op.avoidColors.length)         existingAnswers["avoid-colors"]           = op.avoidColors;
     if (op.styleSupport.length)        existingAnswers["style-support"]          = op.styleSupport;
+    if ((op as any).shoppingPriorities?.length) existingAnswers["shopping-priorities"] = (op as any).shoppingPriorities;
+    if ((op as any).trendAppetite)     existingAnswers["trend-appetite"]         = (op as any).trendAppetite;
     if (op.finalNotes)                 existingAnswers["final-notes"]            = op.finalNotes;
   }
   const pendingSave = await readPendingSave(request);
@@ -172,32 +192,37 @@ const css = `
   .ob-topbar-logo{font-family:var(--ff-display);font-size:22px;font-style:italic;letter-spacing:3px;color:var(--deep)}
   .ob-topbar-close{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);text-decoration:none;background:none;border:none;cursor:pointer}
   .ob-progress{padding:24px 40px 0;max-width:700px;margin:0 auto}
-  .ob-progress-dots{display:flex;gap:8px;justify-content:center;margin-bottom:8px}
-  .ob-progress-dot{width:10px;height:10px;border-radius:50%;background:var(--warm);transition:all .4s}
-  .ob-progress-dot.active{width:28px;border-radius:14px;background:var(--deep)}
+  .ob-progress-dots{display:flex;gap:6px;justify-content:center;margin-bottom:8px}
+  .ob-progress-dot{width:8px;height:8px;border-radius:50%;background:var(--warm);transition:all .4s}
+  .ob-progress-dot.active{width:24px;border-radius:12px;background:var(--deep)}
   .ob-progress-dot.done{background:var(--accent)}
   .ob-progress-label{text-align:center;font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted)}
   .ob-main{max-width:700px;margin:0 auto;padding:48px 40px 80px}
   .ob-step-label{font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--accent);margin-bottom:12px}
-  .ob-headline{font-family:var(--ff-display);font-size:clamp(28px,4vw,42px);font-weight:900;font-style:italic;color:var(--deep);letter-spacing:-1px;margin-bottom:8px;line-height:1.1}
+  .ob-headline{font-family:var(--ff-display);font-size:clamp(26px,4vw,40px);font-weight:900;font-style:italic;color:var(--deep);letter-spacing:-1px;margin-bottom:8px;line-height:1.1}
   .ob-subtitle{font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:32px}
+  .ob-section-divider{margin:32px 0 24px;border:none;border-top:1px solid rgba(59,5,16,.08)}
+  .ob-section-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:16px}
   .ob-pills{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:32px}
   .ob-pill{padding:12px 22px;border:1px solid rgba(59,5,16,.12);font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--deep);cursor:pointer;transition:all .3s;background:transparent}
   .ob-pill:hover{border-color:var(--deep)}
-  .ob-pill.selected{background:#8b2035;color:var(--cream)}
+  .ob-pill.selected{background:#8b2035;color:var(--cream);border-color:#8b2035}
   .ob-pill:disabled{opacity:.35;cursor:not-allowed}
   .ob-color-grid{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:32px}
   .ob-color-swatch{padding:12px 16px;border:1px solid rgba(59,5,16,.12);font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--deep);cursor:pointer;transition:all .3s;background:transparent;display:flex;align-items:center;gap:10px}
   .ob-color-swatch:hover{border-color:var(--deep)}
-  .ob-color-swatch.selected{background:var(--deep);color:var(--cream)}
+  .ob-color-swatch.selected{background:var(--deep);color:var(--cream);border-color:var(--deep)}
+  .ob-color-swatch:disabled{opacity:.35;cursor:not-allowed}
   .ob-color-dot{width:20px;height:20px;border:1px solid rgba(0,0,0,0.15);flex-shrink:0}
   .ob-textarea{width:100%;min-height:150px;padding:20px;border:1px solid rgba(59,5,16,.12);font-size:18px;font-family:var(--ff-body);font-style:italic;background:transparent;resize:vertical;color:var(--deep);outline:none}
   .ob-textarea:focus{border-color:var(--deep)}
   .ob-charcount{font-family:var(--ff-mono);font-size:9px;color:var(--muted);text-align:right;margin-top:6px;margin-bottom:32px}
-  .ob-buttons{display:flex;gap:12px;margin-top:16px}
+  .ob-buttons{display:flex;gap:12px;margin-top:16px;flex-wrap:wrap;align-items:center}
   .ob-btn-continue{padding:14px 40px;border:none;background:#8b2035;font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--cream);cursor:pointer}
   .ob-btn-continue:disabled{opacity:.3;cursor:not-allowed}
   .ob-btn-skip{padding:14px 32px;border:1px solid rgba(59,5,16,.1);background:transparent;font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--deep);cursor:pointer}
+  .ob-required-note{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;color:var(--muted);margin-top:8px}
+  @media(max-width:600px){.ob-topbar{padding:16px 20px}.ob-progress{padding:20px 20px 0}.ob-main{padding:36px 20px 60px}}
 `;
 
 export default function OnboardingStep() {
@@ -207,23 +232,31 @@ export default function OnboardingStep() {
 
   const storageKey = `naia_onboarding_v2:${draftScope}`;
 
-  const [singleValue, setSingleValue] = useState<string | null>(null);
-  const [multiValue, setMultiValue] = useState<string[]>([]);
-  const [textValue, setTextValue] = useState<string>("");
+  const [singleValue,          setSingleValue]          = useState<string | null>(null);
+  const [multiValue,           setMultiValue]           = useState<string[]>([]);
+  const [secondaryMultiValue,  setSecondaryMultiValue]  = useState<string[]>([]);
+  const [textValue,            setTextValue]            = useState<string>("");
 
-  // Read sparse session draft; merge with DB base for display.
-  // Never writes to localStorage — that is done only in saveAndNavigate.
+  // Populate state from DB base + session draft
   useEffect(() => {
     try {
       const rawDraft = readSessionDraft(storageKey, profileUpdatedAt);
       const sessionEdits = sanitizeDraft(rawDraft);
       const merged: OnboardingAnswers = { ...existingAnswers, ...sessionEdits };
-      const prev = merged[question.id as keyof OnboardingAnswers];
-      if (Array.isArray(prev)) setMultiValue(prev as string[]);
+      const prev = (merged as Record<string, unknown>)[question.id];
+      if (Array.isArray(prev))         setMultiValue(prev as string[]);
       else if (typeof prev === "string") { setSingleValue(prev); setTextValue(prev); }
-      else { setSingleValue(null); setMultiValue([]); setTextValue(""); }
+      else                               { setSingleValue(null); setMultiValue([]); setTextValue(""); }
+
+      // Secondary question (avoid-colors on step 8)
+      if (question.secondaryQuestion) {
+        const sec = (merged as Record<string, unknown>)[question.secondaryQuestion.id];
+        setSecondaryMultiValue(Array.isArray(sec) ? (sec as string[]) : []);
+      } else {
+        setSecondaryMultiValue([]);
+      }
     } catch {
-      setSingleValue(null); setMultiValue([]); setTextValue("");
+      setSingleValue(null); setMultiValue([]); setSecondaryMultiValue([]); setTextValue("");
     }
   }, [question.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -236,26 +269,38 @@ export default function OnboardingStep() {
         const qid = question.id as keyof OnboardingAnswers;
 
         if (question.type === "multi" || question.type === "color") {
-          // Compare as a set — order must not create a false edit
-          const dbBase = Array.isArray(existingAnswers[qid])
-            ? (existingAnswers[qid] as string[])
+          const dbBase = Array.isArray((existingAnswers as Record<string, unknown>)[qid])
+            ? (existingAnswers as Record<string, unknown>)[qid] as string[]
             : [];
           if (arraysEqualAsSet(multiValue, dbBase)) {
-            delete sessionEdits[qid];
+            delete (sessionEdits as Record<string, unknown>)[qid];
           } else {
             (sessionEdits as Record<string, unknown>)[qid] = multiValue;
           }
+
+          // Also save secondary question (avoid-colors)
+          if (question.secondaryQuestion) {
+            const secId = question.secondaryQuestion.id as keyof OnboardingAnswers;
+            const secBase = Array.isArray((existingAnswers as Record<string, unknown>)[secId])
+              ? (existingAnswers as Record<string, unknown>)[secId] as string[]
+              : [];
+            if (arraysEqualAsSet(secondaryMultiValue, secBase)) {
+              delete (sessionEdits as Record<string, unknown>)[secId];
+            } else {
+              (sessionEdits as Record<string, unknown>)[secId] = secondaryMultiValue;
+            }
+          }
         } else if (question.type === "single") {
-          const dbBase = (existingAnswers[qid] as string | undefined) ?? null;
+          const dbBase = ((existingAnswers as Record<string, unknown>)[qid] as string | undefined) ?? null;
           if ((singleValue ?? null) === dbBase) {
-            delete sessionEdits[qid];
+            delete (sessionEdits as Record<string, unknown>)[qid];
           } else {
             (sessionEdits as Record<string, unknown>)[qid] = singleValue;
           }
         } else if (question.type === "text") {
-          const dbBase = (existingAnswers[qid] as string | undefined) ?? "";
+          const dbBase = ((existingAnswers as Record<string, unknown>)[qid] as string | undefined) ?? "";
           if (textValue === dbBase) {
-            delete sessionEdits[qid];
+            delete (sessionEdits as Record<string, unknown>)[qid];
           } else {
             (sessionEdits as Record<string, unknown>)[qid] = textValue;
           }
@@ -271,9 +316,36 @@ export default function OnboardingStep() {
   };
 
   const canProceed = (): boolean => {
+    if (!question.required) return true; // skippable screens always allow Continue
     if (question.type === "single") return !!singleValue;
     if (question.type === "multi" || question.type === "color") return multiValue.length > 0;
     return true;
+  };
+
+  const togglePrimary = (id: string) => {
+    setMultiValue(prev => {
+      if (prev.includes(id)) return prev.filter(v => v !== id);
+      if (!question.maxSelections || prev.length < question.maxSelections) {
+        // Mutual exclusion: remove from avoid-colors if present
+        setSecondaryMultiValue(sec => sec.filter(s => s !== id));
+        return [...prev, id];
+      }
+      return prev;
+    });
+  };
+
+  const toggleSecondary = (id: string) => {
+    if (!question.secondaryQuestion) return;
+    const max = question.secondaryQuestion.maxSelections;
+    setSecondaryMultiValue(prev => {
+      if (prev.includes(id)) return prev.filter(v => v !== id);
+      if (prev.length < max) {
+        // Mutual exclusion: remove from favorite-colors if present
+        setMultiValue(fav => fav.filter(f => f !== id));
+        return [...prev, id];
+      }
+      return prev;
+    });
   };
 
   const toggleMulti = (id: string) => {
@@ -284,7 +356,8 @@ export default function OnboardingStep() {
     });
   };
 
-  const totalDots = Math.min(totalSteps, 10);
+  const totalDots = Math.min(totalSteps, 12);
+  const isSkippable = !question.required;
 
   return (
     <div>
@@ -300,7 +373,12 @@ export default function OnboardingStep() {
         <div className="ob-progress-dots">
           {Array.from({ length: totalDots }).map((_, i) => {
             const n = i + 1;
-            return <div key={n} className={`ob-progress-dot${n < step ? " done" : ""}${n === step ? " active" : ""}`} />;
+            return (
+              <div
+                key={n}
+                className={`ob-progress-dot${n < step ? " done" : ""}${n === step ? " active" : ""}`}
+              />
+            );
           })}
         </div>
         <div className="ob-progress-label">Step {step} of {totalSteps}</div>
@@ -325,25 +403,20 @@ export default function OnboardingStep() {
         <h2 className="ob-headline">{question.title}</h2>
         {question.subtitle && <p className="ob-subtitle">{question.subtitle}</p>}
 
-        {question.type === "single" && question.options && (
-          <div className="ob-pills">
-            {question.options.map(opt => (
-              <button key={opt.id} type="button" onClick={() => setSingleValue(opt.id)} className={`ob-pill${singleValue === opt.id ? " selected" : ""}`}>
-                {opt.emoji && <span style={{ marginRight: "6px" }}>{opt.emoji}</span>}
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        )}
-
+        {/* MULTI */}
         {question.type === "multi" && question.options && (
           <div className="ob-pills">
             {question.options.map(opt => {
               const isSelected = multiValue.includes(opt.id);
               const isDisabled = !isSelected && !!question.maxSelections && multiValue.length >= question.maxSelections;
               return (
-                <button key={opt.id} type="button" onClick={() => toggleMulti(opt.id)} disabled={isDisabled} className={`ob-pill${isSelected ? " selected" : ""}`}>
-                  {opt.emoji && <span style={{ marginRight: "6px" }}>{opt.emoji}</span>}
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => toggleMulti(opt.id)}
+                  disabled={isDisabled}
+                  className={`ob-pill${isSelected ? " selected" : ""}`}
+                >
                   {opt.label}
                 </button>
               );
@@ -351,39 +424,120 @@ export default function OnboardingStep() {
           </div>
         )}
 
-        {question.type === "color" && question.colors && (
-          <div className="ob-color-grid">
-            {question.colors.map(color => {
-              const isSelected = multiValue.includes(color.id);
-              const isDisabled = !isSelected && !!question.maxSelections && multiValue.length >= question.maxSelections;
+        {/* SINGLE */}
+        {question.type === "single" && question.options && (
+          <div className="ob-pills">
+            {question.options.map(opt => {
+              const isSelected = singleValue === opt.id;
               return (
-                <button key={color.id} type="button" onClick={() => toggleMulti(color.id)} disabled={isDisabled} className={`ob-color-swatch${isSelected ? " selected" : ""}`}>
-                  <span className="ob-color-dot" style={{ background: color.hex }} />
-                  {color.name}
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setSingleValue(prev => prev === opt.id ? null : opt.id)}
+                  className={`ob-pill${isSelected ? " selected" : ""}`}
+                >
+                  {opt.label}
                 </button>
               );
             })}
           </div>
         )}
 
+        {/* COLOR (primary + optional secondary on same screen) */}
+        {question.type === "color" && question.colors && (
+          <>
+            <div className="ob-color-grid">
+              {question.colors.map(color => {
+                const isSelected = multiValue.includes(color.id);
+                const isDisabled = !isSelected && !!question.maxSelections && multiValue.length >= question.maxSelections;
+                return (
+                  <button
+                    key={color.id}
+                    type="button"
+                    onClick={() => togglePrimary(color.id)}
+                    disabled={isDisabled}
+                    className={`ob-color-swatch${isSelected ? " selected" : ""}`}
+                  >
+                    <span className="ob-color-dot" style={{ background: color.hex }} />
+                    {color.name}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Secondary: avoid-colors — same screen */}
+            {question.secondaryQuestion && (
+              <>
+                <hr className="ob-section-divider" />
+                <div className="ob-section-label">{question.secondaryQuestion.title}</div>
+                {question.secondaryQuestion.subtitle && (
+                  <p className="ob-subtitle" style={{ marginBottom: "16px" }}>{question.secondaryQuestion.subtitle}</p>
+                )}
+                <div className="ob-color-grid">
+                  {question.secondaryQuestion.colors.map(color => {
+                    const isSelected = secondaryMultiValue.includes(color.id);
+                    const isDisabled = !isSelected && secondaryMultiValue.length >= question.secondaryQuestion!.maxSelections;
+                    return (
+                      <button
+                        key={color.id}
+                        type="button"
+                        onClick={() => toggleSecondary(color.id)}
+                        disabled={isDisabled}
+                        className={`ob-color-swatch${isSelected ? " selected" : ""}`}
+                      >
+                        <span className="ob-color-dot" style={{ background: color.hex }} />
+                        {color.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {/* TEXT */}
         {question.type === "text" && (
           <>
-            <textarea className="ob-textarea" value={textValue} onChange={e => setTextValue(e.target.value)} placeholder={question.placeholder} maxLength={question.maxLength} />
-            {question.maxLength && <div className="ob-charcount">{textValue.length} / {question.maxLength}</div>}
+            <textarea
+              className="ob-textarea"
+              value={textValue}
+              onChange={e => setTextValue(e.target.value)}
+              placeholder={question.placeholder}
+              maxLength={question.maxLength}
+            />
+            {question.maxLength && (
+              <div className="ob-charcount">{textValue.length} / {question.maxLength}</div>
+            )}
           </>
         )}
 
         <div className="ob-buttons">
           {step > 1 && (
-            <button type="button" onClick={() => saveAndNavigate("back")} className="ob-btn-skip">Back</button>
+            <button type="button" onClick={() => saveAndNavigate("back")} className="ob-btn-skip">
+              Back
+            </button>
           )}
-          <button type="button" onClick={() => saveAndNavigate("next")} disabled={!canProceed()} className="ob-btn-continue">
+
+          <button
+            type="button"
+            onClick={() => saveAndNavigate("next")}
+            disabled={!canProceed()}
+            className="ob-btn-continue"
+          >
             {step === totalSteps ? "Complete" : "Continue"}
           </button>
-          {question.type === "text" && (
-            <button type="button" onClick={() => saveAndNavigate("skip")} className="ob-btn-skip">Skip</button>
+
+          {isSkippable && (
+            <button type="button" onClick={() => saveAndNavigate("skip")} className="ob-btn-skip">
+              Skip
+            </button>
           )}
         </div>
+
+        {question.required && (
+          <p className="ob-required-note">Required</p>
+        )}
       </main>
     </div>
   );

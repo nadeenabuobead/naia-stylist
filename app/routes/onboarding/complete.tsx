@@ -64,17 +64,20 @@ function buildNaiaNote(a: OnboardingAnswers): string {
 
 // Maps draft key → API field name. Used for both sanitization and POST body.
 const DRAFT_TO_API = [
-  ["style-personalities",    "stylePersonalities", "array"],
-  ["desired-impression",     "desiredImpression",  "array"],
-  ["lifestyle",              "lifestyle",          "array"],
-  ["desired-feelings",       "desiredFeelings",    "array"],
-  ["becoming",               "becoming",           "array"],
-  ["fit-preferences",        "fitPreferences",     "array"],
-  ["wardrobe-disconnection", "styleStruggles",     "array"],
-  ["favorite-colors",        "favoriteColors",     "array"],
-  ["avoid-colors",           "avoidColors",        "array"],
-  ["style-support",          "styleSupport",       "array"],
-  ["final-notes",            "finalNotes",         "text"],
+  ["style-personalities",    "stylePersonalities",   "array"],
+  ["desired-impression",     "desiredImpression",    "array"],
+  ["lifestyle",              "lifestyle",            "array"],
+  ["desired-feelings",       "desiredFeelings",      "array"],
+  ["becoming",               "becoming",             "array"],
+  ["fit-preferences",        "fitPreferences",       "array"],  // legacy
+  ["silhouette",             "silhouette",           "array"],
+  ["wardrobe-disconnection", "styleStruggles",       "array"],
+  ["favorite-colors",        "favoriteColors",       "array"],
+  ["avoid-colors",           "avoidColors",          "array"],
+  ["style-support",          "styleSupport",         "array"],
+  ["shopping-priorities",    "shoppingPriorities",   "array"],
+  ["trend-appetite",         "trendAppetite",        "text"],  // single → stored as string
+  ["final-notes",            "finalNotes",           "text"],
 ] as const;
 
 interface NaiaOnboardingDraft {
@@ -161,17 +164,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const op = customer.onboardingProfile;
   const existingAnswers: OnboardingAnswers = {};
   if (op) {
-    if (op.stylePersonalities.length)  existingAnswers["style-personalities"]    = op.stylePersonalities;
-    if (op.desiredImpression.length)   existingAnswers["desired-impression"]     = op.desiredImpression;
-    if (op.lifestyle)                  existingAnswers["lifestyle"]              = op.lifestyle.split(", ").filter(Boolean);
-    if (op.desiredFeelings.length)     existingAnswers["desired-feelings"]       = op.desiredFeelings;
-    if (op.becoming.length)            existingAnswers["becoming"]               = op.becoming;
-    if (op.fitPreferences.length)      existingAnswers["fit-preferences"]        = op.fitPreferences;
-    if (op.styleStruggles.length)      existingAnswers["wardrobe-disconnection"] = op.styleStruggles;
-    if (op.favoriteColors.length)      existingAnswers["favorite-colors"]        = op.favoriteColors;
-    if (op.avoidColors.length)         existingAnswers["avoid-colors"]           = op.avoidColors;
-    if (op.styleSupport.length)        existingAnswers["style-support"]          = op.styleSupport;
-    if (op.finalNotes)                 existingAnswers["final-notes"]            = op.finalNotes;
+    if (op.stylePersonalities.length)          existingAnswers["style-personalities"]    = op.stylePersonalities;
+    if (op.desiredImpression.length)           existingAnswers["desired-impression"]     = op.desiredImpression;
+    if (op.lifestyle)                          existingAnswers["lifestyle"]              = op.lifestyle.split(", ").filter(Boolean);
+    if (op.desiredFeelings.length)             existingAnswers["desired-feelings"]       = op.desiredFeelings;
+    if (op.becoming.length)                    existingAnswers["becoming"]               = op.becoming;
+    if (op.fitPreferences.length)              existingAnswers["fit-preferences"]        = op.fitPreferences;
+    if ((op as any).silhouette?.length)        existingAnswers["silhouette"]             = (op as any).silhouette;
+    if (op.styleStruggles.length)              existingAnswers["wardrobe-disconnection"] = op.styleStruggles;
+    if (op.favoriteColors.length)              existingAnswers["favorite-colors"]        = op.favoriteColors;
+    if (op.avoidColors.length)                 existingAnswers["avoid-colors"]           = op.avoidColors;
+    if (op.styleSupport.length)                existingAnswers["style-support"]          = op.styleSupport;
+    if ((op as any).shoppingPriorities?.length) existingAnswers["shopping-priorities"]  = (op as any).shoppingPriorities;
+    if ((op as any).trendAppetite)             existingAnswers["trend-appetite"]         = (op as any).trendAppetite;
+    if (op.finalNotes)                         existingAnswers["final-notes"]            = op.finalNotes;
   }
   const pendingSave = await readPendingSave(request);
 
