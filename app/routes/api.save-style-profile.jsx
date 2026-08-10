@@ -324,8 +324,8 @@ export async function action({ request }) {
     : savedSizingSystem;
   const sizingSystemChanging = effectiveSizingSystem !== savedSizingSystem;
   const hasSavedSizes = op && (op.topSize || op.bottomSize || op.dressSize || op.shoeSize);
-  // Require confirmation only when changing an already-set V2-D system with saved sizes
-  if (sizingSystemChanging && savedSizingSystem !== null && hasSavedSizes && body["confirmSizeSystemChange"] !== true) {
+  // Require confirmation whenever the sizing system is changing and sizes are already saved
+  if (sizingSystemChanging && hasSavedSizes && body["confirmSizeSystemChange"] !== true) {
     return Response.json({ error: "size_system_change_requires_confirmation" }, { status: 409 });
   }
   const clearSizesOnSystemChange = sizingSystemChanging && body["confirmSizeSystemChange"] === true;

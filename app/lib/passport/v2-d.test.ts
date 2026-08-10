@@ -382,7 +382,7 @@ describe("D.17 Sizing system change safety contract", () => {
     const savedSys = op.sizingSystem;
     const changing = newSys !== savedSys;
     const hasSaved = !!(op.topSize || op.bottomSize || op.dressSize || op.shoeSize);
-    if (changing && savedSys !== null && hasSaved && !confirmed) return "needs_confirmation";
+    if (changing && hasSaved && !confirmed) return "needs_confirmation";
     return "ok";
   }
 
@@ -396,8 +396,13 @@ describe("D.17 Sizing system change safety contract", () => {
     assert.equal(checkNeedsConfirmation(op, "us", true), "ok");
   });
 
-  it("first-time setup (savedSys = null): no confirmation needed even with legacy sizes", () => {
+  it("legacy sizes with no saved system (null → uk): confirmation still required", () => {
     const op: FakeProfile = { sizingSystem: null, topSize: "UK 10", bottomSize: null, dressSize: null, shoeSize: null };
+    assert.equal(checkNeedsConfirmation(op, "uk", false), "needs_confirmation");
+  });
+
+  it("control: null system, no sizes → uk: no confirmation needed", () => {
+    const op: FakeProfile = { sizingSystem: null, topSize: null, bottomSize: null, dressSize: null, shoeSize: null };
     assert.equal(checkNeedsConfirmation(op, "uk", false), "ok");
   });
 

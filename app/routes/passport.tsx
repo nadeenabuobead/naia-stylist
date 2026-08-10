@@ -723,7 +723,7 @@ export default function PassportPage() {
       (savedAnswers as Record<string, unknown>)["dress-size"] ||
       (savedAnswers as Record<string, unknown>)["shoe-size"]
     );
-    if (hasSavedSizes && currentSystem) {
+    if (hasSavedSizes) {
       setPendingSizingSystem(newSystem);
       return;
     }
