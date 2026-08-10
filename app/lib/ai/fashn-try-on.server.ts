@@ -246,6 +246,71 @@ export async function runFashnTryOn(
   return err("TIMEOUT");
 }
 
+// ── Submit-only adapter (no poll) ────────────────────────────────────────────
+//
+// Validates consent and input, posts to FASHN /v1/run, returns predictionId.
+// Does NOT poll for completion — the caller persists predictionId and an M2
+// route polls /v1/status/{id} later.
+//
+// Use this inside a customer-facing trigger route where the full runFashnTryOn
+// poll loop (up to 90s) would exceed Vercel's 60s function timeout.
+
+export interface SubmitToProviderOptions {
+  _fetch?: FetchFn;
+  _getApiKey?: GetApiKeyFn;
+}
+
+export type SubmitToProviderResult =
+  | { ok: true; predictionId: string }
+  | { ok: false; code: VirtualTryOnErrorCode; customerMessage: string };
+
+export async function submitTryOnToProvider(
+  input: VirtualTryOnInput,
+  { _fetch = fetch, _getApiKey = () => process.env.FASHN_API_KEY }: SubmitToProviderOptions = {},
+): Promise<SubmitToProviderResult> {
+  const apiKey = _getApiKey();
+  if (!apiKey) return submitErr("NOT_CONFIGURED");
+
+  if (!hasVirtualTryOnConsent(input.consent)) return submitErr("CONSENT_REQUIRED");
+  if (!isValidModelImageDataUrl(input.modelImageDataUrl)) return submitErr("INVALID_MODEL_IMAGE");
+  if (!isAllowedProductImageUrl(input.productImageUrl)) return submitErr("INVALID_PRODUCT_IMAGE");
+
+  const now = Date.now();
+  const lastRun = _customerLastRun.get(input.customerId);
+  if (lastRun !== undefined && now - lastRun < DEV_RATE_LIMIT_MS) return submitErr("RATE_LIMITED");
+  _customerLastRun.set(input.customerId, now);
+
+  try {
+    const runRes = await _fetch(`${BASE_URL}/v1/run`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model_name: "tryon-max",
+        inputs: {
+          model_image: input.modelImageDataUrl,
+          product_image: input.productImageUrl,
+          return_base64: true,
+          output_format: "png",
+          resolution: "1k",
+          generation_mode: "fast",
+          num_images: 1,
+        },
+      }),
+    });
+
+    if (!runRes.ok) return submitErr("PROVIDER_REJECTED");
+    const runBody = (await runRes.json()) as FashnRunResponse;
+    if (runBody.error || !runBody.id) return submitErr("PROVIDER_REJECTED");
+
+    return { ok: true, predictionId: runBody.id };
+  } catch {
+    return submitErr("PROVIDER_FAILED");
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function err(code: VirtualTryOnErrorCode): VirtualTryOnResult {
@@ -254,5 +319,9 @@ function err(code: VirtualTryOnErrorCode): VirtualTryOnResult {
     code,
     customerMessage: CUSTOMER_ERROR_MESSAGES[code],
   };
+}
+
+function submitErr(code: VirtualTryOnErrorCode): SubmitToProviderResult {
+  return { ok: false, code, customerMessage: CUSTOMER_ERROR_MESSAGES[code] };
 }
 

@@ -24,6 +24,8 @@ import {
 import {
   runFashnTryOn,
   isValidModelImageDataUrl,
+  submitTryOnToProvider,
+  type SubmitToProviderResult,
 } from "./fashn-try-on.server.js";
 import {
   resolveVerifiedMedia,
@@ -182,6 +184,178 @@ export function checkResultOwnership(
 ): boolean {
   if (!jobCustomerId || !requestingCustomerId) return false;
   return jobCustomerId === requestingCustomerId;
+}
+
+// ── submitTryOnJob ────────────────────────────────────────────────────────────
+//
+// M1 customer-facing orchestration: runs all pre-flight checks, creates the job,
+// submits to FASHN (POST only — no poll), and persists the predictionId.
+// Returns { jobId } immediately; M2 poll route completes PROCESSING → COMPLETED.
+//
+// Why not executeTryOn: its internal poll loop runs up to 90s, which exceeds
+// Vercel's 60s serverless function timeout on any plan.
+
+export interface SubmitJobParams {
+  internalCustomerId: string;
+  naiaModelId: string;
+  bodyPublicId: string;
+  bodyFormat: string | null;
+  deliveryType: string;
+  garmentHandle: string;
+  virtualTryOnConsentAt: Date;
+  saveTryOnResultConsentAt?: Date | null;
+  idempotencyKey: string;
+}
+
+export type SubmitJobResult =
+  | { ok: true; jobId: string }
+  | { ok: false; code: string; customerMessage: string; jobId?: string };
+
+export type SubmitToProviderFn = (
+  input: import("./virtual-try-on.types.js").VirtualTryOnInput,
+) => Promise<SubmitToProviderResult>;
+
+export interface SubmitJobDeps {
+  _downloadPhoto?: DownloadPhotoFn;
+  _submitToProvider?: SubmitToProviderFn;
+  _createOrFindJob?: CreateOrFindJobFn;
+  _advanceJob?: AdvanceJobFn;
+  _checkCooldown?: CheckCooldownFn;
+}
+
+const SUBMIT_ERRORS = {
+  NOT_READY:      "This garment is not available for virtual try-on yet.",
+  COOLDOWN:       "Virtual try-on is temporarily unavailable. Please try again in a moment.",
+  ACTIVE_JOB:     "Generation in progress. Try again shortly.",
+  NOT_CONFIGURED: "Virtual try-on is temporarily unavailable.",
+  STATE_ERROR:    "Virtual try-on is temporarily unavailable.",
+} as const;
+
+export async function submitTryOnJob(
+  params: SubmitJobParams,
+  deps: SubmitJobDeps = {},
+): Promise<SubmitJobResult> {
+  const {
+    _downloadPhoto     = (pid, fmt, dt) => downloadModelPhotoAsDataUrl(pid, fmt, dt),
+    _submitToProvider  = (input) => submitTryOnToProvider(input),
+    _createOrFindJob   = createOrFindTryOnJob,
+    _advanceJob        = (job, status, extras) => advanceTryOnJob(job, status, extras),
+    _checkCooldown     = checkCustomerCooldown,
+  } = deps;
+
+  // 1. Garment eligibility — fail-closed on non-ready entries
+  const garment = validateGarmentEligibility(params.garmentHandle);
+  if (!garment.ok) {
+    return { ok: false, code: "NOT_READY", customerMessage: SUBMIT_ERRORS.NOT_READY };
+  }
+
+  // 2. Per-customer cooldown
+  const cooldown = await _checkCooldown(params.internalCustomerId);
+  if (!cooldown.ok) {
+    return { ok: false, code: "COOLDOWN", customerMessage: SUBMIT_ERRORS.COOLDOWN };
+  }
+
+  // 3. Create or find job (Serializable transaction)
+  const jobResult = await _createOrFindJob({
+    customerId:              params.internalCustomerId,
+    naiaModelId:             params.naiaModelId,
+    productHandle:           params.garmentHandle,
+    bodyPublicId:            params.bodyPublicId,
+    virtualTryOnConsentAt:   params.virtualTryOnConsentAt,
+    saveTryOnResultConsentAt: params.saveTryOnResultConsentAt ?? null,
+    idempotencyKey:          params.idempotencyKey,
+  });
+
+  if (!jobResult.ok) {
+    const msg = jobResult.code === "ACTIVE_JOB_EXISTS"
+      ? SUBMIT_ERRORS.ACTIVE_JOB
+      : SUBMIT_ERRORS.STATE_ERROR;
+    return { ok: false, code: jobResult.code, customerMessage: msg };
+  }
+
+  const { job, created } = jobResult;
+
+  // 4. Existing job — return immediately; client polls M2 for result
+  if (!created) {
+    if (
+      job.status === "PROCESSING" ||
+      job.status === "SUBMITTED" ||
+      job.status === "COMPLETED"
+    ) {
+      return { ok: true, jobId: job.id };
+    }
+    // Terminal failure (FAILED / CANCELED / TIMED_OUT) — client must use a new idempotency key
+    return {
+      ok: false,
+      code: "JOB_FAILED",
+      customerMessage: CUSTOMER_ERROR_MESSAGES.PROVIDER_FAILED,
+      jobId: job.id,
+    };
+  }
+
+  // 5. Advance new job to SUBMITTED before any external I/O (crash-safe ordering)
+  const submitResult = await _advanceJob(job, "SUBMITTED", {});
+  if (!submitResult.ok) {
+    return { ok: false, code: "STATE_ERROR", customerMessage: SUBMIT_ERRORS.STATE_ERROR };
+  }
+  const submittedJob = submitResult.job;
+
+  // 6. Download model photo as base64 data URL (private Cloudinary → memory only, never logged)
+  const photoResult = await _downloadPhoto(
+    params.bodyPublicId,
+    params.bodyFormat,
+    params.deliveryType,
+  );
+  if (!photoResult.ok) {
+    await _advanceJob(submittedJob, "FAILED", { errorCode: photoResult.errorCode });
+    return {
+      ok: false,
+      code: photoResult.errorCode,
+      customerMessage: CUSTOMER_ERROR_MESSAGES.INVALID_MODEL_IMAGE,
+      jobId: submittedJob.id,
+    };
+  }
+
+  // 7. Submit to FASHN — POST only, returns predictionId immediately (no polling)
+  const fashnResult = await _submitToProvider({
+    customerId:        params.internalCustomerId,
+    modelImageDataUrl: photoResult.dataUrl,
+    productImageUrl:   garment.garmentUrl,
+    productHandle:     params.garmentHandle,
+    consent: {
+      virtualTryOnConsent: true,
+      policyVersion:       POLICY_VERSION,
+      consentedAt:         params.virtualTryOnConsentAt.toISOString(),
+    },
+  });
+
+  if (!fashnResult.ok) {
+    await _advanceJob(submittedJob, "FAILED", { errorCode: fashnResult.code });
+    return {
+      ok: false,
+      code: fashnResult.code,
+      customerMessage: fashnResult.customerMessage,
+      jobId: submittedJob.id,
+    };
+  }
+
+  // 8. Advance to PROCESSING — persists predictionId for M2 polling
+  const processingResult = await _advanceJob(submittedJob, "PROCESSING", {
+    predictionId: fashnResult.predictionId,
+  });
+  if (!processingResult.ok) {
+    // predictionId received but state transition failed — M2 can still resume
+    // via the existing SUBMITTED job if the predictionId is separately recoverable.
+    // Return an error; the client may retry with a new key.
+    return {
+      ok: false,
+      code: "STATE_ERROR",
+      customerMessage: SUBMIT_ERRORS.STATE_ERROR,
+      jobId: submittedJob.id,
+    };
+  }
+
+  return { ok: true, jobId: processingResult.job.id };
 }
 
 // ── executeTryOn ──────────────────────────────────────────────────────────────

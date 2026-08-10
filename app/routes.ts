@@ -29,5 +29,6 @@ export default [
   route("post-wear-review", "./routes/post-wear-review.tsx"),
   route("passport", "./routes/passport.tsx"),
   route("passport/selfie", "./routes/passport.selfie.tsx"),
+  route("api/trigger-tryon", "./routes/api.trigger-tryon.tsx"),
 
 ] satisfies RouteConfig;
