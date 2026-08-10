@@ -125,6 +125,17 @@ model OnboardingProfile {
   printAppetite        String?
   shoppingPriorities   String[]  @default([])
   trendAppetite        String?
+
+  // Passport V2-D — complete sizing, measurements, and body fit
+  sizingSystem         String?
+  height               String?
+  bodyShape            String?
+  bustMeasurement      String?
+  waistMeasurement     String?
+  hipMeasurement       String?
+  measurementUnit      String?
+  preferredCoverage    String?
+  fitConcerns          String[]  @default([])
 }
 
 // ============================================

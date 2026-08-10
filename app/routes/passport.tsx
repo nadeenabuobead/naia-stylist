@@ -199,11 +199,28 @@ const SECTIONS: SectionDef[] = [
   {
     id: "sizes",
     label: "Your Sizes & Fit",
-    question: "Where do you like to draw attention, and where do you prefer more coverage?",
-    helper: "Both pickers are optional. Choose up to 5 for each.",
+    question: "Tell nAia about your sizes, measurements and body preferences.",
+    helper: "All fields in this section are optional. Update any time.",
     subFields: [
-      { draftKey: "body-focus-areas" as DraftKey, apiKey: "bodyFocusAreas", subLabel: "Which areas do you enjoy highlighting?",                         kind: "array" as FieldKind, questionId: "body-focus-areas"  },
-      { draftKey: "body-avoid-areas" as DraftKey, apiKey: "bodyAvoidAreas", subLabel: "Where do you usually prefer a little more coverage or less emphasis?", kind: "array" as FieldKind, questionId: "body-avoid-areas" },
+      // V2-C (preserved)
+      { draftKey: "body-focus-areas"   as DraftKey, apiKey: "bodyFocusAreas",   subLabel: "Which areas do you enjoy highlighting?",                              kind: "array"  as FieldKind, questionId: "body-focus-areas"    },
+      { draftKey: "body-avoid-areas"   as DraftKey, apiKey: "bodyAvoidAreas",   subLabel: "Where do you prefer more coverage or less emphasis?",                 kind: "array"  as FieldKind, questionId: "body-avoid-areas"   },
+      // V2-D sizes
+      { draftKey: "sizing-system"      as DraftKey, apiKey: "sizingSystem",     subLabel: "Which sizing system do you use?",                                     kind: "single" as FieldKind, questionId: "sizing-system"       },
+      { draftKey: "top-size"           as DraftKey, apiKey: "topSize",          subLabel: "Top size",                                                            kind: "text"   as FieldKind, questionId: "top-size"           },
+      { draftKey: "bottom-size"        as DraftKey, apiKey: "bottomSize",       subLabel: "Bottom size",                                                         kind: "text"   as FieldKind, questionId: "bottom-size"        },
+      { draftKey: "dress-size"         as DraftKey, apiKey: "dressSize",        subLabel: "Dress size",                                                          kind: "text"   as FieldKind, questionId: "dress-size"         },
+      { draftKey: "shoe-size"          as DraftKey, apiKey: "shoeSize",         subLabel: "Shoe size",                                                           kind: "text"   as FieldKind, questionId: "shoe-size"          },
+      // V2-D measurements
+      { draftKey: "height"             as DraftKey, apiKey: "height",           subLabel: "Your height",                                                         kind: "text"   as FieldKind, questionId: "height"             },
+      { draftKey: "measurement-unit"   as DraftKey, apiKey: "measurementUnit",  subLabel: "Measurements in",                                                     kind: "single" as FieldKind, questionId: "measurement-unit"    },
+      { draftKey: "bust-measurement"   as DraftKey, apiKey: "bustMeasurement",  subLabel: "Bust",                                                                kind: "text"   as FieldKind, questionId: "bust-measurement"   },
+      { draftKey: "waist-measurement"  as DraftKey, apiKey: "waistMeasurement", subLabel: "Natural waist",                                                       kind: "text"   as FieldKind, questionId: "waist-measurement"  },
+      { draftKey: "hip-measurement"    as DraftKey, apiKey: "hipMeasurement",   subLabel: "Hips (widest point)",                                                 kind: "text"   as FieldKind, questionId: "hip-measurement"    },
+      // V2-D proportions & fit
+      { draftKey: "body-shape"         as DraftKey, apiKey: "bodyShape",        subLabel: "How would you describe your proportions?",                            kind: "single" as FieldKind, questionId: "body-shape"          },
+      { draftKey: "fit-concerns"       as DraftKey, apiKey: "fitConcerns",      subLabel: "Are there any fit considerations nAia should know about?",            kind: "array"  as FieldKind, questionId: "fit-concerns"        },
+      { draftKey: "preferred-coverage" as DraftKey, apiKey: "preferredCoverage",subLabel: "How much coverage do you generally prefer?",                          kind: "single" as FieldKind, questionId: "preferred-coverage"  },
     ],
     optional: true,
   },
@@ -287,6 +304,68 @@ const AVOID_TO_FOCUS: Record<string, string> = {
 const FOCUS_LABELS: Record<string, string> = Object.fromEntries(FOCUS_OPTIONS.map(o => [o.id, o.label]));
 const AVOID_LABELS: Record<string, string> = Object.fromEntries(AVOID_OPTIONS.map(o => [o.id, o.label]));
 
+// V2-D: sizing, body shape, fit options
+const SIZING_SYSTEM_OPTIONS = [
+  { id: "uk",            label: "UK"            },
+  { id: "us",            label: "US"            },
+  { id: "eu",            label: "EU"            },
+  { id: "international", label: "International" },
+  { id: "other",         label: "Other"         },
+];
+const SIZING_SYSTEM_LABELS: Record<string, string> = Object.fromEntries(SIZING_SYSTEM_OPTIONS.map(o => [o.id, o.label]));
+
+const CLOTHING_SIZES: Record<string, string[]> = {
+  uk:            ["4","6","8","10","12","14","16","18","20","22","24"],
+  us:            ["0","2","4","6","8","10","12","14","16","18"],
+  eu:            ["32","34","36","38","40","42","44","46","48","50"],
+  international: ["XS","S","M","L","XL","XXL","XXXL"],
+};
+const SHOE_SIZES: Record<string, string[]> = {
+  uk: ["2","2.5","3","3.5","4","4.5","5","5.5","6","6.5","7","7.5","8","8.5"],
+  us: ["4","4.5","5","5.5","6","6.5","7","7.5","8","8.5","9","9.5","10","10.5"],
+  eu: ["34","35","36","37","38","39","40","41","42","43","44"],
+};
+
+const BODY_SHAPE_OPTIONS = [
+  { id: "hourglass",         label: "Hourglass"          },
+  { id: "pear",              label: "Pear"               },
+  { id: "apple",             label: "Apple"              },
+  { id: "rectangle",         label: "Rectangle"          },
+  { id: "inverted-triangle", label: "Inverted triangle"  },
+  { id: "not-sure",          label: "Not sure"           },
+  { id: "prefer-not-to-say", label: "Prefer not to say" },
+];
+
+const FIT_CONCERN_OPTIONS = [
+  { id: "petite",           label: "Petite proportions"                    },
+  { id: "tall",             label: "Tall proportions"                      },
+  { id: "short-torso",      label: "Short torso"                           },
+  { id: "long-torso",       label: "Long torso"                            },
+  { id: "broad-shoulders",  label: "Broad or rounded shoulders"            },
+  { id: "narrow-shoulders", label: "Narrow shoulders"                      },
+  { id: "fuller-bust",      label: "Fuller bust"                           },
+  { id: "narrow-hips",      label: "Narrow hips relative to waist"         },
+  { id: "arm-fit",          label: "Fitted sleeves and arm openings"       },
+  { id: "thigh-fit",        label: "Narrower trouser legs around the thighs" },
+];
+
+const PREFERRED_COVERAGE_OPTIONS = [
+  { id: "mostly-covered", label: "Mostly covered"                                    },
+  { id: "balanced",       label: "A balance"                                         },
+  { id: "varies",         label: "It varies by outfit and occasion"                  },
+  { id: "more-open",      label: "Comfortable showing more skin when appropriate"    },
+];
+
+function parseHeightForDisplay(height: string | undefined, unit: "cm" | "ft-in"): { cm?: string; ft?: string; in?: string } {
+  if (!height || height.trim() === "") return {};
+  if (unit === "cm") {
+    const m = height.match(/^(\d+)cm$/);
+    return m ? { cm: m[1] } : {};
+  }
+  const m = height.match(/^(\d+)ft (\d+)in$/);
+  return m ? { ft: m[1], in: m[2] } : {};
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Diff helper
 // ─────────────────────────────────────────────────────────────────────────────
@@ -367,6 +446,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // V2-C
   if ((op as any).bodyFocusAreas?.length)    savedAnswers["body-focus-areas"]       = (op as any).bodyFocusAreas;
   if ((op as any).bodyAvoidAreas?.length)    savedAnswers["body-avoid-areas"]       = (op as any).bodyAvoidAreas;
+  // V2-D sizes
+  if ((op as any).sizingSystem)              savedAnswers["sizing-system"]          = (op as any).sizingSystem;
+  if ((op as any).topSize)                   savedAnswers["top-size"]               = (op as any).topSize;
+  if ((op as any).bottomSize)                savedAnswers["bottom-size"]            = (op as any).bottomSize;
+  if ((op as any).dressSize)                 savedAnswers["dress-size"]             = (op as any).dressSize;
+  if ((op as any).shoeSize)                  savedAnswers["shoe-size"]              = (op as any).shoeSize;
+  // V2-D measurements
+  if ((op as any).height)                    savedAnswers["height"]                 = (op as any).height;
+  if ((op as any).measurementUnit)           savedAnswers["measurement-unit"]       = (op as any).measurementUnit;
+  if ((op as any).bustMeasurement)           savedAnswers["bust-measurement"]       = (op as any).bustMeasurement;
+  if ((op as any).waistMeasurement)          savedAnswers["waist-measurement"]      = (op as any).waistMeasurement;
+  if ((op as any).hipMeasurement)            savedAnswers["hip-measurement"]        = (op as any).hipMeasurement;
+  // V2-D proportions & fit
+  if ((op as any).bodyShape)                 savedAnswers["body-shape"]             = (op as any).bodyShape;
+  if ((op as any).fitConcerns?.length)       savedAnswers["fit-concerns"]           = (op as any).fitConcerns;
+  if ((op as any).preferredCoverage)         savedAnswers["preferred-coverage"]     = (op as any).preferredCoverage;
 
   return {
     savedAnswers,
@@ -383,26 +478,41 @@ function formatDate(iso: string): string {
 }
 
 function getSectionSummary(def: SectionDef, answers: OnboardingAnswers): ReactNode {
-  // Section 5 (body-area pickers) — label summary: first 2 labels + "+N more"
+  // Section 5 — concise V2-D summary: sizing line + V2-C preference lines
   if (def.id === "sizes") {
-    const focus = ((answers as Record<string, unknown>)["body-focus-areas"] as string[] | undefined) ?? [];
-    const avoid = ((answers as Record<string, unknown>)["body-avoid-areas"] as string[] | undefined) ?? [];
-    if (focus.length === 0 && avoid.length === 0) {
-      return <span className="sp-detail-missing">Not yet completed</span>;
-    }
+    const a = answers as Record<string, unknown>;
+    const focus     = (a["body-focus-areas"]  as string[] | undefined) ?? [];
+    const avoid     = (a["body-avoid-areas"]  as string[] | undefined) ?? [];
+    const sysId     = a["sizing-system"]      as string | undefined;
+    const topSz     = a["top-size"]           as string | undefined;
+    const bottomSz  = a["bottom-size"]        as string | undefined;
+    const dressSz   = a["dress-size"]         as string | undefined;
+    const bodyShape = a["body-shape"]         as string | undefined;
+    const fitCons   = (a["fit-concerns"]      as string[] | undefined) ?? [];
+
+    const isEmpty = !sysId && !topSz && !bottomSz && !dressSz && !bodyShape &&
+                    focus.length === 0 && avoid.length === 0 && fitCons.length === 0;
+    if (isEmpty) return <span className="sp-detail-missing">Not yet completed</span>;
+
     const areaLine = (ids: string[], labels: Record<string, string>, prefix: string): string => {
       const humanLabels = ids.map(id => labels[id] ?? id.replace(/-/g, " "));
       const shown = humanLabels.slice(0, 2);
-      const rest = humanLabels.length - 2;
+      const rest  = humanLabels.length - 2;
       return `${prefix}: ${shown.join(", ")}${rest > 0 ? ` +${rest} more` : ""}`;
     };
-    const hasFocus = focus.length > 0;
-    const hasAvoid = avoid.length > 0;
-    if (hasFocus && hasAvoid) {
-      return <>{areaLine(focus, FOCUS_LABELS, "Highlights")}<br />{areaLine(avoid, AVOID_LABELS, "Coverage")}</>;
-    }
-    if (hasFocus) return areaLine(focus, FOCUS_LABELS, "Highlights");
-    return areaLine(avoid, AVOID_LABELS, "Coverage");
+
+    const parts: string[] = [];
+    const sizeParts: string[] = [];
+    if (sysId) sizeParts.push(SIZING_SYSTEM_LABELS[sysId] ?? sysId.toUpperCase());
+    if (topSz) sizeParts.push(`Top ${topSz}`);
+    if (bottomSz && bottomSz !== topSz) sizeParts.push(`Bottom ${bottomSz}`);
+    if (dressSz) sizeParts.push(`Dress ${dressSz}`);
+    if (sizeParts.length > 0) parts.push(sizeParts.join(" · "));
+    if (focus.length > 0) parts.push(areaLine(focus, FOCUS_LABELS, "Highlights"));
+    if (avoid.length > 0) parts.push(areaLine(avoid, AVOID_LABELS, "Coverage"));
+
+    if (parts.length === 0) return <span className="sp-detail-missing">Not yet completed</span>;
+    return <>{parts[0]}{parts.slice(1).map((p, i) => <span key={i}><br />{p}</span>)}</>;
   }
   if (def.placeholder) {
     return <span className="sp-detail-coming">Coming soon</span>;
@@ -454,7 +564,10 @@ export default function PassportPage() {
   const [saveStatus,           setSaveStatus]           = useState<SaveStatus>("idle");
   const [awaitingRevalidation, setAwaitingRevalidation] = useState(false);
   const [pendingNext,          setPendingNext]          = useState<PendingNext>(null);
-  const [sizeEditedField,      setSizeEditedField]      = useState<"bodyFocusAreas" | "bodyAvoidAreas" | null>(null);
+  const [sizeEditedField,       setSizeEditedField]       = useState<"bodyFocusAreas" | "bodyAvoidAreas" | null>(null);
+  const [pendingSizingSystem,   setPendingSizingSystem]   = useState<string | null>(null);
+  const [sizeSystemConfirmed,   setSizeSystemConfirmed]   = useState(false);
+  const [heightDisplayUnit,     setHeightDisplayUnit]     = useState<"cm" | "ft-in">("cm");
   const lastIntentRef = useRef<PendingNext>(null);
 
   // Missing sections excludes "sizes" (always placeholder) and "notes" (optional)
@@ -510,7 +623,13 @@ export default function PassportPage() {
   }, [awaitingRevalidation, revalidator.state, pendingNext, mode]); // eslint-disable-line
 
   function initEdits(sectionId: SectionId) {
-    if (sectionId === "sizes") setSizeEditedField(null);
+    if (sectionId === "sizes") {
+      setSizeEditedField(null);
+      setPendingSizingSystem(null);
+      setSizeSystemConfirmed(false);
+      const savedH = (savedAnswers as Record<string, unknown>)["height"] as string | undefined;
+      setHeightDisplayUnit(savedH?.includes("ft") ? "ft-in" : "cm");
+    }
     const def = getSectionDef(sectionId);
     const edits: OnboardingAnswers = {};
     for (const { draftKey, kind } of def.subFields) {
@@ -588,6 +707,51 @@ export default function PassportPage() {
     setSizeEditedField(apiKey);
   }, []);
 
+  const handleSizingSystemChange = useCallback((newSystem: string) => {
+    const currentSystem = (flowEdits as Record<string, unknown>)["sizing-system"] as string | undefined;
+    // Deselect if same system clicked again
+    if (currentSystem === newSystem) {
+      setFlowEdits(prev => ({
+        ...(prev as Record<string, unknown>),
+        "sizing-system": "", "top-size": "", "bottom-size": "", "dress-size": "", "shoe-size": "",
+      } as OnboardingAnswers));
+      return;
+    }
+    const hasSavedSizes = !!(
+      (savedAnswers as Record<string, unknown>)["top-size"] ||
+      (savedAnswers as Record<string, unknown>)["bottom-size"] ||
+      (savedAnswers as Record<string, unknown>)["dress-size"] ||
+      (savedAnswers as Record<string, unknown>)["shoe-size"]
+    );
+    if (hasSavedSizes && currentSystem) {
+      setPendingSizingSystem(newSystem);
+      return;
+    }
+    setFlowEdits(prev => ({
+      ...(prev as Record<string, unknown>),
+      "sizing-system": newSystem, "top-size": "", "bottom-size": "", "dress-size": "", "shoe-size": "",
+    } as OnboardingAnswers));
+  }, [savedAnswers, flowEdits]);
+
+  const confirmSizingSystemChange = useCallback(() => {
+    if (!pendingSizingSystem) return;
+    const sys = pendingSizingSystem;
+    setPendingSizingSystem(null);
+    setSizeSystemConfirmed(true);
+    setFlowEdits(prev => ({
+      ...(prev as Record<string, unknown>),
+      "sizing-system": sys, "top-size": "", "bottom-size": "", "dress-size": "", "shoe-size": "",
+    } as OnboardingAnswers));
+  }, [pendingSizingSystem]);
+
+  const cancelSizingSystemChange = useCallback(() => { setPendingSizingSystem(null); }, []);
+
+  const handleHeightUnitSwitch = useCallback((unit: "cm" | "ft-in") => {
+    if (unit === heightDisplayUnit) return;
+    setHeightDisplayUnit(unit);
+    setFlowEdits(prev => ({ ...(prev as Record<string, unknown>), "height": "" } as OnboardingAnswers));
+  }, [heightDisplayUnit]);
+
   const handleSingleSelect = useCallback((draftKey: DraftKey, optId: string) => {
     setFlowEdits(prev => {
       const current = (prev as Record<string, unknown>)[draftKey];
@@ -638,7 +802,10 @@ export default function PassportPage() {
     setSaveStatus("saving");
     try {
       const requestBody: Record<string, unknown> = { ...patch, baseProfileUpdatedAt: profileUpdatedAt };
-      if (sectionId === "sizes") requestBody.editedField = sizeEditedField ?? "bodyFocusAreas";
+      if (sectionId === "sizes") {
+        requestBody.editedField = sizeEditedField ?? "bodyFocusAreas";
+        if (sizeSystemConfirmed) requestBody.confirmSizeSystemChange = true;
+      }
       const res = await fetch("/api/save-style-profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -928,53 +1095,274 @@ export default function PassportPage() {
         </div>
       )}
 
-      {/* Section 5 — body-area pickers with mutual exclusion */}
-      {currentId === "sizes" && (
-        <>
-          <div>
-            <div className="sp-sub-label">Which areas do you enjoy highlighting?</div>
-            <div className="sp-cap-hint">Optional. Choose up to 5.</div>
-            <div className="sp-option-grid">
-              {FOCUS_OPTIONS.map(o => {
-                const sel = ((flowEdits as Record<string, unknown>)["body-focus-areas"] as string[] | undefined) ?? [];
-                const isSel = sel.includes(o.id);
-                const atCap = sel.length >= 5;
-                return (
-                  <button
-                    key={o.id}
-                    type="button"
-                    className={`sp-option${isSel ? " sp-option--active" : ""}${!isSel && atCap ? " sp-option--disabled" : ""}`}
-                    onClick={() => handleBodyAreaToggle("body-focus-areas", "bodyFocusAreas", o.id)}
-                  >
+      {/* Section 5 — V2-D full sizes & fit (4 sub-groups) */}
+      {currentId === "sizes" && (() => {
+        const fe = flowEdits as Record<string, unknown>;
+        const curSys   = (fe["sizing-system"]     as string | undefined) || null;
+        const measUnit = (fe["measurement-unit"]  as string | undefined) || null;
+        const focusSel = (fe["body-focus-areas"]  as string[] | undefined) ?? [];
+        const avoidSel = (fe["body-avoid-areas"]  as string[] | undefined) ?? [];
+        const fitConSel = (fe["fit-concerns"]     as string[] | undefined) ?? [];
+        const heightStr = (fe["height"]           as string | undefined) ?? "";
+        const parsedH  = parseHeightForDisplay(heightStr, heightDisplayUnit);
+        const clothingSizes = curSys && curSys !== "other" ? CLOTHING_SIZES[curSys] : null;
+        const shoeSizes     = curSys && curSys !== "other" && curSys !== "international" ? SHOE_SIZES[curSys] : null;
+
+        return (
+          <>
+            {/* Confirmation dialog when switching sizing system with saved sizes */}
+            {pendingSizingSystem && (
+              <div className="sp-confirm-overlay">
+                <div className="sp-confirm-box">
+                  <p>
+                    Switching to <strong>{SIZING_SYSTEM_LABELS[pendingSizingSystem] ?? pendingSizingSystem}</strong> will
+                    clear your saved sizes. This cannot be undone.
+                  </p>
+                  <div className="sp-confirm-actions">
+                    <button type="button" className="sp-btn-outline" onClick={cancelSizingSystemChange}>Cancel</button>
+                    <button type="button" className="sp-btn-primary" onClick={confirmSizingSystemChange}>Confirm</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Group 1: Your sizes ───────────────────────────────── */}
+            <div className="sp-section-group">
+              <div className="sp-section-group-title">Your sizes</div>
+
+              <div className="sp-sub-label">Which sizing system do you use?</div>
+              <div className="sp-cap-hint">Optional.</div>
+              <div className="sp-option-grid">
+                {SIZING_SYSTEM_OPTIONS.map(o => {
+                  const isSel = curSys === o.id;
+                  return (
+                    <button key={o.id} type="button"
+                      className={`sp-option${isSel ? " sp-option--active" : ""}`}
+                      onClick={() => handleSizingSystemChange(o.id)}>
+                      {o.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {curSys ? (
+                <>
+                  {(["top-size", "bottom-size", "dress-size"] as const).map(key => {
+                    const lbl2 = key === "top-size" ? "Top size" : key === "bottom-size" ? "Bottom size" : "Dress size";
+                    const val  = (fe[key] as string | undefined) ?? "";
+                    return (
+                      <div key={key} className="sp-field-row" style={{ marginTop: "20px" }}>
+                        <div className="sp-sub-label">{lbl2}</div>
+                        {clothingSizes ? (
+                          <select className="sp-size-select" value={val}
+                            onChange={e => setFlowEdits(prev => ({ ...(prev as Record<string,unknown>), [key]: e.target.value } as OnboardingAnswers))}>
+                            <option value="">— Select —</option>
+                            {clothingSizes.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        ) : (
+                          <input className="sp-text-input" type="text" placeholder="e.g. 10" value={val}
+                            onChange={e => handleTextChange(key as DraftKey, e.target.value)} />
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  <div className="sp-field-row" style={{ marginTop: "20px" }}>
+                    <div className="sp-sub-label">Shoe size</div>
+                    {curSys === "international"
+                      ? <p className="sp-no-shoe-note">Shoe sizing requires UK, US, EU or Other selection.</p>
+                      : shoeSizes ? (
+                          <select className="sp-size-select"
+                            value={(fe["shoe-size"] as string | undefined) ?? ""}
+                            onChange={e => setFlowEdits(prev => ({ ...(prev as Record<string,unknown>), "shoe-size": e.target.value } as OnboardingAnswers))}>
+                            <option value="">— Select —</option>
+                            {shoeSizes.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        ) : (
+                          <input className="sp-text-input" type="text" placeholder="e.g. 5" value={(fe["shoe-size"] as string | undefined) ?? ""}
+                            onChange={e => handleTextChange("shoe-size" as DraftKey, e.target.value)} />
+                        )
+                    }
+                  </div>
+                </>
+              ) : (
+                <p className="sp-cap-hint" style={{ marginTop: "16px" }}>
+                  Select a sizing system above to see size options.
+                </p>
+              )}
+            </div>
+
+            {/* ── Group 2: Your measurements ───────────────────────── */}
+            <div className="sp-section-group">
+              <div className="sp-section-group-title">Your measurements</div>
+
+              <div className="sp-sub-label">Your height</div>
+              <div className="sp-cap-hint">Optional.</div>
+              <div className="sp-option-grid" style={{ marginBottom: "12px", gap: "6px" }}>
+                {(["cm", "ft-in"] as const).map(unit => (
+                  <button key={unit} type="button"
+                    className={`sp-option${heightDisplayUnit === unit ? " sp-option--active" : ""}`}
+                    style={{ maxWidth: "90px" }}
+                    onClick={() => handleHeightUnitSwitch(unit)}>
+                    {unit === "cm" ? "cm" : "ft / in"}
+                  </button>
+                ))}
+              </div>
+              {heightDisplayUnit === "cm" ? (
+                <div className="sp-field-row">
+                  <input className="sp-text-input" type="number" min={100} max={250} step={1}
+                    placeholder="e.g. 168" value={parsedH.cm ?? ""}
+                    onChange={e => {
+                      const v = e.target.value.replace(/\D/g, "");
+                      setFlowEdits(prev => ({ ...(prev as Record<string,unknown>), "height": v ? `${v}cm` : "" } as OnboardingAnswers));
+                    }} />
+                  <span className="sp-field-unit">cm</span>
+                </div>
+              ) : (
+                <div className="sp-height-ft-in">
+                  <input className="sp-text-input" type="number" min={3} max={8} step={1}
+                    placeholder="ft" value={parsedH.ft ?? ""}
+                    onChange={e => {
+                      const ft = e.target.value.replace(/\D/g, "") || "0";
+                      const inVal = parsedH.in ?? "0";
+                      setFlowEdits(prev => ({ ...(prev as Record<string,unknown>), "height": ft !== "0" ? `${ft}ft ${inVal}in` : "" } as OnboardingAnswers));
+                    }} />
+                  <span className="sp-height-unit-label">ft</span>
+                  <input className="sp-text-input" type="number" min={0} max={11} step={1}
+                    placeholder="in" value={parsedH.in ?? ""}
+                    onChange={e => {
+                      const inches = e.target.value.replace(/\D/g, "") || "0";
+                      const ftVal = parsedH.ft ?? "0";
+                      setFlowEdits(prev => ({ ...(prev as Record<string,unknown>), "height": ftVal !== "0" ? `${ftVal}ft ${inches}in` : "" } as OnboardingAnswers));
+                    }} />
+                  <span className="sp-height-unit-label">in</span>
+                </div>
+              )}
+
+              <div className="sp-sub-label" style={{ marginTop: "24px" }}>Measurements in</div>
+              <div className="sp-cap-hint">Optional.</div>
+              <div className="sp-option-grid" style={{ marginBottom: "16px", gap: "6px" }}>
+                {[{ id: "cm", label: "cm" }, { id: "in", label: "in" }].map(o => (
+                  <button key={o.id} type="button"
+                    className={`sp-option${measUnit === o.id ? " sp-option--active" : ""}`}
+                    style={{ maxWidth: "80px" }}
+                    onClick={() => handleSingleSelect("measurement-unit" as DraftKey, o.id)}>
                     {o.label}
                   </button>
+                ))}
+              </div>
+
+              {(["bust-measurement", "waist-measurement", "hip-measurement"] as const).map(key => {
+                const measLabel = key === "bust-measurement" ? "Bust" : key === "waist-measurement" ? "Natural waist" : "Hips (widest point)";
+                const val = (fe[key] as string | undefined) ?? "";
+                return (
+                  <div key={key} className="sp-field-row" style={{ marginBottom: "16px" }}>
+                    <div className="sp-sub-label">{measLabel}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <input className="sp-text-input" type="number" min={1} max={300} step={0.5}
+                        placeholder={measUnit === "in" ? "e.g. 36" : "e.g. 92"}
+                        value={val}
+                        onChange={e => handleTextChange(key as DraftKey, e.target.value)} />
+                      {measUnit && <span className="sp-field-unit">{measUnit}</span>}
+                    </div>
+                  </div>
                 );
               })}
             </div>
-          </div>
-          <div>
-            <div className="sp-sub-label">Where do you usually prefer a little more coverage or less emphasis?</div>
-            <div className="sp-cap-hint">Optional. Choose up to 5.</div>
-            <div className="sp-option-grid">
-              {AVOID_OPTIONS.map(o => {
-                const sel = ((flowEdits as Record<string, unknown>)["body-avoid-areas"] as string[] | undefined) ?? [];
-                const isSel = sel.includes(o.id);
-                const atCap = sel.length >= 5;
-                return (
-                  <button
-                    key={o.id}
-                    type="button"
-                    className={`sp-option${isSel ? " sp-option--active" : ""}${!isSel && atCap ? " sp-option--disabled" : ""}`}
-                    onClick={() => handleBodyAreaToggle("body-avoid-areas", "bodyAvoidAreas", o.id)}
-                  >
-                    {o.label}
-                  </button>
-                );
-              })}
+
+            {/* ── Group 3: Your proportions & fit ──────────────────── */}
+            <div className="sp-section-group">
+              <div className="sp-section-group-title">Your proportions &amp; fit</div>
+
+              <div className="sp-sub-label">How would you describe your proportions?</div>
+              <div className="sp-cap-hint">Self-reported only — optional.</div>
+              <div className="sp-option-grid">
+                {BODY_SHAPE_OPTIONS.map(o => {
+                  const isSel = (fe["body-shape"] as string | undefined) === o.id;
+                  return (
+                    <button key={o.id} type="button"
+                      className={`sp-option${isSel ? " sp-option--active" : ""}`}
+                      onClick={() => handleSingleSelect("body-shape" as DraftKey, o.id)}>
+                      {o.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="sp-sub-label" style={{ marginTop: "28px" }}>Any fit considerations nAia should know about?</div>
+              <div className="sp-cap-hint">Optional — select all that apply.</div>
+              <div className="sp-option-grid">
+                {FIT_CONCERN_OPTIONS.map(o => {
+                  const isSel = fitConSel.includes(o.id);
+                  return (
+                    <button key={o.id} type="button"
+                      className={`sp-option${isSel ? " sp-option--active" : ""}`}
+                      onClick={() => setFlowEdits(prev => {
+                        const p = prev as Record<string,unknown>;
+                        const cur = (p["fit-concerns"] as string[] | undefined) ?? [];
+                        return { ...p, "fit-concerns": cur.includes(o.id) ? cur.filter(id => id !== o.id) : [...cur, o.id] } as OnboardingAnswers;
+                      })}>
+                      {o.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        </>
-      )}
+
+            {/* ── Group 4: Your styling preferences ────────────────── */}
+            <div className="sp-section-group">
+              <div className="sp-section-group-title">Your styling preferences</div>
+
+              <div className="sp-sub-label">Which areas do you enjoy highlighting?</div>
+              <div className="sp-cap-hint">Optional. Choose up to 5.</div>
+              <div className="sp-option-grid">
+                {FOCUS_OPTIONS.map(o => {
+                  const isSel = focusSel.includes(o.id);
+                  const atCap = focusSel.length >= 5;
+                  return (
+                    <button key={o.id} type="button"
+                      className={`sp-option${isSel ? " sp-option--active" : ""}${!isSel && atCap ? " sp-option--disabled" : ""}`}
+                      onClick={() => handleBodyAreaToggle("body-focus-areas", "bodyFocusAreas", o.id)}>
+                      {o.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="sp-sub-label" style={{ marginTop: "28px" }}>Where do you prefer more coverage or less emphasis?</div>
+              <div className="sp-cap-hint">Optional. Choose up to 5.</div>
+              <div className="sp-option-grid">
+                {AVOID_OPTIONS.map(o => {
+                  const isSel = avoidSel.includes(o.id);
+                  const atCap = avoidSel.length >= 5;
+                  return (
+                    <button key={o.id} type="button"
+                      className={`sp-option${isSel ? " sp-option--active" : ""}${!isSel && atCap ? " sp-option--disabled" : ""}`}
+                      onClick={() => handleBodyAreaToggle("body-avoid-areas", "bodyAvoidAreas", o.id)}>
+                      {o.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="sp-sub-label" style={{ marginTop: "28px" }}>How much coverage do you generally prefer?</div>
+              <div className="sp-cap-hint">Optional.</div>
+              <div className="sp-option-grid">
+                {PREFERRED_COVERAGE_OPTIONS.map(o => {
+                  const isSel = (fe["preferred-coverage"] as string | undefined) === o.id;
+                  return (
+                    <button key={o.id} type="button"
+                      className={`sp-option${isSel ? " sp-option--active" : ""}`}
+                      onClick={() => handleSingleSelect("preferred-coverage" as DraftKey, o.id)}>
+                      {o.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        );
+      })()}
 
       {/* All other sections — generic sub-field renderer */}
       {currentId !== "sizes" && currentDef.subFields.map(sf => {

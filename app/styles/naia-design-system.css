@@ -1647,6 +1647,107 @@ a.mn-action:focus-visible,
   .sp-option-grid { grid-template-columns: 1fr; }
 }
 
+/* V2-D: Section 5 subsection grouping */
+.sp-section-group { margin-bottom: 40px; }
+.sp-section-group-title {
+  font-family: var(--naia-ff-ui);
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(40, 21, 12, 0.38);
+  margin-bottom: 24px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(40, 21, 12, 0.07);
+}
+
+/* V2-D: single-line text input (sizes, measurements) */
+.sp-text-input {
+  font-family: var(--naia-ff-body);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--naia-ink);
+  background: transparent;
+  border: 1px solid rgba(40, 21, 12, 0.2);
+  padding: 10px 12px;
+  outline: none;
+  transition: border-color 0.15s;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 200px;
+}
+.sp-text-input:focus { border-color: var(--naia-ink); }
+.sp-text-input::placeholder { color: rgba(40, 21, 12, 0.3); }
+
+/* V2-D: native select for structured size pickers */
+.sp-size-select {
+  font-family: var(--naia-ff-body);
+  font-size: 15px;
+  color: var(--naia-ink);
+  background: transparent url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2328150c' stroke-opacity='.5' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center;
+  border: 1px solid rgba(40, 21, 12, 0.2);
+  padding: 10px 36px 10px 12px;
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 120px;
+}
+.sp-size-select:focus { border-color: var(--naia-ink); }
+
+/* V2-D: height ft/in pair */
+.sp-height-ft-in { display: flex; align-items: center; gap: 6px; }
+.sp-height-ft-in .sp-text-input { max-width: 72px; }
+.sp-height-unit-label {
+  font-family: var(--naia-ff-ui);
+  font-size: 11px;
+  color: rgba(40, 21, 12, 0.4);
+  letter-spacing: 0.05em;
+}
+
+/* V2-D: sizing system change confirmation overlay */
+.sp-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(40, 21, 12, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+  padding: 24px;
+}
+.sp-confirm-box {
+  background: #faf9f7;
+  padding: 28px 24px;
+  max-width: 380px;
+  width: 100%;
+}
+.sp-confirm-box p {
+  font-family: var(--naia-ff-body);
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--naia-ink);
+  margin: 0 0 24px;
+}
+.sp-confirm-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+/* V2-D: inline field row (label + compact input side by side on wider screens) */
+.sp-field-row { margin-bottom: 20px; }
+.sp-field-unit {
+  font-family: var(--naia-ff-ui);
+  font-size: 12px;
+  color: rgba(40, 21, 12, 0.45);
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.sp-no-shoe-note {
+  font-family: var(--naia-ff-body);
+  font-size: 13px;
+  color: rgba(40, 21, 12, 0.5);
+  font-style: italic;
+  margin-top: 6px;
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    Digital Closet — dc-* prefix
    ═══════════════════════════════════════════════════════════════════ */

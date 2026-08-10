@@ -21,6 +21,10 @@ const RECOGNISED_FIELDS = new Set([
   "trendAppetite",
   // V2-C
   "bodyFocusAreas", "bodyAvoidAreas",
+  // V2-D
+  "sizingSystem", "topSize", "bottomSize", "dressSize", "shoeSize",
+  "height", "bustMeasurement", "waistMeasurement", "hipMeasurement",
+  "measurementUnit", "bodyShape", "fitConcerns", "preferredCoverage",
 ]);
 
 const ARRAY_FIELDS = [
@@ -31,6 +35,8 @@ const ARRAY_FIELDS = [
   "silhouette", "coveragePreferences", "shoppingPriorities",
   // V2-C
   "bodyFocusAreas", "bodyAvoidAreas",
+  // V2-D
+  "fitConcerns",
 ];
 
 // V2-B1 free-text fields (string | null); validated same pattern as finalNotes.
@@ -54,6 +60,65 @@ const AVOID_TO_FOCUS_NORM = {
   "waist": "waist", "legs": "legs", "neckline": "neckline", "back": "back",
   "bust": "bust", "upper-arms": "arms-shoulders", "hips-thighs": "hips-curves",
 };
+
+// V2-D: validation constants
+const SIZING_SYSTEM_VALID    = new Set(["uk", "us", "eu", "international", "other"]);
+const BODY_SHAPE_VALID       = new Set(["hourglass", "pear", "apple", "rectangle", "inverted-triangle", "not-sure", "prefer-not-to-say"]);
+const FIT_CONCERN_VALID      = new Set(["petite", "tall", "short-torso", "long-torso", "broad-shoulders", "narrow-shoulders", "fuller-bust", "narrow-hips", "arm-fit", "thigh-fit"]);
+const PREFERRED_COVERAGE_VALID = new Set(["mostly-covered", "balanced", "varies", "more-open"]);
+const MEASUREMENT_UNIT_VALID = new Set(["cm", "in"]);
+
+const CLOTHING_SIZES = {
+  uk:            new Set(["4","6","8","10","12","14","16","18","20","22","24"]),
+  us:            new Set(["0","2","4","6","8","10","12","14","16","18"]),
+  eu:            new Set(["32","34","36","38","40","42","44","46","48","50"]),
+  international: new Set(["XS","S","M","L","XL","XXL","XXXL"]),
+};
+const SHOE_SIZES = {
+  uk: new Set(["2","2.5","3","3.5","4","4.5","5","5.5","6","6.5","7","7.5","8","8.5"]),
+  us: new Set(["4","4.5","5","5.5","6","6.5","7","7.5","8","8.5","9","9.5","10","10.5"]),
+  eu: new Set(["34","35","36","37","38","39","40","41","42","43","44"]),
+  // international: no shoe size
+};
+
+function validateClothingSize(value, system) {
+  if (value == null || value === "") return true;
+  if (typeof value !== "string" || value.length > 50) return false;
+  if (system && system !== "other") {
+    const valid = CLOTHING_SIZES[system];
+    if (valid && !valid.has(value.trim())) return false;
+  }
+  return true;
+}
+
+function validateShoeSize(value, system) {
+  if (value == null || value === "") return true;
+  if (typeof value !== "string" || value.length > 10) return false;
+  if (system === "international") return false; // no shoe size for International
+  if (system && system !== "other") {
+    const valid = SHOE_SIZES[system];
+    if (valid && !valid.has(value.trim())) return false;
+  }
+  return true;
+}
+
+function validateHeight(value) {
+  if (value == null || value === "") return true;
+  if (typeof value !== "string") return false;
+  const cm = value.match(/^(\d+)cm$/);
+  if (cm) { const n = parseInt(cm[1]); return n >= 100 && n <= 250; }
+  const ftIn = value.match(/^(\d+)ft (\d+)in$/);
+  if (ftIn) { const ft = parseInt(ftIn[1]); const i = parseInt(ftIn[2]); return ft >= 3 && ft <= 8 && i >= 0 && i <= 11; }
+  return false;
+}
+
+function validateMeasurement(value) {
+  if (value == null || value === "") return true;
+  if (typeof value !== "string") return false;
+  if (!/^\d+(\.\d{1,2})?$/.test(value.trim())) return false;
+  const n = parseFloat(value);
+  return n > 0 && n <= 999;
+}
 
 // Valid option IDs and max selection counts per field — derived from quiz data at module load time
 const VALID_OPTION_IDS = {};
@@ -102,8 +167,8 @@ export async function action({ request }) {
     return Response.json({ error: "invalid_body" }, { status: 400 });
   }
 
-  // "editedField" is request-only (never persisted) — allowed but not in RECOGNISED_FIELDS
-  const REQUEST_ONLY_KEYS = new Set(["baseProfileUpdatedAt", "editedField"]);
+  // request-only keys (allowed but not in RECOGNISED_FIELDS, never persisted)
+  const REQUEST_ONLY_KEYS = new Set(["baseProfileUpdatedAt", "editedField", "confirmSizeSystemChange"]);
   // Reject unknown top-level keys
   for (const key of Object.keys(body)) {
     if (!REQUEST_ONLY_KEYS.has(key) && !RECOGNISED_FIELDS.has(key)) {
@@ -202,7 +267,78 @@ export async function action({ request }) {
     }
   }
 
+  // V2-D: single-value enum fields
+  if (Object.hasOwn(body, "sizingSystem")) {
+    const v = body["sizingSystem"];
+    if (v !== null && (typeof v !== "string" || !SIZING_SYSTEM_VALID.has(v))) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+  if (Object.hasOwn(body, "measurementUnit")) {
+    const v = body["measurementUnit"];
+    if (v !== null && (typeof v !== "string" || !MEASUREMENT_UNIT_VALID.has(v))) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+  if (Object.hasOwn(body, "bodyShape")) {
+    const v = body["bodyShape"];
+    if (v !== null && (typeof v !== "string" || !BODY_SHAPE_VALID.has(v))) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+  if (Object.hasOwn(body, "preferredCoverage")) {
+    const v = body["preferredCoverage"];
+    if (v !== null && (typeof v !== "string" || !PREFERRED_COVERAGE_VALID.has(v))) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+
+  // V2-D: fitConcerns — valid IDs, no duplicates
+  if (Object.hasOwn(body, "fitConcerns")) {
+    const v = body["fitConcerns"];
+    if (!v.every(id => FIT_CONCERN_VALID.has(id)) || new Set(v).size !== v.length) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+
+  // V2-D: height
+  if (Object.hasOwn(body, "height")) {
+    if (!validateHeight(body["height"])) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+
+  // V2-D: measurements
+  for (const field of ["bustMeasurement", "waistMeasurement", "hipMeasurement"]) {
+    if (Object.hasOwn(body, field) && !validateMeasurement(body[field])) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+
   const op = customer.onboardingProfile;
+
+  // V2-D: sizing system change safety
+  const savedSizingSystem = op?.sizingSystem ?? null;
+  const effectiveSizingSystem = Object.hasOwn(body, "sizingSystem")
+    ? (typeof body["sizingSystem"] === "string" && body["sizingSystem"] !== "" ? body["sizingSystem"] : null)
+    : savedSizingSystem;
+  const sizingSystemChanging = effectiveSizingSystem !== savedSizingSystem;
+  const hasSavedSizes = op && (op.topSize || op.bottomSize || op.dressSize || op.shoeSize);
+  // Require confirmation only when changing an already-set V2-D system with saved sizes
+  if (sizingSystemChanging && savedSizingSystem !== null && hasSavedSizes && body["confirmSizeSystemChange"] !== true) {
+    return Response.json({ error: "size_system_change_requires_confirmation" }, { status: 409 });
+  }
+  const clearSizesOnSystemChange = sizingSystemChanging && body["confirmSizeSystemChange"] === true;
+
+  // V2-D: clothing sizes — validate against effective system
+  for (const field of ["topSize", "bottomSize", "dressSize"]) {
+    if (Object.hasOwn(body, field) && !validateClothingSize(body[field], effectiveSizingSystem)) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+  if (Object.hasOwn(body, "shoeSize") && !validateShoeSize(body["shoeSize"], effectiveSizingSystem)) {
+    return Response.json({ error: "invalid_body" }, { status: 400 });
+  }
 
   // All submitted values are validated. Absent keys fall back to the saved DB value
   // (partial-patch behaviour: a caller sending only changed fields is supported).
@@ -277,6 +413,22 @@ export async function action({ request }) {
     // V2-C
     bodyFocusAreas:      normalizedFocusAreas,
     bodyAvoidAreas:      normalizedAvoidAreas,
+    // V2-D sizes (sizes are cleared when sizingSystem changes with confirmation)
+    sizingSystem:        pickText("sizingSystem",     op?.sizingSystem),
+    topSize:             clearSizesOnSystemChange ? null : pickText("topSize",    op?.topSize),
+    bottomSize:          clearSizesOnSystemChange ? null : pickText("bottomSize", op?.bottomSize),
+    dressSize:           clearSizesOnSystemChange ? null : pickText("dressSize",  op?.dressSize),
+    shoeSize:            clearSizesOnSystemChange ? null : pickText("shoeSize",   op?.shoeSize),
+    // V2-D measurements
+    height:              pickText("height",            op?.height),
+    bustMeasurement:     pickText("bustMeasurement",   op?.bustMeasurement),
+    waistMeasurement:    pickText("waistMeasurement",  op?.waistMeasurement),
+    hipMeasurement:      pickText("hipMeasurement",    op?.hipMeasurement),
+    measurementUnit:     pickText("measurementUnit",   op?.measurementUnit),
+    // V2-D proportions & fit
+    bodyShape:           pickText("bodyShape",         op?.bodyShape),
+    fitConcerns:         pickArr("fitConcerns",        op?.fitConcerns),
+    preferredCoverage:   pickText("preferredCoverage", op?.preferredCoverage),
     completed:           true,
   };
 

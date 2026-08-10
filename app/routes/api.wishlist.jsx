@@ -188,16 +188,22 @@ COLOUR PALETTE
 → COLOUR RULE: For the uploaded item's colour, explain specifically whether it complements her palette, usefully expands it, or conflicts with avoided colours. How does it coordinate with confirmed Closet pieces? Treat favourites as preferences, not exclusions. Never reject a neutral without naming how it works or clashes with this specific palette.
 
 FIT & BODY
-- Usual top size: ${styleProfile.topSize || "not on record"}
+- Usual top size: ${styleProfile.topSize || "not on record"}${styleProfile.sizingSystem ? ` (${styleProfile.sizingSystem.toUpperCase()} sizing)` : ""}
 - Usual bottom size: ${styleProfile.bottomSize || "not on record"}
 - Usual dress size: ${styleProfile.dressSize || "not on record"}
 - Fit preferences: ${styleProfile.fitPreferences?.length > 0 ? styleProfile.fitPreferences.join(", ") : "not on record"}
 - Areas to highlight: ${styleProfile.bodyFocusAreas?.length > 0 ? styleProfile.bodyFocusAreas.join(", ") : "not on record"}
 - Areas to minimise: ${styleProfile.bodyAvoidAreas?.length > 0 ? styleProfile.bodyAvoidAreas.join(", ") : "not on record"}
 - Style struggles: ${styleProfile.styleStruggles?.length > 0 ? styleProfile.styleStruggles.join(", ") : "not specified"}
+${styleProfile.fitConcerns?.length > 0 ? `- Fit considerations: ${styleProfile.fitConcerns.join(", ")}` : ""}
+${styleProfile.preferredCoverage ? `- Coverage preference: ${styleProfile.preferredCoverage}` : ""}
+${styleProfile.bodyShape && !["not-sure","prefer-not-to-say"].includes(styleProfile.bodyShape) ? `- Self-described proportions: ${styleProfile.bodyShape}` : ""}
+${styleProfile.bustMeasurement || styleProfile.waistMeasurement || styleProfile.hipMeasurement ? `- Customer measurements (${styleProfile.measurementUnit || "unit not set"}): bust ${styleProfile.bustMeasurement || "–"}, waist ${styleProfile.waistMeasurement || "–"}, hips ${styleProfile.hipMeasurement || "–"}` : ""}
+${styleProfile.height ? `- Height: ${styleProfile.height}` : ""}
 ${styleProfile.finalNotes?.trim() ? `- Customer's personal note: ${sanitize(styleProfile.finalNotes)}` : ""}
-Note: body shape, height, and body measurements are not yet in this Passport.
 
+→ FIT CERTAINTY RULE: Never write "This will fit you", "This is your size", or any equivalent certainty claim based solely on the customer's size or measurement data. Exact-fit conclusions require garment measurements AND a verified size chart comparison. If size/measurement data is on the Passport, offer to verify against the brand's size chart — do not assert fit certainty.
+→ BODY SHAPE RULE: Self-described proportions, if noted, may inform general styling directions but must never generate universal "flattering for X shape" claims or generic shape-based advice.
 → FIT RULE — use available signals in this priority order; never collapse them all into "fit cannot be confirmed":
   1. Fit preferences on record → reference them by name: "Your Passport shows you prefer [preference], so this [item detail] may feel [more/less] secure/comfortable."
   2. Highlight / minimise areas on record → apply them: "Your Passport shows you prefer greater [area] coverage — this [cut] is a direct conflict / strong match."

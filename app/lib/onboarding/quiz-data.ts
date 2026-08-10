@@ -287,6 +287,20 @@ export type OnboardingAnswers = {
   // V2-C body-area pickers
   "body-focus-areas"?: string[];
   "body-avoid-areas"?: string[];
+  // V2-D sizing, measurements, proportions & fit
+  "sizing-system"?:      string;
+  "top-size"?:           string;
+  "bottom-size"?:        string;
+  "dress-size"?:         string;
+  "shoe-size"?:          string;
+  "height"?:             string;
+  "measurement-unit"?:   string;
+  "bust-measurement"?:   string;
+  "waist-measurement"?:  string;
+  "hip-measurement"?:    string;
+  "body-shape"?:         string;
+  "fit-concerns"?:       string[];
+  "preferred-coverage"?: string;
 };
 
 export function getQuestionByStep(step: number): QuizQuestion | undefined {
