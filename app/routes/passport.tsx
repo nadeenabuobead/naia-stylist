@@ -202,7 +202,7 @@ const SECTIONS: SectionDef[] = [
   {
     id: "sizes",
     label: "Your Sizes & Fit",
-    question: "Tell nAia about your sizes, measurements and body preferences.",
+    question: "Tell nAia about your sizes, measurements and fit details.",
     helper: "All fields in this section are optional. Update any time.",
     subFields: [
       // V2-D sizes
