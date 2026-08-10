@@ -80,14 +80,15 @@ export function buildPrivateDownloadUrl(
   return `https://api.cloudinary.com/v1_1/${config.cloudName}/image/download?${params.toString()}`;
 }
 
-// ── Private upload endpoint URL ──────────────────────────────────────────────
+// ── Browser upload endpoint URL ──────────────────────────────────────────────
 //
-// Returns the Cloudinary REST upload endpoint for private-delivery assets.
-// Delivery type is encoded in the URL path, not as a form field.
-// The server provides this URL to the browser via the signature endpoint;
+// Returns the Cloudinary REST upload endpoint for browser-direct uploads.
+// The browser upload API only supports CORS on the /image/upload endpoint.
+// Delivery type is controlled by the signed `type` parameter in the request body,
+// not by the URL path. The server provides this URL via the signature endpoint;
 // the browser must use it verbatim and cannot substitute another endpoint.
 export function buildModelUploadUrl(cloudName: string): string {
-  return `https://api.cloudinary.com/v1_1/${cloudName}/image/private`;
+  return `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
 }
 
 // ── Cloudinary asset verification (Admin API) ─────────────────────────────────

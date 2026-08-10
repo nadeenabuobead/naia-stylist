@@ -145,7 +145,7 @@ export default function BuyOrSkip() {
       if (sigRes.status === 401) { setUploadError("Your session has expired. Please sign in again."); return; }
       if (!sigRes.ok) { setUploadError("Upload service unavailable. Please try again."); return; }
       const sigData = await sigRes.json();
-      const { signature, timestamp, apiKey, assetFolder, uploadPreset, allowedFormats, uploadUrl, maxFileSizeBytes } = sigData;
+      const { signature, timestamp, apiKey, assetFolder, uploadPreset, allowedFormats, uploadUrl, maxFileSizeBytes, deliveryType } = sigData;
 
       if (file.size > maxFileSizeBytes) {
         setUploadError(`Photo is too large. Please choose an image under ${Math.round(maxFileSizeBytes / 1024 / 1024)} MB.`);
@@ -160,8 +160,8 @@ export default function BuyOrSkip() {
       fd.append("signature", signature);
       fd.append("asset_folder", assetFolder);
       fd.append("allowed_formats", allowedFormats);
-      // uploadUrl is the server-provided private-delivery endpoint (/image/private).
-      // Delivery type is enforced by the URL path — no type form field needed.
+      fd.append("type", deliveryType); // signed — enforces private delivery; client cannot override
+      // uploadUrl is the server-provided browser upload endpoint; used verbatim.
       const res = await fetch(uploadUrl, { method: "POST", body: fd });
       const uploadData = await res.json();
       if (!uploadData.public_id) {

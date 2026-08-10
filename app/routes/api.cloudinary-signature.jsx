@@ -30,19 +30,20 @@ export async function loader({ request }) {
   const allowedFormats = "jpg,jpeg,png,webp,heic,heif";
 
   // All customer model photos are uploaded as private-delivery assets.
-  // Delivery type is encoded in the upload endpoint URL (/image/private), not as a form field.
-  // The browser cannot change the endpoint — it is server-provided and used verbatim.
+  // Delivery type is enforced via the signed `type` parameter — not the URL path.
+  // The browser cannot change the type field because it is included in the server signature.
   // Server-side Admin API verification enforces the delivery type before persistence.
   //
   // Parameters must be sorted alphabetically for the Cloudinary signature.
   // public_id is intentionally excluded so Cloudinary auto-generates it;
   // any browser-supplied public_id would fail signature verification.
-  // Alphabetical order: allowed_formats < asset_folder < timestamp < upload_preset
+  // Alphabetical order: allowed_formats < asset_folder < timestamp < type < upload_preset
   const deliveryType = "private";
   const paramsToSign = [
     `allowed_formats=${allowedFormats}`,
     `asset_folder=${assetFolder}`,
     `timestamp=${timestamp}`,
+    `type=${deliveryType}`,
     `upload_preset=${uploadPreset}`,
   ].join("&");
 
