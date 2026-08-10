@@ -168,7 +168,7 @@ const SECTIONS: SectionDef[] = [
     id: "direction",
     label: "Your Style Direction",
     question: "How do you want to feel in what you wear?",
-    helper: "This shapes the emotional register of your StyleMe recommendations.",
+    helper: "This shapes the emotional register of your Style Me recommendations.",
     subFields: [
       { draftKey: "desired-feelings", apiKey: "desiredFeelings", subLabel: "How I want to feel", kind: "array", questionId: "desired-feelings" },
       { draftKey: "becoming",         apiKey: "becoming",        subLabel: "Who I'm becoming",   kind: "array", questionId: "becoming"         },
@@ -188,7 +188,7 @@ const SECTIONS: SectionDef[] = [
     id: "fit",
     label: "Your Fit, Coverage & Comfort",
     question: "What silhouettes and construction details feel most like you?",
-    helper: "nAia uses these to filter recommendations to shapes that work for you.",
+    helper: "Save the silhouettes, construction and coverage details you naturally prefer.",
     subFields: [
       { draftKey: "silhouette",           apiKey: "silhouette",          subLabel: "My silhouettes",        kind: "array",  questionId: "silhouette"           },
       { draftKey: "structure",            apiKey: "structure",           subLabel: "Construction",          kind: "single", questionId: "structure"            },
@@ -674,8 +674,8 @@ export default function PassportPage() {
           <div className="sp-shell-eyebrow">Style Passport</div>
           <h1 className="sp-shell-title">Your Style Passport</h1>
           <p className="sp-shell-desc">
-            Your Style Passport guides every StyleMe recommendation. Update it whenever your
-            preferences evolve — changes flow through the rest of nAia immediately.
+            Your Style Passport keeps the preferences that shape your nAia experience in one
+            place. Update it whenever your style, life or priorities evolve.
           </p>
         </div>
 
