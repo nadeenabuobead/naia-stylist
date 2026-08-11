@@ -1,5 +1,8 @@
 {
   "framework": "react-router",
   "installCommand": "npm install",
-  "buildCommand": "if [ \"$VERCEL_ENV\" != \"development\" ]; then npx prisma migrate deploy; fi && npx prisma generate && npm run build"
+  "buildCommand": "if [ \"$VERCEL_ENV\" != \"development\" ]; then npx prisma migrate deploy; fi && npx prisma generate && npm run build",
+  "functions": {
+    "app/routes/api.closet-assess.ts": { "maxDuration": 60 }
+  }
 }
