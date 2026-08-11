@@ -723,6 +723,9 @@ export default function Closet() {
   const [editPublicId, setEditPublicId] = useState("");
   const [editImageUrl, setEditImageUrl] = useState("");
   const editBlobUrlRef = useRef<string | null>(null);
+  const editPanelRef  = useRef<HTMLDivElement>(null);  // top of edit panel
+  const editPhotoRef  = useRef<HTMLDivElement>(null);  // photo section inside panel
+  const editScrollToPhotoRef = useRef(false);           // true → scroll to photo on open
   const [editUploading, setEditUploading] = useState(false);
   const [editUploadError, setEditUploadError] = useState<string | null>(null);
 
@@ -987,7 +990,8 @@ export default function Closet() {
     }
   }
 
-  function openEdit(item: any) {
+  function openEdit(item: any, scrollToPhoto = false) {
+    editScrollToPhotoRef.current = scrollToPhoto;
     setEditingItemId(item.id);
     setEditName(item.name ?? "");
     setEditCategory(item.category ?? "TOPS");
@@ -1041,6 +1045,15 @@ export default function Closet() {
     if (editFetcher.data?.success) closeEdit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editFetcher.data]);
+
+  // After React commits the panel to the DOM, scroll it (or its photo section) into view.
+  // editScrollToPhotoRef is a plain ref so this effect only depends on editingItemId —
+  // no extra renders, no timeouts.
+  useEffect(() => {
+    if (!editingItemId) return;
+    const target = editScrollToPhotoRef.current ? editPhotoRef.current : editPanelRef.current;
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [editingItemId]);
 
   // Current item being edited — used to render existing photo in the edit panel.
   const editingItem = editingItemId ? (items as any[]).find((i: any) => i.id === editingItemId) ?? null : null;
@@ -1230,12 +1243,13 @@ export default function Closet() {
 
         {/* ── Edit panel ────────────────────────────────────────────────── */}
         {editingItemId && (
-          <div className="cl-form" role="region" aria-label="Edit piece">
+          <div ref={editPanelRef} className="cl-form" role="region" aria-label="Edit piece">
             <div className="cl-form-header">
               <span className="cl-form-title">Edit Piece</span>
               <button type="button" className="cl-form-cancel" onClick={closeEdit}>✕ Cancel</button>
             </div>
 
+            <div ref={editPhotoRef} style={{ scrollMarginTop: "72px" }}>
             <div className="cl-label">Photo</div>
             <div className="cl-edit-photo-row">
               <div className="cl-edit-current">
@@ -1265,6 +1279,7 @@ export default function Closet() {
                 {editUploadError && <p className="cl-error">{editUploadError}</p>}
               </div>
             </div>
+            </div>{/* /editPhotoRef wrapper */}
 
             <div className="cl-label">Item Name</div>
             <input
@@ -1376,7 +1391,7 @@ export default function Closet() {
                       <span className={elig.isNeeds ? "cl-card-elig--needs" : "cl-card-elig--ok"}>
                         {elig.label}
                         {elig.isNeeds && (
-                          <button type="button" className="cl-replace-link" onClick={() => openEdit(item)}>
+                          <button type="button" className="cl-replace-link" onClick={() => openEdit(item, true)}>
                             Replace photo
                           </button>
                         )}

@@ -76,6 +76,8 @@ function buildGarmentPrompt(declaredCategory?: string): string {
   return `\
 You are a fashion image quality assessor for a personal styling app.${categoryLine}
 
+A garment may be presented in any of these valid contexts: isolated on a plain or styled background, worn by a person, displayed on a mannequin, or photographed as a flat-lay. All presentation styles are acceptable — evaluate the garment itself, not how it is presented.
+
 Evaluate this image on these criteria:
 1. Is at least one fashion item (clothing, shoe, bag, accessory, or jewellery) clearly visible and identifiable?
 2. Is the item reasonably sharp and in focus — not excessively blurry?
@@ -93,6 +95,15 @@ Respond ONLY with this JSON object — no other text, no markdown, no code fence
 PASS: item is clearly visible, identifiable, sharp enough for analysis, and category broadly matches (or was not declared). Set subCode to null.
 RETRY_IMAGE: image is not usable — user should upload a different photo (blurry, cropped so nothing visible, no garment present, multiple ambiguous items). Set subCode to the most applicable code.
 NEEDS_CLARIFICATION: image has a usable garment but something is unclear that the user can resolve (colour unreadable, declared category seems wrong, item type unclear). Set subCode to the most applicable code.
+
+subCode guidance:
+- no_garment_visible: use ONLY when there is genuinely no identifiable clothing, shoe, bag, or fashion accessory anywhere in the image (e.g. the photo is of a landscape, a face only with no clothing visible, or an unrelated object). Do NOT use this code because the garment is worn by a person or displayed on a mannequin — those are valid garment photos.
+- image_too_blurry: the item exists but is too out of focus to assess.
+- garment_excessively_cropped: the item exists but is cropped so heavily that less than half is visible.
+- multiple_items_ambiguous: multiple distinct items with no clear primary subject.
+- color_indeterminate: item is visible but colour cannot be determined (lighting, filter, or monochrome).
+- category_mismatch: item is visible but clearly does not match the declared category.
+- item_not_identifiable: something is present but cannot be identified as a specific fashion item.
 
 If status is PASS, subCode must be null.`;
 }
