@@ -338,7 +338,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (stageA.eligible === "pending-assessment" && newItem.imagePublicId) {
       const stageAUrl = buildPrivateDownloadUrl(cfg, newItem.imagePublicId, newItem.imageFormat ?? "jpg", "private");
-      await runStageBAssessment(newItem.id, stageAUrl, stageA.category, async (id, fields) => {
+      void runStageBAssessment(newItem.id, stageAUrl, stageA.category, async (id, fields) => {
         await prisma.closetItem.update({ where: { id }, data: fields });
       });
     }
@@ -350,6 +350,214 @@ export async function action({ request }: ActionFunctionArgs) {
     const itemId = formData.get("itemId") as string;
     const deleted = await prisma.closetItem.deleteMany({ where: { id: itemId, customerId: customer.id } });
     if (deleted.count === 0) return data({ error: "Item not found" }, { status: 403 });
+    return data({ success: true });
+  }
+
+  if (intent === "edit") {
+    const itemId    = (formData.get("itemId")      as string)?.trim();
+    const name      = (formData.get("name")        as string)?.trim();
+    const category  = (formData.get("category")    as string)?.trim();
+    const primaryColor = (formData.get("primaryColor") as string)?.trim();
+    const newPublicId  = (formData.get("newPublicId")  as string)?.trim();
+
+    if (!itemId || !name || !category) {
+      return data({ error: "Item ID, name, and category are required." }, { status: 400 });
+    }
+
+    const existing = await prisma.closetItem.findUnique({ where: { id: itemId } });
+    if (!existing || existing.customerId !== customer.id) {
+      return data({ error: "Item not found." }, { status: 404 });
+    }
+
+    // Meta-only edit — no photo replacement requested.
+    if (!newPublicId) {
+      await prisma.closetItem.update({
+        where: { id: itemId },
+        data: { name, category, primaryColor: primaryColor || null },
+      });
+      return data({ success: true });
+    }
+
+    // ── Photo replacement: full security pipeline (mirrors "add") ─────────────
+
+    // 1. Ownership check — newPublicId must be in the customer's folder.
+    const ownership = validatePublicIdOwnership(newPublicId, customer.id);
+    if (!ownership.ok) {
+      return data({ error: ownership.error }, { status: 400 });
+    }
+
+    // 2. Verify via Cloudinary Admin API.
+    const verify = await verifyCloudinaryAsset(newPublicId, "private");
+    if (!verify.ok) {
+      await deleteCloudinaryAsset(newPublicId, "private");
+      return data({ error: "Image could not be verified. Please upload again." }, { status: 400 });
+    }
+
+    const editAsset   = verify.asset;
+    const editFormat  = editAsset.format.toLowerCase();
+    const editBytes   = editAsset.bytes;
+    const editWidth   = editAsset.width;
+    const editHeight  = editAsset.height;
+
+    if (editAsset.type !== "private") {
+      await deleteCloudinaryAsset(newPublicId, "private");
+      return data({ error: "Image must be uploaded via the app." }, { status: 400 });
+    }
+    if (editAsset.resourceType !== "image") {
+      await deleteCloudinaryAsset(newPublicId, "private");
+      return data({ error: "Uploaded file must be an image." }, { status: 400 });
+    }
+
+    // 3. Format allowlist.
+    const EDIT_ALLOWED_FORMATS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]);
+    if (!EDIT_ALLOWED_FORMATS.has(editFormat)) {
+      await deleteCloudinaryAsset(newPublicId, "private");
+      return data({ error: `File type "${editFormat}" is not accepted. Use JPG, PNG, WEBP, or HEIC.` }, { status: 400 });
+    }
+
+    // 4. File-size cap.
+    if (editBytes > 5 * 1024 * 1024) {
+      await deleteCloudinaryAsset(newPublicId, "private");
+      return data({ error: `Image is too large (${(editBytes / 1024 / 1024).toFixed(1)} MB). Maximum is 5 MB.` }, { status: 400 });
+    }
+
+    // 5. Dimension bounds.
+    const EDIT_MIN_DIM = 200, EDIT_MAX_DIM = 8000;
+    if (editWidth !== null && editWidth < EDIT_MIN_DIM) {
+      await deleteCloudinaryAsset(newPublicId, "private");
+      return data({ error: `Image width (${editWidth} px) is below the minimum of ${EDIT_MIN_DIM} px.` }, { status: 400 });
+    }
+    if (editHeight !== null && editHeight < EDIT_MIN_DIM) {
+      await deleteCloudinaryAsset(newPublicId, "private");
+      return data({ error: `Image height (${editHeight} px) is below the minimum of ${EDIT_MIN_DIM} px.` }, { status: 400 });
+    }
+    if (editWidth !== null && editWidth > EDIT_MAX_DIM) {
+      await deleteCloudinaryAsset(newPublicId, "private");
+      return data({ error: `Image width (${editWidth} px) exceeds the maximum of ${EDIT_MAX_DIM} px.` }, { status: 400 });
+    }
+    if (editHeight !== null && editHeight > EDIT_MAX_DIM) {
+      await deleteCloudinaryAsset(newPublicId, "private");
+      return data({ error: `Image height (${editHeight} px) exceeds the maximum of ${EDIT_MAX_DIM} px.` }, { status: 400 });
+    }
+
+    // 6. Magic-byte check.
+    const editCfg = getCloudinaryConfig();
+    if (!editCfg) {
+      await deleteCloudinaryAsset(newPublicId, "private");
+      return data({ error: "Image service is not configured. Please try again." }, { status: 503 });
+    }
+    const editDownloadUrl = buildPrivateDownloadUrl(editCfg, newPublicId, editFormat, "private");
+    try {
+      const byteRes = await fetch(editDownloadUrl, {
+        headers: { Range: "bytes=0-11" },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (byteRes.ok) {
+        const buf = await byteRes.arrayBuffer();
+        const header = new Uint8Array(buf);
+        if (!detectImageFormatFromBytes(header)) {
+          await deleteCloudinaryAsset(newPublicId, "private");
+          return data({ error: "File signature does not match a supported image format." }, { status: 400 });
+        }
+      }
+    } catch {
+      await deleteCloudinaryAsset(newPublicId, "private");
+      return data({ error: "Image verification timed out. Please try again." }, { status: 400 });
+    }
+
+    // ── Layer 2: Global content safety moderation ─────────────────────────────
+    const editModeration = await moderateImageContent(editDownloadUrl);
+    if (editModeration.status === "MODERATION_UNAVAILABLE") {
+      await deleteCloudinaryAsset(newPublicId, "private");
+      try {
+        await prisma.journeyEvent.create({
+          data: {
+            type: "image_moderation_unavailable",
+            occurredAt: new Date(),
+            customerIdHash: createHash("sha256").update(customer.id).digest("hex").slice(0, 16),
+            sessionId: "closet",
+            payload: { feature: "closet_edit" },
+          },
+        });
+      } catch { /* audit failure never blocks */ }
+      return data({ error: "Image review is temporarily unavailable. Please try again." }, { status: 503 });
+    }
+    if (editModeration.status === "SAFETY_REJECT") {
+      await deleteCloudinaryAsset(newPublicId, "private");
+      try {
+        await prisma.journeyEvent.create({
+          data: {
+            type: "image_safety_reject",
+            occurredAt: new Date(),
+            customerIdHash: createHash("sha256").update(customer.id).digest("hex").slice(0, 16),
+            sessionId: "closet",
+            payload: { feature: "closet_edit", reasonCode: editModeration.reasonCode },
+          },
+        });
+      } catch { /* audit failure never blocks */ }
+      return data({ error: "Photo could not be accepted. Please use a clothing photo." }, { status: 422 });
+    }
+
+    // ── Layer 3: Garment suitability ──────────────────────────────────────────
+    const editSuitability = await screenGarmentSuitability(editDownloadUrl, { declaredCategory: category });
+    const EDIT_GARMENT_GUIDANCE: Record<string, string> = {
+      no_garment_visible:          "No clothing item was detected. Please upload a photo of a single garment.",
+      image_too_blurry:            "Photo is too blurry. Please try a clearer photo.",
+      garment_excessively_cropped: "The garment is too cropped. Please ensure the full item is visible.",
+      multiple_items_ambiguous:    "Multiple items detected. Please photograph one item at a time.",
+      color_indeterminate:         "The colour of this item is unclear in the photo.",
+      category_mismatch:           "The item in the photo does not match the selected category.",
+      item_not_identifiable:       "The item could not be identified. Please try a clearer photo.",
+      assessment_failed:           "Image assessment is temporarily unavailable. Please try again.",
+    };
+    if (editSuitability.status === "RETRY_IMAGE") {
+      await deleteCloudinaryAsset(newPublicId, "private");
+      const msg = EDIT_GARMENT_GUIDANCE[(editSuitability as { status: "RETRY_IMAGE"; subCode: string }).subCode]
+        ?? "Please upload a clearer photo of a single fashion item.";
+      return data({ error: msg }, { status: 422 });
+    }
+
+    // All checks passed — compute eligibility then update DB.
+    const editStageA = assessClosetEligibility({
+      prismaCategory: category,
+      width:  editWidth  ?? undefined,
+      height: editHeight ?? undefined,
+      format: editFormat,
+      bytes:  editBytes,
+    });
+
+    // Capture old publicId before the update so we can delete it afterwards.
+    const oldPublicId = existing.imagePublicId;
+
+    const updatedItem = await prisma.closetItem.update({
+      where: { id: itemId },
+      data: {
+        name,
+        category,
+        primaryColor: primaryColor || null,
+        imageUrl: null,
+        imagePublicId: newPublicId,
+        imageFormat: editFormat,
+        tryOnEligibility:  editStageA.eligible,
+        tryOnAssessedAt:   new Date(editStageA.assessedAt),
+        tryOnCustomerHint: editStageA.customerHint,
+        tryOnInternalNote: editStageA.internalNote,
+      },
+    });
+
+    // Delete old Cloudinary asset ONLY after the DB update succeeds.
+    if (oldPublicId && oldPublicId !== newPublicId) {
+      await deleteCloudinaryAsset(oldPublicId, "private");
+    }
+
+    // Re-run Stage B assessment for the new photo.
+    if (editStageA.eligible === "pending-assessment" && updatedItem.imagePublicId) {
+      const stageBUrl = buildPrivateDownloadUrl(editCfg, updatedItem.imagePublicId, updatedItem.imageFormat ?? "jpg", "private");
+      void runStageBAssessment(updatedItem.id, stageBUrl, editStageA.category, async (id, fields) => {
+        await prisma.closetItem.update({ where: { id }, data: fields });
+      });
+    }
+
     return data({ success: true });
   }
 
@@ -462,6 +670,17 @@ const css = `
     .cl-search-input{width:100%}
     .cl-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
   }
+  /* ── Validation error message ───────────────────────────────────────────── */
+  .cl-error{color:var(--lipstick,#8b2252);font-family:var(--ff-body,inherit);font-size:13px;line-height:1.5;margin:8px 0 0;padding:10px 12px;background:color-mix(in srgb,var(--lipstick,#8b2252) 8%,transparent);border-radius:6px;border-left:3px solid var(--lipstick,#8b2252)}
+  /* ── Edit panel & card edit controls ─────────────────────────────────────── */
+  .cl-edit-btn{display:block;width:100%;background:none;border:none;cursor:pointer;font-family:var(--ff-ui,inherit);font-size:7px;font-weight:500;letter-spacing:1.5px;text-transform:uppercase;color:var(--c-muted,#888);text-align:center;padding:8px 0 2px;text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px}
+  .cl-edit-btn:hover{color:var(--c-ink,#111)}
+  .cl-replace-link{background:none;border:none;cursor:pointer;font-family:var(--ff-ui,inherit);font-size:7px;font-weight:500;letter-spacing:1.2px;text-transform:uppercase;color:var(--lipstick,#8b2252);padding:0;margin-left:6px;text-decoration:underline;text-underline-offset:2px;vertical-align:middle}
+  .cl-replace-link:hover{opacity:0.75}
+  .cl-edit-photo-row{display:flex;gap:16px;align-items:flex-start;margin-bottom:4px}
+  .cl-edit-current{flex:0 0 100px;height:100px;border-radius:6px;overflow:hidden;background:var(--bg-50,#f5f5f5);display:flex;align-items:center;justify-content:center;font-size:32px;opacity:.3}
+  .cl-edit-current img{width:100%;height:100%;object-fit:cover;opacity:1}
+  .cl-edit-upload-side{flex:1;display:flex;flex-direction:column;gap:6px}
 `;
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -473,7 +692,9 @@ const css = `
 
 export default function Closet() {
   const { items, closetInsights } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher();
+  const fetcher    = useFetcher();                                                         // delete only
+  const addFetcher = useFetcher<{ success?: boolean; error?: string }>();                  // add only
+  const addPendingRef = useRef(false);   // true while we are waiting for addFetcher to settle
 
   const [showAddForm, setShowAddForm] = useState(false);
   const addBtnRef = useRef<HTMLButtonElement>(null);
@@ -493,9 +714,24 @@ export default function Closet() {
   const [newOccasions, setNewOccasions] = useState<string[]>([]);
   const [newSeasons, setNewSeasons] = useState<string[]>([]);
 
-  // Revoke the blob preview URL when the component unmounts.
+  // ── Edit state ────────────────────────────────────────────────────────────
+  const editFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editCategory, setEditCategory] = useState("TOPS");
+  const [editColor, setEditColor] = useState("");
+  const [editPublicId, setEditPublicId] = useState("");
+  const [editImageUrl, setEditImageUrl] = useState("");
+  const editBlobUrlRef = useRef<string | null>(null);
+  const [editUploading, setEditUploading] = useState(false);
+  const [editUploadError, setEditUploadError] = useState<string | null>(null);
+
+  // Revoke both blob preview URLs when the component unmounts.
   useEffect(() => {
-    return () => { if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current); };
+    return () => {
+      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+      if (editBlobUrlRef.current) URL.revokeObjectURL(editBlobUrlRef.current);
+    };
   }, []);
 
   const filtered = items.filter((item: any) => {
@@ -514,7 +750,7 @@ export default function Closet() {
       addBtnRef.current?.focus();
       return;
     }
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setShowAddForm(false); };
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") resetAddForm(); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [showAddForm]);
@@ -658,7 +894,8 @@ export default function Closet() {
 
   function handleAdd() {
     if (!newName || !newPublicId) return;
-    fetcher.submit(
+    addPendingRef.current = true;
+    addFetcher.submit(
       {
         intent: "add",
         name: newName,
@@ -672,6 +909,11 @@ export default function Closet() {
       },
       { method: "post" }
     );
+    // Do NOT close or reset the form here.
+    // The useEffect below closes on success and keeps open on error.
+  }
+
+  function resetAddForm() {
     setNewName("");
     if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
     setNewImageUrl("");
@@ -681,8 +923,127 @@ export default function Closet() {
     setNewBrand("");
     setNewOccasions([]);
     setNewSeasons([]);
+    setUploadError(null);
     setShowAddForm(false);
   }
+
+  // ── Edit helpers ──────────────────────────────────────────────────────────
+
+  async function uploadToCloudinaryForEdit(file: File) {
+    setEditUploading(true);
+    setEditUploadError(null);
+
+    const validationError = await validateImageFile(file);
+    if (validationError) {
+      setEditUploadError(validationError);
+      setEditUploading(false);
+      return;
+    }
+
+    try {
+      const sigRes = await fetch("/api/cloudinary-signature", { credentials: "same-origin" });
+      if (sigRes.status === 401) { setEditUploadError("Your session has expired. Please sign in again."); setEditUploading(false); return; }
+      if (!sigRes.ok) { setEditUploadError("Upload service unavailable. Please try again."); setEditUploading(false); return; }
+      const sig = await sigRes.json() as any;
+
+      if (file.size > sig.maxFileSizeBytes) {
+        setEditUploadError(`Image must be under ${Math.round(sig.maxFileSizeBytes / 1024 / 1024)} MB.`);
+        setEditUploading(false);
+        return;
+      }
+
+      const form = new FormData();
+      form.append("file", file);
+      form.append("api_key", sig.apiKey);
+      form.append("timestamp", String(sig.timestamp));
+      form.append("signature", sig.signature);
+      form.append("folder", sig.assetFolder);
+      form.append("upload_preset", sig.uploadPreset);
+      form.append("allowed_formats", sig.allowedFormats);
+      form.append("type", sig.deliveryType);
+
+      const cloudRes = await fetch(sig.uploadUrl, { method: "POST", body: form });
+      if (!cloudRes.ok) {
+        const errData = await cloudRes.json().catch(() => ({} as any));
+        setEditUploadError((errData as any).error?.message || "Upload failed. Please try again.");
+        setEditUploading(false);
+        return;
+      }
+      const cloudData = await cloudRes.json() as any;
+      if (!cloudData.public_id) {
+        setEditUploadError("Upload failed. Please try another photo.");
+        setEditUploading(false);
+        return;
+      }
+      if (editBlobUrlRef.current) URL.revokeObjectURL(editBlobUrlRef.current);
+      const blobUrl = URL.createObjectURL(file);
+      editBlobUrlRef.current = blobUrl;
+      setEditImageUrl(blobUrl);
+      setEditPublicId(cloudData.public_id);
+    } catch {
+      setEditUploadError("Upload failed. Please check your connection and try again.");
+    } finally {
+      setEditUploading(false);
+    }
+  }
+
+  function openEdit(item: any) {
+    setEditingItemId(item.id);
+    setEditName(item.name ?? "");
+    setEditCategory(item.category ?? "TOPS");
+    setEditColor(item.primaryColor ?? "");
+    setEditPublicId("");
+    setEditImageUrl("");
+    setEditUploadError(null);
+    if (editBlobUrlRef.current) { URL.revokeObjectURL(editBlobUrlRef.current); editBlobUrlRef.current = null; }
+  }
+
+  function closeEdit() {
+    setEditingItemId(null);
+    setEditName("");
+    setEditCategory("TOPS");
+    setEditColor("");
+    setEditPublicId("");
+    if (editBlobUrlRef.current) { URL.revokeObjectURL(editBlobUrlRef.current); editBlobUrlRef.current = null; }
+    setEditImageUrl("");
+    setEditUploadError(null);
+  }
+
+  function handleEditSubmit() {
+    if (!editingItemId || !editName || !editCategory) return;
+    editFetcher.submit(
+      {
+        intent: "edit",
+        itemId: editingItemId,
+        name: editName,
+        category: editCategory,
+        primaryColor: editColor,
+        newPublicId: editPublicId,   // empty string = meta-only edit; publicId = photo replacement
+      },
+      { method: "post" }
+    );
+  }
+
+  // Close the add form on success; keep it open on error.
+  // addPendingRef guards against stale data from a previous submission firing this.
+  useEffect(() => {
+    if (!addPendingRef.current) return;
+    if (addFetcher.state !== "idle") return;
+    // addFetcher just settled after our submission.
+    addPendingRef.current = false;
+    if (addFetcher.data?.success) resetAddForm();
+    // On error, keep form open — addFetcher.data?.error renders below the submit button.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addFetcher.state, addFetcher.data]);
+
+  // Close the edit panel when the server reports success.
+  useEffect(() => {
+    if (editFetcher.data?.success) closeEdit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editFetcher.data]);
+
+  // Current item being edited — used to render existing photo in the edit panel.
+  const editingItem = editingItemId ? (items as any[]).find((i: any) => i.id === editingItemId) ?? null : null;
 
   return (
     // Option B shell: compact variant — NADINE header + sidebar, no MY nAia. masthead
@@ -739,7 +1100,7 @@ export default function Closet() {
           <div className="cl-form">
             <div className="cl-form-header">
               <h3 className="cl-form-title">Add to Wardrobe</h3>
-              <button type="button" className="cl-form-cancel" onClick={() => setShowAddForm(false)}>Cancel</button>
+              <button type="button" className="cl-form-cancel" onClick={resetAddForm}>Cancel</button>
             </div>
 
             {/* Photo guide integrated inside Add to Wardrobe panel */}
@@ -856,9 +1217,89 @@ export default function Closet() {
               type="button"
               className="cl-submit"
               onClick={handleAdd}
-              disabled={!newName || !newPublicId || uploading}
+              disabled={!newName || !newPublicId || uploading || addFetcher.state === "submitting"}
             >
-              {uploading ? "Uploading…" : "Add to Wardrobe"}
+              {uploading ? "Uploading…" : addFetcher.state === "submitting" ? "Saving…" : "Add to Wardrobe"}
+            </button>
+
+            {addFetcher.data?.error && (
+              <p className="cl-error">{addFetcher.data.error}</p>
+            )}
+          </div>
+        )}
+
+        {/* ── Edit panel ────────────────────────────────────────────────── */}
+        {editingItemId && (
+          <div className="cl-form" role="region" aria-label="Edit piece">
+            <div className="cl-form-header">
+              <span className="cl-form-title">Edit Piece</span>
+              <button type="button" className="cl-form-cancel" onClick={closeEdit}>✕ Cancel</button>
+            </div>
+
+            <div className="cl-label">Photo</div>
+            <div className="cl-edit-photo-row">
+              <div className="cl-edit-current">
+                {editImageUrl
+                  ? <img src={editImageUrl} alt="New photo preview" />
+                  : editingItem?.displayImageUrl
+                    ? <img src={editingItem.displayImageUrl} alt="Current photo" />
+                    : "◇"
+                }
+              </div>
+              <div className="cl-edit-upload-side">
+                <label className="cl-upload-box" style={{ minHeight: "72px", cursor: "pointer" }}>
+                  {editUploading
+                    ? <span className="cl-upload-hint">Uploading…</span>
+                    : editPublicId
+                      ? <span className="cl-upload-hint" style={{ color: "var(--lipstick,#8b2252)" }}>New photo ready ✓</span>
+                      : <span className="cl-upload-hint">Upload a replacement photo (optional)</span>
+                  }
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={e => { const f = e.target.files?.[0]; if (f) uploadToCloudinaryForEdit(f); }}
+                    disabled={editUploading || editFetcher.state === "submitting"}
+                  />
+                </label>
+                {editUploadError && <p className="cl-error">{editUploadError}</p>}
+              </div>
+            </div>
+
+            <div className="cl-label">Item Name</div>
+            <input
+              className="cl-input"
+              type="text"
+              placeholder="e.g. Black silk blazer"
+              value={editName}
+              onChange={e => setEditName(e.target.value)}
+            />
+
+            <div className="cl-label">Category</div>
+            <div className="cl-pills">
+              {CATEGORIES.map(c => (
+                <button key={c} type="button" onClick={() => setEditCategory(c)} className={`cl-pill${editCategory === c ? " on" : ""}`}>{c.charAt(0) + c.slice(1).toLowerCase()}</button>
+              ))}
+            </div>
+
+            <div className="cl-label">Colour</div>
+            <div className="cl-pills">
+              {COLORS.map(c => (
+                <button key={c} type="button" onClick={() => setEditColor(c)} className={`cl-pill${editColor === c ? " on" : ""}`}>{c}</button>
+              ))}
+            </div>
+
+            {editFetcher.data?.error && (
+              <p className="cl-error" style={{ marginTop: "8px" }}>{editFetcher.data.error}</p>
+            )}
+
+            <button
+              type="button"
+              className="cl-submit"
+              onClick={handleEditSubmit}
+              disabled={!editName || !editCategory || editUploading || editFetcher.state === "submitting"}
+            >
+              {editFetcher.state === "submitting" ? "Saving…" : "Save Changes"}
             </button>
           </div>
         )}
@@ -934,8 +1375,16 @@ export default function Closet() {
                     {elig && (
                       <span className={elig.isNeeds ? "cl-card-elig--needs" : "cl-card-elig--ok"}>
                         {elig.label}
+                        {elig.isNeeds && (
+                          <button type="button" className="cl-replace-link" onClick={() => openEdit(item)}>
+                            Replace photo
+                          </button>
+                        )}
                       </span>
                     )}
+                    <button type="button" className="cl-edit-btn" onClick={() => openEdit(item)}>
+                      Edit
+                    </button>
                   </div>
                   <button
                     type="button"

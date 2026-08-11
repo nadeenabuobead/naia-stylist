@@ -15,6 +15,11 @@
 //   T10 Loader generates signed displayImageUrl from imagePublicId — never exposes raw publicId
 //   T11 action: ownership validated before any AI call
 //   T12 imageUrl set to null for new private-upload records
+//   T13 edit intent checks item ownership (customerId match) before photo pipeline
+//   T14 edit photo replacement runs Layer 2 (moderateImageContent)
+//   T15 edit photo replacement runs Layer 3 (screenGarmentSuitability)
+//   T16 edit: new asset deleted on pipeline failure (before DB update)
+//   T17 edit: old asset deleted ONLY after DB update succeeds
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -222,5 +227,90 @@ describe("T12: new records set imageUrl to null", () => {
       nearby.includes("imageUrl: null"),
       "imageUrl must be null for new private-upload records",
     );
+  });
+});
+
+// ── T13: edit intent validates item ownership ────────────────────────────────
+
+describe("T13: edit intent validates item ownership before photo pipeline", () => {
+  const editIdx = closet.indexOf('intent === "edit"');
+
+  it("edit handler exists", () => {
+    assert.ok(editIdx !== -1, 'action must handle intent === "edit"');
+  });
+
+  it("checks existing.customerId !== customer.id before processing photo", () => {
+    assert.ok(editIdx !== -1, "edit handler must exist");
+    const block = closet.slice(editIdx, editIdx + 1000);
+    assert.ok(
+      block.includes("existing.customerId !== customer.id") ||
+      block.includes("existing.customerId === customer.id"),
+      "edit handler must verify that the item belongs to the authenticated customer",
+    );
+  });
+});
+
+// ── T14: edit photo replacement runs Layer 2 ────────────────────────────────
+
+describe("T14: edit photo replacement calls moderateImageContent (Layer 2)", () => {
+  it("edit block calls moderateImageContent", () => {
+    const editIdx = closet.indexOf('intent === "edit"');
+    assert.ok(editIdx !== -1, "edit handler must exist");
+    const block = closet.slice(editIdx, editIdx + 10000);
+    assert.ok(
+      block.includes("moderateImageContent("),
+      "edit photo replacement must call moderateImageContent (Layer 2)",
+    );
+  });
+});
+
+// ── T15: edit photo replacement runs Layer 3 ────────────────────────────────
+
+describe("T15: edit photo replacement calls screenGarmentSuitability (Layer 3)", () => {
+  it("edit block calls screenGarmentSuitability", () => {
+    const editIdx = closet.indexOf('intent === "edit"');
+    assert.ok(editIdx !== -1, "edit handler must exist");
+    const block = closet.slice(editIdx, editIdx + 10000);
+    assert.ok(
+      block.includes("screenGarmentSuitability("),
+      "edit photo replacement must call screenGarmentSuitability (Layer 3)",
+    );
+  });
+});
+
+// ── T16: edit deletes new asset on pipeline failure ──────────────────────────
+
+describe("T16: edit deletes new (failed) asset before DB update on pipeline failure", () => {
+  it("deleteCloudinaryAsset(newPublicId) appears before the photo-replacement DB update", () => {
+    const editIdx = closet.indexOf('intent === "edit"');
+    assert.ok(editIdx !== -1, "edit handler must exist");
+    const block = closet.slice(editIdx, editIdx + 10000);
+    // Anchor: photo pipeline starts at the ownership check for newPublicId
+    const pipelineStart = block.indexOf("validatePublicIdOwnership(newPublicId");
+    assert.ok(pipelineStart !== -1, "edit block must call validatePublicIdOwnership(newPublicId, ...) to start the photo pipeline");
+    // Within the photo pipeline: delete-new must appear before the photo update
+    const deleteNewIdx = block.indexOf("deleteCloudinaryAsset(newPublicId", pipelineStart);
+    const photoUpdateIdx = block.indexOf("closetItem.update(", pipelineStart);
+    assert.ok(deleteNewIdx !== -1, "edit photo pipeline must call deleteCloudinaryAsset(newPublicId, ...) on pipeline failure");
+    assert.ok(photoUpdateIdx !== -1, "edit photo pipeline must call prisma.closetItem.update");
+    assert.ok(deleteNewIdx < photoUpdateIdx, "deleteCloudinaryAsset(newPublicId) must appear before the photo-replacement DB update");
+  });
+});
+
+// ── T17: edit deletes old asset ONLY after DB update ────────────────────────
+
+describe("T17: edit deletes old asset only after DB update succeeds", () => {
+  it("oldPublicId delete appears after prisma.closetItem.update in edit block", () => {
+    const editIdx = closet.indexOf('intent === "edit"');
+    assert.ok(editIdx !== -1, "edit handler must exist");
+    const block = closet.slice(editIdx, editIdx + 10000);
+    // Anchor: photo pipeline starts at ownership check
+    const pipelineStart = block.indexOf("validatePublicIdOwnership(newPublicId");
+    assert.ok(pipelineStart !== -1, "photo pipeline anchor must exist");
+    const photoUpdateIdx = block.indexOf("closetItem.update(", pipelineStart);
+    const deleteOldIdx = block.indexOf("deleteCloudinaryAsset(oldPublicId", pipelineStart);
+    assert.ok(photoUpdateIdx !== -1, "edit block must have a photo-replacement DB update call");
+    assert.ok(deleteOldIdx !== -1, "edit block must call deleteCloudinaryAsset(oldPublicId, ...) for old-asset cleanup");
+    assert.ok(photoUpdateIdx < deleteOldIdx, "old-asset deleteCloudinaryAsset must appear AFTER the DB update");
   });
 });
