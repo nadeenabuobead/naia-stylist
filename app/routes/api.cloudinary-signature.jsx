@@ -34,14 +34,21 @@ export async function loader({ request }) {
   // The browser cannot change the type field because it is included in the server signature.
   // Server-side Admin API verification enforces the delivery type before persistence.
   //
+  // `folder` (fixed folder mode) is used — not `asset_folder` (dynamic folder mode).
+  // With `folder`, Cloudinary prefixes the auto-generated public_id with the folder path:
+  //   naia-wardrobe/{customerId}/{auto-name}
+  // This prefix is what the server-side ownership check verifies.
+  // With `asset_folder`, Cloudinary stores the folder as metadata only; the public_id is
+  // a bare random string that the ownership check would reject.
+  //
   // Parameters must be sorted alphabetically for the Cloudinary signature.
   // public_id is intentionally excluded so Cloudinary auto-generates it;
   // any browser-supplied public_id would fail signature verification.
-  // Alphabetical order: allowed_formats < asset_folder < timestamp < type < upload_preset
+  // Alphabetical order: allowed_formats < folder < timestamp < type < upload_preset
   const deliveryType = "private";
   const paramsToSign = [
     `allowed_formats=${allowedFormats}`,
-    `asset_folder=${assetFolder}`,
+    `folder=${assetFolder}`,
     `timestamp=${timestamp}`,
     `type=${deliveryType}`,
     `upload_preset=${uploadPreset}`,

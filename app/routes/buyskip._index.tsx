@@ -158,7 +158,7 @@ export default function BuyOrSkip() {
       fd.append("api_key", apiKey);
       fd.append("timestamp", String(timestamp));
       fd.append("signature", signature);
-      fd.append("asset_folder", assetFolder);
+      fd.append("folder", assetFolder); // fixed folder mode — public_id is prefixed with folder path
       fd.append("allowed_formats", allowedFormats);
       fd.append("type", deliveryType); // signed — enforces private delivery; client cannot override
       // uploadUrl is the server-provided browser upload endpoint; used verbatim.
