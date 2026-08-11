@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { useState, useEffect, useRef } from "react";
-import { useLoaderData, useFetcher, useRevalidator, Link } from "react-router";
+import { useLoaderData, useFetcher, Link } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type LinksFunction } from "react-router";
 import prisma from "../db.server";
 import { requireCurrentNaiaCustomer, getCurrentNaiaCustomer } from "~/lib/naia-session.server";
@@ -42,7 +42,7 @@ const CATEGORY_PHOTO_TIPS: Record<string, { title: string; tips: string[] }> = {
 };
 
 function eligibilityStatus(elig: ClosetTryOnEligibility | null, hint: string | null) {
-  if (!elig) return null;
+  if (!elig || elig === "pending-assessment") return null;
   const display = CLOSET_ELIGIBILITY_DISPLAY[elig];
   return { label: display.label, hint: hint || display.fallbackHint, isNeeds: elig === "needs-clearer-photo" };
 }
@@ -295,8 +295,14 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ error: msg }, { status: 422 });
     }
     if (suitability.status === "NEEDS_CLARIFICATION") {
-      // Item is usable but needs clarification — proceed but surface the guidance.
-      // (Do not block; subCode is informational.)
+      // Asset is preserved — same publicId can be resubmitted once the user corrects the field.
+      const subCode = (suitability as { status: "NEEDS_CLARIFICATION"; subCode: string }).subCode;
+      const CLARIFICATION_GUIDANCE: Record<string, string> = {
+        color_indeterminate:   "The colour of this item is unclear in the photo. Please update the Colour field and try again.",
+        category_mismatch:     "The item does not appear to match the selected category. Please update the Category and try again.",
+        item_not_identifiable: "The item type is unclear. Please update the Category and try again.",
+      };
+      return data({ error: CLARIFICATION_GUIDANCE[subCode] ?? "Please review the details below and try again." }, { status: 422 });
     }
     // ──────────────────────────────────────────────────────────────────────────
 
@@ -335,10 +341,7 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     } catch { /* event emission never blocks the response */ }
 
-    // Stage B runs through the dedicated /api/closet-assess endpoint after the response
-    // is sent — not as fire-and-forget background work inside this action.
-    const pendingAssessment = stageA.eligible === "pending-assessment" && !!newItem.imagePublicId;
-    return data({ success: true, pendingAssessment, itemId: pendingAssessment ? newItem.id : undefined });
+    return data({ success: true });
   }
 
   if (intent === "delete") {
@@ -512,6 +515,17 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ error: msg }, { status: 422 });
     }
 
+    if (editSuitability.status === "NEEDS_CLARIFICATION") {
+      // Asset is preserved — same publicId can be resubmitted once the user corrects the field.
+      const subCode = (editSuitability as { status: "NEEDS_CLARIFICATION"; subCode: string }).subCode;
+      const EDIT_CLARIFICATION_GUIDANCE: Record<string, string> = {
+        color_indeterminate:   "The colour of this item is unclear in the photo. Please update the Colour field and try again.",
+        category_mismatch:     "The item does not appear to match the selected category. Please update the Category and try again.",
+        item_not_identifiable: "The item type is unclear. Please update the Category and try again.",
+      };
+      return data({ error: EDIT_CLARIFICATION_GUIDANCE[subCode] ?? "Please review the details below and try again." }, { status: 422 });
+    }
+
     // All checks passed — compute eligibility then update DB.
     const editStageA = assessClosetEligibility({
       prismaCategory: category,
@@ -545,10 +559,7 @@ export async function action({ request }: ActionFunctionArgs) {
       await deleteCloudinaryAsset(oldPublicId, "private");
     }
 
-    // Stage B runs through the dedicated /api/closet-assess endpoint after the response
-    // is sent — not as fire-and-forget background work inside this action.
-    const editPendingAssessment = editStageA.eligible === "pending-assessment" && !!updatedItem.imagePublicId;
-    return data({ success: true, pendingAssessment: editPendingAssessment, itemId: editPendingAssessment ? updatedItem.id : undefined });
+    return data({ success: true });
   }
 
   return data({ error: "Unknown intent" }, { status: 400 });
@@ -682,23 +693,10 @@ const css = `
 
 export default function Closet() {
   const { items, closetInsights } = useLoaderData<typeof loader>();
-  const { revalidate } = useRevalidator();
 
   const fetcher    = useFetcher();  // delete only
-  const addFetcher = useFetcher<{ success?: boolean; error?: string; pendingAssessment?: boolean; itemId?: string }>();
+  const addFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const addPendingRef = useRef(false);   // true while we are waiting for addFetcher to settle
-
-  // ── Stage B assessment fetcher ────────────────────────────────────────────
-  // Posts to /api/closet-assess after a successful add/edit, or on manual re-check.
-  const assessFetcher = useFetcher<{ eligible?: string; customerHint?: string | null; assessmentFailed?: boolean }>();
-  // itemId that is either queued for assessment or currently being assessed.
-  const [pendingAssessId, setPendingAssessId] = useState<string | null>(null);
-  // Tracks the itemId currently in-flight so completion effects can identify it.
-  const assessingIdRef = useRef<string | null>(null);
-  // Items whose assessment call failed — show "Re-check photo" for these.
-  const [failedAssessIds, setFailedAssessIds] = useState<Set<string>>(new Set());
-  // Prevents the page-load recovery from firing more than once per mount.
-  const recoveryDoneRef = useRef(false);
 
   const [showAddForm, setShowAddForm] = useState(false);
   const addBtnRef = useRef<HTMLButtonElement>(null);
@@ -719,7 +717,7 @@ export default function Closet() {
   const [newSeasons, setNewSeasons] = useState<string[]>([]);
 
   // ── Edit state ────────────────────────────────────────────────────────────
-  const editFetcher = useFetcher<{ success?: boolean; error?: string; pendingAssessment?: boolean; itemId?: string }>();
+  const editFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editCategory, setEditCategory] = useState("TOPS");
@@ -1006,11 +1004,6 @@ export default function Closet() {
     if (editBlobUrlRef.current) { URL.revokeObjectURL(editBlobUrlRef.current); editBlobUrlRef.current = null; }
   }
 
-  function handleRecheck(itemId: string) {
-    setFailedAssessIds(prev => { const s = new Set(prev); s.delete(itemId); return s; });
-    setPendingAssessId(itemId);
-  }
-
   function closeEdit() {
     setEditingItemId(null);
     setEditName("");
@@ -1044,10 +1037,6 @@ export default function Closet() {
     if (addFetcher.state !== "idle") return;
     addPendingRef.current = false;
     if (addFetcher.data?.success) {
-      // Queue Stage B if the server flagged this item as pending-assessment.
-      if (addFetcher.data.pendingAssessment && addFetcher.data.itemId) {
-        setPendingAssessId(addFetcher.data.itemId);
-      }
       resetAddForm();
     }
     // On error, keep form open — addFetcher.data?.error renders below the submit button.
@@ -1057,49 +1046,9 @@ export default function Closet() {
   // Close the edit panel when the server reports success.
   useEffect(() => {
     if (!editFetcher.data?.success) return;
-    // Queue Stage B if the server flagged this item as pending-assessment.
-    if (editFetcher.data.pendingAssessment && editFetcher.data.itemId) {
-      setPendingAssessId(editFetcher.data.itemId);
-    }
     closeEdit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editFetcher.data]);
-
-  // ── Stage B — submit assess when a pendingAssessId is set and fetcher is idle ──
-  // Submits to /api/closet-assess; records the in-flight itemId for completion handling.
-  useEffect(() => {
-    if (!pendingAssessId || assessFetcher.state !== "idle") return;
-    assessingIdRef.current = pendingAssessId;
-    setPendingAssessId(null);
-    assessFetcher.submit({ itemId: pendingAssessId }, { method: "post", action: "/api/closet-assess" });
-  }, [pendingAssessId, assessFetcher.state]);
-
-  // ── Stage B — handle assess completion ───────────────────────────────────
-  useEffect(() => {
-    if (assessFetcher.state !== "idle" || !assessFetcher.data) return;
-    if (assessFetcher.data.assessmentFailed) {
-      // AI timeout or system failure — mark for Re-check button without writing to DB.
-      const id = assessingIdRef.current;
-      assessingIdRef.current = null;
-      if (id) setFailedAssessIds(prev => new Set([...prev, id]));
-      return;
-    }
-    if (assessFetcher.data.eligible) {
-      // Genuine result persisted — revalidate so the card reflects the final eligibility.
-      assessingIdRef.current = null;
-      revalidate();
-    }
-  }, [assessFetcher.state, assessFetcher.data, revalidate]);
-
-  // ── Recovery — one assess attempt per page load for stuck items ───────────
-  useEffect(() => {
-    if (recoveryDoneRef.current) return;
-    recoveryDoneRef.current = true;
-    const stuck = (items as any[]).find((i: any) => i.tryOnEligibility === "pending-assessment");
-    if (stuck) setPendingAssessId(stuck.id);
-    // items captured at mount — the dep array is intentionally empty.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // After React commits the panel to the DOM, scroll it (or its photo section) into view.
   // editScrollToPhotoRef is a plain ref so this effect only depends on editingItemId —
@@ -1448,11 +1397,6 @@ export default function Closet() {
                         {elig.isNeeds && (
                           <button type="button" className="cl-replace-link" onClick={() => openEdit(item, true)}>
                             Replace photo
-                          </button>
-                        )}
-                        {item.tryOnEligibility === "pending-assessment" && failedAssessIds.has(item.id) && (
-                          <button type="button" className="cl-replace-link" onClick={() => handleRecheck(item.id)}>
-                            Re-check photo
                           </button>
                         )}
                       </span>
