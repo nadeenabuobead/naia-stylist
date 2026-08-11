@@ -13,6 +13,8 @@ import { emitBuySkipSubmitted, recordJourneyEventAwaited } from "../lib/ai/journ
 import { getAllCatalogProducts } from "../lib/ai/naia-catalog";
 import { NAIA_VERIFIED_MEDIA_MAP } from "../lib/ai/naia-product-media";
 import { quizQuestions } from "../lib/onboarding/quiz-data";
+import { moderateImageContent } from "../lib/image-moderation.server";
+import { screenGarmentSuitability } from "../lib/image-suitability.server";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -210,6 +212,64 @@ async function analyzeItem(request) {
     }
   }
 
+  // ── Layer 2: Global content safety moderation ──────────────────────────────
+  // Run on the same signed URL used for magic-byte check — no extra network call.
+  const privateImageUrl = buildPrivateDownloadUrl(cfg, publicId, serverFormat, "private");
+  {
+    const moderation = await moderateImageContent(privateImageUrl);
+    if (moderation.status === "MODERATION_UNAVAILABLE") {
+      await deleteCloudinaryAsset(publicId, "private");
+      try {
+        await prisma.journeyEvent.create({
+          data: {
+            type: "image_moderation_unavailable",
+            occurredAt: new Date(),
+            customerIdHash: createHash("sha256").update(naiaCustomer.id).digest("hex").slice(0, 16),
+            sessionId: "buy-or-skip",
+            payload: { feature: "buy-or-skip" },
+          },
+        });
+      } catch { /* audit failure never blocks */ }
+      return json({ error: "Image review is temporarily unavailable. Please try again." }, { status: 503 });
+    }
+    if (moderation.status === "SAFETY_REJECT") {
+      await deleteCloudinaryAsset(publicId, "private");
+      try {
+        await prisma.journeyEvent.create({
+          data: {
+            type: "image_safety_reject",
+            occurredAt: new Date(),
+            customerIdHash: createHash("sha256").update(naiaCustomer.id).digest("hex").slice(0, 16),
+            sessionId: "buy-or-skip",
+            payload: { feature: "buy-or-skip", reasonCode: moderation.reasonCode },
+          },
+        });
+      } catch { /* audit failure never blocks */ }
+      return json({ error: "Photo could not be accepted. Please upload a clothing item photo." }, { status: 422 });
+    }
+  }
+
+  // ── Layer 3: Garment suitability ────────────────────────────────────────────
+  {
+    const suitability = await screenGarmentSuitability(privateImageUrl, { declaredCategory: category });
+    const GARMENT_GUIDANCE = {
+      no_garment_visible: "No clothing item was detected. Please upload a photo of a single garment.",
+      image_too_blurry: "Photo is too blurry. Please try a clearer photo.",
+      garment_excessively_cropped: "The garment is too cropped. Please ensure the full item is visible.",
+      multiple_items_ambiguous: "Multiple items detected. Please photograph one item at a time.",
+      color_indeterminate: "The colour of this item is unclear in the photo.",
+      category_mismatch: "The item in the photo does not match the selected category.",
+      item_not_identifiable: "The item could not be identified. Please try a clearer photo.",
+      assessment_failed: "Image assessment is temporarily unavailable. Please try again.",
+    };
+    if (suitability.status === "RETRY_IMAGE") {
+      await deleteCloudinaryAsset(publicId, "private");
+      const msg = GARMENT_GUIDANCE[suitability.subCode] ?? "Please upload a clearer photo of a single fashion item.";
+      return json({ error: msg }, { status: 422 });
+    }
+    // NEEDS_CLARIFICATION: item is usable — proceed (surface subCode in future UI iteration)
+  }
+
   // ── 6. DB-backed idempotency key ────────────────────────────────────────────
   const bucket = Math.floor(Date.now() / (IDEMPOTENCY_WINDOW_SECONDS * 1000));
   const idempotencyKey = "bos:" + createHash("sha256")
@@ -218,9 +278,8 @@ async function analyzeItem(request) {
     .slice(0, 24);
   let isIdempotentRepeat = false;
 
-  // ── 7. Generate a short-lived private download URL for Claude ──────────────
-  // Never persisted. Expires in 10 minutes (enforced by Cloudinary).
-  const privateImageUrl = buildPrivateDownloadUrl(cfg, publicId, serverFormat, "private");
+  // ── 7. Claude analysis URL ─────────────────────────────────────────────────
+  // privateImageUrl was already built above — reuse it. Never persisted.
 
   const styleProfile = naiaCustomer.onboardingProfile;
 

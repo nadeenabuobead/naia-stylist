@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { useState, useEffect, useRef } from "react";
 import { useLoaderData, useFetcher, Link } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type LinksFunction } from "react-router";
@@ -10,6 +11,8 @@ import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import { verifyCloudinaryAsset, deleteCloudinaryAsset, buildPrivateDownloadUrl, getCloudinaryConfig, validatePublicIdOwnership } from "~/lib/cloudinary-admin.server";
 import { computeClosetInsights, type ClosetInsightProfile } from "~/lib/ai/closet-insights";
+import { moderateImageContent } from "~/lib/image-moderation.server";
+import { screenGarmentSuitability } from "~/lib/image-suitability.server";
 
 // Option B shell: MyNaiaLayout + naiaStyles (NADINE header, My nAia navigation)
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
@@ -90,7 +93,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
   if (!customer) return redirect("/auth/shopify/login");
 
-  const insightItems = customer.closetItems.map((item) => ({
+  // Generate signed display URLs for all private closet items (local HMAC, no network).
+  // Legacy items with imageUrl (public delivery) retain their imageUrl as fallback.
+  const cfg = getCloudinaryConfig();
+  const items = customer.closetItems.map((item) => {
+    let displayImageUrl: string | null = null;
+    if (item.imagePublicId && item.imageFormat && cfg) {
+      displayImageUrl = buildPrivateDownloadUrl(cfg, item.imagePublicId, item.imageFormat, "private");
+    } else if (item.imageUrl) {
+      displayImageUrl = item.imageUrl;
+    }
+    return { ...item, displayImageUrl };
+  });
+
+  const insightItems = items.map((item) => ({
     id: item.id,
     category: item.category as string,
     primaryColor: item.primaryColor,
@@ -112,7 +128,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : null;
   const closetInsights = computeClosetInsights(insightItems, insightProfile);
 
-  return data({ items: customer.closetItems, closetInsights });
+  return data({ items, closetInsights });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -127,42 +143,26 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === "add") {
     const name = formData.get("name") as string;
     const category = formData.get("category") as string;
-    const imageUrl = formData.get("imageUrl") as string;
+    const publicId = (formData.get("publicId") as string)?.trim();
     const primaryColor = formData.get("primaryColor") as string;
     const pattern = formData.get("pattern") as string;
     const brand = formData.get("brand") as string;
     const occasions = JSON.parse((formData.get("occasions") as string) || "[]");
     const seasons = JSON.parse((formData.get("seasons") as string) || "[]");
-    if (!name || !category || !imageUrl) return data({ error: "Name and category required" }, { status: 400 });
+    if (!name || !category) return data({ error: "Name and category required" }, { status: 400 });
+    if (!publicId) return data({ error: "Image upload reference required." }, { status: 400 });
 
     // ── Server-side upload validation ─────────────────────────────────────────
     // All checks run BEFORE any DB write. Rejected uploads have their Cloudinary
     // asset deleted so orphaned assets do not accumulate in storage.
 
-    // 1. Cloudinary URL hostname — prevents raw-POST bypass with arbitrary URLs.
-    const allowedHosts = ["res.cloudinary.com", "res-4.cloudinary.com"];
-    let imageUrlHost: string;
-    try {
-      imageUrlHost = new URL(imageUrl).hostname;
-    } catch {
-      return data({ error: "Invalid image URL." }, { status: 400 });
-    }
-    if (!allowedHosts.some(h => imageUrlHost === h || imageUrlHost.endsWith(`.${h}`))) {
-      return data({ error: "Image must be uploaded via the app." }, { status: 400 });
-    }
-
-    // 2. Extract public_id and validate it belongs to this customer's folder.
-    const publicId = extractCloudinaryPublicId(imageUrl);
-    if (!publicId) {
-      return data({ error: "Invalid image URL format." }, { status: 400 });
-    }
+    // 1. Ownership check — publicId must belong to the authenticated customer's folder.
     const ownership = validatePublicIdOwnership(publicId, customer.id);
     if (!ownership.ok) {
       return data({ error: ownership.error }, { status: 400 });
     }
 
-    // 3. Verify via Cloudinary Admin API — authoritative format/bytes/dimensions
-    //    (never trusted from client-provided form data).
+    // 2. Verify via Cloudinary Admin API — authoritative format/bytes/dimensions.
     const verify = await verifyCloudinaryAsset(publicId, "private");
     if (!verify.ok) {
       await deleteCloudinaryAsset(publicId, "private");
@@ -174,21 +174,30 @@ export async function action({ request }: ActionFunctionArgs) {
     const serverWidth  = verify.asset.width;
     const serverHeight = verify.asset.height;
 
-    // 4. Format allowlist — derived from Admin API, not client-provided value.
-    const ALLOWED_FORMATS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"]);
+    if (verify.asset.type !== "private") {
+      await deleteCloudinaryAsset(publicId, "private");
+      return data({ error: "Image must be uploaded via the app." }, { status: 400 });
+    }
+    if (verify.asset.resourceType !== "image") {
+      await deleteCloudinaryAsset(publicId, "private");
+      return data({ error: "Uploaded file must be an image." }, { status: 400 });
+    }
+
+    // 3. Format allowlist — derived from Admin API, not client-provided value.
+    const ALLOWED_FORMATS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]);
     if (!ALLOWED_FORMATS.has(serverFormat)) {
       await deleteCloudinaryAsset(publicId, "private");
       return data({ error: `File type "${serverFormat}" is not accepted. Use JPG, PNG, WEBP, or HEIC.` }, { status: 400 });
     }
 
-    // 5. File-size cap — from Admin API, not client-reported bytes.
+    // 4. File-size cap — from Admin API, not client-reported bytes.
     const SERVER_MAX_BYTES = 5 * 1024 * 1024;
     if (serverBytes > SERVER_MAX_BYTES) {
       await deleteCloudinaryAsset(publicId, "private");
       return data({ error: `Image is too large (${(serverBytes / 1024 / 1024).toFixed(1)} MB). Maximum is 5 MB.` }, { status: 400 });
     }
 
-    // 6. Dimension bounds — serverWidth / serverHeight from Admin API, not client form data.
+    // 5. Dimension bounds — from Admin API, not client form data.
     const MIN_DIM = 200;
     const MAX_DIM = 8000;
     if (serverWidth !== null && serverWidth < MIN_DIM) {
@@ -208,30 +217,87 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ error: `Image height (${serverHeight} px) exceeds the maximum of ${MAX_DIM} px.` }, { status: 400 });
     }
 
-    // 7. Server-side magic-byte check — fetch the first 12 bytes from Cloudinary
-    //    via a signed download URL (Range: bytes=0-11) and verify the file signature.
-    //    This confirms the actual stored bytes match a supported image format,
-    //    independent of any client-reported format string.
+    // 6. Server-side magic-byte check.
     const cfg = getCloudinaryConfig();
-    if (cfg) {
-      const downloadUrl = buildPrivateDownloadUrl(cfg, publicId, serverFormat, "private");
-      try {
-        const byteRes = await fetch(downloadUrl, {
-          headers: { Range: "bytes=0-11" },
-          signal: AbortSignal.timeout(15000),
-        });
-        if (byteRes.ok) {
-          const buf = await byteRes.arrayBuffer();
-          const header = new Uint8Array(buf);
-          if (!detectImageFormatFromBytes(header)) {
-            await deleteCloudinaryAsset(publicId, "private");
-            return data({ error: "File signature does not match a supported image format." }, { status: 400 });
-          }
+    if (!cfg) {
+      await deleteCloudinaryAsset(publicId, "private");
+      return data({ error: "Image service is not configured. Please try again." }, { status: 503 });
+    }
+    const downloadUrl = buildPrivateDownloadUrl(cfg, publicId, serverFormat, "private");
+    try {
+      const byteRes = await fetch(downloadUrl, {
+        headers: { Range: "bytes=0-11" },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (byteRes.ok) {
+        const buf = await byteRes.arrayBuffer();
+        const header = new Uint8Array(buf);
+        if (!detectImageFormatFromBytes(header)) {
+          await deleteCloudinaryAsset(publicId, "private");
+          return data({ error: "File signature does not match a supported image format." }, { status: 400 });
         }
-      } catch {
-        await deleteCloudinaryAsset(publicId, "private");
-        return data({ error: "Image verification timed out. Please try again." }, { status: 400 });
       }
+    } catch {
+      await deleteCloudinaryAsset(publicId, "private");
+      return data({ error: "Image verification timed out. Please try again." }, { status: 400 });
+    }
+
+    // ── Layer 2: Global content safety moderation ──────────────────────────
+    const moderation = await moderateImageContent(downloadUrl);
+    if (moderation.status === "MODERATION_UNAVAILABLE") {
+      await deleteCloudinaryAsset(publicId, "private");
+      // Minimal audit log — no publicId, no URL, no image data.
+      try {
+        await prisma.journeyEvent.create({
+          data: {
+            type: "image_moderation_unavailable",
+            occurredAt: new Date(),
+            customerIdHash: createHash("sha256").update(customer.id).digest("hex").slice(0, 16),
+            sessionId: "closet",
+            payload: { feature: "closet" },
+          },
+        });
+      } catch { /* audit failure never blocks */ }
+      return data({ error: "Image review is temporarily unavailable. Please try again." }, { status: 503 });
+    }
+    if (moderation.status === "SAFETY_REJECT") {
+      await deleteCloudinaryAsset(publicId, "private");
+      // Minimal audit log — no publicId, no URL, no image data.
+      try {
+        await prisma.journeyEvent.create({
+          data: {
+            type: "image_safety_reject",
+            occurredAt: new Date(),
+            customerIdHash: createHash("sha256").update(customer.id).digest("hex").slice(0, 16),
+            sessionId: "closet",
+            payload: { feature: "closet", reasonCode: moderation.reasonCode },
+          },
+        });
+      } catch { /* audit failure never blocks */ }
+      return data({ error: "Photo could not be accepted. Please use a clothing photo." }, { status: 422 });
+    }
+
+    // ── Layer 3: Garment suitability ───────────────────────────────────────
+    const suitability = await screenGarmentSuitability(downloadUrl, { declaredCategory: category });
+    const GARMENT_GUIDANCE: Record<string, string> = {
+      no_garment_visible: "No clothing item was detected. Please upload a photo of a single garment.",
+      image_too_blurry: "Photo is too blurry. Please try a clearer photo.",
+      garment_excessively_cropped: "The garment is too cropped. Please ensure the full item is visible.",
+      multiple_items_ambiguous: "Multiple items detected. Please photograph one item at a time.",
+      color_indeterminate: "The colour of this item is unclear in the photo.",
+      category_mismatch: "The item in the photo does not match the selected category.",
+      item_not_identifiable: "The item could not be identified. Please try a clearer photo.",
+      assessment_failed: "Image assessment is temporarily unavailable. Please try again.",
+    };
+    if (suitability.status === "RETRY_IMAGE") {
+      await deleteCloudinaryAsset(publicId, "private");
+      const msg = GARMENT_GUIDANCE[(suitability as { status: "RETRY_IMAGE"; subCode: string }).subCode]
+        ?? "Please upload a clearer photo of a single fashion item.";
+      return data({ error: msg }, { status: 422 });
+    }
+    if (suitability.status === "NEEDS_CLARIFICATION") {
+      // Item is usable but needs clarification — proceed but surface the guidance.
+      // (Do not block; subCode is informational.)
     }
     // ──────────────────────────────────────────────────────────────────────────
 
@@ -245,8 +311,15 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const newItem = await prisma.closetItem.create({
       data: {
-        customerId: customer.id, name, category, imageUrl,
-        primaryColor: primaryColor || null, pattern: pattern || null, brand: brand || null,
+        customerId: customer.id,
+        name,
+        category,
+        imageUrl: null,                // private upload — null for new records
+        imagePublicId: publicId,
+        imageFormat: serverFormat,
+        primaryColor: primaryColor || null,
+        pattern: pattern || null,
+        brand: brand || null,
         occasions: occasions.length > 0 ? occasions : null,
         seasons: seasons.length > 0 ? seasons : null,
         tryOnEligibility: stageA.eligible,
@@ -263,8 +336,9 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     } catch { /* event emission never blocks the response */ }
 
-    if (stageA.eligible === "pending-assessment" && imageUrl) {
-      await runStageBAssessment(newItem.id, imageUrl, stageA.category, async (id, fields) => {
+    if (stageA.eligible === "pending-assessment" && newItem.imagePublicId) {
+      const stageAUrl = buildPrivateDownloadUrl(cfg, newItem.imagePublicId, newItem.imageFormat ?? "jpg", "private");
+      await runStageBAssessment(newItem.id, stageAUrl, stageA.category, async (id, fields) => {
         await prisma.closetItem.update({ where: { id }, data: fields });
       });
     }
@@ -410,13 +484,19 @@ export default function Closet() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [newCategory, setNewCategory] = useState("TOPS");
-  const [newImageUrl, setNewImageUrl] = useState("");
+  const [newImageUrl, setNewImageUrl] = useState("");  // local blob URL for preview only — never sent to server
+  const [newPublicId, setNewPublicId] = useState("");  // Cloudinary public ID — sent to action
+  const blobUrlRef = useRef<string | null>(null);
   const [newColor, setNewColor] = useState("");
   const [newPattern, setNewPattern] = useState("");
   const [newBrand, setNewBrand] = useState("");
   const [newOccasions, setNewOccasions] = useState<string[]>([]);
   const [newSeasons, setNewSeasons] = useState<string[]>([]);
-  const [imgMeta, setImgMeta] = useState<{ width?: number; height?: number; format?: string; bytes?: number }>({});
+
+  // Revoke the blob preview URL when the component unmounts.
+  useEffect(() => {
+    return () => { if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current); };
+  }, []);
 
   const filtered = items.filter((item: any) => {
     const matchesCat = activeCategory === "ALL" || item.category === activeCategory;
@@ -523,27 +603,27 @@ export default function Closet() {
 
     try {
       const sigRes = await fetch("/api/cloudinary-signature", { credentials: "same-origin" });
-      if (!sigRes.ok) {
-        const errData = await sigRes.json().catch(() => ({} as any));
-        setUploadError((errData as any).error || "Upload service unavailable. Please try again.");
+      if (sigRes.status === 401) { setUploadError("Your session has expired. Please sign in again."); setUploading(false); return; }
+      if (!sigRes.ok) { setUploadError("Upload service unavailable. Please try again."); setUploading(false); return; }
+      const sig = await sigRes.json() as any;
+
+      if (file.size > sig.maxFileSizeBytes) {
+        setUploadError(`Image must be under ${Math.round(sig.maxFileSizeBytes / 1024 / 1024)} MB.`);
         setUploading(false);
         return;
       }
-      const sig = await sigRes.json() as any;
 
       const form = new FormData();
       form.append("file", file);
       form.append("api_key", sig.apiKey);
       form.append("timestamp", String(sig.timestamp));
       form.append("signature", sig.signature);
-      form.append("asset_folder", sig.assetFolder);
+      form.append("folder", sig.assetFolder);        // fixed folder mode — ownership check requires prefix
       form.append("upload_preset", sig.uploadPreset);
       form.append("allowed_formats", sig.allowedFormats);
+      form.append("type", sig.deliveryType);         // signed — enforces private delivery
 
-      const cloudRes = await fetch(
-        `https://api.cloudinary.com/v1_1/${sig.cloudName}/image/upload`,
-        { method: "POST", body: form }
-      );
+      const cloudRes = await fetch(sig.uploadUrl, { method: "POST", body: form });
       if (!cloudRes.ok) {
         const errData = await cloudRes.json().catch(() => ({} as any));
         setUploadError((errData as any).error?.message || "Upload failed. Please try again.");
@@ -551,13 +631,17 @@ export default function Closet() {
         return;
       }
       const cloudData = await cloudRes.json() as any;
-      setNewImageUrl(cloudData.secure_url);
-      setImgMeta({
-        width:  cloudData.width  ?? undefined,
-        height: cloudData.height ?? undefined,
-        format: cloudData.format ?? undefined,
-        bytes:  cloudData.bytes  ?? undefined,
-      });
+      if (!cloudData.public_id) {
+        setUploadError("Upload failed. Please try another photo.");
+        setUploading(false);
+        return;
+      }
+      // Private assets are not accessible via secure_url — use a local blob URL for preview.
+      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+      const blobUrl = URL.createObjectURL(file);
+      blobUrlRef.current = blobUrl;
+      setNewImageUrl(blobUrl);
+      setNewPublicId(cloudData.public_id);
     } catch {
       setUploadError("Upload failed. Please check your connection and try again.");
     } finally {
@@ -573,21 +657,30 @@ export default function Closet() {
   }
 
   function handleAdd() {
-    if (!newName) return;
+    if (!newName || !newPublicId) return;
     fetcher.submit(
       {
-        intent: "add", name: newName, category: newCategory, imageUrl: newImageUrl,
-        primaryColor: newColor, pattern: newPattern, brand: newBrand,
-        occasions: JSON.stringify(newOccasions), seasons: JSON.stringify(newSeasons),
-        ...(imgMeta.width  !== undefined && { imageWidth:  String(imgMeta.width)  }),
-        ...(imgMeta.height !== undefined && { imageHeight: String(imgMeta.height) }),
-        ...(imgMeta.format !== undefined && { imageFormat: imgMeta.format         }),
-        ...(imgMeta.bytes  !== undefined && { imageBytes:  String(imgMeta.bytes)  }),
+        intent: "add",
+        name: newName,
+        category: newCategory,
+        publicId: newPublicId,           // Cloudinary public ID — server verifies ownership
+        primaryColor: newColor,
+        pattern: newPattern,
+        brand: newBrand,
+        occasions: JSON.stringify(newOccasions),
+        seasons: JSON.stringify(newSeasons),
       },
       { method: "post" }
     );
-    setNewName(""); setNewImageUrl(""); setNewColor(""); setNewPattern(""); setNewBrand("");
-    setNewOccasions([]); setNewSeasons([]); setImgMeta({});
+    setNewName("");
+    if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
+    setNewImageUrl("");
+    setNewPublicId("");
+    setNewColor("");
+    setNewPattern("");
+    setNewBrand("");
+    setNewOccasions([]);
+    setNewSeasons([]);
     setShowAddForm(false);
   }
 
@@ -763,7 +856,7 @@ export default function Closet() {
               type="button"
               className="cl-submit"
               onClick={handleAdd}
-              disabled={!newName || !newImageUrl || uploading}
+              disabled={!newName || !newPublicId || uploading}
             >
               {uploading ? "Uploading…" : "Add to Wardrobe"}
             </button>
@@ -826,8 +919,8 @@ export default function Closet() {
               return (
                 <div key={item.id} className="cl-card">
                   <div className="cl-card-img">
-                    {item.imageUrl
-                      ? <img src={item.imageUrl} alt={item.name} />
+                    {item.displayImageUrl
+                      ? <img src={item.displayImageUrl} alt={item.name} />
                       : <span style={{ fontSize: "64px", opacity: 0.2 }}>◇</span>
                     }
                   </div>

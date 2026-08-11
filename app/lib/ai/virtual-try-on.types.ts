@@ -104,6 +104,8 @@ export interface NaiaModelRecord {
   photoAnalysisConsentAt: Date | null;
   saveModelConsentAt: Date | null;
   consentPolicyVersion: string | null;
+  bodyModerationStatus: string | null;
+  bodyModerationAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

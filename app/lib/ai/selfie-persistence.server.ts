@@ -251,6 +251,32 @@ export async function deleteBoth(
   return { ok: true };
 }
 
+// ── getSelfieForModeration ────────────────────────────────────────────────────
+//
+// Returns the stored photo credentials for server-side re-moderation.
+// Only called from the retry-moderation action intent — never serialised to browser.
+
+export interface SelfieModerationCredentials {
+  publicId: string;
+  format: string;
+  consentAt: string;
+  analysisStatus: string;
+}
+
+export async function getSelfieForModeration(
+  customerId: string,
+  _findFn: FindSelfieRecordFn = _findSelfieRecord,
+): Promise<SelfieModerationCredentials | null> {
+  const record = await _findFn(customerId);
+  if (!record || !record.photoPublicId || !record.photoFormat || record.photoDeletedAt !== null) return null;
+  return {
+    publicId: record.photoPublicId,
+    format: record.photoFormat,
+    consentAt: record.consentAt.toISOString(),
+    analysisStatus: record.analysisStatus,
+  };
+}
+
 // ── loadSelfieForDisplay ──────────────────────────────────────────────────────
 //
 // Returns a public-safe view of the record — no photoPublicId or photoFormat.

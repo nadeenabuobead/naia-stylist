@@ -152,8 +152,12 @@ model ClosetItem {
 
   // Basic Info
   name        String?
-  imageUrl    String
+  imageUrl    String?          // Nullable — null for new private-upload records; kept for legacy
   thumbnailUrl String?
+
+  // Private Cloudinary asset reference (replaces public imageUrl for new items)
+  imagePublicId String?        // naia-wardrobe/{customerId}/...
+  imageFormat   String?        // Format for signed URL generation (jpg, png, webp, heic)
 
   // Categorization
   category    ClosetCategory
@@ -739,6 +743,10 @@ model NaiaModel {
   photoAnalysisConsentAt DateTime?
   saveModelConsentAt     DateTime?
   consentPolicyVersion   String?
+
+  // Body photo moderation status — PENDING until Layer 2+3 pass; APPROVED to enable VTO.
+  bodyModerationStatus String?   @default("PENDING")
+  bodyModerationAt     DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

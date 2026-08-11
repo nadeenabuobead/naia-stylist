@@ -205,6 +205,9 @@ export interface SubmitJobParams {
   virtualTryOnConsentAt: Date;
   saveTryOnResultConsentAt?: Date | null;
   idempotencyKey: string;
+  // Gate: PENDING/null means body photo has not passed Layer 2+3 moderation.
+  // submitTryOnJob rejects unless this is "APPROVED".
+  bodyModerationStatus?: string | null;
 }
 
 export type SubmitJobResult =
@@ -242,6 +245,17 @@ export async function submitTryOnJob(
     _advanceJob        = (job, status, extras) => advanceTryOnJob(job, status, extras),
     _checkCooldown     = checkCustomerCooldown,
   } = deps;
+
+  // 0. Body photo moderation gate — APPROVED required before any FASHN submission.
+  // bodyModerationStatus is set to "APPROVED" in saveNaiaModelPhoto after Layer 2+3 pass.
+  // Never send a photo to FASHN when status is PENDING, null, or anything other than APPROVED.
+  if (params.bodyModerationStatus !== undefined && params.bodyModerationStatus !== "APPROVED") {
+    return {
+      ok: false,
+      code: "NOT_READY",
+      customerMessage: "Your model photo is pending review. Please try again in a moment.",
+    };
+  }
 
   // 1. Garment eligibility — fail-closed on non-ready entries
   const garment = validateGarmentEligibility(params.garmentHandle);

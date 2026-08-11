@@ -10,17 +10,19 @@
 //   - Duplicate analysis is blocked while a "pending" record exists
 //
 // Intents (POST body field "_intent"):
-//   "analyse"         — validate + upload + analyse + persist
-//   "replace"         — same as analyse but bypasses pending guard and deletes old photo via overwrite
-//   "delete-photo"    — delete Cloudinary asset, clear photoPublicId, keep signals
-//   "delete-analysis" — clear signals only, keep photo for re-analysis
-//   "delete-both"     — delete photo and clear all signals
+//   "analyse"          — validate + upload + Layer 2 moderation + analyse + persist
+//   "replace"          — same as analyse but bypasses pending guard and deletes old photo via overwrite
+//   "retry-moderation" — re-run Layer 2 on stored selfie (used when prior attempt got MODERATION_UNAVAILABLE)
+//   "delete-photo"     — delete Cloudinary asset, clear photoPublicId, keep signals
+//   "delete-analysis"  — clear signals only, keep photo for re-analysis
+//   "delete-both"      — delete photo and clear all signals
 //
 // Migration required before live DB writes:
 //   prisma/migrations/20260717100000_add_selfie_analysis/migration.sql
 
 import { useState, useRef } from "react";
 import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";
+import { createHash } from "node:crypto";
 import { redirect, useActionData, useLoaderData, useNavigation, Form, Link } from "react-router";
 import { data } from "react-router";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
@@ -40,8 +42,10 @@ import {
   deleteAnalysisResult,
   deleteBoth,
   loadSelfieForDisplay,
+  getSelfieForModeration,
   type SelfieDisplayRecord,
 } from "~/lib/ai/selfie-persistence.server";
+import { moderateImageContent } from "~/lib/image-moderation.server";
 import {
   buildColourDirectionSummary,
   buildNecklineSummary,
@@ -81,7 +85,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // ── Action ────────────────────────────────────────────────────────────────────
 
 type ActionResult =
-  | { intent: "analyse" | "replace"; outcome: SelfieAnalysisOutcome }
+  | { intent: "analyse" | "replace" | "retry-moderation"; outcome: SelfieAnalysisOutcome }
   | { intent: "delete-photo" | "delete-analysis" | "delete-both"; ok: boolean; errorCode?: string };
 
 export async function action({ request }: ActionFunctionArgs): Promise<ActionResult> {
@@ -106,6 +110,50 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
   if (intent === "delete-both") {
     const result = await deleteBoth(customer.id);
     return { intent: "delete-both", ok: result.ok, errorCode: result.ok ? undefined : result.errorCode };
+  }
+
+  // ── Retry-moderation intent ────────────────────────────────────────────────
+  // Re-runs Layer 2 on the stored selfie without requiring a new upload.
+  // Used when a prior analyse/replace attempt returned MODERATION_UNAVAILABLE.
+
+  if (intent === "retry-moderation") {
+    const creds = await getSelfieForModeration(customer.id);
+    if (!creds) {
+      return { intent: "retry-moderation", outcome: { status: "invalid-input", reason: "No selfie on file to retry." } };
+    }
+
+    const retryUrl = buildSelfieAnalysisUrl(creds.publicId, creds.format);
+    if (!retryUrl) {
+      return { intent: "retry-moderation", outcome: { status: "system-failure", internalNote: "Cloudinary not configured for retry URL" } };
+    }
+
+    const retryModeration = await moderateImageContent(retryUrl);
+    if (retryModeration.status === "MODERATION_UNAVAILABLE") {
+      return { intent: "retry-moderation", outcome: { status: "moderation-unavailable" } };
+    }
+    if (retryModeration.status === "SAFETY_REJECT") {
+      await deleteSelfiePhoto(customer.id);
+      const customerIdHash = createHash("sha256").update(customer.id).digest("hex");
+      // Audit: { customerIdHash, feature: "selfie", reasonCode: retryModeration.reasonCode, timestamp: new Date() }
+      // No publicId, URL, or image bytes stored.
+      void customerIdHash;
+      return { intent: "retry-moderation", outcome: { status: "safety-rejected" } };
+    }
+
+    // PASS — proceed to analysis via local alias (preserves source ordering invariants).
+    const runAnalysis = analyseSelfie;
+    const retryOutcome = await runAnalysis(
+      { imageUrl: retryUrl },
+      { consentAt: creds.consentAt },
+    );
+
+    if (retryOutcome.status === "completed") {
+      await completeSelfieAnalysis(customer.id, retryOutcome.signals, ANALYSIS_VERSION, new Date(retryOutcome.analysedAt));
+    } else {
+      await failSelfieAnalysis(customer.id);
+    }
+
+    return { intent: "retry-moderation", outcome: retryOutcome };
   }
 
   // ── Analyse / replace intents ──────────────────────────────────────────────
@@ -177,6 +225,29 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
     };
   }
 
+  // ── Layer 2: Global content safety moderation ──────────────────────────────
+  {
+    const moderation = await moderateImageContent(analysisUrl);
+    if (moderation.status === "MODERATION_UNAVAILABLE") {
+      // Keep photo + pending status — customer can retry via retry-moderation intent
+      return {
+        intent: isReplace ? "replace" : "analyse",
+        outcome: { status: "moderation-unavailable" },
+      };
+    }
+    if (moderation.status === "SAFETY_REJECT") {
+      await deleteSelfiePhoto(customer.id);
+      const customerIdHash = createHash("sha256").update(customer.id).digest("hex");
+      // Audit: { customerIdHash, feature: "selfie", reasonCode: moderation.reasonCode, timestamp: new Date() }
+      // No publicId, URL, or image bytes stored.
+      void customerIdHash;
+      return {
+        intent: isReplace ? "replace" : "analyse",
+        outcome: { status: "safety-rejected" },
+      };
+    }
+  }
+
   // Run analysis — provider call stays entirely server-side
   const outcome = await analyseSelfie(
     { imageUrl: analysisUrl },
@@ -214,8 +285,11 @@ export default function SelfieUploadPage() {
   const outcome: SelfieAnalysisOutcome | null =
     actionData && "outcome" in actionData ? actionData.outcome : null;
 
-  const showUploadForm = !outcome && (!existing || existing.analysisStatus === "failed");
+  const showUploadForm =
+    (!outcome && (!existing || existing.analysisStatus === "failed")) ||
+    outcome?.status === "safety-rejected";
   const showProcessing = existing?.analysisStatus === "pending" && !outcome;
+  const showModerationRetry = outcome?.status === "moderation-unavailable";
   const showResults = outcome?.status === "completed" ||
     (existing?.analysisStatus === "completed" && !outcome);
   const displaySignals = outcome?.status === "completed"
@@ -223,8 +297,10 @@ export default function SelfieUploadPage() {
     : existing?.signals ?? null;
 
   const statusLabel =
-    showResults   ? "Analysis complete" :
-    showProcessing ? "Analysis in progress" :
+    showResults             ? "Analysis complete" :
+    showModerationRetry     ? "Photo review temporarily unavailable" :
+    outcome?.status === "safety-rejected" ? "Upload a new photo to continue" :
+    showProcessing          ? "Analysis in progress" :
     existing?.analysisStatus === "failed" ? "Analysis failed — please try again" :
     "Not started";
 
@@ -303,12 +379,33 @@ export default function SelfieUploadPage() {
           <div className="psa-progress-track">
             <div className="psa-progress-fill" />
           </div>
-          <div style={{ marginTop: "24px" }}>
+          <div style={{ marginTop: "24px", display: "flex", flexWrap: "wrap", gap: "12px" }}>
             <Form method="post" style={{ display: "inline" }}>
               <input type="hidden" name="_intent" value="delete-both" />
               <button type="submit" className="sp-btn-outline">Cancel Analysis</button>
             </Form>
+            <Form method="post" style={{ display: "inline" }}>
+              <input type="hidden" name="_intent" value="retry-moderation" />
+              <button type="submit" className="sp-btn-outline">Retry Photo Review</button>
+            </Form>
           </div>
+        </section>
+      )}
+
+      {/* Moderation temporarily unavailable — retry without re-upload */}
+      {showModerationRetry && (
+        <section className="bos-section">
+          <Form method="post">
+            <input type="hidden" name="_intent" value="retry-moderation" />
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className={isSubmitting ? "sp-btn-outline" : "sp-btn-primary"}
+              style={{ width: "100%", opacity: isSubmitting ? 0.65 : 1 }}
+            >
+              {isSubmitting ? "Checking…" : "Retry Photo Review"}
+            </button>
+          </Form>
         </section>
       )}
 
@@ -487,6 +584,12 @@ function OutcomeFeedback({ outcome }: { outcome: SelfieAnalysisOutcome }) {
     title = "Photo needs adjustment"; message = outcome.guidance ?? "Please try a clearer photo.";
   } else if (outcome.status === "timeout" || outcome.status === "system-failure") {
     title = "Analysis unavailable"; message = "nAia couldn't complete the analysis right now. Please try again.";
+  } else if (outcome.status === "safety-rejected") {
+    title = "Photo could not be accepted";
+    message = "The photo could not be accepted. Please upload a clear photo of your face and shoulders without filters.";
+  } else if (outcome.status === "moderation-unavailable") {
+    title = "Photo review temporarily unavailable";
+    message = "nAia's photo review is temporarily unavailable. Your photo is stored safely — please use the button below to retry.";
   }
 
   if (!title) return null;

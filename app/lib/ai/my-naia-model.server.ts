@@ -42,6 +42,16 @@ import {
   type VerifyAssetFn,
   type CloudinaryConfig,
 } from "../cloudinary-admin.server.js";
+import {
+  moderateImageContent,
+  type ModerationResult,
+  type AnalyzeForModerationFn,
+} from "../image-moderation.server.js";
+import {
+  screenVtoBodyPhoto,
+  type VtoSuitabilityResult,
+  type AnalyzeForSuitabilityFn,
+} from "../image-suitability.server.js";
 
 export { POLICY_VERSION, validatePublicIdOwnership, buildSignedDeliveryUrl, buildPrivateDownloadUrl };
 export type { NaiaModelRecord, VirtualTryOnJobRecord, TryOnJobStatus, VerifyAssetFn };
@@ -194,6 +204,10 @@ const PERMITTED_DELIVERY_TYPES = new Set(["private", "authenticated"]);
 const _verifyModelAsset: VerifyAssetFn = (publicId) =>
   verifyCloudinaryAsset(publicId, "private");
 
+// DI types for moderation (injectable so tests don't hit Claude)
+export type ModerateFn = (imageUrl: string, _analyze?: AnalyzeForModerationFn) => Promise<ModerationResult>;
+export type ScreenBodyFn = (imageUrl: string, _analyze?: AnalyzeForSuitabilityFn) => Promise<VtoSuitabilityResult>;
+
 export async function saveNaiaModelPhoto(
   customerId: string,
   slot: "face" | "body",
@@ -205,6 +219,8 @@ export async function saveNaiaModelPhoto(
   _upsertModelFn: UpsertModelFn = _upsertModel,
   _deleteAsset: DeleteAssetFn = deleteCloudinaryAsset,
   _verifyAsset: VerifyAssetFn = _verifyModelAsset,
+  _moderateContent: ModerateFn = moderateImageContent,
+  _screenBodyPhoto: ScreenBodyFn = screenVtoBodyPhoto,
 ): Promise<
   | { ok: true; model: NaiaModelRecord; orphanPublicId?: string }
   | { ok: false; error: string }
@@ -247,6 +263,74 @@ export async function saveNaiaModelPhoto(
   // Use server-verified values. Browser-supplied version/format are not persisted.
   const verifiedFormat = asset.format || null;
   const verifiedVersion = asset.version || null;
+
+  // ── Layer 1: format allowlist, size cap, dimension bounds (Admin API only) ──
+  const ALLOWED_FORMATS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]);
+  if (verifiedFormat && !ALLOWED_FORMATS.has(verifiedFormat)) {
+    await _deleteAsset(newPublicId, "private");
+    return { ok: false, error: `File type "${verifiedFormat}" is not accepted. Use JPG, PNG, WEBP, or HEIC.` };
+  }
+  const MAX_BYTES = 5 * 1024 * 1024;
+  if (asset.bytes && asset.bytes > MAX_BYTES) {
+    await _deleteAsset(newPublicId, "private");
+    return { ok: false, error: "Photo is too large. Maximum size is 5 MB." };
+  }
+  const MIN_DIM = 200;
+  const MAX_DIM = 8000;
+  if (asset.width !== null && asset.width < MIN_DIM) {
+    await _deleteAsset(newPublicId, "private");
+    return { ok: false, error: `Photo width (${asset.width}px) is below the minimum of ${MIN_DIM}px.` };
+  }
+  if (asset.height !== null && asset.height < MIN_DIM) {
+    await _deleteAsset(newPublicId, "private");
+    return { ok: false, error: `Photo height (${asset.height}px) is below the minimum of ${MIN_DIM}px.` };
+  }
+  if (asset.width !== null && asset.width > MAX_DIM) {
+    await _deleteAsset(newPublicId, "private");
+    return { ok: false, error: `Photo width (${asset.width}px) exceeds the maximum of ${MAX_DIM}px.` };
+  }
+  if (asset.height !== null && asset.height > MAX_DIM) {
+    await _deleteAsset(newPublicId, "private");
+    return { ok: false, error: `Photo height (${asset.height}px) exceeds the maximum of ${MAX_DIM}px.` };
+  }
+
+  // ── Layer 2: global content safety moderation (both slots) ───────────────
+  const cfg = getCloudinaryConfig();
+  if (!cfg) {
+    await _deleteAsset(newPublicId, "private");
+    return { ok: false, error: "Image service is not configured. Please try again." };
+  }
+  const moderationUrl = buildPrivateDownloadUrl(cfg, newPublicId, verifiedFormat ?? "jpg", "private");
+  const moderation = await _moderateContent(moderationUrl);
+  if (moderation.status === "MODERATION_UNAVAILABLE") {
+    await _deleteAsset(newPublicId, "private");
+    return { ok: false, error: "Image review is temporarily unavailable. Please try again." };
+  }
+  if (moderation.status === "SAFETY_REJECT") {
+    await _deleteAsset(newPublicId, "private");
+    return { ok: false, error: "Photo could not be accepted. Please use a different image." };
+  }
+
+  // ── Layer 3: body photo suitability (body slot only) ─────────────────────
+  let bodyModerationApproved = false;
+  if (slot === "body") {
+    const suitability = await _screenBodyPhoto(moderationUrl);
+    if (suitability.status !== "PASS") {
+      await _deleteAsset(newPublicId, "private");
+      const VTO_GUIDANCE: Record<string, string> = {
+        no_person: "No person detected. Please upload a clear full-body photo.",
+        multiple_people: "Only one person should be visible in the photo.",
+        body_area_not_visible: "Please ensure your full body is visible from head to ankle.",
+        image_too_blurry: "Photo is too blurry. Please try a clearer photo.",
+        unusable_pose: "Framing or pose is not suitable. Try a front-facing full-body photo.",
+        assessment_failed: "Photo assessment is temporarily unavailable. Please try again.",
+      };
+      const msg = VTO_GUIDANCE[(suitability as { status: "RETRY_IMAGE"; subCode: string }).subCode]
+        ?? "Photo is not suitable for virtual try-on. Please try a different photo.";
+      return { ok: false, error: msg };
+    }
+    bodyModerationApproved = true;
+  }
   // ─────────────────────────────────────────────────────────────────────────
 
   // Capture the old reference before overwriting (for post-persistence cleanup).
@@ -256,7 +340,14 @@ export async function saveNaiaModelPhoto(
   const slotData =
     slot === "face"
       ? { facePublicId: newPublicId, faceVersion: verifiedVersion, faceFormat: verifiedFormat, deliveryType: asset.type }
-      : { bodyPublicId: newPublicId, bodyVersion: verifiedVersion, bodyFormat: verifiedFormat, deliveryType: asset.type };
+      : {
+          bodyPublicId: newPublicId,
+          bodyVersion: verifiedVersion,
+          bodyFormat: verifiedFormat,
+          deliveryType: asset.type,
+          bodyModerationStatus: bodyModerationApproved ? "APPROVED" : "PENDING",
+          bodyModerationAt: bodyModerationApproved ? new Date() : null,
+        };
 
   let model: NaiaModelRecord;
   try {

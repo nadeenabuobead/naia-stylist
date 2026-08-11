@@ -49,7 +49,9 @@ export type SelfieAnalysisOutcome =
   | { status: "timeout" }
   | { status: "system-failure"; internalNote: string }
   | { status: "consent-missing" }
-  | { status: "invalid-input"; reason: string };
+  | { status: "invalid-input"; reason: string }
+  | { status: "safety-rejected" }
+  | { status: "moderation-unavailable" };
 
 // ── Persistence record ────────────────────────────────────────────────────────
 //

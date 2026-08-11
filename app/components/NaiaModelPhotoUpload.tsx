@@ -146,9 +146,10 @@ export default function NaiaModelPhotoUpload({
       return;
     }
 
-    // Upload to Cloudinary using the server-provided endpoint.
-    // sigData.uploadUrl is used verbatim — the client does not construct the URL.
-    // Delivery type is encoded in the endpoint URL (/image/private); no type form field needed.
+    // Upload to Cloudinary using the server-provided endpoint (verbatim).
+    // `folder` (fixed folder mode) prefixes public_id with naia-wardrobe/{customerId}/...
+    // which is required for server-side ownership validation.
+    // `type=private` is signed into the form — Cloudinary enforces private delivery.
     // Server-side Admin API verification enforces delivery type and asset validity before persistence.
     const form = new FormData();
     form.append("file", file);
@@ -156,8 +157,9 @@ export default function NaiaModelPhotoUpload({
     form.append("timestamp", String(sigData.timestamp));
     form.append("signature", sigData.signature);
     form.append("upload_preset", sigData.uploadPreset);
-    form.append("asset_folder", sigData.assetFolder);
+    form.append("folder", sigData.assetFolder);        // fixed folder mode — ownership check requires prefix
     form.append("allowed_formats", sigData.allowedFormats);
+    form.append("type", sigData.deliveryType);         // signed — enforces private delivery; client cannot override
 
     let uploadPublicId: string;
     let uploadVersion: number;

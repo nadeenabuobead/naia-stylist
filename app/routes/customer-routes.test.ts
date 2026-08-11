@@ -435,9 +435,10 @@ describe("H — Digital Closet: composed shell + content invariants", () => {
     assert.ok(!src.includes("/quick-style"), "no /quick-style links");
   });
 
-  it("closet._index.tsx server action rejects imageUrl values not from Cloudinary", () => {
+  it("closet._index.tsx server action validates asset ownership before processing", () => {
     const src = route("closet._index.tsx");
-    assert.ok(src.includes("res.cloudinary.com"), "validates Cloudinary hostname");
+    // New model: ownership validated via publicId path prefix (not raw CDN hostname)
+    assert.ok(src.includes("validatePublicIdOwnership"), "validates Cloudinary ownership via publicId prefix");
     assert.ok(src.includes("Image must be uploaded via the app"), "returns rejection error message");
   });
 
