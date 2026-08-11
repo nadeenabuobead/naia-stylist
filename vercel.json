@@ -1,5 +1,5 @@
 {
   "framework": "react-router",
   "installCommand": "npm install",
-  "buildCommand": "if [ \"$VERCEL_ENV\" = \"production\" ]; then npx prisma migrate deploy; elif [ \"$VERCEL_ENV\" = \"preview\" ]; then (npx prisma migrate resolve --applied \"20260624100000_add_naia_session\" 2>&1 || true) && npx prisma db push; fi && npx prisma generate && npm run build"
+  "buildCommand": "if [ \"$VERCEL_ENV\" = production ]; then npx prisma migrate deploy && npx prisma generate && npm run build; else sh scripts/build-preview.sh; fi"
 }
