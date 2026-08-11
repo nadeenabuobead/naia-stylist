@@ -311,7 +311,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const newItem = await prisma.closetItem.create({
       data: {
-        customerId: customer.id,
+        customer: { connect: { id: customer.id } },
         name,
         category,
         imageUrl: null,                // private upload — null for new records
