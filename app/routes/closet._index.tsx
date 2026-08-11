@@ -285,14 +285,14 @@ export async function action({ request }: ActionFunctionArgs) {
       multiple_items_ambiguous: "Multiple items detected. Please photograph one item at a time.",
       color_indeterminate: "The colour of this item is unclear in the photo.",
       category_mismatch: "The item in the photo does not match the selected category.",
-      item_not_identifiable: "The item could not be identified. Please try a clearer photo.",
+      item_not_identifiable: "We couldn't identify a wearable fashion item in this photo. Please upload a clear photo of the full item.",
       assessment_failed: "Image assessment is temporarily unavailable. Please try again.",
     };
     if (suitability.status === "RETRY_IMAGE") {
       await deleteCloudinaryAsset(publicId, "private");
       const msg = GARMENT_GUIDANCE[(suitability as { status: "RETRY_IMAGE"; subCode: string }).subCode]
         ?? "Please upload a clearer photo of a single fashion item.";
-      return data({ error: msg }, { status: 422 });
+      return data({ error: msg, retryImage: true }, { status: 422 });
     }
     if (suitability.status === "NEEDS_CLARIFICATION") {
       // Asset is preserved — same publicId can be resubmitted once the user corrects the field.
@@ -505,7 +505,7 @@ export async function action({ request }: ActionFunctionArgs) {
       multiple_items_ambiguous:    "Multiple items detected. Please photograph one item at a time.",
       color_indeterminate:         "The colour of this item is unclear in the photo.",
       category_mismatch:           "The item in the photo does not match the selected category.",
-      item_not_identifiable:       "The item could not be identified. Please try a clearer photo.",
+      item_not_identifiable:       "We couldn't identify a wearable fashion item in this photo. Please upload a clear photo of the full item.",
       assessment_failed:           "Image assessment is temporarily unavailable. Please try again.",
     };
     if (editSuitability.status === "RETRY_IMAGE") {
@@ -695,7 +695,7 @@ export default function Closet() {
   const { items, closetInsights } = useLoaderData<typeof loader>();
 
   const fetcher    = useFetcher();  // delete only
-  const addFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const addFetcher = useFetcher<{ success?: boolean; error?: string; retryImage?: boolean }>();
   const addPendingRef = useRef(false);   // true while we are waiting for addFetcher to settle
 
   const [showAddForm, setShowAddForm] = useState(false);
@@ -710,6 +710,7 @@ export default function Closet() {
   const [newImageUrl, setNewImageUrl] = useState("");  // local blob URL for preview only — never sent to server
   const [newPublicId, setNewPublicId] = useState("");  // Cloudinary public ID — sent to action
   const blobUrlRef = useRef<string | null>(null);
+  const addFileInputRef = useRef<HTMLInputElement>(null);
   const [newColor, setNewColor] = useState("");
   const [newPattern, setNewPattern] = useState("");
   const [newBrand, setNewBrand] = useState("");
@@ -1038,6 +1039,13 @@ export default function Closet() {
     addPendingRef.current = false;
     if (addFetcher.data?.success) {
       resetAddForm();
+      return;
+    }
+    if (addFetcher.data?.retryImage) {
+      // Server deleted the rejected Cloudinary asset — clear the stale publicId so it cannot be reused.
+      if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
+      setNewImageUrl("");
+      setNewPublicId("");
     }
     // On error, keep form open — addFetcher.data?.error renders below the submit button.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1164,6 +1172,7 @@ export default function Closet() {
                   : <span className="cl-upload-hint">Click to upload photo</span>
               }
               <input
+                ref={addFileInputRef}
                 type="file"
                 accept="image/*"
                 onChange={e => e.target.files?.[0] && uploadToCloudinary(e.target.files[0])}
@@ -1241,6 +1250,17 @@ export default function Closet() {
 
             {addFetcher.data?.error && (
               <p className="cl-error">{addFetcher.data.error}</p>
+            )}
+            {addFetcher.data?.retryImage && !newPublicId && (
+              <button
+                type="button"
+                className="cl-submit"
+                style={{ marginTop: "8px", background: "var(--naia-ink, var(--fg, #111))" }}
+                disabled={uploading}
+                onClick={() => addFileInputRef.current?.click()}
+              >
+                CHOOSE ANOTHER PHOTO
+              </button>
             )}
           </div>
         )}
