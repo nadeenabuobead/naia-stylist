@@ -221,6 +221,7 @@ export async function saveNaiaModelPhoto(
   _verifyAsset: VerifyAssetFn = _verifyModelAsset,
   _moderateContent: ModerateFn = moderateImageContent,
   _screenBodyPhoto: ScreenBodyFn = screenVtoBodyPhoto,
+  _getConfig: () => CloudinaryConfig | null = getCloudinaryConfig,
 ): Promise<
   | { ok: true; model: NaiaModelRecord; orphanPublicId?: string }
   | { ok: false; error: string }
@@ -295,7 +296,7 @@ export async function saveNaiaModelPhoto(
   }
 
   // ── Layer 2: global content safety moderation (both slots) ───────────────
-  const cfg = getCloudinaryConfig();
+  const cfg = _getConfig();
   if (!cfg) {
     await _deleteAsset(newPublicId, "private");
     return { ok: false, error: "Image service is not configured. Please try again." };
@@ -424,8 +425,14 @@ export async function deleteNaiaModelPhoto(
   // Step 2: Clear DB reference.
   const clearData =
     slot === "face"
-      ? { facePublicId: null, faceVersion: null }
-      : { bodyPublicId: null, bodyVersion: null };
+      ? { facePublicId: null, faceVersion: null, faceFormat: null }
+      : {
+          bodyPublicId: null,
+          bodyVersion: null,
+          bodyFormat: null,
+          bodyModerationStatus: null,
+          bodyModerationAt: null,
+        };
 
   try {
     await _upsertModelFn(customerId, clearData);

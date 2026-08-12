@@ -425,6 +425,11 @@ function PhotoSection({
           <div style={{ fontFamily: FONT_MONO, fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: COLOR_MUTED }}>
             {statusLabel}
           </div>
+          {error && (
+            <p style={{ fontFamily: FONT_BODY, fontSize: "14px", color: COLOR_ACCENT, margin: "0" }}>
+              {error}
+            </p>
+          )}
           <div style={{ display: "flex", gap: "8px" }}>
             <button type="button" onClick={onUploadClick} style={secondaryBtn}>
               Replace
@@ -434,31 +439,66 @@ function PhotoSection({
             </button>
           </div>
         </div>
-      ) : (
+      ) : uploading ? (
         <button
           type="button"
-          onClick={onUploadClick}
-          disabled={uploading}
+          disabled
           style={{
             padding: "24px 32px",
             border: "1px dashed rgba(59,5,16,0.2)",
             background: "transparent",
-            cursor: uploading ? "wait" : "pointer",
+            cursor: "wait",
             fontFamily: FONT_MONO,
             fontSize: "9px",
             letterSpacing: "3px",
             textTransform: "uppercase",
-            color: uploading ? COLOR_MUTED : COLOR_INK,
+            color: COLOR_MUTED,
           }}
         >
-          {uploading ? "Uploading…" : "Upload photo"}
+          Uploading…
         </button>
-      )}
-
-      {error && (
-        <p style={{ fontFamily: FONT_BODY, fontSize: "14px", color: COLOR_ACCENT, marginTop: "8px" }}>
-          {error}
-        </p>
+      ) : error ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <p style={{ fontFamily: FONT_BODY, fontSize: "14px", color: COLOR_ACCENT, margin: "0" }}>
+            {error}
+          </p>
+          <button
+            type="button"
+            onClick={onUploadClick}
+            style={{
+              alignSelf: "flex-start",
+              padding: "12px 24px",
+              border: "1px solid rgba(139,32,53,0.4)",
+              background: "transparent",
+              cursor: "pointer",
+              fontFamily: FONT_MONO,
+              fontSize: "9px",
+              letterSpacing: "3px",
+              textTransform: "uppercase",
+              color: COLOR_ACCENT,
+            }}
+          >
+            Choose another photo
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={onUploadClick}
+          style={{
+            padding: "24px 32px",
+            border: "1px dashed rgba(59,5,16,0.2)",
+            background: "transparent",
+            cursor: "pointer",
+            fontFamily: FONT_MONO,
+            fontSize: "9px",
+            letterSpacing: "3px",
+            textTransform: "uppercase",
+            color: COLOR_INK,
+          }}
+        >
+          Upload photo
+        </button>
       )}
     </div>
   );

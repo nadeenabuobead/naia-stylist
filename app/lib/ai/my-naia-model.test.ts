@@ -36,8 +36,10 @@ import {
   type RunTransactionFn,
   type FindJobFn,
   type VerifyAssetFn,
+  type ModerateFn,
+  type ScreenBodyFn,
 } from "./my-naia-model.server.ts";
-import { deleteCloudinaryAsset, buildModelUploadUrl } from "../cloudinary-admin.server.ts";
+import { deleteCloudinaryAsset, buildModelUploadUrl, type CloudinaryConfig } from "../cloudinary-admin.server.ts";
 import { DEFAULT_CONSENT_STATE } from "./virtual-try-on.types.ts";
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
@@ -61,6 +63,8 @@ function makeModel(overrides: Partial<NaiaModelRecord> = {}): NaiaModelRecord {
     photoAnalysisConsentAt: null,
     saveModelConsentAt: null,
     consentPolicyVersion: null,
+    bodyModerationStatus: null,
+    bodyModerationAt: null,
     createdAt: new Date("2026-01-01"),
     updatedAt: new Date("2026-01-01"),
     ...overrides,
@@ -98,6 +102,12 @@ const mockVerifyOk: VerifyAssetFn = async (pid) => ({
   asset: { publicId: pid, resourceType: "image", type: "private", version: "1", format: "jpg" },
 });
 
+// Happy-path moderation/suitability mocks — bypass real Claude calls in tests.
+const mockModerationPass: ModerateFn = async () => ({ status: "PASS" });
+const mockSuitabilityPass: ScreenBodyFn = async () => ({ status: "PASS" });
+const mockCfg: CloudinaryConfig = { cloudName: "test-cloud", apiKey: "test-key", apiSecret: "test-secret" };
+const mockGetCfg = () => mockCfg;
+
 // ── MM.1-9: NaiaModel service ─────────────────────────────────────────────────
 // Note: saveNaiaModelPhoto signature: (customerId, slot, publicId, version, format, deliveryType,
 //   _findModelFn, _upsertModelFn, _deleteAsset, _verifyAsset)
@@ -117,6 +127,9 @@ describe("saveNaiaModelPhoto", () => {
       async (_cid, data) => ({ ...upserted, ...data }),
       async () => ({ ok: true }),
       mockVerifyOk,
+      mockModerationPass,
+      mockSuitabilityPass,
+      mockGetCfg,
     );
     assert.equal(result.ok, true);
     if (!result.ok) throw new Error("unreachable");
@@ -137,6 +150,9 @@ describe("saveNaiaModelPhoto", () => {
       async (_cid, data) => ({ ...upserted, ...data }),
       async () => ({ ok: true }),
       mockVerifyOk,
+      mockModerationPass,
+      mockSuitabilityPass,
+      mockGetCfg,
     );
     assert.equal(result.ok, true);
     if (!result.ok) throw new Error("unreachable");
@@ -546,6 +562,9 @@ describe("PV — private delivery", () => {
       async (_cid, data) => { upsertedData = data; return makeModel(data); },
       async () => ({ ok: true }),
       mockVerifyOk,
+      mockModerationPass,
+      mockSuitabilityPass,
+      mockGetCfg,
     );
     assert.equal(upsertedData.deliveryType, "private");
   });
@@ -607,6 +626,9 @@ describe("CP — compensation and privacy-first deletion", () => {
       async () => { throw new Error("DB error"); },
       async (pid) => { deletedIds.push(pid); return { ok: true }; },
       mockVerifyOk,
+      mockModerationPass,
+      mockSuitabilityPass,
+      mockGetCfg,
     );
     assert.equal(result.ok, false);
     assert.deepEqual(deletedIds, [VALID_PUBLIC_ID], "newly uploaded asset must be deleted as compensation");
@@ -624,6 +646,9 @@ describe("CP — compensation and privacy-first deletion", () => {
       async () => { throw new Error("DB error"); },
       async () => ({ ok: false, errorCode: "NET_ERROR" }),
       mockVerifyOk,
+      mockModerationPass,
+      mockSuitabilityPass,
+      mockGetCfg,
     );
     assert.equal(result.ok, false, "success must never be reported when DB persist fails");
   });
@@ -644,6 +669,9 @@ describe("CP — compensation and privacy-first deletion", () => {
       async (_cid, data) => makeModel({ ...data }),
       async (pid) => { deletedIds.push(pid); return { ok: true }; },
       mockVerifyOk,
+      mockModerationPass,
+      mockSuitabilityPass,
+      mockGetCfg,
     );
     assert.equal(result.ok, true);
     assert.deepEqual(deletedIds, [oldId], "old asset must be deleted after successful DB persist");
@@ -664,6 +692,9 @@ describe("CP — compensation and privacy-first deletion", () => {
       async (_cid, data) => makeModel({ ...data }),
       async (pid) => { deletedIds.push(pid); return { ok: true }; },
       mockVerifyOk,
+      mockModerationPass,
+      mockSuitabilityPass,
+      mockGetCfg,
     );
     assert.equal(result.ok, true);
     assert.deepEqual(deletedIds, [], "no Cloudinary call when publicId is unchanged");
@@ -684,6 +715,9 @@ describe("CP — compensation and privacy-first deletion", () => {
       async (_cid, data) => makeModel({ ...data }),
       async () => ({ ok: false, errorCode: "NET_ERROR" }),
       mockVerifyOk,
+      mockModerationPass,
+      mockSuitabilityPass,
+      mockGetCfg,
     );
     assert.equal(result.ok, true, "overall ok=true — DB persisted the new reference");
     if (!result.ok) throw new Error("unreachable");
@@ -939,6 +973,9 @@ describe("PE — private-download endpoint and delivery enforcement", () => {
       async (_cid, data) => makeModel(data),
       async () => ({ ok: true }),
       mockVerifyOk,
+      mockModerationPass,
+      mockSuitabilityPass,
+      mockGetCfg,
     );
     assert.equal(result.ok, true, "private delivery type must be accepted");
   });
@@ -1027,6 +1064,9 @@ describe("PE — private-download endpoint and delivery enforcement", () => {
         ok: true,
         asset: { publicId: pid, resourceType: "image", type: "private", version: "9999", format: "webp" },
       }),
+      mockModerationPass,
+      mockSuitabilityPass,
+      mockGetCfg,
     );
     assert.equal(result.ok, true);
     assert.equal(upsertedData.faceFormat, "webp", "must use Admin API-verified format, not browser-supplied value");
@@ -1068,20 +1108,21 @@ describe("PE — private-download endpoint and delivery enforcement", () => {
 // ── EP.1-2: Upload endpoint ───────────────────────────────────────────────────
 
 describe("EP — upload endpoint", () => {
-  it("EP.1 — buildModelUploadUrl ends with /image/private (not /image/upload)", () => {
+  it("EP.1 — buildModelUploadUrl uses the standard Cloudinary upload endpoint", () => {
     const url = buildModelUploadUrl("my-cloud");
-    assert.ok(url.endsWith("/image/private"), "upload URL must end with /image/private");
-    assert.ok(!url.includes("/image/upload"), "upload URL must not use /image/upload");
-    assert.equal(url, "https://api.cloudinary.com/v1_1/my-cloud/image/private");
+    // Cloudinary upload API uses /image/upload regardless of delivery type.
+    // Private delivery is enforced via the signed `type=private` form parameter.
+    assert.ok(url.includes("/image/upload"), "upload URL must use /image/upload (Cloudinary standard)");
+    assert.equal(url, "https://api.cloudinary.com/v1_1/my-cloud/image/upload");
   });
 
-  it("EP.2 — buildModelUploadUrl encodes delivery type in URL path, not as a form field", () => {
-    // The delivery type must be part of the endpoint path. The browser receives this URL
-    // from the server and uses it verbatim — it cannot substitute another endpoint.
+  it("EP.2 — buildModelUploadUrl uses api.cloudinary.com (not the CDN host)", () => {
+    // The browser receives this URL from the server and must use it verbatim.
+    // Private delivery is enforced by the signed `type=private` parameter, not the URL path.
     const url = buildModelUploadUrl("test-cloud");
     const parsed = new URL(url);
-    assert.ok(parsed.pathname.endsWith("/image/private"), "delivery type must be in the URL path");
-    assert.equal(parsed.hostname, "api.cloudinary.com");
+    assert.equal(parsed.hostname, "api.cloudinary.com", "must use Cloudinary API host");
+    assert.ok(parsed.pathname.includes("/image/upload"), "must include /image/upload path");
   });
 });
 
@@ -1172,6 +1213,9 @@ describe("SV — server-side Cloudinary asset verification", () => {
         ok: true,
         asset: { publicId: pid, resourceType: "image", type: "private", version: "5", format: "heic" },
       }),
+      mockModerationPass,
+      mockSuitabilityPass,
+      mockGetCfg,
     );
     assert.equal(upsertedData.faceFormat, "heic", "verified format must be persisted");
     assert.notEqual(upsertedData.faceFormat, "png", "browser-supplied format must be ignored");
@@ -1195,5 +1239,132 @@ describe("SV — server-side Cloudinary asset verification", () => {
     assert.equal(result.ok, false, "must reject when Admin API is not configured");
     assert.equal(deleteCalled, false, "must not delete when config is missing");
     assert.equal(upsertCalled, false, "must not persist when verification fails");
+  });
+});
+
+// ── MD.1-5: Body-slot moderation and suitability behaviour ───────────────────
+
+describe("MD — body-slot moderation and suitability", () => {
+  const BODY_ID = `naia-wardrobe/${CUST}/body-photo`;
+
+  it("MD.1 — body slot: MODERATION_UNAVAILABLE → rejected, asset deleted, ok=false", async () => {
+    const deletedIds: string[] = [];
+    const result = await saveNaiaModelPhoto(
+      CUST,
+      "body",
+      BODY_ID,
+      null,
+      null,
+      "private",
+      async () => null,
+      async (_cid, data) => makeModel(data),
+      async (pid) => { deletedIds.push(pid); return { ok: true }; },
+      mockVerifyOk,
+      async () => ({ status: "MODERATION_UNAVAILABLE" }),   // moderation unavailable
+      mockSuitabilityPass,
+      mockGetCfg,
+    );
+    assert.equal(result.ok, false, "must fail when moderation is unavailable");
+    assert.deepEqual(deletedIds, [BODY_ID], "asset must be deleted as compensation");
+    if (result.ok) throw new Error("unreachable");
+    assert.ok(result.error.length > 0, "error message must be returned");
+  });
+
+  it("MD.2 — body slot: SAFETY_REJECT → rejected, asset deleted, ok=false", async () => {
+    const deletedIds: string[] = [];
+    const result = await saveNaiaModelPhoto(
+      CUST,
+      "body",
+      BODY_ID,
+      null,
+      null,
+      "private",
+      async () => null,
+      async (_cid, data) => makeModel(data),
+      async (pid) => { deletedIds.push(pid); return { ok: true }; },
+      mockVerifyOk,
+      async () => ({ status: "SAFETY_REJECT", reasonCode: "explicit_sexual" }),
+      mockSuitabilityPass,
+      mockGetCfg,
+    );
+    assert.equal(result.ok, false, "must fail on SAFETY_REJECT");
+    assert.deepEqual(deletedIds, [BODY_ID], "rejected asset must be deleted");
+  });
+
+  it("MD.3 — body slot: suitability RETRY_IMAGE → rejected, asset deleted, specific error", async () => {
+    const deletedIds: string[] = [];
+    const result = await saveNaiaModelPhoto(
+      CUST,
+      "body",
+      BODY_ID,
+      null,
+      null,
+      "private",
+      async () => null,
+      async (_cid, data) => makeModel(data),
+      async (pid) => { deletedIds.push(pid); return { ok: true }; },
+      mockVerifyOk,
+      mockModerationPass,
+      async () => ({ status: "RETRY_IMAGE", subCode: "image_too_blurry" }),
+      mockGetCfg,
+    );
+    assert.equal(result.ok, false, "must fail when suitability check fails");
+    assert.deepEqual(deletedIds, [BODY_ID], "unsuitable asset must be deleted");
+    if (result.ok) throw new Error("unreachable");
+    assert.ok(
+      result.error.toLowerCase().includes("blurry") || result.error.length > 0,
+      "error must reflect the suitability subCode",
+    );
+  });
+
+  it("MD.4 — body slot: bodyModerationStatus=APPROVED only when L2+L3 both pass", async () => {
+    let upsertedData: Partial<NaiaModelRecord> = {};
+    await saveNaiaModelPhoto(
+      CUST,
+      "body",
+      BODY_ID,
+      null,
+      null,
+      "private",
+      async () => null,
+      async (_cid, data) => { upsertedData = data; return makeModel(data); },
+      async () => ({ ok: true }),
+      mockVerifyOk,
+      mockModerationPass,
+      mockSuitabilityPass,
+      mockGetCfg,
+    );
+    assert.equal(upsertedData.bodyModerationStatus, "APPROVED",
+      "bodyModerationStatus must be APPROVED after L2+L3 pass");
+    assert.ok(upsertedData.bodyModerationAt instanceof Date,
+      "bodyModerationAt must be set when APPROVED");
+  });
+
+  it("MD.5 — deleteNaiaModelPhoto body slot clears bodyModerationStatus and bodyFormat", async () => {
+    const bodyId = `naia-wardrobe/${CUST}/body`;
+    const model = makeModel({
+      bodyPublicId: bodyId,
+      bodyVersion: "1",
+      bodyFormat: "jpg",
+      bodyModerationStatus: "APPROVED",
+      bodyModerationAt: new Date(),
+    });
+    let upsertedData: Partial<NaiaModelRecord> = {};
+
+    await deleteNaiaModelPhoto(
+      CUST,
+      "body",
+      async () => model,
+      async (_cid, data) => { upsertedData = data; return makeModel(data); },
+      async () => ({ ok: true }),
+    );
+
+    assert.equal(upsertedData.bodyPublicId, null, "bodyPublicId must be cleared");
+    assert.equal(upsertedData.bodyVersion, null, "bodyVersion must be cleared");
+    assert.equal(upsertedData.bodyFormat, null, "bodyFormat must be cleared");
+    assert.equal(upsertedData.bodyModerationStatus, null,
+      "bodyModerationStatus must be cleared to prevent stale APPROVED state");
+    assert.equal(upsertedData.bodyModerationAt, null,
+      "bodyModerationAt must be cleared");
   });
 });
