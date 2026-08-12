@@ -151,6 +151,7 @@ export async function action({ request }: ActionFunctionArgs) {
     bodyPublicId,
     bodyFormat:              naiaModel.bodyFormat,
     deliveryType:            naiaModel.deliveryType,
+    bodyModerationStatus:    naiaModel.bodyModerationStatus,
     garmentHandle:           productHandle.trim(),
     virtualTryOnConsentAt:   consentAt,
     saveTryOnResultConsentAt,

@@ -548,6 +548,84 @@ describe("T13 — no measurement, body shape, or fit inference", () => {
   });
 });
 
+// ── T14: bodyModerationStatus gate enforced ───────────────────────────────────
+
+describe("T14 — bodyModerationStatus gate enforced before FASHN submission", () => {
+  it("trigger route passes bodyModerationStatus from naiaModel to submitTryOnJob", () => {
+    assert.ok(
+      route.includes("bodyModerationStatus"),
+      "trigger route must reference bodyModerationStatus",
+    );
+    assert.ok(
+      route.includes("naiaModel.bodyModerationStatus"),
+      "bodyModerationStatus must come from naiaModel (DB), not request body",
+    );
+  });
+
+  it("bodyModerationStatus is NOT destructured from request body", () => {
+    const bodyStart = route.indexOf("body as Record");
+    const bodySection = route.slice(bodyStart, bodyStart + 400);
+    assert.ok(
+      !bodySection.includes("bodyModerationStatus"),
+      "bodyModerationStatus must not be read from request body",
+    );
+  });
+
+  it("submitTryOnJob service gate requires APPROVED bodyModerationStatus", () => {
+    const submitBlock = service.slice(service.indexOf("export async function submitTryOnJob"));
+    assert.ok(
+      submitBlock.includes("bodyModerationStatus") && submitBlock.includes("APPROVED"),
+      "submitTryOnJob must check bodyModerationStatus === APPROVED",
+    );
+  });
+
+  it("bodyModerationStatus gate fires before photo download in submitTryOnJob", () => {
+    const submitBlock = service.slice(service.indexOf("export async function submitTryOnJob"));
+    const gatePos = submitBlock.indexOf("bodyModerationStatus");
+    // Use the await call site, not the destructuring assignment, to get the true call position
+    const downloadPos = submitBlock.indexOf("await _downloadPhoto");
+    assert.ok(gatePos > -1, "bodyModerationStatus must appear in submitTryOnJob");
+    assert.ok(downloadPos > -1, "await _downloadPhoto must appear in submitTryOnJob");
+    assert.ok(gatePos < downloadPos, "bodyModerationStatus gate must precede photo download");
+  });
+});
+
+// ── T15: Outcome eligibility enforced ────────────────────────────────────────
+
+describe("T15 — outcome eligibility enforced in submitTryOnJob", () => {
+  it("fashn-tryon-service imports isTryOnEligible from tryon-product-eligibility", () => {
+    assert.ok(
+      service.includes("tryon-product-eligibility"),
+      "service must import from tryon-product-eligibility",
+    );
+    assert.ok(
+      service.includes("isTryOnEligible"),
+      "service must use isTryOnEligible",
+    );
+  });
+
+  it("isTryOnEligible is called inside submitTryOnJob body", () => {
+    const submitFnStart = service.indexOf("export async function submitTryOnJob");
+    const submitFnEnd = service.indexOf("export async function executeTryOn");
+    const submitBlock = service.slice(submitFnStart, submitFnEnd);
+    assert.ok(
+      submitBlock.includes("isTryOnEligible"),
+      "submitTryOnJob body must call isTryOnEligible to enforce outcome eligibility",
+    );
+  });
+
+  it("outcome eligibility check follows image eligibility but precedes cooldown in submitTryOnJob", () => {
+    const submitFnStart = service.indexOf("export async function submitTryOnJob");
+    const submitFnEnd = service.indexOf("export async function executeTryOn");
+    const submitBlock = service.slice(submitFnStart, submitFnEnd);
+    const imgEligPos = submitBlock.indexOf("validateGarmentEligibility");
+    const outcomePos = submitBlock.indexOf("isTryOnEligible");
+    const cooldownPos = submitBlock.indexOf("await _checkCooldown");
+    assert.ok(imgEligPos < outcomePos, "outcome check must follow image eligibility check");
+    assert.ok(outcomePos < cooldownPos, "outcome check must precede cooldown check");
+  });
+});
+
 // ── Route registration ────────────────────────────────────────────────────────
 
 describe("Route registration", () => {

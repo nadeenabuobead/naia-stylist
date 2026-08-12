@@ -47,6 +47,7 @@ import {
   type VirtualTryOnJobRecord,
   type TryOnJobStatus,
 } from "./virtual-try-on.types.js";
+import { isTryOnEligible } from "./tryon-product-eligibility.js";
 
 // ── Garment eligibility ───────────────────────────────────────────────────────
 
@@ -260,6 +261,13 @@ export async function submitTryOnJob(
   // 1. Garment eligibility — fail-closed on non-ready entries
   const garment = validateGarmentEligibility(params.garmentHandle);
   if (!garment.ok) {
+    return { ok: false, code: "NOT_READY", customerMessage: SUBMIT_ERRORS.NOT_READY };
+  }
+
+  // 1a. Outcome eligibility — block garments not yet accepted in live provider testing.
+  // Garments are only "accepted" after a product-owner–approved FASHN generation run.
+  // "pending" (not yet tested) and "not-eligible" (tested and rejected) both block here.
+  if (!isTryOnEligible(params.garmentHandle)) {
     return { ok: false, code: "NOT_READY", customerMessage: SUBMIT_ERRORS.NOT_READY };
   }
 
