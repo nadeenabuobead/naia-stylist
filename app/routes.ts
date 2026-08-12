@@ -8,7 +8,7 @@ export default [
   // (below) conflicts with the auto-nested version flatRoutes() would create.
   // Excluding both files here and registering them explicitly below avoids the
   // duplicate-route definition that causes React Router to 404 /passport.
-  ...await flatRoutes({ ignoredRouteFiles: ["**/passport.tsx", "**/passport.selfie.tsx"] }),
+  ...await flatRoutes({ ignoredRouteFiles: ["**/passport.tsx", "**/passport.selfie.tsx", "**/api.trigger-tryon.tsx"] }),
   route("quick-style", "./routes/quick-style/_index.tsx"),
   route("onboarding/step/:step", "./routes/onboarding/step.$step.tsx"),
   route("onboarding/complete", "./routes/onboarding/complete.tsx"),
