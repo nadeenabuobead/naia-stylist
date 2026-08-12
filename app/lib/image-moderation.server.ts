@@ -27,8 +27,8 @@ export type ModerationResult =
   | { status: "SAFETY_REJECT"; reasonCode: SafetyReasonCode }
   | { status: "MODERATION_UNAVAILABLE" };
 
-// Injectable analyzer type — replaces the Claude Haiku call in tests.
-export type AnalyzeForModerationFn = (args: { imageUrl: string; prompt: string }) => Promise<string>;
+// Injectable analyzer type — replaces the live Claude call in tests.
+export type AnalyzeForModerationFn = (args: { imageUrl: string; prompt: string; signal?: AbortSignal }) => Promise<string>;
 
 // ── Prompt ────────────────────────────────────────────────────────────────────
 
@@ -56,7 +56,14 @@ If safe is false, reasonCode must be the single most applicable code.`;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const MODERATION_TIMEOUT_MS = 12_000;
+// Haiku for fast binary safety classification — stays well within the Vercel
+// function execution budget even when both moderation and suitability run.
+const MODERATION_MODEL = "claude-haiku-4-5";
+
+// Hard abort after 3 s: aborts the underlying HTTP request via AbortSignal so
+// the Vercel function can always return a structured response instead of being
+// killed by the platform timeout.
+const MODERATION_TIMEOUT_MS = 3_000;
 
 const VALID_REASON_CODES = new Set<string>([
   "explicit_sexual",
@@ -66,24 +73,31 @@ const VALID_REASON_CODES = new Set<string>([
   "unsafe_content",
 ]);
 
+// ── Default analyzer (uses Haiku + AbortSignal forwarding) ───────────────────
+
+async function moderationAnalyze(args: {
+  imageUrl: string;
+  prompt: string;
+  signal?: AbortSignal;
+}): Promise<string> {
+  return analyzeImage({ ...args, model: MODERATION_MODEL });
+}
+
 // ── Core moderation function ──────────────────────────────────────────────────
 
 export async function moderateImageContent(
   imageUrl: string,
-  _analyze: AnalyzeForModerationFn = analyzeImage,
+  _analyze: AnalyzeForModerationFn = moderationAnalyze,
 ): Promise<ModerationResult> {
-  const timeout = new Promise<null>((resolve) =>
-    setTimeout(() => resolve(null), MODERATION_TIMEOUT_MS),
-  );
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), MODERATION_TIMEOUT_MS);
 
   let raw: string | null;
   try {
-    const result = await Promise.race([
-      _analyze({ imageUrl, prompt: MODERATION_PROMPT }),
-      timeout,
-    ]);
-    raw = result;
+    raw = await _analyze({ imageUrl, prompt: MODERATION_PROMPT, signal: controller.signal });
+    clearTimeout(timeoutId);
   } catch {
+    clearTimeout(timeoutId);
     return { status: "MODERATION_UNAVAILABLE" };
   }
 

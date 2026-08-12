@@ -41,11 +41,17 @@ export type VtoSuitabilityResult =
   | { status: "RETRY_IMAGE"; subCode: VtoSubCode };
 
 // Injectable analyzer type.
-export type AnalyzeForSuitabilityFn = (args: { imageUrl: string; prompt: string }) => Promise<string>;
+export type AnalyzeForSuitabilityFn = (args: { imageUrl: string; prompt: string; signal?: AbortSignal }) => Promise<string>;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const SUITABILITY_TIMEOUT_MS = 12_000;
+// Haiku for fast structured garment/VTO classification.
+const SUITABILITY_MODEL = "claude-haiku-4-5";
+
+// Hard abort after 3 s — mirrors MODERATION_TIMEOUT_MS so the combined AI
+// budget (moderation + suitability) fits within the default Vercel function
+// execution limit with margin to send a structured response.
+const SUITABILITY_TIMEOUT_MS = 3_000;
 
 const VALID_GARMENT_STATUSES = new Set(["PASS", "RETRY_IMAGE", "NEEDS_CLARIFICATION"]);
 
@@ -128,27 +134,34 @@ RETRY_IMAGE: image is not suitable for virtual try-on. Set subCode to the most a
 
 If status is PASS, subCode must be null.`;
 
+// ── Default analyzer (uses Haiku + AbortSignal forwarding) ───────────────────
+
+async function suitabilityAnalyze(args: {
+  imageUrl: string;
+  prompt: string;
+  signal?: AbortSignal;
+}): Promise<string> {
+  return analyzeImage({ ...args, model: SUITABILITY_MODEL });
+}
+
 // ── Garment suitability ───────────────────────────────────────────────────────
 
 export async function screenGarmentSuitability(
   imageUrl: string,
   context: { declaredCategory?: string } = {},
-  _analyze: AnalyzeForSuitabilityFn = analyzeImage,
+  _analyze: AnalyzeForSuitabilityFn = suitabilityAnalyze,
 ): Promise<GarmentSuitabilityResult> {
   const prompt = buildGarmentPrompt(context.declaredCategory);
 
-  const timeout = new Promise<null>((resolve) =>
-    setTimeout(() => resolve(null), SUITABILITY_TIMEOUT_MS),
-  );
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), SUITABILITY_TIMEOUT_MS);
 
   let raw: string | null;
   try {
-    const result = await Promise.race([
-      _analyze({ imageUrl, prompt }),
-      timeout,
-    ]);
-    raw = result;
+    raw = await _analyze({ imageUrl, prompt, signal: controller.signal });
+    clearTimeout(timeoutId);
   } catch {
+    clearTimeout(timeoutId);
     return { status: "RETRY_IMAGE", subCode: "assessment_failed" };
   }
 
@@ -192,20 +205,17 @@ export async function screenGarmentSuitability(
 
 export async function screenVtoBodyPhoto(
   imageUrl: string,
-  _analyze: AnalyzeForSuitabilityFn = analyzeImage,
+  _analyze: AnalyzeForSuitabilityFn = suitabilityAnalyze,
 ): Promise<VtoSuitabilityResult> {
-  const timeout = new Promise<null>((resolve) =>
-    setTimeout(() => resolve(null), SUITABILITY_TIMEOUT_MS),
-  );
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), SUITABILITY_TIMEOUT_MS);
 
   let raw: string | null;
   try {
-    const result = await Promise.race([
-      _analyze({ imageUrl, prompt: VTO_BODY_PROMPT }),
-      timeout,
-    ]);
-    raw = result;
+    raw = await _analyze({ imageUrl, prompt: VTO_BODY_PROMPT, signal: controller.signal });
+    clearTimeout(timeoutId);
   } catch {
+    clearTimeout(timeoutId);
     return { status: "RETRY_IMAGE", subCode: "assessment_failed" };
   }
 

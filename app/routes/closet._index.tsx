@@ -1248,7 +1248,7 @@ export default function Closet() {
               {uploading ? "Uploading…" : addFetcher.state === "submitting" ? "Saving…" : "Add to Wardrobe"}
             </button>
 
-            {addFetcher.data?.error && (
+            {addFetcher.data?.error && !(addFetcher.data?.retryImage && newPublicId) && (
               <p className="cl-error">{addFetcher.data.error}</p>
             )}
             {addFetcher.data?.retryImage && !newPublicId && (

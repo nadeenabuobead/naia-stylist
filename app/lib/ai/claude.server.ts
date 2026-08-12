@@ -97,19 +97,26 @@ export async function callClaudeJSON<T>({
 /**
  * Analyze an image with Claude Vision.
  * Provide either imageUrl (Cloudinary URL) or imageBase64 + mediaType.
+ * model defaults to claude-opus-4-7; callers that need a faster/cheaper model
+ * (e.g. moderation, suitability) should pass an explicit model.
+ * signal is an optional AbortSignal that cancels the underlying HTTP request.
  */
 export async function analyzeImage({
   imageUrl,
   imageBase64,
   mediaType = "image/jpeg",
   prompt,
-  system
+  system,
+  model = "claude-opus-4-7",
+  signal,
 }: {
   imageUrl?: string;
   imageBase64?: string;
   mediaType?: string;
   prompt: string;
   system?: string;
+  model?: string;
+  signal?: AbortSignal;
 }): Promise<string> {
   if (!imageUrl && !imageBase64) {
     throw new Error("analyzeImage requires imageUrl or imageBase64");
@@ -127,7 +134,7 @@ export async function analyzeImage({
       "anthropic-version": "2023-06-01"
     },
     body: JSON.stringify({
-      model: "claude-opus-4-7",
+      model,
       max_tokens: 1024,
       system: system || undefined,
       messages: [{
@@ -137,7 +144,8 @@ export async function analyzeImage({
           { type: "text", text: prompt }
         ]
       }]
-    })
+    }),
+    signal,
   });
 
   const data = await response.json();
