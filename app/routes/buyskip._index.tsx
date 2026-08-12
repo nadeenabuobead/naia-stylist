@@ -51,12 +51,14 @@ const BOS_LOADING_MESSAGES = [
 
 function UploadRow({
   label, required, imageUrl, uploading, error, onFile, capture, buttonLabel = "Choose File",
+  inputRef,
 }: {
   label: string; required?: boolean;
   imageUrl?: string; uploading?: boolean; error?: string;
   onFile?: (f: File) => void;
   capture?: "environment" | "user";
   buttonLabel?: string;
+  inputRef?: React.RefObject<HTMLInputElement>;
 }) {
   const inputId = `bos-file-${label.replace(/\W+/g, "-").toLowerCase()}`;
   return (
@@ -73,7 +75,7 @@ function UploadRow({
         : onFile
           ? (
             <label htmlFor={inputId} className="bos-upload-btn">
-              <input id={inputId} type="file" accept="image/*"
+              <input id={inputId} ref={inputRef} type="file" accept="image/*"
                 {...(capture ? { capture } : {})}
                 onChange={e => e.target.files?.[0] && onFile(e.target.files[0])}
                 style={{ display: "none" }} />
@@ -105,6 +107,7 @@ export default function BuyOrSkip() {
   const [imageUrl, setImageUrl] = React.useState(""); // local blob URL for preview only (never sent to server)
   const [imagePublicId, setImagePublicId] = React.useState(""); // Cloudinary public ID — sent to analyze API
   const blobUrlRef = React.useRef<string | null>(null);
+  const mainFileInputRef = React.useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = React.useState(false);
   const [analyzing, setAnalyzing] = React.useState(false);
   const [msgIndex, setMsgIndex] = React.useState(0);
@@ -113,6 +116,7 @@ export default function BuyOrSkip() {
   const [brand, setBrand] = React.useState("");
   const [uploadError, setUploadError] = React.useState("");
   const [analyzeError, setAnalyzeError] = React.useState("");
+  const [retryImage, setRetryImage] = React.useState(false);
   const [forOccasion, setForOccasion] = React.useState("");
   const [whatLike, setWhatLike] = React.useState("");
   const [unsureAbout, setUnsureAbout] = React.useState("");
@@ -176,6 +180,9 @@ export default function BuyOrSkip() {
       setImageUrl(blobUrl);
       // Store the Cloudinary public ID — this is what the server receives for verification.
       setImagePublicId(uploadData.public_id);
+      // Clear any stale RETRY_IMAGE error now that a new photo has uploaded successfully.
+      setRetryImage(false);
+      setAnalyzeError("");
     } catch {
       setUploadError("Upload failed. Please check your connection and try again.");
     } finally {
@@ -194,6 +201,7 @@ export default function BuyOrSkip() {
     if (analyzing) return;
     setAnalyzing(true);
     setAnalyzeError("");
+    setRetryImage(false);
     // Track whether we initiated navigation — if so, keep overlay visible until unmount
     let navigated = false;
     try {
@@ -211,6 +219,13 @@ export default function BuyOrSkip() {
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
         setAnalyzeError((errData as any).error || "Recommendation failed. Please try again.");
+        if ((errData as any).retryImage) {
+          setRetryImage(true);
+          // Server deleted the rejected asset — clear local references so a fresh upload is required.
+          if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
+          setImageUrl("");
+          setImagePublicId("");
+        }
         return;
       }
       const data = await response.json();
@@ -244,7 +259,7 @@ export default function BuyOrSkip() {
             {" is assessing your item..."}
           </h2>
           <p style={{ fontFamily: "var(--ff-display)", fontSize: "18px", fontStyle: "normal", fontWeight: 200, letterSpacing: "0.05em", color: "var(--naia-muted)", marginBottom: "40px" }}>
-            Reviewing your item against your Passport, Closet and style.
+            Reviewing your item against your Passport, Closet and Style.
           </p>
           <div className="sm-loading-track">
             <div className="sm-loading-bar" />
@@ -292,6 +307,7 @@ export default function BuyOrSkip() {
             onFile={handleUpload}
             capture={source === "photograph" ? "environment" : undefined}
             buttonLabel={source === "photograph" ? "Take Photo" : "Choose File"}
+            inputRef={mainFileInputRef}
           />
           <UploadRow label="A Second Angle (optional)" buttonLabel={source === "photograph" ? "Take Photo" : "Choose File"} />
           <UploadRow label="Fabric or Detail (optional)" buttonLabel={source === "photograph" ? "Take Photo" : "Choose File"} />
@@ -358,13 +374,24 @@ export default function BuyOrSkip() {
         </button>
         <Link to="/my-naia/buying-decisions" className="bos-link">View All Decisions</Link>
       </div>
-      {analyzeError && (
+      {analyzeError && !(retryImage && imagePublicId) && (
         <p className="bos-error">
           {analyzeError}{" "}
           {analyzeError.includes("session") && (
             <a href="/auth/shopify/login?return_to=/buyskip" style={{ color: "var(--naia-accent)", textDecoration: "underline" }}>Sign in →</a>
           )}
         </p>
+      )}
+      {retryImage && !imagePublicId && (
+        <button
+          type="button"
+          className="bos-upload-btn"
+          style={{ marginTop: "8px" }}
+          disabled={uploading}
+          onClick={() => mainFileInputRef.current?.click()}
+        >
+          CHOOSE ANOTHER PHOTO
+        </button>
       )}
     </MyNaiaLayout>
   );

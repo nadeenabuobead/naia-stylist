@@ -259,13 +259,13 @@ async function analyzeItem(request) {
       multiple_items_ambiguous: "Multiple items detected. Please photograph one item at a time.",
       color_indeterminate: "The colour of this item is unclear in the photo.",
       category_mismatch: "The item in the photo does not match the selected category.",
-      item_not_identifiable: "The item could not be identified. Please try a clearer photo.",
+      item_not_identifiable: "We couldn't identify a wearable fashion item in this photo. Please upload a clear photo of the full item.",
       assessment_failed: "Image assessment is temporarily unavailable. Please try again.",
     };
     if (suitability.status === "RETRY_IMAGE") {
       await deleteCloudinaryAsset(publicId, "private");
       const msg = GARMENT_GUIDANCE[suitability.subCode] ?? "Please upload a clearer photo of a single fashion item.";
-      return json({ error: msg }, { status: 422 });
+      return json({ error: msg, retryImage: true }, { status: 422 });
     }
     // NEEDS_CLARIFICATION: item is usable — proceed (surface subCode in future UI iteration)
   }
