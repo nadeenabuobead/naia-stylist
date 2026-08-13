@@ -13,12 +13,17 @@
 //   "analyse"          — validate + upload + Layer 2 moderation + analyse + persist
 //   "replace"          — same as analyse but bypasses pending guard and deletes old photo via overwrite
 //   "retry-moderation" — re-run Layer 2 on stored selfie (used when prior attempt got MODERATION_UNAVAILABLE)
+//   "reanalyse-selfie" — reanalyse existing stored selfie (after failure/deletion); no new upload required
 //   "delete-photo"     — delete Cloudinary asset, clear photoPublicId, keep signals
 //   "delete-analysis"  — clear signals only, keep photo for re-analysis
 //   "delete-both"      — delete photo and clear all signals
 //
-// Migration required before live DB writes:
-//   prisma/migrations/20260717100000_add_selfie_analysis/migration.sql
+// State model:
+//   Photo state and analysis state are fully independent.
+//   A stored photo is always shown when hasPhoto is true, regardless of analysis state.
+//   Only an explicit delete-photo or delete-both action removes the photo.
+//   Only an explicit delete-analysis or delete-both action removes the analysis.
+//   Analysis failure/system errors never touch the photo reference.
 
 import { useState, useRef } from "react";
 import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";
@@ -28,7 +33,7 @@ import { data } from "react-router";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { analyseSelfie, ANALYSIS_VERSION } from "~/lib/ai/selfie-analysis.server";
-import type { SelfieAnalysisOutcome } from "~/lib/ai/selfie-analysis";
+import type { SelfieAnalysisOutcome, SelfieStyleSignals } from "~/lib/ai/selfie-analysis";
 import {
   validateSelfieFile,
   uploadSelfieToCloudinary,
@@ -69,7 +74,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await getCurrentNaiaCustomer(request);
   if (!customer) throw redirect("/auth/shopify/login");
 
-  // Migration guard: loadSelfieForDisplay returns null when no record exists.
   // buildSelfiePreviewUrl generates a short-lived signed URL for browser display
   // (same pattern as NaiaModel); the photoPublicId itself is never serialised.
   let existing: SelfieDisplayRecord | null = null;
@@ -86,7 +90,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // ── Action ────────────────────────────────────────────────────────────────────
 
 type ActionResult =
-  | { intent: "analyse" | "replace" | "retry-moderation"; outcome: SelfieAnalysisOutcome }
+  | { intent: "analyse" | "replace" | "retry-moderation" | "reanalyse-selfie"; outcome: SelfieAnalysisOutcome }
   | { intent: "delete-photo" | "delete-analysis" | "delete-both"; ok: boolean; errorCode?: string };
 
 export async function action({ request }: ActionFunctionArgs): Promise<ActionResult> {
@@ -135,13 +139,10 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
     if (retryModeration.status === "SAFETY_REJECT") {
       await deleteSelfiePhoto(customer.id);
       const customerIdHash = createHash("sha256").update(customer.id).digest("hex");
-      // Audit: { customerIdHash, feature: "selfie", reasonCode: retryModeration.reasonCode, timestamp: new Date() }
-      // No publicId, URL, or image bytes stored.
       void customerIdHash;
       return { intent: "retry-moderation", outcome: { status: "safety-rejected" } };
     }
 
-    // PASS — proceed to analysis via local alias (preserves source ordering invariants).
     const runAnalysis = analyseSelfie;
     const retryOutcome = await runAnalysis(
       { imageUrl: retryUrl },
@@ -156,10 +157,74 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
       }
     } catch (err) {
       console.error("[selfie-action] retry-moderation persistence failed:", err instanceof Error ? err.message : String(err));
-      return { intent: "retry-moderation", outcome: { status: "system-failure" } };
+      return { intent: "retry-moderation", outcome: { status: "system-failure", internalNote: "retry-moderation persistence failed" } };
     }
 
     return { intent: "retry-moderation", outcome: retryOutcome };
+  }
+
+  // ── Reanalyse-selfie intent ────────────────────────────────────────────────
+  // Reanalyses the existing stored selfie without requiring a new upload.
+  // Used after analysis failure or after the customer deletes the analysis.
+  // Runs the full pipeline: moderation + quality check + v2 analysis.
+  // The server resolves the stored photo — client never supplies the image URL.
+
+  if (intent === "reanalyse-selfie") {
+    const creds = await getSelfieForModeration(customer.id);
+    if (!creds) {
+      return { intent: "reanalyse-selfie", outcome: { status: "invalid-input", reason: "No selfie on file to reanalyse." } };
+    }
+
+    // Reset analysis status to pending, preserving the existing photo reference.
+    try {
+      await beginSelfieAnalysis(
+        customer.id,
+        new Date(creds.consentAt),
+        creds.publicId,
+        creds.format,
+        { forceReplace: true },
+      );
+    } catch (err) {
+      console.error("[selfie-action] reanalyse-selfie begin failed:", err instanceof Error ? err.message : String(err));
+      return { intent: "reanalyse-selfie", outcome: { status: "system-failure", internalNote: "reanalyse begin failed" } };
+    }
+
+    const reanalyseUrl = buildSelfieAnalysisUrl(creds.publicId, creds.format);
+    if (!reanalyseUrl) {
+      try { await failSelfieAnalysis(customer.id); } catch { /* best-effort */ }
+      return { intent: "reanalyse-selfie", outcome: { status: "system-failure", internalNote: "Cloudinary not configured for reanalyse URL" } };
+    }
+
+    // Layer 2: global content safety moderation
+    const moderation = await moderateImageContent(reanalyseUrl);
+    if (moderation.status === "MODERATION_UNAVAILABLE") {
+      return { intent: "reanalyse-selfie", outcome: { status: "moderation-unavailable" } };
+    }
+    if (moderation.status === "SAFETY_REJECT") {
+      await deleteSelfiePhoto(customer.id);
+      const customerIdHash = createHash("sha256").update(customer.id).digest("hex");
+      void customerIdHash;
+      return { intent: "reanalyse-selfie", outcome: { status: "safety-rejected" } };
+    }
+
+    // Full analysis — includes quality check + v2 styling analysis
+    const reanalyseOutcome = await analyseSelfie(
+      { imageUrl: reanalyseUrl },
+      { consentAt: creds.consentAt },
+    );
+
+    try {
+      if (reanalyseOutcome.status === "completed") {
+        await completeSelfieAnalysis(customer.id, reanalyseOutcome.signals, ANALYSIS_VERSION, new Date(reanalyseOutcome.analysedAt));
+      } else {
+        await failSelfieAnalysis(customer.id);
+      }
+    } catch (err) {
+      console.error("[selfie-action] reanalyse-selfie persistence failed:", err instanceof Error ? err.message : String(err));
+      return { intent: "reanalyse-selfie", outcome: { status: "system-failure", internalNote: "reanalyse persistence failed" } };
+    }
+
+    return { intent: "reanalyse-selfie", outcome: reanalyseOutcome };
   }
 
   // ── Analyse / replace intents ──────────────────────────────────────────────
@@ -192,13 +257,13 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
     begin = await beginSelfieAnalysis(
       customer.id,
       consentAt,
-      null,    // photoPublicId set after upload
-      null,    // photoFormat set after upload
+      null,
+      null,
       { forceReplace: isReplace },
     );
   } catch (err) {
     console.error("[selfie-action] beginSelfieAnalysis (1) failed:", err instanceof Error ? err.message : String(err));
-    return { intent: isReplace ? "replace" : "analyse", outcome: { status: "system-failure" } };
+    return { intent: isReplace ? "replace" : "analyse", outcome: { status: "system-failure", internalNote: "beginSelfieAnalysis (1) failed" } };
   }
   if (begin.blocked) {
     return {
@@ -218,24 +283,23 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
   }
 
   // Update DB record with the confirmed public ID and format
-  // (begins analysis guard is now active; photo is stored)
   try {
     await beginSelfieAnalysis(
       customer.id,
       consentAt,
       upload.publicId,
       upload.format,
-      { forceReplace: true }, // already pending — force update to add publicId
+      { forceReplace: true },
     );
   } catch (err) {
     console.error("[selfie-action] beginSelfieAnalysis (2) failed:", err instanceof Error ? err.message : String(err));
-    return { intent: isReplace ? "replace" : "analyse", outcome: { status: "system-failure" } };
+    return { intent: isReplace ? "replace" : "analyse", outcome: { status: "system-failure", internalNote: "beginSelfieAnalysis (2) failed" } };
   }
 
   // Build short-lived signed URL for analyzeImage — NEVER returned to browser
   const analysisUrl = buildSelfieAnalysisUrl(upload.publicId, upload.format);
   if (!analysisUrl) {
-    try { await failSelfieAnalysis(customer.id); } catch { /* best-effort cleanup */ }
+    try { await failSelfieAnalysis(customer.id); } catch { /* best-effort */ }
     return {
       intent: "analyse",
       outcome: { status: "system-failure", internalNote: "Cloudinary not configured for analysis URL" },
@@ -246,7 +310,6 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
   {
     const moderation = await moderateImageContent(analysisUrl);
     if (moderation.status === "MODERATION_UNAVAILABLE") {
-      // Keep photo + pending status — customer can retry via retry-moderation intent
       return {
         intent: isReplace ? "replace" : "analyse",
         outcome: { status: "moderation-unavailable" },
@@ -255,8 +318,6 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
     if (moderation.status === "SAFETY_REJECT") {
       await deleteSelfiePhoto(customer.id);
       const customerIdHash = createHash("sha256").update(customer.id).digest("hex");
-      // Audit: { customerIdHash, feature: "selfie", reasonCode: moderation.reasonCode, timestamp: new Date() }
-      // No publicId, URL, or image bytes stored.
       void customerIdHash;
       return {
         intent: isReplace ? "replace" : "analyse",
@@ -285,10 +346,9 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
     }
   } catch (err) {
     console.error("[selfie-action] final persistence failed:", err instanceof Error ? err.message : String(err));
-    return { intent: isReplace ? "replace" : "analyse", outcome: { status: "system-failure" } };
+    return { intent: isReplace ? "replace" : "analyse", outcome: { status: "system-failure", internalNote: "final persistence failed" } };
   }
 
-  // Return public-safe outcome — no publicId, no format, no signedUrl
   return { intent: isReplace ? "replace" : "analyse", outcome };
 }
 
@@ -300,41 +360,120 @@ export default function SelfieUploadPage() {
   const navigation = useNavigation();
   const [preview, setPreview] = useState<string | null>(null);
   const [pending, setPending] = useState<"delete-photo" | "delete-analysis" | "delete-both" | null>(null);
+  const [showChooseDifferent, setShowChooseDifferent] = useState(false);
   const isSubmitting = navigation.state === "submitting";
 
-  // Derive displayed outcome: action result takes precedence over loader state
-  const analysisIntent = actionData && "outcome" in actionData ? actionData.intent : null;
-  const outcome: SelfieAnalysisOutcome | null =
+  // ── State derivation ───────────────────────────────────────────────────────
+
+  // Fresh action outcome (present for the current render cycle after a form submit)
+  const freshOutcome: SelfieAnalysisOutcome | null =
     actionData && "outcome" in actionData ? actionData.outcome : null;
+  const analysisIntent = actionData && "outcome" in actionData ? actionData.intent : null;
 
-  const showUploadForm =
-    (!outcome && (!existing || existing.analysisStatus === "failed" || existing.analysisStatus === "deleted")) ||
-    outcome?.status === "safety-rejected" ||
-    outcome?.status === "quality-failed" ||
-    outcome?.status === "timeout" ||
-    outcome?.status === "system-failure" ||
-    outcome?.status === "invalid-input" ||
-    outcome?.status === "consent-missing";
-  const showProcessing = existing?.analysisStatus === "pending" && !outcome;
-  const showModerationRetry = outcome?.status === "moderation-unavailable";
-  const showResults = outcome?.status === "completed" ||
-    (existing?.analysisStatus === "completed" && !outcome);
-  const displaySignals = outcome?.status === "completed"
-    ? outcome.signals
-    : existing?.signals ?? null;
+  // DB state (from loader, reflects the current persisted record)
+  const dbStatus = existing?.analysisStatus ?? null;
 
-  // Selfie display URL: FileReader preview (new upload) takes precedence over the
-  // server-generated signed URL (return visits). The signed URL expires after 1 hour.
-  const selfieDisplayUrl = preview ?? existing?.selfiePreviewUrl ?? null;
+  // Photo state — independent of analysis state.
+  // After safety-rejection the server explicitly deletes the photo; treat as no photo.
+  const photoJustRejected = freshOutcome?.status === "safety-rejected";
+  const photoExists = !photoJustRejected && (existing?.hasPhoto ?? false);
+
+  // Selfie display URL: FileReader preview (fresh upload) takes precedence over
+  // the server-generated signed URL (return visit). Signed URL expires in 1 hour.
+  const selfieDisplayUrl = preview ?? (photoExists ? existing?.selfiePreviewUrl ?? null : null);
+
+  // Analysis state — independent of photo state.
+  const analysisCompleted =
+    freshOutcome?.status === "completed" ||
+    (dbStatus === "completed" && !freshOutcome);
+
+  // Pending: DB says pending and there is no fresh action outcome overriding it.
+  // (A fresh "invalid-input" from the blocked guard still leaves DB as pending.)
+  const analysisPending = dbStatus === "pending" && !freshOutcome;
+
+  // Display signals: fresh completed outcome takes precedence over DB signals.
+  const displaySignals: SelfieStyleSignals | null = (() => {
+    if (freshOutcome !== null && freshOutcome.status === "completed") return freshOutcome.signals;
+    return existing?.signals ?? null;
+  })();
+
+  // ── Section visibility ────────────────────────────────────────────────────
+
+  const showProcessing = analysisPending;
+  const showModerationRetry = freshOutcome?.status === "moderation-unavailable";
+
+  // Completed: analysis succeeded
+  const showCompletedSection = analysisCompleted && displaySignals !== null;
+
+  // Failed: system error or timeout (photo preserved, reanalyse available)
+  const showFailedSection =
+    photoExists &&
+    !analysisPending &&
+    !analysisCompleted &&
+    (freshOutcome?.status === "system-failure" ||
+      freshOutcome?.status === "timeout" ||
+      (dbStatus === "failed" && !freshOutcome));
+
+  // Deleted: analysis was explicitly removed (photo preserved, reanalyse available)
+  const showDeletedSection =
+    photoExists &&
+    !analysisPending &&
+    !analysisCompleted &&
+    dbStatus === "deleted" &&
+    !freshOutcome;
+
+  // Quality failed: photo uploaded but quality check failed (photo preserved, different photo needed)
+  const showQualityFailedSection =
+    photoExists && freshOutcome?.status === "quality-failed";
+
+  // Primary upload form: only when no photo is stored and we need a new one.
+  const showPrimaryUploadForm = (() => {
+    if (analysisPending) return false;
+    if (freshOutcome?.status === "moderation-unavailable") return false;
+    if (analysisCompleted) return false;
+    if (showFailedSection || showDeletedSection || showQualityFailedSection) return false;
+    if (freshOutcome?.status === "safety-rejected") return true;
+    if (freshOutcome?.status === "consent-missing") return true;
+    if (freshOutcome?.status === "invalid-input") return true;
+    if (!photoExists && !freshOutcome) return true;
+    return false;
+  })();
+
+  // ── Status label and description ──────────────────────────────────────────
 
   const statusLabel =
-    showResults             ? "Analysis complete" :
-    showModerationRetry     ? "Photo review temporarily unavailable" :
-    outcome?.status === "safety-rejected" ? "Upload a new photo to continue" :
-    showProcessing          ? "Analysis in progress" :
-    existing?.analysisStatus === "failed" ? "Analysis failed — please try again" :
-    existing?.analysisStatus === "deleted" ? "Analysis deleted" :
+    analysisCompleted ? "Analysis complete" :
+    freshOutcome?.status === "moderation-unavailable" ? "Photo review temporarily unavailable" :
+    freshOutcome?.status === "safety-rejected" ? "Upload a new photo to continue" :
+    freshOutcome?.status === "quality-failed" ? "Photo needs adjustment" :
+    freshOutcome?.status === "consent-missing" ? "Consent required" :
+    freshOutcome?.status === "invalid-input" ? "Cannot proceed" :
+    (freshOutcome?.status === "system-failure" || freshOutcome?.status === "timeout") ? "Analysis unavailable" :
+    analysisPending ? "Analysis in progress" :
+    dbStatus === "failed" ? "Analysis unavailable" :
+    dbStatus === "deleted" ? "Analysis removed" :
+    photoExists ? "Selfie saved" :
     "Not started";
+
+  // Supporting copy shown directly under the status label — replaces a separate
+  // error card for system-failure / timeout / DB-failed states.
+  const statusDescription: string | null =
+    (freshOutcome?.status === "system-failure" || freshOutcome?.status === "timeout")
+      ? "We couldn't complete your analysis this time." :
+    (dbStatus === "failed" && !freshOutcome)
+      ? "We couldn't complete your analysis this time." :
+    (dbStatus === "deleted" && !freshOutcome)
+      ? "Your analysis was removed. Your selfie is still saved — you can reanalyse it below." :
+    null;
+
+  // Outcome feedback card: shown only for specific error types that need
+  // actionable inline guidance. system-failure / timeout handled by statusDescription.
+  const showOutcomeFeedback =
+    freshOutcome !== null &&
+    freshOutcome.status !== "completed" &&
+    freshOutcome.status !== "system-failure" &&
+    freshOutcome.status !== "timeout" &&
+    freshOutcome.status !== "moderation-unavailable";
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -366,17 +505,42 @@ export default function SelfieUploadPage() {
       <div className="bos-section">
         <div className="bos-step-label">Current Status</div>
         <div className="psa-status-val">{statusLabel}</div>
+        {statusDescription && (
+          <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", marginTop: "6px", lineHeight: 1.6 }}>
+            {statusDescription}
+          </p>
+        )}
       </div>
 
-      {/* Outcome error feedback */}
-      {outcome && outcome.status !== "completed" && (
+      {/* Outcome error feedback — only for specific types (not system-failure/timeout) */}
+      {showOutcomeFeedback && freshOutcome && (
         <div className="bos-section">
-          <OutcomeFeedback outcome={outcome} />
+          <OutcomeFeedback outcome={freshOutcome} />
         </div>
       )}
 
-      {/* Not started — upload form */}
-      {showUploadForm && (
+      {/* Your Selfie — shown whenever a photo is stored, regardless of analysis state */}
+      {(selfieDisplayUrl || photoExists) && (
+        <section className="bos-section">
+          <div className="bos-step-label">Your Selfie</div>
+          {selfieDisplayUrl ? (
+            <div style={{ maxWidth: "360px" }}>
+              <img
+                src={selfieDisplayUrl}
+                alt="Your selfie"
+                style={{ display: "block", width: "100%", height: "auto" }}
+              />
+            </div>
+          ) : (
+            <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--naia-muted)" }}>
+              Your selfie is stored privately.
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* Primary upload form — first selfie or after photo deletion */}
+      {showPrimaryUploadForm && (
         <>
           <section className="bos-section">
             <div className="bos-step-label">Selfie Guidance</div>
@@ -424,7 +588,7 @@ export default function SelfieUploadPage() {
         </section>
       )}
 
-      {/* Moderation temporarily unavailable — retry without re-upload */}
+      {/* Moderation temporarily unavailable */}
       {showModerationRetry && (
         <section className="bos-section">
           <Form method="post">
@@ -433,7 +597,7 @@ export default function SelfieUploadPage() {
               type="submit"
               disabled={isSubmitting}
               className={isSubmitting ? "sp-btn-outline" : "sp-btn-primary"}
-              style={{ width: "100%", opacity: isSubmitting ? 0.65 : 1 }}
+              style={{ width: "100%", maxWidth: "360px", opacity: isSubmitting ? 0.65 : 1 }}
             >
               {isSubmitting ? "Checking…" : "Retry Photo Review"}
             </button>
@@ -441,27 +605,106 @@ export default function SelfieUploadPage() {
         </section>
       )}
 
-      {/* Completed results */}
-      {showResults && displaySignals && (
-        <>
-          {/* Your Selfie */}
-          <section className="bos-section">
-            <div className="bos-step-label">Your Selfie</div>
-            {selfieDisplayUrl ? (
-              <div style={{ maxWidth: "360px" }}>
-                <img src={selfieDisplayUrl} alt="Your selfie" style={{ display: "block", width: "100%", height: "auto" }} />
-              </div>
-            ) : (
-              <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--naia-muted)" }}>
-                {existing?.hasPhoto ? "Your selfie is stored privately." : "No selfie on file."}
-              </p>
-            )}
-          </section>
+      {/* Analysis failed — photo saved, reanalyse or choose a different photo */}
+      {showFailedSection && (
+        <section className="bos-section">
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxWidth: "360px" }}>
+            <Form method="post">
+              <input type="hidden" name="_intent" value="reanalyse-selfie" />
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className={isSubmitting ? "sp-btn-outline" : "sp-btn-primary"}
+                style={{ width: "100%", opacity: isSubmitting ? 0.65 : 1 }}
+              >
+                {isSubmitting ? "Analysing…" : "Reanalyse This Selfie"}
+              </button>
+            </Form>
+            <button
+              type="button"
+              className="sp-btn-outline"
+              style={{ width: "100%" }}
+              onClick={() => setShowChooseDifferent(v => !v)}
+            >
+              {showChooseDifferent ? "Cancel" : "Choose a Different Photo"}
+            </button>
+          </div>
+          {showChooseDifferent && (
+            <div style={{ marginTop: "24px" }}>
+              <UploadForm
+                intent="replace"
+                isSubmitting={isSubmitting}
+                preview={preview}
+                onFileChange={handleFileChange}
+                submitLabel="Replace and Reanalyse"
+              />
+            </div>
+          )}
+        </section>
+      )}
 
+      {/* Analysis deleted — photo saved, analyse this selfie or choose different */}
+      {showDeletedSection && (
+        <section className="bos-section">
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxWidth: "360px" }}>
+            <Form method="post">
+              <input type="hidden" name="_intent" value="reanalyse-selfie" />
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className={isSubmitting ? "sp-btn-outline" : "sp-btn-primary"}
+                style={{ width: "100%", opacity: isSubmitting ? 0.65 : 1 }}
+              >
+                {isSubmitting ? "Analysing…" : "Analyse This Selfie"}
+              </button>
+            </Form>
+            <button
+              type="button"
+              className="sp-btn-outline"
+              style={{ width: "100%" }}
+              onClick={() => setShowChooseDifferent(v => !v)}
+            >
+              {showChooseDifferent ? "Cancel" : "Choose a Different Photo"}
+            </button>
+          </div>
+          {showChooseDifferent && (
+            <div style={{ marginTop: "24px" }}>
+              <UploadForm
+                intent="replace"
+                isSubmitting={isSubmitting}
+                preview={preview}
+                onFileChange={handleFileChange}
+                submitLabel="Replace and Reanalyse"
+              />
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Quality failed — photo bad, choose a different photo */}
+      {showQualityFailedSection && (
+        <section className="bos-section">
+          <div style={{ maxWidth: "360px" }}>
+            <UploadForm
+              intent="replace"
+              isSubmitting={isSubmitting}
+              preview={preview}
+              onFileChange={handleFileChange}
+              submitLabel="Upload a Different Photo"
+            />
+          </div>
+        </section>
+      )}
+
+      {/* Completed results */}
+      {showCompletedSection && displaySignals && (
+        <>
           {/* Your Analysis */}
           <section className="bos-section">
             <div className="bos-step-label">
-              {analysisIntent === "replace" ? "Updated Observations" : "Your Analysis"}
+              {analysisIntent === "replace" || analysisIntent === "reanalyse-selfie"
+                ? "Updated Observations"
+                : "Your Analysis"}
             </div>
 
             {/* Face & Feature Profile */}
@@ -622,28 +865,41 @@ export default function SelfieUploadPage() {
           <section className="bos-section">
             <div className="bos-step-label">Manage</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
-              <button type="button" className="sp-btn-outline" onClick={() => setPending("delete-photo")}>Delete Selfie Only</button>
-              <button type="button" className="sp-btn-outline" onClick={() => setPending("delete-analysis")}>Delete Analysis Only</button>
-              <button type="button" className="sp-btn-outline" onClick={() => setPending("delete-both")}>Delete Both</button>
+              {photoExists && (
+                <button type="button" className="sp-btn-outline" onClick={() => setPending("delete-photo")}>
+                  Delete Selfie Only
+                </button>
+              )}
+              <button type="button" className="sp-btn-outline" onClick={() => setPending("delete-analysis")}>
+                Delete Analysis Only
+              </button>
+              {photoExists && (
+                <button type="button" className="sp-btn-outline" onClick={() => setPending("delete-both")}>
+                  Delete Both
+                </button>
+              )}
             </div>
           </section>
 
-          <section className="bos-section">
-            <div className="bos-step-label">Update Photo</div>
-            <UploadForm
-              intent="replace"
-              isSubmitting={isSubmitting}
-              preview={preview}
-              onFileChange={handleFileChange}
-              submitLabel="Replace and Re-analyse"
-            />
-          </section>
+          {/* Update Photo — only when a photo is currently stored */}
+          {photoExists && (
+            <section className="bos-section">
+              <div className="bos-step-label">Update Photo</div>
+              <UploadForm
+                intent="replace"
+                isSubmitting={isSubmitting}
+                preview={preview}
+                onFileChange={handleFileChange}
+                submitLabel="Replace and Re-analyse"
+              />
+            </section>
+          )}
         </>
       )}
 
       {/* Privacy note */}
       <div className="sp-state-note" style={{ marginTop: "32px" }}>
-        Your selfie is stored privately and can be managed or removed from My nAia Model.
+        Your selfie is stored privately and can be managed or removed at any time.
       </div>
 
       {/* Confirmation modal */}
@@ -706,7 +962,7 @@ function UploadForm({
       )}
 
       <div style={{ marginBottom: "20px" }}>
-        <div className={`psa-upload-tile${!preview ? "" : ""}`}>
+        <div className="psa-upload-tile">
           <div className="psa-upload-tile-label">
             {intent === "replace" ? "New Selfie" : "Your Selfie"}
           </div>
@@ -749,23 +1005,22 @@ function UploadForm({
 }
 
 function OutcomeFeedback({ outcome }: { outcome: SelfieAnalysisOutcome }) {
+  // system-failure and timeout: handled by statusDescription (no separate card)
+  // moderation-unavailable: handled by the retry section
+  // completed: no feedback needed
   let title = "";
   let message = "";
 
   if (outcome.status === "consent-missing") {
     title = "Consent required"; message = "Please tick the consent box to proceed.";
   } else if (outcome.status === "invalid-input") {
-    title = "Cannot proceed"; message = outcome.reason;
+    title = "Cannot proceed"; message = (outcome as Extract<typeof outcome, { status: "invalid-input" }>).reason;
   } else if (outcome.status === "quality-failed") {
-    title = "Photo needs adjustment"; message = outcome.guidance ?? "Please try a clearer photo.";
-  } else if (outcome.status === "timeout" || outcome.status === "system-failure") {
-    title = "Analysis unavailable"; message = "nAia couldn't complete the analysis right now. Please try again.";
+    title = "Photo needs adjustment";
+    message = (outcome as Extract<typeof outcome, { status: "quality-failed" }>).guidance ?? "Please try a clearer photo.";
   } else if (outcome.status === "safety-rejected") {
     title = "Photo could not be accepted";
     message = "The photo could not be accepted. Please upload a clear photo of your face and shoulders without filters.";
-  } else if (outcome.status === "moderation-unavailable") {
-    title = "Photo review temporarily unavailable";
-    message = "nAia's photo review is temporarily unavailable. Your photo is stored safely — please use the button below to retry.";
   }
 
   if (!title) return null;

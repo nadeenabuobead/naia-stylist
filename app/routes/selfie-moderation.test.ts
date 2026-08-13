@@ -563,3 +563,321 @@ describe("T22: passport.selfie loader imports and uses buildSelfiePreviewUrl", (
     );
   });
 });
+
+// ── T23: reanalyse-selfie intent exists ───────────────────────────────────────
+
+describe("T23: reanalyse-selfie intent handled in action (no new upload)", () => {
+  it("reanalyse-selfie intent is handled in action", () => {
+    assert.ok(
+      selfie.includes('"reanalyse-selfie"'),
+      'selfie route must handle the "reanalyse-selfie" intent',
+    );
+  });
+
+  it("reanalyse-selfie is in ActionResult type", () => {
+    assert.ok(
+      selfie.includes('"reanalyse-selfie"'),
+      "ActionResult type must include reanalyse-selfie intent",
+    );
+  });
+});
+
+// ── T24: reanalyse-selfie uses stored credentials, no file upload ─────────────
+
+describe("T24: reanalyse-selfie uses getSelfieForModeration — no re-upload", () => {
+  const handlerStart = selfie.indexOf('intent === "reanalyse-selfie"');
+
+  it("reanalyse-selfie handler exists", () => {
+    assert.ok(handlerStart !== -1, "reanalyse-selfie handler must exist in action");
+  });
+
+  it("reanalyse-selfie calls getSelfieForModeration", () => {
+    assert.ok(handlerStart !== -1, "handler must exist");
+    const block = selfie.slice(handlerStart, handlerStart + 3000);
+    assert.ok(
+      block.includes("getSelfieForModeration"),
+      "reanalyse-selfie must call getSelfieForModeration to resolve stored photo credentials",
+    );
+  });
+
+  it("reanalyse-selfie does NOT call validateSelfieFile or uploadSelfieToCloudinary", () => {
+    assert.ok(handlerStart !== -1, "handler must exist");
+    const endMarker = selfie.indexOf("// ── Analyse / replace intents", handlerStart);
+    const block = endMarker > handlerStart
+      ? selfie.slice(handlerStart, endMarker)
+      : selfie.slice(handlerStart, handlerStart + 3000);
+    assert.ok(
+      !block.includes("validateSelfieFile"),
+      "reanalyse-selfie must not re-validate file bytes — it uses the stored Cloudinary asset",
+    );
+    assert.ok(
+      !block.includes("uploadSelfieToCloudinary"),
+      "reanalyse-selfie must not re-upload — it uses the stored Cloudinary asset",
+    );
+  });
+});
+
+// ── T25: reanalyse-selfie resets analysis status via beginSelfieAnalysis ──────
+
+describe("T25: reanalyse-selfie calls beginSelfieAnalysis with forceReplace to reset status", () => {
+  const handlerStart = selfie.indexOf('intent === "reanalyse-selfie"');
+
+  it("reanalyse-selfie calls beginSelfieAnalysis", () => {
+    assert.ok(handlerStart !== -1, "handler must exist");
+    const block = selfie.slice(handlerStart, handlerStart + 3000);
+    assert.ok(
+      block.includes("beginSelfieAnalysis"),
+      "reanalyse-selfie must call beginSelfieAnalysis to reset status to pending",
+    );
+  });
+
+  it("reanalyse-selfie passes forceReplace: true", () => {
+    assert.ok(handlerStart !== -1, "handler must exist");
+    const block = selfie.slice(handlerStart, handlerStart + 3000);
+    assert.ok(
+      block.includes("forceReplace: true"),
+      "reanalyse-selfie must pass forceReplace: true to bypass the pending guard",
+    );
+  });
+});
+
+// ── T26: reanalyse-selfie runs moderation ────────────────────────────────────
+
+describe("T26: reanalyse-selfie runs moderateImageContent on the stored selfie", () => {
+  const handlerStart = selfie.indexOf('intent === "reanalyse-selfie"');
+
+  it("reanalyse-selfie calls moderateImageContent", () => {
+    assert.ok(handlerStart !== -1, "handler must exist");
+    const block = selfie.slice(handlerStart, handlerStart + 3000);
+    assert.ok(
+      block.includes("moderateImageContent("),
+      "reanalyse-selfie must call moderateImageContent for Layer 2 safety check",
+    );
+  });
+
+  it("reanalyse-selfie SAFETY_REJECT deletes photo", () => {
+    assert.ok(handlerStart !== -1, "handler must exist");
+    const block = selfie.slice(handlerStart, handlerStart + 3000);
+    const rejectIdx = block.indexOf("SAFETY_REJECT");
+    assert.ok(rejectIdx !== -1, "reanalyse-selfie must handle SAFETY_REJECT");
+    const rejectBlock = block.slice(rejectIdx, rejectIdx + 300);
+    assert.ok(
+      rejectBlock.includes("deleteSelfiePhoto"),
+      "reanalyse-selfie SAFETY_REJECT must call deleteSelfiePhoto",
+    );
+  });
+});
+
+// ── T27: reanalyse-selfie calls analyseSelfie (quality + v2) ─────────────────
+
+describe("T27: reanalyse-selfie runs analyseSelfie (quality check + v2 analysis)", () => {
+  const handlerStart = selfie.indexOf('intent === "reanalyse-selfie"');
+
+  it("reanalyse-selfie calls analyseSelfie", () => {
+    assert.ok(handlerStart !== -1, "handler must exist");
+    const block = selfie.slice(handlerStart, handlerStart + 3000);
+    assert.ok(
+      block.includes("analyseSelfie("),
+      "reanalyse-selfie must call analyseSelfie (which runs quality + v2 analysis)",
+    );
+  });
+
+  it("reanalyse-selfie persistence guarded with try/catch", () => {
+    assert.ok(
+      selfie.includes("[selfie-action] reanalyse-selfie persistence failed:"),
+      "reanalyse-selfie final persistence must be guarded with a try/catch",
+    );
+  });
+});
+
+// ── T28: showFailedSection — photo visible after failed analysis ──────────────
+
+describe("T28: showFailedSection renders selfie and Reanalyse CTA (not upload form)", () => {
+  it("showFailedSection variable defined in component", () => {
+    assert.ok(
+      selfie.includes("showFailedSection"),
+      "component must define showFailedSection for the failed-analysis + stored-photo state",
+    );
+  });
+
+  it("showFailedSection checks photoExists and not analysisCompleted", () => {
+    const idx = selfie.indexOf("showFailedSection");
+    assert.ok(idx !== -1, "showFailedSection must exist");
+    const block = selfie.slice(idx, idx + 400);
+    assert.ok(
+      block.includes("photoExists"),
+      "showFailedSection must gate on photoExists so it only shows when photo is stored",
+    );
+    assert.ok(
+      block.includes("analysisCompleted"),
+      "showFailedSection must gate on !analysisCompleted",
+    );
+  });
+
+  it("showFailedSection renders reanalyse-selfie form", () => {
+    const failIdx = selfie.indexOf("{showFailedSection &&");
+    assert.ok(failIdx !== -1, "showFailedSection section must be rendered in JSX");
+    const block = selfie.slice(failIdx, failIdx + 1000);
+    assert.ok(
+      block.includes("reanalyse-selfie"),
+      "showFailedSection section must include a form with reanalyse-selfie intent",
+    );
+  });
+});
+
+// ── T29: showDeletedSection — photo visible after analysis deletion ────────────
+
+describe("T29: showDeletedSection renders selfie and Analyse CTA (not upload form)", () => {
+  it("showDeletedSection variable defined in component", () => {
+    assert.ok(
+      selfie.includes("showDeletedSection"),
+      "component must define showDeletedSection for the analysis-deleted + stored-photo state",
+    );
+  });
+
+  it("showDeletedSection checks photoExists and dbStatus deleted", () => {
+    const idx = selfie.indexOf("showDeletedSection");
+    assert.ok(idx !== -1, "showDeletedSection must exist");
+    const block = selfie.slice(idx, idx + 300);
+    assert.ok(
+      block.includes("photoExists"),
+      "showDeletedSection must gate on photoExists",
+    );
+    assert.ok(
+      block.includes('"deleted"'),
+      'showDeletedSection must check dbStatus === "deleted"',
+    );
+  });
+
+  it("showDeletedSection renders reanalyse-selfie form", () => {
+    const delIdx = selfie.indexOf("{showDeletedSection &&");
+    assert.ok(delIdx !== -1, "showDeletedSection section must be rendered in JSX");
+    const block = selfie.slice(delIdx, delIdx + 1000);
+    assert.ok(
+      block.includes("reanalyse-selfie"),
+      "showDeletedSection must include a form with reanalyse-selfie intent",
+    );
+  });
+});
+
+// ── T30: Selfie shown independent of analysis state ──────────────────────────
+
+describe("T30: selfie image shown whenever photoExists — not gated on analysisCompleted", () => {
+  it("selfie section uses photoExists as the primary gate, not showResults/analysisCompleted", () => {
+    assert.ok(
+      selfie.includes("photoExists"),
+      "component must use photoExists to gate selfie display",
+    );
+  });
+
+  it("selfie section appears OUTSIDE the showCompletedSection JSX block", () => {
+    // Anchor on the JSX render expression, not the variable declaration
+    const selfieImgIdx = selfie.indexOf("Your selfie is stored privately");
+    const completedJsxIdx = selfie.indexOf("{showCompletedSection && displaySignals");
+    assert.ok(selfieImgIdx !== -1, "selfie fallback text must exist");
+    assert.ok(completedJsxIdx !== -1, "showCompletedSection JSX block must exist");
+    assert.ok(
+      selfieImgIdx < completedJsxIdx,
+      "selfie section must appear before (outside) the {showCompletedSection && ...} JSX block",
+    );
+  });
+});
+
+// ── T31: Status label says "Analysis unavailable", not duplicate message ──────
+
+describe("T31: Status label uses 'Analysis unavailable' for failed states (no duplicate card)", () => {
+  it("statusLabel uses 'Analysis unavailable' for failed DB state", () => {
+    assert.ok(
+      selfie.includes('"Analysis unavailable"'),
+      'statusLabel must produce "Analysis unavailable" for failed analysis state',
+    );
+  });
+
+  it("statusLabel does NOT say 'Analysis failed — please try again'", () => {
+    assert.ok(
+      !selfie.includes("Analysis failed — please try again"),
+      "status label must not duplicate the old 'Analysis failed — please try again' string — it is now 'Analysis unavailable'",
+    );
+  });
+
+  it("statusDescription provides supporting copy for failed state", () => {
+    assert.ok(
+      selfie.includes("We couldn't complete your analysis this time."),
+      "statusDescription must provide 'We couldn't complete your analysis this time.' as supporting copy",
+    );
+  });
+});
+
+// ── T32: OutcomeFeedback suppressed for system-failure / timeout ──────────────
+
+describe("T32: OutcomeFeedback does NOT render for system-failure or timeout outcomes", () => {
+  it("showOutcomeFeedback explicitly excludes system-failure", () => {
+    const idx = selfie.indexOf("showOutcomeFeedback");
+    assert.ok(idx !== -1, "showOutcomeFeedback variable must exist");
+    const block = selfie.slice(idx, idx + 500);
+    assert.ok(
+      block.includes("system-failure"),
+      "showOutcomeFeedback must exclude system-failure so no duplicate error card renders",
+    );
+  });
+
+  it("showOutcomeFeedback explicitly excludes timeout", () => {
+    const idx = selfie.indexOf("showOutcomeFeedback");
+    assert.ok(idx !== -1, "showOutcomeFeedback must exist");
+    const block = selfie.slice(idx, idx + 500);
+    assert.ok(
+      block.includes("timeout"),
+      "showOutcomeFeedback must exclude timeout so no duplicate error card renders",
+    );
+  });
+});
+
+// ── T33: showChooseDifferent toggle state ─────────────────────────────────────
+
+describe("T33: showChooseDifferent state controls Choose a Different Photo flow", () => {
+  it("showChooseDifferent state variable exists in component", () => {
+    assert.ok(
+      selfie.includes("showChooseDifferent"),
+      "component must have showChooseDifferent state for the choose-different-photo toggle",
+    );
+  });
+
+  it("Choose a Different Photo button sets showChooseDifferent", () => {
+    assert.ok(
+      selfie.includes("setShowChooseDifferent"),
+      "Choose a Different Photo button must call setShowChooseDifferent to reveal the replace form",
+    );
+  });
+});
+
+// ── T34: Delete button independence ──────────────────────────────────────────
+
+describe("T34: delete-analysis intent preserved separate from delete-photo and delete-both", () => {
+  it("delete-analysis intent preserved in action and modal", () => {
+    const count = (selfie.match(/"delete-analysis"/g) ?? []).length;
+    assert.ok(
+      count >= 2,
+      "delete-analysis must appear at least twice (action handler + modal form intent value)",
+    );
+  });
+
+  it("delete-photo intent does NOT appear in delete-analysis handler block", () => {
+    const handlerIdx = selfie.indexOf('intent === "delete-analysis"');
+    assert.ok(handlerIdx !== -1, "delete-analysis handler must exist");
+    const block = selfie.slice(handlerIdx, handlerIdx + 200);
+    assert.ok(
+      !block.includes("deleteSelfiePhoto"),
+      "delete-analysis handler must NOT call deleteSelfiePhoto — it only clears analysis",
+    );
+  });
+
+  it("delete-analysis handler calls deleteAnalysisResult", () => {
+    const handlerIdx = selfie.indexOf('intent === "delete-analysis"');
+    assert.ok(handlerIdx !== -1, "handler must exist");
+    const block = selfie.slice(handlerIdx, handlerIdx + 200);
+    assert.ok(
+      block.includes("deleteAnalysisResult"),
+      "delete-analysis handler must call deleteAnalysisResult",
+    );
+  });
+});
