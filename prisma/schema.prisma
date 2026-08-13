@@ -61,6 +61,7 @@ model Customer {
   naiaModel              NaiaModel?
   tryOnJobs              VirtualTryOnJob[]
   recommendationFeedback RecommendationFeedback[]
+  selfieAnalysis         SelfieAnalysis?
 }
 
 // ============================================
@@ -791,4 +792,25 @@ model VirtualTryOnJob {
 
   @@index([customerId])
   @@index([customerId, status])
+}
+
+// One selfie analysis record per customer. Stores only validated style signals —
+// no raw provider output, no biometric inferences, no exact measurements.
+model SelfieAnalysis {
+  id                String    @id @default(cuid())
+  customerId        String    @unique
+  customer          Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  consentAt         DateTime
+  photoPublicId     String?
+  photoFormat       String?
+  photoDeletedAt    DateTime?
+  analysisStatus    String
+  analysisResult    Json?
+  analysedAt        DateTime?
+  analysisDeletedAt DateTime?
+  analysisVersion   Int       @default(1)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([customerId])
 }

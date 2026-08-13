@@ -245,3 +245,54 @@ describe("T10: retry-moderation does not handle file upload", () => {
     );
   });
 });
+
+// ── T11: beginSelfieAnalysis calls wrapped in try/catch ──────────────────────
+// Regression guard: before the fix, unhandled TypeError from undefined prisma
+// accessor escaped to React Router and produced APPLICATION ERROR.
+
+describe("T11: persistence exceptions do not escape action — beginSelfieAnalysis guarded", () => {
+  it("first beginSelfieAnalysis has a catch block that logs and returns system-failure", () => {
+    assert.ok(
+      selfie.includes("[selfie-action] beginSelfieAnalysis (1) failed:"),
+      "first beginSelfieAnalysis must be inside a try/catch whose catch logs '[selfie-action] beginSelfieAnalysis (1) failed:'",
+    );
+  });
+
+  it("second beginSelfieAnalysis (post-upload) has a catch block that returns system-failure", () => {
+    assert.ok(
+      selfie.includes("[selfie-action] beginSelfieAnalysis (2) failed:"),
+      "second beginSelfieAnalysis must be inside a try/catch whose catch logs '[selfie-action] beginSelfieAnalysis (2) failed:'",
+    );
+  });
+
+  it("first beginSelfieAnalysis catch returns system-failure outcome (not an unhandled throw)", () => {
+    const idx = selfie.indexOf("[selfie-action] beginSelfieAnalysis (1) failed:");
+    assert.ok(idx !== -1, "first catch block must exist");
+    const catchBlock = selfie.slice(idx, idx + 200);
+    assert.ok(
+      catchBlock.includes("system-failure"),
+      "first beginSelfieAnalysis catch must return { status: 'system-failure' } to prevent APPLICATION ERROR",
+    );
+  });
+});
+
+// ── T12: final persistence wrapped in try/catch ───────────────────────────────
+
+describe("T12: final completeSelfieAnalysis/failSelfieAnalysis guarded against APPLICATION ERROR", () => {
+  it("final persistence block has a catch that logs and returns system-failure", () => {
+    assert.ok(
+      selfie.includes("[selfie-action] final persistence failed:"),
+      "final completeSelfieAnalysis/failSelfieAnalysis must be inside a try/catch that logs '[selfie-action] final persistence failed:'",
+    );
+  });
+
+  it("final persistence catch returns system-failure outcome (not an unhandled throw)", () => {
+    const idx = selfie.indexOf("[selfie-action] final persistence failed:");
+    assert.ok(idx !== -1, "final catch block must exist");
+    const catchBlock = selfie.slice(idx, idx + 200);
+    assert.ok(
+      catchBlock.includes("system-failure"),
+      "final persistence catch must return { status: 'system-failure' } to prevent APPLICATION ERROR",
+    );
+  });
+});

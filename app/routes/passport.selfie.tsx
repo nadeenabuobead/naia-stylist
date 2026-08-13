@@ -43,6 +43,7 @@ import {
   deleteBoth,
   loadSelfieForDisplay,
   getSelfieForModeration,
+  type BeginSelfieResult,
   type SelfieDisplayRecord,
 } from "~/lib/ai/selfie-persistence.server";
 import { moderateImageContent } from "~/lib/image-moderation.server";
@@ -181,13 +182,19 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
   }
 
   // Duplicate-analysis guard (bypassed for replace intent)
-  const begin = await beginSelfieAnalysis(
-    customer.id,
-    consentAt,
-    null,    // photoPublicId set after upload
-    null,    // photoFormat set after upload
-    { forceReplace: isReplace },
-  );
+  let begin: BeginSelfieResult;
+  try {
+    begin = await beginSelfieAnalysis(
+      customer.id,
+      consentAt,
+      null,    // photoPublicId set after upload
+      null,    // photoFormat set after upload
+      { forceReplace: isReplace },
+    );
+  } catch (err) {
+    console.error("[selfie-action] beginSelfieAnalysis (1) failed:", err instanceof Error ? err.message : String(err));
+    return { intent: isReplace ? "replace" : "analyse", outcome: { status: "system-failure" } };
+  }
   if (begin.blocked) {
     return {
       intent: "analyse",
@@ -198,7 +205,7 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
   // Upload to Cloudinary (private asset, overwrite=true so replace is atomic)
   const upload = await uploadSelfieToCloudinary(bytes, validation.canonicalMime, customer.id);
   if (!upload.ok) {
-    await failSelfieAnalysis(customer.id);
+    try { await failSelfieAnalysis(customer.id); } catch { /* best-effort cleanup */ }
     return {
       intent: "analyse",
       outcome: { status: "system-failure", internalNote: `Upload failed: ${upload.errorCode}` },
@@ -207,18 +214,23 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
 
   // Update DB record with the confirmed public ID and format
   // (begins analysis guard is now active; photo is stored)
-  await beginSelfieAnalysis(
-    customer.id,
-    consentAt,
-    upload.publicId,
-    upload.format,
-    { forceReplace: true }, // already pending — force update to add publicId
-  );
+  try {
+    await beginSelfieAnalysis(
+      customer.id,
+      consentAt,
+      upload.publicId,
+      upload.format,
+      { forceReplace: true }, // already pending — force update to add publicId
+    );
+  } catch (err) {
+    console.error("[selfie-action] beginSelfieAnalysis (2) failed:", err instanceof Error ? err.message : String(err));
+    return { intent: isReplace ? "replace" : "analyse", outcome: { status: "system-failure" } };
+  }
 
   // Build short-lived signed URL for analyzeImage — NEVER returned to browser
   const analysisUrl = buildSelfieAnalysisUrl(upload.publicId, upload.format);
   if (!analysisUrl) {
-    await failSelfieAnalysis(customer.id);
+    try { await failSelfieAnalysis(customer.id); } catch { /* best-effort cleanup */ }
     return {
       intent: "analyse",
       outcome: { status: "system-failure", internalNote: "Cloudinary not configured for analysis URL" },
@@ -255,15 +267,20 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
   );
 
   // Persist result — only validated signals stored; raw response discarded
-  if (outcome.status === "completed") {
-    await completeSelfieAnalysis(
-      customer.id,
-      outcome.signals,
-      ANALYSIS_VERSION,
-      new Date(outcome.analysedAt),
-    );
-  } else {
-    await failSelfieAnalysis(customer.id);
+  try {
+    if (outcome.status === "completed") {
+      await completeSelfieAnalysis(
+        customer.id,
+        outcome.signals,
+        ANALYSIS_VERSION,
+        new Date(outcome.analysedAt),
+      );
+    } else {
+      await failSelfieAnalysis(customer.id);
+    }
+  } catch (err) {
+    console.error("[selfie-action] final persistence failed:", err instanceof Error ? err.message : String(err));
+    return { intent: isReplace ? "replace" : "analyse", outcome: { status: "system-failure" } };
   }
 
   // Return public-safe outcome — no publicId, no format, no signedUrl

@@ -10,7 +10,7 @@
 //
 // All DB operations accept injectable stubs so tests run without a live database.
 // Migration: prisma/migrations/20260717100000_add_selfie_analysis/migration.sql
-//            NOT yet applied — do not call real Prisma fns until migration runs.
+//            Applied to staging DB; model registered in schema.prisma.
 
 import prisma from "../../db.server.js";
 import type { SelfieStyleSignals } from "./selfie-analysis.js";
@@ -22,7 +22,6 @@ import {
 // ── DB record type ─────────────────────────────────────────────────────────────
 //
 // Mirrors the SelfieAnalysis Prisma model fields.
-// Defined manually because the generated Prisma types are unavailable before migration.
 
 export interface DbSelfieRecord {
   id: string;
@@ -50,19 +49,16 @@ export type UpsertSelfieRecordFn = (
 ) => Promise<DbSelfieRecord>;
 
 // ── Real Prisma implementations ───────────────────────────────────────────────
-// These functions require the SelfieAnalysis migration to be applied.
 
 async function _findSelfieRecord(customerId: string): Promise<DbSelfieRecord | null> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (prisma as any).selfieAnalysis.findUnique({ where: { customerId } }) as Promise<DbSelfieRecord | null>;
+  return prisma.selfieAnalysis.findUnique({ where: { customerId } }) as Promise<DbSelfieRecord | null>;
 }
 
 async function _upsertSelfieRecord(
   customerId: string,
   data: Partial<Omit<DbSelfieRecord, "id" | "customerId" | "createdAt">>,
 ): Promise<DbSelfieRecord> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (prisma as any).selfieAnalysis.upsert({
+  return prisma.selfieAnalysis.upsert({
     where: { customerId },
     create: { customerId, updatedAt: new Date(), ...data },
     update: { updatedAt: new Date(), ...data },
