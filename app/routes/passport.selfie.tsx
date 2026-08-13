@@ -286,8 +286,13 @@ export default function SelfieUploadPage() {
     actionData && "outcome" in actionData ? actionData.outcome : null;
 
   const showUploadForm =
-    (!outcome && (!existing || existing.analysisStatus === "failed")) ||
-    outcome?.status === "safety-rejected";
+    (!outcome && (!existing || existing.analysisStatus === "failed" || existing.analysisStatus === "deleted")) ||
+    outcome?.status === "safety-rejected" ||
+    outcome?.status === "quality-failed" ||
+    outcome?.status === "timeout" ||
+    outcome?.status === "system-failure" ||
+    outcome?.status === "invalid-input" ||
+    outcome?.status === "consent-missing";
   const showProcessing = existing?.analysisStatus === "pending" && !outcome;
   const showModerationRetry = outcome?.status === "moderation-unavailable";
   const showResults = outcome?.status === "completed" ||
@@ -302,6 +307,7 @@ export default function SelfieUploadPage() {
     outcome?.status === "safety-rejected" ? "Upload a new photo to continue" :
     showProcessing          ? "Analysis in progress" :
     existing?.analysisStatus === "failed" ? "Analysis failed — please try again" :
+    existing?.analysisStatus === "deleted" ? "Analysis deleted" :
     "Not started";
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
