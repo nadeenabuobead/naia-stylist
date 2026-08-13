@@ -522,6 +522,15 @@ describe("beginSelfieAnalysis", () => {
     assert.equal(captured[0].analysisStatus, "pending");
   });
 
+  it("pa-6: photoDeletedAt is cleared so re-upload after deleteSelfiePhoto shows hasPhoto:true", async () => {
+    // Regression: deleteSelfiePhoto sets photoDeletedAt; beginSelfieAnalysis must reset it
+    // so loadSelfieForDisplay returns hasPhoto:true after the new photo is confirmed.
+    const existing = makeDbRecord({ photoPublicId: null, photoDeletedAt: new Date("2026-08-01T10:00:00Z") });
+    const { fn: upsert, captured } = capturingUpsert();
+    await beginSelfieAnalysis(CUST, new Date(), `naia-wardrobe/${CUST}/selfie`, "jpg", {}, recordFind(existing), upsert);
+    assert.equal(captured[0].photoDeletedAt, null);
+  });
+
 });
 
 describe("completeSelfieAnalysis", () => {
