@@ -135,7 +135,7 @@ export async function analyzeImage({
     },
     body: JSON.stringify({
       model,
-      max_tokens: 1024,
+      max_tokens: 4096,
       system: system || undefined,
       messages: [{
         role: "user",
