@@ -380,9 +380,11 @@ export default function SelfieUploadPage() {
   const photoJustRejected = freshOutcome?.status === "safety-rejected";
   const photoExists = !photoJustRejected && (existing?.hasPhoto ?? false);
 
-  // Selfie display URL: FileReader preview (fresh upload) takes precedence over
-  // the server-generated signed URL (return visit). Signed URL expires in 1 hour.
-  const selfieDisplayUrl = preview ?? (photoExists ? existing?.selfiePreviewUrl ?? null : null);
+  // Selfie display URL: always the server-generated signed URL for the stored photo.
+  // The FileReader preview is shown inside UploadForm only — keeping it out of the
+  // "Your Selfie" section prevents the same image appearing twice when a new file
+  // is selected in the "Choose a Different Photo" or primary upload flows.
+  const selfieDisplayUrl = photoExists ? existing?.selfiePreviewUrl ?? null : null;
 
   // Analysis state — independent of photo state.
   const analysisCompleted =
@@ -452,7 +454,7 @@ export default function SelfieUploadPage() {
     freshOutcome?.status === "invalid-input" ? "Cannot proceed" :
     (freshOutcome?.status === "system-failure" || freshOutcome?.status === "timeout") ? "Analysis unavailable" :
     analysisPending ? "Analysis in progress" :
-    dbStatus === "failed" ? "Analysis unavailable" :
+    dbStatus === "failed" ? (photoExists ? "Selfie saved" : "Analysis unavailable") :
     dbStatus === "deleted" ? "Analysis removed" :
     photoExists ? "Selfie saved" :
     "Not started";
@@ -462,7 +464,7 @@ export default function SelfieUploadPage() {
   const statusDescription: string | null =
     (freshOutcome?.status === "system-failure" || freshOutcome?.status === "timeout")
       ? "We couldn't complete your analysis this time." :
-    (dbStatus === "failed" && !freshOutcome)
+    (dbStatus === "failed" && !freshOutcome && !photoExists)
       ? "We couldn't complete your analysis this time." :
     (dbStatus === "deleted" && !freshOutcome)
       ? "Your analysis was removed. Your selfie is still saved — you can reanalyse it below." :
