@@ -54,6 +54,8 @@ async function _findSelfieRecord(customerId: string): Promise<DbSelfieRecord | n
   return prisma.selfieAnalysis.findUnique({ where: { customerId } }) as Promise<DbSelfieRecord | null>;
 }
 
+// Used only by beginSelfieAnalysis — creates or updates the record.
+// consentAt is required by the DB and MUST be supplied in `data` on every create path.
 async function _upsertSelfieRecord(
   customerId: string,
   data: Partial<Omit<DbSelfieRecord, "id" | "customerId" | "createdAt">>,
@@ -62,6 +64,19 @@ async function _upsertSelfieRecord(
     where: { customerId },
     create: { customerId, updatedAt: new Date(), ...data },
     update: { updatedAt: new Date(), ...data },
+  }) as Promise<DbSelfieRecord>;
+}
+
+// Used by all post-begin operations (complete, fail, delete) — record is guaranteed to
+// exist after beginSelfieAnalysis. Using update() avoids the consentAt constraint that
+// upsert() enforces on the create block even when the record already exists.
+async function _updateSelfieRecord(
+  customerId: string,
+  data: Partial<Omit<DbSelfieRecord, "id" | "customerId" | "createdAt">>,
+): Promise<DbSelfieRecord> {
+  return prisma.selfieAnalysis.update({
+    where: { customerId },
+    data: { updatedAt: new Date(), ...data },
   }) as Promise<DbSelfieRecord>;
 }
 
@@ -115,7 +130,7 @@ export async function completeSelfieAnalysis(
   signals: SelfieStyleSignals,
   analysisVersion: number,
   analysedAt: Date = new Date(),
-  _upsertFn: UpsertSelfieRecordFn = _upsertSelfieRecord,
+  _upsertFn: UpsertSelfieRecordFn = _updateSelfieRecord,
 ): Promise<DbSelfieRecord> {
   return _upsertFn(customerId, {
     analysisStatus: "completed",
@@ -134,7 +149,7 @@ export async function completeSelfieAnalysis(
 
 export async function failSelfieAnalysis(
   customerId: string,
-  _upsertFn: UpsertSelfieRecordFn = _upsertSelfieRecord,
+  _upsertFn: UpsertSelfieRecordFn = _updateSelfieRecord,
 ): Promise<DbSelfieRecord> {
   return _upsertFn(customerId, {
     analysisStatus: "failed",
@@ -160,7 +175,7 @@ export async function deleteSelfiePhoto(
   customerId: string,
   _deleteAssetFn: DeleteAssetFn = deleteCloudinaryAsset,
   _findFn: FindSelfieRecordFn = _findSelfieRecord,
-  _upsertFn: UpsertSelfieRecordFn = _upsertSelfieRecord,
+  _upsertFn: UpsertSelfieRecordFn = _updateSelfieRecord,
 ): Promise<DeletePhotoResult> {
   const existing = await _findFn(customerId);
   if (!existing) return { ok: false, errorCode: "NOT_FOUND" };
@@ -195,7 +210,7 @@ export async function deleteSelfiePhoto(
 export async function deleteAnalysisResult(
   customerId: string,
   _findFn: FindSelfieRecordFn = _findSelfieRecord,
-  _upsertFn: UpsertSelfieRecordFn = _upsertSelfieRecord,
+  _upsertFn: UpsertSelfieRecordFn = _updateSelfieRecord,
 ): Promise<{ ok: boolean; errorCode?: string }> {
   const existing = await _findFn(customerId);
   if (!existing) return { ok: false, errorCode: "NOT_FOUND" };
@@ -221,7 +236,7 @@ export async function deleteBoth(
   customerId: string,
   _deleteAssetFn: DeleteAssetFn = deleteCloudinaryAsset,
   _findFn: FindSelfieRecordFn = _findSelfieRecord,
-  _upsertFn: UpsertSelfieRecordFn = _upsertSelfieRecord,
+  _upsertFn: UpsertSelfieRecordFn = _updateSelfieRecord,
 ): Promise<DeletePhotoResult> {
   const existing = await _findFn(customerId);
   if (!existing) return { ok: false, errorCode: "NOT_FOUND" };

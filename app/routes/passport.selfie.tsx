@@ -148,10 +148,15 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
       { consentAt: creds.consentAt },
     );
 
-    if (retryOutcome.status === "completed") {
-      await completeSelfieAnalysis(customer.id, retryOutcome.signals, ANALYSIS_VERSION, new Date(retryOutcome.analysedAt));
-    } else {
-      await failSelfieAnalysis(customer.id);
+    try {
+      if (retryOutcome.status === "completed") {
+        await completeSelfieAnalysis(customer.id, retryOutcome.signals, ANALYSIS_VERSION, new Date(retryOutcome.analysedAt));
+      } else {
+        await failSelfieAnalysis(customer.id);
+      }
+    } catch (err) {
+      console.error("[selfie-action] retry-moderation persistence failed:", err instanceof Error ? err.message : String(err));
+      return { intent: "retry-moderation", outcome: { status: "system-failure" } };
     }
 
     return { intent: "retry-moderation", outcome: retryOutcome };
@@ -397,7 +402,7 @@ export default function SelfieUploadPage() {
       {showProcessing && (
         <section className="bos-section">
           <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", lineHeight: 1.75, color: "rgba(34,21,22,0.85)", maxWidth: "520px", marginBottom: "24px" }}>
-            nAia is analysing your selfie. This usually takes a few moments — you do not need to remain on this page.
+            nAia is analysing your selfie. This usually takes a few moments.
           </p>
           <div className="psa-progress-track">
             <div className="psa-progress-fill" />
@@ -489,8 +494,7 @@ export default function SelfieUploadPage() {
 
       {/* Privacy note */}
       <div className="sp-state-note" style={{ marginTop: "32px" }}>
-        Selfies and analyses are stored privately and can be removed at any time from this page or
-        from Settings & Privacy.
+        Your selfie is stored privately and can be managed or removed from My nAia Model.
       </div>
 
       {/* Confirmation modal */}
@@ -547,8 +551,8 @@ function UploadForm({
       <input type="hidden" name="_intent" value={intent} />
 
       {preview && (
-        <div style={{ marginBottom: "20px" }}>
-          <img src={preview} alt="Preview" style={{ width: "100%", maxHeight: "320px", objectFit: "cover", display: "block" }} />
+        <div style={{ marginBottom: "20px", maxWidth: "360px" }}>
+          <img src={preview} alt="Preview" style={{ display: "block", width: "100%", height: "auto" }} />
         </div>
       )}
 

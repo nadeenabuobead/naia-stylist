@@ -276,6 +276,75 @@ describe("T11: persistence exceptions do not escape action — beginSelfieAnalys
   });
 });
 
+// ── T13: completeSelfieAnalysis uses update() not upsert() ───────────────────
+// Regression guard: upsert() requires consentAt in the create block; completeSelfieAnalysis
+// does not pass consentAt, so upsert() was throwing PrismaClientValidationError.
+// The fix switches non-begin operations to update() whose create block is never evaluated.
+
+describe("T13: completeSelfieAnalysis/failSelfieAnalysis use update() not upsert()", () => {
+  it("_updateSelfieRecord uses prisma.selfieAnalysis.update (not upsert)", () => {
+    assert.ok(
+      persist.includes("prisma.selfieAnalysis.update("),
+      "selfie-persistence must contain _updateSelfieRecord using prisma.selfieAnalysis.update()",
+    );
+  });
+
+  it("completeSelfieAnalysis defaults to _updateSelfieRecord", () => {
+    const fnIdx = persist.indexOf("export async function completeSelfieAnalysis(");
+    assert.ok(fnIdx !== -1, "completeSelfieAnalysis must be exported");
+    const sig = persist.slice(fnIdx, fnIdx + 400);
+    assert.ok(
+      sig.includes("_updateSelfieRecord"),
+      "completeSelfieAnalysis must default to _updateSelfieRecord so the create block is never evaluated",
+    );
+    assert.ok(
+      !sig.includes("= _upsertSelfieRecord"),
+      "completeSelfieAnalysis must NOT default to _upsertSelfieRecord (causes consentAt error)",
+    );
+  });
+
+  it("failSelfieAnalysis defaults to _updateSelfieRecord", () => {
+    const fnIdx = persist.indexOf("export async function failSelfieAnalysis(");
+    assert.ok(fnIdx !== -1, "failSelfieAnalysis must be exported");
+    const sig = persist.slice(fnIdx, fnIdx + 200);
+    assert.ok(
+      sig.includes("_updateSelfieRecord"),
+      "failSelfieAnalysis must default to _updateSelfieRecord",
+    );
+  });
+
+  it("beginSelfieAnalysis still defaults to _upsertSelfieRecord (needs create semantics)", () => {
+    const fnIdx = persist.indexOf("export async function beginSelfieAnalysis(");
+    assert.ok(fnIdx !== -1, "beginSelfieAnalysis must be exported");
+    const sig = persist.slice(fnIdx, fnIdx + 400);
+    assert.ok(
+      sig.includes("= _upsertSelfieRecord"),
+      "beginSelfieAnalysis must keep _upsertSelfieRecord — it is the only operation that creates the record",
+    );
+  });
+});
+
+// ── T14: retry-moderation persistence guarded ────────────────────────────────
+
+describe("T14: retry-moderation persistence guarded against APPLICATION ERROR", () => {
+  it("retry-moderation final persistence has a catch block that logs and returns system-failure", () => {
+    assert.ok(
+      selfie.includes("[selfie-action] retry-moderation persistence failed:"),
+      "retry-moderation completeSelfieAnalysis/failSelfieAnalysis must be inside a try/catch that logs '[selfie-action] retry-moderation persistence failed:'",
+    );
+  });
+
+  it("retry-moderation catch returns system-failure outcome", () => {
+    const idx = selfie.indexOf("[selfie-action] retry-moderation persistence failed:");
+    assert.ok(idx !== -1, "retry-moderation catch block must exist");
+    const catchBlock = selfie.slice(idx, idx + 200);
+    assert.ok(
+      catchBlock.includes("system-failure"),
+      "retry-moderation catch must return { status: 'system-failure' } to prevent APPLICATION ERROR",
+    );
+  });
+});
+
 // ── T12: final persistence wrapped in try/catch ───────────────────────────────
 
 describe("T12: final completeSelfieAnalysis/failSelfieAnalysis guarded against APPLICATION ERROR", () => {
