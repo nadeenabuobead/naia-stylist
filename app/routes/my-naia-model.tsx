@@ -148,7 +148,7 @@ export default function MyNaiaModelRoute() {
         <h1 className="sp-shell-title">My nAia Model</h1>
         <p className="sp-shell-desc">
           Your saved full-body photograph for Virtual Try-On. Used privately to preview eligible
-          pieces on your own silhouette. This is separate from your Personal Styling Analysis selfie.
+          pieces on your own silhouette. This is separate from your Selfie Style Analysis selfie.
         </p>
         <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", marginTop: "8px" }}>
           Virtual previews show styling direction and silhouette rather than exact physical fit.

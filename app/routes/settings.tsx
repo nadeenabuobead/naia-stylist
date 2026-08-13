@@ -33,15 +33,15 @@ const CONFIRMATIONS: Record<ConfirmKey, { title: string; removes: string }> = {
   },
   selfie: {
     title: "Delete selfie only",
-    removes: "Your uploaded selfie will be removed. Your existing Personal Styling Analysis is kept until you also choose to delete it.",
+    removes: "Your uploaded selfie will be removed. Your existing Selfie Style Analysis is kept until you also choose to delete it.",
   },
   analysis: {
     title: "Delete styling analysis only",
-    removes: "Your Personal Styling Analysis will be removed. Your selfie is kept until you also choose to delete it.",
+    removes: "Your Selfie Style Analysis will be removed. Your selfie is kept until you also choose to delete it.",
   },
   both: {
     title: "Delete both selfie and analysis",
-    removes: "Your selfie and your Personal Styling Analysis will both be removed. You can create them again at any time.",
+    removes: "Your selfie and your Selfie Style Analysis will both be removed. You can create them again at any time.",
   },
   download: {
     title: "Download or request my data",

@@ -195,7 +195,7 @@ describe("my-naia component — static structure", () => {
     expect(html).toContain("Saved");
     expect(html).toContain("Settings &amp; Privacy");
     expect(html).toContain("My nAia Model");
-    expect(html).toContain("Personal Styling Analysis");
+    expect(html).toContain("Selfie Style Analysis");
   });
 
   it("StyleMe hero card is present with correct link", () => {

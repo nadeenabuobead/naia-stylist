@@ -60,7 +60,7 @@ export const links: LinksFunction = () => [
 ];
 
 export function meta() {
-  return [{ title: "Personal Style Analysis | nAia" }];
+  return [{ title: "Selfie Style Analysis | nAia" }];
 }
 
 // ── Loader ────────────────────────────────────────────────────────────────────
@@ -325,7 +325,7 @@ export default function SelfieUploadPage() {
       {/* Section shell */}
       <div className="sp-shell">
         <div className="sp-shell-eyebrow">Personalisation · Optional</div>
-        <h1 className="sp-shell-title">Personal Styling Analysis</h1>
+        <h1 className="sp-shell-title">Selfie Style Analysis</h1>
         <p className="sp-shell-desc">
           Optional selfie-based guidance for colours near your face, necklines, hair direction,
           earrings, glasses and optional makeup direction. This feature is optional — StyleMe works
