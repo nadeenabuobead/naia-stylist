@@ -279,13 +279,13 @@ describe("E — passport signal forwarding: buildProfileSignals maps all 12 fiel
 
 describe("F — route registration: all customer routes registered in routes.js", () => {
   it("my-naia route is registered", () => {
-    const src = rootFile("app/routes.js");
+    const src = rootFile("app/routes.ts");
     assert.ok(src.includes('"my-naia"') || src.includes("'my-naia'"), "my-naia route registered");
     assert.ok(src.includes("my-naia._index.tsx"), "points to my-naia._index.tsx");
   });
 
   it("my-naia/saved route is registered", () => {
-    const src = rootFile("app/routes.js");
+    const src = rootFile("app/routes.ts");
     assert.ok(
       src.includes('"my-naia/saved"') || src.includes("'my-naia/saved'"),
       "my-naia/saved route registered"
@@ -294,7 +294,7 @@ describe("F — route registration: all customer routes registered in routes.js"
   });
 
   it("my-naia-model route is registered", () => {
-    const src = rootFile("app/routes.js");
+    const src = rootFile("app/routes.ts");
     assert.ok(
       src.includes('"my-naia-model"') || src.includes("'my-naia-model'"),
       "my-naia-model route registered"
@@ -303,13 +303,13 @@ describe("F — route registration: all customer routes registered in routes.js"
   });
 
   it("settings route is registered", () => {
-    const src = rootFile("app/routes.js");
+    const src = rootFile("app/routes.ts");
     assert.ok(src.includes('"settings"') || src.includes("'settings'"), "settings route registered");
     assert.ok(src.includes("settings.tsx"), "points to settings.tsx");
   });
 
   it("post-wear-review route is registered", () => {
-    const src = rootFile("app/routes.js");
+    const src = rootFile("app/routes.ts");
     assert.ok(
       src.includes('"post-wear-review"') || src.includes("'post-wear-review'"),
       "post-wear-review route registered"
@@ -318,7 +318,7 @@ describe("F — route registration: all customer routes registered in routes.js"
   });
 
   it("passport/selfie route is registered", () => {
-    const src = rootFile("app/routes.js");
+    const src = rootFile("app/routes.ts");
     assert.ok(
       src.includes('"passport/selfie"') || src.includes("'passport/selfie'"),
       "passport/selfie route registered"
@@ -327,7 +327,7 @@ describe("F — route registration: all customer routes registered in routes.js"
   });
 
   it("style-session-new route is registered (as redirect tombstone)", () => {
-    const src = rootFile("app/routes.js");
+    const src = rootFile("app/routes.ts");
     assert.ok(
       src.includes('"style-session-new"') || src.includes("'style-session-new'"),
       "style-session-new route registered"
@@ -336,7 +336,7 @@ describe("F — route registration: all customer routes registered in routes.js"
   });
 
   it("canonical auth routes are registered", () => {
-    const src = rootFile("app/routes.js");
+    const src = rootFile("app/routes.ts");
     assert.ok(src.includes('"auth/shopify/login"') || src.includes("'auth/shopify/login'"), "auth/shopify/login registered");
     assert.ok(src.includes('"auth/shopify/callback"') || src.includes("'auth/shopify/callback'"), "auth/shopify/callback registered");
     assert.ok(src.includes('"auth/logout"') || src.includes("'auth/logout'"), "auth/logout registered");
@@ -734,7 +734,7 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
   });
 
   it("routes.js registers both new routes", () => {
-    const src = readFileSync(join(ROOT, "app/routes.js"), "utf8");
+    const src = readFileSync(join(ROOT, "app/routes.ts"), "utf8");
     assert.ok(src.includes('"buyskip/:id"'), "buyskip/:id route registered");
     assert.ok(src.includes('"my-naia/buying-decisions"'), "my-naia/buying-decisions route registered");
   });

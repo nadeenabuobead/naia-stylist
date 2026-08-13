@@ -289,6 +289,25 @@ export async function getSelfieForModeration(
   };
 }
 
+// ── clearSelfiePhotoOwnership ─────────────────────────────────────────────────
+//
+// Clears SelfieAnalysis photo reference WITHOUT deleting the Cloudinary asset.
+// Used when the selfie photo is transferred to NaiaModel.facePublicId — NaiaModel
+// becomes the owner and is responsible for future deletion.
+// Sets photoDeletedAt to prevent double-deletion on any subsequent deleteSelfiePhoto call.
+
+export async function clearSelfiePhotoOwnership(
+  customerId: string,
+  _upsertFn: UpsertSelfieRecordFn = _updateSelfieRecord,
+): Promise<void> {
+  await _upsertFn(customerId, {
+    photoPublicId: null,
+    photoFormat: null,
+    photoDeletedAt: new Date(),
+    updatedAt: new Date(),
+  });
+}
+
 // ── loadSelfieForDisplay ──────────────────────────────────────────────────────
 //
 // Returns a public-safe view of the record — no photoPublicId or photoFormat.

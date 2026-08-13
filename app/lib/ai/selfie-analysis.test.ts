@@ -408,6 +408,7 @@ import {
   deleteSelfiePhoto,
   deleteAnalysisResult,
   deleteBoth,
+  clearSelfiePhotoOwnership,
   type DbSelfieRecord,
   type FindSelfieRecordFn,
   type UpsertSelfieRecordFn,
@@ -683,6 +684,31 @@ describe("deleteBoth", () => {
     const result = await deleteBoth(CUST, failDelete("NETWORK_ERROR"), recordFind(existing), upsert);
     assert.equal(result.ok, false);
     assert.equal(captured.length, 0, "DB must not be modified when Cloudinary deletion fails");
+  });
+
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// clearSelfiePhotoOwnership tests
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe("clearSelfiePhotoOwnership", () => {
+
+  it("cop-1: clears photoPublicId and photoFormat without a Cloudinary call", async () => {
+    const { fn: upsert, captured } = capturingUpsert();
+    await clearSelfiePhotoOwnership(CUST, upsert);
+    assert.equal(captured.length, 1, "exactly one DB update");
+    assert.equal(captured[0].photoPublicId, null, "photoPublicId must be cleared");
+    assert.equal(captured[0].photoFormat, null, "photoFormat must be cleared");
+    assert.ok(captured[0].photoDeletedAt instanceof Date, "photoDeletedAt must be set");
+  });
+
+  it("cop-2: sets photoDeletedAt to prevent double-deletion by deleteSelfiePhoto", async () => {
+    const { fn: upsert, captured } = capturingUpsert();
+    await clearSelfiePhotoOwnership(CUST, upsert);
+    const before = Date.now();
+    const deletedAt = captured[0].photoDeletedAt as Date;
+    assert.ok(deletedAt.getTime() <= before, "photoDeletedAt must be a recent timestamp");
   });
 
 });

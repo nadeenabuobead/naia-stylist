@@ -38,6 +38,8 @@ import {
   type VerifyAssetFn,
   type ModerateFn,
   type ScreenBodyFn,
+  type CheckFaceQualityFn,
+  saveSelfieAsModelFace,
 } from "./my-naia-model.server.ts";
 import { deleteCloudinaryAsset, buildModelUploadUrl, type CloudinaryConfig } from "../cloudinary-admin.server.ts";
 import { DEFAULT_CONSENT_STATE } from "./virtual-try-on.types.ts";
@@ -102,9 +104,11 @@ const mockVerifyOk: VerifyAssetFn = async (pid) => ({
   asset: { publicId: pid, resourceType: "image", type: "private", version: "1", format: "jpg" },
 });
 
-// Happy-path moderation/suitability mocks — bypass real Claude calls in tests.
+// Happy-path moderation/suitability/quality mocks — bypass real Claude calls in tests.
 const mockModerationPass: ModerateFn = async () => ({ status: "PASS" });
 const mockSuitabilityPass: ScreenBodyFn = async () => ({ status: "PASS" });
+const mockFaceQualityPass: CheckFaceQualityFn = async () => ({ pass: true, issues: [], guidance: null });
+const mockFaceQualityFail: CheckFaceQualityFn = async () => ({ pass: false, issues: ["blurry"], guidance: "Photo is too blurry." });
 const mockCfg: CloudinaryConfig = { cloudName: "test-cloud", apiKey: "test-key", apiSecret: "test-secret" };
 const mockGetCfg = () => mockCfg;
 
@@ -130,6 +134,7 @@ describe("saveNaiaModelPhoto", () => {
       mockModerationPass,
       mockSuitabilityPass,
       mockGetCfg,
+      mockFaceQualityPass,
     );
     assert.equal(result.ok, true);
     if (!result.ok) throw new Error("unreachable");
@@ -153,6 +158,7 @@ describe("saveNaiaModelPhoto", () => {
       mockModerationPass,
       mockSuitabilityPass,
       mockGetCfg,
+      mockFaceQualityPass,
     );
     assert.equal(result.ok, true);
     if (!result.ok) throw new Error("unreachable");
@@ -565,6 +571,7 @@ describe("PV — private delivery", () => {
       mockModerationPass,
       mockSuitabilityPass,
       mockGetCfg,
+      mockFaceQualityPass,
     );
     assert.equal(upsertedData.deliveryType, "private");
   });
@@ -629,6 +636,7 @@ describe("CP — compensation and privacy-first deletion", () => {
       mockModerationPass,
       mockSuitabilityPass,
       mockGetCfg,
+      mockFaceQualityPass,
     );
     assert.equal(result.ok, false);
     assert.deepEqual(deletedIds, [VALID_PUBLIC_ID], "newly uploaded asset must be deleted as compensation");
@@ -649,6 +657,7 @@ describe("CP — compensation and privacy-first deletion", () => {
       mockModerationPass,
       mockSuitabilityPass,
       mockGetCfg,
+      mockFaceQualityPass,
     );
     assert.equal(result.ok, false, "success must never be reported when DB persist fails");
   });
@@ -672,6 +681,7 @@ describe("CP — compensation and privacy-first deletion", () => {
       mockModerationPass,
       mockSuitabilityPass,
       mockGetCfg,
+      mockFaceQualityPass,
     );
     assert.equal(result.ok, true);
     assert.deepEqual(deletedIds, [oldId], "old asset must be deleted after successful DB persist");
@@ -695,6 +705,7 @@ describe("CP — compensation and privacy-first deletion", () => {
       mockModerationPass,
       mockSuitabilityPass,
       mockGetCfg,
+      mockFaceQualityPass,
     );
     assert.equal(result.ok, true);
     assert.deepEqual(deletedIds, [], "no Cloudinary call when publicId is unchanged");
@@ -718,6 +729,7 @@ describe("CP — compensation and privacy-first deletion", () => {
       mockModerationPass,
       mockSuitabilityPass,
       mockGetCfg,
+      mockFaceQualityPass,
     );
     assert.equal(result.ok, true, "overall ok=true — DB persisted the new reference");
     if (!result.ok) throw new Error("unreachable");
@@ -976,6 +988,7 @@ describe("PE — private-download endpoint and delivery enforcement", () => {
       mockModerationPass,
       mockSuitabilityPass,
       mockGetCfg,
+      mockFaceQualityPass,
     );
     assert.equal(result.ok, true, "private delivery type must be accepted");
   });
@@ -1067,6 +1080,7 @@ describe("PE — private-download endpoint and delivery enforcement", () => {
       mockModerationPass,
       mockSuitabilityPass,
       mockGetCfg,
+      mockFaceQualityPass,
     );
     assert.equal(result.ok, true);
     assert.equal(upsertedData.faceFormat, "webp", "must use Admin API-verified format, not browser-supplied value");
@@ -1216,6 +1230,7 @@ describe("SV — server-side Cloudinary asset verification", () => {
       mockModerationPass,
       mockSuitabilityPass,
       mockGetCfg,
+      mockFaceQualityPass,
     );
     assert.equal(upsertedData.faceFormat, "heic", "verified format must be persisted");
     assert.notEqual(upsertedData.faceFormat, "png", "browser-supplied format must be ignored");
@@ -1263,6 +1278,7 @@ describe("MD — body-slot moderation and suitability", () => {
       async () => ({ status: "MODERATION_UNAVAILABLE" }),   // moderation unavailable
       mockSuitabilityPass,
       mockGetCfg,
+      mockFaceQualityPass,
     );
     assert.equal(result.ok, false, "must fail when moderation is unavailable");
     assert.deepEqual(deletedIds, [BODY_ID], "asset must be deleted as compensation");
@@ -1286,6 +1302,7 @@ describe("MD — body-slot moderation and suitability", () => {
       async () => ({ status: "SAFETY_REJECT", reasonCode: "explicit_sexual" }),
       mockSuitabilityPass,
       mockGetCfg,
+      mockFaceQualityPass,
     );
     assert.equal(result.ok, false, "must fail on SAFETY_REJECT");
     assert.deepEqual(deletedIds, [BODY_ID], "rejected asset must be deleted");
@@ -1333,6 +1350,7 @@ describe("MD — body-slot moderation and suitability", () => {
       mockModerationPass,
       mockSuitabilityPass,
       mockGetCfg,
+      mockFaceQualityPass,
     );
     assert.equal(upsertedData.bodyModerationStatus, "APPROVED",
       "bodyModerationStatus must be APPROVED after L2+L3 pass");
@@ -1366,5 +1384,141 @@ describe("MD — body-slot moderation and suitability", () => {
       "bodyModerationStatus must be cleared to prevent stale APPROVED state");
     assert.equal(upsertedData.bodyModerationAt, null,
       "bodyModerationAt must be cleared");
+  });
+});
+
+// ── MM.SF: saveSelfieAsModelFace ──────────────────────────────────────────────
+
+const SELFIE_ID = `naia-wardrobe/${CUST}/selfie`;
+
+describe("saveSelfieAsModelFace", () => {
+  it("SF.1 — saves selfie publicId as NaiaModel facePublicId", async () => {
+    let upsertedData: Partial<NaiaModelRecord> = {};
+    const result = await saveSelfieAsModelFace(
+      CUST,
+      SELFIE_ID,
+      "jpg",
+      async () => null,
+      async (_cid, data) => { upsertedData = data; return makeModel(data); },
+      async () => ({ ok: true }),
+    );
+    assert.equal(result.ok, true);
+    assert.equal(upsertedData.facePublicId, SELFIE_ID);
+    assert.equal(upsertedData.faceFormat, "jpg");
+    assert.equal(upsertedData.deliveryType, "private");
+  });
+
+  it("SF.2 — deletes old facePublicId from Cloudinary when replaced", async () => {
+    const oldFaceId = `naia-wardrobe/${CUST}/old-face`;
+    const existing = makeModel({ facePublicId: oldFaceId });
+    const deletedIds: string[] = [];
+    const result = await saveSelfieAsModelFace(
+      CUST,
+      SELFIE_ID,
+      "jpg",
+      async () => existing,
+      async (_cid, data) => makeModel(data),
+      async (pid) => { deletedIds.push(pid); return { ok: true }; },
+    );
+    assert.equal(result.ok, true);
+    assert.deepEqual(deletedIds, [oldFaceId], "old face must be deleted from Cloudinary");
+  });
+
+  it("SF.3 — does not delete Cloudinary when selfie replaces itself (same publicId)", async () => {
+    const existing = makeModel({ facePublicId: SELFIE_ID });
+    const deletedIds: string[] = [];
+    await saveSelfieAsModelFace(
+      CUST,
+      SELFIE_ID,
+      "jpg",
+      async () => existing,
+      async (_cid, data) => makeModel(data),
+      async (pid) => { deletedIds.push(pid); return { ok: true }; },
+    );
+    assert.deepEqual(deletedIds, [], "no deletion when publicId is unchanged");
+  });
+
+  it("SF.4 — returns ok:false when DB upsert throws", async () => {
+    const result = await saveSelfieAsModelFace(
+      CUST,
+      SELFIE_ID,
+      "jpg",
+      async () => null,
+      async () => { throw new Error("DB unavailable"); },
+      async () => ({ ok: true }),
+    );
+    assert.equal(result.ok, false);
+  });
+});
+
+// ── MM.FQ: face quality gate in saveNaiaModelPhoto ────────────────────────────
+
+describe("saveNaiaModelPhoto face quality gate", () => {
+  it("FQ.1 — face slot: rejects and deletes asset when quality check fails", async () => {
+    const deletedIds: string[] = [];
+    const result = await saveNaiaModelPhoto(
+      CUST,
+      "face",
+      VALID_PUBLIC_ID,
+      null,
+      null,
+      "private",
+      async () => null,
+      async (_cid, data) => makeModel(data),
+      async (pid) => { deletedIds.push(pid); return { ok: true }; },
+      mockVerifyOk,
+      mockModerationPass,
+      mockSuitabilityPass,
+      mockGetCfg,
+      mockFaceQualityFail,
+    );
+    assert.equal(result.ok, false, "must reject when face quality fails");
+    assert.deepEqual(deletedIds, [VALID_PUBLIC_ID], "must delete asset on quality fail");
+    if (result.ok) throw new Error("unreachable");
+    assert.ok(result.error.includes("blurry") || result.error.length > 0,
+      "error must reflect quality guidance");
+  });
+
+  it("FQ.2 — face slot: proceeds when quality check passes", async () => {
+    const result = await saveNaiaModelPhoto(
+      CUST,
+      "face",
+      VALID_PUBLIC_ID,
+      null,
+      null,
+      "private",
+      async () => null,
+      async (_cid, data) => makeModel(data),
+      async () => ({ ok: true }),
+      mockVerifyOk,
+      mockModerationPass,
+      mockSuitabilityPass,
+      mockGetCfg,
+      mockFaceQualityPass,
+    );
+    assert.equal(result.ok, true, "must succeed when quality check passes");
+  });
+
+  it("FQ.3 — body slot: does not call face quality gate", async () => {
+    const bodyId = `naia-wardrobe/${CUST}/body`;
+    let qualityCalled = false;
+    const trackQuality: CheckFaceQualityFn = async () => { qualityCalled = true; return { pass: true, issues: [], guidance: null }; };
+    await saveNaiaModelPhoto(
+      CUST,
+      "body",
+      bodyId,
+      null,
+      null,
+      "private",
+      async () => null,
+      async (_cid, data) => makeModel(data),
+      async () => ({ ok: true }),
+      mockVerifyOk,
+      mockModerationPass,
+      mockSuitabilityPass,
+      mockGetCfg,
+      trackQuality,
+    );
+    assert.equal(qualityCalled, false, "face quality gate must not run for body slot");
   });
 });

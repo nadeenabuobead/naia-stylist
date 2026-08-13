@@ -677,7 +677,7 @@ describe("T27: reanalyse-selfie runs analyseSelfie (quality check + v2 analysis)
     assert.ok(handlerStart !== -1, "handler must exist");
     const block = selfie.slice(handlerStart, handlerStart + 3000);
     assert.ok(
-      block.includes("analyseSelfie("),
+      block.includes("analyseSelfie(") || block.includes("= analyseSelfie"),
       "reanalyse-selfie must call analyseSelfie (which runs quality + v2 analysis)",
     );
   });

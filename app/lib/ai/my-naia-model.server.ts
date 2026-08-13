@@ -52,6 +52,10 @@ import {
   type VtoSuitabilityResult,
   type AnalyzeForSuitabilityFn,
 } from "../image-suitability.server.js";
+import {
+  checkSelfieQuality,
+  type SelfieAnalyzerFn,
+} from "./selfie-analysis.server.js";
 
 export { POLICY_VERSION, validatePublicIdOwnership, buildSignedDeliveryUrl, buildPrivateDownloadUrl };
 export type { NaiaModelRecord, VirtualTryOnJobRecord, TryOnJobStatus, VerifyAssetFn };
@@ -207,6 +211,7 @@ const _verifyModelAsset: VerifyAssetFn = (publicId) =>
 // DI types for moderation (injectable so tests don't hit Claude)
 export type ModerateFn = (imageUrl: string, _analyze?: AnalyzeForModerationFn) => Promise<ModerationResult>;
 export type ScreenBodyFn = (imageUrl: string, _analyze?: AnalyzeForSuitabilityFn) => Promise<VtoSuitabilityResult>;
+export type CheckFaceQualityFn = typeof checkSelfieQuality;
 
 export async function saveNaiaModelPhoto(
   customerId: string,
@@ -222,6 +227,7 @@ export async function saveNaiaModelPhoto(
   _moderateContent: ModerateFn = moderateImageContent,
   _screenBodyPhoto: ScreenBodyFn = screenVtoBodyPhoto,
   _getConfig: () => CloudinaryConfig | null = getCloudinaryConfig,
+  _checkFaceQuality: CheckFaceQualityFn = checkSelfieQuality,
 ): Promise<
   | { ok: true; model: NaiaModelRecord; orphanPublicId?: string }
   | { ok: false; error: string }
@@ -312,7 +318,21 @@ export async function saveNaiaModelPhoto(
     return { ok: false, error: "Photo could not be accepted. Please use a different image." };
   }
 
-  // ── Layer 3: body photo suitability (body slot only) ─────────────────────
+  // ── Layer 3: face quality gate (face slot only) ──────────────────────────
+  // Reuses the selfie quality check to confirm the photo contains a clear,
+  // forward-facing face — the same gate used during Selfie Style Analysis.
+  if (slot === "face") {
+    const faceQualityUrl = buildPrivateDownloadUrl(cfg, newPublicId, verifiedFormat ?? "jpg", "private");
+    const faceQuality = await _checkFaceQuality({ imageUrl: faceQualityUrl });
+    if (!faceQuality.pass) {
+      await _deleteAsset(newPublicId, "private");
+      const msg = faceQuality.guidance
+        ?? "Photo doesn't show a clear, forward-facing face. Please try a different photo.";
+      return { ok: false, error: msg };
+    }
+  }
+
+  // ── Layer 4: body photo suitability (body slot only) ─────────────────────
   let bodyModerationApproved = false;
   if (slot === "body") {
     const suitability = await _screenBodyPhoto(moderationUrl);
@@ -444,6 +464,49 @@ export async function deleteNaiaModelPhoto(
   }
 
   return { ok: true, cloudinaryOk: true, dbCleared: true, staleReference: false };
+}
+
+// ── NaiaModel — save selfie as model face (trusted path) ─────────────────────
+//
+// Trusted-path transfer: the selfie has already passed content moderation and the
+// face quality gate during Selfie Style Analysis. No re-verification needed.
+// Ownership moves from SelfieAnalysis to NaiaModel — the caller must call
+// clearSelfiePhotoOwnership() afterwards to prevent double-deletion.
+//
+// Replace flow:
+//   1. Read current model to capture old facePublicId.
+//   2. Upsert new facePublicId in DB.
+//   3. On DB failure → return error (caller keeps the selfie as a fallback).
+//   4. On DB success → delete old facePublicId from Cloudinary if different.
+
+export async function saveSelfieAsModelFace(
+  customerId: string,
+  selfiePublicId: string,
+  selfieFormat: string | null,
+  _findModelFn: FindModelFn = _findModel,
+  _upsertModelFn: UpsertModelFn = _upsertModel,
+  _deleteAsset: DeleteAssetFn = deleteCloudinaryAsset,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const existing = await _findModelFn(customerId);
+  const oldFacePublicId = existing?.facePublicId ?? null;
+
+  try {
+    await _upsertModelFn(customerId, {
+      facePublicId: selfiePublicId,
+      faceVersion: null,
+      faceFormat: selfieFormat,
+      deliveryType: "private",
+    });
+  } catch {
+    return { ok: false, error: "Failed to save photo reference." };
+  }
+
+  if (oldFacePublicId && oldFacePublicId !== selfiePublicId) {
+    await _deleteAsset(oldFacePublicId, existing?.deliveryType ?? "private");
+    // Ignore deletion errors — old asset becomes an orphan at worst.
+  }
+
+  return { ok: true };
 }
 
 // ── NaiaModel — consent ───────────────────────────────────────────────────────
