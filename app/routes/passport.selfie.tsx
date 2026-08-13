@@ -25,7 +25,7 @@
 //   Only an explicit delete-analysis or delete-both action removes the analysis.
 //   Analysis failure/system errors never touch the photo reference.
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";
 import { createHash } from "node:crypto";
 import { redirect, useActionData, useLoaderData, useNavigation, Form, Link } from "react-router";
@@ -363,6 +363,7 @@ export default function SelfieUploadPage() {
   const [pending, setPending] = useState<"delete-photo" | "delete-analysis" | "delete-both" | null>(null);
   const [showChooseDifferent, setShowChooseDifferent] = useState(false);
   const isSubmitting = navigation.state === "submitting";
+  const resultsTopRef = useRef<HTMLDivElement>(null);
 
   // True once the user has selected a replacement file — collapses the saved-selfie
   // block and reanalyse controls so only the replacement preview + form are visible.
@@ -482,6 +483,16 @@ export default function SelfieUploadPage() {
     freshOutcome.status !== "timeout" &&
     freshOutcome.status !== "moderation-unavailable";
 
+  // After a fresh successful analysis, clear the lingering FileReader preview
+  // (it persists across the POST because React Router keeps the component mounted)
+  // and scroll the user to the top of their results.
+  useEffect(() => {
+    if (freshOutcome?.status === "completed") {
+      setPreview(null);
+      resultsTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [freshOutcome?.status]);
+
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) { setPreview(null); return; }
@@ -509,7 +520,7 @@ export default function SelfieUploadPage() {
       </div>
 
       {/* Current Status */}
-      <div className="bos-section">
+      <div className="bos-section" ref={resultsTopRef} style={{ scrollMarginTop: "80px" }}>
         <div className="bos-step-label">Current Status</div>
         <div className="psa-status-val">{statusLabel}</div>
         {statusDescription && (
@@ -718,11 +729,7 @@ export default function SelfieUploadPage() {
         <>
           {/* Your Analysis */}
           <section className="bos-section">
-            <div className="bos-step-label">
-              {analysisIntent === "replace" || analysisIntent === "reanalyse-selfie"
-                ? "Updated Observations"
-                : "Your Analysis"}
-            </div>
+            <div className="bos-step-label">Your Analysis</div>
 
             {/* Face & Feature Profile */}
             <AnalysisSubsection title="Face & Feature Profile" first>
