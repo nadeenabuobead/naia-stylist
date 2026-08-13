@@ -79,7 +79,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let existing: SelfieDisplayRecord | null = null;
   try {
     existing = await loadSelfieForDisplay(customer.id, undefined, buildSelfiePreviewUrl);
-    console.info("[selfie-loader] existing:", JSON.stringify({ hasPhoto: existing?.hasPhoto, analysisStatus: existing?.analysisStatus, consentAt: existing?.consentAt }));
   } catch (err) {
     // Table does not exist yet (migration not applied) — treat as no record
     console.error("[selfie-loader] loadSelfieForDisplay threw:", err instanceof Error ? err.message : String(err));
@@ -286,7 +285,6 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
   }
 
   // Update DB record with the confirmed public ID and format
-  console.info("[selfie-action] upload ok, publicId:", upload.publicId, "format:", upload.format);
   try {
     const begin2 = await beginSelfieAnalysis(
       customer.id,
@@ -295,7 +293,6 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
       upload.format,
       { forceReplace: true },
     );
-    console.info("[selfie-action] beginSelfieAnalysis(2) ok, blocked:", begin2.blocked, "photoPublicId:", !begin2.blocked && begin2.record.photoPublicId);
   } catch (err) {
     console.error("[selfie-action] beginSelfieAnalysis (2) failed:", err instanceof Error ? err.message : String(err));
     return { intent: isReplace ? "replace" : "analyse", outcome: { status: "system-failure", internalNote: "beginSelfieAnalysis (2) failed" } };
@@ -338,7 +335,6 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
   );
 
   // Persist result — only validated signals stored; raw response discarded
-  console.info("[selfie-action] analyseSelfie outcome:", outcome.status);
   try {
     if (outcome.status === "completed") {
       await completeSelfieAnalysis(
@@ -348,8 +344,7 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
         new Date(outcome.analysedAt),
       );
     } else {
-      const failRec = await failSelfieAnalysis(customer.id);
-      console.info("[selfie-action] failSelfieAnalysis ok, photoPublicId:", failRec.photoPublicId);
+      await failSelfieAnalysis(customer.id);
     }
   } catch (err) {
     console.error("[selfie-action] final persistence failed:", err instanceof Error ? err.message : String(err));
