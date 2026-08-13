@@ -9,6 +9,8 @@ import {
   validatePublicIdOwnership,
   buildPrivateDownloadUrl,
 } from "~/lib/cloudinary-admin.server";
+import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
+import { VtoExperience } from "~/components/VtoExperience";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
@@ -72,6 +74,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     itemImageUrl = analysis.imageUrl;
   }
 
+  const vtoEnabled = process.env.VTO_UI_ENABLED === "true";
+  // VTO requires: S0 pipeline (imagePublicId) + completed AI analysis (verdict + fullAnalysis).
+  // imagePublicId alone is not sufficient — the analysis must have completed successfully.
+  const vtoSupported = !!(
+    analysis.imagePublicId &&
+    analysis.imageFormat &&
+    analysis.verdict &&
+    analysis.fullAnalysis
+  );
+  const naiaModel = vtoEnabled && vtoSupported ? await loadNaiaModel(naiaCustomer.id) : null;
+  const naiaModelIsReady = computeModelReadinessFromRecord(naiaModel).isReadyForTryOn;
+
   return data({
     id: analysis.id,
     createdAt: analysis.createdAt.toISOString(),
@@ -87,6 +101,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     colorNote: analysis.colorNote,
     itemSize: analysis.itemSize,
     fullAnalysis: analysis.fullAnalysis as Record<string, any> | null,
+    vtoEnabled,
+    vtoSupported,
+    naiaModelIsReady,
   });
 }
 
@@ -224,6 +241,15 @@ export default function BuyOrSkipResult() {
           </div>
           {finalThought && (
             <p className="bos-result-summary">{finalThought}</p>
+          )}
+          {analysis.vtoEnabled && analysis.vtoSupported && (
+            <VtoExperience
+              source="buyskip"
+              analysisId={analysis.id}
+              garmentTitle={analysis.category ? `Your ${String(analysis.category).toLowerCase()}` : "this item"}
+              naiaModelIsReady={analysis.naiaModelIsReady}
+              isAuthenticated={true}
+            />
           )}
         </div>
       </div>

@@ -12,11 +12,17 @@ import { verifyCloudinaryAsset, deleteCloudinaryAsset, buildPrivateDownloadUrl, 
 import { computeClosetInsights, type ClosetInsightProfile } from "~/lib/ai/closet-insights";
 import { moderateImageContent } from "~/lib/image-moderation.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
+import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
+import { VtoExperience } from "~/components/VtoExperience";
 
 // Option B shell: MyNaiaLayout + naiaStyles (NADINE header, My nAia navigation)
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
 
 const CATEGORIES = ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS", "ACCESSORIES", "JEWELRY", "OTHER"];
+
+// Categories where VTO makes visual sense — coarse UI gate only.
+// Server-side suitability check (screenGarmentSuitability) is the real gate at trigger time.
+const VTO_CATEGORY_GATE = new Set(["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"]);
 const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver", "Multicolor"];
 const OCCASIONS = ["Casual", "Work", "Dinner", "Party", "Formal", "Date", "Weekend", "Travel"];
 const SEASONS = ["Spring", "Summer", "Fall", "Winter", "All Season"];
@@ -127,7 +133,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : null;
   const closetInsights = computeClosetInsights(insightItems, insightProfile);
 
-  return data({ items, closetInsights });
+  const vtoEnabled = process.env.VTO_UI_ENABLED === "true";
+  const naiaModel = vtoEnabled ? await loadNaiaModel(naiaCustomer.id) : null;
+  const naiaModelIsReady = computeModelReadinessFromRecord(naiaModel).isReadyForTryOn;
+
+  return data({ items, closetInsights, vtoEnabled, naiaModelIsReady });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -1424,6 +1434,15 @@ export default function Closet() {
                     <button type="button" className="cl-edit-btn" onClick={() => openEdit(item)}>
                       Edit
                     </button>
+                    {loaderData.vtoEnabled && item.imagePublicId && VTO_CATEGORY_GATE.has(item.category) && (
+                      <VtoExperience
+                        source="closet"
+                        closetItemId={item.id}
+                        garmentTitle={item.name}
+                        naiaModelIsReady={loaderData.naiaModelIsReady}
+                        isAuthenticated={true}
+                      />
+                    )}
                   </div>
                   <button
                     type="button"

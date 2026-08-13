@@ -209,6 +209,12 @@ export interface SubmitJobParams {
   // Gate: PENDING/null means body photo has not passed Layer 2+3 moderation.
   // submitTryOnJob rejects unless this is "APPROVED".
   bodyModerationStatus?: string | null;
+  // Non-NADINE garment sources (closet, buyskip):
+  // Route action verifies ownership + eligibility server-side and passes the
+  // pre-resolved signed Cloudinary URL here. When set, catalog eligibility checks
+  // (validateGarmentEligibility / isTryOnEligible) are skipped.
+  resolvedGarmentUrl?: string;
+  garmentSource?: "nadine" | "closet" | "buyskip";
 }
 
 export type SubmitJobResult =
@@ -258,17 +264,24 @@ export async function submitTryOnJob(
     };
   }
 
-  // 1. Garment eligibility — fail-closed on non-ready entries
-  const garment = validateGarmentEligibility(params.garmentHandle);
-  if (!garment.ok) {
-    return { ok: false, code: "NOT_READY", customerMessage: SUBMIT_ERRORS.NOT_READY };
-  }
-
-  // 1a. Outcome eligibility — block garments not yet accepted in live provider testing.
-  // Garments are only "accepted" after a product-owner–approved FASHN generation run.
-  // "pending" (not yet tested) and "not-eligible" (tested and rejected) both block here.
-  if (!isTryOnEligible(params.garmentHandle)) {
-    return { ok: false, code: "NOT_READY", customerMessage: SUBMIT_ERRORS.NOT_READY };
+  // 1. Garment URL resolution — two paths:
+  //   a. Pre-resolved (closet/buyskip): route action verified ownership + eligibility
+  //      server-side; signed URL is already built. Skip catalog checks.
+  //   b. NADINE catalog: resolve from handle via verified media registry and outcome gate.
+  let garmentUrl: string;
+  if (params.resolvedGarmentUrl) {
+    garmentUrl = params.resolvedGarmentUrl;
+  } else {
+    const garment = validateGarmentEligibility(params.garmentHandle);
+    if (!garment.ok) {
+      return { ok: false, code: "NOT_READY", customerMessage: SUBMIT_ERRORS.NOT_READY };
+    }
+    // Outcome eligibility — block garments not yet accepted in live provider testing.
+    // "pending" (not yet tested) and "not-eligible" (tested and rejected) both block here.
+    if (!isTryOnEligible(params.garmentHandle)) {
+      return { ok: false, code: "NOT_READY", customerMessage: SUBMIT_ERRORS.NOT_READY };
+    }
+    garmentUrl = garment.garmentUrl;
   }
 
   // 2. Per-customer cooldown
@@ -342,7 +355,7 @@ export async function submitTryOnJob(
   const fashnResult = await _submitToProvider({
     customerId:        params.internalCustomerId,
     modelImageDataUrl: photoResult.dataUrl,
-    productImageUrl:   garment.garmentUrl,
+    productImageUrl:   garmentUrl,
     productHandle:     params.garmentHandle,
     consent: {
       virtualTryOnConsent: true,

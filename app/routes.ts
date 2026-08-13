@@ -78,4 +78,6 @@ export default [
   route("api/track_event", "routes/api.track_event.jsx"),
   // VTO M1 — customer-facing virtual try-on trigger
   route("api/trigger-tryon", "routes/api.trigger-tryon.tsx"),
+  // VTO M2 — session-auth job status polling and result delivery
+  route("api/tryon-status/:jobId", "routes/api.tryon-status.$jobId.tsx"),
 ] satisfies RouteConfig;

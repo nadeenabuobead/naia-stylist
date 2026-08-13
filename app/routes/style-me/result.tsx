@@ -19,6 +19,7 @@ import { parseSuggestionMetadata } from "~/lib/ai/styleme-result.types";
 import { issueImageToken } from "~/lib/dev-tryon-image-tokens.server";
 import { isTryOnEligible } from "~/lib/ai/tryon-product-eligibility";
 import { TryOnPanel } from "~/components/TryOnPanel";
+import { VtoExperience } from "~/components/VtoExperience";
 import { RecommendationFeedbackWidget } from "~/components/RecommendationFeedbackWidget";
 import { buildCustomerJourneyContext, buildEphemeralContextSignals } from "~/lib/ai/journey-context.server";
 import { emitSessionStarted, emitRecommendationServed, emitLookSaved, emitInSessionReviewSubmitted, recordJourneyEvent, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
@@ -34,6 +35,7 @@ export function meta() {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const devTryOnEnabled = process.env.DEV_TRYON_UI_ENABLED === 'true';
+  const vtoEnabled = process.env.VTO_UI_ENABLED === "true";
   try {
     const url = new URL(request.url);
     const sessionId = url.searchParams.get("sessionId");
@@ -66,6 +68,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             isAuthenticated: false,
             naiaModelIsReady: false,
             devTryOnEnabled,
+            vtoEnabled,
             tryOnFixtureTokens,
             sessionId: null,
             mood: null,
@@ -90,6 +93,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             isAuthenticated: true,
             naiaModelIsReady: false,
             devTryOnEnabled,
+            vtoEnabled,
             tryOnFixtureTokens,
             sessionId: null,
             mood: null,
@@ -108,6 +112,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         isAuthenticated: !!naiaCustomer,
         naiaModelIsReady,
         devTryOnEnabled,
+        vtoEnabled,
         tryOnFixtureTokens,
         sessionId: session.id,
         mood: session.currentMood,
@@ -155,6 +160,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         isAuthenticated: !!naiaCustomer,
         naiaModelIsReady,
         devTryOnEnabled,
+        vtoEnabled,
         tryOnFixtureTokens,
         sessionId: pendingSuggestion.sessionId,
         mood: pendingSuggestion.session.currentMood,
@@ -204,12 +210,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
 
     return data(
-      { isLoading: true, isAuthenticated: !!naiaCustomer, naiaModelIsReady, sessionId: stylingSession.id, mood: moodFirst, currentMood: moodFirst, moods: mood ? [mood] : [], desiredFeelings: feelings ?? [], desiredFeeling: feelings?.[0] || null, occasion, bodyNeeds, nadineAnchorHandle, closetAnchorId, devTryOnEnabled, tryOnFixtureTokens, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, error: null },
+      { isLoading: true, isAuthenticated: !!naiaCustomer, naiaModelIsReady, sessionId: stylingSession.id, mood: moodFirst, currentMood: moodFirst, moods: mood ? [mood] : [], desiredFeelings: feelings ?? [], desiredFeeling: feelings?.[0] || null, occasion, bodyNeeds, nadineAnchorHandle, closetAnchorId, devTryOnEnabled, vtoEnabled, tryOnFixtureTokens, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, error: null },
       { headers: { "Set-Cookie": await commitSession(cookieSession) } }
     );
   } catch (err: any) {
     console.error("Result loader error:", err);
-    return data({ isLoading: false, isAuthenticated: false, naiaModelIsReady: false, devTryOnEnabled, tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null, currentMood: null, desiredFeeling: null, occasion: null, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, error: err?.message || "Something went wrong" });
+    return data({ isLoading: false, isAuthenticated: false, naiaModelIsReady: false, devTryOnEnabled, vtoEnabled, tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null, currentMood: null, desiredFeeling: null, occasion: null, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, error: err?.message || "Something went wrong" });
   }
 }
 
@@ -1023,6 +1029,15 @@ export default function StyleMeResult() {
                   )}
                 </div>
               ))}
+              {loaderData.vtoEnabled && suggestionMeta?.primaryHandle && isTryOnEligible(suggestionMeta.primaryHandle) && (
+                <VtoExperience
+                  source="nadine"
+                  productHandle={suggestionMeta.primaryHandle}
+                  garmentTitle={suggestion.outfitName || suggestionMeta.primaryHandle}
+                  naiaModelIsReady={loaderData.naiaModelIsReady}
+                  isAuthenticated={loaderData.isAuthenticated}
+                />
+              )}
             </>
           )}
         </div>
