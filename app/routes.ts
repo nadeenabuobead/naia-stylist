@@ -1,34 +1,81 @@
 import type { RouteConfig } from "@react-router/dev/routes";
-import { flatRoutes } from "@react-router/fs-routes";
-import { route } from "@react-router/dev/routes";
+import { route, index } from "@react-router/dev/routes";
 
+// Fully explicit route registry.
+// routes.js previously shadowed this file (findEntry prefers .js over .ts).
+// routes.js has been removed; this file is now the authoritative config.
+// Test files (*.test.ts / *.test.tsx) are intentionally absent — they are
+// not application routes and must not appear in the route manifest.
 export default [
-  // passport.tsx is the layout parent of passport.selfie.tsx in the flat-routes
-  // naming scheme. Explicit registration of passport/selfie as a standalone route
-  // (below) conflicts with the auto-nested version flatRoutes() would create.
-  // Excluding both files here and registering them explicitly below avoids the
-  // duplicate-route definition that causes React Router to 404 /passport.
-  ...await flatRoutes({ ignoredRouteFiles: ["**/passport.tsx", "**/passport.selfie.tsx", "**/api.trigger-tryon.tsx"] }),
-  route("quick-style", "./routes/quick-style/_index.tsx"),
-  route("onboarding/step/:step", "./routes/onboarding/step.$step.tsx"),
-  route("onboarding/complete", "./routes/onboarding/complete.tsx"),
-  route("style-me", "./routes/style-me/_index.tsx"),
-  route("style-me/comfort", "./routes/style-me/comfort.tsx"),
-  route("style-me/result", "./routes/style-me/result.tsx"),
-  route("full-style-profile", "./routes/full-style-profile/_index.tsx"),
-  route("trends/:slug/lens/:lens", "./routes/trends.$slug.lens.$lens.tsx"),
-  route("api/recommendation-feedback", "./routes/api.recommendation-feedback.tsx"),
-  route("api/post-wear-review", "./routes/api.post-wear-review.tsx"),
-  // These routes are skipped by flatRoutes() due to implicit parent collision between
-  // my-naia._index.tsx and my-naia.saved.tsx (no my-naia.tsx layout file exists).
-  // Registering them explicitly guarantees they appear in the route manifest.
-  route("my-naia", "./routes/my-naia._index.tsx"),
-  route("my-naia/saved", "./routes/my-naia.saved.tsx"),
-  route("my-naia-model", "./routes/my-naia-model.tsx"),
-  route("settings", "./routes/settings.tsx"),
-  route("post-wear-review", "./routes/post-wear-review.tsx"),
-  route("passport", "./routes/passport.tsx"),
-  route("passport/selfie", "./routes/passport.selfie.tsx"),
-  route("api/trigger-tryon", "./routes/api.trigger-tryon.tsx"),
-
+  index("routes/_index.tsx"),
+  route("onboarding/step/:step", "routes/onboarding/step.$step.tsx"),
+  route("onboarding/complete", "routes/onboarding/complete.tsx"),
+  route("passport", "routes/passport.tsx"),
+  route("closet", "routes/closet._index.tsx"),
+  route("style-me", "routes/style-me/_index.tsx"),
+  route("style-me/mood", "routes/style-me/mood.tsx"),
+  route("style-me/feeling", "routes/style-me/feeling.tsx"),
+  route("style-me/comfort", "routes/style-me/comfort.tsx"),
+  route("style-me/occasion", "routes/style-me/occasion.tsx"),
+  route("style-me/source", "routes/style-me/source.tsx"),
+  route("style-me/result", "routes/style-me/result.tsx"),
+  route("api/customer-auth", "routes/api.customer-auth.jsx"),
+  route("api/closet", "routes/api.closet.jsx"),
+  route("api/style", "routes/api.style.jsx"),
+  route("api/outfit-history", "routes/api.outfit-history.jsx"),
+  route("api/outfit-rating", "routes/api.outfit-rating.jsx"),
+  route("api/naia-products", "routes/api.naia-products.jsx"),
+  route("api/wishlist", "routes/api.wishlist.jsx"),
+  route("api/customer-profile", "routes/api.customer-profile.jsx"),
+  route("api/confidence-dashboard", "routes/api.confidence-dashboard.jsx"),
+  route("api/designer-stats", "routes/api.designer-stats.jsx"),
+  route("api/generate-trend-report", "routes/api.generate-trend-report.jsx"),
+  route("api/personalized-trends", "routes/api.personalized-trends.jsx"),
+  route("trends", "routes/trends.jsx"),
+  route("trends/:slug", "routes/trends.$slug.tsx"),
+  route("trends/:slug/edit", "routes/trends.$slug.edit.tsx"),
+  route("trends/:slug/lens/:lens", "routes/trends.$slug.lens.$lens.tsx"),
+  route("stylist", "routes/stylist.jsx"),
+  route("stylist-popup", "routes/stylist-popup.jsx"),
+  route("api/wardrobe-insights", "routes/api.wardrobe-insights.jsx"),
+  route("app", "routes/app.jsx", [
+    index("routes/app._index.jsx"),
+    route("designer-intelligence", "routes/app.designer-intelligence.jsx"),
+  ]),
+  route("my-naia", "routes/my-naia._index.tsx"),
+  route("my-naia/saved", "routes/my-naia.saved.tsx"),
+  route("my-naia/buying-decisions", "routes/my-naia.buying-decisions.tsx"),
+  route("my-naia-model", "routes/my-naia-model.tsx"),
+  route("settings", "routes/settings.tsx"),
+  route("post-wear-review", "routes/post-wear-review.tsx"),
+  route("passport/selfie", "routes/passport.selfie.tsx"),
+  route("style-session-new", "routes/style-session-new/_index.tsx"),
+  route("auth/login", "routes/auth.login/route.jsx"),
+  route("auth/shopify/login", "routes/auth.shopify.login.tsx"),
+  route("auth/shopify/callback", "routes/auth.shopify.callback.tsx"),
+  route("auth/logout", "routes/auth.logout.tsx"),
+  route("auth/*", "routes/auth.$.jsx"),
+  route("webhooks/app/scopes_update", "routes/webhooks.app.scopes_update.jsx"),
+  route("webhooks/app/uninstalled", "routes/webhooks.app.uninstalled.jsx"),
+  route("quick-style", "routes/quick-style/_index.tsx"),
+  route("api/quick-style", "routes/api.quick-style.jsx"),
+  route("full-style-profile", "routes/full-style-profile/_index.tsx"),
+  route("api/full-style-profile", "routes/api.full-style-profile.jsx"),
+  route("api/save-look", "routes/api.save-look.jsx"),
+  route("buyskip", "routes/buyskip._index.tsx"),
+  route("buyskip/:id", "routes/buyskip.$id.tsx"),
+  route("api/tryon", "routes/api.tryon.jsx"),
+  route("api/body-scan", "routes/api.bodyscan.jsx"),
+  route("account", "routes/account.jsx"),
+  route("api/recommendation-feedback", "routes/api.recommendation-feedback.tsx"),
+  route("api/post-wear-review", "routes/api.post-wear-review.tsx"),
+  route("api/analyze-item", "routes/api.analyze-item.jsx"),
+  route("api/cloudinary-signature", "routes/api.cloudinary-signature.jsx"),
+  route("api/save-style-profile", "routes/api.save-style-profile.jsx"),
+  route("api/customer-account-identity", "routes/api.customer-account-identity.jsx"),
+  route("api/designer-dashboard", "routes/api.designer-dashboard.jsx"),
+  route("api/seed-staging", "routes/api.seed-staging.jsx"),
+  route("api/track_event", "routes/api.track_event.jsx"),
+  // VTO M1 — customer-facing virtual try-on trigger
+  route("api/trigger-tryon", "routes/api.trigger-tryon.tsx"),
 ] satisfies RouteConfig;
