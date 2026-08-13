@@ -702,7 +702,7 @@ const css = `
 //   Logic  → existing staging: Cloudinary, eligibility, journey events, delete, validation
 
 export default function Closet() {
-  const { items, closetInsights } = useLoaderData<typeof loader>();
+  const { items, closetInsights, vtoEnabled, naiaModelIsReady } = useLoaderData<typeof loader>();
 
   const fetcher    = useFetcher();  // delete only
   const addFetcher = useFetcher<{ success?: boolean; error?: string; retryImage?: boolean }>();
@@ -1434,12 +1434,12 @@ export default function Closet() {
                     <button type="button" className="cl-edit-btn" onClick={() => openEdit(item)}>
                       Edit
                     </button>
-                    {loaderData.vtoEnabled && item.imagePublicId && VTO_CATEGORY_GATE.has(item.category) && (
+                    {vtoEnabled && item.imagePublicId && VTO_CATEGORY_GATE.has(item.category) && (
                       <VtoExperience
                         source="closet"
                         closetItemId={item.id}
                         garmentTitle={item.name}
-                        naiaModelIsReady={loaderData.naiaModelIsReady}
+                        naiaModelIsReady={naiaModelIsReady}
                         isAuthenticated={true}
                       />
                     )}
