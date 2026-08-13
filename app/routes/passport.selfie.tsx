@@ -79,8 +79,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let existing: SelfieDisplayRecord | null = null;
   try {
     existing = await loadSelfieForDisplay(customer.id, undefined, buildSelfiePreviewUrl);
-  } catch {
+    console.info("[selfie-loader] existing:", JSON.stringify({ hasPhoto: existing?.hasPhoto, analysisStatus: existing?.analysisStatus, consentAt: existing?.consentAt }));
+  } catch (err) {
     // Table does not exist yet (migration not applied) — treat as no record
+    console.error("[selfie-loader] loadSelfieForDisplay threw:", err instanceof Error ? err.message : String(err));
     existing = null;
   }
 
