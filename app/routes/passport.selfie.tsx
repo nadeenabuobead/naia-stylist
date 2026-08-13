@@ -33,6 +33,7 @@ import {
   validateSelfieFile,
   uploadSelfieToCloudinary,
   buildSelfieAnalysisUrl,
+  buildSelfiePreviewUrl,
 } from "~/lib/ai/selfie-upload.server";
 import {
   beginSelfieAnalysis,
@@ -48,10 +49,8 @@ import {
 } from "~/lib/ai/selfie-persistence.server";
 import { moderateImageContent } from "~/lib/image-moderation.server";
 import {
-  buildColourDirectionSummary,
+  buildContrastNote,
   buildNecklineSummary,
-  buildHairDirectionSummary,
-  buildAccessoriesSummary,
   buildNaiaUsageExplanation,
 } from "~/lib/ai/selfie-styling-signals";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -71,10 +70,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (!customer) throw redirect("/auth/shopify/login");
 
   // Migration guard: loadSelfieForDisplay returns null when no record exists.
-  // Once migration is applied, this will return the existing record.
+  // buildSelfiePreviewUrl generates a short-lived signed URL for browser display
+  // (same pattern as NaiaModel); the photoPublicId itself is never serialised.
   let existing: SelfieDisplayRecord | null = null;
   try {
-    existing = await loadSelfieForDisplay(customer.id);
+    existing = await loadSelfieForDisplay(customer.id, undefined, buildSelfiePreviewUrl);
   } catch {
     // Table does not exist yet (migration not applied) — treat as no record
     existing = null;
@@ -323,6 +323,10 @@ export default function SelfieUploadPage() {
     ? outcome.signals
     : existing?.signals ?? null;
 
+  // Selfie display URL: FileReader preview (new upload) takes precedence over the
+  // server-generated signed URL (return visits). The signed URL expires after 1 hour.
+  const selfieDisplayUrl = preview ?? existing?.selfiePreviewUrl ?? null;
+
   const statusLabel =
     showResults             ? "Analysis complete" :
     showModerationRetry     ? "Photo review temporarily unavailable" :
@@ -440,36 +444,181 @@ export default function SelfieUploadPage() {
       {/* Completed results */}
       {showResults && displaySignals && (
         <>
+          {/* Your Selfie */}
+          <section className="bos-section">
+            <div className="bos-step-label">Your Selfie</div>
+            {selfieDisplayUrl ? (
+              <div style={{ maxWidth: "360px" }}>
+                <img src={selfieDisplayUrl} alt="Your selfie" style={{ display: "block", width: "100%", height: "auto" }} />
+              </div>
+            ) : (
+              <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--naia-muted)" }}>
+                {existing?.hasPhoto ? "Your selfie is stored privately." : "No selfie on file."}
+              </p>
+            )}
+          </section>
+
+          {/* Your Analysis */}
           <section className="bos-section">
             <div className="bos-step-label">
               {analysisIntent === "replace" ? "Updated Observations" : "Your Analysis"}
             </div>
-            <dl className="sp-detail-list">
-              <div className="sp-detail-row">
-                <dt className="sp-detail-label">Colour Direction</dt>
-                <dd className="sp-detail-value">{buildColourDirectionSummary(displaySignals)}</dd>
-              </div>
-              <div className="sp-detail-row">
-                <dt className="sp-detail-label">Necklines</dt>
-                <dd className="sp-detail-value">{buildNecklineSummary(displaySignals)}</dd>
-              </div>
-              <div className="sp-detail-row">
-                <dt className="sp-detail-label">Hair Direction</dt>
-                <dd className="sp-detail-value">{buildHairDirectionSummary(displaySignals)}</dd>
-              </div>
-              <div className="sp-detail-row">
-                <dt className="sp-detail-label">Earrings & Glasses</dt>
-                <dd className="sp-detail-value">{buildAccessoriesSummary(displaySignals)}</dd>
-              </div>
-              <div className="sp-detail-row">
-                <dt className="sp-detail-label">How nAia Uses This</dt>
-                <dd className="sp-detail-value" style={{ fontStyle: "italic", color: "var(--naia-muted)" }}>
-                  {buildNaiaUsageExplanation()}
-                </dd>
-              </div>
-            </dl>
+
+            {/* Face & Feature Profile */}
+            <AnalysisSubsection title="Face & Feature Profile" first>
+              <dl className="sp-detail-list">
+                <SignalRow label="Face Shape" value={displaySignals.faceShapeDirection} />
+                {displaySignals.featureBalance && <SignalRow label="Feature Balance" value={displaySignals.featureBalance} />}
+                {displaySignals.eyeShape && <SignalRow label="Eye Shape" value={displaySignals.eyeShape} />}
+                {displaySignals.browShape && <SignalRow label="Brow Shape" value={displaySignals.browShape} />}
+                {displaySignals.lipShape && <SignalRow label="Lip Shape" value={displaySignals.lipShape} />}
+                <SignalRow label="Contrast" value={buildContrastNote(displaySignals.contrastLevel)} />
+              </dl>
+            </AnalysisSubsection>
+
+            {/* Colour Direction */}
+            <AnalysisSubsection title="Colour Direction">
+              {displaySignals.colourTemperature && (
+                <div style={{ marginBottom: "12px" }}>
+                  <span style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "11px", letterSpacing: "0.4px", padding: "3px 10px", border: "1px solid var(--naia-border)", textTransform: "capitalize" }}>
+                    {displaySignals.colourTemperature} tone
+                  </span>
+                </div>
+              )}
+              <dl className="sp-detail-list">
+                <SignalRow label="Colour Families" value={displaySignals.colourFamilies.join(", ")} />
+              </dl>
+              <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", lineHeight: 1.65, marginTop: "8px" }}>
+                {displaySignals.colourExplanation}
+              </p>
+              {displaySignals.bestNeutrals && displaySignals.bestNeutrals.length > 0 && (
+                <SwatchGroup label="Best Neutrals" swatches={displaySignals.bestNeutrals} />
+              )}
+              {displaySignals.everydayColours && displaySignals.everydayColours.length > 0 && (
+                <SwatchGroup label="Everyday Colours" swatches={displaySignals.everydayColours} />
+              )}
+              {displaySignals.accentColours && displaySignals.accentColours.length > 0 && (
+                <SwatchGroup label="Accent Colours" swatches={displaySignals.accentColours} />
+              )}
+              {displaySignals.useCareNearFace && displaySignals.useCareNearFace.length > 0 && (
+                <SwatchGroup label="Use Carefully Near Face" swatches={displaySignals.useCareNearFace} />
+              )}
+            </AnalysisSubsection>
+
+            {/* Necklines */}
+            <AnalysisSubsection title="Necklines">
+              {displaySignals.necklinesTop && displaySignals.necklinesTop.length > 0 ? (
+                <TieredChips
+                  top={displaySignals.necklinesTop}
+                  also={displaySignals.necklinesAlso}
+                  careful={displaySignals.necklinesCareful}
+                />
+              ) : (
+                <dl className="sp-detail-list">
+                  <SignalRow label="Necklines" value={buildNecklineSummary(displaySignals)} />
+                </dl>
+              )}
+              <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", lineHeight: 1.65, marginTop: "10px" }}>
+                {displaySignals.necklineExplanation}
+              </p>
+            </AnalysisSubsection>
+
+            {/* Jewellery */}
+            <AnalysisSubsection title="Jewellery">
+              <dl className="sp-detail-list">
+                <SignalRow
+                  label="Earrings"
+                  value={displaySignals.earringsTop?.length
+                    ? displaySignals.earringsTop.join(", ")
+                    : displaySignals.earringsDirection}
+                />
+                {displaySignals.earringsScale && <SignalRow label="Scale" value={displaySignals.earringsScale} />}
+                {displaySignals.necklaceLengths && displaySignals.necklaceLengths.length > 0 && (
+                  <SignalRow label="Necklaces" value={displaySignals.necklaceLengths.join(", ")} />
+                )}
+                {displaySignals.metalDirection && <SignalRow label="Metal" value={displaySignals.metalDirection} />}
+              </dl>
+            </AnalysisSubsection>
+
+            {/* Glasses */}
+            <AnalysisSubsection title="Glasses">
+              {displaySignals.glassesTop && displaySignals.glassesTop.length > 0 ? (
+                <TieredChips
+                  top={displaySignals.glassesTop}
+                  also={displaySignals.glassesAlso}
+                  careful={displaySignals.glassesCareful}
+                />
+              ) : (
+                <dl className="sp-detail-list">
+                  <SignalRow label="Frames" value={displaySignals.glassesFrameDirection} />
+                </dl>
+              )}
+            </AnalysisSubsection>
+
+            {/* Hair Direction */}
+            <AnalysisSubsection title="Hair Direction">
+              <dl className="sp-detail-list">
+                <SignalRow label="Length" value={displaySignals.hairLengthDirection} />
+                <SignalRow label="Volume" value={displaySignals.hairVolumeDirection} />
+                <SignalRow label="Parting" value={displaySignals.hairPartingDirection} />
+                {displaySignals.hairLayers && <SignalRow label="Layers" value={displaySignals.hairLayers} />}
+                {displaySignals.hairTextureDirection && <SignalRow label="Texture" value={displaySignals.hairTextureDirection} />}
+                {displaySignals.hairUpdoDirection && <SignalRow label="Updo" value={displaySignals.hairUpdoDirection} />}
+                {displaySignals.hairColourFamilies && displaySignals.hairColourFamilies.length > 0 && (
+                  <SignalRow label="Hair Colour" value={displaySignals.hairColourFamilies.join(", ")} />
+                )}
+              </dl>
+            </AnalysisSubsection>
+
+            {/* Makeup Direction */}
+            {(displaySignals.makeupComplexionFinish || displaySignals.makeupBlush ||
+              displaySignals.makeupEyeshadow || displaySignals.makeupLipsEveryday ||
+              displaySignals.makeupLipsRich || displaySignals.makeupColourDirection) && (
+              <AnalysisSubsection title="Makeup Direction">
+                <dl className="sp-detail-list">
+                  {displaySignals.makeupComplexionFinish && <SignalRow label="Complexion" value={displaySignals.makeupComplexionFinish} />}
+                  {displaySignals.makeupBlush && <SignalRow label="Blush" value={displaySignals.makeupBlush} />}
+                  {displaySignals.makeupEyeshadow && <SignalRow label="Eyeshadow" value={displaySignals.makeupEyeshadow} />}
+                  {displaySignals.makeupLipsEveryday && <SignalRow label="Everyday Lip" value={displaySignals.makeupLipsEveryday} />}
+                  {displaySignals.makeupLipsRich && <SignalRow label="Evening Lip" value={displaySignals.makeupLipsRich} />}
+                  {!displaySignals.makeupComplexionFinish && displaySignals.makeupColourDirection && (
+                    <SignalRow label="Colour Direction" value={displaySignals.makeupColourDirection} />
+                  )}
+                </dl>
+              </AnalysisSubsection>
+            )}
+
+            {/* Visual Style Formula */}
+            {displaySignals.styleFormula && displaySignals.styleFormula.length > 0 && (
+              <AnalysisSubsection title="Visual Style Formula">
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "12px" }}>
+                  {displaySignals.styleFormula.map(tag => (
+                    <span
+                      key={tag}
+                      style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "12px", letterSpacing: "0.4px", padding: "6px 14px", border: "1px solid var(--naia-border)" }}
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+                {displaySignals.styleFormulaNote && (
+                  <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", lineHeight: 1.65 }}>
+                    {displaySignals.styleFormulaNote}
+                  </p>
+                )}
+              </AnalysisSubsection>
+            )}
           </section>
 
+          {/* How nAia Uses This */}
+          <section className="bos-section">
+            <div className="bos-step-label">How nAia Uses This</div>
+            <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--naia-muted)", lineHeight: 1.75 }}>
+              {buildNaiaUsageExplanation()}
+            </p>
+          </section>
+
+          {/* Manage */}
           <section className="bos-section">
             <div className="bos-step-label">Manage</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
@@ -624,6 +773,215 @@ function OutcomeFeedback({ outcome }: { outcome: SelfieAnalysisOutcome }) {
     <div className="psa-outcome-box">
       <div className="psa-outcome-title">{title}</div>
       <p className="psa-outcome-body">{message}</p>
+    </div>
+  );
+}
+
+// ── Analysis display sub-components ──────────────────────────────────────────
+
+function AnalysisSubsection({
+  title,
+  children,
+  first,
+}: {
+  title: string;
+  children: React.ReactNode;
+  first?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        marginTop: first ? "16px" : "24px",
+        ...(first ? {} : { paddingTop: "20px", borderTop: "1px solid var(--naia-border)" }),
+      }}
+    >
+      <div
+        style={{
+          fontFamily: "var(--naia-ff-ui)",
+          fontSize: "10px",
+          letterSpacing: "0.6px",
+          textTransform: "uppercase",
+          color: "var(--naia-muted)",
+          marginBottom: "12px",
+        }}
+      >
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function SignalRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="sp-detail-row">
+      <dt className="sp-detail-label">{label}</dt>
+      <dd className="sp-detail-value">{value}</dd>
+    </div>
+  );
+}
+
+function SwatchGroup({
+  label,
+  swatches,
+}: {
+  label: string;
+  swatches: Array<{ name: string; hex: string }>;
+}) {
+  return (
+    <div style={{ marginTop: "14px" }}>
+      <div
+        style={{
+          fontFamily: "var(--naia-ff-ui)",
+          fontSize: "11px",
+          letterSpacing: "0.4px",
+          color: "var(--naia-muted)",
+          marginBottom: "8px",
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+        {swatches.map(s => (
+          <div
+            key={s.hex + s.name}
+            style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "5px" }}
+          >
+            <div
+              style={{
+                width: "40px",
+                height: "40px",
+                borderRadius: "50%",
+                background: s.hex,
+                border: "1px solid rgba(0,0,0,0.1)",
+                flexShrink: 0,
+              }}
+            />
+            <span
+              style={{
+                fontFamily: "var(--naia-ff-ui)",
+                fontSize: "10px",
+                textAlign: "center",
+                color: "var(--naia-muted)",
+                maxWidth: "58px",
+                lineHeight: 1.3,
+              }}
+            >
+              {s.name}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TieredChips({
+  top,
+  also,
+  careful,
+}: {
+  top?: string[];
+  also?: string[];
+  careful?: string[];
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+      {top && top.length > 0 && (
+        <div>
+          <div
+            style={{
+              fontFamily: "var(--naia-ff-ui)",
+              fontSize: "10px",
+              letterSpacing: "0.5px",
+              textTransform: "uppercase",
+              color: "var(--naia-muted)",
+              marginBottom: "6px",
+            }}
+          >
+            Most Flattering
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {top.map(item => (
+              <span
+                key={item}
+                style={{
+                  fontFamily: "var(--naia-ff-ui)",
+                  fontSize: "12px",
+                  padding: "4px 10px",
+                  border: "1px solid var(--naia-border)",
+                  background: "rgba(34,21,22,0.04)",
+                }}
+              >
+                {item}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {also && also.length > 0 && (
+        <div>
+          <div
+            style={{
+              fontFamily: "var(--naia-ff-ui)",
+              fontSize: "10px",
+              letterSpacing: "0.5px",
+              textTransform: "uppercase",
+              color: "var(--naia-muted)",
+              marginBottom: "6px",
+            }}
+          >
+            Also Works
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {also.map(item => (
+              <span
+                key={item}
+                style={{
+                  fontFamily: "var(--naia-ff-ui)",
+                  fontSize: "12px",
+                  padding: "4px 10px",
+                  border: "1px solid var(--naia-border)",
+                }}
+              >
+                {item}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {careful && careful.length > 0 && (
+        <div>
+          <div
+            style={{
+              fontFamily: "var(--naia-ff-ui)",
+              fontSize: "10px",
+              letterSpacing: "0.5px",
+              textTransform: "uppercase",
+              color: "var(--naia-muted)",
+              marginBottom: "6px",
+            }}
+          >
+            Use Carefully
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {careful.map(item => (
+              <span
+                key={item}
+                style={{
+                  fontFamily: "var(--naia-ff-ui)",
+                  fontSize: "12px",
+                  padding: "4px 10px",
+                  border: "1px dashed var(--naia-border)",
+                  opacity: 0.75,
+                }}
+              >
+                {item}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -19,25 +19,88 @@ export interface SelfiePhotoQualityResult {
   guidance: string | null;
 }
 
+// ── Colour swatch ─────────────────────────────────────────────────────────────
+//
+// A named colour direction with an approximate CSS hex code for swatch display.
+// hex must be a valid 6-character CSS hex (e.g. "#C4956A").
+// Values are AI-generated directional approximations, not colour-science references.
+
+export interface ColourSwatch {
+  name: string;
+  hex: string;
+}
+
 // ── Style signals ─────────────────────────────────────────────────────────────
 //
 // All fields are hedged styling directions derived from photo analysis.
 // None constitute medical, diagnostic, or definitive personal assessment.
 // Must be applied as SOFT_RANK / EXPLANATION_ONLY — never HARD_FILTER.
+//
+// Required fields (no ?) are from the original v1 schema and are always present.
+// Optional fields (marked ?) were added in v2 and may be absent in records
+// produced before the v2 prompt was deployed. UI must degrade gracefully when
+// optional fields are undefined or contain empty arrays.
 
 export interface SelfieStyleSignals {
+  // ── Face & Feature Profile ───────────────────────────────────────────────
   faceShapeDirection: string;
-  suggestedNecklines: string[];
-  necklineExplanation: string;
+  featureBalance?: string;
+  eyeShape?: string;
+  browShape?: string;
+  lipShape?: string;
+  contrastLevel: "low" | "medium" | "high";
+
+  // ── Colour Direction ─────────────────────────────────────────────────────
   colourFamilies: string[];
   colourExplanation: string;
-  contrastLevel: "low" | "medium" | "high";
+  colourTemperature?: "warm" | "cool" | "neutral";
+  bestNeutrals?: ColourSwatch[];
+  everydayColours?: ColourSwatch[];
+  accentColours?: ColourSwatch[];
+  useCareNearFace?: ColourSwatch[];
+
+  // ── Necklines ────────────────────────────────────────────────────────────
+  suggestedNecklines: string[];
+  necklineExplanation: string;
+  necklinesTop?: string[];
+  necklinesAlso?: string[];
+  necklinesCareful?: string[];
+
+  // ── Jewellery ────────────────────────────────────────────────────────────
+  earringsDirection: string;
+  earringsTop?: string[];
+  earringsScale?: string;
+  necklaceLengths?: string[];
+  metalDirection?: string;
+
+  // ── Glasses ──────────────────────────────────────────────────────────────
+  glassesFrameDirection: string;
+  glassesTop?: string[];
+  glassesAlso?: string[];
+  glassesCareful?: string[];
+
+  // ── Hair ─────────────────────────────────────────────────────────────────
   hairLengthDirection: string;
   hairVolumeDirection: string;
   hairPartingDirection: string;
-  earringsDirection: string;
-  glassesFrameDirection: string;
+  hairLayers?: string;
+  hairTextureDirection?: string;
+  hairUpdoDirection?: string;
+  hairColourFamilies?: string[];
+
+  // ── Makeup ───────────────────────────────────────────────────────────────
   makeupColourDirection: string | null;
+  makeupComplexionFinish?: string;
+  makeupBlush?: string;
+  makeupEyeshadow?: string;
+  makeupLipsEveryday?: string;
+  makeupLipsRich?: string;
+
+  // ── Style Formula ────────────────────────────────────────────────────────
+  styleFormula?: string[];
+  styleFormulaNote?: string;
+
+  // ── Overall ──────────────────────────────────────────────────────────────
   overallNote: string;
 }
 

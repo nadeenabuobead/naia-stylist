@@ -365,3 +365,201 @@ describe("T12: final completeSelfieAnalysis/failSelfieAnalysis guarded against A
     );
   });
 });
+
+// ── T15: ColourSwatch type exported ──────────────────────────────────────────
+
+describe("T15: ColourSwatch interface exported from selfie-analysis.ts", () => {
+  it("exports ColourSwatch interface", () => {
+    assert.ok(
+      analysis.includes("export interface ColourSwatch"),
+      "selfie-analysis.ts must export ColourSwatch interface for typed swatch display",
+    );
+  });
+
+  it("ColourSwatch has name and hex fields", () => {
+    const idx = analysis.indexOf("export interface ColourSwatch");
+    assert.ok(idx !== -1, "ColourSwatch must exist");
+    const block = analysis.slice(idx, idx + 200);
+    assert.ok(block.includes("name:"), "ColourSwatch must have name field");
+    assert.ok(block.includes("hex:"), "ColourSwatch must have hex field");
+  });
+});
+
+// ── T16: SelfieStyleSignals has v2 optional fields ───────────────────────────
+
+describe("T16: SelfieStyleSignals expanded with v2 optional fields", () => {
+  it("has featureBalance optional field", () => {
+    assert.ok(
+      analysis.includes("featureBalance?:"),
+      "SelfieStyleSignals must have optional featureBalance field",
+    );
+  });
+
+  it("has colourTemperature optional field", () => {
+    assert.ok(
+      analysis.includes("colourTemperature?:"),
+      "SelfieStyleSignals must have optional colourTemperature field",
+    );
+  });
+
+  it("has necklinesTop optional field", () => {
+    assert.ok(
+      analysis.includes("necklinesTop?:"),
+      "SelfieStyleSignals must have optional necklinesTop field",
+    );
+  });
+
+  it("has styleFormula optional field", () => {
+    assert.ok(
+      analysis.includes("styleFormula?:"),
+      "SelfieStyleSignals must have optional styleFormula field",
+    );
+  });
+
+  it("has bestNeutrals as ColourSwatch array", () => {
+    assert.ok(
+      analysis.includes("bestNeutrals?:"),
+      "SelfieStyleSignals must have optional bestNeutrals field",
+    );
+  });
+});
+
+// ── T17: ANALYSIS_VERSION is 2 ────────────────────────────────────────────────
+
+describe("T17: ANALYSIS_VERSION bumped to 2 for expanded signal schema", () => {
+  const serverSrc = readLib("ai/selfie-analysis.server.ts");
+
+  it("ANALYSIS_VERSION constant is set to 2", () => {
+    assert.ok(
+      serverSrc.includes("ANALYSIS_VERSION = 2"),
+      "ANALYSIS_VERSION must be 2 to distinguish v2 (expanded) analysis records",
+    );
+  });
+});
+
+// ── T18: validateStyleSignals whitelist includes v2 fields ────────────────────
+
+describe("T18: validateStyleSignals extracts new v2 fields from parsed response", () => {
+  const serverSrc = readLib("ai/selfie-analysis.server.ts");
+
+  it("whitelist includes bestNeutrals extraction", () => {
+    assert.ok(
+      serverSrc.includes("bestNeutrals"),
+      "validateStyleSignals must extract bestNeutrals from parsed response",
+    );
+  });
+
+  it("whitelist includes necklinesTop extraction", () => {
+    assert.ok(
+      serverSrc.includes("necklinesTop"),
+      "validateStyleSignals must extract necklinesTop from parsed response",
+    );
+  });
+
+  it("whitelist includes styleFormula extraction", () => {
+    assert.ok(
+      serverSrc.includes("styleFormula"),
+      "validateStyleSignals must extract styleFormula from parsed response",
+    );
+  });
+
+  it("swatch hex validation uses regex for 6-character CSS hex", () => {
+    assert.ok(
+      serverSrc.includes("HEX_RE") || serverSrc.includes("#[0-9a-fA-F]{6}"),
+      "swatch validation must enforce 6-character CSS hex codes",
+    );
+  });
+});
+
+// ── T19: buildSelfiePreviewUrl exported from selfie-upload.server ─────────────
+
+describe("T19: buildSelfiePreviewUrl exported from selfie-upload.server.ts", () => {
+  const uploadSrc = readLib("ai/selfie-upload.server.ts");
+
+  it("exports buildSelfiePreviewUrl", () => {
+    assert.ok(
+      uploadSrc.includes("export function buildSelfiePreviewUrl"),
+      "selfie-upload.server must export buildSelfiePreviewUrl for signed display URLs",
+    );
+  });
+
+  it("buildSelfiePreviewUrl uses 3600 second TTL (1 hour)", () => {
+    const idx = uploadSrc.indexOf("buildSelfiePreviewUrl");
+    assert.ok(idx !== -1, "buildSelfiePreviewUrl must exist");
+    const block = uploadSrc.slice(idx, idx + 400);
+    assert.ok(
+      block.includes("3600"),
+      "buildSelfiePreviewUrl must use 3600s TTL (1 hour) — longer than analysis URL (600s)",
+    );
+  });
+});
+
+// ── T20: SelfieDisplayRecord has selfiePreviewUrl ─────────────────────────────
+
+describe("T20: SelfieDisplayRecord includes selfiePreviewUrl field", () => {
+  it("SelfieDisplayRecord has selfiePreviewUrl field", () => {
+    assert.ok(
+      persist.includes("selfiePreviewUrl:"),
+      "SelfieDisplayRecord must include selfiePreviewUrl for browser display",
+    );
+  });
+
+  it("selfiePreviewUrl is nullable (string | null)", () => {
+    const idx = persist.indexOf("selfiePreviewUrl:");
+    assert.ok(idx !== -1, "selfiePreviewUrl must exist in SelfieDisplayRecord");
+    const field = persist.slice(idx, idx + 40);
+    assert.ok(
+      field.includes("null"),
+      "selfiePreviewUrl must be string | null — null when no photo or Cloudinary not configured",
+    );
+  });
+});
+
+// ── T21: loadSelfieForDisplay accepts _buildPreviewUrl ────────────────────────
+
+describe("T21: loadSelfieForDisplay accepts injectable _buildPreviewUrl parameter", () => {
+  it("_buildPreviewUrl parameter exists in loadSelfieForDisplay signature", () => {
+    const fnIdx = persist.indexOf("export async function loadSelfieForDisplay(");
+    assert.ok(fnIdx !== -1, "loadSelfieForDisplay must be exported");
+    const sig = persist.slice(fnIdx, fnIdx + 300);
+    assert.ok(
+      sig.includes("_buildPreviewUrl"),
+      "loadSelfieForDisplay must accept _buildPreviewUrl for DI and test isolation",
+    );
+  });
+
+  it("BuildPreviewUrlFn type is exported", () => {
+    assert.ok(
+      persist.includes("BuildPreviewUrlFn"),
+      "BuildPreviewUrlFn type must be exported for type-safe injection",
+    );
+  });
+});
+
+// ── T22: passport.selfie loader passes buildSelfiePreviewUrl ──────────────────
+
+describe("T22: passport.selfie loader imports and uses buildSelfiePreviewUrl", () => {
+  it("imports buildSelfiePreviewUrl from selfie-upload.server", () => {
+    assert.ok(
+      selfie.includes("buildSelfiePreviewUrl"),
+      "passport.selfie must import buildSelfiePreviewUrl from selfie-upload.server",
+    );
+  });
+
+  it("loader passes buildSelfiePreviewUrl to loadSelfieForDisplay", () => {
+    const loaderIdx = selfie.indexOf("export async function loader(");
+    assert.ok(loaderIdx !== -1, "loader must exist");
+    const loaderBlock = selfie.slice(loaderIdx, loaderIdx + 600);
+    assert.ok(
+      loaderBlock.includes("buildSelfiePreviewUrl"),
+      "loader must pass buildSelfiePreviewUrl to loadSelfieForDisplay for signed preview URL generation",
+    );
+  });
+
+  it("selfieDisplayUrl uses selfiePreviewUrl from loader data", () => {
+    assert.ok(
+      selfie.includes("selfiePreviewUrl"),
+      "component must use selfiePreviewUrl from loader data for return-visit display",
+    );
+  });
+});

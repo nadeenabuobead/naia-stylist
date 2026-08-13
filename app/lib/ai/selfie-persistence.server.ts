@@ -292,6 +292,12 @@ export async function getSelfieForModeration(
 //
 // Returns a public-safe view of the record — no photoPublicId or photoFormat.
 // Callers must use this function when building loader data for the browser.
+//
+// _buildPreviewUrl is optional. When provided, a time-limited signed Cloudinary
+// URL is generated server-side and included as selfiePreviewUrl. The URL is safe
+// to serialise to the browser (it expires and is signed — unlike photoPublicId).
+
+export type BuildPreviewUrlFn = (publicId: string, format: string) => string | null;
 
 export interface SelfieDisplayRecord {
   hasPhoto: boolean;
@@ -299,20 +305,29 @@ export interface SelfieDisplayRecord {
   signals: SelfieStyleSignals | null;
   analysedAt: string | null;
   consentAt: string | null;
+  selfiePreviewUrl: string | null;  // short-lived signed URL for browser display; null when unavailable
 }
 
 export async function loadSelfieForDisplay(
   customerId: string,
   _findFn: FindSelfieRecordFn = _findSelfieRecord,
+  _buildPreviewUrl?: BuildPreviewUrlFn,
 ): Promise<SelfieDisplayRecord | null> {
   const record = await _findFn(customerId);
   if (!record) return null;
 
+  const hasPhoto = record.photoPublicId !== null && record.photoDeletedAt === null;
+  const selfiePreviewUrl =
+    hasPhoto && record.photoPublicId && record.photoFormat && _buildPreviewUrl
+      ? _buildPreviewUrl(record.photoPublicId, record.photoFormat)
+      : null;
+
   return {
-    hasPhoto: record.photoPublicId !== null && record.photoDeletedAt === null,
+    hasPhoto,
     analysisStatus: record.analysisStatus,
     signals: (record.analysisResult ?? null) as SelfieStyleSignals | null,
     analysedAt: record.analysedAt ? record.analysedAt.toISOString() : null,
     consentAt: record.consentAt.toISOString(),
+    selfiePreviewUrl,
   };
 }

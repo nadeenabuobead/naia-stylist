@@ -269,6 +269,30 @@ export function buildSelfieAnalysisUrl(
   return buildPrivateDownloadUrl(cfg, publicId, format, "private", nowFn, 600);
 }
 
+// ── Short-lived signed preview URL (display) ──────────────────────────────────
+//
+// Generates a Cloudinary private_download URL for rendering the saved selfie
+// in the browser on return visits. TTL: 1 hour — suitable for a page session.
+//
+// Security contract:
+//   - photoPublicId is never returned to the browser directly; only this signed URL is.
+//   - The URL expires after 1 hour and cannot be extended without a new server request.
+//   - This function is called from the loader (server-side) and the result is serialised
+//     to the browser as part of the loader data. That is intentional — it mirrors the
+//     same pattern used for NaiaModel preview URLs.
+//   - The URL must never be stored in the DB or logged.
+
+export function buildSelfiePreviewUrl(
+  publicId: string,
+  format: string,
+  _getConfig: () => CloudinaryConfig | null = getCloudinaryConfig,
+  nowFn: () => number = Date.now,
+): string | null {
+  const cfg = _getConfig();
+  if (!cfg) return null;
+  return buildPrivateDownloadUrl(cfg, publicId, format, "private", nowFn, 3600);
+}
+
 // Re-export for injection in tests
 export { deleteCloudinaryAsset };
 export type { DeleteAssetFn };
