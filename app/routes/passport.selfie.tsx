@@ -333,9 +333,6 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
     { imageUrl: analysisUrl },
     { consentAt: consentAt.toISOString() },
   );
-  // DIAG-LOG: narrow diagnostic to identify failure mode — remove after root cause confirmed
-  console.error("[selfie-diag] analyseSelfie outcome.status:", outcome.status, "internalNote:" in outcome ? (outcome as { internalNote?: string }).internalNote?.slice(0, 300) : "n/a");
-
   // Persist result — only validated signals stored; raw response discarded
   try {
     if (outcome.status === "completed") {

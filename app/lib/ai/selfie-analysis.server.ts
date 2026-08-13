@@ -38,7 +38,7 @@ const defaultAnalyzer: SelfieAnalyzerFn = (input, prompt) =>
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_TIMEOUT_MS = 55_000;
 const ANALYSIS_VERSION = 2;
 
 const VALID_QUALITY_ISSUES = new Set<string>([
@@ -457,15 +457,17 @@ export async function analyseSelfie(
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const analyzer = options?._analyzer ?? defaultAnalyzer;
 
-  const timeoutSignal = new Promise<null>(resolve =>
-    setTimeout(() => resolve(null), timeoutMs),
-  );
+  let timerId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutSignal = new Promise<null>(resolve => {
+    timerId = setTimeout(() => resolve(null), timeoutMs);
+  });
 
   const result = await Promise.race([
     runStyleAnalysis(input, analyzer),
     timeoutSignal,
   ]);
 
+  clearTimeout(timerId);
   if (result === null) return { status: "timeout" };
   return result;
 }
