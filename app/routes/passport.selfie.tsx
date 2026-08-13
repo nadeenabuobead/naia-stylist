@@ -365,6 +365,10 @@ export default function SelfieUploadPage() {
   const [showChooseDifferent, setShowChooseDifferent] = useState(false);
   const isSubmitting = navigation.state === "submitting";
 
+  // True once the user has selected a replacement file — collapses the saved-selfie
+  // block and reanalyse controls so only the replacement preview + form are visible.
+  const replacingPhoto = showChooseDifferent && !!preview;
+
   // ── State derivation ───────────────────────────────────────────────────────
 
   // Fresh action outcome (present for the current render cycle after a form submit)
@@ -523,8 +527,8 @@ export default function SelfieUploadPage() {
         </div>
       )}
 
-      {/* Your Selfie — shown whenever a photo is stored, regardless of analysis state */}
-      {(selfieDisplayUrl || photoExists) && (
+      {/* Your Selfie — hidden while the user has selected a replacement file */}
+      {(selfieDisplayUrl || photoExists) && !replacingPhoto && (
         <section className="bos-section">
           <div className="bos-step-label">Your Selfie</div>
           {selfieDisplayUrl ? (
@@ -613,22 +617,27 @@ export default function SelfieUploadPage() {
       {showFailedSection && (
         <section className="bos-section">
           <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxWidth: "360px" }}>
-            <Form method="post">
-              <input type="hidden" name="_intent" value="reanalyse-selfie" />
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className={isSubmitting ? "sp-btn-outline" : "sp-btn-primary"}
-                style={{ width: "100%", opacity: isSubmitting ? 0.65 : 1 }}
-              >
-                {isSubmitting ? "Analysing…" : "Reanalyse This Selfie"}
-              </button>
-            </Form>
+            {!replacingPhoto && (
+              <Form method="post">
+                <input type="hidden" name="_intent" value="reanalyse-selfie" />
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className={isSubmitting ? "sp-btn-outline" : "sp-btn-primary"}
+                  style={{ width: "100%", opacity: isSubmitting ? 0.65 : 1 }}
+                >
+                  {isSubmitting ? "Analysing…" : "Reanalyse This Selfie"}
+                </button>
+              </Form>
+            )}
             <button
               type="button"
               className="sp-btn-outline"
               style={{ width: "100%" }}
-              onClick={() => setShowChooseDifferent(v => !v)}
+              onClick={() => {
+                if (showChooseDifferent) { setShowChooseDifferent(false); setPreview(null); }
+                else setShowChooseDifferent(true);
+              }}
             >
               {showChooseDifferent ? "Cancel" : "Choose a Different Photo"}
             </button>
@@ -651,22 +660,27 @@ export default function SelfieUploadPage() {
       {showDeletedSection && (
         <section className="bos-section">
           <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxWidth: "360px" }}>
-            <Form method="post">
-              <input type="hidden" name="_intent" value="reanalyse-selfie" />
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className={isSubmitting ? "sp-btn-outline" : "sp-btn-primary"}
-                style={{ width: "100%", opacity: isSubmitting ? 0.65 : 1 }}
-              >
-                {isSubmitting ? "Analysing…" : "Analyse This Selfie"}
-              </button>
-            </Form>
+            {!replacingPhoto && (
+              <Form method="post">
+                <input type="hidden" name="_intent" value="reanalyse-selfie" />
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className={isSubmitting ? "sp-btn-outline" : "sp-btn-primary"}
+                  style={{ width: "100%", opacity: isSubmitting ? 0.65 : 1 }}
+                >
+                  {isSubmitting ? "Analysing…" : "Analyse This Selfie"}
+                </button>
+              </Form>
+            )}
             <button
               type="button"
               className="sp-btn-outline"
               style={{ width: "100%" }}
-              onClick={() => setShowChooseDifferent(v => !v)}
+              onClick={() => {
+                if (showChooseDifferent) { setShowChooseDifferent(false); setPreview(null); }
+                else setShowChooseDifferent(true);
+              }}
             >
               {showChooseDifferent ? "Cancel" : "Choose a Different Photo"}
             </button>
