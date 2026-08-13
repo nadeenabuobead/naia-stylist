@@ -333,6 +333,9 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
     { imageUrl: analysisUrl },
     { consentAt: consentAt.toISOString() },
   );
+  // DIAG: log outcome for root-cause confirmation — remove once fixed
+  console.error("[selfie-diag2] status:", outcome.status, "| note:", "internalNote" in outcome ? (outcome as {internalNote?: string}).internalNote?.slice(0, 400) : "n/a");
+
   // Persist result — only validated signals stored; raw response discarded
   try {
     if (outcome.status === "completed") {
