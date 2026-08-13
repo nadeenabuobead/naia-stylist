@@ -110,6 +110,7 @@ export async function beginSelfieAnalysis(
     consentAt,
     photoPublicId,
     photoFormat,
+    photoDeletedAt: null,  // clear stale deletion flag from any prior deleteSelfiePhoto call
     analysisStatus: "pending",
     analysisResult: null,
     analysedAt: null,
