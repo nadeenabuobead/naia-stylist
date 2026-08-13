@@ -483,15 +483,31 @@ export default function SelfieUploadPage() {
     freshOutcome.status !== "timeout" &&
     freshOutcome.status !== "moderation-unavailable";
 
-  // After a fresh successful analysis, clear the lingering FileReader preview
-  // (it persists across the POST because React Router keeps the component mounted)
-  // and scroll the user to the top of their results.
+  // After a fresh successful analysis, clear the lingering FileReader preview and
+  // scroll to the results.
+  //
+  // Why [actionData] and not [freshOutcome?.status]:
+  //   actionData is a new object reference on every POST response, even when the
+  //   status string is the same ("completed" → replace → "completed"). The string
+  //   dependency never changes in that case and the effect never re-fires.
+  //
+  // Why double requestAnimationFrame:
+  //   React Router's ScrollRestoration runs in the same useEffect batch and
+  //   synchronously restores scroll to wherever the user was when they submitted
+  //   (the bottom of the page). A plain scrollIntoView inside useEffect fires in
+  //   the same batch and is immediately overridden by ScrollRestoration. Double-RAF
+  //   defers our scroll to the second animation frame — after ScrollRestoration has
+  //   already written its position — so ours wins.
   useEffect(() => {
     if (freshOutcome?.status === "completed") {
       setPreview(null);
-      resultsTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          resultsTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      });
     }
-  }, [freshOutcome?.status]);
+  }, [actionData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
