@@ -275,6 +275,7 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
   // Upload to Cloudinary (private asset, overwrite=true so replace is atomic)
   const upload = await uploadSelfieToCloudinary(bytes, validation.canonicalMime, customer.id);
   if (!upload.ok) {
+    console.error("[selfie-action] Cloudinary upload failed:", upload.errorCode);
     try { await failSelfieAnalysis(customer.id); } catch { /* best-effort cleanup */ }
     return {
       intent: "analyse",
@@ -283,14 +284,16 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
   }
 
   // Update DB record with the confirmed public ID and format
+  console.info("[selfie-action] upload ok, publicId:", upload.publicId, "format:", upload.format);
   try {
-    await beginSelfieAnalysis(
+    const begin2 = await beginSelfieAnalysis(
       customer.id,
       consentAt,
       upload.publicId,
       upload.format,
       { forceReplace: true },
     );
+    console.info("[selfie-action] beginSelfieAnalysis(2) ok, blocked:", begin2.blocked, "photoPublicId:", !begin2.blocked && begin2.record.photoPublicId);
   } catch (err) {
     console.error("[selfie-action] beginSelfieAnalysis (2) failed:", err instanceof Error ? err.message : String(err));
     return { intent: isReplace ? "replace" : "analyse", outcome: { status: "system-failure", internalNote: "beginSelfieAnalysis (2) failed" } };
@@ -333,6 +336,7 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
   );
 
   // Persist result — only validated signals stored; raw response discarded
+  console.info("[selfie-action] analyseSelfie outcome:", outcome.status);
   try {
     if (outcome.status === "completed") {
       await completeSelfieAnalysis(
@@ -342,7 +346,8 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
         new Date(outcome.analysedAt),
       );
     } else {
-      await failSelfieAnalysis(customer.id);
+      const failRec = await failSelfieAnalysis(customer.id);
+      console.info("[selfie-action] failSelfieAnalysis ok, photoPublicId:", failRec.photoPublicId);
     }
   } catch (err) {
     console.error("[selfie-action] final persistence failed:", err instanceof Error ? err.message : String(err));
