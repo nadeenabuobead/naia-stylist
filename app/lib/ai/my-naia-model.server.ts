@@ -509,6 +509,24 @@ export async function saveSelfieAsModelFace(
   return { ok: true };
 }
 
+// ── NaiaModel — clear face reference without Cloudinary deletion ──────────────
+//
+// Clears facePublicId/faceFormat/faceVersion in NaiaModel WITHOUT deleting the
+// Cloudinary asset. Used when another code path (e.g. deleteSelfiePhoto in the
+// keep-analysis flow) already owns and will perform the single Cloudinary deletion,
+// preventing double-deletion when SelfieAnalysis and NaiaModel share the same asset.
+
+export async function clearNaiaModelFaceReference(
+  customerId: string,
+  _upsertModelFn: UpsertModelFn = _upsertModel,
+): Promise<void> {
+  await _upsertModelFn(customerId, {
+    facePublicId: null,
+    faceVersion: null,
+    faceFormat: null,
+  });
+}
+
 // ── NaiaModel — consent ───────────────────────────────────────────────────────
 
 export type ConsentType = "photoAnalysis" | "saveModel";

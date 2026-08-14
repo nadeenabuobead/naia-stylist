@@ -58,6 +58,7 @@ import {
   saveSelfieAsModelFace,
   deleteNaiaModelPhoto,
   buildModelPreviewUrl,
+  clearNaiaModelFaceReference,
 } from "~/lib/ai/my-naia-model.server";
 import { moderateImageContent } from "~/lib/image-moderation.server";
 import {
@@ -167,6 +168,16 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
   }
 
   if (intent === "keep-analysis") {
+    // Ownership guard: if NaiaModel.facePublicId is the same Cloudinary asset as the
+    // temp selfie, clear the model reference BEFORE the Cloudinary deletion so that
+    // deleteSelfiePhoto performs the single delete and no dangling reference remains.
+    const tempSelfie = await getSelfieForModeration(customer.id);
+    if (tempSelfie?.publicId) {
+      const model = await loadNaiaModel(customer.id);
+      if (model?.facePublicId === tempSelfie.publicId) {
+        await clearNaiaModelFaceReference(customer.id);
+      }
+    }
     const result = await deleteSelfiePhoto(customer.id);
     return { intent: "keep-analysis", ok: result.ok, errorCode: result.ok ? undefined : result.errorCode };
   }

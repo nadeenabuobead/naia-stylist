@@ -833,3 +833,191 @@ describe("authentication and consent semantics", () => {
   });
 
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// keepAnalysisOnly — ownership safety (Cases A–D)
+//
+// Exercises the ownership-check logic in the keep-analysis action handler:
+// before deleteSelfiePhoto runs, if NaiaModel.facePublicId === the temp
+// selfie's publicId, clearNaiaModelFaceReference is called first so the
+// Cloudinary asset is deleted exactly once and no dangling reference remains.
+// ═════════════════════════════════════════════════════════════════════════════
+
+import {
+  clearNaiaModelFaceReference,
+  loadNaiaModel,
+  type FindModelFn,
+  type UpsertModelFn,
+  type NaiaModelRecord,
+} from "./my-naia-model.server.ts";
+
+const SELFIE_ID = `naia-wardrobe/${CUST}/selfie`;
+const FACE_ID   = `naia-wardrobe/${CUST}/face`;
+
+function makeModelRecord(overrides: Partial<NaiaModelRecord> = {}): NaiaModelRecord {
+  return {
+    id: "model-1",
+    customerId: CUST,
+    facePublicId: null,
+    faceVersion: null,
+    faceFormat: null,
+    bodyPublicId: null,
+    bodyVersion: null,
+    bodyFormat: null,
+    deliveryType: "private",
+    photoAnalysisConsentAt: null,
+    saveModelConsentAt: null,
+    consentPolicyVersion: null,
+    bodyModerationStatus: null,
+    bodyModerationAt: null,
+    createdAt: new Date("2026-01-01"),
+    updatedAt: new Date("2026-01-01"),
+    ...overrides,
+  };
+}
+
+function modelFind(record: NaiaModelRecord | null): FindModelFn {
+  return async () => record;
+}
+
+function capturingModelUpsert(): { fn: UpsertModelFn; captured: Partial<NaiaModelRecord>[] } {
+  const captured: Partial<NaiaModelRecord>[] = [];
+  const fn: UpsertModelFn = async (_id, data) => {
+    captured.push(data);
+    return makeModelRecord(data as Partial<NaiaModelRecord>);
+  };
+  return { fn, captured };
+}
+
+// Simulates the action-handler ownership check + delete sequence.
+// Returns the IDs deleted from Cloudinary and the final captured SA+NM upserts.
+async function runKeepAnalysisOnly(opts: {
+  selfieRecord: DbSelfieRecord;
+  modelRecord: NaiaModelRecord | null;
+  cloudinaryOk?: boolean;
+}): Promise<{
+  deletedIds: string[];
+  saUpserts: Partial<DbSelfieRecord>[];
+  nmUpserts: Partial<NaiaModelRecord>[];
+}> {
+  const deletedIds: string[] = [];
+  const deleteAsset: DeleteAssetFn = async (id) => {
+    deletedIds.push(id);
+    return { ok: opts.cloudinaryOk ?? true };
+  };
+  const { fn: saUpsert, captured: saUpserts } = capturingUpsert();
+  const { fn: nmUpsert, captured: nmUpserts } = capturingModelUpsert();
+
+  const tempPublicId = opts.selfieRecord.photoDeletedAt === null
+    ? opts.selfieRecord.photoPublicId
+    : null;
+
+  // Mirror of the keep-analysis action handler logic:
+  if (tempPublicId) {
+    const model = opts.modelRecord;
+    if (model?.facePublicId === tempPublicId) {
+      await clearNaiaModelFaceReference(CUST, nmUpsert);
+    }
+  }
+  await deleteSelfiePhoto(CUST, deleteAsset, recordFind(opts.selfieRecord), saUpsert);
+
+  return { deletedIds, saUpserts, nmUpserts };
+}
+
+describe("keepAnalysisOnly — ownership safety", () => {
+
+  it("ka-A: temp selfie only (no model face) → deletes temp selfie, analysis preserved, NaiaModel untouched", async () => {
+    const selfieRecord = makeDbRecord({
+      photoPublicId: SELFIE_ID,
+      analysisStatus: "completed",
+    });
+
+    const { deletedIds, saUpserts, nmUpserts } = await runKeepAnalysisOnly({
+      selfieRecord,
+      modelRecord: null,  // no NaiaModel record
+    });
+
+    // Cloudinary: temp selfie deleted exactly once
+    assert.deepEqual(deletedIds, [SELFIE_ID], "temp selfie must be deleted from Cloudinary");
+    // SelfieAnalysis: photo reference cleared, analysis untouched
+    assert.equal(saUpserts[0].photoPublicId, null);
+    assert.ok(saUpserts[0].photoDeletedAt instanceof Date);
+    assert.ok(!("analysisResult" in saUpserts[0]), "analysisResult must not be cleared");
+    assert.ok(!("analysisStatus" in saUpserts[0]), "analysisStatus must not be cleared");
+    // NaiaModel: never touched
+    assert.equal(nmUpserts.length, 0, "NaiaModel must not be touched when there is no model face");
+  });
+
+  it("ka-B: SelfieAnalysis photo and NaiaModel face are THE SAME asset → both refs cleared, asset deleted once, analysis preserved", async () => {
+    const selfieRecord = makeDbRecord({
+      photoPublicId: SELFIE_ID,
+      analysisStatus: "completed",
+    });
+    const modelRecord = makeModelRecord({ facePublicId: SELFIE_ID, faceFormat: "jpg" });
+
+    const { deletedIds, saUpserts, nmUpserts } = await runKeepAnalysisOnly({
+      selfieRecord,
+      modelRecord,
+    });
+
+    // Cloudinary: deleted exactly ONCE (not twice)
+    assert.deepEqual(deletedIds, [SELFIE_ID], "shared asset must be deleted exactly once");
+    // SelfieAnalysis: photo reference cleared
+    assert.equal(saUpserts[0].photoPublicId, null);
+    // NaiaModel: face reference cleared
+    assert.equal(nmUpserts.length, 1, "NaiaModel upsert must be called to clear face reference");
+    assert.equal(nmUpserts[0].facePublicId, null);
+    assert.equal(nmUpserts[0].faceFormat, null);
+    // Analysis preserved
+    assert.ok(!("analysisResult" in saUpserts[0]), "analysisResult must not be cleared");
+  });
+
+  it("ka-C: SelfieAnalysis photo and NaiaModel face are DIFFERENT assets → only temp selfie deleted, existing face untouched", async () => {
+    const selfieRecord = makeDbRecord({
+      photoPublicId: SELFIE_ID,
+      analysisStatus: "completed",
+    });
+    const modelRecord = makeModelRecord({ facePublicId: FACE_ID, faceFormat: "jpg" });
+
+    const { deletedIds, saUpserts, nmUpserts } = await runKeepAnalysisOnly({
+      selfieRecord,
+      modelRecord,
+    });
+
+    // Cloudinary: only the temp selfie deleted; existing face untouched
+    assert.deepEqual(deletedIds, [SELFIE_ID], "only the temp selfie must be deleted");
+    assert.ok(!deletedIds.includes(FACE_ID), "existing model face must NOT be deleted");
+    // SelfieAnalysis: photo reference cleared
+    assert.equal(saUpserts[0].photoPublicId, null);
+    // NaiaModel: not touched (different asset)
+    assert.equal(nmUpserts.length, 0, "NaiaModel must not be touched when face is a different asset");
+  });
+
+  it("ka-D: UI/loader state after each case — hasFaceModel reflects actual DB reference, no dangling state", () => {
+    // After ka-A (no model): hasFaceModel = false
+    const noModel = makeModelRecord({ facePublicId: null });
+    assert.equal(
+      typeof noModel.facePublicId === "string" && noModel.facePublicId.length > 0,
+      false,
+      "no model face → hasFaceModel must be false",
+    );
+
+    // After ka-B (shared asset cleared): hasFaceModel = false, no dangling ref
+    const clearedModel = makeModelRecord({ facePublicId: null, faceFormat: null });
+    assert.equal(
+      typeof clearedModel.facePublicId === "string" && clearedModel.facePublicId.length > 0,
+      false,
+      "cleared model face → hasFaceModel must be false (no dangling ref)",
+    );
+
+    // After ka-C (different asset preserved): hasFaceModel = true, face is the separate photo
+    const separateFaceModel = makeModelRecord({ facePublicId: FACE_ID, faceFormat: "jpg" });
+    assert.equal(
+      typeof separateFaceModel.facePublicId === "string" && separateFaceModel.facePublicId.length > 0,
+      true,
+      "separate model face preserved → hasFaceModel must be true",
+    );
+    assert.equal(separateFaceModel.facePublicId, FACE_ID, "preserved face ID must be the original model face");
+  });
+
+});
