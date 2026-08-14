@@ -493,6 +493,12 @@ export default function SelfieUploadPage() {
     "delete-analysis" | "delete-model-face" | "delete-model-face-and-analysis" |
     "keep-both" | "keep-analysis" | "save-selfie-only" | "delete-both" | null
   >(null);
+  // Captures the storage-choice intent the moment the action confirms success.
+  // Lives in state (not derived from actionData) so it survives the loader
+  // revalidation that React Router triggers immediately after every action.
+  const [successIntent, setSuccessIntent] = useState<
+    "keep-both" | "keep-analysis" | "save-selfie-only" | "delete-both" | null
+  >(null);
   const [showChooseDifferent, setShowChooseDifferent] = useState(false);
   const isSubmitting = navigation.state === "submitting";
   const resultsTopRef = useRef<HTMLDivElement>(null);
@@ -547,14 +553,6 @@ export default function SelfieUploadPage() {
     freshOutcome?.status !== "quality-failed" &&
     freshOutcome?.status !== "moderation-unavailable";
 
-  // True immediately after a post-analysis storage choice succeeds (keep-both, keep-analysis,
-  // save-selfie-only, delete-both). Used to show the success message and suppress
-  // the stale "Your selfie is still saved" statusDescription.
-  const choiceJustSucceeded = !!(
-    actionData && "ok" in actionData && actionData.ok &&
-    (actionData.intent === "keep-both" || actionData.intent === "keep-analysis" ||
-     actionData.intent === "save-selfie-only" || actionData.intent === "delete-both")
-  );
 
   // ── Section visibility ────────────────────────────────────────────────────
 
@@ -624,7 +622,7 @@ export default function SelfieUploadPage() {
 
   // Supporting copy shown directly under the status label — replaces a separate
   // error card for system-failure / timeout / DB-failed states.
-  const statusDescription: string | null = choiceJustSucceeded ? null :
+  const statusDescription: string | null = successIntent ? null :
     (freshOutcome?.status === "system-failure" || freshOutcome?.status === "timeout")
       ? "We couldn't complete your analysis this time." :
     (dbStatus === "failed" && !freshOutcome && !photoExists)
@@ -668,13 +666,29 @@ export default function SelfieUploadPage() {
     }
   }, [actionData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Close confirmation modal when a delete action succeeds.
-  // Avoids clearing pending inside onClick (which could interrupt form submit).
+  // Close confirmation modal when any ok action succeeds.
   useEffect(() => {
     if (actionData && "ok" in actionData && actionData.ok) {
       setPending(null);
     }
   }, [actionData]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Capture storage-choice success into state the moment actionData arrives so
+  // the message survives the loader revalidation React Router triggers afterward.
+  useEffect(() => {
+    if (
+      actionData && "ok" in actionData && actionData.ok &&
+      (actionData.intent === "keep-both" || actionData.intent === "keep-analysis" ||
+       actionData.intent === "save-selfie-only" || actionData.intent === "delete-both")
+    ) {
+      setSuccessIntent(actionData.intent as "keep-both" | "keep-analysis" | "save-selfie-only" | "delete-both");
+    }
+  }, [actionData]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Clear captured success the moment the next form submission starts.
+  useEffect(() => {
+    if (isSubmitting) setSuccessIntent(null);
+  }, [isSubmitting]);
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -720,22 +734,23 @@ export default function SelfieUploadPage() {
         </div>
       )}
 
-      {/* Post-choice success confirmation */}
-      {choiceJustSucceeded && actionData && "intent" in actionData && (
+      {/* Post-choice success confirmation — driven by state, not actionData,
+          so it persists through the loader revalidation that follows the action. */}
+      {successIntent && (
         <div className="bos-section">
           <div className="psa-outcome-box" style={{ borderColor: "var(--naia-border)" }}>
             <div className="psa-outcome-title">
-              {actionData.intent === "keep-both"        ? "Selfie and analysis saved" :
-               actionData.intent === "keep-analysis"    ? "Analysis saved" :
-               actionData.intent === "save-selfie-only" ? "Selfie saved to My nAia Model" :
+              {successIntent === "keep-both"        ? "Selfie and analysis saved" :
+               successIntent === "keep-analysis"    ? "Analysis saved" :
+               successIntent === "save-selfie-only" ? "Selfie saved to My nAia Model" :
                "Selfie and analysis deleted"}
             </div>
             <p className="psa-outcome-body">
-              {actionData.intent === "keep-both"
+              {successIntent === "keep-both"
                 ? "Your Selfie Style Analysis has been kept, and your selfie is now saved to My nAia Model for future styling."
-                : actionData.intent === "keep-analysis"
+                : successIntent === "keep-analysis"
                 ? "Your Selfie Style Analysis has been kept. Your selfie has been deleted."
-                : actionData.intent === "save-selfie-only"
+                : successIntent === "save-selfie-only"
                 ? "Your selfie is now available for future styling. Your Selfie Style Analysis has been deleted."
                 : "Your selfie and Selfie Style Analysis have been removed."}
             </p>
