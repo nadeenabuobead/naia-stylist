@@ -46,6 +46,7 @@ import {
   failSelfieAnalysis,
   deleteSelfiePhoto,
   deleteAnalysisResult,
+  deleteBoth,
   loadSelfieForDisplay,
   getSelfieForModeration,
   clearSelfiePhotoOwnership,
@@ -104,8 +105,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // ── Action ────────────────────────────────────────────────────────────────────
 
 type ActionResult =
-  | { intent: "analyse" | "replace" | "retry-moderation" | "reanalyse-selfie" | "analyse-model-selfie"; outcome: SelfieAnalysisOutcome; savedToModel?: boolean }
-  | { intent: "delete-analysis" | "delete-model-face" | "delete-model-face-and-analysis"; ok: boolean; errorCode?: string };
+  | { intent: "analyse" | "replace" | "retry-moderation" | "reanalyse-selfie" | "analyse-model-selfie"; outcome: SelfieAnalysisOutcome }
+  | { intent: "delete-analysis" | "delete-model-face" | "delete-model-face-and-analysis" | "delete-both" | "keep-both" | "keep-analysis" | "save-selfie-only"; ok: boolean; errorCode?: string };
 
 export async function action({ request }: ActionFunctionArgs): Promise<ActionResult> {
   const customer = await getCurrentNaiaCustomer(request);
@@ -135,6 +136,47 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
       intent: "delete-model-face-and-analysis",
       ok: (modelResult.ok || modelResult.staleReference) && analysisResult.ok,
     };
+  }
+
+  // Restores the previously missing delete-both handler (used by "Cancel Analysis" during
+  // pending state and by the "Delete Both" post-analysis choice).
+  if (intent === "delete-both") {
+    const result = await deleteBoth(customer.id);
+    return { intent: "delete-both", ok: result.ok, errorCode: result.ok ? undefined : result.errorCode };
+  }
+
+  // ── Post-analysis storage choices ──────────────────────────────────────────
+  // Shown after analysis completes while the temp selfie is held in SelfieAnalysis.
+  // Each intent executes the user's storage decision and clears the temp photo.
+
+  if (intent === "keep-both") {
+    const creds = await getSelfieForModeration(customer.id);
+    if (!creds) return { intent: "keep-both", ok: false, errorCode: "NO_PHOTO" };
+    const saveResult = await saveSelfieAsModelFace(customer.id, creds.publicId, creds.format);
+    if (saveResult.ok) {
+      try { await clearSelfiePhotoOwnership(customer.id); } catch { /* best-effort */ }
+    } else {
+      try { await deleteSelfiePhoto(customer.id); } catch { /* best-effort cleanup */ }
+    }
+    return { intent: "keep-both", ok: saveResult.ok, errorCode: saveResult.ok ? undefined : saveResult.error };
+  }
+
+  if (intent === "keep-analysis") {
+    const result = await deleteSelfiePhoto(customer.id);
+    return { intent: "keep-analysis", ok: result.ok, errorCode: result.ok ? undefined : result.errorCode };
+  }
+
+  if (intent === "save-selfie-only") {
+    const creds = await getSelfieForModeration(customer.id);
+    if (!creds) return { intent: "save-selfie-only", ok: false, errorCode: "NO_PHOTO" };
+    const saveResult = await saveSelfieAsModelFace(customer.id, creds.publicId, creds.format);
+    if (saveResult.ok) {
+      try { await clearSelfiePhotoOwnership(customer.id); } catch { /* best-effort */ }
+    } else {
+      try { await deleteSelfiePhoto(customer.id); } catch { /* best-effort cleanup */ }
+    }
+    try { await deleteAnalysisResult(customer.id); } catch { /* best-effort */ }
+    return { intent: "save-selfie-only", ok: true };
   }
 
   // ── Retry-moderation intent ────────────────────────────────────────────────
@@ -243,11 +285,6 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
     } catch (err) {
       console.error("[selfie-action] reanalyse-selfie persistence failed:", err instanceof Error ? err.message : String(err));
       return { intent: "reanalyse-selfie", outcome: { status: "system-failure", internalNote: "reanalyse persistence failed" } };
-    }
-
-    // Auto-delete temp selfie after successful reanalysis
-    if (reanalyseOutcome.status === "completed") {
-      try { await deleteSelfiePhoto(customer.id); } catch { /* best-effort */ }
     }
 
     return { intent: "reanalyse-selfie", outcome: reanalyseOutcome };
@@ -417,8 +454,6 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
     { consentAt: consentAt.toISOString() },
   );
 
-  const saveToModel = formData.get("saveToModel") === "true";
-
   // Persist result — only validated signals stored; raw response discarded
   try {
     if (outcome.status === "completed") {
@@ -436,24 +471,10 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
     return { intent: isReplace ? "replace" : "analyse", outcome: { status: "system-failure", internalNote: "final persistence failed" } };
   }
 
-  // Auto-delete or transfer the temporary selfie after successful analysis.
+  // Photo stays in SelfieAnalysis — user chooses what to keep via the post-analysis section.
   // On failure, the photo is preserved so the user can reanalyse with the same photo.
-  if (outcome.status === "completed") {
-    if (saveToModel) {
-      const saveResult = await saveSelfieAsModelFace(customer.id, upload.publicId, upload.format);
-      if (saveResult.ok) {
-        // NaiaModel now owns the Cloudinary asset — clear the SelfieAnalysis reference only
-        try { await clearSelfiePhotoOwnership(customer.id); } catch { /* best-effort */ }
-      } else {
-        // Transfer failed — delete temp selfie as fallback
-        try { await deleteSelfiePhoto(customer.id); } catch { /* best-effort */ }
-      }
-    } else {
-      try { await deleteSelfiePhoto(customer.id); } catch { /* best-effort */ }
-    }
-  }
 
-  return { intent: isReplace ? "replace" : "analyse", outcome, savedToModel: saveToModel && outcome.status === "completed" };
+  return { intent: isReplace ? "replace" : "analyse", outcome };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -463,7 +484,10 @@ export default function SelfieUploadPage() {
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const [preview, setPreview] = useState<string | null>(null);
-  const [pending, setPending] = useState<"delete-analysis" | "delete-model-face" | "delete-model-face-and-analysis" | null>(null);
+  const [pending, setPending] = useState<
+    "delete-analysis" | "delete-model-face" | "delete-model-face-and-analysis" |
+    "keep-both" | "keep-analysis" | "save-selfie-only" | "delete-both" | null
+  >(null);
   const [showChooseDifferent, setShowChooseDifferent] = useState(false);
   const isSubmitting = navigation.state === "submitting";
   const resultsTopRef = useRef<HTMLDivElement>(null);
@@ -524,6 +548,14 @@ export default function SelfieUploadPage() {
 
   // Completed: analysis succeeded
   const showCompletedSection = analysisCompleted && displaySignals !== null;
+
+  // Choice section: analysis complete and temp selfie still present — user hasn't decided yet
+  const showChoiceSection = showCompletedSection && photoExists;
+
+  // Manage section: shown after the user has made their storage choice (no temp selfie)
+  const showManageSection = !photoExists && !analysisPending && !showModerationRetry && (
+    (analysisCompleted && displaySignals !== null) || hasFaceModel
+  );
 
   // Failed: system error or timeout (photo preserved, reanalyse available)
   const showFailedSection =
@@ -651,8 +683,7 @@ export default function SelfieUploadPage() {
           without it.
         </p>
         <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", marginTop: "8px" }}>
-          Your selfie is used to create your analysis and isn't kept after processing unless you choose
-          to save it to My nAia Model.
+          Your selfie is used privately to create your analysis. Afterward, you choose what you'd like nAia to keep.
         </p>
       </div>
 
@@ -753,7 +784,6 @@ export default function SelfieUploadPage() {
               preview={preview}
               onFileChange={handleFileChange}
               submitLabel="Start My Analysis"
-              showSaveToModel
             />
           </section>
         </>
@@ -835,7 +865,6 @@ export default function SelfieUploadPage() {
                 preview={preview}
                 onFileChange={handleFileChange}
                 submitLabel="Replace and Reanalyse"
-                showSaveToModel
               />
             </div>
           )}
@@ -879,7 +908,6 @@ export default function SelfieUploadPage() {
                 preview={preview}
                 onFileChange={handleFileChange}
                 submitLabel="Replace and Reanalyse"
-                showSaveToModel
               />
             </div>
           )}
@@ -1062,46 +1090,75 @@ export default function SelfieUploadPage() {
             </p>
           </section>
 
-          {/* Manage */}
-          <section className="bos-section">
-            <div className="bos-step-label">Manage</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
-              <button type="button" className="sp-btn-outline" onClick={() => setPending("delete-analysis")}>
-                Delete Analysis
-              </button>
-              {hasFaceModel && (
-                <button type="button" className="sp-btn-outline" onClick={() => setPending("delete-model-face")}>
-                  Remove Saved Selfie
-                </button>
-              )}
-              {hasFaceModel && (
-                <button type="button" className="sp-btn-outline" onClick={() => setPending("delete-model-face-and-analysis")}>
-                  Delete Both
-                </button>
-              )}
-            </div>
-          </section>
+          {/* What Would You Like nAia to Keep? — shown while temp selfie awaits user's decision */}
+          {showChoiceSection && (
+            <section className="bos-section">
+              <div className="bos-step-label">What Would You Like nAia to Keep?</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "16px" }}>
+                {(
+                  [
+                    { intent: "keep-both" as const, label: "Keep Both", bullets: ["Keep your Selfie Style Analysis", "Save your selfie as your reusable nAia Model photo"] },
+                    { intent: "keep-analysis" as const, label: "Keep Analysis Only", bullets: ["Keep your analysis", "Delete your selfie"] },
+                    { intent: "save-selfie-only" as const, label: "Save Selfie Only", bullets: ["Delete your analysis", "Save your selfie to My nAia Model for future styling"] },
+                    { intent: "delete-both" as const, label: "Delete Both", bullets: ["Delete your analysis", "Delete your selfie"] },
+                  ] as const
+                ).map(({ intent: choiceIntent, label, bullets }) => (
+                  <button
+                    key={choiceIntent}
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => setPending(choiceIntent)}
+                    style={{ display: "block", width: "100%", textAlign: "left", padding: "16px 20px", border: "1px solid var(--naia-border)", background: "none", cursor: "pointer", opacity: isSubmitting ? 0.65 : 1 }}
+                  >
+                    <div style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "11px", letterSpacing: "0.5px", textTransform: "uppercase", marginBottom: "6px" }}>{label}</div>
+                    <ul style={{ fontFamily: "var(--naia-ff-body)", fontSize: "13px", fontStyle: "italic", color: "var(--naia-muted)", listStyle: "none", padding: 0, margin: 0, lineHeight: 1.6 }}>
+                      {bullets.map(b => <li key={b}>· {b}</li>)}
+                    </ul>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
 
-          {/* Update Your Analysis */}
-          <section className="bos-section">
-            <div className="bos-step-label">Update Your Analysis</div>
-            <UploadForm
-              intent="replace"
-              isSubmitting={isSubmitting}
-              preview={preview}
-              onFileChange={handleFileChange}
-              submitLabel="Analyse New Selfie"
-              showSaveToModel
-            />
-          </section>
+          {/* Update Your Analysis — only after the user has made their storage choice */}
+          {!showChoiceSection && (
+            <section className="bos-section">
+              <div className="bos-step-label">Update Your Analysis</div>
+              <UploadForm
+                intent="replace"
+                isSubmitting={isSubmitting}
+                preview={preview}
+                onFileChange={handleFileChange}
+                submitLabel="Analyse New Selfie"
+              />
+            </section>
+          )}
         </>
       )}
 
-      {/* Privacy note */}
-      <div className="sp-state-note" style={{ marginTop: "32px" }}>
-        Your selfie is used to create your analysis and isn't kept after processing unless you choose
-        to save it to My nAia Model.
-      </div>
+      {/* Manage — standalone section reflecting what actually exists after the user has decided */}
+      {showManageSection && (
+        <section className="bos-section">
+          <div className="bos-step-label">Manage</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+            {analysisCompleted && displaySignals !== null && (
+              <button type="button" className="sp-btn-outline" onClick={() => setPending("delete-analysis")}>
+                Delete Analysis
+              </button>
+            )}
+            {hasFaceModel && (
+              <button type="button" className="sp-btn-outline" onClick={() => setPending("delete-model-face")}>
+                Remove Saved Selfie
+              </button>
+            )}
+            {analysisCompleted && displaySignals !== null && hasFaceModel && (
+              <button type="button" className="sp-btn-outline" onClick={() => setPending("delete-model-face-and-analysis")}>
+                Delete Both
+              </button>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Confirmation modal */}
       {pending && (
@@ -1109,23 +1166,37 @@ export default function SelfieUploadPage() {
           <div className="dc-modal">
             <div className="dc-modal-eyebrow">Confirm</div>
             <h3 id="psa-confirm-title" className="dc-modal-title">
-              {pending === "delete-analysis"              ? "Delete Analysis" :
-               pending === "delete-model-face"            ? "Remove Saved Selfie" :
-               "Delete Selfie and Analysis"}
+              {pending === "keep-both"                      ? "Keep Both" :
+               pending === "keep-analysis"                  ? "Keep Analysis Only" :
+               pending === "save-selfie-only"               ? "Save Selfie Only" :
+               pending === "delete-both"                    ? "Delete Both" :
+               pending === "delete-analysis"                ? "Delete Analysis" :
+               pending === "delete-model-face"              ? "Remove Saved Selfie" :
+               "Delete Both"}
             </h3>
             <p className="dc-modal-desc">
-              {pending === "delete-analysis"
-                ? "Your analysis will be removed. Any photo saved to My nAia Model is untouched."
+              {pending === "keep-both"
+                ? "Your analysis and selfie will be saved. Your selfie will be used as your nAia Model photo for future styling."
+                : pending === "keep-analysis"
+                ? "Your analysis will be saved. Your selfie will be permanently deleted."
+                : pending === "save-selfie-only"
+                ? "Your selfie will be saved to My nAia Model. Your analysis will be permanently deleted."
+                : pending === "delete-both"
+                ? "Your analysis and selfie will both be permanently deleted."
+                : pending === "delete-analysis"
+                ? "Your analysis will be removed. Any selfie saved to My nAia Model is untouched."
                 : pending === "delete-model-face"
                 ? "Your selfie will be removed from My nAia Model. Your analysis is untouched."
-                : "Your selfie and your analysis will both be removed. You can create them again at any time."}
+                : "Your selfie and analysis will both be removed. You can create them again at any time."}
             </p>
             <div className="dc-modal-actions">
               <button type="button" className="sp-btn-ghost" onClick={() => setPending(null)} disabled={isSubmitting}>Cancel</button>
               <Form method="post" style={{ display: "inline" }}>
-                <input type="hidden" name="_intent" value={pending} />
+                <input type="hidden" name="_intent" value={pending ?? ""} />
                 <button type="submit" className="sp-btn-outline" disabled={isSubmitting}>
-                  {isSubmitting ? "Removing…" : "Confirm"}
+                  {isSubmitting
+                    ? (pending === "keep-both" || pending === "keep-analysis" || pending === "save-selfie-only" ? "Saving…" : "Removing…")
+                    : "Confirm"}
                 </button>
               </Form>
             </div>
@@ -1144,14 +1215,12 @@ function UploadForm({
   preview,
   onFileChange,
   submitLabel,
-  showSaveToModel,
 }: {
   intent: "analyse" | "replace";
   isSubmitting: boolean;
   preview: string | null;
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   submitLabel: string;
-  showSaveToModel?: boolean;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   return (
@@ -1194,17 +1263,6 @@ function UploadForm({
           </span>
         </label>
       </div>
-
-      {showSaveToModel && (
-        <div style={{ marginBottom: "24px", padding: "12px 20px", border: "1px solid var(--naia-border)" }}>
-          <label className="psa-consent-row">
-            <input type="checkbox" name="saveToModel" value="true" id={`save-to-model-${intent}`} className="psa-consent-check" />
-            <span style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px" }}>
-              Save this selfie to My nAia Model for future try-on and styling.
-            </span>
-          </label>
-        </div>
-      )}
 
       <button
         type="submit"
