@@ -14,6 +14,7 @@ const MY_NAIA_NAV: NavGroup[] = [
       { to: "/style-me", label: "StyleMe" },
       { to: "/buyskip", label: "Buy or Skip" },
       { to: "/trends", label: "My Trend Edits" },
+      { to: "/passport/selfie", label: "Selfie Style Analysis" },
     ],
   },
   {
@@ -23,7 +24,6 @@ const MY_NAIA_NAV: NavGroup[] = [
       { to: "/my-naia/orders", label: "Orders" },
       { to: "/my-naia/personalisation", label: "Personalisation" },
       { to: "/my-naia-model", label: "My nAia Model", indent: true },
-      { to: "/passport/selfie", label: "Selfie Style Analysis", indent: true },
       { to: "/my-naia/what-naia-notices", label: "What nAia Is Noticing", indent: true },
       { to: "/my-naia/plan-usage", label: "Plan & Usage" },
       { to: "/settings", label: "Settings & Privacy" },
