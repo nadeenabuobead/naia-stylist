@@ -92,14 +92,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   let hasFaceModel = false;
+  let modelFacePreviewUrl: string | null = null;
   try {
     const model = await loadNaiaModel(customer.id);
     hasFaceModel = !!(model?.facePublicId);
+    if (model?.facePublicId) {
+      modelFacePreviewUrl = buildModelPreviewUrl(model.facePublicId, model.faceFormat ?? null);
+    }
   } catch {
     hasFaceModel = false;
+    modelFacePreviewUrl = null;
   }
 
-  return data({ existing, hasFaceModel });
+  return data({ existing, hasFaceModel, modelFacePreviewUrl });
 }
 
 // ── Action ────────────────────────────────────────────────────────────────────
@@ -480,7 +485,7 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function SelfieUploadPage() {
-  const { existing, hasFaceModel } = useLoaderData<typeof loader>();
+  const { existing, hasFaceModel, modelFacePreviewUrl } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const [preview, setPreview] = useState<string | null>(null);
@@ -532,14 +537,24 @@ export default function SelfieUploadPage() {
     return existing?.signals ?? null;
   })();
 
-  // Show "Analyse This Selfie" option when the user has a saved model face photo
-  // but no analysis in progress or completed. This lets them skip a new upload.
+  // Show the saved-photo section when the user has a model face photo and is not
+  // mid-choice (analysis complete + temp selfie still held). After keep-both the section
+  // shows with just the preview (no consent/button — analysis already exists).
   const showModelSelfieAnalyse =
     hasFaceModel &&
     !analysisPending &&
-    !analysisCompleted &&
+    !(analysisCompleted && photoExists) &&   // hide during the 4-choice decision moment
     freshOutcome?.status !== "quality-failed" &&
     freshOutcome?.status !== "moderation-unavailable";
+
+  // True immediately after a post-analysis storage choice succeeds (keep-both, keep-analysis,
+  // save-selfie-only, delete-both). Used to show the success message and suppress
+  // the stale "Your selfie is still saved" statusDescription.
+  const choiceJustSucceeded = !!(
+    actionData && "ok" in actionData && actionData.ok &&
+    (actionData.intent === "keep-both" || actionData.intent === "keep-analysis" ||
+     actionData.intent === "save-selfie-only" || actionData.intent === "delete-both")
+  );
 
   // ── Section visibility ────────────────────────────────────────────────────
 
@@ -609,7 +624,7 @@ export default function SelfieUploadPage() {
 
   // Supporting copy shown directly under the status label — replaces a separate
   // error card for system-failure / timeout / DB-failed states.
-  const statusDescription: string | null =
+  const statusDescription: string | null = choiceJustSucceeded ? null :
     (freshOutcome?.status === "system-failure" || freshOutcome?.status === "timeout")
       ? "We couldn't complete your analysis this time." :
     (dbStatus === "failed" && !freshOutcome && !photoExists)
@@ -705,6 +720,29 @@ export default function SelfieUploadPage() {
         </div>
       )}
 
+      {/* Post-choice success confirmation */}
+      {choiceJustSucceeded && actionData && "intent" in actionData && (
+        <div className="bos-section">
+          <div className="psa-outcome-box" style={{ borderColor: "var(--naia-border)" }}>
+            <div className="psa-outcome-title">
+              {actionData.intent === "keep-both"        ? "Selfie and analysis saved" :
+               actionData.intent === "keep-analysis"    ? "Analysis saved" :
+               actionData.intent === "save-selfie-only" ? "Selfie saved to My nAia Model" :
+               "Selfie and analysis deleted"}
+            </div>
+            <p className="psa-outcome-body">
+              {actionData.intent === "keep-both"
+                ? "Your Selfie Style Analysis has been kept, and your selfie is now saved to My nAia Model for future styling."
+                : actionData.intent === "keep-analysis"
+                ? "Your Selfie Style Analysis has been kept. Your selfie has been deleted."
+                : actionData.intent === "save-selfie-only"
+                ? "Your selfie is now available for future styling. Your Selfie Style Analysis has been deleted."
+                : "Your selfie and Selfie Style Analysis have been removed."}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Your Selfie — hidden while the user has selected a replacement file */}
       {(selfieDisplayUrl || photoExists) && !replacingPhoto && (
         <section className="bos-section">
@@ -725,36 +763,51 @@ export default function SelfieUploadPage() {
         </section>
       )}
 
-      {/* Analyse using saved model photo — shown when model face exists and no analysis active */}
+      {/* Saved model photo — shown when a face photo exists in My nAia Model.
+          When no analysis: full re-analyse prompt with consent.
+          When analysis already complete (e.g. after keep-both): photo preview only —
+          confirms what was saved without prompting to re-analyse. */}
       {showModelSelfieAnalyse && (
         <section className="bos-section">
           <div className="bos-step-label">Use Saved Photo</div>
-          <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--naia-muted)", lineHeight: 1.75, marginBottom: "20px" }}>
-            You have a photo saved in My nAia Model. nAia can analyse it to create your Selfie
-            Style Analysis — no new upload needed.
-          </p>
-          <Form method="post">
-            <input type="hidden" name="_intent" value="analyse-model-selfie" />
-            <div style={{ marginBottom: "20px", padding: "16px 20px", background: "rgba(34,21,22,0.03)", border: "1px solid var(--naia-border)" }}>
-              <label className="psa-consent-row">
-                <input type="checkbox" name="consent" value="true" id="model-selfie-consent" required className="psa-consent-check" />
-                <span>
-                  I consent to nAia analysing my saved photo to offer me personal styling guidance.
-                  I understand this is not a medical or diagnostic assessment. I can remove my analysis
-                  at any time.
-                </span>
-              </label>
+          {modelFacePreviewUrl && (
+            <div style={{ maxWidth: "200px", marginBottom: "16px" }}>
+              <img
+                src={modelFacePreviewUrl}
+                alt="Saved photo"
+                style={{ display: "block", width: "100%", height: "auto" }}
+              />
             </div>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className={isSubmitting ? "sp-btn-outline" : "sp-btn-primary"}
-              style={{ width: "100%", maxWidth: "360px", opacity: isSubmitting ? 0.65 : 1 }}
-            >
-              {isSubmitting ? "Analysing…" : "Analyse This Selfie"}
-            </button>
-          </Form>
-          {showPrimaryUploadForm && (
+          )}
+          <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--naia-muted)", lineHeight: 1.75, marginBottom: analysisCompleted ? "0" : "20px" }}>
+            {analysisCompleted
+              ? "Your selfie is saved to My nAia Model for future styling."
+              : "You have a photo saved in My nAia Model. nAia can analyse it to create your Selfie Style Analysis — no new upload needed."}
+          </p>
+          {!analysisCompleted && (
+            <Form method="post">
+              <input type="hidden" name="_intent" value="analyse-model-selfie" />
+              <div style={{ marginBottom: "20px", padding: "16px 20px", background: "rgba(34,21,22,0.03)", border: "1px solid var(--naia-border)" }}>
+                <label className="psa-consent-row">
+                  <input type="checkbox" name="consent" value="true" id="model-selfie-consent" required className="psa-consent-check" />
+                  <span>
+                    I consent to nAia analysing my saved photo to offer me personal styling guidance.
+                    I understand this is not a medical or diagnostic assessment. I can remove my analysis
+                    at any time.
+                  </span>
+                </label>
+              </div>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className={isSubmitting ? "sp-btn-outline" : "sp-btn-primary"}
+                style={{ width: "100%", maxWidth: "360px", opacity: isSubmitting ? 0.65 : 1 }}
+              >
+                {isSubmitting ? "Analysing…" : "Analyse This Selfie"}
+              </button>
+            </Form>
+          )}
+          {!analysisCompleted && showPrimaryUploadForm && (
             <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "11px", letterSpacing: "0.3px", color: "var(--naia-muted)", marginTop: "16px" }}>
               Or upload a different photo below.
             </p>
@@ -769,10 +822,10 @@ export default function SelfieUploadPage() {
             <div className="bos-step-label">Selfie Guidance</div>
             <ul className="psa-guidance-list">
               <li>· Front-facing, in natural daylight, without filters.</li>
-              <li>· A neutral top and hair pulled back if possible.</li>
-              <li>· Only the head and shoulders need to be visible.</li>
-              <li>· Sharp, in focus, no heavy colour filters or flash.</li>
-              <li>· Only one person in the frame.</li>
+              <li>· Wear a neutral top; if your hair is visible, pull it back if possible. Hijab or other head coverings are completely fine.</li>
+              <li>· Only your head and shoulders need to be visible.</li>
+              <li>· Keep the photo sharp and in focus, with no heavy colour filters or flash.</li>
+              <li>· Only one person should be in the frame.</li>
             </ul>
           </section>
 
