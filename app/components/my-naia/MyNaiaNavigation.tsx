@@ -20,14 +20,14 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "DIGITAL CLOSET", path: "/closet" },
       { label: "STYLEME",        path: "/style-me" },
       { label: "BUY OR SKIP",    path: "/buyskip" },
-      { label: "MY TREND EDITS", path: "/trends" },
+      { label: "MY TREND EDITS",          path: "/trends" },
+      { label: "SELFIE STYLE ANALYSIS",    path: "/passport/selfie" },
     ],
   },
   {
     title: "ACCOUNT",
     items: [
       { label: "MY nAia MODEL",             path: "/my-naia-model" },
-      { label: "PERSONAL STYLING ANALYSIS", path: "/passport/selfie", indent: true },
       { label: "SAVED",                     path: "/my-naia/saved" },
       { label: "ORDERS",                    path: null },
       { label: "SETTINGS & PRIVACY",        path: "/settings" },

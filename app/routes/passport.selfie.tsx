@@ -147,6 +147,15 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
   // Restores the previously missing delete-both handler (used by "Cancel Analysis" during
   // pending state and by the "Delete Both" post-analysis choice).
   if (intent === "delete-both") {
+    // Ownership guard: if SA and NaiaModel share the same Cloudinary asset, clear the
+    // model reference before deleteBoth runs Cloudinary deletion — same pattern as keep-analysis.
+    const tempSelfie = await getSelfieForModeration(customer.id);
+    if (tempSelfie?.publicId) {
+      const model = await loadNaiaModel(customer.id);
+      if (model?.facePublicId === tempSelfie.publicId) {
+        await clearNaiaModelFaceReference(customer.id);
+      }
+    }
     const result = await deleteBoth(customer.id);
     return { intent: "delete-both", ok: result.ok, errorCode: result.ok ? undefined : result.errorCode };
   }
@@ -322,7 +331,10 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
     }
 
     try {
-      await beginSelfieAnalysis(customer.id, new Date(), null, null, { forceReplace: true });
+      // Write the model's facePublicId into SA so photoExists becomes true after analysis.
+      // This enables the same 4-choice flow for both fresh-upload and model-selfie analyses.
+      // The ownership guard in keep-analysis and delete-both handles the shared-asset case.
+      await beginSelfieAnalysis(customer.id, new Date(), model.facePublicId, model.faceFormat, { forceReplace: true });
     } catch (err) {
       console.error("[selfie-action] analyse-model-selfie begin failed:", err instanceof Error ? err.message : String(err));
       return { intent: "analyse-model-selfie", outcome: { status: "system-failure", internalNote: "begin failed" } };
@@ -504,9 +516,6 @@ export default function SelfieUploadPage() {
     "delete-analysis" | "delete-model-face" | "delete-model-face-and-analysis" |
     "keep-both" | "keep-analysis" | "save-selfie-only" | "delete-both" | null
   >(null);
-  // Captures the storage-choice intent the moment the action confirms success.
-  // Lives in state (not derived from actionData) so it survives the loader
-  // revalidation that React Router triggers immediately after every action.
   const [successIntent, setSuccessIntent] = useState<
     "keep-both" | "keep-analysis" | "save-selfie-only" | "delete-both" | null
   >(null);
@@ -514,95 +523,53 @@ export default function SelfieUploadPage() {
   const isSubmitting = navigation.state === "submitting";
   const resultsTopRef = useRef<HTMLDivElement>(null);
 
-  // True once the user has selected a replacement file — collapses the saved-selfie
-  // block and reanalyse controls so only the replacement preview + form are visible.
-  const replacingPhoto = showChooseDifferent && !!preview;
-
   // ── State derivation ───────────────────────────────────────────────────────
 
-  // Fresh action outcome (present for the current render cycle after a form submit)
   const freshOutcome: SelfieAnalysisOutcome | null =
     actionData && "outcome" in actionData ? actionData.outcome : null;
-  const analysisIntent = actionData && "outcome" in actionData ? actionData.intent : null;
 
-  // DB state (from loader, reflects the current persisted record)
   const dbStatus = existing?.analysisStatus ?? null;
 
-  // Photo state — independent of analysis state.
-  // After safety-rejection the server explicitly deletes the photo; treat as no photo.
   const photoJustRejected = freshOutcome?.status === "safety-rejected";
   const photoExists = !photoJustRejected && (existing?.hasPhoto ?? false);
 
-  // Selfie display URL: always the server-generated signed URL for the stored photo.
-  // The FileReader preview is shown inside UploadForm only — keeping it out of the
-  // "Your Selfie" section prevents the same image appearing twice when a new file
-  // is selected in the "Choose a Different Photo" or primary upload flows.
+  // Server-generated signed URL for the stored temp selfie (never returned to browser directly).
   const selfieDisplayUrl = photoExists ? existing?.selfiePreviewUrl ?? null : null;
 
-  // Analysis state — independent of photo state.
   const analysisCompleted =
     freshOutcome?.status === "completed" ||
     (dbStatus === "completed" && !freshOutcome);
 
-  // Pending: DB says pending and there is no fresh action outcome overriding it.
-  // (A fresh "invalid-input" from the blocked guard still leaves DB as pending.)
   const analysisPending = dbStatus === "pending" && !freshOutcome;
 
-  // Display signals: fresh completed outcome takes precedence over DB signals.
   const displaySignals: SelfieStyleSignals | null = (() => {
     if (freshOutcome !== null && freshOutcome.status === "completed") return freshOutcome.signals;
     return existing?.signals ?? null;
   })();
 
-  // Show the saved-photo section when the user has a model face photo and is not
-  // mid-choice (analysis complete + temp selfie still held). After keep-both the section
-  // shows with just the preview (no consent/button — analysis already exists).
-  const showModelSelfieAnalyse =
-    hasFaceModel &&
-    !analysisPending &&
-    !(analysisCompleted && photoExists) &&   // hide during the 4-choice decision moment
-    freshOutcome?.status !== "quality-failed" &&
-    freshOutcome?.status !== "moderation-unavailable";
-
-
   // ── Section visibility ────────────────────────────────────────────────────
 
   const showProcessing = analysisPending;
   const showModerationRetry = freshOutcome?.status === "moderation-unavailable";
-
-  // Completed: analysis succeeded
   const showCompletedSection = analysisCompleted && displaySignals !== null;
-
-  // Choice section: analysis complete and temp selfie still present — user hasn't decided yet
   const showChoiceSection = showCompletedSection && photoExists;
-
-  // Manage section: shown after the user has made their storage choice (no temp selfie)
   const showManageSection = !photoExists && !analysisPending && !showModerationRetry && (
     (analysisCompleted && displaySignals !== null) || hasFaceModel
   );
 
-  // Failed: system error or timeout (photo preserved, reanalyse available)
   const showFailedSection =
-    photoExists &&
-    !analysisPending &&
-    !analysisCompleted &&
+    photoExists && !analysisPending && !analysisCompleted &&
     (freshOutcome?.status === "system-failure" ||
       freshOutcome?.status === "timeout" ||
       (dbStatus === "failed" && !freshOutcome));
 
-  // Deleted: analysis was explicitly removed (photo preserved, reanalyse available)
   const showDeletedSection =
-    photoExists &&
-    !analysisPending &&
-    !analysisCompleted &&
-    dbStatus === "deleted" &&
-    !freshOutcome;
+    photoExists && !analysisPending && !analysisCompleted &&
+    dbStatus === "deleted" && !freshOutcome;
 
-  // Quality failed: photo uploaded but quality check failed (photo preserved, different photo needed)
-  const showQualityFailedSection =
-    photoExists && freshOutcome?.status === "quality-failed";
+  const showQualityFailedSection = photoExists && freshOutcome?.status === "quality-failed";
 
-  // Primary upload form: only when no photo is stored and we need a new one.
+  // True when the before-analysis UI should be shown (no photo in-flight, no completed analysis).
   const showPrimaryUploadForm = (() => {
     if (analysisPending) return false;
     if (freshOutcome?.status === "moderation-unavailable") return false;
@@ -614,6 +581,15 @@ export default function SelfieUploadPage() {
     if (!photoExists && !freshOutcome) return true;
     return false;
   })();
+
+  // Before-analysis sub-states — mutually exclusive.
+  const showSavedPhotoSection    = showPrimaryUploadForm && hasFaceModel && !showChooseDifferent;
+  const showChooseDifferentSection = showPrimaryUploadForm && showChooseDifferent;
+  const showFreshUploadSection   = showPrimaryUploadForm && !hasFaceModel && !showChooseDifferent;
+
+  // "Your Selfie" display: temp selfie URL takes priority; fall back to model face URL
+  // in the stable "analysis + selfie" state (after keep-both, temp selfie cleared).
+  const displaySelfieUrl = selfieDisplayUrl ?? (hasFaceModel && analysisCompleted ? modelFacePreviewUrl : null);
 
   // ── Status label and description ──────────────────────────────────────────
 
@@ -631,8 +607,6 @@ export default function SelfieUploadPage() {
     photoExists ? "Selfie saved" :
     "Not started";
 
-  // Supporting copy shown directly under the status label — replaces a separate
-  // error card for system-failure / timeout / DB-failed states.
   const statusDescription: string | null = successIntent ? null :
     (freshOutcome?.status === "system-failure" || freshOutcome?.status === "timeout")
       ? "We couldn't complete your analysis this time." :
@@ -642,8 +616,6 @@ export default function SelfieUploadPage() {
       ? "Your analysis was removed. Your selfie is still saved — you can reanalyse it below." :
     null;
 
-  // Outcome feedback card: shown only for specific error types that need
-  // actionable inline guidance. system-failure / timeout handled by statusDescription.
   const showOutcomeFeedback =
     freshOutcome !== null &&
     freshOutcome.status !== "completed" &&
@@ -651,24 +623,15 @@ export default function SelfieUploadPage() {
     freshOutcome.status !== "timeout" &&
     freshOutcome.status !== "moderation-unavailable";
 
-  // After a fresh successful analysis, clear the lingering FileReader preview and
-  // scroll to the results.
-  //
-  // Why [actionData] and not [freshOutcome?.status]:
-  //   actionData is a new object reference on every POST response, even when the
-  //   status string is the same ("completed" → replace → "completed"). The string
-  //   dependency never changes in that case and the effect never re-fires.
-  //
-  // Why double requestAnimationFrame:
-  //   React Router's ScrollRestoration runs in the same useEffect batch and
-  //   synchronously restores scroll to wherever the user was when they submitted
-  //   (the bottom of the page). A plain scrollIntoView inside useEffect fires in
-  //   the same batch and is immediately overridden by ScrollRestoration. Double-RAF
-  //   defers our scroll to the second animation frame — after ScrollRestoration has
-  //   already written its position — so ours wins.
+  // ── Effects ───────────────────────────────────────────────────────────────
+
+  // After a fresh successful analysis: clear preview, collapse choose-different, scroll to results.
+  // Uses [actionData] (object ref) not [freshOutcome?.status] so re-fires on replace → completed.
+  // Double-RAF defers our scroll past React Router's ScrollRestoration which runs in the same batch.
   useEffect(() => {
     if (freshOutcome?.status === "completed") {
       setPreview(null);
+      setShowChooseDifferent(false);
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           resultsTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -677,15 +640,12 @@ export default function SelfieUploadPage() {
     }
   }, [actionData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Close confirmation modal when any ok action succeeds.
   useEffect(() => {
     if (actionData && "ok" in actionData && actionData.ok) {
       setPending(null);
     }
   }, [actionData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Capture storage-choice success into state the moment actionData arrives so
-  // the message survives the loader revalidation React Router triggers afterward.
   useEffect(() => {
     if (
       actionData && "ok" in actionData && actionData.ok &&
@@ -696,7 +656,6 @@ export default function SelfieUploadPage() {
     }
   }, [actionData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Clear captured success the moment the next form submission starts.
   useEffect(() => {
     if (isSubmitting) setSuccessIntent(null);
   }, [isSubmitting]);
@@ -708,6 +667,16 @@ export default function SelfieUploadPage() {
     reader.onload = ev => setPreview(ev.target?.result as string);
     reader.readAsDataURL(file);
   }
+
+  const guidanceList = (
+    <ul className="psa-guidance-list">
+      <li>· Front-facing, in natural daylight, without filters.</li>
+      <li>· Wear a neutral top; if your hair is visible, pull it back if possible. Hijab or other head coverings are completely fine.</li>
+      <li>· Only your head and shoulders need to be visible.</li>
+      <li>· Keep the photo sharp and in focus, with no heavy colour filters or flash.</li>
+      <li>· Only one person should be in the frame.</li>
+    </ul>
+  );
 
   return (
     <MyNaiaLayout>
@@ -738,15 +707,14 @@ export default function SelfieUploadPage() {
         )}
       </div>
 
-      {/* Outcome error feedback — only for specific types (not system-failure/timeout) */}
+      {/* Outcome error feedback */}
       {showOutcomeFeedback && freshOutcome && (
         <div className="bos-section">
           <OutcomeFeedback outcome={freshOutcome} />
         </div>
       )}
 
-      {/* Post-choice success confirmation — driven by state, not actionData,
-          so it persists through the loader revalidation that follows the action. */}
+      {/* Post-choice success confirmation — captured into state so it survives loader revalidation */}
       {successIntent && (
         <div className="bos-section">
           <div className="psa-outcome-box" style={{ borderColor: "var(--naia-border)" }}>
@@ -760,7 +728,7 @@ export default function SelfieUploadPage() {
               {successIntent === "keep-both"
                 ? "Your Selfie Style Analysis has been kept, and your selfie is now saved to My nAia Model for future styling."
                 : successIntent === "keep-analysis"
-                ? "Your Selfie Style Analysis has been kept. Your selfie has been deleted."
+                ? "Your Selfie Style Analysis has been kept. Your selfie has been removed."
                 : successIntent === "save-selfie-only"
                 ? "Your selfie is now available for future styling. Your Selfie Style Analysis has been deleted."
                 : "Your selfie and Selfie Style Analysis have been removed."}
@@ -769,57 +737,32 @@ export default function SelfieUploadPage() {
         </div>
       )}
 
-      {/* Your Selfie — hidden while the user has selected a replacement file */}
-      {(selfieDisplayUrl || photoExists) && !replacingPhoto && (
-        <section className="bos-section">
-          <div className="bos-step-label">Your Selfie</div>
-          {selfieDisplayUrl ? (
-            <div style={{ maxWidth: "360px" }}>
-              <img
-                src={selfieDisplayUrl}
-                alt="Your selfie"
-                style={{ display: "block", width: "100%", height: "auto" }}
-              />
-            </div>
-          ) : (
-            <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--naia-muted)" }}>
-              Your selfie is stored privately.
+      {/* ── BEFORE ANALYSIS: Saved photo in My nAia Model ──────────────────── */}
+      {showSavedPhotoSection && (
+        <>
+          <section className="bos-section">
+            <div className="bos-step-label">Use Saved Photo</div>
+            {modelFacePreviewUrl && (
+              <div style={{ maxWidth: "360px", marginBottom: "16px" }}>
+                <img
+                  src={modelFacePreviewUrl}
+                  alt="Your saved photo"
+                  style={{ display: "block", width: "100%", height: "auto" }}
+                />
+              </div>
+            )}
+            <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--naia-muted)", lineHeight: 1.75, marginBottom: "20px" }}>
+              This is the photo currently saved in My nAia Model.
             </p>
-          )}
-        </section>
-      )}
-
-      {/* Saved model photo — shown when a face photo exists in My nAia Model.
-          When no analysis: full re-analyse prompt with consent.
-          When analysis already complete (e.g. after keep-both): photo preview only —
-          confirms what was saved without prompting to re-analyse. */}
-      {showModelSelfieAnalyse && (
-        <section className="bos-section">
-          <div className="bos-step-label">Use Saved Photo</div>
-          {modelFacePreviewUrl && (
-            <div style={{ maxWidth: "200px", marginBottom: "16px" }}>
-              <img
-                src={modelFacePreviewUrl}
-                alt="Saved photo"
-                style={{ display: "block", width: "100%", height: "auto" }}
-              />
-            </div>
-          )}
-          <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--naia-muted)", lineHeight: 1.75, marginBottom: analysisCompleted ? "0" : "20px" }}>
-            {analysisCompleted
-              ? "Your selfie is saved to My nAia Model for future styling."
-              : "You have a photo saved in My nAia Model. nAia can analyse it to create your Selfie Style Analysis — no new upload needed."}
-          </p>
-          {!analysisCompleted && (
             <Form method="post">
               <input type="hidden" name="_intent" value="analyse-model-selfie" />
               <div style={{ marginBottom: "20px", padding: "16px 20px", background: "rgba(34,21,22,0.03)", border: "1px solid var(--naia-border)" }}>
                 <label className="psa-consent-row">
                   <input type="checkbox" name="consent" value="true" id="model-selfie-consent" required className="psa-consent-check" />
                   <span>
-                    I consent to nAia analysing my saved photo to offer me personal styling guidance.
-                    I understand this is not a medical or diagnostic assessment. I can remove my analysis
-                    at any time.
+                    I consent to nAia analysing this photo to offer me personal styling guidance.
+                    I understand this is not a medical or diagnostic assessment. I can remove my
+                    analysis at any time.
                   </span>
                 </label>
               </div>
@@ -832,29 +775,60 @@ export default function SelfieUploadPage() {
                 {isSubmitting ? "Analysing…" : "Analyse This Selfie"}
               </button>
             </Form>
-          )}
-          {!analysisCompleted && showPrimaryUploadForm && (
-            <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "11px", letterSpacing: "0.3px", color: "var(--naia-muted)", marginTop: "16px" }}>
-              Or upload a different photo below.
-            </p>
-          )}
-        </section>
+            <div style={{ marginTop: "12px", maxWidth: "360px" }}>
+              <button
+                type="button"
+                className="sp-btn-outline"
+                style={{ width: "100%" }}
+                onClick={() => setShowChooseDifferent(true)}
+              >
+                Use a Different Photo
+              </button>
+            </div>
+          </section>
+          <section className="bos-section">
+            <div className="bos-step-label">Selfie Guidance</div>
+            {guidanceList}
+          </section>
+        </>
       )}
 
-      {/* Primary upload form — first selfie or after photo deletion */}
-      {showPrimaryUploadForm && (
+      {/* ── BEFORE ANALYSIS: Choose a different photo ──────────────────────── */}
+      {showChooseDifferentSection && (
+        <>
+          <section className="bos-section">
+            <div className="bos-step-label">Choose a Different Selfie</div>
+            <UploadForm
+              intent="analyse"
+              isSubmitting={isSubmitting}
+              preview={preview}
+              onFileChange={handleFileChange}
+              submitLabel="Analyse New Selfie"
+            />
+            <div style={{ marginTop: "12px" }}>
+              <button
+                type="button"
+                className="sp-btn-outline"
+                onClick={() => { setShowChooseDifferent(false); setPreview(null); }}
+              >
+                ← Use My Saved Photo
+              </button>
+            </div>
+          </section>
+          <section className="bos-section">
+            <div className="bos-step-label">Selfie Guidance</div>
+            {guidanceList}
+          </section>
+        </>
+      )}
+
+      {/* ── BEFORE ANALYSIS: No saved selfie — fresh upload ────────────────── */}
+      {showFreshUploadSection && (
         <>
           <section className="bos-section">
             <div className="bos-step-label">Selfie Guidance</div>
-            <ul className="psa-guidance-list">
-              <li>· Front-facing, in natural daylight, without filters.</li>
-              <li>· Wear a neutral top; if your hair is visible, pull it back if possible. Hijab or other head coverings are completely fine.</li>
-              <li>· Only your head and shoulders need to be visible.</li>
-              <li>· Keep the photo sharp and in focus, with no heavy colour filters or flash.</li>
-              <li>· Only one person should be in the frame.</li>
-            </ul>
+            {guidanceList}
           </section>
-
           <section className="bos-section">
             <div className="bos-step-label">Upload Your Selfie</div>
             <UploadForm
@@ -911,7 +885,7 @@ export default function SelfieUploadPage() {
       {showFailedSection && (
         <section className="bos-section">
           <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxWidth: "360px" }}>
-            {!replacingPhoto && (
+            {!showChooseDifferent && (
               <Form method="post">
                 <input type="hidden" name="_intent" value="reanalyse-selfie" />
                 <button
@@ -950,11 +924,11 @@ export default function SelfieUploadPage() {
         </section>
       )}
 
-      {/* Analysis deleted — photo saved, analyse this selfie or choose different */}
+      {/* Analysis deleted — photo saved, analyse or choose different */}
       {showDeletedSection && (
         <section className="bos-section">
           <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxWidth: "360px" }}>
-            {!replacingPhoto && (
+            {!showChooseDifferent && (
               <Form method="post">
                 <input type="hidden" name="_intent" value="reanalyse-selfie" />
                 <button
@@ -993,7 +967,7 @@ export default function SelfieUploadPage() {
         </section>
       )}
 
-      {/* Quality failed — photo bad, choose a different photo */}
+      {/* Quality failed — bad photo, choose a different one */}
       {showQualityFailedSection && (
         <section className="bos-section">
           <div style={{ maxWidth: "360px" }}>
@@ -1008,14 +982,27 @@ export default function SelfieUploadPage() {
         </section>
       )}
 
-      {/* Completed results */}
+      {/* ── AFTER ANALYSIS — same layout regardless of photo source ────────── */}
       {showCompletedSection && displaySignals && (
         <>
-          {/* Your Analysis */}
+          {/* YOUR SELFIE — temp selfie URL, or model face URL in stable "analysis + selfie" state */}
+          {displaySelfieUrl && (
+            <section className="bos-section">
+              <div className="bos-step-label">Your Selfie</div>
+              <div style={{ maxWidth: "360px" }}>
+                <img
+                  src={displaySelfieUrl}
+                  alt="Your selfie"
+                  style={{ display: "block", width: "100%", height: "auto" }}
+                />
+              </div>
+            </section>
+          )}
+
+          {/* YOUR ANALYSIS */}
           <section className="bos-section">
             <div className="bos-step-label">Your Analysis</div>
 
-            {/* Face & Feature Profile */}
             <AnalysisSubsection title="Face & Feature Profile" first>
               <dl className="sp-detail-list">
                 <SignalRow label="Face Shape" value={displaySignals.faceShapeDirection} />
@@ -1027,7 +1014,6 @@ export default function SelfieUploadPage() {
               </dl>
             </AnalysisSubsection>
 
-            {/* Colour Direction */}
             <AnalysisSubsection title="Colour Direction">
               {displaySignals.colourTemperature && (
                 <div style={{ marginBottom: "12px" }}>
@@ -1056,7 +1042,6 @@ export default function SelfieUploadPage() {
               )}
             </AnalysisSubsection>
 
-            {/* Necklines */}
             <AnalysisSubsection title="Necklines">
               {displaySignals.necklinesTop && displaySignals.necklinesTop.length > 0 ? (
                 <TieredChips
@@ -1074,7 +1059,6 @@ export default function SelfieUploadPage() {
               </p>
             </AnalysisSubsection>
 
-            {/* Jewellery */}
             <AnalysisSubsection title="Jewellery">
               <dl className="sp-detail-list">
                 <SignalRow
@@ -1091,7 +1075,6 @@ export default function SelfieUploadPage() {
               </dl>
             </AnalysisSubsection>
 
-            {/* Glasses */}
             <AnalysisSubsection title="Glasses">
               {displaySignals.glassesTop && displaySignals.glassesTop.length > 0 ? (
                 <TieredChips
@@ -1106,7 +1089,6 @@ export default function SelfieUploadPage() {
               )}
             </AnalysisSubsection>
 
-            {/* Hair Direction */}
             <AnalysisSubsection title="Hair Direction">
               <dl className="sp-detail-list">
                 <SignalRow label="Length" value={displaySignals.hairLengthDirection} />
@@ -1121,7 +1103,6 @@ export default function SelfieUploadPage() {
               </dl>
             </AnalysisSubsection>
 
-            {/* Makeup Direction */}
             {(displaySignals.makeupComplexionFinish || displaySignals.makeupBlush ||
               displaySignals.makeupEyeshadow || displaySignals.makeupLipsEveryday ||
               displaySignals.makeupLipsRich || displaySignals.makeupColourDirection) && (
@@ -1139,7 +1120,6 @@ export default function SelfieUploadPage() {
               </AnalysisSubsection>
             )}
 
-            {/* Visual Style Formula */}
             {displaySignals.styleFormula && displaySignals.styleFormula.length > 0 && (
               <AnalysisSubsection title="Visual Style Formula">
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "12px" }}>
@@ -1161,7 +1141,7 @@ export default function SelfieUploadPage() {
             )}
           </section>
 
-          {/* How nAia Uses This */}
+          {/* HOW nAia USES THIS */}
           <section className="bos-section">
             <div className="bos-step-label">How nAia Uses This</div>
             <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--naia-muted)", lineHeight: 1.75 }}>
@@ -1169,17 +1149,17 @@ export default function SelfieUploadPage() {
             </p>
           </section>
 
-          {/* What Would You Like nAia to Keep? — shown while temp selfie awaits user's decision */}
+          {/* WHAT WOULD YOU LIKE nAia TO KEEP? — four choice cards, same design for all photo sources */}
           {showChoiceSection && (
             <section className="bos-section">
               <div className="bos-step-label">What Would You Like nAia to Keep?</div>
               <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "16px" }}>
                 {(
                   [
-                    { intent: "keep-both" as const, label: "Keep Both", bullets: ["Keep your Selfie Style Analysis", "Save your selfie as your reusable nAia Model photo"] },
-                    { intent: "keep-analysis" as const, label: "Keep Analysis Only", bullets: ["Keep your analysis", "Delete your selfie"] },
-                    { intent: "save-selfie-only" as const, label: "Save Selfie Only", bullets: ["Delete your analysis", "Save your selfie to My nAia Model for future styling"] },
-                    { intent: "delete-both" as const, label: "Delete Both", bullets: ["Delete your analysis", "Delete your selfie"] },
+                    { intent: "keep-both" as const, label: "Keep Both", bullets: ["Keep your Selfie Style Analysis", "Save your selfie in My nAia Model"] },
+                    { intent: "keep-analysis" as const, label: "Keep Analysis Only", bullets: ["Keep your analysis", "Remove the selfie from My nAia Model"] },
+                    { intent: "save-selfie-only" as const, label: "Save Selfie Only", bullets: ["Remove your analysis", "Save your selfie to My nAia Model for future styling"] },
+                    { intent: "delete-both" as const, label: "Delete Both", bullets: ["Delete your analysis", "Delete your saved selfie"] },
                   ] as const
                 ).map(({ intent: choiceIntent, label, bullets }) => (
                   <button
@@ -1199,7 +1179,7 @@ export default function SelfieUploadPage() {
             </section>
           )}
 
-          {/* Update Your Analysis — only after the user has made their storage choice */}
+          {/* UPDATE YOUR ANALYSIS — only after the user has made their storage choice */}
           {!showChoiceSection && (
             <section className="bos-section">
               <div className="bos-step-label">Update Your Analysis</div>
@@ -1215,7 +1195,7 @@ export default function SelfieUploadPage() {
         </>
       )}
 
-      {/* Manage — standalone section reflecting what actually exists after the user has decided */}
+      {/* MANAGE — reflects what actually exists after the user has decided */}
       {showManageSection && (
         <section className="bos-section">
           <div className="bos-step-label">Manage</div>
@@ -1257,7 +1237,7 @@ export default function SelfieUploadPage() {
               {pending === "keep-both"
                 ? "Your analysis and selfie will be saved. Your selfie will be used as your nAia Model photo for future styling."
                 : pending === "keep-analysis"
-                ? "Your analysis will be saved. Your selfie will be permanently deleted."
+                ? "Your analysis will be saved. Your selfie will be permanently removed."
                 : pending === "save-selfie-only"
                 ? "Your selfie will be saved to My nAia Model. Your analysis will be permanently deleted."
                 : pending === "delete-both"
