@@ -13,8 +13,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const secret = url.searchParams.get("secret");
+  const hasEnvVar = Boolean(process.env.STAGING_SEED_SECRET);
+  const secretLen = process.env.STAGING_SEED_SECRET?.length ?? 0;
+  const providedLen = secret?.length ?? 0;
   if (!process.env.STAGING_SEED_SECRET || secret !== process.env.STAGING_SEED_SECRET) {
-    return new Response("Forbidden", { status: 403 });
+    return new Response(
+      JSON.stringify({ error: "Forbidden", debug: { hasEnvVar, secretLen, providedLen } }),
+      { status: 403, headers: { "Content-Type": "application/json" } },
+    );
   }
 
   const shop = url.searchParams.get("shop") ?? "naia-test-store.myshopify.com";
