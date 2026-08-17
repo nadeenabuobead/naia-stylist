@@ -500,7 +500,7 @@ export default function TrendReportDetail() {
             One report, different decisions. Read this direction through the lens that matters to you.
           </p>
           <div className="tr-lens-nav-row">
-            <Link to={`/trends/${report.slug}/edit`} className="tr-lens-btn">My Edit</Link>
+            <Link to={`/trends/my-edits/${report.slug}`} className="tr-lens-btn">My Edit</Link>
             <Link to={`/trends/${report.slug}/lens/designer`} className="tr-lens-btn">Designer</Link>
             <Link to={`/trends/${report.slug}/lens/buyer`} className="tr-lens-btn">Buyer</Link>
             <Link to={`/trends/${report.slug}/lens/marketer`} className="tr-lens-btn">Marketer</Link>

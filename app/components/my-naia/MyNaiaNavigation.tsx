@@ -20,7 +20,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "DIGITAL CLOSET", path: "/closet" },
       { label: "STYLEME",        path: "/style-me" },
       { label: "BUY OR SKIP",    path: "/buyskip" },
-      { label: "MY TREND EDITS",          path: "/trends" },
+      { label: "MY TREND EDITS",          path: "/trends/my-edits" },
       { label: "SELFIE STYLE ANALYSIS",    path: "/passport/selfie" },
     ],
   },

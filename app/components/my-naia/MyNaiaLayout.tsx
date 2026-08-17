@@ -13,7 +13,7 @@ const MY_NAIA_NAV: NavGroup[] = [
       { to: "/closet", label: "My Closet" },
       { to: "/style-me", label: "StyleMe" },
       { to: "/buyskip", label: "Buy or Skip" },
-      { to: "/trends", label: "My Trend Edits" },
+      { to: "/trends/my-edits", label: "My Trend Edits" },
       { to: "/passport/selfie", label: "Selfie Style Analysis" },
     ],
   },

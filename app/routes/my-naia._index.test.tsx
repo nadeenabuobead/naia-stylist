@@ -274,6 +274,20 @@ describe("my-naia component — static structure", () => {
     const html = render({ closetCount: 12 });
     expect(html).toContain("12 of 100 spaces used");
   });
+
+  it("trend teaser 'Open My Trend Edit' links to /trends/my-edits/:slug", () => {
+    const html = render({
+      trendReport: {
+        id: "tr-1",
+        slug: "spring-2026-soft-structure",
+        title: "Spring 2026 Soft Structure",
+        summary: "A nAia edit.",
+        publishedAt: new Date("2026-06-30"),
+      },
+    });
+    expect(html).toContain('href="/trends/my-edits/spring-2026-soft-structure"');
+    expect(html).toContain("Open My Trend Edit");
+  });
 });
 
 // ── Interactive behaviour — requires DOM environment ──────────────────────────

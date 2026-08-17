@@ -32,6 +32,8 @@ export default [
   route("api/generate-trend-report", "routes/api.generate-trend-report.jsx"),
   route("api/personalized-trends", "routes/api.personalized-trends.jsx"),
   route("trends", "routes/trends.jsx"),
+  route("trends/my-edits", "routes/trends.my-edits.tsx"),
+  route("trends/my-edits/:slug", "routes/trends.my-edits.$slug.tsx"),
   route("trends/:slug", "routes/trends.$slug.tsx"),
   route("trends/:slug/edit", "routes/trends.$slug.edit.tsx"),
   route("trends/:slug/lens/:lens", "routes/trends.$slug.lens.$lens.tsx"),

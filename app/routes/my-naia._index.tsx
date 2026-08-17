@@ -331,7 +331,7 @@ export default function MyNaiaOverview() {
         <section className="mn-section">
           <div className="mn-section-head">
             <div className="mn-eyebrow">Your Latest Trend Edit</div>
-            {trendReport && <Link to={`/trends/${trendReport.slug}`} className="mn-see-link">Open My Trend Edit</Link>}
+            {trendReport && <Link to={`/trends/my-edits/${trendReport.slug}`} className="mn-see-link">Open My Trend Edit</Link>}
           </div>
           <div className="mn-section-body">
             {trendReport ? (
