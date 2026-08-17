@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildShopperEdit } from "./trend-evidence.server";
 import type { ShopperEvidenceBundle } from "./trend-evidence.server";
+import { trendReports } from "./trend-reports";
 import type { TrendReportData } from "./trend-reports";
 
 // ---------------------------------------------------------------------------
@@ -69,6 +70,9 @@ const COLOUR_DIRECTION_REPORT: TrendReportData = {
   investmentNotes: null,
   naiaInterpretation: null,
 };
+
+// Real reports — used for tests that must exercise the production corpus, not a simplified fixture.
+const REAL_SOFT_STRUCTURE = trendReports.find((r) => r.slug === "spring-2026-soft-structure")!;
 
 const BASE_PROFILE = {
   stylePersonalities: ["minimal"],
@@ -749,21 +753,24 @@ describe("buildShopperEdit — correction-pass fixes", () => {
     expect(count).toBeLessThanOrEqual(1);
   });
 
-  it("Outcome C + one-piece DRESS route → Look To Try uses owned DRESS, not a missing garment category", () => {
-    // TOPS scores higher (subcategory=blazer + tag=fluid → 2 hits + 3 name = 5)
-    // DRESSES scores lower (material=viscose → 1 hit + 3 name = 4)
-    // Only DRESSES satisfies the one-piece viable route → Outcome C fires
-    // Pre-fix: Look To Try invented a "wide-leg trouser" the customer doesn't own
-    // Post-fix: Look To Try uses the owned Dress as the anchor
+  it("Outcome C + one-piece DRESS route → Look To Try uses owned DRESS, not a missing garment category (real report)", () => {
+    // Uses the production soft-structure report corpus, not a simplified fixture.
+    // In the real corpus: "blazer" and "linen" appear → TOPS scores ≥ 5
+    //                     "midi" appears in howToWear  → DRESSES scores 4
+    // TOPS is namedMatches[0] (higher score), DRESSES is namedMatches[1].
+    // Only DRESSES satisfies the one-piece viable route → Outcome C fires.
+    // Pre-fix: Look To Try used namedMatches[0] (TOPS) and invented a trouser.
+    // Post-fix: buildOutcomeCLookToTry returns a DRESS-anchored outfit formula.
     const evidence = makeEvidence({
+      profile: { ...BASE_PROFILE, lifestyle: ["office"] }, // office → workCtx "work-meetings"
       closetItems: [
         {
-          name: "Cream Blazer",
+          name: "Ivory Linen Blazer",
           category: "TOPS",
           subcategory: "blazer",
-          primaryColor: "cream",
-          material: null,
-          styleTags: ["fluid"],
+          primaryColor: "ivory",
+          material: "linen",
+          styleTags: [],
           occasions: [],
           imageUrl: null,
         },
@@ -772,19 +779,19 @@ describe("buildShopperEdit — correction-pass fixes", () => {
           category: "DRESSES",
           subcategory: null,
           primaryColor: "navy",
-          material: "viscose",
+          material: null,
           styleTags: [],
           occasions: [],
           imageUrl: null,
         },
       ],
     });
-    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
+    const edit = buildShopperEdit(REAL_SOFT_STRUCTURE, evidence);
 
     // Outcome C must fire: DRESS satisfies one-piece route; no BOTTOMS or OUTERWEAR
     expect(edit.worthInvestingStatement).not.toBeNull();
 
-    // Look To Try must use the owned Dress — never invent a missing garment category
+    // Look To Try must anchor on the owned Dress — not invent a missing garment category
     expect(edit.aLookToTry).toContain("Navy Midi Dress");
     expect(edit.aLookToTry).not.toMatch(/trouser/i);
     expect(edit.aLookToTry).not.toMatch(/wide-leg/i);
