@@ -823,8 +823,8 @@ const VERSION_PASSPORT_SUPPLEMENT: Partial<Record<string, Partial<Record<string,
     "effortless":   "One tailored piece against something relaxed reads as considered without appearing dressed-up.",
     "refined":      "One well-cut piece lifts the whole look's register without needing anything else to work harder.",
     "put-together": "It is the most reliable route to a finished, considered look without statement pieces.",
-    "powerful":     "The tailored anchor carries quiet authority without formal weight.",
-    "confident":    "The tailored anchor carries quiet authority without formal weight.",
+    "powerful":     "The tailored anchor makes a clear statement through cut and proportion rather than formality.",
+    "confident":    "The tailored anchor makes a clear statement through cut and proportion rather than formality.",
     "interesting":  "The proportion contrast between the two pieces is where the styling decision lives.",
     "creative":     "The proportion contrast between the two pieces is where the styling decision lives.",
   },
@@ -1006,52 +1006,42 @@ function pickVersionSupplement(
 // Grounded in item.category, primaryColor, material, and slug only.
 // ---------------------------------------------------------------------------
 
-// Appends a 1-sentence colour or material observation when the item carries that data.
-// Groups colours into neutral / dark-anchor / expressive to avoid literal repetition.
+// Appends exactly ONE supporting qualifier to the role note.
+// Priority: Colour Direction → colour only. Soft Structure / Modern Tailoring → material first, colour as fallback.
+// Never stacks multiple qualifiers.
 function buildColorMaterialSuffix(item: ShopperClosetItemEvidence, slug: string): string {
-  const parts: string[] = [];
+  const c = item.primaryColor?.toLowerCase() ?? null;
+  const m = item.material?.toLowerCase() ?? null;
 
-  if (item.primaryColor) {
-    const c = item.primaryColor.toLowerCase();
-    const isNeutral = ["white", "cream", "beige", "stone", "ivory", "off-white", "sand", "ecru", "oatmeal"].some((t) => c.includes(t));
-    const isDarkAnchor = ["black", "navy", "charcoal", "espresso", "brown", "chocolate", "dark", "midnight"].some((t) => c.includes(t));
+  const isNeutral = c ? ["white", "cream", "beige", "stone", "ivory", "off-white", "sand", "ecru", "oatmeal"].some((t) => c.includes(t)) : false;
+  const isDarkAnchor = c ? ["black", "navy", "charcoal", "espresso", "brown", "chocolate", "dark", "midnight"].some((t) => c.includes(t)) : false;
+  const isFluid = m ? ["silk", "viscose", "satin", "chiffon", "jersey", "crepe", "linen", "lyocell", "modal", "georgette"].some((t) => m.includes(t)) : false;
+  const isStructured = m ? ["wool", "twill", "denim", "leather", "suede", "cashmere", "gabardine", "ponte"].some((t) => m.includes(t)) : false;
 
-    if (slug === "spring-2026-colour-direction") {
-      if (isNeutral) {
-        parts.push(`Its ${c} tone reads as the base — the quiet foundation this direction requires.`);
-      } else if (isDarkAnchor) {
-        parts.push(`Its ${c} depth works as the anchor in this direction — one of the warm neutrals the method is built on.`);
-      } else {
-        parts.push(`Its ${c} colour is a potential accent note — one considered colour against a quieter base.`);
-      }
-    } else {
-      if (isNeutral) {
-        parts.push(`Its ${c} tone sits cleanly — the proportion carries without the colour competing.`);
-      } else if (isDarkAnchor) {
-        parts.push(`Its ${c} depth gives the silhouette presence without adding decoration.`);
-      } else {
-        parts.push(`Pair it with quieter, neutral pieces so the silhouette reads on its own terms.`);
-      }
-    }
+  // Colour Direction: colour is always the most relevant signal.
+  if (slug === "spring-2026-colour-direction" && c) {
+    if (isNeutral) return ` Its ${c} tone reads as the base — the quiet foundation this direction requires.`;
+    if (isDarkAnchor) return ` Its ${c} depth works as the anchor in this direction — one of the warm neutrals the method is built on.`;
+    return ` Its ${c} colour is a potential accent note — one considered colour against a quieter base.`;
   }
 
-  if (item.material) {
-    const m = item.material.toLowerCase();
-    const isFluid = ["silk", "viscose", "satin", "chiffon", "jersey", "crepe", "linen", "lyocell", "modal", "georgette"].some((t) => m.includes(t));
-    const isStructured = ["wool", "twill", "denim", "leather", "suede", "cashmere", "gabardine", "ponte"].some((t) => m.includes(t));
-
-    if (slug === "spring-2026-soft-structure") {
-      if (isFluid) parts.push(`Its ${m} carries the line without stiffness — that is what this direction is built on.`);
-      else if (isStructured) parts.push(`Its ${m} holds its shape well — pair with something softer so the look does not become heavy.`);
-    } else if (slug === "modern-tailoring-spring-2026") {
-      if (isFluid) parts.push(`Its ${m} provides movement — which is what keeps this as a separates play rather than formal suiting.`);
-      else if (isStructured) parts.push(`Its ${m} holds its structure cleanly — pair against something relaxed to create the contrast this direction needs.`);
-    } else if (slug === "spring-2026-colour-direction") {
-      if (isFluid) parts.push(`Its ${m} carries colour cleanly without adding texture noise.`);
-    }
+  // Soft Structure / Modern Tailoring: material is the most structurally relevant signal.
+  if (slug === "spring-2026-soft-structure" && m) {
+    if (isFluid) return ` Its ${m} carries the line without stiffness — that is what this direction is built on.`;
+    if (isStructured) return ` Its ${m} holds its shape well — pair with something softer so the look does not become heavy.`;
+  }
+  if (slug === "modern-tailoring-spring-2026" && m) {
+    if (isFluid) return ` Its ${m} provides movement — which is what keeps this as a separates play rather than formal suiting.`;
+    if (isStructured) return ` Its ${m} holds its structure cleanly — pair against something relaxed to create the contrast this direction needs.`;
   }
 
-  return parts.length > 0 ? " " + parts.join(" ") : "";
+  // Colour fallback for Soft Structure / Modern Tailoring when no material qualifier fired.
+  if (c && (slug === "spring-2026-soft-structure" || slug === "modern-tailoring-spring-2026")) {
+    if (isNeutral) return ` Its ${c} tone sits cleanly — the proportion carries without the colour competing.`;
+    if (isDarkAnchor) return ` Its ${c} depth gives the silhouette presence without adding decoration.`;
+  }
+
+  return "";
 }
 
 function buildEvidenceItemRoleNote(item: ShopperClosetItemEvidence, slug: string): string {
@@ -1087,8 +1077,28 @@ function buildEvidenceItemRoleNote(item: ShopperClosetItemEvidence, slug: string
 }
 
 // ---------------------------------------------------------------------------
-// A LOOK TO TRY — combines best available evidence.
-// Named items are exact (uses "your"); all other pieces use natural recommendation language.
+// Wearable-pair compatibility guard.
+// Prevents two garments from the same clothing category (TOP+TOP, BOTTOM+BOTTOM, etc.)
+// from being combined into an outfit. Accessory categories are always wearable with anything.
+// ---------------------------------------------------------------------------
+
+const CLOTHING_CATS_FOR_PAIRING = new Set(["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"]);
+
+function categoriesAreWearablePair(catA: string, catB: string): boolean {
+  if (!CLOTHING_CATS_FOR_PAIRING.has(catA) || !CLOTHING_CATS_FOR_PAIRING.has(catB)) return true;
+  if (catA === catB) return false;
+  // DRESSES only pair with OUTERWEAR in these trend directions.
+  if (catA === "DRESSES" && catB !== "OUTERWEAR") return false;
+  if (catB === "DRESSES" && catA !== "OUTERWEAR") return false;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// A LOOK TO TRY — an executable outfit formula.
+// Always includes: named Closet piece(s) where compatible + complementary category
+// or generic recommendation + footwear + occasion context.
+// Two named items are combined ONLY when their categories form a sensible wearable pair.
+// Incompatible same-category pairs fall back to the strongest single item + generic complement.
 // ---------------------------------------------------------------------------
 
 function buildALookToTry(
@@ -1109,79 +1119,78 @@ function buildALookToTry(
   const second = namedMatches[1]?.item ?? null;
   const name = top.name!;
 
-  // Context-appropriate suffix for a pair look
-  const pairNote = (): string => {
+  const ctxClose = (forPair: boolean): string => {
     if (workCtx === "none") return "";
-    if (workCtx === "events") return " For an event, this combination is already there.";
-    if (workCtx === "work-meetings") return " This holds for work or meetings as it stands.";
-    return " This holds for work, meetings, or events as it stands.";
+    if (workCtx === "events") return forPair ? " Occasion-ready as it stands." : "";
+    if (workCtx === "work-meetings") return " This holds for work or meetings.";
+    return " This holds for work, meetings, or events.";
   };
 
-  // Context-appropriate suffix for a single-item look
-  const singleNote = (): string => {
-    if (workCtx === "none") return "";
-    if (top.category === "OUTERWEAR") return "";
-    const phrase =
-      workCtx === "events" ? "For the occasion"
-      : workCtx === "work-meetings" ? "For work or meetings"
-      : "For work, meetings, or events";
-    return ` ${phrase}, add an open blazer if needed — keep ${name} as the main point.`;
-  };
+  // Two named items — only combine if categories are wearable together.
+  const pairOk = second && categoriesAreWearablePair(top.category, second.category);
 
-  if (namedMatches.length >= 2 && second) {
-    if (slug === "spring-2026-colour-direction") {
-      return `Your ${name} + your ${second.name!}. Position one as the base and one as the accent — keep everything else quiet.`;
-    }
+  if (pairOk && second) {
+    const secName = second.name!;
     if (slug === "spring-2026-soft-structure") {
       const isLayerPair =
         (top.category === "OUTERWEAR" && second.category === "BOTTOMS") ||
         (top.category === "BOTTOMS" && second.category === "OUTERWEAR");
+      const outerName = top.category === "OUTERWEAR" ? name : secName;
+      const innerName = top.category === "OUTERWEAR" ? secName : name;
       if (isLayerPair) {
-        const outerwearName = top.category === "OUTERWEAR" ? top.name! : second.name!;
-        return `Your ${name} + your ${second.name!}. Wear your ${outerwearName} open over a simple knit or clean top; keep the shoe and accessories restrained.${pairNote()}`;
+        return `Your ${outerName} open over a simple fine knit, worn with your ${innerName} and a clean flat. Keep the shoe simple so the proportion carries.${ctxClose(true)}`;
       }
-      return `Your ${name} + your ${second.name!}. One piece anchors the silhouette; the other softens around it.${pairNote()}`;
+      if (top.category === "DRESSES" && second.category === "OUTERWEAR") {
+        return `Your ${name} with your ${secName} worn open above. Clean flat or pointed shoe; no other additions needed.${ctxClose(true)}`;
+      }
+      return `Your ${name} with your ${secName}. A clean pointed flat and no further additions — one proportion statement per look.${ctxClose(true)}`;
     }
-    return `Your ${name} + your ${second.name!}. The proportion contrast between them is the look — keep everything else minimal.${pairNote()}`;
+    if (slug === "modern-tailoring-spring-2026") {
+      return `Your ${name} with your ${secName}. Clean flat or simple leather shoe; keep everything else — bag, jewellery — minimal so the proportion contrast reads.${ctxClose(true)}`;
+    }
+    if (slug === "spring-2026-colour-direction") {
+      return `Your ${name} as the anchor neutral and a single clear accent elsewhere — a bag, flat, or scarf in one deliberate colour. Keep your ${secName} in reserve; two accent pieces compete.`;
+    }
   }
 
-  if (slug === "spring-2026-colour-direction") {
-    if (top.category === "BAGS") {
-      return `Your ${name} as the accent — pair it with a quiet base: cream trousers and a simple top, or washed denim and a fine knit. One colour note; everything else calm.`;
-    }
-    if (top.category === "SHOES") {
-      return `Your ${name} at ground level — pair it with a quiet base: cream, stone, or washed denim. One note from the ground up; nothing competing.`;
-    }
-    if (top.category === "ACCESSORIES") {
-      return `Your ${name} as the one accent — keep the base quiet: cream, stone, or soft white. One considered note; everything else calm.`;
-    }
-    return `Wear your ${name} with a soft white trouser or washed denim, then add one clear accent through a bag, flat, or scarf.`;
-  }
-
+  // Incompatible pair or single match — use strongest item + generic complement.
   if (slug === "spring-2026-soft-structure") {
     if (top.category === "OUTERWEAR") {
-      return `Your ${name} worn open — pair with a fine knit underneath and a fluid wide-leg trouser. Keep everything quiet; the shape does the work.${singleNote()}`;
+      return `Your ${name} worn open over a fine knit or simple top, with a fluid wide-leg trouser and a clean flat. The shape does the work — keep everything underneath quiet.${ctxClose(false)}`;
     }
     if (top.category === "BOTTOMS") {
-      return `Your ${name} — pair with a fine knit or simple top and a clean flat. Keep the top contained so the cut carries the proportion.${singleNote()}`;
+      return `Your ${name} with a fine knit or simple tucked top above, and a clean flat. Keep the top contained so the cut at the bottom carries.${ctxClose(false)}`;
     }
     if (top.category === "DRESSES") {
-      return `Your ${name} worn alone with a clean pointed flat or simple shoe. One piece covers the direction.${singleNote()}`;
+      return `Your ${name} worn alone with a clean pointed flat. One piece covers the whole direction — no other additions needed.${ctxClose(false)}`;
     }
-    return `Your ${name} — pair with a wide-leg tailored trouser or clean structured bottom and a clean pointed shoe.${singleNote()}`;
+    return `Your ${name} with a clean wide-leg trouser and a flat. Keep everything above the trouser quieter so the proportion reads.${ctxClose(false)}`;
   }
 
   if (slug === "modern-tailoring-spring-2026") {
     if (top.category === "OUTERWEAR") {
-      return `Your ${name} — pair with a relaxed knit or jersey and wide-leg denim or a fluid skirt. One structured piece; everything else stays relaxed.${singleNote()}`;
+      return `Your ${name} over a relaxed knit or jersey, with wide-leg denim or a fluid skirt and a clean flat. One structured piece; everything else stays relaxed.${ctxClose(false)}`;
     }
     if (top.category === "BOTTOMS") {
-      return `Your ${name} — pair with a fine knit or soft jersey and a clean flat. The proportion contrast between the two pieces is the look.${singleNote()}`;
+      return `Your ${name} with a fine knit or soft jersey above and a clean flat shoe. The contrast between the two pieces is the complete look.${ctxClose(false)}`;
     }
-    return `Your ${name} — pair with a tailored trouser and a clean flat. Keep everything else minimal.${singleNote()}`;
+    return `Your ${name} with a tailored trouser and a clean flat. Everything else minimal.${ctxClose(false)}`;
   }
 
-  return `Your ${name} — pair with quieter, simpler pieces. Keep accessories minimal.`;
+  if (slug === "spring-2026-colour-direction") {
+    if (top.category === "BAGS") {
+      return `Your ${name} as the accent note — pair with a quiet base of cream trousers and a simple white or ivory top, and a flat shoe. One colour note; everything else neutral.`;
+    }
+    if (top.category === "SHOES") {
+      return `Your ${name} at ground level against a quiet outfit — cream or stone trousers, a fine white knit, and no further colour. One note from the ground up.`;
+    }
+    if (top.category === "ACCESSORIES") {
+      return `Your ${name} as the single accent — keep the rest of the outfit in cream, stone, or soft white. One considered note against a quiet ground.`;
+    }
+    return `Your ${name} as the base — add one clear accent through a bag, flat, or scarf in a single deliberate colour. Keep the rest neutral.`;
+  }
+
+  return `Your ${name} with quieter, simpler pieces. Clean flat shoe; keep accessories minimal.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1237,60 +1246,68 @@ function buildBestRouteIn(
   const top = namedMatches[0].item;
   const name = top.name!;
   const second = namedMatches[1]?.item ?? null;
-  const qual = buildItemQualification(top, slug);
-  const qualPrefix = qual ? `${qual} ` : "";
+
+  // Route In = adoption strategy only. Item is named first.
+  // No outfit formula here — that belongs in Look To Try.
 
   if (slug === "spring-2026-soft-structure") {
     if (second) {
-      const outerwearName = top.category === "OUTERWEAR" ? name : second.name!;
-      const otherName = top.category === "OUTERWEAR" ? second.name! : name;
-      if (
-        (top.category === "OUTERWEAR" && second.category === "BOTTOMS") ||
-        (top.category === "BOTTOMS" && second.category === "OUTERWEAR")
-      ) {
-        return `Your ${outerwearName} open over a simple knit, worn with your ${otherName}. Keep everything else contained — the proportion pair is already there.`;
+      const pairOk = categoriesAreWearablePair(top.category, second.category);
+      if (pairOk) {
+        const outerwearName = top.category === "OUTERWEAR" ? name : second.name!;
+        const otherName = top.category === "OUTERWEAR" ? second.name! : name;
+        if (
+          (top.category === "OUTERWEAR" && second.category === "BOTTOMS") ||
+          (top.category === "BOTTOMS" && second.category === "OUTERWEAR")
+        ) {
+          return `Your ${outerwearName} is the proportioned anchor for this direction — it establishes the layered silhouette the trend is built around. Your ${otherName} grounds it. The principle is proportion first: keep everything else contained.`;
+        }
+        return `Your ${name} is the anchor this direction starts from. Your ${second.name!} supports the structure — one piece holds the silhouette while the other softens around it. The method is proportion, not styling detail.`;
       }
-      return `${qualPrefix}Your ${name} + your ${second.name!}. One anchors the silhouette; the other softens around it. Start there before adding anything else.`;
+      // incompatible pair — use strongest item only
     }
     if (top.category === "OUTERWEAR") {
-      return `${qualPrefix}Your ${name} worn open over a fine knit, with a fluid wide-leg trouser. The shape does the work — keep everything under it quiet.`;
+      return `Your ${name} is the entry point — worn open, it establishes the proportioned, layered silhouette this direction is built around. The shape does the work; the principle is to keep everything underneath simple and contained.`;
     }
     if (top.category === "BOTTOMS") {
-      return `${qualPrefix}Your ${name} with a fine knit or simple top above. Keep the top contained so the proportion at the bottom carries.`;
+      return `Your ${name} is the proportioned anchor — its cut is already the kind of grounded, fluid bottom this direction needs. Start there: one clearly proportioned piece, and everything above it quieter.`;
     }
     if (top.category === "DRESSES") {
-      return `${qualPrefix}Your ${name} worn on its own with a clean flat. One piece is already the full direction.`;
+      return `Your ${name} covers the full direction on its own — one proportioned silhouette without further intervention. The principle is restraint: start and finish here, and keep accessories minimal.`;
     }
-    return `${qualPrefix}Your ${name} as the starting point, paired with a quieter, simpler bottom. Let the anchor read first.`;
+    return `Your ${name} is the starting point. The principle here is proportion: pair it with a quieter, simpler piece so the anchor reads clearly before anything else is added.`;
   }
 
   if (slug === "modern-tailoring-spring-2026") {
     if (second) {
-      return `${qualPrefix}Your ${name} + your ${second.name!}. The proportion contrast between the two pieces is the look — no further styling needed.`;
+      const pairOk = categoriesAreWearablePair(top.category, second.category);
+      if (pairOk) {
+        return `Your ${name} is the tailored anchor. Your ${second.name!} is the relaxed counterpart. The principle is contrast between the two — the structured piece and the easy piece — not matching formality across the outfit.`;
+      }
     }
     if (top.category === "OUTERWEAR") {
-      return `${qualPrefix}Your ${name} over a relaxed knit or jersey, with wide-leg denim or a fluid skirt. One structured piece — everything else stays relaxed.`;
+      return `Your ${name} is the tailored separates anchor this direction is built around. The principle is contrast: one structured piece worn against something relaxed — a knit, a jersey, something without formality. The tailored piece carries the register; the counterpart stays easy.`;
     }
     if (top.category === "BOTTOMS") {
-      return `${qualPrefix}Your ${name} with a fine knit or soft jersey above. The proportion contrast between them is the look.`;
+      return `Your ${name} is the tailored anchor — its cut creates the proportion contrast this direction needs. The counterpart should be relaxed: a fine knit or soft jersey above. The contrast between structured bottom and easy top is the complete styling principle.`;
     }
-    return `${qualPrefix}Your ${name} paired with something simpler and softer. Keep the counterpart relaxed — the tailored piece carries the register.`;
+    return `Your ${name} is the tailored piece — the direction's principle is to wear it against something softer and more relaxed. The contrast between the structured and the easy is where the look lives.`;
   }
 
   if (slug === "spring-2026-colour-direction") {
     if (second) {
-      return `${qualPrefix}Your ${name} + your ${second.name!}. Position one as the base and one as the accent — keep everything else quiet.`;
+      return `Your ${name} is your stronger colour move. The principle is one deliberate note against a quiet ground — position it as either the base or the accent, then keep everything else neutral. Your ${second.name!} plays a supporting role, not a competing one.`;
     }
     if (top.category === "BAGS") {
-      return `${qualPrefix}Your ${name} as the accent note against a quiet base — cream, stone, or washed denim. One colour note; everything else calm.`;
+      return `Your ${name} is the accent piece. The principle is one deliberate colour note against a quiet base — cream, stone, or washed denim in everything else. One note; nothing competing.`;
     }
     if (top.category === "SHOES") {
-      return `${qualPrefix}Your ${name} at ground level against a quiet base outfit. One note from the ground up; nothing competing.`;
+      return `Your ${name} is the colour note at ground level. The principle is a quiet outfit above — cream, stone, or a fine white knit — so the one note from the ground up reads clearly.`;
     }
     if (top.category === "ACCESSORIES") {
-      return `${qualPrefix}Your ${name} as the single accent against a quiet base — soft white, cream, or stone. One considered note; everything else calm.`;
+      return `Your ${name} is the accent. The principle is one considered note against a quiet ground — cream, stone, or soft white in everything else. Everything else neutral; this is the move.`;
     }
-    return `${qualPrefix}Use your ${name} as the anchor base. The colour move comes from one smaller piece — a bag, flat, or scarf — rather than adding another garment.`;
+    return `Your ${name} is the quiet base the method is built on. The principle is to add one deliberate colour note in a smaller piece — a bag, flat, or scarf — and keep everything else neutral. The base makes the note land.`;
   }
 
   return rules.yourBestRouteIn[register];
@@ -1466,9 +1483,12 @@ function assessWorthInvesting(
   }
 
   // Outcome C — adequately covered; no purchase needed.
-  const namedPieces = namedMatches.slice(0, 2).map((m) => `your ${m.item.name!}`).join(" and ");
-  const coveredBy = namedPieces
-    ? `${namedPieces} already give${namedMatches.length === 1 ? "s" : ""} you enough to work with for this direction.`
+  const namedPiecesC = namedMatches
+    .slice(0, 2)
+    .map((m, i) => (i === 0 ? `Your ${m.item.name!}` : `your ${m.item.name!}`))
+    .join(" and ");
+  const coveredBy = namedPiecesC
+    ? `${namedPiecesC} already give${namedMatches.length === 1 ? "s" : ""} you enough to work with for this direction.`
     : "What you already own gives you enough to work with for this direction.";
   return {
     worthInvestingStatement: `You do not need to buy anything for this trend. ${coveredBy}`,
@@ -1854,7 +1874,18 @@ export function buildShopperEdit(
     ? rules.yourVersionPassport[register]
     : (report.naiaVerdict ?? report.summary);
   const versionSupplement = profile ? pickVersionSupplement(profile, slug) : null;
-  const yourVersion = versionSupplement ? `${versionBase} ${versionSupplement}` : versionBase;
+  // Guard: suppress supplement when it repeats a key phrase already in versionBase.
+  // Compares the last 3 words of each sentence to catch near-verbatim repetition.
+  const supplementIsRedundant = versionSupplement
+    ? versionBase.toLowerCase().split(/[.!?]\s+/).some((sentence) => {
+        const baseWords = sentence.trim().split(/\s+/).slice(-4).join(" ").toLowerCase();
+        const supWords = versionSupplement.toLowerCase().split(/\s+/).slice(-4).join(" ");
+        return baseWords && supWords && baseWords === supWords;
+      })
+    : false;
+  const yourVersion = (versionSupplement && !supplementIsRedundant)
+    ? `${versionBase} ${versionSupplement}`
+    : versionBase;
 
   // -------------------------------------------------------------------------
   // 2. YOUR nAia EVIDENCE

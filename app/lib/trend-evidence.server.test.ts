@@ -537,3 +537,215 @@ describe("buildShopperEdit — Route In item qualification", () => {
     expect(edit.yourBestRouteIn).toMatch(/trouser|blazer|professional|work|office/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Correction-pass tests (Fix 1+2: Route In/Look To Try, Fix 3: pronoun, Fix 4: capitalisation)
+// ---------------------------------------------------------------------------
+
+describe("buildShopperEdit — correction-pass fixes", () => {
+  it("Route In and Look To Try are not identical for a named OUTERWEAR+BOTTOMS pair", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Ivory Linen Blazer",
+          imageUrl: null,
+          category: "OUTERWEAR",
+          subcategory: "blazer",
+          primaryColor: "ivory",
+          styleTags: [],
+          occasions: [],
+          material: "linen",
+        },
+        {
+          name: "Wide Leg Trouser",
+          imageUrl: null,
+          category: "BOTTOMS",
+          subcategory: "wide-leg",
+          primaryColor: "cream",
+          styleTags: [],
+          occasions: [],
+          material: "crepe",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
+    expect(edit.yourBestRouteIn).not.toEqual(edit.aLookToTry);
+  });
+
+  it("Route In names the item first — does not begin with 'Its'", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Fluid Wide Leg Trouser",
+          imageUrl: null,
+          category: "BOTTOMS",
+          subcategory: "wide-leg",
+          primaryColor: "oatmeal",
+          styleTags: [],
+          occasions: [],
+          material: "viscose",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
+    expect(edit.yourBestRouteIn).not.toMatch(/^Its\b/i);
+    expect(edit.yourBestRouteIn).toMatch(/fluid wide leg trouser/i);
+  });
+
+  it("TOP+BOTTOM compatible pair → Look To Try mentions both item names", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Silk Blouse",
+          imageUrl: null,
+          category: "TOPS",
+          subcategory: "blouse",
+          primaryColor: "ivory",
+          styleTags: [],
+          occasions: [],
+          material: "viscose",
+        },
+        {
+          name: "Wide Leg Trouser",
+          imageUrl: null,
+          category: "BOTTOMS",
+          subcategory: "wide-leg",
+          primaryColor: "cream",
+          styleTags: [],
+          occasions: [],
+          material: "crepe",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
+    expect(edit.aLookToTry).toMatch(/silk blouse/i);
+    expect(edit.aLookToTry).toMatch(/wide leg trouser/i);
+  });
+
+  it("DRESS+OUTERWEAR compatible pair → Look To Try mentions both item names", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Midi Dress",
+          imageUrl: null,
+          category: "DRESSES",
+          subcategory: "midi",
+          primaryColor: "cream",
+          styleTags: [],
+          occasions: [],
+          material: "viscose",
+        },
+        {
+          name: "Longline Coat",
+          imageUrl: null,
+          category: "OUTERWEAR",
+          subcategory: "blazer",
+          primaryColor: "stone",
+          styleTags: [],
+          occasions: [],
+          material: "crepe",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
+    expect(edit.aLookToTry).toMatch(/midi dress/i);
+    expect(edit.aLookToTry).toMatch(/longline coat/i);
+  });
+
+  it("TOP+TOP incompatible pair → Look To Try does not combine both names in an outfit formula", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Fluid Blouse",
+          imageUrl: null,
+          category: "TOPS",
+          subcategory: "blouse",
+          primaryColor: "ivory",
+          styleTags: [],
+          occasions: [],
+          material: "viscose",
+        },
+        {
+          name: "Crepe Shirt",
+          imageUrl: null,
+          category: "TOPS",
+          subcategory: "blouse",
+          primaryColor: "cream",
+          styleTags: [],
+          occasions: [],
+          material: "crepe",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
+    // TOP+TOP is not a wearable pair — the second item name must not appear alongside the first
+    expect(edit.aLookToTry).not.toMatch(/fluid blouse.*crepe shirt|crepe shirt.*fluid blouse/i);
+  });
+
+  it("OUTERWEAR+OUTERWEAR incompatible pair (modern-tailoring) → Look To Try uses only the stronger item", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Black Blazer",
+          imageUrl: null,
+          category: "OUTERWEAR",
+          subcategory: "blazer",
+          primaryColor: "black",
+          styleTags: [],
+          occasions: [],
+          material: "twill",
+        },
+        {
+          name: "Cream Blazer",
+          imageUrl: null,
+          category: "OUTERWEAR",
+          subcategory: "blazer",
+          primaryColor: "cream",
+          styleTags: [],
+          occasions: [],
+          material: "denim",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence);
+    // OUTERWEAR+OUTERWEAR is not a wearable pair — the two names must not be combined
+    expect(edit.aLookToTry).not.toMatch(/black blazer.*cream blazer|cream blazer.*black blazer/i);
+  });
+
+  it("Outcome C: worthInvestingStatement capitalises first named piece with 'Your' after a period", () => {
+    // Dress alone satisfies one-piece route → Outcome C fires
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Cream Midi Dress",
+          imageUrl: null,
+          category: "DRESSES",
+          subcategory: "midi",
+          primaryColor: "cream",
+          styleTags: [],
+          occasions: [],
+          material: "viscose",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
+    expect(edit.worthInvestingStatement).not.toBeNull();
+    // Must begin "You do not need to buy anything for this trend. Your Cream Midi Dress..."
+    // not "... for this trend. your Cream Midi Dress..." (lowercase bug)
+    expect(edit.worthInvestingStatement).toMatch(/trend\. Your Cream Midi Dress/);
+  });
+
+  it("Modern Tailoring yourVersion does not repeat 'formal weight' when desiredFeelings = powerful", () => {
+    const evidence = makeEvidence({
+      profile: {
+        ...BASE_PROFILE,
+        stylePersonalities: [], // neutral register → base contains "formal weight"
+        fitPreferences: [],     // skip fit-pref priority so desiredFeelings fires
+        desiredFeelings: ["powerful"],
+      },
+    });
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence);
+    const count = (edit.yourVersion.match(/formal weight/g) ?? []).length;
+    expect(count).toBeLessThanOrEqual(1);
+  });
+});
