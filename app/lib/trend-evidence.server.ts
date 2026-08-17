@@ -1194,6 +1194,45 @@ function buildALookToTry(
 }
 
 // ---------------------------------------------------------------------------
+// OUTCOME C — Look To Try override.
+// When Outcome C applies (Closet already covers the trend), Look To Try should
+// demonstrate that with the customer's actual items — not introduce missing
+// garment categories. Called as a post-processing override in buildShopperEdit.
+// Returns null when no owned-route override is available (fallback = original aLookToTry).
+// ---------------------------------------------------------------------------
+
+function buildOutcomeCLookToTry(
+  namedMatches: { item: ShopperClosetItemEvidence }[],
+  slug: string,
+  workCtx: WorkContextLabel,
+): string | null {
+  if (namedMatches.length === 0) return null;
+  const config = TREND_COVERAGE_CONFIG[slug];
+  if (!config) return null;
+
+  const scoredCategories = new Set(namedMatches.map(({ item }) => item.category));
+  const satisfied = config.viableRoutes.filter((r) => routeIsSatisfied(r, scoredCategories));
+
+  const ctxClose =
+    workCtx === "work-meetings"        ? " This holds for work or meetings."        :
+    workCtx === "events"               ? " Occasion-ready as it stands."             :
+    workCtx === "work-meetings-events" ? " This holds for work, meetings, or events." : "";
+
+  if (slug === "spring-2026-soft-structure" && satisfied.some((r) => r.id === "one-piece")) {
+    const dress = namedMatches.find(({ item }) => item.category === "DRESSES");
+    if (!dress) return null;
+    const dressName = dress.item.name!;
+    const layer = namedMatches.find(({ item }) => item.category !== "DRESSES");
+    if (layer) {
+      return `Your ${dressName} with a clean flat and minimal jewellery.${ctxClose} If you want more structure, add your ${layer.item.name!} as the finishing layer.`;
+    }
+    return `Your ${dressName} worn alone with a clean flat. One piece covers the full direction — keep jewellery minimal and the shoe simple.${ctxClose}`;
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // YOUR BEST ROUTE IN — named Closet item path or Passport-only path.
 // With a qualifying item: name it and give a specific pairing direction.
 // Passport-only: the register-specific route from PERSONAL_EDIT_RULES.
@@ -2052,6 +2091,12 @@ export function buildShopperEdit(
     return "Complete your Style Passport to unlock your personal read of this direction — your Style DNA and Lifestyle are how nAia builds this edit for you.";
   })();
 
+  // Outcome C aware override: when the Closet already covers the trend, prefer a Look
+  // To Try built from the actual qualifying items rather than introducing missing garments.
+  const finalLookToTry = worthInvestingStatement !== null
+    ? (buildOutcomeCLookToTry(namedMatches, slug, workCtx) ?? aLookToTry)
+    : aLookToTry;
+
   return {
     subTitle,
     yourVersion,
@@ -2061,7 +2106,7 @@ export function buildShopperEdit(
     evidenceReviews,
     lowDataNotice,
     yourBestRouteIn,
-    aLookToTry,
+    aLookToTry: finalLookToTry,
     theBalanceToProtect,
     partToTake,
     worthInvestingStatement,

@@ -748,4 +748,45 @@ describe("buildShopperEdit — correction-pass fixes", () => {
     const count = (edit.yourVersion.match(/formal weight/g) ?? []).length;
     expect(count).toBeLessThanOrEqual(1);
   });
+
+  it("Outcome C + one-piece DRESS route → Look To Try uses owned DRESS, not a missing garment category", () => {
+    // TOPS scores higher (subcategory=blazer + tag=fluid → 2 hits + 3 name = 5)
+    // DRESSES scores lower (material=viscose → 1 hit + 3 name = 4)
+    // Only DRESSES satisfies the one-piece viable route → Outcome C fires
+    // Pre-fix: Look To Try invented a "wide-leg trouser" the customer doesn't own
+    // Post-fix: Look To Try uses the owned Dress as the anchor
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Cream Blazer",
+          category: "TOPS",
+          subcategory: "blazer",
+          primaryColor: "cream",
+          material: null,
+          styleTags: ["fluid"],
+          occasions: [],
+          imageUrl: null,
+        },
+        {
+          name: "Navy Midi Dress",
+          category: "DRESSES",
+          subcategory: null,
+          primaryColor: "navy",
+          material: "viscose",
+          styleTags: [],
+          occasions: [],
+          imageUrl: null,
+        },
+      ],
+    });
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
+
+    // Outcome C must fire: DRESS satisfies one-piece route; no BOTTOMS or OUTERWEAR
+    expect(edit.worthInvestingStatement).not.toBeNull();
+
+    // Look To Try must use the owned Dress — never invent a missing garment category
+    expect(edit.aLookToTry).toContain("Navy Midi Dress");
+    expect(edit.aLookToTry).not.toMatch(/trouser/i);
+    expect(edit.aLookToTry).not.toMatch(/wide-leg/i);
+  });
 });
