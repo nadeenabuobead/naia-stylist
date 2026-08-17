@@ -1096,8 +1096,14 @@ function buildALookToTry(
   slug: string,
   workCtx: WorkContextLabel,
   passportOnlyLook: string,
+  profile: ShopperProfileEvidence | null,
+  register: StyleRegister,
 ): string {
-  if (namedMatches.length === 0) return passportOnlyLook;
+  if (namedMatches.length === 0) {
+    return profile
+      ? buildPassportLookToTry(profile, workCtx, register, slug, passportOnlyLook)
+      : passportOnlyLook;
+  }
 
   const top = namedMatches[0].item;
   const second = namedMatches[1]?.item ?? null;
@@ -1184,17 +1190,55 @@ function buildALookToTry(
 // Passport-only: the register-specific route from PERSONAL_EDIT_RULES.
 // ---------------------------------------------------------------------------
 
+// One-sentence qualification: WHY this item fits the direction.
+// Draws from the item's own metadata that was likely in its score hits.
+// Purpose: distinguishes Route In (strategy + rationale) from Look To Try (outfit).
+function buildItemQualification(item: ShopperClosetItemEvidence, slug: string): string {
+  const sub = item.subcategory?.toLowerCase();
+  const mat = item.material?.toLowerCase();
+  const col = item.primaryColor?.toLowerCase();
+
+  if (slug === "spring-2026-soft-structure") {
+    if (sub && !["top", "shirt", "blouse", "tee"].includes(sub)) return `Its ${sub} cut is already the anchor this direction is built on.`;
+    if (mat && ["crepe", "viscose", "twill", "linen", "jersey"].some((t) => mat.includes(t))) return `Its ${mat} has enough body to hold the line softly — that is the qualification.`;
+    if (col) return `Its ${col} tone sits cleanly, so the proportion carries without the colour competing.`;
+  }
+  if (slug === "modern-tailoring-spring-2026") {
+    if (sub && !["shirt", "tee", "blouse"].includes(sub)) return `Its ${sub} cut is the tailored separates piece this direction is built around.`;
+    if (mat && ["twill", "wool", "gabardine", "linen", "denim"].some((t) => mat.includes(t))) return `Its ${mat} holds its structure cleanly — that is what makes it the tailored anchor.`;
+    if (col) return `Its ${col} sits as a composed base — the contrast with the relaxed counterpart is where the look lives.`;
+  }
+  if (slug === "spring-2026-colour-direction") {
+    if (col) {
+      const isNeutral = ["white","cream","beige","stone","ivory","sand","ecru"].some((t) => col.includes(t));
+      const isDark = ["black","navy","charcoal","espresso","brown"].some((t) => col.includes(t));
+      if (isNeutral) return `Its ${col} already reads as the quiet base this method requires.`;
+      if (isDark) return `Its ${col} works as the anchor neutral — warmer and more grounded than a standard base.`;
+      return `Its ${col} is a clear accent candidate — one considered note against a quieter base.`;
+    }
+  }
+  return "";
+}
+
 function buildBestRouteIn(
   namedMatches: { item: ShopperClosetItemEvidence }[],
   slug: string,
   register: StyleRegister,
   rules: PersonalEditRules,
+  profile: ShopperProfileEvidence | null,
+  workCtx: WorkContextLabel,
 ): string {
-  if (namedMatches.length === 0) return rules.yourBestRouteIn[register];
+  if (namedMatches.length === 0) {
+    return profile
+      ? buildPassportRouteIn(profile, register, slug, rules)
+      : rules.yourBestRouteIn[register];
+  }
 
   const top = namedMatches[0].item;
   const name = top.name!;
   const second = namedMatches[1]?.item ?? null;
+  const qual = buildItemQualification(top, slug);
+  const qualPrefix = qual ? `${qual} ` : "";
 
   if (slug === "spring-2026-soft-structure") {
     if (second) {
@@ -1206,47 +1250,47 @@ function buildBestRouteIn(
       ) {
         return `Your ${outerwearName} open over a simple knit, worn with your ${otherName}. Keep everything else contained — the proportion pair is already there.`;
       }
-      return `Your ${name} + your ${second.name!}. One anchors the silhouette; the other softens around it. Start there before adding anything else.`;
+      return `${qualPrefix}Your ${name} + your ${second.name!}. One anchors the silhouette; the other softens around it. Start there before adding anything else.`;
     }
     if (top.category === "OUTERWEAR") {
-      return `Your ${name} worn open over a fine knit, with a fluid wide-leg trouser. The shape does the work — keep everything under it quiet.`;
+      return `${qualPrefix}Your ${name} worn open over a fine knit, with a fluid wide-leg trouser. The shape does the work — keep everything under it quiet.`;
     }
     if (top.category === "BOTTOMS") {
-      return `Your ${name} with a fine knit or simple top above. Keep the top contained so the proportion at the bottom carries.`;
+      return `${qualPrefix}Your ${name} with a fine knit or simple top above. Keep the top contained so the proportion at the bottom carries.`;
     }
     if (top.category === "DRESSES") {
-      return `Your ${name} worn on its own with a clean flat. One piece is already the full direction.`;
+      return `${qualPrefix}Your ${name} worn on its own with a clean flat. One piece is already the full direction.`;
     }
-    return `Your ${name} as the starting point, paired with a quieter, simpler bottom. Let the anchor read first.`;
+    return `${qualPrefix}Your ${name} as the starting point, paired with a quieter, simpler bottom. Let the anchor read first.`;
   }
 
   if (slug === "modern-tailoring-spring-2026") {
     if (second) {
-      return `Your ${name} + your ${second.name!}. The proportion contrast between the two pieces is the look — no further styling needed.`;
+      return `${qualPrefix}Your ${name} + your ${second.name!}. The proportion contrast between the two pieces is the look — no further styling needed.`;
     }
     if (top.category === "OUTERWEAR") {
-      return `Your ${name} over a relaxed knit or jersey, with wide-leg denim or a fluid skirt. One structured piece — everything else stays relaxed.`;
+      return `${qualPrefix}Your ${name} over a relaxed knit or jersey, with wide-leg denim or a fluid skirt. One structured piece — everything else stays relaxed.`;
     }
     if (top.category === "BOTTOMS") {
-      return `Your ${name} with a fine knit or soft jersey above. The proportion contrast between them is the look.`;
+      return `${qualPrefix}Your ${name} with a fine knit or soft jersey above. The proportion contrast between them is the look.`;
     }
-    return `Your ${name} paired with something simpler and softer. Keep the counterpart relaxed — the tailored piece carries the register.`;
+    return `${qualPrefix}Your ${name} paired with something simpler and softer. Keep the counterpart relaxed — the tailored piece carries the register.`;
   }
 
   if (slug === "spring-2026-colour-direction") {
     if (second) {
-      return `Your ${name} + your ${second.name!}. Position one as the base and one as the accent — keep everything else quiet.`;
+      return `${qualPrefix}Your ${name} + your ${second.name!}. Position one as the base and one as the accent — keep everything else quiet.`;
     }
     if (top.category === "BAGS") {
-      return `Your ${name} as the accent note against a quiet base — cream, stone, or washed denim. One colour note; everything else calm.`;
+      return `${qualPrefix}Your ${name} as the accent note against a quiet base — cream, stone, or washed denim. One colour note; everything else calm.`;
     }
     if (top.category === "SHOES") {
-      return `Your ${name} at ground level against a quiet base outfit. One note from the ground up; nothing competing.`;
+      return `${qualPrefix}Your ${name} at ground level against a quiet base outfit. One note from the ground up; nothing competing.`;
     }
     if (top.category === "ACCESSORIES") {
-      return `Your ${name} as the single accent against a quiet base — soft white, cream, or stone. One considered note; everything else calm.`;
+      return `${qualPrefix}Your ${name} as the single accent against a quiet base — soft white, cream, or stone. One considered note; everything else calm.`;
     }
-    return `Use your ${name} as the anchor base. The colour move comes from one smaller piece — a bag, flat, or scarf — rather than adding another garment.`;
+    return `${qualPrefix}Use your ${name} as the anchor base. The colour move comes from one smaller piece — a bag, flat, or scarf — rather than adding another garment.`;
   }
 
   return rules.yourBestRouteIn[register];
@@ -1261,6 +1305,378 @@ const TREND_SHORT_TITLES: Record<string, string> = {
   "modern-tailoring-spring-2026": "Modern Tailoring",
   "spring-2026-colour-direction": "Colour Direction",
 };
+
+// ---------------------------------------------------------------------------
+// Worth Investing In — functional outfit-route coverage.
+// A "viable route" is a combination of scored Closet item categories that
+// lets the customer actually wear the trend direction. Owning items in a
+// compatible category is NOT sufficient — the items must form a complete
+// outfit path as defined below.
+// ---------------------------------------------------------------------------
+
+type ViableRoute = {
+  id: string;
+  // Each inner array is an OR group; one item from each group is required.
+  // e.g., [["OUTERWEAR"], ["BOTTOMS"]] = one qualifying OUTERWEAR AND one qualifying BOTTOM.
+  // e.g., [["BAGS","SHOES","ACCESSORIES"]] = one qualifying item from any of those categories.
+  requires: string[][];
+};
+
+type OptionalRole = {
+  categories: string[];         // what to look for
+  appliesToRoutes: string[];    // route ids this gap is relevant to
+  investNote: string;           // Outcome B copy (after "you can already wear this…")
+};
+
+type TrendCoverageConfig = {
+  viableRoutes: ViableRoute[];
+  optionalRole: OptionalRole | null;
+};
+
+const TREND_COVERAGE_CONFIG: Record<string, TrendCoverageConfig> = {
+  "spring-2026-soft-structure": {
+    viableRoutes: [
+      // one-piece: a qualifying dress covers the full direction alone
+      { id: "one-piece",  requires: [["DRESSES"]] },
+      // layered: proportioned outerwear + grounding bottom
+      { id: "layered",    requires: [["OUTERWEAR"], ["BOTTOMS"]] },
+      // separates: proportioned top + proportioned bottom
+      { id: "separates",  requires: [["TOPS"], ["BOTTOMS"]] },
+    ],
+    optionalRole: {
+      categories: ["OUTERWEAR"],
+      appliesToRoutes: ["separates"],
+      investNote: "A longline blazer or fluid outer layer would give you a second way to build the silhouette and extend it across more occasions.",
+    },
+  },
+  "modern-tailoring-spring-2026": {
+    viableRoutes: [
+      // outerwear as the tailored anchor; relaxed counterpart is assumed
+      { id: "outerwear-anchor", requires: [["OUTERWEAR"]] },
+      // trouser/skirt as the tailored anchor; knit or soft top is assumed
+      { id: "trouser-anchor",   requires: [["BOTTOMS"]] },
+    ],
+    optionalRole: {
+      categories: ["OUTERWEAR", "BOTTOMS"],
+      appliesToRoutes: ["outerwear-anchor", "trouser-anchor"],
+      investNote: "A second tailored separates piece — a trouser if you have the blazer, a blazer if you have the trouser — would open different proportion contrasts without repeating the same look.",
+    },
+  },
+  "spring-2026-colour-direction": {
+    viableRoutes: [
+      // accent piece only: quiet base is assumed from any neutral wardrobe
+      { id: "accent-piece",   requires: [["BAGS", "SHOES", "ACCESSORIES"]] },
+      // qualifying top as base + accent in closet = complete method
+      { id: "base-and-accent", requires: [["TOPS"], ["BAGS", "SHOES", "ACCESSORIES"]] },
+      // qualifying top as quiet base alone is also viable (accent via assumed neutrals)
+      { id: "base-only",      requires: [["TOPS"]] },
+    ],
+    optionalRole: {
+      // if only base-only route exists, an accent piece completes the method
+      categories: ["BAGS", "SHOES", "ACCESSORIES"],
+      appliesToRoutes: ["base-only"],
+      investNote: "A bag, flat, or scarf in a clear accent colour would complete the method — you have the quiet base; this is the piece that activates it.",
+    },
+  },
+};
+
+// Check if a set of scored items satisfies a single viable route.
+function routeIsSatisfied(
+  route: ViableRoute,
+  scoredCategories: Set<string>,
+): boolean {
+  return route.requires.every((orGroup) =>
+    orGroup.some((cat) => scoredCategories.has(cat)),
+  );
+}
+
+type WorthInvestingResult = {
+  worthInvestingStatement: string | null;
+  partToTake: string[];
+};
+
+function assessWorthInvesting(
+  scored: Array<{ item: ShopperClosetItemEvidence; score: number }>,
+  namedMatches: Array<{ item: ShopperClosetItemEvidence }>,
+  slug: string,
+  rules: PersonalEditRules,
+  colourEvidence: ColourEvidence,
+  useNeutralColour: boolean,
+): WorthInvestingResult {
+  const config = TREND_COVERAGE_CONFIG[slug];
+
+  // Static bullets — base content for Outcomes A and B.
+  const staticSource: string[] =
+    (useNeutralColour && rules?.partToTakeNeutralColour)
+      ? rules.partToTakeNeutralColour
+      : (rules?.partToTake ?? []);
+
+  // Colour-matched first bullet swap (Colour Direction only).
+  const colourHints = rules?.partToTakeColourHints ?? [];
+  let colourMatchedBullet: string | null = null;
+  if (!useNeutralColour && colourEvidence.found && colourEvidence.label && colourHints.length > 0) {
+    const labelLower = colourEvidence.label.toLowerCase();
+    for (const hint of colourHints) {
+      if (hint.terms.some((t) => labelLower.includes(t))) {
+        colourMatchedBullet = hint.bullet;
+        break;
+      }
+    }
+  }
+  const staticBullets = colourMatchedBullet
+    ? [colourMatchedBullet, ...staticSource.slice(1)].slice(0, 2)
+    : staticSource.slice(0, 2);
+
+  // No config or no scored items → Outcome A (full gap).
+  if (!config || scored.length === 0) {
+    return { worthInvestingStatement: null, partToTake: staticBullets };
+  }
+
+  const scoredCategories = new Set(scored.map((s) => s.item.category));
+
+  const satisfiedRoutes = config.viableRoutes.filter((r) =>
+    routeIsSatisfied(r, scoredCategories),
+  );
+
+  // Outcome A — no viable route can be formed.
+  if (satisfiedRoutes.length === 0) {
+    return { worthInvestingStatement: null, partToTake: staticBullets };
+  }
+
+  // Outcome B — viable route exists, and an optional role is missing AND applies
+  // to at least one of the satisfied routes AND adds real incremental value.
+  const opt = config.optionalRole;
+  if (opt) {
+    const optApplies = satisfiedRoutes.some((r) => opt.appliesToRoutes.includes(r.id));
+    // At least one optional category must be absent — covers the multi-category case
+    // where "OUTERWEAR or BOTTOMS" is the gap rather than requiring all to be missing.
+    const optMissing = opt.categories.some((cat) => !scoredCategories.has(cat));
+
+    if (optApplies && optMissing) {
+      const namedPieces = namedMatches.slice(0, 2).map((m) => `your ${m.item.name!}`).join(" and ");
+      const prefix = namedPieces
+        ? `You can already wear this direction with ${namedPieces}.`
+        : "You can already wear this direction with what you own.";
+      const outcomeBBullet = `${prefix} If you wanted to extend it: ${opt.investNote}`;
+      return {
+        worthInvestingStatement: null,
+        partToTake: [outcomeBBullet, ...staticBullets.slice(1)].slice(0, 2),
+      };
+    }
+  }
+
+  // Outcome C — adequately covered; no purchase needed.
+  const namedPieces = namedMatches.slice(0, 2).map((m) => `your ${m.item.name!}`).join(" and ");
+  const coveredBy = namedPieces
+    ? `${namedPieces} already give${namedMatches.length === 1 ? "s" : ""} you enough to work with for this direction.`
+    : "What you already own gives you enough to work with for this direction.";
+  return {
+    worthInvestingStatement: `You do not need to buy anything for this trend. ${coveredBy}`,
+    partToTake: staticBullets,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Passport-only Route In and Look To Try — personalised when no Closet matches.
+// Lookup tables produce lifestyle- and fit-adjusted copy rather than static strings.
+// ---------------------------------------------------------------------------
+
+// Per-slug, per-lifestyleId: which garment category to lead with when recommending
+// the entry point (no closet evidence). Values slot into the register-based base phrase.
+const PASSPORT_ROUTE_LIFESTYLE_LEAD: Partial<Record<string, Partial<Record<string, string>>>> = {
+  "spring-2026-soft-structure": {
+    "office":      "a wide-leg trouser or longline blazer as your entry — either holds for professional settings without formal weight.",
+    "hybrid":      "a wide-leg trouser or longline blazer — both travel across professional and casual settings without further adjustment.",
+    "events":      "a fluid midi dress or wide-leg trouser as your entry — either creates the proportioned silhouette this direction is built on.",
+    "casual-days": "a wide-leg trouser or draped midi dress — whichever feels most natural to reach for first.",
+    "busy-mom":    "one piece with clear proportion — a wide trouser or longline layer — that sets the look without further adjustment.",
+    "travel":      "a wide-leg trouser or fluid midi dress — whichever packs the direction most efficiently.",
+    "on-the-go":   "one clearly proportioned piece — a wide trouser or longline layer — that works as the complete direction.",
+  },
+  "modern-tailoring-spring-2026": {
+    "office":      "a well-cut blazer or wide-leg trouser as your separates anchor — one tailored piece that holds for professional settings without the rigidity of a matched suit.",
+    "hybrid":      "a well-cut blazer or wide-leg trouser — one tailored separates piece that moves between professional and casual contexts.",
+    "events":      "a longline blazer or sharply cut trouser as the tailored anchor — one structured piece that holds for occasions without formal suiting.",
+    "casual-days": "one tailored piece — a relaxed-fit blazer or wide-leg trouser — worn against something noticeably relaxed.",
+    "busy-mom":    "one tailored separates piece — a blazer or wide-leg trouser — that works across your day without needing to be styled differently.",
+    "travel":      "a well-cut trouser or longline blazer — one tailored piece that functions across arrival, meetings, and dinner.",
+    "on-the-go":   "one well-cut tailored piece — blazer or wide-leg trouser — that carries across the range of what your day requires.",
+  },
+  "spring-2026-colour-direction": {
+    "office":      "one deliberate accent piece — a bag, flat, or scarf — against the neutral base you already wear to professional settings.",
+    "hybrid":      "one considered accent piece — a bag, flat, or scarf — that carries across professional and casual contexts without adjustment.",
+    "events":      "one clear accent note — a bag, flat, or scarf in a single considered colour — against a quiet base outfit for the occasion.",
+    "casual-days": "one accent piece introduced at the accessory level — a bag, flat, or scarf — against the unfussy base you already default to.",
+    "busy-mom":    "one low-commitment accent note — a bag, flat, or scarf — that shifts a familiar outfit without adding anything to think about.",
+    "travel":      "one accent piece you can move across looks — a flat, bag, or scarf — against the neutral base you already travel in.",
+    "on-the-go":   "one accent piece at the accessory level — a bag, flat, or scarf — that activates a familiar outfit without requiring a different approach.",
+  },
+};
+
+// Per-slug, per-fitPreference: framing supplement for the Passport-only route.
+const PASSPORT_ROUTE_FIT_FRAME: Partial<Record<string, Partial<Record<string, string>>>> = {
+  "spring-2026-soft-structure": {
+    "relaxed-fits":  " You lean toward ease — the wide-leg trouser is the most natural entry because the ease is already in the shape.",
+    "structured":    " You respond to clean definition — one clearly proportioned piece, kept simple around it, is where this direction earns its keep.",
+    "midi-length":   " Midi lengths are one of the most direct expressions of this direction — the line is already there.",
+  },
+  "modern-tailoring-spring-2026": {
+    "relaxed-fits":  " You respond to ease — which is exactly why one tailored piece against something genuinely relaxed works so well for you.",
+    "structured":    " You respond to precision — one well-cut separates piece delivers that more directly than a full tailored set.",
+  },
+  "spring-2026-colour-direction": {
+    "relaxed-fits":  " An unfussy base is already your default — the accent is the only thing that needs to change.",
+    "structured":    " A composed, clean base is already in place — the accent has the room it needs to read.",
+    "interesting":   " One considered note registers as intentional rather than decorated.",
+  },
+};
+
+function buildPassportRouteIn(
+  profile: ShopperProfileEvidence,
+  register: StyleRegister,
+  slug: string,
+  rules: PersonalEditRules,
+): string {
+  const lifestyleTable = PASSPORT_ROUTE_LIFESTYLE_LEAD[slug];
+  const fitTable = PASSPORT_ROUTE_FIT_FRAME[slug];
+
+  // Find the first matching lifestyle lead.
+  let lead = "";
+  const lifestyleIds = profile.lifestyle ?? [];
+  if (lifestyleTable) {
+    for (const id of lifestyleIds) {
+      if (lifestyleTable[id]) { lead = lifestyleTable[id]!; break; }
+    }
+  }
+
+  // Find the first matching fit frame supplement.
+  let fitFrame = "";
+  if (fitTable) {
+    for (const pref of profile.fitPreferences) {
+      if (fitTable[pref]) { fitFrame = fitTable[pref]!; break; }
+    }
+  }
+
+  if (lead) {
+    return `Based on your Style Passport, start with ${lead}${fitFrame}`;
+  }
+
+  // Fall back to the register-based static string when no lifestyle match.
+  return rules.yourBestRouteIn[register];
+}
+
+// Per-slug, per-workCtx, per-register: the personalised no-closet look suggestion.
+const PASSPORT_LOOK_VARIANTS: Partial<Record<
+  string,
+  Partial<Record<WorkContextLabel, Partial<Record<StyleRegister, string>>>>
+>> = {
+  "spring-2026-soft-structure": {
+    "work-meetings": {
+      "clean-polished": "A wide-leg trouser with a fine knit tucked in, flat shoe. The trouser carries the proportion — keep everything above it simpler. This holds as-is for work or meetings.",
+      "fluid-ease":     "A wide-leg trouser with a soft tucked knit above, flat shoe. The ease is in the width — keep the top contained so the shape reads. This holds for work or meetings without further adjustment.",
+      "expressive":     "A wide-leg trouser with one considered piece above — a fine knit or a clean top with a single detail. Keep everything else plain. This holds for work or meetings.",
+      "neutral":        "A wide-leg trouser with a simple fine knit above, flat shoe. One proportioned piece; everything else calm. This holds for work or meetings.",
+    },
+    "events": {
+      "clean-polished": "A fluid midi dress in a fabric that holds its line — crepe, viscose, or dry-hand jersey. One piece covers the direction. Keep shoe simple and accessories minimal.",
+      "fluid-ease":     "A draped midi dress worn alone with a clean flat. The ease is already in the drape — nothing needs to be added.",
+      "expressive":     "A midi dress in a fabric with movement — worn with a single considered accessory. One gesture; everything else quiet.",
+      "neutral":        "A fluid midi dress worn alone with a clean shoe. One piece, full direction.",
+    },
+    "work-meetings-events": {
+      "clean-polished": "A longline blazer open over a fine knit with wide-leg trousers, clean flat. Keep the shoe simple and accessories minimal so the shape carries. This moves from work to evening without adjustment.",
+      "fluid-ease":     "Wide-leg trousers with a soft knit and a longline open blazer. The ease is in the bottom; the blazer adds structure above. This range works from meetings to dinner.",
+      "expressive":     "A longline blazer open over a fine knit, wide-leg trousers, clean flat. One composed gesture; everything else quiet. Holds from work to events.",
+      "neutral":        "A longline blazer open over a fine knit, wide trousers, simple shoe. One proportioned look that moves across most contexts.",
+    },
+    "none": {
+      "clean-polished": "A longline blazer open over a fine knit with wide-leg trousers. Keep the shoe simple and accessories minimal so the shape carries.",
+      "fluid-ease":     "A wide-leg trouser with a soft fine knit above, clean flat. One proportioned piece; everything around it quieter.",
+      "expressive":     "A wide-leg trouser or draped midi dress, paired with a single contained top. One gesture; everything else plain.",
+      "neutral":        "A longline blazer open over a fine knit and wide-leg trousers. Keep the shoe simple and accessories minimal so the shape carries.",
+    },
+  },
+  "modern-tailoring-spring-2026": {
+    "work-meetings": {
+      "clean-polished": "A well-cut blazer over a fine knit, wide-leg trouser, flat shoe. One tailored piece against one relaxed counterpart — the contrast between them holds for work without the rigidity of a suit.",
+      "fluid-ease":     "A wide-leg trouser with a soft jersey or fine knit above, flat. The relaxed top is the contrast the tailored bottom needs. Holds for work as-is.",
+      "expressive":     "A longline blazer over a loose, fluid jersey or oversized knit, wide trouser. One structured piece; the relaxed counterpart is deliberate, not casual. Holds for work.",
+      "neutral":        "A tailored wide-leg trouser with a fine knit above, flat shoe. One structured piece against one relaxed — the contrast is the look. Holds for work.",
+    },
+    "events": {
+      "clean-polished": "A tailored wide-leg trouser with a fine knit or simple silk top, clean heel or pointed flat. The tailored bottom carries the occasion register without suiting.",
+      "fluid-ease":     "A longline blazer over a fluid trouser or skirt, simple top underneath. The blazer is the tailored note; everything else stays soft.",
+      "expressive":     "A waistcoat over a fluid wide-leg trouser or skirt, with a simple top underneath. The waistcoat reads as the considered element; the rest stays relaxed.",
+      "neutral":        "A tailored wide-leg trouser with a simple knit above, clean pointed shoe. One tailored piece; one relaxed counterpart. The contrast does the work.",
+    },
+    "work-meetings-events": {
+      "clean-polished": "A well-cut blazer over a fine knit, wide-leg trouser, clean flat or low heel. The contrast between the tailored piece and the relaxed knit holds from work to dinner.",
+      "fluid-ease":     "A wide-leg tailored trouser with a soft knit or jersey above, flat. The ease in the top is the contrast the structured bottom needs. Works across professional and evening contexts.",
+      "expressive":     "A tailored trouser with a considered top — something relaxed but intentional — flat shoe. One structured piece; the counterpart is where the expression lives.",
+      "neutral":        "A tailored wide-leg trouser with a fine knit above, clean flat. One piece carries the register; the counterpart keeps it wearable across more contexts.",
+    },
+    "none": {
+      "clean-polished": "A tailored wide-leg trouser with a fine knit above. One structured piece alongside one relaxed counterpart — keep the shoe flat and accessories simple.",
+      "fluid-ease":     "A longline blazer over a relaxed knit or jersey with wide-leg denim or a fluid skirt. One structured piece; everything else stays relaxed.",
+      "expressive":     "A tailored trouser with a considered relaxed top — a loose knit or fluid jersey. The proportion contrast between them is the look.",
+      "neutral":        "A tailored wide-leg trouser with a fine knit above. One structured piece alongside one relaxed counterpart — keep the shoe flat and accessories simple.",
+    },
+  },
+  "spring-2026-colour-direction": {
+    "work-meetings": {
+      "clean-polished": "Cream trousers and a simple tucked knit, with one clear accent through a bag or flat. One deliberate note; everything else calm. Holds for professional settings.",
+      "fluid-ease":     "Washed denim or a soft neutral trouser with a fine top, plus one accent piece — a bag or flat. Unfussy base; one clear note. Holds for work.",
+      "expressive":     "A quiet neutral base — cream, stone, or soft white — with one single considered accent note through a bag or flat. One deliberate choice; everything else calm.",
+      "neutral":        "A quiet neutral base with one accent introduced through a bag, flat, or scarf. One note; everything else calm. Holds for professional settings.",
+    },
+    "events": {
+      "clean-polished": "A simple outfit in cream, stone, or soft white — one clean silhouette — with one considered colour note through a bag or evening flat. The accent registers more clearly against the restrained base.",
+      "fluid-ease":     "A fluid, unfussy outfit in a quiet neutral with one accent introduced through a bag or shoe. The ease is already in the base — the colour does the one thing it needs to.",
+      "expressive":     "A quiet base — cream, stone, or washed denim — with one genuinely deliberate accent piece. One note; nothing competing with it.",
+      "neutral":        "A quiet base outfit with one clear colour note introduced through a bag, flat, or scarf. One considered choice for the occasion.",
+    },
+    "work-meetings-events": {
+      "clean-polished": "A quiet, clean base — cream, stone, or soft white — worn with one deliberate colour accent through a bag or flat. The same note carries across professional and evening contexts.",
+      "fluid-ease":     "An unfussy neutral base with one accent piece — a bag, flat, or scarf — that moves across professional and evening without adjustment.",
+      "expressive":     "One quiet base, one considered accent. The restraint is intentional — one note registers more clearly than several.",
+      "neutral":        "A quiet neutral base with one accent piece — a bag, flat, or scarf — introduced consistently. One note; everything else calm.",
+    },
+    "none": {
+      "clean-polished": "Cream trousers and a simple knit, or washed denim with a fine top — add one clear accent through a bag, flat, or scarf. One considered note; everything else calm.",
+      "fluid-ease":     "An unfussy neutral base — washed denim, cream, or stone — with one accent piece. The ease is already in the base; the colour is the single deliberate move.",
+      "expressive":     "A quiet base outfit with one genuinely considered accent note. One piece; one colour; everything else restrained.",
+      "neutral":        "Cream trousers and a simple knit, or washed denim with a fine top — add one clear accent through a bag, flat, or scarf. One considered note; everything else calm.",
+    },
+  },
+};
+
+function buildPassportLookToTry(
+  profile: ShopperProfileEvidence,
+  workCtx: WorkContextLabel,
+  register: StyleRegister,
+  slug: string,
+  passportOnlyFallback: string,
+): string {
+  const slugVariants = PASSPORT_LOOK_VARIANTS[slug];
+  if (!slugVariants) return passportOnlyFallback;
+
+  const ctxVariants = slugVariants[workCtx];
+  if (!ctxVariants) return passportOnlyFallback;
+
+  const text = ctxVariants[register];
+  if (!text) return passportOnlyFallback;
+
+  // Append a fit-preference note when strongly matched.
+  const fitTable = PASSPORT_ROUTE_FIT_FRAME[slug];
+  if (fitTable) {
+    for (const pref of profile.fitPreferences) {
+      const frame = fitTable[pref];
+      if (frame) return `${text}${frame}`;
+    }
+  }
+
+  return text;
+}
 
 // ---------------------------------------------------------------------------
 // CustomerStyleEvidence — internal evidence contract.
@@ -1314,8 +1730,9 @@ export type ShopperEdit = {
   aLookToTry: string;
   // 5. THE BALANCE TO PROTECT — one guardrail
   theBalanceToProtect: string;
-  // 6. THE PART TO TAKE — exactly 2 bullets
+  // 6. THE PART TO TAKE — exactly 2 bullets; null when Outcome C (no purchase needed)
   partToTake: string[];
+  worthInvestingStatement: string | null; // Outcome C only: replaces bullets with prose
   // 7. THE PART TO LEAVE — exactly 2 bullets
   partToLeave: string[];
 };
@@ -1463,7 +1880,7 @@ export function buildShopperEdit(
   // 3. YOUR BEST ROUTE IN
   // -------------------------------------------------------------------------
   const yourBestRouteIn = rules
-    ? buildBestRouteIn(namedMatches, slug, register, rules)
+    ? buildBestRouteIn(namedMatches, slug, register, rules, profile, workCtx)
     : (report.wardrobeNote ?? report.summary);
 
   // -------------------------------------------------------------------------
@@ -1477,6 +1894,8 @@ export function buildShopperEdit(
     slug,
     workCtx,
     passportOnlyLook,
+    profile,
+    register,
   );
 
   // -------------------------------------------------------------------------
@@ -1487,52 +1906,72 @@ export function buildShopperEdit(
     : (report.wardrobeNote ?? report.summary);
 
   // -------------------------------------------------------------------------
-  // 6. THE PART TO TAKE — exactly 2 bullets
+  // 6. THE PART TO TAKE — functional coverage determines outcome A/B/C
   // -------------------------------------------------------------------------
-  const partToTakeSource: string[] =
-    (useNeutralColour && rules?.partToTakeNeutralColour)
-      ? rules.partToTakeNeutralColour
-      : (rules?.partToTake ?? report.keyTrends.map((t) => `${t.name}: ${t.description}`));
-
-  // Swap first bullet with colour-matched variant when the customer's colour evidence
-  // identifies a specific anchor neutral (Colour Direction only).
-  const colourHints = rules?.partToTakeColourHints ?? [];
-  let colourMatchedBullet: string | null = null;
-  if (!useNeutralColour && colourEvidence.found && colourEvidence.label && colourHints.length > 0) {
-    const labelLower = colourEvidence.label.toLowerCase();
-    for (const hint of colourHints) {
-      if (hint.terms.some((t) => labelLower.includes(t))) {
-        colourMatchedBullet = hint.bullet;
-        break;
-      }
-    }
-  }
-  const partToTake = colourMatchedBullet
-    ? [colourMatchedBullet, ...partToTakeSource.slice(1)].slice(0, 2)
-    : partToTakeSource.slice(0, 2);
+  const { worthInvestingStatement, partToTake } = rules
+    ? assessWorthInvesting(scored, namedMatches, slug, rules, colourEvidence, useNeutralColour)
+    : {
+        worthInvestingStatement: null,
+        partToTake: report.keyTrends.map((t) => `${t.name}: ${t.description}`).slice(0, 2),
+      };
 
   // -------------------------------------------------------------------------
   // 7. THE PART TO LEAVE — exactly 2 bullets
-  // Review signal reorders candidates; never exposes review language or counts.
+  // Signal priority:
+  //   1. didntWorkTags — incompatibility; candidate vocab match → rises
+  //   2. Closet saturation — purchase redundancy; ≥3 items in same sub-niche → rises
+  //   3. workedTags — compatibility veto; if candidate vocab matches a worked style,
+  //      candidate moves down UNLESS saturation also applies for that style
+  //   4. fitPreferences conflict — if candidate warns against a preference the
+  //      customer holds, candidate moves down
+  // Lifestyle never by itself makes a candidate negative.
   // -------------------------------------------------------------------------
   let partToLeaveOrdered: string[];
   if (rules?.leaveOutCandidates?.length) {
     const candidates = [...rules.leaveOutCandidates];
-    if (
-      styleEvidence.reviews.status === "available" &&
-      activeReviewSignal !== null &&
-      activeReviewSignal.didntWorkTags.length > 0
-    ) {
-      const tagCorpus = activeReviewSignal.didntWorkTags.join(" ");
-      const withScores = candidates.map((c) => ({
-        c,
-        score: matchedTerms(tagCorpus, c.vocab).length,
-      }));
-      withScores.sort((a, b) => b.score - a.score);
-      partToLeaveOrdered = withScores.map((s) => s.c.text);
-    } else {
-      partToLeaveOrdered = candidates.map((c) => c.text);
+
+    // Build signal corpora once.
+    const didntCorpus = activeReviewSignal?.didntWorkTags.join(" ") ?? "";
+    const workedCorpus = activeReviewSignal?.workedTags.join(" ") ?? "";
+
+    // Closet saturation: count scored items per subcategory and per styleTag.
+    const subCatCounts: Record<string, number> = {};
+    const styleTagCounts: Record<string, number> = {};
+    for (const { item } of scored) {
+      if (item.subcategory) subCatCounts[item.subcategory.toLowerCase()] = (subCatCounts[item.subcategory.toLowerCase()] ?? 0) + 1;
+      for (const tag of item.styleTags) {
+        const t = tag.toLowerCase();
+        styleTagCounts[t] = (styleTagCounts[t] ?? 0) + 1;
+      }
     }
+    const isSaturated = (vocab: string[]): boolean =>
+      vocab.some((v) => (subCatCounts[v.toLowerCase()] ?? 0) >= 3 || (styleTagCounts[v.toLowerCase()] ?? 0) >= 3);
+
+    // fitPreferences the customer holds (lowercased for matching).
+    const fitPrefs = new Set((profile?.fitPreferences ?? []).map((f) => f.toLowerCase()));
+
+    const withScores = candidates.map((c) => {
+      let score = 0;
+
+      // +: didntWorkTags incompatibility evidence
+      if (didntCorpus) score += matchedTerms(didntCorpus, c.vocab).length * 3;
+
+      // +: closet saturation — purchase redundancy
+      if (isSaturated(c.vocab)) score += 2;
+
+      // −: workedTags compatibility veto (unless saturation overrides)
+      if (workedCorpus && matchedTerms(workedCorpus, c.vocab).length > 0 && !isSaturated(c.vocab)) {
+        score -= 4;
+      }
+
+      // −: candidate warns against a fit preference the customer actually holds
+      if (c.vocab.some((v) => fitPrefs.has(v.toLowerCase()))) score -= 2;
+
+      return { c, score };
+    });
+
+    withScores.sort((a, b) => b.score - a.score);
+    partToLeaveOrdered = withScores.map((s) => s.c.text);
   } else {
     partToLeaveOrdered = (report.fading ?? []);
   }
@@ -1594,6 +2033,7 @@ export function buildShopperEdit(
     aLookToTry,
     theBalanceToProtect,
     partToTake,
+    worthInvestingStatement,
     partToLeave,
   };
 }

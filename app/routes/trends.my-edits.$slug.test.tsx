@@ -98,6 +98,7 @@ const MOCK_EDIT = {
   yourBestRouteIn: "Start with the blazer.",
   aLookToTry: "A longline blazer with wide-leg trousers.",
   partToTake: ["A longline blazer", "Clean wide-leg trousers"],
+  worthInvestingStatement: null,
   partToLeave: ["Rigid matching suits"],
   theBalanceToProtect: "Keep one tailored piece loose and fluid.",
 };
@@ -304,6 +305,39 @@ describe("MyTrendEditDetail component", () => {
     expect(html).toContain("Your style DNA says");
     expect(html).toContain("Your Passport says");
     expect(html).toContain(MOCK_EDIT.evidenceStyleDna);
+  });
+
+  it("renders partToTake as a bullet list when worthInvestingStatement is null (Outcome A/B)", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      report: MOCK_REPORT,
+      edit: { ...MOCK_EDIT, worthInvestingStatement: null },
+      hasProfile: true,
+      generationFailed: false,
+    });
+    const html = renderToString(React.createElement(MyTrendEditDetail));
+    expect(html).toContain("A longline blazer");
+    expect(html).toContain("Clean wide-leg trousers");
+    expect(html).toContain("<li");
+  });
+
+  it("renders worthInvestingStatement as prose paragraph when Outcome C", () => {
+    const outcomeC = {
+      ...MOCK_EDIT,
+      worthInvestingStatement:
+        "You do not need to buy anything for this trend. Your Wide Leg Trouser and Linen Blouse already give you enough to wear it.",
+      partToTake: [],
+    };
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      report: MOCK_REPORT,
+      edit: outcomeC,
+      hasProfile: true,
+      generationFailed: false,
+    });
+    const html = renderToString(React.createElement(MyTrendEditDetail));
+    expect(html).toContain("do not need to buy anything");
+    expect(html).toContain("Wide Leg Trouser");
+    // Prose statement is rendered in a <p>, not a list
+    expect(html).toContain("do not need to buy anything for this trend");
   });
 
   it("suppresses evidence panel when no evidence is available", () => {

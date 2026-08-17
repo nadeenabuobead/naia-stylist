@@ -471,11 +471,15 @@ export default function MyTrendEditDetail() {
             {/* 05 / WORTH INVESTING IN */}
             <div className="tmd-section">
               <div className="tmd-section-label">05 / Worth investing in</div>
-              <ul className="tmd-dash-list">
-                {edit.partToTake.map((bullet: string, i: number) => (
-                  <li key={i}>{bullet}</li>
-                ))}
-              </ul>
+              {edit.worthInvestingStatement ? (
+                <p className="tmd-body">{edit.worthInvestingStatement}</p>
+              ) : (
+                <ul className="tmd-dash-list">
+                  {edit.partToTake.map((bullet: string, i: number) => (
+                    <li key={i}>{bullet}</li>
+                  ))}
+                </ul>
+              )}
             </div>
 
             {/* 06 / HOLD OFF ON */}
