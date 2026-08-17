@@ -41,7 +41,7 @@ const SITE_NAV_LINKS = [
   { label: "THE COLLECTION", to: "/naia-collection" },
   { label: "THE ART STORY", to: "/art-story" },
   { label: "nAia STYLIST", to: "/stylist" },
-  { label: "TREND REPORTS", to: "/trends" },
+  { label: "MY TREND EDITS", to: "/trends/my-edits" },
 ];
 
 const FOOTER_COLS = [
