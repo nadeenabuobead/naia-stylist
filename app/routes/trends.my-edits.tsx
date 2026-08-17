@@ -13,7 +13,7 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
   {
     rel: "stylesheet",
-    href: "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,200;0,400;1,200;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Space+Mono&display=swap",
+    href: "https://fonts.googleapis.com/css2?family=Oswald:wght@200;300;400&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Space+Mono&display=swap",
   },
 ];
 
@@ -59,188 +59,224 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   return { cards, hasProfile: evidence.hasProfile };
 }
 
-const CARD_TINTS = ["#f0ebe0", "#e8dece", "#ddd0bc"];
+const TINTS = ["#efeae0", "#e6dccb", "#d9c9b5", "#efe6d7", "#e2d3bf", "#ede2cf"];
 
 const css = `
-  .te-page { padding: 48px 0 96px; }
+  .tme-page { padding: 48px 0 96px; }
 
-  .te-hero { margin-bottom: 52px; }
-  .te-hero-eyebrow {
-    font-family: 'Space Mono', 'Courier New', monospace;
+  /* ── Hero ─────────────────────────────────────────────────────── */
+  .tme-hero { margin-bottom: 52px; }
+  .tme-hero-eyebrow {
+    font-family: 'Space Mono', monospace;
     font-size: 0.6rem;
     letter-spacing: 0.34em;
     text-transform: uppercase;
     color: rgba(26,17,9,0.50);
-    margin-bottom: 20px;
-  }
-  .te-hero-title {
-    font-family: 'Playfair Display', Georgia, serif;
-    font-size: clamp(2.6rem, 6vw, 4.2rem);
-    font-weight: 200;
-    line-height: 0.92;
     margin-bottom: 24px;
+  }
+  .tme-hero-title {
+    font-family: 'Oswald', sans-serif;
+    font-size: clamp(3rem, 7vw, 6rem);
+    font-weight: 200;
+    line-height: 0.88;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    margin: 0 0 24px;
     color: #1a1109;
   }
-  .te-hero-accent { font-style: italic; color: #7a1e28; }
-  .te-hero-sub {
-    font-family: 'Cormorant Garamond', Garamond, serif;
-    font-size: 1.1rem;
+  .tme-hero-title em {
+    font-family: 'Cormorant Garamond', serif;
     font-style: italic;
-    color: rgba(26,17,9,0.68);
+    font-weight: 300;
+    text-transform: none;
+    color: #7a1e28;
+  }
+  .tme-hero-sub {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.05rem;
+    font-style: italic;
+    color: rgba(26,17,9,0.65);
     max-width: 38rem;
-    line-height: 1.7;
+    line-height: 1.75;
   }
 
-  .te-divider { height: 1px; background: rgba(26,17,9,0.10); margin: 40px 0; }
+  .tme-divider { height: 1px; background: rgba(26,17,9,0.10); margin: 40px 0; }
 
-  .te-section-eyebrow {
+  /* ── Passport banner ──────────────────────────────────────────── */
+  .tme-banner {
+    background: #2a1e17;
+    color: #f0ebe2;
+    padding: 32px;
+    margin-bottom: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .tme-banner-eyebrow {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: rgba(240,235,226,0.55);
+  }
+  .tme-banner-text {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.05rem;
+    font-style: italic;
+    color: rgba(240,235,226,0.80);
+    line-height: 1.70;
+    max-width: 44rem;
+  }
+  .tme-banner-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid rgba(240,235,226,0.6);
+    border-radius: 9999px;
+    padding: 11px 22px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: #f0ebe2;
+    text-decoration: none;
+    align-self: flex-start;
+    transition: background 0.2s, color 0.2s;
+  }
+  .tme-banner-btn:hover { background: #f0ebe2; color: #1a1109; }
+
+  .tme-section-eyebrow {
     font-family: 'Space Mono', monospace;
     font-size: 0.55rem;
     letter-spacing: 0.30em;
     text-transform: uppercase;
-    color: rgba(26,17,9,0.50);
+    color: rgba(26,17,9,0.45);
     margin-bottom: 20px;
   }
 
-  .te-grid { display: grid; gap: 14px; }
+  /* ── Card grid ────────────────────────────────────────────────── */
+  .tme-grid {
+    display: grid;
+    gap: 16px;
+  }
+  @media (min-width: 640px) { .tme-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1024px) { .tme-grid { grid-template-columns: repeat(3, 1fr); } }
 
-  .te-card {
+  .tme-card {
     position: relative;
-    overflow: hidden;
-    padding: 32px 32px 28px;
     display: flex;
     flex-direction: column;
-    justify-content: flex-end;
-    min-height: 200px;
+    justify-content: space-between;
+    overflow: hidden;
+    padding: 24px;
     text-decoration: none;
     color: inherit;
-    transition: transform 0.35s ease;
+    transition: transform 0.5s ease;
+    aspect-ratio: 4 / 5;
   }
-  .te-card:hover { transform: translateY(-3px); }
-
-  .te-card-num {
+  .tme-card:hover { transform: translateY(-4px); }
+  .tme-card-num {
     position: absolute;
-    right: -10px;
-    top: -20px;
-    font-family: 'Playfair Display', serif;
-    font-size: clamp(6rem, 12vw, 10rem);
+    right: -16px;
+    top: -32px;
+    font-family: 'Oswald', sans-serif;
+    font-size: clamp(10rem, 12vw, 12rem);
     font-weight: 200;
     line-height: 1;
-    color: rgba(26,17,9,0.05);
+    color: rgba(26,17,9,0.06);
     pointer-events: none;
     user-select: none;
     z-index: 0;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
   }
-  .te-card-inner { position: relative; z-index: 1; }
-
-  .te-card-kicker {
+  .tme-card-top {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-family: 'Space Mono', monospace;
     font-size: 0.55rem;
     letter-spacing: 0.28em;
     text-transform: uppercase;
-    color: rgba(26,17,9,0.50);
-    margin-bottom: 12px;
+    color: rgba(26,17,9,0.6);
   }
-  .te-card-title {
-    font-family: 'Playfair Display', serif;
-    font-size: clamp(1.4rem, 2.8vw, 1.9rem);
-    font-weight: 400;
-    line-height: 1.15;
-    margin-bottom: 14px;
+  .tme-card-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #7a1e28;
+    flex-shrink: 0;
+  }
+  .tme-card-bottom { position: relative; z-index: 1; }
+  .tme-card-title {
+    font-family: 'Oswald', sans-serif;
+    font-size: clamp(1.5rem, 2.5vw, 2rem);
+    font-weight: 200;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    line-height: 1.1;
     color: #1a1109;
+    margin-bottom: 16px;
+    transition: color 0.3s;
   }
-  .te-card-title em { font-style: italic; color: #7a1e28; }
+  .tme-card:hover .tme-card-title { color: #7a1e28; }
 
-  /* Personalised subtitle — replaces the public summary */
-  .te-card-subtitle {
+  /* Personalised subtitle */
+  .tme-card-subtitle {
     font-family: 'Cormorant Garamond', serif;
-    font-size: 1rem;
+    font-size: 0.95rem;
     font-style: italic;
-    color: rgba(26,17,9,0.75);
-    line-height: 1.6;
+    color: rgba(26,17,9,0.72);
+    line-height: 1.65;
     margin-bottom: 20px;
-    max-width: 44rem;
   }
 
-  /* Locked state — profile incomplete */
-  .te-card-locked {
+  /* Locked state */
+  .tme-card-locked {
     font-family: 'Cormorant Garamond', serif;
-    font-size: 0.9rem;
+    font-size: 0.88rem;
     font-style: italic;
-    color: rgba(26,17,9,0.45);
+    color: rgba(26,17,9,0.42);
     line-height: 1.55;
     margin-bottom: 16px;
-    padding-left: 16px;
-    border-left: 2px solid rgba(26,17,9,0.15);
-  }
-  .te-card-locked-hint {
-    font-family: 'Space Mono', monospace;
-    font-size: 0.55rem;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    color: rgba(26,17,9,0.35);
-    margin-bottom: 16px;
-    display: block;
+    padding-left: 14px;
+    border-left: 2px solid rgba(26,17,9,0.14);
   }
 
-  .te-card-cta {
+  .tme-card-cta {
     font-family: 'Space Mono', monospace;
     font-size: 0.58rem;
     letter-spacing: 0.28em;
     text-transform: uppercase;
     color: #7a1e28;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
   }
 
-  /* First-use banner when the entire list is locked */
-  .te-passport-banner {
-    padding: 32px;
-    border: 1px solid rgba(26,17,9,0.10);
-    background: rgba(255,255,255,0.45);
-    margin-bottom: 28px;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-  }
-  .te-passport-banner-text {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 1.05rem;
-    font-style: italic;
-    color: rgba(26,17,9,0.70);
-    line-height: 1.65;
-  }
-  .te-passport-banner-link {
-    display: inline-block;
-    padding: 12px 28px;
-    border: 1px solid rgba(26,17,9,0.22);
-    font-family: 'Space Mono', monospace;
-    font-size: 0.6rem;
-    letter-spacing: 0.26em;
-    text-transform: uppercase;
-    color: #1a1109;
-    text-decoration: none;
-    align-self: flex-start;
-    transition: background 0.2s, color 0.2s;
-  }
-  .te-passport-banner-link:hover { background: #1a1109; color: #f5f0e8; }
-
-  .te-empty {
+  /* ── Empty state ──────────────────────────────────────────────── */
+  .tme-empty {
     padding: 72px 40px;
     border: 1px solid rgba(26,17,9,0.10);
     background: rgba(255,255,255,0.45);
     text-align: center;
   }
-  .te-empty-title {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 1.55rem;
-    font-style: italic;
+  .tme-empty-title {
+    font-family: 'Oswald', sans-serif;
+    font-size: 2rem;
+    font-weight: 200;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
     color: #1a1109;
     margin-bottom: 16px;
-    line-height: 1.5;
   }
-  .te-empty-sub {
+  .tme-empty-title em {
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic;
+    text-transform: none;
+    color: #7a1e28;
+  }
+  .tme-empty-sub {
     font-family: 'Cormorant Garamond', serif;
     font-size: 1rem;
     font-style: italic;
@@ -249,10 +285,13 @@ const css = `
     margin: 0 auto 32px;
     line-height: 1.65;
   }
-  .te-empty-link {
-    display: inline-block;
-    padding: 13px 30px;
-    border: 1px solid rgba(26,17,9,0.25);
+  .tme-empty-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid rgba(26,17,9,0.80);
+    border-radius: 9999px;
+    padding: 11px 22px;
     font-family: 'Space Mono', monospace;
     font-size: 0.6rem;
     letter-spacing: 0.26em;
@@ -261,7 +300,7 @@ const css = `
     text-decoration: none;
     transition: background 0.2s, color 0.2s;
   }
-  .te-empty-link:hover { background: #1a1109; color: #f5f0e8; }
+  .tme-empty-link:hover { background: #1a1109; color: #f5f0e8; }
 `;
 
 export default function MyTrendEdits() {
@@ -270,78 +309,74 @@ export default function MyTrendEdits() {
   return (
     <MyNaiaLayout compact>
       <style>{css}</style>
-      <div className="te-page">
-        <div className="te-hero">
-          <div className="te-hero-eyebrow">personal edit</div>
-          <h1 className="te-hero-title">
+      <div className="tme-page">
+        {/* Hero */}
+        <div className="tme-hero">
+          <div className="tme-hero-eyebrow">personal edit</div>
+          <h1 className="tme-hero-title">
             my trend<br />
-            <em className="te-hero-accent">edits.</em>
+            <em>edits.</em>
           </h1>
-          <p className="te-hero-sub">
+          <p className="tme-hero-sub">
             Each Trend Report, read against your Style Passport and Closet — showing what is relevant to you, what to skip, and how to wear it.
           </p>
         </div>
 
-        <div className="te-divider" />
+        <div className="tme-divider" />
 
         {cards.length === 0 ? (
-          <div className="te-empty">
-            <p className="te-empty-title">Your trend edits are on their way.</p>
-            <p className="te-empty-sub">
-              nAia will publish Trend Edits as new reports arrive. Check back shortly — or build your Passport now so your edit is ready the moment it lands.
+          <div className="tme-empty">
+            <p className="tme-empty-title">your trend edits<br /><em>are on their way.</em></p>
+            <p className="tme-empty-sub">
+              nAia will publish Trend Edits as new reports arrive. Build your Passport now so your edit is ready the moment it lands.
             </p>
-            <Link to="/passport" className="te-empty-link">Build My Passport</Link>
+            <Link to="/passport" className="tme-empty-link">Build My Passport →</Link>
           </div>
         ) : (
           <>
             {!hasProfile && (
-              <div className="te-passport-banner">
-                <p className="te-passport-banner-text">
-                  Your Style Passport is incomplete. Complete it and nAia will read each of these directions through your actual style, lifestyle, and wardrobe — and show you exactly what applies to you.
+              <div className="tme-banner">
+                <div className="tme-banner-eyebrow">style passport incomplete</div>
+                <p className="tme-banner-text">
+                  Complete your Style Passport and nAia will read each of these directions through your actual style, lifestyle, and wardrobe — showing you exactly what applies to you.
                 </p>
-                <Link to="/passport" className="te-passport-banner-link">Complete My Passport</Link>
+                <Link to="/passport" className="tme-banner-btn">Complete My Passport →</Link>
               </div>
             )}
 
-            <div className="te-section-eyebrow">
+            <div className="tme-section-eyebrow">
               {hasProfile ? "Your edits" : "Available edits"}
             </div>
 
-            <div className="te-grid">
+            <div className="tme-grid">
               {cards.map((card, i) => {
-                const tint = CARD_TINTS[i % CARD_TINTS.length];
-                const words = card.title.split(" ");
-                const bodyWords = words.slice(0, -1).join(" ");
-                const lastWord = words[words.length - 1];
+                const tint = TINTS[i % TINTS.length];
+                const num = String(i + 1).padStart(2, "0");
 
                 return (
                   <Link
                     key={card.slug}
                     to={`/trends/my-edits/${card.slug}`}
-                    className="te-card"
+                    className="tme-card"
                     style={{ background: tint }}
                   >
-                    <span className="te-card-num" aria-hidden="true">
-                      {String(i + 1).padStart(2, "0")}
-                    </span>
-                    <div className="te-card-inner">
-                      <div className="te-card-kicker">{card.season}</div>
-                      <div className="te-card-title">
-                        {bodyWords}{bodyWords ? " " : ""}<em>{lastWord}</em>
-                      </div>
+                    <span className="tme-card-num" aria-hidden="true">{num}</span>
+                    <div className="tme-card-top">
+                      <span className="tme-card-dot" />
+                      {card.season}
+                    </div>
+                    <div className="tme-card-bottom">
+                      <div className="tme-card-title">{card.title}</div>
 
                       {card.subTitle !== null ? (
-                        <p className="te-card-subtitle">{card.subTitle}</p>
+                        <p className="tme-card-subtitle">{card.subTitle}</p>
                       ) : (
-                        <>
-                          <p className="te-card-locked">
-                            Complete your Style Passport to unlock your edit.
-                          </p>
-                          <span className="te-card-locked-hint">Passport required</span>
-                        </>
+                        <p className="tme-card-locked">
+                          Complete your Style Passport to unlock your edit.
+                        </p>
                       )}
 
-                      <span className="te-card-cta">
+                      <span className="tme-card-cta">
                         {card.subTitle !== null ? "Open My Edit →" : "Start Passport →"}
                       </span>
                     </div>

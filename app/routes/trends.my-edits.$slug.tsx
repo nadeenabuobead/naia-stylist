@@ -22,7 +22,7 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
   {
     rel: "stylesheet",
-    href: "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,200;0,400;1,200;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Space+Mono&display=swap",
+    href: "https://fonts.googleapis.com/css2?family=Oswald:wght@200;300;400&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Space+Mono&display=swap",
   },
 ];
 
@@ -57,143 +57,162 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 }
 
-const css = `
-  .te-detail-page { padding: 40px 0 96px; }
+const TINTS = ["#efeae0", "#e6dccb", "#d9c9b5", "#efe6d7", "#e2d3bf", "#ede2cf"];
 
-  .te-back {
+const css = `
+  .tmd-page { padding: 48px 0 96px; }
+
+  /* ── Back link ───────────────────────────────────────────────── */
+  .tmd-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: rgba(26,17,9,0.55);
+    text-decoration: none;
+    margin-bottom: 40px;
+    transition: color 0.2s;
+  }
+  .tmd-back:hover { color: #7a1e28; }
+
+  /* ── Hero tinted block ───────────────────────────────────────── */
+  .tmd-hero {
+    position: relative;
+    overflow: hidden;
+    padding: 36px;
+    margin-bottom: 48px;
+  }
+  .tmd-hero-num {
+    position: absolute;
+    right: -16px;
+    top: -40px;
+    font-family: 'Oswald', sans-serif;
+    font-size: clamp(10rem, 14vw, 14rem);
+    font-weight: 200;
+    line-height: 1;
+    color: rgba(26,17,9,0.05);
+    pointer-events: none;
+    user-select: none;
+    z-index: 0;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  .tmd-hero-inner { position: relative; z-index: 1; }
+  .tmd-hero-kicker {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.58rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: rgba(26,17,9,0.50);
+    margin-bottom: 16px;
+  }
+  .tmd-hero-title {
+    font-family: 'Oswald', sans-serif;
+    font-size: clamp(2.4rem, 5vw, 4rem);
+    font-weight: 200;
+    line-height: 0.9;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: #1a1109;
+    margin: 0 0 20px;
+  }
+  .tmd-hero-title em {
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic;
+    font-weight: 300;
+    text-transform: none;
+    color: #7a1e28;
+  }
+  .tmd-hero-subtitle {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1rem;
+    font-style: italic;
+    color: rgba(26,17,9,0.68);
+    line-height: 1.7;
+    max-width: 40rem;
+    margin-bottom: 24px;
+  }
+  .tmd-hero-public-link {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: #7a1e28;
+    text-decoration: none;
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    opacity: 0.8;
+    transition: opacity 0.2s;
+  }
+  .tmd-hero-public-link:hover { opacity: 1; }
+
+  /* ── Divider ─────────────────────────────────────────────────── */
+  .tmd-divider { height: 1px; background: rgba(26,17,9,0.10); margin: 36px 0; }
+
+  /* ── Section labels ──────────────────────────────────────────── */
+  .tmd-section-label {
     font-family: 'Space Mono', monospace;
     font-size: 0.58rem;
-    letter-spacing: 0.28em;
+    letter-spacing: 0.34em;
     text-transform: uppercase;
     color: #7a1e28;
-    text-decoration: none;
-    margin-bottom: 40px;
+    margin-bottom: 18px;
   }
-  .te-back:hover { opacity: 0.75; }
+  .tmd-section { margin-bottom: 40px; }
 
-  .te-recap {
-    padding: 24px 28px;
-    border: 1px solid rgba(26,17,9,0.08);
-    background: rgba(255,255,255,0.45);
-    margin-bottom: 48px;
-  }
-  .te-recap-season {
-    font-family: 'Space Mono', monospace;
-    font-size: 0.55rem;
-    letter-spacing: 0.26em;
-    text-transform: uppercase;
-    color: #7a1e28;
-    margin-bottom: 8px;
-  }
-  .te-recap-title {
-    font-family: 'Playfair Display', serif;
-    font-size: 1.3rem;
-    font-weight: 400;
-    font-style: italic;
-    color: #1a1109;
-    margin-bottom: 8px;
-    line-height: 1.2;
-  }
-  .te-recap-summary {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 0.95rem;
-    font-style: italic;
-    color: rgba(26,17,9,0.60);
-    line-height: 1.6;
-    margin-bottom: 14px;
-  }
-  .te-recap-link {
-    font-family: 'Space Mono', monospace;
-    font-size: 0.55rem;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    color: #7a1e28;
-    text-decoration: none;
-  }
-  .te-recap-link:hover { opacity: 0.75; }
-
-  .te-headline {
-    font-family: 'Playfair Display', serif;
-    font-size: clamp(2rem, 5vw, 3rem);
-    font-weight: 200;
-    line-height: 0.95;
-    color: #1a1109;
-    margin-bottom: 10px;
-  }
-  .te-headline-accent { font-style: italic; color: #7a1e28; }
-
-  .te-subtitle {
-    font-family: 'Space Mono', monospace;
-    font-size: 0.6rem;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    color: rgba(26,17,9,0.50);
-    margin-bottom: 44px;
-  }
-
-  .te-divider { height: 1px; background: rgba(26,17,9,0.10); margin: 36px 0; }
-
-  .te-section-label {
-    font-family: 'Space Mono', monospace;
-    font-size: 0.55rem;
-    letter-spacing: 0.30em;
-    text-transform: uppercase;
-    color: #7a1e28;
-    margin-bottom: 16px;
-  }
-
-  .te-body {
+  /* ── Body text ───────────────────────────────────────────────── */
+  .tmd-body {
     font-family: 'Cormorant Garamond', serif;
     font-size: 1.1rem;
-    line-height: 1.8;
-    color: #1a1109;
+    line-height: 1.85;
+    color: rgba(26,17,9,0.85);
   }
 
-  .te-reading-box {
+  /* ── Reading box (why this matters) ─────────────────────────── */
+  .tmd-reading-box {
     padding: 28px 32px;
     border-left: 3px solid #7a1e28;
     background: rgba(122,30,40,0.04);
-    margin-bottom: 44px;
+    margin-bottom: 40px;
   }
 
-  .te-section { margin-bottom: 36px; }
-
-  .te-evidence-panel {
-    padding: 28px 32px;
+  /* ── Evidence panel ──────────────────────────────────────────── */
+  .tmd-evidence {
     border: 1px solid rgba(122,30,40,0.12);
     background: rgba(255,255,255,0.40);
   }
-  .te-evidence-row + .te-evidence-row {
-    border-top: 1px solid rgba(26,17,9,0.06);
-    padding-top: 20px;
-    margin-top: 20px;
+  .tmd-evidence-row { padding: 20px 24px; }
+  .tmd-evidence-row + .tmd-evidence-row {
+    border-top: 1px solid rgba(26,17,9,0.07);
   }
-  .te-evidence-label {
+  .tmd-evidence-label {
     font-family: 'Space Mono', monospace;
-    font-size: 0.5rem;
-    letter-spacing: 0.24em;
+    font-size: 0.52rem;
+    letter-spacing: 0.26em;
     text-transform: uppercase;
-    color: rgba(26,17,9,0.45);
-    margin-bottom: 12px;
+    color: rgba(26,17,9,0.40);
+    margin-bottom: 10px;
   }
 
-  .te-closet-grid {
+  /* Closet items */
+  .tmd-closet-grid {
     display: flex;
-    gap: 18px;
+    gap: 16px;
     flex-wrap: wrap;
     margin-top: 10px;
   }
-  .te-closet-item { flex: 0 0 calc(50% - 9px); max-width: 200px; }
-  .te-closet-img {
+  .tmd-closet-item { flex: 0 0 calc(50% - 8px); max-width: 180px; }
+  .tmd-closet-img {
     width: 100%;
     aspect-ratio: 3/4;
     object-fit: cover;
     background: rgba(26,17,9,0.04);
   }
-  .te-closet-name {
+  .tmd-closet-name {
     font-family: 'Space Mono', monospace;
     font-size: 0.5rem;
     letter-spacing: 0.18em;
@@ -202,15 +221,15 @@ const css = `
     margin-top: 8px;
     margin-bottom: 4px;
   }
-  .te-closet-note {
+  .tmd-closet-note {
     font-family: 'Cormorant Garamond', serif;
-    font-size: 0.9rem;
+    font-size: 0.88rem;
     font-style: italic;
-    color: rgba(26,17,9,0.60);
+    color: rgba(26,17,9,0.58);
     line-height: 1.5;
   }
 
-  .te-low-data-notice {
+  .tmd-low-data {
     font-family: 'Cormorant Garamond', serif;
     font-size: 0.88rem;
     font-style: italic;
@@ -219,112 +238,103 @@ const css = `
     line-height: 1.6;
   }
 
-  .te-bullet-list { list-style: none; margin: 0; padding: 0; }
-  .te-bullet-list li {
+  /* ── Bullet lists (invest/skip) ──────────────────────────────── */
+  .tmd-dash-list { list-style: none; margin: 0; padding: 0; }
+  .tmd-dash-list li {
     font-family: 'Cormorant Garamond', serif;
     font-size: 1.05rem;
+    font-style: italic;
     line-height: 1.7;
-    color: #1a1109;
-    padding: 10px 0 10px 22px;
-    position: relative;
-    border-bottom: 1px solid rgba(26,17,9,0.06);
+    color: rgba(26,17,9,0.82);
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(26,17,9,0.07);
   }
-  .te-bullet-list li::before {
-    content: '—';
-    position: absolute;
-    left: 0;
-    color: #7a1e28;
-  }
+  .tmd-dash-list li::before { content: '— '; color: #7a1e28; }
 
-  .te-state-box {
+  /* ── State boxes ─────────────────────────────────────────────── */
+  .tmd-state {
     padding: 48px 40px;
     border: 1px solid rgba(26,17,9,0.08);
     background: rgba(255,255,255,0.45);
     text-align: center;
-    margin-top: 8px;
   }
-  .te-state-text {
+  .tmd-state-text {
     font-family: 'Cormorant Garamond', serif;
-    font-size: 1.2rem;
+    font-size: 1.15rem;
     font-style: italic;
     color: #1a1109;
-    line-height: 1.65;
-    margin-bottom: 24px;
-    max-width: 32rem;
+    line-height: 1.7;
+    margin-bottom: 28px;
+    max-width: 34rem;
     margin-left: auto;
     margin-right: auto;
   }
-  .te-state-cta {
-    display: inline-block;
-    padding: 13px 30px;
-    background: #1a1109;
-    color: #f5f0e8;
+  .tmd-state-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid rgba(26,17,9,0.80);
+    border-radius: 9999px;
+    padding: 11px 22px;
     font-family: 'Space Mono', monospace;
     font-size: 0.6rem;
     letter-spacing: 0.26em;
     text-transform: uppercase;
+    color: #1a1109;
     text-decoration: none;
+    transition: background 0.2s, color 0.2s;
   }
-  .te-state-cta:hover { opacity: 0.85; }
+  .tmd-state-btn:hover { background: #1a1109; color: #f5f0e8; }
 
-  .te-footer-cta {
+  /* ── Footer CTA ──────────────────────────────────────────────── */
+  .tmd-footer {
     margin-top: 60px;
-    padding-top: 32px;
-    border-top: 1px solid rgba(26,17,9,0.10);
-    text-align: center;
+    padding: 36px 36px;
+    background: #2a1e17;
+    color: #f0ebe2;
   }
-  .te-footer-cta-btn {
-    display: inline-block;
-    padding: 15px 36px;
-    background: #1a1109;
-    color: #f5f0e8;
+  .tmd-footer-eyebrow {
     font-family: 'Space Mono', monospace;
-    font-size: 0.58rem;
-    letter-spacing: 0.28em;
+    font-size: 0.55rem;
+    letter-spacing: 0.3em;
     text-transform: uppercase;
-    text-decoration: none;
+    color: rgba(240,235,226,0.50);
+    margin-bottom: 16px;
   }
-  .te-footer-cta-btn:hover { opacity: 0.85; }
-  .te-footer-cta-note {
+  .tmd-footer-body {
     font-family: 'Cormorant Garamond', serif;
-    font-size: 0.9rem;
+    font-size: 1rem;
     font-style: italic;
-    color: rgba(26,17,9,0.55);
-    margin-top: 14px;
-    line-height: 1.6;
+    color: rgba(240,235,226,0.75);
+    line-height: 1.7;
     max-width: 36rem;
-    margin-left: auto;
-    margin-right: auto;
+    margin-bottom: 24px;
   }
+  .tmd-footer-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid rgba(240,235,226,0.6);
+    border-radius: 9999px;
+    padding: 11px 22px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: #f0ebe2;
+    text-decoration: none;
+    transition: background 0.2s, color 0.2s;
+  }
+  .tmd-footer-btn:hover { background: #f0ebe2; color: #1a1109; }
 `;
 
 export function ErrorBoundary() {
   return (
     <MyNaiaLayout compact>
-      <div style={{ padding: "48px 0" }}>
-        <Link
-          to="/trends/my-edits"
-          style={{
-            fontFamily: "'Space Mono', monospace",
-            fontSize: "0.58rem",
-            letterSpacing: "0.28em",
-            textTransform: "uppercase",
-            color: "#7a1e28",
-            textDecoration: "none",
-            display: "inline-block",
-            marginBottom: "32px",
-          }}
-        >
-          ← My Trend Edits
-        </Link>
-        <p
-          style={{
-            fontFamily: "'Cormorant Garamond', serif",
-            fontSize: "1.1rem",
-            fontStyle: "italic",
-            color: "rgba(26,17,9,0.60)",
-          }}
-        >
+      <style>{css}</style>
+      <div className="tmd-page">
+        <Link to="/trends/my-edits" className="tmd-back">← My Trend Edits</Link>
+        <p style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "1.1rem", fontStyle: "italic", color: "rgba(26,17,9,0.60)" }}>
           This edit could not be found.
         </p>
       </div>
@@ -335,143 +345,144 @@ export function ErrorBoundary() {
 export default function MyTrendEditDetail() {
   const { report, edit, hasProfile, generationFailed } = useLoaderData() as LoaderData;
 
+  const reportIndex = trendReports.filter((r) => r.published).findIndex((r) => r.slug === report.slug);
+  const tint = TINTS[Math.max(0, reportIndex) % TINTS.length];
+  const num = String(Math.max(0, reportIndex)).padStart(2, "0");
+
+  const hasEvidence =
+    edit &&
+    (edit.evidenceStyleDna ||
+      edit.evidencePassportSays ||
+      edit.evidenceClosetItems.length > 0 ||
+      edit.evidenceReviews);
+
   return (
     <MyNaiaLayout compact>
       <style>{css}</style>
-      <div className="te-detail-page">
-        <Link to="/trends/my-edits" className="te-back">← My Trend Edits</Link>
+      <div className="tmd-page">
+        <Link to="/trends/my-edits" className="tmd-back">← My Trend Edits</Link>
 
-        {/* Report recap — links to the public editorial version */}
-        <div className="te-recap">
-          <div className="te-recap-season">{report.season}</div>
-          <div className="te-recap-title">{report.title}</div>
-          <p className="te-recap-summary">{report.summary}</p>
-          <Link to={`/trends/${report.slug}`} className="te-recap-link">
-            Read the full public report →
-          </Link>
+        {/* Hero tinted block */}
+        <div className="tmd-hero" style={{ background: tint }}>
+          <span className="tmd-hero-num" aria-hidden="true">{num}</span>
+          <div className="tmd-hero-inner">
+            <div className="tmd-hero-kicker">{report.season} · personal edit</div>
+            <h1 className="tmd-hero-title">
+              {report.title.split(" ").slice(0, -1).join(" ")}<br />
+              <em>{report.title.split(" ").slice(-1)[0]}</em>
+            </h1>
+            {edit && <p className="tmd-hero-subtitle">{edit.subTitle}</p>}
+            <Link to={`/trends/${report.slug}`} className="tmd-hero-public-link">
+              Read the public report →
+            </Link>
+          </div>
         </div>
-
-        {/* Personal heading */}
-        <h1 className="te-headline">
-          My nAia<br />
-          <em className="te-headline-accent">Trend Edit</em>
-        </h1>
-        {edit && <p className="te-subtitle">{edit.subTitle}</p>}
 
         {/* State: generation error */}
         {generationFailed ? (
-          <div className="te-state-box">
-            <p className="te-state-text">
+          <div className="tmd-state">
+            <p className="tmd-state-text">
               Your nAia Edit is taking a moment. Please try again shortly.
             </p>
-            <Link to={`/trends/${report.slug}`} className="te-state-cta">
+            <Link to={`/trends/${report.slug}`} className="tmd-state-btn">
               Back to the report →
             </Link>
           </div>
         ) : !hasProfile ? (
           /* State: passport incomplete */
-          <div className="te-state-box">
-            <p className="te-state-text">
-              Your nAia Edit reads this report through your Passport — and yours isn&apos;t complete yet. Finish it to see what this direction means for you specifically.
+          <div className="tmd-state">
+            <p className="tmd-state-text">
+              Your nAia Edit reads this report through your Passport — and yours isn&rsquo;t complete yet. Finish it to see what this direction means for you specifically.
             </p>
-            <Link to="/passport" className="te-state-cta">Complete Your Passport</Link>
+            <Link to="/passport" className="tmd-state-btn">Complete Your Passport →</Link>
           </div>
         ) : edit ? (
-          /* State: full edit */
+          /* Full edit */
           <>
-            {/* 1. WHY THIS MATTERS TO YOU */}
-            <div className="te-reading-box">
-              <div className="te-section-label">Why this matters to you</div>
-              <p className="te-body">{edit.yourVersion}</p>
+            {/* 01 / WHY THIS MATTERS TO YOU */}
+            <div className="tmd-reading-box">
+              <div className="tmd-section-label">01 / Why this matters to you</div>
+              <p className="tmd-body">{edit.yourVersion}</p>
             </div>
 
-            <div className="te-divider" />
-
-            {/* 2. YOUR nAia EVIDENCE */}
-            {(edit.evidenceStyleDna ||
-              edit.evidencePassportSays ||
-              edit.evidenceClosetItems.length > 0 ||
-              edit.evidenceReviews) && (
+            {/* 02 / YOUR nAia EVIDENCE */}
+            {hasEvidence && (
               <>
-                <div className="te-section">
-                  <div className="te-section-label">Your nAia evidence</div>
-                  <div className="te-evidence-panel">
+                <div className="tmd-section">
+                  <div className="tmd-section-label">02 / Your nAia Evidence</div>
+                  <div className="tmd-evidence">
                     {edit.evidenceStyleDna && (
-                      <div className="te-evidence-row">
-                        <div className="te-evidence-label">Your style DNA says</div>
-                        <p className="te-body" style={{ fontSize: "1rem" }}>{edit.evidenceStyleDna}</p>
+                      <div className="tmd-evidence-row">
+                        <div className="tmd-evidence-label">Your style DNA says</div>
+                        <p className="tmd-body" style={{ fontSize: "1rem" }}>{edit.evidenceStyleDna}</p>
                       </div>
                     )}
                     {edit.evidencePassportSays && (
-                      <div className="te-evidence-row">
-                        <div className="te-evidence-label">Your Passport says</div>
-                        <p className="te-body" style={{ fontSize: "1rem" }}>{edit.evidencePassportSays}</p>
+                      <div className="tmd-evidence-row">
+                        <div className="tmd-evidence-label">Your Passport says</div>
+                        <p className="tmd-body" style={{ fontSize: "1rem" }}>{edit.evidencePassportSays}</p>
                       </div>
                     )}
                     {edit.evidenceClosetItems.length > 0 && (
-                      <div className="te-evidence-row">
-                        <div className="te-evidence-label">Your Closet shows</div>
-                        <div className="te-closet-grid">
+                      <div className="tmd-evidence-row">
+                        <div className="tmd-evidence-label">Your Closet shows</div>
+                        <div className="tmd-closet-grid">
                           {edit.evidenceClosetItems.map((item: EvidenceClosetItem, i: number) => (
-                            <div key={i} className="te-closet-item">
+                            <div key={i} className="tmd-closet-item">
                               {item.imageUrl && (
-                                <img
-                                  src={item.imageUrl}
-                                  alt={item.name}
-                                  className="te-closet-img"
-                                />
+                                <img src={item.imageUrl} alt={item.name} className="tmd-closet-img" />
                               )}
-                              <div className="te-closet-name">{item.name}</div>
-                              <p className="te-closet-note">{item.roleNote}</p>
+                              <div className="tmd-closet-name">{item.name}</div>
+                              <p className="tmd-closet-note">{item.roleNote}</p>
                             </div>
                           ))}
                         </div>
                       </div>
                     )}
                     {edit.evidenceReviews && (
-                      <div className="te-evidence-row">
-                        <div className="te-evidence-label">Your reviews suggest</div>
-                        <p className="te-body" style={{ fontSize: "1rem" }}>{edit.evidenceReviews}</p>
+                      <div className="tmd-evidence-row">
+                        <div className="tmd-evidence-label">Your reviews suggest</div>
+                        <p className="tmd-body" style={{ fontSize: "1rem" }}>{edit.evidenceReviews}</p>
                       </div>
                     )}
                   </div>
                   {edit.lowDataNotice && (
-                    <p className="te-low-data-notice">{edit.lowDataNotice}</p>
+                    <p className="tmd-low-data">{edit.lowDataNotice}</p>
                   )}
                 </div>
-                <div className="te-divider" />
+                <div className="tmd-divider" />
               </>
             )}
 
-            {/* 3. YOUR ROUTE IN */}
-            <div className="te-section">
-              <div className="te-section-label">Your route in</div>
-              <p className="te-body">{edit.yourBestRouteIn}</p>
+            {/* 03 / YOUR ROUTE IN */}
+            <div className="tmd-section">
+              <div className="tmd-section-label">03 / Your route in</div>
+              <p className="tmd-body">{edit.yourBestRouteIn}</p>
             </div>
 
-            {/* 4. A LOOK TO TRY */}
-            <div className="te-section">
-              <div className="te-section-label">A look to try</div>
-              <p className="te-body">{edit.aLookToTry}</p>
+            {/* 04 / A LOOK TO TRY */}
+            <div className="tmd-section">
+              <div className="tmd-section-label">04 / A look to try</div>
+              <p className="tmd-body">{edit.aLookToTry}</p>
             </div>
 
-            <div className="te-divider" />
+            <div className="tmd-divider" />
 
-            {/* 5. WORTH INVESTING IN */}
-            <div className="te-section">
-              <div className="te-section-label">Worth investing in</div>
-              <ul className="te-bullet-list">
+            {/* 05 / WORTH INVESTING IN */}
+            <div className="tmd-section">
+              <div className="tmd-section-label">05 / Worth investing in</div>
+              <ul className="tmd-dash-list">
                 {edit.partToTake.map((bullet: string, i: number) => (
                   <li key={i}>{bullet}</li>
                 ))}
               </ul>
             </div>
 
-            {/* 6. HOLD OFF ON */}
-            <div className="te-section">
-              <div className="te-section-label">Hold off on</div>
-              <p className="te-body" style={{ marginBottom: "16px" }}>{edit.theBalanceToProtect}</p>
-              <ul className="te-bullet-list">
+            {/* 06 / HOLD OFF ON */}
+            <div className="tmd-section">
+              <div className="tmd-section-label">06 / Hold off on</div>
+              <p className="tmd-body" style={{ marginBottom: "16px" }}>{edit.theBalanceToProtect}</p>
+              <ul className="tmd-dash-list">
                 {edit.partToLeave.map((bullet: string, i: number) => (
                   <li key={i}>{bullet}</li>
                 ))}
@@ -479,11 +490,12 @@ export default function MyTrendEditDetail() {
             </div>
 
             {/* Footer CTA */}
-            <div className="te-footer-cta">
-              <Link to="/closet" className="te-footer-cta-btn">Open My Closet →</Link>
-              <p className="te-footer-cta-note">
-                Add your most-worn pieces and rate your outfits so nAia can build a sharper edit around your real style world.
+            <div className="tmd-footer">
+              <div className="tmd-footer-eyebrow">build a sharper edit</div>
+              <p className="tmd-footer-body">
+                Add your most-worn pieces and rate your outfits so nAia can read your real style world more precisely.
               </p>
+              <Link to="/closet" className="tmd-footer-btn">Open My Closet →</Link>
             </div>
           </>
         ) : null}
