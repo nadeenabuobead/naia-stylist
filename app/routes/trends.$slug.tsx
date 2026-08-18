@@ -695,7 +695,7 @@ export default function TrendReportDetail() {
       y += boxH + 8;
     }
     if (report.naiaVerdict) { addText("NAIA VERDICT", 8, "bold", [139, 32, 53], 3); addText(report.naiaVerdict, 10, "normal", [34, 21, 22], 8); }
-    if (report.howToWear?.length) { addText("HOW TO WEAR THIS TREND", 8, "bold", [139, 32, 53], 4); report.howToWear.forEach((h) => { addText(`${h.feeling}: ${h.direction}`, 10, "normal", [34, 21, 22], 4); }); y += 4; }
+    if (report.howToWear?.length) { addText("HOW IT TRANSLATES", 8, "bold", [139, 32, 53], 4); report.howToWear.forEach((h) => { addText(`${h.feeling}: ${h.direction}`, 10, "normal", [34, 21, 22], 4); }); y += 4; }
     if (report.wardrobeNote) { addText("WHAT THIS MEANS FOR YOUR WARDROBE", 8, "bold", [139, 32, 53], 3); addText(report.wardrobeNote, 10, "normal", [34, 21, 22], 8); }
     if (report.sources?.length) {
       addText("SOURCES", 8, "bold", [139, 32, 53], 4);
@@ -860,12 +860,12 @@ export default function TrendReportDetail() {
           </div>
         )}
 
-        {/* How to Wear */}
+        {/* How It Translates */}
         {report.howToWear?.length ? (
           <>
             <div className="psl-divider" />
             <div className="psl-section">
-              <div className="psl-section-label">How to Wear This</div>
+              <div className="psl-section-label">How It Translates</div>
               {report.howToWear.map((h, i) => (
                 <div key={i} className="psl-how-row">
                   <div className="psl-how-feeling">{h.feeling}</div>

@@ -756,7 +756,7 @@ describe("buildShopperEdit — correction-pass fixes", () => {
   it("Outcome C + one-piece DRESS route → Look To Try uses owned DRESS, not a missing garment category (real report)", () => {
     // Uses the production soft-structure report corpus, not a simplified fixture.
     // In the real corpus: "blazer" and "linen" appear → TOPS scores ≥ 5
-    //                     "midi" appears in howToWear  → DRESSES scores 4
+    //                     "midi" appears in keyTrends[0] → DRESSES scores ≥ 1
     // TOPS is namedMatches[0] (higher score), DRESSES is namedMatches[1].
     // Only DRESSES satisfies the one-piece viable route → Outcome C fires.
     // Pre-fix: Look To Try used namedMatches[0] (TOPS) and invented a trouser.

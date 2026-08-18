@@ -43,6 +43,7 @@ export type TrendReportData = {
   naiaVerdict?: string;
   howToWear?: { feeling: string; direction: string }[];
   wardrobeNote?: string;
+  naiaTake?: string;
   sources: TrendReportSource[];
   published: boolean;
 };
@@ -62,7 +63,7 @@ export const trendReports: TrendReportData[] = [
       {
         name: "Softened tailoring",
         description:
-          "A jacket or trouser that holds its silhouette through cut and fabric weight — a longline blazer with a clean shoulder, wide-leg trousers with enough length to break at the foot. The structure comes from proportion, not from stiff interfacing. Pair one clearly shaped piece with one that simply moves.",
+          "A jacket, trouser, or dress that holds its silhouette through cut and fabric weight — a longline blazer with a clean shoulder, wide-leg trousers with enough length to break at the foot, a draped midi dress in a fabric that keeps its line. The structure comes from proportion, not from stiff interfacing.",
       },
       {
         name: "One sculptural gesture",
@@ -104,39 +105,34 @@ export const trendReports: TrendReportData[] = [
     ],
     spendSaveSkip: {
       spend:
-        "One longline blazer, clean wide-leg trouser, or draped midi dress in a fabric that holds its shape without pressing. This is the anchor piece that changes the proportion of what you already own.",
+        "One longline blazer, clean wide-leg trouser, or draped midi dress in a fabric that holds its shape without pressing. Look for a silhouette that reads as proportioned through cut — not padded through interfacing.",
       save:
         "Extreme sculptural pieces — heavily padded shoulders, oversized balloon sleeves, aggressively asymmetric construction. These are single-season gestures with no repeat value.",
       alreadyOwn:
-        "A straight or wide-leg trouser you already own reads as soft structure when paired with a draped blouse or fine knit instead of a matching jacket. The proportion combination is the editorial move — not a new purchase.",
+        "A straight or wide-leg trouser or blazer you already own reads as soft-structured when the fabric holds its line and the silhouette sits through cut rather than stiffness. Check the piece, not just the outfit.",
     },
     investmentNotes:
       "Buy one piece that changes the proportion of what you already own: a longline blazer, draped midi dress, sharply cut wide-leg trouser, structured vest, or sculptural neutral bag. Skip extreme volume or rigid tailoring that does not suit your real life.",
     naiaInterpretation:
-      "Soft Structure is especially useful for wardrobes seeking polish and presence without tight cuts, revealing silhouettes, or embellished detail. It creates impact through proportion and fabric weight rather than decoration.",
+      "Especially useful as a shopping lens: it gives a criterion for what makes a structured piece worth buying — does its shape come from cut and fabric weight, or from stiffness and internal padding? A piece that holds itself is the investment.",
     naiaVerdict:
       "Soft Structure is the most practically useful Spring 2026 direction for a wardrobe that already exists. It does not require starting over — it requires one anchor piece with real proportion worn against something familiar. The mistake to avoid: buying structured pieces that are too stiff or too fashion-forward to rewear across more than one season.",
     howToWear: [
       {
-        feeling: "For work",
-        direction: "A softly structured blazer, fluid trouser, and fine knit or clean top.",
-      },
-      {
-        feeling: "For dinner",
-        direction: "A draped midi or column dress with minimal accessories.",
-      },
-      {
-        feeling: "For everyday",
-        direction: "One architectural layer with denim or another familiar base.",
-      },
-      {
-        feeling: "For modest dressing",
+        feeling: "When presence is the goal",
         direction:
-          "Use long vertical layers and one structured element, then let the remaining pieces move.",
+          "A garment that holds its shape through cut does the register work that styling usually has to. In professional, social, or considered contexts, the silhouette reads as intentional — nothing around it has to do more.",
+      },
+      {
+        feeling: "In relaxed and everyday contexts",
+        direction:
+          "One piece with genuine construction creates visual ease that multiple layers or accessories usually have to construct together. The discipline is reduction: fewer pieces, more resolved result.",
       },
     ],
     wardrobeNote:
-      "One architectural piece + one familiar fluid piece + restrained accessories = quiet presence.",
+      "A piece that holds its silhouette through cut and fabric weight — not through stiffness — is the only commitment this direction asks.",
+    naiaTake:
+      "The practical test is not how a piece looks on a hanger. It is whether the silhouette comes from cut, proportion, and fabric behaviour — or from heavy interfacing and internal stiffness. A piece that holds its shape through cut has stronger rewear potential across seasons and contexts. A piece that borrows structure from padding or from the outfit assembled around it will need styling to rescue it. That is the Soft Structure criterion.",
     sources: [
       {
         publisher: "Givenchy",
@@ -218,24 +214,25 @@ export const trendReports: TrendReportData[] = [
       "Modern tailoring works when the tailored piece is treated as a tool, not a statement. One well-cut jacket or trouser changes the register of everything worn with it. The investment is in the proportion — long enough, relaxed enough in the leg or sleeve, in a fabric that works across more than one season.",
     howToWear: [
       {
-        feeling: "For work",
-        direction: "Tailored trousers with a soft shirt, knit, or clean jersey top.",
+        feeling: "The contrast is context-independent",
+        direction:
+          "A tailored piece worn against something relaxed creates register at work, at dinner, and at the weekend — because the contrast is doing the work, not the formality of the setting.",
       },
       {
-        feeling: "For dinner",
-        direction: "A structured blazer over a slip, draped skirt, or column dress.",
+        feeling: "The value is in cross-purposing",
+        direction:
+          "One tailored anchor changes the tone of fluid counterparts across multiple outfits. The variation comes from what the anchor meets, not from buying a different anchor for each occasion.",
       },
       {
-        feeling: "For travel",
-        direction: "Fluid trousers, a tonal knit, and a longline blazer.",
-      },
-      {
-        feeling: "For casual days",
-        direction: "One tailored piece with denim, a white T-shirt, or flats.",
+        feeling: "Proportion is the styling decision",
+        direction:
+          "Once the anchor and its counterpart are set, there is nothing left to add. This direction does not compound through layering or accessorising.",
       },
     ],
     wardrobeNote:
       "One tailored anchor + one fluid or familiar piece + one intentional proportion = modern polish without stiffness.",
+    naiaTake:
+      "The argument is strategic rather than aesthetic: one well-chosen tailored piece, worn against fluid counterparts you already own, multiplies functional outfits without multiplying the wardrobe. The buying question is not whether the tailored piece looks good in isolation, but whether it changes the register of several pieces you already own. If it only works in one tightly defined look, its wardrobe value is narrower.",
     sources: [
       {
         publisher: "Victoria Beckham",
@@ -316,25 +313,20 @@ export const trendReports: TrendReportData[] = [
       "Colour direction is a method, not a palette. The nAia approach: one quiet foundation, one deep anchor, one clear accent. The value is in the discipline — choosing one accent that changes everything you already own rather than buying into a seasonal shade that only works in one context.",
     howToWear: [
       {
-        feeling: "For work",
-        direction: "A calm base with colour through a shirt, bag, shoe, scarf, or fine knit.",
-      },
-      {
-        feeling: "For dinner",
-        direction: "A neutral column or tailored base with one coloured satin or leather accent.",
-      },
-      {
-        feeling: "For everyday",
-        direction: "Denim, white, and brown as a base; add one expressive knit, flat, or bag.",
-      },
-      {
-        feeling: "For modest dressing",
+        feeling: "The ratio is constant",
         direction:
-          "Use a long neutral layer and introduce colour through the inner layer, bag, shoe, or scarf.",
+          "One composed foundation, one deliberate departure — across all contexts. How the accent is deployed changes (bag, shoe, outer layer, knit), but the proportion does not.",
+      },
+      {
+        feeling: "Colour works through contrast, not coverage",
+        direction:
+          "One precise accent against a quiet ground reads with clarity. Multiple coloured pieces in the same look reduce the contrast and dilute the effect the accent was meant to create.",
       },
     ],
     wardrobeNote:
       "One quiet base + one deep anchor + one clear accent = colour with intention.",
+    naiaTake:
+      "The distinction that matters is between seasonal colour and colour discipline. Seasonal colour tells you which shades are current; colour discipline tells you that one deliberate accent, placed against a composed quiet base, works regardless of which shades are current. Espresso and warm deep brown are where nAia sees some of the clearest unrealised styling value in this palette: they can ground a look with the depth of black while feeling softer than black and less expected than beige. The Pantone data establishes the broader palette direction. The espresso observation is nAia's editorial read.",
     sources: [
       {
         publisher: "Pantone",
