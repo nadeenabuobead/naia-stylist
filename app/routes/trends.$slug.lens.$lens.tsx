@@ -46,7 +46,7 @@ const LENS_ORDER: LensKey[] = [
 ];
 
 const SITE_NAV = [
-  { label: "HOME", to: "/" },
+  { label: "HOME", to: "/trends" },
   { label: "THE HOUSE", to: "/about" },
   { label: "THE COLLECTION", to: "/naia-collection" },
   { label: "THE ART STORY", to: "/art-story" },
@@ -175,7 +175,7 @@ export function ErrorBoundary() {
               </Link>
             ))}
           </nav>
-          <Link to="/" className="tr-header-logo">NADINE</Link>
+          <Link to="/trends" className="tr-header-logo">NADINE</Link>
           <div className="tr-header-right">
             <Link to="/trends/my-edits" className="tr-personal-link">My Trend Edits ↗</Link>
           </div>
@@ -213,7 +213,7 @@ export default function TrendLens() {
               </Link>
             ))}
           </nav>
-          <Link to="/" className="tr-header-logo">NADINE</Link>
+          <Link to="/trends" className="tr-header-logo">NADINE</Link>
           <div className="tr-header-right">
             <Link to={`/trends/my-edits/${report.slug}`} className="tr-personal-link">My Trend Edits ↗</Link>
           </div>

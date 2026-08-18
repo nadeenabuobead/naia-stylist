@@ -43,25 +43,25 @@ describe("NADINE wordmark in all public trend routes", () => {
   });
 });
 
-// ─── Logo links to / ──────────────────────────────────────────────────────────
+// ─── Logo links to /trends (public homepage — / is authenticated dashboard) ───
 
-describe("Logo (NADINE wordmark) links to /", () => {
-  it("trends.jsx: NADINE links to /", () => {
+describe("Logo (NADINE wordmark) links to /trends", () => {
+  it("trends.jsx: NADINE links to /trends", () => {
     assert.ok(
-      trendsJsx.includes('to="/" className="pub-header-logo">NADINE'),
-      "trends.jsx NADINE must link to /",
+      trendsJsx.includes('to="/trends" className="pub-header-logo">NADINE'),
+      "trends.jsx NADINE must link to /trends, not / (/ is authenticated dashboard)",
     );
   });
-  it("trends.$slug.tsx: NADINE links to /", () => {
+  it("trends.$slug.tsx: NADINE links to /trends", () => {
     assert.ok(
-      slugTsx.includes('to="/" className="psl-header-logo">NADINE'),
-      "trends.$slug.tsx NADINE must link to /",
+      slugTsx.includes('to="/trends" className="psl-header-logo">NADINE'),
+      "trends.$slug.tsx NADINE must link to /trends, not / (/ is authenticated dashboard)",
     );
   });
-  it("trends.$slug.lens.$lens.tsx: NADINE links to /", () => {
+  it("trends.$slug.lens.$lens.tsx: NADINE links to /trends", () => {
     assert.ok(
-      lensTsx.includes('to="/" className="tr-header-logo">NADINE'),
-      "trends.$slug.lens.$lens.tsx NADINE must link to /",
+      lensTsx.includes('to="/trends" className="tr-header-logo">NADINE'),
+      "trends.$slug.lens.$lens.tsx NADINE must link to /trends, not / (/ is authenticated dashboard)",
     );
   });
 });

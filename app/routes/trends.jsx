@@ -512,7 +512,7 @@ const css = `
 `;
 
 const SITE_NAV = [
-  { label: "HOME", to: "/" },
+  { label: "HOME", to: "/trends" },
   { label: "THE HOUSE", to: "/about" },
   { label: "THE COLLECTION", to: "/naia-collection" },
   { label: "THE ART STORY", to: "/art-story" },
@@ -554,7 +554,7 @@ export default function TrendReports() {
               </Link>
             ))}
           </nav>
-          <Link to="/" className="pub-header-logo">NADINE</Link>
+          <Link to="/trends" className="pub-header-logo">NADINE</Link>
           <div className="pub-header-right">
             <Link to="/trends/my-edits" className="pub-personal-link">
               My Trend Edits ↗

@@ -8,7 +8,7 @@ const FONTS =
 const TINTS = ["#efeae0", "#e6dccb", "#d9c9b5", "#efe6d7", "#e2d3bf", "#ede2cf"];
 
 const SITE_NAV = [
-  { label: "HOME", to: "/" },
+  { label: "HOME", to: "/trends" },
   { label: "THE HOUSE", to: "/about" },
   { label: "THE COLLECTION", to: "/naia-collection" },
   { label: "THE ART STORY", to: "/art-story" },
@@ -709,7 +709,7 @@ export function ErrorBoundary() {
               </Link>
             ))}
           </nav>
-          <Link to="/" className="psl-header-logo">NADINE</Link>
+          <Link to="/trends" className="psl-header-logo">NADINE</Link>
           <div className="psl-header-right">
             <Link to="/trends/my-edits" className="psl-personal-link">My Trend Edits ↗</Link>
           </div>
@@ -857,7 +857,7 @@ export default function TrendReportDetail() {
               </Link>
             ))}
           </nav>
-          <Link to="/" className="psl-header-logo">NADINE</Link>
+          <Link to="/trends" className="psl-header-logo">NADINE</Link>
           <div className="psl-header-right">
             <button className={`psl-action-btn${copyStatus === "copied" ? " active" : ""}`} onClick={copyLink}>
               {copyStatus === "copied" ? "Copied ✓" : copyStatus === "error" ? "Failed" : "Copy link"}
