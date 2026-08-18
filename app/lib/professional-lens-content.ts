@@ -138,6 +138,18 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
           avoid: "Heavy interfacing, overbuilt shoulders, complicated drape.",
         },
         {
+          type: "avoid-chips",
+          label: "WHAT NOT TO COPY",
+          chips: [
+            "OVERBUILT SHOULDERS",
+            "HEAVY INTERFACING",
+            "COMPLICATED DRAPE",
+            "STYLING-DEPENDENT SHAPES",
+            "TOO MANY PROPORTION GESTURES",
+          ],
+          closing: "The value is not in recreating the reference. It is in extracting the construction principle.",
+        },
+        {
           type: "product-brief",
           label: "THE PRODUCT TRANSLATION",
           categories: ["Longline blazer", "Wide-leg trouser", "Draped midi dress", "Structured vest"],
@@ -156,18 +168,6 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
             { label: "FABRIC", body: "Choose body or movement. Do not use limp fabric for a structured piece or stiff fabric for a fluid one." },
             { label: "LENGTH", body: "Let length create authority. Cropped or short proportions need a clear reason." },
           ],
-        },
-        {
-          type: "avoid-chips",
-          label: "WHAT NOT TO COPY",
-          chips: [
-            "OVERBUILT SHOULDERS",
-            "HEAVY INTERFACING",
-            "COMPLICATED DRAPE",
-            "STYLING-DEPENDENT SHAPES",
-            "TOO MANY PROPORTION GESTURES",
-          ],
-          closing: "The value is not in recreating the reference. It is in extracting the construction principle.",
         },
         {
           type: "prototype-cards",
@@ -252,20 +252,11 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
         },
         {
           type: "stacked-rows",
-          label: "COMMERCIAL CONFIDENCE",
+          label: "BUYING DEPTH",
           rows: [
-            { label: "HIGH CONFIDENCE", body: "Wide-leg trousers, longline blazers, soft tailoring separates.", sub: "High repeat value; easy wardrobe integration." },
-            { label: "MEDIUM CONFIDENCE", body: "Draped midi dresses, structured vests.", sub: "Commercially useful, but more dependent on customer lifestyle, styling context, and price point." },
-            { label: "LOW CONFIDENCE", body: "Extreme sculptural pieces, heavy padded shoulders, runway-only shapes.", sub: "Low repeat value; higher risk of looking over-designed or too occasion-specific." },
-          ],
-        },
-        {
-          type: "stacked-rows",
-          label: "DEPTH RECOMMENDATION",
-          rows: [
-            { label: "BUY DEEPER", body: "Clean wide-leg trousers, longline blazers, soft tailoring separates." },
-            { label: "TEST LIGHTLY", body: "Structured vests, proportion-led statement pieces, and draped midi dresses where the use case is occasion-specific." },
-            { label: "HOLD OFF", body: "Overbuilt shoulders, extreme volume, stiff suiting, pieces that only work when heavily styled." },
+            { label: "BUY DEEPER", body: "Clean wide-leg trousers, longline blazers, soft tailoring separates.", sub: "High repeat value — easy wardrobe integration. Strongest depth opportunity." },
+            { label: "TEST LIGHTLY", body: "Structured vests, proportion-led statement pieces, and draped midi dresses where the use case is occasion-specific.", sub: "Commercially valid, more dependent on customer lifestyle and styling context." },
+            { label: "HOLD OFF", body: "Overbuilt shoulders, extreme volume, stiff suiting, pieces that only work when heavily styled.", sub: "Short sell-through window. Low repeat value; higher risk of looking over-designed or occasion-specific." },
           ],
         },
         {
@@ -314,6 +305,7 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
           rows: [
             { label: "SAY", body: "Composed · considered · clean · proportion · presence · ease · softened tailoring · quiet confidence" },
             { label: "AVOID", body: "Boss babe · power dressing · statement-making · dramatic · must-have trend · runway-inspired · officewear-only" },
+            { label: "BRIEF AGAINST", body: "Marketing it as a loud trend. Making it a full outfit formula. Over-styling the campaign. Framing as officewear only. The direction works because it feels effortless — over-explaining or over-styling collapses that." },
           ],
         },
         {
@@ -330,19 +322,6 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
           closing: "Use these as social captions, email subject lines, or product description openers. Each one works alone.",
         },
         {
-          type: "avoid-chips",
-          label: "WHAT NOT TO DO",
-          chips: [
-            "MARKET AS A LOUD TREND",
-            "MAKE IT A FULL OUTFIT FORMULA",
-            "MAKE IT LOOK LIKE A RUNWAY COPY",
-            "OVER-STYLE THE CAMPAIGN",
-            "OVER-EXPLAIN THE DIRECTION",
-            "FRAME AS OFFICEWEAR ONLY",
-          ],
-          closing: "The more you over-explain or over-style it, the less believable it becomes. The direction works because it feels effortless.",
-        },
-        {
           type: "highlight",
           label: "THE DECISION",
           body: "Brief from the feeling of already having made a considered decision.\n\nOne look, one garment, one reason for it.",
@@ -353,30 +332,17 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
     "creative-director": {
       modules: [
         {
-          label: "THE CREATIVE READ",
-          body: "Soft Structure is not about drama. It is about controlled ease — clothes with enough shape to hold the frame, and enough softness to let the woman stay present.\n\nThe visual job is not to announce the trend. It is to show the woman wearing the decision she has already made.",
-        },
-        {
-          label: "THE VISUAL WORLD",
-          body: "Quiet interiors. Negative space. Neutral architecture. Soft diffused daylight.\n\nThe set must earn its place by framing the garment, not competing with it. Fabric, proportion, and the woman's presence carry the image. Everything else is background.",
+          label: "THE CREATIVE BRIEF",
+          body: "Soft Structure is not about drama. It is about controlled ease — clothes with enough shape to hold the frame, and enough softness to let the woman stay present. The visual job is not to announce the trend. It is to show the woman wearing the decision she has already made.\n\nQuiet interiors. Negative space. Neutral architecture. Soft diffused daylight. The set earns its place by framing the garment, not competing with it. Fabric, proportion, and the woman's presence carry the image. Everything else is background.",
         },
         {
           type: "stacked-rows",
-          label: "THE IMAGE MUST PROVE",
+          label: "THE IMAGE",
           rows: [
-            { label: "THE GARMENT HOLDS THE FRAME", body: "The line, drape, and proportion must be clear before anything else." },
-            { label: "THE WOMAN HOLDS THE PRESENCE", body: "She should feel self-possessed, not styled into a concept." },
-            { label: "THE SET SUPPORTS THE SILHOUETTE", body: "The environment should frame the silhouette, not become the image." },
-          ],
-        },
-        {
-          type: "stacked-rows",
-          label: "IMAGE LANGUAGE",
-          rows: [
-            { label: "COMPOSITION", body: "One clear silhouette. Let space frame the garment. The eye should land on the line, not the styling." },
-            { label: "LIGHT", body: "Soft natural light or diffused studio. Avoid harsh contrast unless it sharpens the line." },
-            { label: "MOVEMENT", body: "Small gestures. Fabric caught mid-shift. The garment moves; the silhouette holds." },
-            { label: "DETAIL", body: "Shoulder, waist, hem, drape, closure, fabric handle. One detail at a time." },
+            { label: "THE GARMENT LEADS", body: "The line, drape, and proportion must be clear before anything else. One clear silhouette. Let space frame the garment — the eye lands on the line, not the styling." },
+            { label: "LIGHT", body: "Soft natural light or diffused studio. Avoid harsh contrast unless it sharpens the line. The light must describe the shoulder, hem, and fabric handle — not dominate them." },
+            { label: "MOVEMENT", body: "Small gestures. Fabric caught mid-shift. The garment moves; the silhouette holds. The woman should feel self-possessed, not styled into a concept." },
+            { label: "DETAIL", body: "Shoulder, waist, hem, drape, closure, fabric handle. One detail at a time. Close shots where the cut reads clearly." },
           ],
         },
         {
@@ -394,26 +360,12 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
         },
         {
           type: "stacked-rows",
-          label: "CASTING + ENERGY",
+          label: "CAST & SET",
           rows: [
-            { label: "COMPOSURE", body: "Self-possessed. Present but not performing. Confidence through stillness, not attitude." },
-            { label: "POSE", body: "Natural stance, small movements. Not overly directed, not stiff. Nothing that reads as power-suit acting." },
-            { label: "ENERGY", body: "The woman is aware of herself — not the clothes, not the camera." },
+            { label: "COMPOSURE", body: "Self-possessed. Present but not performing. Confidence through stillness, not attitude. She is aware of herself — not the clothes, not the camera." },
+            { label: "POSE", body: "Natural stance, small movements. Not overly directed, not stiff. Nothing that reads as power-suit acting. Hands relaxed — at the side, touching a lapel, settled." },
+            { label: "SET", body: "Neutral room. Gallery-like interior. Stone, plaster, glass, or wood. Quiet hallways, clean studios, soft city interiors. The set should support the silhouette. When the set becomes the story, the garment disappears." },
           ],
-        },
-        {
-          type: "avoid-chips",
-          label: "SET + ATMOSPHERE",
-          chips: [
-            "NEUTRAL ROOM",
-            "GALLERY-LIKE INTERIOR",
-            "STONE / PLASTER / GLASS / WOOD",
-            "QUIET HALLWAY",
-            "CLEAN STUDIO",
-            "SOFT CITY BACKDROP",
-            "TRAVEL / INTERIOR TRANSITION SPACES",
-          ],
-          closing: "The set should support the silhouette. When the set becomes the story, the garment disappears.",
         },
         {
           type: "avoid-chips",
@@ -552,6 +504,19 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
           avoid: "Matching-set logic, stiff interfacings, overbuilt shoulders, and any construction that only reads when styled with its pair.",
         },
         {
+          type: "avoid-chips",
+          label: "WHAT NOT TO COPY",
+          chips: [
+            "MATCHING SUIT LOGIC",
+            "HARD SHOULDER PADS",
+            "STIFF FUSED FRONTS",
+            "NOVELTY LAPELS",
+            "SEASONAL SUIT COLOURS",
+            "OVERBUILT WAIST SEAMING",
+          ],
+          closing: "The value is not in recreating the Victoria Beckham silhouette. It is in extracting the construction principle: one tailored piece must hold its line alone, without its pair.",
+        },
+        {
           type: "product-brief",
           label: "THE PRODUCT TRANSLATION",
           categories: [
@@ -586,19 +551,6 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
             { label: "FABRIC", body: "Choose body or movement. A structured piece needs a fabric that holds its line across wears; a fluid piece needs weight to drape, not collapse." },
             { label: "LENGTH", body: "Length creates the proportion argument. Longline must clear the hip with intention; cropped must sit high enough to contrast a wide leg." },
           ],
-        },
-        {
-          type: "avoid-chips",
-          label: "WHAT NOT TO COPY",
-          chips: [
-            "MATCHING SUIT LOGIC",
-            "HARD SHOULDER PADS",
-            "STIFF FUSED FRONTS",
-            "NOVELTY LAPELS",
-            "SEASONAL SUIT COLOURS",
-            "OVERBUILT WAIST SEAMING",
-          ],
-          closing: "The value is not in recreating the Victoria Beckham silhouette. It is in extracting the construction principle: one tailored piece must hold its line alone, without its pair.",
         },
         {
           type: "prototype-cards",
@@ -672,20 +624,11 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
         },
         {
           type: "stacked-rows",
-          label: "COMMERCIAL CONFIDENCE",
+          label: "BUYING DEPTH",
           rows: [
-            { label: "HIGH CONFIDENCE", body: "Longline blazers, fluid wide-leg trousers, tailored separates in neutrals.", sub: "High repeat value; easy wardrobe integration across work, dinner, and travel." },
-            { label: "MEDIUM CONFIDENCE", body: "Waistcoats as top layers, structured evening blazers, cropped tailored jackets.", sub: "Commercially useful, but more dependent on customer lifestyle, styling context, and price point." },
-            { label: "LOW CONFIDENCE", body: "Matching suits in seasonal colour, fashion-forward tailored cuts, stiff-fabric novelty pieces.", sub: "Low repeat value; higher risk of looking over-designed or too occasion-specific." },
-          ],
-        },
-        {
-          type: "stacked-rows",
-          label: "DEPTH RECOMMENDATION",
-          rows: [
-            { label: "BUY DEEPER", body: "Longline blazers, fluid wide-leg trousers, and tailored separates in neutral fabrics with body and movement.", sub: "Anchor pieces with three or more styling use cases." },
-            { label: "TEST LIGHTLY", body: "Waistcoats worn as top layers, structured evening blazers, and cropped tailored jackets where the use case is more proportion-specific.", sub: "Commercially valid but needs styling context to sell." },
-            { label: "HOLD OFF", body: "Matching suits in seasonal colour, stiff fabrications, and fashion-forward tailored cuts.", sub: "Short lifespan and low repeat value." },
+            { label: "BUY DEEPER", body: "Longline blazers, fluid wide-leg trousers, and tailored separates in neutral fabrics with body and movement.", sub: "High repeat value — anchor pieces with three or more styling use cases across work, dinner, and travel." },
+            { label: "TEST LIGHTLY", body: "Waistcoats worn as top layers, structured evening blazers, and cropped tailored jackets.", sub: "Commercially valid; needs strong styling context and clear price positioning to sell." },
+            { label: "HOLD OFF", body: "Matching suits in seasonal colour, stiff fabrications, and fashion-forward tailored cuts.", sub: "Short lifespan and low repeat value. Only functions in one context." },
           ],
         },
         {
@@ -734,6 +677,7 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
           rows: [
             { label: "SAY", body: "Anchor · counterpart · proportion · fluid · longline · considered · composed · separates · one tailored piece · softened · wearable · changes the feeling" },
             { label: "AVOID", body: "Power suit · boss · workwear · officewear · sharp · commanding · matching set · runway · must-have · statement suit · girl boss · corporate" },
+            { label: "BRIEF AGAINST", body: "Styling it as a full matching suit. Framing as officewear only. Over-layering the campaign looks. Pushing a seasonal colour suit as the hero. The direction only works if the tailored piece looks like a tool, not a costume." },
           ],
         },
         {
@@ -751,20 +695,6 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
           closing: "Use these as social captions, email subject lines, or product page openers — each one stands alone without needing a second line.",
         },
         {
-          type: "avoid-chips",
-          label: "WHAT NOT TO DO",
-          chips: [
-            "STYLE IT AS A FULL MATCHING SUIT",
-            "FRAME AS OFFICEWEAR ONLY",
-            "USE POWER-DRESSING LANGUAGE",
-            "OVER-LAYER THE CAMPAIGN LOOKS",
-            "PUSH A SEASONAL COLOUR SUIT AS THE HERO",
-            "TREAT TAILORING AS A TREND MOMENT",
-            "SHOW THE JACKET ONLY WITH ITS MATCHING TROUSER",
-          ],
-          closing: "The direction only works if the tailored piece looks like a tool, not a costume. Over-styling, matching, or corporate framing collapses the whole idea.",
-        },
-        {
           type: "highlight",
           label: "THE DECISION",
           body: "Brief from the feeling of one considered piece doing the work — not from the suit, not from the office, not from the trend.\n\nOne tailored anchor. One soft counterpart. One deliberate proportion. That is the campaign.",
@@ -775,29 +705,16 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
     "creative-director": {
       modules: [
         {
-          label: "THE CREATIVE READ",
-          body: "Modern tailoring is not a suit. It is one deliberate tailored piece — a blazer, a waistcoat, a trouser — treated as an anchor, softened by something fluid beside it. The register is composed, not corporate. The line matters more than the set.\n\nThe visual job is to show the tailored piece doing its work quietly. Not styled into a look. Not staged as a statement. The image must read as a decision already made — a woman wearing tailoring as a tool, not a uniform.",
-        },
-        {
-          label: "THE VISUAL WORLD",
-          body: "Quiet rooms with architectural bones. Pale plaster, aged wood, cool concrete, a single window doing the lighting. Daylight through linen. Nothing decorative, nothing loud.\n\nThe garment carries the image. The set holds the silhouette in space and steps back. Proportion is the subject; the room is the frame. If the eye lands on the interior before the line of the jacket, the image has failed.",
+          label: "THE CREATIVE BRIEF",
+          body: "Modern tailoring is not a suit. It is one deliberate tailored piece — a blazer, a waistcoat, a trouser — treated as an anchor, softened by something fluid beside it. The register is composed, not corporate. The image must read as a decision already made — a woman wearing tailoring as a tool, not a uniform.\n\nQuiet rooms with architectural bones. Pale plaster, aged wood, cool concrete, a single window doing the lighting. The garment carries the image. The set holds the silhouette in space and steps back. Proportion is the subject; the room is the frame. If the eye lands on the interior before the line of the jacket, the image has failed.",
         },
         {
           type: "stacked-rows",
-          label: "THE IMAGE MUST PROVE",
+          label: "THE IMAGE",
           rows: [
-            { label: "THE TAILORED PIECE READS AS THE ANCHOR", body: "The blazer, waistcoat, or trouser must set the register of the frame. Its line, shoulder, and drape are legible before anything else." },
-            { label: "THE CONTRAST DOES THE STYLING", body: "The softer counterpart — a slip, a knit, denim, a fluid trouser — must be visible as a deliberate proportion decision, not a filler piece." },
-            { label: "THE WOMAN READS AS COMPOSED, NOT CORPORATE", body: "She wears the tailoring; the tailoring does not wear her. Presence over polish. Ease over performance." },
-          ],
-        },
-        {
-          type: "stacked-rows",
-          label: "IMAGE LANGUAGE",
-          rows: [
-            { label: "COMPOSITION", body: "One clear silhouette against negative space. The eye lands on the proportion contrast — long against narrow, structured against fluid — before anything else." },
+            { label: "THE TAILORED PIECE LEADS", body: "The blazer, waistcoat, or trouser must set the register of the frame. Its line, shoulder, and drape are legible before anything else. One clear silhouette against negative space." },
             { label: "LIGHT", body: "Soft diffused daylight. Directional enough to describe the shoulder line and the drape of the trouser. No hard shadows, no studio flatness." },
-            { label: "MOVEMENT", body: "A blazer caught mid-step. A trouser leg in motion. A waistcoat open over a shirt that lifts. The tailored piece holds; the softer piece moves." },
+            { label: "MOVEMENT", body: "A blazer caught mid-step. A trouser leg in motion. A waistcoat open over a shirt that lifts. The tailored piece holds; the softer counterpart — visible, never hidden — moves." },
             { label: "DETAIL", body: "Shoulder seam, lapel roll, waistcoat button stance, trouser break, hem meeting shoe. One structural detail at a time." },
           ],
         },
@@ -817,27 +734,12 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
         },
         {
           type: "stacked-rows",
-          label: "CASTING + ENERGY",
+          label: "CAST & SET",
           rows: [
-            { label: "COMPOSURE", body: "Self-possessed. She has already decided how she wants to be seen. No searching for the camera, no adjusting the jacket." },
+            { label: "COMPOSURE", body: "Self-possessed. She has already decided how she wants to be seen. No searching for the camera, no adjusting the jacket. Quiet authority — she is aware of the room, not the lens." },
             { label: "POSE", body: "Grounded stance. Weight settled. Hands relaxed — in a pocket, at the side, resting on a lapel. Nothing arranged, nothing posed into shape." },
-            { label: "ENERGY", body: "Quiet authority. She is aware of the room, not the lens. The tailoring reads as a tool she uses, not a costume she is wearing." },
+            { label: "SET", body: "Pale plaster walls. Architectural doorways. Bare wooden floors. A single tall window. Linen-filtered daylight. Empty corridors. The room should feel unfurnished, unhurried, and quiet. When the set starts telling a story, the tailoring loses its line." },
           ],
-        },
-        {
-          type: "avoid-chips",
-          label: "SET + ATMOSPHERE",
-          chips: [
-            "PALE PLASTER WALLS",
-            "ARCHITECTURAL DOORWAYS",
-            "BARE WOODEN FLOORS",
-            "A SINGLE TALL WINDOW",
-            "LINEN-FILTERED DAYLIGHT",
-            "EMPTY CORRIDORS",
-            "NEUTRAL STONE OR CONCRETE",
-            "MORNING LIGHT, NEVER GOLDEN HOUR",
-          ],
-          closing: "The room should feel unfurnished, unhurried, and quiet. When the set starts telling a story, the tailoring loses its line.",
         },
         {
           type: "avoid-chips",
@@ -979,6 +881,19 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
           avoid: "Coordinated colourways across multiple pieces, tonal matching between accent and base, and accent placement that competes with a second design gesture on the same garment.",
         },
         {
+          type: "avoid-chips",
+          label: "WHAT NOT TO COPY",
+          chips: [
+            "COORDINATED COLOUR SETS",
+            "ACCENT TRIM ON BASE PIECES",
+            "TONAL MATCHING TOP-TO-BOTTOM",
+            "TWO ACCENT COLOURS IN ONE GARMENT",
+            "CONTRAST TOPSTITCHING ON NEUTRALS",
+            "SEASONAL SHADE AS FULL-LOOK LOGIC",
+          ],
+          closing: "The runway shows the accent already resolved. The design work is building the base piece that lets any accent read — not recreating the specific colour pairing shown.",
+        },
+        {
           type: "product-brief",
           label: "THE PRODUCT TRANSLATION",
           categories: [
@@ -1012,19 +927,6 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
             { label: "FABRIC", body: "Choose base fabrics that read as neutral in multiple lights. If the base shifts tone dramatically, the accent relationship becomes unstable." },
             { label: "LENGTH", body: "Length must be resolved without needing colour to explain it. If the proportion only works because of the accent, the piece has failed." },
           ],
-        },
-        {
-          type: "avoid-chips",
-          label: "WHAT NOT TO COPY",
-          chips: [
-            "COORDINATED COLOUR SETS",
-            "ACCENT TRIM ON BASE PIECES",
-            "TONAL MATCHING TOP-TO-BOTTOM",
-            "TWO ACCENT COLOURS IN ONE GARMENT",
-            "CONTRAST TOPSTITCHING ON NEUTRALS",
-            "SEASONAL SHADE AS FULL-LOOK LOGIC",
-          ],
-          closing: "The runway shows the accent already resolved. The design work is building the base piece that lets any accent read — not recreating the specific colour pairing shown.",
         },
         {
           type: "prototype-cards",
@@ -1099,20 +1001,11 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
         },
         {
           type: "stacked-rows",
-          label: "COMMERCIAL CONFIDENCE",
+          label: "BUYING DEPTH",
           rows: [
-            { label: "HIGH CONFIDENCE", body: "Soft white shirts, stone and cream trousers, espresso tailoring and accessories, washed denim, black knitwear.", sub: "High repeat value. Works across customer segments and wear occasions." },
-            { label: "MEDIUM CONFIDENCE", body: "Deep navy trousers, washed black tailoring, espresso leather bags and shoes at elevated price tier.", sub: "Commercially strong but more dependent on price positioning and customer lifestyle fit." },
-            { label: "LOW CONFIDENCE", body: "Full accent garments — coloured dresses, coloured trousers, coloured tailoring bought in depth.", sub: "Low repeat value. High risk of only working within one styling context." },
-          ],
-        },
-        {
-          type: "stacked-rows",
-          label: "DEPTH RECOMMENDATION",
-          rows: [
-            { label: "BUY DEEPER", body: "Soft white shirts, cream and stone trousers, espresso tailoring, washed denim, black knitwear.", sub: "The quiet base. These pieces underwrite the entire trend." },
-            { label: "TEST LIGHTLY", body: "Espresso bags and shoes, washed black tailored pieces, deep navy trousers at elevated price tiers.", sub: "The anchor. Confident but curated — a single strong option per category." },
-            { label: "HOLD OFF", body: "Full accent-colour garments, coordinated accent capsules, and multi-piece bright colour groupings.", sub: "The accent belongs in accessories and single knits, not in depth categories." },
+            { label: "BUY DEEPER", body: "Soft white shirts, cream and stone trousers, espresso tailoring, washed denim, black knitwear.", sub: "The quiet base. High repeat value; works across customer segments and wear occasions." },
+            { label: "TEST LIGHTLY", body: "Espresso bags and shoes, washed black tailored pieces, deep navy trousers at elevated price tiers.", sub: "The anchor layer — confident but curated. A single strong option per category." },
+            { label: "HOLD OFF", body: "Full accent-colour garments, coordinated accent capsules, and multi-piece bright colour groupings.", sub: "The accent belongs in accessories and single knits — buying depth here contradicts the entire commercial logic of this trend." },
           ],
         },
         {
@@ -1161,6 +1054,7 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
           rows: [
             { label: "SAY", body: "Quiet base · clear accent · deep anchor · considered · one decision · purposeful · espresso · warm neutral · earns its place · intention" },
             { label: "AVOID", body: "Colour of the season · must-have shade · statement colour · palette refresh · trending hue · bold and bright · colour pop · rainbow · dopamine dressing · runway-inspired" },
+            { label: "BRIEF AGAINST", body: "Selling it as a seasonal shade. Styling three coordinated colours in one look. Framing it as a full wardrobe refresh. Ignoring espresso as the anchor story. Over-styling or over-coordinating the accent erases the discipline the direction is built on." },
           ],
         },
         {
@@ -1178,20 +1072,6 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
           closing: "Use these as social captions, email subject lines, or product description openers. Each one works alone.",
         },
         {
-          type: "avoid-chips",
-          label: "WHAT NOT TO DO",
-          chips: [
-            "SELL IT AS A SEASONAL SHADE",
-            "STYLE THREE COORDINATED COLOURS IN ONE LOOK",
-            "OVER-MATCH THE ACCENT TO THE BASE",
-            "FRAME IT AS A FULL WARDROBE REFRESH",
-            "LEAD WITH RUNWAY LANGUAGE",
-            "CROWD THE ACCENT WITH COMPETING DETAIL",
-            "IGNORE ESPRESSO AS THE ANCHOR STORY",
-          ],
-          closing: "The direction works because it feels disciplined. Over-styling or over-coordinating the accent erases the effect it was meant to create.",
-        },
-        {
           type: "highlight",
           label: "THE DECISION",
           body: "Brief from the feeling of one considered accent doing the work the outfit needed.\n\nOne quiet base. One deep anchor. One clear accent. Colour with intention — not colour as a purchase.",
@@ -1202,29 +1082,16 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
     "creative-director": {
       modules: [
         {
-          label: "THE CREATIVE READ",
-          body: "Colour Direction is not a palette story. It is a study in restraint — a quiet base built to hold, and one clear accent placed to change the temperature of the whole frame.\n\nThe visual job is not to celebrate the accent colour. It is to show the discipline of the base that lets the accent read as a decision.",
-        },
-        {
-          label: "THE VISUAL WORLD",
-          body: "Pale plaster walls. Warm concrete. Bleached wood floors. Soft north light held long across a quiet room.\n\nThe set must recede so the base can breathe and the accent can land. Fabric weight, the depth of the anchor neutral, and the single note of colour carry the image. Nothing else competes for the eye.",
+          label: "THE CREATIVE BRIEF",
+          body: "Colour Direction is not a palette story. It is a study in restraint — a quiet base built to hold, and one clear accent placed to change the temperature of the whole frame. The visual job is not to celebrate the accent colour. It is to show the discipline of the base that lets the accent read as a decision.\n\nPale plaster walls. Warm concrete. Bleached wood floors. Soft north light held long across a quiet room. The set must recede so the base can breathe and the accent can land. Fabric weight, the depth of the anchor neutral, and the single note of colour carry the image. Nothing else competes for the eye.",
         },
         {
           type: "stacked-rows",
-          label: "THE IMAGE MUST PROVE",
+          label: "THE IMAGE",
           rows: [
-            { label: "THE BASE HOLDS THE FRAME", body: "The quiet foundation — cream, stone, espresso, washed denim, black — must read as chosen, not default." },
-            { label: "THE ACCENT LANDS ONCE", body: "One clear colour note, placed deliberately, that shifts the mood of the whole look without shouting." },
-            { label: "THE CONTRAST FEELS INTENTIONAL", body: "The accent should meet the base as a decision, not as a coordinated match." },
-          ],
-        },
-        {
-          type: "stacked-rows",
-          label: "IMAGE LANGUAGE",
-          rows: [
-            { label: "COMPOSITION", body: "One silhouette, one accent point. The eye should travel from the calm base to the single note of colour and rest there." },
+            { label: "THE BASE HOLDS", body: "The quiet foundation — cream, stone, espresso, washed denim, black — must read as chosen, not default. One silhouette, one accent point: the eye travels from the calm base to the single note of colour and rests there." },
             { label: "LIGHT", body: "Diffused daylight, warm-neutral. Enough softness to keep the base quiet, enough clarity to let the accent read true." },
-            { label: "MOVEMENT", body: "Stillness with intention. A scarf caught, a bag held, a shoe mid-step — the accent revealed through gesture, not staging." },
+            { label: "MOVEMENT", body: "Stillness with intention. A scarf caught, a bag held, a shoe mid-step — the accent revealed through gesture, not staging. The woman is the reason the colour reads, not the other way around." },
             { label: "DETAIL", body: "Fabric handle of the base. Depth of the anchor neutral. The exact tone of the accent. One note at a time." },
           ],
         },
@@ -1244,27 +1111,12 @@ export const PROFESSIONAL_LENS_CONTENT: Record<string, ReportLenses> = {
         },
         {
           type: "stacked-rows",
-          label: "CASTING + ENERGY",
+          label: "CAST & SET",
           rows: [
-            { label: "COMPOSURE", body: "Assured. The woman wears the accent as a decision already made — not a moment of experimentation caught on camera." },
-            { label: "POSE", body: "Grounded, unhurried. The body holds the base; a hand, a step, or a turn reveals the accent." },
-            { label: "ENERGY", body: "Quiet certainty. She is the reason the colour reads — not the other way around." },
+            { label: "COMPOSURE", body: "Assured. The woman wears the accent as a decision already made — not a moment of experimentation caught on camera. Quiet certainty." },
+            { label: "POSE", body: "Grounded, unhurried. The body holds the base; a hand, a step, or a turn reveals the accent. Nothing overdirected." },
+            { label: "SET", body: "Plaster walls. Warm concrete. Bleached wood. Soft north light. Neutral architecture. Negative space. Undressed rooms. The set should never echo the accent colour — when the room agrees with the colour, the discipline disappears." },
           ],
-        },
-        {
-          type: "avoid-chips",
-          label: "SET + ATMOSPHERE",
-          chips: [
-            "PLASTER WALLS",
-            "WARM CONCRETE",
-            "BLEACHED WOOD",
-            "SOFT NORTH LIGHT",
-            "NEUTRAL ARCHITECTURE",
-            "NEGATIVE SPACE",
-            "MUTED SHADOW",
-            "UNDRESSED ROOMS",
-          ],
-          closing: "The set should never echo the accent. When the room agrees with the colour, the discipline disappears.",
         },
         {
           type: "avoid-chips",
