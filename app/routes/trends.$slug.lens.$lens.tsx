@@ -81,6 +81,7 @@ const css = `
   .tr-lens-nav{margin-bottom:48px}
   .tr-lens-nav-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:16px}
   .tr-lens-nav-row{display:flex;flex-wrap:nowrap;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px;padding-right:16px}
+  @media(max-width:600px){.tr-lens-nav-row{flex-wrap:wrap}}
   .tr-lens-btn{display:inline-block;padding:10px 14px;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;text-decoration:none;border:1px solid rgba(59,5,16,.2);color:var(--deep);transition:background .15s,color .15s,border-color .15s;white-space:nowrap;flex-shrink:0}
   .tr-lens-btn:hover{border-color:var(--accent);color:var(--accent)}
   .tr-lens-btn.active{background:var(--deep);color:var(--cream);border-color:var(--deep)}

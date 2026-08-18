@@ -129,6 +129,7 @@ const css = `
   }
   .psl-action-btn:hover { border-color: #7a1e28; color: #7a1e28; }
   .psl-action-btn.active { color: #7a1e28; border-color: #7a1e28; }
+  @media (max-width: 767px) { .psl-action-btn { display: none; } }
 
   /* ── Hero ───────────────────────────────────────────────────── */
   .psl-hero {
