@@ -7,6 +7,15 @@ const FONTS =
 
 const TINTS = ["#efeae0", "#e6dccb", "#d9c9b5", "#efe6d7", "#e2d3bf", "#ede2cf"];
 
+const SITE_NAV = [
+  { label: "HOME", to: "/" },
+  { label: "THE HOUSE", to: "/about" },
+  { label: "THE COLLECTION", to: "/naia-collection" },
+  { label: "THE ART STORY", to: "/art-story" },
+  { label: "nAia STYLIST", to: "/stylist" },
+  { label: "TREND REPORTS", to: "/trends" },
+];
+
 const SOURCE_DATE_MONTHS = [
   "January","February","March","April","May","June",
   "July","August","September","October","November","December",
@@ -43,28 +52,65 @@ const css = `
     -webkit-font-smoothing: antialiased;
   }
 
-  /* ── Header ─────────────────────────────────────────────────── */
-  .psl-header {
+  /* ── NADINE public navigation ───────────────────────────────────── */
+  .psl-header { border-bottom: 1px solid rgba(26,17,9,0.08); }
+  .psl-header-inner {
+    max-width: 100rem;
+    margin: 0 auto;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 20px 40px;
-    border-bottom: 1px solid rgba(26,17,9,0.08);
+    justify-content: space-between;
+    padding: 18px 40px;
+    gap: 32px;
   }
+  @media (max-width: 639px) { .psl-header-inner { padding: 16px 24px; } }
+  .psl-sitenav-links {
+    display: none;
+    align-items: center;
+    gap: 20px;
+    flex: 1;
+  }
+  @media (min-width: 768px) { .psl-sitenav-links { display: flex; } }
+  .psl-sitenav-link {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.58rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(26,17,9,0.55);
+    text-decoration: none;
+    transition: color 0.2s;
+    white-space: nowrap;
+  }
+  .psl-sitenav-link:hover { color: #7a1e28; }
+  .psl-sitenav-link.active { color: #7a1e28; }
   .psl-header-logo {
     font-family: 'Oswald', sans-serif;
-    font-size: 18px;
-    font-weight: 300;
-    letter-spacing: 0.18em;
+    font-size: 0.875rem;
+    font-weight: 200;
+    letter-spacing: 0.4em;
     text-transform: uppercase;
     color: #1a1109;
     text-decoration: none;
+    white-space: nowrap;
   }
-  .psl-header-actions {
+  .psl-header-right {
     display: flex;
-    gap: 16px;
+    justify-content: flex-end;
     align-items: center;
+    gap: 16px;
+    flex: 1;
   }
+  .psl-personal-link {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.58rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #7a1e28;
+    text-decoration: none;
+    transition: opacity 0.2s;
+    white-space: nowrap;
+  }
+  .psl-personal-link:hover { opacity: 0.75; }
   .psl-action-btn {
     display: inline-flex;
     align-items: center;
@@ -401,8 +447,58 @@ const css = `
     transition: border-color 0.15s, color 0.15s;
   }
   .psl-lens-btn:hover { border-color: #7a1e28; color: #7a1e28; }
-  .psl-lens-btn.my-edit { border-color: #7a1e28; color: #7a1e28; }
-  .psl-lens-btn.my-edit:hover { background: #7a1e28; color: #f5f0e8; }
+  /* nAia Take callout */
+  .psl-naia-take {
+    padding: 28px 32px;
+    border-left: 3px solid #7a1e28;
+    background: rgba(122,30,40,0.04);
+    margin-bottom: 48px;
+  }
+  .psl-naia-take-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.58rem;
+    letter-spacing: 0.34em;
+    text-transform: uppercase;
+    color: #7a1e28;
+    margin-bottom: 16px;
+  }
+  .psl-naia-take-body {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.15rem;
+    line-height: 1.85;
+    color: rgba(26,17,9,0.9);
+    font-style: italic;
+  }
+  /* My Edit — separated from professional lenses */
+  .psl-my-edit-sep {
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(26,17,9,0.08);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .psl-my-edit-sep-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.52rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: rgba(26,17,9,0.40);
+  }
+  .psl-my-edit-btn {
+    display: inline-block;
+    padding: 12px 24px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.58rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    text-decoration: none;
+    border: 1px solid rgba(122,30,40,0.35);
+    color: rgba(26,17,9,0.75);
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .psl-my-edit-btn:hover { background: #7a1e28; color: #f5f0e8; border-color: #7a1e28; }
 
   /* ── Personal CTA dark ──────────────────────────────────────── */
   .psl-cta {
@@ -592,7 +688,7 @@ const css = `
   }
 
   @media print {
-    .psl-header, .psl-hero-num, .psl-cta, .psl-more, .psl-lens,
+    .psl-header, .psl-hero-num, .psl-cta, .psl-more, .psl-lens, .psl-my-edit-sep,
     .psl-action-btn { display: none !important; }
     .psl-body { padding: 0 !important; max-width: 100% !important; }
   }
@@ -604,7 +700,19 @@ export function ErrorBoundary() {
       <link rel="stylesheet" href={FONTS} />
       <style>{css}</style>
       <header className="psl-header">
-        <Link to="/" className="psl-header-logo">nAia</Link>
+        <div className="psl-header-inner">
+          <nav className="psl-sitenav-links" aria-label="Site navigation">
+            {SITE_NAV.map((l) => (
+              <Link key={l.to} to={l.to} className={`psl-sitenav-link${l.to === "/trends" ? " active" : ""}`}>
+                {l.label}
+              </Link>
+            ))}
+          </nav>
+          <Link to="/" className="psl-header-logo">NADINE</Link>
+          <div className="psl-header-right">
+            <Link to="/trends/my-edits" className="psl-personal-link">My Trend Edits ↗</Link>
+          </div>
+        </div>
       </header>
       <div className="psl-error">
         <div className="psl-kicker">404</div>
@@ -738,14 +846,24 @@ export default function TrendReportDetail() {
       <link rel="stylesheet" href={FONTS} />
       <style>{css}</style>
 
-      {/* Header */}
+      {/* NADINE site header */}
       <header className="psl-header">
-        <Link to="/" className="psl-header-logo">nAia</Link>
-        <div className="psl-header-actions">
-          <button className={`psl-action-btn${copyStatus === "copied" ? " active" : ""}`} onClick={copyLink}>
-            {copyStatus === "copied" ? "Copied ✓" : copyStatus === "error" ? "Failed" : "Copy link"}
-          </button>
-          <button className="psl-action-btn" onClick={downloadPdf}>Download PDF</button>
+        <div className="psl-header-inner">
+          <nav className="psl-sitenav-links" aria-label="Site navigation">
+            {SITE_NAV.map((l) => (
+              <Link key={l.to} to={l.to} className={`psl-sitenav-link${l.to === "/trends" ? " active" : ""}`}>
+                {l.label}
+              </Link>
+            ))}
+          </nav>
+          <Link to="/" className="psl-header-logo">NADINE</Link>
+          <div className="psl-header-right">
+            <button className={`psl-action-btn${copyStatus === "copied" ? " active" : ""}`} onClick={copyLink}>
+              {copyStatus === "copied" ? "Copied ✓" : copyStatus === "error" ? "Failed" : "Copy link"}
+            </button>
+            <button className="psl-action-btn" onClick={downloadPdf}>Download PDF</button>
+            <Link to="/trends/my-edits" className="psl-personal-link">My Trend Edits ↗</Link>
+          </div>
         </div>
       </header>
 
@@ -758,7 +876,7 @@ export default function TrendReportDetail() {
             {report.mood ? `${report.mood} · ` : ""}{report.season}
           </div>
           <h1 className="psl-hero-title">
-            {report.title.split(" ").slice(0, -1).join(" ")}<br />
+            {report.title.split(" ").slice(0, -1).join(" ")}{" "}
             <em>{report.title.split(" ").slice(-1)[0]}</em>
           </h1>
           <p className="psl-hero-lede">{report.editorialIntro || report.summary}</p>
@@ -848,6 +966,17 @@ export default function TrendReportDetail() {
           </div>
         ) : null}
 
+        {/* nAia Take */}
+        {report.naiaTake && (
+          <>
+            <div className="psl-divider" />
+            <div className="psl-naia-take">
+              <div className="psl-naia-take-label">nAia Take</div>
+              <p className="psl-naia-take-body">{report.naiaTake}</p>
+            </div>
+          </>
+        )}
+
         {/* Investment Notes */}
         {(report.spendSaveSkip || report.investmentNotes) && (
           <>
@@ -874,27 +1003,6 @@ export default function TrendReportDetail() {
               )}
             </div>
           </>
-        )}
-
-        {/* nAia Interpretation */}
-        {report.naiaInterpretation && (
-          <>
-            <div className="psl-divider" />
-            <div className="psl-naia-box">
-              <div className="psl-section-label">nAia Interpretation</div>
-              <p className="psl-body-text" style={{ fontSize: "1.15rem" }}>
-                {report.naiaInterpretation}
-              </p>
-            </div>
-          </>
-        )}
-
-        {/* nAia Verdict */}
-        {report.naiaVerdict && (
-          <div className="psl-section">
-            <div className="psl-section-label">nAia Verdict</div>
-            <p className="psl-body-text">{report.naiaVerdict}</p>
-          </div>
         )}
 
         {/* How It Translates */}
@@ -946,15 +1054,20 @@ export default function TrendReportDetail() {
       <div className="psl-lens">
         <div className="psl-lens-label">Read this through a lens</div>
         <p className="psl-lens-desc">
-          One report, different decisions. Read this direction through the lens that matters to you.
+          One report, five professional perspectives. Each lens reads the same direction through a different set of decisions.
         </p>
         <div className="psl-lens-row">
-          <Link to={`/trends/my-edits/${report.slug}`} className="psl-lens-btn my-edit">My Edit</Link>
           <Link to={`/trends/${report.slug}/lens/designer`} className="psl-lens-btn">Designer</Link>
           <Link to={`/trends/${report.slug}/lens/buyer`} className="psl-lens-btn">Buyer</Link>
           <Link to={`/trends/${report.slug}/lens/marketer`} className="psl-lens-btn">Marketer</Link>
           <Link to={`/trends/${report.slug}/lens/creative-director`} className="psl-lens-btn">Creative Director</Link>
           <Link to={`/trends/${report.slug}/lens/stylist`} className="psl-lens-btn">Stylist</Link>
+        </div>
+        <div className="psl-my-edit-sep">
+          <div className="psl-my-edit-sep-label">Make it personal</div>
+          <Link to={`/trends/my-edits/${report.slug}`} className="psl-my-edit-btn">
+            My Trend Edit →
+          </Link>
         </div>
       </div>
 
@@ -967,7 +1080,7 @@ export default function TrendReportDetail() {
               <em>tailored to you?</em>
             </h2>
             <p className="psl-cta-body">
-              Your Personal Trend Edit reads this report against your Style Passport, Closet and outfit history — and shows only what is relevant to you.
+              nAia reads this direction against your Style DNA, what you already own, how you&rsquo;ve rated past outfits, and where your wardrobe has gaps. What remains is the part of this trend that is actually yours to wear.
             </p>
             <Link to={`/trends/my-edits/${report.slug}`} className="psl-cta-btn">
               open my trend edit →

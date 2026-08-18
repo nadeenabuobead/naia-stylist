@@ -45,13 +45,31 @@ const LENS_ORDER: LensKey[] = [
   "stylist",
 ];
 
+const SITE_NAV = [
+  { label: "HOME", to: "/" },
+  { label: "THE HOUSE", to: "/about" },
+  { label: "THE COLLECTION", to: "/naia-collection" },
+  { label: "THE ART STORY", to: "/art-story" },
+  { label: "nAia STYLIST", to: "/stylist" },
+  { label: "TREND REPORTS", to: "/trends" },
+];
+
 const css = `
   :root{--cream:#f4f4f1;--warm:#e1dbd7;--deep:#221516;--accent:#8b2035;--muted:#7a6f6a;--ff-display:'Playfair Display',Georgia,serif;--ff-body:'Cormorant Garamond',Garamond,serif;--ff-mono:'Space Mono','Courier New',monospace}
   *{margin:0;padding:0;box-sizing:border-box}
   body{background:var(--cream);color:var(--deep);font-family:var(--ff-body);-webkit-font-smoothing:antialiased}
-  .tr-topbar{display:flex;justify-content:space-between;align-items:center;padding:20px 40px;border-bottom:1px solid rgba(59,5,16,.06)}
-  .tr-topbar-logo{font-family:var(--ff-display);font-size:22px;font-style:italic;letter-spacing:3px;color:var(--deep)}
-  .tr-topbar-link{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);text-decoration:none}
+  .tr-header{border-bottom:1px solid rgba(59,5,16,.06)}
+  .tr-header-inner{max-width:100rem;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:18px 40px;gap:32px}
+  @media(max-width:639px){.tr-header-inner{padding:16px 24px}}
+  .tr-sitenav-links{display:none;align-items:center;gap:20px;flex:1}
+  @media(min-width:768px){.tr-sitenav-links{display:flex}}
+  .tr-sitenav-link{font-family:var(--ff-mono);font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:rgba(34,21,22,.55);text-decoration:none;transition:color .2s;white-space:nowrap}
+  .tr-sitenav-link:hover{color:var(--accent)}
+  .tr-sitenav-link.active{color:var(--accent)}
+  .tr-header-logo{font-family:var(--ff-display);font-size:14px;font-weight:400;letter-spacing:6px;text-transform:uppercase;color:var(--deep);text-decoration:none;white-space:nowrap}
+  .tr-header-right{display:flex;justify-content:flex-end;align-items:center;flex:1}
+  .tr-personal-link{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);text-decoration:none;transition:opacity .2s;white-space:nowrap}
+  .tr-personal-link:hover{opacity:.75}
   .tr-wrap{max-width:900px;margin:0 auto;padding:60px 40px}
   .tr-section-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--accent);margin-bottom:16px}
   .tr-body{font-family:var(--ff-body);font-size:18px;line-height:1.8;color:var(--deep);white-space:pre-line}
@@ -113,17 +131,55 @@ const css = `
   .tr-fabric-sub{font-family:var(--ff-mono);font-size:8px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);white-space:nowrap;flex-shrink:0}
   .tr-fabric-vals{font-family:var(--ff-body);font-size:15px;line-height:1.6;color:var(--deep)}
   .tr-product-proof{font-family:var(--ff-body);font-size:16px;line-height:1.7;color:var(--muted);font-style:italic;margin-top:18px}
-  @media(max-width:600px){.tr-wrap{padding:40px 24px}.tr-topbar{padding:16px 24px}.tr-recap{padding:20px}.tr-struct-grid{grid-template-columns:1fr}.tr-dec-grid{grid-template-columns:1fr}.tr-proto-grid{grid-template-columns:1fr}.tr-stacked-row{grid-template-columns:1fr;gap:4px}}
+  /* ── My Edit — separated from professional lenses ── */
+  .tr-my-edit-sep{margin-top:24px;padding-top:16px;border-top:1px solid rgba(59,5,16,.08);display:flex;flex-direction:column;align-items:flex-start;gap:10px}
+  .tr-my-edit-sep-label{font-family:var(--ff-mono);font-size:8px;letter-spacing:2.5px;text-transform:uppercase;color:rgba(34,21,22,.38)}
+  .tr-my-edit-btn{display:inline-block;padding:10px 20px;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;text-decoration:none;border:1px solid rgba(139,32,53,.35);color:rgba(34,21,22,.70);transition:background .15s,color .15s,border-color .15s;white-space:nowrap}
+  .tr-my-edit-btn:hover{background:var(--accent);color:var(--cream);border-color:var(--accent)}
+
+  /* ── Per-lens visual differentiation ── */
+  [data-lens="designer"] .tr-struct-grid{grid-template-columns:1fr 1fr;gap:8px}
+  [data-lens="designer"] .tr-struct-card{background:transparent;border:1px solid rgba(34,21,22,.12)}
+  [data-lens="buyer"] .tr-stacked-row:nth-child(even){background:rgba(255,255,255,.5)}
+  [data-lens="buyer"] .tr-stacked-row-label{font-size:8.5px;font-weight:700}
+  [data-lens="marketer"] .tr-module .tr-body{font-size:19px;line-height:1.85}
+  [data-lens="marketer"] .tr-assortment-card{background:rgba(255,255,255,.6)}
+  [data-lens="creative-director"] .tr-wrap{max-width:760px}
+  [data-lens="creative-director"] .tr-body{font-size:20px;line-height:1.9}
+  [data-lens="creative-director"] .tr-section-label{letter-spacing:4px}
+  [data-lens="stylist"] .tr-module{padding:20px 24px;border:1px solid var(--warm)}
+  [data-lens="stylist"] .tr-check-num{font-size:10px}
+
+  /* ── Personal CTA on lens pages ── */
+  .tr-personal-cta{max-width:900px;margin:60px auto 0;padding:48px 40px;border-top:1px solid rgba(59,5,16,.08)}
+  .tr-personal-cta-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:20px}
+  .tr-personal-cta-title{font-family:var(--ff-display);font-size:clamp(1.4rem,2.5vw,2rem);font-weight:700;font-style:italic;color:var(--deep);margin-bottom:12px}
+  .tr-personal-cta-body{font-family:var(--ff-body);font-size:1.05rem;line-height:1.8;color:var(--muted);margin-bottom:24px;max-width:40rem}
+  .tr-personal-cta-btn{display:inline-block;padding:12px 28px;border:1px solid var(--deep);font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--deep);text-decoration:none;transition:background .15s,color .15s}
+  .tr-personal-cta-btn:hover{background:var(--deep);color:var(--cream)}
+
+  @media(max-width:600px){.tr-wrap{padding:40px 24px}.tr-header-inner{padding:16px 24px}.tr-recap{padding:20px}.tr-struct-grid{grid-template-columns:1fr}.tr-dec-grid{grid-template-columns:1fr}.tr-proto-grid{grid-template-columns:1fr}.tr-stacked-row{grid-template-columns:1fr;gap:4px}.tr-personal-cta{padding:40px 24px}}
 `;
 
 export function ErrorBoundary() {
   return (
     <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
       <style>{css}</style>
-      <div className="tr-topbar">
-        <div className="tr-topbar-logo">nAia</div>
-        <Link to="/trends" className="tr-topbar-link">← All Reports</Link>
-      </div>
+      <header className="tr-header">
+        <div className="tr-header-inner">
+          <nav className="tr-sitenav-links" aria-label="Site navigation">
+            {SITE_NAV.map((l) => (
+              <Link key={l.to} to={l.to} className={`tr-sitenav-link${l.to === "/trends" ? " active" : ""}`}>
+                {l.label}
+              </Link>
+            ))}
+          </nav>
+          <Link to="/" className="tr-header-logo">NADINE</Link>
+          <div className="tr-header-right">
+            <Link to="/trends/my-edits" className="tr-personal-link">My Trend Edits ↗</Link>
+          </div>
+        </div>
+      </header>
       <div className="tr-wrap">
         <p style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: "20px", fontStyle: "italic", color: "#7a6f6a" }}>
           This lens could not be found.
@@ -140,17 +196,28 @@ export default function TrendLens() {
   const hasTypedModules = modules.some((m) => "type" in m);
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f4f4f1" }}>
+    <div style={{ minHeight: "100vh", background: "#f4f4f1" }} data-lens={lens}>
       <style>{css}</style>
       <link
         href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap"
         rel="stylesheet"
       />
 
-      <div className="tr-topbar">
-        <div className="tr-topbar-logo">nAia</div>
-        <Link to="/trends" className="tr-topbar-link">← All Reports</Link>
-      </div>
+      <header className="tr-header">
+        <div className="tr-header-inner">
+          <nav className="tr-sitenav-links" aria-label="Site navigation">
+            {SITE_NAV.map((l) => (
+              <Link key={l.to} to={l.to} className={`tr-sitenav-link${l.to === "/trends" ? " active" : ""}`}>
+                {l.label}
+              </Link>
+            ))}
+          </nav>
+          <Link to="/" className="tr-header-logo">NADINE</Link>
+          <div className="tr-header-right">
+            <Link to={`/trends/my-edits/${report.slug}`} className="tr-personal-link">My Trend Edits ↗</Link>
+          </div>
+        </div>
+      </header>
 
       <div className="tr-wrap">
         {/* Report reference — brief anchor back to the public report */}
@@ -174,14 +241,8 @@ export default function TrendLens() {
 
         {/* Lens navigation */}
         <div className="tr-lens-nav">
-          <div className="tr-lens-nav-label">Read this through a lens</div>
+          <div className="tr-lens-nav-label">Read through a professional lens</div>
           <div className="tr-lens-nav-row">
-            <Link
-              to={`/trends/${report.slug}/edit`}
-              className="tr-lens-btn for-you"
-            >
-              My Edit
-            </Link>
             {LENS_ORDER.map((key) => (
               <Link
                 key={key}
@@ -191,6 +252,15 @@ export default function TrendLens() {
                 {LENS_LABELS[key]}
               </Link>
             ))}
+          </div>
+          <div className="tr-my-edit-sep">
+            <div className="tr-my-edit-sep-label">Make it personal</div>
+            <Link
+              to={`/trends/my-edits/${report.slug}`}
+              className="tr-my-edit-btn"
+            >
+              My Trend Edit →
+            </Link>
           </div>
         </div>
 
@@ -373,6 +443,25 @@ export default function TrendLens() {
             </div>
           </>
         )}
+
+        {/* Personal CTA */}
+        <div className="tr-personal-cta">
+          <div className="tr-personal-cta-label">Make it personal</div>
+          <div className="tr-personal-cta-title">
+            This is the professional read.
+            <br />
+            <em>Your wardrobe read is different.</em>
+          </div>
+          <p className="tr-personal-cta-body">
+            My Trend Edit reads this direction against your Style DNA, Closet, previous outfit ratings, and actual wardrobe gaps — then shows the part of this trend that belongs to you.
+          </p>
+          <Link
+            to={`/trends/my-edits/${report.slug}`}
+            className="tr-personal-cta-btn"
+          >
+            Open My Trend Edit →
+          </Link>
+        </div>
 
         {/* Footer */}
         <div className="tr-footer">

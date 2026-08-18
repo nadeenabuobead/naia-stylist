@@ -29,39 +29,64 @@ const css = `
     -webkit-font-smoothing: antialiased;
   }
 
-  /* ── Header ─────────────────────────────────────────────────────── */
-  .pub-header {
+  /* ── NADINE public navigation ───────────────────────────────────── */
+  .pub-header { border-bottom: 1px solid rgba(26,17,9,0.08); }
+  .pub-header-inner {
+    max-width: 100rem;
+    margin: 0 auto;
     display: flex;
+    align-items: center;
     justify-content: space-between;
+    padding: 18px 40px;
+    gap: 32px;
+  }
+  @media (max-width: 639px) { .pub-header-inner { padding: 16px 24px; } }
+  .pub-sitenav-links {
+    display: none;
     align-items: center;
-    padding: 20px 40px;
-    border-bottom: 1px solid rgba(26,17,9,0.08);
+    gap: 20px;
+    flex: 1;
   }
-  .pub-header-logo {
-    font-family: 'Oswald', sans-serif;
-    font-size: 18px;
-    font-weight: 300;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: ${C.fg};
-    text-decoration: none;
-  }
-  .pub-header-nav {
-    display: flex;
-    gap: 28px;
-    align-items: center;
-  }
-  .pub-header-link {
+  @media (min-width: 768px) { .pub-sitenav-links { display: flex; } }
+  .pub-sitenav-link {
     font-family: 'Space Mono', monospace;
-    font-size: 0.6rem;
-    letter-spacing: 0.28em;
+    font-size: 0.58rem;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     color: rgba(26,17,9,0.55);
     text-decoration: none;
     transition: color 0.2s;
+    white-space: nowrap;
   }
-  .pub-header-link:hover { color: ${C.lip}; }
-  .pub-header-link.lip { color: ${C.lip}; }
+  .pub-sitenav-link:hover { color: ${C.lip}; }
+  .pub-sitenav-link.active { color: ${C.lip}; }
+  .pub-header-logo {
+    font-family: 'Oswald', sans-serif;
+    font-size: 0.875rem;
+    font-weight: 200;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: ${C.fg};
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .pub-header-right {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    flex: 1;
+  }
+  .pub-personal-link {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.58rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: ${C.lip};
+    text-decoration: none;
+    transition: opacity 0.2s;
+    white-space: nowrap;
+  }
+  .pub-personal-link:hover { opacity: 0.75; }
 
   /* ── Hero ───────────────────────────────────────────────────────── */
   .pub-hero {
@@ -486,6 +511,15 @@ const css = `
   }
 `;
 
+const SITE_NAV = [
+  { label: "HOME", to: "/" },
+  { label: "THE HOUSE", to: "/about" },
+  { label: "THE COLLECTION", to: "/naia-collection" },
+  { label: "THE ART STORY", to: "/art-story" },
+  { label: "nAia STYLIST", to: "/stylist" },
+  { label: "TREND REPORTS", to: "/trends" },
+];
+
 function formatSeason(season) {
   // "Spring 2026" → "ss'26 ·" style
   const lower = season.toLowerCase();
@@ -506,13 +540,27 @@ export default function TrendReports() {
       <link rel="stylesheet" href={FONTS} />
       <style>{css}</style>
 
-      {/* Header */}
+      {/* NADINE site header */}
       <header className="pub-header">
-        <Link to="/" className="pub-header-logo">nAia</Link>
-        <nav className="pub-header-nav">
-          <Link to="/my-naia" className="pub-header-link">My nAia</Link>
-          <Link to="/trends/my-edits" className="pub-header-link lip">My Trend Edits ↗</Link>
-        </nav>
+        <div className="pub-header-inner">
+          <nav className="pub-sitenav-links" aria-label="Site navigation">
+            {SITE_NAV.map((l) => (
+              <Link
+                key={l.to}
+                to={l.to}
+                className={`pub-sitenav-link${l.to === "/trends" ? " active" : ""}`}
+              >
+                {l.label}
+              </Link>
+            ))}
+          </nav>
+          <Link to="/" className="pub-header-logo">NADINE</Link>
+          <div className="pub-header-right">
+            <Link to="/trends/my-edits" className="pub-personal-link">
+              My Trend Edits ↗
+            </Link>
+          </div>
+        </div>
       </header>
 
       {/* Hero */}
@@ -545,7 +593,7 @@ export default function TrendReports() {
               <div>
                 <div className="pub-featured-kicker">latest report</div>
                 <h2 className="pub-featured-title">
-                  {featured.title.split(" ").slice(0, -1).join(" ")}<br />
+                  {featured.title.split(" ").slice(0, -1).join(" ")}{" "}
                   <em>{featured.title.split(" ").slice(-1)[0]}</em>
                 </h2>
                 <p className="pub-featured-lede">{featured.editorialIntro || featured.summary}</p>
