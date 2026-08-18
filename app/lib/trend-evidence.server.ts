@@ -2043,7 +2043,7 @@ export function buildShopperEdit(
     withScores.sort((a, b) => b.score - a.score);
     partToLeaveOrdered = withScores.map((s) => s.c.text);
   } else {
-    partToLeaveOrdered = (report.fading ?? []);
+    partToLeaveOrdered = (report.fading ?? []).map((f) => f.signal);
   }
   const partToLeave = partToLeaveOrdered.slice(0, 2);
 

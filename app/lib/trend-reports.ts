@@ -11,6 +11,12 @@ export type TrendReportKeyTrend = {
   description: string;
 };
 
+export type TrendSignal = {
+  signal: string;
+  why: string;
+  source: string;
+};
+
 export type TrendReportReferenceCard = {
   brand: string;
   collection?: string;
@@ -33,8 +39,8 @@ export type TrendReportData = {
   summary: string;
   editorialIntro: string;
   keyTrends: TrendReportKeyTrend[];
-  rising?: string[];
-  fading?: string[];
+  rising?: TrendSignal[];
+  fading?: TrendSignal[];
   referencesBehindThisEdit?: TrendReportReferenceCard[];
   brandsToWatch?: { name: string; why: string }[]; // retained for type compat; not used in current data
   spendSaveSkip?: TrendReportSpendSaveSkip;
@@ -77,15 +83,43 @@ export const trendReports: TrendReportData[] = [
       },
     ],
     rising: [
-      "Softened shoulders",
-      "Long clean trouser lines",
-      "Defined waist through cut",
-      "Asymmetry used with restraint",
+      {
+        signal: "Softened shoulders",
+        why: "Givenchy's Spring Summer 2026 show notes describe the collection as peeling back tailoring structure toward lightness and ease — the shoulder line is where that direction is most visibly expressed in proportion.",
+        source: "Givenchy SS26 Womenswear, show notes",
+      },
+      {
+        signal: "Long clean trouser lines",
+        why: "A trouser with enough length to break cleanly at the foot creates the proportioned base the silhouette reads from. nAia identifies this as the working component that makes soft structure legible without accessories or styling intervention.",
+        source: "nAia editorial judgment",
+      },
+      {
+        signal: "Defined waist through cut",
+        why: "Structure from a waist seam, wrapped front, or bias-cut tuck is durable across rewears in a way that structure from a cinching belt is not. Construction outlasts styling.",
+        source: "nAia editorial judgment",
+      },
+      {
+        signal: "Asymmetry used with restraint",
+        why: "Victoria Beckham Spring Summer 2026 frames experimental gestures, naïve compositions, and happy accidents as a core direction. The wearable translation: one asymmetric element — a hem, a seam, a wrapped neckline — against an otherwise composed base.",
+        source: "Victoria Beckham SS26, official collection notes",
+      },
     ],
     fading: [
-      "Rigid head-to-toe office suiting",
-      "Overly complicated drape",
-      "Statement pieces that only work once",
+      {
+        signal: "Rigid head-to-toe office suiting",
+        why: "Tailoring that reads primarily through stiffness rather than proportion is context-locked — it functions in formal settings and rarely rewears across occasions without a full outfit assembled around it.",
+        source: "nAia editorial judgment",
+      },
+      {
+        signal: "Overly complicated drape",
+        why: "Multiple drape points or competing folds cancel the effect of each. One controlled gesture against a composed base reads as intentional; competing drape reads as unresolved.",
+        source: "nAia editorial judgment",
+      },
+      {
+        signal: "Statement pieces that only work once",
+        why: "A piece that requires a specific outfit assembled around it, and cannot be rerouted to other looks, has narrow wardrobe value regardless of how good it looks in its designed context.",
+        source: "nAia editorial judgment",
+      },
     ],
     referencesBehindThisEdit: [
       {
@@ -178,15 +212,43 @@ export const trendReports: TrendReportData[] = [
       },
     ],
     rising: [
-      "Longline blazers",
-      "Waistcoats as a top layer",
-      "Fluid trousers",
-      "Tailored separates",
+      {
+        signal: "Longline blazers",
+        why: "The longline proportion is the styling decision that makes modern tailoring work without matching the trouser — a longer line anchors an outfit across more counterparts, from narrow skirts to wide-leg denim.",
+        source: "nAia editorial judgment",
+      },
+      {
+        signal: "Waistcoats as a top layer",
+        why: "Victoria Beckham Pre SS26 brings together the formal with the fluid. The working translation: a waistcoat worn as a standalone top layer over a draped skirt or wide-leg denim, rather than as part of a matching three-piece.",
+        source: "Victoria Beckham Pre SS26, official collection page",
+      },
+      {
+        signal: "Fluid trousers",
+        why: "A tailored anchor needs a soft counterpart to read as modern rather than severe. Fluid-leg trousers provide the contrast in silhouette — the proportion difference is the styling decision, not the formality.",
+        source: "nAia editorial judgment",
+      },
+      {
+        signal: "Tailored separates over matching sets",
+        why: "Victoria Beckham Pre SS26 establishes that a tailored piece earns its value when contrasted with something relaxed. Separates — bought independently — have more cross-outfit utility than a matching set bought as a unit.",
+        source: "Victoria Beckham Pre SS26, official collection page",
+      },
     ],
     fading: [
-      "Suits that only work together",
-      "Stiff fabric with no movement",
-      "Trousers that require heels to make sense",
+      {
+        signal: "Suits that only work together",
+        why: "A matching suit that functions only as a complete set has the wardrobe value of one outfit. Separates that can meet different counterparts have more cross-occasion reach for the same spend.",
+        source: "nAia editorial judgment",
+      },
+      {
+        signal: "Stiff fabric with no movement",
+        why: "Fabric that cannot move between the structured and fluid registers of the look makes the direction brittle — it reads as formal by default rather than by intention.",
+        source: "nAia editorial judgment",
+      },
+      {
+        signal: "Trousers that require heels to make sense",
+        why: "A trouser length that only works in one footwear register narrows the wardrobe utility of the piece. Modern tailoring is a tool across contexts — context-specific by design is the opposite of that.",
+        source: "nAia editorial judgment",
+      },
     ],
     referencesBehindThisEdit: [
       {
@@ -271,15 +333,43 @@ export const trendReports: TrendReportData[] = [
       },
     ],
     rising: [
-      "Soft white foundations",
-      "Deep brown as an anchor",
-      "A single expressive accessory or knit",
-      "Purposeful colour contrast",
+      {
+        signal: "Soft white foundations",
+        why: "Pantone's Spring / Summer 2026 NYFW Fashion Color Trend Report documents the season's colour palette direction — soft white and off-white tones appear as foundational palette choices across multiple collections.",
+        source: "Pantone Fashion Color Trend Report, NYFW Spring / Summer 2026",
+      },
+      {
+        signal: "Deep brown as an anchor",
+        why: "Espresso and warm deep brown anchor a look with the visual weight of black while reading warmer and less expected than beige. The broader palette direction comes from Pantone's SS26 NYFW report; the espresso read is nAia's editorial translation.",
+        source: "nAia editorial judgment (Pantone SS26 as context)",
+      },
+      {
+        signal: "A single expressive accessory or knit",
+        why: "Victoria Beckham Spring Summer 2026 supports personal expression and experimentation in dressing. The lowest-commitment, highest-visibility introduction of an accent is a bag, shoe, or knit — before committing to a full accent garment.",
+        source: "Victoria Beckham SS26, official collection notes",
+      },
+      {
+        signal: "Purposeful colour contrast",
+        why: "One precise accent against a quiet foundation reads with clarity. Multiple coloured pieces reduce the contrast and dilute the accent's effect — the discipline is one interruption, not a conversation between pieces.",
+        source: "nAia editorial judgment",
+      },
     ],
     fading: [
-      "Buying several bright pieces that only work together",
-      "Replacing a whole wardrobe for one seasonal shade",
-      "Over-coordinated colour matching",
+      {
+        signal: "Buying several bright pieces that only work together",
+        why: "Coordinated accent purchases collapse from a colour strategy into a single look. The method's value is in the multiplier — one accent that changes multiple existing outfits — which multiple matched accents cannot deliver.",
+        source: "nAia editorial judgment",
+      },
+      {
+        signal: "Replacing a whole wardrobe for one seasonal shade",
+        why: "A seasonal shade that requires new purchases to function is context-locked rather than versatile. The quiet base / clear accent method is designed to work with what already exists.",
+        source: "nAia editorial judgment",
+      },
+      {
+        signal: "Over-coordinated colour matching",
+        why: "When every piece in an outfit matches, the contrast that gives a single accent its visual power disappears. Coordination erases the effect the accent was meant to create.",
+        source: "nAia editorial judgment",
+      },
     ],
     referencesBehindThisEdit: [
       {

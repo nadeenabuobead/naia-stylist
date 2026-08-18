@@ -236,6 +236,31 @@ const css = `
   }
   .psl-dash-list li::before { content: '— '; }
   .psl-dash-list.muted li { color: rgba(26,17,9,0.52); }
+  .psl-signal-li { padding: 10px 0 14px; border-bottom: 1px solid rgba(26,17,9,0.06); }
+  .psl-signal-li:last-child { border-bottom: none; }
+  .psl-signal-why {
+    display: block;
+    font-style: normal;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: rgba(26,17,9,0.64);
+    padding-left: 1.4em;
+    margin-top: 5px;
+  }
+  .psl-signal-source {
+    display: block;
+    font-style: normal;
+    font-family: sans-serif;
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(26,17,9,0.36);
+    padding-left: 1.4em;
+    margin-top: 4px;
+  }
+  .psl-dash-list.muted .psl-signal-why { color: rgba(26,17,9,0.42); }
+  .psl-dash-list.muted .psl-signal-source { color: rgba(26,17,9,0.26); }
 
   /* References */
   .psl-ref-card {
@@ -663,8 +688,8 @@ export default function TrendReportDetail() {
     addText(report.editorialIntro, 11, "italic", [122, 111, 106], 10);
     addText("KEY DIRECTIONS", 8, "bold", [139, 32, 53], 4);
     (report.keyTrends || []).forEach((t, i) => { addText(`${i + 1}. ${t.name}`, 12, "bold", [34, 21, 22], 2); addText(t.description, 10, "normal", [34, 21, 22], 6); });
-    if (report.rising?.length) { addText("WHAT'S RISING", 8, "bold", [139, 32, 53], 3); addText(report.rising.join("  ·  "), 10, "normal", [34, 21, 22], 8); }
-    if (report.fading?.length) { addText("WHAT'S FADING", 8, "bold", [139, 32, 53], 3); addText(report.fading.join("  ·  "), 10, "normal", [122, 111, 106], 8); }
+    if (report.rising?.length) { addText("WHAT'S RISING", 8, "bold", [139, 32, 53], 3); addText(report.rising.map((r) => r.signal).join("  ·  "), 10, "normal", [34, 21, 22], 8); }
+    if (report.fading?.length) { addText("WHAT'S FADING", 8, "bold", [139, 32, 53], 3); addText(report.fading.map((f) => f.signal).join("  ·  "), 10, "normal", [122, 111, 106], 8); }
     if (report.referencesBehindThisEdit?.length) {
       addText("REFERENCES BEHIND THIS EDIT", 8, "bold", [139, 32, 53], 4);
       report.referencesBehindThisEdit.forEach((ref) => { addText(ref.collection ? `${ref.brand} — ${ref.collection}` : ref.brand, 11, "bold", [34, 21, 22], 2); addText(ref.signal, 10, "italic", [34, 21, 22], 2); addText("nAia: " + ref.naiaRead, 9, "normal", [122, 111, 106], 6); });
@@ -771,7 +796,13 @@ export default function TrendReportDetail() {
                 <div>
                   <div className="psl-section-label">What&rsquo;s Rising</div>
                   <ul className="psl-dash-list">
-                    {report.rising.map((r, i) => <li key={i}>{r}</li>)}
+                    {report.rising.map((r, i) => (
+                      <li key={i} className="psl-signal-li">
+                        {r.signal}
+                        <span className="psl-signal-why">{r.why}</span>
+                        <span className="psl-signal-source">{r.source}</span>
+                      </li>
+                    ))}
                   </ul>
                 </div>
               ) : null}
@@ -779,7 +810,13 @@ export default function TrendReportDetail() {
                 <div>
                   <div className="psl-section-label">What&rsquo;s Fading</div>
                   <ul className="psl-dash-list muted">
-                    {report.fading.map((f, i) => <li key={i}>{f}</li>)}
+                    {report.fading.map((f, i) => (
+                      <li key={i} className="psl-signal-li">
+                        {f.signal}
+                        <span className="psl-signal-why">{f.why}</span>
+                        <span className="psl-signal-source">{f.source}</span>
+                      </li>
+                    ))}
                   </ul>
                 </div>
               ) : null}
