@@ -86,7 +86,7 @@ export const trendReports: TrendReportData[] = [
       {
         signal: "Softened shoulders",
         why: "Givenchy's Spring Summer 2026 show notes describe the collection as peeling back tailoring structure toward lightness and ease — the shoulder line is where that direction is most visibly expressed in proportion.",
-        source: "Givenchy SS26 Womenswear, show notes",
+        source: "nAia inference from Givenchy SS26",
       },
       {
         signal: "Long clean trouser lines",
@@ -101,14 +101,14 @@ export const trendReports: TrendReportData[] = [
       {
         signal: "Asymmetry used with restraint",
         why: "Victoria Beckham Spring Summer 2026 frames experimental gestures, naïve compositions, and happy accidents as a core direction. The wearable translation: one asymmetric element — a hem, a seam, a wrapped neckline — against an otherwise composed base.",
-        source: "Victoria Beckham SS26, official collection notes",
+        source: "nAia inference from Victoria Beckham SS26",
       },
     ],
     fading: [
       {
         signal: "Rigid head-to-toe office suiting",
-        why: "Tailoring that reads primarily through stiffness rather than proportion is context-locked — it functions in formal settings and rarely rewears across occasions without a full outfit assembled around it.",
-        source: "nAia editorial judgment",
+        why: "The inverse of Givenchy's Spring Summer 2026 direction: as tailoring moves toward lightness and ease through cut and proportion, tailoring that reads through stiffness is what the direction moves away from. The wardrobe consequence is context-locking — it only functions in formal settings without a full outfit assembled around it.",
+        source: "nAia inference from Givenchy SS26",
       },
       {
         signal: "Overly complicated drape",
@@ -220,29 +220,29 @@ export const trendReports: TrendReportData[] = [
       {
         signal: "Waistcoats as a top layer",
         why: "Victoria Beckham Pre SS26 brings together the formal with the fluid. The working translation: a waistcoat worn as a standalone top layer over a draped skirt or wide-leg denim, rather than as part of a matching three-piece.",
-        source: "Victoria Beckham Pre SS26, official collection page",
+        source: "nAia inference from Victoria Beckham Pre SS26",
       },
       {
         signal: "Fluid trousers",
-        why: "A tailored anchor needs a soft counterpart to read as modern rather than severe. Fluid-leg trousers provide the contrast in silhouette — the proportion difference is the styling decision, not the formality.",
-        source: "nAia editorial judgment",
+        why: "Victoria Beckham Pre SS26 establishes the formal-meets-fluid direction. Fluid-leg trousers are the specific counterpart nAia identifies as the working garment — the proportion contrast between the structured anchor and the fluid leg is the styling decision, not the formality of the setting.",
+        source: "nAia inference from Victoria Beckham Pre SS26",
       },
       {
         signal: "Tailored separates over matching sets",
         why: "Victoria Beckham Pre SS26 establishes that a tailored piece earns its value when contrasted with something relaxed. Separates — bought independently — have more cross-outfit utility than a matching set bought as a unit.",
-        source: "Victoria Beckham Pre SS26, official collection page",
+        source: "nAia inference from Victoria Beckham Pre SS26",
       },
     ],
     fading: [
       {
         signal: "Suits that only work together",
-        why: "A matching suit that functions only as a complete set has the wardrobe value of one outfit. Separates that can meet different counterparts have more cross-occasion reach for the same spend.",
-        source: "nAia editorial judgment",
+        why: "The inverse of the separates direction Victoria Beckham Pre SS26 establishes: a matching suit that functions only as a complete set has the wardrobe value of one outfit rather than the cross-occasion utility separates deliver.",
+        source: "nAia inference from Victoria Beckham Pre SS26",
       },
       {
         signal: "Stiff fabric with no movement",
-        why: "Fabric that cannot move between the structured and fluid registers of the look makes the direction brittle — it reads as formal by default rather than by intention.",
-        source: "nAia editorial judgment",
+        why: "Victoria Beckham Pre SS26 establishes the formal-meets-fluid direction — fabric that cannot achieve the fluid side of that contrast makes the direction impossible to execute. It reads as formal by default rather than by intention.",
+        source: "nAia inference from Victoria Beckham Pre SS26",
       },
       {
         signal: "Trousers that require heels to make sense",
@@ -335,18 +335,18 @@ export const trendReports: TrendReportData[] = [
     rising: [
       {
         signal: "Soft white foundations",
-        why: "Pantone's Spring / Summer 2026 NYFW Fashion Color Trend Report documents the season's colour palette direction — soft white and off-white tones appear as foundational palette choices across multiple collections.",
-        source: "Pantone Fashion Color Trend Report, NYFW Spring / Summer 2026",
+        why: "Pantone's Spring / Summer 2026 NYFW Fashion Color Trend Report documents the season's colour palette direction including soft white and off-white tones. nAia's method frames these as the repeatable foundation — the quiet base the clear accent needs to read against.",
+        source: "nAia inference from Pantone NYFW SS26",
       },
       {
         signal: "Deep brown as an anchor",
         why: "Espresso and warm deep brown anchor a look with the visual weight of black while reading warmer and less expected than beige. The broader palette direction comes from Pantone's SS26 NYFW report; the espresso read is nAia's editorial translation.",
-        source: "nAia editorial judgment (Pantone SS26 as context)",
+        source: "nAia editorial judgment",
       },
       {
         signal: "A single expressive accessory or knit",
         why: "Victoria Beckham Spring Summer 2026 supports personal expression and experimentation in dressing. The lowest-commitment, highest-visibility introduction of an accent is a bag, shoe, or knit — before committing to a full accent garment.",
-        source: "Victoria Beckham SS26, official collection notes",
+        source: "nAia inference from Victoria Beckham SS26",
       },
       {
         signal: "Purposeful colour contrast",
