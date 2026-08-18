@@ -1,4 +1,5 @@
 import { Link, useLoaderData, type LoaderFunctionArgs } from "react-router";
+import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "../lib/storefront-config";
 import { trendReports, type TrendReportData } from "../lib/trend-reports";
 import {
   PROFESSIONAL_LENS_CONTENT,
@@ -45,14 +46,6 @@ const LENS_ORDER: LensKey[] = [
   "stylist",
 ];
 
-const SITE_NAV = [
-  { label: "HOME", to: "/trends" },
-  { label: "THE HOUSE", to: "/about" },
-  { label: "THE COLLECTION", to: "/naia-collection" },
-  { label: "THE ART STORY", to: "/art-story" },
-  { label: "nAia STYLIST", to: "/stylist" },
-  { label: "TREND REPORTS", to: "/trends" },
-];
 
 const css = `
   :root{--cream:#f4f4f1;--warm:#e1dbd7;--deep:#221516;--accent:#8b2035;--muted:#7a6f6a;--ff-display:'Playfair Display',Georgia,serif;--ff-body:'Cormorant Garamond',Garamond,serif;--ff-mono:'Space Mono','Courier New',monospace}
@@ -169,13 +162,12 @@ export function ErrorBoundary() {
       <header className="tr-header">
         <div className="tr-header-inner">
           <nav className="tr-sitenav-links" aria-label="Site navigation">
-            {SITE_NAV.map((l) => (
-              <Link key={l.to} to={l.to} className={`tr-sitenav-link${l.to === "/trends" ? " active" : ""}`}>
-                {l.label}
-              </Link>
+            {STOREFRONT_NAV.map((l) => (
+              <a key={l.path} href={`${STOREFRONT_ORIGIN}${l.path}`} className="tr-sitenav-link">{l.label}</a>
             ))}
+            <Link to="/trends" className="tr-sitenav-link active">TREND REPORTS</Link>
           </nav>
-          <Link to="/trends" className="tr-header-logo">NADINE</Link>
+          <a href={`${STOREFRONT_ORIGIN}/`} className="tr-header-logo">NADINE</a>
           <div className="tr-header-right">
             <Link to="/trends/my-edits" className="tr-personal-link">My Trend Edits ↗</Link>
           </div>
@@ -207,13 +199,12 @@ export default function TrendLens() {
       <header className="tr-header">
         <div className="tr-header-inner">
           <nav className="tr-sitenav-links" aria-label="Site navigation">
-            {SITE_NAV.map((l) => (
-              <Link key={l.to} to={l.to} className={`tr-sitenav-link${l.to === "/trends" ? " active" : ""}`}>
-                {l.label}
-              </Link>
+            {STOREFRONT_NAV.map((l) => (
+              <a key={l.path} href={`${STOREFRONT_ORIGIN}${l.path}`} className="tr-sitenav-link">{l.label}</a>
             ))}
+            <Link to="/trends" className="tr-sitenav-link active">TREND REPORTS</Link>
           </nav>
-          <Link to="/trends" className="tr-header-logo">NADINE</Link>
+          <a href={`${STOREFRONT_ORIGIN}/`} className="tr-header-logo">NADINE</a>
           <div className="tr-header-right">
             <Link to={`/trends/my-edits/${report.slug}`} className="tr-personal-link">My Trend Edits ↗</Link>
           </div>

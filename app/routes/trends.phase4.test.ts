@@ -15,6 +15,7 @@ import {
   LENS_LABELS,
   type LensKey,
 } from "../lib/professional-lens-content.js";
+import { STOREFRONT_ORIGIN } from "../lib/storefront-config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -43,25 +44,46 @@ describe("NADINE wordmark in all public trend routes", () => {
   });
 });
 
-// ─── Logo links to /trends (public homepage — / is authenticated dashboard) ───
+// ─── Logo links to storefront homepage (/ in naia-stylist is authenticated) ──
 
-describe("Logo (NADINE wordmark) links to /trends", () => {
-  it("trends.jsx: NADINE links to /trends", () => {
+describe("Logo (NADINE wordmark) links to storefront homepage", () => {
+  it("trends.jsx: NADINE wordmark links to storefront origin", () => {
     assert.ok(
-      trendsJsx.includes('to="/trends" className="pub-header-logo">NADINE'),
-      "trends.jsx NADINE must link to /trends, not / (/ is authenticated dashboard)",
+      trendsJsx.includes(`href={\`${STOREFRONT_ORIGIN}/\`} className="pub-header-logo">NADINE`) ||
+      trendsJsx.includes(`href="${STOREFRONT_ORIGIN}/" className="pub-header-logo">NADINE`) ||
+      trendsJsx.includes(`\`\${STOREFRONT_ORIGIN}/\`} className="pub-header-logo">NADINE`),
+      `trends.jsx NADINE wordmark must link to storefront (${STOREFRONT_ORIGIN})`,
     );
   });
-  it("trends.$slug.tsx: NADINE links to /trends", () => {
+  it("trends.$slug.tsx: NADINE wordmark links to storefront origin", () => {
     assert.ok(
-      slugTsx.includes('to="/trends" className="psl-header-logo">NADINE'),
-      "trends.$slug.tsx NADINE must link to /trends, not / (/ is authenticated dashboard)",
+      slugTsx.includes(`\`\${STOREFRONT_ORIGIN}/\`} className="psl-header-logo">NADINE`) ||
+      slugTsx.includes(`href="${STOREFRONT_ORIGIN}/" className="psl-header-logo">NADINE`),
+      `trends.$slug.tsx NADINE wordmark must link to storefront (${STOREFRONT_ORIGIN})`,
     );
   });
-  it("trends.$slug.lens.$lens.tsx: NADINE links to /trends", () => {
+  it("trends.$slug.lens.$lens.tsx: NADINE wordmark links to storefront origin", () => {
     assert.ok(
-      lensTsx.includes('to="/trends" className="tr-header-logo">NADINE'),
-      "trends.$slug.lens.$lens.tsx NADINE must link to /trends, not / (/ is authenticated dashboard)",
+      lensTsx.includes(`\`\${STOREFRONT_ORIGIN}/\`} className="tr-header-logo">NADINE`) ||
+      lensTsx.includes(`href="${STOREFRONT_ORIGIN}/" className="tr-header-logo">NADINE`),
+      `trends.$slug.lens.$lens.tsx NADINE wordmark must link to storefront (${STOREFRONT_ORIGIN})`,
+    );
+  });
+  it("no route links NADINE wordmark to / (authenticated dashboard)", () => {
+    assert.ok(
+      !trendsJsx.includes('to="/" className="pub-header-logo">NADINE') &&
+      !trendsJsx.includes('href="/" className="pub-header-logo">NADINE'),
+      "trends.jsx must not link NADINE to / (authenticated dashboard)",
+    );
+    assert.ok(
+      !slugTsx.includes('to="/" className="psl-header-logo">NADINE') &&
+      !slugTsx.includes('href="/" className="psl-header-logo">NADINE'),
+      "trends.$slug.tsx must not link NADINE to / (authenticated dashboard)",
+    );
+    assert.ok(
+      !lensTsx.includes('to="/" className="tr-header-logo">NADINE') &&
+      !lensTsx.includes('href="/" className="tr-header-logo">NADINE'),
+      "lens route must not link NADINE to / (authenticated dashboard)",
     );
   });
 });
@@ -69,22 +91,22 @@ describe("Logo (NADINE wordmark) links to /trends", () => {
 // ─── TREND REPORTS active state in all 3 routes ───────────────────────────────
 
 describe("TREND REPORTS nav link marked active", () => {
-  it("trends.jsx: TREND REPORTS gets active class", () => {
+  it("trends.jsx: TREND REPORTS link has active class", () => {
     assert.ok(
-      trendsJsx.includes('"/trends" ? " active"'),
-      "trends.jsx must mark /trends nav link as active",
+      trendsJsx.includes('"pub-sitenav-link active">TREND REPORTS</Link>'),
+      "trends.jsx must render TREND REPORTS with active class as an internal Link",
     );
   });
-  it("trends.$slug.tsx: TREND REPORTS gets active class", () => {
+  it("trends.$slug.tsx: TREND REPORTS link has active class", () => {
     assert.ok(
-      slugTsx.includes('"/trends" ? " active"'),
-      "trends.$slug.tsx must mark /trends nav link as active",
+      slugTsx.includes('"psl-sitenav-link active">TREND REPORTS</Link>'),
+      "trends.$slug.tsx must render TREND REPORTS with active class as an internal Link",
     );
   });
-  it("trends.$slug.lens.$lens.tsx: TREND REPORTS gets active class", () => {
+  it("trends.$slug.lens.$lens.tsx: TREND REPORTS link has active class", () => {
     assert.ok(
-      lensTsx.includes('"/trends" ? " active"'),
-      "trends.$slug.lens.$lens.tsx must mark /trends nav link as active",
+      lensTsx.includes('"tr-sitenav-link active">TREND REPORTS</Link>'),
+      "trends.$slug.lens.$lens.tsx must render TREND REPORTS with active class as an internal Link",
     );
   });
 });

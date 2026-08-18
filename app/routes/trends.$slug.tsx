@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useLoaderData, type LoaderFunctionArgs } from "react-router";
+import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "../lib/storefront-config";
 import { trendReports, type TrendReportData } from "../lib/trend-reports";
 
 const FONTS =
@@ -7,14 +8,6 @@ const FONTS =
 
 const TINTS = ["#efeae0", "#e6dccb", "#d9c9b5", "#efe6d7", "#e2d3bf", "#ede2cf"];
 
-const SITE_NAV = [
-  { label: "HOME", to: "/trends" },
-  { label: "THE HOUSE", to: "/about" },
-  { label: "THE COLLECTION", to: "/naia-collection" },
-  { label: "THE ART STORY", to: "/art-story" },
-  { label: "nAia STYLIST", to: "/stylist" },
-  { label: "TREND REPORTS", to: "/trends" },
-];
 
 const SOURCE_DATE_MONTHS = [
   "January","February","March","April","May","June",
@@ -703,13 +696,12 @@ export function ErrorBoundary() {
       <header className="psl-header">
         <div className="psl-header-inner">
           <nav className="psl-sitenav-links" aria-label="Site navigation">
-            {SITE_NAV.map((l) => (
-              <Link key={l.to} to={l.to} className={`psl-sitenav-link${l.to === "/trends" ? " active" : ""}`}>
-                {l.label}
-              </Link>
+            {STOREFRONT_NAV.map((l) => (
+              <a key={l.path} href={`${STOREFRONT_ORIGIN}${l.path}`} className="psl-sitenav-link">{l.label}</a>
             ))}
+            <Link to="/trends" className="psl-sitenav-link active">TREND REPORTS</Link>
           </nav>
-          <Link to="/trends" className="psl-header-logo">NADINE</Link>
+          <a href={`${STOREFRONT_ORIGIN}/`} className="psl-header-logo">NADINE</a>
           <div className="psl-header-right">
             <Link to="/trends/my-edits" className="psl-personal-link">My Trend Edits ↗</Link>
           </div>
@@ -851,13 +843,12 @@ export default function TrendReportDetail() {
       <header className="psl-header">
         <div className="psl-header-inner">
           <nav className="psl-sitenav-links" aria-label="Site navigation">
-            {SITE_NAV.map((l) => (
-              <Link key={l.to} to={l.to} className={`psl-sitenav-link${l.to === "/trends" ? " active" : ""}`}>
-                {l.label}
-              </Link>
+            {STOREFRONT_NAV.map((l) => (
+              <a key={l.path} href={`${STOREFRONT_ORIGIN}${l.path}`} className="psl-sitenav-link">{l.label}</a>
             ))}
+            <Link to="/trends" className="psl-sitenav-link active">TREND REPORTS</Link>
           </nav>
-          <Link to="/trends" className="psl-header-logo">NADINE</Link>
+          <a href={`${STOREFRONT_ORIGIN}/`} className="psl-header-logo">NADINE</a>
           <div className="psl-header-right">
             <button className={`psl-action-btn${copyStatus === "copied" ? " active" : ""}`} onClick={copyLink}>
               {copyStatus === "copied" ? "Copied ✓" : copyStatus === "error" ? "Failed" : "Copy link"}
