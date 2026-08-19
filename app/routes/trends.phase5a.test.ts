@@ -190,7 +190,7 @@ describe("Phase 5A: all reports have mood field", () => {
   }
 });
 
-// ─── Landing page CSS: editorial mood panel and card image/palette ─────────────
+// ─── Landing page CSS: editorial mood panel and colour palette strip ───────────
 
 describe("Phase 5A: trends.jsx landing page CSS", () => {
   it("pub-featured-img-mood class is defined", () => {
@@ -202,26 +202,24 @@ describe("Phase 5A: trends.jsx landing page CSS", () => {
       "pub-featured-img-mood must use Cormorant Garamond"
     );
   });
-  it("pub-card-img-panel class is defined", () => {
-    assert.ok(trendsJsx.includes(".pub-card-img-panel"), "pub-card-img-panel class must be defined for image cards");
-  });
   it("pub-card-palette-strip class is defined", () => {
     assert.ok(trendsJsx.includes(".pub-card-palette-strip"), "pub-card-palette-strip class must be defined for colour direction card");
   });
-  it("pub-card-img-fade class is defined for gradient overlay", () => {
-    assert.ok(trendsJsx.includes(".pub-card-img-fade"), "pub-card-img-fade class must be defined");
+  it("no dead pub-card-img-panel CSS (removed with photography gate-out)", () => {
+    assert.ok(!trendsJsx.includes(".pub-card-img-panel"), "pub-card-img-panel CSS must be removed — no card images are wired");
   });
 });
 
-// ─── Landing page JSX: conditional image rendering ────────────────────────────
+// ─── Landing page JSX: editorial mood + palette strip ────────────────────────
 
 describe("Phase 5A: trends.jsx landing page JSX", () => {
   it("featured card renders editorial mood word from report.mood", () => {
     assert.ok(trendsJsx.includes("pub-featured-img-mood"), "JSX must render pub-featured-img-mood");
     assert.ok(trendsJsx.includes("featured.mood"), "JSX must use featured.mood for the editorial mood word");
   });
-  it("card image panel is conditionally rendered with report.media?.card", () => {
-    assert.ok(trendsJsx.includes("report.media?.card") || trendsJsx.includes("hasCardImg"), "JSX must conditionally render card image panel");
+  it("no dead card image panel JSX (removed with photography gate-out)", () => {
+    assert.ok(!trendsJsx.includes("pub-card-img-panel"), "pub-card-img-panel JSX must be removed");
+    assert.ok(!trendsJsx.includes("hasCardImg"), "hasCardImg variable must be removed");
   });
   it("palette strip is rendered for colour direction slug", () => {
     assert.ok(
@@ -235,15 +233,9 @@ describe("Phase 5A: trends.jsx landing page JSX", () => {
   });
 });
 
-// ─── Public report CSS: hero image + editorial break ──────────────────────────
+// ─── Public report CSS: editorial break (hero image CSS removed) ──────────────
 
 describe("Phase 5A: trends.$slug.tsx public report CSS", () => {
-  it("psl-hero--has-image class is defined", () => {
-    assert.ok(slugTsx.includes(".psl-hero--has-image"), "psl-hero--has-image modifier class must be defined");
-  });
-  it("psl-hero-visual class is defined", () => {
-    assert.ok(slugTsx.includes(".psl-hero-visual"), "psl-hero-visual class must be defined for image column");
-  });
   it("psl-editorial-break class is defined", () => {
     assert.ok(slugTsx.includes(".psl-editorial-break"), "psl-editorial-break class must be defined");
   });
@@ -256,17 +248,24 @@ describe("Phase 5A: trends.$slug.tsx public report CSS", () => {
       "psl-editorial-break-mood must use Cormorant Garamond"
     );
   });
+  it("no dead psl-hero--has-image CSS (removed with photography gate-out)", () => {
+    assert.ok(!slugTsx.includes(".psl-hero--has-image"), "psl-hero--has-image must be removed — no hero images are wired");
+  });
+  it("no dead psl-hero-visual CSS (removed with photography gate-out)", () => {
+    assert.ok(!slugTsx.includes(".psl-hero-visual"), "psl-hero-visual must be removed — no hero images are wired");
+  });
 });
 
-// ─── Public report JSX: conditional hero image + editorial break ──────────────
+// ─── Public report JSX: clean hero + editorial break ─────────────────────────
 
 describe("Phase 5A: trends.$slug.tsx public report JSX", () => {
-  it("hero section conditionally adds psl-hero--has-image class", () => {
-    assert.ok(slugTsx.includes("psl-hero--has-image"), "hero section must conditionally apply psl-hero--has-image");
-    assert.ok(slugTsx.includes("report.media?.hero"), "hero must check report.media?.hero");
+  it("hero section uses plain psl-hero class (no dynamic image modifier)", () => {
+    assert.ok(slugTsx.includes('"psl-hero"'), "hero section must use plain psl-hero class");
+    assert.ok(!slugTsx.includes("psl-hero--has-image"), "psl-hero--has-image must be removed from JSX");
   });
-  it("psl-hero-visual div renders when media.hero is present", () => {
-    assert.ok(slugTsx.includes("psl-hero-visual"), "psl-hero-visual div must appear in JSX");
+  it("no dead hero image JSX (report.media?.hero conditional removed)", () => {
+    assert.ok(!slugTsx.includes("report.media?.hero"), "dead hero image conditional must be removed from JSX");
+    assert.ok(!slugTsx.includes("psl-hero-visual"), "psl-hero-visual JSX must be removed");
   });
   it("editorial break renders report.mood", () => {
     assert.ok(slugTsx.includes("psl-editorial-break"), "psl-editorial-break must appear in JSX");
