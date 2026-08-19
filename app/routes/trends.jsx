@@ -595,7 +595,7 @@ export default function TrendReports() {
             {STOREFRONT_NAV.map((l) => (
               <a key={l.path} href={`${STOREFRONT_ORIGIN}${l.path}`} className="pub-sitenav-link">{l.label}</a>
             ))}
-            <Link to="/trends" className="pub-sitenav-link active">TREND REPORTS</Link>
+            <Link to="/trend-reports" className="pub-sitenav-link active">TREND REPORTS</Link>
           </nav>
           <a href={`${STOREFRONT_ORIGIN}/`} className="pub-header-logo">NADINE</a>
           <div className="pub-header-right">
@@ -641,7 +641,7 @@ export default function TrendReports() {
                 </h2>
                 <p className="pub-featured-lede">{featured.editorialIntro || featured.summary}</p>
                 <div className="pub-featured-actions">
-                  <Link to={`/trends/${featured.slug}`} className="pub-pill-btn">
+                  <Link to={`/trend-reports/${featured.slug}`} className="pub-pill-btn">
                     Read the report →
                   </Link>
                   <Link to={`/trends/my-edits/${featured.slug}`} className="pub-ghost-link">
@@ -678,7 +678,7 @@ export default function TrendReports() {
               return (
                 <Link
                   key={report.slug}
-                  to={`/trends/${report.slug}`}
+                  to={`/trend-reports/${report.slug}`}
                   className="pub-card"
                   style={{ background: tint }}
                 >

@@ -747,7 +747,7 @@ export function ErrorBoundary() {
             {STOREFRONT_NAV.map((l) => (
               <a key={l.path} href={`${STOREFRONT_ORIGIN}${l.path}`} className="psl-sitenav-link">{l.label}</a>
             ))}
-            <Link to="/trends" className="psl-sitenav-link active">TREND REPORTS</Link>
+            <Link to="/trend-reports" className="psl-sitenav-link active">TREND REPORTS</Link>
           </nav>
           <a href={`${STOREFRONT_ORIGIN}/`} className="psl-header-logo">NADINE</a>
           <div className="psl-header-right">
@@ -761,7 +761,7 @@ export function ErrorBoundary() {
           report<br />
           <em>not found.</em>
         </h1>
-        <Link to="/trends" className="psl-lens-btn" style={{ display: "inline-block", marginTop: "32px" }}>
+        <Link to="/trend-reports" className="psl-lens-btn" style={{ display: "inline-block", marginTop: "32px" }}>
           ← back to trend reports
         </Link>
       </div>
@@ -894,7 +894,7 @@ export default function TrendReportDetail() {
             {STOREFRONT_NAV.map((l) => (
               <a key={l.path} href={`${STOREFRONT_ORIGIN}${l.path}`} className="psl-sitenav-link">{l.label}</a>
             ))}
-            <Link to="/trends" className="psl-sitenav-link active">TREND REPORTS</Link>
+            <Link to="/trend-reports" className="psl-sitenav-link active">TREND REPORTS</Link>
           </nav>
           <a href={`${STOREFRONT_ORIGIN}/`} className="psl-header-logo">NADINE</a>
           <div className="psl-header-right">
@@ -911,7 +911,7 @@ export default function TrendReportDetail() {
       <section className="psl-hero" style={{ background: tint }}>
         <span className="psl-hero-num" aria-hidden="true">{num}</span>
         <div className="psl-hero-inner">
-          <Link to="/trends" className="psl-back">← Trend Reports</Link>
+          <Link to="/trend-reports" className="psl-back">← Trend Reports</Link>
           <div className="psl-kicker">
             {report.mood ? `${report.mood} · ` : ""}{report.season}
           </div>
@@ -1144,7 +1144,7 @@ export default function TrendReportDetail() {
             <h3 className="psl-more-title">
               more <em>reports.</em>
             </h3>
-            <Link to="/trends" className="psl-more-link">view all →</Link>
+            <Link to="/trend-reports" className="psl-more-link">view all →</Link>
           </div>
           <div className="psl-more-grid">
             {otherReports.map((r, i) => {
@@ -1154,7 +1154,7 @@ export default function TrendReportDetail() {
               return (
                 <Link
                   key={r.slug}
-                  to={`/trends/${r.slug}`}
+                  to={`/trend-reports/${r.slug}`}
                   className="psl-card"
                   style={{ background: rTint }}
                 >
