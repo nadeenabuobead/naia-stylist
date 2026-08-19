@@ -694,7 +694,7 @@ const css = `
     top: 0;
     left: 0;
     right: 0;
-    height: 48%;
+    height: 38%;
     overflow: hidden;
     z-index: 0;
   }
