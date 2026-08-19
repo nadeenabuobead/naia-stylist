@@ -293,11 +293,20 @@ const css = `
     padding: 0 32px;
     letter-spacing: 0.01em;
   }
-  .pub-featured-img-rule {
-    width: 48px;
-    height: 1px;
-    background: rgba(26,17,9,0.12);
-    margin: 18px 0;
+  .pub-featured-img-graphic {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    z-index: 0;
+  }
+  .pub-featured-img-graphic svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .pub-featured-img-mood {
+    position: relative;
+    z-index: 1;
   }
   .pub-featured-img-label {
     position: absolute;
@@ -310,19 +319,20 @@ const css = `
     color: rgba(26,17,9,0.3);
   }
 
-  /* ── Card palette panel (Colour Direction) ─────────────────────── */
-  .pub-card-palette-strip {
+  /* ── Card visual panel ──────────────────────────────────────────── */
+  .pub-card-visual {
     position: absolute;
     top: 0;
     left: 0;
     right: 0;
-    height: 46%;
-    display: flex;
-    z-index: 0;
+    height: 48%;
     overflow: hidden;
+    z-index: 0;
   }
-  .pub-card-palette-swatch {
-    flex: 1;
+  .pub-card-visual svg {
+    width: 100%;
+    height: 100%;
+    display: block;
   }
 
   /* ── Grid ───────────────────────────────────────────────────────── */
@@ -552,20 +562,71 @@ const css = `
 `;
 
 
-const COLOUR_PALETTE = [
-  { bg: "#f2ede7", label: "soft white" },
-  { bg: "#d4c8b4", label: "stone" },
-  { bg: "#3e2a1c", label: "espresso" },
-  { bg: "#8a9aaa", label: "denim" },
-  { bg: "#a85060", label: "accent" },
-];
-
 function formatSeason(season) {
   // "Spring 2026" → "ss'26 ·" style
   const lower = season.toLowerCase();
   if (lower.includes("spring")) return `ss'${season.slice(-2)} ·`;
   if (lower.includes("autumn") || lower.includes("fall")) return `fw'${season.slice(-2)} ·`;
   return season;
+}
+
+function reportVisual(treatment, variant) {
+  if (treatment === "soft-structure") {
+    return variant === "featured" ? (
+      <svg viewBox="0 0 600 520" xmlns="http://www.w3.org/2000/svg" style={{width:"100%",height:"100%",display:"block"}}>
+        <rect width="600" height="520" fill="#ded6c8"/>
+        <path d="M -20 360 C 100 338, 240 348, 320 356 C 400 364, 500 348, 620 332 L 620 520 L -20 520 Z" fill="#b4a290" opacity="0.90"/>
+        <path d="M -20 222 C 120 202, 250 212, 330 220 C 420 228, 510 210, 620 194 L 620 370 C 490 388, 370 380, 290 372 C 200 364, 90 382, -20 400 Z" fill="#c8b4a0" opacity="0.88"/>
+        <path d="M -20 100 C 140 78, 260 89, 340 98 C 430 107, 520 88, 620 70 L 620 240 C 490 258, 380 248, 300 240 C 200 232, 100 248, -20 268 Z" fill="#dccebe" opacity="0.90"/>
+        <path d="M -20 100 C 140 78, 260 89, 340 98 C 430 107, 520 88, 620 70" fill="none" stroke="#f4ece0" strokeWidth="1.8" opacity="0.70"/>
+        <path d="M -20 222 C 120 202, 250 212, 330 220 C 420 228, 510 210, 620 194" fill="none" stroke="#ece0d0" strokeWidth="1.2" opacity="0.50"/>
+      </svg>
+    ) : (
+      <svg viewBox="0 0 400 220" xmlns="http://www.w3.org/2000/svg" style={{width:"100%",height:"100%",display:"block"}}>
+        <rect width="400" height="220" fill="#ded6c8"/>
+        <path d="M -10 148 C 70 133, 170 140, 220 146 C 280 152, 345 138, 410 125 L 410 220 L -10 220 Z" fill="#b4a290" opacity="0.90"/>
+        <path d="M -10 88 C 80 73, 180 80, 225 87 C 275 94, 345 80, 410 66 L 410 152 C 330 166, 245 160, 195 154 C 140 148, 65 162, -10 174 Z" fill="#c8b4a0" opacity="0.88"/>
+        <path d="M -10 36 C 90 20, 190 28, 230 36 C 275 44, 345 28, 410 14 L 410 90 C 335 104, 245 98, 200 92 C 150 86, 72 100, -10 112 Z" fill="#dccebe" opacity="0.90"/>
+        <path d="M -10 36 C 90 20, 190 28, 230 36 C 275 44, 345 28, 410 14" fill="none" stroke="#f4ece0" strokeWidth="1.5" opacity="0.68"/>
+      </svg>
+    );
+  }
+  if (treatment === "modern-tailoring") {
+    return variant === "featured" ? (
+      <svg viewBox="0 0 600 520" xmlns="http://www.w3.org/2000/svg" style={{width:"100%",height:"100%",display:"block"}}>
+        <rect width="600" height="520" fill="#e4dace"/>
+        <path d="M 0 0 L 244 0 C 246 104, 240 208, 246 312 C 251 416, 248 468, 249 520 L 0 520 Z" fill="#1e1610"/>
+        <path d="M 244 0 C 246 104, 240 208, 246 312 C 251 416, 248 468, 249 520" fill="none" stroke="#a09080" strokeWidth="1.0" opacity="0.45"/>
+        <path d="M 310 330 C 360 310, 430 300, 510 296 C 560 294, 590 292, 610 290" fill="none" stroke="#c0b09a" strokeWidth="1.2" opacity="0.40"/>
+      </svg>
+    ) : (
+      <svg viewBox="0 0 400 200" xmlns="http://www.w3.org/2000/svg" style={{width:"100%",height:"100%",display:"block"}}>
+        <rect width="400" height="200" fill="#e4dace"/>
+        <path d="M 0 0 L 158 0 C 160 50, 156 100, 159 150 C 162 175, 160 188, 160 200 L 0 200 Z" fill="#1e1610"/>
+        <path d="M 158 0 C 160 50, 156 100, 159 150 C 162 175, 160 188, 160 200" fill="none" stroke="#a09080" strokeWidth="0.8" opacity="0.4"/>
+      </svg>
+    );
+  }
+  if (treatment === "colour-direction") {
+    return variant === "featured" ? (
+      <svg viewBox="0 0 600 520" xmlns="http://www.w3.org/2000/svg" style={{width:"100%",height:"100%",display:"block"}}>
+        <rect width="600" height="520" fill="#f0e8dc"/>
+        <rect x="0" y="300" width="600" height="220" fill="#1e1208"/>
+        <line x1="0" y1="300" x2="600" y2="300" stroke="#c8a870" strokeWidth="0.8" opacity="0.4"/>
+        <rect x="152" y="238" width="68" height="200" fill="#7a1e28"/>
+        <rect x="152" y="238" width="3" height="200" fill="#a03040" opacity="0.45"/>
+      </svg>
+    ) : (
+      <svg viewBox="0 0 400 220" xmlns="http://www.w3.org/2000/svg" style={{width:"100%",height:"100%",display:"block"}}>
+        <rect width="400" height="220" fill="#f0e8dc"/>
+        <rect x="0" y="130" width="400" height="90" fill="#1e1208"/>
+        <line x1="0" y1="130" x2="400" y2="130" stroke="#c8a870" strokeWidth="0.7" opacity="0.35"/>
+        <rect x="100" y="96" width="50" height="96" fill="#7a1e28"/>
+        <rect x="100" y="96" width="2" height="96" fill="#a03040" opacity="0.4"/>
+      </svg>
+    );
+  }
+  return null;
 }
 
 export default function TrendReports() {
@@ -651,8 +712,10 @@ export default function TrendReports() {
               </div>
               <div className="pub-featured-img">
                 <div className="pub-featured-img-inner" aria-hidden="true">
+                  <div className="pub-featured-img-graphic">
+                    {reportVisual(featured.visual?.treatment, "featured")}
+                  </div>
                   <div className="pub-featured-img-mood">{featured.mood}</div>
-                  <div className="pub-featured-img-rule" />
                 </div>
                 <span className="pub-featured-img-label">editorial · {featured.season.toLowerCase()}</span>
               </div>
@@ -669,7 +732,6 @@ export default function TrendReports() {
             {rest.map((report, i) => {
               const tint = TINTS[(i + 1) % TINTS.length];
               const num = String(i + 2).padStart(2, "0");
-              const isColourDirection = report.slug === "spring-2026-colour-direction";
               return (
                 <Link
                   key={report.slug}
@@ -677,11 +739,9 @@ export default function TrendReports() {
                   className="pub-card"
                   style={{ background: tint }}
                 >
-                  {isColourDirection && (
-                    <div className="pub-card-palette-strip" aria-hidden="true">
-                      {COLOUR_PALETTE.map((s) => (
-                        <div key={s.label} className="pub-card-palette-swatch" style={{ background: s.bg }} />
-                      ))}
+                  {report.visual?.treatment && (
+                    <div className="pub-card-visual" aria-hidden="true">
+                      {reportVisual(report.visual.treatment, "card")}
                     </div>
                   )}
                   <span className="pub-card-num" aria-hidden="true">{num}</span>

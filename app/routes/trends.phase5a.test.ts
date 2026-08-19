@@ -190,7 +190,40 @@ describe("Phase 5A: all reports have mood field", () => {
   }
 });
 
-// ─── Landing page CSS: editorial mood panel and colour palette strip ───────────
+// ─── Visual system: TrendReportVisual type ────────────────────────────────────
+
+describe("Phase 5A: TrendReportVisual type definition", () => {
+  it("TrendReportVisual type is exported from trend-reports.ts", () => {
+    assert.ok(trendReportsTs.includes("export type TrendReportVisual"), "TrendReportVisual type must be exported");
+  });
+  it("TrendReportData has optional visual field", () => {
+    assert.ok(trendReportsTs.includes("visual?: TrendReportVisual"), "TrendReportData must have optional visual field");
+  });
+  it("treatment union includes all three report treatments", () => {
+    assert.ok(trendReportsTs.includes("soft-structure"), "treatment must include soft-structure");
+    assert.ok(trendReportsTs.includes("modern-tailoring"), "treatment must include modern-tailoring");
+    assert.ok(trendReportsTs.includes("colour-direction"), "treatment must include colour-direction");
+  });
+});
+
+// ─── Visual system: visual.treatment field on all reports ────────────────────
+
+describe("Phase 5A: visual.treatment on each report", () => {
+  it("spring-2026-soft-structure has visual.treatment = soft-structure", () => {
+    const report = trendReports.find((r) => r.slug === "spring-2026-soft-structure");
+    assert.equal(report?.visual?.treatment, "soft-structure");
+  });
+  it("modern-tailoring-spring-2026 has visual.treatment = modern-tailoring", () => {
+    const report = trendReports.find((r) => r.slug === "modern-tailoring-spring-2026");
+    assert.equal(report?.visual?.treatment, "modern-tailoring");
+  });
+  it("spring-2026-colour-direction has visual.treatment = colour-direction", () => {
+    const report = trendReports.find((r) => r.slug === "spring-2026-colour-direction");
+    assert.equal(report?.visual?.treatment, "colour-direction");
+  });
+});
+
+// ─── Landing page CSS: editorial mood panel and card visual panel ─────────────
 
 describe("Phase 5A: trends.jsx landing page CSS", () => {
   it("pub-featured-img-mood class is defined", () => {
@@ -202,34 +235,48 @@ describe("Phase 5A: trends.jsx landing page CSS", () => {
       "pub-featured-img-mood must use Cormorant Garamond"
     );
   });
-  it("pub-card-palette-strip class is defined", () => {
-    assert.ok(trendsJsx.includes(".pub-card-palette-strip"), "pub-card-palette-strip class must be defined for colour direction card");
+  it("pub-featured-img-graphic class is defined", () => {
+    assert.ok(trendsJsx.includes(".pub-featured-img-graphic"), "pub-featured-img-graphic class must be defined for featured visual panel");
+  });
+  it("pub-card-visual class is defined", () => {
+    assert.ok(trendsJsx.includes(".pub-card-visual"), "pub-card-visual class must be defined for secondary card visual panels");
   });
   it("no dead pub-card-img-panel CSS (removed with photography gate-out)", () => {
     assert.ok(!trendsJsx.includes(".pub-card-img-panel"), "pub-card-img-panel CSS must be removed — no card images are wired");
   });
+  it("no dead pub-card-palette-strip CSS (replaced by unified visual system)", () => {
+    assert.ok(!trendsJsx.includes(".pub-card-palette-strip"), "pub-card-palette-strip must be removed — unified visual system used instead");
+  });
 });
 
-// ─── Landing page JSX: editorial mood + palette strip ────────────────────────
+// ─── Landing page JSX: editorial mood + unified visual panels ────────────────
 
 describe("Phase 5A: trends.jsx landing page JSX", () => {
+  it("featured card renders pub-featured-img-graphic wrapper", () => {
+    assert.ok(trendsJsx.includes("pub-featured-img-graphic"), "JSX must render pub-featured-img-graphic in featured card");
+  });
+  it("featured card calls reportVisual with featured.visual?.treatment", () => {
+    assert.ok(
+      trendsJsx.includes("featured.visual?.treatment"),
+      "JSX must call reportVisual with featured.visual?.treatment"
+    );
+  });
   it("featured card renders editorial mood word from report.mood", () => {
     assert.ok(trendsJsx.includes("pub-featured-img-mood"), "JSX must render pub-featured-img-mood");
     assert.ok(trendsJsx.includes("featured.mood"), "JSX must use featured.mood for the editorial mood word");
+  });
+  it("secondary card loop uses pub-card-visual with report.visual.treatment", () => {
+    assert.ok(trendsJsx.includes("pub-card-visual"), "JSX must render pub-card-visual in card loop");
+    assert.ok(trendsJsx.includes("report.visual?.treatment"), "JSX must guard on report.visual?.treatment");
   });
   it("no dead card image panel JSX (removed with photography gate-out)", () => {
     assert.ok(!trendsJsx.includes("pub-card-img-panel"), "pub-card-img-panel JSX must be removed");
     assert.ok(!trendsJsx.includes("hasCardImg"), "hasCardImg variable must be removed");
   });
-  it("palette strip is rendered for colour direction slug", () => {
-    assert.ok(
-      trendsJsx.includes("spring-2026-colour-direction") && trendsJsx.includes("pub-card-palette-strip"),
-      "JSX must render palette strip for colour direction"
-    );
-  });
-  it("COLOUR_PALETTE constant is defined with at least 4 swatches", () => {
-    const matches = trendsJsx.match(/COLOUR_PALETTE/g) ?? [];
-    assert.ok(matches.length >= 2, "COLOUR_PALETTE must be defined and used");
+  it("no dead palette strip JSX (replaced by unified visual system)", () => {
+    assert.ok(!trendsJsx.includes("pub-card-palette-strip"), "pub-card-palette-strip JSX must be removed");
+    assert.ok(!trendsJsx.includes("COLOUR_PALETTE"), "COLOUR_PALETTE must be removed");
+    assert.ok(!trendsJsx.includes("isColourDirection"), "isColourDirection must be removed");
   });
 });
 

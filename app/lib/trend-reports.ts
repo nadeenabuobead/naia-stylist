@@ -44,6 +44,10 @@ export type TrendReportMedia = {
   card?: TrendMedia;
 };
 
+export type TrendReportVisual = {
+  treatment: "soft-structure" | "modern-tailoring" | "colour-direction";
+};
+
 export type TrendReportData = {
   slug: string;
   title: string;
@@ -68,6 +72,7 @@ export type TrendReportData = {
   published: boolean;
   order?: number;
   media?: TrendReportMedia;
+  visual?: TrendReportVisual;
 };
 
 export const trendReports: TrendReportData[] = [
@@ -200,6 +205,7 @@ export const trendReports: TrendReportData[] = [
     ],
     published: true,
     order: 1,
+    visual: { treatment: "soft-structure" },
   },
   {
     slug: "modern-tailoring-spring-2026",
@@ -322,6 +328,7 @@ export const trendReports: TrendReportData[] = [
     ],
     published: true,
     order: 2,
+    visual: { treatment: "modern-tailoring" },
   },
   {
     slug: "spring-2026-colour-direction",
@@ -453,5 +460,6 @@ export const trendReports: TrendReportData[] = [
     ],
     published: true,
     order: 3,
+    visual: { treatment: "colour-direction" },
   },
 ];
