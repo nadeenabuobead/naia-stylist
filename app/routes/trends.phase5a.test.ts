@@ -100,27 +100,22 @@ describe("Phase 5A: order field for deterministic sort", () => {
   });
 });
 
-// ─── Media data: all three reports have hero + card ───────────────────────────
+// ─── Media data: infrastructure present, photographs TBC ──────────────────────
 
-describe("Phase 5A: all three reports have media.hero and media.card", () => {
-  for (const slug of SLUGS) {
-    it(`${slug} has media.hero`, () => {
+describe("Phase 5A: media infrastructure (photographs pending)", () => {
+  it("TrendReportData accepts optional media field", () => {
+    // All three reports intentionally have no media wired yet (awaiting real photographs).
+    // This block confirms the optional field is accepted and no report crashes on load.
+    for (const slug of SLUGS) {
       const report = trendReports.find((r) => r.slug === slug);
-      assert.ok(report?.media?.hero, `${slug} must have media.hero`);
-    });
-    it(`${slug} has media.card`, () => {
-      const report = trendReports.find((r) => r.slug === slug);
-      assert.ok(report?.media?.card, `${slug} must have media.card`);
-    });
-    it(`${slug} hero src points to SVG in /images/`, () => {
-      const report = trendReports.find((r) => r.slug === slug);
-      assert.ok(report?.media?.hero?.src?.endsWith(".svg"), `${slug} hero.src must be an SVG`);
-      assert.ok(report?.media?.hero?.src?.startsWith("/images/"), `${slug} hero.src must be in /images/`);
-    });
-  }
+      assert.ok(report, `${slug} must exist`);
+      // media is optional — undefined is the correct state until photographs are supplied
+      assert.ok(report?.media === undefined || typeof report.media === "object");
+    }
+  });
 });
 
-// ─── No old JPG references remain ─────────────────────────────────────────────
+// ─── No old unclear-provenance JPG references remain ──────────────────────────
 
 describe("Phase 5A: old unclear-provenance images removed", () => {
   it("trend-reports.ts has no reference to tr-modern-tailoring.jpg", () => {
@@ -129,60 +124,36 @@ describe("Phase 5A: old unclear-provenance images removed", () => {
   it("trend-reports.ts has no reference to tr-landing-hero.jpg", () => {
     assert.ok(!trendReportsTs.includes("tr-landing-hero.jpg"), "tr-landing-hero.jpg must not be referenced");
   });
-  it("trend-reports.ts references tr-soft-structure.svg", () => {
-    assert.ok(trendReportsTs.includes("tr-soft-structure.svg"), "Soft Structure SVG must be wired");
-  });
-  it("trend-reports.ts references tr-modern-tailoring.svg", () => {
-    assert.ok(trendReportsTs.includes("tr-modern-tailoring.svg"), "Modern Tailoring SVG must be wired");
-  });
-  it("trend-reports.ts references tr-colour-direction.svg", () => {
-    assert.ok(trendReportsTs.includes("tr-colour-direction.svg"), "Colour Direction SVG must be wired");
+  // SVG files remain in public/images/ as optional editorial-break graphics but are NOT
+  // wired as media.hero/media.card — real photographs are required for those fields.
+  it("trend-reports.ts does not wire SVGs as hero/card imagery", () => {
+    assert.ok(
+      !trendReportsTs.includes('"nadine-owned"') || !trendReportsTs.includes(".svg"),
+      "No SVG file should appear in a TrendMedia rights:nadine-owned block"
+    );
   });
 });
 
-// ─── Media data: Modern Tailoring has hero + card ─────────────────────────────
+// ─── Media data: Modern Tailoring — awaiting real photograph ──────────────────
 
-describe("Phase 5A: Modern Tailoring media data", () => {
+describe("Phase 5A: Modern Tailoring report data", () => {
   const report = trendReports.find((r) => r.slug === "modern-tailoring-spring-2026");
 
   it("modern-tailoring-spring-2026 exists in trendReports", () => {
     assert.ok(report, "modern-tailoring-spring-2026 must be in trendReports");
   });
 
-  it("modern-tailoring has media.hero defined", () => {
-    assert.ok(report?.media?.hero, "modern-tailoring-spring-2026 must have media.hero");
+  it("modern-tailoring has order 2", () => {
+    assert.equal(report?.order, 2);
   });
 
-  it("modern-tailoring has media.card defined", () => {
-    assert.ok(report?.media?.card, "modern-tailoring-spring-2026 must have media.card");
+  it("modern-tailoring is published", () => {
+    assert.ok(report?.published);
   });
 
-  it("media.hero has non-empty src", () => {
-    assert.ok(report?.media?.hero?.src?.length, "media.hero.src must be non-empty");
-  });
-
-  it("media.hero.src is a root-relative path", () => {
-    assert.ok(report?.media?.hero?.src?.startsWith("/"), "media.hero.src must start with /");
-  });
-
-  it("media.hero has non-empty alt text", () => {
-    assert.ok(report?.media?.hero?.alt?.length, "media.hero.alt must be non-empty");
-  });
-
-  it("media.hero.rights is nadine-owned", () => {
-    assert.equal(report?.media?.hero?.rights, "nadine-owned");
-  });
-
-  it("media.card has non-empty src", () => {
-    assert.ok(report?.media?.card?.src?.length, "media.card.src must be non-empty");
-  });
-
-  it("media.card has non-empty alt text", () => {
-    assert.ok(report?.media?.card?.alt?.length, "media.card.alt must be non-empty");
-  });
-
-  it("media.card.rights is nadine-owned", () => {
-    assert.equal(report?.media?.card?.rights, "nadine-owned");
+  it("modern-tailoring has no SVG wired as hero/card (SVGs rejected as hero imagery)", () => {
+    assert.ok(!report?.media?.hero?.src?.endsWith(".svg"), "SVG must not be hero imagery");
+    assert.ok(!report?.media?.card?.src?.endsWith(".svg"), "SVG must not be card imagery");
   });
 });
 

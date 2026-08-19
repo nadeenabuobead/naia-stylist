@@ -200,20 +200,6 @@ export const trendReports: TrendReportData[] = [
     ],
     published: true,
     order: 1,
-    media: {
-      card: {
-        src: "/images/tr-soft-structure.svg",
-        alt: "Three layered fabric folds in warm taupe and cream, illustrating the soft drape and controlled structure of Spring 2026 Soft Structure",
-        focal: "center",
-        rights: "nadine-owned",
-      },
-      hero: {
-        src: "/images/tr-soft-structure.svg",
-        alt: "Overlapping draped fabric layers in graduated taupe tones, evoking the fabric-led, softly structured silhouette of Spring 2026",
-        focal: "center",
-        rights: "nadine-owned",
-      },
-    },
   },
   {
     slug: "modern-tailoring-spring-2026",
@@ -336,20 +322,6 @@ export const trendReports: TrendReportData[] = [
     ],
     published: true,
     order: 2,
-    media: {
-      card: {
-        src: "/images/tr-modern-tailoring.svg",
-        alt: "A bold dark tailored anchor against a warm linen ground, illustrating the styling contrast at the heart of Spring 2026 Modern Tailoring",
-        focal: "center",
-        rights: "nadine-owned",
-      },
-      hero: {
-        src: "/images/tr-modern-tailoring.svg",
-        alt: "Dark structured tailored block paired with a fluid linen counterpart — the tailored anchor and easy separates contrast of Spring 2026",
-        focal: "center",
-        rights: "nadine-owned",
-      },
-    },
   },
   {
     slug: "spring-2026-colour-direction",
@@ -481,19 +453,5 @@ export const trendReports: TrendReportData[] = [
     ],
     published: true,
     order: 3,
-    media: {
-      card: {
-        src: "/images/tr-colour-direction.svg",
-        alt: "Cream linen base, deep espresso anchor, and one deliberate burgundy accent — the colour method of Spring 2026 Colour Direction",
-        focal: "center",
-        rights: "nadine-owned",
-      },
-      hero: {
-        src: "/images/tr-colour-direction.svg",
-        alt: "Three-zone colour composition showing quiet cream base, deep espresso grounding, and a single clear accent note",
-        focal: "center",
-        rights: "nadine-owned",
-      },
-    },
   },
 ];
