@@ -362,22 +362,39 @@ describe("Phase 5A: trends.$slug.tsx public report CSS", () => {
 });
 
 // ─── Phase 5A cleanup: card visual title-protection boundary ─────────────────
+//
+// Structural fix: pub-card uses aspect-ratio 4/5 (height = width × 1.25).
+// padding-top: 40% (of width) = 32% of height, which equals the visual zone.
+// This guarantees flex content always starts at or below the visual zone bottom,
+// regardless of title length — "justify-content: space-between" is safe again.
 
 describe("Phase 5A cleanup: card visual title boundary", () => {
-  it("pub-card-visual height ≤ 42% — prevents linework from crossing title zone", () => {
+  it("pub-card-visual height ≤ 34% — linework stays in visual zone (32% target)", () => {
     const match = trendsJsx.match(/\.pub-card-visual\b[\s\S]*?height:\s*(\d+)%/);
     assert.ok(match, "pub-card-visual must define a height percentage");
     assert.ok(
-      parseInt(match[1], 10) <= 42,
-      `pub-card-visual height must be ≤ 42% to protect title zone (got ${match[1]}%)`
+      parseInt(match[1], 10) <= 34,
+      `pub-card-visual height must be ≤ 34% to protect title zone (got ${match[1]}%)`
     );
   });
-  it("psl-card-visual height ≤ 42% — consistent boundary in More Reports cards", () => {
+  it("psl-card-visual height ≤ 34% — consistent boundary in More Reports cards", () => {
     const match = slugTsx.match(/\.psl-card-visual\b[\s\S]*?height:\s*(\d+)%/);
     assert.ok(match, "psl-card-visual must define a height percentage");
     assert.ok(
-      parseInt(match[1], 10) <= 42,
-      `psl-card-visual height must be ≤ 42% to protect title zone (got ${match[1]}%)`
+      parseInt(match[1], 10) <= 34,
+      `psl-card-visual height must be ≤ 34% to protect title zone (got ${match[1]}%)`
+    );
+  });
+  it("pub-card has padding-top: 40% — structural guarantee flex content starts below visual zone", () => {
+    assert.ok(
+      trendsJsx.includes("padding-top: 40%"),
+      "pub-card must set padding-top: 40% (= 32% of 4/5 card height) to structurally protect title zone"
+    );
+  });
+  it("psl-card has padding-top: 40% — same structural guarantee in More Reports", () => {
+    assert.ok(
+      slugTsx.includes("padding-top: 40%"),
+      "psl-card must set padding-top: 40% to structurally protect title zone in More Reports cards"
     );
   });
 });

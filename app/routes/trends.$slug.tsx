@@ -635,6 +635,7 @@ const css = `
     justify-content: space-between;
     overflow: hidden;
     padding: 24px;
+    padding-top: 40%;
     text-decoration: none;
     color: inherit;
     transition: transform 0.5s ease;
@@ -694,7 +695,7 @@ const css = `
     top: 0;
     left: 0;
     right: 0;
-    height: 38%;
+    height: 32%;
     overflow: hidden;
     z-index: 0;
   }
