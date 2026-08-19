@@ -1,5 +1,6 @@
+import { useState } from "react";
 import type { LinksFunction, LoaderFunctionArgs } from "react-router";
-import { Link, useLoaderData, useState } from "react-router";
+import { Link, useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { trendReports, type TrendReportData } from "~/lib/trend-reports";
 import {

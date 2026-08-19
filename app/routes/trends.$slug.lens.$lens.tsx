@@ -1,4 +1,5 @@
-import { Link, useLoaderData, useState, type LoaderFunctionArgs } from "react-router";
+import { useState } from "react";
+import { Link, useLoaderData, type LoaderFunctionArgs } from "react-router";
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "../lib/storefront-config";
 import { trendReports, type TrendReportData } from "../lib/trend-reports";
 import {
