@@ -22,6 +22,7 @@ function readLib(name: string): string {
 const trendsJsx = readRoute("trends.jsx");
 const slugTsx = readRoute("trends.$slug.tsx");
 const trendReportsTs = readLib("trend-reports.ts");
+const reportVisualTsx = readLib("report-visual.tsx");
 
 const SLUGS = ["spring-2026-soft-structure", "modern-tailoring-spring-2026", "spring-2026-colour-direction"] as const;
 
@@ -206,6 +207,43 @@ describe("Phase 5A: TrendReportVisual type definition", () => {
   });
 });
 
+// ─── Visual system: shared report-visual.tsx renderer ────────────────────────
+
+describe("Phase 5A: report-visual.tsx shared renderer", () => {
+  it("reportVisual is exported from report-visual.tsx", () => {
+    assert.ok(reportVisualTsx.includes("export function reportVisual"), "reportVisual must be exported from report-visual.tsx");
+  });
+  it("TreatmentType is exported from report-visual.tsx", () => {
+    assert.ok(reportVisualTsx.includes("export type TreatmentType"), "TreatmentType must be exported");
+  });
+  it("report-visual.tsx handles soft-structure treatment", () => {
+    assert.ok(reportVisualTsx.includes("soft-structure"), "report-visual.tsx must handle soft-structure");
+  });
+  it("report-visual.tsx handles modern-tailoring treatment", () => {
+    assert.ok(reportVisualTsx.includes("modern-tailoring"), "report-visual.tsx must handle modern-tailoring");
+  });
+  it("report-visual.tsx handles colour-direction treatment", () => {
+    assert.ok(reportVisualTsx.includes("colour-direction"), "report-visual.tsx must handle colour-direction");
+  });
+  it("report-visual.tsx accepts both featured and card variants", () => {
+    assert.ok(reportVisualTsx.includes('"featured"'), "report-visual.tsx must reference featured variant");
+    assert.ok(reportVisualTsx.includes('"card"'), "report-visual.tsx must reference card in TreatmentVariant type");
+    assert.ok(reportVisualTsx.includes("TreatmentVariant"), "TreatmentVariant type must be defined");
+  });
+  it("trends.jsx imports reportVisual from report-visual", () => {
+    assert.ok(
+      trendsJsx.includes('from "../lib/report-visual"'),
+      "trends.jsx must import from report-visual"
+    );
+  });
+  it("trends.$slug.tsx imports reportVisual from report-visual", () => {
+    assert.ok(
+      slugTsx.includes('from "../lib/report-visual"'),
+      "trends.$slug.tsx must import from report-visual"
+    );
+  });
+});
+
 // ─── Visual system: visual.treatment field on all reports ────────────────────
 
 describe("Phase 5A: visual.treatment on each report", () => {
@@ -277,6 +315,26 @@ describe("Phase 5A: trends.jsx landing page JSX", () => {
     assert.ok(!trendsJsx.includes("pub-card-palette-strip"), "pub-card-palette-strip JSX must be removed");
     assert.ok(!trendsJsx.includes("COLOUR_PALETTE"), "COLOUR_PALETTE must be removed");
     assert.ok(!trendsJsx.includes("isColourDirection"), "isColourDirection must be removed");
+  });
+});
+
+// ─── More Reports: visual identity propagated to trends.$slug.tsx ────────────
+
+describe("Phase 5A: trends.$slug.tsx More Reports visual identity", () => {
+  it("psl-card-visual CSS class is defined in trends.$slug.tsx", () => {
+    assert.ok(slugTsx.includes(".psl-card-visual"), "psl-card-visual class must be defined in trends.$slug.tsx");
+  });
+  it("More Reports card loop uses reportVisual from shared renderer", () => {
+    assert.ok(slugTsx.includes("reportVisual("), "trends.$slug.tsx must call reportVisual in More Reports");
+  });
+  it("More Reports card loop guards on r.visual?.treatment", () => {
+    assert.ok(
+      slugTsx.includes("r.visual?.treatment"),
+      "trends.$slug.tsx must guard on r.visual?.treatment before rendering visual panel"
+    );
+  });
+  it("More Reports uses psl-card-visual container class", () => {
+    assert.ok(slugTsx.includes("psl-card-visual"), "psl-card-visual must appear in JSX of trends.$slug.tsx");
   });
 });
 

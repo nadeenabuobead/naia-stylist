@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "../lib/storefront-config";
 import { trendReports } from "../lib/trend-reports";
+import { reportVisual } from "../lib/report-visual";
 
 // Inline Lovable-matched Google Fonts — Oswald (thin-display), Cormorant Garamond (editorial), Space Mono (mono)
 const FONTS =
@@ -568,65 +569,6 @@ function formatSeason(season) {
   if (lower.includes("spring")) return `ss'${season.slice(-2)} ·`;
   if (lower.includes("autumn") || lower.includes("fall")) return `fw'${season.slice(-2)} ·`;
   return season;
-}
-
-function reportVisual(treatment, variant) {
-  if (treatment === "soft-structure") {
-    return variant === "featured" ? (
-      <svg viewBox="0 0 600 520" xmlns="http://www.w3.org/2000/svg" style={{width:"100%",height:"100%",display:"block"}}>
-        <rect width="600" height="520" fill="#ded6c8"/>
-        <path d="M -20 360 C 100 338, 240 348, 320 356 C 400 364, 500 348, 620 332 L 620 520 L -20 520 Z" fill="#b4a290" opacity="0.90"/>
-        <path d="M -20 222 C 120 202, 250 212, 330 220 C 420 228, 510 210, 620 194 L 620 370 C 490 388, 370 380, 290 372 C 200 364, 90 382, -20 400 Z" fill="#c8b4a0" opacity="0.88"/>
-        <path d="M -20 100 C 140 78, 260 89, 340 98 C 430 107, 520 88, 620 70 L 620 240 C 490 258, 380 248, 300 240 C 200 232, 100 248, -20 268 Z" fill="#dccebe" opacity="0.90"/>
-        <path d="M -20 100 C 140 78, 260 89, 340 98 C 430 107, 520 88, 620 70" fill="none" stroke="#f4ece0" strokeWidth="1.8" opacity="0.70"/>
-        <path d="M -20 222 C 120 202, 250 212, 330 220 C 420 228, 510 210, 620 194" fill="none" stroke="#ece0d0" strokeWidth="1.2" opacity="0.50"/>
-      </svg>
-    ) : (
-      <svg viewBox="0 0 400 220" xmlns="http://www.w3.org/2000/svg" style={{width:"100%",height:"100%",display:"block"}}>
-        <rect width="400" height="220" fill="#ded6c8"/>
-        <path d="M -10 148 C 70 133, 170 140, 220 146 C 280 152, 345 138, 410 125 L 410 220 L -10 220 Z" fill="#b4a290" opacity="0.90"/>
-        <path d="M -10 88 C 80 73, 180 80, 225 87 C 275 94, 345 80, 410 66 L 410 152 C 330 166, 245 160, 195 154 C 140 148, 65 162, -10 174 Z" fill="#c8b4a0" opacity="0.88"/>
-        <path d="M -10 36 C 90 20, 190 28, 230 36 C 275 44, 345 28, 410 14 L 410 90 C 335 104, 245 98, 200 92 C 150 86, 72 100, -10 112 Z" fill="#dccebe" opacity="0.90"/>
-        <path d="M -10 36 C 90 20, 190 28, 230 36 C 275 44, 345 28, 410 14" fill="none" stroke="#f4ece0" strokeWidth="1.5" opacity="0.68"/>
-      </svg>
-    );
-  }
-  if (treatment === "modern-tailoring") {
-    return variant === "featured" ? (
-      <svg viewBox="0 0 600 520" xmlns="http://www.w3.org/2000/svg" style={{width:"100%",height:"100%",display:"block"}}>
-        <rect width="600" height="520" fill="#e4dace"/>
-        <path d="M 0 0 L 244 0 C 246 104, 240 208, 246 312 C 251 416, 248 468, 249 520 L 0 520 Z" fill="#1e1610"/>
-        <path d="M 244 0 C 246 104, 240 208, 246 312 C 251 416, 248 468, 249 520" fill="none" stroke="#a09080" strokeWidth="1.0" opacity="0.45"/>
-        <path d="M 310 330 C 360 310, 430 300, 510 296 C 560 294, 590 292, 610 290" fill="none" stroke="#c0b09a" strokeWidth="1.2" opacity="0.40"/>
-      </svg>
-    ) : (
-      <svg viewBox="0 0 400 200" xmlns="http://www.w3.org/2000/svg" style={{width:"100%",height:"100%",display:"block"}}>
-        <rect width="400" height="200" fill="#e4dace"/>
-        <path d="M 0 0 L 158 0 C 160 50, 156 100, 159 150 C 162 175, 160 188, 160 200 L 0 200 Z" fill="#1e1610"/>
-        <path d="M 158 0 C 160 50, 156 100, 159 150 C 162 175, 160 188, 160 200" fill="none" stroke="#a09080" strokeWidth="0.8" opacity="0.4"/>
-      </svg>
-    );
-  }
-  if (treatment === "colour-direction") {
-    return variant === "featured" ? (
-      <svg viewBox="0 0 600 520" xmlns="http://www.w3.org/2000/svg" style={{width:"100%",height:"100%",display:"block"}}>
-        <rect width="600" height="520" fill="#f0e8dc"/>
-        <rect x="0" y="300" width="600" height="220" fill="#1e1208"/>
-        <line x1="0" y1="300" x2="600" y2="300" stroke="#c8a870" strokeWidth="0.8" opacity="0.4"/>
-        <rect x="152" y="238" width="68" height="200" fill="#7a1e28"/>
-        <rect x="152" y="238" width="3" height="200" fill="#a03040" opacity="0.45"/>
-      </svg>
-    ) : (
-      <svg viewBox="0 0 400 220" xmlns="http://www.w3.org/2000/svg" style={{width:"100%",height:"100%",display:"block"}}>
-        <rect width="400" height="220" fill="#f0e8dc"/>
-        <rect x="0" y="130" width="400" height="90" fill="#1e1208"/>
-        <line x1="0" y1="130" x2="400" y2="130" stroke="#c8a870" strokeWidth="0.7" opacity="0.35"/>
-        <rect x="100" y="96" width="50" height="96" fill="#7a1e28"/>
-        <rect x="100" y="96" width="2" height="96" fill="#a03040" opacity="0.4"/>
-      </svg>
-    );
-  }
-  return null;
 }
 
 export default function TrendReports() {

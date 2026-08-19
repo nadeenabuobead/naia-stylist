@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useLoaderData, type LoaderFunctionArgs } from "react-router";
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "../lib/storefront-config";
 import { trendReports, type TrendReportData } from "../lib/trend-reports";
+import { reportVisual } from "../lib/report-visual";
 
 const FONTS =
   "https://fonts.googleapis.com/css2?family=Oswald:wght@200;300;400&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Space+Mono&display=swap";
@@ -687,6 +688,22 @@ const css = `
   .psl-card-arrow { transition: color 0.3s; }
   .psl-card:hover .psl-card-arrow { color: #7a1e28; }
 
+  /* ── Card visual panel (More Reports) ──────────────────────── */
+  .psl-card-visual {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 48%;
+    overflow: hidden;
+    z-index: 0;
+  }
+  .psl-card-visual svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
   /* ── Error ──────────────────────────────────────────────────── */
   .psl-error {
     max-width: 40rem;
@@ -1140,6 +1157,11 @@ export default function TrendReportDetail() {
                   className="psl-card"
                   style={{ background: rTint }}
                 >
+                  {r.visual?.treatment && (
+                    <div className="psl-card-visual" aria-hidden="true">
+                      {reportVisual(r.visual.treatment, "card")}
+                    </div>
+                  )}
                   <span className="psl-card-num" aria-hidden="true">{rNum}</span>
                   <div className="psl-card-cat">{r.season}</div>
                   <div className="psl-card-bottom">
