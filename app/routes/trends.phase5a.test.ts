@@ -25,6 +25,18 @@ const trendReportsTs = readLib("trend-reports.ts");
 
 const SLUGS = ["spring-2026-soft-structure", "modern-tailoring-spring-2026", "spring-2026-colour-direction"] as const;
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function deterministicSort(reports: typeof trendReports) {
+  return reports
+    .filter((r) => r.published)
+    .sort((a, b) => {
+      if (a.publishedAt > b.publishedAt) return -1;
+      if (a.publishedAt < b.publishedAt) return 1;
+      return (a.order ?? 99) - (b.order ?? 99);
+    });
+}
+
 // ─── Data model: TrendMedia / TrendReportMedia types ──────────────────────────
 
 describe("Phase 5A: TrendMedia type definition", () => {
@@ -53,6 +65,79 @@ describe("Phase 5A: all three report slugs exist", () => {
       assert.ok(found, `trendReports must contain slug "${slug}"`);
     });
   }
+});
+
+// ─── Order field: all three reports have order set ────────────────────────────
+
+describe("Phase 5A: order field for deterministic sort", () => {
+  for (const slug of SLUGS) {
+    it(`${slug} has a numeric order field`, () => {
+      const report = trendReports.find((r) => r.slug === slug);
+      assert.ok(typeof report?.order === "number", `${slug} must have a numeric order field`);
+    });
+  }
+
+  it("sort produces spring-2026-soft-structure as featured (order 1)", () => {
+    const sorted = deterministicSort(trendReports);
+    assert.equal(sorted[0].slug, "spring-2026-soft-structure", "Soft Structure must be first after deterministic sort");
+  });
+
+  it("sort produces modern-tailoring-spring-2026 as second", () => {
+    const sorted = deterministicSort(trendReports);
+    assert.equal(sorted[1].slug, "modern-tailoring-spring-2026");
+  });
+
+  it("sort produces spring-2026-colour-direction as third", () => {
+    const sorted = deterministicSort(trendReports);
+    assert.equal(sorted[2].slug, "spring-2026-colour-direction");
+  });
+
+  it("trends.jsx sort uses order as tiebreaker", () => {
+    assert.ok(
+      trendsJsx.includes("a.order") && trendsJsx.includes("b.order"),
+      "trends.jsx sort must use order field as tiebreaker"
+    );
+  });
+});
+
+// ─── Media data: all three reports have hero + card ───────────────────────────
+
+describe("Phase 5A: all three reports have media.hero and media.card", () => {
+  for (const slug of SLUGS) {
+    it(`${slug} has media.hero`, () => {
+      const report = trendReports.find((r) => r.slug === slug);
+      assert.ok(report?.media?.hero, `${slug} must have media.hero`);
+    });
+    it(`${slug} has media.card`, () => {
+      const report = trendReports.find((r) => r.slug === slug);
+      assert.ok(report?.media?.card, `${slug} must have media.card`);
+    });
+    it(`${slug} hero src points to SVG in /images/`, () => {
+      const report = trendReports.find((r) => r.slug === slug);
+      assert.ok(report?.media?.hero?.src?.endsWith(".svg"), `${slug} hero.src must be an SVG`);
+      assert.ok(report?.media?.hero?.src?.startsWith("/images/"), `${slug} hero.src must be in /images/`);
+    });
+  }
+});
+
+// ─── No old JPG references remain ─────────────────────────────────────────────
+
+describe("Phase 5A: old unclear-provenance images removed", () => {
+  it("trend-reports.ts has no reference to tr-modern-tailoring.jpg", () => {
+    assert.ok(!trendReportsTs.includes("tr-modern-tailoring.jpg"), "Old JPG reference must be removed");
+  });
+  it("trend-reports.ts has no reference to tr-landing-hero.jpg", () => {
+    assert.ok(!trendReportsTs.includes("tr-landing-hero.jpg"), "tr-landing-hero.jpg must not be referenced");
+  });
+  it("trend-reports.ts references tr-soft-structure.svg", () => {
+    assert.ok(trendReportsTs.includes("tr-soft-structure.svg"), "Soft Structure SVG must be wired");
+  });
+  it("trend-reports.ts references tr-modern-tailoring.svg", () => {
+    assert.ok(trendReportsTs.includes("tr-modern-tailoring.svg"), "Modern Tailoring SVG must be wired");
+  });
+  it("trend-reports.ts references tr-colour-direction.svg", () => {
+    assert.ok(trendReportsTs.includes("tr-colour-direction.svg"), "Colour Direction SVG must be wired");
+  });
 });
 
 // ─── Media data: Modern Tailoring has hero + card ─────────────────────────────

@@ -1,0 +1,73 @@
+<svg viewBox="0 0 600 750" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="mt-light" x1="0" y1="0" x2="0.1" y2="1">
+      <stop offset="0%" stop-color="#ece6de"/>
+      <stop offset="100%" stop-color="#ddd5c8"/>
+    </linearGradient>
+    <linearGradient id="mt-dark" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0%" stop-color="#1c1410"/>
+      <stop offset="100%" stop-color="#261c14"/>
+    </linearGradient>
+    <linearGradient id="mt-fluid" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#cfc3b3"/>
+      <stop offset="100%" stop-color="#bfb3a3"/>
+    </linearGradient>
+    <filter id="mt-shadow">
+      <feDropShadow dx="6" dy="0" stdDeviation="18" flood-color="#0e0a06" flood-opacity="0.22"/>
+    </filter>
+    <filter id="mt-blur">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+  </defs>
+
+  <!-- Light ground — the fluid counterpart -->
+  <rect width="600" height="750" fill="url(#mt-light)"/>
+
+  <!-- Fluid fabric element on light side — wide trouser/flowing fabric suggestion -->
+  <!-- A soft organic shape in the lower-right, suggesting easy wide-leg trousers -->
+  <path d="
+    M 310 480
+    C 330 470, 390 462, 450 468
+    C 510 474, 565 472, 600 478
+    L 600 750
+    C 545 750, 470 748, 400 742
+    C 345 738, 305 728, 298 710
+    C 290 688, 308 620, 310 570
+    C 312 530, 308 510, 310 480
+    Z
+  " fill="url(#mt-fluid)" opacity="0.65"/>
+
+  <!-- Dark tailored anchor — the structured left element -->
+  <!-- Slightly organic right edge — not a perfect geometric cut, suggesting a seam -->
+  <path d="
+    M 0 0
+    L 336 0
+    C 340 88, 332 180, 338 272
+    C 344 364, 354 448, 348 540
+    C 344 608, 338 668, 342 750
+    L 0 750
+    Z
+  " fill="url(#mt-dark)" filter="url(#mt-shadow)"/>
+
+  <!-- Subtle lapel/structure detail on the dark side -->
+  <!-- A thin V-shape near the top suggesting a jacket lapel -->
+  <path d="M 168 44 L 200 135 L 232 44"
+        fill="none" stroke="#3a2e24" stroke-width="1.2" opacity="0.6"/>
+
+  <!-- Subtle seam line on the dark element — vertical, slightly inside the right edge -->
+  <line x1="300" y1="0" x2="308" y2="750" stroke="#3a2e24" stroke-width="0.8" opacity="0.35"/>
+
+  <!-- Subtle warm highlight running along the dark-light boundary -->
+  <path d="M 337 0 C 341 90, 333 182, 339 274 C 345 366, 355 450, 349 542 C 345 610, 339 670, 343 750"
+        fill="none" stroke="#c8a878" stroke-width="0.8" opacity="0.18"/>
+
+  <!-- Architectural frame — top rule (on light side only) -->
+  <line x1="356" y1="44" x2="556" y2="44" stroke="#9a8a78" stroke-width="0.65" opacity="0.4"/>
+  <!-- Right margin rule -->
+  <line x1="556" y1="44" x2="556" y2="706" stroke="#9a8a78" stroke-width="0.65" opacity="0.3"/>
+  <!-- Bottom rule (full width on light, subtle on dark) -->
+  <line x1="44" y1="706" x2="556" y2="706" stroke="#9a8a78" stroke-width="0.65" opacity="0.22"/>
+
+  <!-- Label — positioned on the light side -->
+  <text x="356" y="730" font-family="'Courier New', Courier, monospace" font-size="8" letter-spacing="4.5" fill="#8a7a68" opacity="0.55">MODERN TAILORING · SS'26</text>
+</svg>

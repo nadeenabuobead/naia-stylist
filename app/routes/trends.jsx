@@ -593,7 +593,11 @@ function formatSeason(season) {
 export default function TrendReports() {
   const published = trendReports
     .filter((r) => r.published)
-    .sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1));
+    .sort((a, b) => {
+      if (a.publishedAt > b.publishedAt) return -1;
+      if (a.publishedAt < b.publishedAt) return 1;
+      return (a.order ?? 99) - (b.order ?? 99);
+    });
 
   const [featured, ...rest] = published;
 
