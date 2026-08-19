@@ -30,6 +30,20 @@ export type TrendReportSpendSaveSkip = {
   alreadyOwn: string;
 };
 
+export type TrendMedia = {
+  src: string;
+  alt: string;
+  caption?: string;
+  credit?: string;
+  focal?: "top" | "center" | "bottom";
+  rights: "nadine-owned";
+};
+
+export type TrendReportMedia = {
+  hero?: TrendMedia;
+  card?: TrendMedia;
+};
+
 export type TrendReportData = {
   slug: string;
   title: string;
@@ -52,6 +66,7 @@ export type TrendReportData = {
   naiaTake?: string;
   sources: TrendReportSource[];
   published: boolean;
+  media?: TrendReportMedia;
 };
 
 export const trendReports: TrendReportData[] = [
@@ -304,6 +319,20 @@ export const trendReports: TrendReportData[] = [
       },
     ],
     published: true,
+    media: {
+      card: {
+        src: "/images/tr-modern-tailoring.jpg",
+        alt: "Black oversized blazer with wide-leg trousers — a structured anchor look illustrating Spring 2026 modern tailoring",
+        focal: "top",
+        rights: "nadine-owned",
+      },
+      hero: {
+        src: "/images/tr-modern-tailoring.jpg",
+        alt: "Structured black blazer with wide-leg trousers, illustrating the tailored anchor paired with ease",
+        focal: "top",
+        rights: "nadine-owned",
+      },
+    },
   },
   {
     slug: "spring-2026-colour-direction",

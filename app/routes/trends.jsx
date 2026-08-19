@@ -273,17 +273,78 @@ const css = `
   }
   .pub-featured-img-inner {
     position: absolute;
-    inset: 24px;
-    border: 1px solid rgba(26,17,9,0.1);
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .pub-featured-img-mood {
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic;
+    font-weight: 300;
+    font-size: clamp(3rem, 5.5vw, 5.5rem);
+    color: rgba(26,17,9,0.10);
+    text-align: center;
+    line-height: 1.15;
+    pointer-events: none;
+    user-select: none;
+    padding: 0 32px;
+    letter-spacing: 0.01em;
+  }
+  .pub-featured-img-rule {
+    width: 48px;
+    height: 1px;
+    background: rgba(26,17,9,0.12);
+    margin: 18px 0;
   }
   .pub-featured-img-label {
     position: absolute;
-    bottom: 32px;
-    left: 32px;
-    font-family: 'Cormorant Garamond', serif;
-    font-style: italic;
-    font-size: 0.9rem;
-    color: rgba(26,17,9,0.5);
+    bottom: 28px;
+    left: 28px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.52rem;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: rgba(26,17,9,0.3);
+  }
+
+  /* ── Card image / palette panels ───────────────────────────────── */
+  .pub-card-img-panel {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 55%;
+    overflow: hidden;
+    z-index: 0;
+  }
+  .pub-card-img-panel img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .pub-card-img-fade {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 55%;
+  }
+  .pub-card-palette-strip {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 46%;
+    display: flex;
+    z-index: 0;
+    overflow: hidden;
+  }
+  .pub-card-palette-swatch {
+    flex: 1;
   }
 
   /* ── Grid ───────────────────────────────────────────────────────── */
@@ -513,6 +574,14 @@ const css = `
 `;
 
 
+const COLOUR_PALETTE = [
+  { bg: "#f2ede7", label: "soft white" },
+  { bg: "#d4c8b4", label: "stone" },
+  { bg: "#3e2a1c", label: "espresso" },
+  { bg: "#8a9aaa", label: "denim" },
+  { bg: "#a85060", label: "accent" },
+];
+
 function formatSeason(season) {
   // "Spring 2026" → "ss'26 ·" style
   const lower = season.toLowerCase();
@@ -599,8 +668,19 @@ export default function TrendReports() {
                 </div>
               </div>
               <div className="pub-featured-img">
-                <div className="pub-featured-img-inner" />
-                <span className="pub-featured-img-label">editorial artwork</span>
+                {featured.media?.hero ? (
+                  <img
+                    src={featured.media.hero.src}
+                    alt={featured.media.hero.alt}
+                    style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: featured.media.hero.focal === "top" ? "center top" : "center center", display: "block" }}
+                  />
+                ) : (
+                  <div className="pub-featured-img-inner" aria-hidden="true">
+                    <div className="pub-featured-img-mood">{featured.mood}</div>
+                    <div className="pub-featured-img-rule" />
+                  </div>
+                )}
+                <span className="pub-featured-img-label">editorial · {featured.season.toLowerCase()}</span>
               </div>
             </div>
           </div>
@@ -615,6 +695,8 @@ export default function TrendReports() {
             {rest.map((report, i) => {
               const tint = TINTS[(i + 1) % TINTS.length];
               const num = String(i + 2).padStart(2, "0");
+              const hasCardImg = !!report.media?.card;
+              const isColourDirection = report.slug === "spring-2026-colour-direction";
               return (
                 <Link
                   key={report.slug}
@@ -622,6 +704,27 @@ export default function TrendReports() {
                   className="pub-card"
                   style={{ background: tint }}
                 >
+                  {hasCardImg && (
+                    <div className="pub-card-img-panel">
+                      <img
+                        src={report.media.card.src}
+                        alt={report.media.card.alt}
+                        loading="lazy"
+                        style={{ objectPosition: report.media.card.focal === "top" ? "center top" : "center center" }}
+                      />
+                      <div
+                        className="pub-card-img-fade"
+                        style={{ background: `linear-gradient(to top, ${tint}, transparent)` }}
+                      />
+                    </div>
+                  )}
+                  {!hasCardImg && isColourDirection && (
+                    <div className="pub-card-palette-strip" aria-hidden="true">
+                      {COLOUR_PALETTE.map((s) => (
+                        <div key={s.label} className="pub-card-palette-swatch" style={{ background: s.bg }} />
+                      ))}
+                    </div>
+                  )}
                   <span className="pub-card-num" aria-hidden="true">{num}</span>
                   <div className="pub-card-top">
                     <span className="pub-card-dot" />

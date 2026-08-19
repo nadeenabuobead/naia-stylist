@@ -208,6 +208,75 @@ const css = `
     color: rgba(26,17,9,0.45);
   }
 
+  /* ── Hero with image ────────────────────────────────────────── */
+  .psl-hero--has-image {
+    display: flex;
+    flex-direction: column;
+  }
+  @media (min-width: 1024px) {
+    .psl-hero--has-image {
+      flex-direction: row;
+      align-items: stretch;
+      min-height: 32rem;
+    }
+    .psl-hero--has-image .psl-hero-inner {
+      flex: 1.15;
+    }
+    .psl-hero--has-image .psl-hero-num {
+      display: none;
+    }
+  }
+  .psl-hero-visual {
+    display: none;
+  }
+  @media (min-width: 1024px) {
+    .psl-hero-visual {
+      display: block;
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      min-height: 28rem;
+    }
+    .psl-hero-visual img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+  }
+
+  /* ── Editorial break ─────────────────────────────────────────── */
+  .psl-editorial-break {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 0;
+    margin: 48px 0;
+    border-top: 1px solid rgba(26,17,9,0.08);
+    border-bottom: 1px solid rgba(26,17,9,0.08);
+    text-align: center;
+  }
+  .psl-editorial-break-mood {
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic;
+    font-weight: 300;
+    font-size: clamp(2.5rem, 5vw, 4.5rem);
+    color: rgba(26,17,9,0.13);
+    line-height: 1.1;
+    letter-spacing: 0.01em;
+    margin-bottom: 16px;
+  }
+  .psl-editorial-break-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.52rem;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: rgba(26,17,9,0.25);
+  }
+
   /* ── Body ───────────────────────────────────────────────────── */
   .psl-body {
     max-width: 48rem;
@@ -860,7 +929,7 @@ export default function TrendReportDetail() {
       </header>
 
       {/* Hero with tinted background */}
-      <section className="psl-hero" style={{ background: tint }}>
+      <section className={`psl-hero${report.media?.hero ? " psl-hero--has-image" : ""}`} style={{ background: tint }}>
         <span className="psl-hero-num" aria-hidden="true">{num}</span>
         <div className="psl-hero-inner">
           <Link to="/trends" className="psl-back">← Trend Reports</Link>
@@ -877,6 +946,15 @@ export default function TrendReportDetail() {
             <span>{new Date(report.publishedAt).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}</span>
           </div>
         </div>
+        {report.media?.hero && (
+          <div className="psl-hero-visual">
+            <img
+              src={report.media.hero.src}
+              alt={report.media.hero.alt}
+              style={{ objectPosition: report.media.hero.focal === "top" ? "center top" : "center center" }}
+            />
+          </div>
+        )}
       </section>
 
       {/* Body */}
@@ -894,6 +972,14 @@ export default function TrendReportDetail() {
                 <p className="psl-body-text">{t.description}</p>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Editorial break between Key Directions and evidence */}
+        {report.mood && (
+          <div className="psl-editorial-break" aria-hidden="true">
+            <div className="psl-editorial-break-mood">{report.mood}</div>
+            <div className="psl-editorial-break-label">nAia editorial · {report.season.toLowerCase()}</div>
           </div>
         )}
 
