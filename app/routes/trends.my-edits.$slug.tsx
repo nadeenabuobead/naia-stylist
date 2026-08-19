@@ -1,5 +1,5 @@
 import type { LinksFunction, LoaderFunctionArgs } from "react-router";
-import { Link, useLoaderData } from "react-router";
+import { Link, useLoaderData, useState } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { trendReports, type TrendReportData } from "~/lib/trend-reports";
 import {
@@ -77,6 +77,22 @@ const css = `
     transition: color 0.2s;
   }
   .tmd-back:hover { color: #7a1e28; }
+
+  /* ── Action buttons ─────────────────────────────────────────── */
+  .tmd-action-row {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 32px;
+  }
+  .tmd-action-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 16px; border: 1px solid rgba(26,17,9,0.18);
+    font-family: 'Space Mono', monospace; font-size: 0.58rem; letter-spacing: 0.24em;
+    text-transform: uppercase; color: #1a1109; background: transparent;
+    cursor: pointer; text-decoration: none; transition: border-color 0.2s, color 0.2s;
+  }
+  .tmd-action-btn:hover { border-color: #7a1e28; color: #7a1e28; }
+  .tmd-action-btn.active { color: #7a1e28; border-color: #7a1e28; }
+  @media (max-width: 767px) { .tmd-action-row { display: none; } }
 
   /* ── Hero tinted block ───────────────────────────────────────── */
   .tmd-hero {
@@ -356,11 +372,90 @@ export default function MyTrendEditDetail() {
       edit.evidenceClosetItems.length > 0 ||
       edit.evidenceReviews);
 
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
+
+  const copyLink = async () => {
+    if (typeof window === "undefined") return;
+    const url = window.location.href;
+    const fallbackCopy = () => {
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = url;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(textarea);
+        return ok;
+      } catch { return false; }
+    };
+    let ok = false;
+    if (navigator.clipboard && window.isSecureContext) {
+      try { await navigator.clipboard.writeText(url); ok = true; } catch { ok = fallbackCopy(); }
+    } else { ok = fallbackCopy(); }
+    setCopyStatus(ok ? "copied" : "error");
+    window.setTimeout(() => setCopyStatus("idle"), 2500);
+  };
+
+  const downloadMyEdit = () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { jsPDF } = (window as any).jspdf;
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const pageW = doc.internal.pageSize.getWidth();
+    const margin = 20;
+    const maxW = pageW - margin * 2;
+    let y = 20;
+    const addText = (text: string, size: number, style: string, color: number[], spaceAfter?: number) => {
+      doc.setFontSize(size);
+      doc.setFont("helvetica", style || "normal");
+      doc.setTextColor(...(color as [number, number, number]));
+      const lines = doc.splitTextToSize(String(text || ""), maxW);
+      lines.forEach((line: string) => {
+        if (y > 270) { doc.addPage(); y = 20; }
+        doc.text(line, margin, y);
+        y += size * 0.45;
+      });
+      y += spaceAfter || 4;
+    };
+    doc.setFontSize(24); doc.setFont("helvetica", "bolditalic"); doc.setTextColor(34, 21, 22);
+    doc.text("nAia", margin, y); y += 8;
+    doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(139, 32, 53);
+    doc.text("MY TREND EDIT · " + report.season.toUpperCase(), margin, y); y += 10;
+    doc.setDrawColor(34, 21, 22); doc.line(margin, y, pageW - margin, y); y += 10;
+    addText(report.title, 20, "bold", [34, 21, 22], 6);
+    if (edit?.subTitle) addText(edit.subTitle, 12, "italic", [122, 111, 106], 10);
+    if (edit?.yourVersion) { addText("YOUR VERSION", 8, "bold", [139, 32, 53], 3); addText(edit.yourVersion, 11, "normal", [34, 21, 22], 10); }
+    if (edit?.evidenceStyleDna) { addText("YOUR STYLE DNA SAYS", 8, "bold", [139, 32, 53], 3); addText(edit.evidenceStyleDna, 10, "normal", [34, 21, 22], 8); }
+    if (edit?.evidencePassportSays) { addText("YOUR PASSPORT SAYS", 8, "bold", [139, 32, 53], 3); addText(edit.evidencePassportSays, 10, "normal", [34, 21, 22], 8); }
+    if (edit?.evidenceReviews) { addText("YOUR RATINGS SAY", 8, "bold", [139, 32, 53], 3); addText(edit.evidenceReviews, 10, "normal", [34, 21, 22], 8); }
+    if (edit?.yourBestRouteIn) { addText("YOUR BEST ROUTE IN", 8, "bold", [139, 32, 53], 3); addText(edit.yourBestRouteIn, 10, "normal", [34, 21, 22], 8); }
+    if (edit?.aLookToTry) { addText("A LOOK TO TRY", 8, "bold", [139, 32, 53], 3); addText(edit.aLookToTry, 10, "normal", [34, 21, 22], 8); }
+    if (edit?.worthInvestingStatement) { addText("WORTH INVESTING IN", 8, "bold", [139, 32, 53], 3); addText(edit.worthInvestingStatement, 10, "normal", [34, 21, 22], 8); }
+    if (edit?.partToTake) { addText("THE PART TO TAKE", 8, "bold", [139, 32, 53], 3); addText(edit.partToTake, 10, "normal", [34, 21, 22], 8); }
+    if (edit?.theBalanceToProtect) { addText("THE BALANCE TO PROTECT", 8, "bold", [139, 32, 53], 3); addText(edit.theBalanceToProtect, 10, "normal", [34, 21, 22], 8); }
+    if (edit?.partToLeave) { addText("THE PART TO LEAVE", 8, "bold", [139, 32, 53], 3); addText(edit.partToLeave, 10, "normal", [34, 21, 22], 8); }
+    doc.setFontSize(7); doc.setFont("helvetica", "normal"); doc.setTextColor(122, 111, 106);
+    doc.text("nAia Trend Reports · Your personalised edit", margin, 285);
+    doc.save("my-edit-" + report.title.replace(/[^a-z0-9]/gi, "-").toLowerCase() + ".pdf");
+  };
+
   return (
     <MyNaiaLayout compact>
       <style>{css}</style>
       <div className="tmd-page">
         <Link to="/trends/my-edits" className="tmd-back">← My Trend Edits</Link>
+
+        {edit && (
+          <div className="tmd-action-row">
+            <button className={`tmd-action-btn${copyStatus === "copied" ? " active" : ""}`} onClick={copyLink}>
+              {copyStatus === "copied" ? "Copied ✓" : copyStatus === "error" ? "Failed" : "Copy link"}
+            </button>
+            <button className="tmd-action-btn" onClick={downloadMyEdit}>Download My Edit</button>
+          </div>
+        )}
 
         {/* Hero tinted block */}
         <div className="tmd-hero" style={{ background: tint }}>
