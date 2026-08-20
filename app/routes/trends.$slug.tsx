@@ -5,7 +5,7 @@ import { trendReports, type TrendReportData } from "../lib/trend-reports";
 import { reportVisual } from "../lib/report-visual";
 
 const FONTS =
-  "https://fonts.googleapis.com/css2?family=Oswald:wght@200;300;400&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Space+Mono&display=swap";
+  "https://fonts.googleapis.com/css2?family=Inter:wght@400&family=Oswald:wght@200;300;400&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Space+Mono&display=swap";
 
 const TINTS = ["#efeae0", "#e6dccb", "#d9c9b5", "#efe6d7", "#e2d3bf", "#ede2cf"];
 
@@ -46,42 +46,40 @@ const css = `
     -webkit-font-smoothing: antialiased;
   }
 
-  /* ── NADINE public navigation ───────────────────────────────────── */
-  .psl-header { border-bottom: 1px solid rgba(26,17,9,0.08); }
+  /* ── NADINE site header — exact parity with nadine-storefront SiteNav ── */
+  .psl-header { border-bottom: 1px solid rgba(26,17,9,0.10); }
   .psl-header-inner {
     max-width: 100rem;
     margin: 0 auto;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 18px 40px;
-    gap: 32px;
+    padding: 20px;
   }
-  @media (max-width: 639px) { .psl-header-inner { padding: 16px 24px; } }
+  @media (min-width: 640px) { .psl-header-inner { padding: 24px 40px; } }
   .psl-sitenav-links {
     display: none;
     align-items: center;
-    gap: 20px;
-    flex: 1;
+    gap: 28px;
   }
   @media (min-width: 768px) { .psl-sitenav-links { display: flex; } }
   .psl-sitenav-link {
-    font-family: 'Space Mono', monospace;
-    font-size: 0.58rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: rgba(26,17,9,0.55);
+    font-family: 'Inter', sans-serif;
+    font-size: 0.72rem;
+    letter-spacing: 0.025em;
+    color: rgba(26,17,9,0.80);
     text-decoration: none;
-    transition: color 0.2s;
+    transition: opacity 0.2s;
     white-space: nowrap;
   }
-  .psl-sitenav-link:hover { color: #7a1e28; }
-  .psl-sitenav-link.active { color: #7a1e28; }
+  .psl-sitenav-link:hover { opacity: 0.60; }
+  .psl-sitenav-link.active { opacity: 0.60; }
   .psl-header-logo {
     font-family: 'Oswald', sans-serif;
     font-size: 0.875rem;
     font-weight: 200;
-    letter-spacing: 0.4em;
+    letter-spacing: 0.02em;
+    line-height: 0.88;
     text-transform: uppercase;
     color: #1a1109;
     text-decoration: none;
@@ -89,10 +87,9 @@ const css = `
   }
   .psl-header-right {
     display: flex;
-    justify-content: flex-end;
     align-items: center;
-    gap: 16px;
-    flex: 1;
+    gap: 20px;
+    color: rgba(26,17,9,0.80);
   }
   .psl-personal-link {
     font-family: 'Space Mono', monospace;
@@ -124,11 +121,10 @@ const css = `
   .psl-action-btn:hover { border-color: #7a1e28; color: #7a1e28; }
   .psl-action-btn.active { color: #7a1e28; border-color: #7a1e28; }
   @media (max-width: 767px) { .psl-action-btn { display: none; } }
-  .psl-nav-icons { display: flex; align-items: center; gap: 18px; }
   .psl-nav-icon {
     display: inline-flex;
     align-items: center;
-    color: rgba(26,17,9,0.55);
+    color: inherit;
     text-decoration: none;
     transition: opacity 0.2s;
     background: none;
@@ -136,7 +132,7 @@ const css = `
     padding: 0;
     cursor: pointer;
   }
-  .psl-nav-icon:hover { opacity: 0.65; }
+  .psl-nav-icon:hover { opacity: 0.60; }
   .psl-nav-icon svg { width: 16px; height: 16px; display: block; }
   .psl-report-actions { border-bottom: 1px solid rgba(26,17,9,0.06); }
   .psl-report-actions-inner {
@@ -776,7 +772,18 @@ export function ErrorBoundary() {
           </nav>
           <a href={`${STOREFRONT_ORIGIN}/`} className="psl-header-logo">NADINE</a>
           <div className="psl-header-right">
-            <Link to="/trends/my-edits" className="psl-personal-link">My Trend Edits ↗</Link>
+            <a href={`${STOREFRONT_ORIGIN}`} aria-label="search" className="psl-nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+            </a>
+            <a href={`${STOREFRONT_ORIGIN}`} aria-label="wishlist" className="psl-nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/></svg>
+            </a>
+            <a href="/my-naia" aria-label="My nAia" title="My nAia" className="psl-nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 20a6 6 0 0 0-12 0"/><circle cx="12" cy="10" r="4"/><circle cx="12" cy="12" r="10"/></svg>
+            </a>
+            <a href={`${STOREFRONT_ORIGIN}`} aria-label="bag" className="psl-nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M16 10a4 4 0 0 1-8 0"/><path d="M3.103 6.034h17.794"/><path d="M3.4 5.467a2 2 0 0 0-.4 1.2V20a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.667a2 2 0 0 0-.4-1.2l-2-2.667A2 2 0 0 0 17 2H7a2 2 0 0 0-1.6.8z"/></svg>
+            </a>
           </div>
         </div>
       </header>
@@ -923,14 +930,18 @@ export default function TrendReportDetail() {
           </nav>
           <a href={`${STOREFRONT_ORIGIN}/`} className="psl-header-logo">NADINE</a>
           <div className="psl-header-right">
-            <div className="psl-nav-icons">
-              <a href="/my-naia" aria-label="My nAia account" className="psl-nav-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="10" r="4"/><path d="M18 20a6 6 0 0 0-12 0"/><circle cx="12" cy="12" r="10"/></svg>
-              </a>
-              <a href={`${STOREFRONT_ORIGIN}`} aria-label="Shopping bag" className="psl-nav-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
-              </a>
-            </div>
+            <a href={`${STOREFRONT_ORIGIN}`} aria-label="search" className="psl-nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+            </a>
+            <a href={`${STOREFRONT_ORIGIN}`} aria-label="wishlist" className="psl-nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/></svg>
+            </a>
+            <a href="/my-naia" aria-label="My nAia" title="My nAia" className="psl-nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 20a6 6 0 0 0-12 0"/><circle cx="12" cy="10" r="4"/><circle cx="12" cy="12" r="10"/></svg>
+            </a>
+            <a href={`${STOREFRONT_ORIGIN}`} aria-label="bag" className="psl-nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M16 10a4 4 0 0 1-8 0"/><path d="M3.103 6.034h17.794"/><path d="M3.4 5.467a2 2 0 0 0-.4 1.2V20a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.667a2 2 0 0 0-.4-1.2l-2-2.667A2 2 0 0 0 17 2H7a2 2 0 0 0-1.6.8z"/></svg>
+            </a>
           </div>
         </div>
       </header>
