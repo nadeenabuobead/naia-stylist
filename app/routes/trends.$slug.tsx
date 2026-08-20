@@ -124,6 +124,31 @@ const css = `
   .psl-action-btn:hover { border-color: #7a1e28; color: #7a1e28; }
   .psl-action-btn.active { color: #7a1e28; border-color: #7a1e28; }
   @media (max-width: 767px) { .psl-action-btn { display: none; } }
+  .psl-nav-icons { display: flex; align-items: center; gap: 18px; }
+  .psl-nav-icon {
+    display: inline-flex;
+    align-items: center;
+    color: rgba(26,17,9,0.55);
+    text-decoration: none;
+    transition: opacity 0.2s;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+  .psl-nav-icon:hover { opacity: 0.65; }
+  .psl-nav-icon svg { width: 16px; height: 16px; display: block; }
+  .psl-report-actions { border-bottom: 1px solid rgba(26,17,9,0.06); }
+  .psl-report-actions-inner {
+    max-width: 100rem;
+    margin: 0 auto;
+    padding: 10px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 14px;
+  }
+  @media (max-width: 639px) { .psl-report-actions-inner { padding: 10px 24px; } }
 
   /* ── Hero ───────────────────────────────────────────────────── */
   .psl-hero {
@@ -898,14 +923,28 @@ export default function TrendReportDetail() {
           </nav>
           <a href={`${STOREFRONT_ORIGIN}/`} className="psl-header-logo">NADINE</a>
           <div className="psl-header-right">
-            <button className={`psl-action-btn${copyStatus === "copied" ? " active" : ""}`} onClick={copyLink}>
-              {copyStatus === "copied" ? "Copied ✓" : copyStatus === "error" ? "Failed" : "Copy link"}
-            </button>
-            <button className="psl-action-btn" onClick={downloadPdf}>Download PDF</button>
-            <Link to="/trends/my-edits" className="psl-personal-link">My Trend Edits ↗</Link>
+            <div className="psl-nav-icons">
+              <a href="/my-naia" aria-label="My nAia account" className="psl-nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="10" r="4"/><path d="M18 20a6 6 0 0 0-12 0"/><circle cx="12" cy="12" r="10"/></svg>
+              </a>
+              <a href={`${STOREFRONT_ORIGIN}`} aria-label="Shopping bag" className="psl-nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+              </a>
+            </div>
           </div>
         </div>
       </header>
+
+      {/* Report action bar — Copy link, Download PDF, My Trend Edits */}
+      <div className="psl-report-actions">
+        <div className="psl-report-actions-inner">
+          <button className={`psl-action-btn${copyStatus === "copied" ? " active" : ""}`} onClick={copyLink}>
+            {copyStatus === "copied" ? "Copied ✓" : copyStatus === "error" ? "Failed" : "Copy link"}
+          </button>
+          <button className="psl-action-btn" onClick={downloadPdf}>Download PDF</button>
+          <Link to="/trends/my-edits" className="psl-personal-link">My Trend Edits ↗</Link>
+        </div>
+      </div>
 
       {/* Hero with tinted background */}
       <section className="psl-hero" style={{ background: tint }}>

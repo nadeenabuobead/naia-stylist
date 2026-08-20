@@ -76,6 +76,7 @@ const css = `
     display: flex;
     justify-content: flex-end;
     align-items: center;
+    gap: 20px;
     flex: 1;
   }
   .pub-personal-link {
@@ -89,6 +90,20 @@ const css = `
     white-space: nowrap;
   }
   .pub-personal-link:hover { opacity: 0.75; }
+  .pub-nav-icons { display: flex; align-items: center; gap: 18px; }
+  .pub-nav-icon {
+    display: inline-flex;
+    align-items: center;
+    color: rgba(26,17,9,0.55);
+    text-decoration: none;
+    transition: opacity 0.2s;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+  .pub-nav-icon:hover { opacity: 0.65; }
+  .pub-nav-icon svg { width: 16px; height: 16px; display: block; }
 
   /* ── Hero ───────────────────────────────────────────────────────── */
   .pub-hero {
@@ -599,9 +614,15 @@ export default function TrendReports() {
           </nav>
           <a href={`${STOREFRONT_ORIGIN}/`} className="pub-header-logo">NADINE</a>
           <div className="pub-header-right">
-            <Link to="/trends/my-edits" className="pub-personal-link">
-              My Trend Edits ↗
-            </Link>
+            <Link to="/trends/my-edits" className="pub-personal-link">My Trend Edits ↗</Link>
+            <div className="pub-nav-icons">
+              <a href="/my-naia" aria-label="My nAia account" className="pub-nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="10" r="4"/><path d="M18 20a6 6 0 0 0-12 0"/><circle cx="12" cy="12" r="10"/></svg>
+              </a>
+              <a href={`${STOREFRONT_ORIGIN}`} aria-label="Shopping bag" className="pub-nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+              </a>
+            </div>
           </div>
         </div>
       </header>
