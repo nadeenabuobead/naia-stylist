@@ -2,11 +2,13 @@ import { getRecommendationEligibleProducts } from "~/lib/ai/naia-catalog";
 import type { GeneratedCatalogProduct } from "~/lib/ai/naia-catalog.types";
 import type { TrendReportData } from "~/lib/trend-reports";
 import type { ShopperEvidenceBundle, ShopperEdit } from "~/lib/trend-evidence.server";
+import { resolveVerifiedMedia } from "~/lib/ai/naia-product-media";
 
 export type NadineProductRecommendation = {
   handle: string;
   title: string;
   url: string | null;
+  imageUrl: string | null;
   gapCategory: string;
   personalExplanation: string;
 };
@@ -135,10 +137,14 @@ export function matchNadineProduct(
   const { product, closetCat } = candidates[0];
   const { verifiedTitle, liveUrl } = product.parsed.identity;
 
+  const mediaEntry = resolveVerifiedMedia(product.handle);
+  const imageUrl = mediaEntry?.eligibility === "ready" ? (mediaEntry.resolvedUrl ?? null) : null;
+
   return {
     handle: product.handle,
     title: verifiedTitle,
     url: liveUrl,
+    imageUrl,
     gapCategory: closetCat,
     personalExplanation: buildExplanation(product, evidence, edit),
   };

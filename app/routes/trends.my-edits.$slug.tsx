@@ -357,8 +357,32 @@ const css = `
   .tmd-nadine-card {
     margin-top: 24px;
     border: 1px solid rgba(26,17,9,0.12);
-    padding: 20px 24px;
     background: rgba(240,235,226,0.35);
+    overflow: hidden;
+  }
+  .tmd-nadine-card-inner {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+  }
+  .tmd-nadine-card-image-col {
+    width: 180px;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+  .tmd-nadine-card-image-col img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .tmd-nadine-card-copy {
+    padding: 20px 24px;
+    flex: 1;
+    min-width: 0;
+  }
+  .tmd-nadine-card-no-image {
+    padding: 20px 24px;
   }
   .tmd-nadine-card-eyebrow {
     font-family: 'Space Mono', monospace;
@@ -393,6 +417,10 @@ const css = `
     text-decoration: none;
   }
   .tmd-nadine-card-link:hover { text-decoration: underline; }
+  @media (max-width: 600px) {
+    .tmd-nadine-card-inner { flex-direction: column; }
+    .tmd-nadine-card-image-col { width: 100%; height: 260px; }
+  }
 `;
 
 export function ErrorBoundary() {
@@ -629,21 +657,34 @@ export default function MyTrendEditDetail() {
                   </ul>
                   {nadineRecommendation && (
                     <div className="tmd-nadine-card">
-                      <div className="tmd-nadine-card-eyebrow">A NADINE piece for this gap</div>
-                      <p className="tmd-nadine-card-title">{nadineRecommendation.title}</p>
-                      <p className="tmd-nadine-card-explanation">
-                        {nadineRecommendation.personalExplanation}
-                      </p>
-                      {nadineRecommendation.url && (
-                        <a
-                          href={nadineRecommendation.url}
-                          className="tmd-nadine-card-link"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          View on NADINE →
-                        </a>
-                      )}
+                      <div className="tmd-nadine-card-inner">
+                        {nadineRecommendation.imageUrl && (
+                          <div className="tmd-nadine-card-image-col">
+                            <img
+                              src={nadineRecommendation.imageUrl}
+                              alt={nadineRecommendation.title}
+                              loading="lazy"
+                            />
+                          </div>
+                        )}
+                        <div className={nadineRecommendation.imageUrl ? "tmd-nadine-card-copy" : "tmd-nadine-card-no-image"}>
+                          <div className="tmd-nadine-card-eyebrow">A NADINE piece for this gap</div>
+                          <p className="tmd-nadine-card-title">{nadineRecommendation.title}</p>
+                          <p className="tmd-nadine-card-explanation">
+                            {nadineRecommendation.personalExplanation}
+                          </p>
+                          {nadineRecommendation.url && (
+                            <a
+                              href={nadineRecommendation.url}
+                              className="tmd-nadine-card-link"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              VIEW PIECE →
+                            </a>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   )}
                 </>
