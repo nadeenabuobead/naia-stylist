@@ -75,14 +75,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return fail(502, "Could not reach Shopify OIDC configuration");
   }
 
-  // Must match the redirect_uri used in the authorization request exactly.
-  // Mirror the same X-Forwarded-Host logic from auth.shopify.login.
+  // Must exactly match the redirect_uri sent in the authorization request.
+  // Mirrors the same STOREFRONT_HOST logic from auth.shopify.login.
   const storefrontHost = process.env.STOREFRONT_HOST ?? "";
-  const forwardedHost  = request.headers.get("x-forwarded-host") ?? "";
-  const callbackOrigin =
-    storefrontHost && forwardedHost === storefrontHost
-      ? `https://${storefrontHost}`
-      : process.env.SHOPIFY_APP_URL!.replace(/\/$/, "");
+  const callbackOrigin = storefrontHost
+    ? `https://${storefrontHost}`
+    : process.env.SHOPIFY_APP_URL!.replace(/\/$/, "");
   const redirectUri = `${callbackOrigin}/auth/shopify/callback`;
 
   // ── 2: exchange code + code_verifier for tokens (Shopify validates PKCE) ──

@@ -19,16 +19,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const oidcConfig   = await getOidcConfig();
   const pkce         = generatePkceBundle();
-  // When the request arrives via the storefront Vercel proxy, X-Forwarded-Host
-  // is the storefront domain — and the PKCE cookie is set on that domain.
-  // Use the storefront origin as redirect_uri so Shopify sends the browser back
-  // there, keeping the cookie and the callback on the same domain.
+  // All customer-facing auth flows through the storefront Vercel proxy.
+  // The PKCE cookie is set on the storefront domain (via proxy Set-Cookie
+  // forwarding). STOREFRONT_HOST makes redirect_uri point back to the storefront
+  // so Shopify sends the browser there and the cookie arrives with the callback.
   const storefrontHost = process.env.STOREFRONT_HOST ?? "";
-  const forwardedHost  = request.headers.get("x-forwarded-host") ?? "";
-  const callbackOrigin =
-    storefrontHost && forwardedHost === storefrontHost
-      ? `https://${storefrontHost}`
-      : process.env.SHOPIFY_APP_URL!.replace(/\/$/, "");
+  const callbackOrigin = storefrontHost
+    ? `https://${storefrontHost}`
+    : process.env.SHOPIFY_APP_URL!.replace(/\/$/, "");
   const redirectUri  = `${callbackOrigin}/auth/shopify/callback`;
   const authUrl      = buildAuthorizationUrl(oidcConfig, pkce, redirectUri);
 
