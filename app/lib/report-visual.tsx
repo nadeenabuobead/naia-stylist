@@ -66,8 +66,8 @@ export function reportVisual(
   }
 
   // ── Modern Tailoring ────────────────────────────────────────────────────────
-  // Fine needle, warm espresso, off-centre upper-right. Short thread trail + stitch marks.
-  // Needle length ≈130px featured / 56px card. Rotated 22°. No large sweeping thread arc.
+  // Two overlapping fabric panels: deep charcoal pinstripe + warm stone.
+  // Angled fold edge on stone panel. Welt mark. Dominant linen negative space.
   if (treatment === "modern-tailoring") {
     return variant === "featured" ? (
       <svg
@@ -77,51 +77,55 @@ export function reportVisual(
         style={{ width: "100%", height: "100%", display: "block" }}
         aria-hidden="true"
       >
-        <rect width="600" height="520" fill="#e6e0d4" />
-        {/* Needle — fine, warm espresso, off-centre upper-right, 22° rotation */}
-        <g transform="rotate(22, 388, 188)">
-          <path
-            d="M 388 122 C 389.0 138, 389.6 156, 389.6 176 C 389.6 196, 389.0 218, 388.4 252 L 387.6 252 C 387.0 218, 386.4 196, 386.4 176 C 386.4 156, 387.0 138, 388 122 Z"
-            fill="#7a6050"
-          />
-          <ellipse cx="388" cy="240" rx="0.7" ry="2.0" fill="#e6e0d4" />
+        <defs>
+          <clipPath id="mt-f-cp">
+            <path d="M 288 520 L 600 520 L 600 0 L 309 0 Z" />
+          </clipPath>
+        </defs>
+        <rect width="600" height="520" fill="#ece6db" />
+        {/* Charcoal pinstripe panel — right side */}
+        <path d="M 288 520 L 600 520 L 600 0 L 309 0 Z" fill="#24201b" />
+        {/* Pinstripes clipped to charcoal panel */}
+        <g clipPath="url(#mt-f-cp)">
+          {[327,341,355,369,383,397,411,425,439,453,467,481,495,509,523,537,551,565,579].map((x) => (
+            <line key={x} x1={x} y1="0" x2={x} y2="520" stroke="#d9d2c7" strokeWidth="0.44" opacity="0.20" />
+          ))}
         </g>
-        {/* Delicate thread trail from needle eye — rotated eye lands ≈ (369, 236) */}
-        <path
-          d="M 369 236 C 358 252, 344 264, 330 259"
-          fill="none" stroke="#9a8878" strokeWidth="0.7" strokeLinecap="round" opacity="0.44"
-        />
-        {/* Three tiny stitch marks near thread end */}
-        <line x1="307" y1="268" x2="316" y2="257" stroke="#9a8878" strokeWidth="0.6" strokeLinecap="round" opacity="0.28" />
-        <line x1="319" y1="277" x2="328" y2="266" stroke="#9a8878" strokeWidth="0.6" strokeLinecap="round" opacity="0.22" />
-        <line x1="295" y1="260" x2="304" y2="249" stroke="#9a8878" strokeWidth="0.6" strokeLinecap="round" opacity="0.18" />
+        {/* Warm stone panel — overlapping charcoal, open bottom */}
+        <path d="M 82 449 L 330 444 L 345 0 L 82 0 Z" fill="#d4c8b4" />
+        {/* Fold edge — right edge of stone panel */}
+        <line x1="345" y1="0" x2="330" y2="444" stroke="#beb3a2" strokeWidth="0.56" strokeLinecap="round" opacity="0.42" />
+        {/* Welt detail */}
+        <line x1="132" y1="354" x2="183" y2="354" stroke="#beb3a2" strokeWidth="0.46" strokeLinecap="round" opacity="0.28" />
       </svg>
     ) : (
       <svg
-        viewBox="0 0 400 200"
+        viewBox="0 0 400 220"
         xmlns="http://www.w3.org/2000/svg"
         preserveAspectRatio="xMidYMid slice"
         style={{ width: "100%", height: "100%", display: "block" }}
         aria-hidden="true"
       >
-        <rect width="400" height="200" fill="#e6e0d4" />
-        {/* Needle — card scale, right-of-centre, 22° rotation */}
-        <g transform="rotate(22, 262, 82)">
-          <path
-            d="M 262 52 C 262.8 60, 263.2 68, 263.2 78 C 263.2 88, 262.8 97, 262.4 108 L 261.6 108 C 261.2 97, 260.8 88, 260.8 78 C 260.8 68, 261.2 60, 262 52 Z"
-            fill="#7a6050"
-          />
-          <ellipse cx="262" cy="103" rx="0.6" ry="1.7" fill="#e6e0d4" />
+        <defs>
+          <clipPath id="mt-c-cp">
+            <path d="M 192 220 L 400 220 L 400 0 L 206 0 Z" />
+          </clipPath>
+        </defs>
+        <rect width="400" height="220" fill="#ece6db" />
+        {/* Charcoal pinstripe panel — right side */}
+        <path d="M 192 220 L 400 220 L 400 0 L 206 0 Z" fill="#24201b" />
+        {/* Pinstripes clipped to charcoal panel */}
+        <g clipPath="url(#mt-c-cp)">
+          {[218,227,236,245,254,263,272,281,290,299,308,317,326,335,344,353,362,371,380,389].map((x) => (
+            <line key={x} x1={x} y1="0" x2={x} y2="220" stroke="#d9d2c7" strokeWidth="0.44" opacity="0.20" />
+          ))}
         </g>
-        {/* Thread trail — rotated eye lands ≈ (254, 102) */}
-        <path
-          d="M 254 102 C 246 113, 237 119, 227 116"
-          fill="none" stroke="#9a8878" strokeWidth="0.6" strokeLinecap="round" opacity="0.42"
-        />
-        {/* Three tiny stitch marks */}
-        <line x1="209" y1="122" x2="216" y2="113" stroke="#9a8878" strokeWidth="0.55" strokeLinecap="round" opacity="0.26" />
-        <line x1="218" y1="128" x2="225" y2="119" stroke="#9a8878" strokeWidth="0.55" strokeLinecap="round" opacity="0.20" />
-        <line x1="200" y1="116" x2="207" y2="107" stroke="#9a8878" strokeWidth="0.55" strokeLinecap="round" opacity="0.16" />
+        {/* Warm stone panel — overlapping charcoal, open bottom */}
+        <path d="M 55 190 L 220 188 L 230 0 L 55 0 Z" fill="#d4c8b4" />
+        {/* Fold edge — right edge of stone panel */}
+        <line x1="230" y1="0" x2="220" y2="188" stroke="#beb3a2" strokeWidth="0.56" strokeLinecap="round" opacity="0.42" />
+        {/* Welt detail */}
+        <line x1="88" y1="150" x2="122" y2="150" stroke="#beb3a2" strokeWidth="0.46" strokeLinecap="round" opacity="0.28" />
       </svg>
     );
   }
