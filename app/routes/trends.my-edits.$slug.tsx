@@ -9,6 +9,10 @@ import {
   type ShopperEdit,
   type EvidenceClosetItem,
 } from "~/lib/trend-evidence.server";
+import {
+  matchNadineProduct,
+  type NadineProductRecommendation,
+} from "~/lib/trend-product-recommendation.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
@@ -17,6 +21,7 @@ type LoaderData = {
   edit: ShopperEdit | null;
   hasProfile: boolean;
   generationFailed: boolean;
+  nadineRecommendation: NadineProductRecommendation | null;
 };
 
 export const links: LinksFunction = () => [
@@ -41,11 +46,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const evidence = await getShopperEvidence(customer.id);
     const edit = evidence.hasProfile ? buildShopperEdit(report, evidence) : null;
+    const nadineRecommendation =
+      edit ? matchNadineProduct(report, evidence, edit) : null;
     return {
       report,
       edit,
       hasProfile: evidence.hasProfile,
       generationFailed: false,
+      nadineRecommendation,
     } satisfies LoaderData;
   } catch (error) {
     console.error("Shopper trend edit generation failed:", error);
@@ -54,6 +62,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       edit: null,
       hasProfile: false,
       generationFailed: true,
+      nadineRecommendation: null,
     } satisfies LoaderData;
   }
 }
@@ -343,6 +352,47 @@ const css = `
     transition: background 0.2s, color 0.2s;
   }
   .tmd-footer-btn:hover { background: #f0ebe2; color: #1a1109; }
+
+  /* ── NADINE product card ─────────────────────────────────────────────── */
+  .tmd-nadine-card {
+    margin-top: 24px;
+    border: 1px solid rgba(26,17,9,0.12);
+    padding: 20px 24px;
+    background: rgba(240,235,226,0.35);
+  }
+  .tmd-nadine-card-eyebrow {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: #7a1e28;
+    margin-bottom: 8px;
+  }
+  .tmd-nadine-card-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.15rem;
+    font-style: italic;
+    font-weight: 400;
+    color: #1a1109;
+    margin: 0 0 10px;
+  }
+  .tmd-nadine-card-explanation {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1rem;
+    font-weight: 300;
+    line-height: 1.6;
+    color: rgba(26,17,9,0.75);
+    margin: 0 0 14px;
+  }
+  .tmd-nadine-card-link {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #7a1e28;
+    text-decoration: none;
+  }
+  .tmd-nadine-card-link:hover { text-decoration: underline; }
 `;
 
 export function ErrorBoundary() {
@@ -360,7 +410,7 @@ export function ErrorBoundary() {
 }
 
 export default function MyTrendEditDetail() {
-  const { report, edit, hasProfile, generationFailed } = useLoaderData() as LoaderData;
+  const { report, edit, hasProfile, generationFailed, nadineRecommendation } = useLoaderData() as LoaderData;
 
   const reportIndex = trendReports.filter((r) => r.published).findIndex((r) => r.slug === report.slug);
   const tint = TINTS[Math.max(0, reportIndex) % TINTS.length];
@@ -436,6 +486,7 @@ export default function MyTrendEditDetail() {
     if (edit?.aLookToTry) { addText("A LOOK TO TRY", 8, "bold", [139, 32, 53], 3); addText(edit.aLookToTry, 10, "normal", [34, 21, 22], 8); }
     if (edit?.worthInvestingStatement) { addText("WORTH INVESTING IN", 8, "bold", [139, 32, 53], 3); addText(edit.worthInvestingStatement, 10, "normal", [34, 21, 22], 8); }
     if (edit?.partToTake) { addText("THE PART TO TAKE", 8, "bold", [139, 32, 53], 3); addText(edit.partToTake, 10, "normal", [34, 21, 22], 8); }
+    if (nadineRecommendation && !edit?.worthInvestingStatement) { addText("A NADINE PIECE FOR THIS GAP", 8, "bold", [139, 32, 53], 3); addText(`${nadineRecommendation.title} — ${nadineRecommendation.personalExplanation}`, 10, "normal", [34, 21, 22], 8); }
     if (edit?.theBalanceToProtect) { addText("THE BALANCE TO PROTECT", 8, "bold", [139, 32, 53], 3); addText(edit.theBalanceToProtect, 10, "normal", [34, 21, 22], 8); }
     if (edit?.partToLeave) { addText("THE PART TO LEAVE", 8, "bold", [139, 32, 53], 3); addText(edit.partToLeave, 10, "normal", [34, 21, 22], 8); }
     doc.setFontSize(7); doc.setFont("helvetica", "normal"); doc.setTextColor(122, 111, 106);
@@ -570,11 +621,32 @@ export default function MyTrendEditDetail() {
               {edit.worthInvestingStatement ? (
                 <p className="tmd-body">{edit.worthInvestingStatement}</p>
               ) : (
-                <ul className="tmd-dash-list">
-                  {edit.partToTake.map((bullet: string, i: number) => (
-                    <li key={i}>{bullet}</li>
-                  ))}
-                </ul>
+                <>
+                  <ul className="tmd-dash-list">
+                    {edit.partToTake.map((bullet: string, i: number) => (
+                      <li key={i}>{bullet}</li>
+                    ))}
+                  </ul>
+                  {nadineRecommendation && (
+                    <div className="tmd-nadine-card">
+                      <div className="tmd-nadine-card-eyebrow">A NADINE piece for this gap</div>
+                      <p className="tmd-nadine-card-title">{nadineRecommendation.title}</p>
+                      <p className="tmd-nadine-card-explanation">
+                        {nadineRecommendation.personalExplanation}
+                      </p>
+                      {nadineRecommendation.url && (
+                        <a
+                          href={nadineRecommendation.url}
+                          className="tmd-nadine-card-link"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          View on NADINE →
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
 

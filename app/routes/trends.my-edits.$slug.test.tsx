@@ -61,6 +61,10 @@ vi.mock("~/lib/trend-evidence.server", () => ({
   buildShopperEdit: vi.fn(),
 }));
 
+vi.mock("~/lib/trend-product-recommendation.server", () => ({
+  matchNadineProduct: vi.fn(() => null),
+}));
+
 vi.mock("~/styles/naia-design-system.css?url", () => ({ default: "/styles.css" }));
 
 vi.mock("~/components/my-naia/MyNaiaLayout", () => ({
@@ -76,6 +80,7 @@ import React from "react";
 import { useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { getShopperEvidence, buildShopperEdit } from "~/lib/trend-evidence.server";
+import { matchNadineProduct } from "~/lib/trend-product-recommendation.server";
 import MyTrendEditDetail, { loader } from "./trends.my-edits.$slug";
 
 const MOCK_REPORT = {
@@ -99,6 +104,7 @@ const MOCK_EDIT = {
   aLookToTry: "A longline blazer with wide-leg trousers.",
   partToTake: ["A longline blazer", "Clean wide-leg trousers"],
   worthInvestingStatement: null,
+  coveredClosetCategories: [],
   partToLeave: ["Rigid matching suits"],
   theBalanceToProtect: "Keep one tailored piece loose and fluid.",
 };
@@ -167,6 +173,28 @@ describe("trends/my-edits/:slug loader", () => {
     expect(result.generationFailed).toBe(false);
   });
 
+  it("returns nadineRecommendation from matchNadineProduct in loader data", async () => {
+    const MOCK_REC = {
+      handle: "trench-coat",
+      title: "Becoming Seen",
+      url: "https://naiabynadine.com/products/trench-coat",
+      gapCategory: "OUTERWEAR",
+      personalExplanation: "Statement outer layer.",
+    };
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
+    vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: true } as any);
+    vi.mocked(buildShopperEdit).mockReturnValueOnce(MOCK_EDIT as any);
+    vi.mocked(matchNadineProduct).mockReturnValueOnce(MOCK_REC as any);
+
+    const result = await loader({
+      request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
+      params: { slug: "spring-2026-soft-structure" },
+      context: {},
+    });
+
+    expect(result.nadineRecommendation).toEqual(MOCK_REC);
+  });
+
   it("returns generationFailed:true on evidence error", async () => {
     vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
     vi.mocked(getShopperEvidence).mockRejectedValueOnce(new Error("DB error"));
@@ -193,6 +221,7 @@ describe("MyTrendEditDetail component", () => {
       edit: null,
       hasProfile: false,
       generationFailed: false,
+      nadineRecommendation: null,
     });
     const html = renderToString(React.createElement(MyTrendEditDetail));
     expect(html).toContain("my-naia-layout");
@@ -204,6 +233,7 @@ describe("MyTrendEditDetail component", () => {
       edit: null,
       hasProfile: false,
       generationFailed: false,
+      nadineRecommendation: null,
     });
     const html = renderToString(React.createElement(MyTrendEditDetail));
     expect(html).toContain('href="/trends/my-edits"');
@@ -216,6 +246,7 @@ describe("MyTrendEditDetail component", () => {
       edit: null,
       hasProfile: false,
       generationFailed: false,
+      nadineRecommendation: null,
     });
     const html = renderToString(React.createElement(MyTrendEditDetail));
     expect(html).toContain(`href="/trends/${MOCK_REPORT.slug}"`);
@@ -228,6 +259,7 @@ describe("MyTrendEditDetail component", () => {
       edit: null,
       hasProfile: false,
       generationFailed: false,
+      nadineRecommendation: null,
     });
     const html = renderToString(React.createElement(MyTrendEditDetail));
     expect(html).toContain("Passport");
@@ -253,6 +285,7 @@ describe("MyTrendEditDetail component", () => {
       edit: MOCK_EDIT,
       hasProfile: true,
       generationFailed: false,
+      nadineRecommendation: null,
     });
     const html = renderToString(React.createElement(MyTrendEditDetail));
     expect(html).toContain("Why this matters to you");
@@ -269,6 +302,7 @@ describe("MyTrendEditDetail component", () => {
       edit: MOCK_EDIT,
       hasProfile: true,
       generationFailed: false,
+      nadineRecommendation: null,
     });
     const html = renderToString(React.createElement(MyTrendEditDetail));
     expect(html).not.toContain("/lens/");
@@ -285,6 +319,7 @@ describe("MyTrendEditDetail component", () => {
       edit: MOCK_EDIT,
       hasProfile: true,
       generationFailed: false,
+      nadineRecommendation: null,
     });
     const html = renderToString(React.createElement(MyTrendEditDetail));
     expect(html).not.toContain("Creative Director");
@@ -300,6 +335,7 @@ describe("MyTrendEditDetail component", () => {
       edit: MOCK_EDIT,
       hasProfile: true,
       generationFailed: false,
+      nadineRecommendation: null,
     });
     const html = renderToString(React.createElement(MyTrendEditDetail));
     expect(html).toContain("Your style DNA says");
@@ -313,6 +349,7 @@ describe("MyTrendEditDetail component", () => {
       edit: { ...MOCK_EDIT, worthInvestingStatement: null },
       hasProfile: true,
       generationFailed: false,
+      nadineRecommendation: null,
     });
     const html = renderToString(React.createElement(MyTrendEditDetail));
     expect(html).toContain("A longline blazer");
@@ -332,6 +369,7 @@ describe("MyTrendEditDetail component", () => {
       edit: outcomeC,
       hasProfile: true,
       generationFailed: false,
+      nadineRecommendation: null,
     });
     const html = renderToString(React.createElement(MyTrendEditDetail));
     expect(html).toContain("do not need to buy anything");
@@ -353,8 +391,90 @@ describe("MyTrendEditDetail component", () => {
       edit: editNoEvidence,
       hasProfile: true,
       generationFailed: false,
+      nadineRecommendation: null,
     });
     const html = renderToString(React.createElement(MyTrendEditDetail));
     expect(html).not.toContain("Your nAia evidence");
+  });
+
+  // ── NADINE product card (Outcome A/B) ─────────────────────────────────────
+
+  it("renders NADINE product card when nadineRecommendation is present (Outcome A/B)", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      report: MOCK_REPORT,
+      edit: { ...MOCK_EDIT, worthInvestingStatement: null },
+      hasProfile: true,
+      generationFailed: false,
+      nadineRecommendation: {
+        handle: "trench-coat",
+        title: "Becoming Seen",
+        url: "https://naiabynadine.com/products/trench-coat",
+        gapCategory: "OUTERWEAR",
+        personalExplanation: "Statement outer layer. Works with your wide-leg trousers.",
+      },
+    });
+    const html = renderToString(React.createElement(MyTrendEditDetail));
+    expect(html).toContain("Becoming Seen");
+    expect(html).toContain("Statement outer layer");
+    expect(html).toContain("NADINE");
+    expect(html).toContain("naiabynadine.com/products/trench-coat");
+  });
+
+  it("does not render NADINE card when nadineRecommendation is null", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      report: MOCK_REPORT,
+      edit: { ...MOCK_EDIT, worthInvestingStatement: null },
+      hasProfile: true,
+      generationFailed: false,
+      nadineRecommendation: null,
+    });
+    const html = renderToString(React.createElement(MyTrendEditDetail));
+    expect(html).not.toContain("A NADINE piece for this gap");
+  });
+
+  it("does not render NADINE card when Outcome C (worthInvestingStatement present)", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      report: MOCK_REPORT,
+      edit: { ...MOCK_EDIT, worthInvestingStatement: "You do not need to buy anything." },
+      hasProfile: true,
+      generationFailed: false,
+      nadineRecommendation: null,
+    });
+    const html = renderToString(React.createElement(MyTrendEditDetail));
+    expect(html).not.toContain("A NADINE piece for this gap");
+  });
+
+  it("renders product card without link when url is null", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      report: MOCK_REPORT,
+      edit: { ...MOCK_EDIT, worthInvestingStatement: null },
+      hasProfile: true,
+      generationFailed: false,
+      nadineRecommendation: {
+        handle: "midi-dress",
+        title: "Becoming Her",
+        url: null,
+        gapCategory: "DRESSES",
+        personalExplanation: "Fluid midi dress. Sits in your artsy register.",
+      },
+    });
+    const html = renderToString(React.createElement(MyTrendEditDetail));
+    expect(html).toContain("Becoming Her");
+    expect(html).not.toContain("naiabynadine.com");
+    expect(html).not.toContain("View on NADINE");
+  });
+
+  it("does not render NADINE card on public reports — only My Trend Edits route renders it", () => {
+    // The product card is only rendered inside the `edit &&` block in this route.
+    // Public trend report route (trends.$slug.tsx) has no nadineRecommendation in LoaderData.
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      report: MOCK_REPORT,
+      edit: null,
+      hasProfile: false,
+      generationFailed: false,
+      nadineRecommendation: null,
+    });
+    const html = renderToString(React.createElement(MyTrendEditDetail));
+    expect(html).not.toContain("A NADINE piece for this gap");
   });
 });

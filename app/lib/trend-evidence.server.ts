@@ -1792,6 +1792,8 @@ export type ShopperEdit = {
   // 6. THE PART TO TAKE — exactly 2 bullets; null when Outcome C (no purchase needed)
   partToTake: string[];
   worthInvestingStatement: string | null; // Outcome C only: replaces bullets with prose
+  // Closet categories present in qualifying scored items — used by recommendation layer
+  coveredClosetCategories: string[];
   // 7. THE PART TO LEAVE — exactly 2 bullets
   partToLeave: string[];
 };
@@ -2097,6 +2099,8 @@ export function buildShopperEdit(
     ? (buildOutcomeCLookToTry(namedMatches, slug, workCtx) ?? aLookToTry)
     : aLookToTry;
 
+  const coveredClosetCategories = [...new Set(scored.map((s) => s.item.category))];
+
   return {
     subTitle,
     yourVersion,
@@ -2110,6 +2114,7 @@ export function buildShopperEdit(
     theBalanceToProtect,
     partToTake,
     worthInvestingStatement,
+    coveredClosetCategories,
     partToLeave,
   };
 }
