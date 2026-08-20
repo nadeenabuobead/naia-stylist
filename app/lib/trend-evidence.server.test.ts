@@ -797,3 +797,100 @@ describe("buildShopperEdit — correction-pass fixes", () => {
     expect(edit.aLookToTry).not.toMatch(/wide-leg/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Modern Tailoring narrative consistency
+// When the shopper's only qualifying closet item is a TOP, the personalised
+// copy must NOT describe that item as the tailored anchor while simultaneously
+// claiming the shopper is missing a tailored anchor. Gap state and narrative
+// must agree.
+// ---------------------------------------------------------------------------
+
+describe("buildShopperEdit — Modern Tailoring TOPS narrative consistency", () => {
+  // A brown top that qualifies: "brown" hits closetMatchText (jersey or similar),
+  // and the item has non-generic metadata.
+  const brownTopItem = {
+    name: "Brown Top",
+    imageUrl: null,
+    category: "TOPS",
+    subcategory: "blouse",
+    primaryColor: "brown",
+    styleTags: ["relaxed"],
+    occasions: [],
+    material: "jersey",
+  };
+
+  it("TOPS-only Outcome A: roleNote describes the top as the softer counterpart, not the tailored anchor", () => {
+    const evidence = makeEvidence({
+      closetItems: [brownTopItem],
+    });
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence);
+
+    expect(edit.worthInvestingStatement).toBeNull();
+
+    const roleNote = edit.evidenceClosetItems[0]?.roleNote ?? "";
+    // Must NOT call it the structured/tailored anchor
+    expect(roleNote).not.toMatch(/tailored anchor/i);
+    expect(roleNote).not.toMatch(/structured element/i);
+    expect(roleNote).not.toMatch(/tailored piece/i);
+    // Must acknowledge the softer / counterpart role
+    expect(roleNote).toMatch(/softer counterpart|softer side|counterpart/i);
+  });
+
+  it("TOPS-only Outcome A: Route In names the top as the softer side and names the missing anchor", () => {
+    const evidence = makeEvidence({
+      closetItems: [brownTopItem],
+    });
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence);
+
+    expect(edit.worthInvestingStatement).toBeNull();
+
+    // Route In must not call the top the tailored piece
+    expect(edit.yourBestRouteIn).not.toMatch(/is the tailored piece/i);
+    // Must name what is missing
+    expect(edit.yourBestRouteIn).toMatch(/missing|what is missing/i);
+    expect(edit.yourBestRouteIn).toMatch(/tailored anchor|blazer|waistcoat|trouser/i);
+  });
+
+  it("TOPS-only Outcome A: partToTake correctly describes missing tailored anchor (no contradiction with roleNote)", () => {
+    const evidence = makeEvidence({
+      closetItems: [brownTopItem],
+    });
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence);
+
+    expect(edit.worthInvestingStatement).toBeNull();
+
+    // partToTake describes the gap (what to buy)
+    const investBullet = edit.partToTake[0];
+    expect(investBullet).toMatch(/tailored anchor|blazer|waistcoat|trouser/i);
+
+    // The roleNote must not contradict the gap by calling the existing top the anchor
+    const roleNote = edit.evidenceClosetItems[0]?.roleNote ?? "";
+    expect(roleNote).not.toMatch(/tailored anchor/i);
+    expect(roleNote).not.toMatch(/structured element/i);
+  });
+
+  it("OUTERWEAR Outcome B: roleNote correctly identifies outerwear as the tailored anchor", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Tailored Blazer",
+          imageUrl: null,
+          category: "OUTERWEAR",
+          subcategory: "blazer",
+          primaryColor: "navy",
+          styleTags: [],
+          occasions: [],
+          material: "wool",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence);
+
+    expect(edit.worthInvestingStatement).toBeNull();
+    expect(edit.partToTake[0]).toMatch(/can already wear/i);
+
+    const roleNote = edit.evidenceClosetItems[0]?.roleNote ?? "";
+    expect(roleNote).toMatch(/tailored anchor/i);
+  });
+});

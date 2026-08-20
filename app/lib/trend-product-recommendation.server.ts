@@ -63,7 +63,20 @@ function buildExplanation(
   product: GeneratedCatalogProduct,
   evidence: ShopperEvidenceBundle,
   edit: ShopperEdit,
+  report: TrendReportData,
 ): string {
+  // For Modern Tailoring: when closet evidence is a TOP, it is the softer
+  // counterpart — not the tailored anchor. Make that role gap explicit.
+  if (
+    report.slug === "modern-tailoring-spring-2026" &&
+    edit.evidenceClosetItems.length > 0 &&
+    edit.evidenceClosetItems[0].category === "TOPS"
+  ) {
+    const topName = edit.evidenceClosetItems[0].name.toLowerCase();
+    const productTitle = product.parsed.identity.verifiedTitle;
+    return `Your ${topName} already gives you the softer, expressive side of this direction. ${productTitle} adds the tailored anchor that is missing, giving that drape a sharper counterpoint.`;
+  }
+
   const parts: string[] = [];
 
   const rawRole = product.parsed.prose.stylingRole;
@@ -146,6 +159,6 @@ export function matchNadineProduct(
     url: liveUrl,
     imageUrl,
     gapCategory: closetCat,
-    personalExplanation: buildExplanation(product, evidence, edit),
+    personalExplanation: buildExplanation(product, evidence, edit, report),
   };
 }

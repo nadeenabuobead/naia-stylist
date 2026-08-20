@@ -403,4 +403,52 @@ describe("matchNadineProduct", () => {
     );
     expect(result).toBeNull();
   });
+
+  // ── Modern Tailoring TOPS explanation consistency ─────────────────────────
+
+  it("Modern Tailoring + TOPS closet item: explanation names the top as softer side and the product as the anchor", () => {
+    const mockProduct = {
+      handle: "leather-suede-jacket",
+      parsed: {
+        identity: {
+          itemType: "OUTERWEAR",
+          verifiedTitle: "Becoming Clear",
+          liveUrl: null,
+          featuredImageUrl: null,
+          colors: ["brown"],
+        },
+        rankings: {
+          desiredFeelingMatch: ["more-confident"],
+          stylePersonalityMatch: [],
+        },
+        prose: { stylingRole: "Structured statement jacket" },
+      },
+    } as any;
+
+    vi.mocked(getRecommendationEligibleProducts).mockReturnValue([mockProduct]);
+
+    const evidence = makeEvidence(makeProfile({ desiredFeelings: ["more-confident"] }));
+    const edit = makeEdit({
+      coveredClosetCategories: ["TOPS"],
+      evidenceClosetItems: [
+        { name: "Brown Top", imageUrl: null, category: "TOPS", roleNote: "softer counterpart" },
+      ],
+    });
+
+    const result = matchNadineProduct(
+      makeReport("modern-tailoring-spring-2026"),
+      evidence,
+      edit,
+    );
+
+    expect(result).not.toBeNull();
+    // Explanation must reference the closet top's role (softer side)
+    expect(result!.personalExplanation).toMatch(/brown top/i);
+    expect(result!.personalExplanation).toMatch(/softer|expressive/i);
+    // Explanation must name the product as adding the anchor
+    expect(result!.personalExplanation).toMatch(/Becoming Clear/i);
+    expect(result!.personalExplanation).toMatch(/tailored anchor/i);
+    // Must NOT say "works with" (the old generic copy)
+    expect(result!.personalExplanation).not.toMatch(/works with/i);
+  });
 });

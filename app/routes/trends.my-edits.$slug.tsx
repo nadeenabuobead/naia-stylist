@@ -45,9 +45,30 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   try {
     const evidence = await getShopperEvidence(customer.id);
-    const edit = evidence.hasProfile ? buildShopperEdit(report, evidence) : null;
+    const rawEdit = evidence.hasProfile ? buildShopperEdit(report, evidence) : null;
     const nadineRecommendation =
-      edit ? matchNadineProduct(report, evidence, edit) : null;
+      rawEdit ? matchNadineProduct(report, evidence, rawEdit) : null;
+
+    // For Modern Tailoring: when the shopper's only closet evidence is a TOP
+    // (the softer counterpart) and a NADINE piece fills the missing tailored
+    // anchor, name the product directly in the Look To Try so the outfit
+    // formula matches the recommendation card below it.
+    let edit = rawEdit;
+    if (
+      rawEdit &&
+      nadineRecommendation &&
+      report.slug === "modern-tailoring-spring-2026" &&
+      rawEdit.worthInvestingStatement === null &&
+      rawEdit.evidenceClosetItems.length > 0 &&
+      rawEdit.evidenceClosetItems[0].category === "TOPS"
+    ) {
+      const topName = rawEdit.evidenceClosetItems[0].name;
+      edit = {
+        ...rawEdit,
+        aLookToTry: `Your ${topName} + ${nadineRecommendation.title} + a clean straight or wide-leg trouser + minimal flats.`,
+      };
+    }
+
     return {
       report,
       edit,

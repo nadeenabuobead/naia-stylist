@@ -1060,7 +1060,7 @@ function buildEvidenceItemRoleNote(item: ShopperClosetItemEvidence, slug: string
     const notes: Partial<Record<string, string>> = {
       OUTERWEAR: "The tailored anchor. Pair it with something relaxed — a soft knit or fluid trouser — for the separates contrast.",
       BOTTOMS:   "The separates foundation. The styling question is which relaxed counterpart it works against.",
-      TOPS:      "The structured element. Pair it against something relaxed — the contrast is the whole method.",
+      TOPS:      "The softer counterpart in this direction. The contrast it creates with a tailored anchor — a blazer, waistcoat, or clean trouser — is what Modern Tailoring is built on.",
     };
     return (notes[item.category] ?? "A starting point for this direction.") + suffix;
   }
@@ -1174,7 +1174,7 @@ function buildALookToTry(
     if (top.category === "BOTTOMS") {
       return `Your ${name} with a fine knit or soft jersey above and a clean flat shoe. The contrast between the two pieces is the complete look.${ctxClose(false)}`;
     }
-    return `Your ${name} with a tailored trouser and a clean flat. Everything else minimal.${ctxClose(false)}`;
+    return `Your ${name} with a structured jacket or wide-leg trouser as the tailored anchor. Clean flat; everything else minimal.${ctxClose(false)}`;
   }
 
   if (slug === "spring-2026-colour-direction") {
@@ -1330,7 +1330,7 @@ function buildBestRouteIn(
     if (top.category === "BOTTOMS") {
       return `Your ${name} is the tailored anchor — its cut creates the proportion contrast this direction needs. The counterpart should be relaxed: a fine knit or soft jersey above. The contrast between structured bottom and easy top is the complete styling principle.`;
     }
-    return `Your ${name} is the tailored piece — the direction's principle is to wear it against something softer and more relaxed. The contrast between the structured and the easy is where the look lives.`;
+    return `Your ${name} already gives you the softer, more expressive side of this direction. What is missing is one clean tailored anchor — a blazer, waistcoat, or wide-leg trouser — to create the contrast Modern Tailoring depends on.`;
   }
 
   if (slug === "spring-2026-colour-direction") {
