@@ -234,7 +234,7 @@ describe("MyTrendEdits component — complete profile", () => {
   it("does not show the passport banner when profile is complete", () => {
     vi.mocked(useLoaderData).mockReturnValueOnce(COMPLETE_DATA);
     const html = renderToString(React.createElement(MyTrendEdits));
-    expect(html).not.toContain("Style Passport is incomplete");
+    expect(html).not.toContain("style passport incomplete");
     expect(html).not.toContain("Complete My Passport");
   });
 
@@ -280,7 +280,7 @@ describe("MyTrendEdits component — incomplete profile", () => {
   it("shows the passport banner", () => {
     vi.mocked(useLoaderData).mockReturnValueOnce(LOCKED_DATA);
     const html = renderToString(React.createElement(MyTrendEdits));
-    expect(html).toContain("Style Passport is incomplete");
+    expect(html).toContain("style passport incomplete");
     expect(html).toContain('href="/passport"');
   });
 
@@ -321,7 +321,8 @@ describe("MyTrendEdits component — no published reports", () => {
   it("renders editorial empty state", () => {
     vi.mocked(useLoaderData).mockReturnValueOnce({ cards: [], hasProfile: false });
     const html = renderToString(React.createElement(MyTrendEdits));
-    expect(html).toContain("trend edits are on their way");
+    expect(html).toContain("your trend edits");
+    expect(html).toContain("are on their way.");
     expect(html).toContain('href="/passport"');
   });
 });
