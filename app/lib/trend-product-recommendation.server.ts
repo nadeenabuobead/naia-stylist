@@ -39,6 +39,14 @@ function passesTrendSuitabilityGate(
   product: GeneratedCatalogProduct,
   reportSlug: string,
 ): boolean {
+  // Shared print-detection helper used by both trend gates below.
+  const hasArtPrintColor = product.parsed.identity.colors.some((c) =>
+    c.toLowerCase().includes("print"),
+  );
+  const hasPrintedConstruction = (product.parsed.identity.silhouette ?? "")
+    .toLowerCase()
+    .includes("print");
+
   if (reportSlug === "modern-tailoring-spring-2026") {
     // The recommended piece must serve as a composed, clean tailored anchor.
     // "Hold Off On: Extra detailing on the tailored piece competes with the
@@ -46,17 +54,20 @@ function passesTrendSuitabilityGate(
     // Disqualify if the product carries art-print coloring, printed construction
     // panels, or an art-led styling role — any of these signals a statement or
     // expressive piece rather than a clean, composed anchor.
-    const hasArtPrintColor = product.parsed.identity.colors.some((c) =>
-      c.toLowerCase().includes("print"),
-    );
     const isArtLedRole = product.parsed.prose.stylingRole
       .toLowerCase()
       .includes("art-led");
-    const hasPrintedConstruction = (product.parsed.identity.silhouette ?? "")
-      .toLowerCase()
-      .includes("print");
     if (hasArtPrintColor || isArtLedRole || hasPrintedConstruction) return false;
   }
+
+  if (reportSlug === "spring-2026-soft-structure") {
+    // Soft Structure: impression must come from proportion and fabric, not decoration.
+    // leaveOutCandidates: "Surface embellishment — the impression comes from proportion
+    // and fabric, not decoration." (vocab trigger: print)
+    // Disqualify products carrying art-print coloring or printed construction panels.
+    if (hasArtPrintColor || hasPrintedConstruction) return false;
+  }
+
   return true;
 }
 
