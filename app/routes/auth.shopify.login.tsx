@@ -13,6 +13,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url      = new URL(request.url);
   const returnTo = validateReturnTo(url.searchParams.get("return_to"));
 
+  // When STOREFRONT_HOST is configured, the PKCE cookie must be set on the
+  // storefront domain — because that is where Shopify will send the callback.
+  // If this request arrived directly at naia-stylist-staging (not via the
+  // storefront Vercel proxy), redirect the browser to the storefront's login URL
+  // so the proxy can forward the response and set the cookie there.
+  //
+  // Detection: the Vercel proxy sets X-Forwarded-Host to the browser-facing
+  // domain. When that header matches STOREFRONT_HOST the request is proxied ✓.
+  // When it is absent or points to the staging host the request is direct → redirect.
+  const storefrontHost = process.env.STOREFRONT_HOST ?? "";
+  if (storefrontHost) {
+    const fwdHost = (request.headers.get("x-forwarded-host") ?? "").split(",")[0].trim();
+    if (fwdHost !== storefrontHost) {
+      const sfLogin = new URL(`https://${storefrontHost}/auth/shopify/login`);
+      sfLogin.searchParams.set("return_to", returnTo);
+      return redirect(sfLogin.toString(), 302);
+    }
+  }
+
   // If caller already has a valid nAia session skip OAuth entirely
   const existing = await resolveNaiaSession(request);
   if (existing) return redirect(returnTo);
@@ -23,7 +42,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // The PKCE cookie is set on the storefront domain (via proxy Set-Cookie
   // forwarding). STOREFRONT_HOST makes redirect_uri point back to the storefront
   // so Shopify sends the browser there and the cookie arrives with the callback.
-  const storefrontHost = process.env.STOREFRONT_HOST ?? "";
   const callbackOrigin = storefrontHost
     ? `https://${storefrontHost}`
     : process.env.SHOPIFY_APP_URL!.replace(/\/$/, "");
