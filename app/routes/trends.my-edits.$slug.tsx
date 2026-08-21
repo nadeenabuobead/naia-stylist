@@ -534,10 +534,10 @@ export default function MyTrendEditDetail() {
     if (edit?.yourBestRouteIn) { addText("YOUR BEST ROUTE IN", 8, "bold", [139, 32, 53], 3); addText(edit.yourBestRouteIn, 10, "normal", [34, 21, 22], 8); }
     if (edit?.aLookToTry) { addText("A LOOK TO TRY", 8, "bold", [139, 32, 53], 3); addText(edit.aLookToTry, 10, "normal", [34, 21, 22], 8); }
     if (edit?.worthInvestingStatement) { addText("WORTH INVESTING IN", 8, "bold", [139, 32, 53], 3); addText(edit.worthInvestingStatement, 10, "normal", [34, 21, 22], 8); }
-    if (edit?.partToTake) { addText("THE PART TO TAKE", 8, "bold", [139, 32, 53], 3); addText(edit.partToTake, 10, "normal", [34, 21, 22], 8); }
+    if (edit?.partToTake?.length) { addText("THE PART TO TAKE", 8, "bold", [139, 32, 53], 3); addText(edit.partToTake.join("\n"), 10, "normal", [34, 21, 22], 8); }
     if (nadineRecommendation && !edit?.worthInvestingStatement) { addText("A NADINE PIECE FOR THIS GAP", 8, "bold", [139, 32, 53], 3); addText(`${nadineRecommendation.title} — ${nadineRecommendation.personalExplanation}`, 10, "normal", [34, 21, 22], 8); }
     if (edit?.theBalanceToProtect) { addText("THE BALANCE TO PROTECT", 8, "bold", [139, 32, 53], 3); addText(edit.theBalanceToProtect, 10, "normal", [34, 21, 22], 8); }
-    if (edit?.partToLeave) { addText("THE PART TO LEAVE", 8, "bold", [139, 32, 53], 3); addText(edit.partToLeave, 10, "normal", [34, 21, 22], 8); }
+    if (edit?.partToLeave?.length) { addText("THE PART TO LEAVE", 8, "bold", [139, 32, 53], 3); addText(edit.partToLeave.join("\n"), 10, "normal", [34, 21, 22], 8); }
     doc.setFontSize(7); doc.setFont("helvetica", "normal"); doc.setTextColor(122, 111, 106);
     doc.text("nAia Trend Reports · Your personalised edit", margin, 285);
     doc.save("my-edit-" + report.title.replace(/[^a-z0-9]/gi, "-").toLowerCase() + ".pdf");

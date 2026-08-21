@@ -335,6 +335,29 @@ const CLOSET_CATEGORY_MAP: Record<string, { label: string; terms: string[] }> = 
 // Retained for buildClosetMatchText and potential formula-text use.
 void CLOSET_CATEGORY_MAP;
 
+// Subcategory terms that indicate an OUTERWEAR-class garment stored under TOPS in the DB.
+// Used to override the effective category for narrative and coverage logic without relying
+// on item names (which are user-supplied strings, not classification fields).
+const OUTERWEAR_SUBCATEGORY_TERMS = new Set([
+  "blazer", "jacket", "coat", "vest", "waistcoat", "trench", "longline",
+]);
+
+// Returns the category that should drive narrative and coverage logic for this item.
+// Corrects for DB misclassification: a TOPS item whose subcategory is an outerwear term
+// (e.g. "blazer") is an outerwear-class garment and should be treated as the tailored
+// anchor in Modern Tailoring rather than the softer counterpart.
+function getEffectiveCategory(item: ShopperClosetItemEvidence, slug: string): string {
+  if (
+    slug === "modern-tailoring-spring-2026" &&
+    item.category === "TOPS" &&
+    item.subcategory &&
+    OUTERWEAR_SUBCATEGORY_TERMS.has(item.subcategory.toLowerCase())
+  ) {
+    return "OUTERWEAR";
+  }
+  return item.category;
+}
+
 // Keys: lifestyle option ids. Values: ordered priority of howToWear[].feeling labels.
 const LIFESTYLE_HOWTO_MAP: Record<string, string[]> = {
   "office":      ["For work",        "For everyday"],
@@ -1062,7 +1085,7 @@ function buildEvidenceItemRoleNote(item: ShopperClosetItemEvidence, slug: string
       BOTTOMS:   "The separates foundation. The styling question is which relaxed counterpart it works against.",
       TOPS:      "The softer counterpart in this direction. The contrast it creates with a tailored anchor — a blazer, waistcoat, or clean trouser — is what Modern Tailoring is built on.",
     };
-    return (notes[item.category] ?? "A starting point for this direction.") + suffix;
+    return (notes[getEffectiveCategory(item, slug)] ?? "A starting point for this direction.") + suffix;
   }
   if (slug === "spring-2026-colour-direction") {
     const notes: Partial<Record<string, string>> = {
@@ -1126,8 +1149,11 @@ function buildALookToTry(
     return " This holds for work, meetings, or events.";
   };
 
+  const topEffCat = getEffectiveCategory(top, slug);
+  const secondEffCat = second ? getEffectiveCategory(second, slug) : null;
+
   // Two named items — only combine if categories are wearable together.
-  const pairOk = second && categoriesAreWearablePair(top.category, second.category);
+  const pairOk = second && categoriesAreWearablePair(topEffCat, secondEffCat!);
 
   if (pairOk && second) {
     const secName = second.name!;
@@ -1168,10 +1194,10 @@ function buildALookToTry(
   }
 
   if (slug === "modern-tailoring-spring-2026") {
-    if (top.category === "OUTERWEAR") {
+    if (topEffCat === "OUTERWEAR") {
       return `Your ${name} over a relaxed knit or jersey, with wide-leg denim or a fluid skirt and a clean flat. One structured piece; everything else stays relaxed.${ctxClose(false)}`;
     }
-    if (top.category === "BOTTOMS") {
+    if (topEffCat === "BOTTOMS") {
       return `Your ${name} with a fine knit or soft jersey above and a clean flat shoe. The contrast between the two pieces is the complete look.${ctxClose(false)}`;
     }
     return `Your ${name} with a structured jacket or wide-leg trouser as the tailored anchor. Clean flat; everything else minimal.${ctxClose(false)}`;
@@ -1318,16 +1344,17 @@ function buildBestRouteIn(
   }
 
   if (slug === "modern-tailoring-spring-2026") {
+    const topEffCat = getEffectiveCategory(top, slug);
     if (second) {
-      const pairOk = categoriesAreWearablePair(top.category, second.category);
+      const pairOk = categoriesAreWearablePair(topEffCat, getEffectiveCategory(second, slug));
       if (pairOk) {
         return `Your ${name} is the tailored anchor. Your ${second.name!} is the relaxed counterpart. The principle is contrast between the two — the structured piece and the easy piece — not matching formality across the outfit.`;
       }
     }
-    if (top.category === "OUTERWEAR") {
+    if (topEffCat === "OUTERWEAR") {
       return `Your ${name} is the tailored separates anchor this direction is built around. The principle is contrast: one structured piece worn against something relaxed — a knit, a jersey, something without formality. The tailored piece carries the register; the counterpart stays easy.`;
     }
-    if (top.category === "BOTTOMS") {
+    if (topEffCat === "BOTTOMS") {
       return `Your ${name} is the tailored anchor — its cut creates the proportion contrast this direction needs. The counterpart should be relaxed: a fine knit or soft jersey above. The contrast between structured bottom and easy top is the complete styling principle.`;
     }
     return `Your ${name} already gives you the softer, more expressive side of this direction. What is missing is one clean tailored anchor — a blazer, waistcoat, or wide-leg trouser — to create the contrast Modern Tailoring depends on.`;
@@ -1488,7 +1515,7 @@ function assessWorthInvesting(
     return { worthInvestingStatement: null, partToTake: staticBullets };
   }
 
-  const scoredCategories = new Set(scored.map((s) => s.item.category));
+  const scoredCategories = new Set(scored.map((s) => getEffectiveCategory(s.item, slug)));
 
   const satisfiedRoutes = config.viableRoutes.filter((r) =>
     routeIsSatisfied(r, scoredCategories),
@@ -2099,7 +2126,7 @@ export function buildShopperEdit(
     ? (buildOutcomeCLookToTry(namedMatches, slug, workCtx) ?? aLookToTry)
     : aLookToTry;
 
-  const coveredClosetCategories = [...new Set(scored.map((s) => s.item.category))];
+  const coveredClosetCategories = [...new Set(scored.map((s) => getEffectiveCategory(s.item, slug)))];
 
   return {
     subTitle,
