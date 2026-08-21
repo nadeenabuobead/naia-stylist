@@ -404,6 +404,160 @@ describe("matchNadineProduct", () => {
     expect(result).toBeNull();
   });
 
+  // ── Modern Tailoring: trend-specific suitability gate ────────────────────
+
+  it("suitability gate: rejects Modern Tailoring OUTERWEAR with art-print coloring even when score ≥ threshold", () => {
+    vi.mocked(getRecommendationEligibleProducts).mockReturnValueOnce([
+      makeCatalogProduct({
+        handle: "printed-jacket",
+        itemType: "OUTERWEAR",
+        colors: ["Taupe", "espresso/black art print"],  // "print" in colors → rejected
+        desiredFeelingMatch: ["more-confident", "more-elevated"],
+        stylePersonalityMatch: ["artsy", "edgy"],
+        stylingRole: "Structured statement jacket",
+      }),
+    ]);
+    const result = matchNadineProduct(
+      makeReport("modern-tailoring-spring-2026"),
+      makeEvidence(makeProfile({
+        desiredFeelings: ["more-confident", "more-elevated"],
+        stylePersonalities: ["artsy", "edgy"],
+      })),
+      makeEdit({ coveredClosetCategories: [] }),
+    );
+    expect(result).toBeNull();
+  });
+
+  it("suitability gate: rejects Modern Tailoring OUTERWEAR with art-led styling role", () => {
+    vi.mocked(getRecommendationEligibleProducts).mockReturnValueOnce([
+      makeCatalogProduct({
+        handle: "art-led-jacket",
+        itemType: "OUTERWEAR",
+        colors: ["Caramel", "beige"],
+        desiredFeelingMatch: ["more-confident"],
+        stylePersonalityMatch: ["artsy"],
+        stylingRole: "art-led tailored trench; statement outer layer",
+      }),
+    ]);
+    const result = matchNadineProduct(
+      makeReport("modern-tailoring-spring-2026"),
+      makeEvidence(makeProfile({
+        desiredFeelings: ["more-confident"],
+        stylePersonalities: ["artsy"],
+      })),
+      makeEdit({ coveredClosetCategories: [] }),
+    );
+    expect(result).toBeNull();
+  });
+
+  it("suitability gate: rejects Modern Tailoring OUTERWEAR with printed construction in silhouette", () => {
+    const printedProduct = {
+      handle: "printed-panels-jacket",
+      eligibility: "unverified",
+      sourceFields: {},
+      parsed: {
+        identity: {
+          itemType: "OUTERWEAR",
+          verifiedTitle: "Printed Panels Jacket",
+          liveUrl: null,
+          featuredImageUrl: null,
+          colors: ["Caramel"],
+          silhouette: "Tailored jacket with printed side panels",
+        },
+        rankings: {
+          desiredFeelingMatch: ["more-confident"],
+          stylePersonalityMatch: ["artsy"],
+        },
+        prose: { stylingRole: "Structured outer layer" },
+        scalars: { formalityScore: 4, stylingEffortLevel: "medium" },
+        pairings: {
+          bestPairedWithNadinePieces: null,
+          conditionalNadinePairings: null,
+          avoidPairingWithNadinePieces: null,
+          bestPairedWithGeneral: "",
+          avoidPairingWithGeneral: "",
+        },
+      },
+    } as any;
+
+    vi.mocked(getRecommendationEligibleProducts).mockReturnValueOnce([printedProduct]);
+
+    const result = matchNadineProduct(
+      makeReport("modern-tailoring-spring-2026"),
+      makeEvidence(makeProfile({ desiredFeelings: ["more-confident"], stylePersonalities: ["artsy"] })),
+      makeEdit({ coveredClosetCategories: [] }),
+    );
+    expect(result).toBeNull();
+  });
+
+  it("suitability gate: passes for Modern Tailoring OUTERWEAR with no print signals (clean anchor)", () => {
+    const cleanJacket = {
+      handle: "clean-blazer",
+      eligibility: "unverified",
+      sourceFields: {},
+      parsed: {
+        identity: {
+          itemType: "OUTERWEAR",
+          verifiedTitle: "Clean Blazer",
+          liveUrl: null,
+          featuredImageUrl: null,
+          colors: ["Black", "charcoal"],
+          silhouette: "Longline tailored blazer with structured shoulders and clean front panels",
+        },
+        rankings: {
+          desiredFeelingMatch: ["more-confident", "more-elevated"],
+          stylePersonalityMatch: ["artsy"],
+        },
+        prose: { stylingRole: "Structured tailored anchor; polished outer layer" },
+        scalars: { formalityScore: 4, stylingEffortLevel: "medium" },
+        pairings: {
+          bestPairedWithNadinePieces: null,
+          conditionalNadinePairings: null,
+          avoidPairingWithNadinePieces: null,
+          bestPairedWithGeneral: "",
+          avoidPairingWithGeneral: "",
+        },
+      },
+    } as any;
+
+    vi.mocked(getRecommendationEligibleProducts).mockReturnValueOnce([cleanJacket]);
+
+    const result = matchNadineProduct(
+      makeReport("modern-tailoring-spring-2026"),
+      makeEvidence(makeProfile({ desiredFeelings: ["more-confident", "more-elevated"], stylePersonalities: ["artsy"] })),
+      makeEdit({ coveredClosetCategories: [] }),
+    );
+    expect(result).not.toBeNull();
+    expect(result!.handle).toBe("clean-blazer");
+  });
+
+  it("suitability gate: returns null when all catalog products carry art-print coloring (no qualifying Modern Tailoring anchor)", () => {
+    vi.mocked(getRecommendationEligibleProducts).mockReturnValueOnce([
+      makeCatalogProduct({
+        handle: "jacket-a",
+        itemType: "OUTERWEAR",
+        colors: ["Taupe", "art print"],
+        desiredFeelingMatch: ["more-confident"],
+        stylePersonalityMatch: ["artsy"],
+        stylingRole: "Statement jacket",
+      }),
+      makeCatalogProduct({
+        handle: "jacket-b",
+        itemType: "OUTERWEAR",
+        colors: ["Beige", "espresso art print"],
+        desiredFeelingMatch: ["more-elevated"],
+        stylePersonalityMatch: ["edgy"],
+        stylingRole: "Tailored outer layer",
+      }),
+    ]);
+    const result = matchNadineProduct(
+      makeReport("modern-tailoring-spring-2026"),
+      makeEvidence(makeProfile({ desiredFeelings: ["more-confident", "more-elevated"], stylePersonalities: ["artsy", "edgy"] })),
+      makeEdit({ coveredClosetCategories: [] }),
+    );
+    expect(result).toBeNull();
+  });
+
   // ── Modern Tailoring TOPS explanation consistency ─────────────────────────
 
   it("Modern Tailoring + TOPS closet item: explanation names the top as softer side and the product as the anchor", () => {

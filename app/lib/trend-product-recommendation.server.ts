@@ -32,6 +32,34 @@ const SLUG_GAP_CATEGORIES: Record<string, string[]> = {
 
 const MIN_SCORE = 2;
 
+// Trend-specific suitability gate — runs AFTER category-gap check, BEFORE scoring.
+// A product that fills the right wardrobe category can still contradict the trend's
+// own product requirements and "Hold Off On" guidance.
+function passesTrendSuitabilityGate(
+  product: GeneratedCatalogProduct,
+  reportSlug: string,
+): boolean {
+  if (reportSlug === "modern-tailoring-spring-2026") {
+    // The recommended piece must serve as a composed, clean tailored anchor.
+    // "Hold Off On: Extra detailing on the tailored piece competes with the
+    // contrast that makes the direction work."
+    // Disqualify if the product carries art-print coloring, printed construction
+    // panels, or an art-led styling role — any of these signals a statement or
+    // expressive piece rather than a clean, composed anchor.
+    const hasArtPrintColor = product.parsed.identity.colors.some((c) =>
+      c.toLowerCase().includes("print"),
+    );
+    const isArtLedRole = product.parsed.prose.stylingRole
+      .toLowerCase()
+      .includes("art-led");
+    const hasPrintedConstruction = (product.parsed.identity.silhouette ?? "")
+      .toLowerCase()
+      .includes("print");
+    if (hasArtPrintColor || isArtLedRole || hasPrintedConstruction) return false;
+  }
+  return true;
+}
+
 function scoreProduct(
   product: GeneratedCatalogProduct,
   evidence: ShopperEvidenceBundle,
@@ -134,6 +162,7 @@ export function matchNadineProduct(
       const closetCat =
         ITEM_TYPE_TO_CLOSET_CATEGORY[product.parsed.identity.itemType];
       if (!closetCat || !gaps.includes(closetCat)) return [];
+      if (!passesTrendSuitabilityGate(product, report.slug)) return [];
       const score = scoreProduct(product, evidence);
       if (score < MIN_SCORE) return [];
       return [{ product, closetCat, score }];
