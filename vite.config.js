@@ -22,9 +22,15 @@ if (host === "localhost") {
 
 // For Vercel preview branch deployments SHOPIFY_APP_URL points to the
 // main-branch auto-alias, which won't have new-hash assets from the feature
-// branch. Use the deployment-specific VERCEL_URL so the browser fetches
-// assets from the same build that served the HTML.
+// branch. Normally we use the deployment-specific VERCEL_URL so the browser
+// fetches assets from the same build that served the HTML.
+// Exception: if ASSET_BASE_URL is set (staging project env), use it so that
+// assets are served from the canonical staging alias rather than the
+// deployment-specific URL (which sits behind its own Vercel SSO gate).
 const assetBase = (() => {
+  if (process.env.ASSET_BASE_URL) {
+    return `${process.env.ASSET_BASE_URL}/`;
+  }
   if (process.env.VERCEL_ENV === "preview" && process.env.VERCEL_URL) {
     return `https://${process.env.VERCEL_URL}/`;
   }
