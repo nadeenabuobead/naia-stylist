@@ -15,21 +15,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // When STOREFRONT_HOST is configured, the PKCE cookie must be set on the
   // storefront domain — because that is where Shopify will send the callback.
-  // If this request arrived directly at naia-stylist-staging (not via the
-  // storefront Vercel proxy), redirect the browser to the storefront's login URL
-  // so the proxy can forward the response and set the cookie there.
   //
-  // Detection: the Vercel proxy sets X-Forwarded-Host to the browser-facing
-  // domain. When that header matches STOREFRONT_HOST the request is proxied ✓.
-  // When it is absent or points to the staging host the request is direct → redirect.
+  // The _sf=1 query flag indicates the request already arrived via the storefront
+  // proxy (set either by requireCurrentNaiaCustomer or by the single redirect below).
+  // Without it, redirect the browser to the storefront login once so the Vercel
+  // proxy can forward the response and the browser commits the cookie on the
+  // storefront domain. Relying on X-Forwarded-Host is not viable: Vercel does not
+  // reliably forward that header in inter-project rewrites, and using it caused
+  // an infinite redirect loop when the proxy re-requested the same URL internally.
   const storefrontHost = process.env.STOREFRONT_HOST ?? "";
-  if (storefrontHost) {
-    const fwdHost = (request.headers.get("x-forwarded-host") ?? "").split(",")[0].trim();
-    if (fwdHost !== storefrontHost) {
-      const sfLogin = new URL(`https://${storefrontHost}/auth/shopify/login`);
-      sfLogin.searchParams.set("return_to", returnTo);
-      return redirect(sfLogin.toString(), 302);
-    }
+  if (storefrontHost && !url.searchParams.has("_sf")) {
+    const sfLogin = new URL(`https://${storefrontHost}/auth/shopify/login`);
+    sfLogin.searchParams.set("return_to", returnTo);
+    sfLogin.searchParams.set("_sf", "1");
+    return redirect(sfLogin.toString(), 302);
   }
 
   // If caller already has a valid nAia session skip OAuth entirely

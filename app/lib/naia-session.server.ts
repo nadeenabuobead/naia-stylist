@@ -122,6 +122,14 @@ export async function requireCurrentNaiaCustomer(request: Request) {
   if (!customer) {
     const url      = new URL(request.url);
     const returnTo = encodeURIComponent(url.pathname);
+    // When STOREFRONT_HOST is set, send the browser directly to the storefront
+    // login URL (absolute). This ensures the PKCE cookie is set on the storefront
+    // domain where Shopify will deliver the callback, with no staging-domain detour.
+    // _sf=1 tells auth.shopify.login to skip its own storefront-redirect check.
+    const sfHost = process.env.STOREFRONT_HOST ?? "";
+    if (sfHost) {
+      throw redirect(`https://${sfHost}/auth/shopify/login?_sf=1&return_to=${returnTo}`);
+    }
     throw redirect(`/auth/shopify/login?return_to=${returnTo}`);
   }
   return customer;
