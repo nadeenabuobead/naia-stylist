@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useLoaderData, type LoaderFunctionArgs } from "react-router";
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "../lib/storefront-config";
 import type { TrendReportData } from "../lib/trend-reports";
-import { getEditorialReportBySlug } from "../lib/editorial-reports.server";
+import { getEditorialReportBySlug, getPublishedEditorialReports } from "../lib/editorial-reports.server";
 import { reportVisual } from "../lib/report-visual";
 
 const FONTS =
@@ -22,9 +22,12 @@ function formatSourceDate(isoDate: string): string {
 }
 
 export async function loader({ params }: LoaderFunctionArgs) {
-  const report = await getEditorialReportBySlug(params.slug ?? "");
+  const [report, allPublished] = await Promise.all([
+    getEditorialReportBySlug(params.slug ?? ""),
+    getPublishedEditorialReports(),
+  ]);
   if (!report) throw new Response("Not Found", { status: 404 });
-  return { report };
+  return { report, allPublished };
 }
 
 export function meta({ data }: { data?: { report: TrendReportData } }) {
@@ -803,15 +806,15 @@ export function ErrorBoundary() {
 }
 
 export default function TrendReportDetail() {
-  const { report } = useLoaderData() as { report: TrendReportData };
+  const { report, allPublished } = useLoaderData() as { report: TrendReportData; allPublished: TrendReportData[] };
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
 
-  const reportIndex = trendReports.filter((r) => r.published).findIndex((r) => r.slug === report.slug);
+  const reportIndex = allPublished.findIndex((r) => r.slug === report.slug);
   const tint = TINTS[Math.max(0, reportIndex) % TINTS.length];
   const num = String(Math.max(0, reportIndex)).padStart(2, "0");
 
-  const otherReports = trendReports
-    .filter((r) => r.published && r.slug !== report.slug)
+  const otherReports = allPublished
+    .filter((r) => r.slug !== report.slug)
     .slice(0, 3);
 
   const copyLink = async () => {
@@ -1199,7 +1202,7 @@ export default function TrendReportDetail() {
           </div>
           <div className="psl-more-grid">
             {otherReports.map((r, i) => {
-              const rIndex = trendReports.filter((x) => x.published).findIndex((x) => x.slug === r.slug);
+              const rIndex = allPublished.findIndex((x) => x.slug === r.slug);
               const rTint = TINTS[Math.max(0, rIndex) % TINTS.length];
               const rNum = String(Math.max(0, rIndex)).padStart(2, "0");
               return (
