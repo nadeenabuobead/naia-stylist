@@ -45,26 +45,30 @@ function dbToTrendReportData(r: NonNullable<DbRow>): TrendReportData {
 }
 
 export async function getPublishedEditorialReports(): Promise<TrendReportData[]> {
+  // Check for any DB records (regardless of status) — a non-zero count means
+  // the table has been seeded and admin controls are authoritative.
+  const totalCount = await prisma.editorialTrendReport.count();
+  if (totalCount === 0) {
+    // Pre-seed safety net: DB table is empty, fall back to static array.
+    return trendReports.filter((r) => r.published);
+  }
   const rows = await prisma.editorialTrendReport.findMany({
     where: { status: "PUBLISHED" },
     orderBy: [{ order: "asc" }, { publishedAt: "desc" }],
   });
-  if (rows.length === 0) {
-    // Fallback to static array while DB is empty (before first seed)
-    return trendReports.filter((r) => r.published);
-  }
   return rows.map(dbToTrendReportData);
 }
 
 export async function getEditorialReportBySlug(slug: string): Promise<TrendReportData | null> {
-  const row = await prisma.editorialTrendReport.findFirst({
-    where: { slug, status: "PUBLISHED" },
-  });
-  if (!row) {
-    // Fallback to static array
-    return trendReports.find((r) => r.slug === slug && r.published) ?? null;
+  // Check if ANY DB record exists for this slug (regardless of status).
+  // If it does, the admin publishing status is authoritative — return null for
+  // DRAFT/ARCHIVED rather than falling through to the static array.
+  const anyRow = await prisma.editorialTrendReport.findUnique({ where: { slug } });
+  if (anyRow) {
+    return anyRow.status === "PUBLISHED" ? dbToTrendReportData(anyRow) : null;
   }
-  return dbToTrendReportData(row);
+  // No DB record at all — fall back to static array (pre-seed safety net).
+  return trendReports.find((r) => r.slug === slug && r.published) ?? null;
 }
 
 export async function getAllEditorialReports() {
