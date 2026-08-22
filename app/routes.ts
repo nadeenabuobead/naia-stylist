@@ -45,6 +45,8 @@ export default [
   route("app", "routes/app.jsx", [
     index("routes/app._index.jsx"),
     route("designer-intelligence", "routes/app.designer-intelligence.jsx"),
+    route("trend-reports", "routes/app.trend-reports._index.tsx"),
+    route("trend-reports/:id", "routes/app.trend-reports.$id.tsx"),
   ]),
   route("my-naia", "routes/my-naia._index.tsx"),
   route("my-naia/saved", "routes/my-naia.saved.tsx"),
