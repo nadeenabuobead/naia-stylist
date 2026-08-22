@@ -732,7 +732,7 @@ export default function TrendReports() {
         </section>
       )}
 
-      {published.length === 0 && (
+      {!featured && rest.length === 0 && (
         <div className="pub-empty">
           <p className="pub-empty-title">Trend reports are being prepared. Check back shortly.</p>
         </div>
