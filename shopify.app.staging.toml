@@ -2,7 +2,7 @@
 
 client_id = "50b4046fe497fe8ff5d5dbda8ae243a0"
 name = "nAia Stylist — Staging"
-application_url = "https://naia-stylist-staging.vercel.app/app/designer-intelligence"
+application_url = "https://naia-stylist-staging-nadeenabuobeads-projects.vercel.app"
 embedded = true
 
 [webhooks]
@@ -15,10 +15,10 @@ optional_scopes = [ ]
 use_legacy_install_flow = false
 
 [auth]
-redirect_urls = [ "https://naia-stylist-staging.vercel.app/auth/callback" ]
+redirect_urls = [ "https://naia-stylist-staging-nadeenabuobeads-projects.vercel.app/auth/callback" ]
 
 [app_proxy]
-url = "https://naia-stylist-staging.vercel.app"
+url = "https://naia-stylist-staging-nadeenabuobeads-projects.vercel.app"
 subpath = "naia-stylist-staging"
 prefix = "apps"
 
