@@ -43,17 +43,25 @@ vi.mock("~/lib/naia-session.server", () => ({
   requireCurrentNaiaCustomer: vi.fn(),
 }));
 
-vi.mock("~/lib/trend-reports", () => ({
-  trendReports: [
-    {
-      slug: "spring-2026-soft-structure",
-      title: "Spring 2026 Soft Structure",
-      season: "Spring 2026",
-      summary: "A nAia edit on softened tailoring.",
-      published: true,
-      publishedAt: "2026-06-30",
-    },
-  ],
+vi.mock("~/lib/editorial-reports.server", () => ({
+  getEditorialReportBySlug: vi.fn().mockImplementation(async (slug: string) => {
+    if (slug === "spring-2026-soft-structure") {
+      return {
+        slug: "spring-2026-soft-structure",
+        title: "Spring 2026 Soft Structure",
+        season: "Spring 2026",
+        summary: "A nAia edit on softened tailoring.",
+        published: true,
+        publishedAt: "2026-06-30",
+      };
+    }
+    return null;
+  }),
+  getPublishedEditorialReports: vi.fn().mockResolvedValue([{
+    slug: "spring-2026-soft-structure",
+    published: true,
+    publishedAt: "2026-06-30",
+  }]),
 }));
 
 vi.mock("~/lib/trend-evidence.server", () => ({

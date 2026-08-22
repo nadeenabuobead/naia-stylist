@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link, useLoaderData, type LoaderFunctionArgs } from "react-router";
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "../lib/storefront-config";
-import { trendReports, type TrendReportData } from "../lib/trend-reports";
+import type { TrendReportData } from "../lib/trend-reports";
+import { getEditorialReportBySlug } from "../lib/editorial-reports.server";
 import { reportVisual } from "../lib/report-visual";
 
 const FONTS =
@@ -21,7 +22,7 @@ function formatSourceDate(isoDate: string): string {
 }
 
 export async function loader({ params }: LoaderFunctionArgs) {
-  const report = trendReports.find((r) => r.slug === params.slug && r.published);
+  const report = await getEditorialReportBySlug(params.slug ?? "");
   if (!report) throw new Response("Not Found", { status: 404 });
   return { report };
 }

@@ -2,7 +2,11 @@ import { useState } from "react";
 import type { LinksFunction, LoaderFunctionArgs } from "react-router";
 import { Link, useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
-import { trendReports, type TrendReportData } from "~/lib/trend-reports";
+import type { TrendReportData } from "~/lib/trend-reports";
+import {
+  getEditorialReportBySlug,
+  getPublishedEditorialReports,
+} from "~/lib/editorial-reports.server";
 import {
   getShopperEvidence,
   buildShopperEdit,
@@ -22,6 +26,7 @@ type LoaderData = {
   hasProfile: boolean;
   generationFailed: boolean;
   nadineRecommendation: NadineProductRecommendation | null;
+  reportIndex: number;
 };
 
 export const links: LinksFunction = () => [
@@ -40,8 +45,12 @@ export function meta({ data }: { data?: LoaderData }) {
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
 
-  const report = trendReports.find((r) => r.slug === params.slug && r.published);
+  const [report, allPublished] = await Promise.all([
+    getEditorialReportBySlug(params.slug ?? ""),
+    getPublishedEditorialReports(),
+  ]);
   if (!report) throw new Response("Not Found", { status: 404 });
+  const reportIndex = allPublished.findIndex((r) => r.slug === report.slug);
 
   try {
     const evidence = await getShopperEvidence(customer.id);
@@ -75,6 +84,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       hasProfile: evidence.hasProfile,
       generationFailed: false,
       nadineRecommendation,
+      reportIndex,
     } satisfies LoaderData;
   } catch (error) {
     console.error("Shopper trend edit generation failed:", error);
@@ -84,6 +94,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       hasProfile: false,
       generationFailed: true,
       nadineRecommendation: null,
+      reportIndex,
     } satisfies LoaderData;
   }
 }
@@ -459,9 +470,7 @@ export function ErrorBoundary() {
 }
 
 export default function MyTrendEditDetail() {
-  const { report, edit, hasProfile, generationFailed, nadineRecommendation } = useLoaderData() as LoaderData;
-
-  const reportIndex = trendReports.filter((r) => r.published).findIndex((r) => r.slug === report.slug);
+  const { report, edit, hasProfile, generationFailed, nadineRecommendation, reportIndex } = useLoaderData() as LoaderData;
   const tint = TINTS[Math.max(0, reportIndex) % TINTS.length];
   const num = String(Math.max(0, reportIndex)).padStart(2, "0");
 

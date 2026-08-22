@@ -1,7 +1,7 @@
 import type { LinksFunction, LoaderFunctionArgs } from "react-router";
 import { Link, useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
-import { trendReports } from "~/lib/trend-reports";
+import { getPublishedEditorialReports } from "~/lib/editorial-reports.server";
 import {
   getShopperEvidence,
   buildShopperEdit,
@@ -36,8 +36,8 @@ type LoaderData = {
 export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderData> {
   const customer = await requireCurrentNaiaCustomer(request);
 
-  const reports = trendReports
-    .filter((r) => r.published)
+  const reports = (await getPublishedEditorialReports())
+    .slice()
     .sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1));
 
   // Single DB round-trip for all personalisation signals.

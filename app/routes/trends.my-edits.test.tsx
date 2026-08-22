@@ -31,8 +31,8 @@ vi.mock("~/lib/naia-session.server", () => ({
   requireCurrentNaiaCustomer: vi.fn(),
 }));
 
-vi.mock("~/lib/trend-reports", () => ({
-  trendReports: [
+vi.mock("~/lib/editorial-reports.server", () => ({
+  getPublishedEditorialReports: vi.fn().mockResolvedValue([
     {
       slug: "spring-2026-soft-structure",
       title: "Spring 2026 Soft Structure",
@@ -49,15 +49,7 @@ vi.mock("~/lib/trend-reports", () => ({
       summary: "Tailoring becomes more fluid.",
       published: true,
     },
-    {
-      slug: "unpublished-draft",
-      title: "Draft Report",
-      season: "Autumn 2026",
-      publishedAt: "2026-09-01",
-      summary: "Not yet live.",
-      published: false,
-    },
-  ],
+  ]),
 }));
 
 vi.mock("~/lib/trend-evidence.server", () => ({

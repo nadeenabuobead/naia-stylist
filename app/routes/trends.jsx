@@ -1,7 +1,20 @@
-import { Link } from "react-router";
+import { Link, useLoaderData } from "react-router";
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "../lib/storefront-config";
-import { trendReports } from "../lib/trend-reports";
+import { getPublishedEditorialReports } from "../lib/editorial-reports.server";
 import { reportVisual } from "../lib/report-visual";
+
+export async function loader() {
+  const reports = await getPublishedEditorialReports();
+  const sorted = reports
+    .slice()
+    .sort((a, b) => {
+      if (a.publishedAt > b.publishedAt) return -1;
+      if (a.publishedAt < b.publishedAt) return 1;
+      return (a.order ?? 99) - (b.order ?? 99);
+    });
+  const [featured, ...rest] = sorted;
+  return { featured: featured ?? null, rest };
+}
 
 // Inline Lovable-matched Google Fonts — Oswald (thin-display), Cormorant Garamond (editorial), Space Mono (mono)
 const FONTS =
@@ -584,15 +597,7 @@ function formatSeason(season) {
 }
 
 export default function TrendReports() {
-  const published = trendReports
-    .filter((r) => r.published)
-    .sort((a, b) => {
-      if (a.publishedAt > b.publishedAt) return -1;
-      if (a.publishedAt < b.publishedAt) return 1;
-      return (a.order ?? 99) - (b.order ?? 99);
-    });
-
-  const [featured, ...rest] = published;
+  const { featured, rest } = useLoaderData();
 
   return (
     <div className="pub-page">
