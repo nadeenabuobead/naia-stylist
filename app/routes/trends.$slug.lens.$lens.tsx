@@ -980,7 +980,7 @@ export default function TrendLens() {
   const { report, lens, modules } = useLoaderData() as LoaderData;
   const lensLabel = LENS_LABELS[lens];
 
-  const reportIndex = trendReports.filter((r) => r.published).findIndex((r) => r.slug === report.slug);
+  const reportIndex = (report.order ?? 1) - 1;
   const tint = TINTS[Math.max(0, reportIndex) % TINTS.length];
   const num = String(Math.max(0, reportIndex)).padStart(2, "0");
 

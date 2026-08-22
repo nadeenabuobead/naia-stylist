@@ -829,8 +829,8 @@ describe("buildShopperEdit — Modern Tailoring TOPS narrative consistency", () 
     expect(edit.worthInvestingStatement).toBeNull();
 
     const roleNote = edit.evidenceClosetItems[0]?.roleNote ?? "";
-    // Must NOT call it the structured/tailored anchor
-    expect(roleNote).not.toMatch(/tailored anchor/i);
+    // Must NOT classify this item itself as the tailored anchor — may reference "tailored anchor" to name the missing contrast piece
+    expect(roleNote).not.toMatch(/\b(is|as) (a |the )?tailored anchor/i);
     expect(roleNote).not.toMatch(/structured element/i);
     expect(roleNote).not.toMatch(/tailored piece/i);
     // Must acknowledge the softer / counterpart role
@@ -864,9 +864,9 @@ describe("buildShopperEdit — Modern Tailoring TOPS narrative consistency", () 
     const investBullet = edit.partToTake[0];
     expect(investBullet).toMatch(/tailored anchor|blazer|waistcoat|trouser/i);
 
-    // The roleNote must not contradict the gap by calling the existing top the anchor
+    // The roleNote must not contradict the gap by classifying the existing top as the anchor
     const roleNote = edit.evidenceClosetItems[0]?.roleNote ?? "";
-    expect(roleNote).not.toMatch(/tailored anchor/i);
+    expect(roleNote).not.toMatch(/\b(is|as) (a |the )?tailored anchor/i);
     expect(roleNote).not.toMatch(/structured element/i);
   });
 
