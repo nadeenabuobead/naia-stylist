@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router";
+import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "~/lib/storefront-config";
 
 type NavItem = { to: string; label: string; exact?: boolean; indent?: boolean };
 type NavGroup = { title: string; items: NavItem[] };
@@ -35,14 +36,6 @@ function isActive(pathname: string, item: NavItem) {
   return item.exact ? pathname === item.to : pathname.startsWith(item.to);
 }
 
-const SITE_NAV_LINKS = [
-  { label: "HOME", to: "/" },
-  { label: "THE HOUSE", to: "/about" },
-  { label: "THE COLLECTION", to: "/naia-collection" },
-  { label: "THE ART STORY", to: "/art-story" },
-  { label: "nAia STYLIST", to: "/stylist" },
-  { label: "TREND REPORTS", to: "/trends" },
-];
 
 const FOOTER_COLS = [
   {
@@ -102,43 +95,43 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
 
   return (
     <main className="mn-page">
-      {/* ── Site-level header (NADINE brand) ── */}
+      {/* ── Site-level header (NADINE brand) — parity with nadine-storefront SiteNav ── */}
       <header className="mn-sitenav">
         <div className="mn-sitenav-inner">
           <nav className="mn-sitenav-links" aria-label="Site navigation">
-            {SITE_NAV_LINKS.map((l) => (
-              <Link key={l.to} to={l.to} className="mn-sitenav-link">
+            {STOREFRONT_NAV.map((l) => (
+              <a key={l.path} href={`${STOREFRONT_ORIGIN}${l.path}`} className="mn-sitenav-link">
                 {l.label}
-              </Link>
+              </a>
             ))}
+            <Link to="/trends" className="mn-sitenav-link">TREND REPORTS</Link>
           </nav>
 
-          <Link to="/" className="mn-sitenav-wordmark" style={{ textTransform: "none" }}>
+          <a href={`${STOREFRONT_ORIGIN}/`} className="mn-sitenav-wordmark">
             NADINE
-          </Link>
+          </a>
 
           <div className="mn-sitenav-actions">
-            <button aria-label="search" className="mn-sitenav-icon-btn">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            <a href={STOREFRONT_ORIGIN} aria-label="search" className="mn-sitenav-icon-link">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/>
               </svg>
-            </button>
-            <button aria-label="wishlist" className="mn-sitenav-icon-btn">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+            </a>
+            <a href={STOREFRONT_ORIGIN} aria-label="wishlist" className="mn-sitenav-icon-link">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/>
               </svg>
-            </button>
+            </a>
             <Link to="/my-naia" aria-label="My nAia account" className="mn-sitenav-icon-link">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <circle cx="12" cy="8" r="4" />
-                <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 20a6 6 0 0 0-12 0"/><circle cx="12" cy="10" r="4"/><circle cx="12" cy="12" r="10"/>
               </svg>
             </Link>
-            <button aria-label="bag" className="mn-sitenav-icon-btn">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/>
+            <a href={STOREFRONT_ORIGIN} aria-label="bag" className="mn-sitenav-icon-link">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M16 10a4 4 0 0 1-8 0"/><path d="M3.103 6.034h17.794"/><path d="M3.4 5.467a2 2 0 0 0-.4 1.2V20a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.667a2 2 0 0 0-.4-1.2l-2-2.667A2 2 0 0 0 17 2H7a2 2 0 0 0-1.6.8z"/>
               </svg>
-            </button>
+            </a>
           </div>
         </div>
       </header>
@@ -146,10 +139,6 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
       {/* ── MY nAia. heading — suppressed in compact (feature-page) mode ── */}
       {!compact && (
         <section className="mn-page-head">
-          <div className="mn-page-head-meta">
-            <div />
-            <span className="mn-page-head-badge">Preview · Sample Information</span>
-          </div>
           <h1 className="mn-page-head-title">
             MY{" "}
             <span className="mn-title-accent">nAia.</span>

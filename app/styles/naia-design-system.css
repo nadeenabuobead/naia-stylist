@@ -2429,14 +2429,15 @@ a.sv-card-action { text-decoration: underline; }
 @media (min-width: 640px) { .mn-sitenav-inner { padding: 1.5rem 2.5rem; } }
 .mn-sitenav-links {
   display: none; align-items: center; gap: 1.75rem;
-  font-size: 0.72rem; letter-spacing: 0.05em; color: var(--fg-80);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.72rem; letter-spacing: 0.025em; color: var(--fg-80);
 }
 @media (min-width: 768px) { .mn-sitenav-links { display: flex; } }
 .mn-sitenav-link { text-decoration: none; color: inherit; transition: opacity 0.15s; }
 .mn-sitenav-link:hover { opacity: 0.6; }
 .mn-sitenav-wordmark {
   font-family: var(--ff-display); font-weight: 200; font-size: 0.875rem;
-  letter-spacing: 0.4em; text-transform: uppercase; color: var(--fg);
+  letter-spacing: 0.02em; text-transform: uppercase; color: var(--fg);
   text-decoration: none; line-height: 0.88;
 }
 .mn-sitenav-actions { display: flex; align-items: center; gap: 1.25rem; color: var(--fg-80); }
@@ -2454,14 +2455,6 @@ a.sv-card-action { text-decoration: underline; }
 /* ── MY nAia page heading ────────────────────────────────────────── */
 .mn-page-head { margin: 0 auto; max-width: var(--max-w); padding: 3rem 1.25rem 0; }
 @media (min-width: 640px) { .mn-page-head { padding: 4rem 2.5rem 0; } }
-.mn-page-head-meta {
-  display: flex; flex-wrap: wrap; align-items: baseline;
-  justify-content: space-between; gap: 0.75rem;
-}
-.mn-page-head-badge {
-  font-size: 0.6rem; text-transform: uppercase;
-  letter-spacing: 0.32em; color: var(--fg-55);
-}
 .mn-page-head-title {
   margin-top: 1rem; font-family: var(--ff-display); font-weight: 200;
   font-size: 2.25rem; line-height: 0.92; letter-spacing: 0.02em; text-transform: uppercase;
