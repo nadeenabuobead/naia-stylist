@@ -447,12 +447,13 @@ describe("Phase 4B3 recovery — route contract", () => {
 
   it("result client effect sends formalityConditional and practicalIds in the initial generate submission", () => {
     const text = src("result.tsx");
+    // Read via the narrowed generationData cast (type-safety fix), not loaderData directly.
     assert.ok(
-      text.includes("formalityConditional: loaderData.formalityConditional"),
+      text.includes("formalityConditional: generationData.formalityConditional"),
       "initial generate submission includes formalityConditional",
     );
     assert.ok(
-      text.includes("practicalIds: JSON.stringify(loaderData.practicalIds"),
+      text.includes("practicalIds: JSON.stringify(generationData.practicalIds"),
       "initial generate submission includes practicalIds",
     );
   });

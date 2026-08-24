@@ -690,6 +690,23 @@ const OCCASION_LABELS: Record<string, string> = {
   "travel": "Travel", "not-sure": "Not sure yet",
 };
 
+// The loader has several return branches (direct sessionId load, pending-save,
+// error, and the cookie-path fresh-generation branch); only the fresh-generation
+// branch (isLoading: true) carries these fields. TypeScript can't narrow the
+// inferred union on `loaderData.isLoading` alone, so the one call site that reads
+// them (the generate-on-mount effect below, itself gated on `loaderData.isLoading`)
+// asserts this known-present shape rather than widening every other branch.
+interface StyleMeGenerationLoaderData {
+  sessionId: string;
+  bodyNeeds: string[];
+  moods: string[];
+  desiredFeelings: string[];
+  formalityConditional: string | null;
+  practicalIds: string[];
+  nadineAnchorHandle: string | null;
+  closetAnchorId: string | null;
+}
+
 export default function StyleMeResult() {
   const loaderData = useLoaderData<typeof loader>();
   const generateFetcher = useFetcher<{ suggestion?: any; error?: string }>();
@@ -773,17 +790,20 @@ export default function StyleMeResult() {
 
   useEffect(() => {
     if (loaderData.isLoading && loaderData.sessionId && generateFetcher.state === "idle" && !generateFetcher.data) {
+      // Safe: the isLoading check above is the runtime proof we're in the
+      // fresh-generation branch, which is the only one that sets these fields.
+      const generationData = loaderData as typeof loaderData & StyleMeGenerationLoaderData;
       generateFetcher.submit(
         {
           intent: "generate",
-          sessionId: loaderData.sessionId,
-          bodyNeeds: JSON.stringify(loaderData.bodyNeeds || []),
-          moods: JSON.stringify(loaderData.moods || []),
-          desiredFeelings: JSON.stringify(loaderData.desiredFeelings || []),
-          formalityConditional: loaderData.formalityConditional ?? "",
-          practicalIds: JSON.stringify(loaderData.practicalIds || []),
-          nadineAnchorHandle: loaderData.nadineAnchorHandle ?? "",
-          closetAnchorId: loaderData.closetAnchorId ?? "",
+          sessionId: generationData.sessionId,
+          bodyNeeds: JSON.stringify(generationData.bodyNeeds || []),
+          moods: JSON.stringify(generationData.moods || []),
+          desiredFeelings: JSON.stringify(generationData.desiredFeelings || []),
+          formalityConditional: generationData.formalityConditional ?? "",
+          practicalIds: JSON.stringify(generationData.practicalIds || []),
+          nadineAnchorHandle: generationData.nadineAnchorHandle ?? "",
+          closetAnchorId: generationData.closetAnchorId ?? "",
         },
         { method: "post" },
       );
