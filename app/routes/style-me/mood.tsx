@@ -18,7 +18,7 @@ const moodOptions = [
   { id: "confident", label: "I feel confident" },
   { id: "tired", label: "Tired or low-energy" },
   { id: "overwhelmed", label: "I feel overwhelmed" },
-  { id: "playful", label: "I feel playful" },
+  { id: "adventurous", label: "I feel adventurous" },
   { id: "romantic", label: "I feel romantic" },
   { id: "powerful", label: "I feel powerful" },
   { id: "need-reset", label: "I need a reset" },

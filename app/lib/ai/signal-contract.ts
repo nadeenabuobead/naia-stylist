@@ -520,8 +520,11 @@ export const DUAL_MOOD_BONUS = {
 export const ANSWER_REGISTRY: readonly AnswerMapping[] = [
   // ── Session: Mood ────────────────────────────────────────────────────────
   // Locked vocabulary (12): confident, tired, low-energy, feeling-low,
-  // overwhelmed, playful, romantic, powerful, need-reset, feel-good,
+  // overwhelmed, adventurous, romantic, powerful, need-reset, feel-good,
   // self-conscious (CONTEXTUAL), neutral (NO_RECOMMENDATION_EFFECT).
+  // adventurous replaced playful — openness to a less predictable, more
+  // expressive styling choice today; not synonymous with loud/colourful/
+  // edgy/trend-driven, and does not override Passport/Occasion/Body Needs.
   // energised and bloated are NOT canonical mood IDs.
 
   {
@@ -532,7 +535,7 @@ export const ANSWER_REGISTRY: readonly AnswerMapping[] = [
     rankingWeight: "active",
   },
   {
-    id: "playful",
+    id: "adventurous",
     questionId: SQ.MOOD,
     activatedFields: [PRODUCT_TEMPLATE_FIELDS.CURRENT_EMOTIONAL_STATE_SUPPORT],
     behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],

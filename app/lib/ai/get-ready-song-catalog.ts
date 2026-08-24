@@ -52,12 +52,12 @@ export const SONG_CATALOG: readonly GetReadySong[] = [
   },
   {
     title: "Express Yourself", artist: "Madonna", genre: "Pop",
-    moods: ["confident", "powerful", "playful"],
+    moods: ["confident", "powerful", "adventurous"],
     occasions: ["everyday", "work", "girls-night"],
   },
   {
     title: "Vogue", artist: "Madonna", genre: "Pop",
-    moods: ["confident", "playful", "powerful"],
+    moods: ["confident", "adventurous", "powerful"],
     occasions: ["girls-night", "special-event", "date-night", "dinner"],
   },
   {
@@ -74,42 +74,42 @@ export const SONG_CATALOG: readonly GetReadySong[] = [
   // ── Playful / Feel-good ───────────────────────────────────────────────────────
   {
     title: "Shake It Off", artist: "Taylor Swift", genre: "Pop",
-    moods: ["playful", "feel-good", "need-reset"],
+    moods: ["adventurous", "feel-good", "need-reset"],
     occasions: ["everyday", "girls-night"],
   },
   {
     title: "Girls Just Want to Have Fun", artist: "Cyndi Lauper", genre: "Pop",
-    moods: ["playful", "feel-good"],
+    moods: ["adventurous", "feel-good"],
     occasions: ["girls-night", "everyday"],
   },
   {
     title: "Dancing Queen", artist: "ABBA", genre: "Pop",
-    moods: ["playful", "feel-good", "romantic"],
+    moods: ["adventurous", "feel-good", "romantic"],
     occasions: ["girls-night", "date-night", "special-event"],
   },
   {
     title: "Good as Hell", artist: "Lizzo", genre: "Pop/R&B",
-    moods: ["feel-good", "confident", "playful", "need-reset"],
+    moods: ["feel-good", "confident", "adventurous", "need-reset"],
     occasions: ["everyday", "girls-night"],
   },
   {
     title: "Juice", artist: "Lizzo", genre: "Pop/R&B",
-    moods: ["playful", "feel-good", "confident"],
+    moods: ["adventurous", "feel-good", "confident"],
     occasions: ["everyday", "girls-night", "date-night"],
   },
   {
     title: "Happy", artist: "Pharrell Williams", genre: "Pop/Soul",
-    moods: ["feel-good", "playful", "neutral"],
+    moods: ["feel-good", "adventurous", "neutral"],
     occasions: ["everyday", "family", "travel"],
   },
   {
     title: "Material Girl", artist: "Madonna", genre: "Pop",
-    moods: ["playful", "confident"],
+    moods: ["adventurous", "confident"],
     occasions: ["girls-night", "date-night", "special-event"],
   },
   {
     title: "Bad Romance", artist: "Lady Gaga", genre: "Pop/Electronic",
-    moods: ["confident", "playful", "powerful", "romantic"],
+    moods: ["confident", "adventurous", "powerful", "romantic"],
     occasions: ["special-event", "girls-night", "date-night"],
   },
 
@@ -136,7 +136,7 @@ export const SONG_CATALOG: readonly GetReadySong[] = [
   },
   {
     title: "Adore You", artist: "Harry Styles", genre: "Pop",
-    moods: ["romantic", "feel-good", "playful"],
+    moods: ["romantic", "feel-good", "adventurous"],
     occasions: ["date-night", "everyday", "dinner"],
   },
   {
@@ -168,14 +168,14 @@ export const SONG_CATALOG: readonly GetReadySong[] = [
   },
   {
     title: "Watermelon Sugar", artist: "Harry Styles", genre: "Pop",
-    moods: ["feel-good", "playful", "neutral"],
+    moods: ["feel-good", "adventurous", "neutral"],
     occasions: ["everyday", "travel", "family"],
   },
 
   // ── Work / Everyday empowerment ───────────────────────────────────────────────
   {
     title: "9 to 5", artist: "Dolly Parton", genre: "Country/Pop",
-    moods: ["playful", "feel-good", "neutral"],
+    moods: ["adventurous", "feel-good", "neutral"],
     occasions: ["work", "everyday"],
   },
   {
@@ -209,7 +209,7 @@ export const SONG_CATALOG: readonly GetReadySong[] = [
   // ── Travel / Easy day ─────────────────────────────────────────────────────────
   {
     title: "Walking on Sunshine", artist: "Katrina and the Waves", genre: "Pop/Rock",
-    moods: ["feel-good", "playful", "neutral"],
+    moods: ["feel-good", "adventurous", "neutral"],
     occasions: ["travel", "everyday"],
   },
   {

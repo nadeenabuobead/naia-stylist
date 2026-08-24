@@ -62,7 +62,7 @@ describe("SONG_CATALOG integrity", () => {
 
   it("SC.9 — catalog covers key mood IDs", () => {
     const moods = [
-      "confident", "playful", "romantic", "powerful", "need-reset",
+      "confident", "adventurous", "romantic", "powerful", "need-reset",
       "feel-good", "tired", "feeling-low", "self-conscious", "neutral",
     ];
     for (const mood of moods) {
@@ -106,7 +106,7 @@ describe("selectSong", () => {
   });
 
   it("SS.5 — returns a full GetReadySong object", () => {
-    const song = selectSong(["playful"], "girls-night", "fp-girls");
+    const song = selectSong(["adventurous"], "girls-night", "fp-girls");
     assert.ok(typeof song.title === "string" && song.title.length > 0);
     assert.ok(typeof song.artist === "string" && song.artist.length > 0);
     assert.ok(typeof song.genre === "string" && song.genre.length > 0);

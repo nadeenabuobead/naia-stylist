@@ -148,12 +148,17 @@ describe("§2  Reachability: all 11 products reachable via realistic signals", (
   //
   // double-top (Becoming Alive) — TOP, fs=4, el=medium
   // SP: artsy, feminine, edgy | ESS: confident, powerful, feel-good, playful
+  // (catalog unchanged — playful->adventurous mood rename intentionally NOT
+  // migrated for this product; see signal-contract.ts mood comment. Dual-mood
+  // pairing swapped to confident+feel-good, both still live in double-top's ESS;
+  // waist-definition body need added to give double-top a decisive, verified win.)
   //
-  it("2.1  double-top wins: playful+confident ESS dual-mood with girls-night occasion", () => {
+  it("2.1  double-top wins: confident+feel-good ESS dual-mood with girls-night occasion", () => {
     const result = run(
       makeSession({
-        moods: ["confident", "playful"],
+        moods: ["confident", "feel-good"],
         desiredFeelings: ["more-feminine"],
+        bodyNeeds: ["waist-definition"],
         occasion: "girls-night",
       }),
       { stylePersonalities: ["feminine"] },
@@ -189,13 +194,13 @@ describe("§2  Reachability: all 11 products reachable via realistic signals", (
 
   //
   // cropped-top (Becoming Fragmented) — TOP, fs=3, el=medium
-  // SP: artsy, edgy, trendy | ESS: confident, feel-good, playful
-  // Unique: dual-mood (playful+confident), both in ESS; playful NOT in collar-shirt ESS
+  // SP: artsy, edgy, trendy | ESS: confident, feel-good, adventurous
+  // Unique: dual-mood (adventurous+confident), both in ESS; adventurous NOT in collar-shirt ESS
   //
-  it("2.3  cropped-top wins: playful+confident dual ESS, edgy SP, everyday + day-to-night PSM", () => {
+  it("2.3  cropped-top wins: adventurous+confident dual ESS, edgy SP, everyday + day-to-night PSM", () => {
     const result = run(
       makeSession({
-        moods: ["confident", "playful"],
+        moods: ["confident", "adventurous"],
         desiredFeelings: ["more-confident", "more-attractive"],
         occasion: "everyday",
         practicalIds: ["day-to-night"],
@@ -560,7 +565,7 @@ describe("§5  Signal combination matrix: every canonical value exercised", () =
     "girls-night", "family", "special-event", "travel", "not-sure",
   ];
   const MOODS = [
-    "confident", "playful", "romantic", "powerful", "need-reset",
+    "confident", "adventurous", "romantic", "powerful", "need-reset",
     "feel-good", "tired", "low-energy", "feeling-low", "overwhelmed",
     "self-conscious", "neutral",
   ];
@@ -705,10 +710,13 @@ describe("§5  Signal combination matrix: every canonical value exercised", () =
 
 describe("§6  Scoring precision", () => {
   it("6.1  dual-mood bonus (+2) appears when both moods match ESS", () => {
-    // double-top ESS: confident, powerful, feel-good, playful
+    // double-top ESS: confident, powerful, feel-good, playful (catalog unchanged —
+    // playful->adventurous mood rename intentionally NOT migrated for this product;
+    // its emotionalSupportLogic is about garment movement/kinetics, not an
+    // unpredictable styling choice, so it no longer matches any live mood option)
     const result = run(
       makeSession({
-        moods: ["confident", "playful"],
+        moods: ["confident", "feel-good"],
         occasion: "girls-night",
       }),
     );
@@ -723,8 +731,8 @@ describe("§6  Scoring precision", () => {
 
   it("6.2  dual-mood bonus does NOT appear when only one mood matches ESS", () => {
     // dress-set ESS: confident, powerful, feel-good, romantic
-    // moods=[confident, playful] — playful NOT in dress-set ESS
-    const result = run(makeSession({ moods: ["confident", "playful"], occasion: "dinner" }));
+    // moods=[confident, adventurous] — adventurous NOT in dress-set ESS
+    const result = run(makeSession({ moods: ["confident", "adventurous"], occasion: "dinner" }));
     const dsEv = result.evaluatedProducts.find((e) => e.handle === "dress-set");
     assert.ok(dsEv);
     const dualBonus = dsEv!.positiveEvidence.find(
@@ -1013,19 +1021,24 @@ describe("§8  Diversity and tie-breaking", () => {
 
   it("8.2  recently-shown handle is not suppressed if it still has highest score", () => {
     // If a recently-shown product scores significantly higher than alternatives,
-    // it should still win (diversity is a tie-break only, not a hard exclusion)
+    // it should still win (diversity is a tie-break only, not a hard exclusion).
+    // Reuses test 2.4's scenario (verified +4 raw margin, +3 after the -1 penalty)
+    // rather than the original double-top scenario, which — after the
+    // playful->adventurous mood rename left double-top's catalog data unchanged
+    // (see 2.1's comment) — ties with midi-dress and is no longer a reliable
+    // fixture for "wins by a large margin."
     const result = run(
       makeSession({
-        moods: ["confident", "playful"],
-        desiredFeelings: ["more-feminine"],
-        occasion: "girls-night",
+        moods: ["confident", "powerful"],
+        bodyNeeds: ["elongates", "balances", "structured"],
+        occasion: "work",
       }),
-      { stylePersonalities: ["feminine"] },
-      { recentlyShown: ["double-top"] }, // double-top should still win despite diversity penalty
+      {},
+      { recentlyShown: ["asymmetrical-pants"] }, // should still win despite diversity penalty
     );
     assert.equal(result.outcome, "nadine-recommendation");
-    // double-top should win by large enough margin to overcome -1 diversity penalty
-    assert.equal(result.primary?.handle, "double-top");
+    // asymmetrical-pants should win by large enough margin to overcome -1 diversity penalty
+    assert.equal(result.primary?.handle, "asymmetrical-pants");
   });
 
   it("8.3  tie-breaking is deterministic regardless of catalog order (anti-first-place)", () => {
@@ -1190,8 +1203,11 @@ describe("§10  Edge cases", () => {
 describe("§11  Distribution audit: no single signal dominates all scenarios", () => {
   const REACHABILITY_SCENARIOS: Array<{ handle: string; session: StyleMeSessionInput; profile?: StyleMeProfileSignals }> = [
     {
+      // playful->adventurous mood rename intentionally NOT migrated for double-top's
+      // catalog data (see 2.1's comment) — confident+feel-good dual-mood + waist-definition
+      // used instead of confident+adventurous to keep this scenario a genuine winner.
       handle: "double-top",
-      session: makeSession({ moods: ["confident", "playful"], desiredFeelings: ["more-feminine"], occasion: "girls-night" }),
+      session: makeSession({ moods: ["confident", "feel-good"], desiredFeelings: ["more-feminine"], bodyNeeds: ["waist-definition"], occasion: "girls-night" }),
       profile: { stylePersonalities: ["feminine"] },
     },
     {
@@ -1201,7 +1217,7 @@ describe("§11  Distribution audit: no single signal dominates all scenarios", (
     },
     {
       handle: "cropped-top",
-      session: makeSession({ moods: ["confident", "playful"], desiredFeelings: ["more-confident", "more-attractive"], occasion: "everyday", practicalIds: ["day-to-night"] }),
+      session: makeSession({ moods: ["confident", "adventurous"], desiredFeelings: ["more-confident", "more-attractive"], occasion: "everyday", practicalIds: ["day-to-night"] }),
       profile: { stylePersonalities: ["artsy", "edgy"] },
     },
     {
@@ -1482,9 +1498,12 @@ describe("§12  Closet anchor compatibility evaluation", () => {
   it("C.11  All 11 V8 products remain reachable (no regression from Closet correction)", () => {
     // Re-run all 11 reachability scenarios without anchor (same as §11 but post-correction)
     const HANDLES_TO_WIN = [
-      { handle: "double-top",          session: makeSession({ moods: ["confident", "playful"], desiredFeelings: ["more-feminine"], occasion: "girls-night" }),          profile: { stylePersonalities: ["feminine"] } },
+      // playful->adventurous mood rename intentionally NOT migrated for double-top's
+      // catalog data (see §11's REACHABILITY_SCENARIOS comment) — confident+feel-good
+      // dual-mood + waist-definition used instead of confident+adventurous.
+      { handle: "double-top",          session: makeSession({ moods: ["confident", "feel-good"], desiredFeelings: ["more-feminine"], bodyNeeds: ["waist-definition"], occasion: "girls-night" }),          profile: { stylePersonalities: ["feminine"] } },
       { handle: "collar-shirt",         session: makeSession({ moods: ["tired"], desiredFeelings: ["more-put-together"], occasion: "work", formalityConditional: "formality-smart", practicalIds: ["quick-to-style"] }), profile: { stylePersonalities: ["corporate-chic"] } },
-      { handle: "cropped-top",          session: makeSession({ moods: ["confident", "playful"], desiredFeelings: ["more-confident", "more-attractive"], occasion: "everyday", practicalIds: ["day-to-night"] }), profile: { stylePersonalities: ["artsy", "edgy"] } },
+      { handle: "cropped-top",          session: makeSession({ moods: ["confident", "adventurous"], desiredFeelings: ["more-confident", "more-attractive"], occasion: "everyday", practicalIds: ["day-to-night"] }), profile: { stylePersonalities: ["artsy", "edgy"] } },
       { handle: "asymmetrical-pants",   session: makeSession({ moods: ["confident", "powerful"], desiredFeelings: ["more-powerful", "more-put-together"], bodyNeeds: ["elongates", "balances", "structured"], occasion: "everyday" }), profile: { stylePersonalities: ["edgy"] } },
       { handle: "straight-pants",       session: makeSession({ moods: ["feel-good"], desiredFeelings: ["more-effortless", "more-elevated"], bodyNeeds: ["relaxed", "comfortable-elevated"], occasion: "travel", practicalIds: ["lots-of-movement"] }), profile: { stylePersonalities: ["effortlessly-chic"] } },
       { handle: "suede-skirt",          session: makeSession({ moods: ["romantic"], desiredFeelings: ["more-feminine", "more-attractive"], occasion: "date-night", formalityConditional: "formality-polished", practicalIds: ["long-day"] }), profile: { stylePersonalities: ["feminine", "romantic"] } },
@@ -1658,7 +1677,7 @@ describe("§14  Session-specific tie-break and diversity behavior", () => {
   // ── DT.2  Different sessions produce different fingerprints ──────────────
   it("DT.2  Different sessions produce different fingerprints", () => {
     const s1 = makeValidSession({ moods: ["confident"], occasion: "everyday" });
-    const s2 = makeValidSession({ moods: ["playful"],   occasion: "dinner" });
+    const s2 = makeValidSession({ moods: ["adventurous"],   occasion: "dinner" });
     const fp1 = buildSessionFingerprint(s1, undefined, null, []);
     const fp2 = buildSessionFingerprint(s2, undefined, null, []);
     assert.notEqual(fp1, fp2, "sessions with different moods/occasions must differ");
@@ -1667,7 +1686,7 @@ describe("§14  Session-specific tie-break and diversity behavior", () => {
   // ── DT.3  sessionSpecificHash varies per session for the same product ─────
   it("DT.3  Same product handle has a different sessionSpecificHash in different sessions", () => {
     const s1 = makeValidSession({ moods: ["confident"], desiredFeelings: ["more-elevated"], occasion: "everyday" });
-    const s2 = makeValidSession({ moods: ["playful"],   desiredFeelings: ["more-attractive"], occasion: "dinner" });
+    const s2 = makeValidSession({ moods: ["adventurous"],   desiredFeelings: ["more-attractive"], occasion: "dinner" });
     const r1 = run(s1);
     const r2 = run(s2);
     // Find at least one handle present in both evaluations
@@ -1777,7 +1796,7 @@ describe("§15  Valid representative matrix (≥120 valid sessions) — certific
   };
 
   const ALL_MOODS = [
-    "confident","playful","romantic","powerful","need-reset",
+    "confident","adventurous","romantic","powerful","need-reset",
     "feel-good","tired","low-energy","feeling-low","overwhelmed",
     "self-conscious","neutral",
   ] as const;
@@ -1869,7 +1888,7 @@ describe("§15  Valid representative matrix (≥120 valid sessions) — certific
     { label: "VI.tops-1",         session: makeValidSession({ occasion: "everyday" }),                                                                                                                          anchor: makeClosetAnchor("TOPS") },
     { label: "VI.tops-2",         session: makeValidSession({ moods: ["tired"], desiredFeelings: ["more-put-together"], occasion: "work", practicalIds: ["quick-to-style"] }),         profile: { stylePersonalities: ["corporate-chic"] }, anchor: makeClosetAnchor("TOPS") },
     { label: "VI.tops-3",         session: makeValidSession({ moods: ["romantic"], desiredFeelings: ["more-feminine"], occasion: "date-night", formalityConditional: "formality-smart" }), profile: { stylePersonalities: ["feminine"] }, anchor: makeClosetAnchor("TOPS", { styleTags: ["elegant"], occasions: ["date-night"] }) },
-    { label: "VI.tops-4",         session: makeValidSession({ moods: ["playful"], desiredFeelings: ["more-attractive"], occasion: "dinner" }),                                                                   anchor: makeClosetAnchor("TOPS", { styleTags: ["casual"] }) },
+    { label: "VI.tops-4",         session: makeValidSession({ moods: ["adventurous"], desiredFeelings: ["more-attractive"], occasion: "dinner" }),                                                                   anchor: makeClosetAnchor("TOPS", { styleTags: ["casual"] }) },
     // Closet BOTTOMS (5)
     { label: "VI.btm-1",          session: makeValidSession({ occasion: "everyday" }),                                                                                                                          anchor: makeClosetAnchor("BOTTOMS") },
     { label: "VI.btm-2",          session: makeValidSession({ moods: ["confident"], desiredFeelings: ["more-elevated"], occasion: "dinner", formalityConditional: "formality-smart" }),                          anchor: makeClosetAnchor("BOTTOMS") },
@@ -1879,20 +1898,20 @@ describe("§15  Valid representative matrix (≥120 valid sessions) — certific
     // Closet DRESSES (3)
     { label: "VI.drs-1",          session: makeValidSession({ occasion: "dinner" }),                                                                                                                             anchor: makeClosetAnchor("DRESSES") },
     { label: "VI.drs-2",          session: makeValidSession({ moods: ["romantic"], desiredFeelings: ["softer"], occasion: "date-night" }),                                                  profile: { stylePersonalities: ["feminine"] },       anchor: makeClosetAnchor("DRESSES") },
-    { label: "VI.drs-3",          session: makeValidSession({ moods: ["playful"], desiredFeelings: ["more-feminine"], occasion: "girls-night" }),                                                                anchor: makeClosetAnchor("DRESSES") },
+    { label: "VI.drs-3",          session: makeValidSession({ moods: ["adventurous"], desiredFeelings: ["more-feminine"], occasion: "girls-night" }),                                                                anchor: makeClosetAnchor("DRESSES") },
     // Closet OUTERWEAR (3)
     { label: "VI.otr-1",          session: makeValidSession({ occasion: "everyday" }),                                                                                                                          anchor: makeClosetAnchor("OUTERWEAR") },
     { label: "VI.otr-2",          session: makeValidSession({ moods: ["powerful"], desiredFeelings: ["more-confident"], occasion: "special-event", formalityConditional: "formality-occasion" }),               anchor: makeClosetAnchor("OUTERWEAR") },
     { label: "VI.otr-3",          session: makeValidSession({ moods: ["confident"], desiredFeelings: ["more-put-together"], occasion: "work" }),                                                                 anchor: makeClosetAnchor("OUTERWEAR") },
     // Closet BAGS — unknown slot → closet-led (2)
     { label: "VI.bags-1",         session: makeValidSession({ occasion: "dinner" }),                                                                                                                             anchor: makeClosetAnchor("BAGS") },
-    { label: "VI.bags-2",         session: makeValidSession({ moods: ["playful"], desiredFeelings: ["more-attractive"], occasion: "girls-night" }),                                                              anchor: makeClosetAnchor("BAGS") },
+    { label: "VI.bags-2",         session: makeValidSession({ moods: ["adventurous"], desiredFeelings: ["more-attractive"], occasion: "girls-night" }),                                                              anchor: makeClosetAnchor("BAGS") },
     // NADINE anchors (6)
     { label: "VI.nadine-collar",   session: makeValidSession({ moods: ["confident"], desiredFeelings: ["more-elevated"], occasion: "dinner" }),                                                                   anchor: { type: "nadine" as const, handle: "collar-shirt" } },
     { label: "VI.nadine-midi",     session: makeValidSession({ moods: ["romantic"], desiredFeelings: ["more-feminine"], occasion: "date-night", formalityConditional: "formality-smart" }), profile: { stylePersonalities: ["feminine"] }, anchor: { type: "nadine" as const, handle: "midi-dress" } },
     { label: "VI.nadine-trench",   session: makeValidSession({ moods: ["powerful"], desiredFeelings: ["more-confident"], bodyNeeds: ["more-coverage"], occasion: "special-event", formalityConditional: "formality-occasion" }), profile: { stylePersonalities: ["corporate-chic"] }, anchor: { type: "nadine" as const, handle: "trench-coat" } },
     { label: "VI.nadine-asym",     session: makeValidSession({ moods: ["confident"], desiredFeelings: ["more-elevated"], bodyNeeds: ["elongates"], occasion: "work" }),                    profile: { stylePersonalities: ["edgy"] },           anchor: { type: "nadine" as const, handle: "asymmetrical-pants" } },
-    { label: "VI.nadine-cropped",  session: makeValidSession({ moods: ["playful"], desiredFeelings: ["more-attractive"], occasion: "girls-night" }),                                       profile: { stylePersonalities: ["trendy"] },          anchor: { type: "nadine" as const, handle: "cropped-top" } },
+    { label: "VI.nadine-cropped",  session: makeValidSession({ moods: ["adventurous"], desiredFeelings: ["more-attractive"], occasion: "girls-night" }),                                       profile: { stylePersonalities: ["trendy"] },          anchor: { type: "nadine" as const, handle: "cropped-top" } },
     { label: "VI.nadine-linen",    session: makeValidSession({ moods: ["feel-good"], desiredFeelings: ["more-effortless"], bodyNeeds: ["relaxed"], occasion: "travel" }),                   profile: { stylePersonalities: ["effortlessly-chic"] }, anchor: { type: "nadine" as const, handle: "straight-pants" } },
 
     // ── Group VM: multi-signal rich scenarios (30) ───────────────────────────
@@ -1905,25 +1924,25 @@ describe("§15  Valid representative matrix (≥120 valid sessions) — certific
     { label: "VM.7",  session: makeValidSession({ moods: ["feeling-low"],          desiredFeelings: ["more-powerful"],               bodyNeeds: ["elongates"], occasion: "work",          formalityConditional: "formality-polished" }),                             profile: { stylePersonalities: ["corporate-chic"] } },
     { label: "VM.8",  session: makeValidSession({ moods: ["overwhelmed"],          desiredFeelings: ["more-put-together"],           bodyNeeds: ["nothing-specific"], occasion: "everyday", practicalIds: ["quick-to-style"] }) },
     { label: "VM.9",  session: makeValidSession({ moods: ["self-conscious"],       desiredFeelings: ["more-feminine"],              bodyNeeds: ["more-coverage"], coverageConditional: "coverage-non-negotiable", occasion: "everyday" }),                          profile: { stylePersonalities: ["feminine"] } },
-    { label: "VM.10", session: makeValidSession({ moods: ["playful"],              desiredFeelings: ["more-attractive"],            bodyNeeds: ["nothing-specific"], occasion: "dinner" }),                                                                          profile: { stylePersonalities: ["artsy","edgy"] } },
+    { label: "VM.10", session: makeValidSession({ moods: ["adventurous"],              desiredFeelings: ["more-attractive"],            bodyNeeds: ["nothing-specific"], occasion: "dinner" }),                                                                          profile: { stylePersonalities: ["artsy","edgy"] } },
     { label: "VM.11", session: makeValidSession({ moods: ["confident"],            desiredFeelings: ["like-myself"],               bodyNeeds: ["nothing-specific"], occasion: "date-night", formalityConditional: "formality-polished" }),                           profile: { stylePersonalities: ["feminine"] } },
     { label: "VM.12", session: makeValidSession({ moods: ["romantic"],             desiredFeelings: ["softer"],                    bodyNeeds: ["waist-definition"], occasion: "dinner" }),                                                                           profile: { stylePersonalities: ["feminine"] } },
     { label: "VM.13", session: makeValidSession({ moods: ["tired"],                desiredFeelings: ["more-effortless"],           bodyNeeds: ["nothing-specific"], occasion: "everyday", practicalIds: ["no-special-constraint"] }),                                profile: { stylePersonalities: ["effortlessly-chic"] } },
     { label: "VM.14", session: makeValidSession({ moods: ["feel-good"],            desiredFeelings: ["more-elevated"],             bodyNeeds: ["nothing-specific"], occasion: "dinner",    formalityConditional: "formality-smart" }),                               profile: { stylePersonalities: ["old-money"] } },
     { label: "VM.15", session: makeValidSession({ moods: ["confident"],            desiredFeelings: ["more-put-together"],         bodyNeeds: ["balances","elongates"], occasion: "work" }),                                                                         profile: { stylePersonalities: ["corporate-chic"] } },
-    { label: "VM.16", session: makeValidSession({ moods: ["playful"],              desiredFeelings: ["more-feminine"],             bodyNeeds: ["nothing-specific"], occasion: "girls-night", formalityConditional: "formality-occasion" }),                          profile: { stylePersonalities: ["trendy","feminine"] } },
+    { label: "VM.16", session: makeValidSession({ moods: ["adventurous"],              desiredFeelings: ["more-feminine"],             bodyNeeds: ["nothing-specific"], occasion: "girls-night", formalityConditional: "formality-occasion" }),                          profile: { stylePersonalities: ["trendy","feminine"] } },
     { label: "VM.17", session: makeValidSession({ moods: ["need-reset"],           desiredFeelings: ["more-effortless"],           bodyNeeds: ["relaxed","comfortable-elevated"], occasion: "everyday" }),                                                           profile: { stylePersonalities: ["effortlessly-chic"] } },
     { label: "VM.18", session: makeValidSession({ moods: ["powerful"],             desiredFeelings: ["more-confident"],            bodyNeeds: ["structured"], occasion: "special-event",   formalityConditional: "formality-occasion" }),                            profile: { stylePersonalities: ["edgy"] } },
     { label: "VM.19", session: makeValidSession({ moods: ["romantic"],             desiredFeelings: ["more-attractive"],           bodyNeeds: ["nothing-specific"], occasion: "date-night", practicalIds: ["long-day"] }),                                           profile: { stylePersonalities: ["feminine"] } },
     { label: "VM.20", session: makeValidSession({ moods: ["tired"],                desiredFeelings: ["more-elevated"],             bodyNeeds: ["waist-definition"], occasion: "dinner",    formalityConditional: "formality-polished" }),                             profile: { stylePersonalities: ["corporate-chic"] } },
     { label: "VM.21", session: makeValidSession({ moods: ["confident"],            desiredFeelings: ["more-feminine"],             bodyNeeds: ["nothing-specific"], occasion: "girls-night", todayColours: { preferred: ["black"], avoid: [] } }),                    profile: { stylePersonalities: ["artsy","feminine"] } },
     { label: "VM.22", session: makeValidSession({ moods: ["feel-good"],            desiredFeelings: ["more-effortless"],           bodyNeeds: ["nothing-specific"], occasion: "everyday" }),                                                                         profile: { stylePersonalities: ["minimal","casual-cool"] } },
-    { label: "VM.23", session: makeValidSession({ moods: ["confident","playful"],  desiredFeelings: ["more-confident","more-attractive"], bodyNeeds: ["nothing-specific"], occasion: "girls-night" }),                                                              profile: { stylePersonalities: ["trendy","edgy"] } },
+    { label: "VM.23", session: makeValidSession({ moods: ["confident","adventurous"],  desiredFeelings: ["more-confident","more-attractive"], bodyNeeds: ["nothing-specific"], occasion: "girls-night" }),                                                              profile: { stylePersonalities: ["trendy","edgy"] } },
     { label: "VM.24", session: makeValidSession({ moods: ["feeling-low"],          desiredFeelings: ["more-powerful"],             bodyNeeds: ["elongates","waist-definition"], occasion: "work", practicalIds: ["practical-footwear","quick-to-style"] }),          profile: { stylePersonalities: ["corporate-chic"] } },
     { label: "VM.25", session: makeValidSession({ moods: ["romantic","need-reset"], desiredFeelings: ["more-effortless","more-feminine"], bodyNeeds: ["waist-definition","relaxed"], occasion: "everyday", practicalIds: ["quick-to-style"] }),                    profile: { stylePersonalities: ["effortlessly-chic","feminine"] } },
     { label: "VM.26", session: makeValidSession({ moods: ["confident"],            desiredFeelings: ["more-elevated"],             bodyNeeds: ["structured","elongates"], occasion: "work", formalityConditional: "formality-polished" }),                           profile: { stylePersonalities: ["corporate-chic","minimal"] } },
     { label: "VM.27", session: makeValidSession({ moods: ["tired","overwhelmed"],  desiredFeelings: ["more-effortless"],           bodyNeeds: ["relaxed"], occasion: "everyday", practicalIds: ["day-to-night"] }),                                                 profile: { stylePersonalities: ["casual-cool"] } },
-    { label: "VM.28", session: makeValidSession({ moods: ["playful"],              desiredFeelings: ["more-attractive","more-elevated"], bodyNeeds: ["nothing-specific"], occasion: "dinner", formalityConditional: "formality-relaxed", todayColours: { preferred: [], avoid: ["black"] } }), profile: { stylePersonalities: ["artsy"] } },
+    { label: "VM.28", session: makeValidSession({ moods: ["adventurous"],              desiredFeelings: ["more-attractive","more-elevated"], bodyNeeds: ["nothing-specific"], occasion: "dinner", formalityConditional: "formality-relaxed", todayColours: { preferred: [], avoid: ["black"] } }), profile: { stylePersonalities: ["artsy"] } },
     { label: "VM.29", session: makeValidSession({ moods: ["confident"],            desiredFeelings: ["more-put-together"],         bodyNeeds: ["more-coverage","waist-definition"], coverageConditional: "coverage-flexible-with-layering", occasion: "family" }),  profile: { stylePersonalities: ["old-money"] } },
     { label: "VM.30", session: makeValidSession({ moods: ["powerful","feel-good"], desiredFeelings: ["more-confident","more-elevated"], bodyNeeds: ["structured","elongates"], occasion: "special-event", formalityConditional: "formality-occasion" }),            profile: { stylePersonalities: ["corporate-chic","edgy"] } },
 
@@ -1933,7 +1952,7 @@ describe("§15  Valid representative matrix (≥120 valid sessions) — certific
     { label: "VN.2",  session: makeValidSession({ moods: ["confident"],     desiredFeelings: ["more-confident"],   bodyNeeds: ["nothing-specific"], occasion: "work",         source: "naia-piece" }) },
     { label: "VN.3",  session: makeValidSession({ moods: ["tired"],         desiredFeelings: ["more-effortless"],  bodyNeeds: ["relaxed"],          occasion: "everyday",     source: "naia-piece" }) },
     { label: "VN.4",  session: makeValidSession({ moods: ["romantic"],      desiredFeelings: ["softer"],           bodyNeeds: ["nothing-specific"], occasion: "dinner",       source: "naia-piece" }) },
-    { label: "VN.5",  session: makeValidSession({ moods: ["playful"],       desiredFeelings: ["more-attractive"],  bodyNeeds: ["nothing-specific"], occasion: "girls-night",  source: "naia-piece" }) },
+    { label: "VN.5",  session: makeValidSession({ moods: ["adventurous"],       desiredFeelings: ["more-attractive"],  bodyNeeds: ["nothing-specific"], occasion: "girls-night",  source: "naia-piece" }) },
     { label: "VN.6",  session: makeValidSession({ moods: ["feel-good"],     desiredFeelings: ["more-feminine"],    bodyNeeds: ["waist-definition"], occasion: "date-night",   source: "naia-piece" }) },
     { label: "VN.7",  session: makeValidSession({ moods: ["powerful"],      desiredFeelings: ["more-powerful"],    bodyNeeds: ["structured"],       occasion: "special-event", source: "naia-piece" }) },
     { label: "VN.8",  session: makeValidSession({ moods: ["need-reset"],    desiredFeelings: ["more-put-together"], bodyNeeds: ["nothing-specific"], occasion: "travel",       source: "my-closet" }) },
@@ -1944,7 +1963,7 @@ describe("§15  Valid representative matrix (≥120 valid sessions) — certific
     { label: "VN.13", session: makeValidSession({ moods: ["confident"],     desiredFeelings: ["more-elevated"],    bodyNeeds: ["balances"],         occasion: "not-sure",     source: "naia-piece" }) },
     { label: "VN.14", session: makeValidSession({ moods: ["tired"],         desiredFeelings: ["more-put-together"], bodyNeeds: ["nothing-specific"], occasion: "work",        source: "naia-piece" }), profile: { stylePersonalities: ["corporate-chic"] } },
     { label: "VN.15", session: makeValidSession({ moods: ["romantic"],      desiredFeelings: ["more-feminine"],    bodyNeeds: ["soft-and-forgiving-around-waist"], occasion: "dinner", source: "naia-piece" }), profile: { stylePersonalities: ["feminine"] } },
-    { label: "VN.16", session: makeValidSession({ moods: ["playful"],       desiredFeelings: ["more-elevated"],    bodyNeeds: ["nothing-specific"], occasion: "everyday", practicalIds: ["hot-outdoors"], source: "naia-piece" }) },
+    { label: "VN.16", session: makeValidSession({ moods: ["adventurous"],       desiredFeelings: ["more-elevated"],    bodyNeeds: ["nothing-specific"], occasion: "everyday", practicalIds: ["hot-outdoors"], source: "naia-piece" }) },
     { label: "VN.17", session: makeValidSession({ moods: ["feel-good"],     desiredFeelings: ["more-effortless"],  bodyNeeds: ["relaxed"],          occasion: "travel", practicalIds: ["cool-air-conditioning"], source: "naia-piece" }) },
     { label: "VN.18", session: makeValidSession({ moods: ["confident"],     desiredFeelings: ["more-confident"],   bodyNeeds: ["nothing-specific"], occasion: "date-night", todayColours: { preferred: ["black","navy"], avoid: [] }, source: "naia-piece" }) },
     { label: "VN.19", session: makeValidSession({ moods: ["powerful"],      desiredFeelings: ["more-elevated"],    bodyNeeds: ["nothing-specific"], occasion: "work",         source: "naia-piece" }), profile: { stylePersonalities: ["minimal"] } },
@@ -2368,7 +2387,8 @@ describe("§V2-A2 quiz-data label contract — becoming and style-support", () =
 //                     occasionTags: work, everyday, dinner, special-event
 //   double-top        DFM: more-confident, more-feminine, more-elevated, more-attractive
 //                     SP:  artsy, feminine, edgy
-//                     ESS: confident, powerful, feel-good, playful
+//                     ESS: confident, powerful, feel-good, playful (catalog unchanged —
+//                          playful->adventurous mood rename NOT migrated for this product)
 //                     occasionTags: dinner, date-night, girls-night, special-event
 //   straight-pants    DFM: more-elevated, more-confident, more-effortless, more-attractive
 //                     SP:  artsy, effortlessly-chic, edgy

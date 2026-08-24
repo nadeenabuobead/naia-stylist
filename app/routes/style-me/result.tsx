@@ -675,7 +675,7 @@ const loadingMessages = ["Reading the runways...", "Consulting your mood...", "M
 
 const MOOD_LABELS: Record<string, string> = {
   "confident": "Confident", "tired": "Low-energy", "overwhelmed": "Overwhelmed",
-  "playful": "Playful", "romantic": "Romantic", "powerful": "Powerful",
+  "adventurous": "Adventurous", "romantic": "Romantic", "powerful": "Powerful",
   "need-reset": "Need a reset", "feel-good": "Feel good",
 };
 const FEELING_LABELS: Record<string, string> = {

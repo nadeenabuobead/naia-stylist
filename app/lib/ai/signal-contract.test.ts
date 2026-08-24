@@ -520,7 +520,7 @@ describe("Session Mood — answer behaviours", () => {
   // Locked canonical mood vocabulary (all 12).
   const CANONICAL_MOOD_IDS = [
     "confident", "tired", "low-energy", "feeling-low", "overwhelmed",
-    "playful", "romantic", "powerful", "need-reset", "feel-good",
+    "adventurous", "romantic", "powerful", "need-reset", "feel-good",
     "self-conscious", "neutral",
   ];
 
@@ -542,7 +542,7 @@ describe("Session Mood — answer behaviours", () => {
 
   // All rankable moods (everything except self-conscious and neutral).
   const rankableMoods = [
-    "confident", "playful", "romantic", "powerful", "need-reset", "feel-good",
+    "confident", "adventurous", "romantic", "powerful", "need-reset", "feel-good",
     "tired", "low-energy", "feeling-low", "overwhelmed",
   ];
 
@@ -580,8 +580,8 @@ describe("Session Mood — answer behaviours", () => {
     assert.ok(!m?.activatedFields.includes(PTF.STYLING_EFFORT_LEVEL));
   });
 
-  it("playful does NOT activate stylingEffortLevel", () => {
-    const m = getMappingsByIdAndQuestion("playful", SQ.MOOD);
+  it("adventurous does NOT activate stylingEffortLevel", () => {
+    const m = getMappingsByIdAndQuestion("adventurous", SQ.MOOD);
     assert.ok(!m?.activatedFields.includes(PTF.STYLING_EFFORT_LEVEL));
   });
 

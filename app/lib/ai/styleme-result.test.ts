@@ -120,7 +120,7 @@ describe("§1 buildProfileSignals", () => {
 describe("§2 buildEngineInput", () => {
   it("2.1 — maps moods and desiredFeelings into session", () => {
     const input = buildEngineInput({
-      moods: ["romantic", "playful"],
+      moods: ["romantic", "adventurous"],
       desiredFeelings: ["more-feminine"],
       bodyNeeds: ["nothing-specific"],
       coverageConditional: null,
@@ -130,7 +130,7 @@ describe("§2 buildEngineInput", () => {
       practicalIds: [],
       source: "naia-piece",
     });
-    assert.deepEqual(input.session.moods, ["romantic", "playful"]);
+    assert.deepEqual(input.session.moods, ["romantic", "adventurous"]);
     assert.deepEqual(input.session.desiredFeelings, ["more-feminine"]);
     assert.equal(input.session.formalityConditional, "semi-formal");
     assert.deepEqual(input.session.todayColours.preferred, ["burgundy"]);
@@ -466,7 +466,7 @@ describe("§8 parseSuggestionMetadata", () => {
 
 describe("§9 buildSongReason", () => {
   it("9.1 — includes mood label when mood matches", () => {
-    const reason = buildSongReason(["confident", "playful"], ["everyday"], ["confident"], "everyday");
+    const reason = buildSongReason(["confident", "adventurous"], ["everyday"], ["confident"], "everyday");
     assert.ok(reason.includes("confident"), `got: ${reason}`);
   });
 
@@ -788,7 +788,7 @@ describe("§12 Source semantics", () => {
       styleTags: [], occasions: [], imageUrl: "https://example.com/img.jpg",
     };
     const input = buildEngineInput({
-      moods: ["playful"], desiredFeelings: [], bodyNeeds: [],
+      moods: ["adventurous"], desiredFeelings: [], bodyNeeds: [],
       coverageConditional: null, occasion: "work", formalityConditional: null,
       todayColours: { preferred: [], avoid: [] }, practicalIds: [],
       source: "both",

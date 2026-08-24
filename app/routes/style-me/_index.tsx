@@ -15,7 +15,7 @@ export function meta() {
 
 const MOOD_LABELS: Record<string, string> = {
   "confident": "Confident", "tired": "Low-energy", "overwhelmed": "Overwhelmed",
-  "playful": "Playful", "romantic": "Romantic", "powerful": "Powerful",
+  "adventurous": "Adventurous", "romantic": "Romantic", "powerful": "Powerful",
   "need-reset": "Need a reset", "feel-good": "Feel good",
 };
 const OCCASION_LABELS: Record<string, string> = {
