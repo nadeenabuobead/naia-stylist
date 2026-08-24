@@ -127,10 +127,15 @@ export default function StyleMeComfort() {
     <SmPage backTo="/style-me/feeling" step={3}>
       <p className="sm-step-label">What You Need Today</p>
       <h1 className="sm-heading">What should the outfit do for you today?</h1>
-      <p className="sm-sub">Choose up to two — or nothing specific.</p>
+      <p className="sm-sub">Choose what matters most today.</p>
 
       <Form method="post">
-        <p style={{ ...groupLabelStyle, marginTop: 0 }}>Fit &amp; Feel</p>
+        <p style={{ ...groupLabelStyle, marginTop: 0 }}>
+          Fit &amp; Feel
+          <span style={{ color: "var(--naia-muted)", textTransform: "none", letterSpacing: 0 }}>
+            {" "}— choose up to two
+          </span>
+        </p>
         <div className="sm-pills">
           {bodyNeedOptions.map((opt) => {
             const isSelected = selected.includes(opt.id);
@@ -149,9 +154,9 @@ export default function StyleMeComfort() {
         </div>
 
         <p style={groupLabelStyle}>
-          Practical Today{" "}
+          Practical Today
           <span style={{ color: "var(--naia-muted)", textTransform: "none", letterSpacing: 0 }}>
-            — optional
+            {" "}— optional · choose up to two
           </span>
         </p>
         <div className="sm-pills">

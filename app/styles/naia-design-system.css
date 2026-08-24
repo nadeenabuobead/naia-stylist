@@ -1040,7 +1040,7 @@ a.mn-action:focus-visible,
   display: flex; justify-content: space-between; align-items: center;
   padding: 20px 40px; border-bottom: 1px solid var(--naia-border);
 }
-.sm-result-wordmark { font-family: var(--naia-ff-display); font-size: 22px; font-style: italic; letter-spacing: 3px; color: var(--naia-ink); }
+.sm-result-wordmark { font-family: var(--naia-ff-body); font-size: 22px; font-style: italic; font-weight: 400; letter-spacing: 0.5px; color: var(--naia-accent); }
 .sm-result-btn {
   font-family: var(--naia-ff-mono); font-size: 9px; letter-spacing: 2px;
   text-transform: uppercase; color: var(--naia-muted); background: none;
@@ -1171,8 +1171,8 @@ a.mn-action:focus-visible,
   padding: 20px 40px; border-bottom: 1px solid var(--naia-border);
 }
 .sm-topbar-wordmark {
-  font-family: var(--naia-ff-display); font-size: 20px; font-style: italic;
-  letter-spacing: 3px; color: var(--naia-ink); user-select: none;
+  font-family: var(--naia-ff-body); font-size: 20px; font-style: italic; font-weight: 400;
+  letter-spacing: 0.5px; color: var(--naia-accent); user-select: none;
 }
 .sm-topbar-exit {
   font-family: var(--naia-ff-mono); font-size: 9px; letter-spacing: 2px;
