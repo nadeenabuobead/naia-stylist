@@ -31,9 +31,13 @@ const GENERATED_PATH = resolve(
   "generated/naia-catalog.generated.ts",
 );
 const V8_SHA256 =
-  "3f019293f5d451d5950ca7ee5bd0f46b95a0fcbb3b5da8945d8666d7270fc85c";
-// Updated 2026-08-24: workbook corrected (Becoming Fragmented playful -> adventurous,
-// StyleMe Mood rename source-of-truth fix). See scripts/extract-naia-catalog.ts.
+  "60af557f9b1b670aedeb734da49dc6e57a1eea66f70ece265273eafa987277bf";
+// Updated 2026-08-24: collection reconciliation. Becoming Fragmented (cropped-top)
+// and Becoming Unfiltered (straight-pants) removed; Becoming Bold (oversized-blazer)
+// and Becoming Free (draped-leather-pants) added; Becoming Clear redesigned as a
+// bomber. Updated again same day: asymmetrical-pants' Occasion tags "day-to-day"
+// typo corrected to "everyday" (surgical single-shared-string edit). See
+// scripts/extract-naia-catalog.ts.
 const V8_PATH = resolve(
   __dirname,
   "../../../.claude/reference/styleme/PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx",
@@ -42,13 +46,13 @@ const V8_PATH = resolve(
 const EXPECTED_HANDLES = new Set([
   "double-top",
   "collar-shirt",
-  "cropped-top",
   "asymmetrical-pants",
-  "straight-pants",
+  "draped-leather-pants",
   "suede-skirt",
   "trench-coat",
   "kimono-jacket",
   "leather-suede-jacket",
+  "oversized-blazer",
   "midi-dress",
   "dress-set",
 ]);
@@ -258,19 +262,19 @@ describe("nAia catalog — Phase 3B validation", () => {
     }
   });
 
-  // ── 18. ESL and PSL keyed IDs are detectable ───────────────────────────
-  test("18. emotionalSupportLogic and practicalSupportLogic contain backtick-keyed IDs", () => {
-    const backtickPattern = /`[a-z][a-z0-9-]*`/;
+  // ── 18. ESL and PSL are consistently unpopulated ────────────────────────
+  test("18. emotionalSupportLogic and practicalSupportLogic are empty for every product", () => {
+    // Workbook restructured 2026-08-24 — these reasoning-essay columns are no
+    // longer populated for any product (confirmed EXPLANATION_ONLY, no ranking
+    // effect). This asserts the removal is consistent, not a partial data gap.
     for (const p of products) {
-      const esl = p.parsed.prose.emotionalSupportLogic;
-      const psl = p.parsed.prose.practicalSupportLogic;
-      assert.ok(
-        backtickPattern.test(esl),
-        `${p.handle}: emotionalSupportLogic has no backtick-keyed ID`,
+      assert.equal(
+        p.parsed.prose.emotionalSupportLogic, "",
+        `${p.handle}: expected emotionalSupportLogic to be empty`,
       );
-      assert.ok(
-        backtickPattern.test(psl),
-        `${p.handle}: practicalSupportLogic has no backtick-keyed ID`,
+      assert.equal(
+        p.parsed.prose.practicalSupportLogic, "",
+        `${p.handle}: expected practicalSupportLogic to be empty`,
       );
     }
   });
@@ -486,22 +490,27 @@ describe("nAia catalog — Phase 3B validation", () => {
   });
 
   // ── 25. Becoming Seen field 35 (V8 fix) ────────────────────────────────
-  test("25. Becoming Seen avoidPairingWithNadinePieces: raw='None', parsed=null", () => {
+  // Updated 2026-08-24: reconciliation gave trench-coat real avoid-pairing
+  // content (it now conflicts with the redesigned Becoming Clear bomber and
+  // with Becoming Whole), so the raw value is no longer the literal "None"
+  // this test originally locked in. No product currently has a literal
+  // "None" in any NADINE pairing field, so the None -> null parsing path
+  // (still exercised by conditionalNadinePairings on several products) has
+  // no dedicated single-product regression case right now.
+  test("25. Becoming Seen avoidPairingWithNadinePieces reflects the redesigned Becoming Clear conflict", () => {
     const becomingSeen = getProductByHandle("trench-coat");
     assert.ok(becomingSeen, "trench-coat not found in catalog");
 
-    // Raw source must remain exactly "None"
     assert.equal(
       becomingSeen.sourceFields.avoidPairingWithNadinePieces,
-      "None",
-      "sourceFields.avoidPairingWithNadinePieces must be exactly 'None'",
+      "Becoming Clear; Becoming Whole",
+      "sourceFields.avoidPairingWithNadinePieces changed unexpectedly",
     );
 
-    // Parsed value must be null
     assert.equal(
       becomingSeen.parsed.pairings.avoidPairingWithNadinePieces,
-      null,
-      "parsed.pairings.avoidPairingWithNadinePieces must be null",
+      "Becoming Clear; Becoming Whole",
+      "parsed.pairings.avoidPairingWithNadinePieces must pass through non-null prose unchanged",
     );
   });
 });

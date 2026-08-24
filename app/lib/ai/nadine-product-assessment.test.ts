@@ -354,9 +354,9 @@ describe("§4 StyleMe handoff fields", () => {
     assert.ok(product);
     // v8Handle must be one of the 11 locked catalogue handles.
     const LOCKED = [
-      "double-top", "collar-shirt", "cropped-top", "asymmetrical-pants",
-      "straight-pants", "suede-skirt", "trench-coat", "kimono-jacket",
-      "leather-suede-jacket", "midi-dress", "dress-set",
+      "double-top", "collar-shirt", "asymmetrical-pants", "draped-leather-pants",
+      "suede-skirt", "trench-coat", "kimono-jacket", "leather-suede-jacket",
+      "oversized-blazer", "midi-dress", "dress-set",
     ];
     assert.ok(LOCKED.includes(product.v8Handle), `unexpected handle: ${product.v8Handle}`);
   });

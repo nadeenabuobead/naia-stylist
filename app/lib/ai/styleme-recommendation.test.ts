@@ -193,28 +193,33 @@ describe("§2  Reachability: all 11 products reachable via realistic signals", (
   });
 
   //
-  // cropped-top (Becoming Fragmented) — TOP, fs=3, el=medium
-  // SP: artsy, edgy, trendy | ESS: confident, feel-good, adventurous
-  // Unique: dual-mood (adventurous+confident), both in ESS; adventurous NOT in collar-shirt ESS
+  // draped-leather-pants (Becoming Free) — BOTTOM, fs=3, el=medium
+  // SP: edgy, artsy, effortlessly-chic | ESS: confident, powerful, adventurous, feel-good
+  // Unique: "adventurous" is now exclusive to this product across the whole catalog
+  // (2026-08-24 reconciliation — was cropped-top's discriminator before it was removed)
   //
-  it("2.3  cropped-top wins: adventurous+confident dual ESS, edgy SP, everyday + day-to-night PSM", () => {
+  it("2.3  draped-leather-pants wins: adventurous+confident dual ESS, edgy SP, everyday + day-to-night PSM", () => {
     const result = run(
       makeSession({
         moods: ["confident", "adventurous"],
-        desiredFeelings: ["more-confident", "more-attractive"],
+        desiredFeelings: ["more-confident", "more-elevated"],
         occasion: "everyday",
         practicalIds: ["day-to-night"],
       }),
-      { stylePersonalities: ["artsy", "edgy"] },
+      { stylePersonalities: ["edgy", "artsy"] },
     );
     assert.equal(result.outcome, "nadine-recommendation");
-    assert.equal(result.primary?.handle, "cropped-top");
+    assert.equal(result.primary?.handle, "draped-leather-pants");
   });
 
   //
   // asymmetrical-pants (Becoming Grounded) — BOTTOM, fs=4, el=medium
   // SP: edgy, artsy, corporate-chic | SMCM: structured, elongates, balances (unique combo)
   // Unique: BOTH elongates AND balances in SMCM; collar-shirt/trench lack elongates+balances combo
+  // The 2026-08-24 reconciliation briefly introduced a "day-to-day" typo into this product's
+  // own occasionTags (should read "everyday"), which caused a 3-way tie with oversized-blazer/
+  // draped-leather-pants under occasion=everyday. Corrected in the workbook same day — this
+  // scenario is back to its natural "everyday" occasion and wins cleanly again.
   //
   it("2.4  asymmetrical-pants wins: confident+powerful dual ESS, elongates+balances+structured SMCM", () => {
     const result = run(
@@ -231,28 +236,23 @@ describe("§2  Reachability: all 11 products reachable via realistic signals", (
   });
 
   //
-  // straight-pants (Becoming Unfiltered) — BOTTOM, fs=4, el=medium
-  // SP: artsy, effortlessly-chic, edgy | SMCM: relaxed, comfortable-elevated, elongates
-  // comfortable-elevated is unique to straight-pants
+  // oversized-blazer (Becoming Bold) — OUTERWEAR, fs=4, el=low
+  // SP: corporate-chic, effortlessly-chic, edgy | SMCM: more-coverage, structured, relaxed, elongates
+  // Unique: structured+relaxed+elongates together — no other product has all three
   //
-  it("2.5  straight-pants wins: comfortable-elevated SMCM, lots-of-movement (PSM normalisation)", () => {
+  it("2.5  oversized-blazer wins: tired mood, structured+relaxed+elongates SMCM, work + formality-polished", () => {
     const result = run(
       makeSession({
-        moods: ["feel-good"],
-        desiredFeelings: ["more-effortless", "more-elevated"],
-        bodyNeeds: ["relaxed", "comfortable-elevated"],
-        occasion: "travel",
-        practicalIds: ["lots-of-movement"], // normalises to movement-friendly
+        moods: ["tired"],
+        desiredFeelings: ["more-powerful", "more-effortless"],
+        bodyNeeds: ["structured", "relaxed", "elongates"],
+        occasion: "work",
+        formalityConditional: "formality-polished",
       }),
-      { stylePersonalities: ["effortlessly-chic"] },
+      { stylePersonalities: ["corporate-chic", "effortlessly-chic"] },
     );
     assert.equal(result.outcome, "nadine-recommendation");
-    assert.equal(result.primary?.handle, "straight-pants");
-    // Verify the normalized PSM produced evidence against movement-friendly
-    const psmEv = result.primary?.positiveEvidence.find(
-      (e) => e.matchedToken === "movement-friendly",
-    );
-    assert.ok(psmEv, "movement-friendly evidence must appear (lots-of-movement normalised)");
+    assert.equal(result.primary?.handle, "oversized-blazer");
   });
 
   //
@@ -318,21 +318,23 @@ describe("§2  Reachability: all 11 products reachable via realistic signals", (
   });
 
   //
-  // leather-suede-jacket (Becoming Clear) — OUTERWEAR, fs=4, el=medium
-  // SP: corporate-chic, artsy, edgy | SMCM: waist-definition+structured+elongates+more-coverage
-  // Unique SMCM combo (elongates+waist-definition) vs collar-shirt (balances+waist-def, no elongates)
+  // leather-suede-jacket (Becoming Clear) — OUTERWEAR, fs=3, el=low
+  // Redesigned 2026-08-24 as a relaxed bomber (was a fitted, waist-shaping jacket).
+  // SP: artsy, edgy, effortlessly-chic | SMCM: relaxed, more-coverage, soft-and-forgiving-around-waist
+  // ("soft-and-forgiving-around-waist" is an off-contract token per the reconciliation report —
+  // not used for scoring here since it isn't in the recognised SMCM vocabulary)
+  // Unique: this is now the only product combining need-reset+overwhelmed ESS with quick-to-style
   //
-  it("2.9  leather-suede-jacket wins: feeling-low+overwhelmed dual ESS, elongates+waist-def SMCM, work", () => {
+  it("2.9  leather-suede-jacket wins: need-reset+overwhelmed dual ESS, relaxed SMCM, girls-night + quick-to-style", () => {
     const result = run(
       makeSession({
-        moods: ["feeling-low", "overwhelmed"],
-        desiredFeelings: ["more-powerful", "more-put-together"],
-        bodyNeeds: ["elongates", "waist-definition"],
-        occasion: "work",
-        formalityConditional: "formality-polished",
-        practicalIds: ["practical-footwear", "quick-to-style"],
+        moods: ["need-reset", "overwhelmed"],
+        desiredFeelings: ["more-effortless", "more-confident"],
+        bodyNeeds: ["relaxed", "more-coverage"],
+        occasion: "girls-night",
+        practicalIds: ["quick-to-style"],
       }),
-      { stylePersonalities: ["corporate-chic"] },
+      { stylePersonalities: ["effortlessly-chic", "artsy"] },
     );
     assert.equal(result.outcome, "nadine-recommendation");
     assert.equal(result.primary?.handle, "leather-suede-jacket");
@@ -363,7 +365,7 @@ describe("§2  Reachability: all 11 products reachable via realistic signals", (
   //
   // dress-set (Becoming Defined) — SET, fs=5, el=high
   // SP: feminine, artsy, trendy | formality-occasion (range 4-5) → fs=5 in range
-  // el=high penalty is counterbalanced by strong signal matches; cropped-top and midi-dress outscored
+  // el=high penalty is counterbalanced by strong signal matches; other feminine/dual-ESS products outscored
   //
   it("2.11 dress-set wins: feminine+trendy SP, confident+powerful dual ESS, girls-night, formality-occasion", () => {
     const result = run(
@@ -394,14 +396,16 @@ describe("§3  Hard exclusion: slot conflicts, self-exclusion, NADINE avoid-pair
     // collar-shirt self-excluded
     assert.ok(excludedHandles.has("collar-shirt"), "anchor (collar-shirt) must be self-excluded");
     // all other TOPs excluded by slot conflict
+    // (only 2 TOP-type products remain post-2026-08-24 reconciliation: collar-shirt
+    // is the anchor above, double-top is the only other one — cropped-top, the former
+    // third TOP, was removed)
     assert.ok(excludedHandles.has("double-top"), "top slot conflict");
-    assert.ok(excludedHandles.has("cropped-top"), "top slot conflict");
     // dresses and sets excluded
     assert.ok(excludedHandles.has("midi-dress"), "dress excluded by top anchor rule");
     assert.ok(excludedHandles.has("dress-set"), "set excluded by top anchor rule");
     // bottoms NOT excluded
     assert.ok(!excludedHandles.has("asymmetrical-pants"), "bottom should be eligible");
-    assert.ok(!excludedHandles.has("straight-pants"), "bottom should be eligible");
+    assert.ok(!excludedHandles.has("draped-leather-pants"), "bottom should be eligible");
     // outerwear NOT excluded
     assert.ok(!excludedHandles.has("trench-coat"), "outerwear should be eligible");
   });
@@ -416,7 +420,7 @@ describe("§3  Hard exclusion: slot conflicts, self-exclusion, NADINE avoid-pair
       result.evaluatedProducts.filter((e) => e.isHardExcluded).map((e) => e.handle),
     );
     assert.ok(excludedHandles.has("asymmetrical-pants"), "self-excluded");
-    assert.ok(excludedHandles.has("straight-pants"), "bottom slot conflict");
+    assert.ok(excludedHandles.has("draped-leather-pants"), "bottom slot conflict");
     assert.ok(excludedHandles.has("suede-skirt"), "bottom slot conflict");
     assert.ok(excludedHandles.has("midi-dress"), "dress excluded by bottom anchor rule");
     assert.ok(excludedHandles.has("dress-set"), "set excluded by bottom anchor rule");
@@ -436,7 +440,7 @@ describe("§3  Hard exclusion: slot conflicts, self-exclusion, NADINE avoid-pair
     assert.ok(excludedHandles.has("midi-dress"), "self-excluded");
     // bottoms excluded
     assert.ok(excludedHandles.has("asymmetrical-pants"), "bottom slot conflict");
-    assert.ok(excludedHandles.has("straight-pants"), "bottom slot conflict");
+    assert.ok(excludedHandles.has("draped-leather-pants"), "bottom slot conflict");
     assert.ok(excludedHandles.has("suede-skirt"), "bottom slot conflict");
     // midi-dress avoid-pairings: Becoming Whole (kimono-jacket) and Becoming Clear (leather-suede-jacket)
     assert.ok(excludedHandles.has("kimono-jacket"), "kimono-jacket in midi-dress avoid-pairing");
@@ -487,8 +491,9 @@ describe("§3  Hard exclusion: slot conflicts, self-exclusion, NADINE avoid-pair
       makeSession({ occasion: "everyday" }),
       { firmNoColors: ["red-burgundy"] },
     );
-    // Products with burgundy/rust colors: double-top, asymmetrical-pants, straight-pants,
-    // suede-skirt, trench-coat, kimono-jacket, leather-suede-jacket, midi-dress, dress-set
+    // Products with burgundy/rust colors: double-top, asymmetrical-pants, suede-skirt,
+    // trench-coat, kimono-jacket, leather-suede-jacket, midi-dress, dress-set, oversized-blazer
+    // (draped-leather-pants, added 2026-08-24, is taupe/art-print only — no burgundy/rust)
     const excluded = result.evaluatedProducts.filter(
       (e) => e.isHardExcluded && e.hardExclusionReasons.includes("firm-no-colour-exclusion"),
     );
@@ -800,16 +805,17 @@ describe("§6  Scoring precision", () => {
   });
 
   it("6.7  today preferred colour adds STRONG_RANK (+4) when any product colour matches", () => {
-    // black is in cropped-top and straight-pants colors
+    // No current product has literal "black" as a colour (that was cropped-top/straight-pants,
+    // both removed 2026-08-24) — burgundy -> red-burgundy is double-top's colour instead.
     const result = run(
-      makeSession({ todayColours: { preferred: ["black"], avoid: [] }, occasion: "everyday" }),
+      makeSession({ todayColours: { preferred: ["red-burgundy"], avoid: [] }, occasion: "everyday" }),
     );
-    const ctEv = result.evaluatedProducts.find((e) => e.handle === "cropped-top");
-    assert.ok(ctEv);
-    const colEv = ctEv!.positiveEvidence.find(
+    const dtEv = result.evaluatedProducts.find((e) => e.handle === "double-top");
+    assert.ok(dtEv);
+    const colEv = dtEv!.positiveEvidence.find(
       (e) => e.sessionSignal === "colour-preferred-today",
     );
-    assert.ok(colEv, "cropped-top should get preferred colour evidence for black");
+    assert.ok(colEv, "double-top should get preferred colour evidence for red-burgundy");
     assert.equal(colEv!.points, SCORING_WEIGHTS.STRONG_RANK);
   });
 
@@ -859,12 +865,14 @@ describe("§6  Scoring precision", () => {
   });
 
   it("6.11 PSM lots-of-movement normalises to movement-friendly before scoring", () => {
+    // midi-dress's practicalSupportMatch was simplified to just "quick-to-style" in the
+    // 2026-08-24 reconciliation (no longer has movement-friendly) — suede-skirt still does.
     const result = run(makeSession({ practicalIds: ["lots-of-movement"], occasion: "everyday" }));
-    const miEv = result.evaluatedProducts.find((e) => e.handle === "midi-dress");
-    assert.ok(miEv);
-    // midi-dress has movement-friendly in PSM (provisional)
-    const psmEv = miEv!.positiveEvidence.find((e) => e.matchedToken === "movement-friendly");
-    assert.ok(psmEv, "midi-dress should match movement-friendly after normalisation");
+    const ssEv = result.evaluatedProducts.find((e) => e.handle === "suede-skirt");
+    assert.ok(ssEv);
+    // suede-skirt has movement-friendly in PSM (provisional)
+    const psmEv = ssEv!.positiveEvidence.find((e) => e.matchedToken === "movement-friendly");
+    assert.ok(psmEv, "suede-skirt should match movement-friendly after normalisation");
   });
 
   it("6.12 no-special-constraint suppresses all PSM scoring", () => {
@@ -1216,19 +1224,25 @@ describe("§11  Distribution audit: no single signal dominates all scenarios", (
       profile: { stylePersonalities: ["corporate-chic"] },
     },
     {
-      handle: "cropped-top",
-      session: makeSession({ moods: ["confident", "adventurous"], desiredFeelings: ["more-confident", "more-attractive"], occasion: "everyday", practicalIds: ["day-to-night"] }),
-      profile: { stylePersonalities: ["artsy", "edgy"] },
+      // "adventurous" is now exclusive to draped-leather-pants (was cropped-top's
+      // discriminator before the 2026-08-24 reconciliation removed that product).
+      handle: "draped-leather-pants",
+      session: makeSession({ moods: ["confident", "adventurous"], desiredFeelings: ["more-confident", "more-elevated"], occasion: "everyday", practicalIds: ["day-to-night"] }),
+      profile: { stylePersonalities: ["edgy", "artsy"] },
     },
     {
+      // A "day-to-day" typo briefly present in this product's own occasionTags (should
+      // read "everyday") caused a 3-way tie with oversized-blazer/draped-leather-pants
+      // under occasion=everyday — corrected in the workbook same day (2026-08-24).
       handle: "asymmetrical-pants",
       session: makeSession({ moods: ["confident", "powerful"], desiredFeelings: ["more-powerful", "more-put-together"], bodyNeeds: ["elongates", "balances", "structured"], occasion: "everyday" }),
       profile: { stylePersonalities: ["edgy"] },
     },
     {
-      handle: "straight-pants",
-      session: makeSession({ moods: ["feel-good"], desiredFeelings: ["more-effortless", "more-elevated"], bodyNeeds: ["relaxed", "comfortable-elevated"], occasion: "travel", practicalIds: ["lots-of-movement"] }),
-      profile: { stylePersonalities: ["effortlessly-chic"] },
+      // structured+relaxed+elongates SMCM combo is unique to oversized-blazer.
+      handle: "oversized-blazer",
+      session: makeSession({ moods: ["tired"], desiredFeelings: ["more-powerful", "more-effortless"], bodyNeeds: ["structured", "relaxed", "elongates"], occasion: "work", formalityConditional: "formality-polished" }),
+      profile: { stylePersonalities: ["corporate-chic", "effortlessly-chic"] },
     },
     {
       handle: "suede-skirt",
@@ -1246,9 +1260,11 @@ describe("§11  Distribution audit: no single signal dominates all scenarios", (
       profile: { stylePersonalities: ["effortlessly-chic", "feminine"] },
     },
     {
+      // Redesigned 2026-08-24 as a relaxed bomber (was a fitted, waist-shaping jacket) —
+      // scenario rebuilt around its new relaxed/more-coverage SMCM, not the old waist-def profile.
       handle: "leather-suede-jacket",
-      session: makeSession({ moods: ["feeling-low", "overwhelmed"], desiredFeelings: ["more-powerful", "more-put-together"], bodyNeeds: ["elongates", "waist-definition"], occasion: "work", formalityConditional: "formality-polished", practicalIds: ["practical-footwear", "quick-to-style"] }),
-      profile: { stylePersonalities: ["corporate-chic"] },
+      session: makeSession({ moods: ["need-reset", "overwhelmed"], desiredFeelings: ["more-effortless", "more-confident"], bodyNeeds: ["relaxed", "more-coverage"], occasion: "girls-night", practicalIds: ["quick-to-style"] }),
+      profile: { stylePersonalities: ["effortlessly-chic", "artsy"] },
     },
     {
       handle: "midi-dress",
@@ -1503,13 +1519,21 @@ describe("§12  Closet anchor compatibility evaluation", () => {
       // dual-mood + waist-definition used instead of confident+adventurous.
       { handle: "double-top",          session: makeSession({ moods: ["confident", "feel-good"], desiredFeelings: ["more-feminine"], bodyNeeds: ["waist-definition"], occasion: "girls-night" }),          profile: { stylePersonalities: ["feminine"] } },
       { handle: "collar-shirt",         session: makeSession({ moods: ["tired"], desiredFeelings: ["more-put-together"], occasion: "work", formalityConditional: "formality-smart", practicalIds: ["quick-to-style"] }), profile: { stylePersonalities: ["corporate-chic"] } },
-      { handle: "cropped-top",          session: makeSession({ moods: ["confident", "adventurous"], desiredFeelings: ["more-confident", "more-attractive"], occasion: "everyday", practicalIds: ["day-to-night"] }), profile: { stylePersonalities: ["artsy", "edgy"] } },
+      // "adventurous" is now exclusive to draped-leather-pants (was cropped-top's discriminator
+      // before the 2026-08-24 reconciliation removed that product).
+      { handle: "draped-leather-pants", session: makeSession({ moods: ["confident", "adventurous"], desiredFeelings: ["more-confident", "more-elevated"], occasion: "everyday", practicalIds: ["day-to-night"] }), profile: { stylePersonalities: ["edgy", "artsy"] } },
+      // A "day-to-day" typo briefly present in this product's own occasionTags (should read
+      // "everyday") caused a 3-way tie with oversized-blazer/draped-leather-pants under
+      // occasion=everyday — corrected in the workbook same day (2026-08-24).
       { handle: "asymmetrical-pants",   session: makeSession({ moods: ["confident", "powerful"], desiredFeelings: ["more-powerful", "more-put-together"], bodyNeeds: ["elongates", "balances", "structured"], occasion: "everyday" }), profile: { stylePersonalities: ["edgy"] } },
-      { handle: "straight-pants",       session: makeSession({ moods: ["feel-good"], desiredFeelings: ["more-effortless", "more-elevated"], bodyNeeds: ["relaxed", "comfortable-elevated"], occasion: "travel", practicalIds: ["lots-of-movement"] }), profile: { stylePersonalities: ["effortlessly-chic"] } },
+      // structured+relaxed+elongates SMCM combo is unique to oversized-blazer.
+      { handle: "oversized-blazer",     session: makeSession({ moods: ["tired"], desiredFeelings: ["more-powerful", "more-effortless"], bodyNeeds: ["structured", "relaxed", "elongates"], occasion: "work", formalityConditional: "formality-polished" }), profile: { stylePersonalities: ["corporate-chic", "effortlessly-chic"] } },
       { handle: "suede-skirt",          session: makeSession({ moods: ["romantic"], desiredFeelings: ["more-feminine", "more-attractive"], occasion: "date-night", formalityConditional: "formality-polished", practicalIds: ["long-day"] }), profile: { stylePersonalities: ["feminine", "romantic"] } },
       { handle: "trench-coat",          session: makeSession({ moods: ["need-reset", "tired"], desiredFeelings: ["more-put-together", "more-elevated"], bodyNeeds: ["more-coverage", "elongates"], coverageConditional: "coverage-non-negotiable", occasion: "special-event", formalityConditional: "formality-polished", practicalIds: ["movement-friendly"] }), profile: { stylePersonalities: ["corporate-chic"] } },
       { handle: "kimono-jacket",        session: makeSession({ moods: ["romantic", "need-reset"], desiredFeelings: ["more-effortless", "more-feminine"], bodyNeeds: ["waist-definition", "relaxed"], occasion: "everyday", practicalIds: ["quick-to-style"] }), profile: { stylePersonalities: ["effortlessly-chic", "feminine"] } },
-      { handle: "leather-suede-jacket", session: makeSession({ moods: ["feeling-low", "overwhelmed"], desiredFeelings: ["more-powerful", "more-put-together"], bodyNeeds: ["elongates", "waist-definition"], occasion: "work", formalityConditional: "formality-polished", practicalIds: ["practical-footwear", "quick-to-style"] }), profile: { stylePersonalities: ["corporate-chic"] } },
+      // Redesigned 2026-08-24 as a relaxed bomber (was a fitted, waist-shaping jacket) —
+      // scenario rebuilt around its new relaxed/more-coverage SMCM, not the old waist-def profile.
+      { handle: "leather-suede-jacket", session: makeSession({ moods: ["need-reset", "overwhelmed"], desiredFeelings: ["more-effortless", "more-confident"], bodyNeeds: ["relaxed", "more-coverage"], occasion: "girls-night", practicalIds: ["quick-to-style"] }), profile: { stylePersonalities: ["effortlessly-chic", "artsy"] } },
       { handle: "midi-dress",           session: makeSession({ moods: ["tired", "low-energy"], desiredFeelings: ["more-feminine", "more-attractive"], bodyNeeds: ["waist-definition", "balances"], coverageConditional: "coverage-non-negotiable", occasion: "date-night", formalityConditional: "formality-smart", practicalIds: ["quick-to-style"] }), profile: { stylePersonalities: ["feminine"] } },
       { handle: "dress-set",            session: makeSession({ moods: ["confident", "powerful"], desiredFeelings: ["more-confident", "more-powerful", "more-feminine"], occasion: "girls-night", formalityConditional: "formality-occasion" }), profile: { stylePersonalities: ["feminine", "trendy"] } },
     ] as const;
@@ -1911,8 +1935,8 @@ describe("§15  Valid representative matrix (≥120 valid sessions) — certific
     { label: "VI.nadine-midi",     session: makeValidSession({ moods: ["romantic"], desiredFeelings: ["more-feminine"], occasion: "date-night", formalityConditional: "formality-smart" }), profile: { stylePersonalities: ["feminine"] }, anchor: { type: "nadine" as const, handle: "midi-dress" } },
     { label: "VI.nadine-trench",   session: makeValidSession({ moods: ["powerful"], desiredFeelings: ["more-confident"], bodyNeeds: ["more-coverage"], occasion: "special-event", formalityConditional: "formality-occasion" }), profile: { stylePersonalities: ["corporate-chic"] }, anchor: { type: "nadine" as const, handle: "trench-coat" } },
     { label: "VI.nadine-asym",     session: makeValidSession({ moods: ["confident"], desiredFeelings: ["more-elevated"], bodyNeeds: ["elongates"], occasion: "work" }),                    profile: { stylePersonalities: ["edgy"] },           anchor: { type: "nadine" as const, handle: "asymmetrical-pants" } },
-    { label: "VI.nadine-cropped",  session: makeValidSession({ moods: ["adventurous"], desiredFeelings: ["more-attractive"], occasion: "girls-night" }),                                       profile: { stylePersonalities: ["trendy"] },          anchor: { type: "nadine" as const, handle: "cropped-top" } },
-    { label: "VI.nadine-linen",    session: makeValidSession({ moods: ["feel-good"], desiredFeelings: ["more-effortless"], bodyNeeds: ["relaxed"], occasion: "travel" }),                   profile: { stylePersonalities: ["effortlessly-chic"] }, anchor: { type: "nadine" as const, handle: "straight-pants" } },
+    { label: "VI.nadine-free",     session: makeValidSession({ moods: ["adventurous"], desiredFeelings: ["more-attractive"], occasion: "girls-night" }),                                       profile: { stylePersonalities: ["trendy"] },          anchor: { type: "nadine" as const, handle: "draped-leather-pants" } },
+    { label: "VI.nadine-bold",     session: makeValidSession({ moods: ["feel-good"], desiredFeelings: ["more-effortless"], bodyNeeds: ["relaxed"], occasion: "travel" }),                   profile: { stylePersonalities: ["effortlessly-chic"] }, anchor: { type: "nadine" as const, handle: "oversized-blazer" } },
 
     // ── Group VM: multi-signal rich scenarios (30) ───────────────────────────
     { label: "VM.1",  session: makeValidSession({ moods: ["confident","powerful"], desiredFeelings: ["more-elevated","more-confident"], bodyNeeds: ["structured"], occasion: "work",       formalityConditional: "formality-polished" }),                           profile: { stylePersonalities: ["edgy","artsy"] } },
@@ -2112,9 +2136,11 @@ describe("§15  Valid representative matrix (≥120 valid sessions) — certific
 // output (ranking / evidence). Each test isolates one profile field against a
 // controlled baseline session where that field is the only difference.
 //
-// Catalog facts used (from generated catalog, verified):
+// Catalog facts used (from generated catalog, verified 2026-08-24 post-reconciliation):
 //   collar-shirt:  desiredFeelingMatch includes "more-put-together"; occasionTags includes "work"
-//   straight-pants: styleMeComfortMatch includes "relaxed"; occasionTags "dinner,date-night,travel,special-event"
+//   suede-skirt:   desiredFeelingMatch lacks "more-put-together" (has feminine/attractive/elevated/confident)
+//   leather-suede-jacket: styleMeComfortMatch includes "relaxed" (bomber redesign); occasionTags "everyday,dinner,girls-night,travel"
+//   midi-dress:    occasionTags "dinner,date-night,girls-night,special-event" — no "work"
 //   kimono-jacket:  styleMeComfortMatch includes "relaxed"; occasionTags includes "everyday"
 //
 // Session baseline: occasion="dinner" (all 11 products match → +4 each); no mood/DFM/body signals.
@@ -2150,19 +2176,19 @@ describe("§16  Profile signal influence tests", () => {
     assert.equal(entry.points, SCORING_WEIGHTS.RANK);
   });
 
-  it("16.1b  profile.desiredFeelings does not score asymmetrical-pants for \"put-together\" (no more-put-together)", () => {
+  it("16.1b  profile.desiredFeelings does not score suede-skirt for \"put-together\" (no more-put-together)", () => {
     // asymmetrical-pants has "more-put-together" in DFM — same as collar-shirt — this test
     // ensures products WITHOUT the token get no bonus
     const without = run(dinnerSession);
     const withProfile = run(dinnerSession, { desiredFeelings: ["put-together"] });
 
-    // straight-pants has desiredFeelingMatch: "more-elevated, more-confident, more-effortless, more-attractive"
+    // suede-skirt has desiredFeelingMatch: "more-feminine, more-attractive, more-elevated, more-confident"
     // — does NOT have "more-put-together"
-    const evWithout = findEval(without, "straight-pants");
-    const evWith   = findEval(withProfile, "straight-pants");
+    const evWithout = findEval(without, "suede-skirt");
+    const evWith   = findEval(withProfile, "suede-skirt");
 
     assert.equal(evWith.totalScore, evWithout.totalScore,
-      "straight-pants lacks more-put-together — score must not change");
+      "suede-skirt lacks more-put-together — score must not change");
   });
 
   // ── 16.2  profile.desiredFeelings does NOT double-score when session covers it ─
@@ -2186,17 +2212,17 @@ describe("§16  Profile signal influence tests", () => {
 
   // ── 16.3  profile.fitPreferences adds RANK to matching SMCM token ────────────
 
-  it("16.3  profile.fitPreferences=\"relaxed-fits\" adds RANK=2 to straight-pants (has \"relaxed\" in SMCM)", () => {
+  it("16.3  profile.fitPreferences=\"relaxed-fits\" adds RANK=2 to leather-suede-jacket (has \"relaxed\" in SMCM)", () => {
     const without = run(dinnerSession);
     const withProfile = run(dinnerSession, { fitPreferences: ["relaxed-fits"] });
 
-    const evWithout = findEval(without,    "straight-pants");
-    const evWith   = findEval(withProfile, "straight-pants");
+    const evWithout = findEval(without,    "leather-suede-jacket");
+    const evWith   = findEval(withProfile, "leather-suede-jacket");
 
     assert.equal(
       evWith.totalScore - evWithout.totalScore,
       SCORING_WEIGHTS.RANK,
-      "profile-fit-preference should add RANK=2 to straight-pants",
+      "profile-fit-preference should add RANK=2 to leather-suede-jacket",
     );
 
     const entry = evWith.positiveEvidence.find((e) => e.sessionSignal === "profile-fit-preference");
@@ -2229,8 +2255,8 @@ describe("§16  Profile signal influence tests", () => {
     const sessionOnly = run(sessionWithBodyNeed);
     const sessionAndProfile = run(sessionWithBodyNeed, { fitPreferences: ["relaxed-fits"] });
 
-    const scoreOnly = findEval(sessionOnly,       "straight-pants").totalScore;
-    const scoreBoth = findEval(sessionAndProfile, "straight-pants").totalScore;
+    const scoreOnly = findEval(sessionOnly,       "leather-suede-jacket").totalScore;
+    const scoreBoth = findEval(sessionAndProfile, "leather-suede-jacket").totalScore;
 
     assert.equal(scoreOnly, scoreBoth,
       "profile-fit-preference must not double-score when session bodyNeeds already matched the same SMCM token");
@@ -2243,13 +2269,13 @@ describe("§16  Profile signal influence tests", () => {
     const profileOne = run(dinnerSession, { fitPreferences: ["relaxed-fits"] });
     const profileTwo = run(dinnerSession, { fitPreferences: ["relaxed-fits", "flowy"] });
 
-    const scoreOne = findEval(profileOne, "straight-pants").totalScore;
-    const scoreTwo = findEval(profileTwo, "straight-pants").totalScore;
+    const scoreOne = findEval(profileOne, "leather-suede-jacket").totalScore;
+    const scoreTwo = findEval(profileTwo, "leather-suede-jacket").totalScore;
 
     assert.equal(scoreOne, scoreTwo,
       "relaxed-fits + flowy both map to relaxed — must score exactly once (deduplicated)");
 
-    const fitEntries = findEval(profileTwo, "straight-pants")
+    const fitEntries = findEval(profileTwo, "leather-suede-jacket")
       .positiveEvidence.filter((e) => e.sessionSignal === "profile-fit-preference");
     assert.equal(fitEntries.length, 1,
       "exactly one profile-fit-preference entry for the deduplicated SMCM token");
@@ -2276,16 +2302,16 @@ describe("§16  Profile signal influence tests", () => {
     assert.equal(entry.points, SCORING_WEIGHTS.RANK);
   });
 
-  it("16.6b  profile.lifestyle does not score straight-pants for \"office\" (no \"work\" tag)", () => {
-    // straight-pants occasionTags: "dinner, date-night, special-event, travel" — no "work"
+  it("16.6b  profile.lifestyle does not score midi-dress for \"office\" (no \"work\" tag)", () => {
+    // midi-dress occasionTags: "dinner, date-night, girls-night, special-event" — no "work"
     const without = run(dinnerSession);
     const withProfile = run(dinnerSession, { lifestyle: ["office"] });
 
-    const evWithout = findEval(without,    "straight-pants");
-    const evWith   = findEval(withProfile, "straight-pants");
+    const evWithout = findEval(without,    "midi-dress");
+    const evWith   = findEval(withProfile, "midi-dress");
 
     assert.equal(evWith.totalScore, evWithout.totalScore,
-      "straight-pants lacks work tag — profile-lifestyle must not score it");
+      "midi-dress lacks work tag — profile-lifestyle must not score it");
   });
 
   // ── 16.7  profile.lifestyle does NOT double-score when token equals session occasion ─
@@ -2390,9 +2416,9 @@ describe("§V2-A2 quiz-data label contract — becoming and style-support", () =
 //                     ESS: confident, powerful, feel-good, playful (catalog unchanged —
 //                          playful->adventurous mood rename NOT migrated for this product)
 //                     occasionTags: dinner, date-night, girls-night, special-event
-//   straight-pants    DFM: more-elevated, more-confident, more-effortless, more-attractive
-//                     SP:  artsy, effortlessly-chic, edgy
-//                     occasionTags: dinner, date-night, special-event, travel
+//   oversized-blazer  DFM: more-powerful, more-put-together, more-elevated, more-effortless
+//                     SP:  corporate-chic, effortlessly-chic, edgy
+//                     occasionTags: work, dinner, everyday, special-event (no girls-night)
 //   kimono-jacket     DFM: more-effortless, more-elevated, more-feminine, more-confident
 //                     SP:  artsy, effortlessly-chic, feminine
 //                     occasionTags: everyday, dinner, travel, special-event
@@ -2509,12 +2535,12 @@ describe("§V2-A3 Profile Aspiration — desiredImpression + becoming", () => {
   });
 
   it("V2A3.8 — SP effortlessly-chic already matched + becoming more-effortless → no extra aspiration point", () => {
-    // straight-pants has "effortlessly-chic" in SP → §7 scores → concept "effortless" in scoredConcepts
+    // oversized-blazer has "effortlessly-chic" in SP → §7 scores → concept "effortless" in scoredConcepts
     const result = run(
       makeSession({ moods: ["confident"], occasion: "girls-night" }),
       { stylePersonalities: ["effortlessly-chic"], becoming: ["more-effortless"] },
     );
-    const ev = findEv(result, "straight-pants");
+    const ev = findEv(result, "oversized-blazer");
     assert.equal(aspirationEvidence(ev).length, 0, "effortless concept already scored via SP");
     assert.equal(ev.totalScore, 6); // 4 ESS + 2 SP (Step 2A: RANK, not STRONG_RANK) + 0 aspiration
   });

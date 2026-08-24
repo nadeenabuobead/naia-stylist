@@ -127,13 +127,13 @@ export type EligibilityState =
 export const PRODUCT_ELIGIBILITY: Record<string, EligibilityState> = {
   "double-top": "unverified",
   "collar-shirt": "unverified",
-  "cropped-top": "unverified",
   "asymmetrical-pants": "unverified",
-  "straight-pants": "unverified",
+  "draped-leather-pants": "unverified",
   "suede-skirt": "unverified",
   "trench-coat": "unverified",
   "kimono-jacket": "unverified",
   "leather-suede-jacket": "unverified",
+  "oversized-blazer": "unverified",
   "midi-dress": "unverified",
   "dress-set": "unverified",
 };
@@ -1547,32 +1547,11 @@ const NEUTRAL_IDS = new Set<string>([
 
 export const PROVISIONAL_EVIDENCE: readonly ProductFieldEvidence[] = [
   {
-    productHandle: "collar-shirt",
-    field: PRODUCT_TEMPLATE_FIELDS.PRACTICAL_SUPPORT_MATCH,
-    canonicalValue: "long-day",
-    evidenceStatus: "provisional",
-    provisionalNote: "Collar/shoulder/extended wear sample pending",
-  },
-  {
     productHandle: "asymmetrical-pants",
     field: PRODUCT_TEMPLATE_FIELDS.STYLING_EFFORT_LEVEL,
     canonicalValue: "medium",
     evidenceStatus: "provisional",
     provisionalNote: "Acknowledged by product owner; no specific sample blocker",
-  },
-  {
-    productHandle: "straight-pants",
-    field: PRODUCT_TEMPLATE_FIELDS.PRACTICAL_SUPPORT_MATCH,
-    canonicalValue: "movement-friendly",
-    evidenceStatus: "provisional",
-    provisionalNote: "Vegan-leather inner trouser sitting/walking comfort sample pending",
-  },
-  {
-    productHandle: "straight-pants",
-    field: PRODUCT_TEMPLATE_FIELDS.PRACTICAL_SUPPORT_MATCH,
-    canonicalValue: "long-day",
-    evidenceStatus: "provisional",
-    provisionalNote: "Same sample as movement-friendly",
   },
   {
     productHandle: "suede-skirt",
@@ -1624,13 +1603,6 @@ export const PROVISIONAL_EVIDENCE: readonly ProductFieldEvidence[] = [
     provisionalNote: "Shoulder/body/sitting comfort and back-tie pre-set pending",
   },
   {
-    productHandle: "leather-suede-jacket",
-    field: PRODUCT_TEMPLATE_FIELDS.PRACTICAL_SUPPORT_MATCH,
-    canonicalValue: "long-day",
-    evidenceStatus: "provisional",
-    provisionalNote: "Same sample as quick-to-style",
-  },
-  {
     productHandle: "midi-dress",
     field: PRODUCT_TEMPLATE_FIELDS.CURRENT_EMOTIONAL_STATE_SUPPORT,
     canonicalValue: "tired",
@@ -1643,20 +1615,6 @@ export const PROVISIONAL_EVIDENCE: readonly ProductFieldEvidence[] = [
     canonicalValue: "low-energy",
     evidenceStatus: "provisional",
     provisionalNote: "Same sample as tired",
-  },
-  {
-    productHandle: "midi-dress",
-    field: PRODUCT_TEMPLATE_FIELDS.PRACTICAL_SUPPORT_MATCH,
-    canonicalValue: "movement-friendly",
-    evidenceStatus: "provisional",
-    provisionalNote: "Movement sample pending",
-  },
-  {
-    productHandle: "midi-dress",
-    field: PRODUCT_TEMPLATE_FIELDS.PRACTICAL_SUPPORT_MATCH,
-    canonicalValue: "day-to-night",
-    evidenceStatus: "provisional",
-    provisionalNote: "Daytime Occasion conflict unresolved",
   },
   {
     productHandle: "dress-set",

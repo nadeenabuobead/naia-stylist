@@ -198,9 +198,9 @@ describe("ELIGIBILITY_STATES — tri-state", () => {
 
 describe("PRODUCT_ELIGIBILITY — all 11 V7 products unverified", () => {
   const V7_HANDLES = [
-    "double-top", "collar-shirt", "cropped-top", "asymmetrical-pants",
-    "straight-pants", "suede-skirt", "trench-coat", "kimono-jacket",
-    "leather-suede-jacket", "midi-dress", "dress-set",
+    "double-top", "collar-shirt", "asymmetrical-pants", "draped-leather-pants",
+    "suede-skirt", "trench-coat", "kimono-jacket", "leather-suede-jacket",
+    "oversized-blazer", "midi-dress", "dress-set",
   ];
 
   it("has all 11 V7 product handles", () => {
@@ -1524,13 +1524,18 @@ describe("API utility functions", () => {
 
 describe("PROVISIONAL_EVIDENCE", () => {
   const V7_HANDLES = new Set([
-    "double-top", "collar-shirt", "cropped-top", "asymmetrical-pants",
-    "straight-pants", "suede-skirt", "trench-coat", "kimono-jacket",
-    "leather-suede-jacket", "midi-dress", "dress-set",
+    "double-top", "collar-shirt", "asymmetrical-pants", "draped-leather-pants",
+    "suede-skirt", "trench-coat", "kimono-jacket", "leather-suede-jacket",
+    "oversized-blazer", "midi-dress", "dress-set",
   ]);
 
-  it("has exactly 17 entries", () => {
-    assert.equal(PROVISIONAL_EVIDENCE.length, 17);
+  it("has exactly 11 entries", () => {
+    // Updated 2026-08-24: was 17. 6 entries removed during collection reconciliation —
+    // 2 for straight-pants (product removed), 1 for collar-shirt long-day and 1 for
+    // leather-suede-jacket long-day (practicalSupportMatch no longer includes long-day
+    // for either), 2 for midi-dress movement-friendly/day-to-night (practicalSupportMatch
+    // simplified to just quick-to-style). See naia-catalog.test.ts test 19.
+    assert.equal(PROVISIONAL_EVIDENCE.length, 11);
   });
 
   it("all entries use verified V7 product handles", () => {
@@ -1579,13 +1584,10 @@ describe("PROVISIONAL_EVIDENCE", () => {
     assert.equal(e.canonicalValue, "high");
   });
 
-  it("includes collar-shirt PSM long-day", () => {
-    const e = PROVISIONAL_EVIDENCE.find(
-      (e) => e.productHandle === "collar-shirt" && e.field === PTF.PRACTICAL_SUPPORT_MATCH
-    );
-    assert.ok(e);
-    assert.equal(e.canonicalValue, "long-day");
-  });
+  // "includes collar-shirt PSM long-day" removed 2026-08-24: collar-shirt's
+  // practicalSupportMatch no longer includes long-day in the reconciled workbook,
+  // so this provisional entry was removed (see naia-catalog.test.ts test 19) and
+  // collar-shirt now has zero PROVISIONAL_EVIDENCE entries.
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

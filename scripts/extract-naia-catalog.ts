@@ -35,12 +35,17 @@ const WORKBOOK_PATH = resolve(
   "../.claude/reference/styleme/PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx",
 );
 const EXPECTED_SHA256 =
-  "3f019293f5d451d5950ca7ee5bd0f46b95a0fcbb3b5da8945d8666d7270fc85c";
-// Updated 2026-08-24: Becoming Fragmented's Current Emotional State Support
-// field (row 135) and its Emotional Support Logic explanation (row 136) were
-// corrected in the source workbook — playful -> adventurous, matching the
-// StyleMe Mood option rename. All other rows unchanged. See commit history
-// for the audit that established only this product qualifies.
+  "60af557f9b1b670aedeb734da49dc6e57a1eea66f70ece265273eafa987277bf";
+// Updated 2026-08-24: collection reconciliation. Becoming Fragmented (cropped-top)
+// and Becoming Unfiltered (straight-pants) removed; Becoming Bold (oversized-blazer)
+// and Becoming Free (draped-leather-pants) added; Becoming Clear (leather-suede-jacket)
+// redesigned as a bomber. Workbook no longer populates "Emotional Support Logic" /
+// "Practical Support Logic" for any product (see OPTIONAL_KEYS below) and mixes
+// "Formality Score" / "Formality Level" as labels for the same field across products
+// (see the formality-level alias in LABEL_TO_KEY below).
+// Updated again same day: asymmetrical-pants' Occasion tags cell had "day-to-day"
+// (not a valid StyleMe occasion ID) corrected to "everyday" — single shared-string
+// edit, surgical (all other archive members byte-identical to the prior version).
 const OUTPUT_PATH = resolve(
   __dirname,
   "../app/lib/ai/generated/naia-catalog.generated.ts",
@@ -92,6 +97,7 @@ LABEL_TO_KEY = {
     "occasion tags": "occasionTags",
     "product style descriptors": "productStyleDescriptors",
     "formality score": "formalityScore",
+    "formality level": "formalityScore",
     "formality description": "formalityDescription",
     "season": "season",
     "body/fit logic": "bodyFitLogic",
@@ -140,6 +146,11 @@ CANONICAL_ORDER = [
     "hairStylingNote", "styleMeExplanation",
 ]
 CANONICAL_KEYS = set(CANONICAL_ORDER)
+
+# No longer populated in any V8 product block (workbook restructured 2026-08-24
+# to drop the reasoning-essay columns). Extraction tolerates their absence and
+# defaults to "" rather than treating them as required.
+OPTIONAL_KEYS = {"emotionalSupportLogic", "practicalSupportLogic"}
 
 def norm(label):
     s = label.strip().lower()
@@ -220,17 +231,18 @@ def extract(col_a, col_b):
                 )
             found[key] = r
 
-        missing = CANONICAL_KEYS - set(found.keys())
+        missing = CANONICAL_KEYS - OPTIONAL_KEYS - set(found.keys())
         if missing:
             raise ValueError(
-                f"Product {i+1}: missing fields: {sorted(missing)}"
+                f"Product {i+1}: missing required fields: {sorted(missing)}"
             )
-        if len(found) != 46:
+        expected_count = 46 - len(OPTIONAL_KEYS - set(found.keys()))
+        if len(found) != expected_count:
             raise ValueError(
-                f"Product {i+1}: {len(found)} fields found, expected 46"
+                f"Product {i+1}: {len(found)} fields found, expected {expected_count}"
             )
 
-        raw = {k: col_b.get(found[k], "") for k in CANONICAL_ORDER}
+        raw = {k: col_b.get(found.get(k), "") for k in CANONICAL_ORDER}
         products.append(raw)
 
     return products

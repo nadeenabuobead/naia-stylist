@@ -937,7 +937,7 @@ describe("§14 Full pipeline — naia-piece source", () => {
   it("PL.3 — naia-piece: nadine-recommendation primary is not the anchor handle (cannot recommend itself)", async () => {
     // Run with each V8 handle as the anchor and verify the primary (if any) differs
     const handles = [
-      "collar-shirt", "midi-dress", "cropped-top", "straight-pants", "suede-skirt",
+      "collar-shirt", "midi-dress", "draped-leather-pants", "oversized-blazer", "suede-skirt",
     ];
     for (const handle of handles) {
       const engineInput = buildEngineInput({

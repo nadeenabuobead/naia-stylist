@@ -12,13 +12,13 @@ import type { ClosetAnchorInput } from "./styleme-recommendation.types.ts";
 const V8_HANDLES = [
   "double-top",
   "collar-shirt",
-  "cropped-top",
   "asymmetrical-pants",
-  "straight-pants",
+  "draped-leather-pants",
   "suede-skirt",
   "trench-coat",
   "kimono-jacket",
   "leather-suede-jacket",
+  "oversized-blazer",
   "midi-dress",
   "dress-set",
 ];
