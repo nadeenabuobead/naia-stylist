@@ -21,6 +21,9 @@ import {
   PSM_NORMALIZATION_MAP,
   PSM_SUPPLEMENTAL_PRODUCT_TOKENS,
   PROFILE_DESIRED_FEELING_TRANSLATION,
+  PROFILE_SILHOUETTE_SMCM_MAP,
+  PROFILE_COVERAGE_PREFERRED_VALUE,
+  PROFILE_COVERAGE_MULTI_IDS,
   STYLING_EFFORT_RULE,
   DUAL_MOOD_BONUS,
   ANSWER_REGISTRY,
@@ -259,10 +262,11 @@ describe("SESSION_QUESTIONS — structure and order", () => {
     assert.equal(q.maxSelections, 2);
   });
 
-  it("BODY_NEEDS has maxSelections=3", () => {
+  it("BODY_NEEDS has maxSelections=2", () => {
+    // Step 2A: "Fit & Feel" group cap, independent of the Practical group's own 2-cap.
     const q = SESSION_QUESTIONS.find((q) => q.id === SQ.BODY_NEEDS);
     assert.ok(q);
-    assert.equal(q.maxSelections, 3);
+    assert.equal(q.maxSelections, 2);
   });
 
   it("TODAY_COLOURS has maxSelections=null (free-form)", () => {
@@ -271,10 +275,11 @@ describe("SESSION_QUESTIONS — structure and order", () => {
     assert.equal(q.maxSelections, null);
   });
 
-  it("PRACTICAL_PLANNING has maxSelections=3", () => {
+  it("PRACTICAL_PLANNING has maxSelections=2", () => {
+    // Step 2A: "Practical Today" group cap, independent of the Fit & Feel group's own 2-cap.
     const q = SESSION_QUESTIONS.find((q) => q.id === SQ.PRACTICAL_PLANNING);
     assert.ok(q);
-    assert.equal(q.maxSelections, 3);
+    assert.equal(q.maxSelections, 2);
   });
 
   it("SOURCE has maxSelections=1", () => {
@@ -694,12 +699,16 @@ describe("Session Desired Feeling — answer behaviours", () => {
     });
   }
 
-  it("softer → EXPLANATION_ONLY + PAIRING (no product has softer in DFM)", () => {
+  it("softer → STRONG_RANK against desiredFeelingMatch (Step 2A: real signal, not explanation-only)", () => {
+    // No catalog product carries "softer" in desiredFeelingMatch yet — catalog
+    // retagging is a separate controlled step — but the mapping mechanism itself
+    // is now a genuine DFM signal, same as every other Feeling option.
     const m = getMappingsByIdAndQuestion("softer", SQ.DESIRED_FEELING);
     assert.ok(m);
-    assert.ok(m.behaviours.includes(B.EXPLANATION_ONLY));
-    assert.ok(m.behaviours.includes(B.PAIRING));
-    assert.ok(!m.behaviours.includes(B.STRONG_RANK));
+    assert.ok(m.behaviours.includes(B.STRONG_RANK));
+    assert.ok(m.activatedFields.includes(PTF.DESIRED_FEELING_MATCH));
+    assert.ok(!m.behaviours.includes(B.EXPLANATION_ONLY));
+    assert.ok(!m.behaviours.includes(B.PAIRING));
     assert.ok(!m.behaviours.includes(B.HARD_FILTER));
   });
 
@@ -1101,10 +1110,16 @@ describe("Profile Style Personalities — approved 10-ID vocabulary", () => {
   });
 
   for (const id of APPROVED_SP_IDS) {
-    it(`${id} → STRONG_RANK against stylePersonalityMatch`, () => {
+    it(`${id} → SOFT_RANK against stylePersonalityMatch (Step 2A: demoted from STRONG_RANK)`, () => {
+      // Declarative tier matches every other Passport background signal in this
+      // file (Fit Preferences, Desired Feelings, Lifestyle, Desired Impression
+      // all use SOFT_RANK here). Engine-side numeric weight is SCORING_WEIGHTS.RANK
+      // — see styleme-recommendation.ts §7. Passport background preferences must
+      // not outweigh today's explicit session-specific StyleMe answers.
       const m = getMappingsByIdAndQuestion(id, PQ.STYLE_PERSONALITIES);
       assert.ok(m, `Missing mapping: ${id}`);
-      assert.ok(m.behaviours.includes(B.STRONG_RANK), `${id} must be STRONG_RANK`);
+      assert.ok(m.behaviours.includes(B.SOFT_RANK), `${id} must be SOFT_RANK`);
+      assert.ok(!m.behaviours.includes(B.STRONG_RANK), `${id} must NOT be STRONG_RANK`);
       assert.ok(m.activatedFields.includes(PTF.STYLE_PERSONALITY_MATCH), `${id} must activate STYLE_PERSONALITY_MATCH`);
     });
   }
@@ -1189,6 +1204,66 @@ describe("Profile Fit Preferences — via SMCM/BPE, NOT silhouette/fit", () => {
     const m = getMappingsByIdAndQuestion("coverage", PQ.FIT_PREFERENCES);
     assert.ok(m?.activatedFields.includes(PTF.STYLE_ME_COMFORT_MATCH));
     assert.ok(m?.activatedFields.includes(PTF.COVERAGE_MODESTY));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 19b. Profile Silhouette / Coverage — Step 2A background mappings
+// Only semantically exact pairs are mapped. Unsupported signals stay unused
+// rather than being approximated onto a nearby token.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Profile Silhouette — approved mappings only", () => {
+  const approved: Array<[string, string]> = [
+    ["defined-waist", "waist-definition"],
+    ["oversized", "relaxed"],
+    ["flowing", "relaxed"],
+    ["relaxed", "relaxed"],
+  ];
+
+  for (const [id, target] of approved) {
+    it(`${id} → ${target}`, () => {
+      assert.equal(PROFILE_SILHOUETTE_SMCM_MAP[id], target);
+    });
+  }
+
+  it("has exactly 4 approved entries", () => {
+    assert.equal(Object.keys(PROFILE_SILHOUETTE_SMCM_MAP).length, 4);
+  });
+
+  it("does NOT map straight or fitted (no semantically exact target exists)", () => {
+    assert.equal(PROFILE_SILHOUETTE_SMCM_MAP["straight"], undefined);
+    assert.equal(PROFILE_SILHOUETTE_SMCM_MAP["fitted"], undefined);
+  });
+});
+
+describe("Profile Coverage — approved background support for more-coverage", () => {
+  it("preferredCoverage single-select target is 'mostly-covered'", () => {
+    assert.equal(PROFILE_COVERAGE_PREFERRED_VALUE, "mostly-covered");
+  });
+
+  it("coveragePreferences multi-select approved IDs are sleeves-preferred and longer-hemlines only", () => {
+    assert.equal(PROFILE_COVERAGE_MULTI_IDS.size, 2);
+    assert.ok(PROFILE_COVERAGE_MULTI_IDS.has("sleeves-preferred"));
+    assert.ok(PROFILE_COVERAGE_MULTI_IDS.has("longer-hemlines"));
+  });
+
+  it("does NOT include open-necklines or cropped (no 'less coverage' target exists)", () => {
+    assert.ok(!PROFILE_COVERAGE_MULTI_IDS.has("open-necklines"));
+    assert.ok(!PROFILE_COVERAGE_MULTI_IDS.has("cropped"));
+  });
+});
+
+describe("Forbidden approximate Passport mappings — must remain unused", () => {
+  it("Trend Appetite has no mapping to 'edgy' or 'trendy' anywhere in the signal contract", () => {
+    // Trend Appetite is not wired to any product field in Step 2A — there is no
+    // TREND_APPETITE-related export to check a mapping on. This test documents
+    // the absence: neither PROFILE_SILHOUETTE_SMCM_MAP nor PROFILE_FIT_PREFERENCE_SMCM_MAP
+    // (the only two Passport→SMCM lookup tables) contain "edgy" or universal "trendy"
+    // as a value, confirming no approximate style-tag mapping was introduced.
+    const silhouetteValues = Object.values(PROFILE_SILHOUETTE_SMCM_MAP);
+    assert.ok(!silhouetteValues.includes("edgy"));
+    assert.ok(!silhouetteValues.includes("trendy"));
   });
 });
 
@@ -1398,8 +1473,8 @@ describe("API utility functions", () => {
 
   it("getBehaviours returns correct behaviours", () => {
     const softerB = getBehaviours("softer");
-    assert.ok(softerB.includes(B.EXPLANATION_ONLY));
-    assert.ok(softerB.includes(B.PAIRING));
+    assert.ok(softerB.includes(B.STRONG_RANK));
+    assert.ok(!softerB.includes(B.EXPLANATION_ONLY));
   });
 
   it("getBehaviours returns [] for unknown ID", () => {

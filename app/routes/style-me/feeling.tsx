@@ -76,7 +76,7 @@ export default function StyleMeFeeling() {
   return (
     <SmPage backTo="/style-me/mood" step={2}>
       <p className="sm-step-label">Desired Feeling</p>
-      <h1 className="sm-heading">How do you want to feel?</h1>
+      <h1 className="sm-heading">How do you want to feel in your outfit?</h1>
       <p className="sm-sub">Choose up to two — or just one.</p>
 
       <Form method="post">

@@ -220,7 +220,7 @@ export const SESSION_QUESTIONS: SessionQuestion[] = [
   {
     id: SQ.BODY_NEEDS,
     storageKey: "styleMeBodyNeeds",
-    maxSelections: 3,
+    maxSelections: 2,
   },
   {
     id: SQ.COVERAGE_CONDITIONAL,
@@ -257,7 +257,7 @@ export const SESSION_QUESTIONS: SessionQuestion[] = [
   {
     id: SQ.PRACTICAL_PLANNING,
     storageKey: "styleMePractical",
-    maxSelections: 3,
+    maxSelections: 2,
   },
   {
     id: SQ.SOURCE,
@@ -413,6 +413,27 @@ export const PROFILE_FIT_PREFERENCE_SMCM_MAP: Readonly<Record<string, string>> =
   "fitted":        "structured",
   "simple":        "comfortable-elevated",
 };
+
+// Maps Passport Silhouette quiz IDs → styleMeComfortMatch catalog tokens.
+// RANK weight only — softer than session body-need STRONG_RANK.
+// Only the 4 semantically exact pairs are mapped. "straight" and "fitted" are
+// deliberately NOT mapped (no exact target exists yet) — an unsupported
+// signal must stay unused rather than being approximated onto a nearby token.
+export const PROFILE_SILHOUETTE_SMCM_MAP: Readonly<Record<string, string>> = {
+  "defined-waist": "waist-definition",
+  "oversized":     "relaxed",
+  "flowing":       "relaxed",
+  "relaxed":       "relaxed",
+};
+
+// Passport Coverage quiz IDs that softly support the "more-coverage" Body Need.
+// RANK weight only; only applied when the session's own Body Needs did not
+// already provide an explicit coverage answer (see scoreProduct §11.5c).
+export const PROFILE_COVERAGE_PREFERRED_VALUE = "mostly-covered"; // preferredCoverage single-select
+export const PROFILE_COVERAGE_MULTI_IDS: ReadonlySet<string> = new Set([
+  "sleeves-preferred",
+  "longer-hemlines",
+]);
 
 // Maps lifestyle quiz answer IDs → occasionTags catalog tokens.
 // Actual quiz IDs (from quiz-data.ts step 3): office, busy-mom, creative,
@@ -655,15 +676,16 @@ export const ANSWER_REGISTRY: readonly AnswerMapping[] = [
     behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
     rankingWeight: "active",
   },
-  // softer: no product carries "softer" in desiredFeelingMatch.
+  // softer: Step 2A — genuine DFM signal (STRONG_RANK), same mechanism as every
+  // other Feeling option. No catalog product carries "softer" in
+  // desiredFeelingMatch yet — catalog retagging is a separate controlled step —
+  // so this currently scores zero matches in practice, but the mapping itself
+  // is real, not explanation-only.
   {
     id: "softer",
     questionId: SQ.DESIRED_FEELING,
-    activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLEME_EXPLANATION],
-    behaviours: [
-      RECOMMENDATION_BEHAVIOURS.EXPLANATION_ONLY,
-      RECOMMENDATION_BEHAVIOURS.PAIRING,
-    ],
+    activatedFields: [PRODUCT_TEMPLATE_FIELDS.DESIRED_FEELING_MATCH],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
     rankingWeight: "active",
   },
   // like-myself: session Desired Feeling; PROFILE_AMPLIFY — no direct product score.
@@ -1017,70 +1039,130 @@ export const ANSWER_REGISTRY: readonly AnswerMapping[] = [
     id: "old-money",
     questionId: PQ.STYLE_PERSONALITIES,
     activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH],
-    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    // Step 2A: demoted STRONG_RANK → SOFT_RANK (same declarative tier as every
+    // other Passport background signal in this file — Fit Preferences, Desired
+    // Feelings, Lifestyle, Desired Impression). The engine's numeric weight for
+    // this tier is SCORING_WEIGHTS.RANK; see styleme-recommendation.ts §7.
+    // Passport background preferences must not outweigh today's explicit
+    // session-specific StyleMe answers.
+    behaviours: [RECOMMENDATION_BEHAVIOURS.SOFT_RANK],
     rankingWeight: "active",
   },
   {
     id: "artsy",
     questionId: PQ.STYLE_PERSONALITIES,
     activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH],
-    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    // Step 2A: demoted STRONG_RANK → SOFT_RANK (same declarative tier as every
+    // other Passport background signal in this file — Fit Preferences, Desired
+    // Feelings, Lifestyle, Desired Impression). The engine's numeric weight for
+    // this tier is SCORING_WEIGHTS.RANK; see styleme-recommendation.ts §7.
+    // Passport background preferences must not outweigh today's explicit
+    // session-specific StyleMe answers.
+    behaviours: [RECOMMENDATION_BEHAVIOURS.SOFT_RANK],
     rankingWeight: "active",
   },
   {
     id: "edgy",
     questionId: PQ.STYLE_PERSONALITIES,
     activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH],
-    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    // Step 2A: demoted STRONG_RANK → SOFT_RANK (same declarative tier as every
+    // other Passport background signal in this file — Fit Preferences, Desired
+    // Feelings, Lifestyle, Desired Impression). The engine's numeric weight for
+    // this tier is SCORING_WEIGHTS.RANK; see styleme-recommendation.ts §7.
+    // Passport background preferences must not outweigh today's explicit
+    // session-specific StyleMe answers.
+    behaviours: [RECOMMENDATION_BEHAVIOURS.SOFT_RANK],
     rankingWeight: "active",
   },
   {
     id: "feminine",
     questionId: PQ.STYLE_PERSONALITIES,
     activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH],
-    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    // Step 2A: demoted STRONG_RANK → SOFT_RANK (same declarative tier as every
+    // other Passport background signal in this file — Fit Preferences, Desired
+    // Feelings, Lifestyle, Desired Impression). The engine's numeric weight for
+    // this tier is SCORING_WEIGHTS.RANK; see styleme-recommendation.ts §7.
+    // Passport background preferences must not outweigh today's explicit
+    // session-specific StyleMe answers.
+    behaviours: [RECOMMENDATION_BEHAVIOURS.SOFT_RANK],
     rankingWeight: "active",
   },
   {
     id: "corporate-chic",
     questionId: PQ.STYLE_PERSONALITIES,
     activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH],
-    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    // Step 2A: demoted STRONG_RANK → SOFT_RANK (same declarative tier as every
+    // other Passport background signal in this file — Fit Preferences, Desired
+    // Feelings, Lifestyle, Desired Impression). The engine's numeric weight for
+    // this tier is SCORING_WEIGHTS.RANK; see styleme-recommendation.ts §7.
+    // Passport background preferences must not outweigh today's explicit
+    // session-specific StyleMe answers.
+    behaviours: [RECOMMENDATION_BEHAVIOURS.SOFT_RANK],
     rankingWeight: "active",
   },
   {
     id: "effortlessly-chic",
     questionId: PQ.STYLE_PERSONALITIES,
     activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH],
-    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    // Step 2A: demoted STRONG_RANK → SOFT_RANK (same declarative tier as every
+    // other Passport background signal in this file — Fit Preferences, Desired
+    // Feelings, Lifestyle, Desired Impression). The engine's numeric weight for
+    // this tier is SCORING_WEIGHTS.RANK; see styleme-recommendation.ts §7.
+    // Passport background preferences must not outweigh today's explicit
+    // session-specific StyleMe answers.
+    behaviours: [RECOMMENDATION_BEHAVIOURS.SOFT_RANK],
     rankingWeight: "active",
   },
   {
     id: "minimal",
     questionId: PQ.STYLE_PERSONALITIES,
     activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH],
-    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    // Step 2A: demoted STRONG_RANK → SOFT_RANK (same declarative tier as every
+    // other Passport background signal in this file — Fit Preferences, Desired
+    // Feelings, Lifestyle, Desired Impression). The engine's numeric weight for
+    // this tier is SCORING_WEIGHTS.RANK; see styleme-recommendation.ts §7.
+    // Passport background preferences must not outweigh today's explicit
+    // session-specific StyleMe answers.
+    behaviours: [RECOMMENDATION_BEHAVIOURS.SOFT_RANK],
     rankingWeight: "active",
   },
   {
     id: "trendy",
     questionId: PQ.STYLE_PERSONALITIES,
     activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH],
-    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    // Step 2A: demoted STRONG_RANK → SOFT_RANK (same declarative tier as every
+    // other Passport background signal in this file — Fit Preferences, Desired
+    // Feelings, Lifestyle, Desired Impression). The engine's numeric weight for
+    // this tier is SCORING_WEIGHTS.RANK; see styleme-recommendation.ts §7.
+    // Passport background preferences must not outweigh today's explicit
+    // session-specific StyleMe answers.
+    behaviours: [RECOMMENDATION_BEHAVIOURS.SOFT_RANK],
     rankingWeight: "active",
   },
   {
     id: "romantic",
     questionId: PQ.STYLE_PERSONALITIES,
     activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH],
-    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    // Step 2A: demoted STRONG_RANK → SOFT_RANK (same declarative tier as every
+    // other Passport background signal in this file — Fit Preferences, Desired
+    // Feelings, Lifestyle, Desired Impression). The engine's numeric weight for
+    // this tier is SCORING_WEIGHTS.RANK; see styleme-recommendation.ts §7.
+    // Passport background preferences must not outweigh today's explicit
+    // session-specific StyleMe answers.
+    behaviours: [RECOMMENDATION_BEHAVIOURS.SOFT_RANK],
     rankingWeight: "active",
   },
   {
     id: "casual-cool",
     questionId: PQ.STYLE_PERSONALITIES,
     activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH],
-    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    // Step 2A: demoted STRONG_RANK → SOFT_RANK (same declarative tier as every
+    // other Passport background signal in this file — Fit Preferences, Desired
+    // Feelings, Lifestyle, Desired Impression). The engine's numeric weight for
+    // this tier is SCORING_WEIGHTS.RANK; see styleme-recommendation.ts §7.
+    // Passport background preferences must not outweigh today's explicit
+    // session-specific StyleMe answers.
+    behaviours: [RECOMMENDATION_BEHAVIOURS.SOFT_RANK],
     rankingWeight: "active",
   },
 

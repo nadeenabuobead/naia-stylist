@@ -11,6 +11,9 @@ import {
   PROVISIONAL_EVIDENCE,
   PROFILE_DESIRED_FEELING_TRANSLATION,
   PROFILE_FIT_PREFERENCE_SMCM_MAP,
+  PROFILE_SILHOUETTE_SMCM_MAP,
+  PROFILE_COVERAGE_PREFERRED_VALUE,
+  PROFILE_COVERAGE_MULTI_IDS,
   PROFILE_LIFESTYLE_OCCASION_MAP,
   PROFILE_DESIRED_IMPRESSION_DFM_MAP,
   PROFILE_BECOMING_DFM_MAP,
@@ -870,12 +873,14 @@ function scoreProduct(
 
   for (const sp of profileSPs) {
     if (rankings.stylePersonalityMatch.includes(sp)) {
+      // Step 2A: demoted STRONG_RANK → RANK. Session answers must outrank
+      // Passport background preferences — see the engine principle note above §11.5.
       addEntry(acc, makeEntry(
         PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH,
         sp,
         sp,
-        "STRONG_RANK",
-        SCORING_WEIGHTS.STRONG_RANK,
+        "RANK",
+        SCORING_WEIGHTS.RANK,
         handle,
       ));
       spMatchType = "direct";
@@ -1079,27 +1084,83 @@ function scoreProduct(
     }
   }
 
-  // ── 11.5. Profile Fit Preferences ────────────────────────────────────────
-  // RANK weight — softer than session body-need STRONG_RANK.
-  // Skips any SMCM token already matched by the session's bodyNeeds.
+  // ── 11.5 / 11.5b / 11.5c. Profile background support for Body Needs ──────
+  // RANK weight — softer than session body-need STRONG_RANK, and softer than
+  // an explicit session answer always wins: every block below skips any SMCM
+  // token already matched by the session's own bodyNeeds.
+  //
+  // seenSmcm is shared across all three sub-blocks (Fit Preferences, Silhouette,
+  // Coverage) so that a customer with overlapping Passport signals (e.g. legacy
+  // fitPreferences "oversized" AND silhouette "oversized") is never awarded RANK
+  // twice for the same underlying token — Passport background influence stays
+  // capped at one RANK contribution per token, never silently stacking back up
+  // toward session-tier weight.
+  const seenSmcm = new Set<string>();
+
+  // ── 11.5. Profile Fit Preferences (legacy) ───────────────────────────────
+  for (const prefId of (profile?.fitPreferences ?? [])) {
+    const smcmToken = PROFILE_FIT_PREFERENCE_SMCM_MAP[prefId];
+    if (!smcmToken) continue;
+    if (activeBodyNeeds.includes(smcmToken)) continue; // session already scored this
+    if (seenSmcm.has(smcmToken)) continue; // deduplicate (e.g. relaxed-fits + flowy both → relaxed)
+    if (rankings.styleMeComfortMatch.includes(smcmToken)) {
+      addEntry(acc, makeEntry(
+        PRODUCT_TEMPLATE_FIELDS.STYLE_ME_COMFORT_MATCH,
+        smcmToken,
+        "profile-fit-preference",
+        "RANK",
+        SCORING_WEIGHTS.RANK,
+        handle,
+      ));
+      seenSmcm.add(smcmToken);
+    }
+  }
+
+  // ── 11.5b. Profile Silhouette ─────────────────────────────────────────────
+  // Only the 4 semantically exact pairs in PROFILE_SILHOUETTE_SMCM_MAP are
+  // mapped ("straight"/"fitted" are deliberately unmapped — no exact target).
+  for (const silhouetteId of (profile?.silhouette ?? [])) {
+    const smcmToken = PROFILE_SILHOUETTE_SMCM_MAP[silhouetteId];
+    if (!smcmToken) continue;
+    if (activeBodyNeeds.includes(smcmToken)) continue;
+    if (seenSmcm.has(smcmToken)) continue;
+    if (rankings.styleMeComfortMatch.includes(smcmToken)) {
+      addEntry(acc, makeEntry(
+        PRODUCT_TEMPLATE_FIELDS.STYLE_ME_COMFORT_MATCH,
+        smcmToken,
+        "profile-silhouette",
+        "RANK",
+        SCORING_WEIGHTS.RANK,
+        handle,
+      ));
+      seenSmcm.add(smcmToken);
+    }
+  }
+
+  // ── 11.5c. Profile Coverage ────────────────────────────────────────────────
+  // mostly-covered (single-select) / sleeves-preferred / longer-hemlines
+  // (multi-select) softly support "more-coverage" — only when the session's
+  // own Body Needs did not already provide an explicit coverage answer.
   {
-    const seenSmcm = new Set<string>();
-    for (const prefId of (profile?.fitPreferences ?? [])) {
-      const smcmToken = PROFILE_FIT_PREFERENCE_SMCM_MAP[prefId];
-      if (!smcmToken) continue;
-      if (activeBodyNeeds.includes(smcmToken)) continue; // session already scored this
-      if (seenSmcm.has(smcmToken)) continue; // deduplicate (e.g. relaxed-fits + flowy both → relaxed)
-      if (rankings.styleMeComfortMatch.includes(smcmToken)) {
-        addEntry(acc, makeEntry(
-          PRODUCT_TEMPLATE_FIELDS.STYLE_ME_COMFORT_MATCH,
-          smcmToken,
-          "profile-fit-preference",
-          "RANK",
-          SCORING_WEIGHTS.RANK,
-          handle,
-        ));
-        seenSmcm.add(smcmToken);
-      }
+    const coverageRequested =
+      profile?.preferredCoverage === PROFILE_COVERAGE_PREFERRED_VALUE ||
+      (profile?.coveragePreferences ?? []).some((id) => PROFILE_COVERAGE_MULTI_IDS.has(id));
+    const smcmToken = "more-coverage";
+    if (
+      coverageRequested &&
+      !activeBodyNeeds.includes(smcmToken) &&
+      !seenSmcm.has(smcmToken) &&
+      rankings.styleMeComfortMatch.includes(smcmToken)
+    ) {
+      addEntry(acc, makeEntry(
+        PRODUCT_TEMPLATE_FIELDS.STYLE_ME_COMFORT_MATCH,
+        smcmToken,
+        "profile-coverage",
+        "RANK",
+        SCORING_WEIGHTS.RANK,
+        handle,
+      ));
+      seenSmcm.add(smcmToken);
     }
   }
 

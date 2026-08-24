@@ -231,6 +231,8 @@ model StylingSession {
   desiredFeeling  String?   // How she wants to feel
   occasion        String?   // Where she's going
   bodyNeeds       String[]  @default([])  // Normalized body-need IDs from comfort step
+  formalityConditional String?  // Conditional formality answer from occasion step (nullable — not all occasions show it)
+  practicalIds    String[]  @default([])  // Practical-today signal IDs from comfort step
   specificNeeds   String?   // Any specific requirements
   bodyPreference  String?   // Body fit preferences
   styleDNA        String?   // Style DNA preferences (JSON array)

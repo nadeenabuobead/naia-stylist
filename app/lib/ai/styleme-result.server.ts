@@ -58,6 +58,9 @@ export function buildProfileSignals(
     bodyFocusAreas?: string[] | null;
     bodyAvoidAreas?: string[] | null;
     fitPreferences?: string[] | null;
+    silhouette?: string[] | null;
+    preferredCoverage?: string | null;
+    coveragePreferences?: string[] | null;
   } | null | undefined,
 ): StyleMeProfileSignals | undefined {
   if (!profile) return undefined;
@@ -75,6 +78,9 @@ export function buildProfileSignals(
   if (profile.bodyFocusAreas?.length) signals.bodyFocusAreas = profile.bodyFocusAreas;
   if (profile.bodyAvoidAreas?.length) signals.bodyAvoidAreas = profile.bodyAvoidAreas;
   if (profile.fitPreferences?.length) signals.fitPreferences = profile.fitPreferences;
+  if (profile.silhouette?.length) signals.silhouette = profile.silhouette;
+  if (profile.preferredCoverage) signals.preferredCoverage = profile.preferredCoverage;
+  if (profile.coveragePreferences?.length) signals.coveragePreferences = profile.coveragePreferences;
   return Object.keys(signals).length > 0 ? signals : undefined;
 }
 

@@ -177,7 +177,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const mood = cookieSession.get("styleMeMood") as string | undefined;
     const feelings = cookieSession.get("styleMeFeelings") as string[] | undefined;
     const bodyNeeds = cookieSession.get("styleMeBodyNeeds") as string[] | undefined;
+    const practicalIds = (cookieSession.get("styleMePractical") as string[] | undefined) ?? [];
     const occasion = cookieSession.get("styleMeOccasion") as string | undefined;
+    const formalityConditional = (cookieSession.get("styleMeFormalityConditional") as string | undefined) ?? null;
     const source = cookieSession.get("styleMeSource");
     const nadineAnchorHandle = (cookieSession.get("styleMeNadineAnchorHandle") as string | undefined) ?? null;
     const closetAnchorId = (cookieSession.get("styleMeClosetAnchorId") as string | undefined) ?? null;
@@ -206,12 +208,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
         desiredFeeling: feelings?.[0] || null,
         occasion,
         bodyNeeds: bodyNeeds ?? [],
+        formalityConditional,
+        practicalIds,
         styleFrom: source === "my-closet" ? "CLOSET" : source === "naia-piece" ? "NAIA" : "BOTH",
       },
     });
 
     return data(
-      { isLoading: true, isAuthenticated: !!naiaCustomer, naiaModelIsReady, sessionId: stylingSession.id, mood: moodFirst, currentMood: moodFirst, moods: mood ? [mood] : [], desiredFeelings: feelings ?? [], desiredFeeling: feelings?.[0] || null, occasion, bodyNeeds, nadineAnchorHandle, closetAnchorId, devTryOnEnabled, vtoEnabled, tryOnFixtureTokens, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, error: null },
+      { isLoading: true, isAuthenticated: !!naiaCustomer, naiaModelIsReady, sessionId: stylingSession.id, mood: moodFirst, currentMood: moodFirst, moods: mood ? [mood] : [], desiredFeelings: feelings ?? [], desiredFeeling: feelings?.[0] || null, occasion, bodyNeeds, formalityConditional, practicalIds, nadineAnchorHandle, closetAnchorId, devTryOnEnabled, vtoEnabled, tryOnFixtureTokens, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, error: null },
       { headers: { "Set-Cookie": await commitSession(cookieSession) } }
     );
   } catch (err: any) {
@@ -244,6 +248,9 @@ export async function action({ request }: ActionFunctionArgs) {
         : [];
       const nadineAnchorHandle = (formData.get("nadineAnchorHandle") as string) || null;
       const closetAnchorId = (formData.get("closetAnchorId") as string) || null;
+      const formalityConditional = (formData.get("formalityConditional") as string) || null;
+      const practicalIdsRaw = formData.get("practicalIds") as string | null;
+      const practicalIds: string[] = practicalIdsRaw ? JSON.parse(practicalIdsRaw) : [];
 
       // Resolve anchor input from session-stored selection.
       // For closet sources (my-closet, both) a missing or unowned ID is rejected here —
@@ -301,9 +308,9 @@ export async function action({ request }: ActionFunctionArgs) {
         bodyNeeds,
         coverageConditional: null,
         occasion: session.occasion ?? "everyday",
-        formalityConditional: null,
+        formalityConditional,
         todayColours: { preferred: [], avoid: [] },
-        practicalIds: [],
+        practicalIds,
         source: sessionSource,
         profile: buildEphemeralContextSignals(buildProfileSignals(naiaCustomer?.onboardingProfile), journeyCtx),
         anchor,
@@ -382,9 +389,9 @@ export async function action({ request }: ActionFunctionArgs) {
         bodyNeeds: session.bodyNeeds ?? [],
         coverageConditional: null,
         occasion: session.occasion ?? "everyday",
-        formalityConditional: null,
+        formalityConditional: session.formalityConditional,
         todayColours: { preferred: [], avoid: [] },
-        practicalIds: [],
+        practicalIds: session.practicalIds ?? [],
         source: sessionSource,
         profile: buildEphemeralContextSignals(buildProfileSignals(naiaCustomer?.onboardingProfile), journeyCtx),
         anchor: anchorResult.anchor,
@@ -773,6 +780,8 @@ export default function StyleMeResult() {
           bodyNeeds: JSON.stringify(loaderData.bodyNeeds || []),
           moods: JSON.stringify(loaderData.moods || []),
           desiredFeelings: JSON.stringify(loaderData.desiredFeelings || []),
+          formalityConditional: loaderData.formalityConditional ?? "",
+          practicalIds: JSON.stringify(loaderData.practicalIds || []),
           nadineAnchorHandle: loaderData.nadineAnchorHandle ?? "",
           closetAnchorId: loaderData.closetAnchorId ?? "",
         },

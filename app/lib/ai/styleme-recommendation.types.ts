@@ -80,6 +80,10 @@ export interface StyleMeProfileSignals {
   bodyFocusAreas?: string[];
   bodyAvoidAreas?: string[];
   fitPreferences?: string[];
+  // Step 2A — Passport background intelligence (semantically exact mappings only)
+  silhouette?: string[];
+  preferredCoverage?: string;
+  coveragePreferences?: string[];
 }
 
 // ─── Anchor inputs ────────────────────────────────────────────────────────────

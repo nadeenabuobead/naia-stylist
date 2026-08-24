@@ -2484,8 +2484,8 @@ describe("§V2-A3 Profile Aspiration — desiredImpression + becoming", () => {
     );
     const ev = findEv(result, "double-top");
     assert.equal(aspirationEvidence(ev).length, 0, "feminine concept already scored via SP");
-    // Score breakdown: ESS +4, SP +4, aspiration 0
-    assert.equal(ev.totalScore, 8);
+    // Score breakdown: ESS +4, SP +2 (Step 2A: demoted RANK, not STRONG_RANK), aspiration 0
+    assert.equal(ev.totalScore, 6);
   });
 
   it("V2A3.8 — SP effortlessly-chic already matched + becoming more-effortless → no extra aspiration point", () => {
@@ -2496,7 +2496,7 @@ describe("§V2-A3 Profile Aspiration — desiredImpression + becoming", () => {
     );
     const ev = findEv(result, "straight-pants");
     assert.equal(aspirationEvidence(ev).length, 0, "effortless concept already scored via SP");
-    assert.equal(ev.totalScore, 8); // 4 ESS + 4 SP + 0 aspiration
+    assert.equal(ev.totalScore, 6); // 4 ESS + 2 SP (Step 2A: RANK, not STRONG_RANK) + 0 aspiration
   });
 
   it("V2A3.9 — session more-feminine already scored (§2) + becoming more-feminine → no extra aspiration point", () => {
@@ -2674,10 +2674,10 @@ describe("§V2-A3 Profile Aspiration — desiredImpression + becoming", () => {
     assert.equal(aspirationEvidence(evB).length, 1, "without SP match, aspiration concept is eligible");
 
     // Score difference confirms dedup is product-specific:
-    // A: ESS(4) + SP(4) + aspiration(0) = 8
+    // A: ESS(4) + SP(2, Step 2A: RANK not STRONG_RANK) + aspiration(0) = 6
     // B: ESS(4) + SP(0) + aspiration(1) = 5
-    // Δ = 3 = STRONG_RANK - LIGHT_RANK
-    assert.equal(evA.totalScore - evB.totalScore, 3);
+    // Δ = 1 = RANK - LIGHT_RANK
+    assert.equal(evA.totalScore - evB.totalScore, 1);
   });
 
   it("V2A3.24 — deterministic provenance: when same concept appears in both fields, sourceField tie-break selects becoming (alphabetically first)", () => {
