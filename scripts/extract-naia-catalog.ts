@@ -35,7 +35,7 @@ const WORKBOOK_PATH = resolve(
   "../.claude/reference/styleme/PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx",
 );
 const EXPECTED_SHA256 =
-  "60af557f9b1b670aedeb734da49dc6e57a1eea66f70ece265273eafa987277bf";
+  "c76b4d70c0e57d88c10ec16723cdd336a50e7e31bc65fbeb7824992b009d89cc";
 // Updated 2026-08-24: collection reconciliation. Becoming Fragmented (cropped-top)
 // and Becoming Unfiltered (straight-pants) removed; Becoming Bold (oversized-blazer)
 // and Becoming Free (draped-leather-pants) added; Becoming Clear (leather-suede-jacket)
@@ -46,6 +46,12 @@ const EXPECTED_SHA256 =
 // Updated again same day: asymmetrical-pants' Occasion tags cell had "day-to-day"
 // (not a valid StyleMe occasion ID) corrected to "everyday" — single shared-string
 // edit, surgical (all other archive members byte-identical to the prior version).
+// Updated again same day: post-audit signal-coverage pass. 12 cells corrected across
+// 5 products (collar-shirt, kimono-jacket, oversized-blazer, trench-coat, suede-skirt)
+// — the source workbook had written several approved new values (softer,
+// comfortable-elevated, family, old-money) into Style Tags instead of their correct
+// fields (Desired Feeling Match / Style Me Comfort Match / Occasion Tags / Style
+// Personality Match); corrected placement to match the approved field-level spec.
 const OUTPUT_PATH = resolve(
   __dirname,
   "../app/lib/ai/generated/naia-catalog.generated.ts",

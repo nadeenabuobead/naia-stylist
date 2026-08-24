@@ -413,11 +413,12 @@ describe("MR — manual review and workbook integrity", () => {
     // Updated 2026-08-24 for the approved, audited collection reconciliation (Becoming
     // Fragmented / Becoming Unfiltered removed; Becoming Bold / Becoming Free added;
     // Becoming Clear redesigned as a bomber; asymmetrical-pants "day-to-day" occasion
-    // typo corrected to "everyday") — this guard is against ACCIDENTAL/unrelated
-    // drift, not against deliberate, audited source-of-truth updates like those.
+    // typo corrected to "everyday"; post-audit signal-coverage corrections for softer/
+    // comfortable-elevated/family/old-money) — this guard is against ACCIDENTAL/
+    // unrelated drift, not against deliberate, audited source-of-truth updates like those.
     assert.equal(
       NAIA_CATALOG.sourceSha256,
-      "60af557f9b1b670aedeb734da49dc6e57a1eea66f70ece265273eafa987277bf",
+      "c76b4d70c0e57d88c10ec16723cdd336a50e7e31bc65fbeb7824992b009d89cc",
       "V8 workbook SHA-256 must remain unchanged",
     );
   });

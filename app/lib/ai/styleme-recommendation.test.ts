@@ -1469,7 +1469,10 @@ describe("§12  Closet anchor compatibility evaluation", () => {
 
   // ─── C.9  Weak category-only Closet anchor → closet-led when no threshold ─
   it("C.9  When Closet anchor exists and no candidate clears threshold, outcome is closet-led", () => {
-    // Use occasion="family" which no product has → no occasion bonus.
+    // Use occasion="not-sure" which no product has → no occasion bonus.
+    // (Was "family" until the 2026-08-25 signal-coverage pass gave family genuine
+    // coverage on collar-shirt/suede-skirt/kimono-jacket per approved audit changes —
+    // "not-sure" is now the only occasion with zero product coverage catalog-wide.)
     // Avoid all dominant color vocab IDs → each eligible product gets closet-category +1
     // but color -3, netting -2 which is below MIN_TOTAL_SCORE=2.
     // Products with no color match still score only +1 (below threshold).
@@ -1479,7 +1482,7 @@ describe("§12  Closet anchor compatibility evaluation", () => {
           preferred: [],
           avoid: ["beige-brown", "red-burgundy", "black", "prints", "white-cream", "grey", "navy", "green", "pink", "yellow", "orange"],
         },
-        occasion: "family",   // no product has this occasion tag
+        occasion: "not-sure",   // no product has this occasion tag
         moods: [],
       }),
       {},

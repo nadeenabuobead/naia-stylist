@@ -31,13 +31,14 @@ const GENERATED_PATH = resolve(
   "generated/naia-catalog.generated.ts",
 );
 const V8_SHA256 =
-  "60af557f9b1b670aedeb734da49dc6e57a1eea66f70ece265273eafa987277bf";
+  "c76b4d70c0e57d88c10ec16723cdd336a50e7e31bc65fbeb7824992b009d89cc";
 // Updated 2026-08-24: collection reconciliation. Becoming Fragmented (cropped-top)
 // and Becoming Unfiltered (straight-pants) removed; Becoming Bold (oversized-blazer)
 // and Becoming Free (draped-leather-pants) added; Becoming Clear redesigned as a
 // bomber. Updated again same day: asymmetrical-pants' Occasion tags "day-to-day"
-// typo corrected to "everyday" (surgical single-shared-string edit). See
-// scripts/extract-naia-catalog.ts.
+// typo corrected to "everyday"; then a post-audit signal-coverage pass (softer,
+// comfortable-elevated, family, old-money moved into their correct fields across
+// 5 products). See scripts/extract-naia-catalog.ts.
 const V8_PATH = resolve(
   __dirname,
   "../../../.claude/reference/styleme/PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx",

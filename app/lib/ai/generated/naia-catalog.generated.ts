@@ -1,6 +1,6 @@
 // THIS FILE IS AUTO-GENERATED. DO NOT EDIT MANUALLY.
 // Source: PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx
-// SHA-256: 60af557f9b1b670aedeb734da49dc6e57a1eea66f70ece265273eafa987277bf
+// SHA-256: c76b4d70c0e57d88c10ec16723cdd336a50e7e31bc65fbeb7824992b009d89cc
 // Re-generate: tsx scripts/extract-naia-catalog.ts
 
 import type { GeneratedCatalog } from "../naia-catalog.types.js";
@@ -8,7 +8,7 @@ import type { GeneratedCatalog } from "../naia-catalog.types.js";
 export const NAIA_CATALOG: GeneratedCatalog = {
   "schemaVersion": 1,
   "sourceWorkbook": "PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx",
-  "sourceSha256": "60af557f9b1b670aedeb734da49dc6e57a1eea66f70ece265273eafa987277bf",
+  "sourceSha256": "c76b4d70c0e57d88c10ec16723cdd336a50e7e31bc65fbeb7824992b009d89cc",
   "products": [
     {
       "handle": "double-top",
@@ -200,8 +200,8 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "stylingRole": "Elevated wardrobe anchor; waist-defining structured shirt; polished layering base",
         "desiredFeelingMatch": "more-put-together, more-confident, more-elevated, more-powerful",
         "stylePersonalityMatch": "corporate-chic, effortlessly-chic, artsy",
-        "styleTags": "formal, classic, minimalist, trendy",
-        "occasionTags": "work, everyday, dinner, special-event",
+        "styleTags": "formal, classic, minimalist, trendy, minimal",
+        "occasionTags": "work, everyday, dinner, special-event, family",
         "productStyleDescriptors": "Tailored, structured, waist-defined, polished, clean, art-detailed",
         "formalityScore": "3.0",
         "formalityDescription": "Smart casual to polished formal",
@@ -267,13 +267,15 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "formal",
             "classic",
             "minimalist",
-            "trendy"
+            "trendy",
+            "minimal"
           ],
           "occasionTags": [
             "work",
             "everyday",
             "dinner",
-            "special-event"
+            "special-event",
+            "family"
           ],
           "season": [
             "spring",
@@ -537,7 +539,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "stylingRole": "Sculptural statement bottom; directional leather trouser; lower-body outfit anchor",
         "desiredFeelingMatch": "more-confident, more-powerful, more-elevated, more-put-together",
         "stylePersonalityMatch": "edgy, artsy, effortlessly-chic",
-        "styleTags": "edgy, casual, minimalist",
+        "styleTags": "edgy, casual, minimalist, minimal, casual-cool",
         "occasionTags": "everyday, dinner, date-night, girls-night",
         "productStyleDescriptors": "Sculptural, draped, directional, utilitarian, art-led, relaxed-tailoring, statement leather",
         "formalityScore": "3.0",
@@ -601,7 +603,9 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "styleTags": [
             "edgy",
             "casual",
-            "minimalist"
+            "minimalist",
+            "minimal",
+            "casual-cool"
           ],
           "occasionTags": [
             "everyday",
@@ -700,7 +704,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "desiredFeelingMatch": "more-feminine, more-attractive, more-elevated, more-confident",
         "stylePersonalityMatch": "feminine, romantic, artsy",
         "styleTags": "formal, romantic, classic, trendy",
-        "occasionTags": "dinner, date-night, special-event, work",
+        "occasionTags": "dinner, date-night, special-event, work, family",
         "productStyleDescriptors": "Feminine, textured, sculptural, refined, artful, body-skimming, waist-defined, evening",
         "formalityScore": "4.0",
         "formalityDescription": "polished day-to-evening and occasion dressing",
@@ -774,7 +778,8 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "dinner",
             "date-night",
             "special-event",
-            "work"
+            "work",
+            "family"
           ],
           "season": [
             "fall",
@@ -868,7 +873,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "artStoryDescription": "The outermost, most public piece—the moment she steps forward and is visible.",
         "stylingRole": "Statement outer layer; polished outfit finisher; art-led tailored trench",
         "desiredFeelingMatch": "more-put-together, more-confident, more-powerful, more-elevated",
-        "stylePersonalityMatch": "corporate-chic, artsy, edgy",
+        "stylePersonalityMatch": "corporate-chic, artsy, edgy, old-money",
         "styleTags": "formal, edgy, trendy, classic",
         "occasionTags": "work, dinner, special-event, travel",
         "productStyleDescriptors": "Sculptural, tailored, editorial, artful, polished, asymmetric, statement, belted",
@@ -932,7 +937,8 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "stylePersonalityMatch": [
             "corporate-chic",
             "artsy",
-            "edgy"
+            "edgy",
+            "old-money"
           ],
           "styleTags": [
             "formal",
@@ -1044,17 +1050,17 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "activePublished": "☐ Confirmed",
         "artStoryDescription": "The wrap piece that holds the fragments, textures and layers together.",
         "stylingRole": "Statement outer layer; waist-shaping wrap jacket; polished outfit finisher",
-        "desiredFeelingMatch": "more-effortless, more-elevated, more-feminine, more-confident",
+        "desiredFeelingMatch": "more-effortless, more-elevated, more-feminine, more-confident, softer",
         "stylePersonalityMatch": "artsy, effortlessly-chic, feminine",
         "styleTags": "formal, romantic, trendy, bohemian",
-        "occasionTags": "everyday, dinner, travel, special-event",
+        "occasionTags": "everyday, dinner, travel, special-event, family",
         "productStyleDescriptors": "Kimono-inspired, artful, relaxed tailoring, statement, layered, editorial, waist-defined, textural",
         "formalityScore": "3.0",
         "formalityDescription": "elevated casual to smart occasion dressing",
         "season": "fall, winter, spring",
         "bodyFitLogic": "The relaxed one-size body allows comfortable layering, while the adjustable wrap belt can be tightened to define the waist or tied more loosely for an effortless shape. The open V-shaped neckline creates a lengthening line through the upper body, and the blouson sleeves add soft volume. The gently flared hem skims over the upper hips.",
         "bodyProportionEffects": "defines-waist, elongates-torso, skims-midsection, skims-upper-hips, adds-upper-body-volume",
-        "styleMeComfortMatch": "waist-definition, more-coverage, relaxed",
+        "styleMeComfortMatch": "waist-definition, more-coverage, relaxed, comfortable-elevated",
         "coverageModesty": "Full-length sleeves and hip-length body provide good upper-body coverage. The wrap front can be adjusted for more or less coverage, although a camisole, fitted top or high-neck base may be added if greater neckline security is preferred.",
         "proportionRule": "Let the jacket provide the volume and print. Pair it with a clean, streamlined base such as straight trousers, a slim skirt or a simple dress. Wear it belted to create shape, or open over a fitted column underneath. Avoid excessive volume and competing prints on the lower half.",
         "notIdealFor": "Very hot weather, bulky layers underneath, highly structured tops with strong shoulder volume, or outfits that combine several competing prints and wide silhouettes.",
@@ -1103,7 +1109,8 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "more-effortless",
             "more-elevated",
             "more-feminine",
-            "more-confident"
+            "more-confident",
+            "softer"
           ],
           "stylePersonalityMatch": [
             "artsy",
@@ -1120,7 +1127,8 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "everyday",
             "dinner",
             "travel",
-            "special-event"
+            "special-event",
+            "family"
           ],
           "season": [
             "fall",
@@ -1137,7 +1145,8 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "styleMeComfortMatch": [
             "waist-definition",
             "more-coverage",
-            "relaxed"
+            "relaxed",
+            "comfortable-elevated"
           ],
           "currentEmotionalStateSupport": [
             "confident",
@@ -1223,7 +1232,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "stylingRole": "Relaxed statement outer layer; art-led bomber; easy outfit finisher",
         "desiredFeelingMatch": "more-confident, more-effortless, more-put-together, more-elevated",
         "stylePersonalityMatch": "artsy, edgy, effortlessly-chic",
-        "styleTags": "edgy, casual",
+        "styleTags": "edgy, casual, casual-cool",
         "occasionTags": "everyday, dinner, girls-night, travel",
         "productStyleDescriptors": "Relaxed, art-led, sculptural, contrast-panelled, sporty-elevated, statement outerwear",
         "formalityScore": "3.0",
@@ -1289,7 +1298,8 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           ],
           "styleTags": [
             "edgy",
-            "casual"
+            "casual",
+            "casual-cool"
           ],
           "occasionTags": [
             "everyday",
@@ -1398,7 +1408,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "season": "fall, winter, spring",
         "bodyFitLogic": "The oversized straight cut skims the waist and hips rather than defining them. Light shoulder pads create a stronger shoulder line, while the long blazer shape and vertical front opening create a lengthening effect. The chiffon extending beyond the cuffs and hem softens the structure and adds movement.",
         "bodyProportionEffects": "adds-shoulder-structure, skims-midsection, skims-hips, creates-vertical-line",
-        "styleMeComfortMatch": "more-coverage, structured, relaxed, elongates",
+        "styleMeComfortMatch": "more-coverage, structured, relaxed, elongates, comfortable-elevated",
         "coverageModesty": "High upper-body coverage with full-length sleeves and a long blazer body. Worn closed, it provides substantial torso coverage; worn open, the base layer remains visible.",
         "proportionRule": "Let the blazer provide the volume and length. Pair with a cleaner, more streamlined base or a fitted/controlled top and bottom so the oversized silhouette remains intentional rather than bulky.",
         "notIdealFor": "Very hot outdoor weather, highly fitted waist-focused styling, or outfits with heavy volume and statement detail on both the upper and lower body",
@@ -1477,7 +1487,8 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "more-coverage",
             "structured",
             "relaxed",
-            "elongates"
+            "elongates",
+            "comfortable-elevated"
           ],
           "currentEmotionalStateSupport": [
             "confident",
