@@ -205,6 +205,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         currentMood: moodFirst,
         desiredFeeling: feelings?.[0] || null,
         occasion,
+        bodyNeeds: bodyNeeds ?? [],
         styleFrom: source === "my-closet" ? "CLOSET" : source === "naia-piece" ? "NAIA" : "BOTH",
       },
     });
@@ -378,7 +379,7 @@ export async function action({ request }: ActionFunctionArgs) {
       const engineInput = buildEngineInput({
         moods: session.currentMood ? [session.currentMood] : [],
         desiredFeelings: session.desiredFeeling ? [session.desiredFeeling] : [],
-        bodyNeeds: [],
+        bodyNeeds: session.bodyNeeds ?? [],
         coverageConditional: null,
         occasion: session.occasion ?? "everyday",
         formalityConditional: null,

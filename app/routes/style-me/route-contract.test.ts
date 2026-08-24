@@ -252,4 +252,60 @@ describe("Phase 4B3 recovery — route contract", () => {
     const text = src("result.tsx");
     assert.ok(text.includes("export function shouldRevalidate"), "exports shouldRevalidate");
   });
+
+  // ── bodyNeeds persistence round-trip (Step 1 correctness) ───────
+
+  it("loader persists bodyNeeds when creating StylingSession", () => {
+    const text = src("result.tsx");
+    // The create payload must include bodyNeeds so the DB stores the original comfort selections.
+    assert.ok(
+      text.includes("bodyNeeds: bodyNeeds ?? []"),
+      "StylingSession.create includes bodyNeeds",
+    );
+  });
+
+  it("regenerate recovers bodyNeeds from DB session (not hardcoded [])", () => {
+    const text = src("result.tsx");
+    // Must use session.bodyNeeds, not a literal empty array, so comfort signals survive regenerate.
+    assert.ok(
+      text.includes("bodyNeeds: session.bodyNeeds ?? []"),
+      "regenerate reads bodyNeeds from DB session",
+    );
+    assert.ok(
+      !text.includes("bodyNeeds: [],"),
+      "regenerate no longer passes a hardcoded empty array",
+    );
+  });
+
+  it("multiple bodyNeeds survive the cookie→DB round trip: source is styleMeBodyNeeds from cookie", () => {
+    const text = src("result.tsx");
+    // The loader reads the normalized array from the cookie session.
+    assert.ok(
+      text.includes('cookieSession.get("styleMeBodyNeeds")'),
+      "loader reads styleMeBodyNeeds from cookie",
+    );
+    // The create call must reference the bodyNeeds variable derived from that cookie key.
+    assert.ok(
+      text.includes("bodyNeeds: bodyNeeds ?? []"),
+      "create payload uses cookie-derived bodyNeeds variable",
+    );
+  });
+
+  it("legacy session missing bodyNeeds regenerates safely (null-coalesce fallback)", () => {
+    const text = src("result.tsx");
+    // The ?? [] guard ensures old sessions with no stored bodyNeeds default to empty array
+    // rather than propagating undefined/null into the recommendation engine.
+    assert.ok(
+      text.includes("session.bodyNeeds ?? []"),
+      "null-coalesce guard on session.bodyNeeds for legacy sessions",
+    );
+  });
+
+  it("style-me.server.ts (dead code) is deleted — no stale imports in result.tsx", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      !text.includes("style-me.server"),
+      "result.tsx does not import the deleted style-me.server.ts",
+    );
+  });
 });
