@@ -122,9 +122,9 @@ export default function StyleMeOccasion() {
               style={{
                 fontFamily: "var(--naia-ff-ui)",
                 fontSize: "10px",
-                letterSpacing: "1.5px",
+                letterSpacing: "3px",
                 textTransform: "uppercase",
-                color: "var(--naia-accent)",
+                color: "rgba(40, 21, 12, 0.5)",
                 marginTop: "20px",
                 marginBottom: "10px",
               }}

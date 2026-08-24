@@ -807,7 +807,7 @@ a.mn-action:focus-visible,
   color: var(--naia-muted);
   text-decoration: none;
   font-size: 11px;
-  font-family: var(--naia-ff-mono);
+  font-family: var(--naia-ff-ui);
   letter-spacing: 2px;
   text-transform: uppercase;
   transition: color 0.15s;
@@ -915,7 +915,7 @@ a.mn-action:focus-visible,
   background: var(--naia-ink);
   color: var(--naia-bg);
   border: none;
-  font-family: var(--naia-ff-mono);
+  font-family: var(--naia-ff-ui);
   font-size: 10px;
   letter-spacing: 4px;
   text-transform: uppercase;
@@ -926,7 +926,7 @@ a.mn-action:focus-visible,
 .sm-continue:disabled { background: var(--naia-muted); cursor: not-allowed; opacity: 0.6; }
 
 /* ── Eyebrow label ───────────────────────────────────────────────── */
-.sm-eyebrow { font-family: var(--naia-ff-mono); font-size: 9px; letter-spacing: 3px; text-transform: uppercase; color: var(--naia-accent); }
+.sm-eyebrow { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 3px; text-transform: uppercase; color: rgba(40, 21, 12, 0.5); }
 .sm-eyebrow--muted { color: var(--naia-muted); }
 .sm-eyebrow--sm { font-size: 7px; letter-spacing: 2px; }
 
@@ -1002,7 +1002,7 @@ a.mn-action:focus-visible,
 .sm-product-card {
   padding: 16px; text-align: left; cursor: pointer;
   background: var(--naia-surface); color: var(--naia-ink);
-  border: 2px solid var(--naia-border-mid);
+  border: 1px solid rgba(40, 21, 12, 0.15);
   transition: background 0.2s, color 0.2s, border-color 0.2s;
   width: 100%;
 }
@@ -1013,7 +1013,7 @@ a.mn-action:focus-visible,
 .sm-source-btn {
   display: block; padding: 18px; text-align: center; text-decoration: none;
   background: var(--naia-ink); color: var(--naia-bg);
-  font-family: var(--naia-ff-mono); font-size: 10px; letter-spacing: 3px; text-transform: uppercase;
+  font-family: var(--naia-ff-ui); font-size: 10px; letter-spacing: 3px; text-transform: uppercase;
   border: none; cursor: pointer; width: 100%; transition: background 0.2s;
 }
 .sm-source-btn:hover { background: var(--naia-accent); }
@@ -1168,14 +1168,14 @@ a.mn-action:focus-visible,
 /* ── StyleMe QS: Topbar ─────────────────────────────────────────── */
 .sm-topbar {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 20px 40px; border-bottom: 1px solid var(--naia-border);
+  padding: 20px 40px; border-bottom: 1px solid rgba(40, 21, 12, 0.12);
 }
 .sm-topbar-wordmark {
   font-family: var(--naia-ff-body); font-size: 20px; font-style: italic; font-weight: 400;
   letter-spacing: 0.5px; color: var(--naia-accent); user-select: none;
 }
 .sm-topbar-exit {
-  font-family: var(--naia-ff-mono); font-size: 9px; letter-spacing: 2px;
+  font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 2px;
   text-transform: uppercase; color: var(--naia-muted); text-decoration: none;
   transition: color 0.15s;
 }
@@ -1192,58 +1192,57 @@ a.mn-action:focus-visible,
 .sm-progress-dot--active { width: 28px; border-radius: 14px; background: var(--naia-ink); }
 .sm-progress-dot--done { background: var(--naia-accent); }
 .sm-progress-label {
-  text-align: center; font-family: var(--naia-ff-mono); font-size: 9px;
+  text-align: center; font-family: var(--naia-ff-ui); font-size: 9px;
   letter-spacing: 3px; text-transform: uppercase; color: var(--naia-muted);
 }
 
 /* ── StyleMe QS: Step label ─────────────────────────────────────── */
 .sm-step-label {
-  font-family: var(--naia-ff-mono); font-size: 10px; letter-spacing: 4px;
-  text-transform: uppercase; color: var(--naia-accent); margin-bottom: 12px;
+  font-family: var(--naia-ff-ui); font-size: 10px; letter-spacing: 3px;
+  text-transform: uppercase; color: rgba(40, 21, 12, 0.5); margin-bottom: 12px;
 }
 
 /* ── StyleMe QS: Pills ──────────────────────────────────────────── */
 .sm-pills { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 32px; }
 .sm-pill {
-  padding: 12px 22px; border: 1px solid var(--naia-border-mid);
-  font-family: var(--naia-ff-mono); font-size: 10px; letter-spacing: 2px;
+  padding: 12px 22px; border: 1px solid rgba(40, 21, 12, 0.15);
+  font-family: var(--naia-ff-ui); font-size: 10px; letter-spacing: 2px;
   text-transform: uppercase; color: var(--naia-ink); cursor: pointer;
   background: transparent; text-align: left;
   transition: border-color 0.2s, background 0.2s, color 0.2s;
 }
-.sm-pill:hover { border-color: var(--naia-ink); }
-.sm-pill.sm-pill--on { background: var(--naia-accent); color: var(--naia-bg); border-color: var(--naia-accent); }
-.sm-pill.sm-pill--off { opacity: 0.38; pointer-events: none; }
+.sm-pill:hover { border-color: rgba(40, 21, 12, 0.4); }
+.sm-pill.sm-pill--on { background: rgba(107, 29, 38, 0.05); color: var(--naia-ink); border-color: var(--naia-accent); }
+.sm-pill.sm-pill--off { opacity: 0.3; cursor: not-allowed; pointer-events: none; }
 
 /* ── StyleMe QS: Step buttons ───────────────────────────────────── */
 .sm-step-buttons { display: flex; gap: 12px; margin-top: 8px; }
 .sm-btn-back {
-  padding: 14px 32px; border: 1px solid var(--naia-border-mid); background: transparent;
-  font-family: var(--naia-ff-mono); font-size: 10px; letter-spacing: 4px;
+  padding: 14px 32px; border: 1px solid rgba(40, 21, 12, 0.15); background: transparent;
+  font-family: var(--naia-ff-ui); font-size: 10px; letter-spacing: 4px;
   text-transform: uppercase; color: var(--naia-ink); cursor: pointer;
   text-decoration: none; display: inline-flex; align-items: center;
   transition: border-color 0.15s;
 }
-.sm-btn-back:hover { border-color: var(--naia-ink); }
+.sm-btn-back:hover { border-color: rgba(40, 21, 12, 0.4); }
 
 /* ── StyleMe QS: Source cards ───────────────────────────────────── */
 .sm-source-pills { display: flex; flex-direction: column; gap: 10px; margin-bottom: 32px; max-width: 440px; }
 .sm-source-pill {
-  padding: 16px 22px; border: 1px solid var(--naia-border-mid); background: transparent;
+  padding: 16px 22px; border: 1px solid rgba(40, 21, 12, 0.15); background: transparent;
   color: var(--naia-ink); cursor: pointer; text-align: left; width: 100%;
   display: flex; flex-direction: column; gap: 4px;
   transition: border-color 0.2s, background 0.2s, color 0.2s;
 }
-.sm-source-pill:hover { border-color: var(--naia-ink); }
-.sm-source-pill.sm-pill--on { background: var(--naia-accent); color: var(--naia-bg); border-color: var(--naia-accent); }
+.sm-source-pill:hover { border-color: rgba(40, 21, 12, 0.4); }
+.sm-source-pill.sm-pill--on { background: rgba(107, 29, 38, 0.05); color: var(--naia-ink); border-color: var(--naia-accent); }
 .sm-source-pill-name {
-  font-family: var(--naia-ff-mono); font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+  font-family: var(--naia-ff-ui); font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
 }
 .sm-source-pill-desc {
   font-family: var(--naia-ff-body); font-size: 13px; font-style: italic;
   color: var(--naia-muted); line-height: 1.4;
 }
-.sm-source-pill.sm-pill--on .sm-source-pill-desc { color: rgba(244,244,241,.72); }
 
 /* ── Focus visible ────────────────────────────────────────────────── */
 .sm-chip:focus-visible,

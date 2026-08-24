@@ -116,9 +116,9 @@ export default function StyleMeComfort() {
   const groupLabelStyle: React.CSSProperties = {
     fontFamily: "var(--naia-ff-ui)",
     fontSize: "10px",
-    letterSpacing: "1.5px",
+    letterSpacing: "3px",
     textTransform: "uppercase",
-    color: "var(--naia-accent)",
+    color: "rgba(40, 21, 12, 0.5)",
     marginBottom: "10px",
     marginTop: "20px",
   };
