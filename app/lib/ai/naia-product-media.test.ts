@@ -410,9 +410,12 @@ describe("MR — manual review and workbook integrity", () => {
   it("MR.3 — no workbook SHA-256 changed (V8 source is the canonical reference)", () => {
     // The generated catalog records the SHA-256 of the workbook used to generate it.
     // This test verifies Phase 4A3 has not introduced any change that would alter that hash.
+    // Updated 2026-08-24 for the approved, controlled workbook correction (Becoming
+    // Fragmented playful -> adventurous) — this guard is against ACCIDENTAL/unrelated
+    // drift, not against deliberate, audited source-of-truth updates like that one.
     assert.equal(
       NAIA_CATALOG.sourceSha256,
-      "b124b41a52b8004e381ed6dab909622451916ce741ce612592db49aa8ad74501",
+      "3f019293f5d451d5950ca7ee5bd0f46b95a0fcbb3b5da8945d8666d7270fc85c",
       "V8 workbook SHA-256 must remain unchanged",
     );
   });

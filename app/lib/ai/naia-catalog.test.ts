@@ -31,7 +31,9 @@ const GENERATED_PATH = resolve(
   "generated/naia-catalog.generated.ts",
 );
 const V8_SHA256 =
-  "b124b41a52b8004e381ed6dab909622451916ce741ce612592db49aa8ad74501";
+  "3f019293f5d451d5950ca7ee5bd0f46b95a0fcbb3b5da8945d8666d7270fc85c";
+// Updated 2026-08-24: workbook corrected (Becoming Fragmented playful -> adventurous,
+// StyleMe Mood rename source-of-truth fix). See scripts/extract-naia-catalog.ts.
 const V8_PATH = resolve(
   __dirname,
   "../../../.claude/reference/styleme/PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx",

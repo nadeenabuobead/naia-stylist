@@ -1,24 +1,14 @@
 // THIS FILE IS AUTO-GENERATED. DO NOT EDIT MANUALLY.
 // Source: PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx
-// SHA-256: b124b41a52b8004e381ed6dab909622451916ce741ce612592db49aa8ad74501
+// SHA-256: 3f019293f5d451d5950ca7ee5bd0f46b95a0fcbb3b5da8945d8666d7270fc85c
 // Re-generate: tsx scripts/extract-naia-catalog.ts
-//
-// MANUAL CORRECTION PENDING WORKBOOK SYNC (mood rename playful -> adventurous):
-// cropped-top's currentEmotionalStateSupport was hand-edited from "playful" to
-// "adventurous" (StyleMe mood rename) after auditing its emotionalSupportLogic
-// prose — its "unexpectedness/visual surprise" language is a genuine match for
-// the new mood's definition. double-top, straight-pants, and kimono-jacket were
-// deliberately left unchanged (still "playful") — their prose emphasizes garment
-// movement/kinetics, not an unpredictable styling choice, so they no longer match
-// any live mood option. This must be folded into the next "PRODUCTS TEMPLATE"
-// workbook pass so a future regeneration doesn't silently revert it.
 
 import type { GeneratedCatalog } from "../naia-catalog.types.js";
 
 export const NAIA_CATALOG: GeneratedCatalog = {
   "schemaVersion": 1,
   "sourceWorkbook": "PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx",
-  "sourceSha256": "b124b41a52b8004e381ed6dab909622451916ce741ce612592db49aa8ad74501",
+  "sourceSha256": "3f019293f5d451d5950ca7ee5bd0f46b95a0fcbb3b5da8945d8666d7270fc85c",
   "products": [
     {
       "handle": "double-top",

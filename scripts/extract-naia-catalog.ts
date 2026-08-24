@@ -35,7 +35,12 @@ const WORKBOOK_PATH = resolve(
   "../.claude/reference/styleme/PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx",
 );
 const EXPECTED_SHA256 =
-  "b124b41a52b8004e381ed6dab909622451916ce741ce612592db49aa8ad74501";
+  "3f019293f5d451d5950ca7ee5bd0f46b95a0fcbb3b5da8945d8666d7270fc85c";
+// Updated 2026-08-24: Becoming Fragmented's Current Emotional State Support
+// field (row 135) and its Emotional Support Logic explanation (row 136) were
+// corrected in the source workbook — playful -> adventurous, matching the
+// StyleMe Mood option rename. All other rows unchanged. See commit history
+// for the audit that established only this product qualifies.
 const OUTPUT_PATH = resolve(
   __dirname,
   "../app/lib/ai/generated/naia-catalog.generated.ts",
