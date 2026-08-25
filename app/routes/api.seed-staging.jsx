@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "crypto";
 import prisma from "../db.server";
 import { emitClosetItemAdded, recordJourneyEvent } from "../lib/ai/journey-events.server";
+import { resolveNaiaSession } from "../lib/naia-session.server";
 
 // Staging-only fixture and diagnostic endpoint.
 // Requires STAGING_SEED_SECRET env var + matching x-seed-secret header.
@@ -78,11 +79,6 @@ export async function action({ request }) {
     return new Response("Not Found", { status: 404 });
   }
 
-  const secret = request.headers.get("x-seed-secret");
-  if (!process.env.STAGING_SEED_SECRET || secret !== process.env.STAGING_SEED_SECRET) {
-    return new Response("Forbidden", { status: 403 });
-  }
-
   let body;
   try {
     body = await request.json();
@@ -91,6 +87,122 @@ export async function action({ request }) {
   }
 
   const act = body?._action ?? "createCustomer";
+
+  // ── migrate ───────────────────────────────────────────────────────────────
+  // One-time Customer A → Customer B data migration (OnboardingProfile + ClosetItems).
+  // Auth: valid __naia_tok session that resolves to Customer B (Aug-21 timestamp).
+  // No x-seed-secret required — uses the user's own authenticated session.
+  // Exact timestamps are hardcoded from the diagnostic result; not user-supplied.
+  if (act === "migrate") {
+    const NO_CACHE = { "Cache-Control": "no-store" };
+
+    const sessionCustomer = await resolveNaiaSession(request);
+    if (!sessionCustomer) {
+      return new Response("Unauthorized", { status: 401, headers: NO_CACHE });
+    }
+
+    // Exact createdAt timestamps from diagnostic — used to resolve IDs deterministically
+    const CUSTOMER_A_TS = new Date("2026-04-20T11:27:28.067Z");
+    const CUSTOMER_B_TS = new Date("2026-08-21T11:20:38.977Z");
+
+    const [rowsA, rowsB] = await Promise.all([
+      prisma.customer.findMany({ where: { createdAt: CUSTOMER_A_TS }, select: { id: true } }),
+      prisma.customer.findMany({ where: { createdAt: CUSTOMER_B_TS }, select: { id: true } }),
+    ]);
+
+    if (rowsA.length !== 1 || rowsB.length !== 1) {
+      return Response.json({
+        error: "timestamp lookup did not resolve to exactly one customer each",
+        foundA: rowsA.length,
+        foundB: rowsB.length,
+      }, { status: 400, headers: NO_CACHE });
+    }
+
+    const idA = rowsA[0].id;
+    const idB = rowsB[0].id;
+
+    // Session must belong to Customer B
+    if (sessionCustomer.id !== idB) {
+      return Response.json({
+        error: "session does not resolve to Customer B — aborted",
+        sessionIsB: false,
+      }, { status: 403, headers: NO_CACHE });
+    }
+
+    // Pre-flight: exact counts required before any write
+    const [aProfileCount, bProfileCount, aClosetCount, bClosetCount, aProfile] = await Promise.all([
+      prisma.onboardingProfile.count({ where: { customerId: idA } }),
+      prisma.onboardingProfile.count({ where: { customerId: idB } }),
+      prisma.closetItem.count({ where: { customerId: idA } }),
+      prisma.closetItem.count({ where: { customerId: idB } }),
+      prisma.onboardingProfile.findUnique({ where: { customerId: idA }, select: { completed: true } }),
+    ]);
+
+    const preFlightOk =
+      aProfileCount === 1 &&
+      bProfileCount === 0 &&
+      aClosetCount === 2 &&
+      bClosetCount === 0 &&
+      aProfile?.completed === true;
+
+    if (!preFlightOk) {
+      return Response.json({
+        error: "pre-flight failed — migration aborted, no writes made",
+        preflight: {
+          aProfileCount,
+          bProfileCount,
+          aClosetCount,
+          bClosetCount,
+          aProfileCompleted: aProfile?.completed ?? null,
+        },
+      }, { status: 400, headers: NO_CACHE });
+    }
+
+    // Transactional migration + inline post-verification
+    // prisma.$transaction auto-rolls back if the thrown Error fires
+    let postCounts;
+    try {
+      postCounts = await prisma.$transaction(async (tx) => {
+        await tx.onboardingProfile.update({
+          where:  { customerId: idA },
+          data:   { customerId: idB },
+        });
+        await tx.closetItem.updateMany({
+          where: { customerId: idA },
+          data:  { customerId: idB },
+        });
+
+        const [aP, bP, aC, bC, bProfile] = await Promise.all([
+          tx.onboardingProfile.count({ where: { customerId: idA } }),
+          tx.onboardingProfile.count({ where: { customerId: idB } }),
+          tx.closetItem.count({ where: { customerId: idA } }),
+          tx.closetItem.count({ where: { customerId: idB } }),
+          tx.onboardingProfile.findUnique({ where: { customerId: idB }, select: { completed: true } }),
+        ]);
+
+        if (aP !== 0 || bP !== 1 || aC !== 0 || bC !== 2 || bProfile?.completed !== true) {
+          throw new Error(
+            `post-verify failed: aProfiles=${aP} bProfiles=${bP} aCloset=${aC} bCloset=${bC} bCompleted=${bProfile?.completed}`
+          );
+        }
+
+        return { aProfiles: aP, bProfiles: bP, aCloset: aC, bCloset: bC, bProfileCompleted: bProfile.completed };
+      });
+    } catch (err) {
+      return Response.json({
+        error: "transaction rolled back",
+        reason: err instanceof Error ? err.message : String(err),
+      }, { status: 500, headers: NO_CACHE });
+    }
+
+    return Response.json({ migrated: true, postMigration: postCounts }, { headers: NO_CACHE });
+  }
+
+  // All other actions require x-seed-secret
+  const secret = request.headers.get("x-seed-secret");
+  if (!process.env.STAGING_SEED_SECRET || secret !== process.env.STAGING_SEED_SECRET) {
+    return new Response("Forbidden", { status: 403 });
+  }
 
   // ── createCustomer ────────────────────────────────────────────────────────
   if (act === "createCustomer") {
