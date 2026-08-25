@@ -458,3 +458,97 @@ describe("Phase 4B3 recovery — route contract", () => {
     );
   });
 });
+
+// ── StyleMe Result Experience cleanup pass ───────────────────────────────────
+
+describe("StyleMe Result Experience — cleanup pass", () => {
+  function src(file: string): string {
+    const dir = join(import.meta.dirname ?? new URL(".", import.meta.url).pathname);
+    return readFileSync(join(dir, file), "utf8");
+  }
+
+  // ── Anchor card deduplication ─────────────────────────────────────
+
+  it("result computes anchorAlreadyInItems to detect when anchor is already in the Look", () => {
+    const text = src("result.tsx");
+    assert.ok(text.includes("anchorAlreadyInItems"), "variable anchorAlreadyInItems exists");
+  });
+
+  it("closet anchor dedup uses closetItemId identity — not text comparison", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("anchor.id"),
+      "closet dedup compares anchor.id against closetItemId",
+    );
+    assert.ok(
+      text.includes("anchor.type === \"closet\""),
+      "closet dedup discriminates on anchor.type",
+    );
+  });
+
+  it("NADINE anchor dedup compares anchor.handle exactly against primaryHandle", () => {
+    const text = src("result.tsx");
+    // anchor "trench-coat" + primaryHandle "trench-coat" → true (hide duplicate).
+    // anchor "trench-coat" + primaryHandle "collar-shirt" → false (keep anchor card).
+    assert.ok(
+      text.includes("anchor.handle === suggestionMeta?.primaryHandle"),
+      "NADINE dedup uses anchor.handle === primaryHandle (exact identity)",
+    );
+  });
+
+  it("NADINE anchor dedup does not infer sameness from !item.closetItemId alone", () => {
+    const text = src("result.tsx");
+    // The NADINE branch must NOT use the broad '!i.closetItemId' existence check —
+    // that would hide Anchor Piece whenever any non-closet garment exists, regardless of handle.
+    // Verify by checking the NADINE branch text uses handle comparison, not the mainItems filter.
+    const nadinaSection = text.slice(
+      text.indexOf("anchor.handle === suggestionMeta"),
+      text.indexOf("anchor.handle === suggestionMeta") + 80,
+    );
+    assert.ok(
+      !nadinaSection.includes("!i.closetItemId"),
+      "NADINE dedup branch does not use !i.closetItemId (that is the closet branch, not here)",
+    );
+  });
+
+  it("anchor card is gated by !anchorAlreadyInItems — prevents BOTH/CLOSET/NAIA duplication", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("!anchorAlreadyInItems"),
+      "anchor card render condition includes !anchorAlreadyInItems",
+    );
+  });
+
+  // ── Closet item label ─────────────────────────────────────────────
+
+  it("closet item card label is 'Already Yours' (not 'From Your Closet')", () => {
+    const text = src("result.tsx");
+    assert.ok(text.includes("Already Yours"), "result.tsx contains 'Already Yours'");
+    assert.ok(!text.includes("From Your Closet"), "result.tsx does not contain 'From Your Closet'");
+  });
+
+  // ── NADINE shopping CTA ───────────────────────────────────────────
+
+  it("NADINE item with productUrl gets a Shop This Piece link", () => {
+    const text = src("result.tsx");
+    assert.ok(text.includes("Shop This Piece"), "Shop This Piece CTA present in result.tsx");
+  });
+
+  it("Shop This Piece CTA is gated by !item.closetItemId — closet items never receive it", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("!item.closetItemId && item.productUrl"),
+      "Shop This Piece condition requires !item.closetItemId",
+    );
+  });
+
+  // ── Footer commerce CTA ───────────────────────────────────────────
+
+  it("Shop nAia footer CTA is suppressed for closet-led results", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("outcome !== \"closet-led\""),
+      "Shop nAia is gated by outcome !== 'closet-led'",
+    );
+  });
+});

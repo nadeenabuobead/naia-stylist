@@ -905,6 +905,23 @@ export default function StyleMeResult() {
     ? suggestionMeta.outcome === "no-eligible-product"
     : !suggestion.items?.some((item: any) => !["SHOES", "ACCESSORY", "BAG"].includes(item.itemType));
 
+  // True when the anchor piece is already present as a first-class garment in suggestion.items.
+  // Prevents the same garment from appearing both in The Look and the separate Anchor Piece card.
+  const anchorAlreadyInItems = (() => {
+    const anchor = suggestionMeta?.anchor;
+    if (!anchor) return false;
+    if (anchor.type === "closet") {
+      const mainItems: any[] = (suggestion.items ?? []).filter(
+        (i: any) => !["SHOES", "ACCESSORY", "BAG"].includes(i.itemType),
+      );
+      return mainItems.some((i: any) => i.closetItemId === anchor.id);
+    }
+    // NADINE anchor: hide only when the exact anchor handle matches the primary item in the look.
+    // e.g. anchor "trench-coat" + primaryHandle "trench-coat" → true (hide).
+    //      anchor "trench-coat" + primaryHandle "collar-shirt" → false (keep).
+    return anchor.handle === suggestionMeta?.primaryHandle;
+  })();
+
   return (
     <div style={{ minHeight: "100vh", background: "var(--naia-bg)" }}>
 
@@ -1031,7 +1048,7 @@ export default function StyleMeResult() {
               {suggestion.items?.filter((item: any) => item.itemType !== "SHOES" && item.itemType !== "ACCESSORY" && item.itemType !== "BAG").map((item: any) => (
                 <div key={item.id} className="sm-item-card">
                   {item.closetItemId && (
-                    <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "10px", letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--naia-accent)", marginBottom: "8px" }}>From Your Closet</p>
+                    <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "10px", letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--naia-accent)", marginBottom: "8px" }}>Already Yours</p>
                   )}
                   {item.productImageUrl && (
                     <img src={item.productImageUrl} alt={item.productTitle} style={{ width: "140px", height: "180px", objectFit: "contain", marginBottom: "12px" }} />
@@ -1040,6 +1057,17 @@ export default function StyleMeResult() {
                     <p className="sm-item-product-label">{item.productTitle}</p>
                   )}
                   <p className="sm-item-notes">{item.stylingNotes || item.productTitle}</p>
+                  {!item.closetItemId && item.productUrl && (
+                    <a
+                      href={item.productUrl}
+                      className="sm-result-action-btn"
+                      style={{ marginTop: "10px", fontSize: "8px", letterSpacing: "2px", padding: "8px 16px", display: "inline-block" }}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Shop This Piece
+                    </a>
+                  )}
                   {loaderData.devTryOnEnabled && !item.closetItemId && suggestionMeta?.primaryHandle && isTryOnEligible(suggestionMeta.primaryHandle) && (
                     <button
                       onClick={() => setTryOnPanel({ handle: suggestionMeta!.primaryHandle!, title: item.productTitle ?? suggestionMeta!.primaryHandle!, context: "single-piece" })}
@@ -1073,8 +1101,8 @@ export default function StyleMeResult() {
           )}
         </div>
 
-        {/* Anchor summary */}
-        {!isNoMatch && suggestionMeta?.anchorSummary && (
+        {/* Anchor summary — suppressed when the anchor is already rendered in The Look */}
+        {!isNoMatch && suggestionMeta?.anchorSummary && !anchorAlreadyInItems && (
           <div className="sm-anchor-card">
             <p className="sm-eyebrow sm-eyebrow--sm sm-eyebrow--muted" style={{ marginBottom: "6px" }}>Anchor Piece</p>
             {suggestionMeta.anchorImageUrl && (
@@ -1211,7 +1239,9 @@ export default function StyleMeResult() {
           >
             Rate This Look
           </button>
-          <a href={primaryNaiaItem?.productUrl || "https://naiabynadine.com"} className="sm-result-action-btn">Shop nAia</a>
+          {suggestionMeta?.outcome !== "closet-led" && (
+            <a href={primaryNaiaItem?.productUrl || "https://naiabynadine.com"} className="sm-result-action-btn">Shop nAia</a>
+          )}
         </div>
 
         {/* Review saved toast */}
