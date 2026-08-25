@@ -1,6 +1,6 @@
 // THIS FILE IS AUTO-GENERATED. DO NOT EDIT MANUALLY.
 // Source: PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx
-// SHA-256: c76b4d70c0e57d88c10ec16723cdd336a50e7e31bc65fbeb7824992b009d89cc
+// SHA-256: 5ad4468e46f92c911c9cd078d51a47f5e1d419449c81e27be132f21041388d74
 // Re-generate: tsx scripts/extract-naia-catalog.ts
 
 import type { GeneratedCatalog } from "../naia-catalog.types.js";
@@ -8,7 +8,7 @@ import type { GeneratedCatalog } from "../naia-catalog.types.js";
 export const NAIA_CATALOG: GeneratedCatalog = {
   "schemaVersion": 1,
   "sourceWorkbook": "PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx",
-  "sourceSha256": "c76b4d70c0e57d88c10ec16723cdd336a50e7e31bc65fbeb7824992b009d89cc",
+  "sourceSha256": "5ad4468e46f92c911c9cd078d51a47f5e1d419449c81e27be132f21041388d74",
   "products": [
     {
       "handle": "double-top",

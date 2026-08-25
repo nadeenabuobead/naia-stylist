@@ -26,6 +26,8 @@ import type {
   ProductItemType,
   StylingEffortLevel,
 } from "../app/lib/ai/naia-catalog.types.js";
+import { NADINE_WORKBOOK_MANIFEST } from "./nadine-workbook.manifest.js";
+import { readEmbeddedRevision } from "./lib/nadine-workbook-revision.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -34,24 +36,12 @@ const WORKBOOK_PATH = resolve(
   __dirname,
   "../.claude/reference/styleme/PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx",
 );
-const EXPECTED_SHA256 =
-  "c76b4d70c0e57d88c10ec16723cdd336a50e7e31bc65fbeb7824992b009d89cc";
-// Updated 2026-08-24: collection reconciliation. Becoming Fragmented (cropped-top)
-// and Becoming Unfiltered (straight-pants) removed; Becoming Bold (oversized-blazer)
-// and Becoming Free (draped-leather-pants) added; Becoming Clear (leather-suede-jacket)
-// redesigned as a bomber. Workbook no longer populates "Emotional Support Logic" /
-// "Practical Support Logic" for any product (see OPTIONAL_KEYS below) and mixes
-// "Formality Score" / "Formality Level" as labels for the same field across products
-// (see the formality-level alias in LABEL_TO_KEY below).
-// Updated again same day: asymmetrical-pants' Occasion tags cell had "day-to-day"
-// (not a valid StyleMe occasion ID) corrected to "everyday" — single shared-string
-// edit, surgical (all other archive members byte-identical to the prior version).
-// Updated again same day: post-audit signal-coverage pass. 12 cells corrected across
-// 5 products (collar-shirt, kimono-jacket, oversized-blazer, trench-coat, suede-skirt)
-// — the source workbook had written several approved new values (softer,
-// comfortable-elevated, family, old-money) into Style Tags instead of their correct
-// fields (Desired Feeling Match / Style Me Comfort Match / Occasion Tags / Style
-// Personality Match); corrected placement to match the approved field-level spec.
+// SHA-256, embedded workbook revision, and expected product count are no longer
+// pinned here — they live in scripts/nadine-workbook.manifest.ts (committed,
+// single source of truth; naia-catalog.test.ts and naia-product-media.test.ts
+// import the same constant rather than each keeping their own copy). See that
+// file for the full workbook-update workflow and why a SHA pin alone isn't
+// sufficient protection against a stale-but-valid workbook snapshot.
 const OUTPUT_PATH = resolve(
   __dirname,
   "../app/lib/ai/generated/naia-catalog.generated.ts",
@@ -60,22 +50,49 @@ const SCHEMA_VERSION = 1;
 const SOURCE_WORKBOOK = "PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx";
 const LIVE_URL_BASE = "https://naiabynadine.com/products/";
 
-// ─── SHA-256 verification ─────────────────────────────────────────────────────
+// ─── Workbook identity verification ────────────────────────────────────────────
+// Three independent checks, all against scripts/nadine-workbook.manifest.ts:
+// SHA-256 (exact byte identity), embedded revision (catches a stale-but-different
+// workbook whose installer only remembered to update the SHA pin), and — after
+// extraction — product count. All three must agree for extraction to proceed.
 
-function verifySha256(): void {
+/** Verifies the canonical workbook's SHA-256 and returns it (used as generated metadata). */
+function verifySha256(): string {
   const bytes = readFileSync(WORKBOOK_PATH);
   const hash = createHash("sha256").update(bytes).digest("hex");
-  if (hash !== EXPECTED_SHA256) {
+  if (hash !== NADINE_WORKBOOK_MANIFEST.approvedSha256) {
     throw new Error(
-      `V8 SHA-256 mismatch.\n  Expected: ${EXPECTED_SHA256}\n  Got:      ${hash}`,
+      `Workbook SHA-256 mismatch.\n` +
+      `  Expected (manifest): ${NADINE_WORKBOOK_MANIFEST.approvedSha256}\n` +
+      `  Got (on disk):       ${hash}\n` +
+      `If this workbook update is intentional, use scripts/promote-nadine-workbook.ts ` +
+      `rather than overwriting the canonical file directly.`,
     );
   }
-  console.log(`✓ V8 SHA-256 verified: ${hash}`);
+  console.log(`✓ Workbook SHA-256 verified: ${hash}`);
+  return hash;
+}
+
+/** Verifies the workbook's embedded NaiaWorkbookRevision matches the manifest. */
+function verifyEmbeddedRevision(): void {
+  const embedded = readEmbeddedRevision(WORKBOOK_PATH);
+  const expected = String(NADINE_WORKBOOK_MANIFEST.workbookRevision);
+  if (embedded !== expected) {
+    throw new Error(
+      `Workbook embedded revision mismatch.\n` +
+      `  Expected (manifest): ${expected}\n` +
+      `  Got (embedded in workbook): ${embedded ?? "(none found)"}\n` +
+      `The workbook's SHA-256 matched but its embedded NaiaWorkbookRevision did not — ` +
+      `this indicates the manifest and the workbook file have drifted out of sync. ` +
+      `Do not hand-edit either one; use scripts/promote-nadine-workbook.ts.`,
+    );
+  }
+  console.log(`✓ Workbook embedded revision verified: ${embedded}`);
 }
 
 // ─── Python extraction ────────────────────────────────────────────────────────
 
-function buildPythonScript(workbookPath: string): string {
+export function buildPythonScript(workbookPath: string): string {
   return `WORKBOOK_PATH = ${JSON.stringify(workbookPath)}
 
 import json, zipfile, re
@@ -258,6 +275,28 @@ products = extract(col_a, col_b)
 import sys
 json.dump(products, sys.stdout, ensure_ascii=False)
 `;
+}
+
+/**
+ * Runs the Python extraction against an arbitrary workbook path and returns
+ * the raw (untransformed) per-product field dicts. Shared by main() (for the
+ * canonical workbook) and promote-nadine-workbook.ts (for canonical + candidate,
+ * to build a product-level diff before promotion).
+ */
+export function runPythonExtraction(workbookPath: string): Record<string, string>[] {
+  const pythonScript = buildPythonScript(workbookPath);
+  let rawJson: string;
+  try {
+    rawJson = execSync("python3 -", {
+      input: pythonScript,
+      maxBuffer: 50 * 1024 * 1024,
+      timeout: 60_000,
+    }).toString("utf8");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Python extraction failed for ${workbookPath}:\n${msg}`);
+  }
+  return JSON.parse(rawJson);
 }
 
 // ─── Parsing helpers ──────────────────────────────────────────────────────────
@@ -490,26 +529,17 @@ function main(): void {
   console.log("Phase 3B catalog extraction — naia-catalog");
   console.log(`Workbook: ${WORKBOOK_PATH}`);
 
-  verifySha256();
+  const sourceSha256 = verifySha256();
+  verifyEmbeddedRevision();
 
-  const pythonScript = buildPythonScript(WORKBOOK_PATH);
-  let rawJson: string;
-  try {
-    rawJson = execSync("python3 -", {
-      input: pythonScript,
-      maxBuffer: 50 * 1024 * 1024,
-      timeout: 60_000,
-    }).toString("utf8");
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Python extraction failed:\n${msg}`);
-  }
-
-  const rawProducts: Record<string, string>[] = JSON.parse(rawJson);
+  const rawProducts = runPythonExtraction(WORKBOOK_PATH);
   console.log(`✓ Python extracted ${rawProducts.length} products`);
 
-  if (rawProducts.length !== 11) {
-    throw new Error(`Expected 11 products, got ${rawProducts.length}`);
+  if (rawProducts.length !== NADINE_WORKBOOK_MANIFEST.expectedProductCount) {
+    throw new Error(
+      `Expected ${NADINE_WORKBOOK_MANIFEST.expectedProductCount} products ` +
+      `(per manifest), got ${rawProducts.length}`,
+    );
   }
 
   const products: GeneratedCatalogProduct[] = rawProducts.map((raw, i) => {
@@ -524,7 +554,7 @@ function main(): void {
   const catalog: GeneratedCatalog = {
     schemaVersion: SCHEMA_VERSION,
     sourceWorkbook: SOURCE_WORKBOOK,
-    sourceSha256: EXPECTED_SHA256,
+    sourceSha256,
     products,
   };
 
@@ -539,4 +569,9 @@ function main(): void {
   );
 }
 
-main();
+// Only auto-run when executed directly (tsx scripts/extract-naia-catalog.ts),
+// not when imported by promote-nadine-workbook.ts for buildPythonScript /
+// runPythonExtraction.
+if (process.argv[1] === __filename) {
+  main();
+}

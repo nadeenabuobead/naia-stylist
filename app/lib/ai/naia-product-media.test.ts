@@ -17,6 +17,7 @@ import {
 } from "./naia-product-media.ts";
 import type { TryOnEligibility, VerifiedMediaEntry, ComponentMediaEntry } from "./naia-product-media.ts";
 import { NAIA_CATALOG } from "./generated/naia-catalog.generated.ts";
+import { NADINE_WORKBOOK_MANIFEST } from "../../../scripts/nadine-workbook.manifest.ts";
 import { SONG_CATALOG } from "./get-ready-song-catalog.ts";
 import { computeStyleMeResult, buildEngineInput, buildDbPayload } from "./styleme-result.server.ts";
 import type { StyleMeRecommendationResult } from "./styleme-recommendation.types.ts";
@@ -410,15 +411,12 @@ describe("MR — manual review and workbook integrity", () => {
   it("MR.3 — no workbook SHA-256 changed (V8 source is the canonical reference)", () => {
     // The generated catalog records the SHA-256 of the workbook used to generate it.
     // This test verifies Phase 4A3 has not introduced any change that would alter that hash.
-    // Updated 2026-08-24 for the approved, audited collection reconciliation (Becoming
-    // Fragmented / Becoming Unfiltered removed; Becoming Bold / Becoming Free added;
-    // Becoming Clear redesigned as a bomber; asymmetrical-pants "day-to-day" occasion
-    // typo corrected to "everyday"; post-audit signal-coverage corrections for softer/
-    // comfortable-elevated/family/old-money) — this guard is against ACCIDENTAL/
-    // unrelated drift, not against deliberate, audited source-of-truth updates like those.
+    // Sourced from scripts/nadine-workbook.manifest.ts — the single committed pin.
+    // Do not hardcode a copy of the SHA here; update the manifest instead, via
+    // scripts/promote-nadine-workbook.ts, not by hand.
     assert.equal(
       NAIA_CATALOG.sourceSha256,
-      "c76b4d70c0e57d88c10ec16723cdd336a50e7e31bc65fbeb7824992b009d89cc",
+      NADINE_WORKBOOK_MANIFEST.approvedSha256,
       "V8 workbook SHA-256 must remain unchanged",
     );
   });
