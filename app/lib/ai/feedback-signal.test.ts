@@ -54,8 +54,8 @@ function makeFeedback(overrides: Partial<RecommendationFeedbackRecord> = {}): Re
     customerId: CUST,
     sessionId: SESSION,
     suggestionId: SUGGESTION,
-    target: "complete-suggestion",
-    shopifyProductId: null,
+    target: "nadine-product",  // product/item default — complete-suggestion is excluded from aggregate
+    shopifyProductId: "prod-default",
     closetItemId: null,
     rating: "love",
     reasonCodes: [],
@@ -359,6 +359,63 @@ describe("computeFeedbackSummary — immediate feedback", () => {
     const colourSignal = summary.activeSignals.find(s => s.reason === "colour-not-for-me");
     assert.ok(colourSignal);
     assert.equal(colourSignal!.strength, "weak");
+  });
+
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// computeFeedbackSummary — complete-suggestion exclusion from product aggregate
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe("computeFeedbackSummary — complete-suggestion exclusion", () => {
+
+  it("cs-excl-1: complete-suggestion love record does NOT increment loveCount", () => {
+    const feedback = [
+      makeFeedback({ target: "complete-suggestion", rating: "love", shopifyProductId: null }),
+    ];
+    const summary = computeFeedbackSummary(CUST, feedback, [], () => FIXED_NOW);
+    assert.equal(summary.loveCount, 0, "complete-suggestion love must not count toward loveCount");
+    assert.equal(summary.okayCount, 0);
+    assert.equal(summary.notForMeCount, 0);
+  });
+
+  it("cs-excl-2: complete-suggestion not-for-me does NOT increment notForMeCount or activeSignals", () => {
+    const feedback = [
+      makeFeedback({ target: "complete-suggestion", rating: "not-for-me", reasonCodes: ["too-formal"], shopifyProductId: null }),
+    ];
+    const summary = computeFeedbackSummary(CUST, feedback, [], () => FIXED_NOW);
+    assert.equal(summary.notForMeCount, 0, "complete-suggestion not-for-me must not count");
+    assert.equal(summary.activeSignals.length, 0, "complete-suggestion reason codes must not appear in activeSignals");
+    assert.equal(summary.tooFormalSignal, "none", "tooFormalSignal must stay none");
+  });
+
+  it("cs-excl-3: mix of complete-suggestion and nadine-product — only nadine-product counts", () => {
+    const feedback = [
+      makeFeedback({ id: "cs-1", target: "complete-suggestion", rating: "not-for-me", reasonCodes: ["too-casual"], shopifyProductId: null }),
+      makeFeedback({ id: "np-1", target: "nadine-product", rating: "love", shopifyProductId: "prod-x" }),
+      makeFeedback({ id: "np-2", target: "nadine-product", rating: "not-for-me", reasonCodes: ["too-formal"], shopifyProductId: "prod-y" }),
+    ];
+    const summary = computeFeedbackSummary(CUST, feedback, [], () => FIXED_NOW);
+    // Only nadine-product records in aggregate
+    assert.equal(summary.loveCount, 1, "only the nadine-product love record counts");
+    assert.equal(summary.notForMeCount, 1, "only the nadine-product not-for-me counts");
+    // too-casual from complete-suggestion must NOT appear; too-formal from nadine-product must
+    assert.ok(!summary.activeSignals.some(s => s.reason === "too-casual"), "too-casual from outfit must not appear");
+    assert.ok(summary.activeSignals.some(s => s.reason === "too-formal"), "too-formal from nadine-product must appear");
+    // totalFeedbackCount is a raw count of all records including complete-suggestion
+    assert.equal(summary.totalFeedbackCount, 3);
+  });
+
+  it("cs-excl-4: nadine-product and closet-item feedback still aggregate as before", () => {
+    const feedback = [
+      makeFeedback({ id: "np-1", target: "nadine-product", rating: "not-for-me", reasonCodes: ["too-revealing"], shopifyProductId: "prod-a" }),
+      makeFeedback({ id: "ci-1", target: "closet-item", rating: "okay", reasonCodes: ["not-practical"], closetItemId: "ci-id" }),
+    ];
+    const summary = computeFeedbackSummary(CUST, feedback, [], () => FIXED_NOW);
+    assert.equal(summary.notForMeCount, 1);
+    assert.equal(summary.okayCount, 1);
+    assert.ok(summary.activeSignals.some(s => s.reason === "too-revealing"), "nadine-product reason counted");
+    assert.ok(summary.activeSignals.some(s => s.reason === "not-practical"), "closet-item reason counted");
   });
 
 });

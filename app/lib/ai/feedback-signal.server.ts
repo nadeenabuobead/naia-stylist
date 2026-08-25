@@ -118,11 +118,16 @@ export function computeFeedbackSummary(
   postWearReviews: PostWearAnswers[],
   nowFn: () => string = () => new Date().toISOString(),
 ): FeedbackSignalSummary {
-  const loveCount     = feedback.filter(f => f.rating === "love").length;
-  const okayCount     = feedback.filter(f => f.rating === "okay").length;
-  const notForMeCount = feedback.filter(f => f.rating === "not-for-me").length;
+  // Exclude outfit-level feedback from product/item signal aggregate.
+  // complete-suggestion records are persisted for future outfit-learning design
+  // but must not silently inflate loveCount/notForMeCount/reasonCounts here.
+  const productFeedback = feedback.filter(f => f.target !== "complete-suggestion");
 
-  const reasonCounts  = countReasonCodes(feedback);
+  const loveCount     = productFeedback.filter(f => f.rating === "love").length;
+  const okayCount     = productFeedback.filter(f => f.rating === "okay").length;
+  const notForMeCount = productFeedback.filter(f => f.rating === "not-for-me").length;
+
+  const reasonCounts  = countReasonCodes(productFeedback);
   const activeSignals = buildFeedbackSignals(reasonCounts);
 
   const tooRevealingSignal = signalStrengthFromCount(reasonCounts.get("too-revealing")  ?? 0);

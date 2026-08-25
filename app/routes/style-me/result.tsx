@@ -21,6 +21,8 @@ import { isTryOnEligible } from "~/lib/ai/tryon-product-eligibility";
 import { TryOnPanel } from "~/components/TryOnPanel";
 import { VtoExperience } from "~/components/VtoExperience";
 import { RecommendationFeedbackWidget } from "~/components/RecommendationFeedbackWidget";
+import { OutfitReactionWidget } from "~/components/OutfitReactionWidget";
+import { loadSessionFeedback } from "~/lib/ai/feedback-persistence.server";
 import { buildCustomerJourneyContext, buildEphemeralContextSignals } from "~/lib/ai/journey-context.server";
 import { emitSessionStarted, emitRecommendationServed, emitLookSaved, emitInSessionReviewSubmitted, recordJourneyEvent, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -77,6 +79,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             occasion: null,
             suggestion: null,
             pendingState: null as "needs_passport" | "ready_to_save" | null,
+            existingOutfitFeedback: null,
             error: "Not found",
           },
           { status: 404 },
@@ -102,11 +105,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
             occasion: null,
             suggestion: null,
             pendingState: null as "needs_passport" | "ready_to_save" | null,
+            existingOutfitFeedback: null,
             error: "Not found",
           },
           { status: 404 },
         );
       }
+      const sessionFeedback = await loadSessionFeedback(session.id, naiaCustomer.id);
+      const currentSuggestionId = session.suggestions[0]?.id ?? null;
+      const existingOutfitFeedback = sessionFeedback.find(
+        (f) => f.target === "complete-suggestion" && f.suggestionId === currentSuggestionId,
+      ) ?? null;
       return data({
         isLoading: false,
         isAuthenticated: !!naiaCustomer,
@@ -121,6 +130,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         desiredFeeling: session.desiredFeeling,
         suggestion: session.suggestions[0] || null,
         pendingState: null as "needs_passport" | "ready_to_save" | null,
+        existingOutfitFeedback: existingOutfitFeedback ? { id: existingOutfitFeedback.id, rating: existingOutfitFeedback.rating, reasonCodes: existingOutfitFeedback.reasonCodes } : null,
         error: null,
       });
     }
@@ -155,6 +165,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const pendingState: "needs_passport" | "ready_to_save" =
         naiaCustomer.onboardingProfile?.completed ? "ready_to_save" : "needs_passport";
 
+      const pendingSessionFeedback = await loadSessionFeedback(pendingSuggestion.sessionId, naiaCustomer.id);
+      const pendingOutfitFeedback = pendingSessionFeedback.find(
+        (f) => f.target === "complete-suggestion" && f.suggestionId === pendingSuggestion.id,
+      ) ?? null;
       return data({
         isLoading: false,
         isAuthenticated: !!naiaCustomer,
@@ -169,6 +183,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         occasion: pendingSuggestion.session.occasion,
         suggestion: pendingSuggestion,
         pendingState,
+        existingOutfitFeedback: pendingOutfitFeedback ? { id: pendingOutfitFeedback.id, rating: pendingOutfitFeedback.rating, reasonCodes: pendingOutfitFeedback.reasonCodes } : null,
         error: null,
       });
     }
@@ -216,12 +231,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
 
     return data(
-      { isLoading: true, isAuthenticated: !!naiaCustomer, naiaModelIsReady, sessionId: stylingSession.id, mood: moodFirst, currentMood: moodFirst, moods: mood ? [mood] : [], desiredFeelings: feelings ?? [], desiredFeeling: feelings?.[0] || null, occasion, bodyNeeds, formalityConditional, practicalIds, nadineAnchorHandle, closetAnchorId, devTryOnEnabled, vtoEnabled, tryOnFixtureTokens, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, error: null },
+      { isLoading: true, isAuthenticated: !!naiaCustomer, naiaModelIsReady, sessionId: stylingSession.id, mood: moodFirst, currentMood: moodFirst, moods: mood ? [mood] : [], desiredFeelings: feelings ?? [], desiredFeeling: feelings?.[0] || null, occasion, bodyNeeds, formalityConditional, practicalIds, nadineAnchorHandle, closetAnchorId, devTryOnEnabled, vtoEnabled, tryOnFixtureTokens, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, existingOutfitFeedback: null, error: null },
       { headers: { "Set-Cookie": await commitSession(cookieSession) } }
     );
   } catch (err: any) {
     console.error("Result loader error:", err);
-    return data({ isLoading: false, isAuthenticated: false, naiaModelIsReady: false, devTryOnEnabled, vtoEnabled, tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null, currentMood: null, desiredFeeling: null, occasion: null, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, error: err?.message || "Something went wrong" });
+    return data({ isLoading: false, isAuthenticated: false, naiaModelIsReady: false, devTryOnEnabled, vtoEnabled, tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null, currentMood: null, desiredFeeling: null, occasion: null, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, existingOutfitFeedback: null, error: err?.message || "Something went wrong" });
   }
 }
 
@@ -1206,6 +1221,17 @@ export default function StyleMeResult() {
             <a href={primaryNaiaItem?.productUrl || "https://naiabynadine.com"} className="sm-result-action-btn">Shop nAia</a>
           )}
         </div>
+
+        {/* Outfit Quick Feedback — authenticated only, all 3 sources */}
+        {loaderData.isAuthenticated && suggestion?.id && loaderData.sessionId && (
+          <OutfitReactionWidget
+            sessionId={loaderData.sessionId}
+            suggestionId={suggestion.id}
+            existingFeedbackId={(loaderData as any).existingOutfitFeedback?.id ?? null}
+            existingRating={(loaderData as any).existingOutfitFeedback?.rating ?? null}
+            existingReasonCodes={(loaderData as any).existingOutfitFeedback?.reasonCodes ?? []}
+          />
+        )}
       </main>
 
 

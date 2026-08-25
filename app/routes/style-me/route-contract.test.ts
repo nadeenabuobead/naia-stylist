@@ -717,3 +717,170 @@ describe("StyleMe Result Actions — cleanup pass", () => {
     );
   });
 });
+
+// ── OutfitReactionWidget — Quick Feedback ────────────────────────────────────
+
+describe("OutfitReactionWidget — Quick Feedback", () => {
+  function src(file: string): string {
+    const dir = join(import.meta.dirname ?? new URL(".", import.meta.url).pathname);
+    return readFileSync(join(dir, file), "utf8");
+  }
+
+  function component(file: string): string {
+    const base = join(import.meta.dirname ?? new URL(".", import.meta.url).pathname, "../..", "components");
+    return readFileSync(join(base, file), "utf8");
+  }
+
+  // ── Component contract ──────────────────────────────────────────────
+
+  it("OutfitReactionWidget.tsx exists", () => {
+    assert.ok(
+      existsSync(join(import.meta.dirname ?? new URL(".", import.meta.url).pathname, "../..", "components", "OutfitReactionWidget.tsx")),
+      "OutfitReactionWidget.tsx must exist in app/components/",
+    );
+  });
+
+  it("OutfitReactionWidget heading is 'How does this look feel?'", () => {
+    const text = component("OutfitReactionWidget.tsx");
+    assert.ok(
+      text.includes("How does this look feel?"),
+      "OutfitReactionWidget must render the heading 'How does this look feel?'",
+    );
+  });
+
+  it("OutfitReactionWidget target is hardcoded to complete-suggestion", () => {
+    const text = component("OutfitReactionWidget.tsx");
+    assert.ok(
+      text.includes('"complete-suggestion"'),
+      "OutfitReactionWidget must hardcode target = 'complete-suggestion'",
+    );
+    assert.ok(
+      !text.includes("FeedbackTarget") || !text.includes("target: FeedbackTarget"),
+      "OutfitReactionWidget must not accept target as a prop — it is always 'complete-suggestion'",
+    );
+  });
+
+  it("OutfitReactionWidget props do not include shopifyProductId or closetItemId", () => {
+    const text = component("OutfitReactionWidget.tsx");
+    // Props interface must not declare shopifyProductId or closetItemId.
+    const propsStart = text.indexOf("OutfitReactionWidgetProps");
+    const propsBlock = text.slice(propsStart, propsStart + 600);
+    assert.ok(
+      !propsBlock.includes("shopifyProductId"),
+      "OutfitReactionWidgetProps must not include shopifyProductId",
+    );
+    assert.ok(
+      !propsBlock.includes("closetItemId"),
+      "OutfitReactionWidgetProps must not include closetItemId",
+    );
+  });
+
+  it("OutfitReactionWidget accepts existingFeedbackId prop for idempotency", () => {
+    const text = component("OutfitReactionWidget.tsx");
+    assert.ok(
+      text.includes("existingFeedbackId"),
+      "OutfitReactionWidget must accept existingFeedbackId prop to prevent duplicate records on refresh",
+    );
+  });
+
+  it("OutfitReactionWidget uses update intent when existingFeedbackId is set", () => {
+    const text = component("OutfitReactionWidget.tsx");
+    assert.ok(
+      text.includes('"update"') && text.includes("existingFeedbackId") || text.includes("feedbackId"),
+      "OutfitReactionWidget must use update intent when a feedback record already exists",
+    );
+    assert.ok(
+      text.includes('"create"'),
+      "OutfitReactionWidget must use create intent for new feedback",
+    );
+  });
+
+  it("OutfitReactionWidget posts to /api/recommendation-feedback", () => {
+    const text = component("OutfitReactionWidget.tsx");
+    assert.ok(
+      text.includes('"/api/recommendation-feedback"'),
+      "OutfitReactionWidget must submit to /api/recommendation-feedback",
+    );
+  });
+
+  // ── Result page integration ─────────────────────────────────────────
+
+  it("OutfitReactionWidget is imported in result.tsx", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("OutfitReactionWidget"),
+      "result.tsx must import OutfitReactionWidget",
+    );
+  });
+
+  it("OutfitReactionWidget is rendered only for authenticated users", () => {
+    const text = src("result.tsx");
+    const widgetIdx = text.indexOf("<OutfitReactionWidget");
+    assert.ok(widgetIdx !== -1, "OutfitReactionWidget must be rendered in result.tsx");
+    // The render must be guarded by loaderData.isAuthenticated
+    const surroundingBlock = text.slice(widgetIdx - 300, widgetIdx + 100);
+    assert.ok(
+      surroundingBlock.includes("isAuthenticated"),
+      "OutfitReactionWidget render must be guarded by isAuthenticated",
+    );
+  });
+
+  it("result.tsx imports loadSessionFeedback for feedback pre-loading", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("loadSessionFeedback"),
+      "result.tsx must import loadSessionFeedback to pre-load existing outfit feedback",
+    );
+  });
+
+  it("result loader pre-loads existingOutfitFeedback from session feedback", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("existingOutfitFeedback"),
+      "result loader must supply existingOutfitFeedback in all loader return branches",
+    );
+    assert.ok(
+      text.includes('target === "complete-suggestion"'),
+      "result loader must filter pre-loaded feedback by target === 'complete-suggestion'",
+    );
+  });
+
+  it("OutfitReactionWidget receives existingFeedbackId from loader data (not hardcoded null)", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("existingOutfitFeedback?.id"),
+      "result.tsx must pass existingOutfitFeedback?.id as existingFeedbackId to OutfitReactionWidget",
+    );
+  });
+
+  // ── Suggestion-scoped idempotency ──────────────────────────────────
+
+  it("result loader filters existingOutfitFeedback by both target AND suggestionId (not sessionId alone)", () => {
+    const text = src("result.tsx");
+    // The lookup must check both conditions together to be suggestion-scoped.
+    // A session-only filter would return Look A's feedback when Look B is displayed.
+    assert.ok(
+      text.includes('f.target === "complete-suggestion"') && text.includes("f.suggestionId ==="),
+      "existingOutfitFeedback lookup must filter by both target and suggestionId",
+    );
+  });
+
+  it("pending-save loader also filters existingOutfitFeedback by suggestionId (not sessionId alone)", () => {
+    const text = src("result.tsx");
+    // Both the direct-sessionId path and the pending-save path must scope by suggestionId.
+    const occurrences = (text.match(/f\.suggestionId ===/g) ?? []).length;
+    assert.ok(
+      occurrences >= 2,
+      `both loader paths must filter by f.suggestionId === (found ${occurrences} occurrence(s))`,
+    );
+  });
+
+  it("OutfitReactionWidget passes suggestionId in the create call (new feedback tied to current suggestion)", () => {
+    const text = component("OutfitReactionWidget.tsx");
+    // Create payload must include suggestionId so the DB record is scoped to the suggestion.
+    assert.ok(
+      text.includes("suggestionId,") || text.includes("suggestionId:"),
+      "OutfitReactionWidget create payload must include suggestionId",
+    );
+  });
+});
