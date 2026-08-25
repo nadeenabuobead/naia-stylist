@@ -551,4 +551,16 @@ describe("StyleMe Result Experience — cleanup pass", () => {
       "Shop nAia is gated by outcome !== 'closet-led'",
     );
   });
+
+  // ── VTO contradiction guard ───────────────────────────────────────
+
+  it("real VtoExperience and 'See This Look On Me' future-update section cannot render simultaneously", () => {
+    const text = src("result.tsx");
+    // vtoIsActive must be derived and used to suppress showTryOnSection.
+    assert.ok(text.includes("vtoIsActive"), "vtoIsActive derived flag must exist in result.tsx");
+    assert.ok(
+      text.includes("!vtoIsActive"),
+      "showTryOnSection must be suppressed (!vtoIsActive) when VtoExperience is active",
+    );
+  });
 });

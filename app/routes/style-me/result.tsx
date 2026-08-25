@@ -884,7 +884,8 @@ export default function StyleMeResult() {
   // "See This Look On Me" — shown only when:
   //   1. customer is authenticated
   //   2. outcome is nadine-recommendation
-  //   3. primary NADINE item has a verified product image (null for all V8; always hidden in first release)
+  //   3. primary NADINE item has a verified product image URL in the DB
+  //   4. VtoExperience is not already active for this handle (prevents duplicate VTO UI)
   const primaryNaiaItemWithImage = suggestion.items?.find(
     (item: any) =>
       !["SHOES", "ACCESSORY", "BAG"].includes(item.itemType) && item.productImageUrl,
@@ -892,10 +893,18 @@ export default function StyleMeResult() {
   const primaryNaiaItem = suggestion.items?.find(
     (item: any) => !["SHOES", "ACCESSORY", "BAG"].includes(item.itemType),
   );
+  // True when the real production VtoExperience is rendering for this session.
+  // When active, the "See This Look On Me" placeholder section is suppressed to avoid
+  // simultaneously showing live VTO and a "coming in future update" message.
+  const vtoIsActive =
+    loaderData.vtoEnabled &&
+    !!suggestionMeta?.primaryHandle &&
+    isTryOnEligible(suggestionMeta.primaryHandle);
   // "See This Look On Me" section visibility:
-  // Shown for authenticated NADINE results that have a product image, regardless of model readiness.
-  // When model is not ready, a setup-required state is shown instead of hiding the section entirely.
+  // Shown for authenticated NADINE results with a product image, when real VTO is not active.
+  // When model is not ready, a setup-required state is shown instead of hiding the section.
   const showTryOnSection =
+    !vtoIsActive &&
     loaderData.isAuthenticated &&
     suggestionMeta?.outcome === "nadine-recommendation" &&
     !!primaryNaiaItemWithImage;

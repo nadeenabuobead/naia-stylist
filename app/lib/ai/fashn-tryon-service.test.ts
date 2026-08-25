@@ -16,8 +16,11 @@ import {
   downloadModelPhotoAsDataUrl,
   uploadTryOnResult,
   executeTryOn,
+  submitTryOnJob,
   type ExecuteTryOnParams,
   type ExecuteTryOnDeps,
+  type SubmitJobParams,
+  type SubmitJobDeps,
 } from "./fashn-tryon-service.server.js";
 import { isValidModelImageDataUrl } from "./fashn-try-on.server.js";
 import { VIRTUAL_TRY_ON_ENABLED, NAIA_COMPONENT_MEDIA_MAP } from "./naia-product-media.js";
@@ -63,6 +66,7 @@ const BASE_PARAMS: ExecuteTryOnParams = {
   garmentHandle: "collar-shirt",
   virtualTryOnConsentAt: new Date("2026-07-16T10:00:00Z"),
   idempotencyKey: "ikey-001",
+  bodyModerationStatus: "APPROVED",
 };
 
 const MINI_PNG_B64 =
@@ -416,5 +420,171 @@ describe("§6 Invariants", () => {
     );
     assert.ok(id.includes("some-customer-id"), "result path must include customerId");
     assert.ok(id.includes("some-job-id"), "result path must include jobId");
+  });
+});
+
+// ── §7 Body moderation gate ───────────────────────────────────────────────────
+// Verifies that submitTryOnJob and executeTryOn both enforce the fail-closed rule:
+// APPROVED is the only status that passes; every other value blocks before any I/O.
+
+// Shared base params for submitTryOnJob — use resolvedGarmentUrl to bypass catalog checks
+// so tests can isolate the moderation gate.
+const SUBMIT_BASE: SubmitJobParams = {
+  internalCustomerId: "cust-mod",
+  naiaModelId: "model-mod",
+  bodyPublicId: "naia-wardrobe/cust-mod/body",
+  bodyFormat: "jpg",
+  deliveryType: "private",
+  garmentHandle: "closet:item-mod",
+  resolvedGarmentUrl: "https://cdn.shopify.com/test-garment.jpg",
+  garmentSource: "closet",
+  virtualTryOnConsentAt: new Date("2026-07-16T10:00:00Z"),
+  idempotencyKey: "ikey-mod-001",
+  bodyModerationStatus: "APPROVED",
+};
+
+function makeSubmitDeps(overrides: SubmitJobDeps = {}): SubmitJobDeps {
+  const createdJob = mockJob({ status: "CREATED" });
+  return {
+    _downloadPhoto: async () => ({ ok: true, dataUrl: `data:image/png;base64,${MINI_PNG_B64}` }),
+    _submitToProvider: async () => ({
+      ok: true as const,
+      predictionId: "pred-mod-001",
+    }),
+    _createOrFindJob: async () => ({ ok: true, job: createdJob, created: true }),
+    _advanceJob: async (job, status) => ({
+      ok: true as const,
+      job: { ...job, status } as VirtualTryOnJobRecord,
+    }),
+    _checkCooldown: async () => ({ ok: true }),
+    ...overrides,
+  };
+}
+
+describe("§7 Body moderation gate", () => {
+  // ── submitTryOnJob ─────────────────────────────────────────────────
+
+  it("MG01 submitTryOnJob — APPROVED passes moderation gate", async () => {
+    const result = await submitTryOnJob(
+      { ...SUBMIT_BASE, bodyModerationStatus: "APPROVED" },
+      makeSubmitDeps(),
+    );
+    // Should not fail with a moderation NOT_READY; may fail for other reasons
+    if (!result.ok) {
+      assert.notEqual(
+        result.customerMessage,
+        "Your model photo is pending review. Please try again in a moment.",
+        "APPROVED must not trigger moderation rejection",
+      );
+    }
+  });
+
+  it("MG02 submitTryOnJob — undefined bodyModerationStatus is blocked (fail-closed)", async () => {
+    let downloadCalled = false;
+    let providerCalled = false;
+    const result = await submitTryOnJob(
+      { ...SUBMIT_BASE, bodyModerationStatus: undefined },
+      makeSubmitDeps({
+        _downloadPhoto: async () => { downloadCalled = true; return { ok: true, dataUrl: `data:image/png;base64,${MINI_PNG_B64}` }; },
+        _submitToProvider: async () => { providerCalled = true; return { ok: true as const, predictionId: "p" }; },
+      }),
+    );
+    assert.ok(!result.ok, "undefined status must fail");
+    assert.ok(!downloadCalled, "body photo must not be downloaded when moderation blocks");
+    assert.ok(!providerCalled, "FASHN provider must not be called when moderation blocks");
+  });
+
+  it("MG03 submitTryOnJob — null bodyModerationStatus is blocked", async () => {
+    let downloadCalled = false;
+    const result = await submitTryOnJob(
+      { ...SUBMIT_BASE, bodyModerationStatus: null },
+      makeSubmitDeps({
+        _downloadPhoto: async () => { downloadCalled = true; return { ok: true, dataUrl: `data:image/png;base64,${MINI_PNG_B64}` }; },
+      }),
+    );
+    assert.ok(!result.ok, "null status must fail");
+    assert.ok(!downloadCalled, "body photo must not be downloaded for null moderation status");
+  });
+
+  it("MG04 submitTryOnJob — PENDING is blocked", async () => {
+    const result = await submitTryOnJob(
+      { ...SUBMIT_BASE, bodyModerationStatus: "PENDING" },
+      makeSubmitDeps(),
+    );
+    assert.ok(!result.ok, "PENDING must fail");
+    assert.ok(!result.ok && result.code === "NOT_READY");
+  });
+
+  it("MG05 submitTryOnJob — REJECTED is blocked", async () => {
+    const result = await submitTryOnJob(
+      { ...SUBMIT_BASE, bodyModerationStatus: "REJECTED" },
+      makeSubmitDeps(),
+    );
+    assert.ok(!result.ok, "REJECTED must fail");
+    assert.ok(!result.ok && result.code === "NOT_READY");
+  });
+
+  it("MG06 submitTryOnJob — moderation rejection fires before FASHN submission", async () => {
+    let providerCalled = false;
+    const result = await submitTryOnJob(
+      { ...SUBMIT_BASE, bodyModerationStatus: "PENDING" },
+      makeSubmitDeps({
+        _submitToProvider: async () => {
+          providerCalled = true;
+          return { ok: true as const, predictionId: "p" };
+        },
+      }),
+    );
+    assert.ok(!result.ok);
+    assert.ok(!providerCalled, "FASHN provider must not be invoked when moderation gate blocks");
+  });
+
+  // ── executeTryOn ───────────────────────────────────────────────────
+
+  it("MG07 executeTryOn — undefined bodyModerationStatus is blocked (fail-closed)", async () => {
+    let downloadCalled = false;
+    const params: ExecuteTryOnParams = { ...BASE_PARAMS, bodyModerationStatus: undefined };
+    const result = await executeTryOn(
+      params,
+      makeDeps({
+        _downloadPhoto: async () => { downloadCalled = true; return { ok: true, dataUrl: `data:image/png;base64,${MINI_PNG_B64}` }; },
+      }),
+    );
+    assert.ok(!result.ok, "undefined status must fail");
+    assert.ok(!result.ok && result.code === "NOT_READY");
+    assert.ok(!downloadCalled, "body photo must not be downloaded when moderation gate blocks");
+  });
+
+  it("MG08 executeTryOn — null bodyModerationStatus is blocked", async () => {
+    const result = await executeTryOn(
+      { ...BASE_PARAMS, bodyModerationStatus: null },
+      makeDeps(),
+    );
+    assert.ok(!result.ok, "null status must fail");
+    assert.ok(!result.ok && result.code === "NOT_READY");
+  });
+
+  it("MG09 executeTryOn — PENDING is blocked before garment check and body-photo download", async () => {
+    let downloadCalled = false;
+    const result = await executeTryOn(
+      { ...BASE_PARAMS, bodyModerationStatus: "PENDING" },
+      makeDeps({
+        _downloadPhoto: async () => { downloadCalled = true; return { ok: true, dataUrl: `data:image/png;base64,${MINI_PNG_B64}` }; },
+      }),
+    );
+    assert.ok(!result.ok && result.code === "NOT_READY");
+    assert.ok(!downloadCalled, "body photo must not be downloaded for PENDING status");
+  });
+
+  it("MG10 executeTryOn — APPROVED passes and reaches garment check", async () => {
+    // collar-shirt has media eligibility "ready" so it passes validateGarmentEligibility.
+    // It does NOT pass isTryOnEligible (outcome: pending), but executeTryOn does not
+    // call isTryOnEligible — only validateGarmentEligibility. So this should succeed.
+    const result = await executeTryOn(
+      { ...BASE_PARAMS, bodyModerationStatus: "APPROVED" },
+      makeDeps(),
+    );
+    // Moderation gate passed — result is the normal happy-path ok=true
+    assert.ok(result.ok, `APPROVED must pass moderation gate; got: ${JSON.stringify(result)}`);
   });
 });

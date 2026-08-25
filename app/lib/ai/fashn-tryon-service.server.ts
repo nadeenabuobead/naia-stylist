@@ -253,10 +253,10 @@ export async function submitTryOnJob(
     _checkCooldown     = checkCustomerCooldown,
   } = deps;
 
-  // 0. Body photo moderation gate — APPROVED required before any FASHN submission.
+  // 0. Body photo moderation gate — fail-closed: APPROVED is the only value that passes.
   // bodyModerationStatus is set to "APPROVED" in saveNaiaModelPhoto after Layer 2+3 pass.
-  // Never send a photo to FASHN when status is PENDING, null, or anything other than APPROVED.
-  if (params.bodyModerationStatus !== undefined && params.bodyModerationStatus !== "APPROVED") {
+  // undefined, null, PENDING, REJECTED, and any unknown status all block here.
+  if (params.bodyModerationStatus !== "APPROVED") {
     return {
       ok: false,
       code: "NOT_READY",
@@ -413,6 +413,9 @@ export interface ExecuteTryOnParams {
   virtualTryOnConsentAt: Date;
   saveTryOnResultConsentAt?: Date | null;
   idempotencyKey: string;
+  // Gate: PENDING/null/undefined means body photo has not passed Layer 2+3 moderation.
+  // executeTryOn rejects unless this is "APPROVED".
+  bodyModerationStatus?: string | null;
 }
 
 export type ExecuteTryOnResult =
@@ -476,6 +479,16 @@ export async function executeTryOn(
     _checkCooldown = checkCustomerCooldown,
     _buildResultUrl = (cid, jid) => buildTryOnResultUrl(cid, jid),
   } = deps;
+
+  // 0. Body photo moderation gate — fail-closed: APPROVED is the only value that passes.
+  // undefined, null, PENDING, REJECTED, and any unknown status all block here.
+  if (params.bodyModerationStatus !== "APPROVED") {
+    return {
+      ok: false,
+      code: "NOT_READY",
+      customerMessage: "Your model photo is pending review. Please try again in a moment.",
+    };
+  }
 
   // 1. Validate garment eligibility — fail-closed on non-ready
   const garment = validateGarmentEligibility(params.garmentHandle);
