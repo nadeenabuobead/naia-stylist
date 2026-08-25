@@ -877,7 +877,7 @@ export default function TrendReportDetail() {
     if (report.fading?.length) { addText("WHAT'S FADING", 8, "bold", [139, 32, 53], 3); addText(report.fading.map((f) => f.signal).join("  ·  "), 10, "normal", [122, 111, 106], 8); }
     if (report.referencesBehindThisEdit?.length) {
       addText("REFERENCES BEHIND THIS EDIT", 8, "bold", [139, 32, 53], 4);
-      report.referencesBehindThisEdit.forEach((ref) => { addText(ref.collection ? `${ref.brand} — ${ref.collection}` : ref.brand, 11, "bold", [34, 21, 22], 2); addText(ref.signal, 10, "italic", [34, 21, 22], 2); addText("nAia: " + ref.naiaRead, 9, "normal", [122, 111, 106], 6); });
+      report.referencesBehindThisEdit.forEach((ref) => { addText(ref.collection ? `${ref.brand} — ${ref.collection}` : ref.brand, 11, "bold", [34, 21, 22], 2); if (ref.signal) addText(ref.signal, 10, "italic", [34, 21, 22], 2); if (ref.naiaRead) addText("nAia: " + ref.naiaRead, 9, "normal", [122, 111, 106], 6); });
       y += 4;
     }
     if (report.spendSaveSkip) {
@@ -909,7 +909,7 @@ export default function TrendReportDetail() {
     if (report.wardrobeNote) { addText("WHAT THIS MEANS FOR YOUR WARDROBE", 8, "bold", [139, 32, 53], 3); addText(report.wardrobeNote, 10, "normal", [34, 21, 22], 8); }
     if (report.sources?.length) {
       addText("SOURCES", 8, "bold", [139, 32, 53], 4);
-      report.sources.forEach((s) => { addText(`${s.publisher} — ${s.title}${s.publishedAt ? ` (${formatSourceDate(s.publishedAt)})` : ""}`, 10, "normal", [34, 21, 22], 6); });
+      report.sources.forEach((s) => { const titlePart = s.title && s.title !== s.publisher ? ` — ${s.title}` : ""; addText(`${s.publisher}${titlePart}${s.publishedAt ? ` (${formatSourceDate(s.publishedAt)})` : ""}`, 10, "normal", [34, 21, 22], 6); });
       const reportUrl = typeof window !== "undefined" ? window.location.href : "";
       addText(`Full source links: ${reportUrl}`, 9, "italic", [122, 111, 106], 8);
     }
@@ -1020,7 +1020,7 @@ export default function TrendReportDetail() {
                       <li key={i} className="psl-signal-li">
                         {r.signal}
                         <span className="psl-signal-why">{r.why}</span>
-                        <span className="psl-signal-source">{r.source}</span>
+                        {r.source && <span className="psl-signal-source">{r.source}</span>}
                       </li>
                     ))}
                   </ul>
@@ -1034,7 +1034,7 @@ export default function TrendReportDetail() {
                       <li key={i} className="psl-signal-li">
                         {f.signal}
                         <span className="psl-signal-why">{f.why}</span>
-                        <span className="psl-signal-source">{f.source}</span>
+                        {f.source && <span className="psl-signal-source">{f.source}</span>}
                       </li>
                     ))}
                   </ul>
@@ -1137,16 +1137,26 @@ export default function TrendReportDetail() {
             <div className="psl-divider" />
             <div className="psl-section">
               <div className="psl-section-label">Sources</div>
-              {report.sources.map((s, i) => (
-                <div key={i} className="psl-source">
-                  <div className="psl-source-publisher">{s.publisher}</div>
-                  {s.descriptor && <div className="psl-source-descriptor">{s.descriptor}</div>}
-                  <div className="psl-source-title">
-                    <a href={s.url} target="_blank" rel="noreferrer">{s.title}</a>
+              {report.sources.map((s, i) => {
+                const distinctTitle = s.title && s.title !== s.publisher;
+                return (
+                  <div key={i} className="psl-source">
+                    <div className="psl-source-publisher">
+                      {distinctTitle
+                        ? s.publisher
+                        : <a href={s.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "underline", textUnderlineOffset: "2px" }}>{s.publisher}</a>
+                      }
+                    </div>
+                    {s.descriptor && <div className="psl-source-descriptor">{s.descriptor}</div>}
+                    {distinctTitle && (
+                      <div className="psl-source-title">
+                        <a href={s.url} target="_blank" rel="noreferrer">{s.title}</a>
+                      </div>
+                    )}
+                    {s.publishedAt && <div className="psl-source-date">{formatSourceDate(s.publishedAt)}</div>}
                   </div>
-                  {s.publishedAt && <div className="psl-source-date">{formatSourceDate(s.publishedAt)}</div>}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </>
         )}

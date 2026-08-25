@@ -3,11 +3,16 @@ import {
   trendReports,
   type TrendReportData,
   type TrendReportKeyTrend,
-  type TrendReportSource,
-  type TrendSignal,
-  type TrendReportReferenceCard,
   type TrendReportSpendSaveSkip,
 } from "./trend-reports";
+import {
+  normaliseSignal,
+  normaliseReference,
+  normaliseSource,
+  signalHasContent,
+  referenceHasContent,
+  sourceHasContent,
+} from "./editorial-reports.normalise";
 
 type DbRow = Awaited<
   ReturnType<typeof prisma.editorialTrendReport.findFirst>
@@ -28,11 +33,15 @@ function dbToTrendReportData(r: NonNullable<DbRow>): TrendReportData {
     wardrobeNote: r.wardrobeNote ?? undefined,
     investmentNotes: r.investmentNotes ?? undefined,
     keyTrends: (r.keyTrends ?? []) as TrendReportKeyTrend[],
-    rising: (r.rising ?? []) as TrendSignal[],
-    fading: (r.fading ?? []) as TrendSignal[],
-    referencesBehindThisEdit: (r.referencesBehindThisEdit ?? []) as TrendReportReferenceCard[],
+    rising: ((r.rising ?? []) as Record<string, unknown>[])
+      .map(normaliseSignal).filter(signalHasContent),
+    fading: ((r.fading ?? []) as Record<string, unknown>[])
+      .map(normaliseSignal).filter(signalHasContent),
+    referencesBehindThisEdit: ((r.referencesBehindThisEdit ?? []) as Record<string, unknown>[])
+      .map(normaliseReference).filter(referenceHasContent),
     howToWear: (r.howToWear ?? []) as { feeling: string; direction: string }[],
-    sources: (r.sources ?? []) as TrendReportSource[],
+    sources: ((r.sources ?? []) as Record<string, unknown>[])
+      .map(normaliseSource).filter(sourceHasContent),
     spendSaveSkip: (r.spendSaveSkip && typeof r.spendSaveSkip === "object" && Object.keys(r.spendSaveSkip).length > 0)
       ? (r.spendSaveSkip as TrendReportSpendSaveSkip)
       : undefined,
