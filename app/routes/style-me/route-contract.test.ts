@@ -564,3 +564,156 @@ describe("StyleMe Result Experience — cleanup pass", () => {
     );
   });
 });
+
+// ── StyleMe Result Actions cleanup ───────────────────────────────────────────
+
+describe("StyleMe Result Actions — cleanup pass", () => {
+  function src(file: string): string {
+    const dir = join(import.meta.dirname ?? new URL(".", import.meta.url).pathname);
+    return readFileSync(join(dir, file), "utf8");
+  }
+
+  function lib(file: string): string {
+    const base = join(import.meta.dirname ?? new URL(".", import.meta.url).pathname, "../..", "lib");
+    return readFileSync(join(base, file), "utf8");
+  }
+
+  // ── Adjust Vibe ──────────────────────────────────────────────────
+
+  it("Adjust Vibe links to /style-me/feeling", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes('to="/style-me/feeling"'),
+      "result.tsx must contain a link to /style-me/feeling",
+    );
+    assert.ok(
+      text.includes("Adjust Vibe"),
+      "result.tsx must render 'Adjust Vibe' label",
+    );
+  });
+
+  // ── Start Over ───────────────────────────────────────────────────
+
+  it("Start Over submits intent=start-over via POST (not a plain link)", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes('value="start-over"'),
+      "result.tsx must include a hidden field with value='start-over'",
+    );
+    // The old pattern was exactly: Link to="/style-me" ... Start Over</Link>
+    // That pattern is gone — verify the old combined string is absent.
+    assert.ok(
+      !text.includes('to="/style-me"') || !text.includes(">Start Over</Link>"),
+      "Start Over must not be a plain <Link to='/style-me'>",
+    );
+    // Positive check: a Form with method=post and intent=start-over is present.
+    assert.ok(
+      text.includes('method="post"') && text.includes('value="start-over"'),
+      "Start Over must use a Form with method=post and intent=start-over",
+    );
+  });
+
+  it("start-over action handler exists and redirects to /style-me/mood", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes('intent === "start-over"'),
+      "action must handle intent=start-over",
+    );
+    assert.ok(
+      text.includes('redirect("/style-me/mood"'),
+      "start-over must redirect to /style-me/mood",
+    );
+  });
+
+  it("clearStyleMeSession is imported and called in the start-over handler", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("clearStyleMeSession"),
+      "result.tsx must import and call clearStyleMeSession",
+    );
+  });
+
+  it("clearStyleMeSession in session.server.ts unsets all 9 StyleMe flow keys", () => {
+    const text = lib("session.server.ts");
+    const STYLEME_KEYS = [
+      "styleMeMood",
+      "styleMeFeelings",
+      "styleMeBodyNeeds",
+      "styleMePractical",
+      "styleMeOccasion",
+      "styleMeFormalityConditional",
+      "styleMeSource",
+      "styleMeNadineAnchorHandle",
+      "styleMeClosetAnchorId",
+    ];
+    for (const key of STYLEME_KEYS) {
+      assert.ok(
+        text.includes(`"${key}"`),
+        `clearStyleMeSession must reference "${key}"`,
+      );
+    }
+  });
+
+  it("clearStyleMeSession does not call destroySession (auth PKCE state preserved)", () => {
+    const text = lib("session.server.ts");
+    // destroySession would wipe the entire __naia_session cookie including any
+    // in-flight pkce_verifier/pkce_state/pkce_nonce keys. clearStyleMeSession
+    // must use session.unset() per key instead.
+    const clearFnStart = text.indexOf("export async function clearStyleMeSession");
+    const clearFnBody = text.slice(clearFnStart, clearFnStart + 500);
+    assert.ok(
+      !clearFnBody.includes("destroySession"),
+      "clearStyleMeSession must not call destroySession",
+    );
+  });
+
+  it("clearStyleMeSession does not clear auth token (__naia_tok)", () => {
+    const text = lib("session.server.ts");
+    const clearFnStart = text.indexOf("export async function clearStyleMeSession");
+    const clearFnBody = text.slice(clearFnStart, clearFnStart + 500);
+    assert.ok(
+      !clearFnBody.includes("__naia_tok"),
+      "clearStyleMeSession must not touch the auth session cookie",
+    );
+  });
+
+  // ── Rate This Look removed ────────────────────────────────────────
+
+  it("Rate This Look button is not rendered on the result page", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      !text.includes("Rate This Look"),
+      "result.tsx must not render 'Rate This Look' (moved to after-wear context)",
+    );
+  });
+
+  it("PostOutfitReview route action is preserved (intent=review handler kept)", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes('intent === "review"'),
+      "action must still handle intent=review (DB persistence kept for after-wear placement)",
+    );
+  });
+
+  // ── Save and New Look still present ──────────────────────────────
+
+  it("Save button is still present on the result page", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes('"save"') || text.includes("intent: \"save\""),
+      "result.tsx must still submit intent=save",
+    );
+  });
+
+  it("New Look, Same Vibe is still present on the result page", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("New Look, Same Vibe"),
+      "result.tsx must still render 'New Look, Same Vibe'",
+    );
+    assert.ok(
+      text.includes('"regenerate"'),
+      "result.tsx must still submit intent=regenerate",
+    );
+  });
+});
