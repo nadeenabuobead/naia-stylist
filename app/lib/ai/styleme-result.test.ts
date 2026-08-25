@@ -1317,3 +1317,212 @@ describe("§16 Generation aborts after failed anchor resolution", () => {
     assert.equal(callCount(), 0, "runRecommendation must never be called after unknown/foreign closet ID");
   });
 });
+
+// ── §17 Mixed NADINE + My Closet payload assembly ────────────────────────────
+
+import type { NormalizedClosetAnchor } from "./styleme-recommendation.types.ts";
+
+function makeNadineWithClosetAnchorResult(overrides: Partial<StyleMeCustomerResult> = {}): StyleMeCustomerResult {
+  const song = SONG_CATALOG[0] as (typeof SONG_CATALOG)[number];
+  const finishing: StyleMeFinishingLayer = {
+    shoes: "Ankle boots or pointed flats.",
+    bag: "A compact structured tote.",
+    accessories: "One gold cuff, nothing more.",
+    hair: "Pulled back for contrast.",
+    colourDirection: "Keep the palette tight — two neutrals max.",
+  };
+  const closetAnchor: NormalizedClosetAnchor = {
+    type: "closet" as const,
+    id: "closet-mix-1",
+    label: "Cream Blazer",
+    slot: "outerwear" as const,
+    colors: ["cream"],
+    normalizedColorIds: ["ivory"],
+    styleTags: ["minimal", "corporate-chic"],
+    occasions: ["work", "everyday"],
+    material: "linen",
+    hasStrongEvidence: true,
+    evidenceFields: ["styleTags", "occasions"],
+    imageUrl: "https://example.com/cream-blazer.jpg",
+  };
+  return {
+    outcome: "nadine-recommendation",
+    outfitName: "Collar Shirt + Cream Blazer for work",
+    whyThisWorks: "The NADINE collar shirt pairs with your blazer for a polished layered look.",
+    confidenceBoost: "Two intentional pieces, one cohesive look.",
+    perfumeNote: null,
+    primaryProduct: {
+      handle: "collar-shirt",
+      title: "Becoming Seen",
+      slot: "top",
+      shopifyProductId: null,
+      productImageUrl: null,
+      liveUrl: null,
+      stylingNotes: "Let this shirt lead the outfit.",
+    },
+    alternatives: [],
+    closetAnchorLabel: "Cream Blazer",
+    closetAnchorImageUrl: "https://example.com/cream-blazer.jpg",
+    pairingNote: "Wear the blazer open for a relaxed polish.",
+    finishingLayer: finishing,
+    songReason: "Curated for your work day.",
+    song,
+    rawRecommendation: {
+      outcome: "nadine-recommendation",
+      anchor: closetAnchor,
+      primary: null,
+      alternatives: [],
+      outfitPlan: { anchorSlot: "outerwear", recommendedSlot: "top", compatibilityStatus: "compatible", notes: [] },
+      evaluatedProducts: [],
+      coverage: { totalCatalogProducts: 11, eligibleCandidates: 11, excludedCandidates: 0 },
+    },
+    ...overrides,
+  };
+}
+
+describe("§17 Mixed NADINE + My Closet — buildDbPayload", () => {
+  it("FL.5 — both + nadine-recommendation: items = 1 NADINE + 1 closet + 3 finishing = 5 total", () => {
+    const result = makeNadineWithClosetAnchorResult();
+    const payload = buildDbPayload(result);
+    assert.equal(payload.items.length, 5, `expected 5 items, got ${payload.items.length}: ${payload.items.map(i => i.itemType).join(", ")}`);
+    const garments = payload.items.filter((i) => !["SHOES", "BAG", "ACCESSORY"].includes(i.itemType));
+    assert.equal(garments.length, 2, "must have exactly 2 garment items (NADINE + closet)");
+    assert.ok(payload.items.some((i) => i.itemType === "SHOES"), "SHOES missing");
+    assert.ok(payload.items.some((i) => i.itemType === "BAG"), "BAG missing");
+    assert.ok(payload.items.some((i) => i.itemType === "ACCESSORY"), "ACCESSORY missing");
+  });
+
+  it("FL.6 — closet garment has closetItemId set and shopifyProductId === null", () => {
+    const result = makeNadineWithClosetAnchorResult();
+    const payload = buildDbPayload(result);
+    const closetItem = payload.items.find((i) => i.closetItemId !== null);
+    assert.ok(closetItem, "a closet-origin garment item must exist");
+    assert.equal(closetItem!.closetItemId, "closet-mix-1");
+    assert.equal(closetItem!.shopifyProductId, null, "closet item must have shopifyProductId null");
+    assert.ok(closetItem!.productTitle, "closet item must have a productTitle");
+    assert.ok(closetItem!.stylingNotes && closetItem!.stylingNotes.length > 0, "closet item must have stylingNotes");
+  });
+
+  it("FL.7 — NADINE garment has closetItemId === null", () => {
+    const result = makeNadineWithClosetAnchorResult();
+    const payload = buildDbPayload(result);
+    const nadineItem = payload.items.find(
+      (i) => !["SHOES", "BAG", "ACCESSORY"].includes(i.itemType) && i.closetItemId === null,
+    );
+    assert.ok(nadineItem, "a NADINE-origin garment item must exist");
+    assert.equal(nadineItem!.closetItemId, null);
+    assert.equal(nadineItem!.productTitle, "Becoming Seen");
+    assert.equal(nadineItem!.stylingNotes, "Let this shirt lead the outfit.");
+  });
+
+  it("FL.8 — closet-led (CLOSET source) still produces exactly 1 closet garment, no NADINE garment", () => {
+    const result = makeClosetLedResult();
+    const payload = buildDbPayload(result);
+    const garments = payload.items.filter((i) => !["SHOES", "BAG", "ACCESSORY"].includes(i.itemType));
+    assert.equal(garments.length, 1, "closet-led must have exactly 1 garment (the closet piece)");
+    assert.equal(garments[0]!.closetItemId, "closet-abc");
+    assert.equal(garments[0]!.shopifyProductId, null);
+  });
+
+  it("FL.9 — naia-piece (no anchor) produces exactly 1 NADINE garment, no closet garment", () => {
+    const result = makeMinimalResult({ outcome: "nadine-recommendation" });
+    const payload = buildDbPayload(result);
+    const garments = payload.items.filter((i) => !["SHOES", "BAG", "ACCESSORY"].includes(i.itemType));
+    assert.equal(garments.length, 1, "naia-piece must have exactly 1 garment (NADINE)");
+    assert.equal(garments[0]!.closetItemId, null);
+  });
+
+  it("FL.10 — pairingNote is used as closet stylingNotes when present", () => {
+    const result = makeNadineWithClosetAnchorResult({ pairingNote: "Wear the blazer open for relaxed polish." });
+    const payload = buildDbPayload(result);
+    const closetItem = payload.items.find((i) => i.closetItemId !== null);
+    assert.ok(closetItem!.stylingNotes!.includes("blazer"), `expected pairingNote text in closet stylingNotes, got: ${closetItem!.stylingNotes}`);
+  });
+
+  it("FL.11 — fallback stylingNotes used when pairingNote is null", () => {
+    const result = makeNadineWithClosetAnchorResult({ pairingNote: null });
+    const payload = buildDbPayload(result);
+    const closetItem = payload.items.find((i) => i.closetItemId !== null);
+    assert.ok(closetItem!.stylingNotes && closetItem!.stylingNotes.length > 0, "fallback stylingNotes must be non-empty");
+  });
+});
+
+// ── §18 Regenerate anchor recovery (persisted closetAnchorId path) ────────────
+
+describe("§18 Regenerate — persisted closetAnchorId recovery", () => {
+  it("RG.1 — BOTH source with valid persisted closetAnchorId resolves anchor successfully", async () => {
+    const fakeClosetItem: import("./styleme-recommendation.types.ts").ClosetAnchorInput = {
+      type: "closet",
+      id: "ci-persisted-1",
+      name: "Black Blazer",
+      category: "OUTERWEAR",
+      colors: ["black"],
+      primaryColor: "black",
+      pattern: null,
+      material: "wool",
+      styleTags: ["minimal"],
+      occasions: ["work"],
+      imageUrl: "https://example.com/black-blazer.jpg",
+    };
+    const fakeResolver = async (_custId: string, id: string) =>
+      id === "ci-persisted-1" ? fakeClosetItem : null;
+
+    const result = await resolveActionAnchor("both", "cust-1", null, "ci-persisted-1", fakeResolver);
+    assert.ok(result.ok, "persisted closetAnchorId for BOTH source must resolve successfully");
+    if (result.ok) {
+      assert.ok(result.anchor !== null, "anchor must not be null for BOTH with valid closetAnchorId");
+      assert.equal(result.anchor!.type, "closet");
+    }
+  });
+
+  it("RG.2 — CLOSET source with valid persisted closetAnchorId resolves anchor successfully", async () => {
+    const fakeClosetItem: import("./styleme-recommendation.types.ts").ClosetAnchorInput = {
+      type: "closet",
+      id: "ci-persisted-2",
+      name: "Linen Trousers",
+      category: "BOTTOMS",
+      colors: ["beige"],
+      primaryColor: "beige",
+      pattern: null,
+      material: "linen",
+      styleTags: ["effortless"],
+      occasions: ["everyday"],
+      imageUrl: "https://example.com/linen-trousers.jpg",
+    };
+    const fakeResolver = async (_custId: string, id: string) =>
+      id === "ci-persisted-2" ? fakeClosetItem : null;
+
+    const result = await resolveActionAnchor("my-closet", "cust-2", null, "ci-persisted-2", fakeResolver);
+    assert.ok(result.ok, "persisted closetAnchorId for CLOSET source must resolve successfully");
+    if (result.ok) {
+      assert.equal(result.anchor!.type, "closet");
+    }
+  });
+
+  it("RG.3 — BOTH source with null closetAnchorId (pre-migration sessions) fails with 400", async () => {
+    const fakeResolver = async () => null;
+    const result = await resolveActionAnchor("both", "cust-1", null, null, fakeResolver);
+    assert.equal(result.ok, false, "null closetAnchorId for BOTH must fail");
+    if (!result.ok) {
+      assert.equal(result.status, 400);
+    }
+  });
+
+  it("RG.4 — BOTH source with foreign/deleted closetAnchorId fails with 403", async () => {
+    const fakeResolver = async () => null; // ownership check fails
+    const result = await resolveActionAnchor("both", "cust-1", null, "ci-foreign", fakeResolver);
+    assert.equal(result.ok, false, "foreign closetAnchorId for BOTH must fail");
+    if (!result.ok) {
+      assert.equal(result.status, 403);
+    }
+  });
+
+  it("RG.5 — NAIA source ignores any persisted closetAnchorId and returns ok with null anchor", async () => {
+    const fakeResolver = async () => null;
+    const result = await resolveActionAnchor("naia-piece", "cust-1", null, null, fakeResolver);
+    assert.ok(result.ok, "NAIA source must always resolve successfully");
+    if (result.ok) {
+      assert.equal(result.anchor, null, "anchor must be null for NAIA source");
+    }
+  });
+});

@@ -544,6 +544,20 @@ export function buildDbPayload(result: StyleMeCustomerResult): StyleMeDbPayload 
       stylingNotes: primaryProduct.stylingNotes,
       productUrl: primaryProduct.productUrl,
     });
+    // Mixed look (BOTH source): also persist the selected Closet anchor as a
+    // garment component so it appears in the outfit alongside the NADINE piece.
+    if (result.rawRecommendation.anchor?.type === "closet") {
+      const a = result.rawRecommendation.anchor as NormalizedClosetAnchor;
+      items.push({
+        itemType: slotToItemType(a.slot),
+        productTitle: a.label,
+        productImageUrl: a.imageUrl ?? null,
+        shopifyProductId: null,
+        closetItemId: a.id,
+        stylingNotes: result.pairingNote ?? `Pair with your ${a.label}.`,
+        productUrl: null,
+      });
+    }
   }
 
   if (outcome === "closet-led" && result.rawRecommendation.anchor?.type === "closet") {

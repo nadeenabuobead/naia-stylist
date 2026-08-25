@@ -239,7 +239,8 @@ model StylingSession {
   
   // Source Selection
   styleFrom       StyleSource @default(BOTH)
-  
+  closetAnchorId  String?     // ClosetItem ID selected for CLOSET/BOTH sources; null for NAIA
+
   // Weather/Context
   weather         String?
   timeOfDay       String?   // morning, afternoon, evening

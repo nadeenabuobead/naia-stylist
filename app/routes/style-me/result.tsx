@@ -211,6 +211,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         formalityConditional,
         practicalIds,
         styleFrom: source === "my-closet" ? "CLOSET" : source === "naia-piece" ? "NAIA" : "BOTH",
+        closetAnchorId: (source === "my-closet" || source === "both") ? (closetAnchorId ?? null) : null,
       },
     });
 
@@ -373,7 +374,7 @@ export async function action({ request }: ActionFunctionArgs) {
       }
 
       const sessionSource = styleSourceToSessionSource(session.styleFrom);
-      const anchorResult = await resolveActionAnchor(sessionSource, session.customerId, null, null);
+      const anchorResult = await resolveActionAnchor(sessionSource, session.customerId, null, session.closetAnchorId ?? null);
       if (!anchorResult.ok) {
         return data({ error: anchorResult.message }, { status: anchorResult.status });
       }
