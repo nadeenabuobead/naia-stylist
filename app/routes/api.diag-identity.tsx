@@ -27,7 +27,7 @@ export async function action({ request }: ActionFunctionArgs) {
       where: { id: currentCustomer.id },
       include: {
         onboardingProfile: { select: { completed: true } },
-        selfieAnalysis:    { select: { status: true } },
+        selfieAnalysis:    { select: { analysisStatus: true } },
         naiaModel:         { select: { id: true } },
       },
     }),
@@ -53,7 +53,7 @@ export async function action({ request }: ActionFunctionArgs) {
     orderBy: { createdAt: "asc" },
     include: {
       onboardingProfile: { select: { completed: true } },
-      selfieAnalysis:    { select: { status: true } },
+      selfieAnalysis:    { select: { analysisStatus: true } },
       naiaModel:         { select: { id: true } },
       _count: { select: { closetItems: true, savedLooks: true } },
     },
@@ -76,7 +76,7 @@ export async function action({ request }: ActionFunctionArgs) {
       closetItems:      counts._count.closetItems,
       savedLooks:       counts._count.savedLooks,
       selfieExists:     current.selfieAnalysis !== null,
-      selfieStatus:     current.selfieAnalysis?.status ?? null,
+      selfieStatus:     current.selfieAnalysis?.analysisStatus ?? null,
       naiaModelExists:  current.naiaModel !== null,
     },
     candidate: candidateRow
