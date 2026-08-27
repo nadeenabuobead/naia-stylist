@@ -232,7 +232,8 @@ const RAW_ENTRIES: readonly VerifiedMediaEntry[] = [
     imageDimensions: { w: 1024, h: 1536 },
     resolvedUrl:
       "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/5373f5ee-5c4e-4083-9ad4-68bd4bd20d1c.png?v=1784196301",
-    displayResolvedUrl: null,
+    displayResolvedUrl:
+      "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/6945d702-09ff-4512-ab26-96dbfb8ae82f.png?v=1787821907",
     mediaUpdatedAt: "2026-07-16T10:05:01.000Z",
     garmentCategory: "outerwear",
     eligibility: "ready",
