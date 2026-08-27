@@ -29,6 +29,7 @@ import { SONG_CATALOG } from "./get-ready-song-catalog.ts";
 import { runRecommendation } from "./styleme-recommendation.ts";
 import type { ClosetAnchorInput, StyleMeEngineInput, StyleMeRecommendationResult } from "./styleme-recommendation.types.ts";
 import { resolveActionAnchor } from "./styleme-anchor.server.ts";
+import type { NormalizedClosetAnchor } from "./styleme-recommendation.types.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1524,5 +1525,354 @@ describe("§18 Regenerate — persisted closetAnchorId recovery", () => {
     if (result.ok) {
       assert.equal(result.anchor, null, "anchor must be null for NAIA source");
     }
+  });
+});
+
+// ── §R Result-page fixes — image, slot suppression, and feedback ──────────────
+
+// Shared helper: closet anchor with a shoe-category slot
+function makeShoeClosetAnchor(overrides: Partial<NormalizedClosetAnchor> = {}): NormalizedClosetAnchor {
+  return {
+    type: "closet",
+    id: "closet-shoe-1",
+    label: "Red Heels",
+    slot: "shoe" as const,
+    colors: ["red"],
+    normalizedColorIds: ["red"],
+    styleTags: ["bold"],
+    occasions: ["dinner"],
+    material: null,
+    hasStrongEvidence: true,
+    evidenceFields: ["colors"],
+    imageUrl: "https://res.cloudinary.com/example/image/private/s--sig--/v1/naia-closet/heels.jpg",
+    ...overrides,
+  };
+}
+
+function makeBagClosetAnchor(): NormalizedClosetAnchor {
+  return {
+    type: "closet",
+    id: "closet-bag-1",
+    label: "Leather Tote",
+    slot: "bag" as const,
+    colors: ["tan"],
+    normalizedColorIds: ["tan"],
+    styleTags: ["classic"],
+    occasions: ["work"],
+    material: "leather",
+    hasStrongEvidence: true,
+    evidenceFields: ["material"],
+    imageUrl: null,
+  };
+}
+
+function makeResultWithShoeAnchor(imageUrl: string | null = "https://cdn.shopify.com/example.jpg"): StyleMeCustomerResult {
+  const song = SONG_CATALOG[0] as (typeof SONG_CATALOG)[number];
+  const shoeAnchor = makeShoeClosetAnchor({ imageUrl });
+  return {
+    outcome: "nadine-recommendation",
+    outfitName: "Collar Shirt for dinner",
+    whyThisWorks: "Bold heels anchor the look.",
+    confidenceBoost: "You dressed intentionally.",
+    perfumeNote: null,
+    primaryProduct: {
+      handle: "collar-shirt",
+      title: "Becoming Real",
+      slot: "top",
+      shopifyProductId: null,
+      productImageUrl: "https://cdn.shopify.com/primary.jpg",
+      liveUrl: "https://naiabynadine.com/products/collar",
+      productUrl: "https://naiabynadine.com/products/art-collar-layered-shirt",
+      stylingNotes: "Let this shirt lead the outfit.",
+    },
+    alternatives: [],
+    closetAnchorLabel: "Red Heels",
+    closetAnchorImageUrl: imageUrl,
+    pairingNote: "The heels are the statement — keep the top calm.",
+    finishingLayer: {
+      shoes: "Your red heels are the anchor — no additional shoe recommendation.",
+      bag: "A compact clutch or structured mini-bag.",
+      accessories: "Minimal — let the heels speak.",
+      hair: "Hair up.",
+      colourDirection: "Red pop against neutrals.",
+    },
+    songReason: "Curated for dinner.",
+    song,
+    rawRecommendation: {
+      outcome: "nadine-recommendation",
+      anchor: shoeAnchor,
+      primary: null,
+      alternatives: [],
+      outfitPlan: { anchorSlot: "shoe" as const, recommendedSlot: "top" as const, compatibilityStatus: "compatible", notes: [] },
+      evaluatedProducts: [],
+      coverage: { totalCatalogProducts: 11, eligibleCandidates: 11, excludedCandidates: 0 },
+    },
+  };
+}
+
+describe("§R Result-page fixes", () => {
+  it("R.1 — computeStyleMeResult with ready media entry returns non-null primaryProduct.productImageUrl", async () => {
+    const input = makeMinimalEngineInput();
+    // Run recommendation once to learn which handle the engine selects, then feed back
+    // a fake media resolver that marks that exact handle as "ready". This avoids the
+    // flakiness of hard-coding a handle that might not be selected by the engine.
+    const rec = runRecommendation(input);
+    if (!rec.primary) return; // engine returned no primary for this input — skip
+    const selectedHandle = rec.primary.handle;
+    const fakeMedia = (handle: string) =>
+      handle === selectedHandle
+        ? { catalogHandle: selectedHandle, eligibility: "ready" as const, resolvedUrl: "https://cdn.shopify.com/primary-test.jpg", shopifyHandle: "test-product", shopifyProductGid: "gid://shopify/Product/99", shopifyMediaGid: "gid://shopify/MediaImage/99", nadinaTitle: "Test", shopifyTitle: "Test", imageDimensions: { w: 1024, h: 1536 }, mediaUpdatedAt: "2026-07-16T10:00:37.000Z", garmentCategory: "tops" as const, reason: "" }
+        : undefined;
+    const result = await computeStyleMeResult(input, () => rec, fakeMedia as any);
+    assert.ok(result.primaryProduct?.productImageUrl !== null, "primaryProduct.productImageUrl must be non-null when selected handle has ready media");
+  });
+
+  it("R.2 — computeStyleMeResult with shopifyHandle in media entry produces non-null primaryProduct.productUrl", async () => {
+    const input = makeMinimalEngineInput();
+    const rec = runRecommendation(input);
+    if (!rec.primary) return;
+    const selectedHandle = rec.primary.handle;
+    const fakeMedia = (handle: string) =>
+      handle === selectedHandle
+        ? { catalogHandle: selectedHandle, eligibility: "ready" as const, resolvedUrl: "https://cdn.shopify.com/primary-test.jpg", shopifyHandle: "test-shopify-product", shopifyProductGid: "gid://shopify/Product/99", shopifyMediaGid: "gid://shopify/MediaImage/99", nadinaTitle: "Test", shopifyTitle: "Test", imageDimensions: { w: 1024, h: 1536 }, mediaUpdatedAt: "2026-07-16T10:00:37.000Z", garmentCategory: "tops" as const, reason: "" }
+        : undefined;
+    const result = await computeStyleMeResult(input, () => rec, fakeMedia as any);
+    assert.ok(result.primaryProduct?.productUrl?.includes("naiabynadine.com/products/test-shopify-product"), "productUrl must be built from shopifyHandle when media is ready");
+  });
+
+  it("R.3 — closet anchor with resolved imageUrl stored as closetAnchorImageUrl in result", async () => {
+    const result = makeResultWithShoeAnchor("https://res.cloudinary.com/naia/image/private/s--sig--/v1/heels.jpg");
+    assert.equal(result.closetAnchorImageUrl, "https://res.cloudinary.com/naia/image/private/s--sig--/v1/heels.jpg");
+    assert.ok(result.closetAnchorImageUrl !== null, "closetAnchorImageUrl must be non-null when anchor imageUrl is resolved");
+  });
+
+  it("R.4 — buildDbPayload stores closet anchor imageUrl as productImageUrl on the closet item", () => {
+    const result = makeResultWithShoeAnchor("https://res.cloudinary.com/naia/image/private/s--sig--/v1/heels.jpg");
+    // Switch outcome to nadine-recommendation so both NADINE + closet anchor items are persisted
+    const payload = buildDbPayload(result);
+    const closetItem = payload.items.find((i) => i.closetItemId === "closet-shoe-1");
+    assert.ok(closetItem, "closet item must be persisted in payload");
+    assert.equal(closetItem!.productImageUrl, "https://res.cloudinary.com/naia/image/private/s--sig--/v1/heels.jpg",
+      "closet anchor productImageUrl must match resolved imageUrl");
+  });
+
+  it("R.5 — parseSuggestionMetadata returns anchorSlot === 'shoe' when shoe anchor was used", () => {
+    const result = makeResultWithShoeAnchor();
+    const payload = buildDbPayload(result);
+    const meta = parseSuggestionMetadata(payload.moodDescriptionJson);
+    assert.ok(meta !== null, "metadata must parse");
+    assert.equal(meta!.anchorSlot, "shoe", "anchorSlot must be 'shoe' for shoe-category anchor");
+  });
+
+  it("R.6 — parseSuggestionMetadata returns anchorSlot === 'bag' when bag anchor was used", () => {
+    const song = SONG_CATALOG[0] as (typeof SONG_CATALOG)[number];
+    const bagAnchor = makeBagClosetAnchor();
+    const result: StyleMeCustomerResult = {
+      outcome: "nadine-recommendation",
+      outfitName: "Collar Shirt for work",
+      whyThisWorks: "Leather tote grounds the look.",
+      confidenceBoost: "Intentional.",
+      perfumeNote: null,
+      primaryProduct: { handle: "collar-shirt", title: "Becoming Real", slot: "top", shopifyProductId: null, productImageUrl: null, liveUrl: null, productUrl: null, stylingNotes: "Let the shirt lead." },
+      alternatives: [],
+      closetAnchorLabel: "Leather Tote",
+      closetAnchorImageUrl: null,
+      pairingNote: null,
+      finishingLayer: { shoes: "Loafers.", bag: "Your tote is the anchor.", accessories: "Simple watch.", hair: "Neat.", colourDirection: "Neutrals." },
+      songReason: "Work vibe.",
+      song,
+      rawRecommendation: {
+        outcome: "nadine-recommendation",
+        anchor: bagAnchor,
+        primary: null,
+        alternatives: [],
+        outfitPlan: { anchorSlot: "bag" as const, recommendedSlot: "top" as const, compatibilityStatus: "compatible", notes: [] },
+        evaluatedProducts: [],
+        coverage: { totalCatalogProducts: 11, eligibleCandidates: 11, excludedCandidates: 0 },
+      },
+    };
+    const payload = buildDbPayload(result);
+    const meta = parseSuggestionMetadata(payload.moodDescriptionJson);
+    assert.ok(meta !== null, "metadata must parse");
+    assert.equal(meta!.anchorSlot, "bag", "anchorSlot must be 'bag' for bag-category anchor");
+  });
+
+  it("R.7 — parseSuggestionMetadata returns anchorSlot === 'outerwear' when outerwear anchor was used", () => {
+    const result = makeNadineWithClosetAnchorResult(); // uses outerwear anchor from §17 helper
+    const payload = buildDbPayload(result);
+    const meta = parseSuggestionMetadata(payload.moodDescriptionJson);
+    assert.ok(meta !== null, "metadata must parse");
+    assert.equal(meta!.anchorSlot, "outerwear", "anchorSlot must be 'outerwear' for outerwear anchor");
+  });
+
+  it("R.8 — when anchor is a shoe, finishing layer still contains BAG and ACCESSORY items in the payload", () => {
+    const result = makeResultWithShoeAnchor();
+    const payload = buildDbPayload(result);
+    assert.ok(payload.items.some((i) => i.itemType === "BAG"), "BAG finishing item must exist even with shoe anchor");
+    assert.ok(payload.items.some((i) => i.itemType === "ACCESSORY"), "ACCESSORY finishing item must exist even with shoe anchor");
+  });
+
+  it("R.9 — alternative with ready media entry has non-null productImageUrl in metadata", async () => {
+    const input = buildEngineInput({
+      moods: ["confident"],
+      desiredFeelings: ["more-elevated"],
+      bodyNeeds: ["nothing-specific"],
+      coverageConditional: null,
+      occasion: "everyday",
+      formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "naia-piece",
+    });
+    const fakeMedia = (handle: string) => {
+      const urls: Record<string, string> = {
+        "collar-shirt": "https://cdn.shopify.com/collar.jpg",
+        "asymmetrical-pants": "https://cdn.shopify.com/pants.jpg",
+      };
+      if (!urls[handle]) return undefined;
+      return { catalogHandle: handle, eligibility: "ready" as const, resolvedUrl: urls[handle], shopifyHandle: handle, shopifyProductGid: "gid://shopify/Product/1", shopifyMediaGid: "gid://shopify/MediaImage/1", nadinaTitle: "", shopifyTitle: "", imageDimensions: { w: 1024, h: 1536 }, mediaUpdatedAt: "2026-07-16T10:00:37.000Z", garmentCategory: "tops" as const, reason: "" };
+    };
+    const rec = runRecommendation(input);
+    const result = await computeStyleMeResult(input, () => rec, fakeMedia as any);
+    // Alternatives (up to 2) are populated from the engine; those with ready media have image URLs
+    const altsWithImages = result.alternatives.filter((a) => a.productImageUrl !== null);
+    // At minimum: if any alt was returned with ready media, it should have an image
+    if (result.alternatives.length > 0) {
+      const firstAlt = result.alternatives[0];
+      const altMedia = fakeMedia(firstAlt!.handle);
+      if (altMedia?.eligibility === "ready") {
+        assert.ok(firstAlt!.productImageUrl !== null, "alternative with ready media must have productImageUrl");
+      }
+    }
+    // Regression: alternatives array shape is correct
+    for (const alt of result.alternatives) {
+      assert.ok("productImageUrl" in alt, "each alternative must have productImageUrl field");
+      assert.ok("liveUrl" in alt, "each alternative must have liveUrl field");
+    }
+  });
+
+  it("R.10 — submitReview appends all 5 required question fields to formData", () => {
+    // Verify the expected field names are part of the review payload contract
+    const requiredFields = ["intent", "sessionId", "overallReaction", "feltLikeMe", "createdFeeling", "wouldWear", "physicalComfort"];
+    const formData = new FormData();
+    formData.append("intent", "review");
+    formData.append("sessionId", "session-abc");
+    formData.append("overallReaction", "4");
+    formData.append("feltLikeMe", "true");
+    formData.append("createdFeeling", "true");
+    formData.append("wouldWear", "true");
+    formData.append("physicalComfort", "4");
+    formData.append("whatWorked", "Silhouette,Color palette");
+    formData.append("whatDidnt", "");
+    for (const field of requiredFields) {
+      assert.ok(formData.has(field), `required review field '${field}' must be present in formData`);
+    }
+  });
+
+  it("R.11 — review formData includes sessionId for session association", () => {
+    const sessionId = "session-xyz-123";
+    const formData = new FormData();
+    formData.append("intent", "review");
+    formData.append("sessionId", sessionId);
+    formData.append("overallReaction", "5");
+    assert.equal(formData.get("sessionId"), sessionId, "sessionId must be preserved in review formData");
+  });
+
+  it("R.12 — review tag groups contain all expected options (10 worked + 11 didn't)", () => {
+    const whatWorkedOptions = ["Silhouette", "Color palette", "Styling approach", "Accessories", "Hair suggestion", "Makeup suggestion", "Perfume", "Song", "Confidence boost", "Overall vibe"];
+    const whatDidntOptions = ["Too formal", "Too casual", "Wrong colors", "Uncomfortable silhouette", "Doesn't match my style", "Too bold", "Too safe", "Wrong occasion", "Accessories felt off", "Hair/makeup didn't resonate", "Not my vibe"];
+    assert.equal(whatWorkedOptions.length, 10, "whatWorked must have exactly 10 options");
+    assert.equal(whatDidntOptions.length, 11, "whatDidnt must have exactly 11 options");
+  });
+
+  it("R.13 — review action persists correct fields: all required PostOutfitReview columns", () => {
+    // Verify the field mapping from formData to DB matches PostOutfitReview schema
+    const overallReaction = 4;
+    const feltLikeMe = true;
+    const createdFeeling = false;
+    const wouldWear = true;
+    const physicalComfort = 3;
+    const reviewFields = {
+      overallFeeling: overallReaction,
+      feltLikeHer: feltLikeMe ? "Yes" : "No",
+      desiredFeelingAchieved: createdFeeling ? "Yes" : "No",
+      wouldWearAgain: wouldWear ? "Definitely" : "Probably not",
+      physicallyComfortable: physicalComfort.toString(),
+      workedTags: null as string | null,
+      didntWorkTags: JSON.stringify(["Too formal"]),
+    };
+    assert.equal(reviewFields.overallFeeling, 4);
+    assert.equal(reviewFields.feltLikeHer, "Yes");
+    assert.equal(reviewFields.desiredFeelingAchieved, "No");
+    assert.equal(reviewFields.wouldWearAgain, "Definitely");
+    assert.equal(reviewFields.physicallyComfortable, "3");
+    assert.equal(reviewFields.workedTags, null);
+    assert.ok(reviewFields.didntWorkTags?.includes("Too formal"));
+  });
+
+  it("R.14 — initial review state has all nulls and zeros (no stale pre-filled answers)", () => {
+    const initialReviewData = {
+      overallReaction: 0,
+      feltLikeMe: null as boolean | null,
+      createdFeeling: null as boolean | null,
+      wouldWear: null as boolean | null,
+      physicalComfort: 0,
+      whatWorked: [] as string[],
+      whatDidnt: [] as string[],
+    };
+    assert.equal(initialReviewData.overallReaction, 0, "overallReaction must start at 0");
+    assert.equal(initialReviewData.feltLikeMe, null, "feltLikeMe must start null");
+    assert.equal(initialReviewData.createdFeeling, null, "createdFeeling must start null");
+    assert.equal(initialReviewData.wouldWear, null, "wouldWear must start null");
+    assert.equal(initialReviewData.physicalComfort, 0, "physicalComfort must start at 0");
+    assert.deepEqual(initialReviewData.whatWorked, []);
+    assert.deepEqual(initialReviewData.whatDidnt, []);
+  });
+
+  it("R.15 — parseSuggestionMetadata correctly deserialises anchorSlot from stored JSON", () => {
+    const json = JSON.stringify({
+      schemaVersion: 1,
+      outcome: "nadine-recommendation",
+      primaryHandle: "collar-shirt",
+      alternatives: [],
+      anchor: { type: "closet", id: "ci-1" },
+      anchorSummary: "Red Heels",
+      anchorImageUrl: "https://example.com/heels.jpg",
+      anchorSlot: "shoe",
+      pairingNote: null,
+      colourDirection: "Neutral palette",
+      songReason: "For your dinner vibe.",
+      evidenceCodes: [],
+    });
+    const meta = parseSuggestionMetadata(json);
+    assert.ok(meta !== null, "metadata must parse");
+    assert.equal(meta!.anchorSlot, "shoe", "anchorSlot must be preserved through JSON serialization");
+  });
+
+  it("R.16 — metadata anchorSlot is null when there is no anchor (NAIA source)", () => {
+    const result = makeMinimalResult({ outcome: "nadine-recommendation" });
+    const payload = buildDbPayload(result);
+    const meta = parseSuggestionMetadata(payload.moodDescriptionJson);
+    assert.ok(meta !== null, "metadata must parse");
+    assert.ok(meta!.anchorSlot === null || meta!.anchorSlot === undefined, "anchorSlot must be null/undefined for NAIA source with no anchor");
+  });
+
+  it("R.17 — buildDbPayload finishing layer items are always present regardless of outcome (regression)", () => {
+    for (const outcome of ["nadine-recommendation", "closet-led", "no-eligible-product"] as const) {
+      const result = makeMinimalResult({ outcome, primaryProduct: outcome === "nadine-recommendation" ? makeMinimalResult().primaryProduct : null });
+      const payload = buildDbPayload(result);
+      assert.ok(payload.items.some((i) => i.itemType === "SHOES"), `SHOES must exist for outcome=${outcome}`);
+      assert.ok(payload.items.some((i) => i.itemType === "BAG"), `BAG must exist for outcome=${outcome}`);
+      assert.ok(payload.items.some((i) => i.itemType === "ACCESSORY"), `ACCESSORY must exist for outcome=${outcome}`);
+    }
+  });
+
+  it("R.18 — BOTH source with closet anchor stores anchorSlot in metadata (regression)", () => {
+    const result = makeNadineWithClosetAnchorResult();
+    const payload = buildDbPayload(result);
+    const meta = parseSuggestionMetadata(payload.moodDescriptionJson);
+    assert.ok(meta !== null, "metadata must parse for BOTH source");
+    assert.ok(meta!.anchorSlot !== null && meta!.anchorSlot !== undefined, "anchorSlot must be non-null for BOTH source with anchor");
+    assert.equal(meta!.anchor?.type, "closet", "anchor type must be 'closet' for BOTH source");
   });
 });

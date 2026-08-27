@@ -748,7 +748,51 @@ export default function StyleMeResult() {
     title: string;
     context: "single-piece" | "complete-look";
   } | null>(null);
+  const [reviewSaved, setReviewSaved] = useState(false);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const reviewFetcher = useFetcher();
+  const [reviewData, setReviewData] = useState({
+    overallReaction: 0,
+    feltLikeMe: null as boolean | null,
+    createdFeeling: null as boolean | null,
+    wouldWear: null as boolean | null,
+    physicalComfort: 0,
+    whatWorked: [] as string[],
+    whatDidnt: [] as string[],
+  });
 
+  const whatWorkedOptions = ["Silhouette", "Color palette", "Styling approach", "Accessories", "Hair suggestion", "Makeup suggestion", "Perfume", "Song", "Confidence boost", "Overall vibe"];
+  const whatDidntOptions = ["Too formal", "Too casual", "Wrong colors", "Uncomfortable silhouette", "Doesn't match my style", "Too bold", "Too safe", "Wrong occasion", "Accessories felt off", "Hair/makeup didn't resonate", "Not my vibe"];
+
+  const submitReview = () => {
+    if (!reviewData.overallReaction || reviewData.feltLikeMe === null || reviewData.createdFeeling === null || reviewData.wouldWear === null || !reviewData.physicalComfort) {
+      setReviewError("Please answer all required questions before submitting.");
+      return;
+    }
+    setReviewError(null);
+    const formData = new FormData();
+    formData.append("intent", "review");
+    formData.append("sessionId", loaderData.sessionId || "");
+    formData.append("overallReaction", reviewData.overallReaction.toString());
+    formData.append("feltLikeMe", reviewData.feltLikeMe.toString());
+    formData.append("createdFeeling", reviewData.createdFeeling.toString());
+    formData.append("wouldWear", reviewData.wouldWear.toString());
+    formData.append("physicalComfort", reviewData.physicalComfort.toString());
+    formData.append("whatWorked", reviewData.whatWorked.join(","));
+    formData.append("whatDidnt", reviewData.whatDidnt.join(","));
+    reviewFetcher.submit(formData, { method: "post" });
+    setShowReviewModal(false);
+    setReviewSaved(true);
+    setTimeout(() => setReviewSaved(false), 3000);
+  };
+
+  const toggleWorkedTag = (tag: string) => {
+    setReviewData({ ...reviewData, whatWorked: reviewData.whatWorked.includes(tag) ? reviewData.whatWorked.filter(t => t !== tag) : [...reviewData.whatWorked, tag] });
+  };
+  const toggleDidntTag = (tag: string) => {
+    setReviewData({ ...reviewData, whatDidnt: reviewData.whatDidnt.includes(tag) ? reviewData.whatDidnt.filter(t => t !== tag) : [...reviewData.whatDidnt, tag] });
+  };
 
   const generationSettled =
     !!generateFetcher.data?.suggestion || !!generateFetcher.data?.error;
@@ -1025,21 +1069,28 @@ export default function StyleMeResult() {
                   Try the complete look
                 </button>
               )}
-              {suggestion.items?.filter((item: any) => item.itemType !== "SHOES" && item.itemType !== "ACCESSORY" && item.itemType !== "BAG").map((item: any) => (
-                <div key={item.id} className="sm-item-card">
+              {suggestion.items?.filter((item: any) => item.itemType !== "SHOES" && item.itemType !== "ACCESSORY" && item.itemType !== "BAG").map((item: any, idx: number) => {
+                const isPrimary = idx === 0 && !item.closetItemId;
+                const shopUrl = item.productUrl || (item.liveUrl && item.liveUrl !== "https://naiabynadine.com/products/" ? item.liveUrl : null) || (!item.closetItemId ? "https://naiabynadine.com" : null);
+                return (
+                <div key={item.id} className={`sm-item-card${isPrimary ? " sm-item-card--primary" : ""}`}>
                   {item.closetItemId && (
                     <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "10px", letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--naia-accent)", marginBottom: "8px" }}>Already Yours</p>
                   )}
-                  {item.productImageUrl && (
-                    <img src={item.productImageUrl} alt={item.productTitle} style={{ width: "140px", height: "180px", objectFit: "contain", marginBottom: "12px" }} />
-                  )}
+                  {item.productImageUrl ? (
+                    <img src={item.productImageUrl} alt={item.productTitle} style={{ width: isPrimary ? "100%" : "140px", maxWidth: isPrimary ? "320px" : "140px", height: isPrimary ? "auto" : "180px", aspectRatio: isPrimary ? "2/3" : undefined, objectFit: "cover", borderRadius: "4px", marginBottom: "12px" }} />
+                  ) : isPrimary ? (
+                    <div style={{ width: "100%", maxWidth: "320px", aspectRatio: "2/3", background: "var(--naia-warm)", borderRadius: "4px", marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", padding: "16px", textAlign: "center" }}>Image coming soon</p>
+                    </div>
+                  ) : null}
                   {item.productTitle && (
                     <p className="sm-item-product-label">{item.productTitle}</p>
                   )}
                   <p className="sm-item-notes">{item.stylingNotes || item.productTitle}</p>
-                  {!item.closetItemId && item.productUrl && (
+                  {!item.closetItemId && shopUrl && (
                     <a
-                      href={item.productUrl}
+                      href={shopUrl}
                       className="sm-result-action-btn"
                       style={{ marginTop: "10px", fontSize: "8px", letterSpacing: "2px", padding: "8px 16px", display: "inline-block" }}
                       target="_blank"
@@ -1067,7 +1118,7 @@ export default function StyleMeResult() {
                     />
                   )}
                 </div>
-              ))}
+              ); })}
               {loaderData.vtoEnabled && suggestionMeta?.primaryHandle && isTryOnEligible(suggestionMeta.primaryHandle) && (
                 <VtoExperience
                   source="nadine"
@@ -1099,10 +1150,18 @@ export default function StyleMeResult() {
           </div>
         )}
 
-        {/* Finishing layer */}
+        {/* Finishing layer — suppresses items in the same slot as the anchor */}
         <div className="sm-result-section">
           <p className="sm-result-section-head">Finishing Layer</p>
-          {suggestion.items?.filter((item: any) => item.itemType === "SHOES" || item.itemType === "ACCESSORY" || item.itemType === "BAG").map((item: any) => (
+          {suggestion.items?.filter((item: any) => {
+            if (!["SHOES", "ACCESSORY", "BAG"].includes(item.itemType)) return false;
+            const anchorSlot = suggestionMeta?.anchorSlot ?? null;
+            if (anchorSlot) {
+              const suppress: Record<string, string> = { shoe: "SHOES", bag: "BAG", accessory: "ACCESSORY", jewelry: "ACCESSORY" };
+              if (suppress[anchorSlot] === item.itemType) return false;
+            }
+            return true;
+          }).map((item: any) => (
             <div key={item.id} className="sm-item-card sm-item-card--secondary">
               <p className="sm-item-type-label">{item.itemType === "BAG" ? "Bag" : item.itemType === "SHOES" ? "Shoes" : "Accessories"}</p>
               <p className="sm-item-notes--secondary">{item.stylingNotes}</p>
@@ -1133,6 +1192,7 @@ export default function StyleMeResult() {
                     src={alt.productImageUrl}
                     alt={alt.title}
                     className="sm-alt-img"
+                    style={{ width: "120px", minWidth: "120px", height: "160px", objectFit: "cover", borderRadius: "4px" }}
                   />
                 )}
                 <div className="sm-alt-body">
@@ -1239,7 +1299,18 @@ export default function StyleMeResult() {
           {suggestionMeta?.outcome !== "closet-led" && (
             <a href={primaryNaiaItem?.productUrl || "https://naiabynadine.com"} className="sm-result-action-btn">Shop nAia</a>
           )}
+          <button
+            onClick={() => setShowReviewModal(true)}
+            className="sm-result-action-btn"
+          >
+            Rate This Look
+          </button>
         </div>
+
+        {/* Review saved toast */}
+        {reviewSaved && (
+          <div className="sm-toast">Review saved — thank you</div>
+        )}
 
         {/* Outfit Quick Feedback — authenticated only, all 3 sources */}
         {loaderData.isAuthenticated && suggestion?.id && loaderData.sessionId && (
@@ -1253,6 +1324,84 @@ export default function StyleMeResult() {
         )}
       </main>
 
+      {/* ── Review modal ── */}
+      {showReviewModal && (
+        <div className="sm-modal-overlay" onClick={() => setShowReviewModal(false)}>
+          <div className="sm-modal" onClick={(e) => e.stopPropagation()}>
+            <h2 className="sm-modal-heading">How was this look?</h2>
+
+            <div className="sm-review-section">
+              <p className="sm-review-label">Overall Reaction *</p>
+              <div className="sm-star-btns">
+                {[1,2,3,4,5].map(n => (
+                  <button key={n} onClick={() => setReviewData({...reviewData, overallReaction: n})} className={`sm-star-btn${reviewData.overallReaction === n ? " sm-star-btn--on" : ""}`}>★</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="sm-review-section">
+              <p className="sm-review-label">Did it feel like you? *</p>
+              <div className="sm-review-btns">
+                <button onClick={() => setReviewData({...reviewData, feltLikeMe: true})} className={`sm-review-btn${reviewData.feltLikeMe === true ? " sm-review-btn--on" : ""}`}>Yes</button>
+                <button onClick={() => setReviewData({...reviewData, feltLikeMe: false})} className={`sm-review-btn${reviewData.feltLikeMe === false ? " sm-review-btn--on" : ""}`}>No</button>
+              </div>
+            </div>
+
+            <div className="sm-review-section">
+              <p className="sm-review-label">Created the feeling you wanted? *</p>
+              <div className="sm-review-btns">
+                <button onClick={() => setReviewData({...reviewData, createdFeeling: true})} className={`sm-review-btn${reviewData.createdFeeling === true ? " sm-review-btn--on" : ""}`}>Yes</button>
+                <button onClick={() => setReviewData({...reviewData, createdFeeling: false})} className={`sm-review-btn${reviewData.createdFeeling === false ? " sm-review-btn--on" : ""}`}>No</button>
+              </div>
+            </div>
+
+            <div className="sm-review-section">
+              <p className="sm-review-label">Would you wear this? *</p>
+              <div className="sm-review-btns">
+                <button onClick={() => setReviewData({...reviewData, wouldWear: true})} className={`sm-review-btn${reviewData.wouldWear === true ? " sm-review-btn--on" : ""}`}>Yes</button>
+                <button onClick={() => setReviewData({...reviewData, wouldWear: false})} className={`sm-review-btn${reviewData.wouldWear === false ? " sm-review-btn--on" : ""}`}>No</button>
+              </div>
+            </div>
+
+            <div className="sm-review-section">
+              <p className="sm-review-label">Physical Comfort *</p>
+              <div className="sm-star-btns">
+                {[1,2,3,4,5].map(n => (
+                  <button key={n} onClick={() => setReviewData({...reviewData, physicalComfort: n})} className={`sm-num-btn${reviewData.physicalComfort === n ? " sm-num-btn--on" : ""}`}>{n}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="sm-review-section">
+              <p className="sm-review-label" style={{ color: "var(--naia-muted)" }}>What Worked?</p>
+              <div className="sm-tags-wrap">
+                {whatWorkedOptions.map(tag => (
+                  <button key={tag} onClick={() => toggleWorkedTag(tag)} className={`sm-tag-btn${reviewData.whatWorked.includes(tag) ? " sm-tag-btn--on" : ""}`}>{tag}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="sm-review-section">
+              <p className="sm-review-label" style={{ color: "var(--naia-muted)" }}>What Didn't Work?</p>
+              <div className="sm-tags-wrap">
+                {whatDidntOptions.map(tag => (
+                  <button key={tag} onClick={() => toggleDidntTag(tag)} className={`sm-tag-btn${reviewData.whatDidnt.includes(tag) ? " sm-tag-btn--on" : ""}`}>{tag}</button>
+                ))}
+              </div>
+            </div>
+
+            {reviewError && (
+              <p style={{ fontFamily: "var(--naia-font-ui, sans-serif)", fontSize: "12px", color: "var(--naia-burg, #8b2035)", marginTop: "8px", marginBottom: "0" }}>
+                {reviewError}
+              </p>
+            )}
+            <div className="sm-review-btns" style={{ marginTop: "16px" }}>
+              <button onClick={() => { setShowReviewModal(false); setReviewError(null); }} className="sm-review-btn" style={{ flex: 1 }}>Cancel</button>
+              <button onClick={submitReview} className="sm-review-btn sm-review-btn--on" style={{ flex: 1, background: "var(--naia-ink)", borderColor: "var(--naia-ink)" }}>Submit Review</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── TryOn panel (dev only) ── */}
       {loaderData.devTryOnEnabled && (

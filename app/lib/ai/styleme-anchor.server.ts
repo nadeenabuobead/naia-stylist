@@ -9,6 +9,7 @@
 import { getAllCatalogProducts } from "./naia-catalog.js";
 import type { NadineAnchorInput, ClosetAnchorInput, AnchorInput } from "./styleme-recommendation.types.js";
 import prisma from "../../db.server.js";
+import { buildPrivateDownloadUrl, getCloudinaryConfig } from "../../lib/cloudinary-admin.server.js";
 
 const VALID_HANDLES = new Set(getAllCatalogProducts().map((p) => p.handle));
 
@@ -37,6 +38,15 @@ export async function resolveClosetAnchor(
 
   if (!item) return null;
 
+  // Resolve image URL: prefer signed private URL for private-upload items.
+  let imageUrl = item.imageUrl;
+  if (item.imagePublicId && item.imageFormat) {
+    const cfg = getCloudinaryConfig();
+    if (cfg) {
+      imageUrl = buildPrivateDownloadUrl(cfg, item.imagePublicId, item.imageFormat, "private");
+    }
+  }
+
   return {
     type: "closet",
     id: item.id,
@@ -48,7 +58,7 @@ export async function resolveClosetAnchor(
     material: item.material ?? null,
     styleTags: item.styleTags,
     occasions: item.occasions,
-    imageUrl: item.imageUrl,
+    imageUrl,
   };
 }
 

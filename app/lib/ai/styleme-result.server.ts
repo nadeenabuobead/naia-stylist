@@ -240,10 +240,13 @@ export function buildSongReason(
 function buildMetadataJson(result: StyleMeCustomerResult): string {
   const rawAnchor = result.rawRecommendation.anchor;
   let anchorMeta: StyleMeMetadata["anchor"] = null;
+  let anchorSlot: string | null = null;
   if (rawAnchor?.type === "nadine") {
     anchorMeta = { type: "nadine", handle: (rawAnchor as NormalizedNadineAnchor).handle };
+    anchorSlot = (rawAnchor as NormalizedNadineAnchor).slot ?? null;
   } else if (rawAnchor?.type === "closet") {
     anchorMeta = { type: "closet", id: (rawAnchor as NormalizedClosetAnchor).id };
+    anchorSlot = (rawAnchor as NormalizedClosetAnchor).slot ?? null;
   }
 
   const metadata: StyleMeMetadata = {
@@ -261,6 +264,7 @@ function buildMetadataJson(result: StyleMeCustomerResult): string {
     anchor: anchorMeta,
     anchorSummary: result.closetAnchorLabel,
     anchorImageUrl: result.closetAnchorImageUrl,
+    anchorSlot,
     pairingNote: result.pairingNote,
     colourDirection: result.finishingLayer.colourDirection,
     songReason: result.songReason,

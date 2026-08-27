@@ -81,6 +81,7 @@ export interface StyleMeMetadata {
   anchor: { type: "nadine"; handle: string } | { type: "closet"; id: string } | null;
   anchorSummary: string | null;
   anchorImageUrl?: string | null;
+  anchorSlot?: string | null;
   pairingNote: string | null;
   colourDirection: string;
   songReason: string;
