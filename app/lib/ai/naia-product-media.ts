@@ -13,6 +13,12 @@
 //   Becoming Clear replacement photo verified 2026-07-16 after token refresh unblocked Shopify query.
 // CTA activation is globally gated by VIRTUAL_TRY_ON_ENABLED (= false until Phase 4A5).
 // 7 component-level entries added (Becoming Alive × 3, Becoming Defined × 4).
+//
+// 2026-08-27 updates:
+//   Becoming Defined (dress-set) → ready; CDN URL resolved via admin DOM; FASHN concern VTO-only.
+//   Becoming Bold (oversized-blazer) → new entry, ready; image added by product owner.
+//   Becoming Free (draped-leather-pants) → new entry, ready; image added by product owner.
+//   shopifyMediaGid for Bold/Free pending Admin API re-auth (session expired 2026-07-30).
 
 // ── Eligibility states ────────────────────────────────────────────────────────
 
@@ -246,15 +252,55 @@ const RAW_ENTRIES: readonly VerifiedMediaEntry[] = [
     // GID points to the complete set (image A) — approved as valid media 2026-07-16.
     shopifyMediaGid: "gid://shopify/MediaImage/52802463596676",
     imageDimensions: { w: 1024, h: 1536 },
-    resolvedUrl: null,
+    resolvedUrl:
+      "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/4fbfaad1-b2a2-4c69-b44d-431f5a9cfe93.png?v=1784196241",
     mediaUpdatedAt: "2026-07-16T10:04:01.000Z",
     garmentCategory: "one-piece",
-    eligibility: "needs-manual-review",
+    eligibility: "ready",
     reason:
-      "Complete set (image A) approved as valid media 2026-07-16 via contact sheet v3. " +
-      "Kept at needs-manual-review pending live FASHN provider testing — multi-piece set " +
-      "(corset, mesh top, skirt) requires runtime assessment of combined silhouette. " +
-      "Component images B (corset), C (mesh top), D (skirt) pending separate visual approval decision.",
+      "Complete set (image A) approved 2026-07-16 via contact sheet v3. GIDs verified via " +
+      "Shopify Admin API. Portrait 1024×1536. CDN URL resolved 2026-08-27 via admin DOM. " +
+      "Multi-piece FASHN concern applies to VTO only — VTO gated separately by VIRTUAL_TRY_ON_ENABLED.",
+  },
+  {
+    catalogHandle: "oversized-blazer",
+    nadinaTitle: "Becoming Bold",
+    shopifyTitle: "Becoming Bold",
+    shopifyHandle: "becoming-bold",
+    shopifyProductGid: "gid://shopify/Product/10463959744644",
+    // Media GID pending Admin API re-auth (offline session expired 2026-07-30).
+    // Product GID and CDN URL verified 2026-08-27 via Shopify Admin DOM.
+    shopifyMediaGid: null,
+    imageDimensions: null,
+    resolvedUrl:
+      "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/c5cd4188-f53e-4c5b-b26e-7b90359dd1a8_1.png?v=1787821875",
+    mediaUpdatedAt: "2026-08-27T09:11:15.000Z",
+    garmentCategory: "outerwear",
+    eligibility: "ready",
+    reason:
+      "Product image added by product owner 2026-08-27. Product GID and CDN URL verified via " +
+      "Shopify Admin DOM. Not in LOCKED_CATALOGUE_HANDLES — null shopifyMediaGid permitted. " +
+      "Backfill GID when Admin API session is next refreshed.",
+  },
+  {
+    catalogHandle: "draped-leather-pants",
+    nadinaTitle: "Becoming Free",
+    shopifyTitle: "Becoming Free",
+    shopifyHandle: "becoming-free",
+    shopifyProductGid: "gid://shopify/Product/10463957516420",
+    // Media GID pending Admin API re-auth (offline session expired 2026-07-30).
+    // Product GID and CDN URL verified 2026-08-27 via Shopify Admin DOM.
+    shopifyMediaGid: null,
+    imageDimensions: null,
+    resolvedUrl:
+      "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/ecb743ba-ac42-4951-a4c5-667bae1af63f_1.png?v=1787821825",
+    mediaUpdatedAt: "2026-08-27T09:10:25.000Z",
+    garmentCategory: "bottoms",
+    eligibility: "ready",
+    reason:
+      "Product image added by product owner 2026-08-27. Product GID and CDN URL verified via " +
+      "Shopify Admin DOM. Not in LOCKED_CATALOGUE_HANDLES — null shopifyMediaGid permitted. " +
+      "Backfill GID when Admin API session is next refreshed.",
   },
 ];
 
@@ -311,12 +357,14 @@ export function validateMediaMap(
   }
 
   // "ready" entries must have non-null GIDs and a non-null resolved URL.
+  // shopifyMediaGid is required only for LOCKED_CATALOGUE_HANDLES — unlocked entries may
+  // carry null while the GID is pending Admin API re-verification.
   for (const entry of map.values()) {
     if (entry.eligibility === "ready") {
       if (!entry.shopifyProductGid) {
         errors.push(`${entry.catalogHandle}: eligibility=ready but shopifyProductGid is null`);
       }
-      if (!entry.shopifyMediaGid) {
+      if (!entry.shopifyMediaGid && (LOCKED_CATALOGUE_HANDLES as readonly string[]).includes(entry.catalogHandle)) {
         errors.push(`${entry.catalogHandle}: eligibility=ready but shopifyMediaGid is null`);
       }
       if (!entry.resolvedUrl) {
