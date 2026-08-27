@@ -1297,3 +1297,281 @@ describe("Interaction-blocker regression guards", () => {
     );
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 3: Journey funnel reconciliation contract tests
+//
+// INCON Register — classification summary (A=Architecture, B=Data Quality,
+//                                          C=Calculation, D=Presentation)
+//   A: 05, 14
+//   B: 01, 02, 04
+//   C: 06, 07
+//   D: 03, 08, 09, 10, 11, 12, 13, 15
+// ─────────────────────────────────────────────────────────────────────────────
+describe("journey funnel — unit coherence (Step 3 reconciliation)", () => {
+  // NOTE: Sample event sets are independently seeded — there is no cross-stage cohort enforcement
+  // (e.g., buyers are not guaranteed to be a subset of savers). Tests here verify formula
+  // correctness (customer counts not event counts) and only assert ≤100% for stages where
+  // subset membership is structurally guaranteed by the data model.
+  const data = getDesignerSampleData({ dateRangeDays: 90, seedOverrides: {} });
+  const stages = data.advanced?.journeyFunnel?.stages ?? [];
+
+  it("sequential core funnel has exactly 4 stages (Passport → Session → Rec Shown → Rec Feedback)", () => {
+    assert.equal(stages.length, 4, `Expected 4 sequential core funnel stages, got ${stages.length}`);
+  });
+
+  it("downstreamSignals exists and has exactly 6 engagement/commercial signals", () => {
+    const signals = data.advanced?.journeyFunnel?.downstreamSignals ?? [];
+    assert.equal(signals.length, 6, `Expected 6 downstream signals, got ${signals.length}: ${signals.map((s: { signal: string }) => s.signal).join(", ")}`);
+    const names = signals.map((s: { signal: string }) => s.signal);
+    assert.ok(names.includes("Save Intent"), "downstreamSignals must include Save Intent");
+    assert.ok(names.includes("VTO Trial (est.)"), "downstreamSignals must include VTO Trial (est.)");
+    assert.ok(names.includes("Purchase"), "downstreamSignals must include Purchase");
+    assert.ok(names.includes("Post-Wear Review"), "downstreamSignals must include Post-Wear Review");
+    assert.ok(names.includes("Repeat Purchase"), "downstreamSignals must include Repeat Purchase");
+  });
+
+  it("Buy Intent (BS events) stage has been removed — it is always a superset of Save Intent", () => {
+    const bs = stages.find(s => s.stage === "Buy Intent (BS events)");
+    assert.ok(!bs, "Buy Intent (BS events) must not appear in the sequential funnel");
+    const signals = data.advanced?.journeyFunnel?.downstreamSignals ?? [];
+    const bsSig = signals.find((s: { signal: string }) => s.signal === "Buy Intent (BS events)");
+    assert.ok(!bsSig, "Buy Intent (BS events) must not appear in downstreamSignals either");
+  });
+
+  it("Recommendation Feedback convFromPrev ≤ 100% — feedback requires a session", () => {
+    const rf = stages.find(s => s.stage === "Recommendation Feedback");
+    const session = stages.find(s => s.stage === "StyleMe Session");
+    assert.ok(rf && session, "Both stages must exist in the sequential funnel");
+    assert.ok(
+      rf.convFromPrev == null || rf.convFromPrev <= 100,
+      `Recommendation Feedback convFromPrev must be ≤ 100% (got ${rf.convFromPrev}%) — feedback customers are a subset of session customers`
+    );
+  });
+
+  it("VTO Trial (est.) rateVsBase ≤ 100% — in downstreamSignals, not the sequential funnel", () => {
+    const signals = data.advanced?.journeyFunnel?.downstreamSignals ?? [];
+    const vto = signals.find((s: { signal: string }) => s.signal === "VTO Trial (est.)");
+    assert.ok(vto, "VTO Trial (est.) must be in downstreamSignals");
+    assert.ok(
+      vto.rateVsBase == null || vto.rateVsBase <= 100,
+      `VTO Trial rateVsBase must be ≤ 100% (got ${vto.rateVsBase}%)`
+    );
+  });
+
+  it("Save Intent rateVsBase ≤ 100% — in downstreamSignals, not the sequential funnel", () => {
+    const signals = data.advanced?.journeyFunnel?.downstreamSignals ?? [];
+    const save = signals.find((s: { signal: string }) => s.signal === "Save Intent");
+    assert.ok(save, "Save Intent must be in downstreamSignals");
+    assert.ok(
+      save.rateVsBase == null || save.rateVsBase <= 100,
+      `Save Intent rateVsBase must be ≤ 100% (got ${save.rateVsBase}%)`
+    );
+  });
+
+  it("Post-Wear Review rateVsBase ≤ 100% — reviewers are a subset of buyers", () => {
+    const signals = data.advanced?.journeyFunnel?.downstreamSignals ?? [];
+    const wr = signals.find((s: { signal: string }) => s.signal === "Post-Wear Review");
+    assert.ok(wr, "Post-Wear Review must be in downstreamSignals");
+    assert.ok(
+      wr.rateVsBase == null || wr.rateVsBase <= 100,
+      `Post-Wear Review rateVsBase must be ≤ 100% (got ${wr.rateVsBase}%)`
+    );
+  });
+
+  it("Repeat Purchase rateVsBase ≤ 100% — repeat buyers are a subset of buyers", () => {
+    const signals = data.advanced?.journeyFunnel?.downstreamSignals ?? [];
+    const rep = signals.find((s: { signal: string }) => s.signal === "Repeat Purchase");
+    assert.ok(rep, "Repeat Purchase must be in downstreamSignals");
+    assert.ok(
+      rep.rateVsBase == null || rep.rateVsBase <= 100,
+      `Repeat Purchase rateVsBase must be ≤ 100% (got ${rep.rateVsBase}%)`
+    );
+  });
+
+  it("ALL stages: customerCount monotonically non-increasing and convFromPrev ≤ 100%", () => {
+    // This is the comprehensive sweep required by the funnel reconciliation spec.
+    // Every sequential stage must have: count ≤ previous count AND conversion ≤ 100%.
+    // Estimated stages (stage name contains "(est.)") may have counts computed from formulas
+    // rather than raw events, but they are still bound by the max(upstream, estimate) constraint.
+    let prevCount = Infinity;
+    const violations: string[] = [];
+    for (const stage of stages) {
+      if (stage.customerCount > prevCount) {
+        violations.push(
+          `INVERSION: "${stage.stage}" has ${stage.customerCount} customers > previous ${prevCount}`
+        );
+      }
+      if (stage.convFromPrev != null && stage.convFromPrev > 100) {
+        violations.push(
+          `OVERFLOW: "${stage.stage}" has convFromPrev=${stage.convFromPrev}% > 100%`
+        );
+      }
+      prevCount = stage.customerCount;
+    }
+    assert.equal(
+      violations.length,
+      0,
+      `Sample funnel has ${violations.length} violation(s):\n  ${violations.join("\n  ")}`
+    );
+  });
+});
+
+describe("journey funnel — route placement (Step 3 move)", () => {
+  it("Sequential Journey Funnel is in TabRecommendation, not TabCustomer", () => {
+    const route = readRoute();
+    const recStart = route.indexOf("function TabRecommendation(");
+    const custEnd = route.indexOf("function TabProduct(");
+    const funnelIdx = route.indexOf('"Sequential Journey Funnel"');
+    assert.ok(funnelIdx !== -1, '"Sequential Journey Funnel" section must exist in the route file');
+    assert.ok(
+      funnelIdx > recStart,
+      '"Sequential Journey Funnel" must appear after TabRecommendation function declaration'
+    );
+    assert.ok(
+      funnelIdx > custEnd,
+      '"Sequential Journey Funnel" must not be inside TabCustomer — it was moved to TabRecommendation'
+    );
+  });
+
+  it("Live Customer Journey is in TabRecommendation, not TabCustomer", () => {
+    const route = readRoute();
+    const recStart = route.indexOf("function TabRecommendation(");
+    const custEnd = route.indexOf("function TabProduct(");
+    const liveJourneyIdx = route.indexOf('"Live Customer Journey"');
+    assert.ok(liveJourneyIdx !== -1, '"Live Customer Journey" section must exist');
+    assert.ok(
+      liveJourneyIdx > recStart,
+      '"Live Customer Journey" must appear after TabRecommendation function declaration'
+    );
+    assert.ok(
+      liveJourneyIdx > custEnd,
+      '"Live Customer Journey" must not be inside TabCustomer — it was moved to TabRecommendation'
+    );
+  });
+});
+
+describe("action plan deduplication (Step 3 INCON-14)", () => {
+  it("canonical key function uses scope-typed keys (product/category/opportunity), not plain text", () => {
+    const route = readRoute();
+    assert.ok(route.includes("_actionCanonKey"), "_actionCanonKey function must exist in TabOpportunitiesContent");
+    assert.ok(route.includes(":product:"), "product-scoped canonical key must include ':product:' literal");
+    assert.ok(route.includes(":category:"), "category-scoped canonical key must include ':category:' literal");
+    assert.ok(route.includes(":opportunity:"), "opportunity-scoped canonical key must include ':opportunity:' literal");
+  });
+
+  it("deduped array is passed to CombinedPriorityBoard, not raw actionItems", () => {
+    const route = readRoute();
+    assert.ok(
+      route.includes("actionItems={deduped}"),
+      "CombinedPriorityBoard must receive the deduped array, not raw actionItems"
+    );
+  });
+
+  it("merged evidence provenance retained when deduping", () => {
+    const route = readRoute();
+    assert.ok(
+      route.includes("_allSources") && route.includes("mergedEvidence"),
+      "Dedup must merge evidence strings and track all source provenance in _allSources"
+    );
+  });
+
+  it("feedback-insights source tag present in INCON-14 wiring", () => {
+    const route = readRoute();
+    assert.ok(
+      route.includes('"feedback-insights"'),
+      'designerInsights items must carry source: "feedback-insights" for provenance tracking'
+    );
+  });
+
+  it("design-actions and product-intelligence both wired to Action Plan", () => {
+    const route = readRoute();
+    assert.ok(route.includes('"design-actions"'), 'design-actions source must be tagged');
+    assert.ok(route.includes('"product-intelligence"'), 'product-intelligence source must be tagged');
+    assert.ok(route.includes('"opportunity-feed"'), 'opportunity-feed source must be tagged');
+  });
+
+  it("INCON-14 safety: different actions targeting same product do not merge (action-type must differ)", () => {
+    // Two items with the same taxonomy+product but different actions should NOT share a canonical key.
+    // taxonomy already encodes the action direction (fix/scale/test), so different actions on the same
+    // product produce different taxonomy prefixes → different canonical keys → no false merge.
+    // The product segment uses the full product name slug (no truncation) for stable deterministic identity.
+    const route = readRoute();
+    assert.ok(
+      !route.includes("slice(0, 3).join"),
+      "Product-scoped canonical key must NOT use first-3-words truncation — full name slug required"
+    );
+    assert.ok(
+      route.includes('replace(/[^a-z0-9]/g, "-")'),
+      "Product-scoped canonical key must use full product name slug (replace non-alphanumeric with hyphens)"
+    );
+  });
+
+  it("INCON-14 safety: cross-source dedup merges evidence from both sources", () => {
+    const route = readRoute();
+    assert.ok(
+      route.includes("mergedEvidence") && route.includes("[existing.evidence, item.evidence].filter(Boolean).join"),
+      "Dedup must merge evidence strings from both sources into a single string"
+    );
+  });
+
+  it("INCON-14 safety: provenance _allSources survives cross-source merge", () => {
+    const route = readRoute();
+    assert.ok(
+      route.includes("_allSources") && route.includes("existing.source"), // existing item source is preserved
+      "_allSources must track all contributing sources after dedup"
+    );
+  });
+});
+
+describe("sample data objection canonicalization (INCON-06)", () => {
+  const data = getDesignerSampleData({ dateRangeDays: 90, seedOverrides: {} });
+
+  it("productNarratives mostCommonObjection is canonicalized — no raw Trouser length variants", () => {
+    const products = data.rel?.productNarratives ?? [];
+    for (const p of products) {
+      const obj = p.mostCommonObjection;
+      if (obj && /trouser/i.test(obj)) {
+        assert.equal(obj, "Trouser length",
+          `mostCommonObjection "${obj}" must be canonicalized to "Trouser length" (found on product "${p.name}")`);
+      }
+    }
+  });
+
+  it("global topObjections list shows at most one Trouser length category", () => {
+    const topObjs: string[] = (data.dashboard?.topObjections ?? []).map((o: { name: string }) => o.name);
+    const trouserVariants = topObjs.filter(o => /trouser/i.test(o));
+    assert.ok(
+      trouserVariants.length <= 1,
+      `topObjections has ${trouserVariants.length} trouser variants: ${trouserVariants.join(", ")} — all should be merged under "Trouser length"`
+    );
+  });
+});
+
+describe("desired feelings deduplication (INCON-07)", () => {
+  const data = getDesignerSampleData({ dateRangeDays: 90, seedOverrides: {} });
+
+  it("helpedFeel in each product card (dashboard.topPieces) has no duplicate feeling labels", () => {
+    const pieces = data.dashboard?.topPieces ?? [];
+    for (const p of pieces) {
+      const feelings: string[] = p.helpedFeel ?? [];
+      const unique = [...new Set(feelings)];
+      assert.equal(
+        feelings.length, unique.length,
+        `Product "${p.name}" helpedFeel has duplicate feeling labels: [${feelings.join(", ")}]`
+      );
+    }
+  });
+
+  it("dnaMatrix topDesiredFeelings has no duplicate labels per personality segment", () => {
+    const segments = data.rel?.dnaMatrix ?? [];
+    for (const seg of segments) {
+      const feelings: string[] = seg.topDesiredFeelings ?? [];
+      const unique = [...new Set(feelings)];
+      assert.equal(
+        feelings.length, unique.length,
+        `Personality "${seg.personality}" topDesiredFeelings has duplicate labels: [${feelings.join(", ")}]`
+      );
+    }
+  });
+});

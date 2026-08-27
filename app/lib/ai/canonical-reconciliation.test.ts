@@ -317,12 +317,14 @@ describe("Sample Preview status fields", () => {
       assert.equal(advanced.saveVsPurchase.status, "sample",
         `[${days}D] advanced.saveVsPurchase.status=${advanced.saveVsPurchase.status} — must be "sample" in sample preview`);
     });
-    it(`47b. [${days}D] advanced.journeyFunnel exists and has populated stages`, () => {
+    it(`47b. [${days}D] advanced.journeyFunnel exists and has populated stages and downstreamSignals`, () => {
       const { advanced } = getDesignerSampleData(days) as any;
       assert.ok(advanced.journeyFunnel, `[${days}D] advanced.journeyFunnel must exist`);
       assert.equal(advanced.journeyFunnel.status, "sample");
-      assert.ok(Array.isArray(advanced.journeyFunnel.stages) && advanced.journeyFunnel.stages.length >= 10,
-        `[${days}D] journeyFunnel.stages must have ≥10 entries`);
+      assert.ok(Array.isArray(advanced.journeyFunnel.stages) && advanced.journeyFunnel.stages.length === 4,
+        `[${days}D] journeyFunnel.stages must have exactly 4 sequential entries (Passport → Session → Rec Shown → Rec Feedback), got ${advanced.journeyFunnel.stages.length}`);
+      assert.ok(Array.isArray(advanced.journeyFunnel.downstreamSignals) && advanced.journeyFunnel.downstreamSignals.length === 6,
+        `[${days}D] journeyFunnel.downstreamSignals must have exactly 6 engagement/commercial signals, got ${advanced.journeyFunnel.downstreamSignals?.length}`);
       assert.ok(advanced.journeyFunnel.totalCustomers > 0, `[${days}D] journeyFunnel.totalCustomers must be > 0`);
     });
     it(`47c. [${days}D] advanced.sizeIntelligence exists and has calculated metrics`, () => {

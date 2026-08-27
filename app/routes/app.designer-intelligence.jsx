@@ -673,8 +673,10 @@ function LiveJourneyFunnel({ journey }) {
             {stage.uniqueCustomers} {stage.uniqueCustomers === 1 ? "customer" : "customers"}
           </div>
           {stage.progressionFromPrevious != null && (
-            <div style={{ fontFamily: "'JetBrains Mono','Courier New',monospace", fontSize: 10, color: "#7a6f6a", minWidth: 44, textAlign: "right" }}>
-              {stage.progressionFromPrevious}%
+            <div style={{ fontFamily: "'JetBrains Mono','Courier New',monospace", fontSize: 10, color: stage.progressionFromPrevious > 100 ? "#8b2035" : "#7a6f6a", minWidth: 72, textAlign: "right" }}>
+              {stage.progressionFromPrevious > 100
+                ? `>100% ⚑`
+                : `${stage.progressionFromPrevious}%`}
             </div>
           )}
         </div>
@@ -1491,7 +1493,7 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays, liv
       {/* Emotional Journey Intelligence */}
       <Section
         title="Emotional Journey Intelligence"
-        desc="Aggregate rates: how reliably nAia lifts confidence, achieves desired feelings, and converts to post-wear satisfaction — measured as percentages across sessions"
+        desc={`Aggregate rates: how reliably nAia lifts confidence, achieves desired feelings, and converts to post-wear satisfaction — ${dateRangeDays >= 365 ? "all time" : `last ${dateRangeDays} days`}`}
         status={advanced?.emotionalJourney?.status || "insufficient-data"}
       >
         {!advanced?.emotionalJourney || advanced.emotionalJourney.status === "insufficient-data" ? (
@@ -1642,68 +1644,11 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays, liv
         )}
       </Section>
 
-      {/* Customer Journey Analytics */}
-      {sampleMode && advanced?.journeyFunnel?.stages?.length > 0 ? (
-        <Section title="Full Journey Mapping" desc={`SAMPLE PREVIEW — linked journey funnel · ${advanced.journeyFunnel.scopeLabel} · ${advanced.journeyFunnel.totalCustomers} customers`} status="sample">
-          <div style={s.kpiGrid}>
-            <KpiCard label="Total Customers" value={advanced.journeyFunnel.totalCustomers} />
-            <KpiCard label="End-to-End Rate" value={`${advanced.journeyFunnel.endToEndRate ?? "—"}%`} tooltip="% of customers completing Passport through Repeat Purchase" />
-            <KpiCard label="Main Drop-off" value={advanced.journeyFunnel.dropoffStage} />
-            <KpiCard label="Top Segments" value={advanced.journeyFunnel.topSegments?.join(", ")} />
-          </div>
-          <div style={{ overflowX: "auto", marginTop: 20 }}>
-            <table style={s.table}>
-              <thead><tr>
-                <th style={s.th}>Stage</th>
-                <th style={s.th}>Customers</th>
-                <th style={s.th}>Events / Count</th>
-                <th style={s.th}>Conv. from Prev</th>
-                <th style={s.th}>Median Days from Prev</th>
-              </tr></thead>
-              <tbody>
-                {advanced.journeyFunnel.stages.map((stage, i) => (
-                  <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
-                    <td style={{ ...s.td, fontFamily: SERIF, fontWeight: 600, fontSize: 13 }}>{stage.stage}</td>
-                    <td style={{ ...s.td, fontFamily: MONO, fontWeight: 700 }}>{stage.customerCount}</td>
-                    <td style={{ ...s.td, fontFamily: MONO, color: "#7a6f6a" }}>{stage.sessionsOrEvents ?? "—"}</td>
-                    <td style={{ ...s.td, fontFamily: MONO, color: stage.convFromPrev != null && stage.convFromPrev < 50 ? "#8b2035" : "#2a5e42", fontWeight: 600 }}>
-                      {stage.convFromPrev != null ? `${stage.convFromPrev}%` : "—"}
-                    </td>
-                    <td style={{ ...s.td, fontFamily: MONO, color: "#7a6f6a" }}>{stage.medianDaysFromPrev != null ? `${stage.medianDaysFromPrev}d` : "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {advanced.journeyFunnel.note && (
-            <div style={{ marginTop: 12, padding: "8px 12px", background: "rgba(34,21,22,0.04)", borderLeft: "2px solid rgba(34,21,22,0.15)", fontSize: 11, color: "#7a6f6a", fontStyle: "italic" }}>
-              {advanced.journeyFunnel.note}
-            </div>
-          )}
-        </Section>
-      ) : (
-        <Section title="Customer Journey Analytics" desc="Multi-session journey mapping from first touch to repeat wear" status={advanced?.journeyAnalytics?.status || "awaiting-integration"}>
-          {advanced?.journeyAnalytics?.status === "live" ? (
-            <div style={s.kpiGrid}>
-              <KpiCard label="Total Journey Events" value={advanced.journeyAnalytics.totalEvents} />
-              {Object.entries(advanced.journeyAnalytics.eventTypeCounts).map(([type, count]) => (
-                <KpiCard key={type} label={type.replace(/_/g, " ")} value={count} />
-              ))}
-            </div>
-          ) : (
-            <AwaitingCard
-              label="Customer Journey Analytics"
-              description="Highest-converting journeys, abandonment points, time-to-purchase, same-session / 24h / 7d / 30d attribution. Requires cart and checkout events from Shopify."
-            />
-          )}
-        </Section>
-      )}
-
       {/* Style DNA × Outcomes Intelligence */}
       {rel?.dnaMatrix?.length > 0 && (
         <Section
           title="Style DNA × Outcomes Intelligence"
-          desc="How each personality type is served — rating, rewear, confidence lift, and desired feeling achievement"
+          desc={`How each personality type is served — rating, rewear, confidence lift, and desired feeling achievement · ${dateRangeDays >= 365 ? "all time" : `last ${dateRangeDays} days`}`}
           status={rel.status}
         >
           {rel.status === "insufficient-data" ? (
@@ -1776,12 +1721,6 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays, liv
         </Section>
       )}
 
-      {/* Live Customer Journey — Batch 2 */}
-      {liveSignals && !sampleMode && liveSignals.journey?.stages?.length > 0 && (
-        <Section title="Live Customer Journey" desc={`${liveSignals.period} · nAia-owned stages only · not a commercial conversion funnel`} status={liveSignals.journey.stages.some(s => s.uniqueCustomers > 0) ? "live" : "insufficient-data"}>
-          <LiveJourneyFunnel journey={liveSignals.journey} />
-        </Section>
-      )}
     </>
   );
 }
@@ -1890,7 +1829,7 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
         </Section>
       )}
 
-      <Section title="Occasion Performance" desc="Where the collection shines — occasion demand, top pieces, and product fit" status="live" action={<ExportCSVButton data={data.topOccasions} filename="occasions.csv" />}>
+      <Section title="Occasion Performance" desc={`Where the collection shines — occasion demand, top pieces, and product fit · ${dateRangeDays >= 365 ? "all time" : `last ${dateRangeDays} days`}`} status="live" action={<ExportCSVButton data={data.topOccasions} filename="occasions.csv" />}>
         {data.topOccasions?.length > 0 ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 16 }}>
             {data.topOccasions.map((occ, i) => (
@@ -2034,7 +1973,89 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
 function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, dateRangeDays, liveSignals }) {
   return (
     <>
-      <Section title="Recommendation Engagement & Response" desc="Immediate Love it / Okay / Not for me reactions to recommendation cards — separate from post-outfit reviews" status={phase4b2?.feedbackEngagement?.migrationPending ? "awaiting-integration" : "live"}>
+      {/* nAia-Linked Customer Journey Funnel — moved from Customers tab */}
+      {sampleMode && advanced?.journeyFunnel?.stages?.length > 0 ? (
+        <Section title="Sequential Journey Funnel" desc={`SAMPLE PREVIEW — only stages with mandatory cohort membership · ${advanced.journeyFunnel.scopeLabel} · ${advanced.journeyFunnel.totalCustomers} customers`} status="sample">
+          <div style={s.kpiGrid}>
+            <KpiCard label="Total Customers" value={advanced.journeyFunnel.totalCustomers} />
+            <KpiCard label="Feedback Rate" value={`${advanced.journeyFunnel.endToEndRate ?? "—"}%`} tooltip="% of passport holders who gave recommendation feedback — the meaningful sequential conversion for nAia" />
+            <KpiCard label="Main Drop-off" value={advanced.journeyFunnel.dropoffStage} />
+            <KpiCard label="Top Segments" value={advanced.journeyFunnel.topSegments?.join(", ")} />
+          </div>
+          <div style={{ overflowX: "auto", marginTop: 20 }}>
+            <table style={s.table}>
+              <thead><tr>
+                <th style={s.th}>Stage</th>
+                <th style={s.th}>Customers</th>
+                <th style={s.th}>Events / Count</th>
+                <th style={s.th}>Conv. from Prev</th>
+                <th style={s.th}>Median Days from Prev</th>
+              </tr></thead>
+              <tbody>
+                {advanced.journeyFunnel.stages.map((stage, i) => (
+                  <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                    <td style={{ ...s.td, fontFamily: SERIF, fontWeight: 600, fontSize: 13 }}>{stage.stage}</td>
+                    <td style={{ ...s.td, fontFamily: MONO, fontWeight: 700 }}>{stage.customerCount}</td>
+                    <td style={{ ...s.td, fontFamily: MONO, color: "#7a6f6a" }}>{stage.sessionsOrEvents ?? "—"}</td>
+                    <td style={{ ...s.td, fontFamily: MONO, color: stage.convFromPrev != null && stage.convFromPrev < 50 ? "#8b2035" : "#2a5e42", fontWeight: 600 }}>
+                      {stage.convFromPrev != null ? `${stage.convFromPrev}%` : "—"}
+                    </td>
+                    <td style={{ ...s.td, fontFamily: MONO, color: "#7a6f6a" }}>{stage.medianDaysFromPrev != null ? `${stage.medianDaysFromPrev}d` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {advanced.journeyFunnel.note && (
+            <div style={{ marginTop: 12, padding: "8px 12px", background: "rgba(34,21,22,0.04)", borderLeft: "2px solid rgba(34,21,22,0.15)", fontSize: 11, color: "#7a6f6a", fontStyle: "italic" }}>
+              {advanced.journeyFunnel.note}
+            </div>
+          )}
+          {advanced.journeyFunnel.downstreamSignals?.length > 0 && (
+            <>
+              <div style={{ ...s.subHeader, marginTop: 24 }}>ENGAGEMENT & COMMERCIAL SIGNALS</div>
+              <div style={{ fontSize: 11, color: "#7a6f6a", fontFamily: "'Inter', sans-serif", marginBottom: 12 }}>
+                Optional behaviors — not sequential funnel steps. Save and Purchase are independent; a customer may purchase without saving. Rates shown vs. the relevant population.
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={s.table}>
+                  <thead><tr>
+                    <th style={s.th}>Signal</th>
+                    <th style={s.th}>Customers</th>
+                    <th style={s.th}>Rate</th>
+                    <th style={s.th}>Base</th>
+                  </tr></thead>
+                  <tbody>
+                    {advanced.journeyFunnel.downstreamSignals.map((sig, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                        <td style={{ ...s.td, fontFamily: SERIF, fontWeight: 600, fontSize: 13 }}>{sig.signal}</td>
+                        <td style={{ ...s.td, fontFamily: MONO, fontWeight: 700 }}>{sig.customerCount}</td>
+                        <td style={{ ...s.td, fontFamily: MONO, color: "#2a5e42", fontWeight: 600 }}>{sig.rateVsBase != null ? `${sig.rateVsBase}%` : "—"}</td>
+                        <td style={{ ...s.td, fontFamily: MONO, color: "#7a6f6a", fontSize: 10 }}>{sig.base}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </Section>
+      ) : !sampleMode && liveSignals?.journey?.stages?.length > 0 ? (
+        <Section title="Live Customer Journey" desc={`${liveSignals.period} · nAia-owned stages only · not a commercial conversion funnel`} status={liveSignals.journey.stages.some(s => s.uniqueCustomers > 0) ? "live" : "insufficient-data"}>
+          <LiveJourneyFunnel journey={liveSignals.journey} />
+          {liveSignals.journey.stages.some(s => s.progressionFromPrevious > 100) && (
+            <div style={{ marginTop: 8, fontSize: 10, color: "#8b2035", fontFamily: "'Inter', sans-serif" }}>
+              ⚑ = Stage marked &gt;100% is non-sequential (independent feature, not strict funnel step) — progression shown for reference only.
+            </div>
+          )}
+        </Section>
+      ) : (
+        <Section title="Customer Journey" desc="nAia-linked funnel from StyleMe session through repeat purchase" status="awaiting-integration">
+          <AwaitingCard label="Customer Journey Funnel" description="Multi-stage journey data requires live customer events. Will populate once sufficient sessions are recorded." />
+        </Section>
+      )}
+
+      <Section title="Recommendation Engagement & Response" desc={`Immediate Love it / Okay / Not for me reactions to recommendation cards — ${dateRangeDays >= 365 ? "all time" : `last ${dateRangeDays} days`}`} status={phase4b2?.feedbackEngagement?.migrationPending ? "awaiting-integration" : "live"}>
         {phase4b2?.feedbackEngagement?.migrationPending ? (
           <MigrationPendingNotice label="Recommendation feedback (RecommendationFeedback table)" />
         ) : (
@@ -3326,8 +3347,8 @@ function ActionCard({ item }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 10px", background: taxColor, color: "#fff" }}>{taxKey}</span>
-          <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: confBg, color: "#fff" }}>{item.confidence}</span>
-          {item.relevance && <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: "rgba(34,21,22,0.06)", color: "#5c5350" }}>{item.relevance} relevance</span>}
+          <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: confBg, color: "#fff" }}>EVIDENCE · {item.confidence}</span>
+          {item.relevance && <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: "rgba(34,21,22,0.06)", color: "#5c5350" }}>PRIORITY · {item.relevance}</span>}
         </div>
         <span style={{ fontSize: 9, fontFamily: MONO, color: "#9CA3AF", whiteSpace: "nowrap" }}>Status: New</span>
       </div>
@@ -3379,6 +3400,7 @@ function TabOpportunitiesContent({ data, phase4b2, advanced, rel, dateRangeDays,
         dependency: opp.dependency ?? null,
         sampleSizeHint: opp.sampleSize ?? 1,
         source: "opportunity-feed",
+        _opportunityType: opp.type ?? null,
       });
     });
 
@@ -3415,7 +3437,7 @@ function TabOpportunitiesContent({ data, phase4b2, advanced, rel, dateRangeDays,
       action: p.recommendation,
       evidence: [`n=${p.sampleSize}`, p.avgRating != null && `★${p.avgRating.toFixed(1)}`, p.rewearRate != null && `${Math.round(p.rewearRate * 100)}% rewear`].filter(Boolean).join(" · "),
       period: null,
-      confidence: p.sampleSize >= 5 ? "high" : "medium",
+      confidence: p.sampleSize >= 20 ? "high" : p.sampleSize >= 5 ? "medium" : "low",
       relevance: p.opportunityScore >= 60 ? "high" : p.opportunityScore >= 40 ? "medium" : "low",
       expectedOutcome: p.recommendationReason,
       dependency: null,
@@ -3447,9 +3469,67 @@ function TabOpportunitiesContent({ data, phase4b2, advanced, rel, dateRangeDays,
 
   actionItems.sort((a, b) => (sortOrder[a.relevance] ?? 2) - (sortOrder[b.relevance] ?? 2) || (sortOrder[a.confidence] ?? 2) - (sortOrder[b.confidence] ?? 2));
 
+  // Meaning-level dedup using deterministic canonical keys.
+  // Key structure: `taxonomy_norm:scope_type:scope_target`
+  // — product-scoped items (design-actions, product-intelligence): scope = "product:<full-product-slug>"
+  //   taxonomy already encodes actionType/direction (fix/scale/test); headline IS the product name.
+  // — category-scoped items (feedback-insights):                   scope = "category:<CAT>"
+  // — opportunity-scoped items (opportunity-feed):                 scope = "opportunity:<opp-type>"
+  // Items at different scope levels are never collapsed (a product fix ≠ a category-wide fix).
+  // When two items share the same key, the higher-confidence one is retained and both provenance
+  // strings are merged into the retained item's evidence field.
+  function _actionCanonKey(item) {
+    const tax = (item.taxonomy ?? "").toLowerCase().replace(/[^a-z]/g, "");
+    if (item.source === "design-actions" || item.source === "product-intelligence") {
+      // Full product name slug — no truncation. taxonomy encodes direction; headline is the product.
+      const prod = (item.headline ?? "").toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+      return `${tax}:product:${prod}`;
+    }
+    if (item.source === "feedback-insights") {
+      const cat = (item.detail ?? "").toLowerCase().replace(/[^a-z]/g, "");
+      return `${tax}:category:${cat}`;
+    }
+    if (item.source === "opportunity-feed") {
+      // Use structured opp.type as identity dimension; fall back to first 4 words of headline only
+      // when type is absent (should not occur in practice).
+      const oppType = item._opportunityType
+        ? item._opportunityType.toLowerCase().replace(/[^a-z0-9]/g, "-")
+        : (item.headline ?? "").toLowerCase().replace(/[^a-z0-9\s]/g, "").trim().split(/\s+/).slice(0, 4).join("-");
+      return `${tax}:opportunity:${oppType}`;
+    }
+    return `text:${(item.action ?? item.headline ?? "").toLowerCase().trim()}`;
+  }
+  const seenCanon = new Map();
+  const deduped = [];
+  const confRank = { high: 0, medium: 1, low: 2 };
+  for (const item of actionItems) {
+    const key = _actionCanonKey(item);
+    if (!key) { deduped.push(item); continue; }
+    const existing = seenCanon.get(key);
+    if (!existing) {
+      seenCanon.set(key, item);
+      item._allSources = [item.source];
+      deduped.push(item);
+    } else {
+      // Merge provenance into the retained item; elevate if current item has higher confidence
+      existing._allSources = [...(existing._allSources ?? [existing.source]), item.source];
+      const mergedEvidence = [existing.evidence, item.evidence].filter(Boolean).join(" · ");
+      if ((confRank[item.confidence] ?? 2) < (confRank[existing.confidence] ?? 2)) {
+        // Current item is more confident — promote it but preserve merged evidence + provenance
+        const allSources = existing._allSources;
+        const idx = deduped.indexOf(existing);
+        const promoted = { ...item, evidence: mergedEvidence, _allSources: allSources };
+        if (idx !== -1) deduped[idx] = promoted;
+        seenCanon.set(key, promoted);
+      } else {
+        existing.evidence = mergedEvidence;
+      }
+    }
+  }
+
   return (
     <>
-      <CombinedPriorityBoard actionItems={actionItems} />
+      <CombinedPriorityBoard actionItems={deduped} />
       <div style={{ padding: "12px 20px", background: "rgba(34,21,22,0.02)", border: "1px solid rgba(34,21,22,0.07)", fontSize: 12, color: "#7a6f6a", fontFamily: SERIF, fontStyle: "italic" }}>
         Experiment Builder and AI Learning Roadmap are in <strong style={{ fontStyle: "normal" }}>Data &amp; AI</strong> — click the button in the header.
       </div>
@@ -3493,7 +3573,7 @@ function CombinedPriorityCard({ item }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontSize: 7, fontFamily: INTER, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", padding: "2px 8px", background: taxColor, color: "#fff" }}>{taxKey}</span>
-            <span style={{ fontSize: 7, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", padding: "2px 6px", background: confBg, color: "#fff" }}>{item.confidence}</span>
+            <span style={{ fontSize: 7, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", padding: "2px 6px", background: confBg, color: "#fff" }}>EVIDENCE · {item.confidence}</span>
             <span style={{ fontSize: 7, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", padding: "2px 6px", background: confData.color, color: "#fff" }}>{confData.label}</span>
           </div>
           <span style={{ fontSize: 8, fontFamily: MONO, color: "#9CA3AF" }}>Status: New</span>
@@ -4062,8 +4142,13 @@ function DataAiExperimentBuilder({ advanced, sampleMode }) {
               {exp.title}
             </div>
           </div>
-          <div style={{ padding: "4px 10px", background: statusColor + "22", border: `1px solid ${statusColor}44`, color: statusColor, fontFamily: INTER_L, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", whiteSpace: "nowrap", flexShrink: 0 }}>
-            {statusLabel}
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexShrink: 0 }}>
+            <div style={{ padding: "4px 10px", background: "rgba(107,72,0,0.10)", border: "1px solid rgba(107,72,0,0.25)", color: "#6b4800", fontFamily: INTER_L, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", whiteSpace: "nowrap" }}>
+              SAMPLE DATA
+            </div>
+            <div style={{ padding: "4px 10px", background: statusColor + "22", border: `1px solid ${statusColor}44`, color: statusColor, fontFamily: INTER_L, fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", whiteSpace: "nowrap" }}>
+              {statusLabel}
+            </div>
           </div>
         </div>
         <div style={{ fontFamily: SERIF_L, fontSize: 13, color: "#5c5350", fontStyle: "italic", margin: "0 18px 14px", lineHeight: 1.6 }}>

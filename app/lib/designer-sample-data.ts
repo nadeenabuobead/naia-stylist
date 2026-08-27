@@ -559,6 +559,21 @@ function tally<T>(vals: (T | null)[]): Map<T, number> {
   return m;
 }
 
+// Canonical objection key → human-readable label. Normalises textual variants that refer
+// to the same underlying fit/style issue so the dashboard never shows them as separate
+// categories. Add new rules here; the key is the canonical label shown in the UI.
+const OBJECTION_CANONICAL: [RegExp, string][] = [
+  [/trouser.*(length|long|short|too)/i, "Trouser length"],
+  [/(length|too long|too short).*trouser/i, "Trouser length"],
+  [/trouser length/i,                   "Trouser length"],
+];
+function canonicalizeObjection(raw: string): string {
+  for (const [pattern, label] of OBJECTION_CANONICAL) {
+    if (pattern.test(raw)) return label;
+  }
+  return raw;
+}
+
 // Per-product metric bundle derived from a filtered event set
 function productStats(events: SE[], name: string) {
   const ps  = forProduct(ofType(events, SS), name);
@@ -594,9 +609,9 @@ function productStats(events: SE[], name: string) {
       ) / 10
     : 0;
 
-  const objections = ps.map(ev => ev.objection).filter((o): o is string => o !== null);
-  const objMap     = tally(objections);
-  const topObj     = objections.length ? topKeys(objMap, 1)[0] ?? null : null;
+  const objections    = ps.map(ev => ev.objection).filter((o): o is string => o !== null).map(canonicalizeObjection);
+  const objMap        = tally(objections);
+  const topObj        = objections.length ? topKeys(objMap, 1)[0] ?? null : null;
 
   const allEventsCids = [...ps, ...pf, ...pr, ...pwr].map(ev => ev.customerId);
   const personalityMap = tally(allEventsCids.map(cid => CUST[cid] ?? null));
@@ -726,7 +741,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       avgRating: p.avgRating,
       ratingCount: p.sampleSize,
       rewear: rewearPct !== null ? rewearPct / 100 : p.rewearRate,
-      helpedFeel: p.actualAfterFeelings.length > 0 ? p.actualAfterFeelings.slice(0, 3) : cat.desiredFeelings.slice(0, 2),
+      helpedFeel: p.actualAfterFeelings.length > 0 ? [...new Set(p.actualAfterFeelings)].slice(0, 3) : [...new Set(cat.desiredFeelings)].slice(0, 2),
       bestOccasions: cat.occasions.slice(0, 3),
       positiveComments: piecePositiveComment(name),
       negativeComments: pieceNegativeComment(name),
@@ -764,7 +779,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
 
   // ── Objection totals across all products ──────────────────────────────
   const allObjEvents = sessions.filter(ev => ev.objection !== null);
-  const objMap = tally(allObjEvents.map(ev => ev.objection));
+  const objMap = tally(allObjEvents.map(ev => canonicalizeObjection(ev.objection!)));
   const topObjList = [...objMap.entries()].sort((a, b) => b[1] - a[1])
     .map(([name, count]) => ({ name: name!, count }));
 
@@ -919,7 +934,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     underperformingPieces: underNames.map(name => {
       const p = pm[name];
       const objections = sessions.filter(ev => ev.productName === name && ev.objection)
-        .map(ev => ev.objection!);
+        .map(ev => canonicalizeObjection(ev.objection!));
       return {
         name,
         weakSignals: [
@@ -2251,35 +2266,48 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       const atBuys     = atBS.filter(ev => ev.outcome === "bought");
       const atWR       = ofType(allTime, WR);
 
-      const uniqueSessionCids = new Set(atSessions.map(ev => ev.customerId)).size;
-      const uniqueRFCids      = new Set(atRF.map(ev => ev.customerId)).size;
-      const loveRFCids        = new Set(atRF.filter(ev => ev.outcome === "love").map(ev => ev.customerId));
-      const clickEst          = Math.round([...loveRFCids].length * 0.72);
-      const savedCids         = new Set(atSaves.map(ev => ev.customerId)).size;
-      const boughtCids        = new Set(atBuys.map(ev => ev.customerId)).size;
-      const wrCids            = new Set(atWR.map(ev => ev.customerId)).size;
-      const vtoTrialEst       = Math.max(1, Math.round(uniqueSessionCids * 0.38));
-      const bsTotal           = atBS.length;
+      const uniqueSessionCids  = new Set(atSessions.map(ev => ev.customerId)).size;
+      const uniqueRFCids       = new Set(atRF.map(ev => ev.customerId)).size;
+      const loveRFCids         = new Set(atRF.filter(ev => ev.outcome === "love").map(ev => ev.customerId));
+      const clickEst           = Math.round([...loveRFCids].length * 0.72);
+      const savedCids          = new Set(atSaves.map(ev => ev.customerId)).size;
+      const boughtCids         = new Set(atBuys.map(ev => ev.customerId)).size;
+      const wrCids             = new Set(atWR.map(ev => ev.customerId)).size;
+      // VTO estimate vs. sessions — a signal, not a funnel stage
+      const vtoTrialEst        = Math.round(uniqueSessionCids * 0.38);
 
       const custBuyCountJF = new Map<string, number>();
       for (const ev of atBuys) custBuyCountJF.set(ev.customerId, (custBuyCountJF.get(ev.customerId) ?? 0) + 1);
       const repeatBuyerCount = [...custBuyCountJF.values()].filter(c => c >= 2).length;
 
-      // Conversion rate between consecutive funnel stages
+      // Conversion rate helper
       const cr = (n: number, d: number) => d > 0 ? pct(n, d) : null;
 
+      // ── Sequential core funnel — only stages with a provable "A requires B" relationship ──
+      // Passport → Session: must complete Passport to use nAia (product gate).
+      // Session → Recommendation Shown: every session surfaces ≥1 recommendation (100%).
+      // Recommendation Shown → Feedback: feedback UI only appears after seeing a recommendation.
+      // Save, VTO, Purchase, and Post-Wear are independent optional behaviors — a customer can
+      // purchase without saving and save without purchasing. They do not belong in the sequential
+      // funnel; they are shown as Engagement & Commercial Signals below.
       const stages = [
-        { stage: "Passport Completed",      customerCount: 120,              sessionsOrEvents: null, convFromPrev: null,                      medianDaysFromPrev: null,  note: "All customers complete a Passport before using nAia" },
-        { stage: "StyleMe Session",          customerCount: uniqueSessionCids, sessionsOrEvents: atSessions.length, convFromPrev: cr(uniqueSessionCids, 120), medianDaysFromPrev: 3,   note: "Customer-initiated styling session" },
-        { stage: "Recommendation Shown",     customerCount: uniqueSessionCids, sessionsOrEvents: atSessions.length, convFromPrev: 100,                        medianDaysFromPrev: 0,   note: "Each StyleMe session shows ≥1 recommendation" },
-        { stage: "Recommendation Feedback",  customerCount: uniqueRFCids,      sessionsOrEvents: atRF.length,       convFromPrev: cr(atRF.length, atSessions.length), medianDaysFromPrev: 0, note: "Love / Skip / Undecided signal captured" },
-        { stage: "Product Click (est.)",     customerCount: clickEst,          sessionsOrEvents: clickEst,          convFromPrev: cr(clickEst, atRF.length),   medianDaysFromPrev: 1,   note: "Estimated from love-feedback events; exact click events require Shopify storefront integration" },
-        { stage: "Save Intent",              customerCount: savedCids,         sessionsOrEvents: atSaves.length,    convFromPrev: cr(atSaves.length, clickEst), medianDaysFromPrev: 2,  note: "Buy-or-Skip 'Saved' events" },
-        { stage: "VTO Trial (est.)",         customerCount: vtoTrialEst,       sessionsOrEvents: vtoTrialEst,       convFromPrev: cr(vtoTrialEst, savedCids),  medianDaysFromPrev: 4,   note: "Estimated from session volume; exact VTO events require FASHN.ai integration" },
-        { stage: "Buy Intent (BS events)",   customerCount: new Set(atBS.map(ev => ev.customerId)).size, sessionsOrEvents: bsTotal, convFromPrev: cr(bsTotal, atSaves.length), medianDaysFromPrev: 7, note: "All Buy-or-Skip decisions (saved + bought)" },
-        { stage: "Purchase",                 customerCount: boughtCids,        sessionsOrEvents: atBuys.length,     convFromPrev: cr(atBuys.length, bsTotal),  medianDaysFromPrev: 14,  note: "Buy-or-Skip 'Bought' events" },
-        { stage: "Post-Wear Review",         customerCount: wrCids,            sessionsOrEvents: atWR.length,       convFromPrev: cr(atWR.length, atBuys.length), medianDaysFromPrev: 21, note: "Post-wear review submitted" },
-        { stage: "Repeat Purchase",          customerCount: repeatBuyerCount,  sessionsOrEvents: repeatBuyerCount,  convFromPrev: cr(repeatBuyerCount, boughtCids), medianDaysFromPrev: 45, note: "Customers with ≥2 Buy-or-Skip 'Bought' events" },
+        { stage: "Passport Completed",      customerCount: 120,              sessionsOrEvents: null,              convFromPrev: null,                               medianDaysFromPrev: null, note: "All customers complete a Passport before using nAia" },
+        { stage: "StyleMe Session",          customerCount: uniqueSessionCids, sessionsOrEvents: atSessions.length, convFromPrev: cr(uniqueSessionCids, 120),          medianDaysFromPrev: 3,    note: "Customer-initiated styling session" },
+        { stage: "Recommendation Shown",     customerCount: uniqueSessionCids, sessionsOrEvents: atSessions.length, convFromPrev: 100,                                medianDaysFromPrev: 0,    note: "Every StyleMe session shows ≥1 recommendation" },
+        { stage: "Recommendation Feedback",  customerCount: uniqueRFCids,      sessionsOrEvents: atRF.length,       convFromPrev: cr(uniqueRFCids, uniqueSessionCids), medianDaysFromPrev: 0,    note: "Love / Skip / Undecided signal captured — requires having seen a recommendation" },
+      ];
+
+      // ── Engagement & Commercial Signals ──
+      // Optional behaviors downstream of a session. Not sequential funnel steps.
+      // Session-relative rates use uniqueSessionCids as denominator.
+      // Post-purchase rates (Post-Wear Review, Repeat Purchase) use boughtCids as denominator.
+      const downstreamSignals = [
+        { signal: "Product Click (est.)", customerCount: clickEst,         rateVsBase: cr(clickEst, uniqueSessionCids),    base: "of session participants", note: "Estimated from love-feedback events; exact click tracking requires Shopify storefront integration" },
+        { signal: "Save Intent",          customerCount: savedCids,        rateVsBase: cr(savedCids, uniqueSessionCids),   base: "of session participants", note: "Buy-or-Skip 'Saved' outcome — optional, not a required precursor to purchase" },
+        { signal: "VTO Trial (est.)",     customerCount: vtoTrialEst,      rateVsBase: cr(vtoTrialEst, uniqueSessionCids), base: "of session participants", note: "Estimated from session volume; exact VTO events require FASHN.ai integration" },
+        { signal: "Purchase",             customerCount: boughtCids,       rateVsBase: cr(boughtCids, uniqueSessionCids),  base: "of session participants", note: "Buy-or-Skip 'Bought' outcome — independent of Save stage" },
+        { signal: "Post-Wear Review",     customerCount: wrCids,           rateVsBase: cr(wrCids, boughtCids),             base: "of buyers",               note: "Post-wear review submitted" },
+        { signal: "Repeat Purchase",      customerCount: repeatBuyerCount, rateVsBase: cr(repeatBuyerCount, boughtCids),   base: "of buyers",               note: "Customers with ≥2 Buy-or-Skip 'Bought' events" },
       ];
 
       return {
@@ -2287,11 +2315,12 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         scopeLabel: "All Time",
         totalCustomers: 120,
         stages,
-        endToEndRate: cr(repeatBuyerCount, 120),
-        dropoffStage: "Product Click → Save Intent",
+        downstreamSignals,
+        endToEndRate: cr(uniqueRFCids, 120),
+        dropoffStage: "Session → Recommendation Feedback (2 customers did not interact)",
         topSegments: ["Corporate Chic", "Edgy", "Artsy"],
         topProducts: [SEEN, ALIVE, CLEAR],
-        note: "Product Click, VTO Trial, and cart/checkout stages are estimated from available session data. Exact counts require Shopify storefront + FASHN.ai integration.",
+        note: "Only stages with guaranteed sequential cohort membership are shown in the funnel. Save, VTO, Purchase, and Post-Wear are optional behaviors shown separately as Engagement & Commercial Signals.",
       };
     })(),
 
@@ -2318,7 +2347,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         returnCount: allReturns.filter(ev => ev.productName === name).length,
         topObjection: sessions.filter(ev => ev.productName === name && ev.objection)
           .reduce((acc: Record<string, number>, ev) => {
-            const o = ev.objection!; acc[o] = (acc[o] ?? 0) + 1; return acc;
+            const o = canonicalizeObjection(ev.objection!); acc[o] = (acc[o] ?? 0) + 1; return acc;
           }, {} as Record<string, number>),
       })).map(r => ({
         ...r,
@@ -2464,7 +2493,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       }).length;
       const topProds   = topKeys(tally(pSessions.map(ev => ev.productName)), 2).filter((p): p is string => p !== null);
       const topFeelings = topKeys(tally(pWear.map(ev => ev.actualAfterFeeling)), 2).filter((f): f is string => f !== null);
-      const catalogFeelings = topProds.flatMap(p => CATALOG[p]?.desiredFeelings.slice(0,1).map(f => f.replace("more-","")) ?? []).slice(0,2);
+      const catalogFeelings = [...new Set(topProds.flatMap(p => CATALOG[p]?.desiredFeelings.slice(0,1).map(f => f.replace("more-","")) ?? []))].slice(0,2);
       const topOccs    = topKeys(tally(pSessions.map(ev => ev.occasion)), 2).filter((o): o is string => o !== null);
       const avgR       = meanRating(pReviews);
       const rewYes     = pWear.filter(ev => ev.rewear).length;
