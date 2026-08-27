@@ -15,7 +15,6 @@ const MY_NAIA_NAV: NavGroup[] = [
       { to: "/style-me", label: "StyleMe" },
       { to: "/buyskip", label: "Buy or Skip" },
       { to: "/trends/my-edits", label: "My Trend Edits" },
-      { to: "/passport/selfie", label: "Selfie Style Analysis" },
     ],
   },
   {

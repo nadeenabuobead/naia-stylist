@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } fro
 import { Link, useLoaderData, useRevalidator, useNavigate, redirect } from "react-router";
 import type { LinksFunction, LoaderFunctionArgs } from "react-router";
 import naiaStyles from "~/styles/naia-design-system.css?url";
+import prisma from "~/db.server";
+import type { SelfieStyleSignals } from "~/lib/ai/selfie-analysis";
+import { SelfieVisualAnalysis } from "~/components/selfie/SelfieVisualAnalysis";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
@@ -503,9 +506,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if ((op as any).fitConcerns?.length)       savedAnswers["fit-concerns"]           = (op as any).fitConcerns;
   if ((op as any).preferredCoverage)         savedAnswers["preferred-coverage"]     = (op as any).preferredCoverage;
 
+  const sa = await prisma.selfieAnalysis.findUnique({
+    where: { customerId: customer.id },
+    select: { analysisStatus: true, analysisResult: true, analysedAt: true },
+  });
+
+  type SelfieChapter =
+    | { status: "completed"; signals: SelfieStyleSignals; analysedAt: string }
+    | { status: "pending" | "failed" | "deleted" };
+
+  const selfieChapter: SelfieChapter | null = !sa ? null
+    : sa.analysisStatus === "completed" && sa.analysisResult !== null
+      ? { status: "completed", signals: sa.analysisResult as SelfieStyleSignals, analysedAt: sa.analysedAt?.toISOString() ?? "" }
+    : sa.analysisStatus === "pending" ? { status: "pending" }
+    : sa.analysisStatus === "failed"  ? { status: "failed" }
+    : sa.analysisStatus === "deleted" ? { status: "deleted" }
+    : null;
+
   return {
     savedAnswers,
     profileUpdatedAt: op.updatedAt.toISOString(),
+    selfieChapter,
   };
 }
 
@@ -677,11 +698,118 @@ type SaveStatus = "idle" | "saving" | "error" | "conflict";
 type PendingNext = "next" | "exit" | null;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Visual Analysis chapter — rendered inside the passport overview
+// ─────────────────────────────────────────────────────────────────────────────
+
+type SelfieChapterProp =
+  | { status: "completed"; signals: SelfieStyleSignals; analysedAt: string }
+  | { status: "pending" | "failed" | "deleted" }
+  | null;
+
+function VisualAnalysisChapter({ selfieChapter }: { selfieChapter: SelfieChapterProp }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div
+      id="visual-analysis"
+      className="sp-ov-section sp-ov-section--visual-analysis"
+      style={{ scrollMarginTop: "80px" }}
+    >
+      <div className="sp-ov-section-header">Visual Analysis</div>
+
+      {/* State 1 & 5: no record, or previously deleted */}
+      {(!selfieChapter || selfieChapter.status === "deleted") && (
+        <div style={{ paddingTop: "8px" }}>
+          <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", lineHeight: 1.75, marginBottom: "16px" }}>
+            Refine your Passport with a selfie. nAia uses visual cues to add personalised
+            guidance around colour, contrast, necklines, jewellery and metals, glasses, hair
+            and makeup — as an optional layer on top of your questionnaire preferences.
+          </p>
+          <Link
+            to="/passport/selfie"
+            className="sp-btn-outline"
+            style={{ display: "inline-block", textDecoration: "none" }}
+          >
+            Add Visual Analysis
+          </Link>
+        </div>
+      )}
+
+      {/* State 2: processing */}
+      {selfieChapter?.status === "pending" && (
+        <div style={{ paddingTop: "8px" }}>
+          <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", lineHeight: 1.75, marginBottom: "16px" }}>
+            Your visual analysis is being prepared.
+          </p>
+          <Link
+            to="/passport/selfie"
+            className="sp-btn-outline"
+            style={{ display: "inline-block", textDecoration: "none" }}
+          >
+            Check Progress
+          </Link>
+        </div>
+      )}
+
+      {/* State 4: failed */}
+      {selfieChapter?.status === "failed" && (
+        <div style={{ paddingTop: "8px" }}>
+          <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", lineHeight: 1.75, marginBottom: "16px" }}>
+            We could not complete your visual analysis last time.
+          </p>
+          <Link
+            to="/passport/selfie"
+            className="sp-btn-outline"
+            style={{ display: "inline-block", textDecoration: "none" }}
+          >
+            Retry Analysis
+          </Link>
+        </div>
+      )}
+
+      {/* State 3: completed — expandable inline */}
+      {selfieChapter?.status === "completed" && (
+        <div style={{ paddingTop: "8px" }}>
+          {selfieChapter.signals.overallNote && (
+            <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", lineHeight: 1.75, marginBottom: "16px" }}>
+              {selfieChapter.signals.overallNote}
+            </p>
+          )}
+
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center", marginBottom: expanded ? "20px" : "0" }}>
+            <button
+              type="button"
+              className="sp-btn-outline"
+              onClick={() => setExpanded(e => !e)}
+              style={{ fontSize: "12px" }}
+            >
+              {expanded ? "Hide Visual Analysis ↑" : "View Visual Analysis ↓"}
+            </button>
+            <Link
+              to="/passport/selfie"
+              style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "11px", letterSpacing: "0.4px", color: "var(--naia-muted)", textDecoration: "none" }}
+            >
+              Update →
+            </Link>
+          </div>
+
+          {expanded && (
+            <div style={{ paddingTop: "4px" }}>
+              <SelfieVisualAnalysis signals={selfieChapter.signals} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function PassportPage() {
-  const { savedAnswers, profileUpdatedAt } = useLoaderData<typeof loader>();
+  const { savedAnswers, profileUpdatedAt, selfieChapter } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
   const navigate = useNavigate();
 
@@ -1129,6 +1257,9 @@ export default function PassportPage() {
             <div className="sp-ov-section-header">{NOTES_SECTION.label}</div>
             {getSectionDetail(NOTES_SECTION, savedAnswers)}
           </div>
+
+          {/* ── VISUAL ANALYSIS chapter ────────────────────────────────────── */}
+          <VisualAnalysisChapter selfieChapter={selfieChapter ?? null} />
         </div>
 
         <div className="sp-actions">

@@ -195,7 +195,8 @@ describe("my-naia component — static structure", () => {
     expect(html).toContain("Saved");
     expect(html).toContain("Settings &amp; Privacy");
     expect(html).toContain("My nAia Model");
-    expect(html).toContain("Selfie Style Analysis");
+    // Selfie Style Analysis removed from top-level nav; discovery is now through Style Passport → Visual Analysis
+    expect(html).toContain("Style Passport");
   });
 
   it("StyleMe hero card is present with correct link", () => {
