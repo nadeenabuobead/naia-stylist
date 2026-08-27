@@ -1149,6 +1149,19 @@ export default function StyleMeResult() {
           </div>
         )}
 
+        {/* Complete the Look — generic wardrobe guidance for missing essential clothing slots */}
+        {suggestionMeta?.completionLayer && suggestionMeta.completionLayer.length > 0 && (
+          <div className="sm-result-section">
+            <p className="sm-result-section-head">Complete the Look</p>
+            {(suggestionMeta.completionLayer as Array<{ slot: string; description: string }>).map((piece, i) => (
+              <div key={i} className="sm-item-card sm-item-card--secondary">
+                <p className="sm-item-type-label">{piece.slot === "top" ? "Top" : "Bottom"}</p>
+                <p className="sm-item-notes--secondary">{piece.description}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Finishing layer — suppresses items in the same slot as the anchor */}
         <div className="sm-result-section">
           <p className="sm-result-section-head">Finishing Layer</p>

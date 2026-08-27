@@ -26,6 +26,16 @@ export interface StyleMePrimaryProduct {
   stylingNotes: string;              // catalog styleMeExplanation or fallback
 }
 
+// ── Outfit completion layer ──────────────────────────────────────────────────
+// Generic wardrobe guidance for essential clothing slots still missing after
+// the anchor + primary NADINE recommendation are placed. These are never
+// NADINE products, never Closet-owned items — styling directions only.
+
+export interface StyleMeCompletionPiece {
+  slot: string;        // "top" | "bottom"
+  description: string; // contextual wardrobe styling guidance
+}
+
 // ── Finishing layer ─────────────────────────────────────────────────────────
 
 export interface StyleMeFinishingLayer {
@@ -59,6 +69,7 @@ export interface StyleMeCustomerResult {
   closetAnchorImageUrl: string | null;
   pairingNote: string | null;
   finishingLayer: StyleMeFinishingLayer;
+  completionLayer: StyleMeCompletionPiece[];
   songReason: string;
   song: GetReadySong;
   rawRecommendation: StyleMeRecommendationResult;
@@ -86,6 +97,7 @@ export interface StyleMeMetadata {
   colourDirection: string;
   songReason: string;
   evidenceCodes: string[];
+  completionLayer?: StyleMeCompletionPiece[];
 }
 
 /**

@@ -268,4 +268,8 @@ export interface StyleMeRecommendationResult {
     eligibleCandidates: number;
     excludedCandidates: number;
   };
+  // Additional Closet garments included in the resulting look beyond the anchor.
+  // Each entry carries only the clothing slot — ownership/display data stays in
+  // the Closet item itself and must not be copied into the completion layer.
+  selectedClosetGarments?: Array<{ slot: string }>;
 }

@@ -16,6 +16,10 @@ import {
   containsBlockedTerms,
   computeStyleMeResult,
   styleSourceToSessionSource,
+  getFilledClothingSlots,
+  getMissingEssentialSlots,
+  buildCompletionLayer,
+  resolveSetSlots,
 } from "./styleme-result.server.ts";
 import type {
   StyleMeCustomerResult,
@@ -23,13 +27,14 @@ import type {
   StyleMeFinishingLayer,
   StyleMeOutcome,
   StyleMeWording,
+  StyleMeCompletionPiece,
 } from "./styleme-result.types.ts";
 import { parseSuggestionMetadata } from "./styleme-result.types.ts";
 import { SONG_CATALOG } from "./get-ready-song-catalog.ts";
 import { runRecommendation } from "./styleme-recommendation.ts";
 import type { ClosetAnchorInput, StyleMeEngineInput, StyleMeRecommendationResult } from "./styleme-recommendation.types.ts";
 import { resolveActionAnchor } from "./styleme-anchor.server.ts";
-import type { NormalizedClosetAnchor } from "./styleme-recommendation.types.ts";
+import type { NormalizedClosetAnchor, NormalizedStyleAnchor } from "./styleme-recommendation.types.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -76,6 +81,7 @@ function makeMinimalResult(overrides: Partial<StyleMeCustomerResult> = {}): Styl
     closetAnchorImageUrl: null,
     pairingNote: null,
     finishingLayer: baseFinishing,
+    completionLayer: [],
     songReason: "Curated to set the tone for your everyday.",
     song,
     rawRecommendation: {
@@ -514,6 +520,7 @@ function makeClosetLedResult(): StyleMeCustomerResult {
     closetAnchorImageUrl: null,
     pairingNote: "Pair with white sneakers for contrast.",
     finishingLayer: finishing,
+    completionLayer: [],
     songReason: "Curated for everyday.",
     song,
     rawRecommendation: {
@@ -1366,6 +1373,7 @@ function makeNadineWithClosetAnchorResult(overrides: Partial<StyleMeCustomerResu
     closetAnchorImageUrl: "https://example.com/cream-blazer.jpg",
     pairingNote: "Wear the blazer open for a relaxed polish.",
     finishingLayer: finishing,
+    completionLayer: [],
     songReason: "Curated for your work day.",
     song,
     rawRecommendation: {
@@ -1596,6 +1604,7 @@ function makeResultWithShoeAnchor(imageUrl: string | null = "https://cdn.shopify
       hair: "Hair up.",
       colourDirection: "Red pop against neutrals.",
     },
+    completionLayer: [],
     songReason: "Curated for dinner.",
     song,
     rawRecommendation: {
@@ -1679,6 +1688,7 @@ describe("§R Result-page fixes", () => {
       closetAnchorImageUrl: null,
       pairingNote: null,
       finishingLayer: { shoes: "Loafers.", bag: "Your tote is the anchor.", accessories: "Simple watch.", hair: "Neat.", colourDirection: "Neutrals." },
+      completionLayer: [],
       songReason: "Work vibe.",
       song,
       rawRecommendation: {
@@ -1937,5 +1947,576 @@ describe("§R Result-page fixes", () => {
     assert.ok(meta !== null, "metadata must parse for BOTH source");
     assert.ok(meta!.anchorSlot !== null && meta!.anchorSlot !== undefined, "anchorSlot must be non-null for BOTH source with anchor");
     assert.equal(meta!.anchor?.type, "closet", "anchor type must be 'closet' for BOTH source");
+  });
+});
+
+// ── §19 Completion layer — slot detection unit tests ─────────────────────────
+
+// Helpers for constructing mock anchors and products
+
+function makeClosetAnchor(slot: import("./styleme-recommendation.types.ts").OutfitSlot, colors: string[] = ["black"]): NormalizedClosetAnchor {
+  return {
+    type: "closet",
+    id: "test-anchor",
+    label: `Test ${slot}`,
+    slot,
+    colors,
+    normalizedColorIds: colors,
+    styleTags: [],
+    occasions: ["everyday"],
+    material: null,
+    hasStrongEvidence: false,
+    evidenceFields: [],
+    imageUrl: null,
+  };
+}
+
+function makePrimaryProduct(slot: string, title = "Test Product"): import("./styleme-result.types.ts").StyleMePrimaryProduct {
+  return {
+    handle: "test-handle",
+    title,
+    slot,
+    shopifyProductId: null,
+    productImageUrl: null,
+    liveUrl: null,
+    productUrl: null,
+    stylingNotes: "Style it.",
+  };
+}
+
+describe("§19 Completion layer — slot detection", () => {
+  it("CL.1 — non-clothing anchor (shoe) does not fill any clothing slot", () => {
+    const anchor = makeClosetAnchor("shoe");
+    const filled = getFilledClothingSlots(anchor, null);
+    assert.equal(filled.size, 0, "shoe anchor must not fill any clothing slot");
+  });
+
+  it("CL.2 — non-clothing anchor (bag) does not fill any clothing slot", () => {
+    const anchor = makeClosetAnchor("bag");
+    const filled = getFilledClothingSlots(anchor, null);
+    assert.equal(filled.size, 0, "bag anchor must not fill any clothing slot");
+  });
+
+  it("CL.3 — non-clothing anchor (accessory) does not fill any clothing slot", () => {
+    const filled = getFilledClothingSlots(makeClosetAnchor("accessory"), null);
+    assert.equal(filled.size, 0);
+  });
+
+  it("CL.4 — non-clothing anchor (jewelry) does not fill any clothing slot", () => {
+    const filled = getFilledClothingSlots(makeClosetAnchor("jewelry"), null);
+    assert.equal(filled.size, 0);
+  });
+
+  it("CL.5 — outerwear anchor fills only 'outerwear'", () => {
+    const filled = getFilledClothingSlots(makeClosetAnchor("outerwear"), null);
+    assert.ok(filled.has("outerwear"));
+    assert.ok(!filled.has("top") && !filled.has("bottom"));
+  });
+
+  it("CL.6 — top anchor fills only 'top'", () => {
+    const filled = getFilledClothingSlots(makeClosetAnchor("top"), null);
+    assert.ok(filled.has("top"));
+    assert.ok(!filled.has("bottom"));
+  });
+
+  it("CL.7 — dress anchor fills 'dress' (not top or bottom)", () => {
+    const filled = getFilledClothingSlots(makeClosetAnchor("dress"), null);
+    assert.ok(filled.has("dress"));
+    assert.ok(!filled.has("top") && !filled.has("bottom"));
+  });
+
+  it("CL.8 — Closet SET anchor with unknown components contributes no fabricated clothing coverage", () => {
+    const filled = getFilledClothingSlots(makeClosetAnchor("set"), null);
+    // Cannot determine components of a Closet SET with no NADINE handle — no coverage fabricated.
+    // Completion generates guidance for potentially uncovered slots rather than suppressing them.
+    assert.equal(filled.size, 0, "Closet SET anchor must not fabricate coverage when components are unknown");
+  });
+
+  it("CL.9 — outerwear anchor + top primary → filled = {outerwear, top}", () => {
+    const filled = getFilledClothingSlots(makeClosetAnchor("outerwear"), makePrimaryProduct("top"));
+    assert.ok(filled.has("outerwear") && filled.has("top") && !filled.has("bottom"));
+  });
+
+  it("CL.10 — null anchor + dress primary → filled = {dress}", () => {
+    const filled = getFilledClothingSlots(null, makePrimaryProduct("dress"));
+    assert.ok(filled.has("dress"));
+    assert.ok(!filled.has("top") && !filled.has("bottom"));
+  });
+
+  it("CL.11 — getMissingEssentialSlots: dress → []", () => {
+    assert.deepEqual(getMissingEssentialSlots(new Set(["dress"])), []);
+  });
+
+  it("CL.12 — getMissingEssentialSlots: top + bottom → []", () => {
+    assert.deepEqual(getMissingEssentialSlots(new Set(["top", "bottom"])), []);
+  });
+
+  it("CL.13 — getMissingEssentialSlots: top only → [bottom]", () => {
+    assert.deepEqual(getMissingEssentialSlots(new Set(["top"])), ["bottom"]);
+  });
+
+  it("CL.14 — getMissingEssentialSlots: bottom only → [top]", () => {
+    assert.deepEqual(getMissingEssentialSlots(new Set(["bottom"])), ["top"]);
+  });
+
+  it("CL.15 — getMissingEssentialSlots: outerwear only → [top, bottom]", () => {
+    const missing = getMissingEssentialSlots(new Set(["outerwear"]));
+    assert.deepEqual(missing, ["top", "bottom"]);
+  });
+
+  it("CL.16 — getMissingEssentialSlots: outerwear + top → [bottom]", () => {
+    assert.deepEqual(getMissingEssentialSlots(new Set(["outerwear", "top"])), ["bottom"]);
+  });
+
+  it("CL.17 — getMissingEssentialSlots: empty → [top, bottom]", () => {
+    assert.deepEqual(getMissingEssentialSlots(new Set()), ["top", "bottom"]);
+  });
+
+  it("CL.18 — getMissingEssentialSlots: {top, outerwear, bottom} → []", () => {
+    assert.deepEqual(getMissingEssentialSlots(new Set(["top", "outerwear", "bottom"])), []);
+  });
+});
+
+// ── §20 Completion layer — integration tests (R1–R9) ─────────────────────────
+
+// Builds a mock _runRec that returns a fixed primary handle + closet anchor slot.
+// The actual primaryProduct.slot is resolved from the catalog inside computeStyleMeResult.
+function makeCompletionMock(
+  primaryHandle: string | null,
+  anchorSlot: import("./styleme-recommendation.types.ts").OutfitSlot | null,
+  anchorColors: string[] = ["black"],
+): (input: StyleMeEngineInput) => StyleMeRecommendationResult {
+  const anchor: NormalizedClosetAnchor | null = anchorSlot
+    ? makeClosetAnchor(anchorSlot, anchorColors)
+    : null;
+  return () => ({
+    outcome: primaryHandle ? "nadine-recommendation" : "no-eligible-product",
+    anchor,
+    primary: primaryHandle
+      ? {
+          handle: primaryHandle,
+          title: "Mock Product",
+          slot: "top" as const,
+          totalScore: 5,
+          positiveEvidence: [],
+          negativeEvidence: [],
+          anchorCompatibility: { status: "compatible" as const, isHardExclusion: false },
+          provisionalEvidenceUsed: false,
+        }
+      : null,
+    alternatives: [],
+    outfitPlan: {
+      anchorSlot: anchorSlot,
+      recommendedSlot: null,
+      compatibilityStatus: "compatible" as const,
+      notes: [],
+    },
+    evaluatedProducts: [],
+    coverage: { totalCatalogProducts: 11, eligibleCandidates: 11, excludedCandidates: 0 },
+  });
+}
+
+function makeBaseInput(source: "naia-piece" | "my-closet" | "both" = "naia-piece"): StyleMeEngineInput {
+  return buildEngineInput({
+    moods: ["confident"],
+    desiredFeelings: ["more-elevated"],
+    bodyNeeds: ["nothing-specific"],
+    coverageConditional: null,
+    occasion: "everyday",
+    formalityConditional: null,
+    todayColours: { preferred: [], avoid: [] },
+    practicalIds: [],
+    source,
+  });
+}
+
+describe("§20 Completion layer — R1–R9 integration", () => {
+  // R1: OUTERWEAR primary + SHOES anchor → generates TOP + BOTTOM
+  it("R1 — outerwear primary + shoe anchor → completionLayer has top and bottom", async () => {
+    const input = makeBaseInput();
+    const result = await computeStyleMeResult(input, makeCompletionMock("oversized-blazer", "shoe"));
+    assert.ok(result.completionLayer.length === 2, `expected 2 completion pieces, got ${result.completionLayer.length}`);
+    const slots = result.completionLayer.map((p) => p.slot);
+    assert.ok(slots.includes("top"), "top must be in completionLayer");
+    assert.ok(slots.includes("bottom"), "bottom must be in completionLayer");
+  });
+
+  // R2: OUTERWEAR primary + Closet TOP anchor → generates BOTTOM only
+  it("R2 — outerwear primary + top anchor → completionLayer has bottom only", async () => {
+    const input = makeBaseInput();
+    const result = await computeStyleMeResult(input, makeCompletionMock("oversized-blazer", "top"));
+    assert.equal(result.completionLayer.length, 1, `expected 1 completion piece, got ${result.completionLayer.length}`);
+    assert.equal(result.completionLayer[0]!.slot, "bottom", "only missing slot is bottom");
+  });
+
+  // R3: TOP primary + SHOES anchor → generates BOTTOM
+  it("R3 — top primary + shoe anchor → completionLayer has bottom only", async () => {
+    const input = makeBaseInput();
+    const result = await computeStyleMeResult(input, makeCompletionMock("collar-shirt", "shoe"));
+    assert.equal(result.completionLayer.length, 1);
+    assert.equal(result.completionLayer[0]!.slot, "bottom");
+  });
+
+  // R4: BOTTOM primary + BAG anchor → generates TOP
+  it("R4 — bottom primary + bag anchor → completionLayer has top only", async () => {
+    const input = makeBaseInput();
+    const result = await computeStyleMeResult(input, makeCompletionMock("draped-leather-pants", "bag"));
+    assert.equal(result.completionLayer.length, 1);
+    assert.equal(result.completionLayer[0]!.slot, "top");
+  });
+
+  // R5: DRESS primary + SHOES anchor → does NOT generate redundant TOP/BOTTOM
+  it("R5 — dress primary + shoe anchor → completionLayer is empty", async () => {
+    const input = makeBaseInput();
+    const result = await computeStyleMeResult(input, makeCompletionMock("midi-dress", "shoe"));
+    assert.equal(result.completionLayer.length, 0, "dress is a complete base — no completion needed");
+  });
+
+  // R6: Generic completion pieces have no Closet or NADINE identity fields
+  it("R6 — completion pieces have slot + non-empty description only (no closet/NADINE fields)", async () => {
+    const input = makeBaseInput();
+    const result = await computeStyleMeResult(input, makeCompletionMock("oversized-blazer", "shoe"));
+    for (const piece of result.completionLayer) {
+      assert.ok(typeof piece.slot === "string" && piece.slot.length > 0, "slot must be a non-empty string");
+      assert.ok(typeof piece.description === "string" && piece.description.length > 0, "description must be non-empty");
+      assert.ok(!("closetItemId" in piece), "completion piece must not have closetItemId");
+      assert.ok(!("shopifyProductId" in piece), "completion piece must not have shopifyProductId");
+      assert.ok(!("handle" in piece), "completion piece must not have a product handle");
+    }
+  });
+
+  // R7: Existing anchor-slot suppression still intact (shoe anchor → SHOES suppressed in finishing layer)
+  it("R7 — shoe anchor slot suppression: anchorSlot 'shoe' is stored in metadata", async () => {
+    const input = makeBaseInput();
+    const result = await computeStyleMeResult(input, makeCompletionMock("collar-shirt", "shoe"));
+    const payload = buildDbPayload(result);
+    const meta = parseSuggestionMetadata(payload.moodDescriptionJson);
+    assert.ok(meta !== null, "metadata must parse");
+    assert.equal(meta!.anchorSlot, "shoe", "anchorSlot must be 'shoe' — route uses this to suppress SHOES from finishing layer");
+  });
+
+  // R8: All essential slots covered → completionLayer is empty
+  it("R8 — top anchor + bottom primary → all slots covered, completionLayer is empty", async () => {
+    const input = makeBaseInput();
+    const result = await computeStyleMeResult(input, makeCompletionMock("suede-skirt", "top"));
+    // suede-skirt is BOTTOM; top anchor fills TOP → both slots covered
+    assert.equal(result.completionLayer.length, 0, "top + bottom fully covered — no completion needed");
+  });
+
+  // R9: Shoe/bag/accessory/jewelry anchor never counts as clothing coverage
+  it("R9 — jewelry anchor does not count as TOP/BOTTOM coverage", async () => {
+    const input = makeBaseInput();
+    const result = await computeStyleMeResult(input, makeCompletionMock("collar-shirt", "jewelry"));
+    // collar-shirt = TOP; jewelry = non-clothing → missing = [bottom]
+    assert.equal(result.completionLayer.length, 1);
+    assert.equal(result.completionLayer[0]!.slot, "bottom", "only bottom is missing when primary is top + jewelry anchor");
+  });
+
+  // Completion pieces are persisted in metadata, not in DB items
+  it("R10 — completionLayer pieces do not appear in buildDbPayload.items", async () => {
+    const input = makeBaseInput();
+    const result = await computeStyleMeResult(input, makeCompletionMock("oversized-blazer", "shoe"));
+    assert.ok(result.completionLayer.length > 0, "pre-condition: must have completion pieces");
+    const payload = buildDbPayload(result);
+    const garmentItems = payload.items.filter((i) => !["SHOES", "BAG", "ACCESSORY"].includes(i.itemType));
+    // Only the primary NADINE item (OUTERWEAR) should be in garments — no completion TOP/BOTTOM
+    assert.equal(garmentItems.length, 1, "completion pieces must not be added to buildDbPayload.items");
+  });
+
+  // Completion pieces are serialised into moodDescriptionJson
+  it("R11 — completionLayer survives buildDbPayload → parseSuggestionMetadata roundtrip", async () => {
+    const input = makeBaseInput();
+    const result = await computeStyleMeResult(input, makeCompletionMock("oversized-blazer", "shoe"));
+    assert.ok(result.completionLayer.length > 0, "pre-condition: must have completion pieces");
+    const payload = buildDbPayload(result);
+    const meta = parseSuggestionMetadata(payload.moodDescriptionJson);
+    assert.ok(meta !== null, "metadata must parse");
+    assert.ok(Array.isArray(meta!.completionLayer) && meta!.completionLayer!.length > 0, "completionLayer must be present in metadata");
+    for (const piece of meta!.completionLayer!) {
+      assert.ok(typeof piece.slot === "string" && piece.slot.length > 0);
+      assert.ok(typeof piece.description === "string" && piece.description.length > 0);
+    }
+  });
+
+  // buildCompletionLayer unit test — pure function, no computeStyleMeResult needed
+  it("R12 — buildCompletionLayer: dress primary with null anchor → [] (no completion)", () => {
+    const primary = makePrimaryProduct("dress", "Becoming Fluid");
+    const result = buildCompletionLayer(null, primary, {
+      moods: ["confident"], desiredFeelings: [], bodyNeeds: [], coverageConditional: null,
+      occasion: "everyday", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    assert.deepEqual(result, []);
+  });
+
+  it("R13 — buildCompletionLayer: top primary, shoe anchor → [bottom]", () => {
+    const anchor = makeClosetAnchor("shoe", ["red"]) as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("top", "Becoming Seen");
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["confident"], desiredFeelings: [], bodyNeeds: [], coverageConditional: null,
+      occasion: "work", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    assert.equal(pieces.length, 1);
+    assert.equal(pieces[0]!.slot, "bottom");
+    assert.ok(pieces[0]!.description.length > 0, "bottom description must be non-empty");
+  });
+
+  it("R14 — completion description references the NADINE title for proportion guidance", () => {
+    const anchor = makeClosetAnchor("shoe") as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("outerwear", "Becoming Clear");
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["confident"], desiredFeelings: [], bodyNeeds: [], coverageConditional: null,
+      occasion: "everyday", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    assert.equal(pieces.length, 2); // top + bottom
+    const topPiece = pieces.find((p) => p.slot === "top");
+    assert.ok(topPiece, "top piece must exist");
+    assert.ok(topPiece!.description.includes("Becoming Clear"), "top description must reference the NADINE title for proportion context");
+  });
+
+  it("R15 — preferred session colour is used in completion piece description", () => {
+    const anchor = makeClosetAnchor("shoe") as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("outerwear", "Becoming Bold");
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["confident"], desiredFeelings: [], bodyNeeds: [], coverageConditional: null,
+      occasion: "everyday", formalityConditional: null,
+      todayColours: { preferred: ["forest-green"], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    const descriptions = pieces.map((p) => p.description).join(" ");
+    assert.ok(descriptions.toLowerCase().includes("forest green"), "preferred colour must appear in completion description");
+  });
+});
+
+// ── §21 Gap corrections ───────────────────────────────────────────────────────
+// Gap 1: SET slot coverage via explicit catalog map
+// Gap 2: Additional Closet garments feed slot coverage
+// Gap 3: StyleMe signals drive completion descriptions
+// Gap 4: Why This Works references completion layer
+// Gap 5: Legacy metadata backward compatibility
+
+describe("§21 Gap corrections — SET coverage, signals, why-this-works, compat", () => {
+
+  // ── Gap 1: SET coverage ──────────────────────────────────────────────────────
+
+  it("G1.1 — resolveSetSlots: dress-set fills top AND bottom (from explicit catalog map)", () => {
+    const slots = resolveSetSlots("dress-set");
+    assert.ok(slots.has("top"), "dress-set must cover top");
+    assert.ok(slots.has("bottom"), "dress-set must cover bottom");
+    assert.equal(slots.size, 2);
+  });
+
+  it("G1.2 — resolveSetSlots: unknown SET handle returns empty — no fabricated coverage", () => {
+    const slots = resolveSetSlots("future-unknown-set");
+    assert.equal(slots.size, 0, "unknown SET must not fabricate slot coverage — completion stays open for unresolved slots");
+  });
+
+  it("G1.3 — resolveSetSlots: injected map proves non-top+bottom SET is handled correctly", () => {
+    // A hypothetical jacket-set with two top layers (no bottom component)
+    const topOnlyMap = new Map([["jacket-set", new Set(["top"])]]);
+    const slots = resolveSetSlots("jacket-set", topOnlyMap);
+    assert.ok(slots.has("top"), "jacket-set covers top");
+    assert.ok(!slots.has("bottom"), "jacket-set must NOT cover bottom");
+    assert.equal(slots.size, 1);
+  });
+
+  it("G1.4 — NADINE SET primary (dress-set handle) fills top+bottom via catalog map", () => {
+    const primary = makePrimaryProduct("set", "Becoming Defined");
+    // Override handle to dress-set so resolveSetSlots can look it up
+    const dressSetPrimary = { ...primary, handle: "dress-set", slot: "set" };
+    const filled = getFilledClothingSlots(null, dressSetPrimary);
+    assert.ok(filled.has("top") && filled.has("bottom"), "dress-set primary covers top+bottom");
+  });
+
+  it("G1.5 — Closet SET anchor (no NADINE handle) returns empty coverage — no fabrication", () => {
+    const filled = getFilledClothingSlots(makeClosetAnchor("set"), null);
+    assert.equal(filled.size, 0, "Closet set anchor must not fabricate top+bottom coverage when components are unknown");
+  });
+
+  // ── Gap 2: Additional items feed slot coverage ───────────────────────────────
+
+  it("G2.1 — shoe anchor + outerwear primary + Closet TOP already in look → only BOTTOM missing", () => {
+    const anchor = makeClosetAnchor("shoe") as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("outerwear");
+    // A Closet TOP is already part of the selected look
+    const additionalItems = [{ slot: "top" }];
+    const filled = getFilledClothingSlots(anchor, primary, additionalItems);
+    assert.ok(filled.has("top"), "top must be filled by Closet item");
+    assert.ok(filled.has("outerwear"), "outerwear must be filled by primary");
+    const missing = getMissingEssentialSlots(filled);
+    assert.deepEqual(missing, ["bottom"], "only bottom should be missing");
+  });
+
+  it("G2.2 — buildCompletionLayer with additional Closet TOP → generates BOTTOM only", () => {
+    const anchor = makeClosetAnchor("shoe") as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("outerwear", "Becoming Bold");
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["confident"], desiredFeelings: [], bodyNeeds: [], coverageConditional: null,
+      occasion: "everyday", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    }, [{ slot: "top" }]);
+    assert.equal(pieces.length, 1, "only one completion piece expected");
+    assert.equal(pieces[0]!.slot, "bottom", "completion piece must be BOTTOM");
+  });
+
+  it("G2.3 — additional Closet item preserves ownership semantics (has only slot, no shopifyProductId)", () => {
+    // Additional items are plain {slot} objects — no NADINE or Closet identity
+    const item = { slot: "top" };
+    assert.ok(!("shopifyProductId" in item), "additional item must not carry NADINE identity");
+    assert.ok(!("closetItemId" in item), "additional item must not carry Closet identity");
+  });
+
+  it("G2.4 — computeStyleMeResult: shoe anchor + NADINE outerwear + selectedClosetGarments TOP → BOTTOM only in completionLayer", async () => {
+    const input = makeBaseInput("both");
+    const shoeAnchor = makeClosetAnchor("shoe", ["black"]);
+    const mockRec = (_: StyleMeEngineInput): StyleMeRecommendationResult => ({
+      outcome: "nadine-recommendation" as const,
+      anchor: shoeAnchor,
+      primary: {
+        handle: "oversized-blazer",
+        title: "Mock Blazer",
+        slot: "outerwear" as const,
+        totalScore: 5,
+        positiveEvidence: [],
+        negativeEvidence: [],
+        anchorCompatibility: { status: "compatible" as const, isHardExclusion: false },
+        provisionalEvidenceUsed: false,
+      },
+      alternatives: [],
+      outfitPlan: { anchorSlot: "shoe" as const, recommendedSlot: null, compatibilityStatus: "compatible" as const, notes: [] },
+      evaluatedProducts: [],
+      coverage: { totalCatalogProducts: 11, eligibleCandidates: 11, excludedCandidates: 0 },
+      selectedClosetGarments: [{ slot: "top" }],
+    });
+    const result = await computeStyleMeResult(input, mockRec);
+    assert.equal(result.completionLayer.length, 1, `expected 1 completion piece (BOTTOM only), got ${result.completionLayer.length}`);
+    assert.equal(result.completionLayer[0]!.slot, "bottom", "completionLayer must contain BOTTOM only — TOP slot already covered by selectedClosetGarments");
+  });
+
+  // ── Gap 3: StyleMe signals drive completion descriptions ─────────────────────
+
+  it("G3.1 — desiredFeelings 'more-confident' produces structured qualifier in description", () => {
+    const anchor = makeClosetAnchor("shoe") as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("bottom", "Becoming Grounded");
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["confident"], desiredFeelings: ["more-confident"], bodyNeeds: [],
+      coverageConditional: null, occasion: "work", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    const topPiece = pieces.find((p) => p.slot === "top");
+    assert.ok(topPiece, "top completion piece must exist");
+    assert.ok(topPiece!.description.toLowerCase().includes("structured"), "'more-confident' must produce 'structured' qualifier");
+  });
+
+  it("G3.2 — desiredFeelings 'more-relaxed' produces relaxed qualifier (different from confident)", () => {
+    const anchor = makeClosetAnchor("shoe") as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("bottom", "Becoming Grounded");
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["content"], desiredFeelings: ["more-relaxed"], bodyNeeds: [],
+      coverageConditional: null, occasion: "work", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    const topPiece = pieces.find((p) => p.slot === "top");
+    assert.ok(topPiece!.description.toLowerCase().includes("relaxed"), "'more-relaxed' must produce 'relaxed' qualifier");
+  });
+
+  it("G3.3 — bodyNeeds 'define-waist' produces high-waisted bottom description", () => {
+    const anchor = makeClosetAnchor("shoe") as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("top", "Becoming Seen");
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["confident"], desiredFeelings: [], bodyNeeds: ["define-waist"],
+      coverageConditional: null, occasion: "everyday", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    const bottomPiece = pieces.find((p) => p.slot === "bottom");
+    assert.ok(bottomPiece, "bottom completion piece must exist");
+    assert.ok(
+      bottomPiece!.description.toLowerCase().includes("high-waisted") || bottomPiece!.description.toLowerCase().includes("waist"),
+      "'define-waist' must influence silhouette description",
+    );
+  });
+
+  it("G3.4 — coverageConditional 'cool weather' produces breathable fabric note", () => {
+    const anchor = makeClosetAnchor("shoe") as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("bottom", "Becoming Grounded");
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["confident"], desiredFeelings: [], bodyNeeds: [],
+      coverageConditional: "cool", occasion: "everyday", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    const topPiece = pieces.find((p) => p.slot === "top");
+    assert.ok(topPiece, "top piece must exist");
+    assert.ok(topPiece!.description.toLowerCase().includes("breathable"), "'cool' coverage must produce breathable fabric note");
+  });
+
+  it("G3.5 — anchor colour influences completion colour (red anchor → ivory top)", () => {
+    const redAnchor = makeClosetAnchor("shoe", ["red"]) as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("bottom", "Becoming Grounded");
+    const pieces = buildCompletionLayer(redAnchor, primary, {
+      moods: ["confident"], desiredFeelings: [], bodyNeeds: [], coverageConditional: null,
+      occasion: "everyday", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    const topPiece = pieces.find((p) => p.slot === "top");
+    assert.ok(topPiece!.description.toLowerCase().includes("ivory"), "red anchor should produce ivory top completion");
+  });
+
+  // ── Gap 4: Why This Works references completion ──────────────────────────────
+
+  it("G4.1 — deterministicWording references completion piece when completionLayer is non-empty", () => {
+    const pieces: import("./styleme-result.types.ts").StyleMeCompletionPiece[] = [
+      { slot: "top", description: "Ivory structured top in a crisp woven. Keep it close to the body." },
+    ];
+    const w = deterministicWording(
+      "nadine-recommendation", ["confident"], ["more-elevated"], "everyday",
+      "Becoming Clear", "Wear it with intention.", pieces,
+    );
+    assert.ok(
+      w.whyThisWorks.toLowerCase().includes("ivory") || w.whyThisWorks.toLowerCase().includes("base layer"),
+      "whyThisWorks must reference completion piece content",
+    );
+  });
+
+  it("G4.2 — deterministicWording without completion pieces retains existing behaviour", () => {
+    const explanation = "This piece anchors the look with precision.";
+    const w = deterministicWording(
+      "nadine-recommendation", ["confident"], ["more-elevated"], "everyday",
+      "Becoming Seen", explanation,
+    );
+    assert.ok(w.whyThisWorks.includes(explanation), "no completion → whyThisWorks is unchanged explanation");
+    assert.ok(!w.whyThisWorks.includes("base layer"), "no completion → no base-layer note");
+  });
+
+  // ── Gap 5: Legacy metadata backward compatibility ────────────────────────────
+
+  it("G5.1 — legacy metadata without completionLayer field parses successfully", () => {
+    const legacy = JSON.stringify({
+      schemaVersion: 1,
+      outcome: "nadine-recommendation",
+      primaryHandle: "collar-shirt",
+      alternatives: [],
+      anchor: null,
+      anchorSummary: null,
+      pairingNote: null,
+      colourDirection: "Neutral tones",
+      songReason: "Matched to your mood.",
+      evidenceCodes: [],
+      // completionLayer intentionally absent
+    });
+    const meta = parseSuggestionMetadata(legacy);
+    assert.ok(meta !== null, "legacy metadata must parse without error");
+    assert.equal(meta!.completionLayer, undefined, "missing completionLayer resolves to undefined");
+  });
+
+  it("G5.2 — completionLayer absent on legacy result gracefully resolves to [] in UI logic", () => {
+    const legacy = JSON.stringify({
+      schemaVersion: 1, outcome: "closet-led", primaryHandle: null, alternatives: [],
+      anchor: null, anchorSummary: null, pairingNote: null,
+      colourDirection: "", songReason: "", evidenceCodes: [],
+    });
+    const meta = parseSuggestionMetadata(legacy);
+    const completionLayer = meta?.completionLayer ?? [];
+    assert.deepEqual(completionLayer, [], "completionLayer ?? [] must be empty array for legacy result");
   });
 });

@@ -15,6 +15,8 @@ import type {
   AnchorInput,
   NormalizedClosetAnchor,
   NormalizedNadineAnchor,
+  NormalizedStyleAnchor,
+  StyleMeSessionInput,
 } from "./styleme-recommendation.types.js";
 import { getProductByHandle } from "./naia-catalog.js";
 import { resolveVerifiedMedia, VIRTUAL_TRY_ON_ENABLED } from "./naia-product-media.js";
@@ -31,6 +33,7 @@ import type {
   StyleMeMetadata,
   OutfitDbItemType,
   StyleMeOutcome,
+  StyleMeCompletionPiece,
 } from "./styleme-result.types.js";
 
 // ── Passport option label resolver ───────────────────────────────────────────
@@ -185,6 +188,7 @@ export function deterministicWording(
   occasion: string,
   primaryTitle: string | null,
   styleMeExplanation: string | null,
+  completionPieces: StyleMeCompletionPiece[] = [],
 ): StyleMeWording {
   const moodStr = moods.slice(0, 2).map((m) => m.replace(/-/g, " ")).join(" & ");
   const occasionLabel = occasion.replace(/-/g, " ");
@@ -198,13 +202,27 @@ export function deterministicWording(
     outfitName = `${moodStr} for ${occasionLabel}`.replace(/^\w/, (c) => c.toUpperCase());
   }
 
-  const whyThisWorks =
+  const baseWhy =
     outcome === "no-eligible-product"
       ? "No single piece from the catalogue matched every constraint today. The finishing layer below gives you a clear direction to work with."
       : (styleMeExplanation ??
           `This selection responds to your ${moodStr} mood and your desire to feel ${desiredFeelings[0] ?? "your best"}.` +
           ` The piece supports the way you want to move through ${occasionLabel}.`);
 
+  const completionNote =
+    completionPieces.length > 0
+      ? " " +
+        completionPieces
+          .map((p) => {
+            const firstClause = p.description.split(".")[0] ?? "";
+            return p.slot === "top"
+              ? `${firstClause} provides the base layer.`
+              : `${firstClause} anchors the lower half.`;
+          })
+          .join(" ")
+      : "";
+
+  const whyThisWorks = `${baseWhy}${completionNote}`;
   const confidenceBoost = `You dressed intentionally for ${occasionLabel} — and that intention shows.`;
 
   return { outfitName, whyThisWorks, confidenceBoost, perfumeNote: null };
@@ -269,6 +287,7 @@ function buildMetadataJson(result: StyleMeCustomerResult): string {
     colourDirection: result.finishingLayer.colourDirection,
     songReason: result.songReason,
     evidenceCodes: [],
+    completionLayer: result.completionLayer.length > 0 ? result.completionLayer : undefined,
   };
 
   return JSON.stringify(metadata);
@@ -312,6 +331,7 @@ async function callClaudeForWording(
   outcome: StyleMeOutcome,
   primaryTitle: string | null,
   styleMeExplanation: string | null,
+  completionPieces: StyleMeCompletionPiece[],
   becoming: string[],
   styleSupport: string[],
   finalNotes: string | null | undefined,
@@ -331,6 +351,13 @@ async function callClaudeForWording(
       : primaryTitle
       ? `The selected piece is: ${primaryTitle}. Styling guidance: ${styleMeExplanation ?? "(none provided)"}`
       : "The customer is dressing from her own closet.";
+
+  const completionContext =
+    completionPieces.length > 0
+      ? " Generic completion pieces complete the base of the look: " +
+        completionPieces.map((p) => `${p.slot} — ${p.description}`).join("; ") +
+        " Incorporate these naturally into whyThisWorks — reference their proportion or colour role, not just that they complete the look."
+      : "";
 
   const aspirationContext =
     [
@@ -359,6 +386,7 @@ async function callClaudeForWording(
             content:
               `Write wording for a styling result. The customer is feeling: ${moodStr}. ` +
               `Desired feeling: ${feelingStr}. Occasion: ${occasionLabel}. ${context}` +
+              (completionContext ? completionContext : "") +
               (aspirationContext ? ` ${aspirationContext}` : "") +
               `\n\nReturn a JSON object with exactly these fields:\n` +
               `- outfitName: creative name for this look (≤8 words)\n` +
@@ -392,6 +420,325 @@ async function callClaudeForWording(
   } catch {
     return null;
   }
+}
+
+// ── Outfit completion layer ───────────────────────────────────────────────────
+// Detects which essential clothing slots are still uncovered after the anchor
+// and the primary NADINE recommendation, then produces generic wardrobe styling
+// guidance for each missing slot.  No new Claude call — deterministic only.
+
+// Slots that count as actual clothing coverage.  Shoe/bag/accessory/jewelry
+// anchors do NOT count and must never fill a clothing slot.
+const CLOTHING_COVERAGE_SLOTS = new Set<string>(["top", "bottom", "dress", "set", "outerwear"]);
+
+// Explicit slot coverage for each NADINE SET product, derived from its actual
+// catalog components. A SET is NOT automatically top+bottom — it depends on what
+// the physical pieces are. Extend this map when new SET products are catalogued.
+// Closet items with slot="set" (no NADINE handle to look up) return empty coverage —
+// components are unknown, so completion is not suppressed for any slot.
+export const NADINE_SET_SLOT_COVERAGE: Map<string, Set<string>> = new Map([
+  // dress-set (Becoming Defined): wrapped crop top + structured corset + asymmetric skirt
+  // Components: wrapped-top (top coverage), corset (top coverage), skirt (bottom coverage)
+  // → full set covers both top and bottom
+  ["dress-set", new Set(["top", "bottom"])],
+]);
+
+export function resolveSetSlots(
+  handle: string | null,
+  coverage: ReadonlyMap<string, ReadonlySet<string>> = NADINE_SET_SLOT_COVERAGE,
+): Set<string> {
+  if (handle && coverage.has(handle)) {
+    return new Set(coverage.get(handle)!);
+  }
+  // Unknown SET or Closet SET with no component metadata: return empty.
+  // Do NOT fabricate coverage — prefer generating completion guidance for
+  // potentially uncovered slots over suppressing a required garment by guessing.
+  return new Set();
+}
+
+export function getFilledClothingSlots(
+  anchor: NormalizedStyleAnchor | null,
+  primaryProduct: StyleMePrimaryProduct | null,
+  additionalItems: Array<{ slot: string }> = [],
+): Set<string> {
+  const filled = new Set<string>();
+
+  const anchorSlot =
+    anchor?.type === "nadine"
+      ? (anchor as NormalizedNadineAnchor).slot
+      : anchor?.type === "closet"
+      ? (anchor as NormalizedClosetAnchor).slot
+      : null;
+  const anchorNadineHandle = anchor?.type === "nadine" ? (anchor as NormalizedNadineAnchor).handle : null;
+
+  if (anchorSlot && CLOTHING_COVERAGE_SLOTS.has(anchorSlot)) {
+    if (anchorSlot === "set") {
+      for (const s of resolveSetSlots(anchorNadineHandle)) filled.add(s);
+    } else {
+      filled.add(anchorSlot);
+    }
+  }
+
+  if (primaryProduct) {
+    const pSlot = primaryProduct.slot;
+    if (CLOTHING_COVERAGE_SLOTS.has(pSlot)) {
+      if (pSlot === "set") {
+        for (const s of resolveSetSlots(primaryProduct.handle)) filled.add(s);
+      } else {
+        filled.add(pSlot);
+      }
+    }
+  }
+
+  for (const item of additionalItems) {
+    if (CLOTHING_COVERAGE_SLOTS.has(item.slot)) {
+      if (item.slot === "set") {
+        for (const s of resolveSetSlots(null)) filled.add(s);
+      } else {
+        filled.add(item.slot);
+      }
+    }
+  }
+
+  return filled;
+}
+
+export function getMissingEssentialSlots(filledSlots: Set<string>): Array<"top" | "bottom"> {
+  // dress fills top + bottom; explicit top + bottom is also complete
+  if (filledSlots.has("dress") || (filledSlots.has("top") && filledSlots.has("bottom"))) {
+    return [];
+  }
+  const missing: Array<"top" | "bottom"> = [];
+  if (!filledSlots.has("top")) missing.push("top");
+  if (!filledSlots.has("bottom")) missing.push("bottom");
+  return missing;
+}
+
+// ── Signal-responsive completion modifiers ────────────────────────────────────
+
+function desiredFeelingGarmentMod(
+  feelings: string[],
+  slot: "top" | "bottom",
+): { qualifier: string; fabricNote: string } {
+  if (feelings.some((f) => ["more-confident", "more-powerful"].includes(f))) {
+    return {
+      qualifier: "structured",
+      fabricNote: slot === "top" ? "in a crisp woven or ponte" : "in a tailored crepe or ponte",
+    };
+  }
+  if (feelings.some((f) => ["more-relaxed", "more-comfortable"].includes(f))) {
+    return { qualifier: "relaxed", fabricNote: "in a soft, easy-wearing fabric" };
+  }
+  if (feelings.some((f) => f === "more-feminine")) {
+    return {
+      qualifier: "soft",
+      fabricNote: slot === "top" ? "in a fluid or satin-touch fabric" : "in a fluid or crepe fabric",
+    };
+  }
+  if (feelings.some((f) => f === "more-elevated")) {
+    return { qualifier: "polished", fabricNote: "in a refined fabric" };
+  }
+  if (feelings.some((f) => f === "more-expressive")) {
+    return { qualifier: "tonal", fabricNote: "in an interesting texture or weave" };
+  }
+  return { qualifier: "", fabricNote: "" };
+}
+
+function bodyNeedSilhouetteNote(bodyNeeds: string[], slot: "top" | "bottom"): string {
+  if (slot === "bottom") {
+    if (bodyNeeds.some((n) => ["define-waist", "emphasise-waist"].includes(n))) {
+      return "High-waisted for a defined waist.";
+    }
+    if (bodyNeeds.some((n) => ["elongate-legs", "create-height", "create-length"].includes(n))) {
+      return "High-rise wide-leg for maximum leg length.";
+    }
+    if (bodyNeeds.some((n) => ["balance-shoulders", "add-volume-lower", "widen-hips"].includes(n))) {
+      return "Wide-leg or A-line to balance a broader shoulder.";
+    }
+    if (bodyNeeds.some((n) => ["minimise-hips", "streamline-hips", "slim-hips"].includes(n))) {
+      return "Straight-leg in a dark shade for a clean hip line.";
+    }
+  } else {
+    if (bodyNeeds.some((n) => ["define-waist", "emphasise-waist"].includes(n))) {
+      return "Tuck or crop to make the waist the focal point.";
+    }
+    if (bodyNeeds.some((n) => ["balance-shoulders", "minimise-shoulders", "soften-shoulders"].includes(n))) {
+      return "A V-neck or open collar creates a softening diagonal.";
+    }
+    if (bodyNeeds.some((n) => ["add-length", "elongate-torso", "lengthen-torso"].includes(n))) {
+      return "A longer hem visually extends the torso.";
+    }
+  }
+  return "";
+}
+
+function comfortFabricNote(coverageConditional: string | null): string {
+  if (!coverageConditional) return "";
+  const lower = coverageConditional.toLowerCase();
+  if (lower.includes("cool") || lower.includes("breathable") || lower.includes("summer")) {
+    return "in a breathable fabric";
+  }
+  if (lower.includes("warm") || lower.includes("layer") || lower.includes("cold")) {
+    return "in a cosy or layerable fabric";
+  }
+  return "";
+}
+
+const TOP_VOCAB: Record<string, string> = {
+  "everyday":   "fitted scoop-neck or crew-neck top",
+  "work":       "structured fitted top or fine-gauge knit",
+  "date-night": "fitted top with a considered neckline",
+  "event":      "polished fitted top in a refined fabric",
+  "travel":     "relaxed fitted top in a breathable fabric",
+  "not-sure":   "fitted jersey or woven top",
+};
+
+const TOP_MATERIAL: Record<string, string> = {
+  "everyday":   "smooth cotton or jersey",
+  "work":       "woven cotton or fine-gauge knit",
+  "date-night": "satin, silk-like fabric, or ribbed jersey",
+  "event":      "crepe, silk, or fluid woven",
+  "travel":     "breathable cotton-linen or jersey",
+  "not-sure":   "smooth cotton or jersey",
+};
+
+const BOTTOM_VOCAB: Record<string, string> = {
+  "everyday":   "straight-leg trousers or clean-cut denim",
+  "work":       "high-waisted tailored straight-leg trousers",
+  "date-night": "wide-leg trousers or a fluid midi skirt",
+  "event":      "wide-leg trousers or a full midi skirt",
+  "travel":     "relaxed straight-leg trousers",
+  "not-sure":   "straight-leg trousers",
+};
+
+const BOTTOM_MATERIAL: Record<string, string> = {
+  "everyday":   "clean denim or a linen blend",
+  "work":       "crepe, wool blend, or ponte",
+  "date-night": "satin, silk-like fabric, or tailored crepe",
+  "event":      "fluid crepe or structured suiting",
+  "travel":     "lightweight linen blend or travel ponte",
+  "not-sure":   "versatile ponte or cotton blend",
+};
+
+function resolveCompletionColour(
+  slot: "top" | "bottom",
+  preferredColors: string[],
+  anchorColors: string[],
+): string {
+  if (preferredColors.length > 0) return preferredColors[0].replace(/-/g, " ");
+  const lower = anchorColors.map((c) => c.toLowerCase());
+  if (slot === "top") {
+    if (lower.some((c) => ["red", "burgundy", "wine", "crimson", "rust", "terracotta"].includes(c))) return "ivory";
+    if (lower.some((c) => ["black", "charcoal", "navy", "midnight"].includes(c))) return "ivory";
+    if (lower.some((c) => ["beige", "camel", "tan", "cream"].includes(c))) return "white";
+    return "ivory";
+  }
+  if (lower.some((c) => ["ivory", "white", "cream", "ecru"].includes(c))) return "black";
+  if (lower.some((c) => ["red", "burgundy", "wine"].includes(c))) return "black";
+  if (lower.some((c) => ["beige", "camel", "tan"].includes(c))) return "black";
+  return "black";
+}
+
+function buildCompletionPiece(
+  slot: "top" | "bottom",
+  primarySlot: string | null,
+  primaryTitle: string | null,
+  occasion: string,
+  anchorColors: string[],
+  preferredColors: string[],
+  desiredFeelings: string[],
+  bodyNeeds: string[],
+  _moods: string[],
+  coverageConditional: string | null,
+): StyleMeCompletionPiece {
+  const occ = TOP_VOCAB[occasion] ? occasion : "not-sure";
+  const colour = resolveCompletionColour(slot, preferredColors, anchorColors);
+  const cap = colour.charAt(0).toUpperCase() + colour.slice(1);
+
+  const feelingMod = desiredFeelingGarmentMod(desiredFeelings, slot);
+  const silhouetteNote = bodyNeedSilhouetteNote(bodyNeeds, slot);
+  const comfortNote = comfortFabricNote(coverageConditional);
+
+  // Resolve material phrase: feeling override → comfort override → occasion default
+  const baseMaterial = ((): string => {
+    if (feelingMod.fabricNote) return feelingMod.fabricNote;
+    if (comfortNote) return comfortNote;
+    return `in ${slot === "top" ? TOP_MATERIAL[occ] : BOTTOM_MATERIAL[occ]}`;
+  })();
+
+  const qualifier = feelingMod.qualifier ? `${feelingMod.qualifier} ` : "";
+
+  if (slot === "top") {
+    const garment = TOP_VOCAB[occ];
+    let proportionNote: string;
+    if (primarySlot === "outerwear" && primaryTitle) {
+      proportionNote = silhouetteNote
+        ? ` ${silhouetteNote} Keep it under ${primaryTitle}.`
+        : ` Keep it close to the body so the volume of ${primaryTitle} stays intentional.`;
+    } else if (primarySlot === "bottom" && primaryTitle) {
+      proportionNote = silhouetteNote
+        ? ` ${silhouetteNote} Tuck or half-tuck with ${primaryTitle}.`
+        : ` Tuck or half-tuck to define proportion with ${primaryTitle}.`;
+    } else if (silhouetteNote) {
+      proportionNote = ` ${silhouetteNote}`;
+    } else {
+      proportionNote = " Keep the fit clean and close to the body.";
+    }
+    return { slot: "top", description: `${cap} ${qualifier}${garment} ${baseMaterial}.${proportionNote}` };
+  }
+
+  const garment = BOTTOM_VOCAB[occ];
+  let proportionNote: string;
+  if (primarySlot === "outerwear" && primaryTitle) {
+    proportionNote = silhouetteNote
+      ? ` ${silhouetteNote} A clean silhouette grounds the outfit under ${primaryTitle}.`
+      : ` A clean-cut silhouette grounds the outfit under ${primaryTitle}.`;
+  } else if (primarySlot === "top" && primaryTitle) {
+    proportionNote = silhouetteNote
+      ? ` ${silhouetteNote} Let ${primaryTitle} lead.`
+      : ` Let ${primaryTitle} lead — keep the bottom simple and proportional.`;
+  } else if (silhouetteNote) {
+    proportionNote = ` ${silhouetteNote}`;
+  } else {
+    proportionNote = " Keep the silhouette clean and intentional.";
+  }
+  return {
+    slot: "bottom",
+    description: `${cap} ${qualifier}${garment} ${baseMaterial} with a clean full-length line.${proportionNote}`,
+  };
+}
+
+export function buildCompletionLayer(
+  anchor: NormalizedStyleAnchor | null,
+  primaryProduct: StyleMePrimaryProduct | null,
+  session: StyleMeSessionInput,
+  additionalItems: Array<{ slot: string }> = [],
+): StyleMeCompletionPiece[] {
+  const filledSlots = getFilledClothingSlots(anchor, primaryProduct, additionalItems);
+  const missingSlots = getMissingEssentialSlots(filledSlots);
+  if (missingSlots.length === 0) return [];
+
+  const anchorColors: string[] =
+    anchor?.type === "closet"
+      ? (anchor as NormalizedClosetAnchor).colors
+      : anchor?.type === "nadine"
+      ? (anchor as NormalizedNadineAnchor).colors
+      : [];
+
+  return missingSlots.map((slot) =>
+    buildCompletionPiece(
+      slot,
+      primaryProduct?.slot ?? null,
+      primaryProduct?.title ?? null,
+      session.occasion,
+      anchorColors,
+      session.todayColours.preferred,
+      session.desiredFeelings,
+      session.bodyNeeds,
+      session.moods,
+      session.coverageConditional,
+    ),
+  );
 }
 
 // ── Display image resolution ──────────────────────────────────────────────────
@@ -488,31 +835,8 @@ export async function computeStyleMeResult(
   // Song reason — deterministic from matched mood/occasion tags; never from Claude
   const songReason = buildSongReason(song.moods, song.occasions, session.moods, session.occasion);
 
-  // Claude wording call — falls back to deterministic if it fails
-  const claudeWording = await callClaudeForWording(
-    session.moods,
-    session.desiredFeelings,
-    session.occasion,
-    effectiveOutcome,
-    primaryTitle,
-    styleMeExplanation,
-    engineInput.profile?.becoming ?? [],
-    engineInput.profile?.styleSupport ?? [],
-    engineInput.profile?.finalNotes ?? null,
-  );
-
-  const wording =
-    claudeWording ??
-    deterministicWording(
-      effectiveOutcome,
-      session.moods,
-      session.desiredFeelings,
-      session.occasion,
-      primaryTitle,
-      styleMeExplanation,
-    );
-
   // Primary product (nAia piece — nadine-recommendation only).
+  // Assembled before the Claude call so completion context can inform wording.
   // Never set for my-closet (effectiveOutcome is closet-led).
   let primaryProduct: StyleMePrimaryProduct | null = null;
   if (effectiveOutcome === "nadine-recommendation" && primaryHandle && catalogProduct) {
@@ -530,6 +854,40 @@ export async function computeStyleMeResult(
     };
   }
 
+  // Outfit completion — identifies clothing slots still uncovered after the anchor,
+  // primary NADINE recommendation, and any additional Closet garments in the look.
+  // selectedClosetGarments carries Closet items beyond the anchor that the engine
+  // determined are part of the selected outfit. Computed before wording so the
+  // explanation can reference the full outfit.
+  const additionalClosetItems: Array<{ slot: string }> = recommendation.selectedClosetGarments ?? [];
+  const completionLayer = buildCompletionLayer(anchor ?? null, primaryProduct, session, additionalClosetItems);
+
+  // Claude wording call — falls back to deterministic if it fails
+  const claudeWording = await callClaudeForWording(
+    session.moods,
+    session.desiredFeelings,
+    session.occasion,
+    effectiveOutcome,
+    primaryTitle,
+    styleMeExplanation,
+    completionLayer,
+    engineInput.profile?.becoming ?? [],
+    engineInput.profile?.styleSupport ?? [],
+    engineInput.profile?.finalNotes ?? null,
+  );
+
+  const wording =
+    claudeWording ??
+    deterministicWording(
+      effectiveOutcome,
+      session.moods,
+      session.desiredFeelings,
+      session.occasion,
+      primaryTitle,
+      styleMeExplanation,
+      completionLayer,
+    );
+
   return {
     outcome: effectiveOutcome,
     outfitName: wording.outfitName,
@@ -542,6 +900,7 @@ export async function computeStyleMeResult(
     closetAnchorImageUrl,
     pairingNote,
     finishingLayer,
+    completionLayer,
     songReason,
     song,
     rawRecommendation: recommendation,
