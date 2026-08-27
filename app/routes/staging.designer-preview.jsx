@@ -89,7 +89,14 @@ function parseCookie(header, name) {
 }
 
 function makeSetCookieHeader(value) {
-  return `${COOKIE_NAME}=${value}; HttpOnly; Secure; SameSite=Lax; Path=/staging/designer-preview; Max-Age=${COOKIE_MAX_AGE_S}`;
+  // Path=/staging/ (not /staging/designer-preview) so the cookie is also sent to
+  // React Router v7's single-fetch data URLs, which are appended with ".data":
+  //   /staging/designer-preview.data?preview=sample
+  // RFC 6265 §5.1.4: the cookie path must match and the next char after the prefix
+  // must be "/" for the cookie to be included. "/staging/designer-preview" fails for
+  // ".data" requests because the next char is ".". "/staging/" passes for both.
+  // Only one route exists under /staging/, so the exposure is identical in practice.
+  return `${COOKIE_NAME}=${value}; HttpOnly; Secure; SameSite=Lax; Path=/staging/; Max-Age=${COOKIE_MAX_AGE_S}`;
 }
 
 // Constant-time secret comparison (safe even when lengths differ)
@@ -165,11 +172,15 @@ export async function action({ request }) {
   }
 
   const cookieValue = createSessionCookieValue(previewSecret);
+  // Preserve the current URL's search params (e.g. ?preview=sample) so the user
+  // lands on the page they were trying to reach, not always the live-data view.
+  const requestUrl = new URL(request.url);
+  const redirectTo = requestUrl.pathname + requestUrl.search;
   return new Response(null, {
     status: 302,
     headers: {
       "Set-Cookie": makeSetCookieHeader(cookieValue),
-      Location: "/staging/designer-preview",
+      Location: redirectTo,
     },
   });
 }
