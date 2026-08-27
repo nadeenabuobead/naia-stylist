@@ -21,7 +21,6 @@ import { isTryOnEligible } from "~/lib/ai/tryon-product-eligibility";
 import { TryOnPanel } from "~/components/TryOnPanel";
 import { VtoExperience } from "~/components/VtoExperience";
 import { RecommendationFeedbackWidget } from "~/components/RecommendationFeedbackWidget";
-import { OutfitReactionWidget } from "~/components/OutfitReactionWidget";
 import { loadSessionFeedback } from "~/lib/ai/feedback-persistence.server";
 import { buildCustomerJourneyContext, buildEphemeralContextSignals } from "~/lib/ai/journey-context.server";
 import { emitSessionStarted, emitRecommendationServed, emitLookSaved, emitInSessionReviewSubmitted, recordJourneyEvent, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
@@ -1078,9 +1077,9 @@ export default function StyleMeResult() {
                     <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "10px", letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--naia-accent)", marginBottom: "8px" }}>Already Yours</p>
                   )}
                   {item.productImageUrl ? (
-                    <img src={item.productImageUrl} alt={item.productTitle} style={{ width: isPrimary ? "100%" : "140px", maxWidth: isPrimary ? "320px" : "140px", height: isPrimary ? "auto" : "180px", aspectRatio: isPrimary ? "2/3" : undefined, objectFit: "cover", borderRadius: "4px", marginBottom: "12px" }} />
+                    <img src={item.productImageUrl} alt={item.productTitle} style={{ width: isPrimary ? "100%" : "140px", maxWidth: isPrimary ? "380px" : "140px", height: "auto", objectFit: "contain", borderRadius: "4px", marginBottom: "12px", background: isPrimary ? "var(--naia-warm)" : undefined }} />
                   ) : isPrimary ? (
-                    <div style={{ width: "100%", maxWidth: "320px", aspectRatio: "2/3", background: "var(--naia-warm)", borderRadius: "4px", marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ width: "100%", maxWidth: "380px", aspectRatio: "3/4", background: "var(--naia-warm)", borderRadius: "4px", marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                       <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", padding: "16px", textAlign: "center" }}>Image coming soon</p>
                     </div>
                   ) : null}
@@ -1140,7 +1139,7 @@ export default function StyleMeResult() {
               <img
                 src={suggestionMeta.anchorImageUrl}
                 alt={suggestionMeta.anchorSummary}
-                style={{ width: "100%", maxWidth: "180px", aspectRatio: "2/3", objectFit: "cover", borderRadius: "4px", marginBottom: "10px" }}
+                style={{ width: "100%", maxWidth: "230px", height: "auto", objectFit: "contain", borderRadius: "4px", marginBottom: "10px", background: "var(--naia-warm)" }}
               />
             )}
             <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "16px", color: "var(--naia-ink)" }}>{suggestionMeta.anchorSummary}</p>
@@ -1192,7 +1191,6 @@ export default function StyleMeResult() {
                     src={alt.productImageUrl}
                     alt={alt.title}
                     className="sm-alt-img"
-                    style={{ width: "120px", minWidth: "120px", height: "160px", objectFit: "cover", borderRadius: "4px" }}
                   />
                 )}
                 <div className="sm-alt-body">
@@ -1312,16 +1310,6 @@ export default function StyleMeResult() {
           <div className="sm-toast">Review saved — thank you</div>
         )}
 
-        {/* Outfit Quick Feedback — authenticated only, all 3 sources */}
-        {loaderData.isAuthenticated && suggestion?.id && loaderData.sessionId && (
-          <OutfitReactionWidget
-            sessionId={loaderData.sessionId}
-            suggestionId={suggestion.id}
-            existingFeedbackId={(loaderData as any).existingOutfitFeedback?.id ?? null}
-            existingRating={(loaderData as any).existingOutfitFeedback?.rating ?? null}
-            existingReasonCodes={(loaderData as any).existingOutfitFeedback?.reasonCodes ?? []}
-          />
-        )}
       </main>
 
       {/* ── Review modal ── */}
