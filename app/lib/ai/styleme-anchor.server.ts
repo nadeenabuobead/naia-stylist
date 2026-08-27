@@ -3,6 +3,8 @@
 // resolveNadineAnchor: pure catalog lookup — no DB access.
 // resolveClosetAnchor: DB-backed lookup with ownership check.
 // resolveActionAnchor: validates source + anchor combination, returns typed result.
+// scoreClosetItemForSession: pure signal-based scoring of a single Closet item.
+// autoSelectClosetAnchor: DB-backed; ranks all items and returns the strongest anchor.
 
 import { getAllCatalogProducts } from "./naia-catalog.js";
 import type { NadineAnchorInput, ClosetAnchorInput, AnchorInput } from "./styleme-recommendation.types.js";
@@ -103,4 +105,107 @@ export async function resolveActionAnchor(
   }
 
   return { ok: true, anchor };
+}
+
+// ── Auto Closet anchor selection ─────────────────────────────────────────────
+// Ranks the customer's Closet items against the current StyleMe session signals
+// and returns the strongest anchor candidate.
+//
+// Scoring (additive, higher = better):
+//  +10  if item.occasions includes the session occasion (strong contextual match)
+//  +3   per mood token that appears in item.styleTags
+//  +2   per desired-feeling token that appears in item.styleTags
+//
+// Category is NOT a scored signal — it is used only as a sort tiebreaker in
+// autoSelectClosetAnchor so anchor-capable garments (TOPS/BOTTOMS/DRESSES/OUTERWEAR)
+// beat accessories when signal scores are equal.
+//
+// Explicit session signals (occasion, mood, feeling) outrank all profile background —
+// no Passport profile signals are used here.
+// Ties broken by: anchor-capable category first, then recency (createdAt DESC).
+
+const ANCHOR_CAPABLE_CATEGORIES = new Set(["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"]);
+
+/**
+ * Scores a single Closet item against the current StyleMe session signals.
+ * Pure function — no DB access, exported for unit testing.
+ * Category is excluded from the score; it is a sort tiebreaker in autoSelectClosetAnchor.
+ */
+export function scoreClosetItemForSession(
+  item: { occasions: string[]; styleTags: string[]; category: string },
+  signals: { occasion: string; moods: string[]; desiredFeelings: string[] },
+): number {
+  let score = 0;
+
+  if (item.occasions.includes(signals.occasion)) score += 10;
+
+  for (const mood of signals.moods) {
+    if (item.styleTags.includes(mood)) score += 3;
+  }
+
+  for (const feeling of signals.desiredFeelings) {
+    if (item.styleTags.includes(feeling)) score += 2;
+  }
+
+  return score;
+}
+
+/**
+ * Loads all Closet items for the customer (up to 50, newest-first), scores each
+ * against the session signals, and returns the highest-scoring item as a
+ * ClosetAnchorInput plus its raw DB id.
+ *
+ * Returns null when the customer has no Closet items.
+ * Never selects by array order or at random — every item is explicitly scored
+ * and the winner is deterministic for a given set of signals.
+ */
+export async function autoSelectClosetAnchor(
+  customerId: string,
+  signals: { occasion: string; moods: string[]; desiredFeelings: string[] },
+): Promise<{ anchor: ClosetAnchorInput; id: string } | null> {
+  const items = await prisma.closetItem.findMany({
+    where: { customerId },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+
+  if (items.length === 0) return null;
+
+  type DbItem = (typeof items)[number];
+  type ScoredItem = { item: DbItem; score: number; isAnchorCapable: boolean };
+
+  const mapped: ScoredItem[] = items.map((item: DbItem) => ({
+    item,
+    score: scoreClosetItemForSession(
+      { occasions: item.occasions, styleTags: item.styleTags, category: item.category },
+      signals,
+    ),
+    isAnchorCapable: ANCHOR_CAPABLE_CATEGORIES.has(item.category),
+  }));
+
+  const scored = mapped.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    // Tiebreaker 1: prefer garments that can anchor an outfit
+    if (a.isAnchorCapable !== b.isAnchorCapable) return a.isAnchorCapable ? -1 : 1;
+    // Tiebreaker 2: recency — preserved by stable sort over createdAt DESC fetch order
+    return 0;
+  });
+
+  const winner = scored[0].item;
+  return {
+    anchor: {
+      type: "closet",
+      id: winner.id,
+      name: winner.name ?? null,
+      category: winner.category,
+      colors: winner.colors,
+      primaryColor: winner.primaryColor ?? null,
+      pattern: winner.pattern ?? null,
+      material: winner.material ?? null,
+      styleTags: winner.styleTags,
+      occasions: winner.occasions,
+      imageUrl: winner.imageUrl,
+    },
+    id: winner.id,
+  };
 }

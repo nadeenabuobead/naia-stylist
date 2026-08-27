@@ -1127,9 +1127,28 @@ export default function StyleMeResult() {
           <div className="sm-result-section">
             <p className="sm-result-section-head">Also Works</p>
             {suggestionMeta.alternatives.map((alt: any, i: number) => (
-              <div key={i} className="sm-item-card sm-item-card--secondary">
-                <p className="sm-item-product-label">{alt.title}</p>
-                <p className="sm-item-notes--secondary">{alt.stylingNotes}</p>
+              <div key={i} className="sm-alt-card">
+                {alt.productImageUrl && (
+                  <img
+                    src={alt.productImageUrl}
+                    alt={alt.title}
+                    className="sm-alt-img"
+                  />
+                )}
+                <div className="sm-alt-body">
+                  <p className="sm-item-product-label">{alt.title}</p>
+                  <p className="sm-item-notes--secondary">{alt.stylingNotes}</p>
+                  {alt.liveUrl && (
+                    <a
+                      href={alt.liveUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="sm-alt-shop-cta"
+                    >
+                      SHOP THIS PIECE
+                    </a>
+                  )}
+                </div>
               </div>
             ))}
           </div>

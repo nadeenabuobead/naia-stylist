@@ -24,6 +24,7 @@ const STYLEME_SESSION_KEYS = [
   "styleMeOccasion",
   "styleMeFormalityConditional",
   "styleMeSource",
+  "styleMeAnchorMode",
   "styleMeNadineAnchorHandle",
   "styleMeClosetAnchorId",
 ] as const;

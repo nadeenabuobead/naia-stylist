@@ -145,13 +145,29 @@ describe("Phase 4B3 recovery — route contract", () => {
     assert.ok(text.includes('session.set("styleMeSource", source)'), "sets styleMeSource");
   });
 
-  it("naia-piece source skips anchor step — no product picker rendered", () => {
+  it("source offers two anchor paths for closet sources — auto and manual", () => {
     const text = src("source.tsx");
+    // Both paths are present
+    assert.ok(text.includes("AnchorMethodStep"), "AnchorMethodStep presents the LET nAia CHOOSE / I HAVE A PIECE IN MIND choice");
+    assert.ok(text.includes("ClosetAnchorStep"), "ClosetAnchorStep present for manual path — 'Which piece are we building around?'");
+    assert.ok(text.includes('"set-anchor"'), "set-anchor intent present for manual selection");
+    assert.ok(text.includes("set-anchor-method"), "set-anchor-method intent handles auto vs manual choice");
+    // Auto path
+    assert.ok(text.includes("autoSelectClosetAnchor"), "auto path calls autoSelectClosetAnchor");
+    assert.ok(text.includes("getCurrentNaiaCustomer"), "resolves naiaCustomer for closet operations");
+    // No NADINE picker (NADINE-only is handled by engine, not a UI picker)
     assert.ok(!text.includes("NadineAnchorStep"), "no NADINE product picker component");
     assert.ok(!text.includes("getAllCatalogProducts"), "no catalog product import");
-    assert.ok(text.includes("ClosetAnchorStep"), "closet anchor step still present");
-    assert.ok(text.includes("set-anchor"), "closet set-anchor intent still present");
-    assert.ok(text.includes("getCurrentNaiaCustomer"), "resolves naiaCustomer for closet step");
+  });
+
+  it("source ClosetAnchorStep imposes no category restriction — any closet item can be manually selected", () => {
+    const text = src("source.tsx");
+    // The ANCHOR_CAPABLE_CATEGORIES set lives in the anchor server (used for auto-selection tiebreaking only).
+    // source.tsx must not import or reference it — manual selection is unrestricted.
+    assert.ok(!text.includes("ANCHOR_CAPABLE_CATEGORIES"), "ANCHOR_CAPABLE_CATEGORIES not referenced in source.tsx — manual picker shows all closet items");
+    // set-anchor validates ownership by customerId, not by category.
+    assert.ok(text.includes('"closetItemId"'), "reads closetItemId from form in set-anchor");
+    assert.ok(text.includes("customerId: naiaCustomer.id"), "set-anchor validates item ownership via customerId, not category");
   });
 
   it("source anchor action stores only styleMeClosetAnchorId; engine selects NADINE piece", () => {

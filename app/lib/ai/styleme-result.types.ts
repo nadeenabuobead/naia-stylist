@@ -75,6 +75,8 @@ export interface StyleMeMetadata {
     title: string;
     slot: string;
     stylingNotes: string;
+    productImageUrl?: string | null;
+    liveUrl?: string | null;
   }>;
   anchor: { type: "nadine"; handle: string } | { type: "closet"; id: string } | null;
   anchorSummary: string | null;

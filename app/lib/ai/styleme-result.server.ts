@@ -251,6 +251,8 @@ function buildMetadataJson(result: StyleMeCustomerResult): string {
       title: a.title,
       slot: a.slot,
       stylingNotes: a.stylingNotes,
+      productImageUrl: a.productImageUrl ?? null,
+      liveUrl: a.liveUrl ?? null,
     })),
     anchor: anchorMeta,
     anchorSummary: result.closetAnchorLabel,
@@ -446,7 +448,9 @@ export async function computeStyleMeResult(
       const altCatalog = getProductByHandle(alt.handle);
       if (!altCatalog) return [];
       const altMedia = _resolveMedia(alt.handle);
-      const altImageUrl = _tryOnEnabled && altMedia?.eligibility === "ready" ? altMedia.resolvedUrl : null;
+      // productImageUrl for display: always populated when the media is verified,
+      // independent of the VTO flag (which only gates the try-on CTA, not the image).
+      const altImageUrl = altMedia?.eligibility === "ready" ? altMedia.resolvedUrl : null;
       return [
         {
           handle: alt.handle,

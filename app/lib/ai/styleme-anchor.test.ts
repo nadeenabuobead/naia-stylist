@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveNadineAnchor, resolveActionAnchor } from "./styleme-anchor.server.ts";
+import { resolveNadineAnchor, resolveActionAnchor, scoreClosetItemForSession } from "./styleme-anchor.server.ts";
 import type { ClosetAnchorInput } from "./styleme-recommendation.types.ts";
 
 const V8_HANDLES = [
@@ -227,5 +227,93 @@ describe("resolveActionAnchor — my-closet and both (DI resolver)", () => {
     assert.equal(result.ok, false);
     if (result.ok) throw new Error("unreachable");
     assert.equal(result.status, 403);
+  });
+});
+
+// ── scoreClosetItemForSession ─────────────────────────────────────────────────
+
+describe("scoreClosetItemForSession", () => {
+  const BASE_ITEM = { occasions: [] as string[], styleTags: [] as string[], category: "TOPS" };
+  const BASE_SIGNALS = { occasion: "work", moods: [] as string[], desiredFeelings: [] as string[] };
+
+  it("SC.1 — no signal overlap → score of 0 (category is not a scored signal)", () => {
+    const score = scoreClosetItemForSession(BASE_ITEM, BASE_SIGNALS);
+    assert.equal(score, 0);
+  });
+
+  it("SC.2 — occasion match adds 10", () => {
+    const item = { ...BASE_ITEM, occasions: ["work"] };
+    const score = scoreClosetItemForSession(item, BASE_SIGNALS);
+    assert.equal(score, 10); // 10 occasion only
+  });
+
+  it("SC.3 — occasion mismatch → score 0", () => {
+    const item = { ...BASE_ITEM, occasions: ["dinner"] };
+    const score = scoreClosetItemForSession(item, BASE_SIGNALS);
+    assert.equal(score, 0);
+  });
+
+  it("SC.4 — mood tag match adds 3 per matching tag", () => {
+    const item = { ...BASE_ITEM, styleTags: ["confident", "minimal"] };
+    const signals = { ...BASE_SIGNALS, moods: ["confident", "minimal"] };
+    const score = scoreClosetItemForSession(item, signals);
+    assert.equal(score, 6); // 3 + 3
+  });
+
+  it("SC.5 — desired-feeling tag match adds 2 per matching tag", () => {
+    const item = { ...BASE_ITEM, styleTags: ["more-elevated"] };
+    const signals = { ...BASE_SIGNALS, desiredFeelings: ["more-elevated"] };
+    const score = scoreClosetItemForSession(item, signals);
+    assert.equal(score, 2); // 2 feeling
+  });
+
+  it("SC.6 — all signals stack additively", () => {
+    const item = { occasions: ["work"], styleTags: ["confident", "more-elevated"], category: "DRESSES" };
+    const signals = { occasion: "work", moods: ["confident"], desiredFeelings: ["more-elevated"] };
+    const score = scoreClosetItemForSession(item, signals);
+    assert.equal(score, 15); // 10 occasion + 3 mood + 2 feeling
+  });
+
+  it("SC.7 — non-anchor-capable category (JEWELRY) with no signals → score 0", () => {
+    const item = { occasions: [], styleTags: [], category: "JEWELRY" };
+    const score = scoreClosetItemForSession(item, BASE_SIGNALS);
+    assert.equal(score, 0);
+  });
+
+  it("SC.8 — category does NOT affect score; TOPS/BOTTOMS/DRESSES/OUTERWEAR with no signals all score 0", () => {
+    for (const cat of ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"]) {
+      const s = scoreClosetItemForSession({ occasions: [], styleTags: [], category: cat }, BASE_SIGNALS);
+      assert.equal(s, 0, `${cat} should score 0 with no signal overlap — category is a sort tiebreaker only`);
+    }
+  });
+
+  it("SC.9 — mood tag not in styleTags → no bonus, score stays 0", () => {
+    const item = { ...BASE_ITEM, styleTags: ["casual"] };
+    const signals = { ...BASE_SIGNALS, moods: ["confident"] };
+    const score = scoreClosetItemForSession(item, signals);
+    assert.equal(score, 0);
+  });
+
+  it("SC.10 — occasion-matched item beats 3-mood item without occasion", () => {
+    const occasionItem = { occasions: ["work"], styleTags: [], category: "TOPS" };
+    const moodItem = { occasions: ["dinner"], styleTags: ["confident", "minimal", "powerful"], category: "TOPS" };
+    const signals = { occasion: "work", moods: ["confident", "minimal", "powerful"], desiredFeelings: [] as string[] };
+    const sOccasion = scoreClosetItemForSession(occasionItem, signals);
+    const sMood = scoreClosetItemForSession(moodItem, signals);
+    // occasion item: 10; mood item: 9 → occasion wins
+    assert.ok(sOccasion > sMood, `occasion item (${sOccasion}) should beat 3-mood item without occasion (${sMood})`);
+  });
+
+  it("SC.11 — multiple occasion entries: only the matching one contributes", () => {
+    const item = { ...BASE_ITEM, occasions: ["dinner", "work", "travel"] };
+    const score = scoreClosetItemForSession(item, BASE_SIGNALS);
+    assert.equal(score, 10); // one +10 occasion match
+  });
+
+  it("SC.12 — empty signals → score 0 (no match possible)", () => {
+    const item = { occasions: ["dinner"], styleTags: ["bold"], category: "TOPS" };
+    const signals = { occasion: "work", moods: [], desiredFeelings: [] };
+    const score = scoreClosetItemForSession(item, signals);
+    assert.equal(score, 0); // no occasion match, no tag match
   });
 });

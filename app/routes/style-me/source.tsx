@@ -8,6 +8,7 @@ import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
+import { autoSelectClosetAnchor } from "~/lib/ai/styleme-anchor.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 export const links: LinksFunction = () => [
@@ -34,6 +35,13 @@ const sourceOptions = [
   },
 ];
 
+type PickerItem = {
+  id: string;
+  name: string | null;
+  category: string;
+  imageUrl: string | null;
+};
+
 // ── Loader ────────────────────────────────────────────────────────────────────
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -49,57 +57,41 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const source = session.get("styleMeSource") as string | undefined;
 
-  // Closet anchor selection step
-  if (source === "my-closet" || source === "both") {
-    const naiaCustomer = await getCurrentNaiaCustomer(request);
-    const selectedClosetId = session.get("styleMeClosetAnchorId") as string | undefined ?? null;
-
-    if (!naiaCustomer) {
-      return data({
-        step: "closet-anchor" as const,
-        source,
-        products: null,
-        closetItems: null,
-        selectedHandle: null,
-        selectedClosetId,
-        requiresLogin: true,
-      });
-    }
-
-    const customer = await prisma.customer.findUnique({
-      where: { id: naiaCustomer.id },
-      include: { closetItems: { orderBy: { createdAt: "desc" }, take: 50 } },
-    });
-
-    const closetItems = (customer?.closetItems ?? []).map((item) => ({
-      id: item.id,
-      name: item.name ?? null,
-      category: item.category as string,
-      imageUrl: item.imageUrl,
-      primaryColor: item.primaryColor ?? null,
-    }));
-
-    return data({
-      step: "closet-anchor" as const,
-      source,
-      products: null,
-      closetItems,
-      selectedHandle: null,
-      selectedClosetId,
-      requiresLogin: false,
-    });
+  // No source chosen, or source is NADINE-only (which redirects to result in the action) —
+  // show the source selection screen.
+  if (!source || !VALID_SOURCE_IDS.has(source) || source === "naia-piece") {
+    return data({ step: "source" as const });
   }
 
-  // Step 1 — source selection
-  return data({
-    step: "source" as const,
-    source: null,
-    products: null,
-    closetItems: null,
-    selectedHandle: null,
-    selectedClosetId: null,
-    requiresLogin: false,
+  // Source is a closet type — check prerequisites before showing the anchor step.
+  const naiaCustomer = await getCurrentNaiaCustomer(request);
+  if (!naiaCustomer) {
+    return data({ step: "requires-login" as const, source });
+  }
+
+  const anchorMode = session.get("styleMeAnchorMode") as string | undefined;
+
+  if (anchorMode === "manual") {
+    const items = await prisma.closetItem.findMany({
+      where: { customerId: naiaCustomer.id },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, name: true, category: true, imageUrl: true },
+    });
+    if (items.length === 0) {
+      return data({ step: "empty-closet" as const, source });
+    }
+    return data({ step: "closet-anchor" as const, source, items: items as PickerItem[] });
+  }
+
+  // No anchorMode yet — check closet has items, then show the method choice.
+  const itemCount = await prisma.closetItem.count({
+    where: { customerId: naiaCustomer.id },
   });
+  if (itemCount === 0) {
+    return data({ step: "empty-closet" as const, source });
+  }
+
+  return data({ step: "anchor-method" as const, source });
 }
 
 // ── Action ────────────────────────────────────────────────────────────────────
@@ -109,42 +101,114 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = formData.get("_action") as string;
   const session = await getSession(request.headers.get("Cookie"));
 
+  // ── Select source ────────────────────────────────────────────────────────────
   if (intent === "set-source") {
     const source = formData.get("source") as string;
     if (!source || !VALID_SOURCE_IDS.has(source)) {
       return data({ error: "Please select what we're styling" }, { status: 400 });
     }
     session.set("styleMeSource", source);
-    // Clear stale anchor keys whenever source changes
+    // Clear stale anchor keys whenever source changes.
     session.unset("styleMeNadineAnchorHandle");
     session.unset("styleMeClosetAnchorId");
-    // naia-piece: engine auto-selects — skip anchor step entirely
+    session.unset("styleMeAnchorMode");
+
+    // NADINE-only: engine auto-selects the best piece from session signals.
     if (source === "naia-piece") {
       return redirect("/style-me/result", {
         headers: { "Set-Cookie": await commitSession(session) },
       });
     }
+
+    // MY CLOSET / NADINE + MY CLOSET: redirect back; loader will show anchor-method step.
     return redirect("/style-me/source", {
       headers: { "Set-Cookie": await commitSession(session) },
     });
   }
 
-  if (intent === "set-anchor") {
-    const source = session.get("styleMeSource") as string | undefined;
-    if (!source || !VALID_SOURCE_IDS.has(source)) {
-      return redirect("/style-me/source");
+  // ── Choose anchor method (auto vs manual) ────────────────────────────────────
+  if (intent === "set-anchor-method") {
+    const method = formData.get("method") as string;
+
+    if (method === "auto") {
+      const mood = session.get("styleMeMood") as string | undefined;
+      const feelings = session.get("styleMeFeelings") as string[] | undefined;
+      const occasion = session.get("styleMeOccasion") as string | undefined;
+
+      const naiaCustomer = await getCurrentNaiaCustomer(request);
+      if (!naiaCustomer) {
+        return redirect("/style-me/source", {
+          headers: { "Set-Cookie": await commitSession(session) },
+        });
+      }
+
+      const selected = await autoSelectClosetAnchor(naiaCustomer.id, {
+        occasion: occasion ?? "everyday",
+        moods: mood ? [mood] : [],
+        desiredFeelings: feelings ?? [],
+      });
+
+      if (!selected) {
+        return redirect("/style-me/source", {
+          headers: { "Set-Cookie": await commitSession(session) },
+        });
+      }
+
+      session.set("styleMeClosetAnchorId", selected.id);
+      return redirect("/style-me/result", {
+        headers: { "Set-Cookie": await commitSession(session) },
+      });
     }
 
-    // Only closet sources use set-anchor; naia-piece goes directly to result
-    // my-closet or both — ownership verified in result action via resolveClosetAnchor
+    if (method === "manual") {
+      session.set("styleMeAnchorMode", "manual");
+      return redirect("/style-me/source", {
+        headers: { "Set-Cookie": await commitSession(session) },
+      });
+    }
+
+    return data({ error: "Invalid anchor method" }, { status: 400 });
+  }
+
+  // ── Manual closet item selection ─────────────────────────────────────────────
+  if (intent === "set-anchor") {
     const closetItemId = formData.get("closetItemId") as string;
     if (!closetItemId) {
-      return data({ error: "Please select an item from your closet" }, { status: 400 });
+      return data({ error: "Please select a Closet item" }, { status: 400 });
     }
-    session.set("styleMeClosetAnchorId", closetItemId);
-    session.unset("styleMeNadineAnchorHandle");
 
+    const naiaCustomer = await getCurrentNaiaCustomer(request);
+    if (!naiaCustomer) {
+      return data({ error: "Not authenticated" }, { status: 401 });
+    }
+
+    const item = await prisma.closetItem.findFirst({
+      where: { id: closetItemId, customerId: naiaCustomer.id },
+    });
+    if (!item) {
+      return data({ error: "Item not found or access denied" }, { status: 403 });
+    }
+
+    session.set("styleMeClosetAnchorId", closetItemId);
+    session.unset("styleMeAnchorMode");
     return redirect("/style-me/result", {
+      headers: { "Set-Cookie": await commitSession(session) },
+    });
+  }
+
+  // ── Back navigation (clears step-specific session state) ─────────────────────
+  if (intent === "back") {
+    const from = formData.get("from") as string;
+    if (from === "anchor-method") {
+      // Going back to source selection — clear source and anchorMode.
+      session.unset("styleMeSource");
+      session.unset("styleMeAnchorMode");
+      session.unset("styleMeClosetAnchorId");
+    } else if (from === "closet-anchor") {
+      // Going back to anchor method — clear anchorMode only.
+      session.unset("styleMeAnchorMode");
+    }
+    return redirect("/style-me/source", {
       headers: { "Set-Cookie": await commitSession(session) },
     });
   }
@@ -176,24 +240,28 @@ export default function StyleMeSource() {
       </div>
 
       <div className="sm-inner sm-inner--wide">
-        {step === "closet-anchor" && (
-          <Link to="/style-me/occasion" className="sm-back">← Back</Link>
-        )}
         {step === "source" && <SourceStep />}
+        {step === "anchor-method" && (
+          <AnchorMethodStep source={(loaderData as { source: string }).source} />
+        )}
         {step === "closet-anchor" && (
           <ClosetAnchorStep
-            closetItems={loaderData.closetItems}
-            initialId={loaderData.selectedClosetId}
-            requiresLogin={loaderData.requiresLogin}
-            source={loaderData.source!}
+            source={(loaderData as { source: string }).source}
+            items={(loaderData as { items: PickerItem[] }).items}
           />
+        )}
+        {step === "requires-login" && (
+          <RequiresLoginStep source={(loaderData as { source: string }).source} />
+        )}
+        {step === "empty-closet" && (
+          <EmptyClosetStep source={(loaderData as { source: string }).source} />
         )}
       </div>
     </div>
   );
 }
 
-// ── Step 1: source selection ──────────────────────────────────────────────────
+// ── Step: source selection ────────────────────────────────────────────────────
 
 function SourceStep() {
   const [selected, setSelected] = useState<string | null>(null);
@@ -230,90 +298,118 @@ function SourceStep() {
   );
 }
 
-// ── Step 2b: closet item selection ────────────────────────────────────────────
+// ── Step: anchor method choice (LET nAia CHOOSE vs I HAVE A PIECE IN MIND) ───
 
-type ClosetItem = { id: string; name: string | null; category: string; imageUrl: string; primaryColor: string | null };
+function AnchorMethodStep({ source }: { source: string }) {
+  const label = source === "both" ? "NADINE + My Closet" : "My Closet";
+  return (
+    <>
+      <p className="sm-step-label">{label}</p>
+      <h1 className="sm-heading">How should nAia choose your anchor piece?</h1>
+      <p className="sm-sub">Your anchor is the piece everything else gets styled around.</p>
+      <Form method="post">
+        <input type="hidden" name="_action" value="set-anchor-method" />
+        <div className="sm-source-pills">
+          <button type="submit" name="method" value="auto" className="sm-source-pill">
+            <span className="sm-source-pill-name">LET nAia CHOOSE</span>
+            <span className="sm-source-pill-desc">Choose the best piece from my Closet for today.</span>
+          </button>
+          <button type="submit" name="method" value="manual" className="sm-source-pill">
+            <span className="sm-source-pill-name">I HAVE A PIECE IN MIND</span>
+            <span className="sm-source-pill-desc">I know what I want to wear — help me style it.</span>
+          </button>
+        </div>
+      </Form>
+      <Form method="post" style={{ marginTop: "4px" }}>
+        <input type="hidden" name="_action" value="back" />
+        <input type="hidden" name="from" value="anchor-method" />
+        <button type="submit" className="sm-btn-back">← Back</button>
+      </Form>
+    </>
+  );
+}
 
-function ClosetAnchorStep({
-  closetItems,
-  initialId,
-  requiresLogin,
-  source,
-}: {
-  closetItems: ClosetItem[] | null;
-  initialId: string | null;
-  requiresLogin: boolean;
-  source: string;
-}) {
-  const [selected, setSelected] = useState<string | null>(initialId);
+// ── Step: manual closet picker (ClosetAnchorStep) ────────────────────────────
 
-  if (requiresLogin) {
-    return (
-      <>
-        <h1 className="sm-heading">Sign in to access your closet</h1>
-        <p className="sm-sub" style={{ marginBottom: "28px" }}>
-          Your closet is stored in your nAia account. Sign in to choose an item to build your look around.
-        </p>
-        <Link to="/auth/shopify/login" className="sm-source-btn">Sign In</Link>
-      </>
-    );
-  }
-
-  if (!closetItems || closetItems.length === 0) {
-    return (
-      <>
-        <h1 className="sm-heading">Your closet is empty</h1>
-        <p className="sm-sub" style={{ marginBottom: "28px" }}>
-          Add items to your closet first, then come back to build a look around them.
-        </p>
-        <Link to="/closet" className="sm-source-btn">Add to My Closet</Link>
-      </>
-    );
-  }
+function ClosetAnchorStep({ source, items }: { source: string; items: PickerItem[] }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const label = source === "both" ? "NADINE + My Closet" : "My Closet";
 
   return (
     <>
-      <p className="sm-eyebrow sm-eyebrow--muted" style={{ marginBottom: "8px" }}>
-        {source === "both" ? "NADINE + My Closet" : "My Closet"}
-      </p>
+      <p className="sm-step-label">{label}</p>
       <h1 className="sm-heading">Which piece are we building around?</h1>
-      <p className="sm-sub" style={{ marginBottom: "28px" }}>Select an item from your closet to anchor the look.</p>
-
+      <p className="sm-sub">Select the item you want nAia to style.</p>
       <Form method="post">
         <input type="hidden" name="_action" value="set-anchor" />
-        <input type="hidden" name="closetItemId" value={selected ?? ""} />
-
-        <div className="sm-product-grid">
-          {closetItems.map((item) => (
+        <div className="sm-item-picker">
+          {items.map((item) => (
             <button
               key={item.id}
               type="button"
               onClick={() => setSelected(item.id)}
-              className={`sm-product-card${selected === item.id ? " sm-chip--on" : ""}`}
+              className={`sm-item-pick-btn${selected === item.id ? " sm-pill--on" : ""}`}
             >
-              <img
-                src={item.imageUrl}
-                alt={item.name ?? item.category}
-                className="sm-product-img"
-              />
-              <div className="sm-product-name">
-                {item.name ?? item.category.charAt(0) + item.category.slice(1).toLowerCase()}
-              </div>
-              {item.primaryColor && (
-                <div className="sm-product-type">{item.primaryColor}</div>
+              {item.imageUrl ? (
+                <img src={item.imageUrl} alt={item.name ?? item.category} className="sm-item-pick-img" />
+              ) : (
+                <div className="sm-item-pick-img" aria-hidden />
               )}
+              <span className="sm-item-pick-label">
+                <span className="sm-item-pick-name">{item.name ?? item.category}</span>
+                <span className="sm-item-pick-cat">{item.category}</span>
+              </span>
             </button>
           ))}
         </div>
-
-        <button
-          type="submit"
-          disabled={!selected}
-          className="sm-continue"
-        >
-          Get My Look
-        </button>
+        <input type="hidden" name="closetItemId" value={selected ?? ""} />
+        <div className="sm-step-buttons">
+          <button type="submit" disabled={!selected} className="sm-continue">
+            Continue
+          </button>
+        </div>
       </Form>
+      <Form method="post" style={{ marginTop: "8px" }}>
+        <input type="hidden" name="_action" value="back" />
+        <input type="hidden" name="from" value="closet-anchor" />
+        <button type="submit" className="sm-btn-back">← Back</button>
+      </Form>
+    </>
+  );
+}
+
+// ── Edge case: not logged in ──────────────────────────────────────────────────
+
+function RequiresLoginStep({ source }: { source: string }) {
+  return (
+    <>
+      <Link to="/style-me/occasion" className="sm-back">← Back</Link>
+      <p className="sm-eyebrow sm-eyebrow--muted" style={{ marginTop: "16px", marginBottom: "8px" }}>
+        {source === "both" ? "NADINE + My Closet" : "My Closet"}
+      </p>
+      <h1 className="sm-heading">Sign in to access your closet</h1>
+      <p className="sm-sub" style={{ marginBottom: "28px" }}>
+        Your closet is stored in your nAia account. Sign in so nAia can choose the strongest piece for this session.
+      </p>
+      <Link to="/auth/shopify/login" className="sm-source-btn">Sign In</Link>
+    </>
+  );
+}
+
+// ── Edge case: closet is empty ────────────────────────────────────────────────
+
+function EmptyClosetStep({ source }: { source: string }) {
+  return (
+    <>
+      <Link to="/style-me/occasion" className="sm-back">← Back</Link>
+      <p className="sm-eyebrow sm-eyebrow--muted" style={{ marginTop: "16px", marginBottom: "8px" }}>
+        {source === "both" ? "NADINE + My Closet" : "My Closet"}
+      </p>
+      <h1 className="sm-heading">Your closet is empty</h1>
+      <p className="sm-sub" style={{ marginBottom: "28px" }}>
+        Add items to your closet first, then come back so nAia can build a look around them.
+      </p>
+      <Link to="/closet" className="sm-source-btn">Add to My Closet</Link>
     </>
   );
 }
