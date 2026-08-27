@@ -87,6 +87,10 @@ export const SLOT_EXCLUSIONS: Readonly<Record<OutfitSlot, readonly OutfitSlot[]>
   dress: ["bottom"],
   set: ["top", "bottom", "dress", "set"],
   outerwear: ["outerwear"],
+  shoe: [],
+  bag: [],
+  accessory: [],
+  jewelry: [],
   unknown: [],
 } as const;
 
@@ -234,6 +238,10 @@ const CLOSET_CATEGORY_TO_SLOT: Record<string, OutfitSlot> = {
   BOTTOMS: "bottom",
   DRESSES: "dress",
   OUTERWEAR: "outerwear",
+  SHOES: "shoe",
+  BAGS: "bag",
+  ACCESSORIES: "accessory",
+  JEWELRY: "jewelry",
 };
 
 function closetCategoryToSlot(category: string): OutfitSlot {
@@ -254,7 +262,11 @@ export const CLOSET_SLOT_PAIRING_TOKENS: Readonly<Record<OutfitSlot, readonly st
   bottom:   ["trouser", "trousers", "pants", "skirt", "skirts", "denim", "shorts"],
   dress:    ["dress", "dresses"],
   outerwear:["coat", "coats", "jacket", "jackets", "trench", "layer", "layers"],
-  set:      [],    // set can be worn as top, bottom, or full outfit — keep conservative
+  set:      [],
+  shoe:     [],
+  bag:      [],
+  accessory:[],
+  jewelry:  [],
   unknown:  [],
 } as const;
 

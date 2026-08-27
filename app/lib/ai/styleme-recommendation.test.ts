@@ -1447,24 +1447,28 @@ describe("§12  Closet anchor compatibility evaluation", () => {
   });
 
   // ─── C.8  Unknown Closet category → insufficient confidence ───────────────
-  it("C.8  Unknown Closet category (BAGS) → closetCompatibility.confidence is 'insufficient'", () => {
+  it("C.8  BAGS Closet anchor → slot='bag', hasStrongEvidence=true, no slot conflict exclusions", () => {
     const result = run(
       makeSession({ moods: ["confident"], occasion: "dinner" }),
       { stylePersonalities: ["artsy"] },
       { anchor: makeClosetAnchor("BAGS") },
     );
-    // Anchor slot is "unknown" → no slot conflict exclusions, confidence insufficient
-    for (const ev of result.evaluatedProducts.filter((e) => !e.isHardExcluded)) {
+    // BAGS maps to slot "bag" — hasStrongEvidence=true → confidence is NOT insufficient
+    // No garment slot is excluded by a bag anchor
+    for (const ev of result.evaluatedProducts) {
       assert.ok(ev.closetCompatibility !== null);
-      assert.equal(
+      assert.notEqual(
         ev.closetCompatibility!.confidence,
         "insufficient",
-        `${ev.handle}: BAGS anchor must produce insufficient confidence`,
+        `${ev.handle}: BAGS anchor has strong evidence and must not produce insufficient confidence`,
       );
-      // No closet-category evidence when slot is unknown
-      const closetCatEv = ev.positiveEvidence.find((e) => e.sessionSignal === "closet-category");
-      assert.ok(!closetCatEv, `${ev.handle}: no category evidence for unknown slot`);
     }
+    // None of the products should be hard-excluded due to a bag slot conflict
+    // (bag has empty exclusion list)
+    const excludedBySlot = result.evaluatedProducts.filter(
+      (e) => e.isHardExcluded && e.negativeEvidence.some((n) => n.code?.startsWith("slot-conflict")),
+    );
+    assert.equal(excludedBySlot.length, 0, "BAGS anchor must not hard-exclude any product via slot conflict");
   });
 
   // ─── C.9  Weak category-only Closet anchor → closet-led when no threshold ─
@@ -1545,6 +1549,109 @@ describe("§12  Closet anchor compatibility evaluation", () => {
       const result = runRecommendation({ session, profile });
       assert.equal(result.primary?.handle, handle, `${handle} must still win its scenario post-correction`);
     }
+  });
+
+  // ─── C.13–C.20  Non-garment anchor slots ─────────────────────────────────
+
+  it("C.13  SHOES anchor → slot='shoe', hasStrongEvidence=true", () => {
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "work" }),
+      {},
+      { anchor: makeClosetAnchor("SHOES") },
+    );
+    // shoe slot has empty exclusion list — all products eligible, no slot conflict hard-exclusions
+    const excluded = result.evaluatedProducts.filter(
+      (e) => e.isHardExcluded && e.negativeEvidence.some((n) => n.code?.startsWith("slot-conflict")),
+    );
+    assert.equal(excluded.length, 0, "SHOES anchor must not hard-exclude any product via slot conflict");
+    // Confidence must not be "insufficient" — hasStrongEvidence is true for shoe slot
+    for (const ev of result.evaluatedProducts) {
+      assert.notEqual(
+        ev.closetCompatibility?.confidence,
+        "insufficient",
+        `${ev.handle}: SHOES anchor must not produce insufficient confidence`,
+      );
+    }
+  });
+
+  it("C.14  ACCESSORIES anchor → slot='accessory', no slot conflict exclusions", () => {
+    const result = run(
+      makeSession({ moods: ["minimal"], occasion: "everyday" }),
+      {},
+      { anchor: makeClosetAnchor("ACCESSORIES") },
+    );
+    const excluded = result.evaluatedProducts.filter(
+      (e) => e.isHardExcluded && e.negativeEvidence.some((n) => n.code?.startsWith("slot-conflict")),
+    );
+    assert.equal(excluded.length, 0, "ACCESSORIES anchor must not hard-exclude any product via slot conflict");
+    for (const ev of result.evaluatedProducts) {
+      assert.notEqual(ev.closetCompatibility?.confidence, "insufficient");
+    }
+  });
+
+  it("C.15  JEWELRY anchor → slot='jewelry', no slot conflict exclusions", () => {
+    const result = run(
+      makeSession({ moods: ["romantic"], occasion: "date-night" }),
+      {},
+      { anchor: makeClosetAnchor("JEWELRY") },
+    );
+    const excluded = result.evaluatedProducts.filter(
+      (e) => e.isHardExcluded && e.negativeEvidence.some((n) => n.code?.startsWith("slot-conflict")),
+    );
+    assert.equal(excluded.length, 0, "JEWELRY anchor must not hard-exclude any product via slot conflict");
+    for (const ev of result.evaluatedProducts) {
+      assert.notEqual(ev.closetCompatibility?.confidence, "insufficient");
+    }
+  });
+
+  it("C.16  Non-garment anchor with matching style tags still scores via session signals", () => {
+    // Shoes with styleTags=["confident"] + occasion match → styleTag and occasion signals score
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "dinner" }),
+      {},
+      { anchor: makeClosetAnchor("SHOES", { styleTags: ["confident"], occasions: ["dinner"] }) },
+    );
+    // At least one product should get positive evidence from style/occasion signals
+    const hasPositiveEvidence = result.evaluatedProducts.some(
+      (e) => !e.isHardExcluded && e.positiveEvidence.length > 0,
+    );
+    assert.ok(hasPositiveEvidence, "Non-garment anchor with session-signal tags must yield positive evidence");
+  });
+
+  it("C.17  Non-garment SHOES anchor does NOT produce garment-pairing token evidence", () => {
+    // shoe has empty CLOSET_SLOT_PAIRING_TOKENS — no bestPairedWithGeneral scoring
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "work" }),
+      {},
+      { anchor: makeClosetAnchor("SHOES") },
+    );
+    for (const ev of result.evaluatedProducts) {
+      const pairingEvidence = ev.positiveEvidence.filter((e) => e.sessionSignal === "closet-general-pairing");
+      assert.equal(pairingEvidence.length, 0, `${ev.handle}: shoe anchor must not score garment-pairing tokens`);
+    }
+  });
+
+  it("C.18  Non-garment anchor supports outfit result (outcome is not 'no-recommendation')", () => {
+    const result = run(
+      makeSession({ moods: ["confident"], desiredFeelings: ["more-elevated"], occasion: "dinner" }),
+      { stylePersonalities: ["artsy"] },
+      { anchor: makeClosetAnchor("BAGS") },
+    );
+    assert.notEqual(result.outcome, "no-recommendation", "Non-garment bag anchor must still yield an outfit");
+  });
+
+  it("C.19  CLOSET_SLOT_PAIRING_TOKENS has empty arrays for all four non-garment slots", () => {
+    assert.deepEqual(CLOSET_SLOT_PAIRING_TOKENS["shoe"], [], "shoe must have empty pairing tokens");
+    assert.deepEqual(CLOSET_SLOT_PAIRING_TOKENS["bag"], [], "bag must have empty pairing tokens");
+    assert.deepEqual(CLOSET_SLOT_PAIRING_TOKENS["accessory"], [], "accessory must have empty pairing tokens");
+    assert.deepEqual(CLOSET_SLOT_PAIRING_TOKENS["jewelry"], [], "jewelry must have empty pairing tokens");
+  });
+
+  it("C.20  SLOT_EXCLUSIONS has empty arrays for all four non-garment slots", () => {
+    assert.deepEqual(SLOT_EXCLUSIONS["shoe"], [], "shoe must have no exclusions");
+    assert.deepEqual(SLOT_EXCLUSIONS["bag"], [], "bag must have no exclusions");
+    assert.deepEqual(SLOT_EXCLUSIONS["accessory"], [], "accessory must have no exclusions");
+    assert.deepEqual(SLOT_EXCLUSIONS["jewelry"], [], "jewelry must have no exclusions");
   });
 
   // ─── C.12  No product wins only because of catalog order ──────────────────

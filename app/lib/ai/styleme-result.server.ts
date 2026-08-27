@@ -137,6 +137,10 @@ function slotToItemType(slot: string): OutfitDbItemType {
     dress: "DRESS",
     set: "DRESS",
     outerwear: "OUTERWEAR",
+    shoe: "SHOES",
+    bag: "BAG",
+    accessory: "ACCESSORY",
+    jewelry: "JEWELRY",
     unknown: "TOP",
   };
   return map[slot] ?? "TOP";

@@ -6,7 +6,7 @@ import type { EligibilityState } from "./naia-catalog.types.js";
 
 // ─── Outfit slots ─────────────────────────────────────────────────────────────
 
-export type OutfitSlot = "top" | "bottom" | "dress" | "set" | "outerwear" | "unknown";
+export type OutfitSlot = "top" | "bottom" | "dress" | "set" | "outerwear" | "shoe" | "bag" | "accessory" | "jewelry" | "unknown";
 
 // ─── Evidence effect ─────────────────────────────────────────────────────────
 
