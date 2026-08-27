@@ -4248,7 +4248,7 @@ function DataAiLearningRoadmap({ advanced, sampleMode }) {
         </MetricCard>
 
         {/* Trajectory */}
-        <MetricCard label="6-Week Model Improvement Trajectory" value={`${al.trajectory[5].precision}% → now`} subValue="Precision, FP rate, calibration — weekly trend" accent="#221516">
+        <MetricCard label="6-Week Model Improvement Trajectory" value={al.trajectory?.length >= 6 ? `${al.trajectory[5].precision}% → now` : "—"} subValue="Precision, FP rate, calibration — weekly trend" accent="#221516">
           {al.trajectory && al.trajectory.length > 0 ? (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: MONO_L }}>
