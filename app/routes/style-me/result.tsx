@@ -1077,9 +1077,9 @@ export default function StyleMeResult() {
                     <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "10px", letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--naia-accent)", marginBottom: "8px" }}>Already Yours</p>
                   )}
                   {item.productImageUrl ? (
-                    <img src={item.productImageUrl} alt={item.productTitle} style={{ width: isPrimary ? "100%" : "140px", maxWidth: isPrimary ? "380px" : "140px", height: "auto", objectFit: "contain", borderRadius: "4px", marginBottom: "12px", background: isPrimary ? "var(--naia-warm)" : undefined }} />
+                    <img src={item.productImageUrl} alt={item.productTitle} className="sm-item-img" />
                   ) : isPrimary ? (
-                    <div style={{ width: "100%", maxWidth: "380px", aspectRatio: "3/4", background: "var(--naia-warm)", borderRadius: "4px", marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div className="sm-item-img" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
                       <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", padding: "16px", textAlign: "center" }}>Image coming soon</p>
                     </div>
                   ) : null}
