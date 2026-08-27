@@ -2,7 +2,7 @@
 // Source of truth: nadine-storefront/src/components/SiteNav.tsx navLinks
 // Architecture: storefront proxies /trends/:slug/lens/:lens → naia-stylist via vercel.json rewrite
 export const STOREFRONT_ORIGIN =
-  "https://nadine-storefront-nadeenabuobeads-projects.vercel.app";
+  "https://nadine-storefront.vercel.app";
 
 // Five storefront destinations for the public trend-reports nav.
 // TREND REPORTS is omitted — it stays as an internal naia-stylist /trends link.
