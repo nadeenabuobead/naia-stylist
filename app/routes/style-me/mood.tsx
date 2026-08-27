@@ -35,6 +35,12 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const session = await getSession(request.headers.get("Cookie"));
   session.set("styleMeMood", mood);
+  // Starting a new StyleMe flow — clear any stale source/anchor state from a previous run
+  // so the source step always shows fresh rather than resuming an old anchor choice.
+  session.unset("styleMeSource");
+  session.unset("styleMeAnchorMode");
+  session.unset("styleMeClosetAnchorId");
+  session.unset("styleMeNadineAnchorHandle");
 
   return redirect("/style-me/feeling", {
     headers: { "Set-Cookie": await commitSession(session) },

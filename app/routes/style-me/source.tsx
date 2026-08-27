@@ -9,6 +9,7 @@ import { commitSession, getSession } from "~/lib/session.server";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
 import { autoSelectClosetAnchor } from "~/lib/ai/styleme-anchor.server";
+import { buildPrivateDownloadUrl, getCloudinaryConfig } from "~/lib/cloudinary-admin.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 export const links: LinksFunction = () => [
@@ -72,15 +73,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const anchorMode = session.get("styleMeAnchorMode") as string | undefined;
 
   if (anchorMode === "manual") {
-    const items = await prisma.closetItem.findMany({
+    const rawItems = await prisma.closetItem.findMany({
       where: { customerId: naiaCustomer.id },
       orderBy: { createdAt: "desc" },
-      select: { id: true, name: true, category: true, imageUrl: true },
+      select: { id: true, name: true, category: true, imageUrl: true, imagePublicId: true, imageFormat: true },
     });
-    if (items.length === 0) {
+    if (rawItems.length === 0) {
       return data({ step: "empty-closet" as const, source });
     }
-    return data({ step: "closet-anchor" as const, source, items: items as PickerItem[] });
+    const cfg = getCloudinaryConfig();
+    const items: PickerItem[] = rawItems.map((item) => {
+      let imageUrl: string | null = null;
+      if (item.imagePublicId && item.imageFormat && cfg) {
+        imageUrl = buildPrivateDownloadUrl(cfg, item.imagePublicId, item.imageFormat, "private");
+      } else if (item.imageUrl) {
+        imageUrl = item.imageUrl;
+      }
+      return { id: item.id, name: item.name, category: item.category, imageUrl };
+    });
+    return data({ step: "closet-anchor" as const, source, items });
   }
 
   // No anchorMode yet — check closet has items, then show the method choice.
