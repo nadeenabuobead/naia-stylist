@@ -1190,7 +1190,7 @@ export default function StyleMeResult() {
                   <img
                     src={alt.productImageUrl}
                     alt={alt.title}
-                    className="sm-alt-img"
+                    className="sm-item-img"
                   />
                 )}
                 <div className="sm-alt-body">
