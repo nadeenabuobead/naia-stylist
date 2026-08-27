@@ -456,9 +456,9 @@ export async function computeStyleMeResult(
       const altCatalog = getProductByHandle(alt.handle);
       if (!altCatalog) return [];
       const altMedia = _resolveMedia(alt.handle);
-      // productImageUrl for display: always populated when the media is verified,
-      // independent of the VTO flag (which only gates the try-on CTA, not the image).
-      const altImageUrl = altMedia?.eligibility === "ready" ? altMedia.resolvedUrl : null;
+      // productImageUrl for display: use displayResolvedUrl when present (display-only entries),
+      // otherwise fall back to resolvedUrl (ready entries only). Independent of VTO flag.
+      const altImageUrl = altMedia?.displayResolvedUrl ?? (altMedia?.eligibility === "ready" ? altMedia?.resolvedUrl : null);
       return [
         {
           handle: alt.handle,
@@ -503,13 +503,12 @@ export async function computeStyleMeResult(
 
   // Primary product (nAia piece — nadine-recommendation only).
   // Never set for my-closet (effectiveOutcome is closet-led).
-  // productImageUrl is populated only when the verified media map has a "ready" entry;
-  // all other states (needs-manual-review, unsupported-layering, etc.) keep it null,
-  // which keeps the try-on CTA hidden in result.tsx.
+  // productImageUrl for display: use displayResolvedUrl when present, otherwise fall back to
+  // resolvedUrl (ready entries only). VTO CTA is gated separately by eligibility === "ready".
   let primaryProduct: StyleMePrimaryProduct | null = null;
   if (effectiveOutcome === "nadine-recommendation" && primaryHandle && catalogProduct) {
     const primaryMedia = _resolveMedia(primaryHandle);
-    const primaryImageUrl = primaryMedia?.eligibility === "ready" ? primaryMedia.resolvedUrl : null;
+    const primaryImageUrl = primaryMedia?.displayResolvedUrl ?? (primaryMedia?.eligibility === "ready" ? primaryMedia?.resolvedUrl : null);
     primaryProduct = {
       handle: primaryHandle,
       title: catalogProduct.parsed.identity.verifiedTitle,

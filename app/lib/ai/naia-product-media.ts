@@ -15,9 +15,10 @@
 // 7 component-level entries added (Becoming Alive × 3, Becoming Defined × 4).
 //
 // 2026-08-27 updates:
-//   Becoming Defined (dress-set) → ready; CDN URL resolved via admin DOM; FASHN concern VTO-only.
-//   Becoming Bold (oversized-blazer) → new entry, ready; image added by product owner.
-//   Becoming Free (draped-leather-pants) → new entry, ready; image added by product owner.
+//   Introduced displayResolvedUrl — display image independent of VTO/FASHN eligibility.
+//   Becoming Defined (dress-set): display image set via admin DOM; eligibility remains needs-manual-review.
+//   Becoming Bold (oversized-blazer): new display-only entry; eligibility=needs-manual-review.
+//   Becoming Free (draped-leather-pants): new display-only entry; eligibility=needs-manual-review.
 //   shopifyMediaGid for Bold/Free pending Admin API re-auth (session expired 2026-07-30).
 
 // ── Eligibility states ────────────────────────────────────────────────────────
@@ -44,7 +45,10 @@ export interface VerifiedMediaEntry {
   shopifyProductGid: string | null; // gid://shopify/Product/… — null until verified
   shopifyMediaGid: string | null;   // gid://shopify/MediaImage/… — null until verified
   imageDimensions: { w: number; h: number } | null; // pixel dimensions from Admin API
-  resolvedUrl: string | null;       // CDN image URL — non-null only when eligibility === "ready"
+  resolvedUrl: string | null;       // CDN image URL — non-null only when eligibility === "ready" (VTO)
+  displayResolvedUrl: string | null;// CDN image URL for display only — independent of VTO eligibility
+                                    // When non-null: image renders in StyleMe regardless of eligibility.
+                                    // When null + eligibility=ready: resolvedUrl is used for display.
   mediaUpdatedAt: string | null;    // ISO 8601 — derived from Shopify CDN ?v= version timestamp
   garmentCategory: FashnGarmentCategory;
   eligibility: TryOnEligibility;
@@ -85,6 +89,7 @@ const RAW_ENTRIES: readonly VerifiedMediaEntry[] = [
     shopifyMediaGid: "gid://shopify/MediaImage/51812553162884",
     imageDimensions: { w: 1024, h: 1536 },
     resolvedUrl: null,
+    displayResolvedUrl: null,
     mediaUpdatedAt: "2026-03-26T13:36:48.000Z",
     garmentCategory: "tops",
     eligibility: "needs-manual-review",
@@ -103,6 +108,7 @@ const RAW_ENTRIES: readonly VerifiedMediaEntry[] = [
     shopifyMediaGid: "gid://shopify/MediaImage/52802462056580",
     imageDimensions: { w: 1024, h: 1536 },
     resolvedUrl: "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/0c950ae7-dfe3-4395-81c4-4d2663fa11bd.png?v=1784196037",
+    displayResolvedUrl: null,
     mediaUpdatedAt: "2026-07-16T10:00:37.000Z",
     garmentCategory: "tops",
     eligibility: "ready",
@@ -119,6 +125,7 @@ const RAW_ENTRIES: readonly VerifiedMediaEntry[] = [
     shopifyMediaGid: "gid://shopify/MediaImage/51812631445636",
     imageDimensions: { w: 1024, h: 1024 },
     resolvedUrl: "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/3614927b-4685-4df3-aeff-b3d5a950cbd2.png?v=1774533037",
+    displayResolvedUrl: null,
     mediaUpdatedAt: "2026-03-26T13:50:37.000Z",
     garmentCategory: "tops",
     eligibility: "ready",
@@ -135,6 +142,7 @@ const RAW_ENTRIES: readonly VerifiedMediaEntry[] = [
     shopifyMediaGid: "gid://shopify/MediaImage/51812633051268",
     imageDimensions: { w: 1024, h: 1536 },
     resolvedUrl: "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/7d5d1e05-796a-45d9-b74a-4ddb0c9da3cf.png?v=1774533080",
+    displayResolvedUrl: null,
     mediaUpdatedAt: "2026-03-26T13:51:20.000Z",
     garmentCategory: "bottoms",
     eligibility: "ready",
@@ -151,6 +159,7 @@ const RAW_ENTRIES: readonly VerifiedMediaEntry[] = [
     shopifyMediaGid: "gid://shopify/MediaImage/51812554768516",
     imageDimensions: { w: 1024, h: 1536 },
     resolvedUrl: "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/3b14fe8b-2c19-492e-82b1-44baaf3a3cc9.png?v=1774532245",
+    displayResolvedUrl: null,
     mediaUpdatedAt: "2026-03-26T13:37:25.000Z",
     garmentCategory: "bottoms",
     eligibility: "ready",
@@ -167,6 +176,7 @@ const RAW_ENTRIES: readonly VerifiedMediaEntry[] = [
     shopifyMediaGid: "gid://shopify/MediaImage/52802464088196",
     imageDimensions: { w: 1024, h: 1536 },
     resolvedUrl: "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/d51e6af2-f7de-4fec-b851-8019e2da72eb_1_1.png?v=1784196279",
+    displayResolvedUrl: null,
     mediaUpdatedAt: "2026-07-16T10:04:39.000Z",
     garmentCategory: "bottoms",
     eligibility: "ready",
@@ -183,6 +193,7 @@ const RAW_ENTRIES: readonly VerifiedMediaEntry[] = [
     shopifyMediaGid: "gid://shopify/MediaImage/51812555915396",
     imageDimensions: { w: 1024, h: 1536 },
     resolvedUrl: "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/b7af3725-7048-4ead-8d04-d6fb42556eac.png?v=1774532277",
+    displayResolvedUrl: null,
     mediaUpdatedAt: "2026-03-26T13:37:57.000Z",
     garmentCategory: "outerwear",
     eligibility: "ready",
@@ -199,6 +210,7 @@ const RAW_ENTRIES: readonly VerifiedMediaEntry[] = [
     shopifyMediaGid: "gid://shopify/MediaImage/51812635476100",
     imageDimensions: { w: 1024, h: 1024 },
     resolvedUrl: "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/77d61b97-37da-4e57-8297-aa5207b35d07.png?v=1774533134",
+    displayResolvedUrl: null,
     mediaUpdatedAt: "2026-03-26T13:52:14.000Z",
     garmentCategory: "outerwear",
     eligibility: "ready",
@@ -220,6 +232,7 @@ const RAW_ENTRIES: readonly VerifiedMediaEntry[] = [
     imageDimensions: { w: 1024, h: 1536 },
     resolvedUrl:
       "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/5373f5ee-5c4e-4083-9ad4-68bd4bd20d1c.png?v=1784196301",
+    displayResolvedUrl: null,
     mediaUpdatedAt: "2026-07-16T10:05:01.000Z",
     garmentCategory: "outerwear",
     eligibility: "ready",
@@ -236,6 +249,7 @@ const RAW_ENTRIES: readonly VerifiedMediaEntry[] = [
     shopifyMediaGid: "gid://shopify/MediaImage/51812640948356",
     imageDimensions: { w: 1024, h: 1536 },
     resolvedUrl: "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/8a855f15-e5e9-4ef5-a7db-a7253e83a542.png?v=1774533199",
+    displayResolvedUrl: null,
     mediaUpdatedAt: "2026-03-26T13:53:19.000Z",
     garmentCategory: "one-piece",
     eligibility: "ready",
@@ -252,15 +266,17 @@ const RAW_ENTRIES: readonly VerifiedMediaEntry[] = [
     // GID points to the complete set (image A) — approved as valid media 2026-07-16.
     shopifyMediaGid: "gid://shopify/MediaImage/52802463596676",
     imageDimensions: { w: 1024, h: 1536 },
-    resolvedUrl:
+    resolvedUrl: null,
+    displayResolvedUrl:
       "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/4fbfaad1-b2a2-4c69-b44d-431f5a9cfe93.png?v=1784196241",
     mediaUpdatedAt: "2026-07-16T10:04:01.000Z",
     garmentCategory: "one-piece",
-    eligibility: "ready",
+    eligibility: "needs-manual-review",
     reason:
       "Complete set (image A) approved 2026-07-16 via contact sheet v3. GIDs verified via " +
       "Shopify Admin API. Portrait 1024×1536. CDN URL resolved 2026-08-27 via admin DOM. " +
-      "Multi-piece FASHN concern applies to VTO only — VTO gated separately by VIRTUAL_TRY_ON_ENABLED.",
+      "Display image available (displayResolvedUrl); VTO/FASHN kept at needs-manual-review — " +
+      "multi-piece construction requires provider testing before eligibility can be promoted to ready.",
   },
   {
     catalogHandle: "oversized-blazer",
@@ -272,15 +288,16 @@ const RAW_ENTRIES: readonly VerifiedMediaEntry[] = [
     // Product GID and CDN URL verified 2026-08-27 via Shopify Admin DOM.
     shopifyMediaGid: null,
     imageDimensions: null,
-    resolvedUrl:
+    resolvedUrl: null,
+    displayResolvedUrl:
       "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/c5cd4188-f53e-4c5b-b26e-7b90359dd1a8_1.png?v=1787821875",
     mediaUpdatedAt: "2026-08-27T09:11:15.000Z",
     garmentCategory: "outerwear",
-    eligibility: "ready",
+    eligibility: "needs-manual-review",
     reason:
       "Product image added by product owner 2026-08-27. Product GID and CDN URL verified via " +
-      "Shopify Admin DOM. Not in LOCKED_CATALOGUE_HANDLES — null shopifyMediaGid permitted. " +
-      "Backfill GID when Admin API session is next refreshed.",
+      "Shopify Admin DOM. Display-only (displayResolvedUrl set); VTO/FASHN not approved. " +
+      "shopifyMediaGid pending Admin API re-auth. Not in LOCKED_CATALOGUE_HANDLES.",
   },
   {
     catalogHandle: "draped-leather-pants",
@@ -292,15 +309,16 @@ const RAW_ENTRIES: readonly VerifiedMediaEntry[] = [
     // Product GID and CDN URL verified 2026-08-27 via Shopify Admin DOM.
     shopifyMediaGid: null,
     imageDimensions: null,
-    resolvedUrl:
+    resolvedUrl: null,
+    displayResolvedUrl:
       "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/ecb743ba-ac42-4951-a4c5-667bae1af63f_1.png?v=1787821825",
     mediaUpdatedAt: "2026-08-27T09:10:25.000Z",
     garmentCategory: "bottoms",
-    eligibility: "ready",
+    eligibility: "needs-manual-review",
     reason:
       "Product image added by product owner 2026-08-27. Product GID and CDN URL verified via " +
-      "Shopify Admin DOM. Not in LOCKED_CATALOGUE_HANDLES — null shopifyMediaGid permitted. " +
-      "Backfill GID when Admin API session is next refreshed.",
+      "Shopify Admin DOM. Display-only (displayResolvedUrl set); VTO/FASHN not approved. " +
+      "shopifyMediaGid pending Admin API re-auth. Not in LOCKED_CATALOGUE_HANDLES.",
   },
 ];
 
@@ -387,6 +405,20 @@ export function validateMediaMap(
         }
       } catch {
         errors.push(`${entry.catalogHandle}: resolvedUrl is not a valid URL`);
+      }
+    }
+  }
+
+  // displayResolvedUrl, when non-null/undefined, must be an absolute HTTPS URL (no eligibility restriction).
+  for (const entry of map.values()) {
+    if (entry.displayResolvedUrl != null) {
+      try {
+        const u = new URL(entry.displayResolvedUrl);
+        if (u.protocol !== "https:") {
+          errors.push(`${entry.catalogHandle}: displayResolvedUrl must use https:`);
+        }
+      } catch {
+        errors.push(`${entry.catalogHandle}: displayResolvedUrl is not a valid URL`);
       }
     }
   }

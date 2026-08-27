@@ -36,6 +36,7 @@ function makeEntry(overrides: Partial<VerifiedMediaEntry>): VerifiedMediaEntry {
     shopifyMediaGid: null,
     imageDimensions: null,
     resolvedUrl: null,
+    displayResolvedUrl: null,
     mediaUpdatedAt: null,
     garmentCategory: "tops",
     eligibility: "needs-manual-review",
@@ -88,7 +89,8 @@ function makeMinimalEngineInput(source: "naia-piece" | "my-closet" | "both" = "n
 
 describe("PM — product-media map integrity", () => {
   it("PM.1 — all 11 locked handles are represented in NAIA_VERIFIED_MEDIA_MAP", () => {
-    assert.equal(NAIA_VERIFIED_MEDIA_MAP.size, 11, "map must have exactly 11 entries");
+    // Map contains 11 locked + 2 display-only entries (oversized-blazer, draped-leather-pants).
+    assert.equal(NAIA_VERIFIED_MEDIA_MAP.size, 13, "map must have exactly 13 entries");
     for (const h of HANDLES) {
       assert.ok(NAIA_VERIFIED_MEDIA_MAP.has(h), `missing handle: ${h}`);
     }
