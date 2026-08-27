@@ -1751,6 +1751,69 @@ describe("§R Result-page fixes", () => {
     }
   });
 
+  it("R.19 — needs-manual-review primary with displayResolvedUrl renders non-null productImageUrl", async () => {
+    const input = makeMinimalEngineInput();
+    const rec = runRecommendation(input);
+    if (!rec.primary) return;
+    const selectedHandle = rec.primary.handle;
+    const displayUrl = `https://cdn.shopify.com/display-test-primary.jpg`;
+    const fakeMedia = (handle: string) =>
+      handle === selectedHandle
+        ? { catalogHandle: selectedHandle, eligibility: "needs-manual-review" as const, resolvedUrl: null, displayResolvedUrl: displayUrl, shopifyHandle: null, shopifyProductGid: null, shopifyMediaGid: null, nadinaTitle: "Test Bold", shopifyTitle: "Test Bold", imageDimensions: null, mediaUpdatedAt: null, garmentCategory: "outerwear" as const, reason: "pending review" }
+        : undefined;
+    const result = await computeStyleMeResult(input, () => rec, fakeMedia as any);
+    assert.ok(result.primaryProduct !== null, "primary product must be set");
+    assert.strictEqual(result.primaryProduct?.productImageUrl, displayUrl, "productImageUrl must equal displayResolvedUrl for needs-manual-review entry");
+    assert.strictEqual(result.primaryProduct?.shopifyProductId, null, "shopifyProductId must remain null — entry is not VTO-ready");
+  });
+
+  it("R.20 — needs-manual-review alternative with displayResolvedUrl renders non-null productImageUrl in metadata", async () => {
+    const input = buildEngineInput({
+      moods: ["confident"],
+      desiredFeelings: ["more-elevated"],
+      bodyNeeds: ["nothing-specific"],
+      coverageConditional: null,
+      occasion: "everyday",
+      formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "naia-piece",
+    });
+    const rec = runRecommendation(input);
+    if (rec.alternatives.length === 0) return;
+    const displayUrl = `https://cdn.shopify.com/display-test-alt.jpg`;
+    // All handles return a needs-manual-review entry with displayResolvedUrl set
+    const fakeMedia = (handle: string) => ({
+      catalogHandle: handle,
+      eligibility: "needs-manual-review" as const,
+      resolvedUrl: null,
+      displayResolvedUrl: displayUrl,
+      shopifyHandle: null,
+      shopifyProductGid: null,
+      shopifyMediaGid: null,
+      nadinaTitle: "Test",
+      shopifyTitle: "Test",
+      imageDimensions: null,
+      mediaUpdatedAt: null,
+      garmentCategory: "outerwear" as const,
+      reason: "pending review",
+    });
+    const result = await computeStyleMeResult(input, () => rec, fakeMedia as any);
+    assert.ok(result.alternatives.length > 0, "engine must return at least one alternative for this input");
+    for (const alt of result.alternatives) {
+      assert.strictEqual(alt.productImageUrl, displayUrl, `alternative ${alt.handle}: productImageUrl must equal displayResolvedUrl`);
+      assert.strictEqual(alt.shopifyProductId, null, `alternative ${alt.handle}: shopifyProductId must remain null`);
+    }
+    // Verify the image propagates through buildMetadataJson into moodDescriptionJson
+    const { buildDbPayload } = await import("~/lib/ai/styleme-result.server");
+    const payload = buildDbPayload(result);
+    const meta = parseSuggestionMetadata(payload.moodDescriptionJson);
+    assert.ok(meta !== null, "moodDescriptionJson must parse");
+    for (const altMeta of meta!.alternatives) {
+      assert.strictEqual(altMeta.productImageUrl, displayUrl, `moodDescriptionJson alt ${altMeta.handle}: productImageUrl must equal displayResolvedUrl`);
+    }
+  });
+
   it("R.10 — submitReview appends all 5 required question fields to formData", () => {
     // Verify the expected field names are part of the review payload contract
     const requiredFields = ["intent", "sessionId", "overallReaction", "feltLikeMe", "createdFeeling", "wouldWear", "physicalComfort"];

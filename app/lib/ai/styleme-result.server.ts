@@ -394,6 +394,19 @@ async function callClaudeForWording(
   }
 }
 
+// ── Display image resolution ──────────────────────────────────────────────────
+// Returns the CDN URL to show in StyleMe for a given media entry.
+// displayResolvedUrl wins unconditionally (present on display-only entries even when
+// eligibility !== "ready"). Falls back to resolvedUrl only for ready entries.
+// This is decoupled from VTO/FASHN — shopifyProductId is gated separately.
+
+function resolveDisplayImage(media: VerifiedMediaEntry | undefined): string | null {
+  if (media == null) return null;
+  if (media.displayResolvedUrl != null) return media.displayResolvedUrl;
+  if (media.eligibility === "ready") return media.resolvedUrl;
+  return null;
+}
+
 // ── Main pipeline ─────────────────────────────────────────────────────────────
 
 export async function computeStyleMeResult(
@@ -456,9 +469,7 @@ export async function computeStyleMeResult(
       const altCatalog = getProductByHandle(alt.handle);
       if (!altCatalog) return [];
       const altMedia = _resolveMedia(alt.handle);
-      // productImageUrl for display: use displayResolvedUrl when present (display-only entries),
-      // otherwise fall back to resolvedUrl (ready entries only). Independent of VTO flag.
-      const altImageUrl = altMedia?.displayResolvedUrl ?? (altMedia?.eligibility === "ready" ? altMedia?.resolvedUrl : null);
+      const altImageUrl = resolveDisplayImage(altMedia);
       return [
         {
           handle: alt.handle,
@@ -503,12 +514,10 @@ export async function computeStyleMeResult(
 
   // Primary product (nAia piece — nadine-recommendation only).
   // Never set for my-closet (effectiveOutcome is closet-led).
-  // productImageUrl for display: use displayResolvedUrl when present, otherwise fall back to
-  // resolvedUrl (ready entries only). VTO CTA is gated separately by eligibility === "ready".
   let primaryProduct: StyleMePrimaryProduct | null = null;
   if (effectiveOutcome === "nadine-recommendation" && primaryHandle && catalogProduct) {
     const primaryMedia = _resolveMedia(primaryHandle);
-    const primaryImageUrl = primaryMedia?.displayResolvedUrl ?? (primaryMedia?.eligibility === "ready" ? primaryMedia?.resolvedUrl : null);
+    const primaryImageUrl = resolveDisplayImage(primaryMedia);
     primaryProduct = {
       handle: primaryHandle,
       title: catalogProduct.parsed.identity.verifiedTitle,
