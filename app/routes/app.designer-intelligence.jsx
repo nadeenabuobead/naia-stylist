@@ -958,7 +958,7 @@ function TopSignalsSection({ data, kpis, phase4b2, advanced, rel, dateRangeDays 
   return (
     <Section
       title="Top Signals"
-      desc="Highest-confidence intelligence selected from all data sources — balanced across identity, context, garment, emotional need, friction, and nAia behaviour"
+      desc="Highest-confidence intelligence selected across all data sources, ranked by evidence strength and signal quality."
       status="live"
     >
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
