@@ -1246,9 +1246,11 @@ function ProductDetailPanel({ narrative, saveVsPurchase, dateRangeDays }) {
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
           <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: confData.color, color: "#fff" }}>{confData.label}</span>
-          {narrative.sampleSize <= 4 && (
+          {!narrative.hasEvidence ? (
+            <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: "rgba(90,90,100,0.1)", color: "#5c5350" }}>Catalog hypothesis</span>
+          ) : narrative.sampleSize <= 4 ? (
             <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: "rgba(107,72,0,0.12)", color: "#6b4800" }}>Directional</span>
-          )}
+          ) : null}
           <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: scoreColor, color: "#fff" }}>
             {narrative.opportunityScore != null ? `Score ${narrative.opportunityScore}` : "Score —"}
           </span>
@@ -1825,7 +1827,7 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
                       <td style={{ ...s.td, fontFamily: SERIF, fontWeight: 600, fontSize: 14 }}>{n.name ?? n.productTitle}</td>
                       <td style={{ ...s.td, color: oppColor, fontFamily: INTER, fontWeight: 700 }}>
                         {n.opportunityScore != null ? n.opportunityScore : "—"}
-                        {n.sampleSize != null && n.sampleSize < 3 && (
+                        {n.hasEvidence && n.sampleSize != null && n.sampleSize < 3 && (
                           <span style={{ display: "block", fontSize: 9, fontWeight: 400, color: "#9CA3AF", fontFamily: MONO }}>Directional</span>
                         )}
                       </td>
@@ -1847,7 +1849,18 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
                         )}
                       </td>
                       <td style={{ ...s.td, fontFamily: MONO, fontSize: 10, color: "#7a6f6a", maxWidth: 200 }}>{evidenceDisplay}</td>
-                      <td style={{ ...s.td, fontSize: 11, color: "#5c5350", maxWidth: 200 }}>{n.recommendation ?? "—"}</td>
+                      <td style={{ ...s.td, fontSize: 11, maxWidth: 200 }}>
+                        {n.hasEvidence ? (
+                          <span style={{ color: "#5c5350" }}>{n.recommendation ?? "—"}</span>
+                        ) : n.recommendation ? (
+                          <>
+                            <span style={{ display: "block", fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginBottom: 3 }}>Positioning hypothesis</span>
+                            <span style={{ color: "#9CA3AF", fontStyle: "italic" }}>{n.recommendation}</span>
+                          </>
+                        ) : (
+                          <span style={{ color: "#9CA3AF" }}>—</span>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -1956,11 +1969,11 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
             <KpiCard label="Total Saves" value={advanced.saveVsPurchase.totalSaves} tooltip={`Buy-or-skip decisions with outcome 'saved' within the selected period (${advanced.saveVsPurchase.scopeLabel}).`} />
             <KpiCard label="Unique Savers" value={advanced.saveVsPurchase.uniqueSavers} tooltip="Distinct customers who saved at least one item this period." />
             <KpiCard label="Total Purchases" value={advanced.saveVsPurchase.totalPurchases} tooltip={`Buy-or-skip decisions with outcome 'bought' within the selected period (${advanced.saveVsPurchase.scopeLabel}).`} />
+            <KpiCard label="Purchases Without Prior Save" value={advanced.saveVsPurchase.purchasesWithoutSave} tooltip={`Period purchases (${advanced.saveVsPurchase.scopeLabel}) with no prior save event for the same customer + product in the same period.`} />
+            <KpiCard label="Most Saved" value={advanced.saveVsPurchase.mostSaved ?? "—"} tooltip="Product with most saves in the selected period." />
             <div style={{ ...s.subHeader, gridColumn: "1 / -1", marginBottom: 0, marginTop: 12 }}>LINKED CONVERSION — ALL TIME</div>
             <KpiCard label="Save→Purchase Rate" value={advanced.saveVsPurchase.saveToConvertRate != null ? `${advanced.saveVsPurchase.saveToConvertRate}%` : "—"} tooltip={`All-time: % of unique saved customer-product journeys that led to a purchase. ${advanced.saveVsPurchase.allLinkedConversions} of ${advanced.saveVsPurchase.allSavedCohortCount} saved journeys converted. Each customer-product pair counts once regardless of how many times they saved.`} />
-            <KpiCard label="Median Days to Convert" value={advanced.saveVsPurchase.medianDaysToConvert != null ? `${advanced.saveVsPurchase.medianDaysToConvert}d` : "— / no linked conversions"} tooltip="Median days between save and subsequent purchase, across all linked pairs." />
-            <KpiCard label="Purchases Without Prior Save" value={advanced.saveVsPurchase.purchasesWithoutSave} tooltip="Purchases in period with no prior save event for the same customer + product." />
-            <KpiCard label="Most Saved" value={advanced.saveVsPurchase.mostSaved ?? "—"} tooltip="Product with most saves in the selected period." />
+            <KpiCard label="Median Days to Convert" value={advanced.saveVsPurchase.medianDaysToConvert != null ? `${advanced.saveVsPurchase.medianDaysToConvert}d` : "— / no linked conversions"} tooltip="Median days between the first save and subsequent purchase across all linked cohorts (all-time)." />
           </div>
           {advanced.saveVsPurchase.highSaveLowBuyProducts?.length > 0 && (
             <div style={{ marginTop: 16, padding: "10px 14px", background: "rgba(90,90,100,0.05)", borderLeft: "3px solid #8b2035" }}>
