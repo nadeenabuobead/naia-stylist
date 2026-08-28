@@ -1258,6 +1258,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       total:           bsDist.total,
       decidedCount:    bsDist.decidedCount,
       buyIntentRate:   bsDist.buyIntentRate,
+      overallBuyIntentRate: pct(bsDist.buyIntentCount, bsDist.total),
       uniqueCustomers: bsDist.uniqueCustomers,
       evidence:        bsDist.evidence,
       state:           bsDist.state,
@@ -1281,8 +1282,6 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   // ── phase4b2 ───────────────────────────────────────────────────────────
   const pwcWoreIt = wearReviews.filter(ev => ev.rewear === true).length;
   const pwcFeltPositive = ejAchieved; // canonical emotional outcome (already computed above)
-  const feedbackEngagementCount = Math.round(ns * 0.62);
-
   const phase4b2 = {
     selfieAdoption: {
       migrationPending: false,
@@ -1309,8 +1308,13 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     feedbackEngagement: {
       migrationPending: false,
       totalSessions: ns,
-      sessionsWithFeedback: feedbackEngagementCount,
-      responseRate: 62,
+      // Event-derived — actual RF events in this period (no session→RF linkage exists)
+      totalCardReactions: feedback.length,
+      lovesCount: lovesTotal,
+      loveRate: feedback.length > 0 ? pct(lovesTotal, feedback.length) : null,
+      // Estimated only — no session→RF linkage to produce a precise count
+      sessionsWithFeedbackEst: Math.round(ns * 0.62),
+      responseRateIsEstimated: true,
     },
     feedbackDistribution: {
       migrationPending: false,
@@ -1361,6 +1365,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     // Sample Preview: VTO Intelligence (populated from synthetic VTO-capable products)
     vtoIntelligence: {
       status:          "sample",
+      isEstimated:     true,
       scopeLabel:      periodLabel,
       totalSessions:   Math.max(1, Math.round(ns * 0.38)),
       completedJobs:   Math.max(1, Math.round(ns * 0.34)),
@@ -1372,8 +1377,10 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         completionRate:   Math.max(75, Math.min(95, 90 - Math.round(pm[p.name].sampleSize * 0.3))),
         postVtoLoveRate:  Math.max(55, Math.min(95, pm[p.name].loveRate + 8)),
         fidelityConcerns: pm[p.name].sessionCount >= 8 ? 1 : 0,
+        isEstimated:      true,
       })),
-      topInsight: "VTO sessions show 8pp higher love rate than non-VTO sessions for the same product across all evaluated periods.",
+      topInsight: "Model hypothesis: VTO could lift recommendation love by approximately 8pp; validate once VTO telemetry is available.",
+      topInsightIsHypothesis: true,
     },
   };
 
@@ -2106,11 +2113,12 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       postWearPositiveRate: nwr > 0 ? pct(ejAchieved, nwr) : 0,
       emotionalTransformations,
       productsByEmotionalImpact,
+      moodDistributionIsEstimated: true,
       moodDistribution: [
-        { mood: "Uncertain",   count: Math.max(1, Math.round(ns * 0.35)) },
-        { mood: "Uninspired",  count: Math.max(1, Math.round(ns * 0.27)) },
-        { mood: "Comfortable", count: Math.max(1, Math.round(ns * 0.22)) },
-        { mood: "Confident",   count: Math.max(1, Math.round(ns * 0.16)) },
+        { mood: "Uncertain",   count: Math.max(1, Math.round(ns * 0.35)), isEstimated: true },
+        { mood: "Uninspired",  count: Math.max(1, Math.round(ns * 0.27)), isEstimated: true },
+        { mood: "Comfortable", count: Math.max(1, Math.round(ns * 0.22)), isEstimated: true },
+        { mood: "Confident",   count: Math.max(1, Math.round(ns * 0.16)), isEstimated: true },
       ],
     },
     collectionHealth: {
@@ -2164,6 +2172,8 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       sampleSize: ns,
       selectionRate: 79,
       feedbackResponseRate: 62,
+      cardReactionCount: feedback.length,
+      loveRateCanonical: feedback.length > 0 ? pct(lovesTotal, feedback.length) : null,
       loveRate,
       disagreementRate: pct(feedback.filter(ev => ev.outcome === "skip").length, feedback.length) || 12,
       repeatCustomers: Math.max(1, [...new Set(sessions.map(ev => ev.customerId))].filter(cid =>
@@ -2423,21 +2433,26 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         scopeLabel: periodLabel,
         evidenceDenominator: totalFeedback,
         sampleSize: totalFeedback,
-        explanationAgreementRate: totalFeedback > 0 ? pct(loveFeedback, totalFeedback) : null,
+        cardLoveRate: totalFeedback > 0 ? pct(loveFeedback, totalFeedback) : null,
+        explanationAgreementRateIsProxy: true,
         clickThroughRate: null,
         saveRate: pct(saves.length, Math.max(1, ns)),
+        saveRateLinkage: "session-level",
         purchaseRate: pct(buys.length, Math.max(1, ns)),
+        purchaseRateLinkage: "session-level",
         reasonsResonate: totalFeedback > 0 ? [
-          { label: "Confidence context",    count: Math.max(1, Math.round(loveFeedback * 0.45)) },
-          { label: "Occasion match",        count: Math.max(1, Math.round(loveFeedback * 0.35)) },
-          { label: "Personality alignment", count: Math.max(1, Math.round(loveFeedback * 0.20)) },
+          { label: "Confidence context",    count: Math.max(1, Math.round(loveFeedback * 0.45)), isEstimated: true },
+          { label: "Occasion match",        count: Math.max(1, Math.round(loveFeedback * 0.35)), isEstimated: true },
+          { label: "Personality alignment", count: Math.max(1, Math.round(loveFeedback * 0.20)), isEstimated: true },
         ] : [],
         reasonsRejected: totalFeedback > 0 ? [
-          { label: "Too formal for context",         count: Math.max(1, Math.round((totalFeedback - loveFeedback) * 0.42)) },
-          { label: "Style too bold for personality", count: Math.max(1, Math.round((totalFeedback - loveFeedback) * 0.33)) },
-          { label: "Fit uncertainty",                count: Math.max(1, Math.round((totalFeedback - loveFeedback) * 0.25)) },
+          { label: "Too formal for context",         count: Math.max(1, Math.round((totalFeedback - loveFeedback) * 0.42)), isEstimated: true },
+          { label: "Style too bold for personality", count: Math.max(1, Math.round((totalFeedback - loveFeedback) * 0.33)), isEstimated: true },
+          { label: "Fit uncertainty",                count: Math.max(1, Math.round((totalFeedback - loveFeedback) * 0.25)), isEstimated: true },
         ] : [],
         byPersonality,
+        personalitySubsetTotal: byPersonality.reduce((s, r) => s + r.sampleSize, 0),
+        reactionsExcludedFromBreakdown: totalFeedback - byPersonality.reduce((s, r) => s + r.sampleSize, 0),
       };
     })(),
     opportunityScores: bySessionCount.slice(0, 3).map(p => ({
@@ -2706,7 +2721,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         sessionCount: pSessions.length,
         avgRating: avgR,
         rewearRate: pWear.length ? rewYes / pWear.length : null,
-        avgConfidenceLift: avgR != null && avgR > 0 ? Math.round((avgR - 3.5) * 10) / 10 : null,
+        ratingDerivedProxy: avgR != null && avgR > 0 ? Math.round((avgR - 3.5) * 10) / 10 : null,
         // null when no post-wear reviews — never report 0% from absence of WR events
         feelingAchievedRate: pWear.length > 0 ? pct(pFeelingOk, pWear.length) : null,
         wrCount: pWear.length,
@@ -2741,44 +2756,20 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     return map[personality] ?? `${sessionCount} sessions · ${loveRate}% love rate · top products: ${topProds.join(", ")}`;
   }
 
-  // Emotional chain — achievedRate from all-time WR events (period-filtered WR has zero events for short windows)
-  const allTimeWR = ofType(allTime, WR);
-  const chainAchievedRate = (desired: string): number | null => {
-    const relevant = allTimeWR.filter(ev => ev.desiredFeeling === desired);
-    if (relevant.length === 0) return null;
-    const achieved = relevant.filter(ev => {
-      const outcome = classifyEmotionalOutcome(ev.desiredFeeling, ev.actualAfterFeeling);
-      return outcome === "achieved" || outcome === "partly";
-    }).length;
-    return pct(achieved, relevant.length);
-  };
-
-  const emotionalChain = [
-    {
-      currentMood: "Uncertain",
-      desiredFeeling: "Confident",
-      count: sessions.filter(ev => ev.productName === SEEN || ev.productName === GROUNDED).length,
-      achievedRate: chainAchievedRate("Confident"),
-      avgRating: pm[SEEN].avgRating,
-      topProducts: [SEEN, GROUNDED].filter(p => pm[p].sessionCount > 0),
-    },
-    {
-      currentMood: "Uninspired",
-      desiredFeeling: "Effortless",
-      count: sessions.filter(ev => ev.productName === WHOLE || ev.productName === REAL).length,
-      achievedRate: chainAchievedRate("Effortless"),
-      avgRating: pm[WHOLE].avgRating,
-      topProducts: [WHOLE, REAL].filter(p => pm[p].sessionCount > 0),
-    },
-    ...(ns >= 15 ? [{
-      currentMood: "Comfortable",
-      desiredFeeling: "Elevated",
-      count: sessions.filter(ev => ev.productName === SEEN || ev.productName === CLEAR).length,
-      achievedRate: chainAchievedRate("Elevated"),
-      avgRating: pm[CLEAR].avgRating ?? pm[SEEN].avgRating,
-      topProducts: [SEEN, CLEAR].filter(p => pm[p].sessionCount > 0),
-    }] : []),
-  ];
+  // emotionalChain — uses PERIOD wearReviews only (matches Customers emotional journey).
+  // Derives directly from emotionalTransformations so the two sections can never diverge.
+  // Rows disappear when period WR evidence is zero — do not fall back to all-time.
+  const emotionalChain = emotionalTransformations.map(t => ({
+    currentMood:     t.startingMood,
+    desiredFeeling:  t.desiredFeeling,
+    wrCount:         t.count,
+    count:           t.count,
+    achievedRate:    t.count > 0 ? t.achievedRate : null,
+    achievedCount:   t.achievedCount,
+    achievedOf:      t.count,
+    avgRating:       pm[t.topProducts?.[0] ?? SEEN]?.avgRating ?? null,
+    topProducts:     t.topProducts,
+  }));
 
   // Occasion-product matrix
   const occasionRows = ["work", "dinner", "date-night", "travel", "special-event", "girls-night", "everyday"];

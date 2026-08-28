@@ -907,11 +907,12 @@ function buildTopSignals({ data, kpis, phase4b2, advanced, rel, dateRangeDays })
   if (advanced?.trustMetrics?.status !== "insufficient-data" && (advanced?.trustMetrics?.sampleSize ?? 0) >= 5) {
     const n = advanced.trustMetrics.sampleSize;
     const lr = advanced.trustMetrics.loveRate;
+    const cardN = advanced?.trustMetrics?.cardReactionCount ?? n;
     push("naia", "Recommendation Love Rate",
       `${lr}% Love it`,
-      `${Math.round(lr / 100 * n)} of ${n} sessions with responses`,
+      `${Math.round(lr / 100 * cardN)} of ${cardN} card reactions`,
       "Recommendation feedback", pLabel,
-      n, lr / 100);
+      cardN, lr / 100);
   }
 
   // nAia: confidence lift
@@ -1129,7 +1130,7 @@ function EmotionalFlowRow({ chain }) {
           </div>
         )}
         <div style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: 11, color: "#9CA3AF", marginLeft: "auto" }}>
-          {chain.count} session{chain.count !== 1 ? "s" : ""}
+          {chain.wrCount ?? chain.count} post-wear review{(chain.wrCount ?? chain.count) !== 1 ? "s" : ""}
           {chain.avgRating != null && ` · ★ ${chain.avgRating}`}
         </div>
       </div>
@@ -1147,7 +1148,7 @@ function DNAIntelligenceRow({ row }) {
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           {row.avgRating != null && <span style={{ ...MONO }}>★ {row.avgRating}</span>}
           {row.rewearRate != null && <span style={{ ...MONO }}>{Math.round(row.rewearRate * 100)}% rewear · {row.wrCount} post-wear</span>}
-          {row.avgConfidenceLift != null && <span style={{ ...MONO, color: "#8b2035" }}>{row.avgConfidenceLift >= 0 ? "+" : ""}{row.avgConfidenceLift} confidence</span>}
+          {row.ratingDerivedProxy != null && <span style={{ ...MONO, color: "#8b2035" }}>{row.ratingDerivedProxy >= 0 ? "+" : ""}{row.ratingDerivedProxy} (rating proxy)</span>}
           <span style={{ ...MONO, color: "#9CA3AF" }}>n={row.sessionCount} sessions</span>
           {(row.wrCount ?? 0) > 0 ? (
             <span style={{ ...MONO, color: row.feelingAchievedRate >= 70 ? "#2a5e42" : row.feelingAchievedRate >= 40 ? "#6b4800" : "#8b2035" }}>
@@ -2158,13 +2159,18 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
               Immediate card reactions — Love it / Okay / Not for me. Separate from post-outfit reviews, which are counted below.
             </div>
             <div style={s.kpiGrid}>
-              <KpiCard label="StyleMe Sessions (period)" value={phase4b2.feedbackEngagement.totalSessions} tooltip={`Count of StyleMe sessions in the ${periodLabel(dateRangeDays)} — denominator for the response rate below.`} />
-              <KpiCard label="Sessions With Response" value={phase4b2.feedbackEngagement.sessionsWithFeedback} />
-              <KpiCard label="Response Rate" value={pctOf(phase4b2.feedbackEngagement.sessionsWithFeedback, phase4b2.feedbackEngagement.totalSessions, "sessions")} tooltip="% of styling sessions where at least one recommendation card received an immediate response." />
+              <KpiCard label="StyleMe Sessions" value={phase4b2.feedbackEngagement.totalSessions} tooltip={`StyleMe sessions in the ${periodLabel(dateRangeDays)}`} />
+              <KpiCard label="Card Reactions" value={phase4b2.feedbackEngagement.totalCardReactions} tooltip="Total individual recommendation card reactions (Love it / Okay / Not for me) — one session can generate multiple reactions." />
+              <KpiCard label="Love Rate" value={phase4b2.feedbackEngagement.loveRate != null ? `${phase4b2.feedbackEngagement.loveRate}%` : "—"} tooltip={`${phase4b2.feedbackEngagement.lovesCount} Love it of ${phase4b2.feedbackEngagement.totalCardReactions} total card reactions`} />
             </div>
+            {phase4b2.feedbackEngagement.responseRateIsEstimated && (
+              <div style={{ fontSize: 11, color: "#9CA3AF", fontFamily: INTER, marginTop: 8, fontStyle: "italic" }}>
+                Est. {phase4b2.feedbackEngagement.sessionsWithFeedbackEst} sessions with ≥1 reaction — estimated from session volume; per-session reaction linkage not yet captured.
+              </div>
+            )}
             {(phase4b2?.feedbackDistribution?.total > 0) && (
               <>
-                <div style={{ ...s.subHeader, marginTop: 20 }}>RESPONSE DISTRIBUTION</div>
+                <div style={{ ...s.subHeader, marginTop: 20 }}>CARD REACTION DISTRIBUTION</div>
                 <div style={s.kpiGrid}>
                   <KpiCard label="Love it" value={phase4b2.feedbackDistribution.love} tooltip={pctOf(phase4b2.feedbackDistribution.love, phase4b2.feedbackDistribution.total, "responses")} />
                   <KpiCard label="It's okay" value={phase4b2.feedbackDistribution.okay} tooltip={pctOf(phase4b2.feedbackDistribution.okay, phase4b2.feedbackDistribution.total, "responses")} />
@@ -2243,16 +2249,22 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
         )}
       </Section>
 
-      <Section title="Buy or Skip Signals" desc="How customers assess new pieces against their wardrobe — all-time counts, does not follow the period filter" status={kpis?.buyOrSkip?.total > 0 ? "live" : "insufficient-data"}>
+      <Section title="Buy or Skip Signals" desc={`How customers assess new pieces against their wardrobe — ${dateRangeDays >= 365 ? "all time" : `last ${dateRangeDays} days`}`} status={kpis?.buyOrSkip?.total > 0 ? "live" : "insufficient-data"}>
         {kpis?.buyOrSkip?.total > 0 ? (
           <>
             {/* 4-category canonical distribution (Req 6): Buy, Skip, Undecided, Incomplete — must sum to total */}
             <div style={s.kpiGrid}>
               <KpiCard label="Total Analyses" value={kpis.buyOrSkip.total} />
               <KpiCard
-                label="Buy-Intent Rate"
+                label="Overall Buy Intent"
+                value={kpis.buyOrSkip.overallBuyIntentRate != null ? `${kpis.buyOrSkip.overallBuyIntentRate}%` : "—"}
+                desc={`${kpis.buyOrSkip.buyIntentCount ?? kpis.buyOrSkip.buy} Buy of ${kpis.buyOrSkip.total} total analyses`}
+              />
+              <KpiCard
+                label="Buy Share (Decisive)"
                 value={kpis.buyOrSkip.buyIntentRate != null ? `${kpis.buyOrSkip.buyIntentRate}%` : "—"}
-                desc={`Buy ÷ decided (${kpis.buyOrSkip.buyIntentCount ?? kpis.buyOrSkip.buy} buy / ${kpis.buyOrSkip.decidedCount ?? (kpis.buyOrSkip.buy + kpis.buyOrSkip.skip)} decided) — intent, not confirmed purchase`}
+                desc={`${kpis.buyOrSkip.buyIntentCount ?? kpis.buyOrSkip.buy} Buy / ${kpis.buyOrSkip.decidedCount ?? (kpis.buyOrSkip.buy + kpis.buyOrSkip.skip)} decisive — excludes Undecided`}
+                tooltip="Buy ÷ (Buy + Skip) only. Shows 100% when Skip = 0."
               />
               <KpiCard label="Buy Intent" value={kpis.buyOrSkip.buyIntentCount ?? kpis.buyOrSkip.buy} />
               <KpiCard label="Skip" value={kpis.buyOrSkip.skipCount ?? kpis.buyOrSkip.skip} />
@@ -2288,32 +2300,41 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
         {phase4b2?.postWearCompletion?.migrationPending ? <MigrationPendingNotice label="Post-wear review breakdown" /> : phase4b2?.postWearCompletion?.totalWithPostWear === 0 ? (
           <EmptyState message="No post-wear data yet." />
         ) : (
-          <div style={s.kpiGrid}>
-            <KpiCard label="Post-Wear Reviews" value={phase4b2.postWearCompletion.totalWithPostWear} />
-            <KpiCard label="Wore the Look" value={phase4b2.postWearCompletion.didWearItYes} suffix={` (${phase4b2.postWearCompletion.wearRate}%)`} />
-            <KpiCard label="Felt Great or Good" value={phase4b2.postWearCompletion.feltPositive} suffix={` (${phase4b2.postWearCompletion.positiveExperienceRate}%)`} />
-          </div>
+          <>
+            <div style={s.kpiGrid}>
+              <KpiCard label="Post-Wear Reviews" value={phase4b2.postWearCompletion.totalWithPostWear} />
+              <KpiCard label="Wore the Look" value={phase4b2.postWearCompletion.didWearItYes} suffix={` (${phase4b2.postWearCompletion.wearRate}%)`} />
+              <KpiCard label="Felt Great or Good" value={phase4b2.postWearCompletion.feltPositive} suffix={` (${phase4b2.postWearCompletion.positiveExperienceRate}%)`} />
+            </div>
+            <div style={{ fontSize: 11, color: "#9CA3AF", fontFamily: INTER, marginTop: 10, fontStyle: "italic" }}>
+              {periodLabel(dateRangeDays)} · n={phase4b2.postWearCompletion.totalWithPostWear} post-wear responses — directional only; minimum n=10 for a reliable pattern.
+            </div>
+          </>
         )}
       </Section>
 
 
       {sampleMode && advanced?.explainability?.status === "sample" ? (
-        <Section title="Explainability Analytics" desc={`SAMPLE PREVIEW — ${advanced.explainability.scopeLabel} · n=${advanced.explainability.evidenceDenominator} explanation-feedback events`} status="sample">
+        <Section title="Explainability Analytics" desc={`SAMPLE PREVIEW — ${advanced.explainability.scopeLabel} · n=${advanced.explainability.evidenceDenominator} recommendation card reactions`} status="sample">
           {advanced.explainability.evidenceDenominator === 0 && (
             <div style={{ padding: "10px 14px", background: "rgba(90,90,100,0.05)", borderLeft: "3px solid #8b2035", marginBottom: 16, fontSize: 13, color: "#8b2035" }}>
               Not enough sample evidence for this period — no explanation-feedback events recorded.
             </div>
           )}
           <div style={s.kpiGrid}>
-            <KpiCard label="Explanation Agreement Rate" value={advanced.explainability.explanationAgreementRate != null ? `${advanced.explainability.explanationAgreementRate}%` : "—"} tooltip="% of recommendation feedback responses that were 'Love it'. Not enough evidence when n=0." />
-            <KpiCard label="→ Click Rate" value="—" status="not-implemented" tooltip="No click events captured in this period." />
-            <KpiCard label="→ Save Rate" value={`${advanced.explainability.saveRate}%`} tooltip="% of sessions that resulted in a save." />
-            <KpiCard label="→ Purchase Rate" value={`${advanced.explainability.purchaseRate}%`} tooltip="% of sessions that resulted in a purchase." />
+            <KpiCard
+              label="Card Love Rate"
+              value={advanced.explainability.cardLoveRate != null ? `${advanced.explainability.cardLoveRate}%` : "—"}
+              tooltip={`${advanced.explainability.sampleSize > 0 ? Math.round(advanced.explainability.cardLoveRate / 100 * advanced.explainability.evidenceDenominator) : "—"} Love it of ${advanced.explainability.evidenceDenominator} card reactions. Not explanation-agreement data — no explanationAgreed field captured yet.`}
+            />
+            <KpiCard label="Session Save Rate" value={`${advanced.explainability.saveRate}%`} tooltip="% of StyleMe sessions in this period that included a save event. No causal linkage to card reactions — session-level only." />
+            <KpiCard label="Session Purchase Rate" value={`${advanced.explainability.purchaseRate}%`} tooltip="% of StyleMe sessions in this period that included a purchase event. No causal linkage to card reactions — session-level only." />
           </div>
           {advanced.explainability.reasonsResonate?.length > 0 && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
               <div style={s.card}>
                 <div style={{ ...s.cardLabel, color: "#2a5e42", marginBottom: 8 }}>Reasons That Resonate</div>
+                <div style={{ fontSize: 10, color: "#9CA3AF", fontFamily: INTER, marginBottom: 8, fontStyle: "italic" }}>Estimated categories — not captured from feedback reason events</div>
                 {advanced.explainability.reasonsResonate.map((r, i) => {
                   const label = typeof r === "object" ? r.label : r;
                   const count = typeof r === "object" ? r.count : null;
@@ -2328,6 +2349,7 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
               {advanced.explainability.reasonsRejected?.length > 0 && (
                 <div style={s.card}>
                   <div style={{ ...s.cardLabel, color: "#8b2035", marginBottom: 8 }}>Reasons Rejected</div>
+                  <div style={{ fontSize: 10, color: "#9CA3AF", fontFamily: INTER, marginBottom: 8, fontStyle: "italic" }}>Estimated categories — not captured from feedback reason events</div>
                   {advanced.explainability.reasonsRejected.map((r, i) => {
                     const label = typeof r === "object" ? r.label : r;
                     const count = typeof r === "object" ? r.count : null;
@@ -2344,16 +2366,21 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
           )}
           {advanced.explainability.byPersonality?.length > 0 && (
             <>
-              <div style={{ ...s.subHeader, marginTop: 20 }}>AGREEMENT RATE BY PERSONALITY</div>
+              <div style={{ ...s.subHeader, marginTop: 20 }}>CARD LOVE RATE BY PERSONALITY</div>
               <div style={s.grid3}>
                 {advanced.explainability.byPersonality.map((row, i) => (
                   <div key={i} style={s.card}>
                     <div style={s.cardLabel}>{row.personality}</div>
                     <div style={{ ...s.cardValue, color: row.agreementRate == null ? "#7a6f6a" : row.agreementRate >= 70 ? "#2a5e42" : row.agreementRate >= 40 ? "#d97706" : "#8b2035" }}>{row.agreementRate != null ? `${row.agreementRate}%` : "—"}</div>
-                    <div style={{ fontSize: 11, color: "#7a6f6a", marginTop: 4 }}>n={row.sampleSize} responses</div>
+                    <div style={{ fontSize: 11, color: "#7a6f6a", marginTop: 4 }}>n={row.sampleSize} reactions</div>
                   </div>
                 ))}
               </div>
+              {advanced.explainability.reactionsExcludedFromBreakdown > 0 && (
+                <div style={{ fontSize: 11, color: "#9CA3AF", fontFamily: INTER, marginTop: 8, fontStyle: "italic" }}>
+                  {advanced.explainability.reactionsExcludedFromBreakdown} card reactions from other style personalities excluded from this breakdown.
+                </div>
+              )}
             </>
           )}
         </Section>
@@ -2375,8 +2402,8 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
           status={rel.status}
         >
           <div style={{ fontSize: 13, color: "#7a6f6a", marginBottom: 16, lineHeight: 1.6 }}>
-            Recommendation success is measured by whether the customer achieves their desired feeling.
-            High achievement rates indicate the right product was matched to the right emotional moment.
+            Recommendation success is measured by whether the customer achieves their desired feeling after wearing the recommended piece.
+            Rates are calculated from post-wear reviews (WR events) in the selected period only — sessions without a post-wear review are not counted.
           </div>
           {rel.emotionalChain.filter(r => r.achievedRate != null).length > 0 ? (
             <>
@@ -2395,6 +2422,9 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
                 confidence="medium"
                 sampleSize={rel.sampleSize}
               />
+              <div style={{ fontSize: 11, color: "#9CA3AF", fontFamily: INTER, marginTop: 12, fontStyle: "italic" }}>
+                n={rel.emotionalChain.reduce((s, r) => s + (r.wrCount ?? r.count), 0)} post-wear responses — directional only; minimum n=10 for a reliable pattern.
+              </div>
             </>
           ) : (
             <InsufficientCard label="Recommendation success patterns" description="Need desiredFeelingAchieved data from post-outfit reviews." sampleSize={rel.sampleSize} />
@@ -2404,13 +2434,13 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
 
       {/* Starting Mood Distribution — moved from Collection */}
       {advanced?.emotionalJourney?.moodDistribution?.length > 0 && (
-        <Section title="Mood Coverage" desc="Starting moods nAia encounters — what customers are feeling when they open Style Me" status="live">
+        <Section title="Mood Coverage" desc="Estimated starting-mood distribution — starting-mood telemetry not yet captured in SS events" status="sample">
           <div style={{ fontFamily: SERIF, fontSize: 13, color: "#7a6f6a", fontStyle: "italic", marginBottom: 16 }}>
             Starting moods differ from desired feelings: these are the emotional states customers bring in, before requesting what they want to feel. Understanding the mood range helps calibrate recommendation tone and product selection.
           </div>
           <div style={s.grid3}>
             {advanced.emotionalJourney.moodDistribution.slice(0, 9).map((m, i) => (
-              <div key={i} style={s.card}><div style={s.cardLabel}>{m.mood}</div><div style={s.cardValue}>{m.count} sessions</div></div>
+              <div key={i} style={s.card}><div style={s.cardLabel}>{m.mood}</div><div style={s.cardValue}>~{m.count} est.</div></div>
             ))}
           </div>
         </Section>
@@ -2438,7 +2468,7 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
                       <th style={s.th}>Feeling Achieved</th>
                       <th style={s.th}>Avg Rating</th>
                       <th style={s.th}>Rewear</th>
-                      <th style={s.th}>Confidence Lift</th>
+                      <th style={s.th}>WR Reviews</th>
                       <th style={s.th}>Sessions</th>
                       <th style={s.th}>Signal</th>
                     </tr>
@@ -2450,12 +2480,14 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
                       return (
                         <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
                           <td style={{ ...s.td, fontFamily: SERIF, fontWeight: 600, fontSize: 14 }}>{row.personality}</td>
-                          <td style={{ ...s.td, fontWeight: 700, color: rateColor, fontFamily: MONO }}>{rate != null ? `${rate}%` : "—"}</td>
-                          <td style={s.td}>{row.avgRating != null ? `★ ${row.avgRating}` : "—"}</td>
-                          <td style={s.td}>{row.rewearRate != null ? `${Math.round(row.rewearRate * 100)}%` : "—"}</td>
-                          <td style={{ ...s.td, color: row.avgConfidenceLift != null && row.avgConfidenceLift > 0 ? "#2a5e42" : "#7a6f6a" }}>
-                            {row.avgConfidenceLift != null ? `${row.avgConfidenceLift >= 0 ? "+" : ""}${row.avgConfidenceLift}` : "—"}
+                          <td style={{ ...s.td, fontWeight: 700, color: rateColor, fontFamily: MONO }}>
+                            {rate != null ? `${rate}% · n=${row.wrCount}` : `— · no post-wear data`}
                           </td>
+                          <td style={s.td}>{row.avgRating != null ? `★ ${row.avgRating}` : "—"}</td>
+                          <td style={s.td}>
+                            {row.rewearRate != null ? `${Math.round(row.rewearRate * 100)}% · n=${row.wrCount}` : `— · no post-wear data`}
+                          </td>
+                          <td style={{ ...s.td, fontFamily: MONO, fontSize: 11 }}>{row.wrCount}</td>
                           <td style={{ ...s.td, fontFamily: MONO, fontSize: 11 }}>{row.sessionCount}</td>
                           <td style={{ ...s.td, fontSize: 11, fontFamily: MONO, color: rateColor }}>
                             {rate == null ? "—" : rate >= 70 ? "Strong" : rate >= 40 ? "Moderate" : "Weak"}
@@ -2492,11 +2524,14 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
 
       {/* Virtual Try-On Intelligence — moved from Products */}
       {sampleMode && phase4b2?.vtoIntelligence ? (
-        <Section title="Virtual Try-On Intelligence" desc="FASHN.ai VTO session outcomes — Sample Preview" status="sample">
+        <Section title="Virtual Try-On Intelligence" desc="Illustrative VTO intelligence model — VTO event telemetry not yet connected" status="sample">
           <div style={s.grid3}>
-            <KpiCard label="VTO Sessions" value={phase4b2.vtoIntelligence.totalSessions} />
-            <KpiCard label="Completion Rate" value={`${phase4b2.vtoIntelligence.completionRate}%`} />
-            <KpiCard label="Fidelity Concern Rate" value={`${phase4b2.vtoIntelligence.fidelityConcernRate}%`} />
+            <KpiCard label="VTO Sessions" value={`~${phase4b2.vtoIntelligence.totalSessions}`} tooltip="Estimated from session volume" />
+            <KpiCard label="Completion Rate" value={`~${phase4b2.vtoIntelligence.completionRate}%`} tooltip="Estimated — no VTO telemetry events yet" />
+            <KpiCard label="Fidelity Concern Rate" value={`~${phase4b2.vtoIntelligence.fidelityConcernRate}%`} />
+          </div>
+          <div style={{ fontSize: 11, color: "#9CA3AF", fontFamily: INTER, marginTop: 8, fontStyle: "italic" }}>
+            ~{phase4b2.vtoIntelligence.totalSessions} total estimated VTO sessions; product breakdown shows top products only.
           </div>
           {phase4b2.vtoIntelligence.productBreakdown?.length > 0 && (
             <div style={{ overflowX: "auto", marginTop: 16 }}>
@@ -2510,17 +2545,20 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
                   {phase4b2.vtoIntelligence.productBreakdown.map((p, i) => (
                     <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
                       <td style={s.td}>{p.product}</td>
-                      <td style={s.td}>{p.vtoTrials}</td>
-                      <td style={s.td}>{p.completionRate}%</td>
-                      <td style={{ ...s.td, color: "#2a5e42", fontWeight: 600 }}>{p.postVtoLoveRate}%</td>
-                      <td style={s.td}>{p.fidelityConcerns}</td>
+                      <td style={s.td}>~{p.vtoTrials}</td>
+                      <td style={s.td}>~{p.completionRate}%</td>
+                      <td style={{ ...s.td, color: "#2a5e42", fontWeight: 600 }}>~{p.postVtoLoveRate}%</td>
+                      <td style={s.td}>~{p.fidelityConcerns}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <div style={{ fontSize: 11, color: "#9CA3AF", fontFamily: INTER, marginTop: 8, fontStyle: "italic" }}>
+                All values are model estimates derived from session volume. Product breakdown shows top {phase4b2.vtoIntelligence.productBreakdown?.length ?? 4} products by session count — not all VTO-capable products. {phase4b2.vtoIntelligence.topInsight}
+              </div>
             </div>
           )}
-          {phase4b2.vtoIntelligence.topInsight && (
+          {phase4b2.vtoIntelligence.topInsight && !phase4b2.vtoIntelligence.productBreakdown?.length && (
             <div style={{ marginTop: 14, padding: "10px 14px", background: "rgba(42,94,66,0.06)", borderLeft: "3px solid #2a5e42", fontSize: 13, color: "#221516" }}>
               {phase4b2.vtoIntelligence.topInsight}
             </div>

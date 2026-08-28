@@ -2132,3 +2132,125 @@ describe("Products tab data coherence: stop-gate reconciliation", () => {
     }
   });
 });
+
+describe("Features & Recommendations coherence: stop-gate reconciliation", () => {
+  const d30 = getDesignerSampleData(30);
+  const phase4b2 = d30.phase4b2;
+  const kpis = d30.kpis;
+  const advanced = d30.advanced;
+  const rel = d30.rel;
+  const d90 = getDesignerSampleData(90);
+
+  it("1. Recommendation Love Rate = 83/94 card reactions at 30D", () => {
+    const fe = phase4b2.feedbackEngagement;
+    assert.strictEqual(fe.lovesCount, 83);
+    assert.strictEqual(fe.totalCardReactions, 94);
+    assert.strictEqual(fe.loveRate, Math.round(83 / 94 * 100));
+  });
+
+  it("2. No formula session-response rate is presented as observed (flagged as estimated)", () => {
+    const fe = phase4b2.feedbackEngagement;
+    assert.strictEqual(fe.responseRateIsEstimated, true);
+    assert.ok(typeof fe.sessionsWithFeedbackEst === "number");
+    // event-derived fields must exist
+    assert.ok(typeof fe.totalCardReactions === "number");
+    assert.ok(typeof fe.loveRate === "number");
+  });
+
+  it("3. Overall Buy Intent rate = 35/60 = 58% at 30D", () => {
+    const bs = kpis.buyOrSkip;
+    assert.strictEqual(bs.total, 60);
+    assert.strictEqual(bs.buyIntentCount, 35);
+    assert.strictEqual(bs.overallBuyIntentRate, Math.round(35 / 60 * 100));
+  });
+
+  it("4. Decisive Buy share = 35/35 = 100% at 30D (skip=0)", () => {
+    const bs = kpis.buyOrSkip;
+    assert.strictEqual(bs.skipCount, 0);
+    assert.strictEqual(bs.decidedCount, 35);
+    assert.strictEqual(bs.buyIntentRate, 100);
+  });
+
+  it("5. Buy/Skip scope follows period filter (30D ≠ 90D totals)", () => {
+    const bs30 = d30.kpis.buyOrSkip;
+    const bs90 = d90.kpis.buyOrSkip;
+    assert.ok(bs90.total >= bs30.total, "90D total must be ≥ 30D total");
+  });
+
+  it("6. Recommendation Success uses period WR only — at 30D achievedOf matches nwr", () => {
+    const chain = rel.emotionalChain;
+    // emotionalChain derives from emotionalTransformations (period WR)
+    // All chain entries' wrCount values must sum to ≤ nwr (30D WR events)
+    const nwr30 = phase4b2.postWearCompletion.totalWithPostWear;
+    const chainTotal = chain.reduce((s: number, r: any) => s + (r.wrCount ?? r.count), 0);
+    assert.ok(chainTotal <= nwr30, `chain WR total ${chainTotal} must not exceed 30D nwr ${nwr30}`);
+  });
+
+  it("7. Recommendation Success reconciles with Customers WR population at 30D", () => {
+    // emotionalTransformations in advanced.emotionalJourney and emotionalChain in rel
+    // must cover the same WR events — no chain entry can have more WR than the global nwr
+    const nwr30 = d30.phase4b2.postWearCompletion.totalWithPostWear;
+    for (const row of rel.emotionalChain as any[]) {
+      assert.ok((row.wrCount ?? 0) <= nwr30,
+        `Arc "${row.desiredFeeling}" wrCount ${row.wrCount} exceeds 30D nwr ${nwr30}`);
+    }
+  });
+
+  it("8. Personality Feeling Achieved and Rewear use WR n (wrCount), not session count", () => {
+    for (const row of rel.dnaMatrix as any[]) {
+      if (row.feelingAchievedRate != null) {
+        assert.ok((row.wrCount ?? 0) > 0,
+          `${row.personality}: feelingAchievedRate is non-null but wrCount=0`);
+      }
+      if (row.rewearRate != null) {
+        assert.ok((row.wrCount ?? 0) > 0,
+          `${row.personality}: rewearRate is non-null but wrCount=0`);
+      }
+    }
+  });
+
+  it("9. No WR data renders null, not 0%, for feelingAchievedRate and rewearRate", () => {
+    for (const row of rel.dnaMatrix as any[]) {
+      if ((row.wrCount ?? 0) === 0) {
+        assert.strictEqual(row.feelingAchievedRate, null,
+          `${row.personality}: expected null feelingAchievedRate when wrCount=0, got ${row.feelingAchievedRate}`);
+        assert.strictEqual(row.rewearRate, null,
+          `${row.personality}: expected null rewearRate when wrCount=0, got ${row.rewearRate}`);
+      }
+    }
+  });
+
+  it("10. dnaMatrix does not expose avgConfidenceLift — uses ratingDerivedProxy instead", () => {
+    for (const row of rel.dnaMatrix as any[]) {
+      assert.strictEqual((row as any).avgConfidenceLift, undefined,
+        `${row.personality}: avgConfidenceLift must not be present in dnaMatrix`);
+      // ratingDerivedProxy may be null but the key must exist
+      assert.ok("ratingDerivedProxy" in row,
+        `${row.personality}: ratingDerivedProxy key missing from dnaMatrix row`);
+    }
+  });
+
+  it("11. Explainability does not expose explanationAgreementRate — uses cardLoveRate", () => {
+    const exp = advanced.explainability;
+    assert.strictEqual((exp as any).explanationAgreementRate, undefined);
+    assert.ok("cardLoveRate" in exp);
+    assert.strictEqual(exp.saveRateLinkage, "session-level");
+    assert.strictEqual(exp.purchaseRateLinkage, "session-level");
+  });
+
+  it("12. VTO values are marked isEstimated=true", () => {
+    const vto = phase4b2.vtoIntelligence;
+    assert.strictEqual(vto.isEstimated, true);
+    for (const p of vto.productBreakdown ?? []) {
+      assert.strictEqual((p as any).isEstimated, true);
+    }
+    assert.strictEqual(vto.topInsightIsHypothesis, true);
+  });
+
+  it("13. Mood Coverage is marked moodDistributionIsEstimated=true", () => {
+    assert.strictEqual((advanced.emotionalJourney as any).moodDistributionIsEstimated, true);
+    for (const m of advanced.emotionalJourney.moodDistribution) {
+      assert.strictEqual((m as any).isEstimated, true);
+    }
+  });
+});
