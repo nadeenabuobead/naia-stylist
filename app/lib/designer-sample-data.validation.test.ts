@@ -1697,6 +1697,37 @@ describe("EVENTS_EXPANDED structural integrity", () => {
   });
 });
 
+describe("DNA Matrix display contract: wrCount exposed on every row for route n-disclosure", () => {
+  for (const days of [30, 90, 365]) {
+    it(`every dnaMatrix row has numeric wrCount at ${days}D`, () => {
+      const d = getDesignerSampleData(days) as any;
+      const dna: any[] = d.advanced?.dnaMatrix ?? d.rel?.dnaMatrix ?? [];
+      assert.ok(dna.length > 0, `dnaMatrix must be non-empty at ${days}D`);
+      for (const row of dna) {
+        assert.ok(
+          typeof row.wrCount === "number",
+          `DNA row "${row.personality}" at ${days}D: wrCount must be a number for route n-disclosure (got ${typeof row.wrCount}). Route renders "X post-wear" or "— · no post-wear data" based on this field.`
+        );
+        assert.ok(
+          row.wrCount >= 0,
+          `DNA row "${row.personality}" at ${days}D: wrCount must be ≥ 0 (got ${row.wrCount})`
+        );
+      }
+    });
+  }
+
+  it("wrCount is ≤ sessionCount for every row (post-wear events cannot exceed sessions)", () => {
+    const d = getDesignerSampleData(365) as any;
+    const dna: any[] = d.advanced?.dnaMatrix ?? d.rel?.dnaMatrix ?? [];
+    for (const row of dna) {
+      assert.ok(
+        row.wrCount <= row.sessionCount,
+        `DNA row "${row.personality}": wrCount (${row.wrCount}) must not exceed sessionCount (${row.sessionCount})`
+      );
+    }
+  });
+});
+
 describe("DNA Matrix: feelingAchievedRate is null — not 0% — when no WR events in period", () => {
   it("Edgy 30D: feelingAchievedRate is null when no post-wear reviews exist", () => {
     const d = getDesignerSampleData(30) as any;

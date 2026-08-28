@@ -1148,12 +1148,14 @@ function DNAIntelligenceRow({ row }) {
           {row.avgRating != null && <span style={{ ...MONO }}>★ {row.avgRating}</span>}
           {row.rewearRate != null && <span style={{ ...MONO }}>{Math.round(row.rewearRate * 100)}% rewear</span>}
           {row.avgConfidenceLift != null && <span style={{ ...MONO, color: "#8b2035" }}>{row.avgConfidenceLift >= 0 ? "+" : ""}{row.avgConfidenceLift} confidence</span>}
-          {row.feelingAchievedRate != null && (
-            <span style={{ ...MONO, color: row.feelingAchievedRate >= 70 ? "#2a5e42" : row.feelingAchievedRate >= 40 ? "#6b4800" : "#8b2035" }}>
-              {row.feelingAchievedRate}% feeling achieved
-            </span>
-          )}
           <span style={{ ...MONO, color: "#9CA3AF" }}>n={row.sessionCount} sessions</span>
+          {(row.wrCount ?? 0) > 0 ? (
+            <span style={{ ...MONO, color: row.feelingAchievedRate >= 70 ? "#2a5e42" : row.feelingAchievedRate >= 40 ? "#6b4800" : "#8b2035" }}>
+              {row.feelingAchievedRate}% feeling achieved · {row.wrCount} post-wear
+            </span>
+          ) : (
+            <span style={{ ...MONO, color: "#9CA3AF" }}>— · no post-wear data</span>
+          )}
         </div>
       </div>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: row.prescriptive ? 10 : 0, fontFamily: "'Cormorant Garamond', Garamond, serif", fontStyle: "italic", fontSize: 13, color: "#7a6f6a" }}>
@@ -1495,8 +1497,13 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays, liv
           <>
             <SampleSizeWarning n={advanced.emotionalJourney.sampleSize} min={10} />
             {/* Feeling Outcome Rates — mutually exclusive, sum = 100% of post-wear reviews */}
-            <div style={{ marginBottom: 6, fontSize: 11, color: "#7a6f6a", fontFamily: "'Inter', sans-serif" }}>
-              Achieved + Partly + Not Achieved = {advanced.emotionalJourney.totalDenominator ?? advanced.emotionalJourney.sampleSize} post-wear reviews (100%). Unknown/No Response excluded from denominator.
+            <div style={{ marginBottom: 10, padding: "8px 12px", background: "rgba(197,85,58,0.06)", border: "1px solid rgba(197,85,58,0.2)", fontFamily: "'Inter', sans-serif", display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#c5553a" }}>
+                n={advanced.emotionalJourney.sampleSize} post-wear {advanced.emotionalJourney.sampleSize === 1 ? "response" : "responses"}
+              </span>
+              <span style={{ fontSize: 11, color: "#7a6f6a" }}>
+                — outcome rates below are based on this sample. Achieved + Partly + Not Achieved sum to 100% of post-wear reviews; treat as directional until n ≥ 10.
+              </span>
             </div>
             <div style={s.kpiGrid}>
               <KpiCard
