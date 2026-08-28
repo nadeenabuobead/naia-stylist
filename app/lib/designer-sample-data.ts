@@ -764,8 +764,13 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   const buys  = buyOrSkip.filter(ev => ev.outcome === "bought");
   const saves = buyOrSkip.filter(ev => ev.outcome === "saved");
 
-  const prevNs = ofType(filterWindow(prior, 9999), SS).length;
-  const prevNr = ofType(filterWindow(prior, 9999), OR).length;
+  const prevNs = ofType(prior, SS).length;
+  const prevNr = ofType(prior, OR).length;
+  const prevWr = ofType(prior, WR);
+  const prevNwr = prevWr.length;
+  const prevRewearRate = prevNwr > 0
+    ? Math.round(prevWr.filter(ev => ev.rewear === true).length / prevNwr * 100)
+    : null;
 
   const allRatings = [...reviews, ...wearReviews].map(ev => ev.rating).filter((r): r is number => r !== null);
   const avgRating  = allRatings.length ? (meanRating([...reviews, ...wearReviews]) ?? 4.1) : 4.1;
@@ -925,12 +930,12 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         { lifestyle: "everyday",  count: 7,  percentage: 47 },
         { lifestyle: "travel",    count: 5,  percentage: 33 },
       ],
-      colorDistribution: [   // kept for live-data backward compat
-        { color: "burgundy",  count: 9,  percentage: 60 },
-        { color: "espresso",  count: 8,  percentage: 53 },
-        { color: "ivory",     count: 6,  percentage: 40 },
-        { color: "black",     count: 6,  percentage: 40 },
-        { color: "caramel",   count: 4,  percentage: 27 },
+      colorDistribution: [   // kept for live-data backward compat; values are catalog hypothesis — no colour field on SE events
+        { color: "burgundy",  count: 9,  percentage: 60, isCatalogHypothesis: true },
+        { color: "espresso",  count: 8,  percentage: 53, isCatalogHypothesis: true },
+        { color: "ivory",     count: 6,  percentage: 40, isCatalogHypothesis: true },
+        { color: "black",     count: 6,  percentage: 40, isCatalogHypothesis: true },
+        { color: "caramel",   count: 4,  percentage: 27, isCatalogHypothesis: true },
       ],
       colorIntelligence: {
         paletteDirection: "Neutral-Forward",
@@ -940,11 +945,11 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
           { direction: "Monochrome",      count: 2,  percentage: 13, description: "Single-colour tonal dressing preferred by Old Money and Minimal profiles" },
         ],
         preferredColors: [
-          { color: "burgundy",  count: 9,  percentage: 60 },
-          { color: "espresso",  count: 8,  percentage: 53 },
-          { color: "ivory",     count: 6,  percentage: 40 },
-          { color: "black",     count: 6,  percentage: 40 },
-          { color: "caramel",   count: 4,  percentage: 27 },
+          { color: "burgundy",  count: 9,  percentage: 60, isCatalogHypothesis: true },
+          { color: "espresso",  count: 8,  percentage: 53, isCatalogHypothesis: true },
+          { color: "ivory",     count: 6,  percentage: 40, isCatalogHypothesis: true },
+          { color: "black",     count: 6,  percentage: 40, isCatalogHypothesis: true },
+          { color: "caramel",   count: 4,  percentage: 27, isCatalogHypothesis: true },
         ],
         avoidedColors: [
           { color: "neon yellow",   count: 8, percentage: 53 },
@@ -999,8 +1004,8 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     topObjections: topObjList.slice(0, 5),
 
     stylingNeeds: [
-      { occasion: "Casual weekend",       need: "Casual weekend",       count: Math.max(1, Math.round(ns * 0.1)) },
-      { occasion: "Active / sporty",      need: "Active / sporty",      count: Math.max(1, Math.round(ns * 0.06)) },
+      { occasion: "Casual weekend",  need: "Casual weekend",  count: Math.max(1, Math.round(ns * 0.1)),  isEstimated: true },
+      { occasion: "Active / sporty", need: "Active / sporty", count: Math.max(1, Math.round(ns * 0.06)), isEstimated: true },
     ],
 
     conversionStats: [],
@@ -1459,20 +1464,28 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         { reason: "Duplicate / gifting error",     count: 1, products: [ALIVE] },
       ],
     },
-    inventory: {
-      // Weighted: total net units sold ÷ total starting units (correct for founder-level inventory decisions)
-      weightedSellThrough,
-      // Unweighted: mean of individual product sell-through rates (biased by product mix — show with label)
-      avgSellThrough,
-      fastestMoving: bySTSorted[0]?.product ?? null,
-      slowestMoving: bySTSorted[bySTSorted.length - 1]?.product ?? null,
-      atRisk: byProductCommercial.filter(r => r.sellThrough < 25 && r.inStock >= 8).map(r => r.product),
-      byProduct: bySTSorted.map(r => ({
-        product: r.product, inStock: r.inStock, unitsSold: r.unitsSold,
-        returned: r.returned, netSold: r.netSold, totalUnits: r.totalUnits,
-        sellThrough: r.sellThrough,
-      })),
-    },
+    inventory: (() => {
+      const minST = bySTSorted.length > 0 ? bySTSorted[bySTSorted.length - 1].sellThrough : 0;
+      const tiedAtMin = bySTSorted.filter(r => r.sellThrough === minST);
+      return {
+        // Weighted: total net units sold ÷ total starting units (correct for founder-level inventory decisions)
+        weightedSellThrough,
+        // Unweighted: mean of individual product sell-through rates (biased by product mix — show with label)
+        avgSellThrough,
+        fastestMoving: bySTSorted[0]?.product ?? null,
+        slowestMoving: bySTSorted[bySTSorted.length - 1]?.product ?? null,
+        // tiedSlowest: set when multiple products share the lowest sell-through; null when one product is uniquely slowest
+        tiedSlowest: tiedAtMin.length > 1
+          ? { products: tiedAtMin.map(r => r.product), pct: minST }
+          : null,
+        atRisk: byProductCommercial.filter(r => r.sellThrough < 25 && r.inStock >= 8).map(r => r.product),
+        byProduct: bySTSorted.map(r => ({
+          product: r.product, inStock: r.inStock, unitsSold: r.unitsSold,
+          returned: r.returned, netSold: r.netSold, totalUnits: r.totalUnits,
+          sellThrough: r.sellThrough,
+        })),
+      };
+    })(),
   };
 
   // ── aiLearning (derived from feedback events + confidence tiers — sample only) ─────────────────
@@ -1996,14 +2009,19 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
 
   // Opportunity feed — derived from period-specific insights
   const seenTooFormalCount   = sessions.filter(ev => ev.productName === SEEN && ev.objection === "Too formal").length;
+  const seenRfDeclineCount   = feedback.filter(ev => ev.productName === SEEN && ev.outcome === "skip").length;
   const groundedObjCount     = sessions.filter(ev => ev.productName === GROUNDED && ev.objection).length;
   const wholeConvRate        = pm[WHOLE].totalBuyOrSkip > 0 ? pct(pm[WHOLE].buyCount, pm[WHOLE].totalBuyOrSkip) : 0;
   const corpChicSessionCount = sessions.filter(ev => CUST[ev.customerId] === "Corporate Chic").length;
+  const aliveEdgyFbCount     = feedback.filter(ev => ev.productName === ALIVE && CUST[ev.customerId] === "Edgy").length;
 
   const opportunityFeed = [
     {
       id: "seen-workwear-hero",
       type: "product-opportunity",
+      _productSlug: "becoming-seen",
+      evidenceN: pm[SEEN].sampleSize,
+      evidencePopulation: "outfit + post-wear reviews for Becoming Seen",
       confidence: evidenceConfidence(pm[SEEN].evidenceN),
       estimatedCommercialRelevance: "high",
       insight: `Becoming Seen leads all products in sessions (${pm[SEEN].sessionCount}) and delivers the highest confidence lift for Corporate Chic customers`,
@@ -2017,6 +2035,9 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     {
       id: "whole-save-gap",
       type: "product-friction",
+      _productSlug: "becoming-whole",
+      evidenceN: pm[WHOLE].saveCount,
+      evidencePopulation: "save intents for Becoming Whole (BS events)",
       confidence: evidenceConfidence(pm[WHOLE].evidenceN),
       estimatedCommercialRelevance: "high",
       insight: `Becoming Whole has ${pm[WHOLE].saveCount} saves and ${pm[WHOLE].buyCount} purchases — the widest save/purchase gap in the collection`,
@@ -2030,6 +2051,9 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     {
       id: "clear-underexposed",
       type: "product-opportunity",
+      _productSlug: "becoming-clear",
+      evidenceN: pm[CLEAR].totalBuyOrSkip,
+      evidencePopulation: "buy-or-skip decisions for Becoming Clear",
       confidence: evidenceConfidence(pm[CLEAR].evidenceN),
       estimatedCommercialRelevance: "high",
       insight: `Becoming Clear converts at ${pm[CLEAR].conversionRate}% (${pm[CLEAR].buyCount}/${pm[CLEAR].totalBuyOrSkip} buy-or-skip interactions) — highest in the collection — but receives far fewer sessions than Becoming Seen`,
@@ -2043,11 +2067,14 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     {
       id: "grounded-fit-objection",
       type: "fit-signal",
+      _productSlug: "becoming-grounded",
+      evidenceN: groundedObjCount,
+      evidencePopulation: "fit objections on Becoming Grounded (SS events)",
       confidence: evidenceConfidence(groundedObjCount),
       estimatedCommercialRelevance: "medium",
       insight: `Becoming Grounded has ${groundedObjCount} fit objections across ${pm[GROUNDED].sessionCount} sessions — trouser length and hip-fit are the primary barriers`,
       customerNeed: "Customers want the asymmetric silhouette but length is a specific, solvable problem — a better-fitting option may resolve this",
-      evidence: `${groundedObjCount} fit objections · top barrier: "${pm[GROUNDED].topObjection}"${pm[GROUNDED].buyCount > 0 ? ` · ${pm[GROUNDED].buyCount} purchase${pm[GROUNDED].buyCount > 1 ? "s" : ""} when fit resolves` : " · purchase conversions visible in 90D+ window"}`,
+      evidence: `${groundedObjCount} fit objections (SS events) · top barrier: "${pm[GROUNDED].topObjection}"${pm[GROUNDED].buyCount > 0 ? ` · ${pm[GROUNDED].buyCount} purchase${pm[GROUNDED].buyCount > 1 ? "s" : ""} when fit resolves` : " · purchase conversions visible in 90D+ window"}`,
       timePeriod: periodLabel,
       suggestedAction: "Introduce ankle-length petite guidance; explore a shorter SKU; add height context to recommendation logic for this piece",
       designImplication: "Investigate whether a cropped or ankle-length version would address the recurring length objection. Do not invest in a new SKU until petite-specific styling guidance has been tested first.",
@@ -2056,6 +2083,9 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     {
       id: "alive-personality-targeting",
       type: "audience-gap",
+      _productSlug: "becoming-alive",
+      evidenceN: aliveEdgyFbCount,
+      evidencePopulation: "Edgy recommendation feedback for Becoming Alive (RF events)",
       confidence: evidenceConfidence(pm[ALIVE].evidenceN),
       estimatedCommercialRelevance: "medium",
       insight: "Becoming Alive delivers 4.7+ outcomes for Edgy customers but consistent rejections from Minimal and Casual Cool profiles",
@@ -2069,6 +2099,9 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     {
       id: "corporate-chic-loyalty",
       type: "retention-signal",
+      _productSlug: null,
+      evidenceN: corpChicSessionCount,
+      evidencePopulation: "Corporate Chic styling sessions (SS events)",
       confidence: evidenceConfidence(corpChicSessionCount),
       estimatedCommercialRelevance: "high",
       insight: `Corporate Chic customers are the most frequent stylists — repeat sessions with Becoming Seen and multi-piece interests visible across the timeline`,
@@ -2082,11 +2115,14 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     {
       id: "seen-formal-objection",
       type: "product-friction",
+      _productSlug: "becoming-seen",
+      evidenceN: seenTooFormalCount,
+      evidencePopulation: '"Too formal" objections on Becoming Seen (SS events)',
       confidence: evidenceConfidence(seenTooFormalCount),
       estimatedCommercialRelevance: "low",
       insight: `${seenTooFormalCount} 'Too formal' objections on Becoming Seen — concentrated among Minimal and Casual Cool profiles`,
       customerNeed: "These customers want the elevated feel of the piece but need to see it styled for less formal contexts",
-      evidence: `${seenTooFormalCount} objections · Minimal and Casual Cool profiles · all ${seenTooFormalCount} objections result in skip`,
+      evidence: `${seenTooFormalCount} "Too formal" objections on Becoming Seen (SS events) · ${seenRfDeclineCount} recommendation declines for Becoming Seen (RF events) — separate signal, correlated by customerId + productName only, no session-level causal link · Buy/Skip: 0 skips on Becoming Seen in this period`,
       timePeriod: periodLabel,
       suggestedAction: "Create casual-styling content for Becoming Seen: weekend context, flat shoes, less structured pairings",
       designImplication: "Evaluate whether a more relaxed version of the Becoming Seen silhouette would serve Minimal and Casual Cool customers without diluting the Corporate Chic positioning.",
@@ -2158,11 +2194,11 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       previous: {
         label: prevLabel,
         sessions: prevNsFinal,
-        reviews: Math.max(1, prevNr || Math.round(nr * 0.78)),
+        reviews: prevNr + prevNwr,
         avgRating: Math.round(prevAvgRatingFinal * 10) / 10,
-        rewearRate: Math.max(60, Math.round(rewearRateTotal * 100) - 6),
+        rewearRate: prevRewearRate,
       },
-      ratingTrend: avgRating > prevAvgRatingFinal ? "up" : "stable",
+      ratingTrend: avgRating > prevAvgRatingFinal ? "up" : avgRating < prevAvgRatingFinal ? "down" : "stable",
       sessionsTrend: ns > prevNsFinal ? "up" : "stable",
       trendSummary: dateRangeDays === 7
         ? `Early signal: Becoming Clear has 3 sessions this week with 100% love rate and 1 purchase. Travel demand rising.`
@@ -2600,8 +2636,8 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         underservedSizes,
         totalFitObjections: fitObjEvents.length,
         totalReturns: allReturns.length,
-        evidenceMaturity: evidenceConfidence(fitObjEvents.length + allReturns.length),
-        recommendation: `Becoming Grounded shows the highest fit objection rate (primarily trouser length and hip fit) with ${allReturns.filter(ev => ev.productName === GROUNDED).length + 1} confirmed returns. Size L and M account for the highest objection volume. Consider a petite-length variant and a clearer size chart. Size Coverage data will improve significantly once garment-size fields are captured in StyleMe sessions.`,
+        evidenceMaturity: "Sample — primarily estimated",
+        recommendation: `Becoming Grounded shows the highest fit objection rate (primarily trouser length and hip fit) with ${allReturns.filter(ev => ev.productName === GROUNDED).length} confirmed returns (all-time). Size L and M account for the highest objection volume. Consider a petite-length variant and a clearer size chart. Size Coverage data will improve significantly once garment-size fields are captured in StyleMe sessions.`,
       };
     })(),
 
@@ -2802,6 +2838,8 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         count: occSessions.length,
         avgRating: occReviews.length ? (meanRating(occReviews) ?? null) : null,
         successRate: occSessions.length > 0 ? pct(successes, occSessions.length) : null,
+        successRateMetric: "recommendation-acceptance-session-matched" as const,
+        successRateDenominator: occSessions.length,
         topPersonalities,
         topDesiredFeelings: topFeelings,
         topProducts: topProds,

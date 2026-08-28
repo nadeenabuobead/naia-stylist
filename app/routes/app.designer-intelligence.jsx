@@ -2785,13 +2785,17 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, l
         const hasDna = rel?.dnaMatrix?.length > 0;
         const occasions = data?.topOccasions ?? [];
         const unmetNeeds = data?.stylingNeeds ?? [];
-        const wellServedCount = hasDna ? rel.dnaMatrix.filter(r => r.avgRating != null && r.avgRating >= 4 && r.rewearRate != null && r.rewearRate >= 0.6).length : null;
+        const wellServedCount = hasDna ? rel.dnaMatrix.filter(r => {
+          const sc = sampleConfidence(r.wrCount ?? 0);
+          return r.avgRating != null && r.avgRating >= 4 && r.rewearRate != null && r.rewearRate >= 0.6
+            && sc.status !== "insufficient-data" && sc.status !== "not-implemented";
+        }).length : null;
         const totalPersonalities = hasDna ? rel.dnaMatrix.length : null;
         const coverageScore = health?.score;
         const gapLabel = health?.largestWeakness ? health.largestWeakness.replace(/([A-Z])/g, " $1").trim().toLowerCase() : null;
         const strongLabel = health?.strongestArea ? health.strongestArea.replace(/([A-Z])/g, " $1").trim().toLowerCase() : null;
-        const isBalanced = coverageScore != null && coverageScore >= 60 && wellServedCount != null && wellServedCount >= Math.ceil(totalPersonalities * 0.6);
-        const balanceVerdict = coverageScore == null ? "Insufficient data to assess balance." : isBalanced ? "Collection is broadly balanced." : "Collection has notable coverage gaps.";
+        const isBalanced = wellServedCount != null && wellServedCount >= Math.ceil(totalPersonalities * 0.6);
+        const balanceVerdict = totalPersonalities == null ? "Insufficient data to assess balance." : isBalanced ? "Collection is broadly balanced." : "Collection has notable coverage gaps.";
         return (
           <div style={{ ...s.card, borderLeft: "3px solid #8b2035", marginBottom: 8, background: "linear-gradient(135deg, #fdfaf7 0%, #fff 100%)" }}>
             <div style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 700, color: "#221516", marginBottom: 10 }}>
@@ -2801,7 +2805,6 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, l
               <div>
                 <div style={s.cardLabel}>Balance verdict</div>
                 <div style={{ fontSize: 14, color: isBalanced ? "#2a5e42" : coverageScore == null ? "#9CA3AF" : "#d97706", fontWeight: 600, marginTop: 4 }}>{balanceVerdict}</div>
-                {coverageScore != null && <div style={{ fontFamily: MONO, fontSize: 10, color: "#7a6f6a", marginTop: 4 }}>Health score: {coverageScore}/100</div>}
               </div>
               <div>
                 <div style={s.cardLabel}>Personality coverage</div>
@@ -2814,7 +2817,7 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, l
                 <div style={{ fontSize: 14, color: "#221516", fontWeight: 600, marginTop: 4 }}>
                   {occasions.length > 0 ? `${occasions.length} occasions active` : "—"}
                 </div>
-                {unmetNeeds.length > 0 && <div style={{ fontSize: 12, color: "#d97706", marginTop: 4 }}>{unmetNeeds.length} unmet need{unmetNeeds.length !== 1 ? "s" : ""} flagged</div>}
+                {unmetNeeds.length > 0 && <div style={{ fontSize: 12, color: "#d97706", marginTop: 4 }}>{unmetNeeds.length} estimated demand gap{unmetNeeds.length !== 1 ? "s" : ""}</div>}
               </div>
               <div>
                 <div style={s.cardLabel}>Gaps &amp; strengths</div>
@@ -2906,7 +2909,7 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, l
       </Section>
 
       {/* Colour Coverage */}
-      <Section title="Preferred Colour Demand" desc="Preferred colour families from completed customer profiles — all time" status={data.onboarding?.colorDistribution?.length > 0 ? "live" : "insufficient-data"}>
+      <Section title="Preferred Colour Demand" desc="Catalog hypothesis — assumed preferred colour families; no colour field exists on StyleMe events · All time" status={data.onboarding?.colorDistribution?.length > 0 ? "sample" : "insufficient-data"}>
         <div style={s.grid3}>
           {data.onboarding?.colorDistribution?.slice(0, 9).map((item, i) => (
             <div key={i} style={s.card}><div style={s.cardLabel}>{normalizeLabel(item.color) ?? item.color}</div><div style={s.cardValue}>{item.count} customers prefer this</div></div>
@@ -2920,7 +2923,7 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, l
           <div style={s.kpiGrid}>
             <KpiCard label="Total Customers" value={advanced.sizeIntelligence.totalCustomers} />
             <KpiCard label="Fit Objections" value={advanced.sizeIntelligence.totalFitObjections} />
-            <KpiCard label="Returns" value={advanced.sizeIntelligence.totalReturns} />
+            <KpiCard label="Returns (all-time)" value={advanced.sizeIntelligence.totalReturns} />
             <KpiCard label="Evidence Maturity" value={advanced.sizeIntelligence.evidenceMaturity} />
           </div>
           <div style={{ ...s.subHeader, marginTop: 20 }}>CUSTOMER DISTRIBUTION BY SIZE GROUP</div>
@@ -2950,7 +2953,7 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, l
               <div style={{ ...s.subHeader, marginTop: 20 }}>FIT OBJECTIONS BY PRODUCT</div>
               <div style={{ overflowX: "auto" }}>
                 <table style={s.table}>
-                  <thead><tr><th style={s.th}>Product</th><th style={s.th}>Fit Objections</th><th style={s.th}>Returns</th><th style={s.th}>Top Objection</th><th style={s.th}>Stock-Out Risk</th></tr></thead>
+                  <thead><tr><th style={s.th}>Product</th><th style={s.th}>Objections</th><th style={s.th}>Returns</th><th style={s.th}>Top Objection</th><th style={s.th}>Stock-Out Risk</th></tr></thead>
                   <tbody>
                     {advanced.sizeIntelligence.fitObjByProduct.map((r, i) => (
                       <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
@@ -2995,13 +2998,13 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, l
       )}
 
       {/* Unmet Needs */}
-      <Section title="Unmet Customer Needs" desc="Occasions and needs requested most with insufficient product coverage" status="live">
+      <Section title="Unmet Customer Needs" desc="Estimated demand gaps — formula-derived; n counts approximate sessions, not observed requests (always 2 items)" status="sample">
         {data.stylingNeeds?.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {data.stylingNeeds.slice(0, 8).map((need, i) => (
               <div key={i} style={{ padding: 16, background: "#fff", border: "1px solid rgba(34,21,22,0.08)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontSize: 15, color: "#221516" }}>{need.occasion || need.need}</span>
-                <span style={{ fontFamily: MONO, fontSize: 11, color: "#7a6f6a" }}>{need.count} requests</span>
+                <span style={{ fontFamily: MONO, fontSize: 11, color: "#7a6f6a" }}>~{need.count} est. demand gap{need.count !== 1 ? "s" : ""}</span>
               </div>
             ))}
           </div>
@@ -3022,7 +3025,10 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, l
               <SampleSizeWarning n={rel.sampleSize} min={10} />
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16, marginBottom: 24 }}>
                 {rel.dnaMatrix.map((row, i) => {
-                  const served = row.avgRating != null && row.avgRating >= 4 && row.rewearRate != null && row.rewearRate >= 0.6;
+                  const wrc = row.wrCount ?? 0;
+                  const sc = sampleConfidence(wrc);
+                  const hasSufficientWr = sc.status !== "insufficient-data" && sc.status !== "not-implemented";
+                  const served = hasSufficientWr && row.avgRating != null && row.avgRating >= 4 && row.rewearRate != null && row.rewearRate >= 0.6;
                   const partial = !served && (row.avgRating != null || row.rewearRate != null);
                   const borderColor = served ? "#2a5e42" : partial ? "#d97706" : "#9CA3AF";
                   const label = served ? "Well Served" : partial ? "Partially Served" : "Insufficient Data";
@@ -3035,9 +3041,9 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, l
                       </div>
                       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11, fontFamily: MONO, color: "#7a6f6a", marginBottom: 8 }}>
                         {row.avgRating != null && <span>★ {row.avgRating}</span>}
-                        {row.rewearRate != null && <span>{Math.round(row.rewearRate * 100)}% rewear</span>}
+                        {row.rewearRate != null && <span>{Math.round(row.rewearRate * 100)}% rewear ({wrc} post-wear)</span>}
                         {row.feelingAchievedRate != null && <span>{row.feelingAchievedRate}% feeling achieved</span>}
-                        <span>n={row.sessionCount}</span>
+                        <span>n={row.sessionCount} sessions</span>
                       </div>
                       {row.topOccasions?.length > 0 && (
                         <div style={{ fontSize: 12, color: "#7a6f6a" }}>Best occasions: {row.topOccasions.join(", ")}</div>
@@ -3060,7 +3066,7 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, l
                         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 15, fontWeight: 600, color: "#221516", marginBottom: 6 }}>{row.occasion}</div>
                         <div style={{ fontSize: 11, fontFamily: MONO, color: "#7a6f6a", marginBottom: 4 }}>
                           {row.count} session{row.count !== 1 ? "s" : ""}
-                          {row.successRate != null && ` · ${row.successRate}% success`}
+                          {row.successRate != null && ` · ${row.successRate}% recommendation acceptance`}
                         </div>
                         {row.topPersonalities?.length > 0 && (
                           <div style={{ fontSize: 11, color: "#8b2035" }}>{row.topPersonalities.join(", ")}</div>
@@ -3073,25 +3079,37 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, l
 
               {/* Prescriptive recommendation */}
               {(() => {
-                const underserved = rel.dnaMatrix.filter(r =>
-                  r.sessionCount >= 2 && (r.avgRating == null || r.avgRating < 3.5 || r.rewearRate == null || r.rewearRate < 0.5)
+                const noPostWear = rel.dnaMatrix.filter(r =>
+                  r.sessionCount >= 2 && (r.wrCount ?? 0) === 0 && (r.avgRating == null || r.avgRating < 3.5)
                 );
-                const wellServed = rel.dnaMatrix.filter(r =>
-                  r.avgRating != null && r.avgRating >= 4 && r.rewearRate != null && r.rewearRate >= 0.6
+                const measuredLow = rel.dnaMatrix.filter(r =>
+                  r.sessionCount >= 2 && (r.wrCount ?? 0) > 0 && (r.rewearRate != null && r.rewearRate < 0.5)
                 );
+                const underserved = [...measuredLow, ...noPostWear];
+                const wellServed = rel.dnaMatrix.filter(r => {
+                  const sc = sampleConfidence(r.wrCount ?? 0);
+                  return r.avgRating != null && r.avgRating >= 4 && r.rewearRate != null && r.rewearRate >= 0.6
+                    && sc.status !== "insufficient-data" && sc.status !== "not-implemented";
+                });
                 if (underserved.length === 0 && wellServed.length === 0) return null;
-                const rec = underserved.length > 0
-                  ? `${underserved[0].personality} customers are showing below-threshold satisfaction${underserved[0].topOccasions[0] ? ` for ${underserved[0].topOccasions[0]}` : ""}. Review whether the collection has depth in pieces that address their desired feelings (${underserved[0].topDesiredFeelings.slice(0, 2).join(", ") || "see profiles"}).`
+                const firstUnder = underserved[0];
+                const isNoData = firstUnder && (firstUnder.wrCount ?? 0) === 0;
+                const rec = firstUnder
+                  ? isNoData
+                    ? `No post-wear data yet for ${firstUnder.personality} customers — recommendation delivery cannot be confirmed from current evidence. Prioritise collecting post-wear feedback from this segment.`
+                    : `${firstUnder.personality} customers are showing below-threshold rewear or satisfaction (post-wear n=${firstUnder.wrCount})${firstUnder.topOccasions?.[0] ? ` for ${firstUnder.topOccasions[0]}` : ""}. Review whether the collection has depth in pieces that address their desired feelings (${firstUnder.topDesiredFeelings?.slice(0, 2).join(", ") || "see profiles"}).`
                   : `Current collection is performing consistently across all personality types with sufficient data. Increase session volume to surface signals for personality types with fewer than 3 sessions.`;
-                const reason = underserved.length > 0
-                  ? `Low rewear rate or rating from a consistent personality segment is the earliest signal of a collection gap — before any conversion data is available.`
+                const reason = firstUnder
+                  ? isNoData
+                    ? `Post-wear responses are needed before assessing whether ${firstUnder.personality} customers achieve their desired feelings. A 0-count is absence of data, not evidence of poor performance.`
+                    : `Below-threshold rewear or satisfaction from a consistent personality segment is the earliest signal of a collection gap — before any conversion data is available.`
                   : `Consistent performance across personality types within the current customer base — no clear gap signal in available observations.`;
                 return (
                   <PrescriptiveBlock
                     recommendation={rec}
                     reason={reason}
-                    confidence={underserved.length > 0 ? "medium" : "high"}
-                    sampleSize={rel.sampleSize}
+                    confidence={firstUnder ? (isNoData ? "low" : "medium") : "high"}
+                    sampleSize={firstUnder?.sessionCount ?? rel.sampleSize}
                   />
                 );
               })()}
@@ -3167,7 +3185,7 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px,1fr))", gap: 1, background: "rgba(34,21,22,0.07)", marginBottom: 24 }}>
             {[
-              { label: "nAia-Assisted Revenue", value: fmtAed(c.revenue.naiaAssisted), color: "#8b2035" },
+              { label: `${c.scopeLabel} nAia-Assisted Revenue`, value: fmtAed(c.revenue.naiaAssisted), color: "#8b2035" },
               { label: "All-Time Assisted Revenue", value: fmtAed(c.revenue.naiaAssistedAllTime), color: "#8b2035" },
               { label: "Avg Order Value", value: fmtAed(c.revenue.avgOrderValue), color: "#221516" },
               { label: "Revenue / Session", value: fmtAed(c.revenue.revenuePerSession), color: "#221516" },
@@ -3182,39 +3200,42 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
           </div>
           {c.revenue?.nonNaiaBaselineNote && (
             <div style={{ padding: "8px 12px", background: "rgba(107,72,0,0.05)", border: "1px solid rgba(107,72,0,0.12)", marginBottom: 14, fontSize: 11, color: "#6b4800", fontFamily: "serif" }}>
-              <strong>Illustrative assumption — not observed performance.</strong> nAia vs. non-nAia comparison: {c.revenue.naiaVsNonNaiaMultiplier}× (baseline estimated — {c.revenue.nonNaiaBaselineNote})
+              <strong>Illustrative assumption — not observed performance.</strong> nAia vs. non-nAia comparison: {c.revenue.naiaVsNonNaiaMultiplier}× estimated (baseline is an assumed market rate, not a tracked unassisted cohort).
             </div>
           )}
           {c.revenue.byProduct?.length > 0 && (
-            <div style={{ overflowX: "auto" }}>
-              <table style={s.table}>
-                <thead><tr>
-                  <th style={s.th}>Product</th>
-                  <th style={s.th}>Units Sold</th>
-                  <th style={s.th}>Revenue (AED)</th>
-                </tr></thead>
-                <tbody>
-                  {c.revenue.byProduct.map((r, i) => (
-                    <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
-                      <td style={{ ...s.td, fontFamily: DISPLAY, fontStyle: "italic", fontSize: 14 }}>{r.product}</td>
-                      <td style={{ ...s.td, fontFamily: MONO }}>{r.units}</td>
-                      <td style={{ ...s.td, fontFamily: MONO, color: "#8b2035", fontWeight: 700 }}>{r.revenue.toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 10, fontWeight: 600 }}>All-Time Assisted Revenue by Product</div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={s.table}>
+                  <thead><tr>
+                    <th style={s.th}>Product</th>
+                    <th style={s.th}>Units Sold</th>
+                    <th style={s.th}>Revenue (AED)</th>
+                  </tr></thead>
+                  <tbody>
+                    {c.revenue.byProduct.map((r, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                        <td style={{ ...s.td, fontFamily: DISPLAY, fontStyle: "italic", fontSize: 14 }}>{r.product}</td>
+                        <td style={{ ...s.td, fontFamily: MONO }}>{r.units}</td>
+                        <td style={{ ...s.td, fontFamily: MONO, color: "#8b2035", fontWeight: 700 }}>{r.revenue.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </Section>
 
         {/* Margin */}
-        <Section title="Gross Margin" desc="Derived from synthetic COGS — illustrative ratios only" status="sample">
+        <Section title="Gross Margin" desc={`${c.scopeLabel} period · derived from synthetic COGS · SAMPLE DATA · illustrative ratios only`} status="sample">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px,1fr))", gap: 1, background: "rgba(34,21,22,0.07)", marginBottom: 24 }}>
             {[
-              { label: "Gross Margin %", value: `${c.margin.grossMarginPct}%`, color: "#2a5e42" },
-              { label: "Gross Margin AED", value: fmtAed(c.margin.grossMarginAed), color: "#2a5e42" },
-              { label: "All-Time Gross", value: fmtAed(c.margin.allTimeGrossAed), color: "#221516" },
-              { label: "Highest Margin", value: c.margin.highestMarginProduct ?? "—", color: "#221516" },
+              { label: `${c.scopeLabel} Gross Margin %`, value: `${c.margin.grossMarginPct}%`, color: "#2a5e42" },
+              { label: `${c.scopeLabel} Gross Margin AED`, value: fmtAed(c.margin.grossMarginAed), color: "#2a5e42" },
+              { label: "All-Time Gross Margin AED", value: fmtAed(c.margin.allTimeGrossAed), color: "#221516" },
+              { label: "Highest Margin Product (All-Time)", value: c.margin.highestMarginProduct ?? "—", color: "#221516" },
             ].map(({ label, value, color }) => (
               <div key={label} style={{ padding: "18px 20px", background: "#fff" }}>
                 <CLabel>{label}</CLabel>
@@ -3223,26 +3244,29 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
             ))}
           </div>
           {c.margin.byProduct?.length > 0 && (
-            <div style={{ overflowX: "auto" }}>
-              <table style={s.table}>
-                <thead><tr>
-                  <th style={s.th}>Product</th>
-                  <th style={s.th}>Gross Margin %</th>
-                  <th style={s.th}>Gross Margin AED</th>
-                  <th style={s.th}>Revenue AED</th>
-                </tr></thead>
-                <tbody>
-                  {c.margin.byProduct.map((r, i) => (
-                    <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
-                      <td style={{ ...s.td, fontFamily: DISPLAY, fontStyle: "italic", fontSize: 14 }}>{r.product}</td>
-                      <td style={{ ...s.td, fontFamily: MONO, color: "#2a5e42", fontWeight: 700 }}>{r.grossPct}%</td>
-                      <td style={{ ...s.td, fontFamily: MONO }}>{r.grossAed.toLocaleString()}</td>
-                      <td style={{ ...s.td, fontFamily: MONO }}>{r.revenue.toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 10, fontWeight: 600 }}>All-Time Gross Margin by Product</div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={s.table}>
+                  <thead><tr>
+                    <th style={s.th}>Product</th>
+                    <th style={s.th}>Gross Margin %</th>
+                    <th style={s.th}>Gross Margin AED</th>
+                    <th style={s.th}>Revenue AED</th>
+                  </tr></thead>
+                  <tbody>
+                    {c.margin.byProduct.map((r, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                        <td style={{ ...s.td, fontFamily: DISPLAY, fontStyle: "italic", fontSize: 14 }}>{r.product}</td>
+                        <td style={{ ...s.td, fontFamily: MONO, color: "#2a5e42", fontWeight: 700 }}>{r.grossPct}%</td>
+                        <td style={{ ...s.td, fontFamily: MONO }}>{r.grossAed.toLocaleString()}</td>
+                        <td style={{ ...s.td, fontFamily: MONO }}>{r.revenue.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </Section>
 
@@ -3272,14 +3296,22 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
               ))}
             </div>
           )}
-          {c.returns.byReason?.length > 0 && (
-            <div>
-              <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 10, fontWeight: 600 }}>Return Reasons</div>
-              {c.returns.byReason.map((r, i) => (
-                <Row key={i} label={r.reason} value={`${r.count} return${r.count !== 1 ? "s" : ""}`} mono />
-              ))}
-            </div>
-          )}
+          {c.returns.byReason?.length > 0 && (() => {
+            const reasonsCovered = c.returns.byReason.reduce((s, r) => s + r.count, 0);
+            const uncaptured = c.returns.total - reasonsCovered;
+            return (
+              <div>
+                <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4, fontWeight: 600 }}>Return Reasons</div>
+                <div style={{ fontFamily: INTER, fontSize: 10, color: "#9CA3AF", marginBottom: 10 }}>{reasonsCovered} of {c.returns.total} returns have a recorded reason</div>
+                {c.returns.byReason.map((r, i) => (
+                  <Row key={i} label={r.reason} value={`${r.count} return${r.count !== 1 ? "s" : ""}`} mono />
+                ))}
+                {uncaptured > 0 && (
+                  <Row label="Reason not captured" value={`${uncaptured} return${uncaptured !== 1 ? "s" : ""}`} mono />
+                )}
+              </div>
+            );
+          })()}
         </Section>
 
         {/* Inventory & Sell-Through */}
@@ -3291,7 +3323,7 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
               // Unweighted: mean of individual product rates — biased by product mix
               { label: "Unweighted Avg Sell-Through (mean of product rates)", value: `${c.inventory.avgSellThrough}%`, color: "#5c5350" },
               { label: "Fastest Moving", value: c.inventory.fastestMoving ?? "—", color: "#2a5e42" },
-              { label: "Slowest Moving", value: c.inventory.slowestMoving ?? "—", color: "#d97706" },
+              { label: "Slowest Moving", value: c.inventory.tiedSlowest ? `${c.inventory.tiedSlowest.products.length} tied at ${c.inventory.tiedSlowest.pct}%` : (c.inventory.slowestMoving ?? "—"), color: "#d97706" },
               { label: "At-Risk Lines", value: c.inventory.atRisk?.length ?? 0, color: c.inventory.atRisk?.length > 0 ? "#8b2035" : "#2a5e42" },
             ].map(({ label, value, color }) => (
               <div key={label} style={{ padding: "18px 20px", background: "#fff" }}>
@@ -3300,6 +3332,11 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
               </div>
             ))}
           </div>
+          {c.inventory.tiedSlowest && (
+            <div style={{ padding: "8px 12px", background: "rgba(107,72,0,0.05)", border: "1px solid rgba(107,72,0,0.12)", marginBottom: 14, fontSize: 11, color: "#6b4800", fontFamily: "serif" }}>
+              <strong>Tied at {c.inventory.tiedSlowest.pct}% sell-through:</strong> {c.inventory.tiedSlowest.products.join(" · ")}. No secondary ranking rule distinguishes these products.
+            </div>
+          )}
           {c.inventory.byProduct?.length > 0 && (
             <div style={{ overflowX: "auto" }}>
               <table style={s.table}>
@@ -3343,7 +3380,7 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
               {[
                 { label: "Avg Buy-Intent Value / Customer", value: fmtAed(ltv.avgLtv), color: "#8b2035" },
                 { label: "Top Customer Buy-Intent Value", value: fmtAed(ltv.topCustomerLtv), color: "#221516" },
-                { label: "Avg Buy-Intent Order Value", value: fmtAed(ltv.avgOrderValue), color: "#221516" },
+                { label: "Avg Buy-Intent Basket Value", value: fmtAed(ltv.avgOrderValue), color: "#221516" },
                 { label: "Avg Illustrative Gross Profit / Customer", value: fmtAed(ltv.avgGrossProfit), color: "#2a5e42" },
                 { label: "Repeat Buy-Intent Rate", value: `${ltv.repeatPurchaseRate}%`, color: "#2a5e42" },
                 { label: "Buy-Intent Frequency", value: `${ltv.purchaseFrequency}× avg`, color: "#221516" },
@@ -3365,9 +3402,9 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
                     <thead><tr>
                       <th style={s.th}>Personality</th>
                       <th style={s.th}>Customers</th>
-                      <th style={s.th}>Purchases</th>
-                      <th style={s.th}>Avg Revenue (AED)</th>
-                      <th style={s.th}>Total Revenue (AED)</th>
+                      <th style={s.th}>Buy-Intent Events</th>
+                      <th style={s.th}>Avg Illustrative Intent Value (AED)</th>
+                      <th style={s.th}>Total Illustrative Intent Value (AED)</th>
                     </tr></thead>
                     <tbody>
                       {ltv.ltvByPersonality.map((r, i) => (
@@ -3386,15 +3423,15 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
             )}
             {ltv.ltvBySegment?.length > 0 && (
               <>
-                <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 12, marginTop: 20, fontWeight: 600 }}>Revenue by Occasion Segment</div>
+                <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 12, marginTop: 20, fontWeight: 600 }}>Illustrative Buy-Intent Value by Occasion</div>
                 <div style={{ overflowX: "auto" }}>
                   <table style={s.table}>
                     <thead><tr>
                       <th style={s.th}>Segment</th>
                       <th style={s.th}>Customers</th>
-                      <th style={s.th}>Purchases</th>
-                      <th style={s.th}>Avg Revenue (AED)</th>
-                      <th style={s.th}>Total Revenue (AED)</th>
+                      <th style={s.th}>Buy-Intent Events</th>
+                      <th style={s.th}>Avg Illustrative Intent Value (AED)</th>
+                      <th style={s.th}>Total Illustrative Intent Value (AED)</th>
                     </tr></thead>
                     <tbody>
                       {ltv.ltvBySegment.map((r, i) => (
@@ -3413,9 +3450,9 @@ function TabCommercial({ data, advanced, rel, commercial, sampleMode, dateRangeD
             )}
             {ltv.repeatProducts?.length > 0 && (
               <>
-                <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 10, marginTop: 20, fontWeight: 600 }}>Products Driving Repeat Customers</div>
+                <div style={{ fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 10, marginTop: 20, fontWeight: 600 }}>Products Driving Repeat Buy Intent</div>
                 {ltv.repeatProducts.map((r, i) => (
-                  <Row key={i} label={r.product} value={`${r.repeatCustomers} repeat customer${r.repeatCustomers !== 1 ? "s" : ""}`} mono />
+                  <Row key={i} label={r.product} value={`${r.repeatCustomers} customer${r.repeatCustomers !== 1 ? "s" : ""} with repeat buy intent`} mono />
                 ))}
               </>
             )}
@@ -3532,9 +3569,10 @@ function TabOpportunitiesContent({ data, phase4b2, advanced, rel, dateRangeDays,
         confidence: opp.confidence ?? "medium",
         relevance: opp.estimatedCommercialRelevance,
         dependency: opp.dependency ?? null,
-        sampleSizeHint: opp.sampleSize ?? 1,
+        sampleSizeHint: opp.evidenceN ?? opp.sampleSize ?? 1,
         source: "opportunity-feed",
         _opportunityType: opp.type ?? null,
+        _productSlug: opp._productSlug ?? null,
       });
     });
 
@@ -3624,8 +3662,11 @@ function TabOpportunitiesContent({ data, phase4b2, advanced, rel, dateRangeDays,
       return `${tax}:category:${cat}`;
     }
     if (item.source === "opportunity-feed") {
-      // Use structured opp.type as identity dimension; fall back to first 4 words of headline only
-      // when type is absent (should not occur in practice).
+      if (item._productSlug) {
+        // Source-independent: same key as design-actions for the same product + direction (taxonomy)
+        return `${tax}:product:${item._productSlug}`;
+      }
+      // No identifiable product — fall back to opportunity-type scope
       const oppType = item._opportunityType
         ? item._opportunityType.toLowerCase().replace(/[^a-z0-9]/g, "-")
         : (item.headline ?? "").toLowerCase().replace(/[^a-z0-9\s]/g, "").trim().split(/\s+/).slice(0, 4).join("-");

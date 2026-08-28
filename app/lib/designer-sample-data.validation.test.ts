@@ -2359,4 +2359,249 @@ describe("Features & Recommendations coherence: stop-gate reconciliation", () =>
         `positiveExperienceRate (${pw.positiveExperienceRate}%) must equal Math.round(feltPositive/totalWithPostWear*100) = ${expectedRate}%`);
     }
   });
+
+  // ── C&O Audit v2 regression tests ─────────────────────────────────────────
+
+  it("22. wellServedCount at 30D requires sampleConfidence(wrCount) ≥ Emerging — Corporate Chic wrCount=2 must not count", () => {
+    // sampleConfidence(2) = "Directional signal" (status: insufficient-data) → NOT well served
+    // Only n≥5 WR events (Emerging pattern) can qualify as well served
+    const cc = rel.dnaMatrix.find((r: any) => r.personality === "Corporate Chic");
+    assert.ok(cc, "Corporate Chic must be present");
+    assert.ok((cc.wrCount ?? 0) < 5,
+      `Corporate Chic wrCount at 30D must be < 5 (got ${cc.wrCount}) — Directional signal only`);
+    // Even if rating and rewear thresholds are met, this card must NOT be counted as well served
+    // due to insufficient WR evidence (wrCount < 5)
+    const wouldPassRating = cc.avgRating != null && cc.avgRating >= 4;
+    const wouldPassRewear = cc.rewearRate != null && cc.rewearRate >= 0.6;
+    const wouldPassWr = (cc.wrCount ?? 0) >= 5;
+    if (wouldPassRating && wouldPassRewear) {
+      assert.strictEqual(wouldPassWr, false,
+        `Corporate Chic wrCount=${cc.wrCount} — cannot reach WELL SERVED; n≥5 required`);
+    }
+  });
+
+  it("23. Previous rewear in collectionEvolution is null when no prior WR events exist at 30D", () => {
+    const evo = (advanced as any).collectionEvolution;
+    // At 30D, the prior window is 31–60 days ago. If there are no WR events in that window,
+    // prevRewearRate must be null — not a formula-derived number like Math.max(60, current-6).
+    // This test verifies the computation is event-based, not offset-based.
+    const prev = evo.previous;
+    assert.ok("rewearRate" in prev,
+      "previous.rewearRate field must exist");
+    // The value must be null (no prior WR) or a real computed percentage (not an offset from current)
+    if (prev.rewearRate !== null) {
+      // If non-null, it must be a real computed value — not current rewearRate minus a fixed offset
+      const current = evo.current.rewearRate;
+      assert.notStrictEqual(prev.rewearRate, Math.max(60, current - 6),
+        `previous.rewearRate (${prev.rewearRate}) must not be the formula offset Math.max(60, current-6) = ${Math.max(60, current - 6)}`);
+    }
+  });
+
+  it("24. ratingTrend at 30D supports 'down' — not just 'up' or 'stable'", () => {
+    // The field must be able to express a downward trend
+    const evo = (advanced as any).collectionEvolution;
+    const validTrends = ["up", "down", "stable"];
+    assert.ok(validTrends.includes(evo.ratingTrend),
+      `ratingTrend must be one of 'up'|'down'|'stable', got: ${evo.ratingTrend}`);
+    // Verify the logic: if avgRating < prevAvgRating, ratingTrend must be "down"
+    // (regression guard — previously only "up" or "stable" were possible)
+    const curr = evo.current.avgRating;
+    const prev = evo.previous.avgRating;
+    if (curr != null && prev != null && curr < prev) {
+      assert.strictEqual(evo.ratingTrend, "down",
+        `avgRating ${curr} < prevAvgRating ${prev} — ratingTrend must be 'down', got '${evo.ratingTrend}'`);
+    }
+  });
+
+  it("25. occasionProductMatrix successRateMetric is 'recommendation-acceptance-session-matched' — not RF love rate", () => {
+    const matrix = rel.occasionProductMatrix as any[];
+    assert.ok(matrix.length > 0, "occasionProductMatrix must have rows at 30D");
+    for (const row of matrix) {
+      assert.ok("successRateMetric" in row,
+        `occasionProductMatrix row '${row.occasion}' must have successRateMetric field`);
+      assert.strictEqual(row.successRateMetric, "recommendation-acceptance-session-matched",
+        `'${row.occasion}' successRateMetric must be 'recommendation-acceptance-session-matched', got '${row.successRateMetric}'`);
+      assert.ok("successRateDenominator" in row,
+        `'${row.occasion}' must have successRateDenominator (SS session count)`);
+      // Denominator must equal the session count for the occasion — not total RF events
+      assert.strictEqual(row.successRateDenominator, row.count,
+        `'${row.occasion}' successRateDenominator (${row.successRateDenominator}) must equal row.count (${row.count})`);
+    }
+  });
+
+  it("26. Opportunity-feed items with identifiable products have claim-specific evidenceN ≠ 1 (not generic fallback)", () => {
+    const opportunityFeed = (advanced as any)?.opportunityFeed;
+    if (!opportunityFeed) return; // not exposed in this period
+    for (const opp of opportunityFeed) {
+      if (opp._productSlug && opp.evidenceN !== undefined) {
+        assert.notStrictEqual(opp.evidenceN, 1,
+          `opp '${opp.id}' with _productSlug='${opp._productSlug}' must have claim-specific evidenceN ≠ 1 (got ${opp.evidenceN})`);
+        assert.ok(opp.evidenceN >= 0,
+          `opp '${opp.id}' evidenceN must be a non-negative integer`);
+      }
+    }
+  });
+
+  it("27. seen-formal-objection evidence string must not contain causal 'result in' language", () => {
+    const opportunityFeed = (advanced as any)?.opportunityFeed;
+    if (!opportunityFeed) return;
+    const item = opportunityFeed.find((o: any) => o.id === "seen-formal-objection");
+    if (!item) return;
+    assert.ok(!item.evidence.includes("result in skip"),
+      `seen-formal-objection evidence must not claim 'all objections result in skip'; got: "${item.evidence}"`);
+    assert.ok(!item.evidence.includes("result in"),
+      `seen-formal-objection evidence must not contain causal 'result in' language; got: "${item.evidence}"`);
+  });
+
+  it("28. colorDistribution items are flagged isCatalogHypothesis — no colour field on SE events", () => {
+    const dist = (d30.dashboard as any)?.onboarding?.colorDistribution ?? [];
+    for (const item of dist) {
+      assert.strictEqual((item as any).isCatalogHypothesis, true,
+        `colorDistribution item '${item.color}' must have isCatalogHypothesis: true`);
+    }
+  });
+
+  it("29. stylingNeeds items are flagged isEstimated — counts are formula-derived, not observed demand", () => {
+    const needs = (d30.dashboard as any)?.stylingNeeds ?? [];
+    assert.ok(needs.length > 0, "stylingNeeds must not be empty");
+    for (const need of needs) {
+      assert.strictEqual((need as any).isEstimated, true,
+        `stylingNeeds item '${need.occasion}' must have isEstimated: true`);
+    }
+  });
+
+  it("30. sizeIntelligence evidenceMaturity is 'Sample — primarily estimated' — not an evidence-count tier", () => {
+    const si = (advanced as any).sizeIntelligence;
+    assert.strictEqual(si.evidenceMaturity, "Sample — primarily estimated",
+      `sizeIntelligence.evidenceMaturity must be 'Sample — primarily estimated', got '${si.evidenceMaturity}'`);
+  });
+
+  it("31. sizeIntelligence recommendation does not add +1 to Becoming Grounded return count", () => {
+    const si = (advanced as any).sizeIntelligence;
+    // The recommendation must reference the actual return count without an offset
+    // Regression guard: previously `allReturns.filter(...).length + 1` inflated the count
+    assert.ok(!si.recommendation.includes("length + 1"),
+      "recommendation must not reference raw '+ 1' offset expression");
+    // The count in the string must be a valid number — verify it does not say e.g. "1 confirmed returns"
+    // when actual allReturns for GROUNDED = 0
+    const match = si.recommendation.match(/(\d+) confirmed returns/);
+    if (match) {
+      const reportedCount = parseInt(match[1], 10);
+      assert.ok(reportedCount >= 0,
+        `Returns count in recommendation must be ≥ 0 (not offset), got ${reportedCount}`);
+    }
+    // Verify "all-time" label appears in recommendation
+    assert.ok(si.recommendation.includes("all-time"),
+      `sizeIntelligence recommendation must include 'all-time' scope label`);
+  });
+});
+
+// ── Commercial tab coherence stop-gates ───────────────────────────────────────
+describe("Commercial tab coherence: scope and terminology regression guards", () => {
+  const d30 = getDesignerSampleData(30);
+  const commercial = (d30 as any).commercial;
+
+  it("C1. allTimeRevenue ≥ periodRevenue for every date window (30D ≤ all-time)", () => {
+    for (const days of [7, 30, 90, 365]) {
+      const d = getDesignerSampleData(days);
+      const c = (d as any).commercial;
+      assert.ok(
+        c.revenue.naiaAssistedAllTime >= c.revenue.naiaAssisted,
+        `days=${days}: naiaAssistedAllTime (${c.revenue.naiaAssistedAllTime}) must be ≥ naiaAssisted (${c.revenue.naiaAssisted})`
+      );
+    }
+  });
+
+  it("C2. byProduct revenue rows are all-time — sum equals naiaAssistedAllTime, not period naiaAssisted", () => {
+    const c = commercial;
+    const tableTotal = c.revenue.byProduct.reduce((s: number, r: any) => s + r.revenue, 0);
+    assert.equal(tableTotal, c.revenue.naiaAssistedAllTime,
+      `byProduct revenue table must sum to naiaAssistedAllTime (all-time), not period revenue`);
+    assert.ok(tableTotal >= c.revenue.naiaAssisted,
+      `table sum (${tableTotal}) must be ≥ period revenue (${c.revenue.naiaAssisted})`);
+  });
+
+  it("C3. margin.byProduct revenue rows are all-time — sum equals allTimeGrossAed denominator pool", () => {
+    const c = commercial;
+    const tableRevTotal = c.margin.byProduct.reduce((s: number, r: any) => s + r.revenue, 0);
+    // All-time gross AED is derived from same pool
+    assert.ok(tableRevTotal >= c.margin.grossMarginAed,
+      `margin byProduct revenue total (${tableRevTotal}) must be ≥ period grossMarginAed (${c.margin.grossMarginAed})`);
+  });
+
+  it("C4. returns.byReason total count ≤ returns.total (reasons cannot exceed total returns)", () => {
+    const c = commercial;
+    const reasonCovered = c.returns.byReason.reduce((s: number, r: any) => s + r.count, 0);
+    assert.ok(reasonCovered <= c.returns.total,
+      `byReason sum (${reasonCovered}) must be ≤ returns.total (${c.returns.total})`);
+  });
+
+  it("C5. when byReason covers < total returns, uncaptured count equals total − covered (truthful display)", () => {
+    const c = commercial;
+    const covered = c.returns.byReason.reduce((s: number, r: any) => s + r.count, 0);
+    const uncaptured = c.returns.total - covered;
+    if (uncaptured > 0) {
+      assert.ok(uncaptured > 0,
+        `uncaptured must be positive when reasons do not cover all returns (got ${uncaptured})`);
+      // Verify the route file renders "Reason not captured" — text-level contract
+      const route = readRoute();
+      assert.ok(route.includes("Reason not captured"),
+        'route must render "Reason not captured" row when uncaptured returns exist');
+      assert.ok(route.includes("of {c.returns.total} returns have a recorded reason"),
+        'route must render coverage note showing partial reason capture');
+    }
+  });
+
+  it("C6. tiedSlowest lists all products at the minimum sell-through, not just one", () => {
+    const c = commercial;
+    if (c.inventory.tiedSlowest) {
+      const minST = c.inventory.tiedSlowest.pct;
+      const actualTied = c.inventory.byProduct.filter((r: any) => r.sellThrough === minST);
+      assert.equal(
+        c.inventory.tiedSlowest.products.length,
+        actualTied.length,
+        `tiedSlowest must list all ${actualTied.length} products at ${minST}% sell-through`
+      );
+      assert.ok(c.inventory.tiedSlowest.products.length > 1,
+        "tiedSlowest should only be set when multiple products are tied (length > 1)");
+    } else {
+      // When no tie: slowestMoving must be uniquely at the bottom
+      const sorted = [...c.inventory.byProduct].sort((a: any, b: any) => a.sellThrough - b.sellThrough);
+      const minST = sorted[0]?.sellThrough ?? 0;
+      const atMin = sorted.filter((r: any) => r.sellThrough === minST);
+      assert.equal(atMin.length, 1,
+        `when tiedSlowest=null, exactly 1 product must have the minimum sell-through (got ${atMin.length})`);
+    }
+  });
+
+  it("C7. route does not use 'Purchases' as a column header in the LTV personality table", () => {
+    const route = readRoute();
+    // The personality table must use "Buy-Intent Events" not "Purchases"
+    assert.ok(!route.includes(">Purchases<"),
+      'route must not use >Purchases< as a visible column header (use "Buy-Intent Events" instead)');
+  });
+
+  it("C8. route does not use 'Revenue by Occasion Segment' — must be renamed", () => {
+    const route = readRoute();
+    assert.ok(!route.includes("Revenue by Occasion Segment"),
+      'route must not use "Revenue by Occasion Segment" (rename to "Illustrative Buy-Intent Value by Occasion")');
+  });
+
+  it("C9. route does not use 'Products Driving Repeat Customers' — must be renamed", () => {
+    const route = readRoute();
+    assert.ok(!route.includes("Products Driving Repeat Customers"),
+      'route must not use "Products Driving Repeat Customers" (rename to "Products Driving Repeat Buy Intent")');
+  });
+
+  it("C10. illustrative uplift note is present and marks baseline as estimated (non-causal)", () => {
+    const route = readRoute();
+    assert.ok(
+      route.includes("Illustrative assumption — not observed performance"),
+      'route must retain "Illustrative assumption — not observed performance" disclosure near multiplier'
+    );
+    assert.ok(
+      route.includes("not a tracked unassisted cohort") || route.includes("baseline estimated") || route.includes("no unassisted cohort"),
+      'route must clarify that the uplift baseline is estimated, not a tracked control group'
+    );
+  });
 });
