@@ -1833,9 +1833,11 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
                       <td style={{ ...s.td, fontFamily: SERIF, fontWeight: 600, fontSize: 14 }}>{n.name ?? n.productTitle}</td>
                       <td style={{ ...s.td, color: oppColor, fontFamily: INTER, fontWeight: 700 }}>
                         {n.opportunityScore != null ? n.opportunityScore : "—"}
-                        {n.hasEvidence && n.sampleSize != null && n.sampleSize < 3 && (
+                        {n.hasEvidence && n.sampleSize === 0 ? (
+                          <span style={{ display: "block", fontSize: 9, fontWeight: 400, color: "#9CA3AF", fontFamily: MONO }}>Session signal</span>
+                        ) : n.hasEvidence && n.sampleSize != null && n.sampleSize < 3 ? (
                           <span style={{ display: "block", fontSize: 9, fontWeight: 400, color: "#9CA3AF", fontFamily: MONO }}>Directional</span>
-                        )}
+                        ) : null}
                       </td>
                       <td style={{ ...s.td, fontFamily: MONO, fontSize: 11 }}>{ratingDisplay}</td>
                       <td style={{ ...s.td, fontFamily: MONO, fontSize: 11, color: n.wrCount > 0 ? "#221516" : "#9CA3AF" }}>
