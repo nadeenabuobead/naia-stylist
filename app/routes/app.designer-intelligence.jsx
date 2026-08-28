@@ -1248,6 +1248,8 @@ function ProductDetailPanel({ narrative, saveVsPurchase, dateRangeDays }) {
           <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: confData.color, color: "#fff" }}>{confData.label}</span>
           {!narrative.hasEvidence ? (
             <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: "rgba(90,90,100,0.1)", color: "#5c5350" }}>Catalog hypothesis</span>
+          ) : narrative.sampleSize === 0 ? (
+            <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: "rgba(90,90,100,0.1)", color: "#5c5350" }}>Session signal</span>
           ) : narrative.sampleSize <= 4 ? (
             <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: "rgba(107,72,0,0.12)", color: "#6b4800" }}>Directional</span>
           ) : null}
@@ -1306,7 +1308,9 @@ function ProductDetailPanel({ narrative, saveVsPurchase, dateRangeDays }) {
             </div>
           )}
           <div style={{ color: "#7a6f6a", fontFamily: SERIF, fontStyle: "italic", fontSize: 11, lineHeight: 1.5, marginTop: 6 }}>
-            Scores reflect available evidence only. Treat as directional.
+            {!narrative.hasEvidence
+              ? "No behavioural evidence in this period. Guidance below is based on catalog positioning and should be treated as a hypothesis to test."
+              : "Scores reflect available evidence only. Treat as directional."}
           </div>
         </div>
       )}
@@ -1328,19 +1332,19 @@ function ProductDetailPanel({ narrative, saveVsPurchase, dateRangeDays }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "14px 24px" }}>
             {narrative.bestPersonality && (
               <div>
-                <div style={{ fontFamily: INTER, fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4 }}>Best-fit Audience</div>
+                <div style={{ fontFamily: INTER, fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4 }}>{narrative.hasEvidence ? "Best-fit Audience" : "Target audience"}</div>
                 <div style={{ fontSize: 13, color: "#8b2035" }}>{narrative.bestPersonality}</div>
               </div>
             )}
             {narrative.bestOccasion && (
               <div>
-                <div style={{ fontFamily: INTER, fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4 }}>Best Context</div>
+                <div style={{ fontFamily: INTER, fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4 }}>{narrative.hasEvidence ? "Best Context" : "Suggested context"}</div>
                 <div style={{ fontSize: 13, color: "#221516" }}>{narrative.bestOccasion}</div>
               </div>
             )}
             {narrative.strongestTransformation && (
               <div>
-                <div style={{ fontFamily: INTER, fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4 }}>Emotional Outcome</div>
+                <div style={{ fontFamily: INTER, fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4 }}>{narrative.hasEvidence ? "Emotional Outcome" : "Target emotional outcome"}</div>
                 <div style={{ fontSize: 13, color: "#221516", fontStyle: "italic", fontFamily: SERIF }}>{narrative.strongestTransformation}</div>
               </div>
             )}
@@ -1360,8 +1364,10 @@ function ProductDetailPanel({ narrative, saveVsPurchase, dateRangeDays }) {
             {narrative.avgConfidenceLift != null && (
               <div>
                 <div style={{ fontFamily: INTER, fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4 }}>Confidence Lift</div>
-                <div style={{ fontSize: 13, color: narrative.avgConfidenceLift > 0 ? "#2a5e42" : "#9CA3AF" }}>
-                  {narrative.avgConfidenceLift >= 0 ? "+" : ""}{narrative.avgConfidenceLift} pts · n={narrative.sampleSize}
+                <div style={{ fontSize: 13, color: narrative.wrCount > 0 && narrative.avgConfidenceLift > 0 ? "#2a5e42" : "#9CA3AF" }}>
+                  {narrative.wrCount > 0
+                    ? `${narrative.avgConfidenceLift >= 0 ? "+" : ""}${narrative.avgConfidenceLift} pts · n=${narrative.sampleSize}`
+                    : "— · no post-wear outcome data"}
                 </div>
               </div>
             )}
