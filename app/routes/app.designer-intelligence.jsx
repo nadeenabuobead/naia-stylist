@@ -2274,7 +2274,7 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
             {/* Customer evidence disclosure (Req 3) */}
             {kpis.buyOrSkip.evidence && (
               <div style={{ marginTop: 8, marginBottom: 12 }}>
-                <EvidenceDisclosure evidence={kpis.buyOrSkip.evidence} />
+                <EvidenceDisclosure evidence={kpis.buyOrSkip.evidence} eventLabel="decisive outcomes" />
               </div>
             )}
             {/* Reconciliation — all 4 categories must sum to total */}
@@ -2410,17 +2410,19 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
               {rel.emotionalChain.filter(r => r.achievedRate != null).slice(0, 8).map((row, i) => <EmotionalFlowRow key={i} chain={row} />)}
               <PrescriptiveBlock
                 recommendation={(() => {
+                  const wrTotal = rel.emotionalChain.reduce((s, r) => s + (r.wrCount ?? r.count), 0);
                   const high = rel.emotionalChain.filter(r => (r.achievedRate ?? 0) >= 70);
                   const low = rel.emotionalChain.filter(r => r.achievedRate != null && (r.achievedRate ?? 100) < 50);
                   if (high.length > 0 && low.length > 0) {
                     return `nAia succeeds when customers want to feel ${high[0].desiredFeeling}${high[0].topProducts[0] ? ` (${high[0].topProducts[0]})` : ""}. It struggles when they want to feel ${low[0].desiredFeeling}. Investigate product options for the under-served feeling states.`;
                   }
-                  if (high.length > 0) return `nAia is consistently delivering on desired feelings. Continue observing to surface patterns across more mood-feeling combinations.`;
+                  if (high.length > 0 && wrTotal >= 10) return `nAia is consistently delivering on desired feelings. Continue observing to surface patterns across more mood-feeling combinations.`;
+                  if (high.length > 0) return `Early post-wear evidence is positive, but the sample is too small to establish a reliable recommendation-success pattern. Continue collecting post-wear feedback across more mood–feeling combinations.`;
                   return `Recommendation delivery rates are forming. Continue collecting post-wear data to identify success and failure patterns.`;
                 })()}
                 reason="The difference between a successful and failed recommendation is usually whether the product matched the emotional aspiration, not just the style. Desired feeling achievement is the leading indicator of recommendation quality."
                 confidence="medium"
-                sampleSize={rel.sampleSize}
+                sampleSize={rel.emotionalChain.reduce((s, r) => s + (r.wrCount ?? r.count), 0)}
               />
               <div style={{ fontSize: 11, color: "#9CA3AF", fontFamily: INTER, marginTop: 12, fontStyle: "italic" }}>
                 n={rel.emotionalChain.reduce((s, r) => s + (r.wrCount ?? r.count), 0)} post-wear responses — directional only; minimum n=10 for a reliable pattern.
@@ -4502,13 +4504,14 @@ function MeasurementStatePill({ state }) {
 }
 
 // ── Req 3: Customer-based evidence disclosure ──────────────────────────────────
-function EvidenceDisclosure({ evidence, period }) {
+function EvidenceDisclosure({ evidence, period, eventLabel }) {
   if (!evidence) return null;
   const { uniqueCustomerCount, eventCount, confidenceLevel } = evidence;
   const p = period ?? evidence.period ?? "";
+  const eLabel = eventLabel ?? "events";
   return (
     <span style={{ fontSize: 9, color: "#7a6f6a", fontFamily: INTER, letterSpacing: "0.3px" }}>
-      {uniqueCustomerCount} customer{uniqueCustomerCount !== 1 ? "s" : ""} · {eventCount} events{p ? ` · ${p}` : ""}
+      {uniqueCustomerCount} customer{uniqueCustomerCount !== 1 ? "s" : ""} · {eventCount} {eLabel}{p ? ` · ${p}` : ""}
       {confidenceLevel ? <> · <strong style={{ fontWeight: 600 }}>{confidenceLevel}</strong></> : null}
     </span>
   );

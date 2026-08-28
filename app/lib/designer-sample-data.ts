@@ -1812,7 +1812,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   // This prevents the same event appearing in multiple arcs (SEEN WR events split by desiredFeeling).
   const transformArc = (
     startingMood: string, desiredFeeling: string, reportedAfterFeeling: string,
-    arcWR: SE[], topProducts: string[],
+    arcWR: SE[], candidateProducts: string[],
   ) => {
     const n   = arcWR.length;
     const ac  = arcWR.filter(ev => classifyEmotionalOutcome(ev.desiredFeeling, ev.actualAfterFeeling) === "achieved").length;
@@ -1822,6 +1822,11 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       return o === "achieved" || o === "partly";
     }).length;
     const wc  = arcWR.filter(ev => ev.rewear === true).length;
+    // Derive topProducts from actual WR events in this period — never show a product unless
+    // it actually contributed a WR event to this arc. Fall back to candidateProducts when empty.
+    const derivedTopProducts = n > 0
+      ? topKeys(tally(arcWR.map(ev => ev.productName)), 2).filter((p): p is string => p !== null)
+      : candidateProducts;
     return {
       startingMood, desiredFeeling, reportedAfterFeeling,
       count: n, sessions: n,
@@ -1830,7 +1835,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       postWearConfirmedCount: pwc, postWearConfirmedOf: n,
       wouldWearAgainCount: wc,    wouldWearAgainOf: n,
       confidenceStatus: evidenceConfidence(n),
-      topProducts,
+      topProducts: derivedTopProducts,
     };
   };
   // Feeling-family membership for each transformation archetype.
