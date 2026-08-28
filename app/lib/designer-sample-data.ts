@@ -1709,40 +1709,53 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     if (wr.productName) t.products.add(wr.productName);
   }
 
-  // Build transformation rows from actual data; supplement with static entries if period too short
-  const mkTransform = (
+  // Build transformation arcs from actual WR events — no hardcoded percentages.
+  // Membership rule: a WR event belongs to an arc iff its product is in the arc's scope
+  // AND its desiredFeeling is in that arc's feeling family.
+  // This prevents the same event appearing in multiple arcs (SEEN WR events split by desiredFeeling).
+  const transformArc = (
     startingMood: string, desiredFeeling: string, reportedAfterFeeling: string,
-    n: number, achievedRate: number, postWearRate: number, wyaRate: number,
-    topProducts: string[], confidenceStatus: string,
+    arcWR: SE[], topProducts: string[],
   ) => {
-    const ac  = Math.max(0, Math.round(n * achievedRate / 100));
-    const pwc = Math.max(0, Math.round(n * postWearRate / 100));
-    const wc  = Math.max(0, Math.round(n * wyaRate / 100));
-    // Derived rates from integer counts (eliminates fraction vs. percentage mismatch)
-    const displayAchievedRate = n > 0 ? pct(ac, n) : 0;
-    const displayPwRate       = n > 0 ? pct(pwc, n) : 0;
-    const displayWyaRate      = n > 0 ? pct(wc, n) : 0;
+    const n   = arcWR.length;
+    const ac  = arcWR.filter(ev => classifyEmotionalOutcome(ev.desiredFeeling, ev.actualAfterFeeling) === "achieved").length;
+    // postWearConfirmed = feeling confirmed in any way (achieved or partly) — not the same signal as rewear
+    const pwc = arcWR.filter(ev => {
+      const o = classifyEmotionalOutcome(ev.desiredFeeling, ev.actualAfterFeeling);
+      return o === "achieved" || o === "partly";
+    }).length;
+    const wc  = arcWR.filter(ev => ev.rewear === true).length;
     return {
       startingMood, desiredFeeling, reportedAfterFeeling,
       count: n, sessions: n,
-      achievedRate: displayAchievedRate,
-      achievedCount: ac, achievedOf: n,
+      achievedRate:           n > 0 ? pct(ac, n) : 0,
+      achievedCount: ac,      achievedOf: n,
       postWearConfirmedCount: pwc, postWearConfirmedOf: n,
-      wouldWearAgainCount: wc, wouldWearAgainOf: n,
-      confidenceStatus, topProducts,
+      wouldWearAgainCount: wc,    wouldWearAgainOf: n,
+      confidenceStatus: evidenceConfidence(n),
+      topProducts,
     };
   };
-  // Transformation table uses WR-only denominators — OR events (outfit reviews) do not carry
-  // desiredFeeling/actualAfterFeeling and must not inflate the "post-wear confirmed" denominator.
-  const staticTransformations = [
-    mkTransform("Uncertain",  "Confident",  "Powerful",   pm[SEEN].wrCount  + pm[GROUNDED].wrCount, 78, 67, 74, [SEEN, GROUNDED], evidenceConfidence(pm[SEEN].wrCount + pm[GROUNDED].wrCount)),
-    mkTransform("Uninspired", "Effortless", "Effortless", pm[WHOLE].wrCount + pm[REAL].wrCount,     71, 60, 65, [WHOLE, REAL],    evidenceConfidence(pm[WHOLE].wrCount + pm[REAL].wrCount)),
-    mkTransform("Comfortable","Elevated",   "Elevated",   pm[SEEN].wrCount  + pm[CLEAR].wrCount,    75, 65, 71, [SEEN, CLEAR],    evidenceConfidence(pm[SEEN].wrCount + pm[CLEAR].wrCount)),
-  ].filter(t => t.count > 0); // Only show rows with actual post-wear evidence
-  const emotionalTransformations =
-    dateRangeDays === 7  ? staticTransformations.slice(0, 1) :
-    dateRangeDays === 30 ? staticTransformations.slice(0, 2) :
-    staticTransformations;
+  // Feeling-family membership for each transformation archetype.
+  const confidentFam  = EMOTIONAL_FAMILIES["Confident"]  as readonly string[]; // Confident, Powerful, Assertive, Assured
+  const effortlessFam = EMOTIONAL_FAMILIES["Effortless"] as readonly string[]; // Effortless, Comfortable, Natural, Easy
+  const elevatedFam   = EMOTIONAL_FAMILIES["Elevated"]   as readonly string[]; // Elevated, Sophisticated, Refined, Polished
+
+  // Arc membership: filter by product scope then by desiredFeeling family.
+  // A SEEN WR event with desiredFeeling="Confident" → Confident arc only.
+  // A SEEN WR event with desiredFeeling="Elevated" → Elevated arc only. No double-counting.
+  const arcConfidentWR  = [...forProduct(wearReviews, SEEN), ...forProduct(wearReviews, GROUNDED)]
+    .filter(ev => confidentFam.includes(ev.desiredFeeling ?? ""));
+  const arcEffortlessWR = [...forProduct(wearReviews, WHOLE), ...forProduct(wearReviews, REAL)]
+    .filter(ev => effortlessFam.includes(ev.desiredFeeling ?? ""));
+  const arcElevatedWR   = [...forProduct(wearReviews, SEEN), ...forProduct(wearReviews, CLEAR)]
+    .filter(ev => elevatedFam.includes(ev.desiredFeeling ?? ""));
+
+  const emotionalTransformations = [
+    transformArc("Uncertain",   "Confident",  "Powerful",   arcConfidentWR,  [SEEN, GROUNDED]),
+    transformArc("Uninspired",  "Effortless", "Effortless", arcEffortlessWR, [WHOLE, REAL]),
+    transformArc("Comfortable", "Elevated",   "Elevated",   arcElevatedWR,   [SEEN, CLEAR]),
+  ].filter(t => t.count > 0);
 
   // Products by emotional impact — ordered by confidence lift
   // achievedRate = WR events where desired feeling exactly confirmed (strong outcome)

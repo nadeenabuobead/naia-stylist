@@ -1146,7 +1146,7 @@ function DNAIntelligenceRow({ row }) {
         <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 15, fontWeight: 700, fontStyle: "italic", color: "#221516" }}>{row.personality}</div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           {row.avgRating != null && <span style={{ ...MONO }}>★ {row.avgRating}</span>}
-          {row.rewearRate != null && <span style={{ ...MONO }}>{Math.round(row.rewearRate * 100)}% rewear</span>}
+          {row.rewearRate != null && <span style={{ ...MONO }}>{Math.round(row.rewearRate * 100)}% rewear · {row.wrCount} post-wear</span>}
           {row.avgConfidenceLift != null && <span style={{ ...MONO, color: "#8b2035" }}>{row.avgConfidenceLift >= 0 ? "+" : ""}{row.avgConfidenceLift} confidence</span>}
           <span style={{ ...MONO, color: "#9CA3AF" }}>n={row.sessionCount} sessions</span>
           {(row.wrCount ?? 0) > 0 ? (
@@ -1495,14 +1495,13 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays, liv
           <InsufficientCard label="Emotional Journey" description="Not enough reviewed sessions to map emotional transformations." sampleSize={advanced?.emotionalJourney?.sampleSize ?? 0} min={5} />
         ) : (
           <>
-            <SampleSizeWarning n={advanced.emotionalJourney.sampleSize} min={10} />
-            {/* Feeling Outcome Rates — mutually exclusive, sum = 100% of post-wear reviews */}
+            {/* Single consolidated disclosure — n= and minimum threshold in one line */}
             <div style={{ marginBottom: 10, padding: "8px 12px", background: "rgba(197,85,58,0.06)", border: "1px solid rgba(197,85,58,0.2)", fontFamily: "'Inter', sans-serif", display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: "#c5553a" }}>
                 n={advanced.emotionalJourney.sampleSize} post-wear {advanced.emotionalJourney.sampleSize === 1 ? "response" : "responses"}
               </span>
               <span style={{ fontSize: 11, color: "#7a6f6a" }}>
-                — outcome rates below are based on this sample. Achieved + Partly + Not Achieved sum to 100% of post-wear reviews; treat as directional until n ≥ 10.
+                — directional only; minimum n=10 for a reliable pattern. Achieved + Partly + Not Achieved sum to 100%.
               </span>
             </div>
             <div style={s.kpiGrid}>
@@ -1561,7 +1560,7 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays, liv
                         <th style={s.th}>Feeling Achieved</th>
                         <th style={s.th}>Post-Wear Confirmed</th>
                         <th style={s.th}>Would Wear Again</th>
-                        <th style={s.th}>Sessions</th>
+                        <th style={s.th}>Post-wear reviews</th>
                         <th style={s.th}>Confidence</th>
                       </tr>
                     </thead>
@@ -1625,7 +1624,7 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays, liv
                       {p.postWearPositiveRate != null && <Metric label="Post-wear positive" value={`${p.postWearPositiveRate}%`} />}
                       {p.wouldWearAgainCount != null && <Metric label="Would wear again" value={`${p.wouldWearAgainCount} of ${p.wrCount ?? p.sampleSize}`} />}
                       {p.notWearAgainCount != null && p.notWearAgainCount > 0 && <Metric label="Would not wear again" value={`${p.notWearAgainCount} of ${p.wrCount ?? p.sampleSize}`} />}
-                      <Metric label="Sample size" value={`n=${p.sampleSize}`} />
+                      <Metric label="Outfit + post-wear reviews" value={`${p.sampleSize} reviewed looks`} />
                       {p.desiredFeelings?.length > 0 && (
                         <div style={{ marginTop: 8, fontSize: 11, color: "#8b2035", fontStyle: "italic" }}>{p.desiredFeelings.join(", ")}</div>
                       )}
