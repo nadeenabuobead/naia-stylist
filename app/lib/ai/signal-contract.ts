@@ -359,6 +359,28 @@ export const BODY_NEED_NORMALIZATION_MAP: Record<string, string> = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Style Personality V2→V3 translation
+// Maps stored V2 Passport profile IDs to the V3 catalogue archetype tokens
+// introduced in Group 3 (Rev 4 workbook).  Applied before SPM direct-match so
+// existing customer profiles containing V2 IDs continue to score correctly.
+// Many-to-one: multiple V2 IDs may map to the same V3 archetype.
+// V3 IDs are not in this map; they pass through as-is.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const PROFILE_SP_V2_TO_V3_MAP: Readonly<Record<string, string>> = {
+  "old-money":         "classic-polished",
+  "corporate-chic":    "classic-polished",
+  "feminine":          "feminine-romantic",
+  "romantic":          "feminine-romantic",
+  "minimal":           "minimal-relaxed",
+  "casual-cool":       "minimal-relaxed",
+  "effortlessly-chic": "minimal-relaxed",
+  "edgy":              "bold-edgy",
+  "trendy":            "bold-edgy",
+  "artsy":             "creative-expressive",
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Style Personality style-tag fallback
 // Profile IDs in this set have no guaranteed direct STYLE_PERSONALITY_MATCH on
 // every product.  When none exists, recommendation logic may consult STYLE_TAGS.

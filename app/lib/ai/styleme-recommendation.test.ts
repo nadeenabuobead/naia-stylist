@@ -32,6 +32,7 @@ import { getAllCatalogProducts } from "./naia-catalog.ts";
 import {
   PRODUCT_TEMPLATE_FIELDS,
   APPROVED_DRESSING_PREFERENCE_IDS,
+  PROFILE_SP_V2_TO_V3_MAP,
 } from "./signal-contract.ts";
 import { buildProfileSignals } from "./styleme-result.server.ts";
 import { quizQuestions } from "../onboarding/quiz-data.ts";
@@ -791,7 +792,7 @@ describe("§6  Scoring precision", () => {
   });
 
   it("6.6  like-myself amplification (+2 per SP match) fires for each direct SP match", () => {
-    // Use SP=feminine + like-myself in desiredFeelings
+    // Use V2 SP=feminine (→ feminine-romantic via V2→V3 map) + like-myself in desiredFeelings
     const result = run(
       makeSession({
         desiredFeelings: ["like-myself"],
@@ -799,7 +800,7 @@ describe("§6  Scoring precision", () => {
       }),
       { stylePersonalities: ["feminine"] },
     );
-    // Products with feminine SP: double-top, suede-skirt, kimono-jacket, midi-dress, dress-set
+    // Products with feminine-romantic SP: double-top, suede-skirt, kimono-jacket, midi-dress, dress-set
     const doubleTopEv = result.evaluatedProducts.find((e) => e.handle === "double-top");
     assert.ok(doubleTopEv);
     const ampEv = doubleTopEv!.positiveEvidence.find(
@@ -2786,9 +2787,10 @@ describe("§V2-A3 Profile Aspiration — desiredImpression + becoming", () => {
     assert.equal(ev.totalScore, 5); // 4 ESS + 1 aspiration
   });
 
-  it("V2A3.7 — SP feminine already matched + desiredImpression feminine → no extra aspiration point", () => {
-    // double-top has "feminine" in stylePersonalityMatch → §7 scores it → concept "feminine"
-    // enters scoredConcepts → §11.7 skips the same concept from desiredImpression
+  it("V2A3.7 — V2 SP feminine (→ feminine-romantic) already matched + desiredImpression feminine → no extra aspiration point", () => {
+    // V2 profile "feminine" → translated to "feminine-romantic" → double-top matches
+    // → §7 scores it → concept "feminine" enters scoredConcepts
+    // → §11.7 skips the same concept from desiredImpression
     const result = run(
       makeSession({ moods: ["confident"], occasion: "work" }),
       { stylePersonalities: ["feminine"], desiredImpression: ["feminine"] },
@@ -2799,8 +2801,9 @@ describe("§V2-A3 Profile Aspiration — desiredImpression + becoming", () => {
     assert.equal(ev.totalScore, 6);
   });
 
-  it("V2A3.8 — SP effortlessly-chic already matched + becoming more-effortless → no extra aspiration point", () => {
-    // oversized-blazer has "effortlessly-chic" in SP → §7 scores → concept "effortless" in scoredConcepts
+  it("V2A3.8 — V2 SP effortlessly-chic (→ minimal-relaxed) already matched + becoming more-effortless → no extra aspiration point", () => {
+    // V2 profile "effortlessly-chic" → translated to "minimal-relaxed" → oversized-blazer matches
+    // → §7 scores → concept "effortless" in scoredConcepts
     const result = run(
       makeSession({ moods: ["confident"], occasion: "girls-night" }),
       { stylePersonalities: ["effortlessly-chic"], becoming: ["more-effortless"] },
@@ -2968,9 +2971,9 @@ describe("§V2-A3 Profile Aspiration — desiredImpression + becoming", () => {
     assert.equal(collarEval.positiveEvidence.length, 0, "hard-excluded product has no positive evidence");
   });
 
-  it("V2A3.23 — SP in profile not matching product is product-specific: aspiration dedup clears when SP missed", () => {
-    // Call A: profile has SP ["feminine"] + desiredImpression ["feminine"]
-    //   double-top has "feminine" in SP → §7 scores → concept "feminine" in scoredConcepts
+  it("V2A3.23 — V2 SP in profile not matching product is product-specific: aspiration dedup clears when SP missed", () => {
+    // Call A: profile has V2 SP ["feminine"] (→ feminine-romantic) + desiredImpression ["feminine"]
+    //   double-top has "feminine-romantic" in SP → §7 scores → concept "feminine" in scoredConcepts
     //   → desiredImpression "feminine" blocked by dedup → 0 aspiration
     const sessionA = makeSession({ moods: ["confident"], occasion: "work" });
     const resultA = run(sessionA, { stylePersonalities: ["feminine"], desiredImpression: ["feminine"] });
@@ -3472,5 +3475,202 @@ describe("§G2 Dressing-preference hard exclusions — missing metadata + catego
     const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["arms-covered"] });
     assert.ok(isDressingExcluded(result, "dress-set"),
       "dress-set (sleeveLength: short) must be excluded by arms-covered");
+  });
+});
+
+// ─── §G3 V2 Style Personality backward-compatibility ─────────────────────────
+// Group 3 re-tagged the catalogue from V2 to V3 SPM tokens.  Existing customers
+// whose Passport stored V2 IDs must still score against V3-only products via
+// PROFILE_SP_V2_TO_V3_MAP.  Each test proves one V2 token produces a direct SP
+// match (RANK evidence, field = stylePersonalityMatch) on an appropriate product.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("§G3 V2 style-personality backward-compat — V2 profile IDs vs V3 catalogue", () => {
+  function makeBaseSession() {
+    return makeSession({ occasion: "everyday" });
+  }
+
+  function findSpMatchEvidence(result: ReturnType<typeof run>, handle: string) {
+    const ev = result.evaluatedProducts.find((e) => e.handle === handle);
+    assert.ok(ev, `${handle} must appear in evaluatedProducts`);
+    return ev!.positiveEvidence.filter(
+      (e) =>
+        e.field === PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH &&
+        !e.matchedToken.includes(":"),  // exclude like-myself-bonus entries
+    );
+  }
+
+  it("G3.SP.01 — V2 'old-money' → classic-polished → direct SP match on collar-shirt", () => {
+    assert.equal(PROFILE_SP_V2_TO_V3_MAP["old-money"], "classic-polished");
+    const result = run(makeBaseSession(), { stylePersonalities: ["old-money"] });
+    const spEvs = findSpMatchEvidence(result, "collar-shirt");
+    assert.equal(spEvs.length, 1, "collar-shirt must receive one direct SP match for old-money");
+    assert.equal(spEvs[0].matchedToken, "classic-polished");
+    assert.equal(spEvs[0].sessionSignal, "old-money");
+  });
+
+  it("G3.SP.02 — V2 'corporate-chic' → classic-polished → direct SP match on trench-coat", () => {
+    assert.equal(PROFILE_SP_V2_TO_V3_MAP["corporate-chic"], "classic-polished");
+    const result = run(makeBaseSession(), { stylePersonalities: ["corporate-chic"] });
+    const spEvs = findSpMatchEvidence(result, "trench-coat");
+    assert.equal(spEvs.length, 1, "trench-coat must receive one direct SP match for corporate-chic");
+    assert.equal(spEvs[0].matchedToken, "classic-polished");
+    assert.equal(spEvs[0].sessionSignal, "corporate-chic");
+  });
+
+  it("G3.SP.03 — V2 'feminine' → feminine-romantic → direct SP match on double-top", () => {
+    assert.equal(PROFILE_SP_V2_TO_V3_MAP["feminine"], "feminine-romantic");
+    const result = run(makeBaseSession(), { stylePersonalities: ["feminine"] });
+    const spEvs = findSpMatchEvidence(result, "double-top");
+    assert.equal(spEvs.length, 1, "double-top must receive one direct SP match for feminine");
+    assert.equal(spEvs[0].matchedToken, "feminine-romantic");
+    assert.equal(spEvs[0].sessionSignal, "feminine");
+  });
+
+  it("G3.SP.04 — V2 'romantic' → feminine-romantic → direct SP match on suede-skirt", () => {
+    assert.equal(PROFILE_SP_V2_TO_V3_MAP["romantic"], "feminine-romantic");
+    const result = run(makeBaseSession(), { stylePersonalities: ["romantic"] });
+    const spEvs = findSpMatchEvidence(result, "suede-skirt");
+    assert.equal(spEvs.length, 1, "suede-skirt must receive one direct SP match for romantic");
+    assert.equal(spEvs[0].matchedToken, "feminine-romantic");
+    assert.equal(spEvs[0].sessionSignal, "romantic");
+  });
+
+  it("G3.SP.05 — V2 'minimal' → minimal-relaxed → direct SP match on collar-shirt", () => {
+    assert.equal(PROFILE_SP_V2_TO_V3_MAP["minimal"], "minimal-relaxed");
+    const result = run(makeBaseSession(), { stylePersonalities: ["minimal"] });
+    const spEvs = findSpMatchEvidence(result, "collar-shirt");
+    assert.equal(spEvs.length, 1, "collar-shirt must receive one direct SP match for minimal");
+    assert.equal(spEvs[0].matchedToken, "minimal-relaxed");
+    assert.equal(spEvs[0].sessionSignal, "minimal");
+  });
+
+  it("G3.SP.06 — V2 'casual-cool' → minimal-relaxed → direct SP match on kimono-jacket", () => {
+    assert.equal(PROFILE_SP_V2_TO_V3_MAP["casual-cool"], "minimal-relaxed");
+    const result = run(makeBaseSession(), { stylePersonalities: ["casual-cool"] });
+    const spEvs = findSpMatchEvidence(result, "kimono-jacket");
+    assert.equal(spEvs.length, 1, "kimono-jacket must receive one direct SP match for casual-cool");
+    assert.equal(spEvs[0].matchedToken, "minimal-relaxed");
+    assert.equal(spEvs[0].sessionSignal, "casual-cool");
+  });
+
+  it("G3.SP.07 — V2 'effortlessly-chic' → minimal-relaxed → direct SP match on oversized-blazer", () => {
+    assert.equal(PROFILE_SP_V2_TO_V3_MAP["effortlessly-chic"], "minimal-relaxed");
+    const result = run(makeBaseSession(), { stylePersonalities: ["effortlessly-chic"] });
+    const spEvs = findSpMatchEvidence(result, "oversized-blazer");
+    assert.equal(spEvs.length, 1, "oversized-blazer must receive one direct SP match for effortlessly-chic");
+    assert.equal(spEvs[0].matchedToken, "minimal-relaxed");
+    assert.equal(spEvs[0].sessionSignal, "effortlessly-chic");
+  });
+
+  it("G3.SP.08 — V2 'edgy' → bold-edgy → direct SP match on double-top", () => {
+    assert.equal(PROFILE_SP_V2_TO_V3_MAP["edgy"], "bold-edgy");
+    const result = run(makeBaseSession(), { stylePersonalities: ["edgy"] });
+    const spEvs = findSpMatchEvidence(result, "double-top");
+    assert.equal(spEvs.length, 1, "double-top must receive one direct SP match for edgy");
+    assert.equal(spEvs[0].matchedToken, "bold-edgy");
+    assert.equal(spEvs[0].sessionSignal, "edgy");
+  });
+
+  it("G3.SP.09 — V2 'trendy' → bold-edgy → direct SP match on dress-set", () => {
+    assert.equal(PROFILE_SP_V2_TO_V3_MAP["trendy"], "bold-edgy");
+    const result = run(makeBaseSession(), { stylePersonalities: ["trendy"] });
+    const spEvs = findSpMatchEvidence(result, "dress-set");
+    assert.equal(spEvs.length, 1, "dress-set must receive one direct SP match for trendy");
+    assert.equal(spEvs[0].matchedToken, "bold-edgy");
+    assert.equal(spEvs[0].sessionSignal, "trendy");
+  });
+
+  it("G3.SP.10 — V2 'artsy' → creative-expressive → direct SP match on collar-shirt", () => {
+    assert.equal(PROFILE_SP_V2_TO_V3_MAP["artsy"], "creative-expressive");
+    const result = run(makeBaseSession(), { stylePersonalities: ["artsy"] });
+    const spEvs = findSpMatchEvidence(result, "collar-shirt");
+    assert.equal(spEvs.length, 1, "collar-shirt must receive one direct SP match for artsy");
+    assert.equal(spEvs[0].matchedToken, "creative-expressive");
+    assert.equal(spEvs[0].sessionSignal, "artsy");
+  });
+
+  // V3 tokens still produce direct matches without needing the compat map
+  it("G3.SP.11 — V3 'creative-expressive' produces direct SP match without translation", () => {
+    const result = run(makeBaseSession(), { stylePersonalities: ["creative-expressive"] });
+    const spEvs = findSpMatchEvidence(result, "collar-shirt");
+    assert.equal(spEvs.length, 1, "collar-shirt must receive a direct SP match for creative-expressive");
+    assert.equal(spEvs[0].matchedToken, "creative-expressive");
+    assert.equal(spEvs[0].sessionSignal, "creative-expressive");
+  });
+
+  it("G3.SP.12 — V3 'bold-edgy' produces direct SP match without translation", () => {
+    const result = run(makeBaseSession(), { stylePersonalities: ["bold-edgy"] });
+    const spEvs = findSpMatchEvidence(result, "double-top");
+    assert.equal(spEvs.length, 1, "double-top must receive a direct SP match for bold-edgy");
+    assert.equal(spEvs[0].matchedToken, "bold-edgy");
+    assert.equal(spEvs[0].sessionSignal, "bold-edgy");
+  });
+
+  // ── V3 collapse dedup: multiple V2 IDs → one V3 archetype → one score ────────
+
+  it("G3.SP.13 — feminine+romantic both map to feminine-romantic → exactly one SPM evidence entry on double-top", () => {
+    // Both V2 tokens collapse to the same V3 archetype.  Engine must not double-score.
+    const result = run(makeBaseSession(), { stylePersonalities: ["feminine", "romantic"] });
+    const spEvs = findSpMatchEvidence(result, "double-top");
+    assert.equal(spEvs.length, 1,
+      "double-top: feminine+romantic must produce ONE feminine-romantic match, not two");
+    assert.equal(spEvs[0].matchedToken, "feminine-romantic");
+    // sessionSignal is whichever V2 token was first in the array
+    assert.equal(spEvs[0].sessionSignal, "feminine");
+  });
+
+  it("G3.SP.14 — old-money+corporate-chic both map to classic-polished → exactly one SPM evidence entry on collar-shirt", () => {
+    const result = run(makeBaseSession(), { stylePersonalities: ["old-money", "corporate-chic"] });
+    const spEvs = findSpMatchEvidence(result, "collar-shirt");
+    assert.equal(spEvs.length, 1,
+      "collar-shirt: old-money+corporate-chic must produce ONE classic-polished match, not two");
+    assert.equal(spEvs[0].matchedToken, "classic-polished");
+  });
+
+  it("G3.SP.15 — minimal+casual-cool+effortlessly-chic all map to minimal-relaxed → exactly one SPM evidence entry on oversized-blazer", () => {
+    const result = run(makeBaseSession(), {
+      stylePersonalities: ["minimal", "casual-cool", "effortlessly-chic"],
+    });
+    const spEvs = findSpMatchEvidence(result, "oversized-blazer");
+    assert.equal(spEvs.length, 1,
+      "oversized-blazer: triple minimal-relaxed collapse must produce ONE match, not three");
+    assert.equal(spEvs[0].matchedToken, "minimal-relaxed");
+  });
+
+  it("G3.SP.16 — edgy+trendy both map to bold-edgy → exactly one SPM evidence entry on double-top", () => {
+    const result = run(makeBaseSession(), { stylePersonalities: ["edgy", "trendy"] });
+    const spEvs = findSpMatchEvidence(result, "double-top");
+    assert.equal(spEvs.length, 1,
+      "double-top: edgy+trendy must produce ONE bold-edgy match, not two");
+    assert.equal(spEvs[0].matchedToken, "bold-edgy");
+  });
+
+  it("G3.SP.17 — feminine+artsy map to different V3 archetypes → two independent SPM evidence entries on double-top", () => {
+    // feminine → feminine-romantic; artsy → creative-expressive — genuinely different V3 archetypes
+    const result = run(makeBaseSession(), { stylePersonalities: ["feminine", "artsy"] });
+    const spEvs = findSpMatchEvidence(result, "double-top");
+    assert.equal(spEvs.length, 2,
+      "double-top: feminine+artsy → 2 different V3 archetypes → 2 independent evidence entries");
+    const tokens = spEvs.map(e => e.matchedToken).sort();
+    assert.deepStrictEqual(tokens, ["bold-edgy", "creative-expressive", "feminine-romantic"].slice(1),
+      // double-top has creative-expressive and feminine-romantic (not bold-edgy)
+    );
+    // verify the two tokens are the expected V3 archetypes
+    assert.ok(tokens.includes("feminine-romantic"), "must include feminine-romantic");
+    assert.ok(tokens.includes("creative-expressive"), "must include creative-expressive");
+  });
+
+  it("G3.SP.18 — native V3 multi-select feminine-romantic+creative-expressive scores both independently on double-top", () => {
+    // Two native V3 tokens that are genuinely distinct — no collapse, no dedup
+    const result = run(makeBaseSession(), {
+      stylePersonalities: ["feminine-romantic", "creative-expressive"],
+    });
+    const spEvs = findSpMatchEvidence(result, "double-top");
+    assert.equal(spEvs.length, 2,
+      "double-top: two distinct V3 archetypes → two evidence entries");
+    const tokens = spEvs.map(e => e.matchedToken).sort();
+    assert.ok(tokens.includes("feminine-romantic"), "must include feminine-romantic");
+    assert.ok(tokens.includes("creative-expressive"), "must include creative-expressive");
   });
 });

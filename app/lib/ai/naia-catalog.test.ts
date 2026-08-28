@@ -446,17 +446,18 @@ describe("nAia catalog — Phase 3B validation", () => {
     );
   });
 
-  // ── 26. stylePersonalityMatch tokens belong to approved 10-ID vocabulary ──
-  test("26. stylePersonalityMatch tokens are in the approved 10-ID vocabulary", () => {
-    const APPROVED = new Set([
-      "old-money", "artsy", "edgy", "feminine", "corporate-chic",
-      "effortlessly-chic", "minimal", "trendy", "romantic", "casual-cool",
+  // ── 26. stylePersonalityMatch tokens are in the V3 archetype vocabulary ──
+  // Updated Group 3: V2 10-ID vocabulary replaced by V3 5-archetype vocabulary.
+  test("26. stylePersonalityMatch tokens are in the V3 archetype vocabulary", () => {
+    const V3_ARCHETYPES = new Set([
+      "classic-polished", "feminine-romantic", "minimal-relaxed",
+      "bold-edgy", "creative-expressive",
     ]);
     const violations: string[] = [];
     for (const p of products) {
       for (const token of p.parsed.rankings.stylePersonalityMatch) {
-        if (!APPROVED.has(token)) {
-          violations.push(`${p.handle}: "${token}" not in approved vocabulary`);
+        if (!V3_ARCHETYPES.has(token)) {
+          violations.push(`${p.handle}: "${token}" not in V3 archetype vocabulary`);
         }
       }
     }
@@ -486,6 +487,93 @@ describe("nAia catalog — Phase 3B validation", () => {
       [],
       `practicalSupportMatch unknown tokens:\n${violations.join("\n")}`,
     );
+  });
+
+  // ── Group 3 regressions (G3.R01–G3.R06) ──────────────────────────────────
+
+  test("G3.R01. No V2 SPM tokens remain in any product", () => {
+    const V2_TOKENS = new Set([
+      "old-money", "artsy", "edgy", "feminine", "corporate-chic",
+      "effortlessly-chic", "minimal", "trendy", "romantic", "casual-cool",
+    ]);
+    const hits: string[] = [];
+    for (const p of products) {
+      for (const token of p.parsed.rankings.stylePersonalityMatch) {
+        if (V2_TOKENS.has(token)) {
+          hits.push(`${p.handle}: "${token}" is a V2 token`);
+        }
+      }
+    }
+    assert.deepStrictEqual(hits, [], `V2 SPM tokens still present:\n${hits.join("\n")}`);
+  });
+
+  test("G3.R02. All 5 V3 archetypes are covered across the catalog", () => {
+    const V3_ARCHETYPES = new Set([
+      "classic-polished", "feminine-romantic", "minimal-relaxed",
+      "bold-edgy", "creative-expressive",
+    ]);
+    const covered = new Set<string>();
+    for (const p of products) {
+      for (const token of p.parsed.rankings.stylePersonalityMatch) {
+        covered.add(token);
+      }
+    }
+    for (const a of V3_ARCHETYPES) {
+      assert.ok(covered.has(a), `V3 archetype "${a}" not present on any product`);
+    }
+  });
+
+  test("G3.R03. midi-dress desiredFeelingMatch includes 'softer'", () => {
+    const p = getProductByHandle("midi-dress");
+    assert.ok(p, "midi-dress not found");
+    const tokens = p.sourceFields.desiredFeelingMatch.split(",").map((t: string) => t.trim());
+    assert.ok(tokens.includes("softer"), `midi-dress DFM missing 'softer'; got: ${tokens.join(", ")}`);
+  });
+
+  test("G3.R04. 'fitted' in SMCM on suede-skirt only (Becoming Rooted)", () => {
+    const hits: string[] = [];
+    for (const p of products) {
+      const smcm = p.sourceFields.styleMeComfortMatch ?? "";
+      const tokens = smcm.split(",").map((t: string) => t.trim());
+      if (tokens.includes("fitted")) hits.push(p.handle);
+    }
+    assert.deepStrictEqual(
+      hits, ["suede-skirt"],
+      `Expected only suede-skirt to have 'fitted' in SMCM; got: ${hits.join(", ")}`,
+    );
+  });
+
+  test("G3.R05. No product has 'straight-clean' in any field", () => {
+    const hits: string[] = [];
+    for (const p of products) {
+      for (const [key, val] of Object.entries(p.sourceFields)) {
+        if (typeof val === "string" && val.includes("straight-clean")) {
+          hits.push(`${p.handle}.${key}`);
+        }
+      }
+    }
+    assert.deepStrictEqual(hits, [], `'straight-clean' found in fields:\n${hits.join("\n")}`);
+  });
+
+  test("G3.R06. Group 2 dressing metadata preserved on all 11 products", () => {
+    const DRESSING_KEYS = [
+      "modestySafe", "abayaCompatible", "hijabCompatible",
+      "sleeveLength", "necklineCoverage", "hemLength", "topLength", "fitProfile",
+    ] as const;
+    const missing: string[] = [];
+    for (const p of products) {
+      if (!p.dressingMetadata) {
+        missing.push(`${p.handle}: dressingMetadata entirely absent`);
+        continue;
+      }
+      for (const k of DRESSING_KEYS) {
+        const val = p.dressingMetadata[k];
+        if (val === undefined || val === null || val === "") {
+          missing.push(`${p.handle}.dressingMetadata.${k}: missing`);
+        }
+      }
+    }
+    assert.deepStrictEqual(missing, [], `Dressing metadata missing:\n${missing.join("\n")}`);
   });
 
   // ── 25. Becoming Seen field 35 (V8 fix) ────────────────────────────────

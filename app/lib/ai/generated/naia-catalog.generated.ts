@@ -1,6 +1,6 @@
 // THIS FILE IS AUTO-GENERATED. DO NOT EDIT MANUALLY.
 // Source: PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx
-// SHA-256: 1c002dda298d253589e095758e779c03ac9f35ef11cc281aba6a4da2d36d6686
+// SHA-256: c765e4352771f7f75564a252006cd43b1e76a71eff6b8da7533cef8e5ed10b40
 // Re-generate: tsx scripts/extract-naia-catalog.ts
 
 import type { GeneratedCatalog } from "../naia-catalog.types.js";
@@ -8,7 +8,7 @@ import type { GeneratedCatalog } from "../naia-catalog.types.js";
 export const NAIA_CATALOG: GeneratedCatalog = {
   "schemaVersion": 1,
   "sourceWorkbook": "PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx",
-  "sourceSha256": "1c002dda298d253589e095758e779c03ac9f35ef11cc281aba6a4da2d36d6686",
+  "sourceSha256": "c765e4352771f7f75564a252006cd43b1e76a71eff6b8da7533cef8e5ed10b40",
   "products": [
     {
       "handle": "double-top",
@@ -28,7 +28,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "artStoryDescription": "Burgundy and deep brown carry the rawest emotional part of the collection.",
         "stylingRole": "Statement anchor; modular layered top; waist-defining hero piece",
         "desiredFeelingMatch": "more-confident, more-feminine, more-elevated, more-attractive",
-        "stylePersonalityMatch": "artsy, feminine, edgy",
+        "stylePersonalityMatch": "creative-expressive, feminine-romantic, bold-edgy",
         "styleTags": "formal, edgy, romantic, trendy",
         "occasionTags": "dinner, date-night, girls-night, special-event",
         "productStyleDescriptors": "Layered, sculptural, waist-defined, feminine, mixed-material, statement, art-led",
@@ -101,9 +101,9 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "more-attractive"
           ],
           "stylePersonalityMatch": [
-            "artsy",
-            "feminine",
-            "edgy"
+            "creative-expressive",
+            "feminine-romantic",
+            "bold-edgy"
           ],
           "styleTags": [
             "formal",
@@ -217,7 +217,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "artStoryDescription": "The clean starting point: the nude base, before performance or expectation.",
         "stylingRole": "Elevated wardrobe anchor; waist-defining structured shirt; polished layering base",
         "desiredFeelingMatch": "more-put-together, more-confident, more-elevated, more-powerful",
-        "stylePersonalityMatch": "corporate-chic, effortlessly-chic, artsy",
+        "stylePersonalityMatch": "classic-polished, minimal-relaxed, creative-expressive",
         "styleTags": "formal, classic, minimalist, trendy, minimal",
         "occasionTags": "work, everyday, dinner, special-event, family",
         "productStyleDescriptors": "Tailored, structured, waist-defined, polished, clean, art-detailed",
@@ -285,9 +285,9 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "more-powerful"
           ],
           "stylePersonalityMatch": [
-            "corporate-chic",
-            "effortlessly-chic",
-            "artsy"
+            "classic-polished",
+            "minimal-relaxed",
+            "creative-expressive"
           ],
           "styleTags": [
             "formal",
@@ -407,7 +407,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "artStoryDescription": "They create balance from the lower body: practical, weighty, and anchored.",
         "stylingRole": "Statement bottom; grounding anchor; hip-detail trouser",
         "desiredFeelingMatch": "more-put-together, more-confident, more-powerful, more-elevated",
-        "stylePersonalityMatch": "edgy, artsy, corporate-chic",
+        "stylePersonalityMatch": "bold-edgy, creative-expressive, classic-polished",
         "styleTags": "formal, edgy, trendy, classic",
         "occasionTags": "work, everyday, dinner, date-night",
         "productStyleDescriptors": "Tailored, directional, structured, artful, modern, statement, asymmetric, low-slung",
@@ -476,9 +476,9 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "more-elevated"
           ],
           "stylePersonalityMatch": [
-            "edgy",
-            "artsy",
-            "corporate-chic"
+            "bold-edgy",
+            "creative-expressive",
+            "classic-polished"
           ],
           "styleTags": [
             "formal",
@@ -592,7 +592,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "artStoryDescription": "Becoming Free explores the moment structure gives way to movement. The controlled waist and clean leather base gradually loosen into sculptural folds, expressing the freedom that comes from releasing the need to remain perfectly composed. The oversized pockets and unexpected printed details disrupt the traditional trouser silhouette, turning something familiar into something instinctive, expressive and unrestricted.",
         "stylingRole": "Sculptural statement bottom; directional leather trouser; lower-body outfit anchor",
         "desiredFeelingMatch": "more-confident, more-powerful, more-elevated, more-put-together",
-        "stylePersonalityMatch": "edgy, artsy, effortlessly-chic",
+        "stylePersonalityMatch": "bold-edgy, creative-expressive, minimal-relaxed",
         "styleTags": "edgy, casual, minimalist, minimal, casual-cool",
         "occasionTags": "everyday, dinner, date-night, girls-night",
         "productStyleDescriptors": "Sculptural, draped, directional, utilitarian, art-led, relaxed-tailoring, statement leather",
@@ -658,9 +658,9 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "more-put-together"
           ],
           "stylePersonalityMatch": [
-            "edgy",
-            "artsy",
-            "effortlessly-chic"
+            "bold-edgy",
+            "creative-expressive",
+            "minimal-relaxed"
           ],
           "styleTags": [
             "edgy",
@@ -774,7 +774,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "artStoryDescription": "Tactile, earthy and close to the original “base,” while the chiffon slit still lets it move.",
         "stylingRole": "Sculptural statement skirt; feminine column anchor; waist-emphasising occasion bottom",
         "desiredFeelingMatch": "more-feminine, more-attractive, more-elevated, more-confident, softer",
-        "stylePersonalityMatch": "feminine, romantic, artsy",
+        "stylePersonalityMatch": "feminine-romantic, creative-expressive",
         "styleTags": "formal, romantic, classic, trendy",
         "occasionTags": "dinner, date-night, special-event, work, family",
         "productStyleDescriptors": "Feminine, textured, sculptural, refined, artful, body-skimming, waist-defined, evening",
@@ -783,7 +783,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "season": "fall, winter, spring",
         "bodyFitLogic": "The high waist and slim column shape follow the waist and hips before falling to a midi length. The knotted belt draws attention to the waist, while the back slit and chiffon insert add movement.",
         "bodyProportionEffects": "defines-waist, emphasises-hips, streamlines-lower-body, creates-vertical-line",
-        "styleMeComfortMatch": "waist-definition, structured, elongates",
+        "styleMeComfortMatch": "waist-definition, structured, elongates, fitted",
         "coverageModesty": "Midi-length lower-body coverage with a high waist. The skirt follows the waist and hips, and the centre-back slit provides movement.",
         "proportionRule": "Keep the top fitted, tucked, cropped or neatly shaped at the waist so the belt and column line remain visible. Avoid adding bulk over the hips.",
         "notIdealFor": "Loose fits through the waist and hips, highly active or very casual settings, hot outdoor weather or bulky tops that cover the knotted belt.",
@@ -845,9 +845,8 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "softer"
           ],
           "stylePersonalityMatch": [
-            "feminine",
-            "romantic",
-            "artsy"
+            "feminine-romantic",
+            "creative-expressive"
           ],
           "styleTags": [
             "formal",
@@ -876,7 +875,8 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "styleMeComfortMatch": [
             "waist-definition",
             "structured",
-            "elongates"
+            "elongates",
+            "fitted"
           ],
           "currentEmotionalStateSupport": [
             "confident",
@@ -964,7 +964,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "artStoryDescription": "The outermost, most public piece—the moment she steps forward and is visible.",
         "stylingRole": "Statement outer layer; polished outfit finisher; art-led tailored trench",
         "desiredFeelingMatch": "more-put-together, more-confident, more-powerful, more-elevated",
-        "stylePersonalityMatch": "corporate-chic, artsy, edgy, old-money",
+        "stylePersonalityMatch": "classic-polished, creative-expressive, bold-edgy",
         "styleTags": "formal, edgy, trendy, classic",
         "occasionTags": "work, dinner, special-event, travel",
         "productStyleDescriptors": "Sculptural, tailored, editorial, artful, polished, asymmetric, statement, belted",
@@ -1034,10 +1034,9 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "more-elevated"
           ],
           "stylePersonalityMatch": [
-            "corporate-chic",
-            "artsy",
-            "edgy",
-            "old-money"
+            "classic-polished",
+            "creative-expressive",
+            "bold-edgy"
           ],
           "styleTags": [
             "formal",
@@ -1160,7 +1159,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "artStoryDescription": "The wrap piece that holds the fragments, textures and layers together.",
         "stylingRole": "Statement outer layer; waist-shaping wrap jacket; polished outfit finisher",
         "desiredFeelingMatch": "more-effortless, more-elevated, more-feminine, more-confident, softer",
-        "stylePersonalityMatch": "artsy, effortlessly-chic, feminine",
+        "stylePersonalityMatch": "creative-expressive, minimal-relaxed, feminine-romantic",
         "styleTags": "formal, romantic, trendy, bohemian",
         "occasionTags": "everyday, dinner, travel, special-event, family",
         "productStyleDescriptors": "Kimono-inspired, artful, relaxed tailoring, statement, layered, editorial, waist-defined, textural",
@@ -1230,9 +1229,9 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "softer"
           ],
           "stylePersonalityMatch": [
-            "artsy",
-            "effortlessly-chic",
-            "feminine"
+            "creative-expressive",
+            "minimal-relaxed",
+            "feminine-romantic"
           ],
           "styleTags": [
             "formal",
@@ -1358,7 +1357,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "artStoryDescription": "Its panel lines and fitted construction read as alignment after the noise.",
         "stylingRole": "Relaxed statement outer layer; art-led bomber; easy outfit finisher",
         "desiredFeelingMatch": "more-confident, more-effortless, more-put-together, more-elevated",
-        "stylePersonalityMatch": "artsy, edgy, effortlessly-chic",
+        "stylePersonalityMatch": "creative-expressive, bold-edgy, minimal-relaxed",
         "styleTags": "edgy, casual, casual-cool",
         "occasionTags": "everyday, dinner, girls-night, travel",
         "productStyleDescriptors": "Relaxed, art-led, sculptural, contrast-panelled, sporty-elevated, statement outerwear",
@@ -1427,9 +1426,9 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "more-elevated"
           ],
           "stylePersonalityMatch": [
-            "artsy",
-            "edgy",
-            "effortlessly-chic"
+            "creative-expressive",
+            "bold-edgy",
+            "minimal-relaxed"
           ],
           "styleTags": [
             "edgy",
@@ -1544,7 +1543,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "artStoryDescription": "Becoming Bold is about taking up space without apology. The oversized tailoring exaggerates the silhouette while the deep burgundy gives it presence and authority. Beneath that structure, printed chiffon escapes from the cuffs and hem — a softer, more expressive layer that refuses to stay contained. The contrast between sharp tailoring and fluid movement reflects a kind of confidence that does not have to choose between strength and softness.",
         "stylingRole": "Oversized tailoring anchor; polished statement outer layer; effortless outfit finisher",
         "desiredFeelingMatch": "more-powerful, more-put-together, more-elevated, more-effortless",
-        "stylePersonalityMatch": "corporate-chic, effortlessly-chic, edgy",
+        "stylePersonalityMatch": "classic-polished, minimal-relaxed, bold-edgy",
         "styleTags": "formal, classic, edgy",
         "occasionTags": "work, dinner, everyday, special-event",
         "productStyleDescriptors": "Oversized, tailored, relaxed, polished, art-led, contrast-texture, modern suiting",
@@ -1610,9 +1609,9 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "more-effortless"
           ],
           "stylePersonalityMatch": [
-            "corporate-chic",
-            "effortlessly-chic",
-            "edgy"
+            "classic-polished",
+            "minimal-relaxed",
+            "bold-edgy"
           ],
           "styleTags": [
             "formal",
@@ -1730,8 +1729,8 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "activePublished": "☐ Confirmed",
         "artStoryDescription": "The full silhouette: the collection’s most direct expression of taking shape in your own body.",
         "stylingRole": "Complete-look hero dress; feminine occasion anchor; sculptural day-to-evening statement",
-        "desiredFeelingMatch": "more-feminine, more-attractive, more-confident, more-elevated",
-        "stylePersonalityMatch": "feminine, romantic, artsy",
+        "desiredFeelingMatch": "more-feminine, more-attractive, more-confident, more-elevated, softer",
+        "stylePersonalityMatch": "feminine-romantic, creative-expressive",
         "styleTags": "formal, romantic, trendy",
         "occasionTags": "dinner, date-night, girls-night, special-event",
         "productStyleDescriptors": "Feminine, artful, sculptural, fitted, softly voluminous, refined, statement, evening",
@@ -1796,12 +1795,12 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "more-feminine",
             "more-attractive",
             "more-confident",
-            "more-elevated"
+            "more-elevated",
+            "softer"
           ],
           "stylePersonalityMatch": [
-            "feminine",
-            "romantic",
-            "artsy"
+            "feminine-romantic",
+            "creative-expressive"
           ],
           "styleTags": [
             "formal",
@@ -1920,7 +1919,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "artStoryDescription": "The corset holds tension and gives the body intentional structure.",
         "stylingRole": "Modular occasion set; complete-look statement; waist-defining sculptural ensemble",
         "desiredFeelingMatch": "more-confident, more-powerful, more-feminine, more-elevated",
-        "stylePersonalityMatch": "feminine, artsy, trendy",
+        "stylePersonalityMatch": "feminine-romantic, creative-expressive, bold-edgy",
         "styleTags": "formal, romantic, trendy, edgy",
         "occasionTags": "dinner, date-night, girls-night, special-event",
         "productStyleDescriptors": "Couture-inspired, sculptural, feminine, artful, statement, editorial, asymmetric, waist-defined",
@@ -1995,9 +1994,9 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "more-elevated"
           ],
           "stylePersonalityMatch": [
-            "feminine",
-            "artsy",
-            "trendy"
+            "feminine-romantic",
+            "creative-expressive",
+            "bold-edgy"
           ],
           "styleTags": [
             "formal",

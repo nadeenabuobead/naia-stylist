@@ -7,6 +7,7 @@ import {
   PSM_NORMALIZATION_MAP,
   PSM_SUPPLEMENTAL_PRODUCT_TOKENS,
   STYLE_PERSONALITY_STYLE_TAG_FALLBACK,
+  PROFILE_SP_V2_TO_V3_MAP,
   STYLING_EFFORT_RULE,
   PROVISIONAL_EVIDENCE,
   PROFILE_DESIRED_FEELING_TRANSLATION,
@@ -1032,17 +1033,28 @@ function scoreProduct(
   }
 
   // ── 7. Style Personalities (profile) ─────────────────────────────────────
+  // V2 profile IDs are translated to V3 catalogue tokens before matching so
+  // existing customers whose Passport stored a V2 ID continue to score against
+  // the V3-only catalogue.  matchedToken stores the V3 token; sessionSignal
+  // preserves the original profile value for evidence transparency.
+  // scoredEffectiveSps guards against double-scoring when multiple V2 IDs
+  // collapse to the same V3 archetype (e.g. "feminine"+"romantic" → one
+  // "feminine-romantic" match, not two).
   let spMatchType: "direct" | "style-tags-fallback" | "none" = "none";
   const profileSPs = profile?.stylePersonalities ?? [];
+  const scoredEffectiveSps = new Set<string>();
 
   for (const sp of profileSPs) {
-    if (rankings.stylePersonalityMatch.includes(sp)) {
+    const effectiveSp = PROFILE_SP_V2_TO_V3_MAP[sp] ?? sp;
+    if (scoredEffectiveSps.has(effectiveSp)) continue;
+    if (rankings.stylePersonalityMatch.includes(effectiveSp)) {
+      scoredEffectiveSps.add(effectiveSp);
       // Step 2A: demoted STRONG_RANK → RANK. Session answers must outrank
       // Passport background preferences — see the engine principle note above §11.5.
       addEntry(acc, makeEntry(
         PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH,
-        sp,
-        sp,
+        effectiveSp,   // V3 catalogue token that matched
+        sp,            // original profile signal (V2 or V3)
         "RANK",
         SCORING_WEIGHTS.RANK,
         handle,
@@ -1053,7 +1065,7 @@ function scoreProduct(
       if (likeMyselfActive) {
         addEntry(acc, makeEntry(
           PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH,
-          `${sp}:like-myself-bonus`,
+          `${effectiveSp}:like-myself-bonus`,
           "like-myself",
           "RANK",
           SCORING_WEIGHTS.LIKE_MYSELF_SP_BONUS,
@@ -1064,6 +1076,7 @@ function scoreProduct(
       STYLE_PERSONALITY_STYLE_TAG_FALLBACK.has(sp) &&
       rankings.styleTags.includes(sp)
     ) {
+      scoredEffectiveSps.add(effectiveSp);
       addEntry(acc, makeEntry(
         PRODUCT_TEMPLATE_FIELDS.STYLE_TAGS,
         sp,
