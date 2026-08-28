@@ -878,7 +878,7 @@ function buildTopSignals({ data, kpis, phase4b2, advanced, rel, dateRangeDays })
     if (d >= 3) {
       const pct = phase4b2.postWearCompletion.positiveExperienceRate;
       push("emotional", "Post-Wear Satisfaction",
-        `${pct}% felt great or good`,
+        `${pct}% desired feeling achieved`,
         `${phase4b2.postWearCompletion.feltPositive} of ${d} post-wear reviews`,
         "Post-wear reviews", pLabel,
         d, pct / 100);
@@ -2304,7 +2304,7 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
             <div style={s.kpiGrid}>
               <KpiCard label="Post-Wear Reviews" value={phase4b2.postWearCompletion.totalWithPostWear} />
               <KpiCard label="Wore the Look" value={phase4b2.postWearCompletion.didWearItYes} suffix={` (${phase4b2.postWearCompletion.wearRate}%)`} />
-              <KpiCard label="Felt Great or Good" value={phase4b2.postWearCompletion.feltPositive} suffix={` (${phase4b2.postWearCompletion.positiveExperienceRate}%)`} />
+              <KpiCard label="Desired Feeling Achieved" value={phase4b2.postWearCompletion.feltPositive} suffix={` (${phase4b2.postWearCompletion.positiveExperienceRate}%)`} />
             </div>
             <div style={{ fontSize: 11, color: "#9CA3AF", fontFamily: INTER, marginTop: 10, fontStyle: "italic" }}>
               {periodLabel(dateRangeDays)} · n={phase4b2.postWearCompletion.totalWithPostWear} post-wear responses — directional only; minimum n=10 for a reliable pattern.
@@ -2420,7 +2420,7 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
                   if (high.length > 0) return `Early post-wear evidence is positive, but the sample is too small to establish a reliable recommendation-success pattern. Continue collecting post-wear feedback across more mood–feeling combinations.`;
                   return `Recommendation delivery rates are forming. Continue collecting post-wear data to identify success and failure patterns.`;
                 })()}
-                reason="The difference between a successful and failed recommendation is usually whether the product matched the emotional aspiration, not just the style. Desired feeling achievement is the leading indicator of recommendation quality."
+                reason="Early post-wear feedback suggests desired-feeling alignment may be worth monitoring, but more post-wear outcomes — both positive and negative — are needed before identifying what drives recommendation success or failure reliably."
                 confidence="medium"
                 sampleSize={rel.emotionalChain.reduce((s, r) => s + (r.wrCount ?? r.count), 0)}
               />
@@ -2491,8 +2491,8 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
                           </td>
                           <td style={{ ...s.td, fontFamily: MONO, fontSize: 11 }}>{row.wrCount}</td>
                           <td style={{ ...s.td, fontFamily: MONO, fontSize: 11 }}>{row.sessionCount}</td>
-                          <td style={{ ...s.td, fontSize: 11, fontFamily: MONO, color: rateColor }}>
-                            {rate == null ? "—" : rate >= 70 ? "Strong" : rate >= 40 ? "Moderate" : "Weak"}
+                          <td style={{ ...s.td, fontSize: 11, fontFamily: MONO, color: sampleConfidence(row.wrCount ?? 0).color }}>
+                            {sampleConfidence(row.wrCount ?? 0).label}
                           </td>
                         </tr>
                       );

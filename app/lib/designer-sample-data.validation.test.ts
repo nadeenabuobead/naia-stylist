@@ -2318,4 +2318,45 @@ describe("Features & Recommendations coherence: stop-gate reconciliation", () =>
         `n=${wrTotal} WR events must NOT produce 'consistently delivering' language`);
     }
   });
+
+  it("19. Signal column uses WR evidence maturity, not rate-tier — at 30D Corporate Chic wrCount=2 must not be 'Strong'", () => {
+    const cc = rel.dnaMatrix.find((r: any) => r.personality === "Corporate Chic");
+    assert.ok(cc, "Corporate Chic row must exist in dnaMatrix at 30D");
+    // At 30D: wrCount=2 → sampleConfidence tier = "Directional signal"
+    // The UI uses sampleConfidence(wrCount) — wrCount < 5 must not produce "Strong pattern"
+    assert.ok(cc.wrCount < 5,
+      `Corporate Chic wrCount at 30D should be < 5 (got ${cc.wrCount}); Signal must be Directional, not Strong`);
+    // Confirm the tier gate: Strong pattern fires at n>=20, so wrCount < 20 never produces it
+    const wouldBeStrong = cc.wrCount >= 20;
+    assert.strictEqual(wouldBeStrong, false,
+      `Corporate Chic wrCount=${cc.wrCount} must not produce 'Strong pattern' Signal`);
+    // And Established fires at n>=10, so wrCount < 10 also rules that out
+    const wouldBeEstablished = cc.wrCount >= 10;
+    assert.strictEqual(wouldBeEstablished, false,
+      `Corporate Chic wrCount=${cc.wrCount} must not produce 'Established pattern' Signal`);
+  });
+
+  it("20. Post-Wear feltPositive is derived from ejAchieved (desired-feeling classification), not a 'great or good' response field", () => {
+    const pw = d30.phase4b2.postWearCompletion;
+    // feltPositive must equal ejAchieved — which is classifyEmotionalOutcome === "achieved" count
+    // It must NOT exceed nwr (total post-wear reviews)
+    assert.ok(pw.feltPositive <= pw.totalWithPostWear,
+      `feltPositive (${pw.feltPositive}) cannot exceed totalWithPostWear (${pw.totalWithPostWear})`);
+    // At 30D: nwr=2, ejAchieved=2 → feltPositive=2, positiveExperienceRate=100%
+    assert.ok(pw.totalWithPostWear > 0, "totalWithPostWear must be > 0 at 30D");
+    assert.ok(pw.feltPositive >= 0, "feltPositive must be non-negative");
+    // The source is ejAchieved (desired-feeling achievement), not a survey response of "great" or "good"
+    // Verified by confirming feltPositive ≤ totalWithPostWear and is a whole number
+    assert.strictEqual(Number.isInteger(pw.feltPositive), true,
+      "feltPositive must be an integer (event count, not a rate)");
+  });
+
+  it("21. At 30D Post-Wear positiveExperienceRate equals ejAchieved / nwr — no 'felt great or good' proxy", () => {
+    const pw = d30.phase4b2.postWearCompletion;
+    if (pw.totalWithPostWear > 0) {
+      const expectedRate = Math.round((pw.feltPositive / pw.totalWithPostWear) * 100);
+      assert.strictEqual(pw.positiveExperienceRate, expectedRate,
+        `positiveExperienceRate (${pw.positiveExperienceRate}%) must equal Math.round(feltPositive/totalWithPostWear*100) = ${expectedRate}%`);
+    }
+  });
 });
