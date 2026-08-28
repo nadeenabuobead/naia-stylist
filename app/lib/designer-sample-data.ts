@@ -630,6 +630,11 @@ function productStats(events: SE[], name: string) {
     // GROUNDED uses objectionCount instead: its claim is about repeatable fit concerns from session data,
     // not reviews or purchase decisions. Using BS events for a fit-objection badge would be category error.
     evidenceN: allRev.length + pbs.length,
+    // wrCount = post-wear reviews only (not outfit reviews). Used as denominator wherever the claim is
+    // about feeling achievement or would-wear-again — both measured exclusively in WR events.
+    wrCount: pwr.length,
+    rewearYesCount: rewearYes,
+    rewearNoCount: pwr.filter(ev => ev.rewear === false).length,
     avgRating, loveRate, rewearRate, feelingAchievedRate: feelingRate,
     strongAchievedCount: strongAchieved, strongAchievedRate: pct(strongAchieved, pwrDenom),
     partlyAchievedCount: partlyAchieved, partlyAchievedRate: pct(partlyAchieved, pwrDenom),
@@ -1727,28 +1732,52 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       confidenceStatus, topProducts,
     };
   };
+  // Transformation table uses WR-only denominators — OR events (outfit reviews) do not carry
+  // desiredFeeling/actualAfterFeeling and must not inflate the "post-wear confirmed" denominator.
   const staticTransformations = [
-    mkTransform("Uncertain",  "Confident",  "Powerful",   pm[SEEN].reviewCount  + pm[GROUNDED].reviewCount,          78, 67, 74, [SEEN, GROUNDED], evidenceConfidence(pm[SEEN].reviewCount + pm[GROUNDED].reviewCount)),
-    mkTransform("Uninspired", "Effortless", "Effortless", pm[WHOLE].reviewCount + Math.max(0, pm[REAL].reviewCount),  71, 60, 65, [WHOLE, REAL],    evidenceConfidence(pm[WHOLE].reviewCount + pm[REAL].reviewCount)),
-    mkTransform("Comfortable","Elevated",   "Elevated",   pm[SEEN].reviewCount  + pm[CLEAR].reviewCount,              75, 65, 71, [SEEN, CLEAR],    evidenceConfidence(pm[SEEN].reviewCount + pm[CLEAR].reviewCount)),
-  ];
+    mkTransform("Uncertain",  "Confident",  "Powerful",   pm[SEEN].wrCount  + pm[GROUNDED].wrCount, 78, 67, 74, [SEEN, GROUNDED], evidenceConfidence(pm[SEEN].wrCount + pm[GROUNDED].wrCount)),
+    mkTransform("Uninspired", "Effortless", "Effortless", pm[WHOLE].wrCount + pm[REAL].wrCount,     71, 60, 65, [WHOLE, REAL],    evidenceConfidence(pm[WHOLE].wrCount + pm[REAL].wrCount)),
+    mkTransform("Comfortable","Elevated",   "Elevated",   pm[SEEN].wrCount  + pm[CLEAR].wrCount,    75, 65, 71, [SEEN, CLEAR],    evidenceConfidence(pm[SEEN].wrCount + pm[CLEAR].wrCount)),
+  ].filter(t => t.count > 0); // Only show rows with actual post-wear evidence
   const emotionalTransformations =
     dateRangeDays === 7  ? staticTransformations.slice(0, 1) :
     dateRangeDays === 30 ? staticTransformations.slice(0, 2) :
     staticTransformations;
 
   // Products by emotional impact — ordered by confidence lift
-  // achievedRate = WR events where feeling confirmed AND rewear:true (strong outcome, avoids 100% fallback)
+  // achievedRate = WR events where desired feeling exactly confirmed (strong outcome)
   const CONFIDENCE_BEFORE = 5.6;
-  const allProductImpact = bySessionCount.filter(p => p.reviewCount > 0).map(p => {
-    const m = pm[p.name];
-    const desiredFeelings = CATALOG[p.name].desiredFeelings.slice(0, 2).map(f => f.replace("more-", ""));
-    const startingMoodMap: Record<string, string> = {
-      [SEEN]: "Uncertain", [WHOLE]: "Uninspired", [ALIVE]: "Reserved",
-      [GROUNDED]: "Underdressed", [CLEAR]: "Unsure", [REAL]: "Casual",
-      [HER]: "Self-conscious", [ROOTED]: "Underdressed",
-    };
-    const interpretationMap: Record<string, string> = {
+
+  // Evidence-aware interpretation: scales claim strength to available WR data
+  function productImpactInterpretation(name: string, state: MeasurementState, wrCount: number): string {
+    if (state === "no_eligible_observations") {
+      const map: Record<string, string> = {
+        [SEEN]:     "No post-wear reviews in this period. Recommendation feedback shows above-average love rate for Corporate Chic and Artsy customers — post-wear data is needed to confirm feeling outcomes.",
+        [WHOLE]:    "No post-wear reviews in this period. Save signals are present but post-wear confirmation is not yet available.",
+        [ALIVE]:    "No post-wear reviews in this period. Recommendation feedback shows Edgy customers consistently love this piece; Minimal and Casual Cool consistently skip. Post-wear data is needed to confirm feeling outcomes.",
+        [GROUNDED]: "No post-wear reviews in this period. Fit objections are the primary observed signal — post-wear data is needed to confirm how often feeling is achieved when fit resolves.",
+        [CLEAR]:    "No post-wear reviews in this period. Buy-through rate is above collection average in recommendation feedback — post-wear data is needed to confirm feeling outcomes.",
+        [REAL]:     "No post-wear reviews in this period. Love rates from recommendation feedback are above average for Minimal and Corporate Chic customers.",
+        [HER]:      "No post-wear reviews in this period. Recommendation feedback shows strong love rates for Feminine and Romantic customers — post-wear data is needed to confirm feeling outcomes.",
+        [ROOTED]:   "No post-wear reviews in this period. Save rates are emerging for Feminine and Romantic customers.",
+      };
+      return map[name] ?? "No post-wear reviews in this period.";
+    }
+    if (state === "insufficient_evidence") {
+      const map: Record<string, string> = {
+        [SEEN]:     `Early indication (${wrCount} post-wear reviews): Corporate Chic customers are directionally achieving 'Powerful' and 'Confident'. More reviews needed to confirm this pattern reliably.`,
+        [WHOLE]:    `Early indication (${wrCount} post-wear reviews): feeling is directionally present. Styling ambiguity may prevent rewear even when the feeling is achieved — more data needed.`,
+        [ALIVE]:    `Early indication (${wrCount} post-wear reviews): Edgy customer outcomes look directionally positive. Minimal and Casual Cool rejection is consistent in feedback. More post-wear data needed to confirm.`,
+        [GROUNDED]: `Early indication (${wrCount} post-wear reviews): when fit resolves, feeling achievement is directionally positive. More reviews needed to establish pattern.`,
+        [CLEAR]:    `Early indication (${wrCount} post-wear reviews): customers who wear it tend to achieve the desired feeling. More reviews needed to confirm.`,
+        [REAL]:     `Early indication (${wrCount} post-wear reviews): low-effort polish outcomes are directionally consistent. More data needed.`,
+        [HER]:      `Early indication (${wrCount} post-wear reviews): Feminine customers are directionally achieving desired feelings. More data needed to confirm.`,
+        [ROOTED]:   `Early indication (${wrCount} post-wear reviews): directional positive signal. More data needed.`,
+      };
+      return map[name] ?? `Early indication (${wrCount} post-wear reviews). More data needed.`;
+    }
+    // measured (≥3 strong achievements)
+    const map: Record<string, string> = {
       [SEEN]:     "Corporate Chic customers consistently achieve 'Powerful' and 'Confident'. Highest confidence lift in work-occasion sessions.",
       [WHOLE]:    "Customers feel the feeling but styling ambiguity prevents rewear — save/purchase gap is the defining signal.",
       [ALIVE]:    "Edgy customers achieve consistent outcomes. Minimal and Casual Cool rejection is consistent — personality gating is directionally supported by available observations.",
@@ -1757,6 +1786,17 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       [REAL]:     "Reliable low-effort polish. Above-average outcomes for Minimal customers seeking daily wearability.",
       [HER]:      "Feminine and Romantic customers achieve their desired feeling consistently. Repeat buy-intent signal observed.",
       [ROOTED]:   "Occasion-specific piece. Works best with clear styling guidance on the column silhouette.",
+    };
+    return map[name] ?? "";
+  }
+
+  const allProductImpact = bySessionCount.filter(p => p.reviewCount > 0).map(p => {
+    const m = pm[p.name];
+    const desiredFeelings = CATALOG[p.name].desiredFeelings.slice(0, 2).map(f => f.replace("more-", ""));
+    const startingMoodMap: Record<string, string> = {
+      [SEEN]: "Uncertain", [WHOLE]: "Uninspired", [ALIVE]: "Reserved",
+      [GROUNDED]: "Underdressed", [CLEAR]: "Unsure", [REAL]: "Casual",
+      [HER]: "Self-conscious", [ROOTED]: "Underdressed",
     };
     const actionMap: Record<string, string> = {
       [SEEN]:     "Commission editorial content positioning Becoming Seen across work, dinner, and travel contexts.",
@@ -1797,12 +1837,17 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       confidenceBefore: CONFIDENCE_BEFORE,
       confidenceAfter,
       avgConfidenceLift: m.avgConfidenceLift,
-      postWearPositiveRate: Math.round(m.rewearRate * 100),
-      wouldWearAgainCount: m.strongAchievedCount,
-      notWearAgainCount:   m.partlyAchievedCount,
+      // postWearPositiveRate: % of WR events where feeling was confirmed (achieved or partly).
+      // Null when no WR data — never report 0% from absence of post-wear reviews.
+      postWearPositiveRate: m.wrCount > 0 ? m.feelingAchievedRate : null,
+      // wouldWearAgainCount: WR events where customer confirmed rewear intent (rewear === true).
+      // Not a proxy for feeling achievement — these are separate signals.
+      wouldWearAgainCount: m.wrCount > 0 ? m.rewearYesCount : null,
+      notWearAgainCount:   m.wrCount > 0 ? m.rewearNoCount : null,
+      wrCount: m.wrCount,
       sampleSize: m.sampleSize,
       statusLabel: evidenceConfidence(m.sampleSize),
-      interpretation: interpretationMap[p.name] ?? "",
+      interpretation: productImpactInterpretation(p.name, achievedEvidenceState, m.wrCount),
       recommendedAction: actionMap[p.name] ?? "",
     };
   });
@@ -1937,7 +1982,9 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
   const advanced = {
     emotionalJourney: {
       status: "live",
-      sampleSize: nr + nwr,
+      // sampleSize = post-wear reviews only (WR events). OR events do not carry feeling data
+      // and must not inflate this count — all rates (feeling achieved, would wear again) use nwr.
+      sampleSize: nwr,
       // Mutually exclusive achieved / partly / not — sum = nwr = 100%
       achievedCount:       ejAchieved,
       partlyCount:         ejPartly,
@@ -2509,22 +2556,30 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         avgRating: avgR,
         rewearRate: pWear.length ? rewYes / pWear.length : null,
         avgConfidenceLift: avgR != null && avgR > 0 ? Math.round((avgR - 3.5) * 10) / 10 : null,
-        feelingAchievedRate: pct(pFeelingOk, Math.max(1, pWear.length)),
+        // null when no post-wear reviews — never report 0% from absence of WR events
+        feelingAchievedRate: pWear.length > 0 ? pct(pFeelingOk, pWear.length) : null,
+        wrCount: pWear.length,
         topProducts: topProds,
         topDesiredFeelings: topFeelings.length > 0 ? topFeelings : catalogFeelings,
         topOccasions: topOccs,
-        prescriptive: prescriptiveInsight(personality, topProds, pSessions.length, pct(pLoves, pFeedback.length)),
+        prescriptive: prescriptiveInsight(personality, topProds, pSessions.length, pct(pLoves, pFeedback.length), pWear.length),
       };
     })
     .filter(Boolean)
     .slice(0, dateRangeDays === 7 ? 2 : dateRangeDays === 30 ? 4 : 6) as NonNullable<ReturnType<typeof Object.assign>>[];
 
-  function prescriptiveInsight(personality: string, topProds: string[], sessionCount: number, loveRate: number): string {
+  function prescriptiveInsight(personality: string, topProds: string[], sessionCount: number, loveRate: number, pWearLength: number): string {
     const map: Record<string, string> = {
       "Corporate Chic":    `Corporate Chic customers achieve their best outcomes with Becoming Seen in work and special-event contexts. Style it with Becoming Grounded or Becoming Real for a complete corporate system.`,
-      "Edgy":              `Edgy customers show the highest rewear frequency — Becoming Alive delivers consistent 'Confident' outcomes and above-average rewear among observed sessions. Evening contexts account for the most love events in this period.`,
+      // Edgy: only claim feeling outcomes when post-wear data exists in this period
+      "Edgy":              pWearLength > 0
+        ? `Edgy customers show the highest rewear frequency — Becoming Alive delivers consistent 'Confident' outcomes and above-average rewear among observed sessions. Evening contexts account for the most love events in this period.`
+        : `Edgy customers show above-average love rates for Becoming Alive in recommendation feedback (${loveRate}% love rate, n=${sessionCount} sessions). Post-wear data is needed to confirm feeling outcomes in this period.`,
       "Artsy":             `Artsy customers are drawn to Becoming Clear and Becoming Whole. Clear shows above-average buy-intent when recommended; Whole needs occasion-led styling guidance to move from save to purchase.`,
-      "Feminine":          `Feminine customers achieve 'Feminine' and 'Attractive' consistently with Becoming Her. The midi dress is the clearest emotional match in the collection for this profile.`,
+      // Feminine: only claim feeling achievement when post-wear data exists in this period
+      "Feminine":          pWearLength > 0
+        ? `Feminine customers achieve 'Feminine' and 'Attractive' consistently with Becoming Her. The midi dress is the clearest emotional match in the collection for this profile.`
+        : `Feminine customers show strong love rates for Becoming Her in recommendation feedback (${loveRate}% love rate, n=${sessionCount} sessions). Post-wear data is needed to confirm feeling outcomes in this period.`,
       "Romantic":          `Romantic customers show the highest repeat buy-intent in the sample — Becoming Her appears in multiple purchase events. Evening and date-night contexts produce above-average outcomes.`,
       "Minimal":           `Minimal customers resist the most formal pieces (Too Formal objection on Becoming Seen is consistent). Becoming Real and Becoming Whole are better matches — lower formality, same polished outcome.`,
       "Effortlessly Chic": `Effortlessly Chic customers appreciate versatility — Becoming Clear and Becoming Whole both work well. Travel and everyday occasions are the highest-performing contexts.`,

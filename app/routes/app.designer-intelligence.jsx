@@ -1153,7 +1153,7 @@ function DNAIntelligenceRow({ row }) {
               {row.feelingAchievedRate}% feeling achieved
             </span>
           )}
-          <span style={{ ...MONO, color: "#9CA3AF" }}>n={row.sessionCount}</span>
+          <span style={{ ...MONO, color: "#9CA3AF" }}>n={row.sessionCount} sessions</span>
         </div>
       </div>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: row.prescriptive ? 10 : 0, fontFamily: "'Cormorant Garamond', Garamond, serif", fontStyle: "italic", fontSize: 13, color: "#7a6f6a" }}>
@@ -1455,7 +1455,7 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays, liv
       {/* Fit & Silhouette */}
       {data.bodyPatterns?.length > 0 && (
         <Section title="Fit and Silhouette Intelligence" desc="What works for different body and fit preferences" status="live">
-          <div style={s.grid3}>
+          <div style={data.bodyPatterns.length === 1 ? { maxWidth: 380 } : s.grid3}>
             {data.bodyPatterns.map((pattern, i) => (
               <div key={i} style={s.card}>
                 <div style={s.cardLabel}>{pattern.preference}</div>
@@ -1502,12 +1502,12 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays, liv
               <KpiCard
                 label="Feeling Achieved"
                 value={advanced.emotionalJourney.intendedFeelingAchievedRate != null ? `${advanced.emotionalJourney.intendedFeelingAchievedRate}%` : "—"}
-                tooltip={`${advanced.emotionalJourney.achievedCount ?? "—"} of ${advanced.emotionalJourney.totalDenominator ?? "—"} post-wear reviews — desired feeling confirmed AND customer said they would wear again. Mutually exclusive with Partly Achieved and Not Achieved.`}
+                tooltip={`${advanced.emotionalJourney.achievedCount ?? "—"} of ${advanced.emotionalJourney.totalDenominator ?? "—"} post-wear reviews — desired feeling confirmed in post-wear review. Mutually exclusive with Partly Achieved and Not Achieved.`}
               />
               <KpiCard
                 label="Partly Achieved"
                 value={advanced.emotionalJourney.partlyAchievedRate != null ? `${advanced.emotionalJourney.partlyAchievedRate}%` : "—"}
-                tooltip={`${advanced.emotionalJourney.partlyCount ?? "—"} of ${advanced.emotionalJourney.totalDenominator ?? "—"} — desired feeling was reported but customer would not wear again. Indicates the feeling was felt but the piece did not earn repeat wear.`}
+                tooltip={`${advanced.emotionalJourney.partlyCount ?? "—"} of ${advanced.emotionalJourney.totalDenominator ?? "—"} — feeling from the same family as desired feeling, but not an exact match. Mutually exclusive with Achieved and Not Achieved.`}
               />
               <KpiCard
                 label="Not Achieved"
@@ -1519,7 +1519,7 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays, liv
                 value={advanced.emotionalJourney.avgConfidenceLift != null
                   ? `${advanced.emotionalJourney.avgConfidenceBefore}/10 → ${advanced.emotionalJourney.avgConfidenceAfter}/10`
                   : "—"}
-                tooltip={`+${advanced.emotionalJourney.avgConfidenceLift} points on a 10-point confidence scale · ${advanced.emotionalJourney.confidenceSampleSize ?? "—"} reviewed sessions · ${advanced.emotionalJourney.confidenceStatus ?? ""} · All time`}
+                tooltip={`+${advanced.emotionalJourney.avgConfidenceLift} points on a 10-point confidence scale · ${advanced.emotionalJourney.confidenceSampleSize ?? "—"} reviewed sessions · ${advanced.emotionalJourney.confidenceStatus ?? ""}`}
               />
               <KpiCard
                 label="Post-Wear Positive Rate"
@@ -1531,7 +1531,7 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays, liv
             {advanced.emotionalJourney.wouldWearAgain?.totalResponses > 0 && (
               <div style={{ marginTop: 16, padding: "12px 16px", background: "rgba(34,21,22,0.03)", border: "1px solid rgba(34,21,22,0.07)" }}>
                 <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "1.5px", color: "#7a6f6a", marginBottom: 10, fontFamily: "'Inter', sans-serif" }}>
-                  Would Wear Again — {advanced.emotionalJourney.wouldWearAgain.totalResponses} responses · all time
+                  Would Wear Again — {advanced.emotionalJourney.wouldWearAgain.totalResponses} responses · {dateRangeDays >= 365 ? "all time" : `last ${dateRangeDays} days`}
                 </div>
                 <div style={s.kpiGrid}>
                   <KpiCard label="Yes — Would Wear Again" value={`${advanced.emotionalJourney.wouldWearAgain.yesCount} · ${advanced.emotionalJourney.wouldWearAgain.yesRate}%`} tooltip={`${advanced.emotionalJourney.wouldWearAgain.yesCount} of ${advanced.emotionalJourney.wouldWearAgain.totalResponses} post-wear reviews`} />
@@ -1615,9 +1615,9 @@ function TabCustomer({ data, kpis, advanced, rel, sampleMode, dateRangeDays, liv
                           value={`${p.confidenceBefore}/10 → ${p.confidenceAfter}/10 / +${p.avgConfidenceLift} pts`}
                         />
                       )}
-                      <Metric label="Post-wear positive" value={`${p.postWearPositiveRate}%`} />
-                      {p.wouldWearAgainCount != null && <Metric label="Would wear again" value={`${p.wouldWearAgainCount} of ${p.sampleSize}`} />}
-                      {p.notWearAgainCount != null && p.notWearAgainCount > 0 && <Metric label="Would not wear again" value={`${p.notWearAgainCount} of ${p.sampleSize}`} />}
+                      {p.postWearPositiveRate != null && <Metric label="Post-wear positive" value={`${p.postWearPositiveRate}%`} />}
+                      {p.wouldWearAgainCount != null && <Metric label="Would wear again" value={`${p.wouldWearAgainCount} of ${p.wrCount ?? p.sampleSize}`} />}
+                      {p.notWearAgainCount != null && p.notWearAgainCount > 0 && <Metric label="Would not wear again" value={`${p.notWearAgainCount} of ${p.wrCount ?? p.sampleSize}`} />}
                       <Metric label="Sample size" value={`n=${p.sampleSize}`} />
                       {p.desiredFeelings?.length > 0 && (
                         <div style={{ marginTop: 8, fontSize: 11, color: "#8b2035", fontStyle: "italic" }}>{p.desiredFeelings.join(", ")}</div>

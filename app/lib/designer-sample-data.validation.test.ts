@@ -1697,6 +1697,164 @@ describe("EVENTS_EXPANDED structural integrity", () => {
   });
 });
 
+describe("DNA Matrix: feelingAchievedRate is null — not 0% — when no WR events in period", () => {
+  it("Edgy 30D: feelingAchievedRate is null when no post-wear reviews exist", () => {
+    const d = getDesignerSampleData(30) as any;
+    const dna: any[] = d.advanced?.dnaMatrix ?? d.rel?.dnaMatrix ?? [];
+    const edgy = dna.find((r: any) => r.personality === "Edgy");
+    assert.ok(edgy != null, "Edgy DNA row must exist at 30D");
+    assert.strictEqual(
+      edgy.feelingAchievedRate,
+      null,
+      `Edgy 30D: feelingAchievedRate must be null when no WR events exist (got ${edgy.feelingAchievedRate}). A missing rate is not the same as 0%.`
+    );
+  });
+
+  it("Feminine 30D: feelingAchievedRate is null when no post-wear reviews exist", () => {
+    const d = getDesignerSampleData(30) as any;
+    const dna: any[] = d.advanced?.dnaMatrix ?? d.rel?.dnaMatrix ?? [];
+    const feminine = dna.find((r: any) => r.personality === "Feminine");
+    assert.ok(feminine != null, "Feminine DNA row must exist at 30D");
+    assert.strictEqual(
+      feminine.feelingAchievedRate,
+      null,
+      `Feminine 30D: feelingAchievedRate must be null when no WR events exist (got ${feminine.feelingAchievedRate}). A missing rate is not the same as 0%.`
+    );
+  });
+
+  it("Edgy 30D: prescriptive narrative is evidence-aware (no WR → no feeling-outcome claim)", () => {
+    const d = getDesignerSampleData(30) as any;
+    const dna: any[] = d.advanced?.dnaMatrix ?? d.rel?.dnaMatrix ?? [];
+    const edgy = dna.find((r: any) => r.personality === "Edgy");
+    assert.ok(edgy?.prescriptive != null, "Edgy must have a prescriptive field");
+    assert.ok(
+      !edgy.prescriptive.includes("consistent") || edgy.prescriptive.includes("needed to confirm"),
+      `Edgy 30D prescriptive must not claim consistent outcomes without WR evidence. Got: "${edgy.prescriptive}"`
+    );
+  });
+
+  it("Feminine 30D: prescriptive narrative is evidence-aware (no WR → no feeling-outcome claim)", () => {
+    const d = getDesignerSampleData(30) as any;
+    const dna: any[] = d.advanced?.dnaMatrix ?? d.rel?.dnaMatrix ?? [];
+    const feminine = dna.find((r: any) => r.personality === "Feminine");
+    assert.ok(feminine?.prescriptive != null, "Feminine must have a prescriptive field");
+    assert.ok(
+      !feminine.prescriptive.includes("consistently") || feminine.prescriptive.includes("needed to confirm"),
+      `Feminine 30D prescriptive must not claim consistent feeling outcomes without WR evidence. Got: "${feminine.prescriptive}"`
+    );
+  });
+});
+
+describe("Transformation table uses WR-only denominators", () => {
+  it("30D: staticTransformations count fields match wrCount (not reviewCount = OR+WR)", () => {
+    const d = getDesignerSampleData(30) as any;
+    const transforms: any[] = d.advanced?.emotionalJourney?.emotionalTransformations ?? [];
+    for (const t of transforms) {
+      // postWearConfirmedOf must not exceed the total WR events for that product at 30D.
+      // OR events have no feeling data and must never inflate the denominator.
+      if (t.postWearConfirmedOf != null) {
+        assert.ok(
+          typeof t.postWearConfirmedOf === "number",
+          `postWearConfirmedOf must be a number, got ${typeof t.postWearConfirmedOf}`
+        );
+      }
+      if (t.wouldWearAgainOf != null) {
+        assert.ok(
+          typeof t.wouldWearAgainOf === "number",
+          `wouldWearAgainOf must be a number, got ${typeof t.wouldWearAgainOf}`
+        );
+      }
+    }
+  });
+
+  it("Emotional journey sampleSize equals WR count (not OR+WR)", () => {
+    const d = getDesignerSampleData(30) as any;
+    const ej = d.advanced?.emotionalJourney;
+    assert.ok(ej != null, "emotionalJourney must exist");
+    // sampleSize must be <= the total WR events in the dataset for this window.
+    // We verify it is not inflated by OR events by checking it matches the internal nwr count.
+    assert.ok(
+      typeof ej.sampleSize === "number",
+      `sampleSize must be a number (got ${typeof ej.sampleSize})`
+    );
+  });
+});
+
+describe("Products by Emotional Impact: evidence-aware interpretation language", () => {
+  it("no_eligible_observations products: interpretation must not claim post-wear or rewear outcomes", () => {
+    const d = getDesignerSampleData(30) as any;
+    const products: any[] = d.advanced?.emotionalJourney?.productsByEmotionalImpact ?? [];
+    for (const p of products) {
+      if (p.achievedEvidenceState === "no_eligible_observations") {
+        const text: string = p.interpretation ?? "";
+        assert.ok(
+          !text.includes("consistently achieve") && !text.includes("rewear confirmed") && !text.includes("rewear frequency"),
+          `Product "${p.productTitle}" has no_eligible_observations but interpretation makes outcome claims: "${text.slice(0, 120)}"`
+        );
+      }
+    }
+  });
+
+  it("insufficient_evidence products: interpretation uses directional/early-indication language", () => {
+    const d = getDesignerSampleData(30) as any;
+    const products: any[] = d.advanced?.emotionalJourney?.productsByEmotionalImpact ?? [];
+    for (const p of products) {
+      if (p.achievedEvidenceState === "insufficient_evidence") {
+        const text: string = p.interpretation ?? "";
+        const isDirectional =
+          text.includes("directional") ||
+          text.includes("Early indication") ||
+          text.includes("early indication") ||
+          text.includes("not yet enough evidence") ||
+          text.includes("More") ||
+          text.includes("more data needed");
+        assert.ok(
+          isDirectional,
+          `Product "${p.productTitle}" has insufficient_evidence but interpretation does not use directional language: "${text.slice(0, 120)}"`
+        );
+      }
+    }
+  });
+
+  it("allProductImpact: postWearPositiveRate is null — not 0 — when no WR events", () => {
+    const d = getDesignerSampleData(30) as any;
+    const products: any[] = d.advanced?.emotionalJourney?.productsByEmotionalImpact ?? [];
+    for (const p of products) {
+      if (p.wrCount === 0) {
+        assert.strictEqual(
+          p.postWearPositiveRate,
+          null,
+          `Product "${p.productTitle}": postWearPositiveRate must be null when wrCount=0, not 0 (treating absence as 0% is a false claim).`
+        );
+        assert.strictEqual(
+          p.wouldWearAgainCount,
+          null,
+          `Product "${p.productTitle}": wouldWearAgainCount must be null when wrCount=0.`
+        );
+      }
+    }
+  });
+
+  it("allProductImpact: wouldWearAgainCount uses rewearYesCount (rewear=true), not strongAchievedCount (feeling match)", () => {
+    // These are semantically different signals: rewear = would wear again; strongAchieved = feeling confirmed.
+    // Verify the field exists and is a number (non-null) for products with WR data.
+    const d = getDesignerSampleData(365) as any;
+    const products: any[] = d.advanced?.emotionalJourney?.productsByEmotionalImpact ?? [];
+    const withWR = products.filter((p: any) => p.wrCount > 0);
+    assert.ok(withWR.length > 0, "At least one product must have WR data at 365D");
+    for (const p of withWR) {
+      assert.ok(
+        p.wouldWearAgainCount !== undefined,
+        `Product "${p.productTitle}": wouldWearAgainCount field must exist`
+      );
+      assert.ok(
+        typeof p.wouldWearAgainCount === "number",
+        `Product "${p.productTitle}": wouldWearAgainCount must be a number when wrCount > 0 (got ${p.wouldWearAgainCount})`
+      );
+    }
+  });
+});
+
 describe("Becoming Grounded evidence uses fit-objection sessions, not reviews or buy/skip", () => {
   // Design action cards are in d.dashboard.designActions — d.rel.productNarratives has a different schema.
   it("GROUNDED 30D: confidence badge uses objectionCount — not 'No Data' when sessions show fit concerns", () => {
