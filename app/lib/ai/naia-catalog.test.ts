@@ -53,7 +53,7 @@ const EXPECTED_HANDLES = new Set([
   "dress-set",
 ]);
 
-const CANONICAL_46_KEYS = [
+const CANONICAL_54_KEYS = [
   "verifiedTitle", "handle", "liveUrl", "featuredImageUrl", "itemType",
   "styleableComponents", "colors", "silhouette", "fit", "fabric",
   "activePublished", "artStoryDescription", "stylingRole",
@@ -69,6 +69,9 @@ const CANONICAL_46_KEYS = [
   "accessoriesDirection", "shoeDirection", "colorDirection",
   "skinToneColourHarmony", "complexionStylingNote", "hairStylingDirection",
   "hairStylingNote", "styleMeExplanation",
+  // Dressing metadata — added V8 Rev 3 (Group 2 / Rev 5 spec)
+  "modestySafe", "abayaCompatible", "hijabCompatible",
+  "sleeveLength", "necklineCoverage", "hemLength", "topLength", "fitProfile",
 ] as const;
 
 const VALID_ITEM_TYPES = new Set(["TOP", "BOTTOM", "OUTERWEAR", "DRESS", "SET"]);
@@ -87,22 +90,22 @@ describe("nAia catalog — Phase 3B validation", () => {
     assert.equal(catalog.sourceSha256, V8_SHA256);
   });
 
-  // ── 3. Exactly 46 source fields per product ────────────────────────────
-  test("3. exactly 46 source fields per product", () => {
+  // ── 3. Exactly 54 source fields per product (46 original + 8 dressing) ──
+  test("3. exactly 54 source fields per product", () => {
     for (const p of products) {
       const count = Object.keys(p.sourceFields).length;
-      assert.equal(count, 46, `${p.handle}: expected 46 sourceFields, got ${count}`);
+      assert.equal(count, 54, `${p.handle}: expected 54 sourceFields, got ${count}`);
     }
   });
 
-  // ── 4. Exact canonical 46-key set in every product ─────────────────────
-  test("4. exact canonical 46-key set in sourceFields", () => {
+  // ── 4. Exact canonical 54-key set in every product ─────────────────────
+  test("4. exact canonical 54-key set in sourceFields", () => {
     for (const p of products) {
       const keys = new Set(Object.keys(p.sourceFields));
-      for (const k of CANONICAL_46_KEYS) {
+      for (const k of CANONICAL_54_KEYS) {
         assert.ok(keys.has(k), `${p.handle}: missing sourceField '${k}'`);
       }
-      assert.equal(keys.size, 46, `${p.handle}: unexpected extra keys`);
+      assert.equal(keys.size, 54, `${p.handle}: unexpected extra keys`);
     }
   });
 

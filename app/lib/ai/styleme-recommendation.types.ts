@@ -32,6 +32,7 @@ export type EvidenceCode =
   | "slot-conflict-set-primary"
   | "slot-conflict-outerwear-outerwear"
   | "firm-no-colour-exclusion"
+  | "dressing-preference-exclusion"
   | "nadine-avoid-exclusion"
   | "nadine-pairing-best"
   | "nadine-pairing-conditional"
@@ -84,6 +85,8 @@ export interface StyleMeProfileSignals {
   silhouette?: string[];
   preferredCoverage?: string;
   coveragePreferences?: string[];
+  // Group 2 — Dressing hard constraints (hard exclusion; see DRESSING_EXCLUDES_MAP)
+  dressingPreferences?: string[];
 }
 
 // ─── Anchor inputs ────────────────────────────────────────────────────────────

@@ -19,6 +19,14 @@ import {
   PRODUCT_TEMPLATE_FIELDS,
 } from "../app/lib/ai/signal-contract.js";
 import type {
+  DressingMetadata,
+  SleeveLength,
+  NecklineCoverage,
+  HemLength,
+  TopLength,
+  FitProfile,
+} from "../app/lib/ai/signal-contract.js";
+import type {
   CatalogParsed,
   CatalogSourceFields,
   GeneratedCatalog,
@@ -148,9 +156,18 @@ LABEL_TO_KEY = {
     "hair styling direction": "hairStylingDirection",
     "hair styling note": "hairStylingNote",
     "styleme explanation": "styleMeExplanation",
+    # Dressing metadata — added V8 Rev 3 (Group 2 / Rev 5 spec)
+    "modesty safe": "modestySafe",
+    "abaya compatible": "abayaCompatible",
+    "hijab compatible": "hijabCompatible",
+    "sleeve length": "sleeveLength",
+    "neckline coverage": "necklineCoverage",
+    "hem length": "hemLength",
+    "top length": "topLength",
+    "fit profile": "fitProfile",
 }
 
-# Stable canonical key order (matches spec field 1-46).
+# Stable canonical key order (fields 1-54: 46 original + 8 dressing metadata).
 CANONICAL_ORDER = [
     "verifiedTitle", "handle", "liveUrl", "featuredImageUrl", "itemType",
     "styleableComponents", "colors", "silhouette", "fit", "fabric",
@@ -167,12 +184,17 @@ CANONICAL_ORDER = [
     "accessoriesDirection", "shoeDirection", "colorDirection",
     "skinToneColourHarmony", "complexionStylingNote", "hairStylingDirection",
     "hairStylingNote", "styleMeExplanation",
+    # Dressing metadata
+    "modestySafe", "abayaCompatible", "hijabCompatible",
+    "sleeveLength", "necklineCoverage", "hemLength", "topLength", "fitProfile",
 ]
 CANONICAL_KEYS = set(CANONICAL_ORDER)
 
-# No longer populated in any V8 product block (workbook restructured 2026-08-24
+# No longer populated in any Rev 3+ product block (workbook restructured 2026-08-24
 # to drop the reasoning-essay columns). Extraction tolerates their absence and
 # defaults to "" rather than treating them as required.
+# All 8 dressing metadata fields (modestySafe … fitProfile) are now required —
+# they were temporary optional during the Rev 2→3 promotion dry-run only.
 OPTIONAL_KEYS = {"emotionalSupportLogic", "practicalSupportLogic"}
 
 def norm(label):
@@ -259,7 +281,7 @@ def extract(col_a, col_b):
             raise ValueError(
                 f"Product {i+1}: missing required fields: {sorted(missing)}"
             )
-        expected_count = 46 - len(OPTIONAL_KEYS - set(found.keys()))
+        expected_count = 54 - len(OPTIONAL_KEYS - set(found.keys()))
         if len(found) != expected_count:
             raise ValueError(
                 f"Product {i+1}: {len(found)} fields found, expected {expected_count}"
@@ -367,6 +389,64 @@ function parseNadinePairing(raw: string): string | null {
   return trimmed || null;
 }
 
+// ─── Dressing metadata ────────────────────────────────────────────────────────
+// Parsed directly from the V8 workbook (Rev 3+). Each product block carries
+// 8 structured dressing fields that are extracted into raw[] and then validated
+// here. Rule semantics applied by checkHardExclusions() in styleme-recommendation.ts.
+
+const VALID_SLEEVE_LENGTHS = new Set<string>([
+  "full", "three-quarter", "short", "sleeveless", "n/a",
+]);
+const VALID_NECKLINE_COVERAGES = new Set<string>([
+  "high", "crew", "mock", "cowl-high", "wrap-variable", "n/a",
+]);
+const VALID_HEM_LENGTHS = new Set<string>([
+  "full", "maxi", "midi", "knee", "mini", "n/a",
+]);
+const VALID_TOP_LENGTHS = new Set<string>([
+  "hip-length", "longline", "tunic", "cropped", "n/a",
+]);
+const VALID_FIT_PROFILES = new Set<string>([
+  "fitted", "tailored", "relaxed", "loose", "oversized", "flowy",
+  "body-skimming", "n/a",
+]);
+
+export function parseDressingMetadata(
+  raw: Record<string, string>,
+): DressingMetadata {
+  const parseBool = (key: string): boolean => {
+    const v = (raw[key] ?? "").trim().toUpperCase();
+    if (v === "TRUE") return true;
+    if (v === "FALSE") return false;
+    throw new Error(
+      `dressingMetadata.${key}: expected TRUE or FALSE, got ${JSON.stringify(raw[key] ?? "(missing)")}`,
+    );
+  };
+  const parseEnum = <T extends string>(key: string, valid: Set<string>): T => {
+    const v = (raw[key] ?? "").trim();
+    if (!v) {
+      throw new Error(`dressingMetadata.${key}: missing value`);
+    }
+    if (!valid.has(v)) {
+      throw new Error(
+        `dressingMetadata.${key}: invalid value ${JSON.stringify(v)}, ` +
+        `must be one of ${[...valid].join(", ")}`,
+      );
+    }
+    return v as T;
+  };
+  return {
+    modestySafe: parseBool("modestySafe"),
+    abayaCompatible: parseBool("abayaCompatible"),
+    hijabCompatible: parseBool("hijabCompatible"),
+    sleeveLength: parseEnum<SleeveLength>("sleeveLength", VALID_SLEEVE_LENGTHS),
+    necklineCoverage: parseEnum<NecklineCoverage>("necklineCoverage", VALID_NECKLINE_COVERAGES),
+    hemLength: parseEnum<HemLength>("hemLength", VALID_HEM_LENGTHS),
+    topLength: parseEnum<TopLength>("topLength", VALID_TOP_LENGTHS),
+    fitProfile: parseEnum<FitProfile>("fitProfile", VALID_FIT_PROFILES),
+  };
+}
+
 // ─── Transform raw JSON → GeneratedCatalogProduct ────────────────────────────
 
 function buildSourceFields(raw: Record<string, string>): CatalogSourceFields {
@@ -418,6 +498,14 @@ function buildSourceFields(raw: Record<string, string>): CatalogSourceFields {
     [f.HAIR_STYLING_DIRECTION]: raw.hairStylingDirection,
     [f.HAIR_STYLING_NOTE]: raw.hairStylingNote,
     [f.STYLEME_EXPLANATION]: raw.styleMeExplanation,
+    [f.MODESTY_SAFE]: raw.modestySafe,
+    [f.ABAYA_COMPATIBLE]: raw.abayaCompatible,
+    [f.HIJAB_COMPATIBLE]: raw.hijabCompatible,
+    [f.SLEEVE_LENGTH]: raw.sleeveLength,
+    [f.NECKLINE_COVERAGE]: raw.necklineCoverage,
+    [f.HEM_LENGTH]: raw.hemLength,
+    [f.TOP_LENGTH]: raw.topLength,
+    [f.FIT_PROFILE]: raw.fitProfile,
   } as CatalogSourceFields;
 }
 
@@ -503,6 +591,7 @@ function transformProduct(
     eligibility,
     sourceFields: buildSourceFields(raw),
     parsed: parseParsed(raw),
+    dressingMetadata: parseDressingMetadata(raw),
   };
 }
 

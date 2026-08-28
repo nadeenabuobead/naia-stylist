@@ -1,6 +1,6 @@
 // THIS FILE IS AUTO-GENERATED. DO NOT EDIT MANUALLY.
 // Source: PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx
-// SHA-256: cdd57ad04643f8184036302fb5fecd7b2a3b495d0452f3788cbe34047f5895ab
+// SHA-256: 1c002dda298d253589e095758e779c03ac9f35ef11cc281aba6a4da2d36d6686
 // Re-generate: tsx scripts/extract-naia-catalog.ts
 
 import type { GeneratedCatalog } from "../naia-catalog.types.js";
@@ -8,7 +8,7 @@ import type { GeneratedCatalog } from "../naia-catalog.types.js";
 export const NAIA_CATALOG: GeneratedCatalog = {
   "schemaVersion": 1,
   "sourceWorkbook": "PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx",
-  "sourceSha256": "cdd57ad04643f8184036302fb5fecd7b2a3b495d0452f3788cbe34047f5895ab",
+  "sourceSha256": "1c002dda298d253589e095758e779c03ac9f35ef11cc281aba6a4da2d36d6686",
   "products": [
     {
       "handle": "double-top",
@@ -59,7 +59,15 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "complexionStylingNote": "Warmer colouring can emphasise rust, warm ivory and espresso; cooler colouring can lean into burgundy, deeper brown and cleaner ivory/black around the face.",
         "hairStylingDirection": "Hair away from the neckline: sleek ponytail/bun, tucked-back waves or controlled loose hai",
         "hairStylingNote": "Keep the high neckline and shoulder/sleeve construction visible. Avoid hair completely covering the collar and upper chiffon detail.",
-        "styleMeExplanation": "Becoming Alive is for days when you want the outfit itself to make a statement. Its fitted leather base and belt define the waist, while the chiffon overlay adds softness and movement through the upper body. It gives you strong coverage and structure without losing femininity, and works best with a cleaner lower half that lets the layered top remain the focus."
+        "styleMeExplanation": "Becoming Alive is for days when you want the outfit itself to make a statement. Its fitted leather base and belt define the waist, while the chiffon overlay adds softness and movement through the upper body. It gives you strong coverage and structure without losing femininity, and works best with a cleaner lower half that lets the layered top remain the focus.",
+        "modestySafe": "TRUE",
+        "abayaCompatible": "TRUE",
+        "hijabCompatible": "TRUE",
+        "sleeveLength": "full",
+        "necklineCoverage": "high",
+        "hemLength": "n/a",
+        "topLength": "hip-length",
+        "fitProfile": "fitted"
       },
       "parsed": {
         "identity": {
@@ -179,6 +187,16 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "bestPairedWithGeneral": "High-waisted tailored trousers, straight-leg trousers, slim trousers, column midi skirts, pencil skirts, clean dark denim, or a streamlined maxi skirt",
           "avoidPairingWithGeneral": "Tiered skirts, very full skirts, paper-bag waists, bulky cargo trousers, low-rise bottoms, heavily printed bottoms, oversized jackets, or tops layered over the blouse"
         }
+      },
+      "dressingMetadata": {
+        "modestySafe": true,
+        "abayaCompatible": true,
+        "hijabCompatible": true,
+        "sleeveLength": "full",
+        "necklineCoverage": "high",
+        "hemLength": "n/a",
+        "topLength": "hip-length",
+        "fitProfile": "fitted"
       }
     },
     {
@@ -230,7 +248,15 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "complexionStylingNote": "Choose warmer cream/beige tones for warmer colouring or cooler ivory, espresso and burgundy accents for cooler colouring.",
         "hairStylingDirection": "Sleek ponytail or bun, tucked-back hair, or soft waves kept away from the collar",
         "hairStylingNote": "Keep the pointed printed collar visible because it is one of the shirt’s key design details.",
-        "styleMeExplanation": "Becoming Real gives you an instantly polished base without requiring a complicated outfit. Its shaped waist creates definition while the shoulder structure adds presence, making it especially useful when you want to feel put together, confident and polished."
+        "styleMeExplanation": "Becoming Real gives you an instantly polished base without requiring a complicated outfit. Its shaped waist creates definition while the shoulder structure adds presence, making it especially useful when you want to feel put together, confident and polished.",
+        "modestySafe": "TRUE",
+        "abayaCompatible": "TRUE",
+        "hijabCompatible": "TRUE",
+        "sleeveLength": "full",
+        "necklineCoverage": "high",
+        "hemLength": "n/a",
+        "topLength": "hip-length",
+        "fitProfile": "tailored"
       },
       "parsed": {
         "identity": {
@@ -351,6 +377,16 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "bestPairedWithGeneral": "High-waisted tailored trousers, straight-leg trousers, column skirts, pencil skirts, clean denim and streamlined skirts",
           "avoidPairingWithGeneral": "Paper-bag waists, very bulky bottoms, highly voluminous skirts, oversized layers that hide the waist, or outerwear with very strong shoulder structure unless there is enough layering room"
         }
+      },
+      "dressingMetadata": {
+        "modestySafe": true,
+        "abayaCompatible": true,
+        "hijabCompatible": true,
+        "sleeveLength": "full",
+        "necklineCoverage": "high",
+        "hemLength": "n/a",
+        "topLength": "hip-length",
+        "fitProfile": "tailored"
       }
     },
     {
@@ -402,7 +438,15 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "complexionStylingNote": "Because the trousers sit away from the face, skin-tone harmony should have little influence on whether they are recommended. Connect the burgundy, espresso, rust and ivory palette to the customer’s complexion through the top, outerwear, jewellery or bag.",
         "hairStylingDirection": "works-with-hair-down, works-with-hair-up, hairstyle-guided-by-top, relevance-low",
         "hairStylingNote": "Hair texture and hairstyle do not directly affect how these trousers work. The hairstyle should respond to the chosen top or outerwear. With a fitted or cropped top, a cleaner hairstyle can reinforce the long, streamlined proportion.",
-        "styleMeExplanation": "Let the asymmetric upper-hip detail lead the outfit. Pair these trousers with a fitted, tucked or cropped top so the crossover waistband stays visible, then keep the shoes and accessories streamlined."
+        "styleMeExplanation": "Let the asymmetric upper-hip detail lead the outfit. Pair these trousers with a fitted, tucked or cropped top so the crossover waistband stays visible, then keep the shoes and accessories streamlined.",
+        "modestySafe": "TRUE",
+        "abayaCompatible": "TRUE",
+        "hijabCompatible": "TRUE",
+        "sleeveLength": "n/a",
+        "necklineCoverage": "n/a",
+        "hemLength": "full",
+        "topLength": "n/a",
+        "fitProfile": "relaxed"
       },
       "parsed": {
         "identity": {
@@ -518,6 +562,16 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "bestPairedWithGeneral": "Fitted tops, tucked shirts, cropped shirts, bodysuits, slim mock-neck tops, fine knits, structured waist-length tops, short jackets, and clean fitted tanks",
           "avoidPairingWithGeneral": "Long untucked shirts, tunics, peplum tops, oversized sweaters, bulky cardigans, low-hip jackets, heavily detailed belts, or printed tops that compete with the suede insert"
         }
+      },
+      "dressingMetadata": {
+        "modestySafe": true,
+        "abayaCompatible": true,
+        "hijabCompatible": true,
+        "sleeveLength": "n/a",
+        "necklineCoverage": "n/a",
+        "hemLength": "full",
+        "topLength": "n/a",
+        "fitProfile": "relaxed"
       }
     },
     {
@@ -569,7 +623,15 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "complexionStylingNote": "Use the top or outer layer to bring the most flattering shade close to the face; the neutral taupe trouser can support both warmer creams/camels and cooler burgundy, ivory, black or taupe combinations.",
         "hairStylingDirection": "No trouser-specific hair requirement — follow the styling direction of the top or outerwear",
         "hairStylingNote": "Hair does not materially affect the proportions or key design details of this piece, so prioritize the neckline/outerwear worn with it.",
-        "styleMeExplanation": "Becoming Free gives a simple leather trouser a more sculptural point of view. The high waist creates definition, while oversized pockets and gathered lower-leg draping add shape and movement. It works best when the rest of the look is kept relatively clean, allowing the trouser’s construction to become the statement."
+        "styleMeExplanation": "Becoming Free gives a simple leather trouser a more sculptural point of view. The high waist creates definition, while oversized pockets and gathered lower-leg draping add shape and movement. It works best when the rest of the look is kept relatively clean, allowing the trouser’s construction to become the statement.",
+        "modestySafe": "TRUE",
+        "abayaCompatible": "TRUE",
+        "hijabCompatible": "TRUE",
+        "sleeveLength": "n/a",
+        "necklineCoverage": "n/a",
+        "hemLength": "full",
+        "topLength": "n/a",
+        "fitProfile": "relaxed"
       },
       "parsed": {
         "identity": {
@@ -682,6 +744,16 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "bestPairedWithGeneral": "Fitted tops, tucked shirts, cropped tops, bodysuits, clean knitwear, simple structured tops, streamlined jackets",
           "avoidPairingWithGeneral": "Long untucked tops, tunics, very oversized tops ending at the hips, heavily draped bottoms, or multiple competing statement details"
         }
+      },
+      "dressingMetadata": {
+        "modestySafe": true,
+        "abayaCompatible": true,
+        "hijabCompatible": true,
+        "sleeveLength": "n/a",
+        "necklineCoverage": "n/a",
+        "hemLength": "full",
+        "topLength": "n/a",
+        "fitProfile": "relaxed"
       }
     },
     {
@@ -733,7 +805,15 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "complexionStylingNote": "The caramel, espresso, burgundy and ivory colours sit below the face, so the skirt can work across a broad range of undertones. Select a top near the face that repeats the customer’s most flattering colour from the skirt or creates her preferred level of contrast.",
         "hairStylingDirection": "works-with-hair-down, works-with-hair-up, hairstyle-guided-by-top, relevance-low",
         "hairStylingNote": "Hair does not need to be adjusted specifically for the skirt. A tied-back hairstyle can make the waist and knotted belt feel more prominent, while hair worn down creates a softer overall finish.",
-        "styleMeExplanation": "Let the slim midi shape and knotted waist define the outfit. Pair the skirt with a fitted, tucked, or cropped top that keeps the waist detail visible, then choose streamlined shoes and refined accessories to preserve its sculptural line."
+        "styleMeExplanation": "Let the slim midi shape and knotted waist define the outfit. Pair the skirt with a fitted, tucked, or cropped top that keeps the waist detail visible, then choose streamlined shoes and refined accessories to preserve its sculptural line.",
+        "modestySafe": "TRUE",
+        "abayaCompatible": "TRUE",
+        "hijabCompatible": "TRUE",
+        "sleeveLength": "n/a",
+        "necklineCoverage": "n/a",
+        "hemLength": "midi",
+        "topLength": "n/a",
+        "fitProfile": "body-skimming"
       },
       "parsed": {
         "identity": {
@@ -854,6 +934,16 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "bestPairedWithGeneral": "Fitted shirts, tucked blouses, bodysuits, slim knits, cropped tops, structured waist-length tops, softly draped blouses, and clean fitted tanks",
           "avoidPairingWithGeneral": "Long untucked shirts, tunics, oversized sweaters, bulky cardigans, peplum tops, low-hip jackets, heavily embellished tops, or tops with excessive volume through both the body and sleeves"
         }
+      },
+      "dressingMetadata": {
+        "modestySafe": true,
+        "abayaCompatible": true,
+        "hijabCompatible": true,
+        "sleeveLength": "n/a",
+        "necklineCoverage": "n/a",
+        "hemLength": "midi",
+        "topLength": "n/a",
+        "fitProfile": "body-skimming"
       }
     },
     {
@@ -905,7 +995,15 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "complexionStylingNote": "The caramel, beige, espresso and burgundy tones frame the face through the lapel and upper body. Warm and neutral undertones naturally harmonise with the earthy palette. Cooler undertones can place burgundy, black, ivory or cooler taupe underneath the open trench to adjust the colour nearest the face.",
         "hairStylingDirection": "hair-swept-back, works-with-hair-down, lapel-should-remain-visible, balance-volume-around-shoulders",
         "hairStylingNote": "Hair can be worn up or down, but the diagonal lapel should remain visible. Sweep the hair behind one or both shoulders, or place more hair on the side opposite the main lapel detail. Heavy volume directly over the front may conceal the coat’s strongest construction.",
-        "styleMeExplanation": "Use this trench as the final statement layer over a clean tonal outfit. Wear it open for a long relaxed line or fasten the belt for more shape."
+        "styleMeExplanation": "Use this trench as the final statement layer over a clean tonal outfit. Wear it open for a long relaxed line or fasten the belt for more shape.",
+        "modestySafe": "TRUE",
+        "abayaCompatible": "TRUE",
+        "hijabCompatible": "TRUE",
+        "sleeveLength": "full",
+        "necklineCoverage": "n/a",
+        "hemLength": "n/a",
+        "topLength": "n/a",
+        "fitProfile": "relaxed"
       },
       "parsed": {
         "identity": {
@@ -1032,6 +1130,16 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "bestPairedWithGeneral": "Fitted tops, crisp shirts, fine knits, bodysuits, tailored trousers, straight-leg trousers, column skirts, fitted midi dresses, simple slip dresses, dark denim and tonal matching separates",
           "avoidPairingWithGeneral": "Oversized hoodies, very bulky knitwear, full tiered skirts, heavily printed dresses, wide statement scarves, or long layers that extend awkwardly below the trench"
         }
+      },
+      "dressingMetadata": {
+        "modestySafe": true,
+        "abayaCompatible": true,
+        "hijabCompatible": true,
+        "sleeveLength": "full",
+        "necklineCoverage": "n/a",
+        "hemLength": "n/a",
+        "topLength": "n/a",
+        "fitProfile": "relaxed"
       }
     },
     {
@@ -1083,7 +1191,15 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "complexionStylingNote": "The cream shawl collar lightens the area around the face, while the beige, brown and burgundy artwork adds warmth. Warm and neutral undertones can emphasise the caramel and espresso tones. Cooler undertones can introduce burgundy, black, silver or cool ivory through the inner top and accessories.",
         "hairStylingDirection": "hair-up-recommended, hair-swept-back, collar-should-remain-visible, balance-volume-around-shoulders",
         "hairStylingNote": "An updo, ponytail, half-up style or hair swept behind the shoulders reveals the contrast shawl collar and wrap neckline. Long or voluminous hair can remain down, but keeping the front open prevents the collar and blouson sleeves from feeling visually crowded.",
-        "styleMeExplanation": "Use this jacket as the statement layer over a clean, streamlined base. Tie the belt to create a more defined shape or leave it slightly relaxed for an effortless look, keeping the rest of the outfit mostly solid so the art print, contrast collar and wrap construction remain the focus."
+        "styleMeExplanation": "Use this jacket as the statement layer over a clean, streamlined base. Tie the belt to create a more defined shape or leave it slightly relaxed for an effortless look, keeping the rest of the outfit mostly solid so the art print, contrast collar and wrap construction remain the focus.",
+        "modestySafe": "FALSE",
+        "abayaCompatible": "FALSE",
+        "hijabCompatible": "FALSE",
+        "sleeveLength": "full",
+        "necklineCoverage": "wrap-variable",
+        "hemLength": "n/a",
+        "topLength": "n/a",
+        "fitProfile": "relaxed"
       },
       "parsed": {
         "identity": {
@@ -1212,6 +1328,16 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "bestPairedWithGeneral": "Fitted tops, camisoles, bodysuits, fine knits, simple shirts, straight-leg trousers, slim tailored trousers, column skirts, fitted midi skirts, simple midi dresses and dark denim",
           "avoidPairingWithGeneral": "Oversized shirts, bulky sweaters, puff-sleeve tops, very full skirts, wide printed trousers, tiered dresses or heavily patterned base layers"
         }
+      },
+      "dressingMetadata": {
+        "modestySafe": false,
+        "abayaCompatible": false,
+        "hijabCompatible": false,
+        "sleeveLength": "full",
+        "necklineCoverage": "wrap-variable",
+        "hemLength": "n/a",
+        "topLength": "n/a",
+        "fitProfile": "relaxed"
       }
     },
     {
@@ -1263,7 +1389,15 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "complexionStylingNote": "For warmer colouring, lean into warmer beige/taupe and rich brown-burgundy tones. For cooler colouring, keep the burgundy near the face and favour a cooler taupe rather than a yellow beige.",
         "hairStylingDirection": "Hair tucked behind the shoulders, sleek ponytail/bun, or loose waves kept away from the collar",
         "hairStylingNote": "Keep the high stand collar visible rather than covering it completely with hair; the collar and shoulder paneling are important parts of the jacket’s silhouette.",
-        "styleMeExplanation": "Becoming Clear gives you a more relaxed way to wear a statement jacket. The bomber shape adds ease and controlled volume, while the structured collar, curved paneling and art-print sections keep it polished and distinctive. It works especially well when you want coverage and comfort without losing a strong, considered look."
+        "styleMeExplanation": "Becoming Clear gives you a more relaxed way to wear a statement jacket. The bomber shape adds ease and controlled volume, while the structured collar, curved paneling and art-print sections keep it polished and distinctive. It works especially well when you want coverage and comfort without losing a strong, considered look.",
+        "modestySafe": "TRUE",
+        "abayaCompatible": "TRUE",
+        "hijabCompatible": "TRUE",
+        "sleeveLength": "full",
+        "necklineCoverage": "n/a",
+        "hemLength": "n/a",
+        "topLength": "n/a",
+        "fitProfile": "relaxed"
       },
       "parsed": {
         "identity": {
@@ -1380,6 +1514,16 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "bestPairedWithGeneral": "Straight-leg trousers, slim/column skirts, fitted tops, clean high-waisted bottoms, simple dresses, streamlined denim",
           "avoidPairingWithGeneral": "Very bulky tops underneath, extremely voluminous bottoms, heavily embellished pieces, or multiple competing statement prints"
         }
+      },
+      "dressingMetadata": {
+        "modestySafe": true,
+        "abayaCompatible": true,
+        "hijabCompatible": true,
+        "sleeveLength": "full",
+        "necklineCoverage": "n/a",
+        "hemLength": "n/a",
+        "topLength": "n/a",
+        "fitProfile": "relaxed"
       }
     },
     {
@@ -1431,7 +1575,15 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "complexionStylingNote": "Warmer complexions can pair the burgundy with cream, camel or warm taupe; cooler complexions can lean into burgundy, black, cool taupe or cleaner ivory.",
         "hairStylingDirection": "Sleek ponytail/bun, hair tucked behind the shoulders, or loose waves with the lapel area kept visible",
         "hairStylingNote": "Avoid covering the lapels and shoulder line completely; the blazer’s tailoring and contrast collar treatment are key to the silhouette.",
-        "styleMeExplanation": "Becoming Bold gives you structure without feeling overly fitted. Its oversized tailoring creates an effortless, confident silhouette, while the leather trim and printed chiffon bring softness and personality to the classic blazer shape. It works especially well when you want to look polished and powerful without feeling rigid."
+        "styleMeExplanation": "Becoming Bold gives you structure without feeling overly fitted. Its oversized tailoring creates an effortless, confident silhouette, while the leather trim and printed chiffon bring softness and personality to the classic blazer shape. It works especially well when you want to look polished and powerful without feeling rigid.",
+        "modestySafe": "TRUE",
+        "abayaCompatible": "TRUE",
+        "hijabCompatible": "TRUE",
+        "sleeveLength": "full",
+        "necklineCoverage": "n/a",
+        "hemLength": "n/a",
+        "topLength": "n/a",
+        "fitProfile": "oversized"
       },
       "parsed": {
         "identity": {
@@ -1549,6 +1701,16 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "bestPairedWithGeneral": "Straight-leg trousers, slim or column skirts, fitted tops, clean dresses, simple denim, streamlined base layers",
           "avoidPairingWithGeneral": "Very bulky tops, extremely voluminous bottoms, oversized layers underneath, competing statement prints"
         }
+      },
+      "dressingMetadata": {
+        "modestySafe": true,
+        "abayaCompatible": true,
+        "hijabCompatible": true,
+        "sleeveLength": "full",
+        "necklineCoverage": "n/a",
+        "hemLength": "n/a",
+        "topLength": "n/a",
+        "fitProfile": "oversized"
       }
     },
     {
@@ -1600,7 +1762,15 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "complexionStylingNote": "The printed bodice places burgundy, beige and espresso directly near the face. Warm and neutral undertones naturally harmonise with the earthy palette. Cooler undertones can focus on the burgundy, black or ivory areas and introduce cool metallic jewellery or a cooler-toned outer layer.",
         "hairStylingDirection": "hair-up-recommended, tuck-behind-ears, neckline-should-remain-visible, works-with-hair-down",
         "hairStylingNote": "A bun, ponytail, half-up style or hair tucked behind the ears keeps the high neckline and printed bodice visible. Hair can remain down, but it should not completely cover the shoulders and upper artwork. Softer waves complement the rounded skirt, while a cleaner hairstyle creates a more sculptural finish.",
-        "styleMeExplanation": "Let the dress carry the full look. Its fitted art-print bodice defines the upper body, while the softly rounded leather midi skirt adds controlled volume below. Finish it with streamlined shoes, restrained accessories and a clean outer layer that preserves the waist and skirt shape."
+        "styleMeExplanation": "Let the dress carry the full look. Its fitted art-print bodice defines the upper body, while the softly rounded leather midi skirt adds controlled volume below. Finish it with streamlined shoes, restrained accessories and a clean outer layer that preserves the waist and skirt shape.",
+        "modestySafe": "FALSE",
+        "abayaCompatible": "FALSE",
+        "hijabCompatible": "FALSE",
+        "sleeveLength": "short",
+        "necklineCoverage": "high",
+        "hemLength": "midi",
+        "topLength": "n/a",
+        "fitProfile": "fitted"
       },
       "parsed": {
         "identity": {
@@ -1720,6 +1890,16 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "bestPairedWithGeneral": "Long tailored coats, clean trench coats, cropped fitted jackets, minimal shawls, streamlined evening coats and softly structured waist-length layers",
           "avoidPairingWithGeneral": "Boxy hip-length jackets, oversized puffers, bulky cardigans, peplum outerwear, heavily patterned coats, wide statement belts or layers that obscure the shaped waist"
         }
+      },
+      "dressingMetadata": {
+        "modestySafe": false,
+        "abayaCompatible": false,
+        "hijabCompatible": false,
+        "sleeveLength": "short",
+        "necklineCoverage": "high",
+        "hemLength": "midi",
+        "topLength": "n/a",
+        "fitProfile": "fitted"
       }
     },
     {
@@ -1771,7 +1951,15 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "complexionStylingNote": "The wrapped top places cream, taupe, espresso and burgundy close to the face, making colour harmony most relevant when the complete set or top is worn. Warm and neutral undertones naturally harmonise with the earthy shades. Cooler undertones can emphasise the burgundy, dark brown or ivory sections and introduce black, silver or cooler taupe accessories. When only the corset or skirt is worn, colour harmony should be determined mainly by the separate top worn near the face.",
         "hairStylingDirection": "hair-up-recommended, hair-swept-back, neckline-should-remain-visible, hairstyle-guided-by-component",
         "hairStylingNote": "With the wrapped high-neck top, wear the hair up, swept back or tucked behind the ears so the neckline and wrap construction remain visible. With the corset alone, the hair may be worn up or down depending on the base layer. With the skirt alone, the hairstyle should be guided by the chosen top rather than by the skirt.",
-        "styleMeExplanation": "Wear the three pieces together for the strongest sculptural statement, allowing the corset to define the waist and the asymmetric skirt to create movement below. When styling the set as separates, choose one hero component and pair it with a clean, solid piece so its shape and construction remain the focus."
+        "styleMeExplanation": "Wear the three pieces together for the strongest sculptural statement, allowing the corset to define the waist and the asymmetric skirt to create movement below. When styling the set as separates, choose one hero component and pair it with a clean, solid piece so its shape and construction remain the focus.",
+        "modestySafe": "FALSE",
+        "abayaCompatible": "FALSE",
+        "hijabCompatible": "FALSE",
+        "sleeveLength": "short",
+        "necklineCoverage": "high",
+        "hemLength": "knee",
+        "topLength": "cropped",
+        "fitProfile": "fitted"
       },
       "parsed": {
         "identity": {
@@ -1894,6 +2082,16 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "bestPairedWithGeneral": "Wrapped top with high-waisted tailored trousers, straight-leg trousers, column skirts or clean wide-leg trousers. Corset over fitted shirts, slim mock-neck tops, simple dresses or bodysuits. Skirt with fitted tops, tucked blouses, bodysuits, fine knits or minimal cropped tops.",
           "avoidPairingWithGeneral": "Oversized tops that cover the corset, heavily draped blouses, bulky knitwear, peplum tops, additional statement belts, tiered skirts, heavily printed separates or outerwear ending directly over the asymmetric hip drape"
         }
+      },
+      "dressingMetadata": {
+        "modestySafe": false,
+        "abayaCompatible": false,
+        "hijabCompatible": false,
+        "sleeveLength": "short",
+        "necklineCoverage": "high",
+        "hemLength": "knee",
+        "topLength": "cropped",
+        "fitProfile": "fitted"
       }
     }
   ]

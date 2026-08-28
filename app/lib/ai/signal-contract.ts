@@ -4,7 +4,7 @@
 // Source of truth for answer IDs, product-field mappings, and precedence rules.
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Product Template Fields — 46 fields verified from V7 workbook (Gate 0 Final)
+// Product Template Fields — 54 fields (46 original + 8 dressing metadata added V8 Rev 3).
 // Column A field labels, parsed case-insensitively from vertical product blocks.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -58,6 +58,15 @@ export const PRODUCT_TEMPLATE_FIELDS = {
   HAIR_STYLING_DIRECTION: "hairStylingDirection",
   HAIR_STYLING_NOTE: "hairStylingNote",
   STYLEME_EXPLANATION: "styleMeExplanation",
+  // Dressing metadata — added V8 Rev 3 (Group 2 / Rev 5 spec)
+  MODESTY_SAFE: "modestySafe",
+  ABAYA_COMPATIBLE: "abayaCompatible",
+  HIJAB_COMPATIBLE: "hijabCompatible",
+  SLEEVE_LENGTH: "sleeveLength",
+  NECKLINE_COVERAGE: "necklineCoverage",
+  HEM_LENGTH: "hemLength",
+  TOP_LENGTH: "topLength",
+  FIT_PROFILE: "fitProfile",
 } as const;
 
 export type ProductTemplateField =
@@ -1682,6 +1691,66 @@ export const PROVISIONAL_EVIDENCE: readonly ProductFieldEvidence[] = [
     provisionalNote: "Three-component set; fastening/adjustment methods TBC from sample",
   },
 ];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dressing-preference hard-exclusion metadata (Group 2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The 9 approved dressingPreferences constraint IDs.
+export const APPROVED_DRESSING_PREFERENCE_IDS: ReadonlySet<string> = new Set([
+  "dresses-modestly",
+  "usually-wears-abayas",
+  "arms-covered",
+  "chest-neckline-covered",
+  "legs-covered",
+  "longer-tops",
+  "no-cropped-tops",
+  "looser-fitting",
+  "wears-hijab",
+]);
+
+// ── Dressing metadata types ───────────────────────────────────────────────────
+
+// Sleeve length as worn. "n/a" = not applicable (BOTTOM item type).
+export type SleeveLength = "full" | "three-quarter" | "short" | "sleeveless" | "n/a";
+
+// Neckline coverage. "n/a" = not applicable (BOTTOM) or exempt (OUTERWEAR that is not
+// wrap-variable). "wrap-variable" = wrap front that does not guarantee coverage without a base.
+export type NecklineCoverage =
+  | "high" | "crew" | "mock" | "cowl-high"
+  | "v-neck" | "low" | "off-shoulder" | "wrap-variable"
+  | "n/a";
+
+// Hem length of the garment. "full" = full-length trouser/maxi. "n/a" = not applicable
+// for TOP or OUTERWEAR (leg coverage is determined by the bottom worn beneath).
+export type HemLength = "full" | "maxi" | "midi" | "knee" | "mini" | "n/a";
+
+// Length of a top or set's top component. "n/a" = not applicable (BOTTOM, DRESS, OUTERWEAR).
+export type TopLength = "cropped" | "hip-length" | "longline" | "tunic" | "n/a";
+
+// Overall fit profile. Values satisfying `looser-fitting`: relaxed / loose / oversized / flowy.
+export type FitProfile =
+  | "fitted" | "body-skimming" | "tailored" | "structured"
+  | "relaxed" | "loose" | "oversized" | "flowy"
+  | "n/a";
+
+// Per-product dressing-preference metadata. Baked into GeneratedCatalogProduct
+// by scripts/extract-naia-catalog.ts. Absent = fail-closed for most constraints;
+// permissive only for `wears-hijab`.
+export interface DressingMetadata {
+  // dresses-modestly → require true (fail closed when false or absent)
+  modestySafe: boolean;
+  // usually-wears-abayas → require true (fail closed when false or absent)
+  abayaCompatible: boolean;
+  // wears-hijab → exclude when false; permissive when product absent from catalog
+  hijabCompatible: boolean;
+  sleeveLength: SleeveLength;
+  necklineCoverage: NecklineCoverage;
+  hemLength: HemLength;
+  topLength: TopLength;
+  fitProfile: FitProfile;
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal indexes (built once at module load)

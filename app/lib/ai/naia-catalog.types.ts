@@ -1,6 +1,7 @@
 import type {
   EligibilityState,
   ProductTemplateField,
+  DressingMetadata,
 } from "./signal-contract.js";
 
 export type { EligibilityState, ProductTemplateField };
@@ -90,6 +91,7 @@ export interface GeneratedCatalogProduct {
   eligibility: EligibilityState;
   sourceFields: CatalogSourceFields;
   parsed: CatalogParsed;
+  dressingMetadata?: DressingMetadata; // injected at runtime by naia-catalog.ts; absent = fail-closed
 }
 
 export interface GeneratedCatalog extends CatalogSourceMeta {

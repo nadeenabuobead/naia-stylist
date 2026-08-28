@@ -550,6 +550,7 @@ function checkHardExclusions(
   anchor: NormalizedStyleAnchor | null,
   firmNoColorIds: Set<string>,
   productColorIds: Set<string>,
+  dressingPreferenceIds: Set<string>,
 ): { isExcluded: boolean; reasons: EvidenceCode[] } {
   const reasons: EvidenceCode[] = [];
 
@@ -594,6 +595,105 @@ function checkHardExclusions(
     if (productColorIds.has(colorId)) {
       reasons.push("firm-no-colour-exclusion");
       break;
+    }
+  }
+
+  // Dressing-preference hard exclusions (Group 2 — metadata-driven)
+  // product.dressingMetadata is injected by naia-catalog.ts at module load.
+  // Missing-metadata behaviour: fail-closed for all constraints except wears-hijab (permissive).
+  if (dressingPreferenceIds.size > 0) {
+    const dressing = product.dressingMetadata;
+    const itemType = product.parsed.identity.itemType;
+    let dressingFailed = false;
+
+    // dresses-modestly → require modestySafe: true (fail closed when absent)
+    if (!dressingFailed && dressingPreferenceIds.has("dresses-modestly")) {
+      dressingFailed = !dressing || !dressing.modestySafe;
+    }
+
+    // usually-wears-abayas → require abayaCompatible: true (fail closed when absent)
+    if (!dressingFailed && dressingPreferenceIds.has("usually-wears-abayas")) {
+      dressingFailed = !dressing || !dressing.abayaCompatible;
+    }
+
+    // wears-hijab → exclude when hijabCompatible: false; permissive when absent from catalog
+    if (!dressingFailed && dressingPreferenceIds.has("wears-hijab")) {
+      dressingFailed = dressing !== undefined && !dressing.hijabCompatible;
+    }
+
+    // arms-covered → sleeveLength must be full or three-quarter
+    // n/a (BOTTOM) = exempt; absent metadata = fail closed
+    if (!dressingFailed && dressingPreferenceIds.has("arms-covered")) {
+      if (!dressing) {
+        dressingFailed = true;
+      } else if (dressing.sleeveLength !== "n/a") {
+        dressingFailed = dressing.sleeveLength !== "full" && dressing.sleeveLength !== "three-quarter";
+      }
+      // sleeveLength "n/a" (BOTTOM) → exempt
+    }
+
+    // chest-neckline-covered → necklineCoverage must be high/crew/mock/cowl-high
+    // n/a (BOTTOM or outerwear without wrap-variable) = exempt; absent = fail closed
+    if (!dressingFailed && dressingPreferenceIds.has("chest-neckline-covered")) {
+      if (!dressing) {
+        dressingFailed = true;
+      } else if (dressing.necklineCoverage !== "n/a") {
+        const safe = dressing.necklineCoverage === "high" || dressing.necklineCoverage === "crew"
+          || dressing.necklineCoverage === "mock" || dressing.necklineCoverage === "cowl-high";
+        dressingFailed = !safe;
+      }
+      // necklineCoverage "n/a" → exempt
+    }
+
+    // legs-covered → hemLength must be full/maxi/midi
+    // n/a (TOP or OUTERWEAR) = exempt; absent = fail closed
+    if (!dressingFailed && dressingPreferenceIds.has("legs-covered")) {
+      if (!dressing) {
+        dressingFailed = true;
+      } else if (dressing.hemLength !== "n/a") {
+        const safe = dressing.hemLength === "full" || dressing.hemLength === "maxi" || dressing.hemLength === "midi";
+        dressingFailed = !safe;
+      }
+      // hemLength "n/a" (TOP/OUTERWEAR) → exempt
+    }
+
+    // longer-tops → topLength must be hip-length/longline/tunic (TOP and SET only)
+    // n/a on a TOP/SET = fail closed (missing data); other item types = not applicable
+    if (!dressingFailed && dressingPreferenceIds.has("longer-tops")
+        && (itemType === "TOP" || itemType === "SET")) {
+      if (!dressing || dressing.topLength === "n/a") {
+        dressingFailed = true;
+      } else {
+        const safe = dressing.topLength === "hip-length" || dressing.topLength === "longline"
+          || dressing.topLength === "tunic";
+        dressingFailed = !safe;
+      }
+    }
+
+    // no-cropped-tops → topLength must not be cropped (TOP and SET only)
+    // n/a on a TOP/SET = fail closed; other item types = not applicable
+    if (!dressingFailed && dressingPreferenceIds.has("no-cropped-tops")
+        && (itemType === "TOP" || itemType === "SET")) {
+      if (!dressing || dressing.topLength === "n/a") {
+        dressingFailed = true;
+      } else {
+        dressingFailed = dressing.topLength === "cropped";
+      }
+    }
+
+    // looser-fitting → fitProfile must be relaxed/loose/oversized/flowy (fail closed when absent)
+    if (!dressingFailed && dressingPreferenceIds.has("looser-fitting")) {
+      if (!dressing) {
+        dressingFailed = true;
+      } else {
+        const safe = dressing.fitProfile === "relaxed" || dressing.fitProfile === "loose"
+          || dressing.fitProfile === "oversized" || dressing.fitProfile === "flowy";
+        dressingFailed = !safe;
+      }
+    }
+
+    if (dressingFailed) {
+      reasons.push("dressing-preference-exclusion");
     }
   }
 
@@ -1541,6 +1641,9 @@ export function runRecommendation(
   // Firm-no colour set
   const firmNoColorIds: Set<string> = new Set(profile?.firmNoColors ?? []);
 
+  // Dressing-preference constraint set (hard exclusion via product.dressingMetadata)
+  const dressingPreferenceIds: Set<string> = new Set(profile?.dressingPreferences ?? []);
+
   // Session fingerprint — computed once; combined with each product handle for
   // the session-specific tie-break hash.
   const sessionFingerprint = buildSessionFingerprint(session, profile, anchor, recentlyShownHandles);
@@ -1562,6 +1665,7 @@ export function runRecommendation(
       anchor,
       firmNoColorIds,
       productColorIds,
+      dressingPreferenceIds,
     );
 
     if (isExcluded) {

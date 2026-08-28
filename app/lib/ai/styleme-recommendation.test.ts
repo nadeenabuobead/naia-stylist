@@ -29,7 +29,10 @@ import type {
   SemanticTieBreak,
 } from "./styleme-recommendation.types.ts";
 import { getAllCatalogProducts } from "./naia-catalog.ts";
-import { PRODUCT_TEMPLATE_FIELDS } from "./signal-contract.ts";
+import {
+  PRODUCT_TEMPLATE_FIELDS,
+  APPROVED_DRESSING_PREFERENCE_IDS,
+} from "./signal-contract.ts";
 import { buildProfileSignals } from "./styleme-result.server.ts";
 import { quizQuestions } from "../onboarding/quiz-data.ts";
 
@@ -3041,5 +3044,433 @@ describe("§V2-A3 Profile Aspiration — desiredImpression + becoming", () => {
     const ev = findEv(result, "collar-shirt");
     assert.equal(aspirationEvidence(ev).length, 2, "one concept per field → two evidence entries");
     assert.equal(ev.totalScore, 6); // ESS(4) + aspiration(2)
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §G2 Group 2 — Dressing-preference hard exclusions
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("§G2 Dressing-preference hard exclusions — contract", () => {
+  const allProducts = getAllCatalogProducts();
+  const dm = (handle: string) => allProducts.find((p) => p.handle === handle)?.dressingMetadata;
+
+  it("APPROVED_DRESSING_PREFERENCE_IDS has exactly 9 IDs", () => {
+    assert.equal(APPROVED_DRESSING_PREFERENCE_IDS.size, 9);
+  });
+
+  it("all 9 approved IDs are present in the set", () => {
+    const expected = [
+      "dresses-modestly", "usually-wears-abayas", "arms-covered",
+      "chest-neckline-covered", "legs-covered", "longer-tops",
+      "no-cropped-tops", "looser-fitting", "wears-hijab",
+    ];
+    for (const id of expected) {
+      assert.ok(APPROVED_DRESSING_PREFERENCE_IDS.has(id), `${id} missing from approved set`);
+    }
+  });
+
+  it("all 11 catalog products carry dressingMetadata directly on the product", () => {
+    assert.equal(allProducts.length, 11);
+    for (const p of allProducts) {
+      assert.ok(p.dressingMetadata, `${p.handle} missing dressingMetadata`);
+    }
+  });
+
+  it("no-violation products have modestySafe/abayaCompatible/hijabCompatible all true", () => {
+    const noViolationHandles = [
+      "asymmetrical-pants", "draped-leather-pants", "trench-coat",
+      "leather-suede-jacket", "oversized-blazer",
+    ];
+    for (const handle of noViolationHandles) {
+      const d = dm(handle);
+      assert.ok(d, `${handle} must have dressingMetadata`);
+      assert.equal(d.modestySafe, true, `${handle} modestySafe`);
+      assert.equal(d.abayaCompatible, true, `${handle} abayaCompatible`);
+      assert.equal(d.hijabCompatible, true, `${handle} hijabCompatible`);
+    }
+  });
+
+  it("generic rule: metadata-driven only — all products expose structured fields, no handle blacklist", () => {
+    for (const p of allProducts) {
+      const d = p.dressingMetadata;
+      assert.ok(d, `${p.handle} must have dressingMetadata`);
+      assert.ok("modestySafe" in d, `${p.handle} must have modestySafe`);
+      assert.ok("sleeveLength" in d, `${p.handle} must have sleeveLength`);
+      assert.ok("fitProfile" in d, `${p.handle} must have fitProfile`);
+    }
+  });
+});
+
+describe("§G2 Dressing-preference hard exclusions — per-constraint pass/fail", () => {
+  function findEv(result: ReturnType<typeof run>, handle: string) {
+    const ev = result.evaluatedProducts.find((e) => e.handle === handle);
+    assert.ok(ev, `${handle} must appear in evaluatedProducts`);
+    return ev!;
+  }
+
+  function isDressingExcluded(result: ReturnType<typeof run>, handle: string): boolean {
+    const ev = findEv(result, handle);
+    return ev.isHardExcluded && ev.hardExclusionReasons.includes("dressing-preference-exclusion");
+  }
+
+  function isNotExcluded(result: ReturnType<typeof run>, handle: string): boolean {
+    const ev = findEv(result, handle);
+    return !ev.isHardExcluded || !ev.hardExclusionReasons.includes("dressing-preference-exclusion");
+  }
+
+  // ── looser-fitting ────────────────────────────────────────────────────────
+  it("G2.1  looser-fitting: double-top excluded", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["looser-fitting"] });
+    assert.ok(isDressingExcluded(result, "double-top"), "double-top (fitted bodice) must be excluded");
+  });
+
+  it("G2.2  looser-fitting: collar-shirt excluded", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["looser-fitting"] });
+    assert.ok(isDressingExcluded(result, "collar-shirt"), "collar-shirt (tailored) must be excluded");
+  });
+
+  it("G2.3  looser-fitting: suede-skirt excluded", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["looser-fitting"] });
+    assert.ok(isDressingExcluded(result, "suede-skirt"), "suede-skirt (body-skimming) must be excluded");
+  });
+
+  it("G2.4  looser-fitting: asymmetrical-pants NOT excluded (relaxed straight leg)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["looser-fitting"] });
+    assert.ok(isNotExcluded(result, "asymmetrical-pants"), "asymmetrical-pants must NOT be excluded");
+  });
+
+  it("G2.5  looser-fitting: draped-leather-pants NOT excluded (high-waist, sculptural volume)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["looser-fitting"] });
+    assert.ok(isNotExcluded(result, "draped-leather-pants"), "draped-leather-pants must NOT be excluded");
+  });
+
+  it("G2.6  looser-fitting: oversized-blazer NOT excluded", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["looser-fitting"] });
+    assert.ok(isNotExcluded(result, "oversized-blazer"), "oversized-blazer must NOT be excluded");
+  });
+
+  it("G2.7  looser-fitting: trench-coat NOT excluded (relaxed straight fit)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["looser-fitting"] });
+    assert.ok(isNotExcluded(result, "trench-coat"), "trench-coat must NOT be excluded");
+  });
+
+  // ── arms-covered ──────────────────────────────────────────────────────────
+  it("G2.8  arms-covered: midi-dress excluded (short sleeves)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["arms-covered"] });
+    assert.ok(isDressingExcluded(result, "midi-dress"), "midi-dress (short sleeves) must be excluded");
+  });
+
+  it("G2.9  arms-covered: double-top NOT excluded (full-length sleeves)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["arms-covered"] });
+    assert.ok(isNotExcluded(result, "double-top"), "double-top (full sleeves) must NOT be excluded");
+  });
+
+  it("G2.10 arms-covered: collar-shirt NOT excluded (full-length sleeves)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["arms-covered"] });
+    assert.ok(isNotExcluded(result, "collar-shirt"), "collar-shirt must NOT be excluded");
+  });
+
+  it("G2.11 arms-covered: trench-coat NOT excluded (full-length sleeves)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["arms-covered"] });
+    assert.ok(isNotExcluded(result, "trench-coat"), "trench-coat must NOT be excluded");
+  });
+
+  // ── chest-neckline-covered ────────────────────────────────────────────────
+  it("G2.12 chest-neckline-covered: kimono-jacket excluded (uncertain wrap-front neckline)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["chest-neckline-covered"] });
+    assert.ok(isDressingExcluded(result, "kimono-jacket"), "kimono-jacket must be excluded");
+  });
+
+  it("G2.13 chest-neckline-covered: leather-suede-jacket NOT excluded (high stand collar)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["chest-neckline-covered"] });
+    assert.ok(isNotExcluded(result, "leather-suede-jacket"), "leather-suede-jacket must NOT be excluded");
+  });
+
+  it("G2.14 chest-neckline-covered: double-top NOT excluded (high neckline)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["chest-neckline-covered"] });
+    assert.ok(isNotExcluded(result, "double-top"), "double-top must NOT be excluded");
+  });
+
+  // ── legs-covered ──────────────────────────────────────────────────────────
+  it("G2.15 legs-covered: dress-set excluded (knee-high slit reveals leg)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["legs-covered"] });
+    assert.ok(isDressingExcluded(result, "dress-set"), "dress-set (knee-high slit) must be excluded");
+  });
+
+  it("G2.16 legs-covered: suede-skirt NOT excluded (midi-length, back slit below knee)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["legs-covered"] });
+    assert.ok(isNotExcluded(result, "suede-skirt"), "suede-skirt (midi, no knee exposure) must NOT be excluded");
+  });
+
+  it("G2.17 legs-covered: draped-leather-pants NOT excluded (full-length, opaque)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["legs-covered"] });
+    assert.ok(isNotExcluded(result, "draped-leather-pants"), "draped-leather-pants must NOT be excluded");
+  });
+
+  // ── no-cropped-tops / longer-tops ─────────────────────────────────────────
+  it("G2.18 no-cropped-tops: dress-set excluded (cropped proportion)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["no-cropped-tops"] });
+    assert.ok(isDressingExcluded(result, "dress-set"), "dress-set (cropped top) must be excluded");
+  });
+
+  it("G2.19 no-cropped-tops: double-top NOT excluded (not cropped)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["no-cropped-tops"] });
+    assert.ok(isNotExcluded(result, "double-top"), "double-top must NOT be excluded");
+  });
+
+  it("G2.20 longer-tops: dress-set excluded", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["longer-tops"] });
+    assert.ok(isDressingExcluded(result, "dress-set"), "dress-set must be excluded for longer-tops");
+  });
+
+  it("G2.21 longer-tops: collar-shirt NOT excluded", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["longer-tops"] });
+    assert.ok(isNotExcluded(result, "collar-shirt"), "collar-shirt must NOT be excluded for longer-tops");
+  });
+
+  // ── dresses-modestly ──────────────────────────────────────────────────────
+  it("G2.22 dresses-modestly: kimono-jacket excluded", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["dresses-modestly"] });
+    assert.ok(isDressingExcluded(result, "kimono-jacket"), "kimono-jacket must be excluded");
+  });
+
+  it("G2.23 dresses-modestly: midi-dress excluded", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["dresses-modestly"] });
+    assert.ok(isDressingExcluded(result, "midi-dress"), "midi-dress must be excluded");
+  });
+
+  it("G2.24 dresses-modestly: dress-set excluded", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["dresses-modestly"] });
+    assert.ok(isDressingExcluded(result, "dress-set"), "dress-set must be excluded");
+  });
+
+  it("G2.25 dresses-modestly: trench-coat NOT excluded (long, full sleeves, high coverage)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["dresses-modestly"] });
+    assert.ok(isNotExcluded(result, "trench-coat"), "trench-coat must NOT be excluded");
+  });
+
+  it("G2.26 dresses-modestly: leather-suede-jacket NOT excluded (high stand collar, full sleeves)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["dresses-modestly"] });
+    assert.ok(isNotExcluded(result, "leather-suede-jacket"), "leather-suede-jacket must NOT be excluded");
+  });
+
+  // ── usually-wears-abayas ──────────────────────────────────────────────────
+  it("G2.27 usually-wears-abayas: kimono-jacket excluded", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["usually-wears-abayas"] });
+    assert.ok(isDressingExcluded(result, "kimono-jacket"), "kimono-jacket must be excluded");
+  });
+
+  it("G2.28 usually-wears-abayas: midi-dress excluded", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["usually-wears-abayas"] });
+    assert.ok(isDressingExcluded(result, "midi-dress"), "midi-dress must be excluded");
+  });
+
+  it("G2.29 usually-wears-abayas: dress-set excluded", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["usually-wears-abayas"] });
+    assert.ok(isDressingExcluded(result, "dress-set"), "dress-set must be excluded");
+  });
+
+  it("G2.30 usually-wears-abayas: oversized-blazer NOT excluded", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["usually-wears-abayas"] });
+    assert.ok(isNotExcluded(result, "oversized-blazer"), "oversized-blazer must NOT be excluded");
+  });
+
+  // ── wears-hijab ───────────────────────────────────────────────────────────
+  it("G2.31 wears-hijab: kimono-jacket excluded", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["wears-hijab"] });
+    assert.ok(isDressingExcluded(result, "kimono-jacket"), "kimono-jacket must be excluded");
+  });
+
+  it("G2.32 wears-hijab: midi-dress excluded", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["wears-hijab"] });
+    assert.ok(isDressingExcluded(result, "midi-dress"), "midi-dress must be excluded");
+  });
+
+  it("G2.33 wears-hijab: dress-set excluded", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["wears-hijab"] });
+    assert.ok(isDressingExcluded(result, "dress-set"), "dress-set must be excluded");
+  });
+
+  it("G2.34 wears-hijab: collar-shirt NOT excluded (high collar, full sleeves, opaque)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["wears-hijab"] });
+    assert.ok(isNotExcluded(result, "collar-shirt"), "collar-shirt must NOT be excluded");
+  });
+});
+
+describe("§G2 Dressing-preference hard exclusions — override and V2 compat", () => {
+  function findEv(result: ReturnType<typeof run>, handle: string) {
+    const ev = result.evaluatedProducts.find((e) => e.handle === handle);
+    assert.ok(ev, `${handle} must appear in evaluatedProducts`);
+    return ev!;
+  }
+
+  it("G2.35 hard exclusion survives high-score signals — excluded product must not appear in results", () => {
+    // dress-set is excluded by dresses-modestly; give it maximum score signals
+    const result = run(
+      makeSession({ moods: ["confident", "powerful"], desiredFeelings: ["more-elevated", "more-confident"], occasion: "special-event" }),
+      { dressingPreferences: ["dresses-modestly"], stylePersonalities: ["edgy", "trendy"] },
+    );
+    const ev = findEv(result, "dress-set");
+    assert.ok(ev.isHardExcluded, "dress-set must still be hard-excluded");
+    assert.ok(ev.hardExclusionReasons.includes("dressing-preference-exclusion"));
+    const allShown = [result.primary, ...result.alternatives].filter(Boolean).map((e) => e!.handle);
+    assert.ok(!allShown.includes("dress-set"), "excluded product must not appear as primary or alternative");
+  });
+
+  it("G2.36 hard exclusion survives high-score signals — midi-dress excluded even with strong profile match", () => {
+    const result = run(
+      makeSession({ moods: ["romantic", "confident"], desiredFeelings: ["more-feminine", "more-elevated"], occasion: "dinner" }),
+      { dressingPreferences: ["arms-covered"], stylePersonalities: ["feminine", "romantic"] },
+    );
+    const ev = findEv(result, "midi-dress");
+    assert.ok(ev.isHardExcluded, "midi-dress must be hard-excluded");
+    assert.ok(ev.hardExclusionReasons.includes("dressing-preference-exclusion"));
+    const allShown = [result.primary, ...result.alternatives].filter(Boolean).map((e) => e!.handle);
+    assert.ok(!allShown.includes("midi-dress"), "midi-dress must not appear in results");
+  });
+
+  it("G2.37 empty dressingPreferences preserves current behavior — all products eligible", () => {
+    const withEmpty = run(makeSession({ occasion: "everyday" }), { dressingPreferences: [] });
+    const withUndefined = run(makeSession({ occasion: "everyday" }), {});
+    const excludedWithEmpty = withEmpty.evaluatedProducts.filter(
+      (e) => e.isHardExcluded && e.hardExclusionReasons.includes("dressing-preference-exclusion"),
+    );
+    const excludedWithUndefined = withUndefined.evaluatedProducts.filter(
+      (e) => e.isHardExcluded && e.hardExclusionReasons.includes("dressing-preference-exclusion"),
+    );
+    assert.equal(excludedWithEmpty.length, 0, "empty dressingPreferences must exclude nothing");
+    assert.equal(excludedWithUndefined.length, 0, "undefined dressingPreferences must exclude nothing");
+  });
+
+  it("G2.38 V2 users (no dressingPreferences field) are unaffected — no dressing exclusions applied", () => {
+    // A V2 user has no dressingPreferences — dress-set, kimono-jacket, midi-dress all still eligible
+    const result = run(
+      makeSession({ occasion: "everyday" }),
+      { stylePersonalities: ["feminine"], firmNoColors: [] },
+    );
+    const dressingExcluded = result.evaluatedProducts.filter(
+      (e) => e.isHardExcluded && e.hardExclusionReasons.includes("dressing-preference-exclusion"),
+    );
+    assert.equal(dressingExcluded.length, 0, "V2 users must have zero dressing-preference exclusions");
+  });
+
+  it("G2.39 null/undefined profile means no dressingPreferences — all products eligible for dressing", () => {
+    const result = run(makeSession({ occasion: "everyday" }), undefined);
+    const dressingExcluded = result.evaluatedProducts.filter(
+      (e) => e.isHardExcluded && e.hardExclusionReasons.includes("dressing-preference-exclusion"),
+    );
+    assert.equal(dressingExcluded.length, 0, "null profile must produce zero dressing-preference exclusions");
+  });
+
+  it("G2.40 multiple constraints combine correctly — union of all constraint violations excluded", () => {
+    const result = run(
+      makeSession({ occasion: "everyday" }),
+      { dressingPreferences: ["arms-covered", "no-cropped-tops", "chest-neckline-covered"] },
+    );
+    // midi-dress: excluded by arms-covered
+    // dress-set: excluded by no-cropped-tops
+    // kimono-jacket: excluded by chest-neckline-covered
+    const ev = (h: string) => findEv(result, h);
+    assert.ok(ev("midi-dress").isHardExcluded, "midi-dress excluded");
+    assert.ok(ev("dress-set").isHardExcluded, "dress-set excluded");
+    assert.ok(ev("kimono-jacket").isHardExcluded, "kimono-jacket excluded");
+    // double-top: NOT excluded by any of these constraints
+    assert.ok(!ev("double-top").isHardExcluded || !ev("double-top").hardExclusionReasons.includes("dressing-preference-exclusion"),
+      "double-top must not be dressing-excluded");
+  });
+
+  it("G2.41 dressing-preference exclusion is orthogonal to firm-no colour — both can apply independently", () => {
+    const result = run(
+      makeSession({ occasion: "everyday" }),
+      {
+        dressingPreferences: ["dresses-modestly"],
+        firmNoColors: ["red-burgundy"],
+      },
+    );
+    const midiEv = findEv(result, "midi-dress");
+    assert.ok(midiEv.isHardExcluded, "midi-dress excluded");
+    // midi-dress may carry both exclusion codes
+    assert.ok(midiEv.hardExclusionReasons.includes("dressing-preference-exclusion"),
+      "midi-dress must have dressing-preference-exclusion");
+  });
+});
+
+describe("§G2 Dressing-preference hard exclusions — missing metadata + category applicability", () => {
+  function findEv(result: ReturnType<typeof run>, handle: string) {
+    const ev = result.evaluatedProducts.find((e) => e.handle === handle);
+    assert.ok(ev, `${handle} must appear in evaluatedProducts`);
+    return ev!;
+  }
+  function isDressingExcluded(result: ReturnType<typeof run>, handle: string): boolean {
+    const ev = findEv(result, handle);
+    return ev.isHardExcluded && ev.hardExclusionReasons.includes("dressing-preference-exclusion");
+  }
+
+  it("G2.42 longer-tops does NOT apply to BOTTOM items (asymmetrical-pants exempt)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["longer-tops"] });
+    assert.ok(!isDressingExcluded(result, "asymmetrical-pants"),
+      "asymmetrical-pants (BOTTOM) must be exempt from longer-tops");
+  });
+
+  it("G2.43 no-cropped-tops does NOT apply to BOTTOM items (draped-leather-pants exempt)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["no-cropped-tops"] });
+    assert.ok(!isDressingExcluded(result, "draped-leather-pants"),
+      "draped-leather-pants (BOTTOM) must be exempt from no-cropped-tops");
+  });
+
+  it("G2.44 legs-covered does NOT apply to TOP items (double-top exempt via n/a hemLength)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["legs-covered"] });
+    assert.ok(!isDressingExcluded(result, "double-top"),
+      "double-top (TOP) must be exempt from legs-covered (n/a hemLength)");
+  });
+
+  it("G2.45 arms-covered does NOT apply to BOTTOM items (suede-skirt exempt via n/a sleeveLength)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["arms-covered"] });
+    assert.ok(!isDressingExcluded(result, "suede-skirt"),
+      "suede-skirt (BOTTOM) must be exempt from arms-covered (n/a sleeveLength)");
+  });
+
+  it("G2.46 chest-neckline-covered does NOT apply to standard outerwear (trench-coat exempt via n/a)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["chest-neckline-covered"] });
+    assert.ok(!isDressingExcluded(result, "trench-coat"),
+      "trench-coat must be exempt from chest-neckline-covered (n/a necklineCoverage)");
+  });
+
+  it("G2.47 chest-neckline-covered DOES exclude kimono-jacket (wrap-variable neckline not n/a)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["chest-neckline-covered"] });
+    assert.ok(isDressingExcluded(result, "kimono-jacket"),
+      "kimono-jacket (wrap-variable) must be excluded even without modesty constraints");
+  });
+
+  it("G2.48 legs-covered DOES exclude dress-set (knee hemLength is not midi/full/maxi)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["legs-covered"] });
+    assert.ok(isDressingExcluded(result, "dress-set"),
+      "dress-set (hemLength: knee from slit) must be excluded by legs-covered");
+  });
+
+  it("G2.49 wears-hijab is permissive — rule activates only when hijabCompatible is explicitly false", () => {
+    // wears-hijab must NOT exclude products with hijabCompatible: true
+    const passingHandles = [
+      "double-top", "collar-shirt", "asymmetrical-pants", "draped-leather-pants",
+      "suede-skirt", "trench-coat", "leather-suede-jacket", "oversized-blazer",
+    ];
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["wears-hijab"] });
+    for (const handle of passingHandles) {
+      assert.ok(!isDressingExcluded(result, handle),
+        `${handle} (hijabCompatible: true) must NOT be excluded by wears-hijab`);
+    }
+  });
+
+  it("G2.50 looser-fitting: midi-dress excluded (fitProfile: fitted)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["looser-fitting"] });
+    assert.ok(isDressingExcluded(result, "midi-dress"),
+      "midi-dress (fitProfile: fitted) must be excluded by looser-fitting");
+  });
+
+  it("G2.51 arms-covered: dress-set excluded (sleeveLength: short for SET type)", () => {
+    const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["arms-covered"] });
+    assert.ok(isDressingExcluded(result, "dress-set"),
+      "dress-set (sleeveLength: short) must be excluded by arms-covered");
   });
 });

@@ -25,6 +25,7 @@ import {
   PROFILE_LIFESTYLE_OCCASION_MAP,
   PROFILE_FIT_PREFERENCE_SMCM_MAP,
   PROFILE_COVERAGE_PREFERRED_VALUE,
+  APPROVED_DRESSING_PREFERENCE_IDS,
   PROFILE_COVERAGE_MULTI_IDS,
   STYLING_EFFORT_RULE,
   DUAL_MOOD_BONUS,
@@ -47,6 +48,7 @@ import {
   getStylingEffortActivationMoods,
   readLifestyle,
 } from "./signal-contract.ts";
+import { getAllCatalogProducts } from "./naia-catalog.ts";
 
 const PTF = PRODUCT_TEMPLATE_FIELDS;
 const B = RECOMMENDATION_BEHAVIOURS;
@@ -54,7 +56,7 @@ const SQ = SESSION_QUESTION_IDS;
 const PQ = PROFILE_QUESTION_IDS;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 1. PRODUCT_TEMPLATE_FIELDS — 46 fields, correct V7 values
+// 1. PRODUCT_TEMPLATE_FIELDS — 54 fields (46 original + 8 dressing metadata)
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("PRODUCT_TEMPLATE_FIELDS — structure", () => {
@@ -78,12 +80,12 @@ describe("PRODUCT_TEMPLATE_FIELDS — structure", () => {
     "hairStylingDirection", "hairStylingNote", "styleMeExplanation",
   ];
 
-  it("has exactly 46 fields", () => {
-    assert.equal(Object.keys(PTF).length, 46);
+  it("has exactly 54 fields", () => {
+    assert.equal(Object.keys(PTF).length, 54);
   });
 
-  it("ALL_PRODUCT_TEMPLATE_FIELD_VALUES has exactly 46 entries", () => {
-    assert.equal(ALL_PRODUCT_TEMPLATE_FIELD_VALUES.size, 46);
+  it("ALL_PRODUCT_TEMPLATE_FIELD_VALUES has exactly 54 entries", () => {
+    assert.equal(ALL_PRODUCT_TEMPLATE_FIELD_VALUES.size, 54);
   });
 
   it("contains all expected camelCase value strings", () => {
@@ -1864,5 +1866,339 @@ describe("Group 1 V3 — SMCM token safety invariants", () => {
     assert.notEqual(PROFILE_SILHOUETTE_SMCM_MAP["fitted"], PROFILE_FIT_PREFERENCE_SMCM_MAP["fitted"]);
     assert.equal(PROFILE_FIT_PREFERENCE_SMCM_MAP["fitted"], "structured");
     assert.equal(PROFILE_SILHOUETTE_SMCM_MAP["fitted"], "fitted");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Group 2 — Dressing-preference hard exclusion metadata
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Group 2 — APPROVED_DRESSING_PREFERENCE_IDS contract", () => {
+  const EXPECTED_IDS = [
+    "dresses-modestly", "usually-wears-abayas", "arms-covered",
+    "chest-neckline-covered", "legs-covered", "longer-tops",
+    "no-cropped-tops", "looser-fitting", "wears-hijab",
+  ];
+
+  it("has exactly 9 approved dressing-preference IDs", () => {
+    assert.equal(APPROVED_DRESSING_PREFERENCE_IDS.size, 9);
+  });
+
+  for (const id of EXPECTED_IDS) {
+    it(`approved set contains "${id}"`, () => {
+      assert.ok(APPROVED_DRESSING_PREFERENCE_IDS.has(id), `${id} missing`);
+    });
+  }
+});
+
+describe("Group 2 — catalog dressingMetadata contract", () => {
+  // Reads from the canonical GeneratedCatalogProduct.dressingMetadata field
+  // (baked into the generated catalog by scripts/extract-naia-catalog.ts).
+  const ALL_HANDLES = [
+    "double-top", "collar-shirt", "asymmetrical-pants", "draped-leather-pants",
+    "suede-skirt", "trench-coat", "kimono-jacket", "leather-suede-jacket",
+    "oversized-blazer", "midi-dress", "dress-set",
+  ];
+  const dm = (handle: string) =>
+    getAllCatalogProducts().find((p) => p.handle === handle)?.dressingMetadata;
+
+  it("all 11 current NAIA products have dressingMetadata in the catalog", () => {
+    for (const handle of ALL_HANDLES) {
+      assert.ok(dm(handle), `${handle} missing dressingMetadata in catalog`);
+    }
+  });
+
+  it("all 11 catalog products expose the 8 required metadata fields", () => {
+    for (const p of getAllCatalogProducts()) {
+      const d = p.dressingMetadata;
+      assert.ok(d, `${p.handle} missing dressingMetadata`);
+      assert.ok("modestySafe" in d, `${p.handle} missing modestySafe`);
+      assert.ok("abayaCompatible" in d, `${p.handle} missing abayaCompatible`);
+      assert.ok("hijabCompatible" in d, `${p.handle} missing hijabCompatible`);
+      assert.ok("sleeveLength" in d, `${p.handle} missing sleeveLength`);
+      assert.ok("necklineCoverage" in d, `${p.handle} missing necklineCoverage`);
+      assert.ok("hemLength" in d, `${p.handle} missing hemLength`);
+      assert.ok("topLength" in d, `${p.handle} missing topLength`);
+      assert.ok("fitProfile" in d, `${p.handle} missing fitProfile`);
+    }
+  });
+
+  // ── Per-product metadata assertions ─────────────────────────────────────
+
+  it("double-top: modestySafe + full sleeves + high neckline + hip-length + fitted", () => {
+    const d = dm("double-top")!;
+    assert.equal(d.modestySafe, true);
+    assert.equal(d.abayaCompatible, true);
+    assert.equal(d.hijabCompatible, true);
+    assert.equal(d.sleeveLength, "full");
+    assert.equal(d.necklineCoverage, "high");
+    assert.equal(d.hemLength, "n/a");
+    assert.equal(d.topLength, "hip-length");
+    assert.equal(d.fitProfile, "fitted");
+  });
+
+  it("collar-shirt: modestySafe + full sleeves + high neckline + hip-length + tailored", () => {
+    const d = dm("collar-shirt")!;
+    assert.equal(d.modestySafe, true);
+    assert.equal(d.sleeveLength, "full");
+    assert.equal(d.necklineCoverage, "high");
+    assert.equal(d.topLength, "hip-length");
+    assert.equal(d.fitProfile, "tailored");
+  });
+
+  it("asymmetrical-pants: full modesty + n/a sleeves/neckline + full hemLength + relaxed", () => {
+    const d = dm("asymmetrical-pants")!;
+    assert.equal(d.modestySafe, true);
+    assert.equal(d.abayaCompatible, true);
+    assert.equal(d.sleeveLength, "n/a");
+    assert.equal(d.necklineCoverage, "n/a");
+    assert.equal(d.hemLength, "full");
+    assert.equal(d.fitProfile, "relaxed");
+  });
+
+  it("draped-leather-pants: full modesty + full hemLength + relaxed", () => {
+    const d = dm("draped-leather-pants")!;
+    assert.equal(d.modestySafe, true);
+    assert.equal(d.hemLength, "full");
+    assert.equal(d.fitProfile, "relaxed");
+  });
+
+  it("suede-skirt: modestySafe + midi hemLength + body-skimming (fails looser-fitting)", () => {
+    const d = dm("suede-skirt")!;
+    assert.equal(d.modestySafe, true);
+    assert.equal(d.hemLength, "midi");
+    assert.equal(d.fitProfile, "body-skimming");
+  });
+
+  it("trench-coat: modestySafe + full sleeves + n/a neckline/hemLength (outerwear exempt)", () => {
+    const d = dm("trench-coat")!;
+    assert.equal(d.modestySafe, true);
+    assert.equal(d.sleeveLength, "full");
+    assert.equal(d.necklineCoverage, "n/a");
+    assert.equal(d.hemLength, "n/a");
+    assert.equal(d.fitProfile, "relaxed");
+  });
+
+  it("kimono-jacket: modestySafe false + abayaCompatible false + wrap-variable neckline", () => {
+    const d = dm("kimono-jacket")!;
+    assert.equal(d.modestySafe, false);
+    assert.equal(d.abayaCompatible, false);
+    assert.equal(d.hijabCompatible, false);
+    assert.equal(d.necklineCoverage, "wrap-variable");
+    assert.equal(d.sleeveLength, "full");
+    assert.equal(d.fitProfile, "relaxed");
+  });
+
+  it("leather-suede-jacket: full modesty + full sleeves + relaxed fit", () => {
+    const d = dm("leather-suede-jacket")!;
+    assert.equal(d.modestySafe, true);
+    assert.equal(d.sleeveLength, "full");
+    assert.equal(d.fitProfile, "relaxed");
+  });
+
+  it("oversized-blazer: full modesty + full sleeves + oversized fit (passes looser-fitting)", () => {
+    const d = dm("oversized-blazer")!;
+    assert.equal(d.modestySafe, true);
+    assert.equal(d.sleeveLength, "full");
+    assert.equal(d.fitProfile, "oversized");
+  });
+
+  it("midi-dress: modestySafe false + short sleeves + high neckline + midi hem", () => {
+    const d = dm("midi-dress")!;
+    assert.equal(d.modestySafe, false);
+    assert.equal(d.abayaCompatible, false);
+    assert.equal(d.hijabCompatible, false);
+    assert.equal(d.sleeveLength, "short");
+    assert.equal(d.necklineCoverage, "high");
+    assert.equal(d.hemLength, "midi");
+    assert.equal(d.fitProfile, "fitted");
+  });
+
+  it("dress-set: modestySafe false + cropped topLength + knee hemLength + short sleeves", () => {
+    const d = dm("dress-set")!;
+    assert.equal(d.modestySafe, false);
+    assert.equal(d.abayaCompatible, false);
+    assert.equal(d.hijabCompatible, false);
+    assert.equal(d.sleeveLength, "short");
+    assert.equal(d.topLength, "cropped");
+    assert.equal(d.hemLength, "knee");
+    assert.equal(d.fitProfile, "fitted");
+  });
+
+  // ── Pass/fail summary per constraint ───────────────────────────────────
+
+  it("dresses-modestly: kimono-jacket, midi-dress, dress-set fail; all others pass", () => {
+    const failing = ALL_HANDLES.filter((h) => !dm(h)?.modestySafe);
+    assert.deepEqual(failing.sort(), ["dress-set", "kimono-jacket", "midi-dress"].sort());
+  });
+
+  it("usually-wears-abayas: kimono-jacket, midi-dress, dress-set fail; all others pass", () => {
+    const failing = ALL_HANDLES.filter((h) => !dm(h)?.abayaCompatible);
+    assert.deepEqual(failing.sort(), ["dress-set", "kimono-jacket", "midi-dress"].sort());
+  });
+
+  it("wears-hijab: kimono-jacket, midi-dress, dress-set fail; all others pass", () => {
+    const failing = ALL_HANDLES.filter((h) => !dm(h)?.hijabCompatible);
+    assert.deepEqual(failing.sort(), ["dress-set", "kimono-jacket", "midi-dress"].sort());
+  });
+
+  it("arms-covered: midi-dress and dress-set fail (short sleeves); all others pass or exempt", () => {
+    const failing = ALL_HANDLES.filter((h) => {
+      const d = dm(h);
+      if (!d || d.sleeveLength === "n/a") return false;
+      return d.sleeveLength !== "full" && d.sleeveLength !== "three-quarter";
+    });
+    assert.deepEqual(failing.sort(), ["dress-set", "midi-dress"].sort());
+  });
+
+  it("chest-neckline-covered: only kimono-jacket fails (wrap-variable); all others pass or exempt", () => {
+    const failing = ALL_HANDLES.filter((h) => {
+      const d = dm(h);
+      if (!d || d.necklineCoverage === "n/a") return false;
+      return !["high", "crew", "mock", "cowl-high"].includes(d.necklineCoverage);
+    });
+    assert.deepEqual(failing, ["kimono-jacket"]);
+  });
+
+  it("legs-covered: dress-set fails (knee hemLength); suede-skirt and midi-dress pass (midi)", () => {
+    const failing = ALL_HANDLES.filter((h) => {
+      const d = dm(h);
+      if (!d || d.hemLength === "n/a") return false;
+      return !["full", "maxi", "midi"].includes(d.hemLength);
+    });
+    assert.deepEqual(failing, ["dress-set"]);
+    assert.equal(dm("suede-skirt")?.hemLength, "midi");
+    assert.equal(dm("midi-dress")?.hemLength, "midi");
+  });
+
+  it("looser-fitting: double-top, collar-shirt, suede-skirt, midi-dress, dress-set fail", () => {
+    const failing = ALL_HANDLES.filter((h) => {
+      const d = dm(h);
+      if (!d) return false;
+      return !["relaxed", "loose", "oversized", "flowy"].includes(d.fitProfile);
+    });
+    assert.deepEqual(
+      failing.sort(),
+      ["collar-shirt", "double-top", "dress-set", "midi-dress", "suede-skirt"].sort(),
+    );
+  });
+
+  it("no-cropped-tops (TOP/SET only): only dress-set (SET, cropped) fails", () => {
+    const topSetHandles = ALL_HANDLES.filter((h) => dm(h)?.topLength !== "n/a");
+    const failing = topSetHandles.filter((h) => dm(h)?.topLength === "cropped");
+    assert.deepEqual(failing, ["dress-set"]);
+  });
+
+  it("longer-tops (TOP/SET only): dress-set fails (cropped); double-top and collar-shirt pass (hip-length)", () => {
+    assert.equal(dm("dress-set")?.topLength, "cropped");
+    const safe = (h: string) => ["hip-length", "longline", "tunic"].includes(dm(h)?.topLength ?? "");
+    assert.ok(safe("double-top"), "double-top must pass longer-tops");
+    assert.ok(safe("collar-shirt"), "collar-shirt must pass longer-tops");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Group 2 — parseDressingMetadata required-field regression tests (Rev 3+)
+// Extraction must fail when any of the 8 dressing fields is missing or invalid.
+// These fields were temporary-optional during Rev 2→3 promotion only;
+// from Rev 3 onward they are enforced as required by OPTIONAL_KEYS omission.
+// ─────────────────────────────────────────────────────────────────────────────
+import { parseDressingMetadata } from "../../../scripts/extract-naia-catalog.ts";
+
+describe("Group 2 — parseDressingMetadata required-field regression", () => {
+  const VALID_RAW: Record<string, string> = {
+    modestySafe: "TRUE",
+    abayaCompatible: "TRUE",
+    hijabCompatible: "TRUE",
+    sleeveLength: "full",
+    necklineCoverage: "high",
+    hemLength: "n/a",
+    topLength: "hip-length",
+    fitProfile: "fitted",
+  };
+
+  it("G2.R01 succeeds with all 8 valid dressing fields present", () => {
+    const d = parseDressingMetadata(VALID_RAW);
+    assert.equal(d.modestySafe, true);
+    assert.equal(d.abayaCompatible, true);
+    assert.equal(d.sleeveLength, "full");
+    assert.equal(d.fitProfile, "fitted");
+  });
+
+  it("G2.R02 throws when modestySafe is missing (empty string)", () => {
+    assert.throws(
+      () => parseDressingMetadata({ ...VALID_RAW, modestySafe: "" }),
+      /dressingMetadata\.modestySafe/,
+    );
+  });
+
+  it("G2.R03 throws when abayaCompatible is missing", () => {
+    assert.throws(
+      () => parseDressingMetadata({ ...VALID_RAW, abayaCompatible: "" }),
+      /dressingMetadata\.abayaCompatible/,
+    );
+  });
+
+  it("G2.R04 throws when hijabCompatible is missing", () => {
+    assert.throws(
+      () => parseDressingMetadata({ ...VALID_RAW, hijabCompatible: "" }),
+      /dressingMetadata\.hijabCompatible/,
+    );
+  });
+
+  it("G2.R05 throws when sleeveLength is missing", () => {
+    assert.throws(
+      () => parseDressingMetadata({ ...VALID_RAW, sleeveLength: "" }),
+      /dressingMetadata\.sleeveLength/,
+    );
+  });
+
+  it("G2.R06 throws when sleeveLength has an unrecognised value", () => {
+    assert.throws(
+      () => parseDressingMetadata({ ...VALID_RAW, sleeveLength: "long" }),
+      /dressingMetadata\.sleeveLength/,
+    );
+  });
+
+  it("G2.R07 throws when necklineCoverage is missing", () => {
+    assert.throws(
+      () => parseDressingMetadata({ ...VALID_RAW, necklineCoverage: "" }),
+      /dressingMetadata\.necklineCoverage/,
+    );
+  });
+
+  it("G2.R08 throws when hemLength is missing", () => {
+    assert.throws(
+      () => parseDressingMetadata({ ...VALID_RAW, hemLength: "" }),
+      /dressingMetadata\.hemLength/,
+    );
+  });
+
+  it("G2.R09 throws when topLength is missing", () => {
+    assert.throws(
+      () => parseDressingMetadata({ ...VALID_RAW, topLength: "" }),
+      /dressingMetadata\.topLength/,
+    );
+  });
+
+  it("G2.R10 throws when fitProfile is missing", () => {
+    assert.throws(
+      () => parseDressingMetadata({ ...VALID_RAW, fitProfile: "" }),
+      /dressingMetadata\.fitProfile/,
+    );
+  });
+
+  it("G2.R11 throws when fitProfile has an unrecognised value", () => {
+    assert.throws(
+      () => parseDressingMetadata({ ...VALID_RAW, fitProfile: "structured" }),
+      /dressingMetadata\.fitProfile/,
+    );
+  });
+
+  it("G2.R12 modestySafe rejects any value other than TRUE or FALSE", () => {
+    assert.throws(
+      () => parseDressingMetadata({ ...VALID_RAW, modestySafe: "yes" }),
+      /dressingMetadata\.modestySafe/,
+    );
   });
 });
