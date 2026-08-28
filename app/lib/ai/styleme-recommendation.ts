@@ -141,10 +141,13 @@ const ASPIRATION_DFM_TO_CONCEPT: Readonly<Record<string, string>> = {
 } as const;
 
 // Maps style personality IDs → canonical concept keys.
-// Limited to the two confirmed semantic equivalences; do not broaden.
+// V2 + V3 confirmed semantic equivalences only; do not broaden.
 const ASPIRATION_SP_TO_CONCEPT: Readonly<Record<string, string>> = {
   "feminine":          "feminine",
   "effortlessly-chic": "effortless",
+  // V3 equivalences (Group 1)
+  "feminine-romantic": "feminine",
+  "minimal-relaxed":   "effortless",
 } as const;
 
 // ─── Minimum thresholds ───────────────────────────────────────────────────────

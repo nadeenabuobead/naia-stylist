@@ -356,9 +356,13 @@ export const BODY_NEED_NORMALIZATION_MAP: Record<string, string> = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const STYLE_PERSONALITY_STYLE_TAG_FALLBACK = new Set<string>([
+  // V2 IDs (backward compat)
   "old-money",
   "minimal",
   "casual-cool",
+  // V3 IDs (Group 1) — absorb V2 fallback equivalents
+  "classic-polished",  // absorbs old-money
+  "minimal-relaxed",   // absorbs minimal, casual-cool
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -417,13 +421,21 @@ export const PROFILE_FIT_PREFERENCE_SMCM_MAP: Readonly<Record<string, string>> =
 // Maps Passport Silhouette quiz IDs → styleMeComfortMatch catalog tokens.
 // RANK weight only — softer than session body-need STRONG_RANK.
 // Only the 4 semantically exact pairs are mapped. "straight" and "fitted" are
-// deliberately NOT mapped (no exact target exists yet) — an unsupported
-// signal must stay unused rather than being approximated onto a nearby token.
+// V2 IDs kept for backward compat. V3 IDs added in Group 1.
+// Intentionally unmapped: "straight" (V2 legacy), "not-sure" (V3 zero-scoring — by design).
+// New SMCM tokens introduced in V3: "fitted" and "straight-clean".
 export const PROFILE_SILHOUETTE_SMCM_MAP: Readonly<Record<string, string>> = {
-  "defined-waist": "waist-definition",
-  "oversized":     "relaxed",
-  "flowing":       "relaxed",
-  "relaxed":       "relaxed",
+  // V2 vocabulary (backward compat)
+  "defined-waist":      "waist-definition",
+  "oversized":          "relaxed",
+  "flowing":            "relaxed",
+  "relaxed":            "relaxed",
+  // V3 vocabulary (Group 1)
+  "fitted":             "fitted",          // new SMCM token; must NOT proxy to "structured"
+  "waist-defined":      "waist-definition",
+  "straight-simple":    "straight-clean",  // new SMCM token; zero catalog products — catalog reality
+  "loose-flowing":      "relaxed",
+  "structured-tailored": "structured",
 };
 
 // Passport Coverage quiz IDs that softly support the "more-coverage" Body Need.
@@ -436,18 +448,27 @@ export const PROFILE_COVERAGE_MULTI_IDS: ReadonlySet<string> = new Set([
 ]);
 
 // Maps lifestyle quiz answer IDs → occasionTags catalog tokens.
-// Actual quiz IDs (from quiz-data.ts step 3): office, busy-mom, creative,
-// casual-days, events, on-the-go, travel, hybrid.
+// V2 IDs: office, busy-mom, creative, casual-days, events, on-the-go, travel, hybrid.
+// V3 IDs (Group 1): work-office, everyday-casual, dinners-going-out,
+// events-special-occasions, family-parenting, active-busy-days.
 // One quiz answer may map to multiple occasion tokens.
 export const PROFILE_LIFESTYLE_OCCASION_MAP: Readonly<Record<string, readonly string[]>> = {
-  "office":       ["work"],
-  "busy-mom":     ["everyday"],
-  "creative":     ["everyday"],
-  "casual-days":  ["everyday"],
-  "events":       ["dinner", "date-night", "girls-night"],
-  "on-the-go":    ["everyday", "travel"],
-  "travel":       ["travel"],
-  "hybrid":       ["work", "everyday"],
+  // V2 vocabulary (backward compat)
+  "office":                   ["work"],
+  "busy-mom":                 ["everyday"],
+  "creative":                 ["everyday"],
+  "casual-days":              ["everyday"],
+  "events":                   ["dinner", "date-night", "girls-night"],
+  "on-the-go":                ["everyday", "travel"],
+  "travel":                   ["travel"],
+  "hybrid":                   ["work", "everyday"],
+  // V3 vocabulary (Group 1)
+  "work-office":              ["work"],
+  "everyday-casual":          ["everyday"],
+  "dinners-going-out":        ["dinner", "date-night", "girls-night"],
+  "events-special-occasions": ["special-event"],
+  "family-parenting":         ["everyday", "family"],
+  "active-busy-days":         ["everyday", "travel"],
 };
 
 // Maps profile desiredImpression quiz IDs → desiredFeelingMatch canonical tokens.
@@ -1165,6 +1186,43 @@ export const ANSWER_REGISTRY: readonly AnswerMapping[] = [
     // this tier is SCORING_WEIGHTS.RANK; see styleme-recommendation.ts §7.
     // Passport background preferences must not outweigh today's explicit
     // session-specific StyleMe answers.
+    behaviours: [RECOMMENDATION_BEHAVIOURS.SOFT_RANK],
+    rankingWeight: "active",
+  },
+
+  // ── Profile: Style Personalities (V3 archetypes — Group 1) ───────────────
+  {
+    id: "classic-polished",
+    questionId: PQ.STYLE_PERSONALITIES,
+    activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.SOFT_RANK],
+    rankingWeight: "active",
+  },
+  {
+    id: "feminine-romantic",
+    questionId: PQ.STYLE_PERSONALITIES,
+    activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.SOFT_RANK],
+    rankingWeight: "active",
+  },
+  {
+    id: "minimal-relaxed",
+    questionId: PQ.STYLE_PERSONALITIES,
+    activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.SOFT_RANK],
+    rankingWeight: "active",
+  },
+  {
+    id: "bold-edgy",
+    questionId: PQ.STYLE_PERSONALITIES,
+    activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.SOFT_RANK],
+    rankingWeight: "active",
+  },
+  {
+    id: "creative-expressive",
+    questionId: PQ.STYLE_PERSONALITIES,
+    activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLE_PERSONALITY_MATCH],
     behaviours: [RECOMMENDATION_BEHAVIOURS.SOFT_RANK],
     rankingWeight: "active",
   },

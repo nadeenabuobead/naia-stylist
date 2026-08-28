@@ -22,6 +22,8 @@ import {
   PSM_SUPPLEMENTAL_PRODUCT_TOKENS,
   PROFILE_DESIRED_FEELING_TRANSLATION,
   PROFILE_SILHOUETTE_SMCM_MAP,
+  PROFILE_LIFESTYLE_OCCASION_MAP,
+  PROFILE_FIT_PREFERENCE_SMCM_MAP,
   PROFILE_COVERAGE_PREFERRED_VALUE,
   PROFILE_COVERAGE_MULTI_IDS,
   STYLING_EFFORT_RULE,
@@ -1089,23 +1091,31 @@ describe("Session Source — pool constraint, not product-field score", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 18.5. Profile: Style Personalities — approved 10-ID vocabulary
+// 18.5. Profile: Style Personalities — approved 15-ID vocabulary (10 V2 + 5 V3)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("Profile Style Personalities — approved 10-ID vocabulary", () => {
+describe("Profile Style Personalities — approved 15-ID vocabulary", () => {
   const APPROVED_SP_IDS = [
+    // V2 vocabulary (backward compat)
     "old-money", "artsy", "edgy", "feminine", "corporate-chic",
     "effortlessly-chic", "minimal", "trendy", "romantic", "casual-cool",
+    // V3 archetypes (Group 1)
+    "classic-polished", "feminine-romantic", "minimal-relaxed", "bold-edgy", "creative-expressive",
   ];
   const STALE_SP_IDS = [
     "bold", "minimalist", "classic", "eclectic", "bohemian", "preppy", "artistic",
   ];
-  const STYLE_TAG_FALLBACK_IDS = ["old-money", "minimal", "casual-cool"];
+  const STYLE_TAG_FALLBACK_IDS = [
+    // V2
+    "old-money", "minimal", "casual-cool",
+    // V3 (Group 1)
+    "classic-polished", "minimal-relaxed",
+  ];
 
-  it("exactly 10 style personality answer IDs registered", () => {
+  it("exactly 15 style personality answer IDs registered", () => {
     const sp = getAnswersByQuestion(PQ.STYLE_PERSONALITIES);
     const ids = sp.map((m) => m.id).sort();
-    assert.equal(sp.length, 10, `Expected 10, got ${sp.length}: ${ids.join(", ")}`);
+    assert.equal(sp.length, 15, `Expected 15, got ${sp.length}: ${ids.join(", ")}`);
     assert.deepEqual(ids, [...APPROVED_SP_IDS].sort());
   });
 
@@ -1134,8 +1144,8 @@ describe("Profile Style Personalities — approved 10-ID vocabulary", () => {
     });
   }
 
-  it("STYLE_PERSONALITY_STYLE_TAG_FALLBACK contains exactly the 3 fallback IDs", () => {
-    assert.equal(STYLE_PERSONALITY_STYLE_TAG_FALLBACK.size, 3);
+  it("STYLE_PERSONALITY_STYLE_TAG_FALLBACK contains exactly the 5 fallback IDs", () => {
+    assert.equal(STYLE_PERSONALITY_STYLE_TAG_FALLBACK.size, 5);
     for (const id of STYLE_TAG_FALLBACK_IDS) {
       assert.ok(STYLE_PERSONALITY_STYLE_TAG_FALLBACK.has(id), `${id} missing from fallback set`);
     }
@@ -1215,10 +1225,17 @@ describe("Profile Fit Preferences — via SMCM/BPE, NOT silhouette/fit", () => {
 
 describe("Profile Silhouette — approved mappings only", () => {
   const approved: Array<[string, string]> = [
+    // V2 vocabulary (backward compat)
     ["defined-waist", "waist-definition"],
     ["oversized", "relaxed"],
     ["flowing", "relaxed"],
     ["relaxed", "relaxed"],
+    // V3 vocabulary (Group 1)
+    ["fitted", "fitted"],
+    ["waist-defined", "waist-definition"],
+    ["straight-simple", "straight-clean"],
+    ["loose-flowing", "relaxed"],
+    ["structured-tailored", "structured"],
   ];
 
   for (const [id, target] of approved) {
@@ -1227,13 +1244,26 @@ describe("Profile Silhouette — approved mappings only", () => {
     });
   }
 
-  it("has exactly 4 approved entries", () => {
-    assert.equal(Object.keys(PROFILE_SILHOUETTE_SMCM_MAP).length, 4);
+  it("has exactly 9 approved entries", () => {
+    assert.equal(Object.keys(PROFILE_SILHOUETTE_SMCM_MAP).length, 9);
   });
 
-  it("does NOT map straight or fitted (no semantically exact target exists)", () => {
+  it("V3: fitted maps to 'fitted' NOT 'structured' (critical Group 1 invariant)", () => {
+    assert.equal(PROFILE_SILHOUETTE_SMCM_MAP["fitted"], "fitted");
+    assert.notEqual(PROFILE_SILHOUETTE_SMCM_MAP["fitted"], "structured");
+  });
+
+  it("V3: straight-simple maps to 'straight-clean' NOT 'structured'", () => {
+    assert.equal(PROFILE_SILHOUETTE_SMCM_MAP["straight-simple"], "straight-clean");
+    assert.notEqual(PROFILE_SILHOUETTE_SMCM_MAP["straight-simple"], "structured");
+  });
+
+  it("V3: not-sure is intentionally absent (zero scoring — by design)", () => {
+    assert.equal(PROFILE_SILHOUETTE_SMCM_MAP["not-sure"], undefined);
+  });
+
+  it("V2 legacy 'straight' remains unmapped (no V3 analog)", () => {
     assert.equal(PROFILE_SILHOUETTE_SMCM_MAP["straight"], undefined);
-    assert.equal(PROFILE_SILHOUETTE_SMCM_MAP["fitted"], undefined);
   });
 });
 
@@ -1717,5 +1747,122 @@ describe("readLifestyle", () => {
 
   it("whitespace-only entries are filtered out", () => {
     assert.deepEqual(readLifestyle("professional, ,casual"), ["professional", "casual"]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Group 1 V3 Signal-Contract — Lifestyle Occasion Map
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("PROFILE_LIFESTYLE_OCCASION_MAP — V2 backward compat + V3 completeness", () => {
+  const v2Pairs: Array<[string, readonly string[]]> = [
+    ["office",      ["work"]],
+    ["busy-mom",    ["everyday"]],
+    ["creative",    ["everyday"]],
+    ["casual-days", ["everyday"]],
+    ["events",      ["dinner", "date-night", "girls-night"]],
+    ["on-the-go",   ["everyday", "travel"]],
+    ["travel",      ["travel"]],
+    ["hybrid",      ["work", "everyday"]],
+  ];
+
+  const v3Pairs: Array<[string, readonly string[]]> = [
+    ["work-office",              ["work"]],
+    ["everyday-casual",          ["everyday"]],
+    ["dinners-going-out",        ["dinner", "date-night", "girls-night"]],
+    ["events-special-occasions", ["special-event"]],
+    ["family-parenting",         ["everyday", "family"]],
+    ["active-busy-days",         ["everyday", "travel"]],
+  ];
+
+  for (const [id, tokens] of v2Pairs) {
+    it(`V2: ${id} → [${tokens.join(", ")}]`, () => {
+      assert.deepEqual(PROFILE_LIFESTYLE_OCCASION_MAP[id], tokens);
+    });
+  }
+
+  for (const [id, tokens] of v3Pairs) {
+    it(`V3: ${id} → [${tokens.join(", ")}]`, () => {
+      assert.deepEqual(PROFILE_LIFESTYLE_OCCASION_MAP[id], tokens);
+    });
+  }
+
+  it("has exactly 14 entries (8 V2 + 6 V3)", () => {
+    assert.equal(Object.keys(PROFILE_LIFESTYLE_OCCASION_MAP).length, 14);
+  });
+
+  it("V3: events-special-occasions maps to special-event (not dinner/date-night/girls-night)", () => {
+    assert.deepEqual(PROFILE_LIFESTYLE_OCCASION_MAP["events-special-occasions"], ["special-event"]);
+  });
+
+  it("V3: family-parenting includes family token", () => {
+    const tokens = PROFILE_LIFESTYLE_OCCASION_MAP["family-parenting"];
+    assert.ok(Array.isArray(tokens) && tokens.includes("family"), "family token must be present");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Group 1 V3 Signal-Contract — V2 backward compat smoke tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Group 1 V2 backward compat — all V2 SP IDs still registered", () => {
+  const v2SpIds = [
+    "old-money", "artsy", "edgy", "feminine", "corporate-chic",
+    "effortlessly-chic", "minimal", "trendy", "romantic", "casual-cool",
+  ];
+
+  for (const id of v2SpIds) {
+    it(`V2 SP ${id} still SOFT_RANK against STYLE_PERSONALITY_MATCH`, () => {
+      const m = getMappingsByIdAndQuestion(id, PQ.STYLE_PERSONALITIES);
+      assert.ok(m, `V2 SP ${id} missing — backward compat broken`);
+      assert.ok(m.behaviours.includes(B.SOFT_RANK));
+      assert.ok(m.activatedFields.includes(PTF.STYLE_PERSONALITY_MATCH));
+    });
+  }
+});
+
+describe("Group 1 V3 — all V3 SP archetypes registered as SOFT_RANK", () => {
+  const v3SpIds = [
+    "classic-polished", "feminine-romantic", "minimal-relaxed", "bold-edgy", "creative-expressive",
+  ];
+
+  for (const id of v3SpIds) {
+    it(`V3 SP ${id} → SOFT_RANK against stylePersonalityMatch`, () => {
+      const m = getMappingsByIdAndQuestion(id, PQ.STYLE_PERSONALITIES);
+      assert.ok(m, `V3 SP ${id} missing from ANSWER_REGISTRY`);
+      assert.ok(m.behaviours.includes(B.SOFT_RANK), `${id} must be SOFT_RANK`);
+      assert.ok(!m.behaviours.includes(B.STRONG_RANK), `${id} must NOT be STRONG_RANK`);
+      assert.ok(m.activatedFields.includes(PTF.STYLE_PERSONALITY_MATCH));
+    });
+  }
+
+  it("V3 SP fallback set includes classic-polished and minimal-relaxed", () => {
+    assert.ok(STYLE_PERSONALITY_STYLE_TAG_FALLBACK.has("classic-polished"));
+    assert.ok(STYLE_PERSONALITY_STYLE_TAG_FALLBACK.has("minimal-relaxed"));
+  });
+
+  it("V3 SP fallback set does NOT include bold-edgy, creative-expressive, feminine-romantic", () => {
+    assert.ok(!STYLE_PERSONALITY_STYLE_TAG_FALLBACK.has("bold-edgy"));
+    assert.ok(!STYLE_PERSONALITY_STYLE_TAG_FALLBACK.has("creative-expressive"));
+    assert.ok(!STYLE_PERSONALITY_STYLE_TAG_FALLBACK.has("feminine-romantic"));
+  });
+});
+
+describe("Group 1 V3 — SMCM token safety invariants", () => {
+  it("'fitted' SMCM token appears in silhouette map as a value", () => {
+    const values = Object.values(PROFILE_SILHOUETTE_SMCM_MAP);
+    assert.ok(values.includes("fitted"), "'fitted' must be a mapped SMCM token");
+  });
+
+  it("'straight-clean' SMCM token appears in silhouette map as a value", () => {
+    const values = Object.values(PROFILE_SILHOUETTE_SMCM_MAP);
+    assert.ok(values.includes("straight-clean"), "'straight-clean' must be a mapped SMCM token");
+  });
+
+  it("'fitted' silhouette entry does NOT share a value with PROFILE_FIT_PREFERENCE_SMCM_MAP['fitted']", () => {
+    // V2 fit-pref 'fitted' maps to 'structured'. V3 silhouette 'fitted' maps to 'fitted'.
+    assert.notEqual(PROFILE_SILHOUETTE_SMCM_MAP["fitted"], PROFILE_FIT_PREFERENCE_SMCM_MAP["fitted"]);
+    assert.equal(PROFILE_FIT_PREFERENCE_SMCM_MAP["fitted"], "structured");
+    assert.equal(PROFILE_SILHOUETTE_SMCM_MAP["fitted"], "fitted");
   });
 });
