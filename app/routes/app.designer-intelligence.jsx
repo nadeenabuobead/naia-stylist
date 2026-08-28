@@ -983,7 +983,7 @@ function PeriodCard({ period, label }) {
         <Metric label="Sessions" value={period.sessions} />
         <Metric label="Reviews" value={period.reviews} />
         <Metric label="Avg Rating" value={period.avgRating != null ? `${period.avgRating}/5` : "—"} />
-        <Metric label="Rewear Rate" value={period.rewearRate != null ? `${period.rewearRate}%` : "—"} />
+        <Metric label="Rewear Rate" value={period.rewearRate != null ? `${period.rewearRate}%${period.wrCount != null ? ` · n=${period.wrCount} post-wear` : ""}` : "—"} />
       </div>
     </div>
   );
@@ -2815,14 +2815,14 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, l
               <div>
                 <div style={s.cardLabel}>Occasion demand</div>
                 <div style={{ fontSize: 14, color: "#221516", fontWeight: 600, marginTop: 4 }}>
-                  {occasions.length > 0 ? `${occasions.length} occasions active` : "—"}
+                  {(() => { const n = rel?.occasionProductMatrix?.length ?? occasions.length; return n > 0 ? `${n} occasions active` : "—"; })()}
                 </div>
                 {unmetNeeds.length > 0 && <div style={{ fontSize: 12, color: "#d97706", marginTop: 4 }}>{unmetNeeds.length} estimated demand gap{unmetNeeds.length !== 1 ? "s" : ""}</div>}
               </div>
               <div>
                 <div style={s.cardLabel}>Gaps &amp; strengths</div>
-                {gapLabel && <div style={{ fontSize: 12, color: "#d97706", marginTop: 4 }}>Gap: {gapLabel}</div>}
-                {strongLabel && <div style={{ fontSize: 12, color: "#2a5e42", marginTop: 2 }}>Strong: {strongLabel}</div>}
+                {gapLabel && <div style={{ fontSize: 12, color: "#d97706", marginTop: 4 }}>Gap: {gapLabel} (estimated)</div>}
+                {strongLabel && <div style={{ fontSize: 12, color: "#2a5e42", marginTop: 2 }}>Strong: {strongLabel} (estimated)</div>}
                 {!gapLabel && !strongLabel && <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 4 }}>—</div>}
               </div>
             </div>
@@ -2873,7 +2873,7 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, l
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, gap: 8 }}>
                     <span style={{ fontSize: 12, color: "#221516", flexShrink: 0 }}>{key.replace(/([A-Z])/g, " $1").trim()}</span>
                     <span style={{ fontFamily: MONO, fontSize: 10, color: "#7a6f6a", textAlign: "right" }}>
-                      {factor.label}
+                      {factor.label}{factor.confidenceLabel ? ` · ${factor.confidenceLabel}` : ""}
                     </span>
                   </div>
                   {factor.score != null && (
@@ -2912,7 +2912,11 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, l
       <Section title="Preferred Colour Demand" desc="Catalog hypothesis — assumed preferred colour families; no colour field exists on StyleMe events · All time" status={data.onboarding?.colorDistribution?.length > 0 ? "sample" : "insufficient-data"}>
         <div style={s.grid3}>
           {data.onboarding?.colorDistribution?.slice(0, 9).map((item, i) => (
-            <div key={i} style={s.card}><div style={s.cardLabel}>{normalizeLabel(item.color) ?? item.color}</div><div style={s.cardValue}>{item.count} customers prefer this</div></div>
+            <div key={i} style={s.card}>
+              <div style={s.cardLabel}>{normalizeLabel(item.color) ?? item.color}</div>
+              <div style={s.cardValue}>~{item.count} assumed</div>
+              <div style={{ fontSize: 11, color: "#7a6f6a", marginTop: 2 }}>assumed preference signal</div>
+            </div>
           ))}
         </div>
       </Section>
@@ -3029,21 +3033,22 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, l
                   const sc = sampleConfidence(wrc);
                   const hasSufficientWr = sc.status !== "insufficient-data" && sc.status !== "not-implemented";
                   const served = hasSufficientWr && row.avgRating != null && row.avgRating >= 4 && row.rewearRate != null && row.rewearRate >= 0.6;
-                  const partial = !served && (row.avgRating != null || row.rewearRate != null);
-                  const borderColor = served ? "#2a5e42" : partial ? "#d97706" : "#9CA3AF";
-                  const label = served ? "Well Served" : partial ? "Partially Served" : "Insufficient Data";
-                  const labelColor = served ? "#2a5e42" : partial ? "#d97706" : "#7a6f6a";
+                  const isDirectional = !hasSufficientWr && (row.avgRating != null || row.rewearRate != null);
+                  const borderColor = served ? "#2a5e42" : isDirectional ? "#6b7280" : "#9CA3AF";
+                  const label = served ? "Well Served" : isDirectional ? "Directional" : "Insufficient Data";
+                  const labelColor = served ? "#2a5e42" : isDirectional ? "#6b7280" : "#7a6f6a";
                   return (
                     <div key={i} style={{ ...s.card, borderLeft: `3px solid ${borderColor}` }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
                         <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, fontWeight: 700, color: "#221516" }}>{row.personality}</div>
-                        <span style={{ fontSize: 9, fontFamily: MONO, textTransform: "uppercase", letterSpacing: "1.5px", color: labelColor }}>{label}</span>
+                        <span style={{ fontSize: 9, fontFamily: MONO, textTransform: "uppercase", letterSpacing: "1.5px", color: labelColor }}>{isDirectional ? "Directional — not yet well served" : label}</span>
                       </div>
                       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11, fontFamily: MONO, color: "#7a6f6a", marginBottom: 8 }}>
-                        {row.avgRating != null && <span>★ {row.avgRating}</span>}
-                        {row.rewearRate != null && <span>{Math.round(row.rewearRate * 100)}% rewear ({wrc} post-wear)</span>}
-                        {row.feelingAchievedRate != null && <span>{row.feelingAchievedRate}% feeling achieved</span>}
-                        <span>n={row.sessionCount} sessions</span>
+                        <span>{row.sessionCount} sessions</span>
+                        {wrc > 0 && <span>{wrc} post-wear review{wrc !== 1 ? "s" : ""}</span>}
+                        {row.rewearRate != null && <span>{Math.round(row.rewearRate * 100)}% rewear {isDirectional ? `(${wrc}/${wrc})` : `(${wrc} post-wear)`}</span>}
+                        {row.feelingAchievedRate != null && <span>{row.feelingAchievedRate}% feeling achieved {isDirectional ? `(${wrc}/${wrc})` : ""}</span>}
+                        {row.avgRating != null && !isDirectional && <span>★ {row.avgRating}</span>}
                       </div>
                       {row.topOccasions?.length > 0 && (
                         <div style={{ fontSize: 12, color: "#7a6f6a" }}>Best occasions: {row.topOccasions.join(", ")}</div>

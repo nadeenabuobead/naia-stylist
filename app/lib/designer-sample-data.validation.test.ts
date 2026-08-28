@@ -2605,3 +2605,91 @@ describe("Commercial tab coherence: scope and terminology regression guards", ()
     );
   });
 });
+
+// ── QA fix regression tests (issues 1–6) ─────────────────────────────────────
+
+describe("QA fix regressions", () => {
+  it("QA1. occasionProductMatrix length drives occasion count — not capped topOccasions", () => {
+    const d = getDesignerSampleData(30);
+    const matrix: any[] = (d.rel as any)?.occasionProductMatrix ?? [];
+    const top: any[] = (d.dashboard as any)?.topOccasions ?? [];
+    // At 30D there are 4 occasion rows in the matrix but topOccasions is sliced to 3
+    assert.ok(matrix.length > top.length,
+      `occasionProductMatrix (${matrix.length}) must be larger than topOccasions (${top.length}) at 30D so the route uses the matrix length`);
+    assert.equal(matrix.length, 4, "30D occasionProductMatrix must have 4 rows");
+    assert.equal(top.length, 3, "30D topOccasions must be capped at 3 (confirming the source of the bug)");
+  });
+
+  it("QA2. gap and strength labels in route carry (estimated) qualifier", () => {
+    const route = readRoute();
+    assert.ok(
+      route.includes("Gap: {gapLabel} (estimated)") || route.includes("(estimated)"),
+      'route must qualify Gap label with "(estimated)"'
+    );
+    assert.ok(
+      route.includes("Strong: {strongLabel} (estimated)") || (route.includes("strongLabel") && route.includes("(estimated)")),
+      'route must qualify Strong label with "(estimated)"'
+    );
+  });
+
+  it("QA3a. emotionalOutcomes factor carries confidenceLabel field", () => {
+    const d = getDesignerSampleData(30);
+    const factors: any = (d.advanced as any)?.collectionHealth?.factors;
+    assert.ok(factors?.emotionalOutcomes, "emotionalOutcomes factor must exist");
+    assert.ok(typeof factors.emotionalOutcomes.confidenceLabel === "string",
+      "emotionalOutcomes.confidenceLabel must be a string");
+    assert.ok(factors.emotionalOutcomes.confidenceLabel.length > 0,
+      "emotionalOutcomes.confidenceLabel must be non-empty");
+    // At 30D nwr=2 → sampleConfidence(2).label = "Directional signal"
+    assert.equal(factors.emotionalOutcomes.confidenceLabel, "Directional signal",
+      "30D emotionalOutcomes.confidenceLabel must be 'Directional signal' (nwr=2)");
+  });
+
+  it("QA3b. collectionEvolution.current carries wrCount for n-context display", () => {
+    const d = getDesignerSampleData(30);
+    const current: any = (d.advanced as any)?.collectionEvolution?.current;
+    assert.ok(current, "collectionEvolution.current must exist");
+    assert.ok("wrCount" in current, "collectionEvolution.current must have wrCount field");
+    assert.equal(current.wrCount, 2, "30D current.wrCount must equal 2 (post-wear review count)");
+  });
+
+  it("QA4. colour demand evidence string in route uses assumed language, not 'customers prefer this'", () => {
+    const route = readRoute();
+    assert.ok(!route.includes("customers prefer this"),
+      'route must not render "customers prefer this" in colour demand cards');
+    assert.ok(
+      route.includes("assumed preference signal"),
+      'route must include "assumed preference signal" sub-label in colour demand cards'
+    );
+  });
+
+  it("QA5. personality card logic: isDirectional state when !hasSufficientWr and rating/rewear data exists", () => {
+    const route = readRoute();
+    assert.ok(
+      route.includes("isDirectional"),
+      'route must define isDirectional state for personality cards'
+    );
+    assert.ok(
+      route.includes("Directional — not yet well served"),
+      'route must render "Directional — not yet well served" label for directional cards'
+    );
+    assert.ok(
+      !route.includes('"Partially Served"'),
+      'route must not use "Partially Served" as a label value'
+    );
+  });
+
+  it("QA6. seen-workwear-hero evidence uses buy-intent language and explicit denominators", () => {
+    const d = getDesignerSampleData(30);
+    const feed: any[] = (d.advanced as any)?.opportunityFeed ?? [];
+    const seenItem = feed.find((f: any) => f.id === "seen-workwear-hero");
+    assert.ok(seenItem, "seen-workwear-hero must exist in opportunityFeed");
+    const ev: string = seenItem.evidence;
+    assert.ok(!ev.includes(" purchases"), 'evidence must not use "purchases" for BS buy-intent events');
+    assert.ok(ev.includes("Buy/Skip buy-intent outcome"), 'evidence must say "Buy/Skip buy-intent outcome"');
+    assert.ok(ev.includes("reviews)"), 'evidence must include review count context, e.g. "(6 reviews)"');
+    assert.ok(ev.includes("post-wear)"), 'evidence must include rewear denominator, e.g. "(2/2 post-wear)"');
+    // At 30D: 23 sessions · 10 Buy/Skip buy-intent outcomes · ★5.0 avg (6 reviews) · 100% rewear (2/2 post-wear)
+    assert.ok(ev.startsWith("23 sessions"), "30D evidence must start with '23 sessions'");
+  });
+});
