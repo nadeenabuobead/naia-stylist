@@ -2315,7 +2315,7 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
 
 
       {sampleMode && advanced?.explainability?.status === "sample" ? (
-        <Section title="Explainability Analytics" desc={`SAMPLE PREVIEW — ${advanced.explainability.scopeLabel} · n=${advanced.explainability.evidenceDenominator} recommendation card reactions`} status="sample">
+        <Section title="Recommendation Reasoning & Response" desc={`SAMPLE PREVIEW — ${advanced.explainability.scopeLabel} · n=${advanced.explainability.evidenceDenominator} card reactions observed · explanation-attribution not yet implemented`} status="sample">
           {advanced.explainability.evidenceDenominator === 0 && (
             <div style={{ padding: "10px 14px", background: "rgba(90,90,100,0.05)", borderLeft: "3px solid #8b2035", marginBottom: 16, fontSize: 13, color: "#8b2035" }}>
               Not enough sample evidence for this period — no explanation-feedback events recorded.
@@ -2385,7 +2385,7 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
           )}
         </Section>
       ) : (
-        <RoadmapPanel title="Explainability Analytics Roadmap" items={[
+        <RoadmapPanel title="Recommendation Reasoning & Response — Roadmap" items={[
           { label: "Explanation Agreement Rate", description: "Whether customers agree with nAia's explanations. Requires logging explanationAgreed + explanationVersion on each feedback record." },
           { label: "Explanation → Click Rate", description: "Does the explanation drive product clicks?" },
           { label: "Explanation → Save / Purchase Rate", description: "Does agreeing with the explanation correlate with conversion?" },
