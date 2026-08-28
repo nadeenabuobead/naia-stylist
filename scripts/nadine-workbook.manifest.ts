@@ -32,10 +32,10 @@
 
 export const NADINE_WORKBOOK_MANIFEST = {
   /** Embedded in the workbook itself as a hidden defined name "NaiaWorkbookRevision". */
-  workbookRevision: 1,
+  workbookRevision: 2,
   /** SHA-256 of the canonical .xlsx, computed AFTER the revision marker was embedded. */
   approvedSha256:
-    "5ad4468e46f92c911c9cd078d51a47f5e1d419449c81e27be132f21041388d74",
+    "cdd57ad04643f8184036302fb5fecd7b2a3b495d0452f3788cbe34047f5895ab",
   /** Hard-fails extraction if the workbook doesn't parse to exactly this many products. */
   expectedProductCount: 11,
   /** Catalog-repo commit this workbook revision was approved alongside. Informational only. */

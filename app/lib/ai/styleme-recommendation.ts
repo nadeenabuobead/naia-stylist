@@ -94,6 +94,40 @@ export const SLOT_EXCLUSIONS: Readonly<Record<OutfitSlot, readonly OutfitSlot[]>
   unknown: [],
 } as const;
 
+// ─── SET anchor: explicit component-coverage registry ────────────────────────
+// Stores the ACTUAL garment component slots occupied by each NADINE SET product.
+// Only add an entry when the product's catalog styleableComponents explicitly document
+// which slots it occupies — not what conflicts to exclude.
+//
+// Hard exclusions are DERIVED from these components by deriveForbiddenFromSetComponents:
+//   occupied TOP → forbid TOP candidates
+//   occupied BOTTOM → forbid BOTTOM candidates
+//   occupied TOP + BOTTOM → also forbid DRESS and SET (they replace a complete top+bottom base)
+//
+// A SET anchor with no entry (Closet SETs, future unmapped NADINE SETs) gets components=[]
+// and therefore forbidden=[] — conservative, no garment slots excluded.
+export const NADINE_SET_COVERED_SLOTS: Readonly<Record<string, readonly OutfitSlot[]>> = {
+  // dress-set / Becoming Defined: styleableComponents — wrapped-top/corset (TOP) + skirt (BOTTOM).
+  "dress-set": ["top", "bottom"],
+} as const;
+
+// Derives the hard-exclusion slot list from the actual component slots a SET occupies.
+// Does not read from SLOT_EXCLUSIONS — exclusions are a consequence of component coverage.
+export function deriveForbiddenFromSetComponents(
+  occupiedSlots: readonly OutfitSlot[],
+): readonly OutfitSlot[] {
+  if (occupiedSlots.length === 0) return [];
+  const forbidden = new Set<OutfitSlot>(occupiedSlots as OutfitSlot[]);
+  // A complete top+bottom base conflicts with DRESS and SET candidates:
+  // — a DRESS would replace both top and bottom, creating a redundant base layer
+  // — another SET would duplicate the complete garment foundation
+  if (forbidden.has("top") && forbidden.has("bottom")) {
+    forbidden.add("dress");
+    forbidden.add("set");
+  }
+  return [...forbidden];
+}
+
 // ─── §11.7 Aspiration concept vocabulary (feature-local, not exported) ───────
 // Maps DFM tokens → canonical concept keys used for cross-field dedup in §11.7.
 // Covers only the 6 concepts reachable from the approved aspiration maps.
@@ -237,6 +271,7 @@ const CLOSET_CATEGORY_TO_SLOT: Record<string, OutfitSlot> = {
   TOPS: "top",
   BOTTOMS: "bottom",
   DRESSES: "dress",
+  SETS: "set",
   OUTERWEAR: "outerwear",
   SHOES: "shoe",
   BAGS: "bag",
@@ -521,8 +556,22 @@ function checkHardExclusions(
       reasons.push("self-exclusion");
     }
 
-    // Slot conflict
-    const forbidden = SLOT_EXCLUSIONS[anchor.slot];
+    // Slot conflict.
+    // For non-SET slots: use SLOT_EXCLUSIONS directly (product type is unambiguous).
+    // For SET slot: forbidden list is DERIVED from actual occupied component slots via
+    // deriveForbiddenFromSetComponents — not inferred from anchor type or "set" slot alone.
+    // Source of components: NADINE_SET_COVERED_SLOTS[handle] for NADINE anchors, [] for Closet.
+    // Unknown/unmapped anchors get components=[] → forbidden=[] → conservative.
+    const setComponents: readonly OutfitSlot[] =
+      anchor.slot === "set"
+        ? anchor.type === "nadine"
+          ? (NADINE_SET_COVERED_SLOTS[anchor.handle] ?? [])
+          : []
+        : [];
+    const forbidden: readonly OutfitSlot[] =
+      anchor.slot !== "set"
+        ? SLOT_EXCLUSIONS[anchor.slot]
+        : deriveForbiddenFromSetComponents(setComponents);
     if (forbidden.includes(productSlot)) {
       const code = slotConflictCode(anchor.slot, productSlot);
       reasons.push(code);

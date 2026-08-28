@@ -16,6 +16,8 @@ import {
   parseGeneralAvoidSegments,
   findExactAvoidToken,
   CLOSET_SLOT_PAIRING_TOKENS,
+  NADINE_SET_COVERED_SLOTS,
+  deriveForbiddenFromSetComponents,
   buildSessionFingerprint,
 } from "./styleme-recommendation.ts";
 import type {
@@ -1652,6 +1654,156 @@ describe("§12  Closet anchor compatibility evaluation", () => {
     assert.deepEqual(SLOT_EXCLUSIONS["bag"], [], "bag must have no exclusions");
     assert.deepEqual(SLOT_EXCLUSIONS["accessory"], [], "accessory must have no exclusions");
     assert.deepEqual(SLOT_EXCLUSIONS["jewelry"], [], "jewelry must have no exclusions");
+  });
+
+  // ─── C.21–C.25  SETS Closet anchor (F3 regression) ───────────────────────
+
+  it("C.21  SETS Closet anchor → slot='set', hasStrongEvidence=true (not insufficient)", () => {
+    // SETS is a forward-compatible mapping: not yet in Prisma ClosetCategory enum but engine
+    // must resolve it to slot "set" (not "unknown") so confidence is never "insufficient".
+    // Hard-excluded products have null closetCompatibility; skip those — they cannot win anyway.
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "dinner" }),
+      {},
+      { anchor: makeClosetAnchor("SETS") },
+    );
+    for (const ev of result.evaluatedProducts.filter((e) => !e.isHardExcluded)) {
+      assert.ok(ev.closetCompatibility !== null, `${ev.handle}: non-excluded product must have closetCompatibility`);
+      assert.notEqual(
+        ev.closetCompatibility!.confidence,
+        "insufficient",
+        `${ev.handle}: SETS anchor has strong evidence and must not produce insufficient confidence`,
+      );
+    }
+    // At least some products should be eligible (outcome must not be no-recommendation)
+    assert.notEqual(result.outcome, "no-recommendation", "SETS anchor must still yield an outfit");
+  });
+
+  it("C.22  Unknown Closet SET does NOT automatically exclude TOP / BOTTOM / DRESS products", () => {
+    // Closet SET has no explicit component metadata — cannot prove it covers top or bottom.
+    // SLOT_EXCLUSIONS["set"] must NOT apply for Closet anchors; only NADINE anchors carry
+    // explicit component coverage (see C.26).
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "dinner" }),
+      {},
+      { anchor: makeClosetAnchor("SETS") },
+    );
+    // No product should be hard-excluded by a slot-conflict code
+    const slotExcluded = result.evaluatedProducts.filter(
+      (e) => e.isHardExcluded && e.hardExclusionReasons.some((c) => c.startsWith("slot-conflict")),
+    );
+    assert.equal(
+      slotExcluded.length,
+      0,
+      `Closet SETS anchor must not hard-exclude any product via slot-conflict — unknown component coverage`,
+    );
+    // Specifically: TOP and BOTTOM and DRESS products must remain eligible
+    for (const handle of ["collar-shirt", "double-top", "suede-skirt", "asymmetrical-pants", "midi-dress"]) {
+      const ev = result.evaluatedProducts.find((e) => e.handle === handle);
+      assert.ok(ev && !ev.isHardExcluded, `${handle} must remain eligible with an unknown Closet SET anchor`);
+    }
+    // Outfit recommendation must still be produced (conservative, but not empty)
+    assert.notEqual(result.outcome, "no-recommendation", "Closet SETS anchor must still yield an outfit");
+  });
+
+  it("C.23  SETS Closet anchor does NOT produce garment-pairing token evidence", () => {
+    // CLOSET_SLOT_PAIRING_TOKENS["set"] must remain [] — a Closet set should not
+    // fabricate TOP+BOTTOM coverage as if the components were separately anchored.
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "dinner" }),
+      {},
+      { anchor: makeClosetAnchor("SETS") },
+    );
+    for (const ev of result.evaluatedProducts) {
+      const pairingEvidence = ev.positiveEvidence.filter((e) => e.sessionSignal === "closet-general-pairing");
+      assert.equal(pairingEvidence.length, 0, `${ev.handle}: SETS anchor must not score garment-pairing tokens`);
+    }
+  });
+
+  it("C.24  CLOSET_SLOT_PAIRING_TOKENS['set'] is empty; SLOT_EXCLUSIONS['set'] covers top/bottom/dress/set", () => {
+    assert.deepEqual(CLOSET_SLOT_PAIRING_TOKENS["set"], [], "set must have empty pairing tokens");
+    assert.deepEqual(
+      [...SLOT_EXCLUSIONS["set"]].sort(),
+      ["bottom", "dress", "set", "top"],
+      "set exclusions must cover top, bottom, dress, and set itself",
+    );
+  });
+
+  it("C.25  NADINE dress-set (SET itemType via itemTypeToSlot) still wins its scenario unaffected", () => {
+    // NADINE path uses itemTypeToSlot(), not CLOSET_CATEGORY_TO_SLOT.
+    // Adding SETS to CLOSET_CATEGORY_TO_SLOT must not change the NADINE recommendation path.
+    const result = runRecommendation({
+      session: makeSession({ moods: ["confident", "powerful"], desiredFeelings: ["more-confident", "more-powerful", "more-feminine"], occasion: "girls-night", formalityConditional: "formality-occasion" }),
+      profile: { stylePersonalities: ["feminine", "trendy"] },
+    });
+    assert.equal(result.primary?.handle, "dress-set", "NADINE dress-set must still win its scenario after F3 fix");
+  });
+
+  it("C.27  SET coverage model: actual components stored, exclusions derived; future/unknown SETs conservative", () => {
+    // NADINE_SET_COVERED_SLOTS stores ACTUAL occupied component slots only.
+    // Candidate exclusions are derived via deriveForbiddenFromSetComponents — not stored.
+
+    // (1) dress-set records actual components: TOP + BOTTOM (not the derived exclusion set).
+    assert.deepEqual(
+      [...(NADINE_SET_COVERED_SLOTS["dress-set"] ?? [])].sort(),
+      ["bottom", "top"],
+      "dress-set component registry must contain actual occupied slots: top + bottom only",
+    );
+
+    // (2) Derivation of ["top","bottom"] → forbidden includes top, bottom, dress, set.
+    //     Becoming Defined still produces full top/bottom/dress/set candidate conflicts —
+    //     but derived from its actual components, not stored as fake slot values.
+    const dressSetForbidden = deriveForbiddenFromSetComponents(NADINE_SET_COVERED_SLOTS["dress-set"] ?? []);
+    assert.deepEqual(
+      [...dressSetForbidden].sort(),
+      ["bottom", "dress", "set", "top"],
+      "TOP+BOTTOM components must derive forbidden=[top,bottom,dress,set]",
+    );
+
+    // (3) Derivation of [] → forbidden = [] (conservative — no components known).
+    const emptyForbidden = deriveForbiddenFromSetComponents([]);
+    assert.deepEqual([...emptyForbidden], [], "empty components → empty forbidden list");
+
+    // (4) Future/unmapped NADINE SET: not in registry → components=[] → forbidden=[].
+    const syntheticFutureHandle = "future-set-v2";
+    assert.equal(NADINE_SET_COVERED_SLOTS[syntheticFutureHandle], undefined,
+      "future NADINE SET handle must not appear in registry until explicitly documented",
+    );
+    const futureForbidden = deriveForbiddenFromSetComponents(NADINE_SET_COVERED_SLOTS[syntheticFutureHandle] ?? []);
+    assert.deepEqual([...futureForbidden], [], "future NADINE SET resolves to empty forbidden — conservative");
+
+    // (5) Registry is bounded — only products with explicit catalog documentation.
+    assert.deepEqual(Object.keys(NADINE_SET_COVERED_SLOTS), ["dress-set"],
+      "NADINE_SET_COVERED_SLOTS must only contain explicitly registered SET products",
+    );
+  });
+
+  it("C.26  NADINE SET anchor (dress-set) still hard-excludes top/bottom/dress products (known component coverage)", () => {
+    // When the user anchors on NADINE dress-set (explicit component coverage known),
+    // SLOT_EXCLUSIONS["set"] = ["top","bottom","dress","set"] must still fully apply.
+    // This is the "explicit known component coverage" path distinct from a Closet SETS anchor.
+    const result = run(
+      makeSession({ moods: ["confident"], occasion: "everyday" }),
+      {},
+      { anchor: { type: "nadine", handle: "dress-set" } },
+    );
+    const slotExcluded = result.evaluatedProducts.filter(
+      (e) => e.isHardExcluded && e.hardExclusionReasons.some((c) => c.startsWith("slot-conflict")),
+    );
+    const excludedHandles = slotExcluded.map((e) => e.handle);
+    // TOP, BOTTOM, DRESS products must be slot-conflict excluded
+    for (const handle of ["collar-shirt", "double-top", "suede-skirt", "asymmetrical-pants", "draped-leather-pants", "midi-dress"]) {
+      assert.ok(
+        excludedHandles.includes(handle),
+        `${handle} must be hard-excluded by slot-conflict when NADINE dress-set anchor is active`,
+      );
+    }
+    // Outerwear must NOT be slot-excluded
+    for (const handle of ["trench-coat", "kimono-jacket", "oversized-blazer", "leather-suede-jacket"]) {
+      const ev = result.evaluatedProducts.find((e) => e.handle === handle);
+      const slotConflictExcluded = ev?.isHardExcluded && ev.hardExclusionReasons.some((c) => c.startsWith("slot-conflict"));
+      assert.ok(!slotConflictExcluded, `${handle} must NOT be slot-conflict excluded when NADINE dress-set anchor is active`);
+    }
   });
 
   // ─── C.12  No product wins only because of catalog order ──────────────────

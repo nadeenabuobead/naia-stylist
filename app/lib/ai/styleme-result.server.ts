@@ -167,7 +167,7 @@ export function buildFinishingLayer(handle: string | null): StyleMeFinishingLaye
   return {
     shoes: prose.shoeDirection || GENERIC_FINISHING.shoes,
     bag: extractBagSentence(prose.accessoriesDirection) || GENERIC_FINISHING.bag,
-    accessories: prose.accessoriesDirection || GENERIC_FINISHING.accessories,
+    accessories: stripBagLanguage(prose.accessoriesDirection) || GENERIC_FINISHING.accessories,
     hair: prose.hairStylingNote || GENERIC_FINISHING.hair,
     colourDirection: prose.colorDirection || GENERIC_FINISHING.colourDirection,
   };
@@ -176,7 +176,31 @@ export function buildFinishingLayer(handle: string | null): StyleMeFinishingLaye
 function extractBagSentence(accessoriesDir: string): string {
   const match = accessoriesDir.match(/(?:^|[.!?]\s+)([^.!?]*\bbag\b[^.!?]*[.!?])/i);
   if (match) return match[1].trim();
-  return accessoriesDir;
+  // No distinct bag sentence found — return empty so the caller falls back
+  // to GENERIC_FINISHING.bag rather than duplicating accessories copy into the bag slot.
+  return "";
+}
+
+function stripBagLanguage(accessoriesDir: string): string {
+  if (!accessoriesDir) return accessoriesDir;
+  // Patterns seen in catalog: "compact structured bag", "medium structured bag",
+  // "compact or medium structured bag", "structured bag", "structured handbag".
+  // All appear as trailing list items (after a comma or "and") or standalone fragments.
+  // Step 1: remove "and a <variant> structured bag/handbag" clauses before sentence end.
+  let result = accessoriesDir.replace(
+    /\s+and\s+(?:a\s+)?(?:compact\s+)?(?:or\s+medium\s+)?(?:medium\s+)?structured\s+(?:bag|handbag)\b[^.!?]*/gi,
+    "",
+  );
+  // Step 2: remove comma-list items like ", compact structured bag" / ", a compact or medium structured bag".
+  result = result.replace(
+    /,\s*(?:a\s+)?(?:compact\s+)?(?:or\s+medium\s+)?(?:medium\s+)?structured\s+(?:bag|handbag)\b[^,.!?]*/gi,
+    "",
+  );
+  // Step 3: catch any remaining standalone "structured handbag" after a comma.
+  result = result.replace(/,\s*structured\s+handbag\b[^,.!?]*/gi, "");
+  // Normalise: remove trailing comma before period, collapse whitespace.
+  result = result.replace(/,\s*([.!?])/g, "$1").replace(/\s{2,}/g, " ").trim();
+  return result || accessoriesDir;
 }
 
 // ── Deterministic wording fallback ────────────────────────────────────────────
@@ -189,6 +213,7 @@ export function deterministicWording(
   primaryTitle: string | null,
   styleMeExplanation: string | null,
   completionPieces: StyleMeCompletionPiece[] = [],
+  anchor?: { label: string | null; slot: string | null; colors: string[] } | null,
 ): StyleMeWording {
   const moodStr = moods.slice(0, 2).map((m) => m.replace(/-/g, " ")).join(" & ");
   const occasionLabel = occasion.replace(/-/g, " ");
@@ -206,23 +231,58 @@ export function deterministicWording(
     outcome === "no-eligible-product"
       ? "No single piece from the catalogue matched every constraint today. The finishing layer below gives you a clear direction to work with."
       : (styleMeExplanation ??
-          `This selection responds to your ${moodStr} mood and your desire to feel ${desiredFeelings[0] ?? "your best"}.` +
-          ` The piece supports the way you want to move through ${occasionLabel}.`);
+          (desiredFeelings.includes("softer")
+            ? `This selection brings a fluid, grounded quality to your ${moodStr} mood for ${occasionLabel}.`
+            : `This selection responds to your ${moodStr} mood and your desire to feel ${desiredFeelings[0] ?? "your best"}.` +
+              ` The piece supports the way you want to move through ${occasionLabel}.`));
 
-  const completionNote =
-    completionPieces.length > 0
-      ? " " +
-        completionPieces
-          .map((p) => {
-            const firstClause = p.description.split(".")[0] ?? "";
-            return p.slot === "top"
-              ? `${firstClause} provides the base layer.`
-              : `${firstClause} anchors the lower half.`;
-          })
-          .join(" ")
-      : "";
+  const completionNote = (() => {
+    if (completionPieces.length === 0) return "";
+    const topPiece = completionPieces.find((p) => p.slot === "top");
+    const bottomPiece = completionPieces.find((p) => p.slot === "bottom");
+    const parts: string[] = [];
+    if (topPiece) {
+      const relation = primaryTitle
+        ? `keeps the proportion intentional under ${primaryTitle}`
+        : "keeps the silhouette balanced";
+      parts.push(`A tonal base ${relation}.`);
+    }
+    if (bottomPiece) {
+      const hasSkirt = /skirt/i.test(bottomPiece.description);
+      const bottomWord = hasSkirt ? "skirt" : "trouser";
+      parts.push(`A clean ${bottomWord} grounds the look and anchors the palette.`);
+    }
+    return " " + parts.join(" ");
+  })();
 
-  const whyThisWorks = `${baseWhy}${completionNote}`;
+  // Softer note — explains the styling relationship when 'softer' is a desired feeling.
+  // Must reference fabric/line/construction, not just restate the desire.
+  const softerNote = (() => {
+    if (!desiredFeelings.includes("softer")) return "";
+    if (completionPieces.length > 0) {
+      return primaryTitle
+        ? ` The fluid, draped fabrication in the completion softens the overall line alongside ${primaryTitle}.`
+        : " The fluid, draped fabrication in the completion carries softness through the full look without losing shape.";
+    }
+    return " Fluid fabrication and a relaxed construction carry softness through the full look.";
+  })();
+
+  // Anchor note — explains the anchor's colour, energy, and relationship to the look.
+  // Essential when a manual piece (shoes, bag, etc.) grounds the outfit's tone.
+  const anchorNote = (() => {
+    if (!anchor?.label) return "";
+    const colourStr =
+      anchor.colors.length > 0 ? ` in ${anchor.colors[0].replace(/-/g, " ")}` : "";
+    if (anchor.slot === "shoe" || anchor.slot === "shoes") {
+      return ` Your ${anchor.label}${colourStr} ground the look — they set the colour energy and define the occasion register for every piece above them.`;
+    }
+    if (anchor.slot === "bag") {
+      return ` Your ${anchor.label}${colourStr} is the structural accent that holds the palette together.`;
+    }
+    return ` Your ${anchor.label}${colourStr} brings a defining accent that ties the whole look together.`;
+  })();
+
+  const whyThisWorks = `${baseWhy}${completionNote}${softerNote}${anchorNote}`;
   const confidenceBoost = `You dressed intentionally for ${occasionLabel} — and that intention shows.`;
 
   return { outfitName, whyThisWorks, confidenceBoost, perfumeNote: null };
@@ -335,6 +395,7 @@ async function callClaudeForWording(
   becoming: string[],
   styleSupport: string[],
   finalNotes: string | null | undefined,
+  anchor?: { label: string | null; slot: string | null; colors: string[] } | null,
 ): Promise<StyleMeWording | null> {
   const occasionLabel = occasion.replace(/-/g, " ");
   const moodStr = moods.join(", ");
@@ -358,6 +419,12 @@ async function callClaudeForWording(
         completionPieces.map((p) => `${p.slot} — ${p.description}`).join("; ") +
         " Incorporate these naturally into whyThisWorks — reference their proportion or colour role, not just that they complete the look."
       : "";
+
+  const anchorContext = (() => {
+    if (!anchor?.label) return "";
+    const colourStr = anchor.colors.length > 0 ? ` (${anchor.colors[0].replace(/-/g, " ")})` : "";
+    return ` Anchor piece: ${anchor.label}${colourStr}, slot: ${anchor.slot ?? "unknown"}. In whyThisWorks, explicitly explain the anchor's role in the look — its colour contribution, proportion relationship to the primary piece, and the energy it brings to the occasion.`;
+  })();
 
   const aspirationContext =
     [
@@ -387,6 +454,7 @@ async function callClaudeForWording(
               `Write wording for a styling result. The customer is feeling: ${moodStr}. ` +
               `Desired feeling: ${feelingStr}. Occasion: ${occasionLabel}. ${context}` +
               (completionContext ? completionContext : "") +
+              (anchorContext ? anchorContext : "") +
               (aspirationContext ? ` ${aspirationContext}` : "") +
               `\n\nReturn a JSON object with exactly these fields:\n` +
               `- outfitName: creative name for this look (≤8 words)\n` +
@@ -529,6 +597,15 @@ function desiredFeelingGarmentMod(
   if (feelings.some((f) => ["more-relaxed", "more-comfortable"].includes(f))) {
     return { qualifier: "relaxed", fabricNote: "in a soft, easy-wearing fabric" };
   }
+  if (feelings.some((f) => f === "more-attractive")) {
+    return {
+      qualifier: slot === "top" ? "sleek" : "",
+      // Neckline guidance is handled by resolveTopDetailNote (composed once with mood signals)
+      fabricNote: slot === "top"
+        ? "in a satin-touch or fluid fabric"
+        : "in a satin-touch or fluid fabric for a figure-aware, polished line",
+    };
+  }
   if (feelings.some((f) => f === "more-feminine")) {
     return {
       qualifier: "soft",
@@ -540,6 +617,9 @@ function desiredFeelingGarmentMod(
   }
   if (feelings.some((f) => f === "more-expressive")) {
     return { qualifier: "tonal", fabricNote: "in an interesting texture or weave" };
+  }
+  if (feelings.some((f) => f === "softer")) {
+    return { qualifier: "", fabricNote: "in a draped or fluid fabric" };
   }
   return { qualifier: "", fabricNote: "" };
 }
@@ -585,39 +665,47 @@ function comfortFabricNote(coverageConditional: string | null): string {
 }
 
 const TOP_VOCAB: Record<string, string> = {
-  "everyday":   "fitted scoop-neck or crew-neck top",
-  "work":       "structured fitted top or fine-gauge knit",
-  "date-night": "fitted top with a considered neckline",
-  "event":      "polished fitted top in a refined fabric",
-  "travel":     "relaxed fitted top in a breathable fabric",
-  "not-sure":   "fitted jersey or woven top",
+  "everyday":    "fitted scoop-neck or crew-neck top",
+  "work":        "structured fitted top or fine-gauge knit",
+  "date-night":  "fitted top",
+  "girls-night": "draped or wrapped top",
+  "night-out":   "draped or wrapped top",
+  "event":       "polished fitted top in a refined fabric",
+  "travel":      "relaxed fitted top in a breathable fabric",
+  "not-sure":    "fitted jersey or woven top",
 };
 
 const TOP_MATERIAL: Record<string, string> = {
-  "everyday":   "smooth cotton or jersey",
-  "work":       "woven cotton or fine-gauge knit",
-  "date-night": "satin, silk-like fabric, or ribbed jersey",
-  "event":      "crepe, silk, or fluid woven",
-  "travel":     "breathable cotton-linen or jersey",
-  "not-sure":   "smooth cotton or jersey",
+  "everyday":    "smooth cotton or jersey",
+  "work":        "woven cotton or fine-gauge knit",
+  "date-night":  "satin, silk-like fabric, or ribbed jersey",
+  "girls-night": "satin, charmeuse, or fluid jersey",
+  "night-out":   "satin, charmeuse, or fluid jersey",
+  "event":       "crepe, silk, or fluid woven",
+  "travel":      "breathable cotton-linen or jersey",
+  "not-sure":    "smooth cotton or jersey",
 };
 
 const BOTTOM_VOCAB: Record<string, string> = {
-  "everyday":   "straight-leg trousers or clean-cut denim",
-  "work":       "high-waisted tailored straight-leg trousers",
-  "date-night": "wide-leg trousers or a fluid midi skirt",
-  "event":      "wide-leg trousers or a full midi skirt",
-  "travel":     "relaxed straight-leg trousers",
-  "not-sure":   "straight-leg trousers",
+  "everyday":    "straight-leg trousers or clean-cut denim",
+  "work":        "high-waisted tailored straight-leg trousers",
+  "date-night":  "wide-leg trousers or a fluid midi skirt",
+  "girls-night": "wide-leg trousers or a fluid midi skirt",
+  "night-out":   "wide-leg trousers or a fluid midi skirt",
+  "event":       "wide-leg trousers or a full midi skirt",
+  "travel":      "relaxed straight-leg trousers",
+  "not-sure":    "straight-leg trousers",
 };
 
 const BOTTOM_MATERIAL: Record<string, string> = {
-  "everyday":   "clean denim or a linen blend",
-  "work":       "crepe, wool blend, or ponte",
-  "date-night": "satin, silk-like fabric, or tailored crepe",
-  "event":      "fluid crepe or structured suiting",
-  "travel":     "lightweight linen blend or travel ponte",
-  "not-sure":   "versatile ponte or cotton blend",
+  "everyday":    "clean denim or a linen blend",
+  "work":        "crepe, wool blend, or ponte",
+  "date-night":  "satin, silk-like fabric, or tailored crepe",
+  "girls-night": "satin, silk-like fabric, or tailored crepe",
+  "night-out":   "satin, silk-like fabric, or tailored crepe",
+  "event":       "fluid crepe or structured suiting",
+  "travel":      "lightweight linen blend or travel ponte",
+  "not-sure":    "versatile ponte or cotton blend",
 };
 
 function resolveCompletionColour(
@@ -639,6 +727,73 @@ function resolveCompletionColour(
   return "black";
 }
 
+// Compose feeling + mood signals into ONE top detail/neckline instruction.
+// This is called instead of stacking separate feeling, mood, and occasion fragments.
+// Precedence (when not coverage-suppressed): feeling+mood compose together → occasion fallback.
+function resolveTopDetailNote(
+  desiredFeelings: string[],
+  moods: string[],
+  occ: string,
+  isCoveragePreference: boolean,
+): string {
+  const attractive = desiredFeelings.some((f) => f === "more-attractive");
+  const adventurous = moods.includes("adventurous");
+  const softer = desiredFeelings.some((f) => f === "softer");
+
+  if (isCoveragePreference) {
+    if (adventurous || attractive) {
+      return "Look for an interesting drape, asymmetric seam, or textural contrast for visual edge.";
+    }
+    return "";
+  }
+
+  if (attractive && adventurous) {
+    return "Opt for an open or asymmetric neckline — a wrap, off-shoulder, or draped variation for daring impact.";
+  }
+  if (attractive) {
+    return "Opt for an open or wrapped neckline for impact.";
+  }
+  if (adventurous) {
+    return "A wrap, off-shoulder, or asymmetric neckline adds edge.";
+  }
+  if (softer) {
+    return "Avoid sharp plackets or rigid structure — a rounded collar or relaxed construction carries the feel.";
+  }
+  // Occasion-based fallback when no feeling/mood override applies
+  if (occ === "girls-night" || occ === "night-out") {
+    return "A considered or daring neckline suits the occasion.";
+  }
+  if (occ === "date-night") {
+    return "A considered neckline adds intention.";
+  }
+  return "";
+}
+
+// Compose mood signals into ONE bottom detail instruction.
+function resolveBottomDetailNote(moods: string[], isCoveragePreference: boolean): string {
+  if (moods.includes("adventurous")) {
+    return isCoveragePreference
+      ? "A wide silhouette with an asymmetric hem or unexpected texture adds edge."
+      : "A wrap hem or side split adds an unexpected element.";
+  }
+  return "";
+}
+
+// Returns true when the customer has signaled a preference for more coverage.
+// When true, exposure-suggesting vocabulary (open neckline, off-shoulder, mini, split)
+// must be suppressed. Coverage + body needs outrank desired feeling + mood + occasion vocab.
+function hasHigherCoveragePreference(
+  coverageConditional: string | null,
+  bodyNeeds: string[],
+): boolean {
+  if (coverageConditional) {
+    if (/higher|more|covered|modest|conservative|fuller/i.test(coverageConditional)) return true;
+  }
+  return bodyNeeds.some((n) =>
+    ["cover-arms", "cover-stomach", "cover-legs", "cover-chest", "more-coverage", "minimise-exposure"].includes(n),
+  );
+}
+
 function buildCompletionPiece(
   slot: "top" | "bottom",
   primarySlot: string | null,
@@ -648,28 +803,48 @@ function buildCompletionPiece(
   preferredColors: string[],
   desiredFeelings: string[],
   bodyNeeds: string[],
-  _moods: string[],
+  moods: string[],
   coverageConditional: string | null,
 ): StyleMeCompletionPiece {
   const occ = TOP_VOCAB[occasion] ? occasion : "not-sure";
   const colour = resolveCompletionColour(slot, preferredColors, anchorColors);
   const cap = colour.charAt(0).toUpperCase() + colour.slice(1);
 
+  // Precedence: coverage + body needs > desired feeling + mood > occasion vocabulary.
+  // When the customer signals higher coverage, exposure-suggesting vocab is suppressed
+  // and replaced with coverage-safe alternatives that still deliver the evening/attractive character
+  // through colour, fabrication, drape, asymmetry, and structure.
+  const isCoveragePreference = hasHigherCoveragePreference(coverageConditional, bodyNeeds);
+
   const feelingMod = desiredFeelingGarmentMod(desiredFeelings, slot);
   const silhouetteNote = bodyNeedSilhouetteNote(bodyNeeds, slot);
   const comfortNote = comfortFabricNote(coverageConditional);
 
+  // Strip neckline exposure guidance from feeling fabricNote when coverage is preferred
+  const effectiveFabricNote = isCoveragePreference
+    ? feelingMod.fabricNote.replace(/ — opt for an? [^.]*?(neckline|impact)[^.]*/i, "").trim()
+    : feelingMod.fabricNote;
+
   // Resolve material phrase: feeling override → comfort override → occasion default
   const baseMaterial = ((): string => {
-    if (feelingMod.fabricNote) return feelingMod.fabricNote;
+    if (effectiveFabricNote) return effectiveFabricNote;
     if (comfortNote) return comfortNote;
     return `in ${slot === "top" ? TOP_MATERIAL[occ] : BOTTOM_MATERIAL[occ]}`;
   })();
 
   const qualifier = feelingMod.qualifier ? `${feelingMod.qualifier} ` : "";
 
+  // Coverage-aware occasion vocab overrides and signal composition.
+  const isEveningOccasion = occ === "girls-night" || occ === "night-out";
+
   if (slot === "top") {
-    const garment = TOP_VOCAB[occ];
+    // Coverage guard: replace evening occasion shape with a coverage-safe variant
+    const garment =
+      isCoveragePreference && isEveningOccasion
+        ? "draped or wrapped top with a refined or moderate neckline"
+        : TOP_VOCAB[occ];
+    // Single composed detail note: feeling + mood → one instruction (not stacked fragments)
+    const detailNote = resolveTopDetailNote(desiredFeelings, moods, occ, isCoveragePreference);
     let proportionNote: string;
     if (primarySlot === "outerwear" && primaryTitle) {
       proportionNote = silhouetteNote
@@ -684,10 +859,18 @@ function buildCompletionPiece(
     } else {
       proportionNote = " Keep the fit clean and close to the body.";
     }
-    return { slot: "top", description: `${cap} ${qualifier}${garment} ${baseMaterial}.${proportionNote}` };
+    const detailSuffix = detailNote ? ` ${detailNote}` : "";
+    return { slot: "top", description: `${cap} ${qualifier}${garment} ${baseMaterial}.${proportionNote}${detailSuffix}` };
   }
 
-  const garment = BOTTOM_VOCAB[occ];
+  // Bottom: resolve garment, hemline suffix, and detail note separately
+  const garment =
+    isCoveragePreference && isEveningOccasion
+      ? "wide-leg trousers or a fluid midi skirt"
+      : BOTTOM_VOCAB[occ];
+  // "full-length line" only applies to trousers — not to skirts (midi/mini/fluid)
+  const hemlineSuffix = /skirt/i.test(garment) ? "" : " with a clean full-length line";
+  const detailNote = resolveBottomDetailNote(moods, isCoveragePreference);
   let proportionNote: string;
   if (primarySlot === "outerwear" && primaryTitle) {
     proportionNote = silhouetteNote
@@ -702,9 +885,10 @@ function buildCompletionPiece(
   } else {
     proportionNote = " Keep the silhouette clean and intentional.";
   }
+  const detailSuffix = detailNote ? ` ${detailNote}` : "";
   return {
     slot: "bottom",
-    description: `${cap} ${qualifier}${garment} ${baseMaterial} with a clean full-length line.${proportionNote}`,
+    description: `${cap} ${qualifier}${garment} ${baseMaterial}${hemlineSuffix}.${proportionNote}${detailSuffix}`,
   };
 }
 
@@ -862,6 +1046,21 @@ export async function computeStyleMeResult(
   const additionalClosetItems: Array<{ slot: string }> = recommendation.selectedClosetGarments ?? [];
   const completionLayer = buildCompletionLayer(anchor ?? null, primaryProduct, session, additionalClosetItems);
 
+  // Anchor summary — passed to both Claude and deterministic fallback so the
+  // anchor's colour, slot, and label are available for inclusion in Why This Works.
+  const anchorSummary = (() => {
+    if (!anchor) return null;
+    if (anchor.type === "closet") {
+      const ca = anchor as NormalizedClosetAnchor;
+      return { label: ca.label, slot: ca.slot as string, colors: ca.colors };
+    }
+    if (anchor.type === "nadine") {
+      const na = anchor as NormalizedNadineAnchor;
+      return { label: na.title, slot: na.slot as string, colors: na.colors };
+    }
+    return null;
+  })();
+
   // Claude wording call — falls back to deterministic if it fails
   const claudeWording = await callClaudeForWording(
     session.moods,
@@ -874,6 +1073,7 @@ export async function computeStyleMeResult(
     engineInput.profile?.becoming ?? [],
     engineInput.profile?.styleSupport ?? [],
     engineInput.profile?.finalNotes ?? null,
+    anchorSummary,
   );
 
   const wording =
@@ -886,6 +1086,7 @@ export async function computeStyleMeResult(
       primaryTitle,
       styleMeExplanation,
       completionLayer,
+      anchorSummary,
     );
 
   return {

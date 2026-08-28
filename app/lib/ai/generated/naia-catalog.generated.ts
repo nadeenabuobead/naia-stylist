@@ -1,6 +1,6 @@
 // THIS FILE IS AUTO-GENERATED. DO NOT EDIT MANUALLY.
 // Source: PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx
-// SHA-256: 5ad4468e46f92c911c9cd078d51a47f5e1d419449c81e27be132f21041388d74
+// SHA-256: cdd57ad04643f8184036302fb5fecd7b2a3b495d0452f3788cbe34047f5895ab
 // Re-generate: tsx scripts/extract-naia-catalog.ts
 
 import type { GeneratedCatalog } from "../naia-catalog.types.js";
@@ -8,7 +8,7 @@ import type { GeneratedCatalog } from "../naia-catalog.types.js";
 export const NAIA_CATALOG: GeneratedCatalog = {
   "schemaVersion": 1,
   "sourceWorkbook": "PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx",
-  "sourceSha256": "5ad4468e46f92c911c9cd078d51a47f5e1d419449c81e27be132f21041388d74",
+  "sourceSha256": "cdd57ad04643f8184036302fb5fecd7b2a3b495d0452f3788cbe34047f5895ab",
   "products": [
     {
       "handle": "double-top",
@@ -701,7 +701,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "activePublished": "☐ Confirmed",
         "artStoryDescription": "Tactile, earthy and close to the original “base,” while the chiffon slit still lets it move.",
         "stylingRole": "Sculptural statement skirt; feminine column anchor; waist-emphasising occasion bottom",
-        "desiredFeelingMatch": "more-feminine, more-attractive, more-elevated, more-confident",
+        "desiredFeelingMatch": "more-feminine, more-attractive, more-elevated, more-confident, softer",
         "stylePersonalityMatch": "feminine, romantic, artsy",
         "styleTags": "formal, romantic, classic, trendy",
         "occasionTags": "dinner, date-night, special-event, work, family",
@@ -761,7 +761,8 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "more-feminine",
             "more-attractive",
             "more-elevated",
-            "more-confident"
+            "more-confident",
+            "softer"
           ],
           "stylePersonalityMatch": [
             "feminine",

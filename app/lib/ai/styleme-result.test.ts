@@ -2472,9 +2472,18 @@ describe("§21 Gap corrections — SET coverage, signals, why-this-works, compat
       "nadine-recommendation", ["confident"], ["more-elevated"], "everyday",
       "Becoming Clear", "Wear it with intention.", pieces,
     );
+    // New synthesis: references proportion/role relationship (not verbatim description copy)
     assert.ok(
-      w.whyThisWorks.toLowerCase().includes("ivory") || w.whyThisWorks.toLowerCase().includes("base layer"),
-      "whyThisWorks must reference completion piece content",
+      w.whyThisWorks.toLowerCase().includes("base") ||
+      w.whyThisWorks.toLowerCase().includes("proportion") ||
+      w.whyThisWorks.toLowerCase().includes("tonal"),
+      `whyThisWorks must reference completion piece relationship — got: "${w.whyThisWorks}"`,
+    );
+    // Must NOT verbatim copy the first clause of the completion description
+    const firstClause = pieces[0]!.description.split(".")[0] ?? "";
+    assert.ok(
+      !w.whyThisWorks.includes(firstClause),
+      `whyThisWorks must not paste completion description verbatim — found: "${firstClause}"`,
     );
   });
 
@@ -2518,5 +2527,410 @@ describe("§21 Gap corrections — SET coverage, signals, why-this-works, compat
     const meta = parseSuggestionMetadata(legacy);
     const completionLayer = meta?.completionLayer ?? [];
     assert.deepEqual(completionLayer, [], "completionLayer ?? [] must be empty array for legacy result");
+  });
+});
+
+// ── §22 QA regression — quality fixes for live result issues ─────────────────
+
+describe("§22 QA regression — completion quality, anchor wording, finishing slot separation", () => {
+  // QA.1 — different desiredFeelings must produce meaningfully different completion details
+  it("QA.1 — 'more-attractive' girls-night produces different completion detail than 'more-confident'", () => {
+    const anchor = makeClosetAnchor("shoe", ["red"]) as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("outerwear", "Becoming Bold");
+
+    const attractivePieces = buildCompletionLayer(anchor, primary, {
+      moods: ["adventurous"], desiredFeelings: ["more-attractive"], bodyNeeds: [],
+      coverageConditional: null, occasion: "girls-night", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+
+    const confidentPieces = buildCompletionLayer(anchor, primary, {
+      moods: ["confident"], desiredFeelings: ["more-confident"], bodyNeeds: [],
+      coverageConditional: null, occasion: "girls-night", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+
+    assert.ok(attractivePieces.length > 0, "attractive session must generate completion pieces");
+    assert.ok(confidentPieces.length > 0, "confident session must generate completion pieces");
+
+    const attractiveDesc = attractivePieces.map((p) => p.description).join(" ");
+    const confidentDesc = confidentPieces.map((p) => p.description).join(" ");
+    assert.notEqual(
+      attractiveDesc,
+      confidentDesc,
+      "different desiredFeelings must produce different completion descriptions",
+    );
+  });
+
+  // QA.2 — adventurous mood adds edge detail to girls-night completion pieces
+  it("QA.2 — adventurous mood produces wrap/asymmetric detail in completion description", () => {
+    const anchor = makeClosetAnchor("shoe", ["red"]) as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("outerwear", "Becoming Bold");
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["adventurous"], desiredFeelings: ["more-attractive"], bodyNeeds: [],
+      coverageConditional: null, occasion: "girls-night", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    const combined = pieces.map((p) => p.description).join(" ");
+    assert.ok(
+      /wrap|asymmetric|split|neckline|open|draped/i.test(combined),
+      `adventurous mood must produce edge/shape detail in completion — got: "${combined}"`,
+    );
+  });
+
+  // QA.3 — manual shoe anchor appears in deterministicWording.whyThisWorks
+  it("QA.3 — shoe anchor label is referenced in deterministicWording whyThisWorks", () => {
+    const wording = deterministicWording(
+      "nadine-recommendation",
+      ["adventurous"],
+      ["more-attractive"],
+      "girls-night",
+      "Becoming Bold",
+      null,
+      [],
+      { label: "Red Heels", slot: "shoe", colors: ["red"] },
+    );
+    assert.ok(
+      wording.whyThisWorks.toLowerCase().includes("red heels"),
+      `anchor must be named in whyThisWorks — got: "${wording.whyThisWorks}"`,
+    );
+  });
+
+  // QA.4 — BAG and ACCESSORIES cannot render identical text
+  it("QA.4 — buildFinishingLayer: bag and accessories fields must not be identical", () => {
+    // Test with null handle (generic fallback) — they should be distinct by design
+    const generic = buildFinishingLayer(null);
+    assert.notEqual(
+      generic.bag,
+      generic.accessories,
+      `generic finishing layer: bag and accessories must not be identical strings — bag: "${generic.bag}", accessories: "${generic.accessories}"`,
+    );
+
+    // Also confirm with a catalog product handle
+    const catalog = buildFinishingLayer("collar-shirt");
+    assert.notEqual(
+      catalog.bag,
+      catalog.accessories,
+      `catalog finishing layer for collar-shirt: bag must not duplicate accessories — bag: "${catalog.bag}", accessories: "${catalog.accessories}"`,
+    );
+  });
+
+  // QA.5 — BAG copy contains bag guidance and does not primarily describe jewellery
+  it("QA.5 — generic finishing layer bag copy is bag-specific and does not lead with jewellery", () => {
+    const layer = buildFinishingLayer(null);
+    const bagLower = layer.bag.toLowerCase();
+    // Bag copy should mention bag-related terms
+    assert.ok(
+      /bag|tote|clutch|structured|handbag|carry/.test(bagLower),
+      `generic bag copy must reference bag guidance — got: "${layer.bag}"`,
+    );
+    // Bag copy must not primarily be about jewellery (earring/cuff/bracelet as lead content)
+    const firstTenWords = bagLower.split(" ").slice(0, 10).join(" ");
+    assert.ok(
+      !/earring|bracelet|cuff|necklace|ring/.test(firstTenWords),
+      `bag copy must not lead with jewellery terms — got: "${layer.bag}"`,
+    );
+  });
+
+  // QA.COVERAGE — coverage preference outranks feeling + mood + occasion vocab
+  it("QA.COVERAGE — adventurous + more-attractive + girls-night + higher-coverage: no daring neckline, no mini, no split", () => {
+    const anchor = makeClosetAnchor("shoe", ["red"]) as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("outerwear", "Becoming Bold");
+
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["adventurous"],
+      desiredFeelings: ["more-attractive"],
+      bodyNeeds: [],
+      coverageConditional: "higher-coverage",
+      occasion: "girls-night",
+      formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "naia-piece",
+    });
+
+    assert.ok(pieces.length > 0, "must still generate completion pieces with coverage preference");
+    const combined = pieces.map((p) => p.description).join(" ");
+
+    // Must NOT contain exposure-conflicting vocabulary
+    assert.ok(
+      !/daring neckline|open neckline|off.shoulder|mini skirt|side split/i.test(combined),
+      `coverage preference must suppress exposure-conflicting vocab — got: "${combined}"`,
+    );
+
+    // Must still deliver evening/attractive character through safe alternatives
+    assert.ok(
+      /satin|fluid|drape|asymmetric|texture|charmeuse|midi|moderate|refined/i.test(combined),
+      `coverage-safe pieces must still express evening/attractive character — got: "${combined}"`,
+    );
+  });
+
+  // QA.6 — shoe anchor continues to suppress SHOES in buildDbPayload (slot-suppression invariant)
+  it("QA.6 — shoe anchor: SHOES item present in buildDbPayload (UI handles slot suppression, not server)", () => {
+    const result = makeResultWithShoeAnchor();
+    const payload = buildDbPayload(result);
+    assert.ok(
+      payload.items.some((i) => i.itemType === "SHOES"),
+      "SHOES must remain in buildDbPayload items even with shoe anchor — UI layer handles suppression",
+    );
+    assert.ok(
+      payload.items.some((i) => i.itemType === "BAG"),
+      "BAG must still be present with shoe anchor",
+    );
+    assert.ok(
+      payload.items.some((i) => i.itemType === "ACCESSORY"),
+      "ACCESSORY must still be present with shoe anchor",
+    );
+  });
+
+  // QA.7 — no stacked neckline instructions in TOP completion piece
+  it("QA.7 — adventurous + more-attractive girls-night TOP contains at most one neckline instruction", () => {
+    const anchor = makeClosetAnchor("shoe", ["red"]) as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("outerwear", "Becoming Bold");
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["adventurous"], desiredFeelings: ["more-attractive"], bodyNeeds: [],
+      coverageConditional: null, occasion: "girls-night", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    const topPiece = pieces.find((p) => p.slot === "top");
+    assert.ok(topPiece, "TOP completion piece must exist");
+    const necklineCount = (topPiece!.description.match(/neckline/gi) ?? []).length;
+    assert.ok(
+      necklineCount <= 1,
+      `TOP description must contain at most one neckline instruction, found ${necklineCount}: "${topPiece!.description}"`,
+    );
+  });
+
+  // QA.8 — garment-detail contradiction: skirt description must not include "full-length line"
+  it("QA.8 — girls-night BOTTOM with skirt garment does not include 'full-length line' contradiction", () => {
+    const anchor = makeClosetAnchor("shoe", ["red"]) as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("outerwear", "Becoming Bold");
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["adventurous"], desiredFeelings: ["more-attractive"], bodyNeeds: [],
+      coverageConditional: null, occasion: "girls-night", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    const bottomPiece = pieces.find((p) => p.slot === "bottom");
+    assert.ok(bottomPiece, "BOTTOM completion piece must exist");
+    const desc = bottomPiece!.description;
+    const hasSkirt = /skirt/i.test(desc);
+    const hasFullLength = /full-length line/i.test(desc);
+    assert.ok(
+      !hasSkirt || !hasFullLength,
+      `BOTTOM with skirt must not also contain "full-length line": "${desc}"`,
+    );
+  });
+
+  // QA.9 — ACCESSORIES must not contain handbag/structured bag language
+  it("QA.9 — buildFinishingLayer accessories field contains no handbag or structured bag language", () => {
+    // All catalog handles have structured bag / handbag in accessoriesDirection; verify stripping works.
+    const handles = ["collar-shirt", "asymmetrical-pants", "draped-leather-pants", "oversized-blazer", "kimono-jacket", null];
+    for (const handle of handles) {
+      const layer = buildFinishingLayer(handle);
+      const hasBagLanguage = /\bhandbag\b|\bstructured\s+bag\b/i.test(layer.accessories);
+      assert.ok(
+        !hasBagLanguage,
+        `ACCESSORIES must not contain handbag/structured bag language for handle "${handle}": "${layer.accessories}"`,
+      );
+    }
+  });
+
+  // QA.10 — WHY THIS WORKS must not verbatim copy the first clause of a completion description
+  it("QA.10 — deterministicWording whyThisWorks does not paste completion-piece description verbatim", () => {
+    const anchor = makeClosetAnchor("shoe", ["red"]) as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("outerwear", "Becoming Bold");
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["adventurous"], desiredFeelings: ["more-attractive"], bodyNeeds: [],
+      coverageConditional: null, occasion: "girls-night", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    const wording = deterministicWording(
+      "nadine-recommendation",
+      ["adventurous"],
+      ["more-attractive"],
+      "girls-night",
+      "Becoming Bold",
+      null,
+      pieces,
+      { label: "Red Heels", slot: "shoe", colors: ["red"] },
+    );
+    for (const piece of pieces) {
+      const firstClause = piece.description.split(".")[0] ?? "";
+      assert.ok(
+        !wording.whyThisWorks.includes(firstClause),
+        `whyThisWorks must not verbatim paste completion-piece first clause "${firstClause}"`,
+      );
+    }
+  });
+});
+
+// ── §23 F2 regression — softer signal ────────────────────────────────────────
+import { getProductByHandle } from "./naia-catalog.ts";
+
+describe("§23 F2 regression — softer desired-feeling signal", () => {
+  it("F2.1 — Becoming Rooted (suede-skirt) now has 'softer' in desiredFeelingMatch", () => {
+    const product = getProductByHandle("suede-skirt");
+    assert.ok(product, "suede-skirt must exist in catalog");
+    assert.ok(
+      product!.parsed.rankings.desiredFeelingMatch.includes("softer"),
+      "suede-skirt desiredFeelingMatch must include 'softer'",
+    );
+  });
+
+  it("F2.2 — Becoming Whole (kimono-jacket) still has 'softer' in desiredFeelingMatch", () => {
+    const product = getProductByHandle("kimono-jacket");
+    assert.ok(product, "kimono-jacket must exist in catalog");
+    assert.ok(
+      product!.parsed.rankings.desiredFeelingMatch.includes("softer"),
+      "kimono-jacket desiredFeelingMatch must still include 'softer'",
+    );
+  });
+
+  it("F2.3 — at least two catalog products have 'softer' in desiredFeelingMatch", () => {
+    const handles = ["suede-skirt", "kimono-jacket"];
+    const withSofter = handles.filter((h) => {
+      const p = getProductByHandle(h);
+      return p?.parsed.rankings.desiredFeelingMatch.includes("softer");
+    });
+    assert.ok(withSofter.length >= 2, `Expected ≥2 products with 'softer' DFM, found: ${withSofter.join(", ")}`);
+  });
+
+  it("F2.4 — 'softer' desired feeling changes TOP completion to draped/fluid fabric", () => {
+    const anchor = makeClosetAnchor("shoe") as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("bottom", "Becoming Grounded");
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["content"], desiredFeelings: ["softer"], bodyNeeds: [],
+      coverageConditional: null, occasion: "everyday", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    const topPiece = pieces.find((p) => p.slot === "top");
+    assert.ok(topPiece, "top completion piece must exist");
+    const desc = topPiece!.description.toLowerCase();
+    assert.ok(
+      desc.includes("draped") || desc.includes("fluid"),
+      `'softer' must produce draped/fluid fabric note in top description. Got: "${topPiece!.description}"`,
+    );
+  });
+
+  it("F2.5 — 'softer' completion does not introduce romantic, frilly, or pastel language", () => {
+    const anchor = makeClosetAnchor("shoe") as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("bottom", "Becoming Grounded");
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["content"], desiredFeelings: ["softer"], bodyNeeds: [],
+      coverageConditional: null, occasion: "everyday", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    for (const piece of pieces) {
+      const desc = piece.description.toLowerCase();
+      assert.ok(!desc.includes("romantic"), `'softer' must not introduce 'romantic' in ${piece.slot}`);
+      assert.ok(!desc.includes("frilly"), `'softer' must not introduce 'frilly' in ${piece.slot}`);
+      assert.ok(!desc.includes("pastel"), `'softer' must not introduce 'pastel' in ${piece.slot}`);
+      assert.ok(!desc.includes("feminine"), `'softer' must not introduce 'feminine' in ${piece.slot}`);
+    }
+  });
+
+  it("F2.6 — more-coverage preference outranks 'softer': top detail note is suppressed", () => {
+    const anchor = makeClosetAnchor("shoe") as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("bottom", "Becoming Grounded");
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["content"], desiredFeelings: ["softer"], bodyNeeds: ["more-coverage"],
+      coverageConditional: null, occasion: "everyday", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    const topPiece = pieces.find((p) => p.slot === "top");
+    assert.ok(topPiece, "top completion piece must exist");
+    const desc = topPiece!.description;
+    assert.ok(
+      !desc.includes("rounded collar") && !desc.includes("sharp plackets"),
+      `When more-coverage is active, the 'softer' detail note must be suppressed. Got: "${desc}"`,
+    );
+  });
+
+  it("F2.W1 — deterministicWording with 'softer' + completion references fluid/draped styling relationship", () => {
+    const pieces: import("./styleme-result.types.ts").StyleMeCompletionPiece[] = [
+      { slot: "top", description: "Ivory fitted top in a draped or fluid fabric. Avoid sharp plackets — a rounded collar carries the feel." },
+    ];
+    const w = deterministicWording(
+      "nadine-recommendation", ["content"], ["softer"], "dinner",
+      "Becoming Rooted", "Let the slim midi shape and knotted waist define the outfit.", pieces,
+    );
+    const lower = w.whyThisWorks.toLowerCase();
+    assert.ok(
+      lower.includes("fluid") || lower.includes("draped") || lower.includes("soften"),
+      `deterministicWording with 'softer' must reference fluid/draped/softens. Got: "${w.whyThisWorks}"`,
+    );
+  });
+
+  it("F2.W2 — deterministicWording softerNote explains styling relationship, not just restating desire", () => {
+    const pieces: import("./styleme-result.types.ts").StyleMeCompletionPiece[] = [
+      { slot: "top", description: "Ivory top in a draped or fluid fabric." },
+    ];
+    const w = deterministicWording(
+      "nadine-recommendation", ["content"], ["softer"], "dinner",
+      "Becoming Rooted", null, pieces,
+    );
+    assert.ok(
+      !w.whyThisWorks.includes("desire to feel softer"),
+      `softerNote must not say 'desire to feel softer'. Got: "${w.whyThisWorks}"`,
+    );
+    assert.ok(
+      !w.whyThisWorks.includes("you wanted to feel"),
+      `softerNote must not say 'you wanted to feel'. Got: "${w.whyThisWorks}"`,
+    );
+    const lower = w.whyThisWorks.toLowerCase();
+    assert.ok(
+      lower.includes("fluid") || lower.includes("draped") || lower.includes("soften"),
+      `softerNote must reference a styling relationship via fabric/line. Got: "${w.whyThisWorks}"`,
+    );
+  });
+
+  it("F2.W3 — softerNote still present under higher-coverage (softness via fabric, coverage wins on shape)", () => {
+    const pieces: import("./styleme-result.types.ts").StyleMeCompletionPiece[] = [
+      { slot: "top", description: "Ivory top in a draped or fluid fabric. Keep it close to the body." },
+      { slot: "bottom", description: "Black straight-leg trousers in a draped or fluid fabric." },
+    ];
+    const w = deterministicWording(
+      "nadine-recommendation", ["content"], ["softer"], "dinner",
+      "Becoming Whole", "Use this jacket as the statement layer.", pieces,
+    );
+    const lower = w.whyThisWorks.toLowerCase();
+    assert.ok(
+      lower.includes("fluid") || lower.includes("draped") || lower.includes("soften"),
+      `softerNote must still reference soft fabric under coverage context. Got: "${w.whyThisWorks}"`,
+    );
+    assert.ok(!lower.includes("romantic"), "softerNote must not introduce 'romantic' under coverage");
+  });
+
+  it("F2.W4 — deterministicWording with 'softer' never introduces romantic/frilly/pastel", () => {
+    const pieces: import("./styleme-result.types.ts").StyleMeCompletionPiece[] = [
+      { slot: "top", description: "Ivory top in a draped or fluid fabric." },
+      { slot: "bottom", description: "Black trousers in a draped or fluid fabric." },
+    ];
+    const w = deterministicWording(
+      "nadine-recommendation", ["content"], ["softer"], "everyday",
+      "Becoming Clear", null, pieces,
+    );
+    const lower = w.whyThisWorks.toLowerCase();
+    assert.ok(!lower.includes("romantic"), "softer whyThisWorks must not say 'romantic'");
+    assert.ok(!lower.includes("frilly"), "softer whyThisWorks must not say 'frilly'");
+    assert.ok(!lower.includes("pastel"), "softer whyThisWorks must not say 'pastel'");
+    assert.ok(!lower.includes("feminine"), "softer whyThisWorks must not say 'feminine'");
+  });
+
+  it("F2.7 — existing 'more-attractive' + adventurous + girls-night composition is unchanged", () => {
+    const anchor = makeClosetAnchor("shoe") as NormalizedStyleAnchor;
+    const primary = makePrimaryProduct("bottom", "Becoming Grounded");
+    const pieces = buildCompletionLayer(anchor, primary, {
+      moods: ["adventurous"], desiredFeelings: ["more-attractive"], bodyNeeds: [],
+      coverageConditional: null, occasion: "girls-night", formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] }, practicalIds: [], source: "naia-piece",
+    });
+    const topPiece = pieces.find((p) => p.slot === "top");
+    assert.ok(topPiece, "top piece must exist");
+    const desc = topPiece!.description.toLowerCase();
+    assert.ok(
+      desc.includes("wrap") || desc.includes("off-shoulder") || desc.includes("asymmetric") || desc.includes("daring"),
+      `'more-attractive' + adventurous + girls-night must still produce daring neckline detail. Got: "${topPiece!.description}"`,
+    );
   });
 });
