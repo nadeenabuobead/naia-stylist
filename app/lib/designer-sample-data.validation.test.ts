@@ -2663,7 +2663,7 @@ describe("QA fix regressions", () => {
     );
   });
 
-  it("QA5. personality card logic: isDirectional state when !hasSufficientWr and rating/rewear data exists", () => {
+  it("QA5. personality card logic: isDirectional requires wrc > 0; Partially Served for wrc=0 with rating", () => {
     const route = readRoute();
     assert.ok(
       route.includes("isDirectional"),
@@ -2674,8 +2674,12 @@ describe("QA fix regressions", () => {
       'route must render "Directional — not yet well served" label for directional cards'
     );
     assert.ok(
-      !route.includes('"Partially Served"'),
-      'route must not use "Partially Served" as a label value'
+      route.includes("wrc > 0") && route.includes("isDirectional"),
+      'isDirectional must require wrc > 0 so zero-WR personalities are not mislabelled as Directional'
+    );
+    assert.ok(
+      route.includes('"Partially Served"'),
+      'route must include "Partially Served" label for personalities with avgRating but no WR data (e.g. Edgy, Artsy at 30D)'
     );
   });
 

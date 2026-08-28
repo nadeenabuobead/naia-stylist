@@ -3033,10 +3033,11 @@ function TabCollection({ data, kpis, advanced, rel, sampleMode, dateRangeDays, l
                   const sc = sampleConfidence(wrc);
                   const hasSufficientWr = sc.status !== "insufficient-data" && sc.status !== "not-implemented";
                   const served = hasSufficientWr && row.avgRating != null && row.avgRating >= 4 && row.rewearRate != null && row.rewearRate >= 0.6;
-                  const isDirectional = !hasSufficientWr && (row.avgRating != null || row.rewearRate != null);
-                  const borderColor = served ? "#2a5e42" : isDirectional ? "#6b7280" : "#9CA3AF";
-                  const label = served ? "Well Served" : isDirectional ? "Directional" : "Insufficient Data";
-                  const labelColor = served ? "#2a5e42" : isDirectional ? "#6b7280" : "#7a6f6a";
+                  const isDirectional = !hasSufficientWr && wrc > 0 && (row.avgRating != null || row.rewearRate != null);
+                  const partial = !served && !isDirectional && (row.avgRating != null || row.rewearRate != null);
+                  const borderColor = served ? "#2a5e42" : isDirectional ? "#6b7280" : partial ? "#d97706" : "#9CA3AF";
+                  const label = served ? "Well Served" : isDirectional ? "Directional" : partial ? "Partially Served" : "Insufficient Data";
+                  const labelColor = served ? "#2a5e42" : isDirectional ? "#6b7280" : partial ? "#d97706" : "#7a6f6a";
                   return (
                     <div key={i} style={{ ...s.card, borderLeft: `3px solid ${borderColor}` }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
@@ -3602,7 +3603,13 @@ function TabOpportunitiesContent({ data, phase4b2, advanced, rel, dateRangeDays,
     });
   });
 
-  (rel?.productNarratives ?? []).filter(p => p.sampleSize >= 3).forEach((p, i) => {
+  const _oppProductSlugs = new Set(
+    (advanced?.opportunityFeed ?? []).filter(o => o._productSlug).map(o => o._productSlug)
+  );
+  (rel?.productNarratives ?? []).filter(p => {
+    const slug = p.name.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+    return p.sampleSize >= 3 && !_oppProductSlugs.has(slug);
+  }).forEach((p, i) => {
     const taxonomy = p.opportunityScore >= 60 ? "Scale" : p.mostCommonObjection ? "Fix" : "Test";
     actionItems.push({
       id: `ri-${i}`,
@@ -3753,8 +3760,7 @@ function CombinedPriorityCard({ item }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontSize: 7, fontFamily: INTER, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", padding: "2px 8px", background: taxColor, color: "#fff" }}>{taxKey}</span>
-            <span style={{ fontSize: 7, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", padding: "2px 6px", background: confBg, color: "#fff" }}>EVIDENCE · {item.confidence}</span>
-            <span style={{ fontSize: 7, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", padding: "2px 6px", background: confData.color, color: "#fff" }}>{confData.label}</span>
+            <span style={{ fontSize: 7, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", padding: "2px 6px", background: confData.color, color: "#fff" }}>EVIDENCE · {confData.label}</span>
           </div>
           <span style={{ fontSize: 8, fontFamily: MONO, color: "#9CA3AF" }}>Status: New</span>
         </div>
