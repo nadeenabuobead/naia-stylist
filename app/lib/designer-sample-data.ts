@@ -626,6 +626,10 @@ function productStats(events: SE[], name: string) {
 
   return {
     sessionCount: ps.length, reviewCount: allRev.length, sampleSize: allRev.length,
+    // evidenceN = reviews + buy-or-skip decisions — total direct customer interactions (SEEN, WHOLE, ALIVE, CLEAR).
+    // GROUNDED uses objectionCount instead: its claim is about repeatable fit concerns from session data,
+    // not reviews or purchase decisions. Using BS events for a fit-objection badge would be category error.
+    evidenceN: allRev.length + pbs.length,
     avgRating, loveRate, rewearRate, feelingAchievedRate: feelingRate,
     strongAchievedCount: strongAchieved, strongAchievedRate: pct(strongAchieved, pwrDenom),
     partlyAchievedCount: partlyAchieved, partlyAchievedRate: pct(partlyAchieved, pwrDenom),
@@ -976,14 +980,14 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       {
         // Legacy display fields (preserved for backward compatibility)
         piece: SEEN,
-        confidenceBadge: evidenceConfidence(pm[SEEN].sampleSize),
+        confidenceBadge: evidenceConfidence(pm[SEEN].evidenceN),
         actionType: "Scale",
         action: "Commission a work-styling test centred on Becoming Seen — cover work, travel, and evening contexts",
         performance: `★ ${pm[SEEN].avgRating} avg · ${Math.round(pm[SEEN].rewearRate * 100)}% rewear · +${pm[SEEN].avgConfidenceLift} confidence lift`,
         liked: "Corporate Chic customers achieve 'Confident' and 'Powerful' consistently — highest confidence lift in work-occasion sessions",
         watch: "Minimal and Casual Cool customers object to the formality — observe whether styling context resolves this",
         nextStep: "Commission editorial content: Becoming Seen at the boardroom, at dinner, and at a gallery opening",
-        data: `n=${pm[SEEN].sampleSize} reviews · ${CATALOG[SEEN].garmentType} · Best with Corporate Chic`,
+        data: `n=${pm[SEEN].evidenceN} interactions (${pm[SEEN].sampleSize} reviews + ${pm[SEEN].totalBuyOrSkip} buy/skip) · ${CATALOG[SEEN].garmentType} · Best with Corporate Chic`,
         // Canonical fields
         id: "seen-workwear-versatility",
         product: SEEN,
@@ -992,9 +996,9 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         interpretation: "Becoming Seen leads all products in sessions and delivers the highest confidence lift for Corporate Chic customers in work and special-event contexts. Both rating and rewear signals are consistent across the observed period.",
         recommendedTest: "Commission editorial content positioning Becoming Seen in three work contexts: boardroom, dinner, and gallery opening. Measure Corporate Chic love rate and rewear rate after launch.",
         successMetric: "Corporate Chic session love rate ≥ 70% and rewear rate maintained after content launch.",
-        evidenceCount: pm[SEEN].sampleSize,
+        evidenceCount: pm[SEEN].evidenceN,
         period: periodLabel,
-        confidence: evidenceConfidence(pm[SEEN].sampleSize),
+        confidence: evidenceConfidence(pm[SEEN].evidenceN),
         designImplication: "No design change indicated — the product achieves its intended feeling for the target audience consistently. Validate whether the workwear styling system needs additional supporting pieces.",
         merchandisingImplication: "Test a curated work styling system positioned on Becoming Seen. Editorial content across three contexts is a low-effort, high-signal test.",
         impact: "high" as const,
@@ -1004,14 +1008,14 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       {
         // Legacy display fields
         piece: WHOLE,
-        confidenceBadge: evidenceConfidence(pm[WHOLE].sampleSize),
+        confidenceBadge: evidenceConfidence(pm[WHOLE].evidenceN),
         actionType: "Fix",
         action: "Create occasion-specific styling guides to convert saves into purchases",
         performance: `★ ${pm[WHOLE].avgRating} avg · ${pm[WHOLE].saveCount} saves · ${pm[WHOLE].buyCount} purchases`,
         liked: "Customers describe it as beautiful and effortless — aspiration is not the issue",
         watch: `Save-to-purchase gap: ${pm[WHOLE].saveCount} saves but ${pm[WHOLE].buyCount} purchases — occasion ambiguity is observed as the most likely cause`,
         nextStep: "Produce three styling guides: Desk to Lunch, Weekend Travel, Evening with Friends",
-        data: `n=${pm[WHOLE].sampleSize} reviews · ${CATALOG[WHOLE].garmentType} · Top objection: 'Not sure how to style it'`,
+        data: `n=${pm[WHOLE].totalBuyOrSkip} buy/skip decisions (${pm[WHOLE].saveCount} saves · ${pm[WHOLE].buyCount} purchases) · ${CATALOG[WHOLE].garmentType} · Top objection: 'Not sure how to style it'`,
         // Canonical fields
         id: "whole-save-to-purchase",
         product: WHOLE,
@@ -1020,9 +1024,9 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         interpretation: "Customers find Becoming Whole aspirational but face occasion ambiguity that prevents purchase. The save signal is present — the barrier may be styling confidence rather than desirability.",
         recommendedTest: "Create 3 occasion-specific styling guides (Desk to Lunch, Weekend Travel, Evening with Friends) and measure whether save-to-purchase conversion improves within 60 days.",
         successMetric: "Save-to-purchase rate improvement visible within 60 days of guide publication.",
-        evidenceCount: pm[WHOLE].sampleSize,
+        evidenceCount: pm[WHOLE].evidenceN,
         period: periodLabel,
-        confidence: evidenceConfidence(pm[WHOLE].sampleSize),
+        confidence: evidenceConfidence(pm[WHOLE].evidenceN),
         designImplication: "Investigate whether the silhouette needs clearer occasion framing in the design intent before new product development.",
         merchandisingImplication: "Occasion-specific styling guides are the most direct test of whether the save/purchase gap is a content problem rather than a product problem.",
         impact: "high" as const,
@@ -1032,7 +1036,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       {
         // Legacy display fields
         piece: ALIVE,
-        confidenceBadge: evidenceConfidence(pm[ALIVE].sampleSize),
+        confidenceBadge: evidenceConfidence(pm[ALIVE].evidenceN),
         actionType: "Test",
         action: "Observe whether surfacing Becoming Alive for Edgy and Artsy profiles in evening contexts improves love rate",
         performance: `★ ${pm[ALIVE].avgRating} avg · ${Math.round(pm[ALIVE].rewearRate * 100)}% rewear among repeat wearers`,
@@ -1041,7 +1045,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
           : `Edgy customers give it 4.7+ — rewear data visible in 90D+ window (first rewear events outside this period)`,
         watch: "Minimal and Casual Cool rejections are observed — the pattern suggests a personality mismatch rather than a product issue",
         nextStep: "Test personality-based recommendation gating: surface Becoming Alive for Edgy and Artsy profiles in evening sessions and measure outcomes",
-        data: `n=${pm[ALIVE].sampleSize} reviews · ${CATALOG[ALIVE].garmentType} · Polarising across personality types`,
+        data: `n=${pm[ALIVE].evidenceN} interactions (${pm[ALIVE].sampleSize} reviews + ${pm[ALIVE].totalBuyOrSkip} buy/skip) · ${CATALOG[ALIVE].garmentType} · Polarising across personality types`,
         // Canonical fields
         id: "alive-personality-targeting",
         product: ALIVE,
@@ -1050,9 +1054,9 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         interpretation: "Becoming Alive delivers consistent outcomes for Edgy customers in evening contexts but shows consistent rejection from Minimal and Casual Cool profiles. The pattern suggests a personality match issue rather than a design issue.",
         recommendedTest: "Test personality-based recommendation gating — only surface Becoming Alive for Edgy and Artsy profiles in evening sessions. Measure whether overall love rate improves.",
         successMetric: "Edgy customer love rate maintained at 4.7+ while overall love rate improves after gating. Measure over 30-day window.",
-        evidenceCount: pm[ALIVE].sampleSize,
+        evidenceCount: pm[ALIVE].evidenceN,
         period: periodLabel,
-        confidence: evidenceConfidence(pm[ALIVE].sampleSize),
+        confidence: evidenceConfidence(pm[ALIVE].evidenceN),
         designImplication: "Do not alter the garment yet — validate whether versatility is the real issue or whether the current design already serves its intended audience well.",
         merchandisingImplication: "Test desk-to-dinner styling and broader occasion positioning only if Edgy and Artsy outcomes are maintained. Start with evening occasion gating.",
         impact: "medium" as const,
@@ -1062,14 +1066,16 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       {
         // Legacy display fields
         piece: GROUNDED,
-        confidenceBadge: evidenceConfidence(pm[GROUNDED].sampleSize),
+        // Fit objections come from session events (SS), not reviews or buy/skip decisions.
+        // Use objectionCount so that 0 reviews does not produce "No Data" when sessions show a clear fit pattern.
+        confidenceBadge: evidenceConfidence(pm[GROUNDED].objectionCount),
         actionType: "Fix",
         action: "Introduce petite-length styling guidance to address the most commonly observed fit concern",
         performance: `★ ${pm[GROUNDED].avgRating} avg · ${pm[GROUNDED].objectionCount} fit objections across ${pm[GROUNDED].sessionCount} sessions`,
         liked: "When fit resolves, customers describe feeling grounded and powerful — purchase intent follows",
         watch: `Trouser length and hip-fit objections are recurring: ${pm[GROUNDED].topObjection} is the most observed barrier`,
         nextStep: "Commission petite styling content; explore whether a cropped or ankle-length option would address the length signal",
-        data: `n=${pm[GROUNDED].sampleSize} reviews · ${CATALOG[GROUNDED].garmentType} · Top objection: "${pm[GROUNDED].topObjection}"`,
+        data: `n=${pm[GROUNDED].objectionCount} fit-objection sessions · ${CATALOG[GROUNDED].garmentType} · Top objection: "${pm[GROUNDED].topObjection}"`,
         // Canonical fields
         id: "grounded-fit-resolution",
         product: GROUNDED,
@@ -1078,9 +1084,9 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         interpretation: "Trouser length and hip-fit objections are the primary barrier for Becoming Grounded. Customers want the asymmetric silhouette but the length concern appears across multiple personality types — a better-fitting option may resolve this.",
         recommendedTest: "Introduce petite-specific styling guidance and measure whether it reduces length-related objections in subsequent sessions.",
         successMetric: "Fit objection rate below 30% in sessions with petite-profile customers after guidance launch.",
-        evidenceCount: pm[GROUNDED].sampleSize,
+        evidenceCount: pm[GROUNDED].objectionCount,
         period: periodLabel,
-        confidence: evidenceConfidence(pm[GROUNDED].sampleSize),
+        confidence: evidenceConfidence(pm[GROUNDED].objectionCount),
         designImplication: "Investigate whether a cropped or ankle-length version would resolve the repeating length objection before investing in a full new SKU.",
         merchandisingImplication: "Petite-specific styling content would address the identified fit concern without a product change — test this first.",
         impact: "medium" as const,
@@ -1090,14 +1096,14 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       {
         // Legacy display fields
         piece: CLEAR,
-        confidenceBadge: evidenceConfidence(pm[CLEAR].sampleSize),
+        confidenceBadge: evidenceConfidence(pm[CLEAR].evidenceN),
         actionType: "Test",
         action: "Test whether surfacing Becoming Clear more frequently improves conversion rate",
         performance: `★ ${pm[CLEAR].avgRating} avg · ${pm[CLEAR].buyCount}/${pm[CLEAR].totalBuyOrSkip} buy-or-skip interactions (${pm[CLEAR].conversionRate}%) · ${pm[CLEAR].sessionCount} sessions`,
         liked: "Customers who see it tend to purchase — the buy-through rate is above collection average",
         watch: "Currently receives fewer sessions than Becoming Seen — whether this is a weighting decision or an exposure gap needs testing",
         nextStep: "Test whether adjusting recommendation weights for Corporate Chic and Artsy profiles in work and dinner sessions changes outcomes",
-        data: `n=${pm[CLEAR].sampleSize} reviews · ${CATALOG[CLEAR].garmentType} · Best with Corporate Chic / Artsy`,
+        data: `n=${pm[CLEAR].evidenceN} interactions (${pm[CLEAR].sampleSize} reviews + ${pm[CLEAR].totalBuyOrSkip} buy/skip) · ${CATALOG[CLEAR].garmentType} · Best with Corporate Chic / Artsy`,
         // Canonical fields
         id: "clear-exposure-test",
         product: CLEAR,
@@ -1106,9 +1112,9 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         interpretation: "Becoming Clear converts at a higher rate than other pieces when recommended. The piece receives fewer sessions than Becoming Seen — whether increasing frequency improves outcomes is an observable hypothesis.",
         recommendedTest: "Increase recommendation frequency for Corporate Chic and Artsy profiles in work and dinner sessions. Measure conversion rate change over 30 days.",
         successMetric: "Conversion rate maintained or improved with higher session volume within 30 days.",
-        evidenceCount: pm[CLEAR].sampleSize,
+        evidenceCount: pm[CLEAR].evidenceN,
         period: periodLabel,
-        confidence: evidenceConfidence(pm[CLEAR].sampleSize),
+        confidence: evidenceConfidence(pm[CLEAR].evidenceN),
         designImplication: "No design change indicated — the product performs well when recommended. Validate the exposure hypothesis before acting on any design direction.",
         merchandisingImplication: "Test whether increased recommendation frequency improves overall conversion outcomes. This is a low-effort, high-signal test that does not require a product change.",
         impact: "high" as const,
@@ -1838,7 +1844,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     {
       id: "seen-workwear-hero",
       type: "product-opportunity",
-      confidence: evidenceConfidence(pm[SEEN].sampleSize),
+      confidence: evidenceConfidence(pm[SEEN].evidenceN),
       estimatedCommercialRelevance: "high",
       insight: `Becoming Seen leads all products in sessions (${pm[SEEN].sessionCount}) and delivers the highest confidence lift for Corporate Chic customers`,
       customerNeed: "Professional women need a styled system for high-stakes work moments — not just individual pieces",
@@ -1851,7 +1857,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     {
       id: "whole-save-gap",
       type: "product-friction",
-      confidence: evidenceConfidence(pm[WHOLE].sampleSize),
+      confidence: evidenceConfidence(pm[WHOLE].evidenceN),
       estimatedCommercialRelevance: "high",
       insight: `Becoming Whole has ${pm[WHOLE].saveCount} saves and ${pm[WHOLE].buyCount} purchases — the widest save/purchase gap in the collection`,
       customerNeed: "Customers are drawn to the piece but need confidence in when and how to wear it before purchasing",
@@ -1864,7 +1870,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     {
       id: "clear-underexposed",
       type: "product-opportunity",
-      confidence: evidenceConfidence(pm[CLEAR].sampleSize),
+      confidence: evidenceConfidence(pm[CLEAR].evidenceN),
       estimatedCommercialRelevance: "high",
       insight: `Becoming Clear converts at ${pm[CLEAR].conversionRate}% (${pm[CLEAR].buyCount}/${pm[CLEAR].totalBuyOrSkip} buy-or-skip interactions) — highest in the collection — but receives far fewer sessions than Becoming Seen`,
       customerNeed: "Once customers see it in the right context, they tend to purchase — the issue is exposure, not desirability",
@@ -1890,7 +1896,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     {
       id: "alive-personality-targeting",
       type: "audience-gap",
-      confidence: evidenceConfidence(pm[ALIVE].sampleSize),
+      confidence: evidenceConfidence(pm[ALIVE].evidenceN),
       estimatedCommercialRelevance: "medium",
       insight: "Becoming Alive delivers 4.7+ outcomes for Edgy customers but consistent rejections from Minimal and Casual Cool profiles",
       customerNeed: "Edgy customers want a piece that matches their self-expression — they will pay for something that feels exactly right",

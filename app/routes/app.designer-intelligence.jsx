@@ -801,13 +801,15 @@ function buildTopSignals({ data, kpis, phase4b2, advanced, rel, dateRangeDays })
   }
 
   // identity
+  // n = signal count (how many profiles chose this style), not pool size.
+  // Pool size is context; signal count is evidence for this specific claim.
   const topStyle = data?.onboarding?.styleDNADistribution?.[0];
   if (topStyle && totalProfiles >= 3)
     push("identity", "Top Style Personality",
       normalizeLabel(topStyle.style) ?? topStyle.style,
       `${topStyle.count} of ${totalProfiles} completed profiles`,
       "Passport profiles", "All time",
-      totalProfiles, topStyle.count / totalProfiles);
+      topStyle.count, topStyle.count / totalProfiles);
 
   // context: occasion
   const topOcc = data?.topOccasions?.[0];
@@ -816,7 +818,7 @@ function buildTopSignals({ data, kpis, phase4b2, advanced, rel, dateRangeDays })
       normalizeLabel(topOcc.name) ?? topOcc.name,
       `${topOcc.lookCount} of ${totalReviews} reviewed looks`,
       "Outfit reviews", "All time",
-      totalReviews, topOcc.lookCount / totalReviews);
+      topOcc.lookCount, topOcc.lookCount / totalReviews);
 
   // context: lifestyle
   const topLifestyle = data?.onboarding?.lifestyleDistribution?.[0];
@@ -825,7 +827,7 @@ function buildTopSignals({ data, kpis, phase4b2, advanced, rel, dateRangeDays })
       normalizeLabel(topLifestyle.lifestyle) ?? topLifestyle.lifestyle,
       `${topLifestyle.count} of ${totalProfiles} completed profiles`,
       "Passport profiles", "All time",
-      totalProfiles, topLifestyle.count / totalProfiles);
+      topLifestyle.count, topLifestyle.count / totalProfiles);
 
   // garment: colour
   const topColor = data?.onboarding?.colorDistribution?.[0];
@@ -834,7 +836,7 @@ function buildTopSignals({ data, kpis, phase4b2, advanced, rel, dateRangeDays })
       normalizeLabel(topColor.color) ?? topColor.color,
       `${topColor.count} of ${totalProfiles} completed profiles`,
       "Passport profiles", "All time",
-      totalProfiles, topColor.count / totalProfiles);
+      topColor.count, topColor.count / totalProfiles);
 
   // garment: fit / silhouette
   const topFit = data?.bodyPatterns?.[0];
@@ -854,7 +856,7 @@ function buildTopSignals({ data, kpis, phase4b2, advanced, rel, dateRangeDays })
       normalizeLabel(topFeeling.feeling) ?? topFeeling.feeling,
       `${topFeeling.count} of ${totalProfiles} completed profiles`,
       "Passport profiles", "All time",
-      totalProfiles, topFeeling.count / totalProfiles);
+      topFeeling.count, topFeeling.count / totalProfiles);
 
   // emotional: confirmed shift (ONLY when achievedRate data is actually present)
   if (rel?.status !== "insufficient-data") {
@@ -890,7 +892,7 @@ function buildTopSignals({ data, kpis, phase4b2, advanced, rel, dateRangeDays })
       normalizeLabel(topObj.name) ?? topObj.name,
       `${topObj.count} mentions across ${totalReviews} reviews`,
       "Outfit reviews", "All time",
-      totalReviews, Math.min(topObj.count / Math.max(totalReviews, 1), 0.5) * 2);
+      topObj.count, Math.min(topObj.count / Math.max(totalReviews, 1), 0.5) * 2);
 
   // friction: styling struggle
   const topStruggle = data?.onboarding?.commonStruggles?.[0];
@@ -899,7 +901,7 @@ function buildTopSignals({ data, kpis, phase4b2, advanced, rel, dateRangeDays })
       normalizeLabel(topStruggle.struggle) ?? topStruggle.struggle,
       `${topStruggle.count} of ${totalProfiles} completed profiles`,
       "Passport profiles", "All time",
-      totalProfiles, topStruggle.count / totalProfiles);
+      topStruggle.count, topStruggle.count / totalProfiles);
 
   // nAia: recommendation love rate
   if (advanced?.trustMetrics?.status !== "insufficient-data" && (advanced?.trustMetrics?.sampleSize ?? 0) >= 5) {
@@ -923,21 +925,12 @@ function buildTopSignals({ data, kpis, phase4b2, advanced, rel, dateRangeDays })
       n, Math.min(lift / 5, 1));
   }
 
-  // Sort by score descending
+  // Sort by score descending — highest-confidence signals first
   candidates.sort((a, b) => b.score - a.score);
 
-  // Balance: one from each category first, then fill to 3 default (show up to 6 if expanded)
-  const ORDER = ["identity", "context", "garment", "emotional", "friction", "naia"];
-  const selected = [];
-  const used = new Set();
-  for (const cat of ORDER) {
-    if (selected.length >= 3) break;
-    const idx = candidates.findIndex((c, i) => c.cat === cat && !used.has(i));
-    if (idx !== -1) { selected.push(candidates[idx]); used.add(idx); }
-  }
-  for (let i = 0; i < candidates.length && selected.length < 3; i++) {
-    if (!used.has(i)) { selected.push(candidates[i]); used.add(i); }
-  }
+  // Default 3 = pure top-3 by score (description promises "highest-confidence intelligence").
+  // All signals are available in the expanded view.
+  const selected = candidates.slice(0, 3);
 
   return { selected, all: candidates };
 }

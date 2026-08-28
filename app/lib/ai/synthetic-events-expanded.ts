@@ -153,7 +153,7 @@ export const EVENTS_EXPANDED: SE[] = [
   ...sskip(10,"C75", SEEN, "work",        "Put Together", "Too formal"),    // Minimal
   ...slb(11, "C23", SEEN, "work",         "Confident"),
   ...sl (11, "C24", SEEN, "work",         "Powerful"),
-  [or_(11,   "C23", SEEN, 5)],
+  or_(11,   "C23", SEEN, 5),
 
   // Artsy — Whole love/save gap
   ...sls(12, "C31", WHOLE, "everyday",    "Effortless"),
@@ -172,8 +172,8 @@ export const EVENTS_EXPANDED: SE[] = [
   ...slb(11, "C46", ALIVE, "girls-night", "Confident"),
   ...sundc(12,"C47", GROUNDED,"everyday", "Put Together","Hip fit uncertain"),
   ...sl (13, "C48", ALIVE, "date-night",  "Confident"),
-  [or_(14,   "C43", ALIVE, 5)],
-  [or_(14,   "C46", ALIVE, 4)],
+  or_(14,   "C43", ALIVE, 5),
+  or_(14,   "C46", ALIVE, 4),
 
   // Feminine — Her dominance
   ...slb(9,  "C55", HER,  "dinner",       "Feminine"),
@@ -198,8 +198,8 @@ export const EVENTS_EXPANDED: SE[] = [
   ...sls(12, "C77", WHOLE,"everyday",     "Effortless"),
   ...sskip(13,"C78", SEEN,"work",         "Put Together","Too formal"),
   ...slb(14, "C79", REAL, "work",         "Confident"),
-  [or_(15,   "C76", REAL, 4)],
-  [or_(15,   "C79", REAL, 5)],
+  or_(15,   "C76", REAL, 4),
+  or_(15,   "C79", REAL, 5),
 
   // EF Chic — Whole saves; Clear buys
   ...sls(9,  "C83", WHOLE,"travel",       "Effortless"),
@@ -213,7 +213,7 @@ export const EVENTS_EXPANDED: SE[] = [
   ...sl (11, "C93", ROOTED,"special-event","Elevated"),
   ...sls(12, "C93", ROOTED,"special-event","Elevated"),
   ...slb(13, "C94", CLEAR,"dinner",       "Elevated"),
-  [or_(14,   "C92", SEEN, 5)],
+  or_(14,   "C92", SEEN, 5),
 
   // Trendy — mixed products
   ...slb(8,  "C98", CLEAR,"date-night",   "Confident"),
@@ -221,7 +221,7 @@ export const EVENTS_EXPANDED: SE[] = [
   ...slb(10, "C99", HER,  "girls-night",  "Attractive"),
   ...sl (11, "C100",ALIVE,"dinner",       "Confident"),
   ...slb(11, "C100",ALIVE,"dinner",       "Confident"),
-  [or_(12,   "C98", CLEAR, 5)],
+  or_(12,   "C98", CLEAR, 5),
 
   // Casual Cool — Real; Grounded hesitation
   ...slb(8,  "C105",REAL, "work",         "Put Together"),
@@ -230,8 +230,8 @@ export const EVENTS_EXPANDED: SE[] = [
   ...sundc(10,"C107",GROUNDED,"everyday", "Put Together","Trouser length concern"),
   ...slb(11, "C108",REAL, "work",         "Confident"),
   ...sl (12, "C109",WHOLE,"everyday",     "Effortless"),
-  [or_(13,   "C105",REAL, 4)],
-  [or_(13,   "C108",REAL, 5)],
+  or_(13,   "C105",REAL, 4),
+  or_(13,   "C108",REAL, 5),
 
   // Mixed extras (C115–C120) — 7D/30D representation
   ...slb(5,  "C115",SEEN, "work",         "Powerful"),
@@ -251,14 +251,14 @@ export const EVENTS_EXPANDED: SE[] = [
   ...slb(32, "C25", SEEN, "work",         "Confident"),
   ...slb(33, "C26", SEEN, "work",         "Powerful"),
   ...sl (34, "C27", SEEN, "special-event","Elevated"),
-  [or_(34,   "C25", SEEN, 5)], [or_(34, "C26", SEEN, 5)],
+  or_(34,   "C25", SEEN, 5), or_(34, "C26", SEEN, 5),
   ...slb(35, "C28", SEEN, "work",         "Confident"),
   ...sundc(36,"C29", GROUNDED,"work",     "Powerful",   "Trouser length concern"),
   ...sl (37, "C30", SEEN, "work",         "Confident"),
   ...slb(38, "C29", GROUNDED,"work",      "Confident"),  // resolves after initial concern
   ...slb(40, "C16", REAL, "work",         "Put Together"), // multi-product CC buyer
   ...slb(42, "C17", REAL, "work",         "Put Together"),
-  [or_(42,   "C28", SEEN, 5)], [or_(42, "C30", SEEN, 5)],
+  or_(42,   "C28", SEEN, 5), or_(42, "C30", SEEN, 5),
   ...sskip(43,"C80", SEEN, "work",        "Put Together","Too formal"),    // Minimal
 
   // Artsy — Whole persistent save gap; Clear converts
@@ -269,8 +269,8 @@ export const EVENTS_EXPANDED: SE[] = [
   ...sl (37, "C40", CLEAR, "travel",      "Elevated"),
   ...slb(38, "C40", CLEAR, "travel",      "Elevated"),
   ...sls(40, "C41", WHOLE, "everyday",    "Effortless"),
-  [wr(38, "C35", CLEAR, "Elevated", "Elevated", true, 5, 5.6, 7.8)],   // Clear post-wear
-  [wr(42, "C36", CLEAR, "Elevated", "Elevated", true, 5, 5.5, 7.9)],
+  wr(38, "C35", CLEAR, "Elevated", "Elevated", true, 5, 5.6, 7.8),   // Clear post-wear
+  wr(42, "C36", CLEAR, "Elevated", "Elevated", true, 5, 5.5, 7.9),
 
   // Edgy — Alive love/buy pattern entrenched; Grounded friction stable
   ...slb(33, "C48", ALIVE, "girls-night", "Confident"),
@@ -281,10 +281,10 @@ export const EVENTS_EXPANDED: SE[] = [
   ...sundc(38,"C53", GROUNDED,"everyday", "Put Together","Hip fit uncertain"),
   ...slb(40, "C54", ALIVE, "date-night",  "Confident"),
   ...sl (45, "C116",ALIVE, "girls-night", "Confident"),  // extra Edgy session — shifts 90D ratio off 71%
-  [or_(40,   "C48", ALIVE, 5)], [or_(40, "C49", ALIVE, 5)],
-  [wr(50, "C48", ALIVE, "Confident", "Confident", true, 5, 5.7, 7.8)],
-  [wr(52, "C49", ALIVE, "Confident", "Confident", true, 5, 5.5, 7.5)],
-  [wr(55, "C51", ALIVE, "Confident", "Confident", true, 4, 5.6, 7.4)],
+  or_(40,   "C48", ALIVE, 5), or_(40, "C49", ALIVE, 5),
+  wr(50, "C48", ALIVE, "Confident", "Confident", true, 5, 5.7, 7.8),
+  wr(52, "C49", ALIVE, "Confident", "Confident", true, 5, 5.5, 7.5),
+  wr(55, "C51", ALIVE, "Confident", "Confident", true, 4, 5.6, 7.4),
   // Edgy Grounded return — fit concern → return
   ev(82, "C50", RT, GROUNDED, {}),
 
@@ -294,20 +294,20 @@ export const EVENTS_EXPANDED: SE[] = [
   ...slb(35, "C62", HER,  "special-event","Feminine"),
   ...slb(36, "C63", ROOTED,"date-night",  "Feminine"),
   ...sl (37, "C64", HER,  "dinner",       "Feminine"),
-  [or_(38,   "C60", HER, 5)], [or_(38, "C62", HER, 5)],
-  [wr(45, "C55", HER, "Feminine", "Feminine", true, 5, 5.4, 7.6)],
-  [wr(48, "C60", HER, "Feminine", "Feminine", true, 5, 5.5, 7.7)],
-  [wr(52, "C62", HER, "Feminine", "Feminine", true, 5, 5.6, 7.8)],
+  or_(38,   "C60", HER, 5), or_(38, "C62", HER, 5),
+  wr(45, "C55", HER, "Feminine", "Feminine", true, 5, 5.4, 7.6),
+  wr(48, "C60", HER, "Feminine", "Feminine", true, 5, 5.5, 7.7),
+  wr(52, "C62", HER, "Feminine", "Feminine", true, 5, 5.6, 7.8),
 
   // Romantic — Her repeat interest; Rooted evening
   ...slb(33, "C69", HER,  "date-night",   "Attractive"),
   ...sls(34, "C70", HER,  "dinner",       "Feminine"),
   ...sls(35, "C71", ROOTED,"special-event","Feminine"),
   ...slb(36, "C72", HER,  "date-night",   "Attractive"),
-  [or_(37,   "C69", HER, 5)], [or_(37, "C72", HER, 5)],
-  [wr(50, "C68", HER, "Attractive", "Attractive", true, 5, 5.3, 7.7)],
-  [wr(55, "C69", HER, "Attractive", "Attractive", true, 5, 5.4, 7.6)],
-  [wr(58, "C72", HER, "Attractive", "Attractive", true, 5, 5.5, 7.8)],
+  or_(37,   "C69", HER, 5), or_(37, "C72", HER, 5),
+  wr(50, "C68", HER, "Attractive", "Attractive", true, 5, 5.3, 7.7),
+  wr(55, "C69", HER, "Attractive", "Attractive", true, 5, 5.4, 7.6),
+  wr(58, "C72", HER, "Attractive", "Attractive", true, 5, 5.5, 7.8),
 
   // Minimal — Real stable; Seen rejection consistent
   ...slb(33, "C80", REAL, "work",         "Put Together"),
@@ -315,9 +315,9 @@ export const EVENTS_EXPANDED: SE[] = [
   ...slb(35, "C81", REAL, "work",         "Put Together"),
   ...sls(36, "C82", WHOLE,"everyday",     "Effortless"),
   ...slb(37, "C76", REAL, "work",         "Confident"),
-  [or_(38,   "C80", REAL, 5)], [or_(38, "C81", REAL, 5)],
-  [wr(48, "C73", REAL, "Put Together", "Put Together", true, 5, 5.5, 7.6)],
-  [wr(52, "C76", REAL, "Put Together", "Put Together", true, 5, 5.3, 7.4)],
+  or_(38,   "C80", REAL, 5), or_(38, "C81", REAL, 5),
+  wr(48, "C73", REAL, "Put Together", "Put Together", true, 5, 5.5, 7.6),
+  wr(52, "C76", REAL, "Put Together", "Put Together", true, 5, 5.3, 7.4),
 
   // EF Chic — Whole saves stack; Clear converts reliably; Seen secondary
   ...sls(33, "C88", WHOLE, "travel",      "Effortless"),
@@ -325,19 +325,19 @@ export const EVENTS_EXPANDED: SE[] = [
   ...slb(35, "C90", CLEAR, "dinner",      "Elevated"),
   ...slb(36, "C83", SEEN,  "travel",      "Elevated"),
   ...sls(37, "C89", WHOLE, "travel",      "Effortless"),
-  [or_(38,   "C84", CLEAR, 5)], [or_(38, "C90", CLEAR, 5)],
-  [wr(48, "C84", CLEAR, "Effortless", "Elevated", true, 5, 5.7, 7.9)],
-  [wr(52, "C85", CLEAR, "Elevated",   "Elevated", true, 5, 5.6, 7.8)],
-  [wr(55, "C90", CLEAR, "Elevated",   "Elevated", true, 5, 5.8, 8.0)],
+  or_(38,   "C84", CLEAR, 5), or_(38, "C90", CLEAR, 5),
+  wr(48, "C84", CLEAR, "Effortless", "Elevated", true, 5, 5.7, 7.9),
+  wr(52, "C85", CLEAR, "Elevated",   "Elevated", true, 5, 5.6, 7.8),
+  wr(55, "C90", CLEAR, "Elevated",   "Elevated", true, 5, 5.8, 8.0),
 
   // Old Money — Seen + Clear premium buying
   ...slb(33, "C95", SEEN,  "dinner",      "Elevated"),
   ...slb(34, "C96", CLEAR, "dinner",      "Elevated"),
   ...sls(35, "C91", ROOTED,"special-event","Elevated"),
   ...slb(36, "C92", CLEAR, "dinner",      "Elevated"),
-  [or_(38,   "C95", SEEN, 5)], [or_(38, "C96", CLEAR, 5)],
-  [wr(48, "C91", SEEN, "Elevated", "Elevated", true, 5, 5.8, 8.0)],
-  [wr(52, "C92", SEEN, "Elevated", "Elevated", true, 5, 5.9, 8.1)],
+  or_(38,   "C95", SEEN, 5), or_(38, "C96", CLEAR, 5),
+  wr(48, "C91", SEEN, "Elevated", "Elevated", true, 5, 5.8, 8.0),
+  wr(52, "C92", SEEN, "Elevated", "Elevated", true, 5, 5.9, 8.1),
 
   // Trendy — CLEAR + HER + ALIVE mixed
   ...slb(33, "C101",CLEAR,"date-night",   "Confident"),
@@ -347,7 +347,7 @@ export const EVENTS_EXPANDED: SE[] = [
   ...slb(35, "C103",ALIVE,"dinner",       "Confident"),
   ...sl (36, "C104",CLEAR,"date-night",   "Elevated"),
   ...slb(37, "C104",CLEAR,"date-night",   "Elevated"),
-  [or_(38,   "C101",CLEAR, 5)], [or_(38, "C103", ALIVE, 4)],
+  or_(38,   "C101",CLEAR, 5), or_(38, "C103", ALIVE, 4),
 
   // Casual Cool — Real + Whole; Grounded hesitation
   ...slb(33, "C110",REAL, "work",         "Put Together"),
@@ -355,7 +355,7 @@ export const EVENTS_EXPANDED: SE[] = [
   ...sundc(35,"C112",GROUNDED,"everyday", "Put Together","Trouser length concern"),
   ...slb(36, "C113",REAL, "work",         "Confident"),
   ...sl (37, "C114",WHOLE,"everyday",     "Effortless"),
-  [or_(38,   "C110",REAL, 4)], [or_(38, "C113",REAL, 5)],
+  or_(38,   "C110",REAL, 4), or_(38, "C113",REAL, 5),
 
   // Closet uploads — 90D batch
   ev(33, "C18", CU, null), ev(35, "C31", CU, null), ev(37, "C43", CU, null),
@@ -369,51 +369,51 @@ export const EVENTS_EXPANDED: SE[] = [
 
   // CC — long-term Seen loyalty + Real cross-sells
   ...sl (95,  "C16", SEEN,  "work",        "Powerful"),
-  [or_(95,    "C16", SEEN, 5)],
+  or_(95,    "C16", SEEN, 5),
   ...slb(100, "C18", REAL,  "work",        "Put Together"),
   ...slb(100, "C19", GROUNDED,"work",      "Confident"),
   ...sl (105, "C20", SEEN,  "work",        "Powerful"),
-  [or_(105,   "C20", SEEN, 5)],
+  or_(105,   "C20", SEEN, 5),
   ...slb(110, "C21", REAL,  "work",        "Put Together"),
   ...sl (115, "C22", SEEN,  "special-event","Elevated"),
-  [or_(115,   "C22", SEEN, 5)],
+  or_(115,   "C22", SEEN, 5),
   ...slb(120, "C23", SEEN,  "work",        "Confident"),
   ...sl (125, "C24", SEEN,  "work",        "Powerful"),
-  [or_(125,   "C24", SEEN, 5)],
-  [wr(100, "C17", SEEN, "Powerful", "Powerful", true, 5, 5.7, 7.8)],
-  [wr(110, "C18", SEEN, "Put Together","Confident", true, 4, 5.5, 7.4)],
-  [wr(120, "C19", SEEN, "Powerful", "Powerful", true, 5, 5.8, 7.9)],
-  [wr(125, "C23", SEEN, "Confident", "Confident", true, 5, 5.6, 7.5)],
-  [wr(130, "C16", SEEN, "Powerful", "Powerful", true, 5, 5.9, 8.0)],
-  [wr(140, "C25", SEEN, "Confident", "Confident", true, 5, 5.7, 7.7)],
-  [wr(145, "C26", SEEN, "Powerful", "Powerful", true, 5, 5.8, 7.8)],
+  or_(125,   "C24", SEEN, 5),
+  wr(100, "C17", SEEN, "Powerful", "Powerful", true, 5, 5.7, 7.8),
+  wr(110, "C18", SEEN, "Put Together","Confident", true, 4, 5.5, 7.4),
+  wr(120, "C19", SEEN, "Powerful", "Powerful", true, 5, 5.8, 7.9),
+  wr(125, "C23", SEEN, "Confident", "Confident", true, 5, 5.6, 7.5),
+  wr(130, "C16", SEEN, "Powerful", "Powerful", true, 5, 5.9, 8.0),
+  wr(140, "C25", SEEN, "Confident", "Confident", true, 5, 5.7, 7.7),
+  wr(145, "C26", SEEN, "Powerful", "Powerful", true, 5, 5.8, 7.8),
 
   // Artsy — Whole saved but still not buying; Clear rewear pattern
   ...sl (95,  "C38", WHOLE, "travel",     "Effortless"),
-  [ev(95, "C38", WR, WHOLE, { desiredFeeling:"Effortless", actualAfterFeeling:"Comfortable", rewear:false, rating:3, confidenceBefore:5.0, confidenceAfter:5.8 })],
+  ev(95, "C38", WR, WHOLE, { desiredFeeling:"Effortless", actualAfterFeeling:"Comfortable", rewear:false, rating:3, confidenceBefore:5.0, confidenceAfter:5.8 }),
   ...sl (100, "C39", CLEAR, "dinner",     "Elevated"),
   ...slb(100, "C39", CLEAR, "dinner",     "Elevated"),
   ...sl (105, "C41", WHOLE, "everyday",   "Effortless"),
-  [ev(105, "C41", WR, WHOLE, { desiredFeeling:"Effortless", actualAfterFeeling:"Comfortable", rewear:false, rating:3, confidenceBefore:4.9, confidenceAfter:5.7 })],
+  ev(105, "C41", WR, WHOLE, { desiredFeeling:"Effortless", actualAfterFeeling:"Comfortable", rewear:false, rating:3, confidenceBefore:4.9, confidenceAfter:5.7 }),
   ...sl (110, "C42", CLEAR, "travel",     "Elevated"),
   ...slb(110, "C42", CLEAR, "travel",     "Elevated"),
-  [wr(115, "C39", CLEAR, "Elevated", "Elevated", true, 5, 5.5, 7.7)],
-  [wr(120, "C40", CLEAR, "Elevated", "Elevated", true, 5, 5.6, 7.8)],
-  [wr(125, "C42", CLEAR, "Elevated", "Elevated", true, 5, 5.7, 7.9)],
+  wr(115, "C39", CLEAR, "Elevated", "Elevated", true, 5, 5.5, 7.7),
+  wr(120, "C40", CLEAR, "Elevated", "Elevated", true, 5, 5.6, 7.8),
+  wr(125, "C42", CLEAR, "Elevated", "Elevated", true, 5, 5.7, 7.9),
 
   // Edgy — Alive repeat buyers; Grounded partial adoption
   ...slb(95,  "C52", ALIVE, "girls-night","Confident"),
   ...slb(100, "C53", ALIVE, "date-night", "Confident"),
-  [or_(100,   "C52", ALIVE, 5)],
+  or_(100,   "C52", ALIVE, 5),
   ...slb(105, "C54", ALIVE, "girls-night","Confident"),
   // C50 eventually buys Grounded after fit concern resolved
   ...slb(110, "C50", GROUNDED,"work",     "Powerful"),
-  [or_(115,   "C53", ALIVE, 5)],
-  [wr(115, "C52", ALIVE, "Confident", "Confident", true, 5, 5.6, 7.8)],
-  [wr(120, "C53", ALIVE, "Confident", "Confident", true, 5, 5.5, 7.6)],
-  [wr(125, "C54", ALIVE, "Confident", "Confident", true, 5, 5.7, 7.9)],
-  [wr(130, "C43", ALIVE, "Confident", "Confident", true, 5, 5.8, 8.0)],
-  [wr(135, "C44", ALIVE, "Confident", "Confident", true, 5, 5.7, 7.8)],
+  or_(115,   "C53", ALIVE, 5),
+  wr(115, "C52", ALIVE, "Confident", "Confident", true, 5, 5.6, 7.8),
+  wr(120, "C53", ALIVE, "Confident", "Confident", true, 5, 5.5, 7.6),
+  wr(125, "C54", ALIVE, "Confident", "Confident", true, 5, 5.7, 7.9),
+  wr(130, "C43", ALIVE, "Confident", "Confident", true, 5, 5.8, 8.0),
+  wr(135, "C44", ALIVE, "Confident", "Confident", true, 5, 5.7, 7.8),
   // Return: C53 second Alive purchase returned (gift duplicate)
   ...slb(140, "C53", ALIVE, "girls-night","Confident"),
   ev(145, "C53", RT, ALIVE, {}),
@@ -424,10 +424,10 @@ export const EVENTS_EXPANDED: SE[] = [
   ...slb(100, "C56", ROOTED,"date-night", "Feminine"),
   ...sl (105, "C57", HER,  "dinner",      "Feminine"),
   ...slb(110, "C63", ROOTED,"special-event","Feminine"),
-  [or_(110,   "C64", HER, 5)],
-  [wr(110, "C56", HER, "Feminine", "Feminine", true, 5, 5.4, 7.7)],
-  [wr(115, "C57", HER, "Feminine", "Feminine", true, 5, 5.5, 7.6)],
-  [wr(120, "C64", HER, "Feminine", "Feminine", true, 5, 5.6, 7.8)],
+  or_(110,   "C64", HER, 5),
+  wr(110, "C56", HER, "Feminine", "Feminine", true, 5, 5.4, 7.7),
+  wr(115, "C57", HER, "Feminine", "Feminine", true, 5, 5.5, 7.6),
+  wr(120, "C64", HER, "Feminine", "Feminine", true, 5, 5.6, 7.8),
   // Repeat purchases — Feminine is highest LTV per segment
   ...slb(150, "C55", HER, "dinner",       "Feminine"),
   ...slb(160, "C57", HER, "special-event","Feminine"),
@@ -437,61 +437,61 @@ export const EVENTS_EXPANDED: SE[] = [
   ...sl (100, "C66", HER,  "date-night",  "Attractive"),
   ...slb(105, "C70", HER,  "date-night",  "Attractive"),
   ...slb(110, "C71", ROOTED,"dinner",     "Feminine"),
-  [wr(115, "C65", HER, "Attractive", "Attractive", true, 5, 5.3, 7.6)],
-  [wr(120, "C66", HER, "Attractive", "Attractive", true, 5, 5.2, 7.5)],
-  [wr(125, "C70", HER, "Attractive", "Attractive", true, 5, 5.4, 7.7)],
+  wr(115, "C65", HER, "Attractive", "Attractive", true, 5, 5.3, 7.6),
+  wr(120, "C66", HER, "Attractive", "Attractive", true, 5, 5.2, 7.5),
+  wr(125, "C70", HER, "Attractive", "Attractive", true, 5, 5.4, 7.7),
   // Repeat purchase — Romantic is strongest for HER LTV
   ...slb(150, "C68", HER, "date-night",   "Attractive"),
   ...slb(165, "C69", HER, "date-night",   "Attractive"),
 
   // Minimal — Real repeat buys; complete Seen rejection pattern
   ...sl (95,  "C74", REAL, "work",        "Put Together"),
-  [or_(95,    "C74", REAL, 4)],
+  or_(95,    "C74", REAL, 4),
   ...slb(100, "C78", REAL, "work",        "Put Together"),
   ...sskip(100,"C82",SEEN, "work",        "Put Together","Too formal"),
   ...sl (105, "C79", REAL, "work",        "Confident"),
-  [or_(105,   "C78", REAL, 5)],
+  or_(105,   "C78", REAL, 5),
   ...slb(110, "C80", REAL, "work",        "Confident"),
-  [wr(115, "C79", REAL, "Confident", "Put Together", true, 4, 5.4, 7.3)],
-  [wr(120, "C80", REAL, "Confident", "Confident",    true, 5, 5.5, 7.5)],
+  wr(115, "C79", REAL, "Confident", "Put Together", true, 4, 5.4, 7.3),
+  wr(120, "C80", REAL, "Confident", "Confident",    true, 5, 5.5, 7.5),
 
   // EF Chic — Clear/Seen long-term; Whole never converts
   ...slb(95,  "C86", CLEAR,"dinner",      "Elevated"),
   ...sl (100, "C87", SEEN, "travel",      "Elevated"),
   ...sls(100, "C89", WHOLE,"travel",      "Effortless"),  // persistent save gap
   ...slb(105, "C88", SEEN, "travel",      "Elevated"),
-  [or_(105,   "C87", SEEN, 5)], [or_(105, "C88", SEEN, 5)],
-  [wr(115, "C86", CLEAR, "Elevated", "Elevated", true, 5, 5.6, 7.8)],
-  [wr(120, "C83", SEEN,  "Elevated", "Elevated", true, 5, 5.7, 7.9)],
-  [wr(125, "C87", SEEN,  "Elevated", "Elevated", true, 5, 5.8, 8.0)],
+  or_(105,   "C87", SEEN, 5), or_(105, "C88", SEEN, 5),
+  wr(115, "C86", CLEAR, "Elevated", "Elevated", true, 5, 5.6, 7.8),
+  wr(120, "C83", SEEN,  "Elevated", "Elevated", true, 5, 5.7, 7.9),
+  wr(125, "C87", SEEN,  "Elevated", "Elevated", true, 5, 5.8, 8.0),
 
   // Old Money — premium repeat buying; Rooted evening
   ...slb(95,  "C91", SEEN,  "dinner",     "Elevated"),
   ...sl (100, "C93", SEEN,  "dinner",     "Elevated"),
   ...slb(105, "C94", SEEN,  "dinner",     "Elevated"),
   ...slb(110, "C95", CLEAR, "dinner",     "Elevated"),
-  [or_(110,   "C91", SEEN, 5)], [or_(110, "C95", SEEN, 5)],
-  [wr(115, "C91", SEEN, "Elevated", "Elevated", true, 5, 6.0, 8.2)],
-  [wr(120, "C92", SEEN, "Elevated", "Elevated", true, 5, 5.9, 8.1)],
-  [wr(125, "C94", SEEN, "Elevated", "Elevated", true, 5, 6.1, 8.3)],
+  or_(110,   "C91", SEEN, 5), or_(110, "C95", SEEN, 5),
+  wr(115, "C91", SEEN, "Elevated", "Elevated", true, 5, 6.0, 8.2),
+  wr(120, "C92", SEEN, "Elevated", "Elevated", true, 5, 5.9, 8.1),
+  wr(125, "C94", SEEN, "Elevated", "Elevated", true, 5, 6.1, 8.3),
 
   // Trendy — multi-product rotation; lower repeat wear
   ...sl (95,  "C100",ALIVE,"girls-night", "Confident"),
   ...sl (100, "C101",HER,  "dinner",      "Attractive"),
   ...slb(105, "C102",CLEAR,"date-night",  "Confident"),
   ...sl (110, "C103",HER,  "girls-night", "Attractive"),
-  [or_(110,   "C102",CLEAR, 4)], [or_(110, "C103", HER, 4)],
-  [wr(120, "C97",  CLEAR, "Confident", "Confident", true, 4, 5.4, 7.2)],
-  [wr(125, "C101", CLEAR, "Elevated",  "Elevated",  true, 4, 5.5, 7.3)],
+  or_(110,   "C102",CLEAR, 4), or_(110, "C103", HER, 4),
+  wr(120, "C97",  CLEAR, "Confident", "Confident", true, 4, 5.4, 7.2),
+  wr(125, "C101", CLEAR, "Elevated",  "Elevated",  true, 4, 5.5, 7.3),
 
   // Casual Cool — Real steady repeat; Whole never converts
   ...sl (95,  "C109",REAL, "work",        "Put Together"),
-  [or_(95,    "C109",REAL, 4)],
+  or_(95,    "C109",REAL, 4),
   ...slb(100, "C110",REAL, "work",        "Put Together"),
   ...sls(105, "C111",WHOLE,"everyday",    "Effortless"),
   ...slb(110, "C113",REAL, "work",        "Confident"),
-  [wr(120, "C108",REAL, "Confident", "Put Together", true, 4, 5.3, 7.1)],
-  [wr(125, "C110",REAL, "Put Together","Confident", true, 4, 5.4, 7.2)],
+  wr(120, "C108",REAL, "Confident", "Put Together", true, 4, 5.3, 7.1),
+  wr(125, "C110",REAL, "Put Together","Confident", true, 4, 5.4, 7.2),
 
   // Grounded return cohort — petite fit issue → return (all-time pattern)
   ev(118, "C45", RT, GROUNDED, {}),   // C45 (Edgy) — bought day 31ish, returned

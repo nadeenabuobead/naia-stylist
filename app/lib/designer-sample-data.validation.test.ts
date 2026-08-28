@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getDesignerSampleData, classifyEmotionalOutcome } from "./designer-sample-data.js";
+import { EVENTS_EXPANDED } from "./ai/synthetic-events-expanded.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -352,13 +353,14 @@ describe("classifyEmotionalOutcome does not use rewear", () => {
   it("365D emotional counts match classification of desired+actual pairs (rewear not a factor)", () => {
     const d = getDesignerSampleData(365);
     const ej = (d.advanced as any)?.emotionalJourney;
-    // Total = 20 WR events in 365D fixture; achieved=16, partly=3, not=1
+    // 73 WR events total (post-wear reviews now properly decoded from EVENTS_EXPANDED after source repair)
+    // achieved=62 (exact desired=actual matches), partly=7 (same-family), notAchieved=4 (null/cross-family)
     assert.equal(ej.achievedCount + ej.partlyCount + ej.notAchievedCount, ej.totalDenominator,
       "sum of outcome counts must equal totalDenominator");
     // These specific values can only derive from desired/actual matching, not rewear
-    assert.equal(ej.achievedCount,    16, "365D: 16 exact desired=actual matches");
-    assert.equal(ej.partlyCount,       3, "365D: 3 same-family near-matches");
-    assert.equal(ej.notAchievedCount,  1, "365D: 1 null/cross-family non-match");
+    assert.equal(ej.achievedCount,    62, "365D: 62 exact desired=actual matches");
+    assert.equal(ej.partlyCount,       7, "365D: 7 same-family near-matches");
+    assert.equal(ej.notAchievedCount,  4, "365D: 4 null/cross-family non-matches");
   });
 });
 
@@ -1313,7 +1315,7 @@ describe("journey funnel — unit coherence (Step 3 reconciliation)", () => {
   // (e.g., buyers are not guaranteed to be a subset of savers). Tests here verify formula
   // correctness (customer counts not event counts) and only assert ≤100% for stages where
   // subset membership is structurally guaranteed by the data model.
-  const data = getDesignerSampleData({ dateRangeDays: 90, seedOverrides: {} });
+  const data = getDesignerSampleData(90);
   const stages = data.advanced?.journeyFunnel?.stages ?? [];
 
   it("sequential core funnel has exactly 4 stages (Passport → Session → Rec Shown → Rec Feedback)", () => {
@@ -1525,7 +1527,7 @@ describe("action plan deduplication (Step 3 INCON-14)", () => {
 });
 
 describe("sample data objection canonicalization (INCON-06)", () => {
-  const data = getDesignerSampleData({ dateRangeDays: 90, seedOverrides: {} });
+  const data = getDesignerSampleData(90);
 
   it("productNarratives mostCommonObjection is canonicalized — no raw Trouser length variants", () => {
     const products = data.rel?.productNarratives ?? [];
@@ -1549,7 +1551,7 @@ describe("sample data objection canonicalization (INCON-06)", () => {
 });
 
 describe("desired feelings deduplication (INCON-07)", () => {
-  const data = getDesignerSampleData({ dateRangeDays: 90, seedOverrides: {} });
+  const data = getDesignerSampleData(90);
 
   it("helpedFeel in each product card (dashboard.topPieces) has no duplicate feeling labels", () => {
     const pieces = data.dashboard?.topPieces ?? [];
@@ -1573,5 +1575,153 @@ describe("desired feelings deduplication (INCON-07)", () => {
         `Personality "${seg.personality}" topDesiredFeelings has duplicate labels: [${feelings.join(", ")}]`
       );
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Overview QA — signal confidence and Top Signals selection
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("product evidence badge uses evidenceN (reviews + buy-or-skip), not reviews alone", () => {
+  // At 30D: Becoming Whole has 0 reviews but 13 saves → badge must not be 'No Data'.
+  // Design action cards are in d.dashboard.designActions (not d.rel.productNarratives).
+  it("Becoming Whole at 30D: evidenceN includes saves — badge is not 'No Data'", () => {
+    const d = getDesignerSampleData(30) as any;
+    const acts: any[] = d.dashboard?.designActions ?? [];
+    const whole = acts.find(p => p.piece === "Becoming Whole");
+    assert.ok(whole != null, "Becoming Whole design action card must exist");
+    assert.notEqual(whole.confidence, "No Data",
+      `Becoming Whole 30D: confidence must not be 'No Data' when saves exist (got "${whole.confidence}")`);
+    assert.notEqual(whole.confidence, "Single Observation",
+      `Becoming Whole 30D: confidence must not be 'Single Observation' for 13 saves (got "${whole.confidence}")`);
+  });
+
+  // At 30D: Becoming Clear has 2 reviews + 9 buys → evidenceN=11 → must be above 'Single Observation'.
+  it("Becoming Clear at 30D: evidenceN includes buys — badge exceeds 'Single Observation'", () => {
+    const d = getDesignerSampleData(30) as any;
+    const acts: any[] = d.dashboard?.designActions ?? [];
+    const clear = acts.find(p => p.piece === "Becoming Clear");
+    assert.ok(clear != null, "Becoming Clear design action card must exist");
+    const SINGLE = "Single Observation";
+    assert.notEqual(clear.confidence, SINGLE,
+      `Becoming Clear 30D: confidence must not be '${SINGLE}' when 9 buy-or-skip decisions exist (got "${clear.confidence}")`);
+    assert.notEqual(clear.confidence, "No Data",
+      `Becoming Clear 30D: must not be 'No Data' (got "${clear.confidence}")`);
+  });
+
+  // evidenceN >= sampleSize for products whose badge counts reviews+buy/skip.
+  // GROUNDED is excluded — it uses objectionCount (session-level evidence), not evidenceN.
+  it("evidenceN (reviews + buy/skip) >= sampleSize (reviews only) for SEEN, WHOLE, ALIVE, CLEAR", () => {
+    const d = getDesignerSampleData(30) as any;
+    // designActions hold evidenceCount (=evidenceN or objectionCount)
+    const acts: any[] = d.dashboard?.designActions ?? [];
+    // productNarratives hold sampleSize (=allRev.length, reviews only)
+    const narr: any[] = d.rel?.productNarratives ?? [];
+    const GROUNDED = "Becoming Grounded";
+    for (const act of acts) {
+      if (act.piece === GROUNDED) continue; // GROUNDED uses objectionCount — checked separately
+      const rev = narr.find((p: any) => p.name === act.piece)?.sampleSize ?? 0;
+      const n = act.evidenceCount ?? 0;
+      assert.ok(n >= rev,
+        `Product "${act.piece}": evidenceCount(${n}) must be >= sampleSize/reviews(${rev})`);
+    }
+  });
+
+  it("GROUNDED evidenceCount > 0 — objectionCount is used, not generic evidenceN", () => {
+    const d = getDesignerSampleData(30) as any;
+    const acts: any[] = d.dashboard?.designActions ?? [];
+    const grounded = acts.find((a: any) => a.piece === "Becoming Grounded");
+    if (!grounded) return;
+    assert.ok((grounded.evidenceCount ?? 0) > 0,
+      `GROUNDED evidenceCount must be > 0 when fit-objection sessions exist (got ${grounded.evidenceCount})`);
+  });
+});
+
+describe("Top Signals selection: default 3 are genuinely highest-scored", () => {
+  const route = readRoute();
+
+  it("selection uses pure score sort — no category ORDER loop", () => {
+    // The old approach forced one signal from each of ["identity","context","garment"] first.
+    // Now it must be pure top-3 by score.
+    assert.ok(
+      !route.includes('const ORDER = ["identity", "context", "garment"'),
+      "Top Signals must not use category ORDER forcing — pure score sort required"
+    );
+    assert.ok(
+      route.includes("candidates.slice(0, 3)"),
+      "Top Signals must use candidates.slice(0, 3) for pure top-3 selection"
+    );
+  });
+
+  it("signal confidence n uses signal count, not total pool", () => {
+    // Identity: topStyle.count, not totalProfiles
+    assert.ok(
+      route.includes("topStyle.count, topStyle.count / totalProfiles"),
+      "Identity push must use topStyle.count as n, not totalProfiles"
+    );
+    // Friction objection: topObj.count, not totalReviews
+    assert.ok(
+      route.includes("topObj.count, Math.min(topObj.count"),
+      "Friction objection push must use topObj.count as n, not totalReviews"
+    );
+  });
+});
+
+describe("EVENTS_EXPANDED structural integrity", () => {
+  it("no nested arrays — every element is a plain SE object", () => {
+    for (let i = 0; i < EVENTS_EXPANDED.length; i++) {
+      const ev = EVENTS_EXPANDED[i];
+      assert.ok(!Array.isArray(ev),
+        `EVENTS_EXPANDED[${i}] is an array, not an SE object — remove the outer [ ] wrapper`);
+    }
+  });
+
+  it("every event has a valid eventType string", () => {
+    const VALID = new Set([
+      "STYLING_SESSION", "POST_OUTFIT_REVIEW", "POST_WEAR_REVIEW",
+      "RECOMMENDATION_FEEDBACK", "BUY_OR_SKIP", "CLOSET_UPLOAD", "RETURN",
+    ]);
+    for (let i = 0; i < EVENTS_EXPANDED.length; i++) {
+      const ev = EVENTS_EXPANDED[i] as any;
+      assert.ok(typeof ev.eventType === "string" && VALID.has(ev.eventType),
+        `EVENTS_EXPANDED[${i}]: invalid eventType "${ev.eventType}"`);
+    }
+  });
+
+  it("every event has a non-negative numeric daysAgo", () => {
+    for (let i = 0; i < EVENTS_EXPANDED.length; i++) {
+      const ev = EVENTS_EXPANDED[i] as any;
+      assert.ok(typeof ev.daysAgo === "number" && ev.daysAgo >= 0,
+        `EVENTS_EXPANDED[${i}]: daysAgo must be a non-negative number, got "${ev.daysAgo}"`);
+    }
+  });
+});
+
+describe("Becoming Grounded evidence uses fit-objection sessions, not reviews or buy/skip", () => {
+  // Design action cards are in d.dashboard.designActions — d.rel.productNarratives has a different schema.
+  it("GROUNDED 30D: confidence badge uses objectionCount — not 'No Data' when sessions show fit concerns", () => {
+    const d = getDesignerSampleData(30) as any;
+    const acts: any[] = d.dashboard?.designActions ?? [];
+    const grounded = acts.find(p => p.piece === "Becoming Grounded");
+    assert.ok(grounded != null, "Becoming Grounded design action card must exist");
+    assert.notEqual(grounded.confidence, "No Data",
+      `Becoming Grounded 30D: badge must not be 'No Data' when fit-objection sessions exist (got "${grounded.confidence}")`);
+    // Evidence count must reflect session objections, not buy/skip decisions
+    assert.ok(typeof grounded.evidenceCount === "number" && grounded.evidenceCount > 0,
+      `Becoming Grounded 30D: evidenceCount must be > 0 when fit-objection sessions exist (got ${grounded.evidenceCount})`);
+  });
+
+  it("GROUNDED data text references fit-objection sessions, not reviews", () => {
+    const data = readFileSync(
+      join(__dirname, "./designer-sample-data.ts"), "utf8"
+    );
+    assert.ok(
+      data.includes("objectionCount} fit-objection sessions"),
+      "GROUNDED data text must reference fit-objection sessions, not generic reviews"
+    );
+    assert.ok(
+      !data.includes("pm[GROUNDED].evidenceN,"),
+      "GROUNDED badge must not use generic evidenceN — use objectionCount"
+    );
   });
 });
