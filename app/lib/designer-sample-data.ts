@@ -15,19 +15,22 @@ import type { MeasurementState } from "./ai/canonical-vocabulary";
 
 // ── Real NADINE product names ──────────────────────────────────────────────
 const SEEN     = "Becoming Seen";      // trench coat · Corporate Chic/Artsy/Edgy · work hero
-const WHOLE    = "Becoming Whole";     // kimono wrap jacket · Artsy/EF Chic/Feminine · high saves, no buys
+const WHOLE    = "Becoming Whole";     // kimono wrap jacket · Artsy/EFC/Feminine · high saves, no buys
 const ALIVE    = "Becoming Alive";     // two-layer peplum top · polarising · Edgy loves it
 const GROUNDED = "Becoming Grounded"; // asymmetrical trousers · fit objections · strong intent
 const CLEAR    = "Becoming Clear";     // leather suede jacket · underexposed, high-converting
 const REAL     = "Becoming Real";      // structured collar shirt · reliable everyday anchor
 const HER      = "Becoming Her";       // midi dress · Feminine/Romantic evening anchor
 const ROOTED   = "Becoming Rooted";    // suede column skirt · supporting occasion role
+const FREE     = "Becoming Free";      // draped leather trousers · BOTTOM · Edgy/Artsy/EFC
+const BOLD     = "Becoming Bold";      // oversized blazer · OUTERWEAR · Corporate Chic/Edgy/Artsy
+const DEFINED  = "Becoming Defined";   // dress-set · SET · Feminine/Romantic/EFC
 
-// ── Static catalog metadata ────────────────────────────────────────────────
+// ── Catalog metadata — no pre-calculated scores (those are computed dynamically) ──
 interface ProductMeta {
   category: string; garmentType: string; personalities: string[];
   occasions: string[]; desiredFeelings: string[];
-  opportunityScore: number; recommendation: string; recommendationReason: string;
+  recommendation: string; recommendationReason: string;
 }
 const CATALOG: Record<string, ProductMeta> = {
   [SEEN]: {
@@ -35,16 +38,14 @@ const CATALOG: Record<string, ProductMeta> = {
     personalities: ["Corporate Chic", "Artsy", "Edgy"],
     occasions: ["work", "dinner", "special-event", "travel"],
     desiredFeelings: ["Confident", "Powerful", "Put Together", "Elevated"],
-    opportunityScore: 85,
     recommendation: "Highest confidence lift across Corporate Chic work sessions. A work-styling test centred on this piece is a low-cost next step.",
-    recommendationReason: "Corporate Chic customers consistently achieve 'Confident' and 'Powerful'. 85% rewear rate and the highest confidence lift in work-occasion sessions.",
+    recommendationReason: "Corporate Chic customers consistently achieve 'Confident' and 'Powerful'. Highest confidence lift in work-occasion sessions.",
   },
   [WHOLE]: {
     category: "Outerwear", garmentType: "Kimono-inspired wrap jacket",
     personalities: ["Artsy", "Effortlessly Chic", "Feminine"],
     occasions: ["everyday", "dinner", "travel", "special-event"],
     desiredFeelings: ["Effortless", "Elevated", "Feminine", "Confident"],
-    opportunityScore: 71,
     recommendation: "Create occasion-specific styling guides to convert saves into purchases.",
     recommendationReason: "High save rate but zero purchase conversion. Styling ambiguity ('not sure how to wear it') is the primary barrier — occasion-led content would unlock this.",
   },
@@ -53,7 +54,6 @@ const CATALOG: Record<string, ProductMeta> = {
     personalities: ["Artsy", "Feminine", "Edgy"],
     occasions: ["dinner", "date-night", "girls-night", "special-event"],
     desiredFeelings: ["Confident", "Feminine", "Elevated", "Attractive"],
-    opportunityScore: 58,
     recommendation: "Directional signal: Edgy and Artsy customers show above-average love rates. Evening occasions account for most love events in this period.",
     recommendationReason: "Polarising piece. Edgy customers give 4.7+ ratings and high rewear across observed sessions. Minimal and Corporate Chic customers show consistent rejection — further observation would clarify whether personality-based surfacing improves overall outcomes.",
   },
@@ -62,7 +62,6 @@ const CATALOG: Record<string, ProductMeta> = {
     personalities: ["Edgy", "Artsy", "Corporate Chic"],
     occasions: ["work", "everyday", "dinner", "date-night"],
     desiredFeelings: ["Put Together", "Confident", "Powerful", "Elevated"],
-    opportunityScore: 52,
     recommendation: "Address trouser-length and hip-fit objections with petite-specific styling guidance.",
     recommendationReason: "Buy-intent increases when fit resolves — customers describe feeling grounded and powerful. Recurring length and waist-detail objections are reducing conversion for petite and conservative frames.",
   },
@@ -71,7 +70,6 @@ const CATALOG: Record<string, ProductMeta> = {
     personalities: ["Corporate Chic", "Artsy", "Edgy"],
     occasions: ["work", "dinner", "date-night", "special-event"],
     desiredFeelings: ["Put Together", "Confident", "Powerful", "Elevated"],
-    opportunityScore: 79,
     recommendation: "Becoming Clear converts at a higher rate than other pieces when recommended — worth testing whether increased frequency improves overall outcomes.",
     recommendationReason: "Observed: consistent 4.5+ ratings and higher buy-through rate when recommended compared to session frequency. Currently receives fewer sessions than Becoming Seen — testing whether increased exposure changes outcomes is a low-effort next step.",
   },
@@ -80,7 +78,6 @@ const CATALOG: Record<string, ProductMeta> = {
     personalities: ["Corporate Chic", "Effortlessly Chic", "Artsy"],
     occasions: ["work", "everyday", "dinner", "special-event"],
     desiredFeelings: ["Put Together", "Confident", "Elevated", "Powerful"],
-    opportunityScore: 63,
     recommendation: "Prioritise for everyday Corporate Chic and Minimal styling.",
     recommendationReason: "Low styling effort, consistent outcome delivery. Works for customers who want polish without complexity — especially Minimal customers who find more formal outerwear unsuitable.",
   },
@@ -89,7 +86,6 @@ const CATALOG: Record<string, ProductMeta> = {
     personalities: ["Feminine", "Romantic", "Artsy"],
     occasions: ["dinner", "date-night", "girls-night", "special-event"],
     desiredFeelings: ["Feminine", "Attractive", "Confident", "Elevated"],
-    opportunityScore: 67,
     recommendation: "Feature in occasion-specific campaigns for Feminine and Romantic profiles.",
     recommendationReason: "Consistently achieves 'Feminine' and 'Attractive' for target profiles. Repeat buy-intent signal observed in historical data for this segment.",
   },
@@ -98,30 +94,58 @@ const CATALOG: Record<string, ProductMeta> = {
     personalities: ["Feminine", "Romantic", "Artsy"],
     occasions: ["dinner", "date-night", "special-event", "work"],
     desiredFeelings: ["Feminine", "Attractive", "Elevated", "Confident"],
-    opportunityScore: 55,
-    recommendation: "Pair with Becoming Real or Becoming Fragmented for work occasions.",
+    recommendation: "Pair with Becoming Real for work occasions — the column silhouette anchors the look.",
     recommendationReason: "Body-skimming column creates a confident, elevated look. Works best when customers understand how to pair the high waist — styling guidance improves outcomes.",
+  },
+  [FREE]: {
+    category: "Bottom", garmentType: "Draped leather trousers",
+    personalities: ["Edgy", "Artsy", "Effortlessly Chic"],
+    occasions: ["dinner", "date-night", "girls-night", "special-event"],
+    desiredFeelings: ["Confident", "Elevated", "Powerful", "Attractive"],
+    recommendation: "Surface to Edgy and Artsy customers in evening contexts as an alternative to Becoming Grounded.",
+    recommendationReason: "Draped leather bottom commands attention in evening and social contexts. No post-wear evidence yet — begin building with Edgy and Artsy profiles.",
+  },
+  [BOLD]: {
+    category: "Outerwear", garmentType: "Oversized structured blazer",
+    personalities: ["Corporate Chic", "Edgy", "Artsy"],
+    occasions: ["work", "dinner", "special-event", "date-night"],
+    desiredFeelings: ["Confident", "Powerful", "Put Together", "Elevated"],
+    recommendation: "Pair with Becoming Grounded for work occasions to reach Corporate Chic profiles.",
+    recommendationReason: "Oversized silhouette addresses a gap in the outerwear range — powerful work look without the formality of a trench. No evidence yet — begin with Corporate Chic work sessions.",
+  },
+  [DEFINED]: {
+    category: "Set", garmentType: "Co-ordinated dress-set",
+    personalities: ["Feminine", "Romantic", "Effortlessly Chic"],
+    occasions: ["dinner", "special-event", "date-night", "girls-night"],
+    desiredFeelings: ["Feminine", "Elevated", "Effortless", "Attractive"],
+    recommendation: "Lead with occasion-specific styling for Feminine and Romantic profiles — the easiest entry point for a new-to-sets customer.",
+    recommendationReason: "Dress-set removes the styling burden entirely. Feminine and Romantic customers who want 'Effortless' are the natural first audience. No evidence yet — begin building with evening occasions.",
   },
 };
 
-const ALL_PRODUCTS = [SEEN, WHOLE, ALIVE, GROUNDED, CLEAR, REAL, HER, ROOTED];
+// Canonical NADINE catalog — 11 products. Order: styling-session depth descending for documented products,
+// then new additions in logical category grouping.
+const ALL_PRODUCTS = [SEEN, WHOLE, ALIVE, GROUNDED, CLEAR, REAL, HER, ROOTED, FREE, BOLD, DEFINED];
 
 // Synthetic piece prices (AED) — used for commercial sample KPI derivation only
 const PRICE: Record<string, number> = {
   [SEEN]: 2800, [WHOLE]: 1950, [ALIVE]: 850,  [GROUNDED]: 1650,
   [CLEAR]: 3200, [REAL]: 950,  [HER]: 1750,  [ROOTED]: 1350,
+  [FREE]: 1800,  [BOLD]: 2600, [DEFINED]: 2200,
 };
 
 // Synthetic COGS per piece (AED) — used for margin derivation only
 const COGS: Record<string, number> = {
   [SEEN]: 980, [WHOLE]: 680, [ALIVE]: 285, [GROUNDED]: 560,
   [CLEAR]: 1080, [REAL]: 315, [HER]: 595, [ROOTED]: 450,
+  [FREE]: 620,   [BOLD]: 880, [DEFINED]: 740,
 };
 
 // Synthetic stock on hand (units) — used for sell-through derivation only
 const STOCK: Record<string, number> = {
   [SEEN]: 10, [WHOLE]: 16, [ALIVE]: 6, [GROUNDED]: 9,
   [CLEAR]: 5, [REAL]: 14, [HER]: 9, [ROOTED]: 11,
+  [FREE]: 8,  [BOLD]: 12, [DEFINED]: 10,
 };
 
 // ── Fictional customer profiles (C1–C15 base + C16–C120 expanded) ─────────
@@ -648,6 +672,73 @@ function productStats(events: SE[], name: string) {
   };
 }
 
+// ── Dynamic opportunity score ──────────────────────────────────────────────
+// Computed from available evidence only. Missing factors are excluded and the
+// remaining weights are renormalized to 100% so absence is never scored as 0.
+// Requires at least avg-rating evidence (sampleSize > 0) to produce a score;
+// products with no reviews in the period return score = null (not measured).
+function computeOpportunityScore(p: ReturnType<typeof productStats>): {
+  score: number | null;
+  available: Array<{ name: string; baseWeight: number; effectiveWeight: number; rawValue: string; contribution: number }>;
+  missing: string[];
+} {
+  // Data-quality score (step ladder matching evidenceConfidence tiers)
+  const qualityStep = (n: number) => {
+    if (n === 0) return 0;
+    if (n === 1) return 17;
+    if (n <= 4)  return 33;
+    if (n <= 9)  return 50;
+    if (n <= 19) return 67;
+    return 83;
+  };
+
+  const ratingAvail = p.sampleSize > 0 && p.avgRating != null;
+  const rewearAvail = p.wrCount > 0;
+  const liftAvail   = p.wrCount > 0; // confidence pairs live in WR events
+  const qualityAvail = p.sampleSize > 0;
+
+  const candidates = [
+    {
+      name: "Avg rating", baseWeight: 30, available: ratingAvail,
+      score: ratingAvail ? (p.avgRating! / 5) * 100 : 0,
+      rawValue: ratingAvail ? `★${p.avgRating!.toFixed(1)}` : "—",
+    },
+    {
+      name: "Rewear rate", baseWeight: 25, available: rewearAvail,
+      score: rewearAvail ? p.rewearRate * 100 : 0,
+      rawValue: rewearAvail ? `${Math.round(p.rewearRate * 100)}% · n=${p.wrCount} post-wear` : "—",
+    },
+    {
+      name: "Confidence lift", baseWeight: 25, available: liftAvail,
+      // lift of 2.5 pts on a 10-pt scale = ceiling (100). Negative lift → 0.
+      score: liftAvail ? Math.max(0, Math.min(100, (p.avgConfidenceLift / 2.5) * 100)) : 0,
+      rawValue: liftAvail ? `+${p.avgConfidenceLift} pts` : "—",
+    },
+    {
+      name: "Data quality", baseWeight: 20, available: qualityAvail,
+      score: qualityAvail ? qualityStep(p.sampleSize) : 0,
+      rawValue: qualityAvail ? `n=${p.sampleSize} reviews` : "—",
+    },
+  ];
+
+  const avail   = candidates.filter(c => c.available);
+  const missing = candidates.filter(c => !c.available).map(c => c.name);
+
+  // Without at least a rating we cannot produce a meaningful directional score.
+  if (!ratingAvail || avail.length === 0) {
+    return { score: null, available: [], missing: candidates.map(c => c.name) };
+  }
+
+  const totalBase = avail.reduce((s, c) => s + c.baseWeight, 0);
+  const available = avail.map(c => {
+    const effectiveWeight = Math.round((c.baseWeight / totalBase) * 100);
+    const contribution    = Math.round((c.score * c.baseWeight) / totalBase);
+    return { name: c.name, baseWeight: c.baseWeight, effectiveWeight, rawValue: c.rawValue, contribution };
+  });
+  const score = Math.round(avail.reduce((s, c) => s + (c.score * c.baseWeight) / totalBase, 0));
+  return { score, available, missing };
+}
+
 // ── Main export ────────────────────────────────────────────────────────────
 
 export function getDesignerSampleData(dateRangeDays: number = 30) {
@@ -881,8 +972,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         return {
           name: occ ?? "Other",
           lookCount: cnt,
-          avgRating: occRatings.length ? meanRating(occRatings.map(r => ({ rating: r } as SE))) : 4.1,
-          rewear: 0.74,
+          avgRating: occRatings.length ? meanRating(occRatings.map(r => ({ rating: r } as SE))) : null,
           topPieces: topPs,
         };
       });
@@ -2205,12 +2295,55 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       const periodSaves = saves;
       const periodBuys  = buys;
 
-      // Per-product save vs purchase (period scope)
+      // All-time BS events — needed for linked-conversion logic (must come before productSvP)
+      const allTimeSavesForConv = ofType(allTime, BS).filter(ev => ev.outcome === "saved");
+      const allTimeBuysForConv  = ofType(allTime, BS).filter(ev => ev.outcome === "bought");
+
+      // Per-product: period activity + all-time linked conversion (same customer, same product, buy after save)
       const productSvP = ALL_PRODUCTS.map(name => {
         const s = periodSaves.filter(ev => ev.productName === name).length;
         const b = periodBuys.filter(ev => ev.productName === name).length;
-        const conv = s > 0 ? pct(b, s) : 0;
-        return { product: name, saves: s, purchases: b, saveToP: conv };
+
+        // Cohort-based linked conversions:
+        // Each unique (customerId, productName) pair = one saved-product journey.
+        // Journey start = the oldest (first-ever) save event for that customer+product.
+        // Conversion = at least one purchase of that product by that customer after the journey start.
+        // One cohort contributes at most 1 conversion to the numerator and 1 to the denominator.
+        const prodSaveEvents = allTimeSavesForConv.filter(ev => ev.productName === name);
+        const prodBuys       = allTimeBuysForConv.filter(ev => ev.productName === name);
+
+        // Build cohort map: cid → oldest save daysAgo (journey start)
+        const prodCohortMap = new Map<string, number>();
+        for (const sv of prodSaveEvents) {
+          const prev = prodCohortMap.get(sv.customerId);
+          if (prev === undefined || sv.daysAgo > prev) prodCohortMap.set(sv.customerId, sv.daysAgo);
+        }
+        const savedCohortCount = prodCohortMap.size;
+
+        // One conversion per cohort: check if a buy came after the journey-start save
+        const prodConvDays: number[] = [];
+        for (const [cid, oldestSaveDaysAgo] of prodCohortMap) {
+          const matched = prodBuys.find(bu => bu.customerId === cid && bu.daysAgo < oldestSaveDaysAgo);
+          if (matched) prodConvDays.push(oldestSaveDaysAgo - matched.daysAgo);
+        }
+        const linkedConversions = prodConvDays.length;
+        // saves=0 (period) → null; cohorts exist → pct(converted, cohorts)
+        const linkedConvRate = s === 0 ? null
+          : savedCohortCount > 0 ? pct(linkedConversions, savedCohortCount) : 0;
+        const medianDays = prodConvDays.length > 0
+          ? [...prodConvDays].sort((a, bv) => a - bv)[Math.floor(prodConvDays.length / 2)]
+          : null;
+        const buyWithoutSaveProd = periodBuys.filter(ev =>
+          ev.productName === name &&
+          !periodSaves.some(sv => sv.customerId === ev.customerId && sv.productName === name)
+        ).length;
+        return {
+          product: name, saves: s, purchases: b,
+          savedCohortCount, // unique cid journeys (all-time); denominator for linkedConvRate
+          linkedConversions, linkedConvRate, medianDaysToConvert: medianDays,
+          purchasesWithoutSave: buyWithoutSaveProd,
+          saveToP: linkedConvRate, // alias kept for backwards compat
+        };
       }).filter(r => r.saves + r.purchases > 0)
         .sort((a, b) => (b.saves + b.purchases) - (a.saves + a.purchases));
 
@@ -2224,28 +2357,31 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       // Unique customers who saved at least one item in this period
       const uniqueSavers = new Set(periodSaves.map(ev => ev.customerId)).size;
 
-      // Customers who saved then later bought the same product (all-time window for conversion)
-      const allTimeSavesForConv = ofType(allTime, BS).filter(ev => ev.outcome === "saved");
-      const allTimeBuysForConv  = ofType(allTime, BS).filter(ev => ev.outcome === "bought");
-      const conversionPairs: number[] = []; // days-to-convert
+      // Overall cohort-based conversion:
+      // Build a global cid:product cohort map; each cohort contributes at most 1 to denominator and 1 to numerator.
+      const globalCohortMap = new Map<string, number>(); // "cid:product" → oldest save daysAgo
       for (const sv of allTimeSavesForConv) {
-        const later = allTimeBuysForConv.find(b =>
-          b.customerId === sv.customerId && b.productName === sv.productName && b.daysAgo < sv.daysAgo
-        );
-        if (later) conversionPairs.push(sv.daysAgo - later.daysAgo);
+        const key = sv.customerId + ":" + sv.productName;
+        const prev = globalCohortMap.get(key);
+        if (prev === undefined || sv.daysAgo > prev) globalCohortMap.set(key, sv.daysAgo);
       }
-      const medianDaysToConvert = conversionPairs.length > 0
-        ? conversionPairs.sort((a, b) => a - b)[Math.floor(conversionPairs.length / 2)] : null;
+      const allSavedCohortCount = globalCohortMap.size; // canonical denominator
 
-      // Save-to-convert rate (how often a save leads to eventual purchase, all-time)
-      const allSavedCustProd = allTimeSavesForConv.map(sv => `${sv.customerId}:${sv.productName}`);
-      const convertedSaves = allSavedCustProd.filter(key => {
-        const [cid, pn] = key.split(":");
-        const sv = allTimeSavesForConv.find(s => s.customerId === cid && s.productName === pn)!;
-        return allTimeBuysForConv.some(b => b.customerId === cid && b.productName === pn && b.daysAgo < sv.daysAgo);
-      });
-      const saveToConvertRate = allSavedCustProd.length > 0
-        ? pct(convertedSaves.length, allSavedCustProd.length) : 0;
+      const allConvDays: number[] = [];
+      for (const [key, oldestSaveDaysAgo] of globalCohortMap) {
+        const colon = key.indexOf(":");
+        const cid = key.slice(0, colon);
+        const pn  = key.slice(colon + 1);
+        const matched = allTimeBuysForConv.find(b =>
+          b.customerId === cid && b.productName === pn && b.daysAgo < oldestSaveDaysAgo
+        );
+        if (matched) allConvDays.push(oldestSaveDaysAgo - matched.daysAgo);
+      }
+      const allLinkedConversions = allConvDays.length;
+      const medianDaysToConvert = allConvDays.length > 0
+        ? [...allConvDays].sort((a, b) => a - b)[Math.floor(allConvDays.length / 2)] : null;
+      const saveToConvertRate = allSavedCohortCount > 0
+        ? pct(allLinkedConversions, allSavedCohortCount) : 0;
 
       // Highest save-to-purchase product (by conversion rate)
       const highestSvp = [...productSvP].sort((a, b) => b.saveToP - a.saveToP).find(r => r.saves > 0);
@@ -2258,6 +2394,8 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         totalSaves:         periodSaves.length,
         totalPurchases:     periodBuys.length,
         uniqueSavers,
+        allSavedCohortCount, // unique cid:product journeys (canonical denominator for saveToConvertRate)
+        allLinkedConversions,
         overallSaveToP:     saveToConvertRate,
         saveToConvertRate,
         medianDaysToConvert,
@@ -2304,7 +2442,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     })(),
     opportunityScores: bySessionCount.slice(0, 3).map(p => ({
       productTitle: p.name,
-      score: CATALOG[p.name].opportunityScore,
+      score: computeOpportunityScore(pm[p.name]).score ?? 0,
       sampleSize: pm[p.name].sampleSize,
       breakdown: {
         emotionalImpact: Math.round(pm[p.name].loveRate * 0.9),
@@ -2676,26 +2814,6 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
     .filter(Boolean)
     .slice(0, dateRangeDays === 7 ? 2 : 4) as NonNullable<ReturnType<typeof Object.assign>>[];
 
-  // Product narratives
-  const productNarratives = bySessionCount.slice(0, 5).map(({ name }) => {
-    const p = pm[name]; const cat = CATALOG[name];
-    return {
-      name,
-      opportunityScore: cat.opportunityScore,
-      avgRating: p.avgRating,
-      rewearRate: p.rewearRate,
-      bestPersonality: p.topPersonalities[0] ?? cat.personalities[0],
-      bestOccasion: p.topOccasions[0] ?? cat.occasions[0],
-      mostCommonObjection: p.topObjection,
-      sampleSize: p.sampleSize,
-      avgConfidenceLift: p.avgConfidenceLift,
-      strongestTransformation: narrativeTransformation(name),
-      topDesiredFeelings: cat.desiredFeelings.slice(0, 2).map(f => f.replace("more-", "")),
-      recommendation: cat.recommendation,
-      recommendationReason: cat.recommendationReason,
-    };
-  });
-
   function narrativeTransformation(name: string): string {
     const map: Record<string, string> = {
       [SEEN]:     "Uncertain → Confident",
@@ -2706,9 +2824,44 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
       [REAL]:     "Casual → Polished",
       [HER]:      "Self-conscious → Feminine",
       [ROOTED]:   "Underdressed → Elevated",
+      [FREE]:     "Restrained → Free",
+      [BOLD]:     "Reserved → Bold",
+      [DEFINED]:  "Uncertain → Defined",
     };
     return map[name] ?? "Comfortable → Elevated";
   }
+
+  // Product narratives — all 11 canonical products.
+  // Products with no period evidence show hasEvidence=false and score=null ("Not measured").
+  // WR denominator is wrCount (post-wear reviews only), never sampleSize (which includes outfit reviews).
+  const productNarratives = ALL_PRODUCTS.map(name => {
+    const p   = pm[name];
+    const cat = CATALOG[name];
+    const opp = computeOpportunityScore(p);
+    const outfitReviewCount = p.sampleSize - p.wrCount; // OR-only reviews
+    return {
+      name,
+      hasEvidence: p.sessionCount > 0,
+      opportunityScore: opp.score,
+      opportunityScoreFactors: opp.available,
+      opportunityScoreMissing: opp.missing,
+      avgRating: p.avgRating,
+      // rewearRate is null when wrCount=0 — never 0%, which would imply observed non-rewear
+      rewearRate: p.wrCount > 0 ? p.rewearRate : null,
+      wrCount: p.wrCount,
+      outfitReviewCount,
+      feelingAchievedRate: p.wrCount > 0 ? p.feelingAchievedRate : null,
+      bestPersonality: p.sessionCount > 0 ? (p.topPersonalities[0] ?? cat.personalities[0]) : cat.personalities[0],
+      bestOccasion: p.sessionCount > 0 ? (p.topOccasions[0] ?? cat.occasions[0]) : cat.occasions[0],
+      mostCommonObjection: p.topObjection,
+      sampleSize: p.sampleSize,
+      avgConfidenceLift: p.avgConfidenceLift,
+      strongestTransformation: narrativeTransformation(name),
+      topDesiredFeelings: cat.desiredFeelings.slice(0, 2).map(f => f.replace("more-", "")),
+      recommendation: cat.recommendation,
+      recommendationReason: cat.recommendationReason,
+    };
+  });
 
   const rel = {
     status: relStatus,

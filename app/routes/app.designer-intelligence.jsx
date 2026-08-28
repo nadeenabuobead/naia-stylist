@@ -1183,8 +1183,11 @@ function OccasionIntelCard({ row }) {
         <div style={{ display: "flex", gap: 10 }}>
           <span style={{ ...MONO, color: "#7a6f6a" }}>{row.count} session{row.count !== 1 ? "s" : ""}</span>
           {row.successRate != null && (
-            <span style={{ ...MONO, color: row.successRate >= 70 ? "#2a5e42" : row.successRate >= 40 ? "#6b4800" : "#8b2035" }}>
-              {row.successRate}% success
+            <span
+              title="% of styling sessions for this occasion where the customer gave 'Love it' feedback on the NADINE recommendation (RF outcome = love). Not rewear."
+              style={{ ...MONO, color: row.successRate >= 70 ? "#2a5e42" : row.successRate >= 40 ? "#6b4800" : "#8b2035", cursor: "help" }}
+            >
+              {row.successRate}% love-feedback
             </span>
           )}
         </div>
@@ -1222,7 +1225,7 @@ function ProductDetailPanel({ narrative, saveVsPurchase, dateRangeDays }) {
   const [scoreOpen, setScoreOpen] = useState(false);
   if (!narrative) return null;
   const confData = sampleConfidence(narrative.sampleSize);
-  const scoreColor = narrative.opportunityScore >= 70 ? "#2a5e42" : narrative.opportunityScore >= 45 ? "#d97706" : "#7a6f6a";
+  const scoreColor = (narrative.opportunityScore ?? 0) >= 70 ? "#2a5e42" : (narrative.opportunityScore ?? 0) >= 45 ? "#d97706" : "#7a6f6a";
   const svp = saveVsPurchase?.productBreakdown?.find(p => p.product === narrative.name);
 
   return (
@@ -1232,7 +1235,13 @@ function ProductDetailPanel({ narrative, saveVsPurchase, dateRangeDays }) {
         <div>
           <div style={{ fontFamily: DISPLAY, fontSize: 17, fontWeight: 600, fontStyle: "italic", color: "#221516" }}>{narrative.name}</div>
           <div style={{ fontFamily: MONO, fontSize: 10, color: "#7a6f6a", marginTop: 3 }}>
-            Score {narrative.opportunityScore} · ★ {narrative.avgRating?.toFixed(1) ?? "—"} · {narrative.rewearRate != null ? `${Math.round(narrative.rewearRate * 100)}% rewear` : "—"} · n={narrative.sampleSize}
+            {narrative.opportunityScore != null ? `Score ${narrative.opportunityScore}` : "Score — (not measured)"}
+            {" · "}★ {narrative.avgRating?.toFixed(1) ?? "—"}
+            {" · "}
+            {narrative.wrCount > 0
+              ? `${Math.round(narrative.rewearRate * 100)}% rewear · ${narrative.wrCount} post-wear`
+              : narrative.hasEvidence ? "— · no post-wear data" : "no period evidence"}
+            {narrative.outfitReviewCount > 0 && ` · ${narrative.outfitReviewCount} outfit review${narrative.outfitReviewCount !== 1 ? "s" : ""}`}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
@@ -1240,7 +1249,9 @@ function ProductDetailPanel({ narrative, saveVsPurchase, dateRangeDays }) {
           {narrative.sampleSize <= 4 && (
             <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: "rgba(107,72,0,0.12)", color: "#6b4800" }}>Directional</span>
           )}
-          <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: scoreColor, color: "#fff" }}>Score {narrative.opportunityScore}</span>
+          <span style={{ fontSize: 8, fontFamily: INTER, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", padding: "3px 8px", background: scoreColor, color: "#fff" }}>
+            {narrative.opportunityScore != null ? `Score ${narrative.opportunityScore}` : "Score —"}
+          </span>
           <button type="button" onClick={() => setScoreOpen(o => !o)} style={{ ...s.linkBtn, marginTop: 0, fontSize: 9 }}>
             How scored {scoreOpen ? "↑" : "↓"}
           </button>
@@ -1250,20 +1261,49 @@ function ProductDetailPanel({ narrative, saveVsPurchase, dateRangeDays }) {
         </div>
       </div>
 
-      {/* Score disclosure — How this is calculated */}
+      {/* Score disclosure — dynamically rendered from available factors */}
       {scoreOpen && (
         <div style={{ borderTop: "1px solid rgba(34,21,22,0.07)", padding: "14px 20px", background: "#fafaf9", fontSize: 11, fontFamily: MONO, lineHeight: 1.7 }}>
-          <div style={{ color: "#221516", marginBottom: 8, fontWeight: 600 }}>
-            Directional score: {narrative.opportunityScore} · {confData.label}
-          </div>
-          <div style={{ color: "#5c5350", marginBottom: 6, fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", fontWeight: 600 }}>Available factors:</div>
-          <div style={{ color: "#221516", marginBottom: 2 }}>· Avg rating: 30% weight</div>
-          <div style={{ color: "#221516", marginBottom: 2 }}>· Rewear rate: 25% weight</div>
-          <div style={{ color: "#221516", marginBottom: 2 }}>· Confidence lift: 25% weight</div>
-          <div style={{ color: "#221516", marginBottom: 10 }}>· Data quality: 20% weight</div>
-          <div style={{ color: "#7a6f6a", marginBottom: 2 }}>Evidence: n={narrative.sampleSize} · {periodLabel(dateRangeDays)}</div>
-          <div style={{ color: "#7a6f6a", marginBottom: 8 }}>Pending (excluded): Shopify conversion · LTV · FASHN.ai fidelity</div>
-          <div style={{ color: "#7a6f6a", fontFamily: SERIF, fontStyle: "italic", fontSize: 11, lineHeight: 1.5 }}>
+          {narrative.opportunityScore != null ? (
+            <>
+              <div style={{ color: "#221516", marginBottom: 8, fontWeight: 600 }}>
+                Directional score: {narrative.opportunityScore} · {confData.label}
+              </div>
+              <div style={{ color: "#5c5350", marginBottom: 6, fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", fontWeight: 600 }}>
+                Available factors (weights renormalized to 100%):
+              </div>
+              {(narrative.opportunityScoreFactors ?? []).map((f, fi) => (
+                <div key={fi} style={{ color: "#221516", marginBottom: 2 }}>
+                  · {f.name}: {f.rawValue} → {f.contribution} pts
+                  <span style={{ color: "#9CA3AF" }}> (base {f.baseWeight}% → effective {f.effectiveWeight}%)</span>
+                </div>
+              ))}
+              {(narrative.opportunityScoreMissing ?? []).length > 0 && (
+                <>
+                  <div style={{ color: "#5c5350", marginTop: 8, marginBottom: 4, fontFamily: INTER, fontSize: 8, textTransform: "uppercase", letterSpacing: "2px", fontWeight: 600 }}>
+                    Excluded (no data in period):
+                  </div>
+                  {(narrative.opportunityScoreMissing ?? []).map((m, mi) => (
+                    <div key={mi} style={{ color: "#9CA3AF", marginBottom: 2 }}>· {m}: —</div>
+                  ))}
+                </>
+              )}
+              <div style={{ color: "#7a6f6a", marginTop: 8, marginBottom: 2 }}>
+                Evidence: {narrative.outfitReviewCount > 0 ? `${narrative.outfitReviewCount} outfit review${narrative.outfitReviewCount !== 1 ? "s" : ""}` : ""}
+                {narrative.outfitReviewCount > 0 && narrative.wrCount > 0 ? " + " : ""}
+                {narrative.wrCount > 0 ? `${narrative.wrCount} post-wear review${narrative.wrCount !== 1 ? "s" : ""}` : ""}
+                {narrative.outfitReviewCount === 0 && narrative.wrCount === 0 ? "sessions only" : ""}
+                {" · "}{periodLabel(dateRangeDays)}
+              </div>
+              <div style={{ color: "#7a6f6a", marginBottom: 8 }}>Pending (excluded): Shopify conversion · LTV · FASHN.ai fidelity</div>
+            </>
+          ) : (
+            <div style={{ color: "#9CA3AF", fontStyle: "italic" }}>
+              Not measured — no outfit or post-wear reviews recorded in this period.
+              Score requires at least one outfit review.
+            </div>
+          )}
+          <div style={{ color: "#7a6f6a", fontFamily: SERIF, fontStyle: "italic", fontSize: 11, lineHeight: 1.5, marginTop: 6 }}>
             Scores reflect available evidence only. Treat as directional.
           </div>
         </div>
@@ -1335,7 +1375,15 @@ function ProductDetailPanel({ narrative, saveVsPurchase, dateRangeDays }) {
             <div>
               <div style={{ fontFamily: INTER, fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px", color: "#7a6f6a", marginBottom: 4 }}>Evidence</div>
               <div style={{ fontFamily: MONO, fontSize: 12, fontWeight: 700, color: confData.color }}>
-                {narrative.sampleSize} review{narrative.sampleSize !== 1 ? "s" : ""} · {periodLabel(dateRangeDays)}
+                {[
+                  narrative.outfitReviewCount > 0
+                    ? `${narrative.outfitReviewCount} outfit review${narrative.outfitReviewCount !== 1 ? "s" : ""}`
+                    : null,
+                  narrative.wrCount > 0
+                    ? `${narrative.wrCount} post-wear review${narrative.wrCount !== 1 ? "s" : ""}`
+                    : null,
+                ].filter(Boolean).join(" + ") || (narrative.hasEvidence ? "Sessions only — no reviews" : "Not measured")}
+                {" · "}{periodLabel(dateRangeDays)}
               </div>
             </div>
           </div>
@@ -1736,7 +1784,7 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
       {/* Product Summary — concise table from productNarratives */}
       <Section
         title="Product Summary"
-        desc="Every product in the current period — opportunity score, emotional outcome, best audience, top objection, and recommended next step."
+        desc="All 11 NADINE products — opportunity score, post-wear evidence, best audience, top objection, and recommended next step. Products with no period evidence show Not measured."
         status={narratives.length > 0 ? (rel.status ?? "live") : "insufficient-data"}
       >
         {narratives.length > 0 ? (
@@ -1751,16 +1799,23 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
                   <th style={s.th}>Best Audience</th>
                   <th style={s.th}>Top Objection</th>
                   <th style={s.th}>Evidence Maturity</th>
-                  <th style={s.th}>Design Signal</th>
-                  <th style={s.th}>Commercial / Positioning Signal</th>
+                  <th style={s.th}>Evidence Sources</th>
+                  <th style={s.th}>Recommended Next Step</th>
                 </tr>
               </thead>
               <tbody>
                 {narratives.map((n, i) => {
                   const oppColor = (n.opportunityScore ?? 0) >= 60 ? "#2a5e42" : (n.opportunityScore ?? 0) >= 40 ? "#d97706" : "#8b2035";
-                  const rewearDisplay = n.sampleSize > 0 && n.rewearRate != null
-                    ? `${Math.round(n.rewearRate * 100)}% · n=${n.sampleSize}`
-                    : "Not yet measured";
+                  // Rewear denominator is wrCount (post-wear reviews only), not sampleSize.
+                  // null rewearRate means no post-wear data, which must never render as "0% rewear".
+                  const rewearDisplay = n.wrCount > 0 && n.rewearRate != null
+                    ? `${Math.round(n.rewearRate * 100)}% rewear · ${n.wrCount} post-wear`
+                    : n.hasEvidence ? "— · no post-wear data" : "Not measured";
+                  const evidenceDisplay = !n.hasEvidence ? "Not measured"
+                    : [
+                        n.outfitReviewCount > 0 ? `${n.outfitReviewCount} outfit review${n.outfitReviewCount !== 1 ? "s" : ""}` : null,
+                        n.wrCount > 0 ? `${n.wrCount} post-wear review${n.wrCount !== 1 ? "s" : ""}` : null,
+                      ].filter(Boolean).join(" + ") || "Sessions only";
                   const ratingDisplay = n.avgRating != null
                     ? `★${n.avgRating.toFixed(1)}`
                     : "—";
@@ -1775,7 +1830,7 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
                         )}
                       </td>
                       <td style={{ ...s.td, fontFamily: MONO, fontSize: 11 }}>{ratingDisplay}</td>
-                      <td style={{ ...s.td, fontFamily: MONO, fontSize: 11, color: n.sampleSize > 0 && n.rewearRate != null ? "#221516" : "#9CA3AF" }}>
+                      <td style={{ ...s.td, fontFamily: MONO, fontSize: 11, color: n.wrCount > 0 ? "#221516" : "#9CA3AF" }}>
                         {rewearDisplay}
                       </td>
                       <td style={{ ...s.td, fontSize: 11 }}>{n.bestPersonality ?? "—"}</td>
@@ -1783,12 +1838,16 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
                         {n.mostCommonObjection ?? "—"}
                       </td>
                       <td style={{ ...s.td, fontSize: 9 }}>
-                        <span style={{ padding: "2px 6px", background: confData.color, color: "#fff", fontFamily: INTER, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px" }}>
-                          {confData.label}
-                        </span>
+                        {n.hasEvidence ? (
+                          <span style={{ padding: "2px 6px", background: confData.color, color: "#fff", fontFamily: INTER, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px" }}>
+                            {confData.label}
+                          </span>
+                        ) : (
+                          <span style={{ fontFamily: MONO, fontSize: 9, color: "#9CA3AF" }}>No evidence</span>
+                        )}
                       </td>
-                      <td style={{ ...s.td, fontSize: 11, color: "#5c5350", maxWidth: 200 }}>{n.designImplication ?? "—"}</td>
-                      <td style={{ ...s.td, fontSize: 11, color: "#5c5350", maxWidth: 200 }}>{n.recommendedAction ?? "—"}</td>
+                      <td style={{ ...s.td, fontFamily: MONO, fontSize: 10, color: "#7a6f6a", maxWidth: 200 }}>{evidenceDisplay}</td>
+                      <td style={{ ...s.td, fontSize: 11, color: "#5c5350", maxWidth: 200 }}>{n.recommendation ?? "—"}</td>
                     </tr>
                   );
                 })}
@@ -1808,7 +1867,7 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
       {narratives.length > 0 && (
         <Section
           title="Product Intelligence"
-          desc="Every NADINE product — opportunity score, emotional outcome, best audience, top objection, recommended action. Click View Detail for the full canonical profile."
+          desc="All 11 NADINE products — dynamically scored from available evidence. Products without period reviews show score as 'Not measured'. Click View Detail for the full canonical profile."
           status={rel.status}
         >
           {rel.status === "insufficient-data" ? (
@@ -1828,18 +1887,17 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
         </Section>
       )}
 
-      <Section title="Occasion Performance" desc={`Where the collection shines — occasion demand, top pieces, and product fit · ${dateRangeDays >= 365 ? "all time" : `last ${dateRangeDays} days`}`} status="live" action={<ExportCSVButton data={data.topOccasions} filename="occasions.csv" />}>
+      <Section title="Occasion Performance" desc={`Styling sessions and ratings by occasion — look count, avg rating, top pieces · ${dateRangeDays >= 365 ? "all time" : `last ${dateRangeDays} days`}. Post-wear rewear is not shown — per-occasion rewear requires matched session→post-wear attribution that is not yet available.`} status="live" action={<ExportCSVButton data={data.topOccasions} filename="occasions.csv" />}>
         {data.topOccasions?.length > 0 ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 16 }}>
             {data.topOccasions.map((occ, i) => (
               <div key={i} style={s.card}>
                 <div style={s.cardLabel}>{occ.name}</div>
                 <div style={{ display: "flex", gap: 16, marginTop: 8, fontFamily: MONO, fontSize: 11, color: "#7a6f6a" }}>
-                  {occ.avgRating != null && <span>★ {occ.avgRating.toFixed(1)}</span>}
-                  <span>{occ.lookCount} looks</span>
-                  <span>{occ.rewear != null && occ.lookCount > 0 ? `${Math.round(occ.rewear * 100)}% rewear` : "rewear: —"}</span>
+                  <span>{occ.lookCount} styling session{occ.lookCount !== 1 ? "s" : ""}</span>
+                  {occ.avgRating != null ? <span>★ {occ.avgRating.toFixed(1)} avg</span> : <span style={{ color: "#9CA3AF" }}>no rating yet</span>}
                 </div>
-                {occ.topPieces?.length > 0 && <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>Best: {occ.topPieces.join(", ")}</div>}
+                {occ.topPieces?.length > 0 && <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>Top pieces: {occ.topPieces.join(", ")}</div>}
               </div>
             ))}
           </div>
@@ -1894,15 +1952,15 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
       {sampleMode && advanced?.saveVsPurchase?.status === "sample" ? (
         <Section title="Save vs Purchase Intelligence" desc={`SAMPLE PREVIEW — ${advanced.saveVsPurchase.scopeLabel} save/buy events · ${advanced.saveVsPurchase.evidenceMaturity}`} status="sample">
           <div style={s.kpiGrid}>
-            <KpiCard label="Total Saves" value={advanced.saveVsPurchase.totalSaves} tooltip={`Saves within the selected period (${advanced.saveVsPurchase.scopeLabel}).`} />
-            <KpiCard label="Unique Savers" value={advanced.saveVsPurchase.uniqueSavers} />
-            <KpiCard label="Total Purchases" value={advanced.saveVsPurchase.totalPurchases} />
-            <KpiCard label="Save-to-Purchase Rate" value={`${advanced.saveVsPurchase.overallSaveToP}%`} tooltip="% of saved items purchased in the same period." />
-            <KpiCard label="Save-to-Convert Rate" value={advanced.saveVsPurchase.saveToConvertRate != null ? `${advanced.saveVsPurchase.saveToConvertRate}%` : "—"} tooltip="% of all-time saves that eventually led to a purchase of the same product." />
-            <KpiCard label="Median Days Save→Purchase" value={advanced.saveVsPurchase.medianDaysToConvert != null ? `${advanced.saveVsPurchase.medianDaysToConvert}d` : "—"} />
-            <KpiCard label="Highest SVP Product" value={advanced.saveVsPurchase.highestSvpProduct ?? "—"} tooltip="Product with the highest save-to-purchase conversion rate." />
-            <KpiCard label="Most Saved" value={advanced.saveVsPurchase.mostSaved ?? "—"} />
-            <KpiCard label="Purchases Without Prior Save" value={advanced.saveVsPurchase.purchasesWithoutSave} tooltip="Number of purchases where no prior save was recorded for the same product-customer pair." />
+            <div style={{ ...s.subHeader, gridColumn: "1 / -1", marginBottom: 0 }}>PERIOD ACTIVITY — {advanced.saveVsPurchase.scopeLabel}</div>
+            <KpiCard label="Total Saves" value={advanced.saveVsPurchase.totalSaves} tooltip={`Buy-or-skip decisions with outcome 'saved' within the selected period (${advanced.saveVsPurchase.scopeLabel}).`} />
+            <KpiCard label="Unique Savers" value={advanced.saveVsPurchase.uniqueSavers} tooltip="Distinct customers who saved at least one item this period." />
+            <KpiCard label="Total Purchases" value={advanced.saveVsPurchase.totalPurchases} tooltip={`Buy-or-skip decisions with outcome 'bought' within the selected period (${advanced.saveVsPurchase.scopeLabel}).`} />
+            <div style={{ ...s.subHeader, gridColumn: "1 / -1", marginBottom: 0, marginTop: 12 }}>LINKED CONVERSION — ALL TIME</div>
+            <KpiCard label="Save→Purchase Rate" value={advanced.saveVsPurchase.saveToConvertRate != null ? `${advanced.saveVsPurchase.saveToConvertRate}%` : "—"} tooltip={`All-time: % of unique saved customer-product journeys that led to a purchase. ${advanced.saveVsPurchase.allLinkedConversions} of ${advanced.saveVsPurchase.allSavedCohortCount} saved journeys converted. Each customer-product pair counts once regardless of how many times they saved.`} />
+            <KpiCard label="Median Days to Convert" value={advanced.saveVsPurchase.medianDaysToConvert != null ? `${advanced.saveVsPurchase.medianDaysToConvert}d` : "— / no linked conversions"} tooltip="Median days between save and subsequent purchase, across all linked pairs." />
+            <KpiCard label="Purchases Without Prior Save" value={advanced.saveVsPurchase.purchasesWithoutSave} tooltip="Purchases in period with no prior save event for the same customer + product." />
+            <KpiCard label="Most Saved" value={advanced.saveVsPurchase.mostSaved ?? "—"} tooltip="Product with most saves in the selected period." />
           </div>
           {advanced.saveVsPurchase.highSaveLowBuyProducts?.length > 0 && (
             <div style={{ marginTop: 16, padding: "10px 14px", background: "rgba(90,90,100,0.05)", borderLeft: "3px solid #8b2035" }}>
@@ -1913,26 +1971,42 @@ function TabProduct({ data, phase4b2, advanced, rel, sampleMode, dateRangeDays, 
           )}
           {advanced.saveVsPurchase.productBreakdown?.length > 0 && (
             <>
-              <div style={{ ...s.subHeader, marginTop: 20 }}>SAVE VS PURCHASE BY PRODUCT</div>
+              <div style={{ ...s.subHeader, marginTop: 20 }}>SAVE VS PURCHASE BY PRODUCT (period saves/purchases · linked conversion all-time)</div>
               <div style={{ overflowX: "auto" }}>
                 <table style={s.table}>
                   <thead><tr>
                     <th style={s.th}>Product</th>
-                    <th style={s.th}>Saves</th>
-                    <th style={s.th}>Purchases</th>
-                    <th style={s.th}>Save → Purchase Rate</th>
+                    <th style={s.th}>Saves (period)</th>
+                    <th style={s.th}>Purchases (period)</th>
+                    <th style={s.th}>Saved Journeys (all-time)</th>
+                    <th style={s.th}>Linked Rate (all-time)</th>
+                    <th style={s.th}>Linked Conversions</th>
+                    <th style={s.th}>Median Days</th>
+                    <th style={s.th}>Buys Without Prior Save (period)</th>
                   </tr></thead>
                   <tbody>
-                    {advanced.saveVsPurchase.productBreakdown.map((row, i) => (
-                      <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
-                        <td style={{ ...s.td, fontFamily: "'Cormorant Garamond', serif", fontWeight: 600, fontSize: 14 }}>{row.product}</td>
-                        <td style={s.td}>{row.saves}</td>
-                        <td style={s.td}>{row.purchases}</td>
-                        <td style={{ ...s.td, color: row.saveToP === 0 && row.saves > 0 ? "#8b2035" : row.saveToP >= 50 ? "#2a5e42" : "#221516", fontFamily: "'Inter', sans-serif", fontWeight: 600 }}>
-                          {row.saves === 0 ? "—" : `${row.saveToP}%`}
-                        </td>
-                      </tr>
-                    ))}
+                    {advanced.saveVsPurchase.productBreakdown.map((row, i) => {
+                      const rateColor = row.linkedConvRate === null ? "#9CA3AF"
+                        : row.linkedConvRate === 0 && row.saves > 0 ? "#8b2035"
+                        : row.linkedConvRate >= 50 ? "#2a5e42" : "#221516";
+                      return (
+                        <tr key={i} style={{ background: i % 2 === 0 ? "rgba(255,255,255,0.6)" : "transparent" }}>
+                          <td style={{ ...s.td, fontFamily: "'Cormorant Garamond', serif", fontWeight: 600, fontSize: 14 }}>{row.product}</td>
+                          <td style={s.td}>{row.saves}</td>
+                          <td style={s.td}>{row.purchases}</td>
+                          <td style={{ ...s.td, fontFamily: MONO, color: "#7a6f6a" }}>{row.savedCohortCount ?? 0}</td>
+                          <td style={{ ...s.td, color: rateColor, fontFamily: "'Inter', sans-serif", fontWeight: 600 }}
+                            title={row.linkedConvRate !== null && row.savedCohortCount > 0 ? `${row.linkedConversions} of ${row.savedCohortCount} saved journeys converted` : ""}>
+                            {row.linkedConvRate === null ? "—" : `${row.linkedConvRate}%`}
+                          </td>
+                          <td style={{ ...s.td, fontFamily: MONO, color: "#7a6f6a" }}>{row.linkedConversions ?? 0}</td>
+                          <td style={{ ...s.td, fontFamily: MONO, color: "#7a6f6a" }}>
+                            {row.medianDaysToConvert != null ? `${row.medianDaysToConvert}d` : "—"}
+                          </td>
+                          <td style={{ ...s.td, fontFamily: MONO, color: "#7a6f6a" }}>{row.purchasesWithoutSave ?? 0}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

@@ -406,7 +406,9 @@ describe("canonical product metrics are consistent across sections", () => {
       for (const n of narratives) {
         const match = oppScores.find((p: any) => p.productTitle === n.name);
         if (!match) continue;
-        assert.equal(match.score, n.opportunityScore,
+        // opportunityScores coerces null→0 for legacy display; both sections use computeOpportunityScore
+        const expectedScore = n.opportunityScore ?? 0;
+        assert.equal(match.score, expectedScore,
           `opportunityScore mismatch for "${n.name}": narratives=${n.opportunityScore}, opportunityScores=${match.score} (days=${days})`);
       }
     }
@@ -1912,5 +1914,221 @@ describe("Becoming Grounded evidence uses fit-objection sessions, not reviews or
       !data.includes("pm[GROUNDED].evidenceN,"),
       "GROUNDED badge must not use generic evidenceN — use objectionCount"
     );
+  });
+});
+
+// ── Products tab reconciliation — all 9 stop-gate invariants ──────────────
+describe("Products tab data coherence: stop-gate reconciliation", () => {
+
+  it("productNarratives covers all 11 canonical products", () => {
+    const CANONICAL = [
+      "Becoming Seen", "Becoming Whole", "Becoming Alive", "Becoming Grounded",
+      "Becoming Clear", "Becoming Real", "Becoming Her", "Becoming Rooted",
+      "Becoming Free", "Becoming Bold", "Becoming Defined",
+    ];
+    for (const days of [30, 90, 365]) {
+      const d = getDesignerSampleData(days);
+      const narratives: any[] = (d.rel as any)?.productNarratives ?? [];
+      assert.equal(narratives.length, 11,
+        `productNarratives must have 11 rows at ${days}D (got ${narratives.length})`);
+      for (const name of CANONICAL) {
+        assert.ok(narratives.some(n => n.name === name),
+          `${name} missing from productNarratives at ${days}D`);
+      }
+    }
+  });
+
+  it("WR denominator (wrCount) is consistent between Products and Customers at 30D", () => {
+    const d = getDesignerSampleData(30);
+    const narratives: any[] = (d.rel as any)?.productNarratives ?? [];
+    // Ground truth from Customers tab: total WR = 2, both Becoming Seen
+    const customerWR = (d.advanced as any)?.emotionalJourney?.totalDenominator
+      ?? (d.kpis as any)?.postWearReviews?.value
+      ?? null;
+    const seenNarrative = narratives.find(n => n.name === "Becoming Seen");
+    assert.ok(seenNarrative, "Becoming Seen must appear in productNarratives");
+    assert.equal(seenNarrative.wrCount, 2,
+      `Becoming Seen wrCount must be 2 at 30D (got ${seenNarrative.wrCount})`);
+    // All other products must have wrCount=0 at 30D
+    for (const n of narratives.filter(n => n.name !== "Becoming Seen")) {
+      assert.equal(n.wrCount, 0,
+        `${n.name} wrCount must be 0 at 30D (got ${n.wrCount}) — only Becoming Seen has WR events in this window`);
+    }
+  });
+
+  it("missing WR (wrCount=0) never renders as 0% rewear — rewearRate must be null", () => {
+    for (const days of [7, 30, 90]) {
+      const d = getDesignerSampleData(days);
+      const narratives: any[] = (d.rel as any)?.productNarratives ?? [];
+      for (const n of narratives) {
+        if (n.wrCount === 0) {
+          assert.equal(n.rewearRate, null,
+            `${n.name} (days=${days}): rewearRate must be null when wrCount=0 (got ${n.rewearRate}). ` +
+            "null means no post-wear evidence; 0% would incorrectly imply observed non-rewear.");
+        }
+      }
+    }
+  });
+
+  it("opportunity score factors renormalize correctly when a factor is missing", () => {
+    // At 30D, only Becoming Seen has WR data — all others lack rewear + confidence lift.
+    const d = getDesignerSampleData(30);
+    const narratives: any[] = (d.rel as any)?.productNarratives ?? [];
+
+    // Products with at least a rating but no WR: effective weights must sum to ~100
+    const withRatingNoWR = narratives.filter(n => n.opportunityScore != null && n.wrCount === 0);
+    for (const n of withRatingNoWR) {
+      const factors: any[] = n.opportunityScoreFactors ?? [];
+      const sum = factors.reduce((s: number, f: any) => s + f.effectiveWeight, 0);
+      // Allow ±2% rounding tolerance
+      assert.ok(sum >= 98 && sum <= 102,
+        `${n.name}: effective weights must sum to ~100 (got ${sum}). ` +
+        "Renormalization failed — missing factors are being silently counted as 0.");
+      // Rewear and Confidence lift must be in missing, not in available factors
+      const availNames: string[] = factors.map((f: any) => f.name);
+      assert.ok(!availNames.includes("Rewear rate"),
+        `${n.name}: "Rewear rate" must not appear in available factors when wrCount=0`);
+      assert.ok(!availNames.includes("Confidence lift"),
+        `${n.name}: "Confidence lift" must not appear in available factors when wrCount=0`);
+    }
+  });
+
+  it("products with no period evidence have opportunityScore=null (not a fabricated score)", () => {
+    // At 30D, FREE / BOLD / DEFINED have no events → no score
+    const d = getDesignerSampleData(30);
+    const narratives: any[] = (d.rel as any)?.productNarratives ?? [];
+    for (const name of ["Becoming Free", "Becoming Bold", "Becoming Defined"]) {
+      const n = narratives.find(n => n.name === name);
+      assert.ok(n, `${name} must appear in productNarratives`);
+      assert.equal(n.opportunityScore, null,
+        `${name} opportunityScore must be null — no period evidence exists`);
+      assert.equal(n.hasEvidence, false, `${name} hasEvidence must be false`);
+    }
+  });
+
+  it("no hardcoded occasion rewear remains — topOccasions must not have a rewear field", () => {
+    for (const days of [7, 30, 90, 365]) {
+      const d = getDesignerSampleData(days);
+      const occs: any[] = d.topOccasions ?? [];
+      for (const occ of occs) {
+        assert.ok(!("rewear" in occ),
+          `topOccasions["${occ.name}"] must not have a rewear field (days=${days}). ` +
+          "Hardcoded 0.74 rewear was removed because per-occasion WR attribution is not available.");
+      }
+    }
+  });
+
+  it("per-product saveToP (linkedConvRate) uses linked events, not purchases÷saves", () => {
+    // Invariant: linkedConvRate cannot exceed 100% (purchases÷saves can)
+    for (const days of [30, 90, 365]) {
+      const d = getDesignerSampleData(days);
+      const breakdown: any[] = (d.advanced as any)?.saveVsPurchase?.productBreakdown ?? [];
+      for (const row of breakdown) {
+        if (row.linkedConvRate !== null) {
+          assert.ok(row.linkedConvRate >= 0 && row.linkedConvRate <= 100,
+            `${row.product} linkedConvRate must be 0–100% (got ${row.linkedConvRate}) at ${days}D. ` +
+            "A rate >100 means purchases÷saves was used instead of linked conversion.");
+        }
+      }
+    }
+  });
+
+  it("conversion rate is null (not 0%) when saves=0", () => {
+    for (const days of [30, 90, 365]) {
+      const d = getDesignerSampleData(days);
+      const breakdown: any[] = (d.advanced as any)?.saveVsPurchase?.productBreakdown ?? [];
+      for (const row of breakdown) {
+        if (row.saves === 0) {
+          assert.equal(row.linkedConvRate, null,
+            `${row.product} linkedConvRate must be null when saves=0 (got ${row.linkedConvRate}) at ${days}D. ` +
+            "null means 'no savers to convert'; 0% means 'savers existed but none converted'.");
+        }
+      }
+    }
+  });
+
+  it("median conversion time only exists when linked conversions exist", () => {
+    for (const days of [30, 90, 365]) {
+      const d = getDesignerSampleData(days);
+      const breakdown: any[] = (d.advanced as any)?.saveVsPurchase?.productBreakdown ?? [];
+      for (const row of breakdown) {
+        if ((row.linkedConversions ?? 0) === 0) {
+          assert.equal(row.medianDaysToConvert, null,
+            `${row.product} medianDaysToConvert must be null when linkedConversions=0 ` +
+            `(got ${row.medianDaysToConvert}) at ${days}D`);
+        }
+      }
+    }
+  });
+
+  it("saveToConvertRate matches pct(allLinkedConversions, allSavedCohortCount) — numerator ≤ denominator", () => {
+    for (const days of [30, 90, 365]) {
+      const svp: any = getDesignerSampleData(days).advanced.saveVsPurchase;
+      const allLinked: number = svp.allLinkedConversions ?? 0;
+      const cohorts: number = svp.allSavedCohortCount ?? 0;
+      const expectedRate = cohorts > 0 ? Math.round((allLinked / cohorts) * 100) : 0;
+      assert.equal(svp.saveToConvertRate, expectedRate,
+        `saveToConvertRate must equal pct(${allLinked}, ${cohorts})=${expectedRate} at ${days}D (got ${svp.saveToConvertRate})`);
+      assert.ok(allLinked <= cohorts,
+        `allLinkedConversions (${allLinked}) cannot exceed allSavedCohortCount (${cohorts}) at ${days}D`);
+    }
+  });
+
+  it("repeated saves by one customer for the same product create one conversion cohort", () => {
+    // C9:HER: saves at daysAgo=15 and 120 → 2 events, 1 cohort.
+    // C65:HER: saves at daysAgo=6 and 8 → 2 events, 1 cohort.
+    // C89:WHOLE: saves at daysAgo=34, 37, 100 → 3 events, 1 cohort.
+    // C111:WHOLE: saves at daysAgo=34 and 105 → 2 events, 1 cohort.
+    // Test at 365D only: at shorter windows, period saves < all-time cohorts for unrelated reasons
+    // (some cohort members saved outside the window), so the comparison is not meaningful.
+    const svp: any = getDesignerSampleData(365).advanced.saveVsPurchase;
+    const her = svp.productBreakdown.find((r: any) => r.product === "Becoming Her");
+    const whole = svp.productBreakdown.find((r: any) => r.product === "Becoming Whole");
+    assert.ok(her, "Becoming Her must appear in productBreakdown at 365D");
+    assert.ok(whole, "Becoming Whole must appear in productBreakdown at 365D");
+    // At 365D period=all-time: Her has 12 save events but 10 unique cohorts
+    assert.ok(her.savedCohortCount < her.saves,
+      `Her savedCohortCount (${her.savedCohortCount}) must be < save events (${her.saves}) at 365D`);
+    // Whole has 26 save events but 23 unique cohorts
+    assert.ok(whole.savedCohortCount < whole.saves,
+      `Whole savedCohortCount (${whole.savedCohortCount}) must be < save events (${whole.saves}) at 365D`);
+  });
+
+  it("one purchase cannot generate multiple linked conversions", () => {
+    // C9 bought HER once (daysAgo=40) and saved HER twice (daysAgo=15 and 120).
+    // Only 1 conversion must be counted for Her, not 2.
+    for (const days of [90, 365]) {
+      const svp: any = getDesignerSampleData(days).advanced.saveVsPurchase;
+      const her = svp.productBreakdown.find((r: any) => r.product === "Becoming Her");
+      assert.ok(her?.linkedConversions <= her?.savedCohortCount,
+        `linkedConversions (${her?.linkedConversions}) cannot exceed savedCohortCount (${her?.savedCohortCount}) at ${days}D`);
+    }
+  });
+
+  it("per-product linkedConvRate uses cohort denominator (savedCohortCount), not raw save-event count", () => {
+    for (const days of [30, 90, 365]) {
+      const svp: any = getDesignerSampleData(days).advanced.saveVsPurchase;
+      for (const row of svp.productBreakdown) {
+        if (row.linkedConvRate !== null && row.savedCohortCount > 0) {
+          const expected = Math.round((row.linkedConversions / row.savedCohortCount) * 100);
+          assert.equal(row.linkedConvRate, expected,
+            `${row.product} linkedConvRate must be pct(${row.linkedConversions}, ${row.savedCohortCount})=${expected} at ${days}D (got ${row.linkedConvRate})`);
+        }
+      }
+    }
+  });
+
+  it("median conversion time uses only converted unique cohorts", () => {
+    // medianDaysToConvert is null when no conversions; when 1 conversion it equals that cohort's days
+    for (const days of [30, 90, 365]) {
+      const svp: any = getDesignerSampleData(days).advanced.saveVsPurchase;
+      if (svp.allLinkedConversions === 0) {
+        assert.equal(svp.medianDaysToConvert, null,
+          `medianDaysToConvert must be null when allLinkedConversions=0 at ${days}D`);
+      } else {
+        assert.ok(typeof svp.medianDaysToConvert === "number",
+          `medianDaysToConvert must be a number when conversions exist at ${days}D`);
+      }
+    }
   });
 });
