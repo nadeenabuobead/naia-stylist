@@ -41,11 +41,13 @@ function sanitizeDraft(raw: OnboardingAnswers): OnboardingAnswers {
   const out: OnboardingAnswers = {};
 
   const arrayKeys: Array<keyof OnboardingAnswers> = [
-    "style-personalities", "desired-impression", "lifestyle",
-    "desired-feelings", "becoming", "fit-preferences",
-    "silhouette", "wardrobe-disconnection",
-    "favorite-colors", "avoid-colors",
-    "style-support", "shopping-priorities",
+    // Rev 6 onboarding
+    "current-goal", "style-personalities", "successful-outfit-gives",
+    "lifestyle", "favorite-colors", "avoid-colors",
+    "silhouette", "fit-concerns", "dressing-preferences",
+    // Legacy (still accepted if in draft)
+    "desired-impression", "desired-feelings", "becoming", "fit-preferences",
+    "wardrobe-disconnection", "style-support", "shopping-priorities",
     "coverage-preferences",
   ];
 
@@ -66,6 +68,8 @@ function sanitizeDraft(raw: OnboardingAnswers): OnboardingAnswers {
   if (typeof ta === "string") out["trend-appetite"] = ta;
   const td = raw["typical-day"];
   if (typeof td === "string") out["typical-day"] = td;
+  const fcn = raw["fit-concerns-note"];
+  if (typeof fcn === "string") out["fit-concerns-note"] = fcn;
 
   return out;
 }
@@ -133,16 +137,23 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   const op = customer.onboardingProfile;
   const existingAnswers: OnboardingAnswers = {};
   if (op) {
-    if (op.stylePersonalities.length)  existingAnswers["style-personalities"]    = op.stylePersonalities;
+    // Rev 6 fields
+    if ((op as any).currentGoal?.length)           existingAnswers["current-goal"]           = (op as any).currentGoal;
+    if (op.stylePersonalities.length)              existingAnswers["style-personalities"]    = op.stylePersonalities;
+    if ((op as any).successfulOutfitGives?.length) existingAnswers["successful-outfit-gives"]= (op as any).successfulOutfitGives;
+    if (op.lifestyle.length)                       existingAnswers["lifestyle"]              = op.lifestyle;
+    if (op.favoriteColors.length)                  existingAnswers["favorite-colors"]        = op.favoriteColors;
+    if (op.avoidColors.length)                     existingAnswers["avoid-colors"]           = op.avoidColors;
+    if ((op as any).silhouette?.length)            existingAnswers["silhouette"]             = (op as any).silhouette;
+    if (op.fitConcerns?.length)                    existingAnswers["fit-concerns"]           = op.fitConcerns;
+    if ((op as any).fitConcernsNote)               existingAnswers["fit-concerns-note"]      = (op as any).fitConcernsNote;
+    if ((op as any).dressingPreferences?.length)   existingAnswers["dressing-preferences"]   = (op as any).dressingPreferences;
+    // Legacy fields (not shown in Rev 6 flow but preserved if in draft)
     if (op.desiredImpression.length)   existingAnswers["desired-impression"]     = op.desiredImpression;
-    if (op.lifestyle.length)           existingAnswers["lifestyle"]              = op.lifestyle;
     if (op.desiredFeelings.length)     existingAnswers["desired-feelings"]       = op.desiredFeelings;
     if (op.becoming.length)            existingAnswers["becoming"]               = op.becoming;
     if (op.fitPreferences.length)      existingAnswers["fit-preferences"]        = op.fitPreferences;
-    if ((op as any).silhouette?.length) existingAnswers["silhouette"]            = (op as any).silhouette;
     if (op.styleStruggles.length)      existingAnswers["wardrobe-disconnection"] = op.styleStruggles;
-    if (op.favoriteColors.length)      existingAnswers["favorite-colors"]        = op.favoriteColors;
-    if (op.avoidColors.length)         existingAnswers["avoid-colors"]           = op.avoidColors;
     if (op.styleSupport.length)        existingAnswers["style-support"]          = op.styleSupport;
     if ((op as any).shoppingPriorities?.length) existingAnswers["shopping-priorities"] = (op as any).shoppingPriorities;
     if ((op as any).trendAppetite)     existingAnswers["trend-appetite"]         = (op as any).trendAppetite;
@@ -236,6 +247,7 @@ export default function OnboardingStep() {
   const [multiValue,           setMultiValue]           = useState<string[]>([]);
   const [secondaryMultiValue,  setSecondaryMultiValue]  = useState<string[]>([]);
   const [textValue,            setTextValue]            = useState<string>("");
+  const [noteFieldValue,       setNoteFieldValue]       = useState<string>("");
 
   // Populate state from DB base + session draft
   useEffect(() => {
@@ -248,15 +260,23 @@ export default function OnboardingStep() {
       else if (typeof prev === "string") { setSingleValue(prev); setTextValue(prev); }
       else                               { setSingleValue(null); setMultiValue([]); setTextValue(""); }
 
-      // Secondary question (avoid-colors on step 8)
+      // Secondary question (avoid-colors on step 5)
       if (question.secondaryQuestion) {
         const sec = (merged as Record<string, unknown>)[question.secondaryQuestion.id];
         setSecondaryMultiValue(Array.isArray(sec) ? (sec as string[]) : []);
       } else {
         setSecondaryMultiValue([]);
       }
+
+      // Note field (fit-concerns-note on step 7)
+      if (question.noteField) {
+        const nf = (merged as Record<string, unknown>)[question.noteField.id];
+        setNoteFieldValue(typeof nf === "string" ? nf : "");
+      } else {
+        setNoteFieldValue("");
+      }
     } catch {
-      setSingleValue(null); setMultiValue([]); setSecondaryMultiValue([]); setTextValue("");
+      setSingleValue(null); setMultiValue([]); setSecondaryMultiValue([]); setTextValue(""); setNoteFieldValue("");
     }
   }, [question.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -278,7 +298,7 @@ export default function OnboardingStep() {
             (sessionEdits as Record<string, unknown>)[qid] = multiValue;
           }
 
-          // Also save secondary question (avoid-colors)
+          // Also save secondary question (avoid-colors on step 5)
           if (question.secondaryQuestion) {
             const secId = question.secondaryQuestion.id as keyof OnboardingAnswers;
             const secBase = Array.isArray((existingAnswers as Record<string, unknown>)[secId])
@@ -288,6 +308,17 @@ export default function OnboardingStep() {
               delete (sessionEdits as Record<string, unknown>)[secId];
             } else {
               (sessionEdits as Record<string, unknown>)[secId] = secondaryMultiValue;
+            }
+          }
+
+          // Also save note field (fit-concerns-note on step 7)
+          if (question.noteField) {
+            const nfId = question.noteField.id as keyof OnboardingAnswers;
+            const nfBase = ((existingAnswers as Record<string, unknown>)[nfId] as string | undefined) ?? "";
+            if (noteFieldValue === nfBase) {
+              delete (sessionEdits as Record<string, unknown>)[nfId];
+            } else {
+              (sessionEdits as Record<string, unknown>)[nfId] = noteFieldValue;
             }
           }
         } else if (question.type === "single") {
@@ -351,7 +382,16 @@ export default function OnboardingStep() {
   const toggleMulti = (id: string) => {
     setMultiValue(prev => {
       if (prev.includes(id)) return prev.filter(v => v !== id);
-      if (!question.maxSelections || prev.length < question.maxSelections) return [...prev, id];
+      const exclusives = question.exclusiveIds ?? [];
+      if (exclusives.includes(id)) {
+        // Exclusive selected: replace everything with just this id
+        return [id];
+      }
+      // Non-exclusive selected: remove any exclusive IDs currently selected
+      const withoutExclusives = prev.filter(v => !exclusives.includes(v));
+      if (!question.maxSelections || withoutExclusives.length < question.maxSelections) {
+        return [...withoutExclusives, id];
+      }
       return prev;
     });
   };
@@ -405,23 +445,52 @@ export default function OnboardingStep() {
 
         {/* MULTI */}
         {question.type === "multi" && question.options && (
-          <div className="ob-pills">
-            {question.options.map(opt => {
-              const isSelected = multiValue.includes(opt.id);
-              const isDisabled = !isSelected && !!question.maxSelections && multiValue.length >= question.maxSelections;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => toggleMulti(opt.id)}
-                  disabled={isDisabled}
-                  className={`ob-pill${isSelected ? " selected" : ""}`}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
+          <>
+            <div className="ob-pills">
+              {question.options.map(opt => {
+                const exclusives = question.exclusiveIds ?? [];
+                const isSelected = multiValue.includes(opt.id);
+                const hasExclusiveActive = exclusives.some(eid => multiValue.includes(eid));
+                const isExclusive = exclusives.includes(opt.id);
+                // Disable non-exclusive when max reached AND no exclusive is active
+                const isDisabled =
+                  !isSelected &&
+                  !isExclusive &&
+                  !!question.maxSelections &&
+                  !hasExclusiveActive &&
+                  multiValue.filter(v => !exclusives.includes(v)).length >= question.maxSelections;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => toggleMulti(opt.id)}
+                    disabled={isDisabled}
+                    className={`ob-pill${isSelected ? " selected" : ""}`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Note field (e.g. fit-concerns-note revealed when "other" is selected) */}
+            {question.noteField && multiValue.includes(question.noteField.triggerId) && (
+              <div style={{ marginTop: "16px" }}>
+                <div className="ob-section-label">{question.noteField.placeholder}</div>
+                <textarea
+                  className="ob-textarea"
+                  value={noteFieldValue}
+                  onChange={e => setNoteFieldValue(e.target.value)}
+                  placeholder={question.noteField.placeholder}
+                  maxLength={question.noteField.maxLength}
+                  style={{ minHeight: "100px" }}
+                />
+                {question.noteField.maxLength && (
+                  <div className="ob-charcount">{noteFieldValue.length} / {question.noteField.maxLength}</div>
+                )}
+              </div>
+            )}
+          </>
         )}
 
         {/* SINGLE */}

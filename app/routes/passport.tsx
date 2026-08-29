@@ -110,6 +110,13 @@ const PASSPORT_ONLY_QUESTIONS: Record<string, QuizQuestion> = {
       { id: "pattern-mixing",  label: "Pattern mixing is my thing"           },
     ],
   },
+  "fit-concerns-note": {
+    id: "fit-concerns-note",
+    type: "text",
+    title: "Anything else about fit you'd like us to know?",
+    placeholder: "e.g. I have very narrow shoulders and wide hips, or sleeves are always too short.",
+    maxLength: 500,
+  },
 };
 
 // Add passport-only questions to lookup tables
@@ -132,6 +139,7 @@ function lbl(qId: string, oId: string): string {
 
 type SectionId =
   | "identity" | "direction" | "life" | "fit" | "sizes" | "colours" | "wardrobe"
+  | "dressing" | "goals"
   | "notes";
 
 type FieldKind = "array" | "color" | "single" | "text";
@@ -159,12 +167,23 @@ interface SectionDef {
 // Exact section labels (names) as specified
 const SECTIONS: SectionDef[] = [
   {
+    id: "goals",
+    label: "Your Current Focus",
+    question: "What would you most like nAia to help you with right now?",
+    helper: "This tells nAia where to focus. It is mutable context — you can update it anytime.",
+    optional: true,
+    subFields: [
+      { draftKey: "current-goal"           as DraftKey, apiKey: "currentGoal",          subLabel: "What I want nAia to help with",       kind: "array" as FieldKind, questionId: "current-goal"            },
+      { draftKey: "successful-outfit-gives" as DraftKey, apiKey: "successfulOutfitGives", subLabel: "What great outfits give me",         kind: "array" as FieldKind, questionId: "successful-outfit-gives" },
+    ],
+  },
+  {
     id: "identity",
     label: "Your Style Identity",
-    question: "Which style energies feel most like you?",
-    helper: "Select what resonates. nAia blends these into the aesthetic of every recommendation.",
+    question: "Which styles currently feel most like you?",
+    helper: "Select up to 2. nAia blends these into the aesthetic of every recommendation.",
     subFields: [
-      { draftKey: "style-personalities", apiKey: "stylePersonalities", subLabel: "Style energies",       kind: "array", questionId: "style-personalities" },
+      { draftKey: "style-personalities", apiKey: "stylePersonalities", subLabel: "My style",             kind: "array", questionId: "style-personalities" },
       { draftKey: "desired-impression",  apiKey: "desiredImpression",  subLabel: "The impression I make", kind: "array", questionId: "desired-impression"  },
     ],
   },
@@ -223,9 +242,20 @@ const SECTIONS: SectionDef[] = [
       { draftKey: "hip-measurement"    as DraftKey, apiKey: "hipMeasurement",   subLabel: "Hips (widest point)",                                                 kind: "text"   as FieldKind, questionId: "hip-measurement"    },
       // V2-D proportions & fit
       { draftKey: "body-shape"         as DraftKey, apiKey: "bodyShape",        subLabel: "How would you describe your proportions?",                            kind: "single" as FieldKind, questionId: "body-shape"          },
-      { draftKey: "fit-concerns"       as DraftKey, apiKey: "fitConcerns",      subLabel: "Are there any fit considerations nAia should know about?",            kind: "array"  as FieldKind, questionId: "fit-concerns"        },
+      { draftKey: "fit-concerns"       as DraftKey, apiKey: "fitConcerns",      subLabel: "Fit considerations",                                                  kind: "array"  as FieldKind, questionId: "fit-concerns"        },
+      { draftKey: "fit-concerns-note"  as DraftKey, apiKey: "fitConcernsNote",  subLabel: "Additional fit notes",                                                kind: "text"   as FieldKind, questionId: "fit-concerns-note"   },
     ],
     optional: true,
+  },
+  {
+    id: "dressing",
+    label: "Your Dressing Requirements",
+    question: "Are there any dressing requirements nAia should always respect?",
+    helper: "These are hard requirements — nAia will filter out products that do not meet them.",
+    optional: true,
+    subFields: [
+      { draftKey: "dressing-preferences" as DraftKey, apiKey: "dressingPreferences", subLabel: "My dressing requirements", kind: "array" as FieldKind, questionId: "dressing-preferences" },
+    ],
   },
   {
     id: "colours",
@@ -504,7 +534,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // V2-D proportions & fit
   if ((op as any).bodyShape)                 savedAnswers["body-shape"]             = (op as any).bodyShape;
   if ((op as any).fitConcerns?.length)       savedAnswers["fit-concerns"]           = (op as any).fitConcerns;
+  if ((op as any).fitConcernsNote)           savedAnswers["fit-concerns-note"]      = (op as any).fitConcernsNote;
   if ((op as any).preferredCoverage)         savedAnswers["preferred-coverage"]     = (op as any).preferredCoverage;
+  // Rev 6 fields
+  if ((op as any).currentGoal?.length)           savedAnswers["current-goal"]           = (op as any).currentGoal;
+  if ((op as any).successfulOutfitGives?.length) savedAnswers["successful-outfit-gives"]= (op as any).successfulOutfitGives;
+  if ((op as any).dressingPreferences?.length)   savedAnswers["dressing-preferences"]   = (op as any).dressingPreferences;
 
   const sa = await prisma.selfieAnalysis.findUnique({
     where: { customerId: customer.id },

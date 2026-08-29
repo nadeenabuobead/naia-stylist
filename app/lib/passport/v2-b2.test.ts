@@ -1,8 +1,8 @@
-// V2-B2 contract tests.
+// V2-B2 contract tests — updated for Passport Rev 6 (2026-08-29).
 //
-// Tests: 12-screen onboarding quiz, COLOUR_FAMILIES, Section 5 placeholder,
-// shopping priorities approved list, required-screen contracts,
-// mutual exclusion logic, legacy hint detection.
+// Tests: Rev 6 8-screen onboarding quiz, COLOUR_FAMILIES, Section 5,
+// optional-screen contracts (Rev 6: no required screens), legacy hint detection,
+// and backward-compat assertions about removed first-onboarding screens.
 //
 // Run: node --test --import tsx/esm app/lib/passport/v2-b2.test.ts
 
@@ -51,83 +51,51 @@ describe("B2.1 COLOUR_FAMILIES", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// B2.2 — 12-screen onboarding quiz
+// B2.2 — Rev 6 onboarding quiz (8 screens)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("B2.2 12-screen quiz", () => {
-  it("getTotalSteps() returns 12", () => {
-    assert.equal(getTotalSteps(), 12);
+describe("B2.2 Rev 6 8-screen quiz", () => {
+  it("getTotalSteps() returns 8", () => {
+    assert.equal(getTotalSteps(), 8);
   });
 
-  it("quizQuestions array has 12 entries", () => {
-    assert.equal(quizQuestions.length, 12);
+  it("quizQuestions array has 8 entries", () => {
+    assert.equal(quizQuestions.length, 8);
   });
 
-  it("screen IDs are in the expected order", () => {
+  it("screen IDs are in the Rev 6 approved order", () => {
     const ids = quizQuestions.map(q => q.id);
     assert.deepEqual(ids, [
+      "current-goal",
       "style-personalities",
-      "desired-impression",
+      "successful-outfit-gives",
       "lifestyle",
-      "desired-feelings",
-      "becoming",
-      "silhouette",
-      "wardrobe-disconnection",
       "favorite-colors",
-      "style-support",
-      "shopping-priorities",
-      "trend-appetite",
-      "final-notes",
+      "silhouette",
+      "fit-concerns",
+      "dressing-preferences",
     ]);
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// B2.3 — Required screens (1, 3, 4; favourite portion of Screen 8)
+// B2.3 — Rev 6: all screens are optional (no required screens)
+// Previously (V2-B2), style-personalities/lifestyle/desired-feelings/favorite-colors
+// were required. Rev 6 removes the required concept entirely from first onboarding.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("B2.3 required screens", () => {
-  it("screen 1 (style-personalities) is required", () => {
-    assert.ok(quizQuestions[0].required === true);
+describe("B2.3 Rev 6 optional screens (no screen marked required)", () => {
+  it("no screen has required: true", () => {
+    assert.equal(quizQuestions.filter(q => q.required).length, 0);
   });
 
-  it("screen 2 (desired-impression) is NOT required (skippable)", () => {
-    assert.ok(!quizQuestions[1].required);
-  });
-
-  it("screen 3 (lifestyle) is required", () => {
-    assert.ok(quizQuestions[2].required === true);
-  });
-
-  it("screen 4 (desired-feelings) is required", () => {
-    assert.ok(quizQuestions[3].required === true);
-  });
-
-  it("screen 5 (becoming) is NOT required (skippable)", () => {
-    assert.ok(!quizQuestions[4].required);
-  });
-
-  it("screen 6 (silhouette) is NOT required (skippable)", () => {
-    assert.ok(!quizQuestions[5].required);
-  });
-
-  it("screen 7 (wardrobe-disconnection) is NOT required (skippable)", () => {
-    assert.ok(!quizQuestions[6].required);
-  });
-
-  it("screen 8 (favorite-colors) is required", () => {
-    assert.ok(quizQuestions[7].required === true);
-  });
-
-  it("screens 9–12 are NOT required", () => {
-    for (const q of quizQuestions.slice(8)) {
-      assert.ok(!q.required, `screen ${q.id} should not be required`);
-    }
-  });
-
-  it("exactly 4 screens are marked required", () => {
-    assert.equal(quizQuestions.filter(q => q.required).length, 4);
-  });
+  for (let i = 0; i < 8; i++) {
+    const label = ["current-goal", "style-personalities", "successful-outfit-gives",
+      "lifestyle", "favorite-colors", "silhouette", "fit-concerns", "dressing-preferences"][i];
+    it(`screen ${i + 1} (${label}) is optional`, () => {
+      assert.ok(!quizQuestions[i].required, `${label} must not be marked required`);
+    });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,94 +141,61 @@ describe("B2.4 Screen 8 (favourite + avoided colours)", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// B2.5 — Shopping priorities approved list (6 options, no deferred ones)
+// B2.5 — shopping-priorities removed from first onboarding in Rev 6
+// It is now a Passport-only question (editable in Profile but not asked during
+// first onboarding). Legacy stored shoppingPriorities values are preserved in DB.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("B2.5 shopping priorities approved options", () => {
-  const shoppingQ = quizQuestions.find(q => q.id === "shopping-priorities")!;
-
-  it("shopping-priorities screen exists", () => {
-    assert.ok(shoppingQ !== undefined);
-  });
-
-  it("has exactly 6 options", () => {
-    assert.equal(shoppingQ.options!.length, 6);
-  });
-
-  it("contains all 6 approved option IDs", () => {
-    const ids = new Set(shoppingQ.options!.map(o => o.id));
-    assert.ok(ids.has("versatility"));
-    assert.ok(ids.has("comfort"));
-    assert.ok(ids.has("price"));
-    assert.ok(ids.has("uniqueness"));
-    assert.ok(ids.has("occasion-impact"));
-    assert.ok(ids.has("trend-relevance"));
-  });
-
-  it("does NOT contain deferred option: 'sustainability'", () => {
-    assert.ok(!shoppingQ.options!.some(o => o.id === "sustainability"));
-  });
-
-  it("does NOT contain deferred option: 'brand'", () => {
-    assert.ok(!shoppingQ.options!.some(o => o.id === "brand"));
-  });
-
-  it("does NOT contain deferred option: 'quality'", () => {
-    assert.ok(!shoppingQ.options!.some(o => o.id === "quality"));
-  });
-
-  it("does NOT contain deferred option: 'ethical-sourcing'", () => {
-    assert.ok(!shoppingQ.options!.some(o => o.id === "ethical-sourcing"));
-  });
-
-  it("maxSelections is 3", () => {
-    assert.equal(shoppingQ.maxSelections, 3);
+describe("B2.5 shopping-priorities NOT in Rev 6 first onboarding", () => {
+  it("shopping-priorities is NOT in quizQuestions", () => {
+    assert.ok(!quizQuestions.some(q => q.id === "shopping-priorities"),
+      "shopping-priorities must be absent from the onboarding quiz since Rev 6");
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// B2.6 — trend-appetite is single type
+// B2.6 — trend-appetite removed from first onboarding in Rev 6
+// It is now a Passport-only question. Legacy stored trendAppetite is preserved.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("B2.6 trend-appetite (single type)", () => {
-  const trendQ = quizQuestions.find(q => q.id === "trend-appetite")!;
-
-  it("trend-appetite screen exists", () => {
-    assert.ok(trendQ !== undefined);
-  });
-
-  it("has type 'single'", () => {
-    assert.equal(trendQ.type, "single");
-  });
-
-  it("has 5 options", () => {
-    assert.equal(trendQ.options!.length, 5);
-  });
-
-  it("is NOT marked required", () => {
-    assert.ok(!trendQ.required);
+describe("B2.6 trend-appetite NOT in Rev 6 first onboarding", () => {
+  it("trend-appetite is NOT in quizQuestions", () => {
+    assert.ok(!quizQuestions.some(q => q.id === "trend-appetite"),
+      "trend-appetite must be absent from the onboarding quiz since Rev 6");
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// B2.7 — Lifestyle IDs
+// B2.7 — Lifestyle IDs (Rev 6 V3 IDs)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("B2.7 lifestyle option IDs", () => {
+describe("B2.7 lifestyle option IDs (Rev 6 V3)", () => {
   const lifestyleQ = quizQuestions.find(q => q.id === "lifestyle")!;
 
-  it("uses 'always-on-the-go' (not 'on-the-go')", () => {
+  it("has exactly 7 options (V3 — removed always-on-the-go / busy-mom)", () => {
+    assert.equal(lifestyleQ.options!.length, 7);
+  });
+
+  it("uses V3 IDs: work-office, everyday-casual, dinners-going-out", () => {
     const ids = lifestyleQ.options!.map(o => o.id);
-    assert.ok(ids.includes("always-on-the-go"), "should have always-on-the-go");
-    assert.ok(!ids.includes("on-the-go"), "should not have legacy on-the-go");
+    assert.ok(ids.includes("work-office"), "work-office missing");
+    assert.ok(ids.includes("everyday-casual"), "everyday-casual missing");
+    assert.ok(ids.includes("dinners-going-out"), "dinners-going-out missing");
   });
 
-  it("retains 'busy-mom'", () => {
-    assert.ok(lifestyleQ.options!.some(o => o.id === "busy-mom"));
+  it("uses V3 IDs: events-special-occasions, family-parenting, travel, active-busy-days", () => {
+    const ids = lifestyleQ.options!.map(o => o.id);
+    assert.ok(ids.includes("events-special-occasions"), "events-special-occasions missing");
+    assert.ok(ids.includes("family-parenting"), "family-parenting missing");
+    assert.ok(ids.includes("travel"), "travel missing");
+    assert.ok(ids.includes("active-busy-days"), "active-busy-days missing");
   });
 
-  it("has exactly 8 options", () => {
-    assert.equal(lifestyleQ.options!.length, 8);
+  it("does NOT contain removed V2 IDs: always-on-the-go, busy-mom, on-the-go", () => {
+    const ids = lifestyleQ.options!.map(o => o.id);
+    assert.ok(!ids.includes("always-on-the-go"), "always-on-the-go should be absent");
+    assert.ok(!ids.includes("busy-mom"), "busy-mom should be absent");
+    assert.ok(!ids.includes("on-the-go"), "on-the-go should be absent");
   });
 });
 
@@ -391,43 +326,42 @@ describe("B2.10 Section 5 (V2-C activated: optional body-area pickers)", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// B2.11 — canProceed: non-required screens always allow Continue
+// B2.11 — canProceed: Rev 6 all screens are optional → always can proceed
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("B2.11 canProceed for non-required screens", () => {
+describe("B2.11 canProceed — Rev 6 all screens optional", () => {
   // Mirrored from step.$step.tsx
   function canProceed(question: QuizQuestion, multiValue: string[]): boolean {
     if (!question.required) return true;
     if (question.type === "multi" || question.type === "color") return multiValue.length > 0;
     if (question.type === "single") return multiValue.length > 0;
-    if (question.type === "text") return multiValue.length > 0; // multiValue holds text chars
+    if (question.type === "text") return multiValue.length > 0;
     return false;
   }
 
-  it("non-required screen: canProceed is true even with empty selection", () => {
-    const q = quizQuestions.find(q => q.id === "becoming")!;
-    assert.ok(canProceed(q, []));
-  });
-
-  it("required screen (style-personalities): canProceed is false when empty", () => {
+  it("style-personalities: canProceed is true even with empty selection (optional in Rev 6)", () => {
     const q = quizQuestions.find(q => q.id === "style-personalities")!;
-    assert.ok(!canProceed(q, []));
+    assert.ok(canProceed(q, []), "style-personalities is optional in Rev 6 — must allow empty");
   });
 
-  it("required screen (style-personalities): canProceed is true with 1 selection", () => {
-    const q = quizQuestions.find(q => q.id === "style-personalities")!;
-    assert.ok(canProceed(q, ["minimal"]));
-  });
-
-  it("required screen (lifestyle): canProceed requires at least 1 selection", () => {
+  it("lifestyle: canProceed is true even with empty selection (optional in Rev 6)", () => {
     const q = quizQuestions.find(q => q.id === "lifestyle")!;
-    assert.ok(!canProceed(q, []));
-    assert.ok(canProceed(q, ["office"]));
+    assert.ok(canProceed(q, []), "lifestyle is optional in Rev 6 — must allow empty");
   });
 
-  it("required screen (favorite-colors): canProceed requires at least 1 colour", () => {
+  it("favorite-colors: canProceed is true even with empty selection (optional in Rev 6)", () => {
     const q = quizQuestions.find(q => q.id === "favorite-colors")!;
-    assert.ok(!canProceed(q, []));
-    assert.ok(canProceed(q, ["black"]));
+    assert.ok(canProceed(q, []), "favorite-colors is optional in Rev 6 — must allow empty");
+  });
+
+  it("dressing-preferences: canProceed is true even with empty selection (optional in Rev 6)", () => {
+    const q = quizQuestions.find(q => q.id === "dressing-preferences")!;
+    assert.ok(canProceed(q, []), "dressing-preferences is optional");
+  });
+
+  it("all 8 Rev 6 screens: canProceed with empty selection", () => {
+    for (const q of quizQuestions) {
+      assert.ok(canProceed(q, []), `${q.id} must allow empty (optional screen)`);
+    }
   });
 });

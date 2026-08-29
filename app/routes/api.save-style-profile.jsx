@@ -26,18 +26,22 @@ const RECOGNISED_FIELDS = new Set([
   "shoeSizingSystem", "shoeSize",
   "height", "bustMeasurement", "waistMeasurement", "hipMeasurement",
   "measurementUnit", "bodyShape", "fitConcerns", "preferredCoverage",
+  // Passport Rev 6
+  "currentGoal", "successfulOutfitGives", "dressingPreferences", "fitConcernsNote",
 ]);
 
 const ARRAY_FIELDS = [
   "stylePersonalities", "desiredImpression", "lifestyle", "desiredFeelings",
   "becoming", "fitPreferences", "styleStruggles", "favoriteColors",
   "avoidColors", "styleSupport",
-  // V2-B1 array fields (no quiz-option validation yet — UI doesn't exist)
+  // V2-B1 array fields
   "silhouette", "coveragePreferences", "shoppingPriorities",
   // V2-C
   "bodyFocusAreas", "bodyAvoidAreas",
   // V2-D
   "fitConcerns",
+  // Rev 6
+  "currentGoal", "successfulOutfitGives", "dressingPreferences",
 ];
 
 // V2-B1 free-text fields (string | null); validated same pattern as finalNotes.
@@ -62,15 +66,75 @@ const AVOID_TO_FOCUS_NORM = {
   "bust": "bust", "upper-arms": "arms-shoulders", "hips-thighs": "hips-curves",
 };
 
-// V2-E: lifestyle valid IDs (matches quiz-data.ts question "lifestyle")
-const LIFESTYLE_VALID_IDS = new Set(["office", "busy-mom", "creative", "casual-days", "events", "always-on-the-go", "travel", "hybrid"]);
+// Lifestyle valid IDs: V2 (backward compat) + V3 (Rev 6 canonical)
+const LIFESTYLE_VALID_IDS = new Set([
+  // V2 — backward compat for existing stored values
+  "office", "busy-mom", "creative", "casual-days", "events", "always-on-the-go", "travel", "hybrid",
+  // V3 — Rev 6 canonical
+  "work-office", "everyday-casual", "dinners-going-out", "events-special-occasions",
+  "family-parenting", "active-busy-days",
+  // "travel" is shared V2/V3
+]);
+
+// Rev 6: silhouette valid IDs — V2 (backward compat) + V3 canonical
+const SILHOUETTE_VALID_IDS = new Set([
+  // V2 — backward compat
+  "defined-waist", "straight", "relaxed", "fitted", "oversized", "flowing",
+  // V3 — Rev 6 canonical
+  "waist-defined", "straight-simple", "loose-flowing", "structured-tailored", "not-sure",
+  // "fitted", "relaxed", "oversized" are shared V2/V3
+]);
+const SILHOUETTE_MAX = 3; // Rev 6 raises max from 2 to 3
+
+// Rev 6: style personality valid IDs — V2 (backward compat) + V3 canonical
+const STYLE_PERSONALITY_VALID_IDS = new Set([
+  // V2 — backward compat for existing stored values
+  "old-money", "artsy", "edgy", "feminine", "corporate-chic",
+  "effortlessly-chic", "minimal", "trendy", "romantic", "casual-cool",
+  // V3 — Rev 6 canonical
+  "classic-polished", "feminine-romantic", "minimal-relaxed", "bold-edgy", "creative-expressive",
+]);
+const STYLE_PERSONALITY_MAX = 2; // Rev 6 lowers max from 3 to 2
+
+// Rev 6: current goal valid IDs
+const CURRENT_GOAL_VALID_IDS = new Set([
+  "understand-my-style", "feel-more-like-myself", "use-what-i-own",
+  "easier-getting-dressed", "stop-regret-purchases", "more-cohesive-wardrobe",
+  "dress-for-my-life", "refresh-my-style", "specific-event-trip-change", "not-sure-yet",
+]);
+const CURRENT_GOAL_MAX = 2;
+
+// Rev 6: successful outfit gives valid IDs
+const SUCCESSFUL_OUTFIT_GIVES_VALID_IDS = new Set([
+  "feel-like-myself", "confidence", "feel-put-together", "comfort-ease",
+  "sense-of-expression", "feel-attractive", "sense-of-power", "effortlessness", "not-sure",
+]);
+const SUCCESSFUL_OUTFIT_GIVES_MAX = 3;
+
+// Rev 6: dressing preferences valid IDs (must match APPROVED_DRESSING_PREFERENCE_IDS in signal-contract)
+const DRESSING_PREF_VALID_IDS = new Set([
+  "dresses-modestly", "usually-wears-abayas", "arms-covered",
+  "chest-neckline-covered", "legs-covered", "longer-tops",
+  "no-cropped-tops", "looser-fitting", "wears-hijab",
+]);
+
+// Rev 6: fit concerns — legacy IDs (backward compat) + new Rev 6 IDs
+const FIT_CONCERN_VALID = new Set([
+  // Legacy V2-D IDs (backward compat; may be stored in existing profiles)
+  "petite", "tall", "short-torso", "long-torso", "broad-shoulders",
+  "narrow-shoulders", "fuller-bust", "narrow-hips", "arm-fit", "thigh-fit",
+  // Rev 6 IDs
+  "tops-pull-bust", "waistbands-gape", "tight-hips-thighs", "uncomfortable-rise",
+  "shoulder-sleeve-fit", "often-too-short", "often-too-long", "less-cling-midsection",
+  "shoe-width-comfort", "size-changes", "no-fit-problems", "other",
+]);
+const FIT_CONCERN_MAX_NORMAL = 5; // exclusive "no-fit-problems" + "other" not counted in cap
 
 // V2-D: validation constants
 const SIZING_SYSTEM_VALID    = new Set(["uk", "us", "eu", "international", "other"]);
 // V2-F: shoe sizing system — no "international" option
 const SHOE_SIZING_SYSTEM_VALID = new Set(["uk", "us", "eu", "other"]);
 const BODY_SHAPE_VALID       = new Set(["hourglass", "pear", "apple", "rectangle", "inverted-triangle", "not-sure", "prefer-not-to-say"]);
-const FIT_CONCERN_VALID      = new Set(["petite", "tall", "short-torso", "long-torso", "broad-shoulders", "narrow-shoulders", "fuller-bust", "narrow-hips", "arm-fit", "thigh-fit"]);
 const PREFERRED_COVERAGE_VALID = new Set(["mostly-covered", "balanced", "varies", "more-open"]);
 const MEASUREMENT_UNIT_VALID = new Set(["cm", "in"]);
 
@@ -135,11 +199,12 @@ for (const q of quizQuestions) {
   if (q.maxSelections !== undefined) MAX_SELECTIONS[q.id] = q.maxSelections;
 }
 
-// Maps API field names to their quiz question IDs
+// Maps API field names to their quiz question IDs for option-ID validation.
+// Fields with dedicated combined-vocabulary validation (stylePersonalities, lifestyle,
+// silhouette, fitConcerns, currentGoal, successfulOutfitGives, dressingPreferences)
+// are handled in their own blocks below and excluded here.
 const FIELD_TO_QUESTION_ID = {
-  stylePersonalities: "style-personalities",
   desiredImpression:  "desired-impression",
-  lifestyle:          "lifestyle",
   desiredFeelings:    "desired-feelings",
   becoming:           "becoming",
   fitPreferences:     "fit-preferences",
@@ -310,11 +375,89 @@ export async function action({ request }) {
     }
   }
 
-  // V2-D: fitConcerns — valid IDs, no duplicates
+  // stylePersonalities — V2+V3 combined IDs, max 2 (Rev 6 lowers from 3)
+  if (Object.hasOwn(body, "stylePersonalities")) {
+    const v = body["stylePersonalities"];
+    if (v.length > 0) {
+      if (!v.every(id => STYLE_PERSONALITY_VALID_IDS.has(id)) || new Set(v).size !== v.length) {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
+      if (v.length > STYLE_PERSONALITY_MAX) {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
+    }
+  }
+
+  // silhouette — V2+V3 combined IDs, max 3 (Rev 6 raises from 2)
+  if (Object.hasOwn(body, "silhouette")) {
+    const v = body["silhouette"];
+    if (v.length > 0) {
+      if (!v.every(id => SILHOUETTE_VALID_IDS.has(id)) || new Set(v).size !== v.length) {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
+      if (v.length > SILHOUETTE_MAX) {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
+    }
+  }
+
+  // fitConcerns — legacy + Rev 6 IDs, max 5 for normal selections
   if (Object.hasOwn(body, "fitConcerns")) {
     const v = body["fitConcerns"];
     if (!v.every(id => FIT_CONCERN_VALID.has(id)) || new Set(v).size !== v.length) {
       return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+    // no-fit-problems and other don't count toward the 5-item cap
+    const normalIds = v.filter(id => id !== "no-fit-problems" && id !== "other");
+    if (normalIds.length > FIT_CONCERN_MAX_NORMAL) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+
+  // fitConcernsNote — string | null, max 500 chars
+  if (Object.hasOwn(body, "fitConcernsNote")) {
+    const v = body["fitConcernsNote"];
+    if (v !== null && typeof v !== "string") {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+    if (typeof v === "string" && v.length > 500) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+
+  // currentGoal — approved IDs, max 2
+  if (Object.hasOwn(body, "currentGoal")) {
+    const v = body["currentGoal"];
+    if (v.length > 0) {
+      if (!v.every(id => CURRENT_GOAL_VALID_IDS.has(id)) || new Set(v).size !== v.length) {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
+      if (v.length > CURRENT_GOAL_MAX) {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
+    }
+  }
+
+  // successfulOutfitGives — approved IDs, max 3
+  if (Object.hasOwn(body, "successfulOutfitGives")) {
+    const v = body["successfulOutfitGives"];
+    if (v.length > 0) {
+      if (!v.every(id => SUCCESSFUL_OUTFIT_GIVES_VALID_IDS.has(id)) || new Set(v).size !== v.length) {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
+      if (v.length > SUCCESSFUL_OUTFIT_GIVES_MAX) {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
+    }
+  }
+
+  // dressingPreferences — approved IDs only, no duplicates, no cap
+  if (Object.hasOwn(body, "dressingPreferences")) {
+    const v = body["dressingPreferences"];
+    if (v.length > 0) {
+      if (!v.every(id => DRESSING_PREF_VALID_IDS.has(id)) || new Set(v).size !== v.length) {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
     }
   }
 
@@ -371,7 +514,23 @@ export async function action({ request }) {
     return Response.json({ error: "invalid_body" }, { status: 400 });
   }
 
-  // All submitted values are validated. Absent keys fall back to the saved DB value
+  // Rev 6: exclusive-ID normalization — applied after validation, before persistence.
+  // Only fields actually present in the request body are normalized.
+  // The exclusive ID wins: all other values in the same field are removed.
+  if (Object.hasOwn(body, "currentGoal") && body["currentGoal"].includes("not-sure-yet")) {
+    body["currentGoal"] = ["not-sure-yet"];
+  }
+  if (Object.hasOwn(body, "successfulOutfitGives") && body["successfulOutfitGives"].includes("not-sure")) {
+    body["successfulOutfitGives"] = ["not-sure"];
+  }
+  if (Object.hasOwn(body, "silhouette") && body["silhouette"].includes("not-sure")) {
+    body["silhouette"] = ["not-sure"];
+  }
+  if (Object.hasOwn(body, "fitConcerns") && body["fitConcerns"].includes("no-fit-problems")) {
+    body["fitConcerns"] = ["no-fit-problems"];
+  }
+
+  // All submitted values are validated and normalized. Absent keys fall back to the saved DB value
   // (partial-patch behaviour: a caller sending only changed fields is supported).
   const pickArr = (key, fallback) =>
     Object.hasOwn(body, key) ? body[key] : (fallback ?? []);
@@ -411,6 +570,16 @@ export async function action({ request }) {
     existingSilhouette,
     existingStructure,
   );
+
+  // Rev 6: fitConcernsNote is only meaningful when `other` is the selected fitConcern.
+  // If fitConcerns is submitted and the resolved array does not include `other`, clear the note.
+  // If fitConcerns is NOT in the payload, the existing note is preserved unchanged.
+  const resolvedFitConcernsNote = (() => {
+    if (!Object.hasOwn(body, "fitConcerns")) return pickText("fitConcernsNote", op?.fitConcernsNote);
+    return pickArr("fitConcerns", op?.fitConcerns).includes("other")
+      ? pickText("fitConcernsNote", op?.fitConcernsNote)
+      : null;
+  })();
 
   const profileData = {
     stylePersonalities:  pickArr("stylePersonalities",  op?.stylePersonalities),
@@ -456,6 +625,11 @@ export async function action({ request }) {
     bodyShape:           pickText("bodyShape",         op?.bodyShape),
     fitConcerns:         pickArr("fitConcerns",        op?.fitConcerns),
     preferredCoverage:   pickText("preferredCoverage", op?.preferredCoverage),
+    // Passport Rev 6
+    currentGoal:           pickArr("currentGoal",           op?.currentGoal),
+    successfulOutfitGives: pickArr("successfulOutfitGives", op?.successfulOutfitGives),
+    dressingPreferences:   pickArr("dressingPreferences",   op?.dressingPreferences),
+    fitConcernsNote:       resolvedFitConcernsNote,
     completed:           true,
   };
 

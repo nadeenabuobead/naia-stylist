@@ -28,29 +28,37 @@ function lbl(qId: string, oId: string): string {
 }
 
 const IDENTITY: Record<string, { title: string; description: string }> = {
-  "old-money":         { title: "The Timeless Classic",      description: "You appreciate quality, heritage, and understated elegance." },
-  "artsy":             { title: "The Creative Spirit",       description: "You express yourself through unique pieces and artistic flair." },
-  "edgy":              { title: "The Bold Rebel",            description: "You're not afraid to make a statement and push boundaries." },
-  "feminine":          { title: "The Soft Romantic",         description: "You're drawn to delicate details and graceful silhouettes." },
-  "corporate-chic":    { title: "The Polished Professional", description: "You blend sophistication with modern elegance." },
-  "effortlessly-chic": { title: "The Natural Stylist",       description: "You make looking put-together seem completely effortless." },
-  "minimal":           { title: "The Modern Minimalist",     description: "You believe in the power of simplicity and intentional pieces." },
-  "trendy":            { title: "The Fashion Forward",       description: "You love staying ahead of the curve and experimenting with new styles." },
-  "romantic":          { title: "The Dreamer",               description: "You're drawn to soft, feminine pieces that tell a story." },
-  "casual-cool":       { title: "The Relaxed Stylist",       description: "You master the art of looking good without trying too hard." },
+  // V3 archetypes (Rev 6)
+  "classic-polished":    { title: "The Classic & Polished",    description: "You appreciate refined quality and understated elegance that lasts." },
+  "feminine-romantic":   { title: "The Feminine Romantic",     description: "You're drawn to soft details, graceful silhouettes, and a romantic sensibility." },
+  "minimal-relaxed":     { title: "The Minimal Relaxed",       description: "You believe in simplicity, ease, and intentional pieces that do the work quietly." },
+  "bold-edgy":           { title: "The Bold & Edgy",           description: "You're not afraid to make a statement and push boundaries with your look." },
+  "creative-expressive": { title: "The Creative Expressive",   description: "You express who you are through original, artistic choices that are distinctly yours." },
+  // V2 legacy (backward compat for existing users)
+  "old-money":           { title: "The Timeless Classic",      description: "You appreciate quality, heritage, and understated elegance." },
+  "artsy":               { title: "The Creative Spirit",       description: "You express yourself through unique pieces and artistic flair." },
+  "edgy":                { title: "The Bold Rebel",            description: "You're not afraid to make a statement and push boundaries." },
+  "feminine":            { title: "The Soft Romantic",         description: "You're drawn to delicate details and graceful silhouettes." },
+  "corporate-chic":      { title: "The Polished Professional", description: "You blend sophistication with modern elegance." },
+  "effortlessly-chic":   { title: "The Natural Stylist",       description: "You make looking put-together seem completely effortless." },
+  "minimal":             { title: "The Modern Minimalist",     description: "You believe in the power of simplicity and intentional pieces." },
+  "trendy":              { title: "The Fashion Forward",       description: "You love staying ahead of the curve and experimenting with new styles." },
+  "romantic":            { title: "The Dreamer",               description: "You're drawn to soft, feminine pieces that tell a story." },
+  "casual-cool":         { title: "The Relaxed Stylist",       description: "You master the art of looking good without trying too hard." },
 };
 
 function buildNaiaNote(a: OnboardingAnswers): string {
   const p = (a["style-personalities"] ?? []).slice(0, 2).map(id => lbl("style-personalities", id));
-  const f = (a["desired-feelings"] ?? []).slice(0, 2).map(id => lbl("desired-feelings", id).toLowerCase());
   const av = (a["avoid-colors"] ?? []).map(id => lbl("avoid-colors", id).toLowerCase());
+  // Rev 6: desiredFeelings may be absent for new users; fall back to successfulOutfitGives for note copy
+  const sog = (a["successful-outfit-gives"] ?? []).slice(0, 2).map(id => lbl("successful-outfit-gives", id).toLowerCase());
   let note = "nAia will use your style passport to personalise every styling suggestion to your unique aesthetic.";
-  if (p.length && f.length) {
-    note = `nAia knows your style runs ${p.join(" and ")} and you want to feel ${f.join(" and ")} — every suggestion will lead with that.`;
+  if (p.length && sog.length) {
+    note = `nAia knows your style runs ${p.join(" and ")} and great outfits give you ${sog.join(" and ")} — every suggestion will lead with that.`;
   } else if (p.length) {
     note = `nAia knows your style leans ${p.join(" and ")} — suggestions will stay true to that energy.`;
-  } else if (f.length) {
-    note = `nAia knows you want to feel ${f.join(" and ")} — outfits will always lead with that intention.`;
+  } else if (sog.length) {
+    note = `nAia knows great outfits give you ${sog.join(" and ")} — every suggestion will lead with that.`;
   }
   if (av.length) {
     note += ` Colours to deprioritise: ${av.join(", ")}.`;
@@ -64,19 +72,26 @@ function buildNaiaNote(a: OnboardingAnswers): string {
 
 // Maps draft key → API field name. Used for both sanitization and POST body.
 const DRAFT_TO_API = [
+  // Rev 6 onboarding fields
+  ["current-goal",           "currentGoal",          "array"],
   ["style-personalities",    "stylePersonalities",   "array"],
-  ["desired-impression",     "desiredImpression",    "array"],
+  ["successful-outfit-gives","successfulOutfitGives","array"],
   ["lifestyle",              "lifestyle",            "array"],
-  ["desired-feelings",       "desiredFeelings",      "array"],
-  ["becoming",               "becoming",             "array"],
-  ["fit-preferences",        "fitPreferences",       "array"],  // legacy
-  ["silhouette",             "silhouette",           "array"],
-  ["wardrobe-disconnection", "styleStruggles",       "array"],
   ["favorite-colors",        "favoriteColors",       "array"],
   ["avoid-colors",           "avoidColors",          "array"],
+  ["silhouette",             "silhouette",           "array"],
+  ["fit-concerns",           "fitConcerns",          "array"],
+  ["fit-concerns-note",      "fitConcernsNote",      "text"],
+  ["dressing-preferences",   "dressingPreferences",  "array"],
+  // Legacy fields (not in Rev 6 flow; preserved if already in draft)
+  ["desired-impression",     "desiredImpression",    "array"],
+  ["desired-feelings",       "desiredFeelings",      "array"],
+  ["becoming",               "becoming",             "array"],
+  ["fit-preferences",        "fitPreferences",       "array"],
+  ["wardrobe-disconnection", "styleStruggles",       "array"],
   ["style-support",          "styleSupport",         "array"],
   ["shopping-priorities",    "shoppingPriorities",   "array"],
-  ["trend-appetite",         "trendAppetite",        "text"],  // single → stored as string
+  ["trend-appetite",         "trendAppetite",        "text"],
   ["final-notes",            "finalNotes",           "text"],
 ] as const;
 

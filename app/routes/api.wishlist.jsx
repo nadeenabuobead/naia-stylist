@@ -367,7 +367,7 @@ FIT & BODY
 - Areas to highlight: ${styleProfile.bodyFocusAreas?.length > 0 ? styleProfile.bodyFocusAreas.join(", ") : "not on record"}
 - Areas to minimise: ${styleProfile.bodyAvoidAreas?.length > 0 ? styleProfile.bodyAvoidAreas.join(", ") : "not on record"}
 - Style struggles: ${styleProfile.styleStruggles?.length > 0 ? styleProfile.styleStruggles.join(", ") : "not specified"}
-${styleProfile.fitConcerns?.length > 0 ? `- Fit considerations: ${styleProfile.fitConcerns.join(", ")}` : ""}
+${styleProfile.fitConcerns?.length > 0 ? `- Fit considerations: ${styleProfile.fitConcerns.join(", ")}` : ""}${styleProfile.fitConcerns?.includes("other") && styleProfile.fitConcernsNote?.trim() ? `\n- Additional fit note: ${styleProfile.fitConcernsNote.trim()}` : ""}
 ${styleProfile.preferredCoverage ? `- Coverage preference: ${styleProfile.preferredCoverage}` : ""}
 ${styleProfile.bodyShape && !["not-sure","prefer-not-to-say"].includes(styleProfile.bodyShape) ? `- Self-described proportions: ${styleProfile.bodyShape}` : ""}
 ${styleProfile.bustMeasurement || styleProfile.waistMeasurement || styleProfile.hipMeasurement ? `- Customer measurements (${styleProfile.measurementUnit || "unit not set"}): bust ${styleProfile.bustMeasurement || "–"}, waist ${styleProfile.waistMeasurement || "–"}, hips ${styleProfile.hipMeasurement || "–"}` : ""}

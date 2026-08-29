@@ -64,6 +64,7 @@ export function buildProfileSignals(
     silhouette?: string[] | null;
     preferredCoverage?: string | null;
     coveragePreferences?: string[] | null;
+    dressingPreferences?: string[] | null;  // Rev 6: feeds Group 2 hard-exclusion engine
   } | null | undefined,
 ): StyleMeProfileSignals | undefined {
   if (!profile) return undefined;
@@ -84,6 +85,9 @@ export function buildProfileSignals(
   if (profile.silhouette?.length) signals.silhouette = profile.silhouette;
   if (profile.preferredCoverage) signals.preferredCoverage = profile.preferredCoverage;
   if (profile.coveragePreferences?.length) signals.coveragePreferences = profile.coveragePreferences;
+  // dressingPreferences: always populate (even empty) so Group 2 hard-exclusion engine
+  // receives the correct signal rather than falling back to its own undefined default.
+  signals.dressingPreferences = profile.dressingPreferences ?? [];
   return Object.keys(signals).length > 0 ? signals : undefined;
 }
 

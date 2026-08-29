@@ -2649,24 +2649,33 @@ describe("§V2-A2 buildProfileSignals — finalNotes wiring", () => {
   });
 });
 
-describe("§V2-A2 quiz-data label contract — becoming and style-support", () => {
-  const becomingQ = quizQuestions.find(q => q.id === "becoming");
-  const styleSupportQ = quizQuestions.find(q => q.id === "style-support");
-
-  it("V2A2.7 — becoming question exists with options", () => {
-    assert.ok(becomingQ !== undefined, "becoming question must exist in quiz-data");
-    assert.ok((becomingQ!.options?.length ?? 0) > 0, "becoming must have options");
+// Rev 6 (2026-08-29): becoming and style-support are LEGACY fields.
+// They are no longer asked during first onboarding but their stored DB values
+// are preserved and remain compatible with buildProfileSignals.
+// The quiz-screen-existence checks (V2A2.7-9) are replaced with:
+//   (a) proof that the quiz screens are intentionally absent, and
+//   (b) proof that legacy stored values still flow through buildProfileSignals.
+describe("§V2-A2 quiz-data label contract — becoming and style-support (Rev 6 legacy state)", () => {
+  it("V2A2.7 — becoming is NOT in the Rev 6 first onboarding quiz (legacy field)", () => {
+    const becomingQ = quizQuestions.find(q => q.id === "becoming");
+    assert.ok(becomingQ === undefined,
+      "becoming must NOT be in Rev 6 quizQuestions — it is a legacy field retained in DB only");
   });
 
-  it("V2A2.8 — becoming 'new-chapter' label is 'A new chapter'", () => {
-    const opt = becomingQ?.options?.find(o => o.id === "new-chapter");
-    assert.equal(opt?.label, "A new chapter");
+  it("V2A2.8 — style-support is NOT in the Rev 6 first onboarding quiz (legacy field)", () => {
+    const styleSupportQ = quizQuestions.find(q => q.id === "style-support");
+    assert.ok(styleSupportQ === undefined,
+      "style-support must NOT be in Rev 6 quizQuestions — it is a legacy field retained in DB only");
   });
 
-  it("V2A2.9 — style-support 'style-what-i-own' has a descriptive label (not just ID)", () => {
-    const opt = styleSupportQ?.options?.find(o => o.id === "style-what-i-own");
-    assert.ok(opt !== undefined, "style-what-i-own option must exist");
-    assert.ok((opt!.label?.length ?? 0) > 15, "style-what-i-own label must be descriptive (>15 chars)");
+  it("V2A2.9 — legacy becoming[] stored values still flow through buildProfileSignals", () => {
+    // Existing users whose DB still has becoming[] values get them passed to the engine.
+    const signals = buildProfileSignals({
+      stylePersonalities: ["classic-polished"],
+      becoming: ["more-confident", "more-polished"],
+    });
+    assert.deepEqual(signals?.becoming, ["more-confident", "more-polished"],
+      "legacy becoming values must reach buildProfileSignals output");
   });
 });
 

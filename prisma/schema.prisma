@@ -138,6 +138,12 @@ model OnboardingProfile {
   measurementUnit      String?
   preferredCoverage    String?
   fitConcerns          String[]  @default([])
+
+  // Passport Rev 6 — new fields (additive; no legacy data removed)
+  currentGoal           String[]  @default([])   // mutable context; never scored
+  successfulOutfitGives String[]  @default([])   // standing; future Style Memory
+  dressingPreferences   String[]  @default([])   // feeds Group 2 hard-exclusion engine
+  fitConcernsNote       String?                   // free-text "other" from fit screen
 }
 
 // ============================================
