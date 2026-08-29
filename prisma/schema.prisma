@@ -185,9 +185,28 @@ model ClosetItem {
   lastWorn    DateTime?
   favorite    Boolean  @default(false)
   
-  // AI Analysis
+  // AI Analysis (legacy)
   aiDescription String?      // AI-generated description
   aiStyleNotes  String?      // AI notes about styling this piece
+
+  // Garment Intelligence — Group 3B (migration 20260828000000_closet_garment_intelligence)
+  analysisStatus        String    @default("not_analyzed") // not_analyzed | pending | ready | failed
+  analyzedAt            DateTime?
+  analysisSchemaVersion String?
+  // Tier 2 — observable attributes (Group 2 dressing vocab reused for coverage fields)
+  silhouette            String?   // GarmentSilhouette token
+  fitProfile            String?   // FitProfile token (Group 2 vocab)
+  hemLength             String?   // HemLength token (Group 2 vocab); "n/a" for tops
+  topLength             String?   // TopLength token (Group 2 vocab); "n/a" for bottoms/dresses
+  sleeveLength          String?   // SleeveLength token (Group 2 vocab); "n/a" when not applicable
+  necklineCoverage      String?   // NecklineCoverage token (Group 2 vocab); null if not visible
+  shoulderCoverage      Boolean?
+  midriffExposed        Boolean?
+  waistShape            String?   // GarmentWaistShape token
+  // Tier 3 — matching signals (all vocabulary-normalized; never raw AI strings)
+  formality             String?   // GarmentFormality token
+  stylePersonality      String?   // single V3 archetype token or null
+  fieldConfidence       Json?     // GarmentFieldConfidence partial record
 
   // Try-On Eligibility (Phase 4A6 — migration 20260717000000)
   tryOnEligibility  String?   // ready-for-try-on | needs-clearer-photo | not-supported | pending-assessment | null

@@ -9,6 +9,7 @@ import { emitClosetItemAdded, recordJourneyEventAwaited } from "~/lib/ai/journey
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import { verifyCloudinaryAsset, deleteCloudinaryAsset, buildPrivateDownloadUrl, getCloudinaryConfig, validatePublicIdOwnership } from "~/lib/cloudinary-admin.server";
+import { analyzeClosetGarment } from "~/lib/ai/closet-garment-analysis.server";
 import { computeClosetInsights, type ClosetInsightProfile } from "~/lib/ai/closet-insights";
 import { moderateImageContent } from "~/lib/image-moderation.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
@@ -341,6 +342,8 @@ export async function action({ request }: ActionFunctionArgs) {
         tryOnAssessedAt: new Date(stageA.assessedAt),
         tryOnCustomerHint: stageA.customerHint,
         tryOnInternalNote: stageA.internalNote,
+        // Garment intelligence — pending immediately; analysis fires below
+        analysisStatus: "pending",
       },
     });
 
@@ -350,6 +353,22 @@ export async function action({ request }: ActionFunctionArgs) {
         `closet_item_added:${newItem.id}:v1`,
       );
     } catch { /* event emission never blocks the response */ }
+
+    // Await garment intelligence extraction before returning.
+    // analyzeClosetGarment is bounded by its internal AbortController timeout
+    // (GARMENT_ANALYSIS_TIMEOUT_MS) so it always resolves within a fixed window.
+    // On timeout or any error it calls persistFailure internally → status "failed".
+    // The outer .catch ensures even a persistFailure DB error cannot surface here.
+    // Items always exit this action as "ready" or "failed" — never permanently "pending".
+    await analyzeClosetGarment({
+      closetItemId: newItem.id,
+      imagePublicId: publicId,
+      category: newItem.category,
+      userPrimaryColor: primaryColor || null,
+      userPattern:      pattern || null,
+      userOccasions:    occasions.length > 0 ? occasions : [],
+      userSeasons:      seasons.length > 0 ? seasons : [],
+    }).catch(() => {});
 
     return data({ success: true });
   }
@@ -379,10 +398,30 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Meta-only edit — no photo replacement requested.
     if (!newPublicId) {
-      await prisma.closetItem.update({
-        where: { id: itemId },
-        data: { name, category, primaryColor: primaryColor || null },
-      });
+      const categoryChanged = category !== (existing.category as string);
+
+      if (categoryChanged && existing.imagePublicId) {
+        // Category change invalidates AI intelligence derived from the old category.
+        // Set pending then rerun analysis on the existing image with the updated category.
+        await prisma.closetItem.update({
+          where: { id: itemId },
+          data: { name, category, primaryColor: primaryColor || null, analysisStatus: "pending" },
+        });
+        await analyzeClosetGarment({
+          closetItemId: itemId,
+          imagePublicId: existing.imagePublicId,
+          category,
+          userPrimaryColor: primaryColor || null,
+          userPattern:   existing.pattern   || null,
+          userOccasions: existing.occasions ?? [],
+          userSeasons:   existing.seasons   ?? [],
+        }).catch(() => {});
+      } else {
+        await prisma.closetItem.update({
+          where: { id: itemId },
+          data: { name, category, primaryColor: primaryColor || null },
+        });
+      }
       return data({ success: true });
     }
 
@@ -548,7 +587,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // Capture old publicId before the update so we can delete it afterwards.
     const oldPublicId = existing.imagePublicId;
 
-    const updatedItem = await prisma.closetItem.update({
+    await prisma.closetItem.update({
       where: { id: itemId },
       data: {
         name,
@@ -561,6 +600,8 @@ export async function action({ request }: ActionFunctionArgs) {
         tryOnAssessedAt:   new Date(editStageA.assessedAt),
         tryOnCustomerHint: editStageA.customerHint,
         tryOnInternalNote: editStageA.internalNote,
+        // Image replaced — stale intelligence is no longer current; reanalysis below.
+        analysisStatus: "pending",
       },
     });
 
@@ -568,6 +609,19 @@ export async function action({ request }: ActionFunctionArgs) {
     if (oldPublicId && oldPublicId !== newPublicId) {
       await deleteCloudinaryAsset(oldPublicId, "private");
     }
+
+    // Rerun garment intelligence on the new image. User-entered values on the
+    // existing item (pattern, occasions, seasons) are forwarded so they are not
+    // overwritten. primaryColor from the edit form takes precedence over AI colour.
+    await analyzeClosetGarment({
+      closetItemId: itemId,
+      imagePublicId: newPublicId,
+      category,
+      userPrimaryColor: primaryColor || null,
+      userPattern:   existing.pattern   || null,
+      userOccasions: existing.occasions ?? [],
+      userSeasons:   existing.seasons   ?? [],
+    }).catch(() => {});
 
     return data({ success: true });
   }

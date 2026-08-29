@@ -256,7 +256,7 @@ describe("T14: edit photo replacement calls moderateImageContent (Layer 2)", () 
   it("edit block calls moderateImageContent", () => {
     const editIdx = closet.indexOf('intent === "edit"');
     assert.ok(editIdx !== -1, "edit handler must exist");
-    const block = closet.slice(editIdx, editIdx + 10000);
+    const block = closet.slice(editIdx, editIdx + 14000);
     assert.ok(
       block.includes("moderateImageContent("),
       "edit photo replacement must call moderateImageContent (Layer 2)",
@@ -270,7 +270,7 @@ describe("T15: edit photo replacement calls screenGarmentSuitability (Layer 3)",
   it("edit block calls screenGarmentSuitability", () => {
     const editIdx = closet.indexOf('intent === "edit"');
     assert.ok(editIdx !== -1, "edit handler must exist");
-    const block = closet.slice(editIdx, editIdx + 10000);
+    const block = closet.slice(editIdx, editIdx + 14000);
     assert.ok(
       block.includes("screenGarmentSuitability("),
       "edit photo replacement must call screenGarmentSuitability (Layer 3)",
@@ -284,7 +284,7 @@ describe("T16: edit deletes new (failed) asset before DB update on pipeline fail
   it("deleteCloudinaryAsset(newPublicId) appears before the photo-replacement DB update", () => {
     const editIdx = closet.indexOf('intent === "edit"');
     assert.ok(editIdx !== -1, "edit handler must exist");
-    const block = closet.slice(editIdx, editIdx + 10000);
+    const block = closet.slice(editIdx, editIdx + 14000);
     // Anchor: photo pipeline starts at the ownership check for newPublicId
     const pipelineStart = block.indexOf("validatePublicIdOwnership(newPublicId");
     assert.ok(pipelineStart !== -1, "edit block must call validatePublicIdOwnership(newPublicId, ...) to start the photo pipeline");
@@ -303,7 +303,7 @@ describe("T17: edit deletes old asset only after DB update succeeds", () => {
   it("oldPublicId delete appears after prisma.closetItem.update in edit block", () => {
     const editIdx = closet.indexOf('intent === "edit"');
     assert.ok(editIdx !== -1, "edit handler must exist");
-    const block = closet.slice(editIdx, editIdx + 10000);
+    const block = closet.slice(editIdx, editIdx + 14000);
     // Anchor: photo pipeline starts at ownership check
     const pipelineStart = block.indexOf("validatePublicIdOwnership(newPublicId");
     assert.ok(pipelineStart !== -1, "photo pipeline anchor must exist");
