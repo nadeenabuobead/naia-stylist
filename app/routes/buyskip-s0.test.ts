@@ -355,3 +355,63 @@ describe("T14: schema declares imagePublicId and imageFormat", () => {
     );
   });
 });
+
+// ── T15: Constitution H — anti-sales VOICE RULE ───────────────────────────────
+describe("T15: Buy/Skip prompt contains anti-sales VOICE RULE (Constitution H)", () => {
+  it("prompt contains a numbered VOICE RULE entry", () => {
+    assert.ok(
+      api.includes("VOICE RULE"),
+      "api.wishlist prompt must contain a VOICE RULE entry in STRICT RULES",
+    );
+  });
+
+  it("VOICE RULE identifies nAia as independent decision tool, not salesperson", () => {
+    assert.ok(
+      api.includes("independent decision tool") &&
+      (api.includes("salesperson") || api.includes("sales")),
+      "VOICE RULE must describe nAia as an independent decision tool, not a salesperson",
+    );
+  });
+
+  it("VOICE RULE explicitly prohibits 'you deserve it'", () => {
+    assert.ok(api.includes("you deserve it"), "VOICE RULE must name 'you deserve it'");
+  });
+
+  it("VOICE RULE explicitly prohibits 'treat yourself'", () => {
+    assert.ok(api.includes("treat yourself"), "VOICE RULE must name 'treat yourself'");
+  });
+
+  it("VOICE RULE explicitly prohibits 'must-have'", () => {
+    assert.ok(api.includes("must-have"), "VOICE RULE must name 'must-have'");
+  });
+
+  it("VOICE RULE explicitly prohibits 'game-changer'", () => {
+    assert.ok(api.includes("game-changer"), "VOICE RULE must name 'game-changer'");
+  });
+
+  it("VOICE RULE explicitly prohibits 'last chance'", () => {
+    assert.ok(api.includes("last chance"), "VOICE RULE must name 'last chance'");
+  });
+
+  it("VOICE RULE explicitly prohibits 'hurry'", () => {
+    assert.ok(api.includes('"hurry"'), "VOICE RULE must name 'hurry'");
+  });
+
+  it("VOICE RULE explicitly prohibits 'selling fast'", () => {
+    assert.ok(api.includes("selling fast"), "VOICE RULE must name 'selling fast'");
+  });
+
+  it("VOICE RULE prohibits artificial urgency and scarcity pressure", () => {
+    assert.ok(
+      api.includes("artificial urgency") && api.includes("scarcity pressure"),
+      "VOICE RULE must prohibit artificial urgency and scarcity pressure",
+    );
+  });
+
+  it("VOICE RULE requires calm, evidence-based reasoning", () => {
+    assert.ok(
+      api.includes("evidence-based"),
+      "VOICE RULE must require evidence-based reasoning",
+    );
+  });
+});
