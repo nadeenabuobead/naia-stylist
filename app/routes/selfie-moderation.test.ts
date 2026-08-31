@@ -770,15 +770,17 @@ describe("T30: selfie image shown whenever photoExists — not gated on analysis
     );
   });
 
-  it("selfie section appears OUTSIDE the showCompletedSection JSX block", () => {
-    // Anchor on the JSX render expression, not the variable declaration
-    const selfieImgIdx = selfie.indexOf("Your selfie is stored privately");
+  it("selfie img src uses displaySelfieUrl — server-signed URL, never raw publicId", () => {
+    // Security + structural invariant: selfie is served via a server-signed URL
+    // (displaySelfieUrl → selfieDisplayUrl → selfiePreviewUrl from loader).
+    // The raw Cloudinary publicId is never serialised to the browser.
+    const imgIdx = selfie.indexOf("src={displaySelfieUrl}");
     const completedJsxIdx = selfie.indexOf("{showCompletedSection && displaySignals");
-    assert.ok(selfieImgIdx !== -1, "selfie fallback text must exist");
+    assert.ok(imgIdx !== -1, "selfie img src must be displaySelfieUrl — server-signed preview URL, not a raw publicId");
     assert.ok(completedJsxIdx !== -1, "showCompletedSection JSX block must exist");
     assert.ok(
-      selfieImgIdx < completedJsxIdx,
-      "selfie section must appear before (outside) the {showCompletedSection && ...} JSX block",
+      imgIdx > completedJsxIdx,
+      "selfie img must render inside the showCompletedSection block (shown with analysis results)",
     );
   });
 });
