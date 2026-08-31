@@ -1,6 +1,6 @@
 // THIS FILE IS AUTO-GENERATED. DO NOT EDIT MANUALLY.
 // Source: PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx
-// SHA-256: c765e4352771f7f75564a252006cd43b1e76a71eff6b8da7533cef8e5ed10b40
+// SHA-256: fc566aea8f51fa83ac37064c62ed3d5d27a053cc7d1745980f9e3b20b07ccd09
 // Re-generate: tsx scripts/extract-naia-catalog.ts
 
 import type { GeneratedCatalog } from "../naia-catalog.types.js";
@@ -8,7 +8,7 @@ import type { GeneratedCatalog } from "../naia-catalog.types.js";
 export const NAIA_CATALOG: GeneratedCatalog = {
   "schemaVersion": 1,
   "sourceWorkbook": "PRODUCTS TEMPLATE v8 - Runtime Clean.xlsx",
-  "sourceSha256": "c765e4352771f7f75564a252006cd43b1e76a71eff6b8da7533cef8e5ed10b40",
+  "sourceSha256": "fc566aea8f51fa83ac37064c62ed3d5d27a053cc7d1745980f9e3b20b07ccd09",
   "products": [
     {
       "handle": "double-top",
@@ -416,7 +416,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "season": "fall, winter, spring",
         "bodyFitLogic": "The low-slung asymmetric crossover waistband sits across the upper hips and creates a directional focal point rather than defining the natural waist. The straight leg falls cleanly from the hips and balances the layered upper detail.",
         "bodyProportionEffects": "emphasises-upper-hips, elongates-legs, streamlines-lower-body, creates-vertical-line",
-        "styleMeComfortMatch": "structured, elongates, balances",
+        "styleMeComfortMatch": "structured, elongates, balances, relaxed",
         "coverageModesty": "Full lower-body coverage. The crossover construction visually highlights the upper-hip area and may reveal more of the lower stomach when worn with a cropped top.",
         "proportionRule": "Pair with a fitted, tucked, cropped, or shorter top that keeps the asymmetrical crossover waistband visible. Keep the upper half controlled and avoid adding bulk or another strong horizontal detail around the hips.",
         "notIdealFor": "Long untucked tops, tunics, peplum hems, oversized knitwear ending at the hips, bulky layering or styling intended to minimise attention around the upper hips.",
@@ -506,7 +506,8 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "styleMeComfortMatch": [
             "structured",
             "elongates",
-            "balances"
+            "balances",
+            "relaxed"
           ],
           "currentEmotionalStateSupport": [
             "confident",
@@ -601,7 +602,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "season": "fall, winter, spring",
         "bodyFitLogic": "The structured high waist defines the top of the silhouette, while the oversized pockets create visual width around the hip area. The leg falls straighter before gathering into sculptural draping lower down, creating controlled lower-body volume without fitting closely through the full leg.",
         "bodyProportionEffects": "defines-waist, emphasises-upper-hips, adds-lower-body-volume, balances-shoulders-and-hips",
-        "styleMeComfortMatch": "waist-definition, structured, balances, more-coverage",
+        "styleMeComfortMatch": "waist-definition, structured, balances, more-coverage, relaxed",
         "coverageModesty": "Full lower-body coverage with a high waist and full-length leg. The trousers are opaque and do not expose the leg despite the sculptural draping.",
         "proportionRule": "Keep the upper half cleaner and more controlled so the oversized pockets and draped leg remain the focal point. Fitted, tucked or cropped tops work especially well because they keep the waistband visible.",
         "notIdealFor": "Long untucked tops that cover the pocket construction, very bulky upper-body volume, highly conservative formal settings, or very hot outdoor weather",
@@ -690,7 +691,8 @@ export const NAIA_CATALOG: GeneratedCatalog = {
             "waist-definition",
             "structured",
             "balances",
-            "more-coverage"
+            "more-coverage",
+            "relaxed"
           ],
           "currentEmotionalStateSupport": [
             "confident",
@@ -972,7 +974,7 @@ export const NAIA_CATALOG: GeneratedCatalog = {
         "formalityDescription": " polished smart casual to formal",
         "season": "fall, winter, spring",
         "bodyFitLogic": "The long, straight cut creates a strong vertical line, while the diagonal wrap lapel draws the eye across the body and gives the front a sculptural shape. The relaxed fit allows for layering, and the belt can be tied to introduce waist definition or left open for a straighter, more effortless silhouette.",
-        "bodyProportionEffects": "creates-vertical-line, elongates-body, optional-waist-definition, skims-midsection, skims-hips",
+        "bodyProportionEffects": "creates-vertical-line, elongates-body, skims-midsection, skims-hips",
         "styleMeComfortMatch": "more-coverage, structured, elongates",
         "coverageModesty": "High coverage through the arms and body, with a long hem and full-length sleeves. When worn open, the neckline and outfit underneath remain visible; fastening and belting the coat provides greater front coverage.",
         "proportionRule": "Keep the base outfit clean and streamlined so the diagonal lapel, contrast flap and printed panel remain the focus. Wear it open over a straight silhouette, or belt it over a fitted or lightly structured base. Avoid bulky layers extending below the coat or excessive volume on both halves.",
@@ -1058,7 +1060,6 @@ export const NAIA_CATALOG: GeneratedCatalog = {
           "bodyProportionEffects": [
             "creates-vertical-line",
             "elongates-body",
-            "optional-waist-definition",
             "skims-midsection",
             "skims-hips"
           ],
