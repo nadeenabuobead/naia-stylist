@@ -62,6 +62,7 @@ model Customer {
   tryOnJobs              VirtualTryOnJob[]
   recommendationFeedback RecommendationFeedback[]
   selfieAnalysis         SelfieAnalysis?
+  naiaObservationFeedback NaiaObservationFeedback[]
 }
 
 // ============================================
@@ -219,6 +220,11 @@ model ClosetItem {
   tryOnAssessedAt   DateTime?
   tryOnCustomerHint String?
   tryOnInternalNote String?
+
+  // Garment Relationship — First nAia Read group (migration 20260830000000)
+  // Customer-stated relationship to this piece (not inferred by AI).
+  // Multi-select, max 2. See GARMENT_RELATIONSHIP_IDS in first-naia-read.ts.
+  garmentRelationships  String[]  @default([])
 
   // Relationships
   outfitItems   OutfitItem[]
@@ -866,6 +872,27 @@ model VirtualTryOnJob {
 
   @@index([customerId])
   @@index([customerId, status])
+}
+
+// Customer feedback on a single nAia First Read observation.
+// One row per (customerId, observationKey) pair — upserted on each response.
+// Provenance (type/fields/values/claim) is SERVER-GENERATED from the customer's
+// current OnboardingProfile — never accepted from the browser.
+model NaiaObservationFeedback {
+  id               String   @id @default(cuid())
+  customerId       String
+  customer         Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  observationKey   String   // deterministic: "first-read-v1|{type}|{field:value pairs}"
+  response         String   // "accurate" | "not-quite"
+  observationType  String   // server-generated provenance
+  evidenceFields   String[] // server-generated provenance
+  evidenceValues   String[] // server-generated provenance
+  claimText        String   // server-generated provenance
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([customerId, observationKey])
+  @@index([customerId])
 }
 
 // One selfie analysis record per customer. Stores only validated style signals —

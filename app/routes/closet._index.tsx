@@ -11,6 +11,7 @@ import naiaStyles from "~/styles/naia-design-system.css?url";
 import { verifyCloudinaryAsset, deleteCloudinaryAsset, buildPrivateDownloadUrl, getCloudinaryConfig, validatePublicIdOwnership } from "~/lib/cloudinary-admin.server";
 import { analyzeClosetGarment } from "~/lib/ai/closet-garment-analysis.server";
 import { computeClosetInsights, type ClosetInsightProfile } from "~/lib/ai/closet-insights";
+import { normalizeGarmentRelationships, GARMENT_RELATIONSHIP_LABELS, GARMENT_RELATIONSHIP_MAX } from "~/lib/ai/first-naia-read";
 import { moderateImageContent } from "~/lib/image-moderation.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
@@ -159,6 +160,12 @@ export async function action({ request }: ActionFunctionArgs) {
     const brand = formData.get("brand") as string;
     const occasions = JSON.parse((formData.get("occasions") as string) || "[]");
     const seasons = JSON.parse((formData.get("seasons") as string) || "[]");
+    const rawRelationships = JSON.parse((formData.get("garmentRelationships") as string) || "[]");
+    const relationshipsResult = normalizeGarmentRelationships(rawRelationships);
+    if (!relationshipsResult.ok) {
+      return data({ error: relationshipsResult.error }, { status: 400 });
+    }
+    const garmentRelationships = relationshipsResult.value;
     if (!name || !category) return data({ error: "Name and category required" }, { status: 400 });
     if (!publicId) return data({ error: "Image upload reference required." }, { status: 400 });
 
@@ -342,6 +349,7 @@ export async function action({ request }: ActionFunctionArgs) {
         tryOnAssessedAt: new Date(stageA.assessedAt),
         tryOnCustomerHint: stageA.customerHint,
         tryOnInternalNote: stageA.internalNote,
+        garmentRelationships,
         // Garment intelligence — pending immediately; analysis fires below
         analysisStatus: "pending",
       },
@@ -396,6 +404,13 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ error: "Item not found." }, { status: 404 });
     }
 
+    const rawEditRelationships = JSON.parse((formData.get("garmentRelationships") as string) || "[]");
+    const editRelationshipsResult = normalizeGarmentRelationships(rawEditRelationships);
+    if (!editRelationshipsResult.ok) {
+      return data({ error: editRelationshipsResult.error }, { status: 400 });
+    }
+    const editGarmentRelationships = editRelationshipsResult.value;
+
     // Meta-only edit — no photo replacement requested.
     if (!newPublicId) {
       const categoryChanged = category !== (existing.category as string);
@@ -405,7 +420,7 @@ export async function action({ request }: ActionFunctionArgs) {
         // Set pending then rerun analysis on the existing image with the updated category.
         await prisma.closetItem.update({
           where: { id: itemId },
-          data: { name, category, primaryColor: primaryColor || null, analysisStatus: "pending" },
+          data: { name, category, primaryColor: primaryColor || null, garmentRelationships: editGarmentRelationships, analysisStatus: "pending" },
         });
         await analyzeClosetGarment({
           closetItemId: itemId,
@@ -419,7 +434,7 @@ export async function action({ request }: ActionFunctionArgs) {
       } else {
         await prisma.closetItem.update({
           where: { id: itemId },
-          data: { name, category, primaryColor: primaryColor || null },
+          data: { name, category, primaryColor: primaryColor || null, garmentRelationships: editGarmentRelationships },
         });
       }
       return data({ success: true });
@@ -600,6 +615,7 @@ export async function action({ request }: ActionFunctionArgs) {
         tryOnAssessedAt:   new Date(editStageA.assessedAt),
         tryOnCustomerHint: editStageA.customerHint,
         tryOnInternalNote: editStageA.internalNote,
+        garmentRelationships: editGarmentRelationships,
         // Image replaced — stale intelligence is no longer current; reanalysis below.
         analysisStatus: "pending",
       },
@@ -780,6 +796,7 @@ export default function Closet() {
   const [newBrand, setNewBrand] = useState("");
   const [newOccasions, setNewOccasions] = useState<string[]>([]);
   const [newSeasons, setNewSeasons] = useState<string[]>([]);
+  const [newRelationships, setNewRelationships] = useState<string[]>([]);
 
   // ── Edit state ────────────────────────────────────────────────────────────
   const editFetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -795,6 +812,7 @@ export default function Closet() {
   const editScrollToPhotoRef = useRef(false);           // true → scroll to photo on open
   const [editUploading, setEditUploading] = useState(false);
   const [editUploadError, setEditUploadError] = useState<string | null>(null);
+  const [editRelationships, setEditRelationships] = useState<string[]>([]);
 
   // Revoke both blob preview URLs when the component unmounts.
   useEffect(() => {
@@ -976,6 +994,7 @@ export default function Closet() {
         brand: newBrand,
         occasions: JSON.stringify(newOccasions),
         seasons: JSON.stringify(newSeasons),
+        garmentRelationships: JSON.stringify(newRelationships),
       },
       { method: "post" }
     );
@@ -993,6 +1012,7 @@ export default function Closet() {
     setNewBrand("");
     setNewOccasions([]);
     setNewSeasons([]);
+    setNewRelationships([]);
     setUploadError(null);
     setShowAddForm(false);
   }
@@ -1066,6 +1086,7 @@ export default function Closet() {
     setEditPublicId("");
     setEditImageUrl("");
     setEditUploadError(null);
+    setEditRelationships(item.garmentRelationships ?? []);
     if (editBlobUrlRef.current) { URL.revokeObjectURL(editBlobUrlRef.current); editBlobUrlRef.current = null; }
   }
 
@@ -1078,6 +1099,7 @@ export default function Closet() {
     if (editBlobUrlRef.current) { URL.revokeObjectURL(editBlobUrlRef.current); editBlobUrlRef.current = null; }
     setEditImageUrl("");
     setEditUploadError(null);
+    setEditRelationships([]);
   }
 
   function handleEditSubmit() {
@@ -1090,6 +1112,7 @@ export default function Closet() {
         category: editCategory,
         primaryColor: editColor,
         newPublicId: editPublicId,   // empty string = meta-only edit; publicId = photo replacement
+        garmentRelationships: JSON.stringify(editRelationships),
       },
       { method: "post" }
     );
@@ -1303,6 +1326,28 @@ export default function Closet() {
               onChange={e => setNewBrand(e.target.value)}
             />
 
+            <div className="cl-label">How do you feel about it? (optional, up to {GARMENT_RELATIONSHIP_MAX})</div>
+            <div className="cl-pills">
+              {Object.entries(GARMENT_RELATIONSHIP_LABELS).map(([id, label]) => {
+                const selected = newRelationships.includes(id);
+                const atMax = newRelationships.length >= GARMENT_RELATIONSHIP_MAX;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setNewRelationships(prev =>
+                      prev.includes(id) ? prev.filter(x => x !== id) : atMax ? prev : [...prev, id]
+                    )}
+                    className={`cl-pill${selected ? " on" : ""}`}
+                    disabled={!selected && atMax}
+                    style={!selected && atMax ? { opacity: 0.4 } : undefined}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+
             <button
               type="button"
               className="cl-submit"
@@ -1392,6 +1437,28 @@ export default function Closet() {
               ))}
             </div>
 
+            <div className="cl-label">How do you feel about it? (optional, up to {GARMENT_RELATIONSHIP_MAX})</div>
+            <div className="cl-pills">
+              {Object.entries(GARMENT_RELATIONSHIP_LABELS).map(([id, label]) => {
+                const selected = editRelationships.includes(id);
+                const atMax = editRelationships.length >= GARMENT_RELATIONSHIP_MAX;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setEditRelationships(prev =>
+                      prev.includes(id) ? prev.filter(x => x !== id) : atMax ? prev : [...prev, id]
+                    )}
+                    className={`cl-pill${selected ? " on" : ""}`}
+                    disabled={!selected && atMax}
+                    style={!selected && atMax ? { opacity: 0.4 } : undefined}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+
             {editFetcher.data?.error && (
               <p className="cl-error" style={{ marginTop: "8px" }}>{editFetcher.data.error}</p>
             )}
@@ -1475,6 +1542,15 @@ export default function Closet() {
                       <div className="cl-card-meta">{[item.primaryColor, item.pattern].filter(Boolean).join(" · ")}</div>
                     )}
                     {item.brand && <div className="cl-card-meta" style={{ marginTop: "4px" }}>{item.brand}</div>}
+                    {item.garmentRelationships?.length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "6px" }}>
+                        {(item.garmentRelationships as string[]).map((id: string) => (
+                          <span key={id} style={{ fontSize: "10px", padding: "2px 7px", borderRadius: "10px", background: "rgba(139,32,53,.08)", color: "var(--accent, #8B2035)", fontFamily: "var(--ff-ui, sans-serif)", letterSpacing: "0.02em" }}>
+                            {GARMENT_RELATIONSHIP_LABELS[id] ?? id}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     {elig && (
                       <span className={elig.isNeeds ? "cl-card-elig--needs" : "cl-card-elig--ok"}>
                         {elig.label}

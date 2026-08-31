@@ -6,6 +6,8 @@ import { quizQuestions } from "~/lib/onboarding/quiz-data";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { prisma } from "~/lib/prisma.server";
 import { readPendingSave, clearPendingSave } from "~/lib/pending-save.server";
+import { computeNaiaFirstRead } from "~/lib/ai/first-naia-read";
+import type { NaiaFirstReadObservation } from "~/lib/ai/first-naia-read";
 
 // Option label, colour-hex, and valid-ID lookups built from quiz data at module load time
 const OPTION_LABELS: Record<string, Record<string, string>> = {};
@@ -269,6 +271,9 @@ export default function OnboardingComplete() {
 
   const [displayAnswers, setDisplayAnswers] = useState<OnboardingAnswers | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saving");
+  const [feedbackState, setFeedbackState] = useState<Record<string, "accurate" | "not-quite">>({});
+  const [feedbackPending, setFeedbackPending] = useState<Set<string>>(new Set());
+  const [feedbackError, setFeedbackError] = useState<Set<string>>(new Set());
 
   // POST only the sparse session patch (keys the user actually changed this session).
   // Absent keys fall back to the saved DB value via the API's pick* helpers.
@@ -326,9 +331,46 @@ export default function OnboardingComplete() {
     window.location.reload();
   }, [storageKey]);
 
+  const submitFeedback = useCallback(async (obs: NaiaFirstReadObservation, choice: "accurate" | "not-quite") => {
+    const key = obs.observationKey;
+    // Prevent duplicate in-flight requests for the same key
+    if (feedbackPending.has(key)) return;
+    setFeedbackPending(prev => new Set(prev).add(key));
+    setFeedbackError(prev => { const s = new Set(prev); s.delete(key); return s; });
+    try {
+      const res = await fetch("/api/naia-observation-feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ observationKey: key, feedback: choice }),
+      });
+      if (res.ok) {
+        setFeedbackState(prev => ({ ...prev, [key]: choice }));
+      } else {
+        // Server rejected — do not display as saved
+        setFeedbackError(prev => new Set(prev).add(key));
+      }
+    } catch {
+      // Network failure — revert optimistic state
+      setFeedbackError(prev => new Set(prev).add(key));
+    } finally {
+      setFeedbackPending(prev => { const s = new Set(prev); s.delete(key); return s; });
+    }
+  }, [feedbackPending]);
+
   if (!displayAnswers) return <div style={{ minHeight: "100vh", background: "#f4f4f1" }} />;
 
   const a = displayAnswers;
+
+  // First Read — deterministic, runs after localStorage draft is merged into displayAnswers
+  const firstReadResult = computeNaiaFirstRead({
+    stylePersonalities:    a["style-personalities"]     as string[] | undefined,
+    silhouette:            a["silhouette"]              as string[] | undefined,
+    successfulOutfitGives: a["successful-outfit-gives"] as string[] | undefined,
+    lifestyle:             a["lifestyle"]               as string[] | undefined,
+    favoriteColors:        a["favorite-colors"]         as string[] | undefined,
+    avoidColors:           a["avoid-colors"]            as string[] | undefined,
+  });
+
   const personalities   = a["style-personalities"]    ?? [];
   const impression      = a["desired-impression"]     ?? [];
   const lifestyle       = a["lifestyle"]              ?? [];
@@ -536,12 +578,73 @@ export default function OnboardingComplete() {
           </>
         )}
 
-        {/* How nAia will use this */}
+        {/* First Read or fallback nAia note */}
         <div className="cp-divider" />
-        <div className="cp-naia-box">
-          <div className="cp-naia-label">How nAia will use this</div>
-          <p className="cp-naia-text">{buildNaiaNote(a)}</p>
-        </div>
+        {saveStatus === "saved" && firstReadResult.observations.length > 0 ? (
+          <div className="cp-naia-box">
+            <div className="cp-naia-label">nAia&rsquo;s first read on you</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              {firstReadResult.observations.map(obs => {
+                const key = obs.observationKey;
+                const confirmed = feedbackState[key];
+                const pending   = feedbackPending.has(key);
+                const hasError  = feedbackError.has(key);
+                return (
+                  <div key={key} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <p className="cp-naia-text" style={{ margin: 0 }}>{obs.claim}</p>
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                      {pending ? (
+                        <span style={{ fontSize: "12px", color: "#999", fontStyle: "italic" }}>Saving…</span>
+                      ) : hasError ? (
+                        <>
+                          <span style={{ fontSize: "12px", color: "#c0392b" }}>Couldn&rsquo;t save —&nbsp;</span>
+                          <button
+                            onClick={() => setFeedbackError(prev => { const s = new Set(prev); s.delete(key); return s; })}
+                            style={{ fontSize: "12px", color: "var(--accent)", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}
+                          >
+                            try again
+                          </button>
+                        </>
+                      ) : confirmed ? (
+                        <>
+                          <span style={{ fontSize: "12px", color: "var(--accent)", fontStyle: "italic" }}>
+                            {confirmed === "accurate" ? "Noted — thanks." : "Noted — nAia will keep learning."}
+                          </span>
+                          <button
+                            onClick={() => setFeedbackState(prev => { const s = { ...prev }; delete s[key]; return s; })}
+                            style={{ fontSize: "11px", color: "#999", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}
+                          >
+                            change
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => submitFeedback(obs, "accurate")}
+                            style={{ fontSize: "12px", padding: "4px 12px", border: "1px solid var(--accent)", background: "transparent", color: "var(--accent)", borderRadius: "4px", cursor: "pointer" }}
+                          >
+                            That&rsquo;s me
+                          </button>
+                          <button
+                            onClick={() => submitFeedback(obs, "not-quite")}
+                            style={{ fontSize: "12px", padding: "4px 12px", border: "1px solid #999", background: "transparent", color: "#999", borderRadius: "4px", cursor: "pointer" }}
+                          >
+                            Not quite
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="cp-naia-box">
+            <div className="cp-naia-label">How nAia will use this</div>
+            <p className="cp-naia-text">{buildNaiaNote(a)}</p>
+          </div>
+        )}
 
         {/* CTAs */}
         <div className="cp-section-label">What would you like to do first?</div>
@@ -579,6 +682,16 @@ export default function OnboardingComplete() {
             <div>
               <div className="cp-action-title">YOUR LOOK IS READY TO SAVE</div>
               <div className="cp-action-sub">Return to your Style Me result to save it to your Passport</div>
+            </div>
+            <span className="cp-arrow">→</span>
+          </a>
+        )}
+
+        {saveStatus === "saved" && (
+          <a href="/closet" className="cp-action" style={{ borderColor: "var(--accent)" }}>
+            <div>
+              <div className="cp-action-title">Now show nAia what you actually wear.</div>
+              <div className="cp-action-sub">Add pieces to your closet so nAia can read your real style</div>
             </div>
             <span className="cp-arrow">→</span>
           </a>
