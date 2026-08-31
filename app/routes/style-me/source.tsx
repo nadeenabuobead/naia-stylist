@@ -18,6 +18,30 @@ export const links: LinksFunction = () => [
 
 const VALID_SOURCE_IDS = new Set(["naia-piece", "my-closet", "both"]);
 
+// Rev 3 UI source options — "specific-piece" maps to source=both + anchorMode=manual in action.
+const REV3_SOURCE_OPTIONS = [
+  {
+    id: "my-closet",
+    label: "Only My Closet",
+    description: "Style a look from what I already own.",
+  },
+  {
+    id: "both",
+    label: "My Closet + suggestions if genuinely useful",
+    description: "Start with my closet; let nAia add a NADINE piece if it really adds something.",
+  },
+  {
+    id: "specific-piece",
+    label: "Style one specific piece",
+    description: "Choose a piece and build the look around it.",
+  },
+  {
+    id: "naia-piece",
+    label: "Start with something new",
+    description: "Build the look around a NADINE piece nAia selects for me.",
+  },
+];
+
 const sourceOptions = [
   {
     id: "naia-piece",
@@ -47,13 +71,18 @@ type PickerItem = {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await getSession(request.headers.get("Cookie"));
+  const isRev3 = !!session.get("styleMeState");
   const mood = session.get("styleMeMood");
   const feelings = session.get("styleMeFeelings");
   const bodyNeeds = session.get("styleMeBodyNeeds") as string[] | undefined;
   const occasion = session.get("styleMeOccasion") as string | undefined;
 
-  if (!mood || !feelings || !bodyNeeds || !occasion) {
+  // Accept Rev 3 path (styleMeState) or legacy path (mood + feelings)
+  if (!isRev3 && (!mood || !feelings)) {
     return redirect("/style-me/mood");
+  }
+  if (!bodyNeeds || !occasion) {
+    return redirect(isRev3 ? "/style-me/physical-need" : "/style-me/comfort");
   }
 
   const source = session.get("styleMeSource") as string | undefined;
@@ -61,7 +90,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // No source chosen, or source is NADINE-only (which redirects to result in the action) —
   // show the source selection screen.
   if (!source || !VALID_SOURCE_IDS.has(source) || source === "naia-piece") {
-    return data({ step: "source" as const });
+    return data({ step: "source" as const, isRev3 });
   }
 
   // Source is a closet type — check prerequisites before showing the anchor step.
@@ -114,7 +143,20 @@ export async function action({ request }: ActionFunctionArgs) {
 
   // ── Select source ────────────────────────────────────────────────────────────
   if (intent === "set-source") {
-    const source = formData.get("source") as string;
+    const rawSource = formData.get("source") as string;
+
+    // Rev 3 "specific-piece" → source=both + anchorMode=manual (bypasses anchor-method step).
+    if (rawSource === "specific-piece") {
+      session.set("styleMeSource", "both");
+      session.set("styleMeAnchorMode", "manual");
+      session.unset("styleMeNadineAnchorHandle");
+      session.unset("styleMeClosetAnchorId");
+      return redirect("/style-me/source", {
+        headers: { "Set-Cookie": await commitSession(session) },
+      });
+    }
+
+    const source = rawSource;
     if (!source || !VALID_SOURCE_IDS.has(source)) {
       return data({ error: "Please select what we're styling" }, { status: 400 });
     }
@@ -276,6 +318,9 @@ export default function StyleMeSource() {
 
 function SourceStep() {
   const [selected, setSelected] = useState<string | null>(null);
+  const loaderData = useLoaderData<typeof loader>();
+  const isRev3 = "isRev3" in loaderData ? (loaderData as { isRev3?: boolean }).isRev3 : false;
+  const options = isRev3 ? REV3_SOURCE_OPTIONS : sourceOptions;
 
   return (
     <>
@@ -285,7 +330,7 @@ function SourceStep() {
       <Form method="post">
         <input type="hidden" name="_action" value="set-source" />
         <div className="sm-source-pills">
-          {sourceOptions.map((option) => (
+          {options.map((option) => (
             <button
               key={option.id}
               type="button"

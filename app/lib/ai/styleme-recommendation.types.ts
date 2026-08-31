@@ -59,6 +59,9 @@ export interface StyleMeSessionInput {
   todayColours: { preferred: string[]; avoid: string[] };
   practicalIds: string[];
   source: "naia-piece" | "my-closet" | "both";
+  // Rev 3 — Psychology-First (Group 5). Wording context only; zero product scoring.
+  state?: string;
+  intentions?: string[];
 }
 
 // ─── Profile signals ──────────────────────────────────────────────────────────

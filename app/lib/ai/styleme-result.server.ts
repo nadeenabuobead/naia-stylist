@@ -34,7 +34,10 @@ import type {
   OutfitDbItemType,
   StyleMeOutcome,
   StyleMeCompletionPiece,
+  ResultDirection,
 } from "./styleme-result.types.js";
+import { getMappingById } from "./signal-contract.js";
+import type { ProductEvaluation } from "./styleme-recommendation.types.js";
 
 // ── Passport option label resolver ───────────────────────────────────────────
 
@@ -106,6 +109,9 @@ export function buildEngineInput(params: {
   profile?: StyleMeProfileSignals;
   anchor?: AnchorInput | null;
   recentlyShownHandles?: string[];
+  // Rev 3 — Psychology-First wording context (Group 5). Zero engine scoring.
+  state?: string;
+  intentions?: string[];
 }): StyleMeEngineInput {
   return {
     session: {
@@ -118,6 +124,8 @@ export function buildEngineInput(params: {
       todayColours: params.todayColours,
       practicalIds: params.practicalIds,
       source: params.source,
+      ...(params.state !== undefined && { state: params.state }),
+      ...(params.intentions !== undefined && { intentions: params.intentions }),
     },
     profile: params.profile,
     anchor: params.anchor ?? null,
@@ -287,7 +295,11 @@ export function deterministicWording(
   })();
 
   const whyThisWorks = `${baseWhy}${completionNote}${softerNote}${anchorNote}`;
-  const confidenceBoost = `You dressed intentionally for ${occasionLabel} — and that intention shows.`;
+  // Stylist's note (internal field: confidenceBoost — retained for schema/type compat).
+  // Semantics changed per Constitution V1: one clothing/styling observation, never an emotional affirmation.
+  const confidenceBoost = primaryTitle
+    ? `The ${primaryTitle} is the lead piece here — keep everything around it intentional and quiet.`
+    : `One strong direction is enough. Keep the rest of the look clean.`;
 
   return { outfitName, whyThisWorks, confidenceBoost, perfumeNote: null };
 }
@@ -352,6 +364,19 @@ function buildMetadataJson(result: StyleMeCustomerResult): string {
     songReason: result.songReason,
     evidenceCodes: [],
     completionLayer: result.completionLayer.length > 0 ? result.completionLayer : undefined,
+    // Rev 3 — persist direction identity so reopened sessions recover MOST YOU / FRESH / PUSH ME.
+    // Stored as lightweight tuples (handle+label+note+url) — no full product object in metadata.
+    ...(result.resultDirections.length > 0 && {
+      resultDirections: result.resultDirections.map((d) => ({
+        label: d.label,
+        displayLabel: d.displayLabel,
+        directionalNote: d.directionalNote,
+        handle: d.product?.handle ?? null,
+        title: d.product?.title ?? null,
+        productUrl: d.product?.productUrl ?? null,
+        productImageUrl: d.product?.productImageUrl ?? null,
+      })),
+    }),
   };
 
   return JSON.stringify(metadata);
@@ -378,6 +403,23 @@ export function containsBlockedTerms(text: string): boolean {
   const lower = text.toLowerCase();
   return BLOCKED_TERMS.some((term) => lower.includes(term));
 }
+
+// ── StyleMe wording system prompt (Constitution V1 — locked) ─────────────────
+// Exported so tests can assert on tone spec and prohibited-phrase coverage.
+
+export const STYLEME_WORDING_SYSTEM_PROMPT =
+  "You are nAia — observant, calm, tasteful, decisive, understated, specific. " +
+  "Warm without sentimentality. Respond ONLY with valid JSON, no extra text.\n" +
+  "Rules you must follow:\n" +
+  "1. Base all wording strictly on the evidence provided in the user message. Do not invent product details, fit, fabric, colour, or compatibility not stated.\n" +
+  "2. Do not select, rank, add, remove, or reorder products. Do not introduce any product name or handle not explicitly given to you.\n" +
+  "3. For uncertain or inferred points, use conditional language (e.g. 'may work well with', 'tends to').\n" +
+  "4. Never use these blocked phrases or concepts: 'stunning piece', 'elevate your wardrobe', 'unleash your inner', 'therapy', 'therapeutic', 'treats', 'cures', 'clinical', 'diagnose', 'mental health', 'emotional healing', " +
+  "'Absolutely!', 'Obsessed.', 'Gorgeous!', \"You're going to look amazing\", 'This is so you!', 'Trust me.', 'Game-changer.', 'perfect for you', 'matches your vibe', 'super flattering'.\n" +
+  "5. Do not describe clothing as treating, curing, or improving any mental or emotional condition.\n" +
+  "6. No marketing filler, clichés, or inflated superlatives.\n" +
+  "7. The confidenceBoost field must be one short styling observation or decision — about the garment, not how she will feel. Name what the garment is doing or state one concrete styling note. It must not predict how the customer will feel, affirm her emotionally, or produce a motivational conclusion. Example: 'The blazer is already giving the structure — keep the rest clean.'\n" +
+  "8. State (how the customer is feeling today) is CONTEXT ONLY — it describes the customer's brief, not the reason clothing was chosen. Forbidden pattern: \"Because you're stressed, I chose something oversized.\" Required: justify the clothing choice through Intention, Physical Need, garment properties, or Profile evidence — never through State.";
 
 // ── Claude wording call (with 8-second timeout + graceful fallback) ───────────
 
@@ -442,15 +484,7 @@ async function callClaudeForWording(
   try {
     const result = await Promise.race<ClaudeWordingResponse | null>([
       callClaudeJSON<ClaudeWordingResponse>({
-        system:
-          "You are nAia, a warm and confident AI personal stylist. Respond ONLY with valid JSON, no extra text.\n" +
-          "Rules you must follow:\n" +
-          "1. Base all wording strictly on the evidence provided in the user message. Do not invent product details, fit, fabric, colour, or compatibility not stated.\n" +
-          "2. Do not select, rank, add, remove, or reorder products. Do not introduce any product name or handle not explicitly given to you.\n" +
-          "3. For uncertain or inferred points, use conditional language (e.g. 'may work well with', 'tends to').\n" +
-          "4. Never use these blocked phrases or concepts: 'stunning piece', 'elevate your wardrobe', 'unleash your inner', 'therapy', 'therapeutic', 'treats', 'cures', 'clinical', 'diagnose', 'mental health', 'emotional healing'.\n" +
-          "5. Do not describe clothing as treating, curing, or improving any mental or emotional condition.\n" +
-          "6. No marketing filler, clichés, or inflated superlatives.",
+        system: STYLEME_WORDING_SYSTEM_PROMPT,
         messages: [
           {
             role: "user",
@@ -463,7 +497,7 @@ async function callClaudeForWording(
               `\n\nReturn a JSON object with exactly these fields:\n` +
               `- outfitName: creative name for this look (≤8 words)\n` +
               `- whyThisWorks: 2–3 sentences explaining why this works for this customer\n` +
-              `- confidenceBoost: 1 short affirming sentence about how she will feel\n` +
+              `- confidenceBoost: 1 short styling observation or decision — one specific note about the clothing, proportion, or styling choice (about the garment, not how she will feel). Example: 'The blazer is already giving the structure — keep the rest clean.'\n` +
               `- perfumeNote: 1 sentence of scent direction (type of notes, not a brand name)`,
           },
         ],
@@ -942,6 +976,201 @@ function resolveDisplayImage(media: VerifiedMediaEntry | undefined): string | nu
   return null;
 }
 
+// ── Rev 3 profile hint + slot labels (Group 5 voice) ─────────────────────────
+// buildProfileHint produces a short clothing-grounded phrase from the customer's
+// dominant Profile signals. Used in directional notes so MOST YOU / FRESH / PUSH ME
+// reference profile evidence rather than asserting identity.
+
+const DIRECTION_SLOT_LABELS: Readonly<Record<string, string>> = {
+  top:       "top",
+  bottom:    "trouser or skirt",
+  dress:     "dress",
+  set:       "set",
+  outerwear: "jacket or coat",
+  shoe:      "shoes",
+  bag:       "bag",
+  accessory: "accessory",
+  jewelry:   "jewellery",
+  unknown:   "piece",
+};
+
+function directionSlotLabel(slot: string): string {
+  return DIRECTION_SLOT_LABELS[slot] ?? slot;
+}
+
+export function buildProfileHint(profile?: StyleMeProfileSignals): string {
+  if (!profile) return "your established Profile preferences";
+
+  const SIL_LABELS: Readonly<Record<string, string>> = {
+    "fitted":              "fitted",
+    "waist-defined":       "waist-defining",
+    "straight-simple":     "clean, straight-cut",
+    "relaxed":             "relaxed",
+    "oversized":           "oversized",
+    "loose-flowing":       "loose and flowing",
+    "structured-tailored": "structured and tailored",
+  };
+  const PERS_LABELS: Readonly<Record<string, string>> = {
+    "classic-polished":    "classic, polished",
+    "feminine-romantic":   "soft and romantic",
+    "minimal-relaxed":     "clean and minimal",
+    "bold-edgy":           "bold and distinctive",
+    "creative-expressive": "creatively expressive",
+    "old-money":           "timeless and classic",
+    "minimal":             "clean and minimal",
+    "artsy":               "creative and artistic",
+    "edgy":                "bold and edgy",
+    "feminine":            "soft and feminine",
+    "corporate-chic":      "polished and professional",
+    "effortlessly-chic":   "effortlessly stylish",
+    "casual-cool":         "relaxed and cool",
+    "romantic":            "dreamy and romantic",
+  };
+
+  const silPhrases = (profile.silhouette ?? []).slice(0, 2)
+    .map((id) => SIL_LABELS[id]).filter(Boolean);
+  const persPhrases = (profile.stylePersonalities ?? []).slice(0, 1)
+    .map((id) => PERS_LABELS[id]).filter(Boolean);
+
+  if (silPhrases.length > 0 && persPhrases.length > 0) {
+    return `${persPhrases[0]} direction with ${silPhrases.join(" and ")} shapes`;
+  }
+  if (silPhrases.length > 0) return `${silPhrases.join(" and ")} silhouettes`;
+  if (persPhrases.length > 0) return `${persPhrases[0]} direction`;
+  return "your established Profile preferences";
+}
+
+// ── Rev 3 result directions (Group 5) ─────────────────────────────────────────
+// Partitions evaluatedProducts into MOST YOU / FRESH / PUSH ME.
+// Profile alignment score = points from signals whose question is a Profile question
+// (i.e. questionId does NOT start with "sq-").
+// Session score = totalScore minus profile score.
+// MOST YOU: highest totalScore overall.
+// PUSH ME: lowest profile alignment (but has at least some session signal engagement).
+// FRESH: highest totalScore among remaining (between MOST YOU and PUSH ME in profile fit).
+
+function isSessionSignal(signal: string): boolean {
+  const mapping = getMappingById(signal);
+  if (!mapping) return true; // unknown → treat as session-only
+  return mapping.questionId.startsWith("sq-");
+}
+
+function computeProductProfileScore(product: ProductEvaluation): number {
+  return product.positiveEvidence.reduce((sum, ev) => {
+    if (isSessionSignal(ev.sessionSignal)) return sum;
+    return sum + ev.points;
+  }, 0);
+}
+
+export function computeResultDirections(
+  evaluatedProducts: ProductEvaluation[],
+  resolvePrimaryProduct: (handle: string) => StyleMePrimaryProduct | null,
+  profileHint: string = "your established Profile preferences",
+): ResultDirection[] {
+  const eligible = evaluatedProducts.filter(
+    (p) => !p.isHardExcluded && p.totalScore > 0,
+  );
+  if (eligible.length === 0) return [];
+
+  const withScores = eligible.map((p) => {
+    const profileScore = computeProductProfileScore(p);
+    return {
+      product: p,
+      profileScore,
+      sessionScore: p.totalScore - profileScore,
+    };
+  });
+
+  const byTotal = [...withScores].sort(
+    (a, b) =>
+      b.product.totalScore - a.product.totalScore ||
+      b.product.deterministicRank - a.product.deterministicRank,
+  );
+
+  const mostYouEntry = byTotal[0];
+  const mostYouProduct = resolvePrimaryProduct(mostYouEntry.product.handle);
+  const mostYouSlot = directionSlotLabel(mostYouEntry.product.slot);
+
+  const directions: ResultDirection[] = [
+    {
+      label: "most-you",
+      displayLabel: "MOST YOU",
+      product: mostYouProduct,
+      directionalNote: `Strongest alignment with ${profileHint} — the direction that tracks closest to your Profile.`,
+    },
+  ];
+
+  if (byTotal.length === 1) return directions;
+
+  const remaining = byTotal.slice(1);
+
+  // PUSH ME: product with lowest profile alignment and some session engagement.
+  // Must be genuinely less profile-aligned than MOST YOU — otherwise there is no safe
+  // stretch and no directions beyond MOST YOU are assigned.
+  const pushMeCandidate =
+    remaining
+      .filter((s) => s.sessionScore > 0)
+      .sort(
+        (a, b) =>
+          a.profileScore - b.profileScore ||
+          b.product.totalScore - a.product.totalScore,
+      )[0] ?? remaining[remaining.length - 1];
+
+  if (pushMeCandidate.profileScore >= mostYouEntry.profileScore) {
+    // No meaningful profile spread — MOST YOU is the only direction.
+    return directions;
+  }
+
+  const pushMeProduct = resolvePrimaryProduct(pushMeCandidate.product.handle);
+  const pushMeSlot = directionSlotLabel(pushMeCandidate.product.slot);
+  const pushMeNote = pushMeCandidate.product.slot !== mostYouEntry.product.slot
+    ? `The bolder reach — a ${pushMeSlot}-led direction at the outer edge of your Profile alignment.`
+    : `The bolder alignment — this ${pushMeSlot} sits furthest from your established ${profileHint}.`;
+  directions.push({
+    label: "push-me",
+    displayLabel: "PUSH ME",
+    product: pushMeProduct,
+    directionalNote: pushMeNote,
+  });
+
+  if (remaining.length === 1) return directions;
+
+  // FRESH: highest totalScore among remaining that is:
+  //   (a) not MOST YOU and not PUSH ME
+  //   (b) genuinely less profile-aligned than MOST YOU (measurable deviation)
+  //   (c) more profile-aligned than PUSH ME (so it sits between them)
+  // If no such product exists, FRESH is omitted — meaningful diversity is insufficient.
+  const freshEntry = remaining.find(
+    (s) =>
+      s.product.handle !== pushMeCandidate.product.handle &&
+      s.profileScore < mostYouEntry.profileScore &&
+      s.profileScore > pushMeCandidate.profileScore,
+  ) ??
+  // Fallback: accept any remaining that is not PUSH ME and has lower profileScore than MOST YOU,
+  // even if it isn't strictly above PUSH ME's score (handles ties at PUSH ME's profileScore).
+  remaining.find(
+    (s) =>
+      s.product.handle !== pushMeCandidate.product.handle &&
+      s.profileScore < mostYouEntry.profileScore,
+  );
+
+  if (freshEntry) {
+    const freshProduct = resolvePrimaryProduct(freshEntry.product.handle);
+    const freshSlot = directionSlotLabel(freshEntry.product.slot);
+    const freshNote = freshEntry.product.slot !== mostYouEntry.product.slot
+      ? `Keeps the ${profileHint}, but shifts the outfit around a ${freshSlot} rather than a ${mostYouSlot}.`
+      : `Still within ${profileHint}, but a different proportion balance through the ${freshSlot}.`;
+    directions.splice(1, 0, {
+      label: "fresh",
+      displayLabel: "FRESH",
+      product: freshProduct,
+      directionalNote: freshNote,
+    });
+  }
+
+  return directions;
+}
+
 // ── Main pipeline ─────────────────────────────────────────────────────────────
 
 export async function computeStyleMeResult(
@@ -994,6 +1223,41 @@ export async function computeStyleMeResult(
   // Pairing note from the primary product's anchor compatibility
   const pairingNote = primary?.anchorCompatibility.pairingNote ?? null;
 
+  // Rev 3 result directions — only produced when session carries state/intentions (Group 5 flow).
+  // resolveSingleProduct converts a ProductEvaluation handle into a StyleMePrimaryProduct.
+  const resolveSingleProduct = (handle: string): StyleMePrimaryProduct | null => {
+    const cp = getProductByHandle(handle);
+    if (!cp) return null;
+    const media = _resolveMedia(handle);
+    const imgUrl = resolveDisplayImage(media);
+    return {
+      handle,
+      title: cp.parsed.identity.verifiedTitle,
+      slot: cp.parsed.identity.itemType.toLowerCase(),
+      shopifyProductId:
+        _tryOnEnabled && media?.eligibility === "ready"
+          ? (media.shopifyProductGid ?? null)
+          : null,
+      productImageUrl: imgUrl,
+      liveUrl: cp.parsed.identity.liveUrl,
+      productUrl:
+        media?.shopifyHandle
+          ? `https://naiabynadine.com/products/${media.shopifyHandle}`
+          : null,
+      stylingNotes:
+        cp.parsed.prose.styleMeExplanation ??
+        `Style the ${cp.parsed.identity.verifiedTitle} with intention.`,
+    };
+  };
+  const isRev3Session = !!(session.state ?? session.intentions?.length);
+  const resultDirections: ResultDirection[] = isRev3Session
+    ? computeResultDirections(
+        recommendation.evaluatedProducts,
+        resolveSingleProduct,
+        buildProfileHint(engineInput.profile),
+      )
+    : [];
+
   // Alternatives — up to 2, from engine output only; order preserved.
   // Suppressed for my-closet (customer piece is the primary; no NADINE complement surfaces).
   const alternatives: StyleMePrimaryProduct[] = session.source === "my-closet"
@@ -1013,6 +1277,7 @@ export async function computeStyleMeResult(
           shopifyProductId: _tryOnEnabled && altMedia?.eligibility === "ready" ? (altMedia.shopifyProductGid ?? null) : null,
           productImageUrl: altImageUrl,
           liveUrl: altCatalog.parsed.identity.liveUrl,
+          productUrl: altMedia?.shopifyHandle ? `https://naiabynadine.com/products/${altMedia.shopifyHandle}` : null,
           stylingNotes:
             altCatalog.parsed.prose.styleMeExplanation ??
             `Style the ${altCatalog.parsed.identity.verifiedTitle} with intention.`,
@@ -1109,6 +1374,7 @@ export async function computeStyleMeResult(
     songReason,
     song,
     rawRecommendation: recommendation,
+    resultDirections,
   };
 }
 

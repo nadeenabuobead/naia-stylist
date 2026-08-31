@@ -268,6 +268,10 @@ model StylingSession {
   bodyPreference  String?   // Body fit preferences
   styleDNA        String?   // Style DNA preferences (JSON array)
   
+  // Rev 3 — Psychology-First StyleMe (Group 5)
+  state           String?        // Rev 3 state answer ID (wording context only)
+  intentions      String[]  @default([])  // Rev 3 intention answer IDs (up to 2)
+
   // Source Selection
   styleFrom       StyleSource @default(BOTH)
   closetAnchorId  String?     // ClosetItem ID selected for CLOSET/BOTH sources; null for NAIA

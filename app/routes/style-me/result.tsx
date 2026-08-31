@@ -188,6 +188,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     const cookieSession = await getSession(request.headers.get("Cookie"));
+
+    // Rev 3 — Psychology-First. Read new keys first; fall back to legacy.
+    const rev3State = (cookieSession.get("styleMeState") as string | undefined) ?? null;
+    const rev3IntentionsRaw = cookieSession.get("styleMeIntentions") as string | undefined;
+    const rev3Intentions: string[] = rev3IntentionsRaw
+      ? (Array.isArray(rev3IntentionsRaw) ? rev3IntentionsRaw : (() => { try { return JSON.parse(rev3IntentionsRaw); } catch { return []; } })())
+      : [];
+
     const mood = cookieSession.get("styleMeMood") as string | undefined;
     const feelings = cookieSession.get("styleMeFeelings") as string[] | undefined;
     const bodyNeeds = cookieSession.get("styleMeBodyNeeds") as string[] | undefined;
@@ -198,8 +206,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const nadineAnchorHandle = (cookieSession.get("styleMeNadineAnchorHandle") as string | undefined) ?? null;
     const closetAnchorId = (cookieSession.get("styleMeClosetAnchorId") as string | undefined) ?? null;
 
-    if (!mood || !mood.length || !feelings || !feelings.length || !bodyNeeds || !bodyNeeds.length || !occasion || !source) {
-      return redirect("/style-me/mood");
+    const isRev3Session = !!rev3State;
+
+    if (isRev3Session) {
+      // Rev 3 path: need bodyNeeds + occasion + source (moods/feelings derived from intentions)
+      if (!bodyNeeds || !bodyNeeds.length || !occasion || !source) {
+        return redirect("/style-me/state");
+      }
+    } else {
+      // Legacy path
+      if (!mood || !mood.length || !feelings || !feelings.length || !bodyNeeds || !bodyNeeds.length || !occasion || !source) {
+        return redirect("/style-me/mood");
+      }
     }
 
     // Authenticated customers use their real ID; unauthenticated visitors fall back to the
@@ -214,7 +232,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       resolvedCustomerId = guest.id;
     }
 
-    const moodFirst = mood;
+    const moodFirst = mood ?? null;
     const stylingSession = await prisma.stylingSession.create({
       data: {
         customerId: resolvedCustomerId,
@@ -226,11 +244,42 @@ export async function loader({ request }: LoaderFunctionArgs) {
         practicalIds,
         styleFrom: source === "my-closet" ? "CLOSET" : source === "naia-piece" ? "NAIA" : "BOTH",
         closetAnchorId: (source === "my-closet" || source === "both") ? (closetAnchorId ?? null) : null,
+        // Rev 3 — Psychology-First (Group 5). Wording context only; zero product scoring.
+        ...(isRev3Session && {
+          state: rev3State,
+          intentions: rev3Intentions,
+        }),
       },
     });
 
     return data(
-      { isLoading: true, isAuthenticated: !!naiaCustomer, naiaModelIsReady, sessionId: stylingSession.id, mood: moodFirst, currentMood: moodFirst, moods: mood ? [mood] : [], desiredFeelings: feelings ?? [], desiredFeeling: feelings?.[0] || null, occasion, bodyNeeds, formalityConditional, practicalIds, nadineAnchorHandle, closetAnchorId, devTryOnEnabled, vtoEnabled, tryOnFixtureTokens, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, existingOutfitFeedback: null, error: null },
+      {
+        isLoading: true,
+        isAuthenticated: !!naiaCustomer,
+        naiaModelIsReady,
+        sessionId: stylingSession.id,
+        mood: moodFirst,
+        currentMood: moodFirst,
+        moods: mood ? [mood] : [],
+        desiredFeelings: feelings ?? [],
+        desiredFeeling: feelings?.[0] || null,
+        occasion,
+        bodyNeeds,
+        formalityConditional,
+        practicalIds,
+        nadineAnchorHandle,
+        closetAnchorId,
+        devTryOnEnabled,
+        vtoEnabled,
+        tryOnFixtureTokens,
+        suggestion: null,
+        pendingState: null as "needs_passport" | "ready_to_save" | null,
+        existingOutfitFeedback: null,
+        error: null,
+        // Rev 3 — Psychology-First (Group 5)
+        rev3State: rev3State ?? null,
+        rev3Intentions,
+      },
       { headers: { "Set-Cookie": await commitSession(cookieSession) } }
     );
   } catch (err: any) {
@@ -251,7 +300,7 @@ export async function action({ request }: ActionFunctionArgs) {
       const clearedCookie = await clearStyleMeSession(request);
       // return, not throw — throw inside this try/catch would be caught by the
       // outer catch block and silently become a 500 instead of a 302.
-      return redirect("/style-me/mood", {
+      return redirect("/style-me/state", {
         headers: { "Set-Cookie": clearedCookie },
       });
     }
@@ -263,18 +312,77 @@ export async function action({ request }: ActionFunctionArgs) {
       const bodyNeedsRaw = formData.get("bodyNeeds") as string | null;
       const bodyNeeds: string[] = bodyNeedsRaw ? JSON.parse(bodyNeedsRaw) : [];
       const moodsRaw = formData.get("moods") as string | null;
-      const moods: string[] = moodsRaw ? JSON.parse(moodsRaw) : [session.currentMood || "confident"];
       const desiredFeelingsRaw = formData.get("desiredFeelings") as string | null;
-      const desiredFeelings: string[] = desiredFeelingsRaw
-        ? JSON.parse(desiredFeelingsRaw)
-        : session.desiredFeeling
-        ? [session.desiredFeeling]
-        : [];
       const nadineAnchorHandle = (formData.get("nadineAnchorHandle") as string) || null;
       const closetAnchorId = (formData.get("closetAnchorId") as string) || null;
       const formalityConditional = (formData.get("formalityConditional") as string) || null;
       const practicalIdsRaw = formData.get("practicalIds") as string | null;
       const practicalIds: string[] = practicalIdsRaw ? JSON.parse(practicalIdsRaw) : [];
+
+      // Rev 3 — Psychology-First (Group 5)
+      const rev3StateAction = (formData.get("rev3State") as string) || null;
+      const rev3IntentionsRawAction = formData.get("rev3Intentions") as string | null;
+      const rev3IntentionsAction: string[] = rev3IntentionsRawAction
+        ? (() => { try { return JSON.parse(rev3IntentionsRawAction); } catch { return []; } })()
+        : (session.intentions ?? []);
+
+      // Translate Rev 3 intention IDs to canonical engine signals.
+      // The engine never sees raw Rev 3 intention IDs — only canonical DFM/SMCM/PSM IDs.
+      // feel-like-myself / express-myself → PROFILE_AMPLIFY via "like-myself" mood.
+      // ground-me / give-energy → NO_RECOMMENDATION_EFFECT (wording context only).
+      const INTENTION_DFM_MAP: Record<string, string> = {
+        confidence: "more-confident",
+        "feel-put-together": "more-put-together",
+        "feel-attractive": "more-attractive",
+        "feel-softer": "softer",
+      };
+      const INTENTION_SMCM_MAP: Record<string, string> = {
+        "give-structure": "structured",
+        "feel-less-exposed": "more-coverage",
+      };
+      const INTENTION_PRACTICAL_MAP: Record<string, string> = {
+        "make-it-easy": "quick-to-style",
+      };
+      const PROFILE_AMPLIFY_IDS = new Set(["feel-like-myself", "express-myself"]);
+
+      const translatedDesiredFeelings: string[] = [];
+      const translatedSmcmIds: string[] = [];
+      const translatedPracticalIds: string[] = [];
+      const translatedMoods: string[] = [];
+
+      for (const intentionId of rev3IntentionsAction) {
+        if (PROFILE_AMPLIFY_IDS.has(intentionId)) {
+          translatedMoods.push("like-myself");
+        } else if (INTENTION_DFM_MAP[intentionId]) {
+          translatedDesiredFeelings.push(INTENTION_DFM_MAP[intentionId]);
+        } else if (INTENTION_SMCM_MAP[intentionId]) {
+          translatedSmcmIds.push(INTENTION_SMCM_MAP[intentionId]);
+        } else if (INTENTION_PRACTICAL_MAP[intentionId]) {
+          translatedPracticalIds.push(INTENTION_PRACTICAL_MAP[intentionId]);
+        }
+        // ground-me, give-energy → no engine signal
+      }
+
+      const isRev3Generate = !!(rev3StateAction ?? session.state);
+
+      // For Rev 3: moods come from intention translation; state is NEVER passed to engine.
+      // For legacy: moods/desiredFeelings come from form.
+      const moods: string[] = isRev3Generate
+        ? translatedMoods
+        : (moodsRaw ? JSON.parse(moodsRaw) : [session.currentMood || "confident"]);
+
+      const desiredFeelings: string[] = isRev3Generate
+        ? translatedDesiredFeelings
+        : (desiredFeelingsRaw
+            ? JSON.parse(desiredFeelingsRaw)
+            : session.desiredFeeling
+            ? [session.desiredFeeling]
+            : []);
+
+      // SMCM and practical signals from intention translation merge with form values
+      const effectivePracticalIds = isRev3Generate
+        ? [...practicalIds, ...translatedPracticalIds]
+        : practicalIds;
 
       // Resolve anchor input from session-stored selection.
       // For closet sources (my-closet, both) a missing or unowned ID is rejected here —
@@ -326,17 +434,27 @@ export async function action({ request }: ActionFunctionArgs) {
         } catch { /* never let event emission block generation */ }
       }
 
+      // For Rev 3: SMCM tokens from intention translation merge into bodyNeeds.
+      const effectiveBodyNeeds = isRev3Generate
+        ? [...bodyNeeds, ...translatedSmcmIds]
+        : bodyNeeds;
+
       const engineInput = buildEngineInput({
         moods,
         desiredFeelings,
-        bodyNeeds,
+        bodyNeeds: effectiveBodyNeeds,
         coverageConditional: null,
         occasion: session.occasion ?? "everyday",
         formalityConditional,
         todayColours: { preferred: [], avoid: [] },
-        practicalIds,
+        practicalIds: isRev3Generate ? effectivePracticalIds : practicalIds,
         source: sessionSource,
         profile: buildEphemeralContextSignals(buildProfileSignals(naiaCustomer?.onboardingProfile), journeyCtx),
+        // Rev 3 wording context — never affects engine scoring
+        ...(isRev3Generate && {
+          state: rev3StateAction ?? session.state ?? undefined,
+          intentions: rev3IntentionsAction,
+        }),
         anchor,
       });
 
@@ -729,6 +847,9 @@ interface StyleMeGenerationLoaderData {
   practicalIds: string[];
   nadineAnchorHandle: string | null;
   closetAnchorId: string | null;
+  // Rev 3 — Psychology-First (Group 5)
+  rev3State?: string | null;
+  rev3Intentions?: string[];
 }
 
 export default function StyleMeResult() {
@@ -819,6 +940,9 @@ export default function StyleMeResult() {
           practicalIds: JSON.stringify(generationData.practicalIds || []),
           nadineAnchorHandle: generationData.nadineAnchorHandle ?? "",
           closetAnchorId: generationData.closetAnchorId ?? "",
+          // Rev 3 — Psychology-First (Group 5). Empty string = legacy session.
+          rev3State: (generationData as any).rev3State ?? "",
+          rev3Intentions: JSON.stringify((generationData as any).rev3Intentions ?? []),
         },
         { method: "post" },
       );
@@ -1225,6 +1349,64 @@ export default function StyleMeResult() {
           </div>
         )}
 
+        {/* ── Rev 3: Result Directions (MOST YOU / FRESH / PUSH ME) ── */}
+        {/* Only rendered when computeResultDirections returned directions for this Rev 3 session. */}
+        {/* Legacy sessions have no resultDirections in metadata; this section is silently absent. */}
+        {suggestionMeta?.resultDirections && suggestionMeta.resultDirections.length > 0 && (
+          <div className="sm-result-section">
+            <p className="sm-result-section-head">Your Directions</p>
+            <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", marginBottom: "16px" }}>
+              Same session, different angles — choose the direction that fits today.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {suggestionMeta.resultDirections.map((dir) => (
+                <div
+                  key={dir.label}
+                  className="sm-item-card"
+                  style={{ borderLeft: "3px solid var(--naia-accent)", paddingLeft: "16px" }}
+                >
+                  <p style={{
+                    fontFamily: "var(--naia-ff-ui)",
+                    fontSize: "10px",
+                    letterSpacing: "2px",
+                    textTransform: "uppercase",
+                    color: "var(--naia-accent)",
+                    marginBottom: "4px",
+                  }}>
+                    {dir.displayLabel}
+                  </p>
+                  {dir.title && (
+                    <p style={{ fontFamily: "var(--naia-ff-display)", fontSize: "18px", fontWeight: 700, color: "var(--naia-ink)", marginBottom: "4px" }}>
+                      {dir.title}
+                    </p>
+                  )}
+                  {dir.productImageUrl && (
+                    <img
+                      src={dir.productImageUrl}
+                      alt={dir.title ?? dir.displayLabel}
+                      style={{ width: "100%", maxWidth: "200px", height: "auto", objectFit: "contain", borderRadius: "4px", marginBottom: "8px", background: "var(--naia-warm)" }}
+                    />
+                  )}
+                  <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", marginBottom: dir.productUrl ? "10px" : "0" }}>
+                    {dir.directionalNote}
+                  </p>
+                  {dir.productUrl && (
+                    <a
+                      href={dir.productUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="sm-result-action-btn"
+                      style={{ fontSize: "8px", letterSpacing: "2px", padding: "8px 16px", display: "inline-block" }}
+                    >
+                      SHOP THIS DIRECTION
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Why this works */}
         {suggestion.whyThisWorks && !isNoMatch && (
           <div className="sm-why-block">
@@ -1260,10 +1442,10 @@ export default function StyleMeResult() {
           )}
         </div>
 
-        {/* Confidence boost */}
+        {/* Stylist's Note (internal field: confidenceBoost — semantics changed per Constitution V1) */}
         {suggestion.confidenceBoost && (
           <div className="sm-confidence-block">
-            <p className="sm-confidence-label">The Shift</p>
+            <p className="sm-confidence-label">STYLIST'S NOTE</p>
             <p className="sm-confidence-quote">{suggestion.confidenceBoost}</p>
           </div>
         )}

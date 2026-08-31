@@ -1,4 +1,4 @@
-import { Form, Link } from "react-router";
+import { Form, Link, useLoaderData } from "react-router";
 import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs, type LinksFunction } from "react-router";
 
 export function meta() {
@@ -15,17 +15,27 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
 ];
 
+// Rev 3 UI — exactly 9 approved customer-facing IDs.
+// Canonical IDs (date-night, special-event) are internal only; girls-night/not-sure removed from UI.
 const occasions = [
-  { id: "everyday", label: "Everyday or casual plans" },
-  { id: "work", label: "Work or meetings" },
-  { id: "dinner", label: "Dinner" },
-  { id: "date-night", label: "Date night" },
-  { id: "girls-night", label: "Girls' night" },
-  { id: "family", label: "Family gathering" },
-  { id: "special-event", label: "Special event" },
-  { id: "travel", label: "Travel day" },
-  { id: "not-sure", label: "I'm not sure yet" },
+  { id: "work",            label: "Work or meetings" },
+  { id: "dinner",          label: "Dinner" },
+  { id: "date",            label: "Date" },
+  { id: "everyday",        label: "Everyday or casual plans" },
+  { id: "event",           label: "Event or occasion" },
+  { id: "family",          label: "Family gathering" },
+  { id: "travel",          label: "Travel day" },
+  { id: "active-busy-day", label: "Active / busy day" },
+  { id: "other",           label: "Something else" },
 ];
+
+// Rev 3 UI IDs → canonical engine IDs (applied at action time, before session storage)
+const REV3_OCCASION_MAP: Record<string, string> = {
+  "date": "date-night",
+  "event": "special-event",
+  "active-busy-day": "everyday",
+  "other": "not-sure",
+};
 
 const formalityOptions = [
   { id: "formality-relaxed", label: "Keep it relaxed" },
@@ -44,29 +54,35 @@ const FORMALITY_OCCASIONS = new Set(FORMALITY_QUESTION?.showForOccasions ?? []);
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await getSession(request.headers.get("Cookie"));
-  const mood = session.get("styleMeMood");
-  const feelings = session.get("styleMeFeelings");
+  // Accept both Rev 3 path (styleMeState) and legacy path (styleMeMood + styleMeFeelings)
+  const isRev3 = !!session.get("styleMeState");
+  const isLegacy = !!(session.get("styleMeMood") && session.get("styleMeFeelings"));
   const bodyNeeds = session.get("styleMeBodyNeeds");
 
-  if (!mood || !feelings || !bodyNeeds) {
+  if (!isRev3 && !isLegacy) {
     return redirect("/style-me/mood");
   }
+  if (!bodyNeeds) {
+    return redirect(isRev3 ? "/style-me/physical-need" : "/style-me/comfort");
+  }
 
-  return data({ mood, feelings, bodyNeeds });
+  return data({ isRev3 });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
-  const occasion = formData.get("occasion") as string;
+  const rawOccasion = formData.get("occasion") as string;
   const formalityRaw = formData.get("formalityConditional") as string | null;
 
-  if (!occasion || !VALID_OCCASION_IDS.has(occasion)) {
+  if (!rawOccasion || !VALID_OCCASION_IDS.has(rawOccasion)) {
     return data({ error: "Please select an occasion" }, { status: 400 });
   }
 
+  // Normalize Rev 3 UI IDs to canonical engine IDs
+  const occasion = REV3_OCCASION_MAP[rawOccasion] ?? rawOccasion;
+
   // Server-side defense: only honor a formality answer for an occasion that
-  // actually shows the micro-question — ignores any stale/tampered value from
-  // a previous occasion selection.
+  // actually shows the micro-question — uses the normalized ID to match FORMALITY_OCCASIONS.
   const formalityConditional =
     FORMALITY_OCCASIONS.has(occasion) && formalityRaw && VALID_FORMALITY_IDS.has(formalityRaw)
       ? formalityRaw
@@ -86,18 +102,22 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function StyleMeOccasion() {
+  const { isRev3 } = useLoaderData<typeof loader>();
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedFormality, setSelectedFormality] = useState<string | null>(null);
 
-  const showFormality = !!selected && FORMALITY_OCCASIONS.has(selected);
+  // Normalize Rev 3 UI ID before checking formality occasions (which use canonical IDs).
+  const normalizedForFormality = selected ? (REV3_OCCASION_MAP[selected] ?? selected) : null;
+  const showFormality = !!normalizedForFormality && FORMALITY_OCCASIONS.has(normalizedForFormality);
+  const backTo = isRev3 ? "/style-me/physical-need" : "/style-me/comfort";
 
   const selectOccasion = (id: string) => {
     setSelected(id);
-    if (!FORMALITY_OCCASIONS.has(id)) setSelectedFormality(null);
+    if (!FORMALITY_OCCASIONS.has(REV3_OCCASION_MAP[id] ?? id)) setSelectedFormality(null);
   };
 
   return (
-    <SmPage backTo="/style-me/comfort" step={4}>
+    <SmPage backTo={backTo} step={4}>
       <p className="sm-step-label">Occasion</p>
       <h1 className="sm-heading">What does the outfit need to work for?</h1>
       <p className="sm-sub">Choose your occasion.</p>
@@ -153,7 +173,7 @@ export default function StyleMeOccasion() {
           value={showFormality ? selectedFormality ?? "" : ""}
         />
         <div className="sm-step-buttons">
-          <Link to="/style-me/comfort" className="sm-btn-back">← Back</Link>
+          <Link to={backTo} className="sm-btn-back">← Back</Link>
           <SmContinue disabled={!selected} />
         </div>
       </Form>

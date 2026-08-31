@@ -210,6 +210,9 @@ export const SESSION_QUESTION_IDS = {
   //              CLOSET_ANCHOR_ID only when source === "my-closet" or "both".
   NADINE_ANCHOR_HANDLE: "sq-nadine-anchor-handle",
   CLOSET_ANCHOR_ID: "sq-closet-anchor-id",
+  // Rev 3 — Psychology-First StyleMe (Group 5)
+  STATE: "sq-state",
+  INTENTIONS: "sq-intentions",
 } as const;
 
 export const SQ = SESSION_QUESTION_IDS;
@@ -285,6 +288,17 @@ export const SESSION_QUESTIONS: SessionQuestion[] = [
     maxSelections: 1,
     isConditional: true,
   },
+  // Rev 3 — Psychology-First screens
+  {
+    id: SQ.STATE,
+    storageKey: "styleMeState",
+    maxSelections: 1,
+  },
+  {
+    id: SQ.INTENTIONS,
+    storageKey: "styleMeIntentions",
+    maxSelections: 2,
+  },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -356,6 +370,10 @@ export const BPE_ALIAS_MAP: Record<string, readonly string[]> = {
 export const BODY_NEED_NORMALIZATION_MAP: Record<string, string> = {
   bloated: "soft-and-forgiving-around-waist",
   "nothing-clingy": "relaxed",
+  // Rev 3 Physical Need IDs → canonical engine signals (Group 5)
+  "nothing-tight-waist": "soft-and-forgiving-around-waist",
+  "less-body-conscious": "relaxed",
+  "loose-comfortable": "relaxed",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1083,6 +1101,183 @@ export const ANSWER_REGISTRY: readonly AnswerMapping[] = [
     behaviours: [],
     rankingWeight: "none",
     candidatePool: CANDIDATE_POOLS.BOTH,
+  },
+
+  // ── Session: Rev 3 State — "How are you arriving today?" ─────────────────────
+  // Zero scoring. TEMPORARY SESSION CONTEXT + EXPLANATION/WORDING CONTEXT ONLY.
+  // NEVER map State into any product field, emotion tag, or body signal.
+  {
+    id: "feel-good",
+    questionId: SQ.STATE,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],
+    rankingWeight: "none",
+  },
+  {
+    id: "stressed-overloaded",
+    questionId: SQ.STATE,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],
+    rankingWeight: "none",
+  },
+  {
+    id: "low-energy",
+    questionId: SQ.STATE,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],
+    rankingWeight: "none",
+  },
+  {
+    id: "not-feeling-like-myself",
+    questionId: SQ.STATE,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],
+    rankingWeight: "none",
+  },
+  {
+    id: "physically-uncomfortable",
+    questionId: SQ.STATE,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],
+    rankingWeight: "none",
+  },
+  {
+    id: "self-conscious",
+    questionId: SQ.STATE,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],
+    rankingWeight: "none",
+  },
+  {
+    id: "going-through-change",
+    questionId: SQ.STATE,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],
+    rankingWeight: "none",
+  },
+  {
+    id: "want-reset",
+    questionId: SQ.STATE,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],
+    rankingWeight: "none",
+  },
+  {
+    id: "nothing-in-particular",
+    questionId: SQ.STATE,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.NO_RECOMMENDATION_EFFECT],
+    rankingWeight: "none",
+  },
+  {
+    id: "other",
+    questionId: SQ.STATE,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.NO_RECOMMENDATION_EFFECT],
+    rankingWeight: "none",
+  },
+
+  // ── Session: Rev 3 Intentions — "What do you want your clothes to do?" ───────
+  // Scored via translation in result.tsx to canonical engine signals.
+  // feel-like-myself / express-myself → PROFILE_AMPLIFY.
+  // ground-me / give-energy → NO_RECOMMENDATION_EFFECT (wording context only).
+  {
+    id: "feel-like-myself",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.PROFILE_AMPLIFY],
+    rankingWeight: "none",
+  },
+  {
+    id: "confidence",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [PRODUCT_TEMPLATE_FIELDS.DESIRED_FEELING_MATCH],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    rankingWeight: "active",
+  },
+  {
+    id: "ground-me",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.NO_RECOMMENDATION_EFFECT],
+    rankingWeight: "none",
+  },
+  {
+    id: "give-structure",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [PRODUCT_TEMPLATE_FIELDS.STYLE_ME_COMFORT_MATCH],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    rankingWeight: "active",
+  },
+  {
+    id: "make-it-easy",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [PRODUCT_TEMPLATE_FIELDS.PRACTICAL_SUPPORT_MATCH],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    rankingWeight: "active",
+  },
+  {
+    id: "feel-put-together",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [PRODUCT_TEMPLATE_FIELDS.DESIRED_FEELING_MATCH],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    rankingWeight: "active",
+  },
+  {
+    id: "feel-attractive",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [PRODUCT_TEMPLATE_FIELDS.DESIRED_FEELING_MATCH],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    rankingWeight: "active",
+  },
+  {
+    id: "give-energy",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.NO_RECOMMENDATION_EFFECT],
+    rankingWeight: "none",
+  },
+  {
+    id: "feel-softer",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [PRODUCT_TEMPLATE_FIELDS.DESIRED_FEELING_MATCH],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    rankingWeight: "active",
+  },
+  {
+    id: "feel-less-exposed",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [
+      PRODUCT_TEMPLATE_FIELDS.STYLE_ME_COMFORT_MATCH,
+      PRODUCT_TEMPLATE_FIELDS.COVERAGE_MODESTY,
+    ],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    rankingWeight: "active",
+  },
+  {
+    id: "express-myself",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.PROFILE_AMPLIFY],
+    rankingWeight: "none",
+  },
+
+  // ── Session: Body Needs — Rev 3 context-only Physical Needs ──────────────────
+  // softer-easier-fabrics + still-want-shape pass through BODY_NEED_NORMALIZATION_MAP
+  // unchanged (no canonical mapping); they remain as wording context for the AI.
+  {
+    id: "softer-easier-fabrics",
+    questionId: SQ.BODY_NEEDS,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],
+    rankingWeight: "none",
+  },
+  {
+    id: "still-want-shape",
+    questionId: SQ.BODY_NEEDS,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],
+    rankingWeight: "none",
   },
 
   // ── Profile: Style Personalities ──────────────────────���──────────────────

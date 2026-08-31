@@ -20,6 +20,8 @@ import {
   getMissingEssentialSlots,
   buildCompletionLayer,
   resolveSetSlots,
+  STYLEME_WORDING_SYSTEM_PROMPT,
+  buildProfileHint,
 } from "./styleme-result.server.ts";
 import type {
   StyleMeCustomerResult,
@@ -74,6 +76,7 @@ function makeMinimalResult(overrides: Partial<StyleMeCustomerResult> = {}): Styl
       shopifyProductId: null,
       productImageUrl: null,
       liveUrl: null,
+      productUrl: null,
       stylingNotes: "Let this shirt lead the outfit.",
     },
     alternatives: [],
@@ -84,6 +87,7 @@ function makeMinimalResult(overrides: Partial<StyleMeCustomerResult> = {}): Styl
     completionLayer: [],
     songReason: "Curated to set the tone for your everyday.",
     song,
+    resultDirections: [],
     rawRecommendation: {
       outcome: "nadine-recommendation",
       anchor: null,
@@ -224,12 +228,14 @@ describe("§4 deterministicWording", () => {
     assert.ok(w.outfitName.includes("Becoming Seen"), `got: ${w.outfitName}`);
   });
 
-  it("4.3 — occasion dashes are removed in confidenceBoost", () => {
+  it("4.3 — confidenceBoost is a clothing observation referencing the primary title", () => {
     const w = deterministicWording(
       "nadine-recommendation", ["confident"], [], "date-night", "Shirt", null,
     );
-    assert.ok(!w.confidenceBoost.includes("date-night"), `got: ${w.confidenceBoost}`);
-    assert.ok(w.confidenceBoost.includes("date night"), `got: ${w.confidenceBoost}`);
+    // Constitution V1: confidenceBoost is a clothing/styling observation, not an occasion reference.
+    assert.ok(!w.confidenceBoost.includes("date-night"), `must not contain hyphenated occasion: ${w.confidenceBoost}`);
+    assert.ok(w.confidenceBoost.includes("Shirt"), `must reference the primary title: ${w.confidenceBoost}`);
+    assert.ok(!w.confidenceBoost.toLowerCase().includes(" feel"), `must not predict how she will feel: ${w.confidenceBoost}`);
   });
 
   it("4.4 — confidenceBoost is always a non-empty string", () => {
@@ -523,6 +529,7 @@ function makeClosetLedResult(): StyleMeCustomerResult {
     completionLayer: [],
     songReason: "Curated for everyday.",
     song,
+    resultDirections: [],
     rawRecommendation: {
       outcome: "closet-led",
       anchor: {
@@ -744,8 +751,8 @@ describe("§11 Claude safety", () => {
 
   it("CS.12 — alternatives in metadata preserve engine order (not reordered)", () => {
     const song = SONG_CATALOG[0] as (typeof SONG_CATALOG)[number];
-    const alt1 = { handle: "midi-dress", title: "Midi", slot: "dress", shopifyProductId: null, productImageUrl: null, liveUrl: null, stylingNotes: "Style 1" };
-    const alt2 = { handle: "cropped-top", title: "Crop", slot: "top", shopifyProductId: null, productImageUrl: null, liveUrl: null, stylingNotes: "Style 2" };
+    const alt1 = { handle: "midi-dress", title: "Midi", slot: "dress", shopifyProductId: null, productImageUrl: null, liveUrl: null, productUrl: null, stylingNotes: "Style 1" };
+    const alt2 = { handle: "cropped-top", title: "Crop", slot: "top", shopifyProductId: null, productImageUrl: null, liveUrl: null, productUrl: null, stylingNotes: "Style 2" };
     const result = makeMinimalResult({ alternatives: [alt1, alt2] });
     const payload = buildDbPayload(result);
     const meta = parseSuggestionMetadata(payload.moodDescriptionJson);
@@ -1366,6 +1373,7 @@ function makeNadineWithClosetAnchorResult(overrides: Partial<StyleMeCustomerResu
       shopifyProductId: null,
       productImageUrl: null,
       liveUrl: null,
+      productUrl: null,
       stylingNotes: "Let this shirt lead the outfit.",
     },
     alternatives: [],
@@ -1376,6 +1384,7 @@ function makeNadineWithClosetAnchorResult(overrides: Partial<StyleMeCustomerResu
     completionLayer: [],
     songReason: "Curated for your work day.",
     song,
+    resultDirections: [],
     rawRecommendation: {
       outcome: "nadine-recommendation",
       anchor: closetAnchor,
@@ -1607,6 +1616,7 @@ function makeResultWithShoeAnchor(imageUrl: string | null = "https://cdn.shopify
     completionLayer: [],
     songReason: "Curated for dinner.",
     song,
+    resultDirections: [],
     rawRecommendation: {
       outcome: "nadine-recommendation",
       anchor: shoeAnchor,
@@ -1691,6 +1701,7 @@ describe("§R Result-page fixes", () => {
       completionLayer: [],
       songReason: "Work vibe.",
       song,
+      resultDirections: [],
       rawRecommendation: {
         outcome: "nadine-recommendation",
         anchor: bagAnchor,
@@ -2932,5 +2943,168 @@ describe("§23 F2 regression — softer desired-feeling signal", () => {
       desc.includes("wrap") || desc.includes("off-shoulder") || desc.includes("asymmetric") || desc.includes("daring"),
       `'more-attractive' + adventurous + girls-night must still produce daring neckline detail. Got: "${topPiece!.description}"`,
     );
+  });
+});
+
+// ── §V — Constitution V1 voice compliance ────────────────────────────────────
+
+// ── §V.D — confidenceBoost: styling observation, not emotional affirmation ────
+
+describe("§V.D — deterministic confidenceBoost: clothing observation, not emotional affirmation", () => {
+  const EMOTIONAL_PATTERNS: RegExp[] = [
+    /you dressed intentionally/i,
+    /that intention shows/i,
+    /you('ll| will) feel/i,
+    /you've got this/i,
+    /you look amazing/i,
+    /you are going to/i,
+  ];
+
+  it("V.D.1 — with primaryTitle: does not produce motivational affirmation", () => {
+    const w = deterministicWording("nadine-recommendation", ["confident"], ["more-elevated"], "work", "Becoming Defined", "A structured corset set.");
+    for (const p of EMOTIONAL_PATTERNS) {
+      assert.ok(!p.test(w.confidenceBoost), `confidenceBoost must not match /${p.source}/; got: "${w.confidenceBoost}"`);
+    }
+  });
+
+  it("V.D.2 — with primaryTitle: references the garment by name", () => {
+    const w = deterministicWording("nadine-recommendation", ["confident"], [], "everyday", "Becoming Defined", null);
+    assert.ok(w.confidenceBoost.includes("Becoming Defined"), `expected garment name in confidenceBoost; got: "${w.confidenceBoost}"`);
+  });
+
+  it("V.D.3 — without primaryTitle: produces clothing-grounded fallback", () => {
+    const w = deterministicWording("no-eligible-product", ["confident"], [], "everyday", null, null);
+    for (const p of EMOTIONAL_PATTERNS) {
+      assert.ok(!p.test(w.confidenceBoost), `confidenceBoost must not match /${p.source}/; got: "${w.confidenceBoost}"`);
+    }
+    assert.ok(w.confidenceBoost.length > 0, "confidenceBoost must be non-empty");
+  });
+
+  it("V.D.4 — closet-led with null primaryTitle: clothing-grounded fallback", () => {
+    const w = deterministicWording("closet-led", [], [], "casual", null, null);
+    for (const p of EMOTIONAL_PATTERNS) {
+      assert.ok(!p.test(w.confidenceBoost), `confidenceBoost must not match /${p.source}/; got: "${w.confidenceBoost}"`);
+    }
+  });
+
+  it("V.D.5 — confidenceBoost field still exists on StyleMeDbPayload (legacy schema compat)", () => {
+    const payload: StyleMeDbPayload = {
+      outfitName: "Test",
+      whyThisWorks: "The trouser grounds the look.",
+      confidenceBoost: "The blazer is doing the structural work — keep the rest clean.",
+      perfumeRec: null,
+      hairstyleRec: null,
+      makeupVibeRec: null,
+      songRec: '"Blossom" by Test',
+      songArtist: "Test",
+      items: [],
+      moodDescriptionJson: "{}",
+    };
+    assert.equal(payload.confidenceBoost, "The blazer is doing the structural work — keep the rest clean.");
+  });
+});
+
+// ── §V.E — StyleMe system prompt: tone spec and blocked phrases ───────────────
+
+describe("§V.E — STYLEME_WORDING_SYSTEM_PROMPT: tone spec and prohibited phrases", () => {
+  it("V.E.1 — system prompt does not use 'warm and confident AI personal stylist'", () => {
+    assert.ok(!STYLEME_WORDING_SYSTEM_PROMPT.includes("warm and confident AI personal stylist"),
+      "old tone description must be replaced");
+  });
+
+  it("V.E.2 — system prompt includes constitution tone descriptors", () => {
+    const REQUIRED = ["observant", "calm", "decisive", "understated"];
+    for (const word of REQUIRED) {
+      assert.ok(STYLEME_WORDING_SYSTEM_PROMPT.includes(word),
+        `system prompt must include tone descriptor "${word}"`);
+    }
+  });
+
+  it("V.E.3 — system prompt explicitly blocks bubbly/salesy phrases", () => {
+    const MUST_BLOCK = [
+      "Absolutely!", "Obsessed.", "Gorgeous!", "Game-changer.",
+      "perfect for you", "matches your vibe", "super flattering",
+    ];
+    for (const phrase of MUST_BLOCK) {
+      assert.ok(STYLEME_WORDING_SYSTEM_PROMPT.includes(phrase),
+        `system prompt must list "${phrase}" as blocked`);
+    }
+  });
+
+  it("V.E.4 — system prompt instructs confidenceBoost as styling observation not emotional", () => {
+    assert.ok(STYLEME_WORDING_SYSTEM_PROMPT.includes("styling observation"),
+      "system prompt must instruct styling observation");
+    assert.ok(STYLEME_WORDING_SYSTEM_PROMPT.includes("about the garment, not how she will feel"),
+      "system prompt must prohibit emotional payoff");
+  });
+});
+
+// ── §V.F — StyleMe system prompt: State context-only guard ───────────────────
+
+describe("§V.F — STYLEME_WORDING_SYSTEM_PROMPT: State context-only guard", () => {
+  it("V.F.1 — system prompt includes State-as-context guard", () => {
+    assert.ok(STYLEME_WORDING_SYSTEM_PROMPT.includes("CONTEXT ONLY"),
+      "system prompt must label State as CONTEXT ONLY");
+  });
+
+  it("V.F.2 — system prompt names the forbidden State pattern", () => {
+    assert.ok(
+      STYLEME_WORDING_SYSTEM_PROMPT.includes("Because you") ||
+      STYLEME_WORDING_SYSTEM_PROMPT.includes("Because you're stressed"),
+      "system prompt must show the forbidden pattern by example",
+    );
+  });
+
+  it("V.F.3 — system prompt specifies valid clothing-justification channels", () => {
+    const REQUIRED = ["Intention", "Physical Need"];
+    for (const channel of REQUIRED) {
+      assert.ok(STYLEME_WORDING_SYSTEM_PROMPT.includes(channel),
+        `system prompt must name "${channel}" as valid justification channel`);
+    }
+  });
+});
+
+// ── §V.10 — Legacy schema: parseSuggestionMetadata still works ───────────────
+
+describe("§V.10 — legacy schema compatibility: parseSuggestionMetadata", () => {
+  it("V.10.1 — parses metadata payload without resultDirections field (pre-Rev3 record)", () => {
+    const payload = JSON.stringify({
+      schemaVersion: 1,
+      outcome: "nadine-recommendation",
+      primaryHandle: "collar-shirt",
+      alternatives: [],
+      anchor: null,
+      anchorSummary: null,
+      pairingNote: null,
+      colourDirection: "neutrals",
+      songReason: "matched",
+      evidenceCodes: [],
+    });
+    const meta = parseSuggestionMetadata(payload);
+    assert.ok(meta !== null, "must parse valid pre-Rev3 metadata");
+    assert.equal(meta!.schemaVersion, 1);
+    assert.equal(meta!.resultDirections, undefined);
+  });
+
+  it("V.10.2 — parses metadata with resultDirections field (Rev3 record)", () => {
+    const payload = JSON.stringify({
+      schemaVersion: 1,
+      outcome: "nadine-recommendation",
+      primaryHandle: "collar-shirt",
+      alternatives: [],
+      anchor: null,
+      anchorSummary: null,
+      pairingNote: null,
+      colourDirection: "neutrals",
+      songReason: "matched",
+      evidenceCodes: [],
+      resultDirections: [
+        { label: "most-you", displayLabel: "MOST YOU", directionalNote: "Strongest alignment.", handle: "collar-shirt", title: "Becoming Seen", productUrl: null, productImageUrl: null },
+      ],
+    });
+    const meta = parseSuggestionMetadata(payload);
+    assert.ok(meta !== null, "must parse Rev3 metadata");
+    assert.equal(meta!.resultDirections?.length, 1);
+    assert.equal(meta!.resultDirections?.[0]?.label, "most-you");
   });
 });

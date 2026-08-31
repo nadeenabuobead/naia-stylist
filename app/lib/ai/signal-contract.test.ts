@@ -230,8 +230,8 @@ describe("PRODUCT_ELIGIBILITY — all 11 V7 products unverified", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("SESSION_QUESTIONS — structure and order", () => {
-  it("has exactly 11 questions (9 flow steps + 2 anchor keys)", () => {
-    assert.equal(SESSION_QUESTIONS.length, 11);
+  it("has exactly 13 questions (9 flow steps + 2 anchor keys + 2 Rev 3 questions)", () => {
+    assert.equal(SESSION_QUESTIONS.length, 13);
   });
 
   it("questions are in locked order (flow steps 0–8, anchor keys 9–10)", () => {
@@ -732,14 +732,16 @@ describe("Session Desired Feeling — answer behaviours", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("Session Body Needs — answer behaviours", () => {
-  // Locked canonical Body Need vocabulary (all 9).
+  // Locked canonical Body Need vocabulary (9 engine IDs + 2 Rev 3 context-only IDs).
   const CANONICAL_BN_IDS = [
     "waist-definition", "soft-and-forgiving-around-waist", "relaxed",
     "more-coverage", "structured", "elongates", "balances",
     "comfortable-elevated", "nothing-specific",
+    // Rev 3 context-only (CONTEXTUAL, no activatedFields, no scoring)
+    "softer-easier-fabrics", "still-want-shape",
   ];
 
-  it("canonical body need vocabulary contains exactly 9 IDs", () => {
+  it("canonical body need vocabulary contains exactly 11 IDs (9 engine + 2 Rev 3 context-only)", () => {
     const bnAnswers = getAnswersByQuestion(SQ.BODY_NEEDS);
     assert.equal(bnAnswers.length, CANONICAL_BN_IDS.length);
     for (const id of CANONICAL_BN_IDS) {
@@ -1692,10 +1694,10 @@ describe("ANSWER_REGISTRY — structural integrity", () => {
     }
   });
 
-  it("ANSWER_REGISTRY has entries for all 9 flow-step session questions (anchor keys excluded)", () => {
+  it("ANSWER_REGISTRY has entries for all flow-step session questions (anchor keys excluded)", () => {
     // The two anchor keys (NADINE_ANCHOR_HANDLE, CLOSET_ANCHOR_ID) store free-form IDs
     // selected by the customer — they have no predefined answer vocabulary.
-    const ANCHOR_KEY_IDS = new Set([SQ.NADINE_ANCHOR_HANDLE, SQ.CLOSET_ANCHOR_ID]);
+    const ANCHOR_KEY_IDS: Set<string> = new Set([SQ.NADINE_ANCHOR_HANDLE, SQ.CLOSET_ANCHOR_ID]);
     const sessionQIds = new Set(Object.values(SQ).filter((id) => !ANCHOR_KEY_IDS.has(id)));
     const registeredQIds = new Set(ANSWER_REGISTRY.map((m) => m.questionId));
     for (const sqId of sessionQIds) {

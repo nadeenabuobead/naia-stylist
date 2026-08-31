@@ -27,6 +27,10 @@ const STYLEME_SESSION_KEYS = [
   "styleMeAnchorMode",
   "styleMeNadineAnchorHandle",
   "styleMeClosetAnchorId",
+  // Rev 3 — Psychology-First StyleMe (Group 5)
+  "styleMeState",
+  "styleMeIntentions",
+  "styleMeCoverageConditional",
 ] as const;
 
 export async function clearStyleMeSession(request: Request): Promise<string> {

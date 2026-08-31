@@ -55,6 +55,17 @@ export interface StyleMeWording {
   perfumeNote: string | null;
 }
 
+// ── Rev 3 result directions (Group 5) ────────────────────────────────────────
+
+export type ResultDirectionLabel = "most-you" | "fresh" | "push-me";
+
+export interface ResultDirection {
+  label: ResultDirectionLabel;
+  displayLabel: string;  // "MOST YOU" | "FRESH" | "PUSH ME"
+  product: StyleMePrimaryProduct | null;
+  directionalNote: string;
+}
+
 // ── Full customer result (server-side only) ─────────────────────────────────
 
 export interface StyleMeCustomerResult {
@@ -73,6 +84,8 @@ export interface StyleMeCustomerResult {
   songReason: string;
   song: GetReadySong;
   rawRecommendation: StyleMeRecommendationResult;
+  // Rev 3 — Psychology-First result directions (Group 5). Empty array for legacy sessions.
+  resultDirections: ResultDirection[];
 }
 
 // ── Versioned metadata envelope (stored in OutfitSuggestion.moodDescription) ─
@@ -98,6 +111,18 @@ export interface StyleMeMetadata {
   songReason: string;
   evidenceCodes: string[];
   completionLayer?: StyleMeCompletionPiece[];
+  // Rev 3 — Psychology-First result directions (Group 5).
+  // Stored in metadata so direction identity survives session reload.
+  // Absent on legacy sessions — consumers must guard with optional chaining.
+  resultDirections?: Array<{
+    label: string;
+    displayLabel: string;
+    directionalNote: string;
+    handle: string | null;
+    title: string | null;
+    productUrl: string | null;
+    productImageUrl: string | null;
+  }>;
 }
 
 /**
@@ -111,7 +136,7 @@ export function parseSuggestionMetadata(
   try {
     const parsed = JSON.parse(moodDescription) as Record<string, unknown>;
     if (parsed.schemaVersion !== 1) return null;
-    return parsed as StyleMeMetadata;
+    return parsed as unknown as StyleMeMetadata;
   } catch {
     return null;
   }

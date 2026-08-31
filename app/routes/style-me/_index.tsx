@@ -99,7 +99,7 @@ export default function StyleMeIndex() {
             nAia will build a complete look for you.
           </p>
           <div className="sml-start-actions">
-            <Link to="/style-me/mood" className="sp-btn-primary">Start StyleMe</Link>
+            <Link to="/style-me/state" className="sp-btn-primary">Start StyleMe</Link>
           </div>
         </div>
       </section>
