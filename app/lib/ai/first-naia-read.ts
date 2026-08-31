@@ -230,7 +230,7 @@ function buildColourWorld(profile: FirstReadProfile): NaiaFirstReadObservation |
     const avoidVerb = avoidLabels.length === 1 ? "is" : "are";
     claim = `You seem to reach toward ${joinLabels(favLabels)}, while ${joinLabels(avoidLabels)} ${avoidVerb} something you tend to step back from.`;
   } else if (favLabels.length > 0) {
-    claim = `You seem to reach for ${joinLabels(favLabels)} most — that palette tells us something about your instincts.`;
+    claim = `You seem to reach for ${joinLabels(favLabels)} most — that's becoming a clear signal in your palette.`;
   } else {
     const avoidVerb = avoidLabels.length === 1 ? "is" : "are";
     claim = `You seem to know what you step back from — ${joinLabels(avoidLabels)} ${avoidVerb} not where you naturally go.`;

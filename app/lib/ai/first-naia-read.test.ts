@@ -302,6 +302,21 @@ describe("FR14 — no banned psychology inference", () => {
     const claim = obs?.claim ?? "";
     assert.ok(!claim.toLowerCase().includes("insecur"), "oversized must not imply insecurity");
   });
+  it("colour-world claim (favorites only) does not use prohibited interpretive language", () => {
+    const obs = computeNaiaFirstRead({ favoriteColors: ["black", "navy"] })
+      .observations.find(o => o.type === "colour-world");
+    const claim = (obs?.claim ?? "").toLowerCase();
+    assert.ok(!claim.includes("instinct"), "colour-world must not mention instincts");
+    assert.ok(!claim.includes("personality"), "colour-world must not infer personality");
+    assert.ok(!claim.includes("psychology"), "colour-world must not use psychology");
+    assert.ok(!claim.includes("tells us something about"), "colour-world must not use 'tells us something about' interpretive framing");
+  });
+  it("colour-world claim (favorites only) is grounded in palette not psychology", () => {
+    const obs = computeNaiaFirstRead({ favoriteColors: ["black"] })
+      .observations.find(o => o.type === "colour-world");
+    const claim = obs?.claim ?? "";
+    assert.ok(claim.includes("palette"), "colour-world favorites-only claim must reference palette");
+  });
 });
 
 // ── Closet Relationship normalization ─────────────────────────────────────────
