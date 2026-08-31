@@ -124,9 +124,14 @@ describe("Phase 4B3 recovery — route contract", () => {
     assert.ok(!text.includes('redirect("/style-me/today-colours"'), "not redirecting to today-colours");
   });
 
-  it("occasion back link is /style-me/comfort", () => {
+  it("occasion back link is derived from isRev3 (physical-need for Rev3, comfort for legacy)", () => {
     const text = src("occasion.tsx");
-    assert.ok(text.includes('backTo="/style-me/comfort"'), "back link to comfort");
+    // Rev 3: back to /style-me/physical-need
+    assert.ok(text.includes('"/style-me/physical-need"'), "Rev 3 path links to physical-need");
+    // Legacy: back to /style-me/comfort
+    assert.ok(text.includes('"/style-me/comfort"'), "legacy path links to comfort");
+    // Dynamic derivation — backTo is set via isRev3, not a single hardcoded literal
+    assert.ok(text.includes("isRev3"), "backTo is conditional on isRev3");
     assert.ok(!text.includes('backTo="/style-me/feeling"'), "not back to feeling");
   });
 
@@ -553,8 +558,8 @@ describe("StyleMe Result Experience — cleanup pass", () => {
   it("Shop This Piece CTA is gated by !item.closetItemId — closet items never receive it", () => {
     const text = src("result.tsx");
     assert.ok(
-      text.includes("!item.closetItemId && item.productUrl"),
-      "Shop This Piece condition requires !item.closetItemId",
+      text.includes("!item.closetItemId && shopUrl"),
+      "Shop This Piece condition requires !item.closetItemId and derived shopUrl",
     );
   });
 
@@ -820,26 +825,8 @@ describe("OutfitReactionWidget — Quick Feedback", () => {
   });
 
   // ── Result page integration ─────────────────────────────────────────
-
-  it("OutfitReactionWidget is imported in result.tsx", () => {
-    const text = src("result.tsx");
-    assert.ok(
-      text.includes("OutfitReactionWidget"),
-      "result.tsx must import OutfitReactionWidget",
-    );
-  });
-
-  it("OutfitReactionWidget is rendered only for authenticated users", () => {
-    const text = src("result.tsx");
-    const widgetIdx = text.indexOf("<OutfitReactionWidget");
-    assert.ok(widgetIdx !== -1, "OutfitReactionWidget must be rendered in result.tsx");
-    // The render must be guarded by loaderData.isAuthenticated
-    const surroundingBlock = text.slice(widgetIdx - 300, widgetIdx + 100);
-    assert.ok(
-      surroundingBlock.includes("isAuthenticated"),
-      "OutfitReactionWidget render must be guarded by isAuthenticated",
-    );
-  });
+  // OutfitReactionWidget is NOT wired into result.tsx — the current post-wear
+  // path is StyleMeOutcome (outcome-contract + api.styleme-outcome).
 
   it("result.tsx imports loadSessionFeedback for feedback pre-loading", () => {
     const text = src("result.tsx");
@@ -858,14 +845,6 @@ describe("OutfitReactionWidget — Quick Feedback", () => {
     assert.ok(
       text.includes('target === "complete-suggestion"'),
       "result loader must filter pre-loaded feedback by target === 'complete-suggestion'",
-    );
-  });
-
-  it("OutfitReactionWidget receives existingFeedbackId from loader data (not hardcoded null)", () => {
-    const text = src("result.tsx");
-    assert.ok(
-      text.includes("existingOutfitFeedback?.id"),
-      "result.tsx must pass existingOutfitFeedback?.id as existingFeedbackId to OutfitReactionWidget",
     );
   });
 

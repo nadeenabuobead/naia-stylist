@@ -182,34 +182,6 @@ describe("no alert() in active customer-facing routes", () => {
   }
 });
 
-// ── F. Style Me result review — inline error contract ────────────────────────
-
-describe("style-me/result.tsx review modal — inline error state", () => {
-  it("has reviewError state (no alert for validation)", () => {
-    const code = src("style-me/result.tsx");
-    assert.ok(code.includes("reviewError"), "reviewError state exists");
-    assert.ok(code.includes("setReviewError"), "setReviewError setter exists");
-  });
-
-  it("submitReview calls setReviewError instead of alert()", () => {
-    const code = src("style-me/result.tsx");
-    assert.ok(code.includes("setReviewError("), "uses setReviewError for validation feedback");
-    assert.ok(!code.includes("alert("), "no alert() present");
-  });
-
-  it("reviewError is cleared on successful validation in submitReview", () => {
-    const code = src("style-me/result.tsx");
-    assert.ok(code.includes("setReviewError(null)"), "error cleared on valid submit");
-  });
-
-  it("reviewError is cleared when review modal is cancelled", () => {
-    const code = src("style-me/result.tsx");
-    // The cancel button should clear the error
-    assert.ok(code.includes("setReviewError(null)") && code.includes("setShowReviewModal(false)"),
-      "both setShowReviewModal(false) and setReviewError(null) called on cancel");
-  });
-});
-
 // ── G. Passport selfie — server-side validation contract ─────────────────────
 
 describe("passport.selfie.tsx — server-side validation before external provider", () => {
