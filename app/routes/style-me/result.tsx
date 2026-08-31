@@ -22,6 +22,7 @@ import { TryOnPanel } from "~/components/TryOnPanel";
 import { VtoExperience } from "~/components/VtoExperience";
 import { RecommendationFeedbackWidget } from "~/components/RecommendationFeedbackWidget";
 import { loadSessionFeedback } from "~/lib/ai/feedback-persistence.server";
+import { loadOutcomeForSuggestion } from "~/lib/ai/outcome-persistence.server";
 import { buildCustomerJourneyContext, buildEphemeralContextSignals } from "~/lib/ai/journey-context.server";
 import { emitSessionStarted, emitRecommendationServed, emitLookSaved, emitInSessionReviewSubmitted, recordJourneyEvent, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -79,6 +80,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             suggestion: null,
             pendingState: null as "needs_passport" | "ready_to_save" | null,
             existingOutfitFeedback: null,
+            existingOutcome: null,
             error: "Not found",
           },
           { status: 404 },
@@ -105,6 +107,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             suggestion: null,
             pendingState: null as "needs_passport" | "ready_to_save" | null,
             existingOutfitFeedback: null,
+            existingOutcome: null,
             error: "Not found",
           },
           { status: 404 },
@@ -115,6 +118,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const existingOutfitFeedback = sessionFeedback.find(
         (f) => f.target === "complete-suggestion" && f.suggestionId === currentSuggestionId,
       ) ?? null;
+      const existingOutcome = currentSuggestionId
+        ? await loadOutcomeForSuggestion(currentSuggestionId, naiaCustomer.id)
+        : null;
       return data({
         isLoading: false,
         isAuthenticated: !!naiaCustomer,
@@ -130,6 +136,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         suggestion: session.suggestions[0] || null,
         pendingState: null as "needs_passport" | "ready_to_save" | null,
         existingOutfitFeedback: existingOutfitFeedback ? { id: existingOutfitFeedback.id, rating: existingOutfitFeedback.rating, reasonCodes: existingOutfitFeedback.reasonCodes } : null,
+        existingOutcome,
         error: null,
       });
     }
@@ -168,6 +175,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const pendingOutfitFeedback = pendingSessionFeedback.find(
         (f) => f.target === "complete-suggestion" && f.suggestionId === pendingSuggestion.id,
       ) ?? null;
+      const pendingExistingOutcome = await loadOutcomeForSuggestion(pendingSuggestion.id, naiaCustomer.id);
       return data({
         isLoading: false,
         isAuthenticated: !!naiaCustomer,
@@ -183,6 +191,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         suggestion: pendingSuggestion,
         pendingState,
         existingOutfitFeedback: pendingOutfitFeedback ? { id: pendingOutfitFeedback.id, rating: pendingOutfitFeedback.rating, reasonCodes: pendingOutfitFeedback.reasonCodes } : null,
+        existingOutcome: pendingExistingOutcome,
         error: null,
       });
     }
@@ -275,6 +284,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         suggestion: null,
         pendingState: null as "needs_passport" | "ready_to_save" | null,
         existingOutfitFeedback: null,
+        existingOutcome: null,
         error: null,
         // Rev 3 — Psychology-First (Group 5)
         rev3State: rev3State ?? null,
@@ -284,7 +294,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     );
   } catch (err: any) {
     console.error("Result loader error:", err);
-    return data({ isLoading: false, isAuthenticated: false, naiaModelIsReady: false, devTryOnEnabled, vtoEnabled, tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null, currentMood: null, desiredFeeling: null, occasion: null, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, existingOutfitFeedback: null, error: err?.message || "Something went wrong" });
+    return data({ isLoading: false, isAuthenticated: false, naiaModelIsReady: false, devTryOnEnabled, vtoEnabled, tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null, currentMood: null, desiredFeeling: null, occasion: null, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, existingOutfitFeedback: null, existingOutcome: null, error: err?.message || "Something went wrong" });
   }
 }
 
@@ -882,6 +892,24 @@ export default function StyleMeResult() {
     whatDidnt: [] as string[],
   });
 
+  // ── Style Memory V1 — outcome capture state ───────────────────────────────
+  const existingOutcome = (loaderData as any).existingOutcome as import("~/lib/ai/outcome-contract").StyleMeOutcomeSummary | null;
+  const outcomeFetcher = useFetcher<{ ok?: boolean; outcome?: import("~/lib/ai/outcome-contract").StyleMeOutcomeSummary; error?: string }>();
+  const [outcomeStatus, setOutcomeStatus] = useState<string | null>(existingOutcome?.outcomeStatus ?? null);
+  const [selectedChangeTypes, setSelectedChangeTypes] = useState<string[]>(existingOutcome?.changeTypes ?? []);
+  const [otherChangeNote, setOtherChangeNote] = useState<string>(existingOutcome?.otherChangeNote ?? "");
+  const [goalOutcome, setGoalOutcome] = useState<string | null>(existingOutcome?.goalOutcome ?? null);
+  const [outcomeSaved, setOutcomeSaved] = useState<boolean>(existingOutcome != null);
+  const [isOutcomeEditing, setIsOutcomeEditing] = useState(false);
+  const [selectedResultDirection, setSelectedResultDirection] = useState<string | null>(existingOutcome?.selectedDirection ?? null);
+
+  useEffect(() => {
+    if (outcomeFetcher.data?.ok) {
+      setOutcomeSaved(true);
+      setIsOutcomeEditing(false);
+    }
+  }, [outcomeFetcher.data]);
+
   const whatWorkedOptions = ["Silhouette", "Color palette", "Styling approach", "Accessories", "Hair suggestion", "Makeup suggestion", "Perfume", "Song", "Confidence boost", "Overall vibe"];
   const whatDidntOptions = ["Too formal", "Too casual", "Wrong colors", "Uncomfortable silhouette", "Doesn't match my style", "Too bold", "Too safe", "Wrong occasion", "Accessories felt off", "Hair/makeup didn't resonate", "Not my vibe"];
 
@@ -1363,7 +1391,17 @@ export default function StyleMeResult() {
                 <div
                   key={dir.label}
                   className="sm-item-card"
-                  style={{ borderLeft: "3px solid var(--naia-accent)", paddingLeft: "16px" }}
+                  style={{
+                    borderLeft: selectedResultDirection === dir.label
+                      ? "3px solid var(--naia-ink)"
+                      : "3px solid var(--naia-accent)",
+                    paddingLeft: "16px",
+                    cursor: "pointer",
+                    opacity: selectedResultDirection !== null && selectedResultDirection !== dir.label ? 0.55 : 1,
+                  }}
+                  role="button"
+                  aria-pressed={selectedResultDirection === dir.label}
+                  onClick={() => setSelectedResultDirection(prev => prev === dir.label ? null : dir.label)}
                 >
                   <p style={{
                     fontFamily: "var(--naia-ff-ui)",
@@ -1449,6 +1487,227 @@ export default function StyleMeResult() {
             <p className="sm-confidence-quote">{suggestion.confidenceBoost}</p>
           </div>
         )}
+
+        {/* ── Style Memory V1 — After you wear this ────────────────────────── */}
+        {/* Only shown for authenticated customers with a saved suggestion. No modal, no popup. */}
+        {loaderData.isAuthenticated && suggestion.id && (() => {
+          const currentSuggestionId = suggestion.id;
+          const submitOutcome = () => {
+            if (!outcomeStatus) return;
+            outcomeFetcher.submit(
+              JSON.stringify({
+                suggestionId: currentSuggestionId,
+                outcomeStatus,
+                changeTypes: selectedChangeTypes,
+                otherChangeNote: otherChangeNote.trim() || null,
+                goalOutcome,
+                selectedDirection: selectedResultDirection,
+              }),
+              { method: "post", action: "/api/styleme-outcome", encType: "application/json" },
+            );
+          };
+
+          const toggleChangeType = (ct: string) => {
+            setSelectedChangeTypes(prev =>
+              prev.includes(ct) ? prev.filter(x => x !== ct) : prev.length < 5 ? [...prev, ct] : prev
+            );
+          };
+
+          const changeTypeLabels: Record<string, string> = {
+            shoes: "Shoes",
+            top: "Top",
+            bottom: "Bottom",
+            layer: "Layer",
+            "more-coverage": "More coverage",
+            "less-formal": "Less formal",
+            "more-comfortable": "More comfortable",
+            "different-colour": "Different colour",
+            "different-fit": "Different fit",
+            other: "Other",
+          };
+
+          if (outcomeSaved && outcomeFetcher.state === "idle" && !isOutcomeEditing) {
+            return (
+              <div style={{ borderTop: "1px solid rgba(34,21,22,0.08)", paddingTop: "20px", marginTop: "8px" }}>
+                <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "11px", letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--naia-muted)", marginBottom: "4px" }}>
+                  After you wear this
+                </p>
+                <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", color: "var(--naia-ink)", marginBottom: "6px" }}>
+                  Noted.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setIsOutcomeEditing(true)}
+                  style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "10px", letterSpacing: "1.5px", textTransform: "uppercase", background: "none", border: "none", color: "var(--naia-muted)", padding: 0, cursor: "pointer", textDecoration: "underline" }}
+                >
+                  Edit
+                </button>
+              </div>
+            );
+          }
+
+          return (
+            <div style={{ borderTop: "1px solid rgba(34,21,22,0.08)", paddingTop: "20px", marginTop: "8px" }}>
+              <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "11px", letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--naia-muted)", marginBottom: "16px" }}>
+                After you wear this
+              </p>
+              <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", color: "var(--naia-ink)", marginBottom: "12px" }}>
+                What happened with this look?
+              </p>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "16px" }}>
+                {(["wore-it", "changed-something", "didnt-wear-it"] as const).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => {
+                      setOutcomeStatus(s);
+                      if (s === "wore-it") { setSelectedChangeTypes([]); setOtherChangeNote(""); }
+                      if (s === "didnt-wear-it") { setSelectedChangeTypes([]); setOtherChangeNote(""); setGoalOutcome(null); }
+                    }}
+                    style={{
+                      fontFamily: "var(--naia-ff-ui)",
+                      fontSize: "10px",
+                      letterSpacing: "1.5px",
+                      textTransform: "uppercase",
+                      padding: "8px 14px",
+                      border: "1px solid",
+                      borderColor: outcomeStatus === s ? "var(--naia-ink)" : "rgba(34,21,22,0.2)",
+                      background: outcomeStatus === s ? "var(--naia-ink)" : "transparent",
+                      color: outcomeStatus === s ? "var(--naia-paper)" : "var(--naia-ink)",
+                      cursor: "pointer",
+                      borderRadius: "2px",
+                    }}
+                  >
+                    {s === "wore-it" ? "Wore it" : s === "changed-something" ? "Changed something" : "Didn't wear it"}
+                  </button>
+                ))}
+              </div>
+
+              {outcomeStatus === "changed-something" && (
+                <div style={{ marginBottom: "16px" }}>
+                  <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "13px", color: "var(--naia-muted)", marginBottom: "8px" }}>
+                    What did you change? (up to 5)
+                  </p>
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                    {Object.entries(changeTypeLabels).map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => toggleChangeType(id)}
+                        style={{
+                          fontFamily: "var(--naia-ff-ui)",
+                          fontSize: "10px",
+                          letterSpacing: "1px",
+                          padding: "6px 10px",
+                          border: "1px solid",
+                          borderColor: selectedChangeTypes.includes(id) ? "var(--naia-accent)" : "rgba(34,21,22,0.15)",
+                          background: selectedChangeTypes.includes(id) ? "var(--naia-accent)" : "transparent",
+                          color: selectedChangeTypes.includes(id) ? "#fff" : "var(--naia-ink)",
+                          cursor: "pointer",
+                          borderRadius: "2px",
+                          opacity: !selectedChangeTypes.includes(id) && selectedChangeTypes.length >= 5 ? 0.4 : 1,
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {selectedChangeTypes.includes("other") && (
+                    <textarea
+                      placeholder="Anything else? (optional, 280 chars)"
+                      maxLength={280}
+                      value={otherChangeNote}
+                      onChange={(e) => setOtherChangeNote(e.target.value)}
+                      rows={2}
+                      style={{
+                        marginTop: "10px",
+                        width: "100%",
+                        fontFamily: "var(--naia-ff-body)",
+                        fontSize: "13px",
+                        color: "var(--naia-ink)",
+                        background: "transparent",
+                        border: "1px solid rgba(34,21,22,0.2)",
+                        borderRadius: "2px",
+                        padding: "8px",
+                        resize: "vertical",
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+
+              {(outcomeStatus === "wore-it" || outcomeStatus === "changed-something") && (
+                <div style={{ marginBottom: "16px" }}>
+                  <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "13px", color: "var(--naia-muted)", marginBottom: "8px" }}>
+                    Did the outfit give you what you wanted today?
+                  </p>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    {(["yes", "somewhat", "no"] as const).map((g) => (
+                      <button
+                        key={g}
+                        type="button"
+                        onClick={() => setGoalOutcome(prev => prev === g ? null : g)}
+                        style={{
+                          fontFamily: "var(--naia-ff-ui)",
+                          fontSize: "10px",
+                          letterSpacing: "1px",
+                          padding: "6px 12px",
+                          border: "1px solid",
+                          borderColor: goalOutcome === g ? "var(--naia-ink)" : "rgba(34,21,22,0.2)",
+                          background: goalOutcome === g ? "var(--naia-ink)" : "transparent",
+                          color: goalOutcome === g ? "var(--naia-paper)" : "var(--naia-ink)",
+                          cursor: "pointer",
+                          borderRadius: "2px",
+                        }}
+                      >
+                        {g === "yes" ? "Yes" : g === "somewhat" ? "Somewhat" : "No"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                {outcomeStatus && (
+                  <button
+                    type="button"
+                    onClick={submitOutcome}
+                    disabled={outcomeFetcher.state === "submitting" || (outcomeStatus === "changed-something" && selectedChangeTypes.length === 0)}
+                    style={{
+                      fontFamily: "var(--naia-ff-ui)",
+                      fontSize: "10px",
+                      letterSpacing: "2px",
+                      textTransform: "uppercase",
+                      padding: "10px 20px",
+                      border: "1px solid var(--naia-ink)",
+                      background: "transparent",
+                      color: "var(--naia-ink)",
+                      cursor: (outcomeStatus === "changed-something" && selectedChangeTypes.length === 0) ? "not-allowed" : "pointer",
+                      opacity: (outcomeStatus === "changed-something" && selectedChangeTypes.length === 0) ? 0.4 : 1,
+                      borderRadius: "2px",
+                    }}
+                  >
+                    {outcomeFetcher.state === "submitting" ? "Saving…" : "Save"}
+                  </button>
+                )}
+                {isOutcomeEditing && outcomeSaved && (
+                  <button
+                    type="button"
+                    onClick={() => setIsOutcomeEditing(false)}
+                    style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "10px", letterSpacing: "1.5px", textTransform: "uppercase", background: "none", border: "none", color: "var(--naia-muted)", cursor: "pointer" }}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+              {outcomeFetcher.data?.error && (
+                <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "11px", color: "var(--naia-burg, #8b2035)", marginTop: "8px" }}>
+                  Something went wrong. Please try again.
+                </p>
+              )}
+            </div>
+          );
+        })()}
 
         {/* "See This Look On Me" section — always shown for eligible NADINE results */}
         {showTryOnSection && (

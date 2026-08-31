@@ -92,4 +92,6 @@ export default [
   route("api/trigger-tryon", "routes/api.trigger-tryon.tsx"),
   // VTO M2 — session-auth job status polling and result delivery
   route("api/tryon-status/:jobId", "routes/api.tryon-status.$jobId.tsx"),
+  // Style Memory V1 — StyleMe outcome capture (UPSERT per OutfitSuggestion)
+  route("api/styleme-outcome", "routes/api.styleme-outcome.tsx"),
 ] satisfies RouteConfig;

@@ -63,6 +63,7 @@ model Customer {
   recommendationFeedback RecommendationFeedback[]
   selfieAnalysis         SelfieAnalysis?
   naiaObservationFeedback NaiaObservationFeedback[]
+  styleMemoryOutcomes     StyleMeOutcome[]
 }
 
 // ============================================
@@ -333,6 +334,7 @@ model OutfitSuggestion {
   selected          Boolean        @default(false)
   savedAsLook            Boolean        @default(false)
   recommendationFeedback RecommendationFeedback[]
+  outcome                StyleMeOutcome?
 }
 
 model OutfitItem {
@@ -918,4 +920,37 @@ model SelfieAnalysis {
   updatedAt         DateTime  @updatedAt
 
   @@index([customerId])
+}
+
+// ============================================
+// STYLE MEMORY V1 — STYLEME OUTCOME CAPTURE
+// ============================================
+
+// One outcome row per OutfitSuggestion — UPSERT semantics.
+// Stores customer-reported outcome evidence only; no inference, no pattern scoring.
+// sessionId is server-derived (from OutfitSuggestion.session) — never from client input.
+model StyleMeOutcome {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Canonical owner — one outcome per suggestion
+  suggestionId String            @unique
+  suggestion   OutfitSuggestion  @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
+
+  // Denormalized for efficient querying; always server-derived
+  sessionId String
+
+  // Core outcome — stable IDs only (validated server-side)
+  outcomeStatus    String    // wore-it | changed-something | didnt-wear-it
+  changeTypes      String[]  @default([])  // max 5; non-empty only when outcomeStatus=changed-something
+  otherChangeNote  String?   @db.Text      // max 280 chars; only when "other" in changeTypes
+  goalOutcome      String?   // yes | somewhat | no; null when outcomeStatus=didnt-wear-it
+  selectedDirection String?  // most-you | fresh | push-me; null when no direction shown or selected
+
+  submittedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([sessionId])
 }
