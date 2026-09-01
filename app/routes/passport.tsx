@@ -209,16 +209,11 @@ const SECTIONS: SectionDef[] = [
   },
   {
     id: "fit",
-    label: "Your Fit, Coverage & Comfort",
-    question: "Tell nAia how you like clothing to fit, cover and emphasise your body.",
-    helper: "Save your silhouette, construction and coverage preferences — including which areas you enjoy highlighting or prefer covered.",
+    label: "Your Fit & Silhouette",
+    question: "What silhouettes feel most like you?",
+    helper: "Pick up to 3. These shape the garment suggestions nAia makes.",
     subFields: [
-      { draftKey: "silhouette",           apiKey: "silhouette",          subLabel: "My silhouettes",                                        kind: "array",  questionId: "silhouette"           },
-      { draftKey: "structure",            apiKey: "structure",           subLabel: "Construction",                                          kind: "single", questionId: "structure"            },
-      { draftKey: "coverage-preferences", apiKey: "coveragePreferences", subLabel: "Garment coverage preferences",                          kind: "array",  questionId: "coverage-preferences" },
-      { draftKey: "body-focus-areas"   as DraftKey, apiKey: "bodyFocusAreas",   subLabel: "Areas you enjoy highlighting",                   kind: "array"  as FieldKind, questionId: "body-focus-areas"    },
-      { draftKey: "body-avoid-areas"   as DraftKey, apiKey: "bodyAvoidAreas",   subLabel: "Areas you prefer more coverage or less emphasis", kind: "array"  as FieldKind, questionId: "body-avoid-areas"   },
-      { draftKey: "preferred-coverage" as DraftKey, apiKey: "preferredCoverage",subLabel: "Overall coverage preference",                    kind: "single" as FieldKind, questionId: "preferred-coverage"  },
+      { draftKey: "silhouette", apiKey: "silhouette", subLabel: "My silhouettes", kind: "array", questionId: "silhouette" },
     ],
   },
   {
@@ -411,6 +406,112 @@ OPTION_LABELS["preferred-coverage"]  = Object.fromEntries(PREFERRED_COVERAGE_OPT
 const BODY_SHAPE_LABELS: Record<string, string> = Object.fromEntries(BODY_SHAPE_OPTIONS.map(o => [o.id, o.label]));
 const FIT_CONCERN_LABELS: Record<string, string> = Object.fromEntries(FIT_CONCERN_OPTIONS.map(o => [o.id, o.label]));
 
+// Rev 6 canonical option IDs for fields whose IDs changed between legacy and Rev 6.
+// Used during legacy refresh prefill to preserve only currently-valid IDs.
+const REV6_VALID_IDS: Partial<Record<string, Set<string>>> = (() => {
+  const m: Partial<Record<string, Set<string>>> = {};
+  for (const q of quizQuestions) {
+    if (q.options) m[q.id] = new Set(q.options.map((o: { id: string }) => o.id));
+    if (q.colors)  m[q.id] = new Set(q.colors.map((c: { id: string }) => c.id));
+    if (q.secondaryQuestion?.colors) m[q.secondaryQuestion.id] = new Set(q.secondaryQuestion.colors.map((c: { id: string }) => c.id));
+  }
+  return m;
+})();
+
+// ── Legacy refresh flow ───────────────────────────────────────────────────────
+// 7 screens shown to customers with profileVersion=null (completed before Rev 6).
+// Each entry is a subset of the full SECTIONS sub-field list.
+// "noAutoFill" fields are never prefilled; "rev6OnlyFill" fields keep only valid Rev 6 IDs.
+
+type RefreshField = {
+  draftKey: DraftKey;
+  apiKey: string;
+  subLabel: string;
+  kind: FieldKind;
+  questionId: string;
+  noAutoFill?: true;      // never prefill (old IDs are semantically incompatible)
+  rev6OnlyFill?: true;    // prefill only values that are valid current Rev 6 IDs
+};
+
+type RefreshScreen = {
+  screenId: string;
+  label: string;
+  question: string;
+  helper?: string;
+  optional?: true;
+  fields: RefreshField[];
+};
+
+const REFRESH_SCREENS: RefreshScreen[] = [
+  {
+    screenId: "r-goal",
+    label: "Your Current Focus",
+    question: "What would you most like nAia to help you with right now?",
+    helper: "Choose up to 2. This is mutable context — update it any time.",
+    optional: true,
+    fields: [
+      { draftKey: "current-goal" as DraftKey, apiKey: "currentGoal", subLabel: "What I want nAia to help with", kind: "array" as FieldKind, questionId: "current-goal" },
+    ],
+  },
+  {
+    screenId: "r-identity",
+    label: "Your Style Identity",
+    question: "Which styles currently feel most like you?",
+    helper: "Select up to 2. nAia blends these into the aesthetic of every recommendation.",
+    fields: [
+      { draftKey: "style-personalities" as DraftKey, apiKey: "stylePersonalities", subLabel: "My style", kind: "array" as FieldKind, questionId: "style-personalities", rev6OnlyFill: true },
+    ],
+  },
+  {
+    screenId: "r-outfit-gives",
+    label: "What Great Outfits Give You",
+    question: "When an outfit really works for you, what does it usually give you?",
+    helper: "Choose up to 3.",
+    optional: true,
+    fields: [
+      { draftKey: "successful-outfit-gives" as DraftKey, apiKey: "successfulOutfitGives", subLabel: "What great outfits give me", kind: "array" as FieldKind, questionId: "successful-outfit-gives" },
+    ],
+  },
+  {
+    screenId: "r-lifestyle",
+    label: "Your Life & Dress Codes",
+    question: "Where does your wardrobe need to show up most often?",
+    fields: [
+      { draftKey: "lifestyle" as DraftKey, apiKey: "lifestyle", subLabel: "My lifestyle", kind: "array" as FieldKind, questionId: "lifestyle", rev6OnlyFill: true },
+    ],
+  },
+  {
+    screenId: "r-silhouette",
+    label: "Your Fit & Silhouette",
+    question: "What silhouettes feel most like you?",
+    helper: "Pick up to 3.",
+    fields: [
+      { draftKey: "silhouette" as DraftKey, apiKey: "silhouette", subLabel: "My silhouettes", kind: "array" as FieldKind, questionId: "silhouette", rev6OnlyFill: true },
+    ],
+  },
+  {
+    screenId: "r-fit-concerns",
+    label: "Fit Considerations",
+    question: "Does clothing ever fit you in a particular way you'd like nAia to know about?",
+    helper: "Optional — select any that apply.",
+    optional: true,
+    fields: [
+      { draftKey: "fit-concerns" as DraftKey, apiKey: "fitConcerns", subLabel: "Fit considerations", kind: "array" as FieldKind, questionId: "fit-concerns" },
+      { draftKey: "fit-concerns-note" as DraftKey, apiKey: "fitConcernsNote", subLabel: "Additional fit notes", kind: "text" as FieldKind, questionId: "fit-concerns-note" },
+    ],
+  },
+  {
+    screenId: "r-dressing",
+    label: "Your Dressing Requirements",
+    question: "Are there any dressing requirements nAia should always respect?",
+    helper: "Optional — these are hard requirements. nAia will filter out products that do not meet them. An empty selection is valid.",
+    optional: true,
+    fields: [
+      { draftKey: "dressing-preferences" as DraftKey, apiKey: "dressingPreferences", subLabel: "My dressing requirements", kind: "array" as FieldKind, questionId: "dressing-preferences", rev6OnlyFill: true },
+    ],
+  },
+];
+
 // Short display labels for the overview (form subLabels are question-phrased)
 const OVERVIEW_FIELD_LABELS: Record<string, string> = {
   "sizing-system":      "Clothing sizing system",
@@ -494,6 +595,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     throw redirect("/onboarding/step/1");
   }
 
+  // Legacy detection: completed before Rev 6 was introduced.
+  // profileVersion IS NULL → customer has never confirmed Rev 6 answers.
+  const isLegacyCustomer = (op as any).profileVersion === null || (op as any).profileVersion === undefined;
+
   const savedAnswers: OnboardingAnswers = {};
   if (op.stylePersonalities.length)          savedAnswers["style-personalities"]    = op.stylePersonalities;
   if (op.desiredImpression.length)           savedAnswers["desired-impression"]     = op.desiredImpression;
@@ -562,6 +667,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     savedAnswers,
     profileUpdatedAt: op.updatedAt.toISOString(),
     selfieChapter,
+    isLegacyCustomer,
   };
 }
 
@@ -727,7 +833,8 @@ function getSectionDetail(def: SectionDef, answers: OnboardingAnswers): ReactNod
 type Mode =
   | { kind: "overview" }
   | { kind: "flow"; queue: SectionId[]; index: number; done?: boolean }
-  | { kind: "picker" };
+  | { kind: "picker" }
+  | { kind: "refresh"; stepIndex: number; done?: boolean };
 
 type SaveStatus = "idle" | "saving" | "error" | "conflict";
 type PendingNext = "next" | "exit" | null;
@@ -844,7 +951,7 @@ function VisualAnalysisChapter({ selfieChapter }: { selfieChapter: SelfieChapter
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function PassportPage() {
-  const { savedAnswers, profileUpdatedAt, selfieChapter } = useLoaderData<typeof loader>();
+  const { savedAnswers, profileUpdatedAt, selfieChapter, isLegacyCustomer } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
   const navigate = useNavigate();
 
@@ -956,6 +1063,79 @@ export default function PassportPage() {
   function editSection(id: SectionId) {
     initEdits(id);
     setMode({ kind: "flow", queue: [id], index: 0 });
+  }
+
+  // ── Legacy Rev 6 refresh ─────────────────────────────────────────────────────
+
+  function initRefreshEdits(screen: RefreshScreen): OnboardingAnswers {
+    const edits: OnboardingAnswers = {};
+    for (const rf of screen.fields) {
+      const saved = (savedAnswers as Record<string, unknown>)[rf.draftKey];
+      if (rf.noAutoFill) {
+        // Never prefill: old IDs are semantically incompatible with Rev 6 options
+        (edits as Record<string, unknown>)[rf.draftKey] = rf.kind === "text" ? "" : [];
+      } else if (rf.rev6OnlyFill) {
+        // Prefill only values that are valid current Rev 6 IDs
+        const arr = (Array.isArray(saved) ? saved : []) as string[];
+        const valid = REV6_VALID_IDS[rf.questionId];
+        (edits as Record<string, unknown>)[rf.draftKey] = valid ? arr.filter(id => valid.has(id)) : arr;
+      } else {
+        // Preserve as-is (fields new in Rev 6 — all stored IDs are compatible)
+        if (rf.kind === "text") {
+          (edits as Record<string, unknown>)[rf.draftKey] = typeof saved === "string" ? saved : "";
+        } else {
+          (edits as Record<string, unknown>)[rf.draftKey] = Array.isArray(saved) ? [...saved] : [];
+        }
+      }
+    }
+    return edits;
+  }
+
+  function startRefresh() {
+    window.history.pushState({ passport: "refresh" }, "");
+    setFlowEdits(initRefreshEdits(REFRESH_SCREENS[0]));
+    setMode({ kind: "refresh", stepIndex: 0 });
+  }
+
+  async function saveRefreshStep(stepIndex: number, direction: "next" | "exit") {
+    const screen = REFRESH_SCREENS[stepIndex];
+    const isLast = stepIndex + 1 >= REFRESH_SCREENS.length;
+
+    // Build patch for this screen's fields only
+    const patch: Record<string, unknown> = { baseProfileUpdatedAt: profileUpdatedAt };
+    for (const rf of screen.fields) {
+      const v = (flowEdits as Record<string, unknown>)[rf.draftKey];
+      patch[rf.apiKey] = v;
+    }
+    if (isLast && direction === "next") {
+      patch.onboardingComplete = true; // triggers profileVersion=6 in the API
+    }
+
+    setSaveStatus("saving");
+    try {
+      const res = await fetch("/api/save-style-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (res.status === 409) { setSaveStatus("conflict"); return; }
+      if (!res.ok)            { setSaveStatus("error");    return; }
+
+      setSaveStatus("idle");
+      revalidator.revalidate();
+
+      if (direction === "exit") {
+        setMode({ kind: "overview" });
+      } else if (isLast) {
+        setMode({ kind: "refresh", stepIndex, done: true });
+      } else {
+        const nextScreen = REFRESH_SCREENS[stepIndex + 1];
+        setFlowEdits(initRefreshEdits(nextScreen));
+        setMode({ kind: "refresh", stepIndex: stepIndex + 1 });
+      }
+    } catch {
+      setSaveStatus("error");
+    }
   }
 
   const handleToggle = useCallback((draftKey: DraftKey, optId: string, maxSel: number, pairKey?: DraftKey) => {
@@ -1272,10 +1452,27 @@ export default function PassportPage() {
           </p>
         </div>
 
+        {isLegacyCustomer && (
+          <div className="sp-refresh-banner">
+            <div className="sp-refresh-banner-title">Your Style Passport has evolved</div>
+            <p className="sp-refresh-banner-desc">
+              A few quick answers will bring it up to date with the current version of nAia.
+              Your existing preferences are preserved.
+            </p>
+            <button type="button" className="sp-btn-primary" onClick={startRefresh}>
+              Refresh your Style Passport
+            </button>
+          </div>
+        )}
+
         <div className="sp-status-block">
           <div className="sp-status-label">Status</div>
           <p className="sp-status-text">
-            {isComplete ? "Your Style Passport is up to date." : "A few details are still missing."}
+            {isLegacyCustomer
+              ? "Refresh recommended — your passport predates the current version."
+              : isComplete
+                ? "Your Style Passport is up to date."
+                : "A few details are still missing."}
           </p>
           <div className="sp-status-date" suppressHydrationWarning>Last updated · {formatDate(profileUpdatedAt)}</div>
         </div>
@@ -1298,7 +1495,7 @@ export default function PassportPage() {
         </div>
 
         <div className="sp-actions">
-          {!isComplete && (
+          {!isLegacyCustomer && !isComplete && (
             <button type="button" className="sp-btn-primary" onClick={startContinue}>
               Continue Passport
             </button>
@@ -1308,7 +1505,7 @@ export default function PassportPage() {
           </button>
         </div>
 
-        {!isComplete && missingSections[0] && (
+        {!isLegacyCustomer && !isComplete && missingSections[0] && (
           <div className="sp-state-note">
             You'll resume at <strong>{missingSections[0].label}</strong>. All previous answers are preserved.
           </div>
@@ -1355,6 +1552,104 @@ export default function PassportPage() {
             <span className="sp-picker-label">{NOTES_SECTION.label}</span>
             <span className="sp-picker-value">{getSectionSummary(NOTES_SECTION, savedAnswers)}</span>
           </button>
+        </div>
+      </MyNaiaLayout>
+    );
+  }
+
+  // ── REFRESH DONE ─────────────────────────────────────────────────────────────
+
+  if (mode.kind === "refresh" && mode.done) {
+    return (
+      <MyNaiaLayout>
+        <button type="button" className="sp-back" onClick={() => setMode({ kind: "overview" })}>
+          ← Style Passport
+        </button>
+
+        <div className="sp-shell">
+          <div className="sp-shell-eyebrow">Style Passport</div>
+          <h1 className="sp-shell-title">Your Style Passport is up to date</h1>
+          <p className="sp-shell-desc">
+            nAia now has your current preferences. Every suggestion from here will reflect the
+            updated version of your Passport.
+          </p>
+        </div>
+
+        <div className="sp-actions">
+          <button type="button" className="sp-btn-primary" onClick={() => setMode({ kind: "overview" })}>
+            Return to Passport
+          </button>
+        </div>
+      </MyNaiaLayout>
+    );
+  }
+
+  // ── REFRESH STEP ─────────────────────────────────────────────────────────────
+
+  if (mode.kind === "refresh") {
+    const screen    = REFRESH_SCREENS[mode.stepIndex];
+    const stepNum   = mode.stepIndex + 1;
+    const stepTotal = REFRESH_SCREENS.length;
+    const isLast    = mode.stepIndex + 1 >= REFRESH_SCREENS.length;
+
+    return (
+      <MyNaiaLayout>
+        <button
+          type="button"
+          className="sp-back"
+          disabled={isBusy}
+          onClick={() => saveRefreshStep(mode.stepIndex, "exit")}
+        >
+          ← Save and exit
+        </button>
+
+        <div className="sp-flow-header">
+          <div className="sp-flow-meta">
+            Step {stepNum} of {stepTotal} · {screen.label}
+          </div>
+          <h2 className="sp-flow-question">{screen.question}</h2>
+          {screen.helper && <p className="sp-flow-helper">{screen.helper}</p>}
+        </div>
+
+        {screen.fields.map(rf => (
+          <div key={rf.draftKey} className="sp-sub-section">
+            {screen.fields.length > 1 && (
+              <div className="sp-sub-label">{rf.subLabel}</div>
+            )}
+            {renderSubField(rf as SubField)}
+          </div>
+        ))}
+
+        {saveStatus === "error" && (
+          <div className="sp-save-error">Something went wrong — please try again.</div>
+        )}
+        {saveStatus === "conflict" && (
+          <div className="sp-save-error">Your profile was updated elsewhere. Please reload.</div>
+        )}
+
+        <div className="sp-flow-actions">
+          <button
+            type="button"
+            className="sp-btn-primary"
+            disabled={isBusy}
+            onClick={() => saveRefreshStep(mode.stepIndex, "next")}
+          >
+            {isBusy ? "Saving…" : isLast ? "Complete Refresh" : "Next"}
+          </button>
+          {screen.optional && !isLast && (
+            <button
+              type="button"
+              className="sp-btn-outline"
+              disabled={isBusy}
+              onClick={() => {
+                const nextScreen = REFRESH_SCREENS[mode.stepIndex + 1];
+                setFlowEdits(initRefreshEdits(nextScreen));
+                setMode({ kind: "refresh", stepIndex: mode.stepIndex + 1 });
+              }}
+            >
+              Skip for now
+            </button>
+          )}
         </div>
       </MyNaiaLayout>
     );

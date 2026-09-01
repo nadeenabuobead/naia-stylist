@@ -239,7 +239,8 @@ export async function action({ request }) {
   }
 
   // request-only keys (allowed but not in RECOGNISED_FIELDS, never persisted)
-  const REQUEST_ONLY_KEYS = new Set(["baseProfileUpdatedAt", "editedField", "confirmSizeSystemChange", "confirmShoeSystemChange"]);
+  // onboardingComplete: true → set profileVersion=6 on final Rev 6 onboarding or legacy refresh
+  const REQUEST_ONLY_KEYS = new Set(["baseProfileUpdatedAt", "editedField", "confirmSizeSystemChange", "confirmShoeSystemChange", "onboardingComplete"]);
   // Reject unknown top-level keys
   for (const key of Object.keys(body)) {
     if (!REQUEST_ONLY_KEYS.has(key) && !RECOGNISED_FIELDS.has(key)) {
@@ -632,6 +633,12 @@ export async function action({ request }) {
     fitConcernsNote:       resolvedFitConcernsNote,
     completed:           true,
   };
+
+  // profileVersion=6 only on final Rev 6 onboarding or legacy refresh completion.
+  // Normal passport section saves must NOT set this — they preserve the existing value.
+  if (body["onboardingComplete"] === true) {
+    profileData.profileVersion = 6;
+  }
 
   if (op) {
     // Existing profile — fast early check before the DB write

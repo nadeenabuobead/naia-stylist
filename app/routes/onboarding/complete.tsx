@@ -280,7 +280,7 @@ export default function OnboardingComplete() {
   const attemptSave = useCallback(async (sessionEdits: OnboardingAnswers) => {
     setSaveStatus("saving");
     try {
-      const patch: Record<string, unknown> = { baseProfileUpdatedAt: profileUpdatedAt };
+      const patch: Record<string, unknown> = { baseProfileUpdatedAt: profileUpdatedAt, onboardingComplete: true };
       for (const [draftKey, apiKey] of DRAFT_TO_API) {
         if (Object.hasOwn(sessionEdits, draftKey)) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any

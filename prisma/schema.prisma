@@ -146,6 +146,7 @@ model OnboardingProfile {
   successfulOutfitGives String[]  @default([])   // standing; future Style Memory
   dressingPreferences   String[]  @default([])   // feeds Group 2 hard-exclusion engine
   fitConcernsNote       String?                   // free-text "other" from fit screen
+  profileVersion        Int?                      // null=legacy; 6=Rev 6 confirmed
 }
 
 // ============================================
