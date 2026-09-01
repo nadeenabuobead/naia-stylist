@@ -1470,6 +1470,7 @@ export default function PassportPage() {
   // ── OVERVIEW ─────────────────────────────────────────────────────────────────
 
   if (mode.kind === "overview") {
+    const hasNote = !!((savedAnswers as Record<string, unknown>)["final-notes"] as string | undefined)?.trim();
     return (
       <MyNaiaLayout>
         <Link to="/my-naia" className="sp-back">← Overview</Link>
@@ -1519,6 +1520,13 @@ export default function PassportPage() {
           <div className="sp-ov-section sp-ov-section--notes">
             <div className="sp-ov-section-header">{NOTES_SECTION.label}</div>
             {getSectionDetail(NOTES_SECTION, savedAnswers)}
+            <button
+              type="button"
+              className="sp-ov-notes-cta"
+              onClick={() => editSection("notes")}
+            >
+              {hasNote ? "EDIT NOTE" : "ADD A NOTE"}
+            </button>
           </div>
 
           {/* ── VISUAL ANALYSIS chapter ────────────────────────────────────── */}

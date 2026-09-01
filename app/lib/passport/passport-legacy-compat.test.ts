@@ -1236,3 +1236,163 @@ describe("U: Back navigation race-safety — committedEditsRef", () => {
     );
   });
 });
+
+describe("V: Notes to nAia — overview editability", () => {
+  // Tests A-L from the approved spec. Source-structure proofs where interaction testing
+  // is not possible in the node:test/tsx harness (no DOM/React renderer).
+
+  // ── V.A: empty Notes does not block Passport completion ───────────────────
+  it("V.A: NOTES_SECTION has optional:true so empty Notes never blocks completion", () => {
+    const notesSectionIdx = passport.indexOf("const NOTES_SECTION: SectionDef");
+    assert.ok(notesSectionIdx !== -1, "NOTES_SECTION must be defined");
+    const notesSectionBlock = passport.slice(notesSectionIdx, notesSectionIdx + 400);
+    assert.ok(
+      notesSectionBlock.includes("optional: true"),
+      "NOTES_SECTION must have optional: true so missingSections skips it",
+    );
+  });
+
+  // ── V.B: empty Notes overview shows ADD A NOTE ────────────────────────────
+  it("V.B: overview renders ADD A NOTE when hasNote is false", () => {
+    const ovIdx = passport.indexOf("// ── OVERVIEW");
+    assert.ok(ovIdx !== -1, "OVERVIEW section comment must exist");
+    const ovBlock = passport.slice(ovIdx, ovIdx + 3500);
+    assert.ok(
+      ovBlock.includes('"ADD A NOTE"'),
+      'Overview Notes section must include the "ADD A NOTE" string for the empty-state CTA',
+    );
+  });
+
+  // ── V.C: existing note displays its saved text ────────────────────────────
+  it("V.C: getSectionDetail for notes returns the saved text when present", () => {
+    const detailIdx = passport.indexOf("if (def.id === \"notes\")");
+    assert.ok(detailIdx !== -1, 'getSectionDetail must have a "notes" branch');
+    const detailBlock = passport.slice(detailIdx, detailIdx + 250);
+    assert.ok(
+      detailBlock.includes("sp-ov-notes-body"),
+      "notes detail branch must render text via sp-ov-notes-body paragraph",
+    );
+  });
+
+  // ── V.D: existing note shows EDIT NOTE ────────────────────────────────────
+  it("V.D: overview renders EDIT NOTE when hasNote is true", () => {
+    const ovIdx = passport.indexOf("// ── OVERVIEW");
+    assert.ok(ovIdx !== -1, "OVERVIEW section comment must exist");
+    const ovBlock = passport.slice(ovIdx, ovIdx + 3500);
+    assert.ok(
+      ovBlock.includes('"EDIT NOTE"'),
+      'Overview Notes section must include the "EDIT NOTE" string for the filled-state CTA',
+    );
+  });
+
+  // ── V.E: ADD/EDIT calls editSection("notes") ──────────────────────────────
+  it("V.E: Notes CTA calls editSection(\"notes\") — opens the existing flow editor", () => {
+    const ovIdx = passport.indexOf("// ── OVERVIEW");
+    assert.ok(ovIdx !== -1, "OVERVIEW section comment must exist");
+    const ovBlock = passport.slice(ovIdx, ovIdx + 3500);
+    // The button onClick must call editSection("notes")
+    assert.ok(
+      ovBlock.includes('editSection("notes")'),
+      'Notes CTA onClick must call editSection("notes") to reuse the existing flow editor',
+    );
+  });
+
+  // ── V.F: existing note is prefilled via initEdits ─────────────────────────
+  it("V.F: initEdits reads savedAnswers for text fields — existing note is prefilled", () => {
+    const initEditsIdx = passport.indexOf("function initEdits(");
+    assert.ok(initEditsIdx !== -1, "initEdits must exist");
+    const initEditsBlock = passport.slice(initEditsIdx, initEditsIdx + 1200);
+    assert.ok(
+      initEditsBlock.includes("kind === \"text\"") || initEditsBlock.includes('kind === "text"'),
+      "initEdits must handle text-kind fields so final-notes is prefilled from savedAnswers",
+    );
+  });
+
+  // ── V.G: Save persists final-notes via existing path ─────────────────────
+  it("V.G: computeSectionPatch sends finalNotes in the patch for the notes section", () => {
+    const notesSectionIdx = passport.indexOf("const NOTES_SECTION: SectionDef");
+    assert.ok(notesSectionIdx !== -1, "NOTES_SECTION must be defined");
+    const notesSectionBlock = passport.slice(notesSectionIdx, notesSectionIdx + 500);
+    assert.ok(
+      notesSectionBlock.includes('apiKey: "finalNotes"'),
+      'NOTES_SECTION subField must map to apiKey "finalNotes" so computeSectionPatch sends the correct key',
+    );
+    assert.ok(
+      notesSectionBlock.includes('draftKey: "final-notes"'),
+      'NOTES_SECTION subField must use draftKey "final-notes"',
+    );
+  });
+
+  // ── V.H: reload hydrates saved note ───────────────────────────────────────
+  it("V.H: loader maps finalNotes to savedAnswers[\"final-notes\"] so saved note survives reload", () => {
+    const loaderIdx = passport.indexOf("savedAnswers[\"final-notes\"]") !== -1
+      ? passport.indexOf("savedAnswers[\"final-notes\"]")
+      : passport.indexOf("savedAnswers['final-notes']");
+    assert.ok(
+      loaderIdx !== -1,
+      "loader must map op.finalNotes into savedAnswers[\"final-notes\"] for hydration on reload",
+    );
+  });
+
+  // ── V.I: editing replaces existing note ───────────────────────────────────
+  it("V.I: computeSectionPatch detects text changes and sends null to clear or new value to update", () => {
+    const patchIdx = passport.indexOf("function computeSectionPatch(");
+    assert.ok(patchIdx !== -1, "computeSectionPatch must exist");
+    const patchBlock = passport.slice(patchIdx, patchIdx + 700);
+    assert.ok(
+      patchBlock.includes("kind === \"text\"") || patchBlock.includes('kind === "text"'),
+      "computeSectionPatch must handle text-kind fields so Notes edits and clears are sent correctly",
+    );
+    assert.ok(
+      patchBlock.includes("null"),
+      "computeSectionPatch must send null for empty text (clearing the note)",
+    );
+  });
+
+  // ── V.J: Notes save does not alter profileVersion ─────────────────────────
+  it("V.J: editSection flow never sends onboardingComplete so profileVersion is unchanged", () => {
+    const editSectionIdx = passport.indexOf("function editSection(");
+    assert.ok(editSectionIdx !== -1, "editSection must exist");
+    const editSectionBlock = passport.slice(editSectionIdx, editSectionIdx + 200);
+    assert.ok(
+      !editSectionBlock.includes("onboardingComplete"),
+      "editSection must not set onboardingComplete — profileVersion must not be changed when editing Notes",
+    );
+  });
+
+  // ── V.K: empty Notes does not make Passport incomplete ────────────────────
+  it("V.K: missingSections skips sections with optional:true so empty Notes is never missing", () => {
+    const missingIdx = passport.indexOf("missingSections");
+    assert.ok(missingIdx !== -1, "missingSections must exist");
+    // Find the filter expression
+    const missingBlock = passport.slice(missingIdx, missingIdx + 300);
+    assert.ok(
+      missingBlock.includes("s.optional") || passport.slice(missingIdx - 200, missingIdx + 300).includes("s.optional"),
+      "missingSections filter must exclude optional sections (NOTES_SECTION.optional = true)",
+    );
+  });
+
+  // ── V.L: Update Answers is the Rev 6 questionnaire path ───────────────────
+  it("V.L: Update Answers (startUpdate) sets picker mode — Notes CTA uses editSection, not startUpdate", () => {
+    // startUpdate opens the picker which lists all sections including Notes.
+    // The Notes CTA added to the overview uses editSection("notes") directly.
+    // These are separate — startUpdate is not repurposed for Notes.
+    const startUpdateIdx = passport.indexOf("function startUpdate(");
+    assert.ok(startUpdateIdx !== -1, "startUpdate must exist");
+    const startUpdateBlock = passport.slice(startUpdateIdx, startUpdateIdx + 150);
+    assert.ok(
+      startUpdateBlock.includes('kind: "picker"'),
+      "startUpdate must set picker mode (Update Answers remains the full questionnaire path)",
+    );
+    // The overview Notes CTA calls editSection, not startUpdate
+    const ovIdx = passport.indexOf("// ── OVERVIEW");
+    const ovBlock = passport.slice(ovIdx, ovIdx + 3500);
+    const notesCTAIdx = ovBlock.indexOf("sp-ov-notes-cta");
+    assert.ok(notesCTAIdx !== -1, "sp-ov-notes-cta button must exist in overview");
+    const notesCTABlock = ovBlock.slice(notesCTAIdx, notesCTAIdx + 200);
+    assert.ok(
+      notesCTABlock.includes("editSection") && !notesCTABlock.includes("startUpdate"),
+      "Notes CTA must use editSection(\"notes\"), not startUpdate — Update Answers is not repurposed for Notes",
+    );
+  });
+});
