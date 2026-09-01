@@ -66,7 +66,8 @@ describe("FR3 — deterministic priority order", () => {
     const types = result.observations.map(o => o.type);
     assert.ok(types.indexOf("style-direction") < types.indexOf("clothing-relationship"));
   });
-  it("clothing-relationship always comes before wardrobe-context", () => {
+  it("clothing-relationship comes before wardrobe-context (no colour evidence)", () => {
+    // When colour-world has no evidence, the order is clothing-relationship → wardrobe-context
     const result = computeNaiaFirstRead({
       successfulOutfitGives: ["feel-like-myself"],
       lifestyle: ["work-office"],
@@ -74,13 +75,13 @@ describe("FR3 — deterministic priority order", () => {
     const types = result.observations.map(o => o.type);
     assert.ok(types.indexOf("clothing-relationship") < types.indexOf("wardrobe-context"));
   });
-  it("wardrobe-context always comes before colour-world", () => {
+  it("colour-world always comes before wardrobe-context", () => {
     const result = computeNaiaFirstRead({
       lifestyle: ["everyday-casual"],
       favoriteColors: ["black"],
     });
     const types = result.observations.map(o => o.type);
-    assert.ok(types.indexOf("wardrobe-context") < types.indexOf("colour-world"));
+    assert.ok(types.indexOf("colour-world") < types.indexOf("wardrobe-context"));
   });
   it("same profile always returns same order", () => {
     const profile: FirstReadProfile = {
@@ -516,5 +517,129 @@ describe("FR44 — fieldValueMap is present and structurally correct", () => {
     assert.ok(obs.fieldValueMap, "fieldValueMap must be present");
     assert.ok("stylePersonalities" in obs.fieldValueMap, "fieldValueMap must have stylePersonalities");
     assert.ok(!("silhouette" in obs.fieldValueMap), "fieldValueMap must not include empty silhouette");
+  });
+});
+
+// ── FR65–FR76: Priority order revision + evidence rules ───────────────────────
+
+describe("FR65 — G: full-evidence profile returns exactly 3 observations", () => {
+  it("profile with all four evidence types still returns at most 3", () => {
+    const profile: FirstReadProfile = {
+      stylePersonalities: ["classic-polished"],
+      successfulOutfitGives: ["feel-like-myself"],
+      lifestyle: ["work-office"],
+      favoriteColors: ["black"],
+      avoidColors: ["orange"],
+    };
+    assert.equal(computeNaiaFirstRead(profile).observations.length, 3);
+  });
+});
+
+describe("FR66 — H: full-evidence profile prioritizes style-direction, clothing-relationship, colour-world", () => {
+  it("observations are style-direction, clothing-relationship, colour-world (wardrobe-context dropped)", () => {
+    const profile: FirstReadProfile = {
+      stylePersonalities: ["classic-polished"],
+      successfulOutfitGives: ["feel-like-myself"],
+      lifestyle: ["work-office"],
+      favoriteColors: ["black"],
+    };
+    const types = computeNaiaFirstRead(profile).observations.map(o => o.type);
+    assert.equal(types.length, 3);
+    assert.equal(types[0], "style-direction");
+    assert.equal(types[1], "clothing-relationship");
+    assert.equal(types[2], "colour-world");
+  });
+  it("wardrobe-context is absent when all three higher-priority slots are filled", () => {
+    const profile: FirstReadProfile = {
+      stylePersonalities: ["minimal-relaxed"],
+      successfulOutfitGives: ["confidence"],
+      favoriteColors: ["navy"],
+      lifestyle: ["travel"],
+    };
+    const types = computeNaiaFirstRead(profile).observations.map(o => o.type);
+    assert.ok(!types.includes("wardrobe-context"), "wardrobe-context must not appear when 3 higher-priority slots are filled");
+  });
+});
+
+describe("FR67 — I: wardrobe-context eligible as fallback when colour evidence absent", () => {
+  it("wardrobe-context appears as third observation when no colour evidence", () => {
+    const profile: FirstReadProfile = {
+      stylePersonalities: ["bold-edgy"],
+      successfulOutfitGives: ["sense-of-power"],
+      lifestyle: ["work-office"],
+    };
+    const types = computeNaiaFirstRead(profile).observations.map(o => o.type);
+    assert.equal(types[2], "wardrobe-context");
+  });
+  it("wardrobe-context appears as second observation when only style-direction + lifestyle evidence", () => {
+    const profile: FirstReadProfile = {
+      stylePersonalities: ["feminine-romantic"],
+      lifestyle: ["dinners-going-out"],
+    };
+    const types = computeNaiaFirstRead(profile).observations.map(o => o.type);
+    assert.ok(types.includes("wardrobe-context"), "wardrobe-context must appear when lifestyle evidence exists");
+  });
+});
+
+describe("FR68 — J: no valid colour evidence means no colour-world observation", () => {
+  it("profile with no favoriteColors or avoidColors does not include colour-world", () => {
+    const profile: FirstReadProfile = {
+      stylePersonalities: ["minimal-relaxed"],
+      successfulOutfitGives: ["comfort-ease"],
+      lifestyle: ["everyday-casual"],
+    };
+    const types = computeNaiaFirstRead(profile).observations.map(o => o.type);
+    assert.ok(!types.includes("colour-world"), "colour-world must not appear without colour evidence");
+  });
+  it("empty arrays for favoriteColors and avoidColors produce no colour-world", () => {
+    const profile: FirstReadProfile = {
+      stylePersonalities: ["classic-polished"],
+      favoriteColors: [],
+      avoidColors: [],
+    };
+    const types = computeNaiaFirstRead(profile).observations.map(o => o.type);
+    assert.ok(!types.includes("colour-world"), "empty colour arrays must not produce colour-world");
+  });
+});
+
+describe("FR69 — K: avoidColors is valid direct palette evidence", () => {
+  it("avoidColors alone generates a colour-world observation", () => {
+    const obs = computeNaiaFirstRead({ avoidColors: ["orange", "yellow"] })
+      .observations.find(o => o.type === "colour-world");
+    assert.ok(obs, "avoidColors alone must produce colour-world");
+    assert.ok(obs!.evidenceFields.includes("avoidColors"), "evidenceFields must include avoidColors");
+    assert.ok(obs!.evidenceValues.includes("orange"), "evidenceValues must include orange");
+    assert.ok(obs!.evidenceValues.includes("yellow"), "evidenceValues must include yellow");
+  });
+  it("avoidColors is not treated as personality or psychology evidence", () => {
+    const result = computeNaiaFirstRead({ avoidColors: ["red-burgundy"] });
+    const obs = result.observations.find(o => o.type === "colour-world");
+    assert.ok(obs, "avoidColors must generate colour-world, not style-direction or clothing-relationship");
+    assert.ok(!result.observations.find(o => o.type === "style-direction"), "no style-direction from avoidColors alone");
+  });
+  it("avoidColors is not palette preference inference — claim uses step-back language", () => {
+    const obs = computeNaiaFirstRead({ avoidColors: ["pink"] })
+      .observations.find(o => o.type === "colour-world");
+    const claim = obs?.claim ?? "";
+    assert.ok(
+      claim.includes("step back") || claim.includes("tend to") || claim.includes("not where"),
+      `avoidColors-only claim must not sound like a positive preference: "${claim}"`,
+    );
+  });
+});
+
+describe("FR70 — L: currentGoal, fitConcerns, dressingPreferences remain excluded", () => {
+  it("currentGoal passed as unknown field produces no observations", () => {
+    // FirstReadProfile does not include currentGoal; passing it is a no-op
+    const profile = { currentGoal: ["understand-my-style"] } as FirstReadProfile;
+    assert.equal(computeNaiaFirstRead(profile).observations.length, 0);
+  });
+  it("fitConcerns passed as unknown field produces no observations", () => {
+    const profile = { fitConcerns: ["tops-pull-bust"] } as FirstReadProfile;
+    assert.equal(computeNaiaFirstRead(profile).observations.length, 0);
+  });
+  it("dressingPreferences passed as unknown field produces no observations", () => {
+    const profile = { dressingPreferences: ["wears-hijab"] } as FirstReadProfile;
+    assert.equal(computeNaiaFirstRead(profile).observations.length, 0);
   });
 });

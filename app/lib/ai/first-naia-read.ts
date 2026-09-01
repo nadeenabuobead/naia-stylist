@@ -253,8 +253,11 @@ function buildColourWorld(profile: FirstReadProfile): NaiaFirstReadObservation |
 // ── Main export ───────────────────────────────────────────────────────────────
 
 // Deterministic priority order: style-direction → clothing-relationship →
-// wardrobe-context → colour-world. Returns the first MAX_OBSERVATIONS types
+// colour-world → wardrobe-context. Returns the first MAX_OBSERVATIONS types
 // for which meaningful evidence exists.
+// colour-world is prioritised over wardrobe-context because direct personal-style
+// signals (palette choices) are more informative for a First Read than context observations.
+// wardrobe-context remains a valid fallback when colour evidence is absent.
 export function computeNaiaFirstRead(
   profile: FirstReadProfile | null | undefined,
 ): NaiaFirstReadResult {
@@ -263,8 +266,8 @@ export function computeNaiaFirstRead(
   const builders = [
     () => buildStyleDirection(profile),
     () => buildClothingRelationship(profile),
-    () => buildWardrobeContext(profile),
     () => buildColourWorld(profile),
+    () => buildWardrobeContext(profile),
   ];
 
   const observations: NaiaFirstReadObservation[] = [];

@@ -39,6 +39,7 @@ const migration = readFileSync(
   join(ROOT, "prisma/migrations/20260830000000_first_naia_read/migration.sql"),
   "utf8",
 ).toUpperCase();
+const complete = readFileSync(join(ROOT, "app/routes/onboarding/complete.tsx"), "utf8");
 
 // ── FR15: method guard ────────────────────────────────────────────────────────
 
@@ -379,6 +380,131 @@ describe("FR64 — Prisma schema has provenance fields on NaiaObservationFeedbac
     assert.ok(
       schema.includes("@@unique([customerId, observationKey])"),
       "schema must have compound unique constraint",
+    );
+  });
+});
+
+// ── FR71–FR76: Feedback hydration (A–F) ──────────────────────────────────────
+// Static source-code contract tests for onboarding/complete.tsx loader hydration.
+// Covers: A accurate hydrates, B not-quite hydrates, C cross-customer isolation,
+//         D stale-key filtering, E upsert preserved, F no profile mutation.
+
+describe("FR71 — A+B: loader queries NaiaObservationFeedback and returns existingFeedback", () => {
+  it("complete.tsx loader queries naiaObservationFeedback for the customer", () => {
+    assert.ok(
+      complete.includes("naiaObservationFeedback.findMany"),
+      "loader must call naiaObservationFeedback.findMany",
+    );
+  });
+  it("query is scoped to the authenticated customer (not a global fetch)", () => {
+    const block = complete.slice(complete.indexOf("naiaObservationFeedback.findMany"));
+    assert.ok(
+      block.includes("customer.id"),
+      "findMany must filter by customer.id",
+    );
+  });
+  it("loader returns existingFeedback in its payload", () => {
+    assert.ok(
+      complete.includes("existingFeedback"),
+      "loader must include existingFeedback in the returned payload",
+    );
+  });
+  it("feedback response field is selected (observationKey + response)", () => {
+    const block = complete.slice(complete.indexOf("naiaObservationFeedback.findMany"));
+    assert.ok(block.includes("observationKey"), "select must include observationKey");
+    assert.ok(block.includes("response"), "select must include response");
+  });
+});
+
+describe("FR72 — C: cross-customer isolation — existingFeedback keyed only by authenticated customer.id", () => {
+  it("findMany where clause uses customer.id, not a client-supplied id", () => {
+    const block = complete.slice(complete.indexOf("naiaObservationFeedback.findMany"));
+    const whereEnd = block.indexOf("}");
+    const whereClause = block.slice(0, whereEnd);
+    assert.ok(
+      whereClause.includes("customer.id"),
+      "where clause must use customer.id from server session",
+    );
+    assert.ok(
+      !whereClause.includes("params") && !whereClause.includes("formData") && !whereClause.includes("searchParams"),
+      "where clause must not use any client-supplied id",
+    );
+  });
+});
+
+describe("FR73 — D: stale feedback filtered client-side by current observation keys", () => {
+  it("component filters existingFeedback using currentKeys derived from computeNaiaFirstRead", () => {
+    assert.ok(
+      complete.includes("currentKeys"),
+      "component must derive currentKeys from the current observation set",
+    );
+    assert.ok(
+      complete.includes("currentKeys.has(key)"),
+      "component must filter existingFeedback keys through currentKeys.has()",
+    );
+  });
+  it("computeNaiaFirstRead is called inside the hydration effect (not only at render)", () => {
+    // The hydration effect recomputes First Read on the merged profile so stale keys are excluded
+    const effectBlock = complete.slice(complete.indexOf("useEffect("), complete.indexOf("}, [attemptSave"));
+    assert.ok(
+      effectBlock.includes("computeNaiaFirstRead"),
+      "useEffect must call computeNaiaFirstRead to determine current observation keys",
+    );
+  });
+  it("only matching keys are applied to feedbackState (hydrated object)", () => {
+    assert.ok(
+      complete.includes("hydrated"),
+      "component must build a hydrated object from filtered keys",
+    );
+    assert.ok(
+      complete.includes("setFeedbackState(hydrated)"),
+      "component must initialise feedbackState from the hydrated object",
+    );
+  });
+});
+
+describe("FR74 — E: feedback submission still upserts (existing behaviour preserved)", () => {
+  it("POST route still uses upsert for persistence", () => {
+    assert.ok(
+      route.includes(".upsert(") || route.includes(".upsert({"),
+      "must use prisma upsert — not create — for idempotency",
+    );
+  });
+  it("upsert compound key is unchanged: (customerId, observationKey)", () => {
+    assert.ok(
+      route.includes("customerId_observationKey"),
+      "upsert where clause must use customerId_observationKey compound key",
+    );
+  });
+});
+
+describe("FR75 — F: loader does not mutate OnboardingProfile", () => {
+  it("loader does not call onboardingProfile.update or onboardingProfile.upsert", () => {
+    // Extract only the loader function body
+    const loaderStart = complete.indexOf("export async function loader(");
+    const loaderEnd   = complete.indexOf("\nexport ", loaderStart + 1);
+    const loaderBody  = complete.slice(loaderStart, loaderEnd === -1 ? undefined : loaderEnd);
+    assert.ok(
+      !loaderBody.includes("onboardingProfile.update"),
+      "loader must not mutate OnboardingProfile via update",
+    );
+    assert.ok(
+      !loaderBody.includes("onboardingProfile.upsert"),
+      "loader must not mutate OnboardingProfile via upsert",
+    );
+    assert.ok(
+      !loaderBody.includes("onboardingProfile.create"),
+      "loader must not mutate OnboardingProfile via create",
+    );
+  });
+  it("feedback action does not mutate OnboardingProfile", () => {
+    assert.ok(
+      !route.includes("onboardingProfile.update"),
+      "feedback action must not mutate OnboardingProfile",
+    );
+    assert.ok(
+      !route.includes("onboardingProfile.create"),
+      "feedback action must not create OnboardingProfile records",
     );
   });
 });

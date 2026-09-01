@@ -218,11 +218,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
+  // Load existing First Read feedback for this customer.
+  // All rows are returned; the client filters to keys matching the current observation set.
+  const feedbackRows = await prisma.naiaObservationFeedback.findMany({
+    where: { customerId: customer.id },
+    select: { observationKey: true, response: true },
+  });
+  const existingFeedback: Record<string, "accurate" | "not-quite"> = Object.fromEntries(
+    feedbackRows.map(r => [r.observationKey, r.response as "accurate" | "not-quite"]),
+  );
+
   const payload = {
     existingAnswers,
     draftScope:       customer.id,
     profileUpdatedAt: op?.updatedAt?.toISOString() ?? null,
     hasPendingLook,
+    existingFeedback,
   };
   return pendingClearHeader
     ? data(payload, { headers: { "Set-Cookie": pendingClearHeader } })
@@ -265,7 +276,7 @@ const css = `
 type SaveStatus = "saving" | "saved" | "error" | "conflict";
 
 export default function OnboardingComplete() {
-  const { existingAnswers, draftScope, profileUpdatedAt, hasPendingLook } = useLoaderData<typeof loader>();
+  const { existingAnswers, draftScope, profileUpdatedAt, hasPendingLook, existingFeedback } = useLoaderData<typeof loader>();
 
   const storageKey = `naia_onboarding_v2:${draftScope}`;
 
@@ -311,12 +322,31 @@ export default function OnboardingComplete() {
     // DB values are the display base; session edits override per-field
     const merged: OnboardingAnswers = { ...existingAnswers, ...sessionEdits };
     setDisplayAnswers(merged);
+
+    // Hydrate feedback from server-loaded rows.
+    // Only keys that match the current observation set are applied —
+    // stale feedback for observations the current profile no longer generates is ignored.
+    const currentFirstRead = computeNaiaFirstRead({
+      stylePersonalities:    merged["style-personalities"]     as string[] | undefined,
+      silhouette:            merged["silhouette"]              as string[] | undefined,
+      successfulOutfitGives: merged["successful-outfit-gives"] as string[] | undefined,
+      lifestyle:             merged["lifestyle"]               as string[] | undefined,
+      favoriteColors:        merged["favorite-colors"]         as string[] | undefined,
+      avoidColors:           merged["avoid-colors"]            as string[] | undefined,
+    });
+    const currentKeys = new Set(currentFirstRead.observations.map(o => o.observationKey));
+    const hydrated: Record<string, "accurate" | "not-quite"> = {};
+    for (const [key, response] of Object.entries(existingFeedback)) {
+      if (currentKeys.has(key)) hydrated[key] = response;
+    }
+    setFeedbackState(hydrated);
+
     if (Object.keys(sessionEdits).length > 0) {
       attemptSave(sessionEdits);
     } else {
       setSaveStatus("saved");
     }
-  }, [attemptSave, existingAnswers]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [attemptSave, existingAnswers, existingFeedback]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRetry = useCallback(() => {
     const rawDraft = readSessionDraft(storageKey, profileUpdatedAt);
