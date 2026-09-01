@@ -134,24 +134,25 @@ function lbl(qId: string, oId: string): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Section definitions — 7 named sections + Notes (outside sections)
+// Section definitions
 // ─────────────────────────────────────────────────────────────────────────────
 
 type SectionId =
-  | "identity" | "direction" | "life" | "fit" | "sizes" | "colours" | "wardrobe"
-  | "dressing" | "goals"
-  | "notes";
+  | "goals" | "outfit-gives" | "identity" | "direction" | "life" | "fit"
+  | "fit-concerns" | "sizes" | "colours" | "wardrobe"
+  | "dressing" | "notes";
 
 type FieldKind = "array" | "color" | "single" | "text";
 type DraftKey = keyof OnboardingAnswers;
 
 interface SubField {
-  draftKey:   DraftKey;
-  apiKey:     string;
-  subLabel:   string;
-  kind:       FieldKind;
-  questionId: string;
-  pairKey?:   DraftKey; // for mutual-exclusion between colour pickers
+  draftKey:       DraftKey;
+  apiKey:         string;
+  subLabel:       string;
+  kind:           FieldKind;
+  questionId:     string;
+  pairKey?:       DraftKey; // for mutual-exclusion between colour pickers
+  hiddenForRev6?: boolean;  // hidden from editor + detail for profileVersion=6 customers
 }
 
 interface SectionDef {
@@ -161,120 +162,156 @@ interface SectionDef {
   helper:      string;
   subFields:   SubField[];
   placeholder?: boolean;
-  optional?:   boolean; // never "missing"; excluded from Continue Passport queue
+  optional?:   boolean;    // never "missing"; excluded from Continue Passport queue
+  rev6Hidden?:  boolean;   // hidden from picker + editor for profileVersion=6 customers
+  rev6Only?:    boolean;   // only shown to profileVersion=6 customers
 }
 
-// Exact section labels (names) as specified
 const SECTIONS: SectionDef[] = [
+  // 1. CURRENT FOCUS — core, currentGoal only for Rev 6
   {
     id: "goals",
-    label: "Your Current Focus",
-    question: "What would you most like nAia to help you with right now?",
-    helper: "This tells nAia where to focus. It is mutable context — you can update it anytime.",
+    label: "Current Focus",
+    question: "What would you like nAia to help you with right now?",
+    helper: "Choose up to 2. You can change this anytime.",
     optional: true,
     subFields: [
-      { draftKey: "current-goal"           as DraftKey, apiKey: "currentGoal",          subLabel: "What I want nAia to help with",       kind: "array" as FieldKind, questionId: "current-goal"            },
-      { draftKey: "successful-outfit-gives" as DraftKey, apiKey: "successfulOutfitGives", subLabel: "What great outfits give me",         kind: "array" as FieldKind, questionId: "successful-outfit-gives" },
+      { draftKey: "current-goal" as DraftKey, apiKey: "currentGoal", subLabel: "What I want nAia to help with", kind: "array" as FieldKind, questionId: "current-goal" },
+      // Legacy: successfulOutfitGives bundled here. Rev 6: moved to outfit-gives section.
+      { draftKey: "successful-outfit-gives" as DraftKey, apiKey: "successfulOutfitGives", subLabel: "What great outfits give me", kind: "array" as FieldKind, questionId: "successful-outfit-gives", hiddenForRev6: true },
     ],
   },
+  // 2. WHAT MAKES AN OUTFIT WORK — Rev 6 only; successfulOutfitGives as own section
+  {
+    id: "outfit-gives",
+    label: "What Makes an Outfit Work",
+    question: "What makes an outfit feel right for you?",
+    helper: "Choose up to 3.",
+    optional: true,
+    rev6Only: true,
+    subFields: [
+      { draftKey: "successful-outfit-gives" as DraftKey, apiKey: "successfulOutfitGives", subLabel: "What great outfits give me", kind: "array" as FieldKind, questionId: "successful-outfit-gives" },
+    ],
+  },
+  // 3. STYLE — desiredImpression hidden for Rev 6 (blank editor, superseded)
   {
     id: "identity",
-    label: "Your Style Identity",
+    label: "Style",
     question: "Which styles currently feel most like you?",
-    helper: "Select up to 2. nAia blends these into the aesthetic of every recommendation.",
+    helper: "Choose up to 2.",
     subFields: [
-      { draftKey: "style-personalities", apiKey: "stylePersonalities", subLabel: "My style",             kind: "array", questionId: "style-personalities" },
-      { draftKey: "desired-impression",  apiKey: "desiredImpression",  subLabel: "The impression I make", kind: "array", questionId: "desired-impression"  },
+      { draftKey: "style-personalities" as DraftKey, apiKey: "stylePersonalities", subLabel: "My style", kind: "array" as FieldKind, questionId: "style-personalities" },
+      { draftKey: "desired-impression" as DraftKey, apiKey: "desiredImpression", subLabel: "The impression I make", kind: "array" as FieldKind, questionId: "desired-impression", hiddenForRev6: true },
     ],
   },
-  {
-    id: "direction",
-    label: "Your Style Direction",
-    question: "How do you want to feel in what you wear?",
-    helper: "This shapes the emotional register of your Style Me recommendations.",
-    subFields: [
-      { draftKey: "desired-feelings", apiKey: "desiredFeelings", subLabel: "How I want to feel", kind: "array", questionId: "desired-feelings" },
-      { draftKey: "becoming",         apiKey: "becoming",        subLabel: "Who I'm becoming",   kind: "array", questionId: "becoming"         },
-    ],
-  },
+  // 4. LIFESTYLE — typicalDay hidden for Rev 6 (no AI consumer)
   {
     id: "life",
-    label: "Your Life & Dress Codes",
-    question: "Where does your wardrobe need to show up most often?",
-    helper: "Choose the settings that define your week, and describe how your days unfold.",
+    label: "Lifestyle",
+    question: "What do you dress for most often?",
+    helper: "Choose up to 3.",
     subFields: [
-      { draftKey: "lifestyle",    apiKey: "lifestyle",   subLabel: "My lifestyle",       kind: "array", questionId: "lifestyle"    },
-      { draftKey: "typical-day", apiKey: "typicalDay",  subLabel: "A typical week",     kind: "text",  questionId: "typical-day"  },
+      { draftKey: "lifestyle" as DraftKey, apiKey: "lifestyle", subLabel: "My lifestyle", kind: "array" as FieldKind, questionId: "lifestyle" },
+      { draftKey: "typical-day" as DraftKey, apiKey: "typicalDay", subLabel: "A typical week", kind: "text" as FieldKind, questionId: "typical-day", hiddenForRev6: true },
     ],
   },
+  // 5. COLOUR PALETTE — advanced colour fields hidden for Rev 6 (no AI consumer)
+  {
+    id: "colours",
+    label: "Colour Palette",
+    question: "Which colours do you love wearing?",
+    helper: "Choose up to 5 favourite colours.",
+    subFields: [
+      { draftKey: "favorite-colors" as DraftKey, apiKey: "favoriteColors", subLabel: "My colour palette", kind: "color" as FieldKind, questionId: "favorite-colors", pairKey: "avoid-colors" as DraftKey },
+      { draftKey: "avoid-colors" as DraftKey, apiKey: "avoidColors", subLabel: "Colours to avoid", kind: "color" as FieldKind, questionId: "avoid-colors", pairKey: "favorite-colors" as DraftKey },
+      { draftKey: "neutral-vs-colour" as DraftKey, apiKey: "neutralVsColour", subLabel: "Neutrals vs colour", kind: "single" as FieldKind, questionId: "neutral-vs-colour", hiddenForRev6: true },
+      { draftKey: "colour-intensity" as DraftKey, apiKey: "colourIntensity", subLabel: "Colour intensity", kind: "single" as FieldKind, questionId: "colour-intensity", hiddenForRev6: true },
+      { draftKey: "print-appetite" as DraftKey, apiKey: "printAppetite", subLabel: "Prints & patterns", kind: "single" as FieldKind, questionId: "print-appetite", hiddenForRev6: true },
+    ],
+  },
+  // 6. SILHOUETTE — canonical Rev 6 copy
   {
     id: "fit",
-    label: "Your Fit & Silhouette",
-    question: "What silhouettes feel most like you?",
-    helper: "Pick up to 3. These shape the garment suggestions nAia makes.",
+    label: "Silhouette",
+    question: "Which silhouettes do you usually feel best in?",
+    helper: "Choose up to 3.",
     subFields: [
-      { draftKey: "silhouette", apiKey: "silhouette", subLabel: "My silhouettes", kind: "array", questionId: "silhouette" },
+      { draftKey: "silhouette" as DraftKey, apiKey: "silhouette", subLabel: "My silhouettes", kind: "array" as FieldKind, questionId: "silhouette" },
     ],
   },
+  // 7. FIT CONCERNS — Rev 6 only; dedicated section with canonical Rev 6 IDs
   {
-    id: "sizes",
-    label: "Your Sizes & Fit",
-    question: "Tell nAia about your sizes, measurements and fit details.",
-    helper: "All fields in this section are optional. Update any time.",
-    subFields: [
-      // V2-D sizes
-      { draftKey: "sizing-system"      as DraftKey, apiKey: "sizingSystem",     subLabel: "Which clothing sizing system do you use?",                          kind: "single" as FieldKind, questionId: "sizing-system"       },
-      { draftKey: "top-size"           as DraftKey, apiKey: "topSize",          subLabel: "Top size",                                                            kind: "text"   as FieldKind, questionId: "top-size"           },
-      { draftKey: "bottom-size"        as DraftKey, apiKey: "bottomSize",       subLabel: "Bottom size",                                                         kind: "text"   as FieldKind, questionId: "bottom-size"        },
-      { draftKey: "dress-size"         as DraftKey, apiKey: "dressSize",        subLabel: "Dress size",                                                          kind: "text"   as FieldKind, questionId: "dress-size"         },
-      { draftKey: "shoe-sizing-system" as DraftKey, apiKey: "shoeSizingSystem", subLabel: "Which shoe sizing system do you use?",                                kind: "single" as FieldKind, questionId: "shoe-sizing-system"  },
-      { draftKey: "shoe-size"          as DraftKey, apiKey: "shoeSize",         subLabel: "Shoe size",                                                           kind: "text"   as FieldKind, questionId: "shoe-size"          },
-      // V2-D measurements
-      { draftKey: "height"             as DraftKey, apiKey: "height",           subLabel: "Your height",                                                         kind: "text"   as FieldKind, questionId: "height"             },
-      { draftKey: "measurement-unit"   as DraftKey, apiKey: "measurementUnit",  subLabel: "Measurements in",                                                     kind: "single" as FieldKind, questionId: "measurement-unit"    },
-      { draftKey: "bust-measurement"   as DraftKey, apiKey: "bustMeasurement",  subLabel: "Bust",                                                                kind: "text"   as FieldKind, questionId: "bust-measurement"   },
-      { draftKey: "waist-measurement"  as DraftKey, apiKey: "waistMeasurement", subLabel: "Natural waist",                                                       kind: "text"   as FieldKind, questionId: "waist-measurement"  },
-      { draftKey: "hip-measurement"    as DraftKey, apiKey: "hipMeasurement",   subLabel: "Hips (widest point)",                                                 kind: "text"   as FieldKind, questionId: "hip-measurement"    },
-      // V2-D proportions & fit
-      { draftKey: "body-shape"         as DraftKey, apiKey: "bodyShape",        subLabel: "How would you describe your proportions?",                            kind: "single" as FieldKind, questionId: "body-shape"          },
-      { draftKey: "fit-concerns"       as DraftKey, apiKey: "fitConcerns",      subLabel: "Fit considerations",                                                  kind: "array"  as FieldKind, questionId: "fit-concerns"        },
-      { draftKey: "fit-concerns-note"  as DraftKey, apiKey: "fitConcernsNote",  subLabel: "Additional fit notes",                                                kind: "text"   as FieldKind, questionId: "fit-concerns-note"   },
-    ],
+    id: "fit-concerns",
+    label: "Fit Concerns",
+    question: "Are there any fit issues nAia should keep in mind?",
+    helper: "Select any that apply.",
     optional: true,
+    rev6Only: true,
+    subFields: [
+      { draftKey: "fit-concerns" as DraftKey, apiKey: "fitConcerns", subLabel: "Fit concerns", kind: "array" as FieldKind, questionId: "fit-concerns" },
+      { draftKey: "fit-concerns-note" as DraftKey, apiKey: "fitConcernsNote", subLabel: "Additional fit notes", kind: "text" as FieldKind, questionId: "fit-concerns-note" },
+    ],
   },
+  // 8. DRESSING REQUIREMENTS — updated helper copy
   {
     id: "dressing",
-    label: "Your Dressing Requirements",
+    label: "Dressing Requirements",
     question: "Are there any dressing requirements nAia should always respect?",
-    helper: "These are hard requirements — nAia will filter out products that do not meet them.",
+    helper: "Optional. Select anything nAia should always keep in mind when styling you.",
     optional: true,
     subFields: [
       { draftKey: "dressing-preferences" as DraftKey, apiKey: "dressingPreferences", subLabel: "My dressing requirements", kind: "array" as FieldKind, questionId: "dressing-preferences" },
     ],
   },
+  // 9. SIZES & MEASUREMENTS — renamed; bodyShape + old fitConcerns hidden for Rev 6
   {
-    id: "colours",
-    label: "Your Colour & Visual Language",
-    question: "Which palette should nAia lean into for you?",
-    helper: "Pick the tones you want to see returning across your looks.",
+    id: "sizes",
+    label: "Sizes & Measurements",
+    question: "Tell nAia about your sizes and measurements.",
+    helper: "All fields are optional. Update any time.",
+    optional: true,
     subFields: [
-      { draftKey: "favorite-colors",   apiKey: "favoriteColors",  subLabel: "My colour palette",    kind: "color",  questionId: "favorite-colors",   pairKey: "avoid-colors"      },
-      { draftKey: "avoid-colors",      apiKey: "avoidColors",     subLabel: "Colours to avoid",     kind: "color",  questionId: "avoid-colors",      pairKey: "favorite-colors"   },
-      { draftKey: "neutral-vs-colour", apiKey: "neutralVsColour", subLabel: "Neutrals vs colour",   kind: "single", questionId: "neutral-vs-colour"  },
-      { draftKey: "colour-intensity",  apiKey: "colourIntensity", subLabel: "Colour intensity",     kind: "single", questionId: "colour-intensity"   },
-      { draftKey: "print-appetite",    apiKey: "printAppetite",   subLabel: "Prints & patterns",    kind: "single", questionId: "print-appetite"     },
+      { draftKey: "sizing-system" as DraftKey, apiKey: "sizingSystem", subLabel: "Which clothing sizing system do you use?", kind: "single" as FieldKind, questionId: "sizing-system" },
+      { draftKey: "top-size" as DraftKey, apiKey: "topSize", subLabel: "Top size", kind: "text" as FieldKind, questionId: "top-size" },
+      { draftKey: "bottom-size" as DraftKey, apiKey: "bottomSize", subLabel: "Bottom size", kind: "text" as FieldKind, questionId: "bottom-size" },
+      { draftKey: "dress-size" as DraftKey, apiKey: "dressSize", subLabel: "Dress size", kind: "text" as FieldKind, questionId: "dress-size" },
+      { draftKey: "shoe-sizing-system" as DraftKey, apiKey: "shoeSizingSystem", subLabel: "Which shoe sizing system do you use?", kind: "single" as FieldKind, questionId: "shoe-sizing-system" },
+      { draftKey: "shoe-size" as DraftKey, apiKey: "shoeSize", subLabel: "Shoe size", kind: "text" as FieldKind, questionId: "shoe-size" },
+      { draftKey: "height" as DraftKey, apiKey: "height", subLabel: "Your height", kind: "text" as FieldKind, questionId: "height" },
+      { draftKey: "measurement-unit" as DraftKey, apiKey: "measurementUnit", subLabel: "Measurements in", kind: "single" as FieldKind, questionId: "measurement-unit" },
+      { draftKey: "bust-measurement" as DraftKey, apiKey: "bustMeasurement", subLabel: "Bust", kind: "text" as FieldKind, questionId: "bust-measurement" },
+      { draftKey: "waist-measurement" as DraftKey, apiKey: "waistMeasurement", subLabel: "Natural waist", kind: "text" as FieldKind, questionId: "waist-measurement" },
+      { draftKey: "hip-measurement" as DraftKey, apiKey: "hipMeasurement", subLabel: "Hips (widest point)", kind: "text" as FieldKind, questionId: "hip-measurement" },
+      // Legacy only: bodyShape + old fitConcerns hidden for Rev 6 (bespoke UI also gated)
+      { draftKey: "body-shape" as DraftKey, apiKey: "bodyShape", subLabel: "How would you describe your proportions?", kind: "single" as FieldKind, questionId: "body-shape", hiddenForRev6: true },
+      { draftKey: "fit-concerns" as DraftKey, apiKey: "fitConcerns", subLabel: "Fit considerations", kind: "array" as FieldKind, questionId: "fit-concerns", hiddenForRev6: true },
+      { draftKey: "fit-concerns-note" as DraftKey, apiKey: "fitConcernsNote", subLabel: "Additional fit notes", kind: "text" as FieldKind, questionId: "fit-concerns-note", hiddenForRev6: true },
     ],
   },
+  // HIDDEN FOR REV 6: Style Direction (blank editors, superseded emotional profile)
+  {
+    id: "direction",
+    label: "Your Style Direction",
+    question: "How do you want to feel in what you wear?",
+    helper: "Guides the overall tone and direction of your Style Me recommendations.",
+    rev6Hidden: true,
+    subFields: [
+      { draftKey: "desired-feelings" as DraftKey, apiKey: "desiredFeelings", subLabel: "How I want to feel", kind: "array" as FieldKind, questionId: "desired-feelings" },
+      { draftKey: "becoming" as DraftKey, apiKey: "becoming", subLabel: "Who I'm becoming", kind: "array" as FieldKind, questionId: "becoming" },
+    ],
+  },
+  // HIDDEN FOR REV 6: Wardrobe / Shopping / Trend (all blank editors)
   {
     id: "wardrobe",
     label: "Your Wardrobe, Shopping & Trend Preferences",
     question: "What does your wardrobe need most right now?",
     helper: "Knowing where you feel disconnected and what drives your purchases helps nAia focus on the right solutions.",
+    rev6Hidden: true,
     subFields: [
-      { draftKey: "wardrobe-disconnection", apiKey: "styleStruggles",     subLabel: "When I feel most disconnected",        kind: "array",  questionId: "wardrobe-disconnection" },
-      { draftKey: "style-support",          apiKey: "styleSupport",       subLabel: "What would make getting dressed easier", kind: "array", questionId: "style-support"          },
-      { draftKey: "shopping-priorities",    apiKey: "shoppingPriorities", subLabel: "Shopping priorities",                  kind: "array",  questionId: "shopping-priorities"    },
-      { draftKey: "trend-appetite",         apiKey: "trendAppetite",      subLabel: "Trend appetite",                       kind: "single", questionId: "trend-appetite"         },
+      { draftKey: "wardrobe-disconnection" as DraftKey, apiKey: "styleStruggles", subLabel: "When I feel most disconnected", kind: "array" as FieldKind, questionId: "wardrobe-disconnection" },
+      { draftKey: "style-support" as DraftKey, apiKey: "styleSupport", subLabel: "What would make getting dressed easier", kind: "array" as FieldKind, questionId: "style-support" },
+      { draftKey: "shopping-priorities" as DraftKey, apiKey: "shoppingPriorities", subLabel: "Shopping priorities", kind: "array" as FieldKind, questionId: "shopping-priorities" },
+      { draftKey: "trend-appetite" as DraftKey, apiKey: "trendAppetite", subLabel: "Trend appetite", kind: "single" as FieldKind, questionId: "trend-appetite" },
     ],
   },
 ];
@@ -296,6 +333,21 @@ const ALL_SECTIONS = [...SECTIONS, NOTES_SECTION];
 
 function getSectionDef(id: SectionId): SectionDef {
   return ALL_SECTIONS.find(s => s.id === id) ?? SECTIONS[0];
+}
+
+// Returns sections visible in the picker/overview for this customer type.
+function getVisibleSections(isRev6: boolean): SectionDef[] {
+  return SECTIONS.filter(s => {
+    if (isRev6 && s.rev6Hidden) return false;
+    if (!isRev6 && s.rev6Only)  return false;
+    return true;
+  });
+}
+
+// Returns a def with hiddenForRev6 sub-fields filtered out for Rev 6 customers.
+function getEffectiveDef(def: SectionDef, isRev6: boolean): SectionDef {
+  if (!isRev6) return def;
+  return { ...def, subFields: def.subFields.filter(sf => !sf.hiddenForRev6) };
 }
 
 // Legacy colour IDs that are stripped from favoriteColors on explicit Passport save
@@ -689,6 +741,13 @@ function formatDate(iso: string): string {
 }
 
 function getSectionSummary(def: SectionDef, answers: OnboardingAnswers): ReactNode {
+  // Notes: special empty-state copy (optional enrichment, never "Not yet completed")
+  if (def.id === "notes") {
+    const v = (answers as Record<string, unknown>)["final-notes"] as string | undefined;
+    if (v?.trim()) return "Notes added";
+    return <span className="sp-detail-optional">Optional — add a note</span>;
+  }
+
   const areaLine = (ids: string[], labels: Record<string, string>, prefix: string): string => {
     const humanLabels = ids.map(id => labels[id] ?? id.replace(/-/g, " "));
     const shown = humanLabels.slice(0, 2);
@@ -963,6 +1022,11 @@ export default function PassportPage() {
   const revalidator = useRevalidator();
   const navigate = useNavigate();
 
+  // Rev 6 customers have profileVersion=6; legacy customers have profileVersion=null.
+  const isRev6 = !isLegacyCustomer;
+  const visibleSections      = useMemo(() => getVisibleSections(isRev6), [isRev6]);
+  const visibleAllSections   = useMemo(() => [...visibleSections, NOTES_SECTION], [visibleSections]);
+
   const [mode,                 setMode]                 = useState<Mode>({ kind: "overview" });
   const [flowEdits,            setFlowEdits]            = useState<OnboardingAnswers>({});
   const [saveStatus,           setSaveStatus]           = useState<SaveStatus>("idle");
@@ -979,12 +1043,13 @@ export default function PassportPage() {
   // stepIndex. Used by Back navigation so it never depends on revalidation timing.
   const committedEditsRef = useRef<Record<number, OnboardingAnswers>>({});
 
-  // Missing sections excludes "sizes" (always placeholder) and "notes" (optional)
-  // Notes is handled separately — it appears in the Continue queue if missing
+  // Missing sections uses visible sections for this customer type.
+  // Optional sections never trigger as "missing". Primary sub-field uses effective (Rev 6-filtered) def.
   const missingSections = useMemo(() =>
-    ALL_SECTIONS.filter(s => {
-      if (s.placeholder || s.optional) return false; // optional sections never trigger as "missing"
-      const primary = s.subFields[0];
+    visibleAllSections.filter(s => {
+      if (s.placeholder || s.optional) return false;
+      const effectiveDef = getEffectiveDef(s, isRev6);
+      const primary = effectiveDef.subFields[0];
       if (!primary) return false;
       const v = (savedAnswers as Record<string, unknown>)[primary.draftKey];
       if (primary.kind === "text" || primary.kind === "single") {
@@ -997,7 +1062,7 @@ export default function PassportPage() {
         : raw;
       return effective.length === 0;
     }),
-    [savedAnswers],
+    [savedAnswers, visibleAllSections, isRev6],
   );
 
   const isComplete = missingSections.length === 0;
@@ -1509,12 +1574,12 @@ export default function PassportPage() {
           <div className="sp-status-date" suppressHydrationWarning>Last updated · {formatDate(profileUpdatedAt)}</div>
         </div>
 
-        {/* Full detail — all 7 sections + Notes */}
+        {/* Full detail — visible sections for this customer type + Notes */}
         <div className="sp-ov-sections">
-          {SECTIONS.map(def => (
+          {visibleSections.map(def => (
             <div key={def.id} className="sp-ov-section">
               <div className="sp-ov-section-header">{def.label}</div>
-              {getSectionDetail(def, savedAnswers)}
+              {getSectionDetail(getEffectiveDef(def, isRev6), savedAnswers)}
             </div>
           ))}
           <div className="sp-ov-section sp-ov-section--notes">
@@ -1571,7 +1636,7 @@ export default function PassportPage() {
         </div>
 
         <div className="sp-picker-list">
-          {SECTIONS.map(def => (
+          {visibleSections.map(def => (
             <button
               key={def.id}
               type="button"
@@ -1579,10 +1644,10 @@ export default function PassportPage() {
               onClick={() => editSection(def.id)}
             >
               <span className="sp-picker-label">{def.label}</span>
-              <span className="sp-picker-value">{getSectionSummary(def, savedAnswers)}</span>
+              <span className="sp-picker-value">{getSectionSummary(getEffectiveDef(def, isRev6), savedAnswers)}</span>
             </button>
           ))}
-          {/* Notes — in picker but outside the 7-section count */}
+          {/* Notes — in picker but outside named sections */}
           <button
             type="button"
             className="sp-picker-btn"
@@ -2000,64 +2065,69 @@ export default function PassportPage() {
               })}
             </div>
 
-            {/* ── Group 3: Your proportions & fit ──────────────────── */}
-            <div className="sp-section-group">
-              <div className="sp-section-group-title">Your proportions &amp; fit</div>
+            {/* ── Group 3: Proportions & fit — legacy customers only ── */}
+            {isLegacyCustomer && (
+              <div className="sp-section-group">
+                <div className="sp-section-group-title">Your proportions &amp; fit</div>
 
-              <div className="sp-sub-label">How would you describe your proportions?</div>
-              <div className="sp-cap-hint">Self-reported only — optional.</div>
-              <div className="sp-option-grid">
-                {BODY_SHAPE_OPTIONS.map(o => {
-                  const isSel = (fe["body-shape"] as string | undefined) === o.id;
-                  return (
-                    <button key={o.id} type="button"
-                      className={`sp-option${isSel ? " sp-option--active" : ""}`}
-                      onClick={() => handleSingleSelect("body-shape" as DraftKey, o.id)}>
-                      {o.label}
-                    </button>
-                  );
-                })}
-              </div>
+                <div className="sp-sub-label">How would you describe your proportions?</div>
+                <div className="sp-cap-hint">Self-reported only — optional.</div>
+                <div className="sp-option-grid">
+                  {BODY_SHAPE_OPTIONS.map(o => {
+                    const isSel = (fe["body-shape"] as string | undefined) === o.id;
+                    return (
+                      <button key={o.id} type="button"
+                        className={`sp-option${isSel ? " sp-option--active" : ""}`}
+                        onClick={() => handleSingleSelect("body-shape" as DraftKey, o.id)}>
+                        {o.label}
+                      </button>
+                    );
+                  })}
+                </div>
 
-              <div className="sp-sub-label" style={{ marginTop: "28px" }}>Any fit considerations nAia should know about?</div>
-              <div className="sp-cap-hint">Optional — select all that apply.</div>
-              <div className="sp-option-grid">
-                {FIT_CONCERN_OPTIONS.map(o => {
-                  const isSel = fitConSel.includes(o.id);
-                  return (
-                    <button key={o.id} type="button"
-                      className={`sp-option${isSel ? " sp-option--active" : ""}`}
-                      onClick={() => setFlowEdits(prev => {
-                        const p = prev as Record<string,unknown>;
-                        const cur = (p["fit-concerns"] as string[] | undefined) ?? [];
-                        return { ...p, "fit-concerns": cur.includes(o.id) ? cur.filter(id => id !== o.id) : [...cur, o.id] } as OnboardingAnswers;
-                      })}>
-                      {o.label}
-                    </button>
-                  );
-                })}
+                <div className="sp-sub-label" style={{ marginTop: "28px" }}>Any fit considerations nAia should know about?</div>
+                <div className="sp-cap-hint">Optional — select all that apply.</div>
+                <div className="sp-option-grid">
+                  {FIT_CONCERN_OPTIONS.map(o => {
+                    const isSel = fitConSel.includes(o.id);
+                    return (
+                      <button key={o.id} type="button"
+                        className={`sp-option${isSel ? " sp-option--active" : ""}`}
+                        onClick={() => setFlowEdits(prev => {
+                          const p = prev as Record<string,unknown>;
+                          const cur = (p["fit-concerns"] as string[] | undefined) ?? [];
+                          return { ...p, "fit-concerns": cur.includes(o.id) ? cur.filter(id => id !== o.id) : [...cur, o.id] } as OnboardingAnswers;
+                        })}>
+                        {o.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            )}
 
           </>
         );
       })()}
 
-      {/* All other sections — generic sub-field renderer */}
-      {currentId !== "sizes" && currentDef.subFields.map(sf => {
-        const capHint = (sf.kind === "array" || sf.kind === "color") && MAX_SELECTIONS[sf.questionId]
-          ? (QUESTION_BY_ID[sf.questionId]?.subtitle ?? `Choose up to ${MAX_SELECTIONS[sf.questionId]}`)
-          : null;
-        return (
-          <div key={String(sf.draftKey)}>
-            {currentDef.subFields.length > 1 && (
-              <div className="sp-sub-label">{sf.subLabel}</div>
-            )}
-            {capHint && <div className="sp-cap-hint">{capHint}</div>}
-            {renderSubField(sf)}
-          </div>
-        );
-      })}
+      {/* All other sections — generic sub-field renderer (uses effective def for Rev 6 filtering) */}
+      {currentId !== "sizes" && (() => {
+        const effectiveSubFields = getEffectiveDef(currentDef, isRev6).subFields;
+        return effectiveSubFields.map(sf => {
+          const capHint = (sf.kind === "array" || sf.kind === "color") && MAX_SELECTIONS[sf.questionId]
+            ? (QUESTION_BY_ID[sf.questionId]?.subtitle ?? `Choose up to ${MAX_SELECTIONS[sf.questionId]}`)
+            : null;
+          return (
+            <div key={String(sf.draftKey)}>
+              {effectiveSubFields.length > 1 && (
+                <div className="sp-sub-label">{sf.subLabel}</div>
+              )}
+              {capHint && <div className="sp-cap-hint">{capHint}</div>}
+              {renderSubField(sf)}
+            </div>
+          );
+        });
+      })()}
 
       <div className="sp-flow-actions">
         <button

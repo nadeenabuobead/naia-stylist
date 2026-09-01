@@ -1265,11 +1265,15 @@ describe("V: Notes to nAia — overview editability", () => {
 
   // ── V.C: existing note displays its saved text ────────────────────────────
   it("V.C: getSectionDetail for notes returns the saved text when present", () => {
-    const detailIdx = passport.indexOf("if (def.id === \"notes\")");
-    assert.ok(detailIdx !== -1, 'getSectionDetail must have a "notes" branch');
-    const detailBlock = passport.slice(detailIdx, detailIdx + 250);
+    // Anchor to the getSectionDetail function, then find the notes branch within it
+    const detailFnIdx = passport.indexOf("function getSectionDetail(");
+    assert.ok(detailFnIdx !== -1, "getSectionDetail function must exist");
+    const detailFnBlock = passport.slice(detailFnIdx, detailFnIdx + 3000);
+    const notesIdx = detailFnBlock.indexOf('def.id === "notes"');
+    assert.ok(notesIdx !== -1, 'getSectionDetail must have a "notes" branch');
+    const notesBlock = detailFnBlock.slice(notesIdx, notesIdx + 300);
     assert.ok(
-      detailBlock.includes("sp-ov-notes-body"),
+      notesBlock.includes("sp-ov-notes-body"),
       "notes detail branch must render text via sp-ov-notes-body paragraph",
     );
   });
@@ -1394,5 +1398,406 @@ describe("V: Notes to nAia — overview editability", () => {
       notesCTABlock.includes("editSection") && !notesCTABlock.includes("startUpdate"),
       "Notes CTA must use editSection(\"notes\"), not startUpdate — Update Answers is not repurposed for Notes",
     );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Group W: Rev 6 Update Answers cleanup
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("W: Rev 6 Update Answers cleanup", () => {
+  // W.A: Legacy Sizes & Measurements does NOT render old FIT_CONCERN_OPTIONS for Rev 6
+  it("W.A: profileVersion=6 Sizes editor does NOT render FIT_CONCERN_OPTIONS", () => {
+    // For Rev 6 customers (isLegacyCustomer === false), the Group 3 proportions block
+    // is gated behind {isLegacyCustomer && ...}. This means FIT_CONCERN_OPTIONS
+    // is only iterated inside that legacy-gated block.
+    const sizesIdx = passport.indexOf('currentId === "sizes"');
+    assert.ok(sizesIdx !== -1, 'Sizes bespoke UI block must exist');
+    // FIT_CONCERN_OPTIONS is ~12774 chars in from the sizes bespoke block; use 15000 to be safe
+    const sizesBlock = passport.slice(sizesIdx, sizesIdx + 15000);
+    // FIT_CONCERN_OPTIONS must be inside the isLegacyCustomer guard
+    const legacyGuardIdx = sizesBlock.indexOf("isLegacyCustomer");
+    assert.ok(legacyGuardIdx !== -1, "isLegacyCustomer guard must exist in sizes block");
+    const fitConIdx = sizesBlock.indexOf("FIT_CONCERN_OPTIONS");
+    assert.ok(fitConIdx !== -1, "FIT_CONCERN_OPTIONS must still exist in sizes block for legacy");
+    // FIT_CONCERN_OPTIONS must appear AFTER the isLegacyCustomer guard
+    assert.ok(
+      fitConIdx > legacyGuardIdx,
+      "FIT_CONCERN_OPTIONS must appear inside the isLegacyCustomer guard, not before it",
+    );
+  });
+
+  // W.B: Dedicated Fit Concerns section uses Rev 6 canonical IDs
+  it("W.B: dedicated fit-concerns SECTION uses Rev 6 quiz-data options", () => {
+    // The "fit-concerns" section in SECTIONS uses questionId: "fit-concerns"
+    // which resolves to QUESTION_BY_ID["fit-concerns"] — the quiz-data entry
+    // with canonical Rev 6 IDs (tops-pull-bust, waistbands-gape, etc.)
+    const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
+    assert.ok(sectionsIdx !== -1, "SECTIONS array must exist");
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    // A "fit-concerns" section definition with rev6Only: true must exist
+    const fitConcernsSectionIdx = sectionsBlock.indexOf('id: "fit-concerns"');
+    assert.ok(fitConcernsSectionIdx !== -1, 'A section with id "fit-concerns" must exist in SECTIONS');
+    const fcBlock = sectionsBlock.slice(fitConcernsSectionIdx, fitConcernsSectionIdx + 500);
+    assert.ok(fcBlock.includes("rev6Only: true"), 'fit-concerns section must be rev6Only: true');
+    assert.ok(fcBlock.includes('questionId: "fit-concerns"'), 'fit-concerns section must reference the quiz-data question');
+  });
+
+  // W.C: existing Rev 6 fitConcerns prefill — QUESTION_BY_ID["fit-concerns"] has Rev 6 options
+  it("W.C: QUESTION_BY_ID[fit-concerns] is registered from quiz-data (Rev 6 IDs)", () => {
+    // quizQuestions are iterated and registered into QUESTION_BY_ID.
+    // "fit-concerns" is Screen 7 of quizQuestions. Verify the loop registers it.
+    const loopIdx = passport.indexOf("for (const q of quizQuestions)");
+    assert.ok(loopIdx !== -1, "quizQuestions registration loop must exist");
+    const loopBlock = passport.slice(loopIdx, loopIdx + 400);
+    assert.ok(loopBlock.includes("QUESTION_BY_ID[q.id] = q"), "QUESTION_BY_ID must be populated from quizQuestions");
+    // Rev 6 IDs must be in quiz-data (uses the pre-loaded quizData constant)
+    assert.ok(quizData.includes("tops-pull-bust"), "quiz-data must contain Rev 6 fit-concerns ID tops-pull-bust");
+    assert.ok(quizData.includes("waistbands-gape"), "quiz-data must contain Rev 6 fit-concerns ID waistbands-gape");
+  });
+
+  // W.D: saving Rev 6 Fit Concerns cannot persist legacy IDs through the dedicated UI
+  it("W.D: fit-concerns section subField uses questionId: \"fit-concerns\" — no FIT_CONCERN_OPTIONS", () => {
+    // The fit-concerns section renders via the generic renderSubField path,
+    // which reads options from QUESTION_BY_ID["fit-concerns"] (Rev 6 quiz-data).
+    // FIT_CONCERN_OPTIONS (old IDs) are only rendered inside the isLegacyCustomer guard in sizes.
+    const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const fcSectionIdx = sectionsBlock.indexOf('id: "fit-concerns"');
+    const fcBlock = sectionsBlock.slice(fcSectionIdx, fcSectionIdx + 500);
+    // Must NOT reference FIT_CONCERN_OPTIONS directly in the section def
+    assert.ok(!fcBlock.includes("FIT_CONCERN_OPTIONS"), "fit-concerns section must not reference FIT_CONCERN_OPTIONS");
+    assert.ok(fcBlock.includes('questionId: "fit-concerns"'), "fit-concerns section must use canonical questionId");
+  });
+
+  // W.E: no-fit-problems exclusivity is preserved via quiz-data exclusiveIds
+  it("W.E: no-fit-problems remains exclusive via quiz-data exclusiveIds", () => {
+    // exclusiveIds for fit-concerns must contain no-fit-problems (uses pre-loaded quizData)
+    const fcIdx = quizData.indexOf('"fit-concerns"');
+    assert.ok(fcIdx !== -1, "fit-concerns question must be in quiz-data");
+    const fcBlock = quizData.slice(fcIdx, fcIdx + 800);
+    assert.ok(fcBlock.includes('"no-fit-problems"'), "no-fit-problems ID must exist in fit-concerns");
+    assert.ok(fcBlock.includes("exclusiveIds"), "fit-concerns must declare exclusiveIds in quiz-data");
+    // handleToggle must respect exclusiveIds from QUESTION_BY_ID
+    const toggleIdx = passport.indexOf("const handleToggle = useCallback");
+    assert.ok(toggleIdx !== -1, "handleToggle must exist");
+    const toggleBlock = passport.slice(toggleIdx, toggleIdx + 600);
+    assert.ok(toggleBlock.includes("exclusiveIds"), "handleToggle must process exclusiveIds");
+  });
+
+  // W.F: fitConcernsNote remains associated with Rev 6 fit-concerns section
+  it("W.F: fitConcernsNote sub-field is in the fit-concerns section", () => {
+    const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const fcSectionIdx = sectionsBlock.indexOf('id: "fit-concerns"');
+    const fcBlock = sectionsBlock.slice(fcSectionIdx, fcSectionIdx + 500);
+    assert.ok(fcBlock.includes('"fit-concerns-note"'), "fit-concerns-note sub-field must be in fit-concerns section");
+  });
+
+  // W.G: Current Focus section contains currentGoal only (successfulOutfitGives is hiddenForRev6)
+  it("W.G: goals section has successfulOutfitGives with hiddenForRev6: true", () => {
+    const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const goalsIdx = sectionsBlock.indexOf('id: "goals"');
+    assert.ok(goalsIdx !== -1, 'goals section must exist');
+    const goalsBlock = sectionsBlock.slice(goalsIdx, goalsIdx + 700);
+    assert.ok(goalsBlock.includes("hiddenForRev6: true"), "successfulOutfitGives sub-field must be hiddenForRev6: true in goals");
+    assert.ok(goalsBlock.includes('"successful-outfit-gives"'), "goals must still declare successful-outfit-gives (for legacy customers)");
+  });
+
+  // W.H: successfulOutfitGives has its own dedicated section for Rev 6
+  it("W.H: outfit-gives section exists and is rev6Only", () => {
+    const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const ogIdx = sectionsBlock.indexOf('id: "outfit-gives"');
+    assert.ok(ogIdx !== -1, 'outfit-gives section must exist in SECTIONS');
+    const ogBlock = sectionsBlock.slice(ogIdx, ogIdx + 400);
+    assert.ok(ogBlock.includes("rev6Only: true"), "outfit-gives must be rev6Only: true");
+    assert.ok(ogBlock.includes('"successful-outfit-gives"'), "outfit-gives must include the successfulOutfitGives sub-field");
+  });
+
+  // W.I: Style section does not render desiredImpression for Rev 6 (hiddenForRev6)
+  it("W.I: identity section has desired-impression with hiddenForRev6: true", () => {
+    // SECTIONS array is ~9700 chars; direction at 8021, wardrobe at 8663 — use 10500
+    const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const identityIdx = sectionsBlock.indexOf('id: "identity"');
+    assert.ok(identityIdx !== -1, "identity section must exist");
+    const identityBlock = sectionsBlock.slice(identityIdx, identityIdx + 600);
+    const diIdx = identityBlock.indexOf('"desired-impression"');
+    assert.ok(diIdx !== -1, "desired-impression must remain in identity section (for legacy customers)");
+    // hiddenForRev6 is ~159 chars after the desired-impression key — use 250-char window
+    const diBlock = identityBlock.slice(diIdx, diIdx + 250);
+    assert.ok(diBlock.includes("hiddenForRev6: true"), "desired-impression must be hiddenForRev6: true");
+  });
+
+  // W.J: direction section is hidden for Rev 6 (rev6Hidden)
+  it("W.J: direction section has rev6Hidden: true", () => {
+    const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const dirIdx = sectionsBlock.indexOf('id: "direction"');
+    assert.ok(dirIdx !== -1, "direction section must still exist in SECTIONS (for legacy customers)");
+    const dirBlock = sectionsBlock.slice(dirIdx, dirIdx + 300);
+    assert.ok(dirBlock.includes("rev6Hidden: true"), "direction section must have rev6Hidden: true");
+  });
+
+  // W.K: Lifestyle section does not render typicalDay for Rev 6 (hiddenForRev6)
+  it("W.K: life section has typical-day with hiddenForRev6: true", () => {
+    const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const lifeIdx = sectionsBlock.indexOf('id: "life"');
+    assert.ok(lifeIdx !== -1, "life section must exist");
+    const lifeBlock = sectionsBlock.slice(lifeIdx, lifeIdx + 600);
+    const tdIdx = lifeBlock.indexOf('"typical-day"');
+    assert.ok(tdIdx !== -1, "typical-day must remain in life section (for legacy customers)");
+    // hiddenForRev6 is ~130 chars after the typical-day key — use 200-char window
+    const tdBlock = lifeBlock.slice(tdIdx, tdIdx + 200);
+    assert.ok(tdBlock.includes("hiddenForRev6: true"), "typical-day must be hiddenForRev6: true");
+  });
+
+  // W.L: Sizes does not render bodyShape for Rev 6 (hiddenForRev6 + bespoke UI guard)
+  it("W.L: body-shape sub-field has hiddenForRev6: true in sizes section", () => {
+    const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const sizesIdx = sectionsBlock.indexOf('id: "sizes"');
+    assert.ok(sizesIdx !== -1, "sizes section must exist");
+    // body-shape is ~2057 chars into the sizes entry — use 3000-char window
+    const sizesBlock = sectionsBlock.slice(sizesIdx, sizesIdx + 3000);
+    const bsIdx = sizesBlock.indexOf('"body-shape"');
+    assert.ok(bsIdx !== -1, "body-shape must remain in sizes section (for legacy customers)");
+    // hiddenForRev6 is ~155 chars after body-shape key — use 200-char window
+    const bsBlock = sizesBlock.slice(bsIdx, bsIdx + 200);
+    assert.ok(bsBlock.includes("hiddenForRev6: true"), "body-shape sub-field must be hiddenForRev6: true");
+  });
+
+  // W.M: Colour Palette does not render the 3 advanced fields for Rev 6
+  it("W.M: colours section has neutral-vs-colour, colour-intensity, print-appetite with hiddenForRev6: true", () => {
+    const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const coloursIdx = sectionsBlock.indexOf('id: "colours"');
+    assert.ok(coloursIdx !== -1, "colours section must exist");
+    // print-appetite is ~967 chars in; hiddenForRev6 for each is ~154 chars after the key
+    const coloursBlock = sectionsBlock.slice(coloursIdx, coloursIdx + 1400);
+    for (const field of ['"neutral-vs-colour"', '"colour-intensity"', '"print-appetite"']) {
+      const fIdx = coloursBlock.indexOf(field);
+      assert.ok(fIdx !== -1, `${field} must remain in colours section`);
+      const fBlock = coloursBlock.slice(fIdx, fIdx + 250);
+      assert.ok(fBlock.includes("hiddenForRev6: true"), `${field} must be hiddenForRev6: true`);
+    }
+  });
+
+  // W.N: Wardrobe / Shopping / Trend section is hidden for Rev 6
+  it("W.N: wardrobe section has rev6Hidden: true", () => {
+    const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const wIdx = sectionsBlock.indexOf('id: "wardrobe"');
+    assert.ok(wIdx !== -1, "wardrobe section must still exist in SECTIONS (for legacy customers)");
+    const wBlock = sectionsBlock.slice(wIdx, wIdx + 300);
+    assert.ok(wBlock.includes("rev6Hidden: true"), "wardrobe section must have rev6Hidden: true");
+  });
+
+  // W.O: legacy profileVersion=null retains backwards-compatible section access
+  it("W.O: getVisibleSections with isRev6=false includes direction and wardrobe", () => {
+    // getVisibleSections filters out rev6Hidden when isRev6=true, but not when false
+    const fnIdx = passport.indexOf("function getVisibleSections(");
+    assert.ok(fnIdx !== -1, "getVisibleSections helper must exist");
+    const fnBlock = passport.slice(fnIdx, fnIdx + 300);
+    assert.ok(fnBlock.includes("rev6Hidden"), "getVisibleSections must check rev6Hidden");
+    assert.ok(fnBlock.includes("rev6Only"), "getVisibleSections must check rev6Only");
+    // The logic: rev6Hidden excluded when isRev6, rev6Only excluded when not isRev6
+    assert.ok(fnBlock.includes("isRev6 && s.rev6Hidden"), "rev6Hidden sections excluded only for Rev 6");
+    assert.ok(fnBlock.includes("!isRev6 && s.rev6Only"), "rev6Only sections excluded only for legacy");
+  });
+
+  // W.P: canonical question/helper copy matches approved Rev 6 wording
+  it("W.P: key section question/helper copy matches approved canonical wording", () => {
+    const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    // Current Focus helper
+    assert.ok(sectionsBlock.includes("Choose up to 2. You can change this anytime."), "goals helper must match canonical wording");
+    // Style helper
+    assert.ok(sectionsBlock.includes("Choose up to 2."), "identity helper must use canonical choose-up-to-2 wording");
+    // Lifestyle question
+    assert.ok(sectionsBlock.includes("What do you dress for most often?"), "life question must match canonical wording");
+    // Silhouette question (canonical Rev 6 from quiz-data)
+    assert.ok(sectionsBlock.includes("Which silhouettes do you usually feel best in?"), "fit question must match quiz-data canonical wording");
+    // Dressing Requirements helper
+    assert.ok(sectionsBlock.includes("Optional. Select anything nAia should always keep in mind when styling you."), "dressing helper must match canonical wording");
+    // No internal language
+    assert.ok(!sectionsBlock.includes("mutable context"), 'SECTIONS must not contain internal language "mutable context"');
+    assert.ok(!sectionsBlock.includes("emotional register"), 'SECTIONS must not contain internal language "emotional register"');
+    assert.ok(!sectionsBlock.includes("blends these into the aesthetic"), 'SECTIONS must not contain internal marketing language');
+    assert.ok(!sectionsBlock.includes("garment suggestions nAia makes"), 'SECTIONS must not contain internal language');
+  });
+
+  // W.Q: Notes remains optional
+  it("W.Q: NOTES_SECTION has optional: true", () => {
+    const notesIdx = passport.indexOf("const NOTES_SECTION: SectionDef");
+    assert.ok(notesIdx !== -1, "NOTES_SECTION must be defined");
+    const notesBlock = passport.slice(notesIdx, notesIdx + 500);
+    assert.ok(notesBlock.includes("optional: true"), "NOTES_SECTION must have optional: true");
+  });
+
+  // W.R: empty Notes picker summary no longer says "Not yet completed"
+  it("W.R: getSectionSummary returns optional copy for empty Notes, not 'Not yet completed'", () => {
+    const summaryFnIdx = passport.indexOf("function getSectionSummary(");
+    assert.ok(summaryFnIdx !== -1, "getSectionSummary must exist");
+    const summaryBlock = passport.slice(summaryFnIdx, summaryFnIdx + 800);
+    // Must have a notes-specific branch
+    const notesIdx = summaryBlock.indexOf('def.id === "notes"');
+    assert.ok(notesIdx !== -1, 'getSectionSummary must have a "notes" special case');
+    // "Optional — add a note" text starts ~200 chars in; use 300-char window to capture it
+    const notesBlock = summaryBlock.slice(notesIdx, notesIdx + 300);
+    // Must NOT return "Not yet completed" for notes
+    assert.ok(!notesBlock.includes("Not yet completed"), "notes getSectionSummary must not return 'Not yet completed'");
+    // Must return optional-state copy
+    assert.ok(
+      notesBlock.includes("Optional") || notesBlock.includes("add a note"),
+      "notes getSectionSummary must return optional-state copy when empty",
+    );
+  });
+
+  // W.S: ADD A NOTE / EDIT NOTE behavior from e02f95d remains
+  it("W.S: ADD A NOTE and EDIT NOTE CTAs exist in the overview Notes block", () => {
+    const ovIdx = passport.indexOf("// ── OVERVIEW");
+    assert.ok(ovIdx !== -1, "OVERVIEW section must exist");
+    const ovBlock = passport.slice(ovIdx, ovIdx + 4000);
+    assert.ok(ovBlock.includes('"ADD A NOTE"'), "Overview Notes block must include ADD A NOTE CTA");
+    assert.ok(ovBlock.includes('"EDIT NOTE"'), "Overview Notes block must include EDIT NOTE CTA");
+    // Both must be inside the sp-ov-notes-cta button
+    const ctaIdx = ovBlock.indexOf("sp-ov-notes-cta");
+    assert.ok(ctaIdx !== -1, "sp-ov-notes-cta button must exist");
+    const ctaBlock = ovBlock.slice(ctaIdx, ctaIdx + 200);
+    assert.ok(ctaBlock.includes("hasNote"), "Notes CTA must be conditional on hasNote");
+  });
+
+  // W.T: no hidden legacy DB field is deleted or cleared by saving another Rev 6 section
+  it("W.T: computeSectionPatch only sends changed fields — unchanged hidden fields not included", () => {
+    // computeSectionPatch iterates def.subFields. Hidden sub-fields are initialized
+    // from savedAnswers and not changed by the UI, so they produce no change → not in patch.
+    const patchFnIdx = passport.indexOf("function computeSectionPatch(");
+    assert.ok(patchFnIdx !== -1, "computeSectionPatch must exist");
+    const patchBlock = passport.slice(patchFnIdx, patchFnIdx + 1600);
+    // It checks for changes before including a field in the patch
+    assert.ok(patchBlock.includes("hasChange"), "computeSectionPatch must track hasChange");
+    assert.ok(patchBlock.includes("patch[apiKey]"), "computeSectionPatch must write to patch by apiKey");
+    // Returns null if no changes — hidden fields won't change → null returned or field omitted
+    assert.ok(patchBlock.includes("return hasChange ? patch : null"), "computeSectionPatch must return null when no changes");
+  });
+
+  // W.U: Update Answers picker order matches approved Rev 6 structure
+  it("W.U: picker renders visibleSections, not the full SECTIONS array directly", () => {
+    const pickerIdx = passport.indexOf("// ── PICKER");
+    assert.ok(pickerIdx !== -1, "PICKER section must exist");
+    const pickerBlock = passport.slice(pickerIdx, pickerIdx + 1200);
+    // Picker must use visibleSections, not SECTIONS directly
+    assert.ok(pickerBlock.includes("visibleSections"), "picker must iterate visibleSections");
+    assert.ok(!pickerBlock.includes("SECTIONS.map"), "picker must not directly iterate SECTIONS (uses visibleSections)");
+    // Overview must also use visibleSections
+    const ovIdx = passport.indexOf("Full detail");
+    assert.ok(ovIdx !== -1, "Full detail comment must exist in overview");
+    const ovBlock = passport.slice(ovIdx, ovIdx + 600);
+    assert.ok(ovBlock.includes("visibleSections"), "overview must iterate visibleSections");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Group X: Fit Concerns behavioral verification
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("X: Fit Concerns behavioral verification", () => {
+  // X.A: Rev 6 Fit Concerns preloads from loader — fitConcerns saved from op.fitConcerns
+  it("X.A: loader maps op.fitConcerns → savedAnswers[fit-concerns] for canonical preload", () => {
+    // The loader assembles savedAnswers from the onboardingProfile (op).
+    // op.fitConcerns (Rev 6 canonical IDs) must be mapped to savedAnswers["fit-concerns"].
+    // The mapping is ~4300 chars into the loader function — use a 6000-char window.
+    const loaderFnIdx = passport.indexOf("export async function loader(");
+    assert.ok(loaderFnIdx !== -1, "loader function must exist");
+    const loaderBlock = passport.slice(loaderFnIdx, loaderFnIdx + 6000);
+    const mappingIdx = loaderBlock.indexOf('savedAnswers["fit-concerns"]');
+    assert.ok(mappingIdx !== -1, 'loader must assign savedAnswers["fit-concerns"] from op.fitConcerns');
+    const mappingBlock = loaderBlock.slice(mappingIdx, mappingIdx + 100);
+    assert.ok(mappingBlock.includes("fitConcerns"), "fit-concerns savedAnswer must come from op.fitConcerns");
+  });
+
+  // X.B: editSection uses getSectionDef (full def) for initEdits, not getEffectiveDef
+  // This ensures fitConcernsNote is also initialized when opening the fit-concerns section
+  it("X.B: initEdits reads def.subFields via getSectionDef (full def, not effective)", () => {
+    const initEditsIdx = passport.indexOf("function initEdits(");
+    assert.ok(initEditsIdx !== -1, "initEdits function must exist");
+    const initBlock = passport.slice(initEditsIdx, initEditsIdx + 600);
+    // initEdits must call getSectionDef (not getEffectiveDef) to read ALL sub-fields
+    assert.ok(initBlock.includes("getSectionDef("), "initEdits must use getSectionDef to read full def including hidden sub-fields");
+    assert.ok(!initBlock.includes("getEffectiveDef"), "initEdits must NOT use getEffectiveDef — hidden sub-fields must be initialized from savedAnswers");
+    // It iterates def.subFields
+    assert.ok(initBlock.includes("def.subFields"), "initEdits must iterate def.subFields to initialize all draft keys");
+  });
+
+  // X.C: Sizes & Measurements cannot write fitConcerns for Rev 6
+  // Generic renderer path is excluded for sizes (bespoke UI); bespoke UI Group 3 gated by isLegacyCustomer
+  it("X.C: sizes section uses bespoke UI (not generic renderer); Group 3 fitConcerns gated by isLegacyCustomer", () => {
+    // 1. The generic renderer is gated: {currentId !== "sizes" && ...}
+    const genericIdx = passport.indexOf('currentId !== "sizes"');
+    assert.ok(genericIdx !== -1, 'generic renderer must be gated with currentId !== "sizes"');
+    // 2. The bespoke sizes UI exists
+    const sizesUIIdx = passport.indexOf('currentId === "sizes"');
+    assert.ok(sizesUIIdx !== -1, "sizes bespoke UI conditional must exist");
+    // 3. FIT_CONCERN_OPTIONS inside that UI is gated by isLegacyCustomer
+    const sizesUIBlock = passport.slice(sizesUIIdx, sizesUIIdx + 15000);
+    const legacyGuardIdx = sizesUIBlock.indexOf("isLegacyCustomer");
+    const fitConIdx = sizesUIBlock.indexOf("FIT_CONCERN_OPTIONS");
+    assert.ok(legacyGuardIdx !== -1, "bespoke sizes UI must have isLegacyCustomer guard");
+    assert.ok(fitConIdx !== -1, "FIT_CONCERN_OPTIONS must exist in bespoke UI (for legacy customers)");
+    assert.ok(fitConIdx > legacyGuardIdx, "FIT_CONCERN_OPTIONS must appear after the isLegacyCustomer guard — never rendered for Rev 6");
+  });
+
+  // X.D: computeSectionPatch for sizes: fitConcerns initialized from savedAnswers, unchanged → not in patch
+  // This is the key invariant preventing Sizes from writing fitConcerns for Rev 6.
+  it("X.D: computeSectionPatch only patches changed fields — fitConcerns initialized from saved = no-op", () => {
+    // computeSectionPatch compares each draftKey against savedAnswers.
+    // For Rev 6 editing sizes: fitConcerns is in full def but UI never modifies it →
+    // its draft value stays equal to savedAnswers → computeSectionPatch returns null for it.
+    const patchIdx = passport.indexOf("function computeSectionPatch(");
+    assert.ok(patchIdx !== -1, "computeSectionPatch must exist");
+    const patchBlock = passport.slice(patchIdx, patchIdx + 1600);
+    // It compares each draftKey to saved
+    assert.ok(patchBlock.includes("editedRaw"), "patch must read editedRaw from flowEdits");
+    assert.ok(patchBlock.includes("savedRaw"), "patch must read savedRaw from savedAnswers");
+    // Only changes are patched
+    assert.ok(patchBlock.includes("hasChange"), "patch must track hasChange before including any field");
+    assert.ok(patchBlock.includes("hasChange = true"), "patch must only set hasChange when values differ");
+    // Returns null when nothing changed
+    assert.ok(patchBlock.includes("return hasChange ? patch : null"), "patch returns null when no fields changed — hidden unchanged fields produce no write");
+  });
+
+  // X.E: "other" + fitConcernsNote in fit-concerns section — persists and reloads
+  it("X.E: fit-concerns-note sub-field is in fit-concerns section (persists on save, reloads from savedAnswers)", () => {
+    // fit-concerns-note sub-field is in the fit-concerns section (NOT hiddenForRev6 there)
+    const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const fcSectIdx = sectionsBlock.indexOf('id: "fit-concerns"');
+    const fcSectBlock = sectionsBlock.slice(fcSectIdx, fcSectIdx + 500);
+    assert.ok(fcSectBlock.includes('"fit-concerns-note"'), "fit-concerns-note sub-field must be in fit-concerns section");
+    // Must NOT have hiddenForRev6 in this section's fit-concerns-note entry
+    const fcNoteInFcSect = fcSectBlock.indexOf('"fit-concerns-note"');
+    const fcNoteBlock = fcSectBlock.slice(fcNoteInFcSect, fcNoteInFcSect + 150);
+    assert.ok(!fcNoteBlock.includes("hiddenForRev6"), "fit-concerns-note in the fit-concerns section must NOT be hiddenForRev6 — it must be visible and saved for Rev 6");
+    // Loader must also map fitConcernsNote to savedAnswers (mapping is ~4400 chars into loader)
+    const loaderIdx = passport.indexOf("export async function loader(");
+    const loaderBlock = passport.slice(loaderIdx, loaderIdx + 6000);
+    assert.ok(loaderBlock.includes('"fit-concerns-note"'), 'loader must map fitConcernsNote to savedAnswers["fit-concerns-note"] for preloading');
+  });
+
+  // X.F: legacy customers retain old fitConcerns editor — FIT_CONCERN_OPTIONS present in legacy path
+  it("X.F: legacy customers see FIT_CONCERN_OPTIONS in sizes bespoke UI (old IDs retained)", () => {
+    // The old FIT_CONCERN_OPTIONS array must still exist (for legacy customers)
+    const fitConArrayIdx = passport.indexOf("const FIT_CONCERN_OPTIONS");
+    assert.ok(fitConArrayIdx !== -1, "FIT_CONCERN_OPTIONS constant must still exist for legacy customers");
+    // It must contain legacy IDs (e.g., petite, tall) — not Rev 6 IDs
+    const fitConBlock = passport.slice(fitConArrayIdx, fitConArrayIdx + 600);
+    assert.ok(fitConBlock.includes('"petite"') || fitConBlock.includes('"tall"') || fitConBlock.includes('"short-torso"'),
+      "FIT_CONCERN_OPTIONS must contain legacy IDs (petite/tall/short-torso) for legacy customer experience");
+    // Rev 6 IDs must NOT be in FIT_CONCERN_OPTIONS
+    assert.ok(!fitConBlock.includes('"tops-pull-bust"'), "FIT_CONCERN_OPTIONS must NOT contain Rev 6 IDs (those are in quiz-data)");
   });
 });
