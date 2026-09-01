@@ -123,7 +123,8 @@ describe("D: Normal passport section saves do not touch profileVersion", () => {
   it("profileVersion is only set inside the onboardingComplete=true guard", () => {
     const idx = saveApi.indexOf("profileVersion = 6");
     assert.ok(idx > 0, "profileVersion=6 must exist in api.save-style-profile");
-    const block = saveApi.slice(Math.max(0, idx - 300), idx + 50);
+    // Window enlarged to 1100 to accommodate the Rev 6 completion guard that now precedes the assignment.
+    const block = saveApi.slice(Math.max(0, idx - 1100), idx + 50);
     assert.ok(
       block.includes("onboardingComplete"),
       "profileVersion=6 must be inside a block guarded by onboardingComplete",
@@ -234,24 +235,28 @@ describe("F: dressingPreferences uses rev6OnlyFill (preserve explicit current da
   });
 });
 
-// ── G. Colors are preserved, not re-asked in refresh ─────────────────────────
-describe("G: favoriteColors and avoidColors are not in the refresh flow", () => {
-  it("REFRESH_SCREENS does not include favorite-colors", () => {
-    const rsIdx = passport.indexOf("REFRESH_SCREENS: RefreshScreen[]");
+// ── G. Base REFRESH_SCREENS does not include colours (handled by COLOURS_REFRESH_SCREEN) ─
+describe("G: favoriteColors/avoidColors not in base REFRESH_SCREENS (handled conditionally)", () => {
+  it("REFRESH_SCREENS static constant does not include favorite-colors", () => {
+    // Narrow to the array content only — COLOURS_REFRESH_SCREEN follows immediately after "];".
+    const rsIdx = passport.indexOf("const REFRESH_SCREENS: RefreshScreen[] = [");
     assert.ok(rsIdx > 0, "REFRESH_SCREENS must exist");
-    const rsBlock = passport.slice(rsIdx, rsIdx + 3000);
+    const rsEnd = passport.indexOf("];", rsIdx);
+    assert.ok(rsEnd > rsIdx, "REFRESH_SCREENS must have a closing ];");
+    const rsBlock = passport.slice(rsIdx, rsEnd);
     assert.ok(
       !rsBlock.includes('"favorite-colors"'),
-      "REFRESH_SCREENS must not include favorite-colors",
+      "REFRESH_SCREENS static constant must not include favorite-colors (colors handled by COLOURS_REFRESH_SCREEN)",
     );
   });
 
-  it("REFRESH_SCREENS does not include avoid-colors", () => {
-    const rsIdx = passport.indexOf("REFRESH_SCREENS: RefreshScreen[]");
-    const rsBlock = passport.slice(rsIdx, rsIdx + 3000);
+  it("REFRESH_SCREENS static constant does not include avoid-colors", () => {
+    const rsIdx = passport.indexOf("const REFRESH_SCREENS: RefreshScreen[] = [");
+    const rsEnd = passport.indexOf("];", rsIdx);
+    const rsBlock = passport.slice(rsIdx, rsEnd);
     assert.ok(
       !rsBlock.includes('"avoid-colors"'),
-      "REFRESH_SCREENS must not include avoid-colors",
+      "REFRESH_SCREENS static constant must not include avoid-colors",
     );
   });
 });
@@ -559,13 +564,16 @@ describe("N: Completion marker safety — profileVersion=6 on final completion o
     assert.equal(matches.length, 1, "profileData.profileVersion=6 must appear exactly once (not via comments)");
   });
 
-  it("N2: profileVersion = 6 is unconditionally inside the onboardingComplete guard", () => {
+  it("N2: profileVersion = 6 is inside the onboardingComplete guard, after Rev 6 completion validation", () => {
     const guardIdx = saveApi.indexOf('body["onboardingComplete"] === true');
     assert.ok(guardIdx > 0, "onboardingComplete guard must exist");
     const assignIdx = saveApi.indexOf("profileVersion = 6", guardIdx);
+    assert.ok(assignIdx > guardIdx, "profileVersion=6 must appear inside the onboardingComplete=true block");
+    // Rev 6 completion validation (incomplete_rev6_profile guard) must precede the assignment
+    const between = saveApi.slice(guardIdx, assignIdx);
     assert.ok(
-      assignIdx > 0 && assignIdx < guardIdx + 200,
-      "profileVersion=6 must appear immediately inside the onboardingComplete=true block",
+      between.includes("incomplete_rev6_profile"),
+      "Rev 6 completion validation must precede profileVersion=6 inside the onboardingComplete guard",
     );
   });
 
@@ -617,6 +625,168 @@ describe("N: Completion marker safety — profileVersion=6 on final completion o
     assert.ok(
       !initBlock.includes("fetch("),
       "initRefreshEdits must not make any API call (no DB write on screen navigation)",
+    );
+  });
+});
+
+// ── O. Refresh required/optional flag correctness ─────────────────────────────
+describe("O: Only dressingPreferences is optional in the refresh flow", () => {
+  it("O.A: exactly one screen in REFRESH_SCREENS has optional: true (r-dressing only)", () => {
+    const rsIdx = passport.indexOf("const REFRESH_SCREENS: RefreshScreen[] = [");
+    const rsEnd = passport.indexOf("];", rsIdx);
+    const rsBlock = passport.slice(rsIdx, rsEnd);
+    const optMatches = rsBlock.match(/optional:\s*true/g) ?? [];
+    assert.equal(optMatches.length, 1, "exactly one screen in REFRESH_SCREENS must be marked optional: true");
+    const dressingIdx = rsBlock.indexOf('"r-dressing"');
+    assert.ok(dressingIdx > 0, "r-dressing must exist in REFRESH_SCREENS");
+    const dressingBlock = rsBlock.slice(dressingIdx);
+    assert.ok(dressingBlock.includes("optional: true"), "the sole optional: true must be on the r-dressing screen");
+  });
+
+  it("O.A: r-goal does NOT have optional: true", () => {
+    const idx = passport.indexOf('"r-goal"');
+    const block = passport.slice(idx, idx + 500);
+    assert.ok(!block.includes("optional: true"), "r-goal must not be marked optional");
+  });
+
+  it("O.A: r-outfit-gives does NOT have optional: true", () => {
+    const idx = passport.indexOf('"r-outfit-gives"');
+    const block = passport.slice(idx, idx + 500);
+    assert.ok(!block.includes("optional: true"), "r-outfit-gives must not be marked optional");
+  });
+
+  it("O.A: r-fit-concerns does NOT have optional: true", () => {
+    const idx = passport.indexOf('"r-fit-concerns"');
+    const block = passport.slice(idx, idx + 500);
+    assert.ok(!block.includes("optional: true"), "r-fit-concerns must not be marked optional");
+  });
+
+  it("O.B-G: refresh JSX computes isBlocked to enforce required selections", () => {
+    // Anchor on the section comment to avoid the earlier "refresh && done" check at ~line 1582.
+    const refreshStepIdx = passport.indexOf("// ── REFRESH STEP");
+    assert.ok(refreshStepIdx > 0, "REFRESH STEP section comment must exist");
+    const refreshBlock = passport.slice(refreshStepIdx, refreshStepIdx + 1000);
+    assert.ok(refreshBlock.includes("isBlocked"), "refresh JSX must compute isBlocked");
+    assert.ok(
+      refreshBlock.includes("screen.optional") && refreshBlock.includes("primaryArr.length === 0"),
+      "isBlocked must check screen.optional and primaryArr.length === 0",
+    );
+  });
+
+  it("O.B-G: Next button disabled prop includes isBlocked", () => {
+    const refreshStepIdx = passport.indexOf("// ── REFRESH STEP");
+    assert.ok(refreshStepIdx > 0, "REFRESH STEP section comment must exist");
+    // sp-btn-primary is ~50 lines past the comment; search forward from isBlocked to stay in range.
+    const isBlockedIdx = passport.indexOf("isBlocked", refreshStepIdx);
+    assert.ok(isBlockedIdx > 0, "isBlocked must be defined in the refresh JSX");
+    const fromBlocked = passport.slice(isBlockedIdx, isBlockedIdx + 1500);
+    const nextBtnIdx = fromBlocked.indexOf("sp-btn-primary");
+    assert.ok(nextBtnIdx > 0, "sp-btn-primary button must exist after isBlocked in refresh JSX");
+    const btnBlock = fromBlocked.slice(nextBtnIdx, nextBtnIdx + 200);
+    assert.ok(btnBlock.includes("isBlocked"), "Next button disabled prop must include isBlocked");
+  });
+
+  it("O.H: r-dressing optional: true — Next never blocked on empty dressingPreferences", () => {
+    const dressingIdx = passport.indexOf('"r-dressing"');
+    const dressingBlock = passport.slice(dressingIdx, dressingIdx + 600);
+    assert.ok(
+      dressingBlock.includes("optional: true"),
+      "r-dressing must remain optional: true so dressingPreferences can be empty on Next",
+    );
+  });
+});
+
+// ── P. Server-side Rev 6 completion guard ─────────────────────────────────────
+describe("P: Server rejects onboardingComplete when required Rev 6 fields are missing", () => {
+  it("P.I: api returns incomplete_rev6_profile when required fields missing", () => {
+    assert.ok(
+      saveApi.includes("incomplete_rev6_profile"),
+      "api.save-style-profile must return incomplete_rev6_profile when required Rev 6 fields are empty",
+    );
+  });
+
+  it("P.I: all 7 required Rev 6 fields are checked before setting profileVersion=6", () => {
+    const guardIdx = saveApi.indexOf('body["onboardingComplete"] === true');
+    const assignIdx = saveApi.indexOf("profileVersion = 6", guardIdx);
+    const between = saveApi.slice(guardIdx, assignIdx);
+    for (const field of ["currentGoal", "stylePersonalities", "successfulOutfitGives", "lifestyle", "favoriteColors", "silhouette", "fitConcerns"]) {
+      assert.ok(between.includes(`"${field}"`), `completion guard must check required field "${field}"`);
+    }
+  });
+
+  it("P.I: dressingPreferences is NOT in the required completion check", () => {
+    const guardIdx = saveApi.indexOf('body["onboardingComplete"] === true');
+    const assignIdx = saveApi.indexOf("profileVersion = 6", guardIdx);
+    const between = saveApi.slice(guardIdx, assignIdx);
+    assert.ok(!between.includes('"dressingPreferences"'), "dressingPreferences must not be required for Rev 6 completion");
+  });
+
+  it("P.J: incomplete_rev6_profile early return precedes profileVersion=6 assignment", () => {
+    const guardIdx = saveApi.indexOf('body["onboardingComplete"] === true');
+    const incompleteIdx = saveApi.indexOf("incomplete_rev6_profile", guardIdx);
+    const assignIdx = saveApi.indexOf("profileVersion = 6", guardIdx);
+    assert.ok(incompleteIdx > guardIdx && incompleteIdx < assignIdx,
+      "incomplete_rev6_profile must appear before profileVersion=6 inside the guard",
+    );
+    // The slice between guard and assignment must contain both the return statement and the error.
+    // (returnIdx via forward search would skip past the line since "return" precedes "incomplete_rev6_profile"
+    //  on the same line; check the slice instead.)
+    const guardToAssign = saveApi.slice(guardIdx, assignIdx);
+    assert.ok(
+      guardToAssign.includes("return Response.json") && guardToAssign.includes("incomplete_rev6_profile"),
+      "a return Response.json containing incomplete_rev6_profile must appear before profileVersion=6",
+    );
+  });
+
+  it("P.K: missingRev6.length > 0 guard precedes profileVersion=6 assignment", () => {
+    const guardIdx = saveApi.indexOf('body["onboardingComplete"] === true');
+    const assignIdx = saveApi.indexOf("profileVersion = 6", guardIdx);
+    const between = saveApi.slice(guardIdx, assignIdx);
+    assert.ok(between.includes("missingRev6.length > 0"), "guard must check missingRev6.length > 0 before early return");
+  });
+});
+
+// ── Q. Legacy colours edge case ───────────────────────────────────────────────
+describe("Q: Legacy customer colours handling", () => {
+  it("Q.L: COLOURS_REFRESH_SCREEN constant exists with screenId r-colors", () => {
+    assert.ok(passport.includes("COLOURS_REFRESH_SCREEN"), "COLOURS_REFRESH_SCREEN must be defined");
+    assert.ok(passport.includes('"r-colors"'), "COLOURS_REFRESH_SCREEN must have screenId r-colors");
+  });
+
+  it("Q.L: COLOURS_REFRESH_SCREEN maps to favoriteColors, not avoidColors", () => {
+    const colIdx = passport.indexOf("COLOURS_REFRESH_SCREEN");
+    const colBlock = passport.slice(colIdx, colIdx + 500);
+    assert.ok(colBlock.includes('"favoriteColors"'), "COLOURS_REFRESH_SCREEN must include favoriteColors");
+    assert.ok(!colBlock.includes('"avoidColors"'), "COLOURS_REFRESH_SCREEN must not include avoidColors");
+  });
+
+  it("Q.L: activeRefreshScreens returns REFRESH_SCREENS unchanged when favoriteColors non-empty", () => {
+    const memoIdx = passport.indexOf("activeRefreshScreens");
+    const memoBlock = passport.slice(memoIdx, memoIdx + 500);
+    assert.ok(memoBlock.includes("return REFRESH_SCREENS"), "when favoriteColors non-empty, REFRESH_SCREENS returned unchanged");
+  });
+
+  it("Q.L: activeRefreshScreens is driven by savedAnswers[\"favorite-colors\"]", () => {
+    const memoIdx = passport.indexOf("activeRefreshScreens");
+    const memoBlock = passport.slice(memoIdx, memoIdx + 500);
+    assert.ok(
+      memoBlock.includes("favColors") && (memoBlock.includes("favColors.length > 0") || memoBlock.includes("favColors.length === 0")),
+      "activeRefreshScreens must check favColors.length to decide whether to insert the colours screen",
+    );
+  });
+
+  it("Q.M: COLOURS_REFRESH_SCREEN is inserted when favoriteColors is empty", () => {
+    const memoIdx = passport.indexOf("activeRefreshScreens");
+    const memoBlock = passport.slice(memoIdx, memoIdx + 500);
+    assert.ok(memoBlock.includes("COLOURS_REFRESH_SCREEN"), "COLOURS_REFRESH_SCREEN must be in the insertion branch");
+  });
+
+  it("Q.M: colours screen is inserted before r-dressing (at REFRESH_SCREENS.length - 1)", () => {
+    const memoIdx = passport.indexOf("activeRefreshScreens");
+    const memoBlock = passport.slice(memoIdx, memoIdx + 500);
+    assert.ok(
+      memoBlock.includes("REFRESH_SCREENS.length - 1"),
+      "COLOURS_REFRESH_SCREEN must be inserted at REFRESH_SCREENS.length-1 (before r-dressing)",
     );
   });
 });

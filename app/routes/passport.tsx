@@ -448,7 +448,6 @@ const REFRESH_SCREENS: RefreshScreen[] = [
     label: "Your Current Focus",
     question: "What would you most like nAia to help you with right now?",
     helper: "Choose up to 2. This is mutable context — update it any time.",
-    optional: true,
     fields: [
       { draftKey: "current-goal" as DraftKey, apiKey: "currentGoal", subLabel: "What I want nAia to help with", kind: "array" as FieldKind, questionId: "current-goal" },
     ],
@@ -467,7 +466,6 @@ const REFRESH_SCREENS: RefreshScreen[] = [
     label: "What Great Outfits Give You",
     question: "When an outfit really works for you, what does it usually give you?",
     helper: "Choose up to 3.",
-    optional: true,
     fields: [
       { draftKey: "successful-outfit-gives" as DraftKey, apiKey: "successfulOutfitGives", subLabel: "What great outfits give me", kind: "array" as FieldKind, questionId: "successful-outfit-gives" },
     ],
@@ -493,8 +491,7 @@ const REFRESH_SCREENS: RefreshScreen[] = [
     screenId: "r-fit-concerns",
     label: "Fit Considerations",
     question: "Does clothing ever fit you in a particular way you'd like nAia to know about?",
-    helper: "Optional — select any that apply.",
-    optional: true,
+    helper: "Select any that apply, or choose \"No specific fit issues\" if none apply.",
     fields: [
       { draftKey: "fit-concerns" as DraftKey, apiKey: "fitConcerns", subLabel: "Fit considerations", kind: "array" as FieldKind, questionId: "fit-concerns" },
       { draftKey: "fit-concerns-note" as DraftKey, apiKey: "fitConcernsNote", subLabel: "Additional fit notes", kind: "text" as FieldKind, questionId: "fit-concerns-note" },
@@ -511,6 +508,17 @@ const REFRESH_SCREENS: RefreshScreen[] = [
     ],
   },
 ];
+
+// Inserted into the active refresh sequence only when the legacy customer has no
+// favoriteColors saved. avoidColors is not re-asked in the refresh flow.
+const COLOURS_REFRESH_SCREEN: RefreshScreen = {
+  screenId: "r-colors",
+  label: "Your Colour Palette",
+  question: "Which colours do you love to wear?",
+  fields: [
+    { draftKey: "favorite-colors" as DraftKey, apiKey: "favoriteColors", subLabel: "My colour palette", kind: "color" as FieldKind, questionId: "favorite-colors" },
+  ],
+};
 
 // Short display labels for the overview (form subLabels are question-phrased)
 const OVERVIEW_FIELD_LABELS: Record<string, string> = {
@@ -991,6 +999,18 @@ export default function PassportPage() {
 
   const isComplete = missingSections.length === 0;
 
+  // Colours screen inserted before r-dressing only when the legacy customer has no
+  // favoriteColors saved (empty array ⇒ key absent from savedAnswers).
+  const activeRefreshScreens = useMemo(() => {
+    const favColors = (savedAnswers["favorite-colors"] ?? []) as string[];
+    if (favColors.length > 0) return REFRESH_SCREENS;
+    return [
+      ...REFRESH_SCREENS.slice(0, REFRESH_SCREENS.length - 1),
+      COLOURS_REFRESH_SCREEN,
+      REFRESH_SCREENS[REFRESH_SCREENS.length - 1],
+    ];
+  }, [savedAnswers]);
+
   useEffect(() => {
     function onPopState(e: PopStateEvent) {
       const state = e.state as { passport?: string } | null;
@@ -1093,13 +1113,13 @@ export default function PassportPage() {
 
   function startRefresh() {
     window.history.pushState({ passport: "refresh" }, "");
-    setFlowEdits(initRefreshEdits(REFRESH_SCREENS[0]));
+    setFlowEdits(initRefreshEdits(activeRefreshScreens[0]));
     setMode({ kind: "refresh", stepIndex: 0 });
   }
 
   async function saveRefreshStep(stepIndex: number, direction: "next" | "exit") {
-    const screen = REFRESH_SCREENS[stepIndex];
-    const isLast = stepIndex + 1 >= REFRESH_SCREENS.length;
+    const screen = activeRefreshScreens[stepIndex];
+    const isLast = stepIndex + 1 >= activeRefreshScreens.length;
 
     // Build patch for this screen's fields only
     const patch: Record<string, unknown> = { baseProfileUpdatedAt: profileUpdatedAt };
@@ -1129,7 +1149,7 @@ export default function PassportPage() {
       } else if (isLast) {
         setMode({ kind: "refresh", stepIndex, done: true });
       } else {
-        const nextScreen = REFRESH_SCREENS[stepIndex + 1];
+        const nextScreen = activeRefreshScreens[stepIndex + 1];
         setFlowEdits(initRefreshEdits(nextScreen));
         setMode({ kind: "refresh", stepIndex: stepIndex + 1 });
       }
@@ -1587,10 +1607,17 @@ export default function PassportPage() {
   // ── REFRESH STEP ─────────────────────────────────────────────────────────────
 
   if (mode.kind === "refresh") {
-    const screen    = REFRESH_SCREENS[mode.stepIndex];
+    const screen    = activeRefreshScreens[mode.stepIndex];
     const stepNum   = mode.stepIndex + 1;
-    const stepTotal = REFRESH_SCREENS.length;
-    const isLast    = mode.stepIndex + 1 >= REFRESH_SCREENS.length;
+    const stepTotal = activeRefreshScreens.length;
+    const isLast    = mode.stepIndex + 1 >= activeRefreshScreens.length;
+
+    // Required-field guard: Next is disabled until the primary field has at least one
+    // selection. Only non-optional screens are blocked (dressingPreferences stays skippable).
+    const primaryField = screen.fields[0];
+    const primaryVal   = (flowEdits as Record<string, unknown>)[primaryField.draftKey];
+    const primaryArr   = Array.isArray(primaryVal) ? (primaryVal as string[]) : [];
+    const isBlocked    = !screen.optional && primaryArr.length === 0;
 
     return (
       <MyNaiaLayout>
@@ -1631,7 +1658,7 @@ export default function PassportPage() {
           <button
             type="button"
             className="sp-btn-primary"
-            disabled={isBusy}
+            disabled={isBusy || isBlocked}
             onClick={() => saveRefreshStep(mode.stepIndex, "next")}
           >
             {isBusy ? "Saving…" : isLast ? "Complete Refresh" : "Next"}
@@ -1642,7 +1669,7 @@ export default function PassportPage() {
               className="sp-btn-outline"
               disabled={isBusy}
               onClick={() => {
-                const nextScreen = REFRESH_SCREENS[mode.stepIndex + 1];
+                const nextScreen = activeRefreshScreens[mode.stepIndex + 1];
                 setFlowEdits(initRefreshEdits(nextScreen));
                 setMode({ kind: "refresh", stepIndex: mode.stepIndex + 1 });
               }}

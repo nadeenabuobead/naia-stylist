@@ -637,6 +637,23 @@ export async function action({ request }) {
   // profileVersion=6 only on final Rev 6 onboarding or legacy refresh completion.
   // Normal passport section saves must NOT set this — they preserve the existing value.
   if (body["onboardingComplete"] === true) {
+    // Guard: all required Rev 6 fields must be non-empty in the resulting profile state.
+    // dressingPreferences is intentionally optional and excluded from this check.
+    const requiredRev6 = [
+      ["currentGoal",           profileData.currentGoal],
+      ["stylePersonalities",    profileData.stylePersonalities],
+      ["successfulOutfitGives", profileData.successfulOutfitGives],
+      ["lifestyle",             profileData.lifestyle],
+      ["favoriteColors",        profileData.favoriteColors],
+      ["silhouette",            profileData.silhouette],
+      ["fitConcerns",           profileData.fitConcerns],
+    ];
+    const missingRev6 = requiredRev6
+      .filter(([, v]) => !Array.isArray(v) || v.length === 0)
+      .map(([k]) => k);
+    if (missingRev6.length > 0) {
+      return Response.json({ error: "incomplete_rev6_profile", missingFields: missingRev6 }, { status: 400 });
+    }
     profileData.profileVersion = 6;
   }
 
