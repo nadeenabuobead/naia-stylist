@@ -1391,9 +1391,11 @@ describe("V: Notes to nAia — overview editability", () => {
     // The overview Notes CTA calls editSection, not startUpdate
     const ovIdx = passport.indexOf("// ── OVERVIEW");
     const ovBlock = passport.slice(ovIdx, ovIdx + 3500);
-    const notesCTAIdx = ovBlock.indexOf("sp-ov-notes-cta");
-    assert.ok(notesCTAIdx !== -1, "sp-ov-notes-cta button must exist in overview");
-    const notesCTABlock = ovBlock.slice(notesCTAIdx, notesCTAIdx + 200);
+    // Notes CTA now uses sp-btn-outline (was sp-ov-notes-cta — changed in Phase 5 polish)
+    const addNoteIdx = ovBlock.indexOf('"ADD A NOTE"');
+    assert.ok(addNoteIdx !== -1, "ADD A NOTE string must exist in overview");
+    const notesCTABlock = ovBlock.slice(Math.max(0, addNoteIdx - 250), addNoteIdx + 50);
+    assert.ok(notesCTABlock.includes("sp-btn-outline"), "Notes CTA must use sp-btn-outline class");
     assert.ok(
       notesCTABlock.includes("editSection") && !notesCTABlock.includes("startUpdate"),
       "Notes CTA must use editSection(\"notes\"), not startUpdate — Update Answers is not repurposed for Notes",
@@ -1664,10 +1666,11 @@ describe("W: Rev 6 Update Answers cleanup", () => {
     const ovBlock = passport.slice(ovIdx, ovIdx + 4000);
     assert.ok(ovBlock.includes('"ADD A NOTE"'), "Overview Notes block must include ADD A NOTE CTA");
     assert.ok(ovBlock.includes('"EDIT NOTE"'), "Overview Notes block must include EDIT NOTE CTA");
-    // Both must be inside the sp-ov-notes-cta button
-    const ctaIdx = ovBlock.indexOf("sp-ov-notes-cta");
-    assert.ok(ctaIdx !== -1, "sp-ov-notes-cta button must exist");
-    const ctaBlock = ovBlock.slice(ctaIdx, ctaIdx + 200);
+    // Both must be inside a sp-btn-outline button (was sp-ov-notes-cta — changed in Phase 5 polish)
+    const addNoteIdx2 = ovBlock.indexOf('"ADD A NOTE"');
+    assert.ok(addNoteIdx2 !== -1, "ADD A NOTE string must exist");
+    const ctaBlock = ovBlock.slice(Math.max(0, addNoteIdx2 - 200), addNoteIdx2 + 50);
+    assert.ok(ctaBlock.includes("sp-btn-outline"), "Notes CTA must use sp-btn-outline class");
     assert.ok(ctaBlock.includes("hasNote"), "Notes CTA must be conditional on hasNote");
   });
 
@@ -1799,5 +1802,122 @@ describe("X: Fit Concerns behavioral verification", () => {
       "FIT_CONCERN_OPTIONS must contain legacy IDs (petite/tall/short-torso) for legacy customer experience");
     // Rev 6 IDs must NOT be in FIT_CONCERN_OPTIONS
     assert.ok(!fitConBlock.includes('"tops-pull-bust"'), "FIT_CONCERN_OPTIONS must NOT contain Rev 6 IDs (those are in quiz-data)");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Group Y: Polish fixes — Sizes optional summary + Notes CTA styling
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Y: Polish fixes — Sizes optional summary + Notes CTA", () => {
+  // Y.A: empty Sizes & Measurements summary renders "Optional", not "Not yet completed"
+  it("Y.A: empty Sizes summary returns sp-detail-optional with 'Optional'", () => {
+    const summaryFnIdx = passport.indexOf("function getSectionSummary(");
+    assert.ok(summaryFnIdx !== -1, "getSectionSummary must exist");
+    // Find the sizes branch within getSectionSummary
+    const sizesBranchIdx = passport.indexOf('def.id === "sizes"', summaryFnIdx);
+    assert.ok(sizesBranchIdx !== -1, "sizes branch must exist in getSectionSummary");
+    const sizesBranchBlock = passport.slice(sizesBranchIdx, sizesBranchIdx + 1600);
+    // Must use sp-detail-optional with "Optional" for empty state (JSX: >Optional<)
+    assert.ok(sizesBranchBlock.includes("sp-detail-optional"), "empty sizes must render sp-detail-optional span");
+    assert.ok(sizesBranchBlock.includes(">Optional<"), 'empty sizes must render "Optional" JSX text node');
+  });
+
+  // Y.B: empty Sizes must NOT render "Not yet completed"
+  it("Y.B: empty Sizes summary does NOT render 'Not yet completed'", () => {
+    const summaryFnIdx = passport.indexOf("function getSectionSummary(");
+    const sizesBranchIdx = passport.indexOf('def.id === "sizes"', summaryFnIdx);
+    const sizesBranchBlock = passport.slice(sizesBranchIdx, sizesBranchIdx + 1600);
+    // "Not yet completed" must not appear in the sizes branch
+    assert.ok(
+      !sizesBranchBlock.includes('"Not yet completed"'),
+      "empty Sizes summary must not return 'Not yet completed' — it is optional, not incomplete",
+    );
+  });
+
+  // Y.C: Sizes remains excluded from required completion (optional: true, not in missingSections)
+  it("Y.C: sizes section has optional: true — excluded from missingSections", () => {
+    // missingSections filters out sections where s.optional === true
+    const missingIdx = passport.indexOf("const missingSections = useMemo");
+    assert.ok(missingIdx !== -1, "missingSections useMemo must exist");
+    const missingBlock = passport.slice(missingIdx, missingIdx + 400);
+    assert.ok(missingBlock.includes("s.optional"), "missingSections must filter out optional sections");
+    // The sizes section def must declare optional: true
+    const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
+    const sizesDefIdx = passport.indexOf('id: "sizes"', sectionsIdx);
+    const sizesDefBlock = passport.slice(sizesDefIdx, sizesDefIdx + 200);
+    assert.ok(sizesDefBlock.includes("optional: true"), "sizes section must have optional: true");
+  });
+
+  // Y.D: populated Sizes still shows useful summary (not "Optional")
+  it("Y.D: populated Sizes summary returns clothing/shoe data, not 'Optional'", () => {
+    const summaryFnIdx = passport.indexOf("function getSectionSummary(");
+    const sizesBranchIdx = passport.indexOf('def.id === "sizes"', summaryFnIdx);
+    const sizesBranchBlock = passport.slice(sizesBranchIdx, sizesBranchIdx + 1600);
+    // Must still compute clothingParts and shoeParts for populated state
+    assert.ok(sizesBranchBlock.includes("clothingParts"), "populated path must build clothingParts");
+    assert.ok(sizesBranchBlock.includes("shoeParts"), "populated path must build shoeParts");
+    assert.ok(sizesBranchBlock.includes("allParts.join"), "populated path must join and return all parts");
+  });
+
+  // Y.E: ADD A NOTE uses sp-btn-outline
+  it("Y.E: ADD A NOTE button uses sp-btn-outline class", () => {
+    const ovIdx = passport.indexOf("// ── OVERVIEW");
+    assert.ok(ovIdx !== -1, "OVERVIEW block must exist");
+    const ovBlock = passport.slice(ovIdx, ovIdx + 5000);
+    // Find the Notes CTA button
+    const notesCTAIdx = ovBlock.indexOf('"ADD A NOTE"');
+    assert.ok(notesCTAIdx !== -1, "ADD A NOTE string must exist in overview");
+    // The button element containing ADD A NOTE must have sp-btn-outline
+    // Search backwards from the ADD A NOTE label to find the enclosing button className
+    const buttonContext = ovBlock.slice(Math.max(0, notesCTAIdx - 200), notesCTAIdx + 50);
+    assert.ok(buttonContext.includes("sp-btn-outline"), "ADD A NOTE button must use sp-btn-outline class");
+  });
+
+  // Y.F: EDIT NOTE uses the same sp-btn-outline class (same button element, conditional label)
+  it("Y.F: EDIT NOTE is in the same button as ADD A NOTE — sp-btn-outline", () => {
+    const ovIdx = passport.indexOf("// ── OVERVIEW");
+    const ovBlock = passport.slice(ovIdx, ovIdx + 5000);
+    const editNoteIdx = ovBlock.indexOf('"EDIT NOTE"');
+    assert.ok(editNoteIdx !== -1, "EDIT NOTE string must exist in overview");
+    // Same button: search backwards for sp-btn-outline
+    const buttonContext = ovBlock.slice(Math.max(0, editNoteIdx - 200), editNoteIdx + 50);
+    assert.ok(buttonContext.includes("sp-btn-outline"), "EDIT NOTE button must use sp-btn-outline class");
+  });
+
+  // Y.G: both CTAs call editSection("notes")
+  it("Y.G: Notes CTA button calls editSection(\"notes\")", () => {
+    const ovIdx = passport.indexOf("// ── OVERVIEW");
+    const ovBlock = passport.slice(ovIdx, ovIdx + 5000);
+    // The button that contains ADD A NOTE / EDIT NOTE must have editSection("notes")
+    const notesCTAIdx = ovBlock.indexOf('"ADD A NOTE"');
+    const buttonContext = ovBlock.slice(Math.max(0, notesCTAIdx - 300), notesCTAIdx + 50);
+    assert.ok(buttonContext.includes('editSection("notes")'), 'Notes CTA must call editSection("notes")');
+  });
+
+  // Y.H: Notes remains optional (NOTES_SECTION.optional === true)
+  it("Y.H: NOTES_SECTION retains optional: true after styling change", () => {
+    const notesSectIdx = passport.indexOf("const NOTES_SECTION: SectionDef");
+    assert.ok(notesSectIdx !== -1, "NOTES_SECTION must exist");
+    const notesSectBlock = passport.slice(notesSectIdx, notesSectIdx + 300);
+    assert.ok(notesSectBlock.includes("optional: true"), "NOTES_SECTION must retain optional: true");
+  });
+
+  // Y.I: Notes save/edit/reload — getSectionDetail renders saved note text, getSectionSummary returns "Notes added"
+  it("Y.I: getSectionSummary returns 'Notes added' for populated notes (unchanged)", () => {
+    const summaryFnIdx = passport.indexOf("function getSectionSummary(");
+    const summaryBlock = passport.slice(summaryFnIdx, summaryFnIdx + 400);
+    // Notes branch: populated → "Notes added"
+    const notesIdx = summaryBlock.indexOf('def.id === "notes"');
+    assert.ok(notesIdx !== -1, "getSectionSummary must have notes branch");
+    const notesBlock = summaryBlock.slice(notesIdx, notesIdx + 200);
+    assert.ok(notesBlock.includes('"Notes added"'), "populated notes must still return 'Notes added'");
+    // getSectionDetail renders the saved text
+    const detailFnIdx = passport.indexOf("function getSectionDetail(");
+    const detailBlock = passport.slice(detailFnIdx, detailFnIdx + 800);
+    const detailNotesIdx = detailBlock.indexOf('def.id === "notes"');
+    assert.ok(detailNotesIdx !== -1, "getSectionDetail must have notes branch");
+    const detailNotesBlock = detailBlock.slice(detailNotesIdx, detailNotesIdx + 200);
+    assert.ok(detailNotesBlock.includes("sp-ov-notes-body"), "getSectionDetail must render saved note via sp-ov-notes-body");
   });
 });

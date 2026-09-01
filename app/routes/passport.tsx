@@ -788,7 +788,7 @@ function getSectionSummary(def: SectionDef, answers: OnboardingAnswers): ReactNo
     const shoeSz     = a["shoe-size"]          as string | undefined;
 
     const isEmpty = !sysId && !topSz && !bottomSz && !dressSz && !shoeSysId && !shoeSz;
-    if (isEmpty) return <span className="sp-detail-missing">Not yet completed</span>;
+    if (isEmpty) return <span className="sp-detail-optional">Optional</span>;
 
     const clothingParts: string[] = [];
     if (sysId)                           clothingParts.push(SIZING_SYSTEM_LABELS[sysId] ?? sysId.toUpperCase());
@@ -801,7 +801,7 @@ function getSectionSummary(def: SectionDef, answers: OnboardingAnswers): ReactNo
     else if (shoeSz)         shoeParts.push(`Shoes ${shoeSz}`);
 
     const allParts = [...clothingParts, ...shoeParts];
-    if (allParts.length === 0) return <span className="sp-detail-missing">Not yet completed</span>;
+    if (allParts.length === 0) return <span className="sp-detail-optional">Optional</span>;
     return <>{allParts.join(" · ")}</>;
   }
   if (def.placeholder) {
@@ -1587,7 +1587,7 @@ export default function PassportPage() {
             {getSectionDetail(NOTES_SECTION, savedAnswers)}
             <button
               type="button"
-              className="sp-ov-notes-cta"
+              className="sp-btn-outline"
               onClick={() => editSection("notes")}
             >
               {hasNote ? "EDIT NOTE" : "ADD A NOTE"}
