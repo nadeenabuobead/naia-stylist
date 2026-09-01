@@ -92,7 +92,7 @@ export const quizQuestions: QuizQuestion[] = [
   {
     id: "successful-outfit-gives",
     type: "multi",
-    title: "When an outfit really works for you, what does it usually give you?",
+    title: "What makes an outfit feel right for you?",
     subtitle: "Choose up to 3",
     maxSelections: 3,
     exclusiveIds: ["not-sure"],
@@ -113,7 +113,7 @@ export const quizQuestions: QuizQuestion[] = [
   {
     id: "lifestyle",
     type: "multi",
-    title: "Where does your wardrobe need to work hardest?",
+    title: "What do you dress for most often?",
     subtitle: "Choose up to 3",
     maxSelections: 3,
     options: [
@@ -168,7 +168,7 @@ export const quizQuestions: QuizQuestion[] = [
   {
     id: "fit-concerns",
     type: "multi",
-    title: "Is there anything about fit you'd like nAia to keep in mind?",
+    title: "Are there any fit issues nAia should keep in mind?",
     subtitle: "Choose up to 5",
     maxSelections: 5,
     exclusiveIds: ["no-fit-problems"],
@@ -199,7 +199,7 @@ export const quizQuestions: QuizQuestion[] = [
     id: "dressing-preferences",
     type: "multi",
     title: "Are there any dressing requirements nAia should always respect?",
-    subtitle: "Optional — select any that apply",
+    subtitle: "Optional. Select anything nAia should always keep in mind when styling you.",
     options: [
       { id: "dresses-modestly",           label: "I dress modestly"                     },
       { id: "usually-wears-abayas",       label: "I usually wear abayas"               },

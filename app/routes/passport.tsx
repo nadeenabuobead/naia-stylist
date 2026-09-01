@@ -279,12 +279,13 @@ const SECTIONS: SectionDef[] = [
   },
 ];
 
-// Notes to nAia — outside the 7 named sections
+// Notes to nAia — outside the 7 named sections; always optional enrichment, never blocks completion
 const NOTES_SECTION: SectionDef = {
   id: "notes",
   label: "Notes to nAia",
   question: "Anything else nAia should know about your style right now?",
   helper: "Share context that wouldn't come through in selections — life changes, occasions, or specific things to avoid.",
+  optional: true,
   subFields: [
     { draftKey: "final-notes", apiKey: "finalNotes", subLabel: "Your notes to nAia", kind: "text", questionId: "final-notes" },
   ],
@@ -464,7 +465,7 @@ const REFRESH_SCREENS: RefreshScreen[] = [
   {
     screenId: "r-outfit-gives",
     label: "What Great Outfits Give You",
-    question: "When an outfit really works for you, what does it usually give you?",
+    question: "What makes an outfit feel right for you?",
     helper: "Choose up to 3.",
     fields: [
       { draftKey: "successful-outfit-gives" as DraftKey, apiKey: "successfulOutfitGives", subLabel: "What great outfits give me", kind: "array" as FieldKind, questionId: "successful-outfit-gives" },
@@ -473,7 +474,7 @@ const REFRESH_SCREENS: RefreshScreen[] = [
   {
     screenId: "r-lifestyle",
     label: "Your Life & Dress Codes",
-    question: "Where does your wardrobe need to show up most often?",
+    question: "What do you dress for most often?",
     fields: [
       { draftKey: "lifestyle" as DraftKey, apiKey: "lifestyle", subLabel: "My lifestyle", kind: "array" as FieldKind, questionId: "lifestyle", rev6OnlyFill: true },
     ],
@@ -490,8 +491,8 @@ const REFRESH_SCREENS: RefreshScreen[] = [
   {
     screenId: "r-fit-concerns",
     label: "Fit Considerations",
-    question: "Does clothing ever fit you in a particular way you'd like nAia to know about?",
-    helper: "Select any that apply, or choose \"No specific fit issues\" if none apply.",
+    question: "Are there any fit issues nAia should keep in mind?",
+    helper: "Select any that apply.",
     fields: [
       { draftKey: "fit-concerns" as DraftKey, apiKey: "fitConcerns", subLabel: "Fit considerations", kind: "array" as FieldKind, questionId: "fit-concerns" },
       { draftKey: "fit-concerns-note" as DraftKey, apiKey: "fitConcernsNote", subLabel: "Additional fit notes", kind: "text" as FieldKind, questionId: "fit-concerns-note" },
@@ -501,7 +502,7 @@ const REFRESH_SCREENS: RefreshScreen[] = [
     screenId: "r-dressing",
     label: "Your Dressing Requirements",
     question: "Are there any dressing requirements nAia should always respect?",
-    helper: "Optional — these are hard requirements. nAia will filter out products that do not meet them. An empty selection is valid.",
+    helper: "Optional. Select anything nAia should always keep in mind when styling you.",
     optional: true,
     fields: [
       { draftKey: "dressing-preferences" as DraftKey, apiKey: "dressingPreferences", subLabel: "My dressing requirements", kind: "array" as FieldKind, questionId: "dressing-preferences", rev6OnlyFill: true },
@@ -814,7 +815,6 @@ function getSectionDetail(def: SectionDef, answers: OnboardingAnswers): ReactNod
       let labelled: string[];
       if (dKey === "body-focus-areas")       labelled = ids.map(id => FOCUS_LABELS[id] ?? id);
       else if (dKey === "body-avoid-areas")  labelled = ids.map(id => AVOID_LABELS[id] ?? id);
-      else if (dKey === "fit-concerns")      labelled = ids.map(id => FIT_CONCERN_LABELS[id] ?? id);
       else labelled = ids.map(id => lbl(sf.questionId, id));
       fields.push({ key: dKey, label: displayLabel, value: labelled.join(" · ") });
     }
@@ -975,6 +975,9 @@ export default function PassportPage() {
   const [shoeSystemConfirmed,   setShoeSystemConfirmed]   = useState(false);
   const [heightDisplayUnit,     setHeightDisplayUnit]     = useState<"cm" | "ft-in">("cm");
   const lastIntentRef = useRef<PendingNext>(null);
+  // Stores the exact flowEdits snapshot that was successfully persisted for each refresh
+  // stepIndex. Used by Back navigation so it never depends on revalidation timing.
+  const committedEditsRef = useRef<Record<number, OnboardingAnswers>>({});
 
   // Missing sections excludes "sizes" (always placeholder) and "notes" (optional)
   // Notes is handled separately — it appears in the Continue queue if missing
@@ -1142,6 +1145,7 @@ export default function PassportPage() {
       if (!res.ok)            { setSaveStatus("error");    return; }
 
       setSaveStatus("idle");
+      committedEditsRef.current[stepIndex] = { ...flowEdits } as OnboardingAnswers;
       revalidator.revalidate();
 
       if (direction === "exit") {
@@ -1662,6 +1666,22 @@ export default function PassportPage() {
         )}
 
         <div className="sp-flow-actions">
+          {mode.stepIndex > 0 && (
+            <button
+              type="button"
+              className="sp-btn-outline"
+              disabled={isBusy}
+              onClick={() => {
+                const prevIndex = mode.stepIndex - 1;
+                const prevScreen = activeRefreshScreens[prevIndex];
+                const edits = committedEditsRef.current[prevIndex] ?? initRefreshEdits(prevScreen);
+                setFlowEdits(edits);
+                setMode({ kind: "refresh", stepIndex: prevIndex });
+              }}
+            >
+              ← Back
+            </button>
+          )}
           <button
             type="button"
             className="sp-btn-primary"

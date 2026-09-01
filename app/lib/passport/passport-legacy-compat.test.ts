@@ -677,9 +677,10 @@ describe("O: Only dressingPreferences is optional in the refresh flow", () => {
     const refreshStepIdx = passport.indexOf("// ── REFRESH STEP");
     assert.ok(refreshStepIdx > 0, "REFRESH STEP section comment must exist");
     // sp-btn-primary is ~50 lines past the comment; search forward from isBlocked to stay in range.
+    // Window extended to 2000 to accommodate the Back button added before sp-btn-primary.
     const isBlockedIdx = passport.indexOf("isBlocked", refreshStepIdx);
     assert.ok(isBlockedIdx > 0, "isBlocked must be defined in the refresh JSX");
-    const fromBlocked = passport.slice(isBlockedIdx, isBlockedIdx + 1500);
+    const fromBlocked = passport.slice(isBlockedIdx, isBlockedIdx + 2000);
     const nextBtnIdx = fromBlocked.indexOf("sp-btn-primary");
     assert.ok(nextBtnIdx > 0, "sp-btn-primary button must exist after isBlocked in refresh JSX");
     const btnBlock = fromBlocked.slice(nextBtnIdx, nextBtnIdx + 200);
@@ -941,6 +942,297 @@ describe("R: Refresh exclusivity — handleToggle and quiz-data contracts", () =
     assert.ok(
       rfcBlock.includes('"fit-concerns"'),
       "r-fit-concerns screen must reference questionId fit-concerns, which carries no-fit-problems exclusiveIds in quiz-data",
+    );
+  });
+});
+
+// ── S. QA cleanup batch — Notes optional, fitConcerns labels, copy, Back ──────
+// A–O from the approved QA cleanup spec.
+describe("S: QA cleanup — Notes optional and fitConcerns labels", () => {
+
+  // ── S.A: NOTES_SECTION has optional: true ────────────────────────────────
+  it("S.A: NOTES_SECTION is marked optional:true", () => {
+    const notesIdx = passport.indexOf("const NOTES_SECTION");
+    assert.ok(notesIdx !== -1, "NOTES_SECTION must exist");
+    const notesBlock = passport.slice(notesIdx, notesIdx + 400);
+    assert.ok(notesBlock.includes("optional: true"), "NOTES_SECTION must have optional: true so it never blocks completion");
+  });
+
+  // ── S.B: missingSections skips optional sections ─────────────────────────
+  it("S.B: missingSections filter short-circuits on s.optional, so Notes cannot trigger incomplete", () => {
+    const msIdx = passport.indexOf("missingSections = useMemo");
+    assert.ok(msIdx !== -1, "missingSections useMemo must exist");
+    const msBlock = passport.slice(msIdx, msIdx + 400);
+    assert.ok(
+      msBlock.includes("s.optional") || msBlock.includes("s.placeholder || s.optional"),
+      "missingSections must short-circuit on s.optional so optional sections (Notes) are skipped",
+    );
+  });
+
+  // ── S.C: Continue Passport gate is isComplete ────────────────────────────
+  it("S.C: Continue Passport CTA is gated on !isComplete, which is false when only Notes is empty", () => {
+    const continueIdx = passport.indexOf("Continue Passport");
+    assert.ok(continueIdx !== -1, "Continue Passport button must exist");
+    // Verify isComplete = missingSections.length === 0 (Notes now optional → not in missingSections)
+    assert.ok(
+      passport.includes("isComplete = missingSections.length === 0") ||
+      passport.includes("missingSections.length === 0"),
+      "isComplete must be derived from missingSections length",
+    );
+  });
+
+  // ── S.D: fitConcerns no longer uses stale FIT_CONCERN_LABELS ─────────────
+  it("S.D: getSectionDetail does NOT use FIT_CONCERN_LABELS for fit-concerns display", () => {
+    const detailIdx = passport.indexOf("function getSectionDetail");
+    assert.ok(detailIdx !== -1, "getSectionDetail must exist");
+    const detailBlock = passport.slice(detailIdx, detailIdx + 2000);
+    // The stale special-case line must not appear
+    assert.ok(
+      !detailBlock.includes('dKey === "fit-concerns"') || !detailBlock.includes("FIT_CONCERN_LABELS"),
+      "getSectionDetail must not use FIT_CONCERN_LABELS for fit-concerns (stale legacy labels)",
+    );
+  });
+
+  // ── S.E: fitConcerns falls through to lbl() which resolves OPTION_LABELS ─
+  it("S.E: fit-concerns in getSectionDetail uses the generic lbl() path (OPTION_LABELS-backed)", () => {
+    const detailIdx = passport.indexOf("function getSectionDetail");
+    assert.ok(detailIdx !== -1, "getSectionDetail must exist");
+    // Window extended to 3000 — getSectionDetail is ~47 lines; 2000 chars was insufficient.
+    const detailBlock = passport.slice(detailIdx, detailIdx + 3000);
+    // The generic labelled path must exist
+    assert.ok(
+      detailBlock.includes("ids.map(id => lbl(sf.questionId, id))"),
+      "getSectionDetail must have a generic lbl(sf.questionId, id) path that covers fit-concerns",
+    );
+  });
+});
+
+// ── T. QA cleanup — copy changes and Back navigation ─────────────────────────
+describe("T: QA cleanup — simplified copy and Back button", () => {
+
+  // ── T.F: Q3 — r-outfit-gives simplified question ─────────────────────────
+  it("T.F: r-outfit-gives refresh screen uses simplified question copy", () => {
+    const rIdx = passport.indexOf('"r-outfit-gives"');
+    assert.ok(rIdx !== -1, "r-outfit-gives screen must exist");
+    const rBlock = passport.slice(rIdx, rIdx + 300);
+    assert.ok(
+      rBlock.includes("What makes an outfit feel right for you?"),
+      "r-outfit-gives must use simplified question: 'What makes an outfit feel right for you?'",
+    );
+    assert.ok(
+      !rBlock.includes("When an outfit really works for you"),
+      "r-outfit-gives must not use the old abstract question wording",
+    );
+  });
+
+  // ── T.G: Q4 — r-lifestyle simplified question ────────────────────────────
+  it("T.G: r-lifestyle refresh screen uses simplified question copy", () => {
+    const rIdx = passport.indexOf('"r-lifestyle"');
+    assert.ok(rIdx !== -1, "r-lifestyle screen must exist");
+    const rBlock = passport.slice(rIdx, rIdx + 300);
+    assert.ok(
+      rBlock.includes("What do you dress for most often?"),
+      "r-lifestyle must use simplified question: 'What do you dress for most often?'",
+    );
+    assert.ok(
+      !rBlock.includes("Where does your wardrobe need to show up most often?"),
+      "r-lifestyle must not use the old abstract question wording",
+    );
+  });
+
+  // ── T.H: Q6 — r-fit-concerns simplified question and helper ──────────────
+  it("T.H: r-fit-concerns uses simplified question and helper", () => {
+    const rIdx = passport.indexOf('"r-fit-concerns"');
+    assert.ok(rIdx !== -1, "r-fit-concerns screen must exist");
+    const rBlock = passport.slice(rIdx, rIdx + 400);
+    assert.ok(
+      rBlock.includes("Are there any fit issues nAia should keep in mind?"),
+      "r-fit-concerns must use simplified question copy",
+    );
+    assert.ok(
+      rBlock.includes("Select any that apply."),
+      "r-fit-concerns must use simplified helper: 'Select any that apply.'",
+    );
+    assert.ok(
+      !rBlock.includes("Does clothing ever fit you in a particular way"),
+      "r-fit-concerns must not use the old complex question wording",
+    );
+  });
+
+  // ── T.I: Q7 — r-dressing simplified helper ───────────────────────────────
+  it("T.I: r-dressing helper is simplified (no 'hard requirements' / 'filter out products')", () => {
+    const rIdx = passport.indexOf('"r-dressing"');
+    assert.ok(rIdx !== -1, "r-dressing screen must exist");
+    const rBlock = passport.slice(rIdx, rIdx + 400);
+    assert.ok(
+      rBlock.includes("Optional. Select anything nAia should always keep in mind when styling you."),
+      "r-dressing must use simplified helper copy",
+    );
+    assert.ok(
+      !rBlock.includes("hard requirements"),
+      "r-dressing helper must not contain 'hard requirements' technical language",
+    );
+    assert.ok(
+      !rBlock.includes("filter out products"),
+      "r-dressing helper must not contain 'filter out products' technical language",
+    );
+  });
+
+  // ── T.J: Back absent on Step 1 (stepIndex = 0) ───────────────────────────
+  it("T.J: Back button is gated on stepIndex > 0, so it is absent on Step 1", () => {
+    // Anchor on REFRESH STEP comment to avoid "← Back to Passport" in the done-state block (before this comment).
+    const refreshStepIdx = passport.indexOf("// ── REFRESH STEP");
+    assert.ok(refreshStepIdx > 0, "REFRESH STEP section comment must exist");
+    const backIdx = passport.indexOf("← Back", refreshStepIdx);
+    assert.ok(backIdx !== -1, "Back button label must exist in refresh JSX");
+    const backContext = passport.slice(Math.max(refreshStepIdx, backIdx - 600), backIdx + 10);
+    assert.ok(
+      backContext.includes("stepIndex > 0"),
+      "Back button must be inside a stepIndex > 0 guard so it does not appear on Step 1",
+    );
+  });
+
+  // ── T.K: Back present on Step 2+ ─────────────────────────────────────────
+  it("T.K: Back button label exists in the refresh JSX", () => {
+    const refreshStepIdx = passport.indexOf("// ── REFRESH STEP");
+    assert.ok(refreshStepIdx > 0, "REFRESH STEP section comment must exist");
+    assert.ok(
+      passport.indexOf("← Back", refreshStepIdx) !== -1,
+      "Back button with '← Back' label must exist inside the REFRESH STEP JSX block",
+    );
+  });
+
+  // ── T.L: Back moves to previous refresh screen ───────────────────────────
+  it("T.L: Back button sets stepIndex to mode.stepIndex - 1", () => {
+    const refreshStepIdx = passport.indexOf("// ── REFRESH STEP");
+    assert.ok(refreshStepIdx > 0, "REFRESH STEP section comment must exist");
+    const backIdx = passport.indexOf("← Back", refreshStepIdx);
+    assert.ok(backIdx !== -1, "Back button must exist in REFRESH STEP block");
+    const backBlock = passport.slice(Math.max(refreshStepIdx, backIdx - 700), backIdx + 50);
+    // prevIndex is extracted from mode.stepIndex - 1 and passed to setMode
+    assert.ok(
+      backBlock.includes("mode.stepIndex - 1"),
+      "Back onClick must compute prevIndex as mode.stepIndex - 1",
+    );
+    assert.ok(
+      backBlock.includes("stepIndex: prevIndex"),
+      "Back onClick must navigate using prevIndex",
+    );
+  });
+
+  // ── T.M: Back restores previous selections via initRefreshEdits ───────────
+  it("T.M: Back button calls initRefreshEdits(prevScreen) to restore previous selections", () => {
+    const refreshStepIdx = passport.indexOf("// ── REFRESH STEP");
+    assert.ok(refreshStepIdx > 0, "REFRESH STEP section comment must exist");
+    const backIdx = passport.indexOf("← Back", refreshStepIdx);
+    assert.ok(backIdx !== -1, "Back button must exist in REFRESH STEP block");
+    const backBlock = passport.slice(Math.max(refreshStepIdx, backIdx - 600), backIdx + 50);
+    assert.ok(
+      backBlock.includes("initRefreshEdits(prevScreen)"),
+      "Back must call initRefreshEdits(prevScreen) to restore saved answers for the previous screen",
+    );
+  });
+
+  // ── T.N: Back uses activeRefreshScreens (handles conditional Colours) ─────
+  it("T.N: Back reads prevScreen from activeRefreshScreens (not a hardcoded index)", () => {
+    const refreshStepIdx = passport.indexOf("// ── REFRESH STEP");
+    assert.ok(refreshStepIdx > 0, "REFRESH STEP section comment must exist");
+    const backIdx = passport.indexOf("← Back", refreshStepIdx);
+    assert.ok(backIdx !== -1, "Back button must exist in REFRESH STEP block");
+    const backBlock = passport.slice(Math.max(refreshStepIdx, backIdx - 700), backIdx + 50);
+    // prevIndex = mode.stepIndex - 1 is passed to activeRefreshScreens lookup
+    assert.ok(
+      backBlock.includes("activeRefreshScreens[prevIndex]"),
+      "Back must use activeRefreshScreens[prevIndex] to look up the previous screen (handles conditional Colours insertion)",
+    );
+  });
+
+  // ── T.O: Back cannot set profileVersion=6 ────────────────────────────────
+  it("T.O: Back onClick does not send onboardingComplete or call saveRefreshStep", () => {
+    const refreshStepIdx = passport.indexOf("// ── REFRESH STEP");
+    assert.ok(refreshStepIdx > 0, "REFRESH STEP section comment must exist");
+    const backIdx = passport.indexOf("← Back", refreshStepIdx);
+    assert.ok(backIdx !== -1, "Back button must exist in REFRESH STEP block");
+    const backBlock = passport.slice(Math.max(refreshStepIdx, backIdx - 700), backIdx + 10);
+    assert.ok(
+      !backBlock.includes("onboardingComplete") && !backBlock.includes("saveRefreshStep"),
+      "Back onClick must not call saveRefreshStep or set onboardingComplete — profileVersion must not be set early",
+    );
+  });
+});
+
+describe("U: Back navigation race-safety — committedEditsRef", () => {
+  // True interaction-level testing (mounting React component, simulating user events, inspecting
+  // rendered state) requires a DOM environment and React testing utilities (jsdom, @testing-library/react).
+  // The current harness is Node's native test runner with tsx/esm — no DOM, no render. These tests
+  // therefore prove the behavioural contract through source-structure analysis: they verify that
+  // (a) the committed-edits cache is declared and populated at the correct point in `saveRefreshStep`,
+  // and (b) the Back button prefers the cache over `savedAnswers`/`initRefreshEdits`.
+  // `passport` is the file-scope constant loaded at the top of this file.
+
+  // ── U.A: committedEditsRef is declared ────────────────────────────────────
+  it("U.A: committedEditsRef is declared as a useRef in the component", () => {
+    assert.ok(
+      passport.includes("committedEditsRef = useRef<Record<number, OnboardingAnswers>>({})"),
+      "committedEditsRef must be declared as useRef<Record<number, OnboardingAnswers>>({}) — the per-stepIndex cache",
+    );
+  });
+
+  // ── U.B: snapshot is taken after successful save ───────────────────────────
+  it("U.B: committedEditsRef.current[stepIndex] is set after fetch succeeds but before revalidate", () => {
+    const saveIdx = passport.indexOf("async function saveRefreshStep(");
+    assert.ok(saveIdx !== -1, "saveRefreshStep must exist");
+    // Capture a window from after the successful-response guard through revalidate() call
+    const saveBlock = passport.slice(saveIdx, saveIdx + 1200);
+    const cacheSetIdx   = saveBlock.indexOf("committedEditsRef.current[stepIndex] =");
+    const revalidateIdx = saveBlock.indexOf("revalidator.revalidate()");
+    assert.ok(cacheSetIdx !== -1, "committedEditsRef.current[stepIndex] must be set inside saveRefreshStep");
+    assert.ok(revalidateIdx !== -1, "revalidator.revalidate() must be called inside saveRefreshStep");
+    assert.ok(
+      cacheSetIdx < revalidateIdx,
+      "committed-edits snapshot must be captured before revalidator.revalidate() is called, " +
+      "ensuring Back always reads the confirmed saved state regardless of revalidation timing",
+    );
+  });
+
+  // ── U.C: Back prefers cache over initRefreshEdits ─────────────────────────
+  it("U.C: Back button reads committedEditsRef.current[prevIndex] before falling back to initRefreshEdits", () => {
+    const refreshStepIdx = passport.indexOf("// ── REFRESH STEP");
+    assert.ok(refreshStepIdx > 0, "REFRESH STEP section comment must exist");
+    const backIdx = passport.indexOf("← Back", refreshStepIdx);
+    assert.ok(backIdx !== -1, "Back button must exist in REFRESH STEP block");
+    const backBlock = passport.slice(Math.max(refreshStepIdx, backIdx - 700), backIdx + 50);
+    assert.ok(
+      backBlock.includes("committedEditsRef.current[prevIndex]"),
+      "Back onClick must read committedEditsRef.current[prevIndex] — the committed cache entry for the previous step",
+    );
+    assert.ok(
+      backBlock.includes("?? initRefreshEdits(prevScreen)"),
+      "Back onClick must fall back to initRefreshEdits(prevScreen) only when no committed cache entry exists",
+    );
+  });
+
+  // ── U.D: snapshot uses exact flowEdits at time of save ────────────────────
+  it("U.D: snapshot captures flowEdits spread — reflects exactly what the server received", () => {
+    const saveIdx = passport.indexOf("async function saveRefreshStep(");
+    assert.ok(saveIdx !== -1, "saveRefreshStep must exist");
+    const saveBlock = passport.slice(saveIdx, saveIdx + 1200);
+    assert.ok(
+      saveBlock.includes("committedEditsRef.current[stepIndex] = { ...flowEdits }"),
+      "snapshot must spread flowEdits so it is an independent copy that cannot be mutated by later state updates",
+    );
+  });
+
+  // ── U.E: Back does not depend on revalidator.state ────────────────────────
+  it("U.E: Back onClick does not read revalidator.state (no timing dependency)", () => {
+    const refreshStepIdx = passport.indexOf("// ── REFRESH STEP");
+    assert.ok(refreshStepIdx > 0, "REFRESH STEP section comment must exist");
+    const backIdx = passport.indexOf("← Back", refreshStepIdx);
+    assert.ok(backIdx !== -1, "Back button must exist in REFRESH STEP block");
+    const backBlock = passport.slice(Math.max(refreshStepIdx, backIdx - 700), backIdx + 50);
+    assert.ok(
+      !backBlock.includes("revalidator.state"),
+      "Back onClick must not check revalidator.state — it must be deterministic regardless of network timing",
     );
   });
 });
