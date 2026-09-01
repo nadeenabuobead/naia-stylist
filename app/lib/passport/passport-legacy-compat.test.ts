@@ -790,3 +790,157 @@ describe("Q: Legacy customer colours handling", () => {
     );
   });
 });
+
+// ── R. Refresh exclusivity fix ────────────────────────────────────────────────
+// Verifies that handleToggle supports exclusiveIds (from QuizQuestion metadata)
+// and that renderSubField passes q?.exclusiveIds into the array-kind toggle call.
+// Also verifies quiz-data.ts carries the correct exclusiveIds for all four
+// affected questions. Normal onboarding (onboarding/step.$step.tsx) is untouched.
+describe("R: Refresh exclusivity — handleToggle and quiz-data contracts", () => {
+
+  // ── R.A: handleToggle signature ──────────────────────────────────────────
+  it("R.A: handleToggle accepts an exclusiveIds parameter", () => {
+    const htIdx = passport.indexOf("const handleToggle = useCallback");
+    assert.ok(htIdx !== -1, "handleToggle must exist");
+    const sig = passport.slice(htIdx, htIdx + 200);
+    assert.ok(sig.includes("exclusiveIds"), "handleToggle signature must include exclusiveIds parameter");
+  });
+
+  // ── R.B: exclusive branch replaces entire selection ──────────────────────
+  it("R.B: handleToggle has an exclusive branch that replaces the selection with only the exclusive ID", () => {
+    const htIdx = passport.indexOf("const handleToggle = useCallback");
+    assert.ok(htIdx !== -1, "handleToggle must exist");
+    const htBlock = passport.slice(htIdx, htIdx + 700);
+    assert.ok(
+      htBlock.includes("excl.includes(optId)") || htBlock.includes("exclusiveIds.includes(optId)"),
+      "handleToggle must check if the selected option is in the exclusive list",
+    );
+    assert.ok(
+      htBlock.includes("[optId]"),
+      "exclusive branch must produce a single-element array containing only optId",
+    );
+  });
+
+  // ── R.C: non-exclusive branch clears exclusive IDs before adding ──────────
+  it("R.C: handleToggle removes currently-selected exclusive IDs before adding a non-exclusive option", () => {
+    const htIdx = passport.indexOf("const handleToggle = useCallback");
+    assert.ok(htIdx !== -1, "handleToggle must exist");
+    const htBlock = passport.slice(htIdx, htIdx + 700);
+    assert.ok(
+      htBlock.includes("withoutExclusives") || htBlock.includes("filter(id => !excl.includes(id))"),
+      "handleToggle must filter out exclusive IDs from the current selection before adding a non-exclusive option",
+    );
+  });
+
+  // ── R.D: renderSubField passes q?.exclusiveIds to handleToggle ────────────
+  it("R.D: renderSubField array branch passes q?.exclusiveIds into handleToggle", () => {
+    const rsIdx = passport.indexOf("function renderSubField");
+    assert.ok(rsIdx !== -1, "renderSubField must exist");
+    const rsBlock = passport.slice(rsIdx, rsIdx + 3000);
+    assert.ok(
+      rsBlock.includes("q?.exclusiveIds"),
+      "renderSubField must pass q?.exclusiveIds to handleToggle in the array-kind branch",
+    );
+  });
+
+  // ── R.E: current-goal exclusiveIds in quiz-data ──────────────────────────
+  it("R.E: quiz-data current-goal has exclusiveIds: [\"not-sure-yet\"]", () => {
+    assert.ok(
+      quizData.includes('"current-goal"') && quizData.includes('"not-sure-yet"'),
+      "quiz-data must define not-sure-yet option for current-goal",
+    );
+    const cgIdx = quizData.indexOf('"current-goal"');
+    const cgBlock = quizData.slice(cgIdx, cgIdx + 800);
+    assert.ok(
+      cgBlock.includes("exclusiveIds") && cgBlock.includes('"not-sure-yet"'),
+      "current-goal question must declare exclusiveIds containing not-sure-yet",
+    );
+  });
+
+  // ── R.F: successful-outfit-gives exclusiveIds in quiz-data ───────────────
+  it("R.F: quiz-data successful-outfit-gives has exclusiveIds: [\"not-sure\"]", () => {
+    const soIdx = quizData.indexOf('"successful-outfit-gives"');
+    assert.ok(soIdx !== -1, "successful-outfit-gives question must exist in quiz-data");
+    const soBlock = quizData.slice(soIdx, soIdx + 800);
+    assert.ok(
+      soBlock.includes("exclusiveIds") && soBlock.includes('"not-sure"'),
+      "successful-outfit-gives must declare exclusiveIds containing not-sure",
+    );
+  });
+
+  // ── R.G: silhouette exclusiveIds in quiz-data ────────────────────────────
+  it("R.G: quiz-data silhouette has exclusiveIds: [\"not-sure\"]", () => {
+    const silIdx = quizData.indexOf('"silhouette"');
+    assert.ok(silIdx !== -1, "silhouette question must exist in quiz-data");
+    const silBlock = quizData.slice(silIdx, silIdx + 800);
+    assert.ok(
+      silBlock.includes("exclusiveIds") && silBlock.includes('"not-sure"'),
+      "silhouette must declare exclusiveIds containing not-sure",
+    );
+  });
+
+  // ── R.H: fit-concerns exclusiveIds in quiz-data ──────────────────────────
+  it("R.H: quiz-data fit-concerns has exclusiveIds: [\"no-fit-problems\"]", () => {
+    const fcIdx = quizData.indexOf('"fit-concerns"');
+    assert.ok(fcIdx !== -1, "fit-concerns question must exist in quiz-data");
+    const fcBlock = quizData.slice(fcIdx, fcIdx + 800);
+    assert.ok(
+      fcBlock.includes("exclusiveIds") && fcBlock.includes('"no-fit-problems"'),
+      "fit-concerns must declare exclusiveIds containing no-fit-problems",
+    );
+  });
+
+  // ── R.I: dressing-preferences has no exclusiveIds (unaffected) ───────────
+  it("R.I: quiz-data dressing-preferences does NOT declare exclusiveIds (refresh r-dressing unaffected)", () => {
+    const dpIdx = quizData.indexOf('"dressing-preferences"');
+    assert.ok(dpIdx !== -1, "dressing-preferences question must exist in quiz-data");
+    // Find the next question boundary after dressing-preferences
+    const nextQ = quizData.indexOf('\n  {', dpIdx + 1);
+    const dpBlock = quizData.slice(dpIdx, nextQ !== -1 ? nextQ : dpIdx + 1000);
+    assert.ok(
+      !dpBlock.includes("exclusiveIds"),
+      "dressing-preferences must NOT have exclusiveIds — r-dressing is unaffected by the exclusivity fix",
+    );
+  });
+
+  // ── R.J: colour branch in renderSubField does NOT pass exclusiveIds ───────
+  it("R.J: colour-kind branch in renderSubField uses pairKey, not exclusiveIds", () => {
+    const rsIdx = passport.indexOf("function renderSubField");
+    assert.ok(rsIdx !== -1, "renderSubField must exist");
+    const colorBranchIdx = passport.indexOf('sf.kind === "color"', rsIdx);
+    assert.ok(colorBranchIdx !== -1, "color branch must exist in renderSubField");
+    // Color branch ends before the array fallback return
+    const colorBranchEnd = passport.indexOf("// array (multi-select pills)", rsIdx);
+    const colorBlock = passport.slice(colorBranchIdx, colorBranchEnd !== -1 ? colorBranchEnd : colorBranchIdx + 600);
+    assert.ok(
+      colorBlock.includes("pairKey"),
+      "colour-kind branch must use pairKey for mutual colour exclusion",
+    );
+    assert.ok(
+      !colorBlock.includes("exclusiveIds"),
+      "colour-kind branch must NOT pass exclusiveIds (colours have no exclusive IDs)",
+    );
+  });
+
+  // ── R.K: r-goal question ID maps to current-goal (exclusiveIds flow complete)
+  it("R.K: r-goal refresh screen maps to questionId \"current-goal\" carrying not-sure-yet exclusiveIds", () => {
+    const rGoalIdx = passport.indexOf('"r-goal"');
+    assert.ok(rGoalIdx !== -1, "r-goal screen must exist in REFRESH_SCREENS");
+    const rGoalBlock = passport.slice(rGoalIdx, rGoalIdx + 300);
+    assert.ok(
+      rGoalBlock.includes('"current-goal"'),
+      "r-goal screen must reference questionId current-goal, which carries not-sure-yet exclusiveIds in quiz-data",
+    );
+  });
+
+  // ── R.L: r-fit-concerns question ID maps to fit-concerns (exclusiveIds flow complete)
+  it("R.L: r-fit-concerns refresh screen maps to questionId \"fit-concerns\" carrying no-fit-problems exclusiveIds", () => {
+    const rfcIdx = passport.indexOf('"r-fit-concerns"');
+    assert.ok(rfcIdx !== -1, "r-fit-concerns screen must exist in REFRESH_SCREENS");
+    const rfcBlock = passport.slice(rfcIdx, rfcIdx + 400);
+    assert.ok(
+      rfcBlock.includes('"fit-concerns"'),
+      "r-fit-concerns screen must reference questionId fit-concerns, which carries no-fit-problems exclusiveIds in quiz-data",
+    );
+  });
+});

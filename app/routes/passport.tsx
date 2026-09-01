@@ -1158,14 +1158,21 @@ export default function PassportPage() {
     }
   }
 
-  const handleToggle = useCallback((draftKey: DraftKey, optId: string, maxSel: number, pairKey?: DraftKey) => {
+  const handleToggle = useCallback((draftKey: DraftKey, optId: string, maxSel: number, pairKey?: DraftKey, exclusiveIds?: string[]) => {
     setFlowEdits(prev => {
       const current = ((prev as Record<string, unknown>)[draftKey] as string[] | undefined) ?? [];
       if (current.includes(optId)) {
         return { ...prev, [draftKey]: current.filter(id => id !== optId) };
       }
-      if (current.length < maxSel) {
-        const next = { ...prev, [draftKey]: [...current, optId] };
+      const excl = exclusiveIds ?? [];
+      if (excl.includes(optId)) {
+        // Exclusive selected: replace entire selection with only this ID
+        return { ...prev, [draftKey]: [optId] };
+      }
+      // Non-exclusive: remove any currently-selected exclusive IDs first
+      const withoutExclusives = current.filter(id => !excl.includes(id));
+      if (withoutExclusives.length < maxSel) {
+        const next = { ...prev, [draftKey]: [...withoutExclusives, optId] };
         // Mutual exclusion: remove from paired colour picker
         if (pairKey) {
           const pair = ((prev as Record<string, unknown>)[pairKey] as string[] | undefined) ?? [];
@@ -1440,7 +1447,7 @@ export default function PassportPage() {
           const handleClick =
             sf.draftKey === "body-focus-areas" ? () => handleBodyAreaToggle("body-focus-areas", "bodyFocusAreas", o.id) :
             sf.draftKey === "body-avoid-areas" ? () => handleBodyAreaToggle("body-avoid-areas", "bodyAvoidAreas", o.id) :
-            () => handleToggle(sf.draftKey, o.id, max);
+            () => handleToggle(sf.draftKey, o.id, max, undefined, q?.exclusiveIds);
           return (
             <button
               key={o.id}
