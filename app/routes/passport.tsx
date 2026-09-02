@@ -980,10 +980,13 @@ function VisualAnalysisChapter({ selfieChapter }: { selfieChapter: SelfieChapter
       {selfieChapter?.status === "completed" && (
         <div style={{ paddingTop: "8px" }}>
           {selfieChapter.signals.overallNote && (
-            <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", lineHeight: 1.75, marginBottom: "16px" }}>
+            <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", lineHeight: 1.75, marginBottom: "12px" }}>
               {selfieChapter.signals.overallNote}
             </p>
           )}
+          <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "13px", fontStyle: "italic", color: "var(--naia-muted)", lineHeight: 1.65, marginBottom: "16px" }}>
+            Visual Analysis is optional — your questionnaire answers always take precedence.
+          </p>
 
           <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center", marginBottom: expanded ? "20px" : "0" }}>
             <button
@@ -1576,12 +1579,41 @@ export default function PassportPage() {
 
         {/* Full detail — visible sections for this customer type + Notes */}
         <div className="sp-ov-sections">
-          {visibleSections.map(def => (
-            <div key={def.id} className="sp-ov-section">
-              <div className="sp-ov-section-header">{def.label}</div>
-              {getSectionDetail(getEffectiveDef(def, isRev6), savedAnswers)}
-            </div>
-          ))}
+          {visibleSections.map(def => {
+            const detail = getSectionDetail(getEffectiveDef(def, isRev6), savedAnswers);
+            const sizesEmpty = isRev6 && def.id === "sizes" && detail === null;
+            return (
+              <div key={def.id} className="sp-ov-section">
+                {isRev6 ? (
+                  <div className="sp-ov-section-header-row">
+                    <span className="sp-ov-section-header">{def.label}</span>
+                    <button
+                      type="button"
+                      className="sp-ov-edit-btn"
+                      onClick={() => editSection(def.id)}
+                    >
+                      EDIT
+                    </button>
+                  </div>
+                ) : (
+                  <div className="sp-ov-section-header">{def.label}</div>
+                )}
+                {sizesEmpty ? (
+                  <div className="sp-ov-sizes-empty">
+                    <p className="sp-ov-sizes-empty-text">No sizes or measurements added yet.</p>
+                    <p className="sp-ov-sizes-empty-hint">Add these for more precise fit and shopping guidance.</p>
+                    <button
+                      type="button"
+                      className="sp-btn-outline"
+                      onClick={() => editSection("sizes")}
+                    >
+                      ADD SIZES &amp; MEASUREMENTS
+                    </button>
+                  </div>
+                ) : detail}
+              </div>
+            );
+          })}
           <div className="sp-ov-section sp-ov-section--notes">
             <div className="sp-ov-section-header">{NOTES_SECTION.label}</div>
             {getSectionDetail(NOTES_SECTION, savedAnswers)}

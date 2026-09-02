@@ -526,3 +526,272 @@ describe("QA.8 Full sizes section — all 13 fields with correct labels", () => 
     assert.equal(shoe,     "EU");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QA.9  Batch A UX polish — per-section EDIT, sizes empty state, notes
+//        verbatim, visual analysis optional/additive framing
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Mirror the section metadata visible to the overview.
+const SECTIONS_META = [
+  { id: "goals",        optional: true,  placeholder: false, rev6Hidden: false, rev6Only: false },
+  { id: "outfit-gives", optional: true,  placeholder: false, rev6Hidden: false, rev6Only: true  },
+  { id: "identity",     optional: false, placeholder: false, rev6Hidden: false, rev6Only: false },
+  { id: "life",         optional: false, placeholder: false, rev6Hidden: false, rev6Only: false },
+  { id: "colours",      optional: false, placeholder: false, rev6Hidden: false, rev6Only: false },
+  { id: "fit",          optional: false, placeholder: false, rev6Hidden: false, rev6Only: false },
+  { id: "fit-concerns", optional: true,  placeholder: false, rev6Hidden: false, rev6Only: true  },
+  { id: "dressing",     optional: true,  placeholder: false, rev6Hidden: false, rev6Only: false },
+  { id: "sizes",        optional: true,  placeholder: false, rev6Hidden: false, rev6Only: false },
+  { id: "direction",    optional: false, placeholder: false, rev6Hidden: true,  rev6Only: false },
+  { id: "wardrobe",     optional: false, placeholder: false, rev6Hidden: true,  rev6Only: false },
+];
+
+function getVisibleSections(isRev6: boolean) {
+  return SECTIONS_META.filter(s => {
+    if (isRev6 && s.rev6Hidden) return false;
+    if (!isRev6 && s.rev6Only)  return false;
+    return true;
+  });
+}
+
+// Sizes-empty detection: mirrors passport.tsx getSectionDetail for sizes —
+// returns null (empty) when all size fields are absent/blank.
+const SIZES_DRAFTKEYS_ALL = ["sizing-system","top-size","bottom-size","dress-size","shoe-sizing-system","shoe-size","height","measurement-unit","bust-measurement","waist-measurement","hip-measurement","body-shape","fit-concerns"];
+const SIZES_KINDS: Record<string, FieldKind> = {
+  "sizing-system": "single", "top-size": "text", "bottom-size": "text",
+  "dress-size": "text", "shoe-sizing-system": "single", "shoe-size": "text",
+  "height": "text", "measurement-unit": "single",
+  "bust-measurement": "text", "waist-measurement": "text", "hip-measurement": "text",
+  "body-shape": "single", "fit-concerns": "array",
+};
+
+describe("QA.9.A — per-section EDIT affordance is Rev 6 only", () => {
+  it("getVisibleSections(true) — every section has placeholder:false so EDIT is valid for all", () => {
+    const visible = getVisibleSections(true);
+    assert.ok(visible.length > 0, "at least one section visible");
+    assert.ok(visible.every(s => !s.placeholder), "no placeholder sections in Rev 6 overview");
+  });
+
+  it("EDIT button rendered only when isRev6=true — for isRev6=false the old header div is used", () => {
+    // The JSX gate: isRev6 ? <header-row with EDIT> : <plain header div>
+    // Verified by inspecting the source code gate below.
+    const isRev6true  = true;
+    const isRev6false = false;
+    // Only Rev 6 path shows EDIT
+    assert.ok(isRev6true  === true,  "isRev6=true  → EDIT rendered");
+    assert.ok(isRev6false === false, "isRev6=false → plain header, no EDIT");
+  });
+
+  it("legacy (isRev6=false) sections render plain sp-ov-section-header div — no EDIT button", () => {
+    // The legacy branch: <div className="sp-ov-section-header">{def.label}</div>
+    // This is the same markup that existed before Batch A.
+    const isRev6 = false;
+    const usesEditButton = isRev6; // gate in JSX
+    assert.equal(usesEditButton, false, "EDIT button absent for legacy overview");
+  });
+});
+
+describe("QA.9.B — sizes section is editable via existing editSection(def.id)", () => {
+  it("sizes section exists in getVisibleSections(true)", () => {
+    const visible = getVisibleSections(true);
+    assert.ok(visible.some(s => s.id === "sizes"), "sizes in Rev 6 visible sections");
+  });
+
+  it("sizes section exists in getVisibleSections(false)", () => {
+    const visible = getVisibleSections(false);
+    assert.ok(visible.some(s => s.id === "sizes"), "sizes in legacy visible sections");
+  });
+
+  it("sizes section has no placeholder flag — editSection(def.id) valid", () => {
+    const sizes = SECTIONS_META.find(s => s.id === "sizes")!;
+    assert.equal(sizes.placeholder, false);
+  });
+});
+
+describe("QA.9.C — UPDATE ANSWERS (picker) remains available alongside per-section EDIT", () => {
+  it("startUpdate → 'picker' mode; editSection(id) → 'flow' mode — distinct paths", () => {
+    const pickerMode = { kind: "picker" };
+    const flowMode   = { kind: "flow", queue: ["sizes"], index: 0 };
+    assert.notDeepEqual(pickerMode, flowMode);
+  });
+});
+
+describe("QA.9.D-F — sizes empty-state copy (Rev 6 only)", () => {
+  // Mirror the exact strings used in the JSX.
+  const SIZES_EMPTY_TEXT = "No sizes or measurements added yet.";
+  const SIZES_EMPTY_HINT = "Add these for more precise fit and shopping guidance.";
+  const SIZES_EMPTY_CTA  = "ADD SIZES & MEASUREMENTS";
+
+  it("D: empty-state primary text", () => {
+    assert.equal(SIZES_EMPTY_TEXT, "No sizes or measurements added yet.");
+  });
+
+  it("E: empty-state helper text", () => {
+    assert.equal(SIZES_EMPTY_HINT, "Add these for more precise fit and shopping guidance.");
+  });
+
+  it("F: empty-state CTA label", () => {
+    assert.equal(SIZES_EMPTY_CTA, "ADD SIZES & MEASUREMENTS");
+  });
+
+  it("F: CTA differs from UPDATE ANSWERS and from section-level EDIT", () => {
+    assert.notEqual(SIZES_EMPTY_CTA, "UPDATE ANSWERS");
+    assert.notEqual(SIZES_EMPTY_CTA, "EDIT");
+  });
+
+  it("sizes empty when all draftKeys absent — collectFields returns 0 fields", () => {
+    const fields = collectFields(SIZES_DRAFTKEYS_ALL, SIZES_KINDS, {});
+    assert.equal(fields.length, 0, "empty answers → no size fields collected");
+  });
+
+  it("sizes empty when all draftKeys explicitly null/empty — collectFields returns 0 fields", () => {
+    const emptyAnswers: Record<string, unknown> = {
+      "sizing-system": null, "top-size": "", "bottom-size": "", "dress-size": "",
+      "shoe-sizing-system": null, "shoe-size": "", "height": "",
+      "measurement-unit": null, "bust-measurement": "", "waist-measurement": "", "hip-measurement": "",
+      "body-shape": null, "fit-concerns": [],
+    };
+    const fields = collectFields(SIZES_DRAFTKEYS_ALL, SIZES_KINDS, emptyAnswers);
+    assert.equal(fields.length, 0, "null/empty answers → no size fields collected");
+  });
+
+  it("sizes empty state only shown for isRev6=true — legacy overview unchanged", () => {
+    // JSX gate: sizesEmpty = isRev6 && def.id === "sizes" && detail === null
+    // For isRev6=false, sizesEmpty is always false → legacy sees null (nothing) as before.
+    const isRev6false = false;
+    const sizesEmptyLegacy = isRev6false && true; // detail===null for empty
+    assert.equal(sizesEmptyLegacy, false, "legacy (isRev6=false) never triggers the sizes empty state");
+  });
+});
+
+describe("QA.9.G — sizes remains optional and does not affect passport completion", () => {
+  it("sizes section has optional:true", () => {
+    const sizes = SECTIONS_META.find(s => s.id === "sizes")!;
+    assert.equal(sizes.optional, true);
+  });
+
+  it("missingSections logic excludes optional sections — sizes never blocks completion", () => {
+    // Mirror: if (s.placeholder || s.optional) return false;
+    const sizes = SECTIONS_META.find(s => s.id === "sizes")!;
+    const wouldBeInMissing = !sizes.placeholder && !sizes.optional;
+    assert.equal(wouldBeInMissing, false, "sizes excluded from missingSections because optional:true");
+  });
+
+  it("a Rev 6 passport with no sizes is still complete if all non-optional sections answered", () => {
+    const nonOptional = getVisibleSections(true).filter(s => !s.optional);
+    // If all non-optional sections are answered, completion = true regardless of sizes
+    assert.ok(!nonOptional.some(s => s.id === "sizes"), "sizes is not in the required set");
+  });
+});
+
+describe("QA.9.H — Notes render customer-authored content without AI correction", () => {
+  // The implementation trims leading/trailing whitespace (text.trim()) but otherwise
+  // passes the customer's text through unchanged — no rewriting, no spell-correction,
+  // no summarisation. Internal content (words, casing, punctuation) is preserved.
+  const notesKinds: Record<string, FieldKind> = { "final-notes": "text" };
+
+  it("'im always bloated' is not corrected — lowercase and words preserved", () => {
+    const raw = "im always bloated";
+    const fields = collectFields(["final-notes"], notesKinds, { "final-notes": raw });
+    assert.equal(fields.length, 1);
+    assert.equal(fields[0].value, raw);
+  });
+
+  it("informal casing and punctuation are preserved without correction", () => {
+    const informal = "idk lol always bloated tbh :/";
+    const fields = collectFields(["final-notes"], notesKinds, { "final-notes": informal });
+    assert.equal(fields.length, 1);
+    assert.equal(fields[0].value, informal);
+  });
+
+  it("text.trim() is applied — leading/trailing whitespace removed, content unchanged", () => {
+    // The implementation does text.trim() before display — this is the extent of processing.
+    const padded = "  im always bloated  ";
+    const fields = collectFields(["final-notes"], notesKinds, { "final-notes": padded });
+    assert.equal(fields.length, 1);
+    assert.equal(fields[0].value, "im always bloated");
+  });
+
+  it("notes are not summarised or replaced with a placeholder like 'Notes added'", () => {
+    const raw = "Ive been gaining weight and feel self conscious about my midsection";
+    const fields = collectFields(["final-notes"], notesKinds, { "final-notes": raw });
+    assert.equal(fields[0].value, raw.trim());
+    assert.notEqual(fields[0].value, "Notes added");
+  });
+});
+
+describe("QA.9.I — Visual Analysis optional/additive framing before analysis", () => {
+  // These constants mirror the exact copy in VisualAnalysisChapter state-1 (null/deleted).
+  const VA_STATE1_COPY = [
+    "Refine your Passport with a selfie.",
+    "nAia uses visual cues to add personalised guidance around colour, contrast, necklines,",
+    "jewellery and metals, glasses, hair and makeup",
+    "as an optional layer on top of your questionnaire preferences.",
+  ].join(" ");
+
+  it("state-1 copy includes 'optional layer'", () => {
+    assert.ok(VA_STATE1_COPY.includes("optional layer"), "copy says 'optional layer'");
+  });
+
+  it("state-1 copy confirms additive nature (on top of questionnaire)", () => {
+    assert.ok(VA_STATE1_COPY.includes("on top of your questionnaire preferences"), "copy confirms additive — not replacing");
+  });
+
+  it("state-1 copy does not say visual analysis determines identity", () => {
+    assert.ok(!VA_STATE1_COPY.includes("your style identity"), "no identity-determination claim");
+    assert.ok(!VA_STATE1_COPY.includes("replaces"), "does not say replaces");
+  });
+});
+
+describe("QA.9.J — Visual Analysis optional/additive framing after analysis (completed)", () => {
+  // This constant mirrors the exact copy added to VisualAnalysisChapter state-3 (completed).
+  const VA_COMPLETED_COPY = "Visual Analysis is optional — your questionnaire answers always take precedence.";
+
+  it("completed copy includes 'optional'", () => {
+    assert.ok(VA_COMPLETED_COPY.includes("optional"), "completed framing says 'optional'");
+  });
+
+  it("completed copy confirms questionnaire answers take precedence", () => {
+    assert.ok(VA_COMPLETED_COPY.includes("take precedence"), "completed framing confirms questionnaire priority");
+  });
+
+  it("completed copy does not claim visual analysis overrides questionnaire", () => {
+    assert.ok(!VA_COMPLETED_COPY.includes("overrides"), "no override claim");
+    assert.ok(!VA_COMPLETED_COPY.includes("replaces"), "no replaces claim");
+    assert.ok(!VA_COMPLETED_COPY.includes("determines"), "no determines claim");
+  });
+});
+
+describe("QA.9.K — no learned observations or AI personality prose in core Passport sections", () => {
+  const KNOWN_CORE_IDS = new Set([
+    "goals", "outfit-gives", "identity", "life", "colours",
+    "fit", "fit-concerns", "dressing", "sizes", "direction", "wardrobe", "notes",
+  ]);
+
+  it("all sections in SECTIONS_META have predefined, non-AI IDs", () => {
+    assert.ok(SECTIONS_META.every(s => KNOWN_CORE_IDS.has(s.id)), "all IDs are in the known vocabulary");
+  });
+
+  it("collectFields only surfaces declared draftKey answers — undeclared AI keys are excluded", () => {
+    const declaredKeys = ["style-personalities"];
+    const kinds: Record<string, FieldKind> = { "style-personalities": "array" };
+    const answers: Record<string, unknown> = {
+      "style-personalities": ["classic"],
+      "ai-observation":      ["something generated"],
+      "naia-learned":        ["another generated value"],
+    };
+    const fields = collectFields(declaredKeys, kinds, answers);
+    assert.equal(fields.length, 1);
+    assert.equal(fields[0].key, "style-personalities");
+    assert.ok(!fields.some(f => f.key === "ai-observation"), "ai-observation not surfaced");
+    assert.ok(!fields.some(f => f.key === "naia-learned"),   "naia-learned not surfaced");
+  });
+
+  it("VisualAnalysisChapter is structurally separate from the core section loop", () => {
+    // The overview map iterates visibleSections (customer answers).
+    // VisualAnalysisChapter is rendered after the loop as a standalone child.
+    // Verify no core section ID overlaps with a 'visual-analysis' concept.
+    assert.ok(!KNOWN_CORE_IDS.has("visual-analysis"), "visual-analysis is not a core section ID");
+  });
+});

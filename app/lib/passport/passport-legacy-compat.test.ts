@@ -1256,7 +1256,7 @@ describe("V: Notes to nAia — overview editability", () => {
   it("V.B: overview renders ADD A NOTE when hasNote is false", () => {
     const ovIdx = passport.indexOf("// ── OVERVIEW");
     assert.ok(ovIdx !== -1, "OVERVIEW section comment must exist");
-    const ovBlock = passport.slice(ovIdx, ovIdx + 3500);
+    const ovBlock = passport.slice(ovIdx, ovIdx + 4200);
     assert.ok(
       ovBlock.includes('"ADD A NOTE"'),
       'Overview Notes section must include the "ADD A NOTE" string for the empty-state CTA',
@@ -1282,7 +1282,7 @@ describe("V: Notes to nAia — overview editability", () => {
   it("V.D: overview renders EDIT NOTE when hasNote is true", () => {
     const ovIdx = passport.indexOf("// ── OVERVIEW");
     assert.ok(ovIdx !== -1, "OVERVIEW section comment must exist");
-    const ovBlock = passport.slice(ovIdx, ovIdx + 3500);
+    const ovBlock = passport.slice(ovIdx, ovIdx + 4200);
     assert.ok(
       ovBlock.includes('"EDIT NOTE"'),
       'Overview Notes section must include the "EDIT NOTE" string for the filled-state CTA',
@@ -1293,7 +1293,7 @@ describe("V: Notes to nAia — overview editability", () => {
   it("V.E: Notes CTA calls editSection(\"notes\") — opens the existing flow editor", () => {
     const ovIdx = passport.indexOf("// ── OVERVIEW");
     assert.ok(ovIdx !== -1, "OVERVIEW section comment must exist");
-    const ovBlock = passport.slice(ovIdx, ovIdx + 3500);
+    const ovBlock = passport.slice(ovIdx, ovIdx + 4200);
     // The button onClick must call editSection("notes")
     assert.ok(
       ovBlock.includes('editSection("notes")'),
@@ -1390,7 +1390,7 @@ describe("V: Notes to nAia — overview editability", () => {
     );
     // The overview Notes CTA calls editSection, not startUpdate
     const ovIdx = passport.indexOf("// ── OVERVIEW");
-    const ovBlock = passport.slice(ovIdx, ovIdx + 3500);
+    const ovBlock = passport.slice(ovIdx, ovIdx + 4200);
     // Notes CTA now uses sp-btn-outline (was sp-ov-notes-cta — changed in Phase 5 polish)
     const addNoteIdx = ovBlock.indexOf('"ADD A NOTE"');
     assert.ok(addNoteIdx !== -1, "ADD A NOTE string must exist in overview");
