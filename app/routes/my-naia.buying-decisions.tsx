@@ -13,6 +13,31 @@ export function meta() {
   return [{ title: "My Decisions | nAia" }];
 }
 
+function buildOutcomeSummary(
+  outcome: { decision: string; postPurchaseOutcome: string | null } | null | undefined,
+): string | null {
+  if (!outcome) return null;
+  const DECISION: Record<string, string> = {
+    BOUGHT_IT:      "BOUGHT IT",
+    DIDNT_BUY_IT:   "DIDN'T BUY IT",
+    STILL_DECIDING: "STILL DECIDING",
+  };
+  const POST: Record<string, string> = {
+    LOVE_IT:     "LOVE IT",
+    ITS_OKAY:    "IT'S OKAY",
+    RETURNED_IT: "RETURNED IT",
+  };
+  const dLabel = DECISION[outcome.decision] ?? outcome.decision;
+  if (
+    outcome.decision === "BOUGHT_IT" &&
+    outcome.postPurchaseOutcome &&
+    POST[outcome.postPurchaseOutcome]
+  ) {
+    return `${dLabel} · ${POST[outcome.postPurchaseOutcome]}`;
+  }
+  return dLabel;
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const naiaCustomer = await requireCurrentNaiaCustomer(request);
 
@@ -28,6 +53,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       confidence: true,
       category: true,
       reasoning: true,
+      outcome: {
+        select: { decision: true, postPurchaseOutcome: true },
+      },
     },
   });
 
@@ -40,6 +68,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       confidence: a.confidence,
       category: a.category,
       reasoning: a.reasoning,
+      outcomeSummary: buildOutcomeSummary(a.outcome),
     })),
   });
 }
@@ -81,6 +110,11 @@ export default function BuyingDecisions() {
                 {d.category && <div className="bos-decision-category">{d.category}</div>}
                 {typeof d.confidence === "number" && d.confidence > 0 && (
                   <div className="bos-decision-confidence">{d.confidence}% confidence</div>
+                )}
+                {d.outcomeSummary && (
+                  <div className="bos-decision-outcome" data-testid="bos-decision-outcome">
+                    {d.outcomeSummary}
+                  </div>
                 )}
                 <div className="bos-decision-date">
                   {new Date(d.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}

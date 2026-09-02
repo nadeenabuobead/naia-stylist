@@ -2363,6 +2363,27 @@ a.mn-action:focus-visible,
 .bos-better-direction-btn { display: inline-block; font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; padding: 12px 24px; border: 1px solid var(--naia-ink); color: var(--naia-ink); text-decoration: none; transition: background 0.18s, color 0.18s; }
 .bos-better-direction-btn:hover { background: var(--naia-ink); color: var(--naia-bg); }
 
+/* ── Buy/Skip Outcome (Phase B) ──────────────────────────────────────────── */
+.bos-outcome { border-top: 1px solid var(--naia-border); padding: 24px 0 16px; }
+.bos-outcome-q { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--naia-muted); margin-bottom: 16px; }
+.bos-outcome-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.bos-outcome-option { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; padding: 10px 18px; border: 1px solid var(--naia-border-mid); background: transparent; color: var(--naia-ink); cursor: pointer; transition: border-color 0.14s, background 0.14s; }
+.bos-outcome-option:hover { border-color: var(--naia-ink); }
+.bos-outcome-option--selected { border-color: var(--naia-ink); background: var(--naia-surface); }
+.bos-outcome-followup { margin-top: 16px; }
+.bos-outcome-followup-q { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--naia-muted); margin-bottom: 12px; }
+.bos-outcome-save-row { display: flex; align-items: center; gap: 16px; margin-top: 20px; }
+.bos-outcome-saved-msg { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--naia-muted); }
+.bos-outcome-error-msg { font-family: var(--naia-ff-body); font-size: 12px; color: var(--naia-accent); }
+.bos-outcome-summary { display: flex; flex-direction: column; gap: 6px; }
+.bos-outcome-summary-decision { font-family: var(--naia-ff-ui); font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--naia-ink); }
+.bos-outcome-summary-post { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--naia-muted); }
+.bos-outcome-summary-saved { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--naia-muted); margin-top: 2px; }
+.bos-outcome-edit-btn { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; background: none; border: none; color: var(--naia-muted); cursor: pointer; padding: 0; margin-top: 8px; text-decoration: underline; text-underline-offset: 3px; }
+.bos-outcome-edit-btn:hover { color: var(--naia-ink); }
+/* Buying Decisions outcome label */
+.bos-decision-outcome { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--naia-muted); margin-top: 2px; }
+
 @media (max-width: 640px) {
   .bos-source-grid { grid-template-columns: 1fr; }
   .bos-upload-row { grid-template-columns: 1fr; }
