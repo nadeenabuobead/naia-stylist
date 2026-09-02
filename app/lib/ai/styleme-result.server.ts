@@ -111,6 +111,7 @@ export function buildEngineInput(params: {
   recentlyShownHandles?: string[];
   // Rev 3 — Psychology-First wording context (Group 5). Zero engine scoring.
   state?: string;
+  stateOtherText?: string; // free text when state === "other"; context only
   intentions?: string[];
 }): StyleMeEngineInput {
   return {
@@ -125,6 +126,7 @@ export function buildEngineInput(params: {
       practicalIds: params.practicalIds,
       source: params.source,
       ...(params.state !== undefined && { state: params.state }),
+      ...(params.stateOtherText !== undefined && { stateOtherText: params.stateOtherText }),
       ...(params.intentions !== undefined && { intentions: params.intentions }),
     },
     profile: params.profile,
@@ -442,6 +444,7 @@ async function callClaudeForWording(
   styleSupport: string[],
   finalNotes: string | null | undefined,
   anchor?: { label: string | null; slot: string | null; colors: string[] } | null,
+  stateOtherText?: string | null,
 ): Promise<StyleMeWording | null> {
   const occasionLabel = occasion.replace(/-/g, " ");
   const moodStr = moods.join(", ");
@@ -490,6 +493,7 @@ async function callClaudeForWording(
             role: "user",
             content:
               `Write wording for a styling result. The customer is feeling: ${moodStr}. ` +
+              (stateOtherText ? `The customer described their current state as: "${stateOtherText}". ` : "") +
               `Desired feeling: ${feelingStr}. Occasion: ${occasionLabel}. ${context}` +
               (completionContext ? completionContext : "") +
               (anchorContext ? anchorContext : "") +
@@ -1343,6 +1347,7 @@ export async function computeStyleMeResult(
     engineInput.profile?.styleSupport ?? [],
     engineInput.profile?.finalNotes ?? null,
     anchorSummary,
+    session.state === "other" ? (session.stateOtherText ?? null) : null,
   );
 
   const wording =

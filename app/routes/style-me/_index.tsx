@@ -1,5 +1,6 @@
-import { Link, useLoaderData } from "react-router";
-import { data, type LoaderFunctionArgs, type LinksFunction } from "react-router";
+import { Form, Link, useLoaderData } from "react-router";
+import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs, type LinksFunction } from "react-router";
+import { clearStyleMeSession } from "~/lib/session.server";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { prisma } from "~/lib/prisma.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -23,6 +24,13 @@ const OCCASION_LABELS: Record<string, string> = {
   "girls-night": "Girls' night", "family": "Family", "special-event": "Special event",
   "travel": "Travel", "not-sure": "Not sure yet",
 };
+
+export async function action({ request }: ActionFunctionArgs) {
+  const clearedCookie = await clearStyleMeSession(request);
+  return redirect("/style-me/state", {
+    headers: { "Set-Cookie": clearedCookie },
+  });
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await getCurrentNaiaCustomer(request);
@@ -99,7 +107,9 @@ export default function StyleMeIndex() {
             nAia will build a complete look for you.
           </p>
           <div className="sml-start-actions">
-            <Link to="/style-me/state" className="sp-btn-primary">Start StyleMe</Link>
+            <Form method="post">
+              <button type="submit" className="sp-btn-primary">Start StyleMe</button>
+            </Form>
           </div>
         </div>
       </section>

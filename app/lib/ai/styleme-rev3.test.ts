@@ -1244,10 +1244,10 @@ describe("R3.21 — State UI: exact 10 approved IDs and labels", () => {
     "not-feeling-like-myself":    "I don't really feel like myself",
     "physically-uncomfortable":   "Physically uncomfortable",
     "self-conscious":             "Self-conscious",
-    "going-through-change":       "I'm going through a change / something",
+    "going-through-change":       "I'm going through something",
     "want-reset":                 "I want a reset",
     "nothing-in-particular":      "Nothing in particular",
-    "other":                      "Something else",
+    "other":                      "Other",
   };
 
   for (const id of APPROVED_STATE_IDS) {
@@ -1340,7 +1340,7 @@ describe("R3.23 — Physical Need UI: exact 8 approved IDs, correct labels", () 
 
   const APPROVED_LABELS: Record<string, string> = {
     "nothing-tight-waist":   "Nothing tight around my waist",
-    "less-body-conscious":   "Less body-conscious",
+    "less-body-conscious":   "Nothing too body-hugging",
     "more-coverage":         "More coverage",
     "softer-easier-fabrics": "Softer / easier fabrics",
     "loose-comfortable":     "Loose and comfortable",
@@ -1384,7 +1384,7 @@ describe("R3.24 — Occasion UI: exactly 9 approved Rev 3 customer-facing IDs", 
   const occasionSrc = readFileSync(join(ROOT, "app/routes/style-me/occasion.tsx"), "utf8");
 
   const APPROVED_OCCASION_IDS = [
-    "work", "dinner", "date", "everyday", "event", "family", "travel", "active-busy-day", "other",
+    "work", "dinner", "date", "everyday", "event", "family", "travel", "active-busy-day",
   ];
 
   for (const id of APPROVED_OCCASION_IDS) {
@@ -1426,10 +1426,8 @@ describe("R3.25 — Source UI: exactly 4 approved Rev 3 customer choices", () =>
   const sourceSrc = readFileSync(join(ROOT, "app/routes/style-me/source.tsx"), "utf8");
 
   const APPROVED_SOURCE_LABELS = [
-    "Only My Closet",
-    "My Closet + suggestions if genuinely useful",
-    "Style one specific piece",
-    "Start with something new",
+    "ONLY MY CLOSET",
+    "MY CLOSET + BRANDS",
   ];
 
   for (const label of APPROVED_SOURCE_LABELS) {
@@ -1438,11 +1436,11 @@ describe("R3.25 — Source UI: exactly 4 approved Rev 3 customer choices", () =>
     });
   }
 
-  it("source UI has exactly 4 REV3_SOURCE_OPTIONS", () => {
+  it("source UI has exactly 2 REV3_SOURCE_OPTIONS", () => {
     const match = sourceSrc.match(/REV3_SOURCE_OPTIONS\s*=\s*\[[\s\S]*?\];/);
     assert.ok(match, "REV3_SOURCE_OPTIONS must be defined");
     const countIds = (match![0].match(/id:/g) ?? []).length;
-    assert.equal(countIds, 4, "REV3_SOURCE_OPTIONS must have exactly 4 entries");
+    assert.equal(countIds, 2, "REV3_SOURCE_OPTIONS must have exactly 2 entries");
   });
 });
 

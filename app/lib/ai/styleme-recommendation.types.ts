@@ -61,6 +61,7 @@ export interface StyleMeSessionInput {
   source: "naia-piece" | "my-closet" | "both";
   // Rev 3 — Psychology-First (Group 5). Wording context only; zero product scoring.
   state?: string;
+  stateOtherText?: string; // free text when state === "other"; context only
   intentions?: string[];
 }
 

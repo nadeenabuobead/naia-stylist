@@ -204,6 +204,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     // Rev 3 — Psychology-First. Read new keys first; fall back to legacy.
     const rev3State = (cookieSession.get("styleMeState") as string | undefined) ?? null;
+    const rev3StateOtherText = rev3State === "other"
+      ? ((cookieSession.get("styleMeStateOtherText") as string | undefined) ?? null)
+      : null;
     const rev3IntentionsRaw = cookieSession.get("styleMeIntentions") as string | undefined;
     const rev3Intentions: string[] = rev3IntentionsRaw
       ? (Array.isArray(rev3IntentionsRaw) ? rev3IntentionsRaw : (() => { try { return JSON.parse(rev3IntentionsRaw); } catch { return []; } })())
@@ -211,7 +214,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const mood = cookieSession.get("styleMeMood") as string | undefined;
     const feelings = cookieSession.get("styleMeFeelings") as string[] | undefined;
-    const bodyNeeds = cookieSession.get("styleMeBodyNeeds") as string[] | undefined;
+    // styleMeBodyNeeds is stored as JSON.stringify(array) — parse it back to a real string[].
+    // The Array.isArray guard handles any session that stored the value directly.
+    const _bodyNeedsStored = cookieSession.get("styleMeBodyNeeds") as string | string[] | undefined;
+    const bodyNeeds: string[] | undefined = _bodyNeedsStored == null ? undefined
+      : Array.isArray(_bodyNeedsStored) ? _bodyNeedsStored
+      : (() => { try { return JSON.parse(_bodyNeedsStored) as string[]; } catch { return undefined; } })();
     const practicalIds = (cookieSession.get("styleMePractical") as string[] | undefined) ?? [];
     const occasion = cookieSession.get("styleMeOccasion") as string | undefined;
     const formalityConditional = (cookieSession.get("styleMeFormalityConditional") as string | undefined) ?? null;
@@ -292,6 +300,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         error: null,
         // Rev 3 — Psychology-First (Group 5)
         rev3State: rev3State ?? null,
+        rev3StateOtherText: rev3StateOtherText ?? null,
         rev3Intentions,
       },
       { headers: { "Set-Cookie": await commitSession(cookieSession) } }
@@ -335,6 +344,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
       // Rev 3 — Psychology-First (Group 5)
       const rev3StateAction = (formData.get("rev3State") as string) || null;
+      const rev3StateOtherTextAction = (formData.get("rev3StateOtherText") as string) || null;
       const rev3IntentionsRawAction = formData.get("rev3Intentions") as string | null;
       const rev3IntentionsAction: string[] = rev3IntentionsRawAction
         ? (() => { try { return JSON.parse(rev3IntentionsRawAction); } catch { return []; } })()
@@ -468,6 +478,10 @@ export async function action({ request }: ActionFunctionArgs) {
         ...(isRev3Generate && {
           state: rev3StateAction ?? session.state ?? undefined,
           intentions: rev3IntentionsAction,
+          // stateOtherText: only when state === "other"; context only, zero scoring
+          ...((rev3StateAction ?? session.state) === "other" && rev3StateOtherTextAction
+            ? { stateOtherText: rev3StateOtherTextAction }
+            : {}),
         }),
         anchor,
       });
@@ -888,6 +902,7 @@ interface StyleMeGenerationLoaderData {
   closetAnchorId: string | null;
   // Rev 3 — Psychology-First (Group 5)
   rev3State?: string | null;
+  rev3StateOtherText?: string | null;
   rev3Intentions?: string[];
 }
 
@@ -953,6 +968,7 @@ export default function StyleMeResult() {
           closetAnchorId: generationData.closetAnchorId ?? "",
           // Rev 3 — Psychology-First (Group 5). Empty string = legacy session.
           rev3State: (generationData as any).rev3State ?? "",
+          rev3StateOtherText: (generationData as any).rev3StateOtherText ?? "",
           rev3Intentions: JSON.stringify((generationData as any).rev3Intentions ?? []),
         },
         { method: "post" },

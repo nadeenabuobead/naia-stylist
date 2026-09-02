@@ -65,6 +65,10 @@ export async function action({ request }: ActionFunctionArgs) {
   // nothing-specific is exclusive
   const selected = raw.includes(EXCLUSIVE_ID) ? [EXCLUSIVE_ID] : raw;
 
+  if (selected.length === 0) {
+    return { error: "Please choose at least one physical need, or choose 'Nothing specific'." };
+  }
+
   if (selected.length > MAX_SELECTIONS) {
     return { error: `Please choose up to ${MAX_SELECTIONS} physical needs.` };
   }
@@ -100,7 +104,7 @@ export default function PhysicalNeedPage() {
     <SmPage step={3}>
       <p className="sm-step-label">Physical Comfort</p>
       <h1 className="sm-heading">Any physical comfort needs right now?</h1>
-      <p className="sm-sub">Choose up to {MAX_SELECTIONS}, or skip.</p>
+      <p className="sm-sub">Choose up to {MAX_SELECTIONS}.</p>
 
       <Form method="post">
         <div className="sm-pills">
@@ -120,7 +124,7 @@ export default function PhysicalNeedPage() {
         ))}
         <div className="sm-step-buttons">
           <Link to="/style-me/intention" className="sm-btn-back">← Back</Link>
-          <SmContinue />
+          <SmContinue disabled={selected.length === 0} />
         </div>
       </Form>
     </SmPage>
