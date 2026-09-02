@@ -269,13 +269,19 @@ describe("CPL-F — CTA subtitle is exactly 'Your Style Passport has been saved.
   });
 });
 
-// ── G: destination route is unchanged ───────────────────────────────────────
+// ── G: destination route is /passport ───────────────────────────────────────
 
-describe("CPL-G — Style Passport CTA destination route is unchanged", () => {
-  it("CTA links to /my-naia (unchanged)", () => {
+describe("CPL-G — Style Passport CTA destination is /passport", () => {
+  it("CTA links to /passport", () => {
     assert.ok(
-      complete.includes('href="/my-naia"'),
-      "Style Passport CTA must still link to /my-naia",
+      complete.includes('href="/passport"'),
+      "Style Passport CTA must link to /passport",
+    );
+  });
+  it("CTA does not link to /my-naia", () => {
+    assert.ok(
+      !complete.includes('href="/my-naia"'),
+      "Style Passport CTA must not link to /my-naia",
     );
   });
 });
@@ -293,6 +299,162 @@ describe("CPL-P — StyleMe CTA subtitle uses Rev 3 copy", () => {
     assert.ok(
       !complete.includes("Get outfit ideas based on your mood"),
       "old 'Get outfit ideas based on your mood' subtitle must not appear",
+    );
+  });
+});
+
+// ── Rev 6 completion page regression tests (CPL-R6-A through CPL-R6-K) ──────
+
+describe("CPL-R6-A — Rev 6 completion page has only one Closet CTA", () => {
+  it("Digital Closet action-title card is gated on !isRev6 so Rev 6 sees only the show-nAia card", () => {
+    const ctasIdx = complete.indexOf("{/* CTAs */}");
+    assert.ok(ctasIdx !== -1, "CTAs section comment must be present");
+    const ctasBlock = complete.slice(ctasIdx, ctasIdx + 2500);
+    // ">Digital Closet<" targets the JSX text node, not the comment
+    const guardIdx      = ctasBlock.indexOf("!isRev6 &&");
+    const closetCardIdx = ctasBlock.indexOf(">Digital Closet<");
+    assert.ok(guardIdx !== -1, "!isRev6 guard must be present in CTAs block");
+    assert.ok(closetCardIdx !== -1, "'Digital Closet' action-title element must be present (for legacy users)");
+    assert.ok(guardIdx < closetCardIdx, "!isRev6 guard must appear before the Digital Closet action-title element");
+  });
+});
+
+describe("CPL-R6-B — Digital Closet duplicate CTA is absent for Rev 6", () => {
+  it("Digital Closet card is wrapped in {!isRev6 && ...}", () => {
+    assert.ok(
+      complete.includes("hidden for Rev 6 to avoid duplicate Closet CTA"),
+      "Digital Closet comment must confirm the Rev 6 hide intent",
+    );
+    // The !isRev6 && guard must precede the Digital Closet action-title element
+    const ctasIdx = complete.indexOf("{/* CTAs */}");
+    const ctasBlock = complete.slice(ctasIdx, ctasIdx + 2500);
+    const guardIdx      = ctasBlock.indexOf("!isRev6 &&");
+    const actionTitleIdx = ctasBlock.indexOf(">Digital Closet<");
+    assert.ok(guardIdx < actionTitleIdx, "!isRev6 && must appear before the Digital Closet action-title element in CTAs block");
+  });
+});
+
+describe("CPL-R6-C — Closet CTA uses approved 'Show nAia what you actually wear' copy", () => {
+  it("show-nAia card title is 'Show nAia what you actually wear'", () => {
+    assert.ok(
+      complete.includes("Show nAia what you actually wear"),
+      "Closet CTA must say 'Show nAia what you actually wear'",
+    );
+  });
+  it("old 'Now show nAia what you actually wear.' title is removed", () => {
+    assert.ok(
+      !complete.includes("Now show nAia what you actually wear."),
+      "old 'Now show nAia...' title must not appear",
+    );
+  });
+  it("Rev 6 subtitle says 'Add pieces to your Closet so nAia can learn from your real wardrobe.'", () => {
+    assert.ok(
+      complete.includes("Add pieces to your Closet so nAia can learn from your real wardrobe."),
+      "Rev 6 Closet subtitle must use the approved copy",
+    );
+  });
+});
+
+describe("CPL-R6-D — Closet CTA destination is /closet", () => {
+  it("Closet CTA links to /closet", () => {
+    assert.ok(
+      complete.includes('href="/closet"'),
+      "Closet CTA must link to /closet",
+    );
+  });
+});
+
+describe("CPL-R6-E — StyleMe CTA does not use mood terminology", () => {
+  it("StyleMe subtitle does not mention mood", () => {
+    assert.ok(
+      !complete.includes("based on your mood"),
+      "StyleMe CTA must not use mood-based subtitle",
+    );
+  });
+  it("StyleMe subtitle says 'Get outfit ideas based on what you need today.'", () => {
+    assert.ok(
+      complete.includes("Get outfit ideas based on what you need today."),
+      "StyleMe CTA must use the current non-mood subtitle",
+    );
+  });
+});
+
+describe("CPL-R6-F — Passport CTA says 'View your Style Passport'", () => {
+  it("source contains 'View your Style Passport'", () => {
+    assert.ok(
+      complete.includes("View your Style Passport"),
+      "Passport CTA must say 'View your Style Passport'",
+    );
+  });
+});
+
+describe("CPL-R6-G — Passport CTA destination is exactly /passport", () => {
+  it("source contains href='/passport'", () => {
+    assert.ok(
+      complete.includes('href="/passport"'),
+      "Passport CTA must link to /passport",
+    );
+  });
+});
+
+describe("CPL-R6-H — Passport CTA does not go to /my-naia", () => {
+  it("source does not contain href='/my-naia'", () => {
+    assert.ok(
+      !complete.includes('href="/my-naia"'),
+      "Passport CTA must not link to /my-naia",
+    );
+  });
+});
+
+describe("CPL-R6-I — 'Style DNA' terminology is absent", () => {
+  it("source does not contain 'Style DNA'", () => {
+    assert.ok(
+      !complete.includes("Style DNA"),
+      "'Style DNA' must not appear anywhere in complete.tsx",
+    );
+  });
+});
+
+describe("CPL-R6-J — First Read remains present", () => {
+  it("computeNaiaFirstRead is called on the completion page", () => {
+    assert.ok(
+      complete.includes("computeNaiaFirstRead"),
+      "completion page must call computeNaiaFirstRead",
+    );
+  });
+  it("First Read label is present in the UI", () => {
+    assert.ok(
+      complete.includes("first read"),
+      "First Read label must appear in the rendered UI",
+    );
+  });
+});
+
+describe("CPL-R6-K — completion page is not an editable Passport dashboard", () => {
+  it("source does not contain form or input elements", () => {
+    assert.ok(
+      !complete.includes("<form"),
+      "completion page must not contain a <form> element",
+    );
+    assert.ok(
+      !complete.includes("<input"),
+      "completion page must not contain an <input> element",
+    );
+  });
+  it("sections 3 and 4 (colour, lifestyle) are gated on !isRev6", () => {
+    const sec3Comment = complete.indexOf("/* 3 —");
+    const sec4Comment = complete.indexOf("/* 4 —");
+    assert.ok(sec3Comment !== -1, "section 3 comment must exist");
+    assert.ok(sec4Comment !== -1, "section 4 comment must exist");
+    const sec3Block = complete.slice(sec3Comment, sec3Comment + 120);
+    const sec4Block = complete.slice(sec4Comment, sec4Comment + 120);
+    assert.ok(sec3Block.includes("!isRev6"), "section 3 (colours) must be gated on !isRev6");
+    assert.ok(sec4Block.includes("!isRev6"), "section 4 (lifestyle/fit) must be gated on !isRev6");
+  });
+  it("Rev 6 headline is 'Your Style Passport is ready.'", () => {
+    assert.ok(
+      complete.includes("Your Style Passport is ready."),
+      "Rev 6 must show 'Your Style Passport is ready.' headline",
     );
   });
 });

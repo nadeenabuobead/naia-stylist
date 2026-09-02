@@ -458,23 +458,32 @@ export default function OnboardingComplete() {
       )}
 
       <main className="cp-main">
-        <div className="cp-eyebrow">Your nAia Passport</div>
-
-        {/* 1 — Style identity */}
-        {identity && (
+        {isRev6 ? (
           <>
-            <h1 className="cp-headline">{identity.title}</h1>
-            <p className="cp-desc">{identity.description}</p>
+            <div className="cp-eyebrow">Style Passport</div>
+            <h1 className="cp-headline">Your Style Passport is ready.</h1>
+            <p className="cp-desc">nAia now has a starting point for your style.</p>
           </>
-        )}
-        {personalities.length > 0 && (
+        ) : (
           <>
-            <div className="cp-section-label">Style energies</div>
-            <div className="cp-pills">
-              {personalities.map(id => (
-                <span key={id} className="cp-pill">{lbl("style-personalities", id)}</span>
-              ))}
-            </div>
+            <div className="cp-eyebrow">Your nAia Passport</div>
+            {/* 1 — Style identity */}
+            {identity && (
+              <>
+                <h1 className="cp-headline">{identity.title}</h1>
+                <p className="cp-desc">{identity.description}</p>
+              </>
+            )}
+            {personalities.length > 0 && (
+              <>
+                <div className="cp-section-label">Style energies</div>
+                <div className="cp-pills">
+                  {personalities.map(id => (
+                    <span key={id} className="cp-pill">{lbl("style-personalities", id)}</span>
+                  ))}
+                </div>
+              </>
+            )}
           </>
         )}
 
@@ -505,8 +514,8 @@ export default function OnboardingComplete() {
           </>
         )}
 
-        {/* 3 — Colour direction and colours to avoid */}
-        {(favColors.length > 0 || avoidColors.length > 0) && (
+        {/* 3 — Colour direction and colours to avoid (legacy only — hidden for Rev 6) */}
+        {!isRev6 && (favColors.length > 0 || avoidColors.length > 0) && (
           <>
             <div className="cp-divider" />
             {favColors.length > 0 && (
@@ -538,8 +547,8 @@ export default function OnboardingComplete() {
           </>
         )}
 
-        {/* 4 — Lifestyle and fit */}
-        {(lifestyle.length > 0 || fitPrefs.length > 0) && (
+        {/* 4 — Lifestyle and fit (legacy only — hidden for Rev 6) */}
+        {!isRev6 && (lifestyle.length > 0 || fitPrefs.length > 0) && (
           <>
             <div className="cp-divider" />
             {lifestyle.length > 0 && (
@@ -680,7 +689,9 @@ export default function OnboardingComplete() {
         )}
 
         {/* CTAs */}
-        <div className="cp-section-label">What would you like to do first?</div>
+        <div className="cp-section-label">
+          {isRev6 ? "What would you like to do next?" : "What would you like to do first?"}
+        </div>
 
         <a href="/style-me" className="cp-action">
           <div>
@@ -690,21 +701,24 @@ export default function OnboardingComplete() {
           <span className="cp-arrow">→</span>
         </a>
 
-        <a href="/closet" className="cp-action">
-          <div>
-            <div className="cp-action-title">Digital Closet</div>
-            <div className="cp-action-sub">Upload your pieces for personalised styling</div>
-          </div>
-          <span className="cp-arrow">→</span>
-        </a>
+        {/* Digital Closet card — legacy only; hidden for Rev 6 to avoid duplicate Closet CTA */}
+        {!isRev6 && (
+          <a href="/closet" className="cp-action">
+            <div>
+              <div className="cp-action-title">Digital Closet</div>
+              <div className="cp-action-sub">Upload your pieces for personalised styling</div>
+            </div>
+            <span className="cp-arrow">→</span>
+          </a>
+        )}
 
-        <a href="/my-naia" className="cp-action">
+        <a href="/passport" className="cp-action">
           <div>
             <div className="cp-action-title">
-              {saveStatus === "saved" ? "View your Style Passport" : "Go to My nAia"}
+              {isRev6 || saveStatus === "saved" ? "View your Style Passport" : "Go to My nAia"}
             </div>
             <div className="cp-action-sub">
-              {saveStatus === "saved" ? "Your Style Passport has been saved." : "Explore all features"}
+              {isRev6 || saveStatus === "saved" ? "Your Style Passport has been saved." : "Explore all features"}
             </div>
           </div>
           <span className="cp-arrow">→</span>
@@ -720,11 +734,16 @@ export default function OnboardingComplete() {
           </a>
         )}
 
-        {saveStatus === "saved" && (
+        {/* Closet CTA — Rev 6: always visible; legacy: only when saved */}
+        {(isRev6 || saveStatus === "saved") && (
           <a href="/closet" className="cp-action" style={{ borderColor: "var(--accent)" }}>
             <div>
-              <div className="cp-action-title">Now show nAia what you actually wear.</div>
-              <div className="cp-action-sub">Add pieces to your closet so nAia can read your real style</div>
+              <div className="cp-action-title">Show nAia what you actually wear</div>
+              <div className="cp-action-sub">
+                {isRev6
+                  ? "Add pieces to your Closet so nAia can learn from your real wardrobe."
+                  : "Add pieces to your closet so nAia can read your real style"}
+              </div>
             </div>
             <span className="cp-arrow">→</span>
           </a>
