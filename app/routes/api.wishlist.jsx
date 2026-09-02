@@ -391,7 +391,30 @@ PERSONALIZATION MANDATE
 - BUY: every positive claim must cite a Passport or form field. Name the style personality, reference the lifestyle occasions, apply fit preferences and colour palette. No praise that applies to any customer.
 - SKIP FOR NOW / SKIP: every blocker must cite a Passport or form field. "Your Passport shows you prefer… so this item…" is the required structure.` : "No style profile on record — give a general analysis."}
 
-CUSTOMER'S INPUTS:
+${(() => {
+  const CURRENT_GOAL_CONTEXT = {
+    "understand-my-style":        "understand her personal style better",
+    "feel-more-like-myself":      "feel more like herself when dressed",
+    "use-what-i-own":             "make the most of what she already owns — avoid adding more without a genuine gap",
+    "easier-getting-dressed":     "make getting dressed easier and faster",
+    "stop-regret-purchases":      "stop buying things she ends up not wearing",
+    "more-cohesive-wardrobe":     "build a more cohesive wardrobe",
+    "dress-for-my-life":          "dress better for her actual life and occasions",
+    "refresh-my-style":           "refresh her style",
+    "specific-event-trip-change": "dress well for a specific event, trip, or life change",
+  };
+  const goals = (styleProfile?.currentGoal ?? [])
+    .filter(id => id !== "not-sure-yet" && CURRENT_GOAL_CONTEXT[id]);
+  if (goals.length === 0) return "";
+  const labels = goals.map(id => CURRENT_GOAL_CONTEXT[id]);
+  const goalLine = labels.length === 1 ? labels[0] : labels.slice(0, -1).join(", ") + " and " + labels[labels.length - 1];
+  return `CURRENT FOCUS — what she is actively working on right now:
+She wants to ${goalLine}.
+→ Let this inform the direction and framing of your reasoning — not override the item evidence. Weight the questions most relevant to this focus: e.g. if she wants to stop regret purchases, be more attentive to lifestyle fit, redundancy with existing items, and fit uncertainty. If she wants to use what she owns, assess whether this item fills a genuine gap not already covered by her Closet.
+→ Do NOT use CURRENT FOCUS to generate an automatic BUY or SKIP. The verdict must come from the item + Passport + Closet evidence.
+
+`;
+})()}CUSTOMER'S INPUTS:
 
 OCCASION: ${safeOccasion || "(not provided)"}
 ${safeOccasion ? `→ Does this item suit "${safeOccasion}"? One concrete reason referencing the item's formality and that occasion's dress code. If yes, one styling tip. If no, what adjustment would help.` : "→ Suggest the most suitable occasions given this customer's actual lifestyle contexts."}
@@ -649,6 +672,94 @@ Respond ONLY with valid JSON, no markdown:
 }
 
 
+// OUTCOME ACTION — record or update what the customer decided
+// Client sends kebab-case values; server maps them to DB enums.
+// Ownership is enforced: analysis must belong to the authenticated customer.
+// No Profile or Closet fields are mutated — outcome is customer-reported evidence only.
+
+const DECISION_MAP = {
+  "bought-it":      "BOUGHT_IT",
+  "didnt-buy-it":   "DIDNT_BUY_IT",
+  "still-deciding": "STILL_DECIDING",
+};
+
+const POST_OUTCOME_MAP = {
+  "love-it":     "LOVE_IT",
+  "its-okay":    "ITS_OKAY",
+  "returned-it": "RETURNED_IT",
+};
+
+async function recordOutcome(request) {
+  // ── 1. Auth — session only ─────────────────────────────────────────────────
+  const naiaCustomer = await getCurrentNaiaCustomer(request);
+  if (!naiaCustomer) {
+    return json({ error: "not_authenticated" }, { status: 401 });
+  }
+  if (naiaCustomer.shopifyCustomerId === "guest") {
+    return json({ error: "not_authenticated" }, { status: 401 });
+  }
+
+  // ── 2. Parse body ──────────────────────────────────────────────────────────
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid_body", message: "Request body must be valid JSON." }, { status: 400 });
+  }
+
+  // analysisId and decision are from the body; customerId is never accepted from the client.
+  const { analysisId, decision, postPurchaseOutcome } = body;
+
+  // ── 3. Validate analysisId ─────────────────────────────────────────────────
+  if (!analysisId || typeof analysisId !== "string" || analysisId.trim().length === 0) {
+    return json({ error: "invalid_input", message: "analysisId is required." }, { status: 400 });
+  }
+
+  // ── 4. Validate decision ───────────────────────────────────────────────────
+  const dbDecision = DECISION_MAP[decision];
+  if (!dbDecision) {
+    return json({ error: "invalid_decision", message: `Invalid decision: "${decision}". Must be one of bought-it, didnt-buy-it, still-deciding.` }, { status: 400 });
+  }
+
+  // ── 5. Validate postPurchaseOutcome ────────────────────────────────────────
+  let dbPostOutcome = null;
+  if (postPurchaseOutcome !== undefined && postPurchaseOutcome !== null) {
+    if (dbDecision !== "BOUGHT_IT") {
+      return json({ error: "invalid_input", message: "postPurchaseOutcome is only valid with decision 'bought-it'." }, { status: 400 });
+    }
+    dbPostOutcome = POST_OUTCOME_MAP[postPurchaseOutcome];
+    if (!dbPostOutcome) {
+      return json({ error: "invalid_post_outcome", message: `Invalid postPurchaseOutcome: "${postPurchaseOutcome}". Must be one of love-it, its-okay, returned-it.` }, { status: 400 });
+    }
+  }
+
+  // ── 6. Ownership check — load analysis owned by this customer ──────────────
+  // Never trust customerId from the client. Ownership is derived through the analysis.
+  const analysis = await prisma.buyOrSkipAnalysis.findUnique({
+    where: { id: analysisId.trim() },
+    select: { id: true, customerId: true },
+  });
+
+  if (!analysis) {
+    return json({ error: "not_found", message: "Analysis not found." }, { status: 404 });
+  }
+
+  if (analysis.customerId !== naiaCustomer.id) {
+    return json({ error: "forbidden", message: "Access denied." }, { status: 403 });
+  }
+
+  // ── 7. Upsert outcome (create first time; update on repeat) ───────────────
+  // analysisId is unique — one outcome per analysis, no duplicate rows.
+  const outcome = await prisma.buySkipOutcome.upsert({
+    where:  { analysisId: analysis.id },
+    create: { analysisId: analysis.id, decision: dbDecision, postPurchaseOutcome: dbPostOutcome },
+    update: { decision: dbDecision, postPurchaseOutcome: dbPostOutcome },
+  });
+
+  return json({ success: true, outcomeId: outcome.id });
+}
+
+
 // DEPRECATED loader — Batch 1 (2026-07-29)
 // WishlistItem model does not exist in schema.prisma; this loader crashed with P2021.
 // Saved Looks (style-me/result.tsx intent=save) is the current nAia-owned save mechanism.
@@ -668,6 +779,9 @@ export async function action({ request }) {
   const url = new URL(request.url);
   if (url.searchParams.get("action") === "analyze") {
     return analyzeItem(request);
+  }
+  if (url.searchParams.get("action") === "outcome") {
+    return recordOutcome(request);
   }
   
   if (request.method === "OPTIONS") {

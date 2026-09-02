@@ -432,6 +432,21 @@ model BuyOrSkipAnalysis {
   // S0 — private Cloudinary asset reference (replaces public imageUrl for new analyses)
   imagePublicId String?  // Cloudinary public ID (naia-wardrobe/{customerId}/...)
   imageFormat   String?  // Format stored for signed URL generation (jpg, png, webp, heic)
+
+  // V1 Outcome — customer-reported decision (zero or one per analysis)
+  outcome       BuySkipOutcome?
+}
+
+// Customer-reported outcome for one BuyOrSkipAnalysis.
+// Ownership is derived through the parent analysis — customerId is never duplicated here.
+model BuySkipOutcome {
+  id                  String              @id @default(cuid())
+  analysisId          String              @unique
+  analysis            BuyOrSkipAnalysis   @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  decision            BuySkipDecision
+  postPurchaseOutcome BuySkipPostOutcome?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
 }
 
 enum BuySkipVerdict {
@@ -439,6 +454,18 @@ enum BuySkipVerdict {
   SKIP
   MAYBE
   INCOMPLETE
+}
+
+enum BuySkipDecision {
+  BOUGHT_IT
+  DIDNT_BUY_IT
+  STILL_DECIDING
+}
+
+enum BuySkipPostOutcome {
+  LOVE_IT
+  ITS_OKAY
+  RETURNED_IT
 }
 
 // ============================================
