@@ -81,15 +81,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
       prisma.closetItem.count({ where: { customerId } }),
     ]);
 
+  const p = customer.onboardingProfile;
+  // VIEW only when profileVersion=6 (atomically set on Rev 6 onboarding/refresh completion).
+  // Legacy customers (completed=true, profileVersion=null) → CONTINUE (need refresh).
+  const passportState: "start" | "continue" | "view" =
+    !p ? "start"
+    : (p as any).profileVersion === 6 ? "view"
+    : "continue";
+
   return {
     firstName: customer.firstName ?? null,
-    profile: customer.onboardingProfile,
+    profile: p,
     sessions, trendReport, buyOrSkipHistory, reviewCount, closetCount,
+    passportState,
   };
 }
 
 export default function MyNaiaOverview() {
-  const { firstName, profile, sessions, trendReport, buyOrSkipHistory, reviewCount, closetCount } =
+  const { firstName, profile, sessions, trendReport, buyOrSkipHistory, reviewCount, closetCount, passportState } =
     useLoaderData<typeof loader>();
 
   const quote = getDailyQuote();
@@ -152,6 +161,60 @@ export default function MyNaiaOverview() {
                 </svg>
               </Link>
             </div>
+          </div>
+        </section>
+
+        {/* Style Passport CTA — three states */}
+        <section className="mn-section">
+          <div className="mn-section-head">
+            <div className="mn-eyebrow">Your Style Passport</div>
+          </div>
+          <div className="mn-section-body">
+            {passportState === "start" && (
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontSize: "0.95rem", lineHeight: 1.625, color: "var(--fg-90, var(--fg))", marginBottom: "0.375rem" }}>
+                    nAia builds every recommendation from your Style Passport.
+                  </div>
+                  <p style={{ fontSize: "0.82rem", color: "var(--fg-55)", lineHeight: 1.625 }}>
+                    Answer a few questions so nAia knows your style, your life, and what great dressing means to you.
+                  </p>
+                </div>
+                <Link to="/passport" className="mn-see-link" style={{ flexShrink: 0 }}>
+                  START YOUR STYLE PASSPORT
+                </Link>
+              </div>
+            )}
+            {passportState === "continue" && (
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontSize: "0.95rem", lineHeight: 1.625, color: "var(--fg-90, var(--fg))", marginBottom: "0.375rem" }}>
+                    Your Style Passport is in progress.
+                  </div>
+                  <p style={{ fontSize: "0.82rem", color: "var(--fg-55)", lineHeight: 1.625 }}>
+                    A few more answers and nAia will have everything it needs to personalise your experience.
+                  </p>
+                </div>
+                <Link to="/passport" className="mn-see-link" style={{ flexShrink: 0 }}>
+                  CONTINUE YOUR STYLE PASSPORT
+                </Link>
+              </div>
+            )}
+            {passportState === "view" && (
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontSize: "0.95rem", lineHeight: 1.625, color: "var(--fg-90, var(--fg))", marginBottom: "0.375rem" }}>
+                    Your Style Passport is complete.
+                  </div>
+                  <p style={{ fontSize: "0.82rem", color: "var(--fg-55)", lineHeight: 1.625 }}>
+                    nAia is personalised to you. Update your answers any time as your style evolves.
+                  </p>
+                </div>
+                <Link to="/passport" className="mn-see-link" style={{ flexShrink: 0 }}>
+                  VIEW STYLE PASSPORT
+                </Link>
+              </div>
+            )}
           </div>
         </section>
 

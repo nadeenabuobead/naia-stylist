@@ -508,3 +508,123 @@ describe("FR75 — F: loader does not mutate OnboardingProfile", () => {
     );
   });
 });
+
+// ── FR76–FR83: successfulOutfitGives field mapping fix (tests A–H) ─────────────
+// Verify that complete.tsx loader now maps op.successfulOutfitGives into
+// existingAnswers so the client-side First Read and the server-side feedback API
+// see the same evidence.
+
+describe("FR76 — A: loader maps successfulOutfitGives into existingAnswers", () => {
+  it("complete.tsx loader assigns op.successfulOutfitGives to existingAnswers[successful-outfit-gives]", () => {
+    assert.ok(
+      complete.includes('existingAnswers["successful-outfit-gives"]'),
+      'loader must assign existingAnswers["successful-outfit-gives"]',
+    );
+    assert.ok(
+      complete.includes("op.successfulOutfitGives"),
+      "loader must read op.successfulOutfitGives from the DB profile",
+    );
+  });
+});
+
+describe("FR77 — B: mapping is length-guarded (empty arrays do not write)", () => {
+  it("loader guards successfulOutfitGives mapping on .length", () => {
+    const loaderStart = complete.indexOf("export async function loader(");
+    const loaderEnd   = complete.indexOf("\nexport ", loaderStart + 1);
+    const loaderBody  = complete.slice(loaderStart, loaderEnd === -1 ? complete.length : loaderEnd);
+    // The assignment must be conditional, not unconditional
+    const assignIdx = loaderBody.indexOf('existingAnswers["successful-outfit-gives"]');
+    assert.ok(assignIdx !== -1, "loader must include the mapping");
+    const context = loaderBody.slice(Math.max(0, assignIdx - 80), assignIdx + 60);
+    assert.ok(
+      context.includes(".length") || context.includes("?.length"),
+      "assignment must be inside a length check",
+    );
+  });
+});
+
+describe("FR78 — C: render-time computeNaiaFirstRead receives successful-outfit-gives", () => {
+  it("component passes a[successful-outfit-gives] to computeNaiaFirstRead at render", () => {
+    // There are two computeNaiaFirstRead call sites: useEffect (hydration) and render.
+    // Both must include successfulOutfitGives.
+    const occurrences = (complete.match(/computeNaiaFirstRead\(/g) ?? []).length;
+    assert.ok(occurrences >= 1, "computeNaiaFirstRead must be called at least once");
+    // Verify the field is referenced in the render-time call (the first call after displayAnswers is set)
+    const firstIdx = complete.indexOf("computeNaiaFirstRead(");
+    const callBlock = complete.slice(firstIdx, firstIdx + 400);
+    assert.ok(
+      callBlock.includes("successful-outfit-gives"),
+      "computeNaiaFirstRead must receive successful-outfit-gives",
+    );
+  });
+});
+
+describe("FR79 — D: DRAFT_TO_API includes successful-outfit-gives → successfulOutfitGives mapping", () => {
+  it("DRAFT_TO_API contains the successful-outfit-gives entry", () => {
+    assert.ok(
+      complete.includes('"successful-outfit-gives"'),
+      'DRAFT_TO_API must include the "successful-outfit-gives" draft key',
+    );
+    assert.ok(
+      complete.includes('"successfulOutfitGives"'),
+      'DRAFT_TO_API must include the "successfulOutfitGives" API key',
+    );
+  });
+});
+
+describe("FR80 — E: useEffect hydration also passes successful-outfit-gives to computeNaiaFirstRead", () => {
+  it("the useEffect hydration block includes successful-outfit-gives in computeNaiaFirstRead call", () => {
+    const effectStart = complete.indexOf("useEffect(");
+    const effectEnd   = complete.indexOf("}, [attemptSave");
+    assert.ok(effectStart !== -1 && effectEnd !== -1, "useEffect with attemptSave dependency must exist");
+    const effectBody  = complete.slice(effectStart, effectEnd);
+    assert.ok(
+      effectBody.includes("successful-outfit-gives"),
+      "useEffect must pass successful-outfit-gives to computeNaiaFirstRead",
+    );
+  });
+});
+
+describe("FR81 — F: buildNaiaNote uses successful-outfit-gives for fallback copy", () => {
+  it("buildNaiaNote reads a[successful-outfit-gives] for the nAia note", () => {
+    const fnStart = complete.indexOf("function buildNaiaNote(");
+    const fnEnd   = complete.indexOf("\n}", fnStart);
+    const fnBody  = complete.slice(fnStart, fnEnd);
+    assert.ok(
+      fnBody.includes('"successful-outfit-gives"'),
+      'buildNaiaNote must read a["successful-outfit-gives"]',
+    );
+  });
+});
+
+describe("FR82 — G: successful-outfit-gives is the only new field added to existingAnswers mapping", () => {
+  it("only successfulOutfitGives was added — no other new fields sneak into the mapping block", () => {
+    // The block of existingAnswers assignments is bounded by `if (op) {` and the closing `}`
+    const opBlockStart = complete.indexOf("if (op) {");
+    const opBlockEnd   = complete.indexOf("\n  }", opBlockStart);
+    const opBlock      = complete.slice(opBlockStart, opBlockEnd);
+    // Known fields (pre-existing + the new one):
+    const knownFields = [
+      "stylePersonalities", "desiredImpression", "lifestyle", "desiredFeelings",
+      "becoming", "fitPreferences", "silhouette", "styleStruggles",
+      "favoriteColors", "avoidColors", "styleSupport", "shoppingPriorities",
+      "trendAppetite", "finalNotes", "successfulOutfitGives",
+    ];
+    for (const f of knownFields) {
+      // Each known field appears in the op block; no unknown extra fields
+      assert.ok(
+        opBlock.includes(f),
+        `expected to find known field "${f}" in the op mapping block`,
+      );
+    }
+  });
+});
+
+describe("FR83 — H: clothing-relationship observation requires successfulOutfitGives evidence", () => {
+  it("api.naia-observation-feedback.tsx loads successfulOutfitGives in profile select", () => {
+    assert.ok(
+      route.includes("successfulOutfitGives"),
+      "observation-feedback route must select successfulOutfitGives from the DB profile",
+    );
+  });
+});

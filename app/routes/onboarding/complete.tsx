@@ -195,6 +195,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if ((op as any).shoppingPriorities?.length) existingAnswers["shopping-priorities"]  = (op as any).shoppingPriorities;
     if ((op as any).trendAppetite)             existingAnswers["trend-appetite"]         = (op as any).trendAppetite;
     if (op.finalNotes)                         existingAnswers["final-notes"]            = op.finalNotes;
+    if (op.successfulOutfitGives?.length)      existingAnswers["successful-outfit-gives"] = op.successfulOutfitGives;
   }
   const pendingSave = await readPendingSave(request);
 
@@ -234,6 +235,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     profileUpdatedAt: op?.updatedAt?.toISOString() ?? null,
     hasPendingLook,
     existingFeedback,
+    profileVersion:   (op as any)?.profileVersion ?? null,
   };
   return pendingClearHeader
     ? data(payload, { headers: { "Set-Cookie": pendingClearHeader } })
@@ -276,7 +278,7 @@ const css = `
 type SaveStatus = "saving" | "saved" | "error" | "conflict";
 
 export default function OnboardingComplete() {
-  const { existingAnswers, draftScope, profileUpdatedAt, hasPendingLook, existingFeedback } = useLoaderData<typeof loader>();
+  const { existingAnswers, draftScope, profileUpdatedAt, hasPendingLook, existingFeedback, profileVersion } = useLoaderData<typeof loader>();
 
   const storageKey = `naia_onboarding_v2:${draftScope}`;
 
@@ -390,6 +392,7 @@ export default function OnboardingComplete() {
   if (!displayAnswers) return <div style={{ minHeight: "100vh", background: "#f4f4f1" }} />;
 
   const a = displayAnswers;
+  const isRev6 = profileVersion === 6;
 
   // First Read — deterministic, runs after localStorage draft is merged into displayAnswers
   const firstReadResult = computeNaiaFirstRead({
@@ -475,8 +478,8 @@ export default function OnboardingComplete() {
           </>
         )}
 
-        {/* 2 — Desired impression and feelings */}
-        {(impression.length > 0 || feelings.length > 0) && (
+        {/* 2 — Desired impression and feelings (legacy only — hidden for Rev 6) */}
+        {!isRev6 && (impression.length > 0 || feelings.length > 0) && (
           <>
             <div className="cp-divider" />
             {impression.length > 0 && (
@@ -562,8 +565,8 @@ export default function OnboardingComplete() {
           </>
         )}
 
-        {/* 5 — Becoming, wardrobe struggles, and desired support */}
-        {(becoming.length > 0 || struggles.length > 0 || support.length > 0) && (
+        {/* 5 — Becoming, wardrobe struggles, and desired support (legacy only — hidden for Rev 6) */}
+        {!isRev6 && (becoming.length > 0 || struggles.length > 0 || support.length > 0) && (
           <>
             <div className="cp-divider" />
             {becoming.length > 0 && (
@@ -682,7 +685,7 @@ export default function OnboardingComplete() {
         <a href="/style-me" className="cp-action">
           <div>
             <div className="cp-action-title">Style Me</div>
-            <div className="cp-action-sub">Get outfit ideas based on your mood</div>
+            <div className="cp-action-sub">Get outfit ideas based on what you need today.</div>
           </div>
           <span className="cp-arrow">→</span>
         </a>

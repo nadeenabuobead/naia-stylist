@@ -41,6 +41,7 @@ vi.mock("react-router", async (importOriginal) => {
     buyOrSkipHistory: [],
     reviewCount: 0,
     closetCount: 0,
+    passportState: "start" as const,
   }));
   return {
     ...actual,
@@ -147,6 +148,7 @@ type LoaderShape = {
   buyOrSkipHistory: unknown[];
   reviewCount: number;
   closetCount: number;
+  passportState?: "start" | "continue" | "view";
 };
 
 describe("my-naia component — static structure", () => {
@@ -161,6 +163,7 @@ describe("my-naia component — static structure", () => {
       buyOrSkipHistory: [],
       reviewCount: 0,
       closetCount: 0,
+      passportState: "start" as const,
       ...overrides,
     });
     return renderToString(<MyNaiaOverview />);
@@ -288,6 +291,130 @@ describe("my-naia component — static structure", () => {
     });
     expect(html).toContain('href="/trends/my-edits/spring-2026-soft-structure"');
     expect(html).toContain("Open My Trend Edit");
+  });
+});
+
+// ── Loader tests: passportState derivation (Q–T) ─────────────────────────────
+
+describe("my-naia loader — passportState derivation", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("Q: loader returns passportState field", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({
+      id: "c1", firstName: null, onboardingProfile: null,
+    } as any);
+    const result = await loader({
+      request: new Request("http://localhost/my-naia"),
+      params: {}, context: {},
+    } as any);
+    expect(result).toHaveProperty("passportState");
+  });
+
+  it("R: passportState is 'start' when onboardingProfile is null", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({
+      id: "c1", firstName: null, onboardingProfile: null,
+    } as any);
+    const result = await loader({
+      request: new Request("http://localhost/my-naia"),
+      params: {}, context: {},
+    } as any);
+    expect((result as any).passportState).toBe("start");
+  });
+
+  it("S: passportState is 'continue' when profile exists but completed=false", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({
+      id: "c1", firstName: null,
+      onboardingProfile: { completed: false },
+    } as any);
+    const result = await loader({
+      request: new Request("http://localhost/my-naia"),
+      params: {}, context: {},
+    } as any);
+    expect((result as any).passportState).toBe("continue");
+  });
+
+  it("T: passportState is 'view' when profile.profileVersion===6", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({
+      id: "c1", firstName: null,
+      onboardingProfile: { completed: true, profileVersion: 6 },
+    } as any);
+    const result = await loader({
+      request: new Request("http://localhost/my-naia"),
+      params: {}, context: {},
+    } as any);
+    expect((result as any).passportState).toBe("view");
+  });
+
+  it("T2: passportState is 'continue' (not view) for legacy completed=true + profileVersion=null", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({
+      id: "c1", firstName: null,
+      onboardingProfile: { completed: true, profileVersion: null },
+    } as any);
+    const result = await loader({
+      request: new Request("http://localhost/my-naia"),
+      params: {}, context: {},
+    } as any);
+    expect((result as any).passportState).toBe("continue");
+  });
+});
+
+// ── Component: Passport CTA states (U–W) ─────────────────────────────────────
+
+describe("my-naia component — Passport CTA three states", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function render(overrides: Partial<LoaderShape> = {}): string {
+    vi.mocked(useLoaderData).mockReturnValue({
+      firstName: null,
+      profile: null,
+      sessions: [],
+      trendReport: null,
+      buyOrSkipHistory: [],
+      reviewCount: 0,
+      closetCount: 0,
+      passportState: "start" as const,
+      ...overrides,
+    });
+    return renderToString(<MyNaiaOverview />);
+  }
+
+  it("U: START state renders 'START YOUR STYLE PASSPORT' CTA linking to /passport", () => {
+    const html = render({ passportState: "start" });
+    expect(html).toContain("START YOUR STYLE PASSPORT");
+    expect(html).toContain('href="/passport"');
+  });
+
+  it("V: CONTINUE state renders 'CONTINUE YOUR STYLE PASSPORT' CTA linking to /passport", () => {
+    const html = render({ passportState: "continue" });
+    expect(html).toContain("CONTINUE YOUR STYLE PASSPORT");
+    expect(html).toContain('href="/passport"');
+  });
+
+  it("W: VIEW state renders 'VIEW STYLE PASSPORT' CTA linking to /passport", () => {
+    const html = render({ passportState: "view" });
+    expect(html).toContain("VIEW STYLE PASSPORT");
+    expect(html).toContain('href="/passport"');
+  });
+
+  it("Passport section heading 'Your Style Passport' is always present", () => {
+    for (const state of ["start", "continue", "view"] as const) {
+      const html = render({ passportState: state });
+      expect(html, `state=${state}`).toContain("Your Style Passport");
+    }
+  });
+
+  it("only one state's content renders at a time", () => {
+    const startHtml = render({ passportState: "start" });
+    expect(startHtml).not.toContain("CONTINUE YOUR STYLE PASSPORT");
+    expect(startHtml).not.toContain("VIEW STYLE PASSPORT");
+
+    const continueHtml = render({ passportState: "continue" });
+    expect(continueHtml).not.toContain("START YOUR STYLE PASSPORT");
+    expect(continueHtml).not.toContain("VIEW STYLE PASSPORT");
+
+    const viewHtml = render({ passportState: "view" });
+    expect(viewHtml).not.toContain("START YOUR STYLE PASSPORT");
+    expect(viewHtml).not.toContain("CONTINUE YOUR STYLE PASSPORT");
   });
 });
 
