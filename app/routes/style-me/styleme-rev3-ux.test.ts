@@ -747,10 +747,13 @@ describe("BUG1-A — OTHER reveals a text field in state.tsx", () => {
       "state.tsx label text must match approved copy",
     );
   });
-  it("placeholder is 'A few words is enough…'", () => {
+  it("OTHER follow-up input has no placeholder (visual QA fix)", () => {
+    // Placeholder was removed so the label alone guides the user.
+    // The sm-other-input block must not carry a placeholder attribute.
+    const inputBlock = state.slice(state.indexOf("sm-other-input"), state.indexOf("autoComplete"));
     assert.ok(
-      state.includes("A few words is enough"),
-      "state.tsx placeholder must match approved copy",
+      !inputBlock.includes("placeholder"),
+      "sm-other-input must not have a placeholder attribute",
     );
   });
 });

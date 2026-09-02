@@ -115,7 +115,6 @@ export default function StatePage() {
               name="stateOtherText"
               type="text"
               className="sm-other-input"
-              placeholder="A few words is enough…"
               value={otherText}
               onChange={(e) => setOtherText(e.target.value)}
               autoComplete="off"
