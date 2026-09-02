@@ -11,6 +11,7 @@
 //   N   section 5 becoming is gated on !isRev6
 //   O   section 5 struggles/support is gated on !isRev6
 //   P   StyleMe CTA subtitle updated to Rev 3 copy
+//   Q   Notes block suppressed for Rev 6 (belongs on /passport, not one-time reveal)
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -455,6 +456,48 @@ describe("CPL-R6-K — completion page is not an editable Passport dashboard", (
     assert.ok(
       complete.includes("Your Style Passport is ready."),
       "Rev 6 must show 'Your Style Passport is ready.' headline",
+    );
+  });
+});
+
+// ── Q: Notes block suppressed for Rev 6 ────────────────────────────────────
+describe("CPL-Q — Notes block is suppressed for Rev 6 (belongs on /passport)", () => {
+  it("section 6 Notes block is gated on !isRev6", () => {
+    const sec6Comment = complete.indexOf("/* 6 — Final notes");
+    assert.ok(sec6Comment !== -1, "section 6 Notes comment must exist");
+    const sec6Block = complete.slice(sec6Comment, sec6Comment + 200);
+    assert.ok(
+      sec6Block.includes("!isRev6"),
+      "section 6 Notes block must include !isRev6 guard so Rev6 suppresses it",
+    );
+  });
+
+  it("the note is NOT deleted — final-notes key is still read from answers", () => {
+    assert.ok(
+      complete.includes(`a["final-notes"]`),
+      "component must still read final-notes from answers (note is preserved, just not shown for Rev6)",
+    );
+  });
+
+  it("First Read label is still present and unchanged", () => {
+    assert.ok(
+      complete.includes("first read on you"),
+      "First Read label 'first read on you' must still be present in complete.tsx",
+    );
+  });
+
+  it("the three Rev6 next-action CTA labels are unchanged", () => {
+    assert.ok(
+      complete.includes("Style Me"),
+      "Rev6 CTA card title 'Style Me' must be present",
+    );
+    assert.ok(
+      complete.includes("View your Style Passport"),
+      "Rev6 CTA card title 'View your Style Passport' must be present",
+    );
+    assert.ok(
+      complete.includes("Show nAia what you actually wear"),
+      "Rev6 CTA card title 'Show nAia what you actually wear' must be present",
     );
   });
 });

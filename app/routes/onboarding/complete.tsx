@@ -611,8 +611,8 @@ export default function OnboardingComplete() {
           </>
         )}
 
-        {/* 6 — Final notes */}
-        {notes && (
+        {/* 6 — Final notes (legacy only; Rev6 shows notes on /passport, not the one-time reveal) */}
+        {!isRev6 && notes && (
           <>
             <div className="cp-divider" />
             <div className="cp-section-label">Your notes to nAia</div>
