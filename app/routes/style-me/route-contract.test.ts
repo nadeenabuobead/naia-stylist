@@ -634,15 +634,19 @@ describe("StyleMe Result Actions — cleanup pass", () => {
     );
   });
 
-  it("start-over action handler exists and redirects to /style-me/mood", () => {
+  it("start-over action handler exists and redirects to /style-me/state (Rev 3 contract)", () => {
     const text = src("result.tsx");
     assert.ok(
       text.includes('intent === "start-over"'),
       "action must handle intent=start-over",
     );
     assert.ok(
-      text.includes('redirect("/style-me/mood"'),
-      "start-over must redirect to /style-me/mood",
+      text.includes('redirect("/style-me/state"'),
+      "start-over must redirect to /style-me/state (Rev 3 entry point)",
+    );
+    assert.ok(
+      !text.includes('redirect("/style-me/mood"') || text.indexOf('redirect("/style-me/state"') < text.indexOf('redirect("/style-me/mood"'),
+      "start-over action must not redirect to /style-me/mood",
     );
   });
 
@@ -877,5 +881,183 @@ describe("OutfitReactionWidget — Quick Feedback", () => {
       text.includes("suggestionId,") || text.includes("suggestionId:"),
       "OutfitReactionWidget create payload must include suggestionId",
     );
+  });
+});
+
+// ── StyleMe Rev 3 Pre-QA Cleanup — Regression Tests ─────────────────────────
+// Tests A–N cover the confirmed issues fixed in the Rev 3 pre-QA cleanup batch.
+
+describe("StyleMe Rev 3 Pre-QA cleanup — regression tests", () => {
+  function src(file: string): string {
+    const dir = join(import.meta.dirname ?? new URL(".", import.meta.url).pathname);
+    return readFileSync(join(dir, file), "utf8");
+  }
+  function lib(file: string): string {
+    const base = join(import.meta.dirname ?? new URL(".", import.meta.url).pathname, "../..", "lib");
+    return readFileSync(join(base, file), "utf8");
+  }
+
+  // A. Rev 3 start-over action redirects to /style-me/state
+  it("A: start-over action redirects to /style-me/state", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes('intent === "start-over"') && text.includes('redirect("/style-me/state"'),
+      "start-over intent handler must redirect to /style-me/state",
+    );
+  });
+
+  // B. start-over clears StyleMe session
+  it("B: start-over clears StyleMe session via clearStyleMeSession", () => {
+    const text = src("result.tsx");
+    const startOverIdx = text.indexOf('intent === "start-over"');
+    const nextBlock = text.slice(startOverIdx, startOverIdx + 400);
+    assert.ok(
+      nextBlock.includes("clearStyleMeSession"),
+      "start-over block must call clearStyleMeSession before redirecting",
+    );
+  });
+
+  // C. error-state Start Again uses canonical restart behavior (intent=start-over)
+  it("C: error-state Start Again submits intent=start-over (not a plain link)", () => {
+    const text = src("result.tsx");
+    // Anchor on the error JSX block gating expression — only present in the component
+    const errorBlockStart = text.indexOf("error || !suggestion");
+    assert.ok(errorBlockStart !== -1, "error || !suggestion guard must exist in result.tsx");
+    const errorBlock = text.slice(errorBlockStart, errorBlockStart + 1000);
+    assert.ok(
+      errorBlock.includes('value="start-over"'),
+      "error-state must submit intent=start-over via a Form",
+    );
+    assert.ok(
+      errorBlock.includes("Start Again"),
+      "error-state must render 'Start Again' label",
+    );
+  });
+
+  // D. error-state does not link Rev 3 customer to /style-me/mood
+  it("D: error-state Start Again does not link to /style-me/mood", () => {
+    const text = src("result.tsx");
+    const errorBlockStart = text.indexOf("Something went wrong");
+    const errorBlock = text.slice(errorBlockStart, errorBlockStart + 600);
+    assert.ok(
+      !errorBlock.includes('"/style-me/mood"') && !errorBlock.includes("to=\"/style-me/mood\""),
+      "error-state must not contain a link to /style-me/mood",
+    );
+  });
+
+  // E. pure Rev 3 result uses rev3State
+  it("E: result context grid reads rev3State for Rev 3 sessions", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("rev3State") && text.includes("REV3_STATE_LABELS"),
+      "result.tsx must reference rev3State and REV3_STATE_LABELS in the context grid",
+    );
+  });
+
+  // F. pure Rev 3 result uses rev3Intentions
+  it("F: result context grid reads rev3Intentions for Rev 3 sessions", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("rev3Intentions") && text.includes("REV3_INTENTION_LABELS"),
+      "result.tsx must reference rev3Intentions and REV3_INTENTION_LABELS in the context grid",
+    );
+  });
+
+  // G. Rev 3 state renders human label, not raw ID
+  it("G: REV3_STATE_LABELS map is defined with human-readable labels", () => {
+    const text = src("result.tsx");
+    assert.ok(text.includes("REV3_STATE_LABELS"), "REV3_STATE_LABELS must be defined");
+    assert.ok(text.includes('"stressed-overloaded"'), "must include stressed-overloaded key");
+    assert.ok(text.includes('"Stressed / overloaded"'), "must map to human-readable label");
+    assert.ok(text.includes('"feel-good"'), "must include feel-good key");
+    assert.ok(text.includes('"I feel good"'), "must map feel-good to human label");
+  });
+
+  // H. one intention renders correctly (join with ·)
+  it("H: one intention renders using REV3_INTENTION_LABELS (no separator on single)", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes(".join(") && text.includes('" · "'),
+      "rev3Intentions must be joined with ' · ' separator (renders correctly for 1 or 2)",
+    );
+  });
+
+  // I. two intentions render correctly
+  it("I: two intentions render as joined labels separated by ·", () => {
+    const text = src("result.tsx");
+    // The join pattern handles 1 or 2 intentions; ensure the separator is the expected one
+    assert.ok(
+      text.includes('" · "'),
+      "separator must be ' · ' (middle dot with spaces) for two intentions",
+    );
+    assert.ok(
+      text.includes("REV3_INTENTION_LABELS"),
+      "each intention is mapped through REV3_INTENTION_LABELS before joining",
+    );
+  });
+
+  // J. Rev 3 result contains no blank legacy mood/feeling rows
+  it("J: Rev 3 context grid suppresses legacy mood/feeling rows when rev3State is set", () => {
+    const text = src("result.tsx");
+    // The Rev 3 branch must be conditional — legacy rows only render in the else branch
+    // Confirm the pattern: rev3State check gates the two branches
+    assert.ok(
+      text.includes("rev3State ?") || text.includes("rev3State &&") || (text.includes("rev3State") && text.includes("? (")),
+      "context grid must branch on rev3State to prevent blank legacy rows",
+    );
+  });
+
+  // K. occasion still renders correctly
+  it("K: occasion label renders for Rev 3 sessions using OCCASION_LABELS", () => {
+    const text = src("result.tsx");
+    // The Rev 3 branch in the template uses REV3_STATE_LABELS inline — anchor on it
+    const templateUsage = text.indexOf("REV3_STATE_LABELS[(loaderData");
+    assert.ok(templateUsage !== -1, "REV3_STATE_LABELS must be used in the template");
+    const rev3Section = text.slice(templateUsage, templateUsage + 1500);
+    assert.ok(
+      rev3Section.includes("OCCASION_LABELS") && rev3Section.includes("Dressing for"),
+      "Rev 3 branch must render the occasion row using OCCASION_LABELS",
+    );
+  });
+
+  // L. genuine legacy result behavior remains supported
+  it("L: legacy context grid branch still renders You're Feeling and You Want to Feel rows", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("You're Feeling") && text.includes("MOOD_LABELS"),
+      "legacy branch must render You're Feeling with MOOD_LABELS",
+    );
+    assert.ok(
+      text.includes("You Want to Feel") && text.includes("FEELING_LABELS"),
+      "legacy branch must render You Want to Feel with FEELING_LABELS",
+    );
+  });
+
+  // M. loading copy no longer says "mood"
+  it("M: loading copy does not contain the word 'mood'", () => {
+    const text = src("result.tsx");
+    // Only the loading spinner paragraph should be checked; MOOD_LABELS still contains the word
+    // so we scope the check to the loading state paragraph text
+    const loadingParagraph = text.slice(text.indexOf("nAia is styling you"), text.indexOf("sm-loading-track"));
+    assert.ok(
+      !loadingParagraph.toLowerCase().includes("mood"),
+      "loading subtitle must not reference 'mood'",
+    );
+  });
+
+  // N. new loading copy exact string
+  it("N: loading copy exact string is 'Building your look around what you need today, the occasion, and your wardrobe.'", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("Building your look around what you need today, the occasion, and your wardrobe."),
+      "loading copy must match the exact approved string",
+    );
+  });
+
+  // Bonus: clearStyleMeSession references Rev 3 session keys
+  it("clearStyleMeSession unsets styleMeState and styleMeIntentions (Rev 3 keys)", () => {
+    const text = lib("session.server.ts");
+    assert.ok(text.includes('"styleMeState"'), "clearStyleMeSession must unset styleMeState");
+    assert.ok(text.includes('"styleMeIntentions"'), "clearStyleMeSession must unset styleMeIntentions");
   });
 });

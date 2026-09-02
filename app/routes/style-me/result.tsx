@@ -133,6 +133,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         currentMood: session.currentMood,
         occasion: session.occasion,
         desiredFeeling: session.desiredFeeling,
+        rev3State: session.state ?? null,
+        rev3Intentions: session.intentions ?? [],
         suggestion: session.suggestions[0] || null,
         pendingState: null as "needs_passport" | "ready_to_save" | null,
         existingOutfitFeedback: existingOutfitFeedback ? { id: existingOutfitFeedback.id, rating: existingOutfitFeedback.rating, reasonCodes: existingOutfitFeedback.reasonCodes } : null,
@@ -188,6 +190,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         currentMood: pendingSuggestion.session.currentMood,
         desiredFeeling: pendingSuggestion.session.desiredFeeling,
         occasion: pendingSuggestion.session.occasion,
+        rev3State: pendingSuggestion.session.state ?? null,
+        rev3Intentions: pendingSuggestion.session.intentions ?? [],
         suggestion: pendingSuggestion,
         pendingState,
         existingOutfitFeedback: pendingOutfitFeedback ? { id: pendingOutfitFeedback.id, rating: pendingOutfitFeedback.rating, reasonCodes: pendingOutfitFeedback.reasonCodes } : null,
@@ -825,6 +829,31 @@ export function shouldRevalidate({
 const MIN_LOADING_MS = 4800;
 const loadingMessages = ["Reading the runways...", "Consulting your mood...", "Matching textures and fabrics...", "Finalizing your look..."];
 
+const REV3_STATE_LABELS: Record<string, string> = {
+  "feel-good": "I feel good",
+  "stressed-overloaded": "Stressed / overloaded",
+  "low-energy": "Low-energy",
+  "not-feeling-like-myself": "I don't really feel like myself",
+  "physically-uncomfortable": "Physically uncomfortable",
+  "self-conscious": "Self-conscious",
+  "going-through-change": "I'm going through a change / something",
+  "want-reset": "I want a reset",
+  "nothing-in-particular": "Nothing in particular",
+  "other": "Something else",
+};
+const REV3_INTENTION_LABELS: Record<string, string> = {
+  "feel-like-myself": "Help me feel like myself",
+  "confidence": "Give me confidence",
+  "ground-me": "Ground me",
+  "give-structure": "Give me structure",
+  "make-it-easy": "Make things feel easy",
+  "feel-put-together": "Help me feel put together",
+  "feel-attractive": "Make me feel attractive",
+  "give-energy": "Give me energy",
+  "feel-softer": "Help me feel softer",
+  "feel-less-exposed": "Help me feel less exposed",
+  "express-myself": "Let me express myself",
+};
 const MOOD_LABELS: Record<string, string> = {
   "confident": "Confident", "tired": "Low-energy", "overwhelmed": "Overwhelmed",
   "adventurous": "Adventurous", "romantic": "Romantic", "powerful": "Powerful",
@@ -969,7 +998,7 @@ export default function StyleMeResult() {
             nAia is styling you...
           </h2>
           <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--naia-muted)", marginBottom: "40px" }}>
-            Building your look based on mood, occasion, and wardrobe.
+            Building your look around what you need today, the occasion, and your wardrobe.
           </p>
           <div className="sm-loading-track">
             <div className="sm-loading-bar" />
@@ -991,9 +1020,12 @@ export default function StyleMeResult() {
           <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--naia-muted)", marginBottom: "32px" }}>
             {error || "Couldn't create your styling. Let's try again"}
           </p>
-          <Link to="/style-me/mood" className="sm-result-action-btn sm-result-action-btn--primary">
-            Start Again
-          </Link>
+          <Form method="post">
+            <input type="hidden" name="intent" value="start-over" />
+            <button type="submit" className="sm-result-action-btn sm-result-action-btn--primary">
+              Start Again
+            </button>
+          </Form>
         </div>
       </div>
     );
@@ -1138,18 +1170,49 @@ export default function StyleMeResult() {
         </div>
 
         <div className="sm-result-context-grid">
-          <div>
-            <p className="sm-result-context-label">You're Feeling</p>
-            <p className="sm-result-context-value">{MOOD_LABELS[loaderData.currentMood ?? ""] ?? loaderData.currentMood}</p>
-          </div>
-          <div>
-            <p className="sm-result-context-label">You Want to Feel</p>
-            <p className="sm-result-context-value">{FEELING_LABELS[loaderData.desiredFeeling ?? ""] ?? loaderData.desiredFeeling}</p>
-          </div>
-          <div>
-            <p className="sm-result-context-label">Dressing For</p>
-            <p className="sm-result-context-value">{OCCASION_LABELS[loaderData.occasion ?? ""] ?? loaderData.occasion}</p>
-          </div>
+          {(loaderData as any).rev3State ? (
+            <>
+              <div>
+                <p className="sm-result-context-label">Today</p>
+                <p className="sm-result-context-value">{REV3_STATE_LABELS[(loaderData as any).rev3State] ?? (loaderData as any).rev3State}</p>
+              </div>
+              {((loaderData as any).rev3Intentions as string[]).length > 0 && (
+                <div>
+                  <p className="sm-result-context-label">What you want from the outfit</p>
+                  <p className="sm-result-context-value">
+                    {((loaderData as any).rev3Intentions as string[]).map((id: string) => REV3_INTENTION_LABELS[id] ?? id).join(" · ")}
+                  </p>
+                </div>
+              )}
+              {loaderData.occasion && (
+                <div>
+                  <p className="sm-result-context-label">Dressing for</p>
+                  <p className="sm-result-context-value">{OCCASION_LABELS[loaderData.occasion] ?? loaderData.occasion}</p>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {loaderData.currentMood && (
+                <div>
+                  <p className="sm-result-context-label">You're Feeling</p>
+                  <p className="sm-result-context-value">{MOOD_LABELS[loaderData.currentMood] ?? loaderData.currentMood}</p>
+                </div>
+              )}
+              {loaderData.desiredFeeling && (
+                <div>
+                  <p className="sm-result-context-label">You Want to Feel</p>
+                  <p className="sm-result-context-value">{FEELING_LABELS[loaderData.desiredFeeling] ?? loaderData.desiredFeeling}</p>
+                </div>
+              )}
+              {loaderData.occasion && (
+                <div>
+                  <p className="sm-result-context-label">Dressing For</p>
+                  <p className="sm-result-context-value">{OCCASION_LABELS[loaderData.occasion] ?? loaderData.occasion}</p>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* Outfit direction */}
