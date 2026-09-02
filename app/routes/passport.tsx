@@ -10,7 +10,7 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
 ];
 import type { OnboardingAnswers, QuizQuestion } from "~/lib/onboarding/quiz-data";
-import { quizQuestions, COLOUR_FAMILIES } from "~/lib/onboarding/quiz-data";
+import { quizQuestions, COLOUR_FAMILIES, NOTES_HELPER_TEXT } from "~/lib/onboarding/quiz-data";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 
@@ -321,7 +321,7 @@ const NOTES_SECTION: SectionDef = {
   id: "notes",
   label: "Notes to nAia",
   question: "Anything else nAia should know about your style right now?",
-  helper: "Share context that wouldn't come through in selections — life changes, occasions, or specific things to avoid.",
+  helper: NOTES_HELPER_TEXT,
   optional: true,
   subFields: [
     { draftKey: "final-notes", apiKey: "finalNotes", subLabel: "Your notes to nAia", kind: "text", questionId: "final-notes" },
@@ -1743,7 +1743,7 @@ export default function PassportPage() {
           disabled={isBusy}
           onClick={() => saveRefreshStep(mode.stepIndex, "exit")}
         >
-          ← Save and exit
+          ← Continue Later
         </button>
 
         <div className="sp-flow-header">
@@ -1863,7 +1863,7 @@ export default function PassportPage() {
         disabled={isBusy}
         onClick={() => saveSection(currentId, "exit")}
       >
-        ← Save and exit
+        ← Continue Later
       </button>
 
       <div className="sp-flow-header">
@@ -2194,7 +2194,7 @@ export default function PassportPage() {
             className="sp-btn-ghost"
             onClick={() => saveSection(currentId, "exit")}
           >
-            Save and exit
+            Continue Later
           </button>
         )}
 

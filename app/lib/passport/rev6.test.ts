@@ -5,7 +5,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { quizQuestions, getTotalSteps } from "../onboarding/quiz-data.js";
+import { quizQuestions, getTotalSteps, getGroupLabel, JOURNEY_GROUPS, NOTES_HELPER_TEXT } from "../onboarding/quiz-data.js";
 import { buildProfileSignals } from "../ai/styleme-result.server.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -360,4 +360,174 @@ describe("R24 — favorite-colors screen includes avoid-colors secondary questio
     const q = quizQuestions[4];
     assert.equal(q.secondaryQuestion?.id, "avoid-colors");
   });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// UX POLISH — Rev 6 onboarding journey grouping and framing (checks A–L)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── R25 (check C): questions 1–3 belong to "WHAT MATTERS TO YOU" ─────────────
+
+describe("R25 — steps 1–3 group label is WHAT MATTERS TO YOU", () => {
+  [1, 2, 3].forEach(step => {
+    it(`getGroupLabel(${step}) = "WHAT MATTERS TO YOU"`, () => {
+      assert.equal(getGroupLabel(step), "WHAT MATTERS TO YOU");
+    });
+  });
+});
+
+// ─── R26 (check D): questions 4–6 belong to "YOUR STYLE IN REAL LIFE" ─────────
+
+describe("R26 — steps 4–6 group label is YOUR STYLE IN REAL LIFE", () => {
+  [4, 5, 6].forEach(step => {
+    it(`getGroupLabel(${step}) = "YOUR STYLE IN REAL LIFE"`, () => {
+      assert.equal(getGroupLabel(step), "YOUR STYLE IN REAL LIFE");
+    });
+  });
+});
+
+// ─── R27 (check E): questions 7–8 belong to "WHAT NAIA SHOULD RESPECT" ────────
+
+describe("R27 — steps 7–8 group label is WHAT NAIA SHOULD RESPECT", () => {
+  [7, 8].forEach(step => {
+    it(`getGroupLabel(${step}) = "WHAT NAIA SHOULD RESPECT"`, () => {
+      assert.equal(getGroupLabel(step), "WHAT NAIA SHOULD RESPECT");
+    });
+  });
+});
+
+// ─── R28 (checks F + G): groups cover all 8 steps exactly once; no extra screens ─
+
+describe("R28 — JOURNEY_GROUPS covers all 8 steps exactly once, no extras", () => {
+  it("JOURNEY_GROUPS spans exactly 8 total step slots", () => {
+    const allSteps = JOURNEY_GROUPS.flatMap(g => [...g.steps]);
+    assert.equal(allSteps.length, 8);
+  });
+
+  it("every step 1–8 appears in exactly one group", () => {
+    for (let s = 1; s <= 8; s++) {
+      const matches = JOURNEY_GROUPS.filter(g => (g.steps as readonly number[]).includes(s));
+      assert.equal(matches.length, 1, `step ${s} belongs to ${matches.length} groups`);
+    }
+  });
+
+  it("getTotalSteps() matches total JOURNEY_GROUPS step slots", () => {
+    const allSteps = JOURNEY_GROUPS.flatMap(g => [...g.steps]);
+    assert.equal(getTotalSteps(), allSteps.length);
+  });
+
+  it("quizQuestions.length is still 8 (no extra screens injected)", () => {
+    assert.equal(quizQuestions.length, 8);
+  });
+});
+
+// ─── R29 (check H): Rev 6 draft keys present — persistence architecture unchanged
+
+describe("R29 — Rev 6 draft keys still present in quiz data", () => {
+  const rev6DraftKeys = [
+    "current-goal",
+    "style-personalities",
+    "successful-outfit-gives",
+    "lifestyle",
+    "favorite-colors",
+    "avoid-colors",
+    "silhouette",
+    "fit-concerns",
+    "dressing-preferences",
+  ];
+  for (const key of rev6DraftKeys) {
+    it(`question id or secondaryQuestion id "${key}" exists`, () => {
+      const inPrimary   = quizQuestions.some(q => q.id === key);
+      const inSecondary = quizQuestions.some(q => q.secondaryQuestion?.id === key);
+      assert.ok(inPrimary || inSecondary, `Draft key missing: ${key}`);
+    });
+  }
+});
+
+// ─── R30 (check J): Notes (final-notes) outside the 8-question onboarding flow ─
+
+describe("R30 — Notes (final-notes) absent from the 8-question onboarding flow", () => {
+  it("no quizQuestion has id 'final-notes'", () => {
+    assert.equal(quizQuestions.some(q => q.id === "final-notes"), false);
+  });
+  it("no quizQuestion noteField leads to 'final-notes'", () => {
+    assert.equal(quizQuestions.some(q => q.noteField?.id === "final-notes"), false);
+  });
+  it("no quizQuestion secondaryQuestion has id 'final-notes'", () => {
+    assert.equal(quizQuestions.some(q => q.secondaryQuestion?.id === "final-notes"), false);
+  });
+});
+
+// ─── R31 (check K): NOTES_HELPER_TEXT contains the approved directional phrases ─
+
+describe("R31 — NOTES_HELPER_TEXT contains approved direction", () => {
+  it("contains 'Tell nAia anything'", () => {
+    assert.ok(NOTES_HELPER_TEXT.startsWith("Tell nAia anything"), `NOTES_HELPER_TEXT: ${NOTES_HELPER_TEXT}`);
+  });
+  it("contains 'how you actually like to dress'", () => {
+    assert.ok(NOTES_HELPER_TEXT.includes("how you actually like to dress"));
+  });
+  it("contains 'preferences, frustrations'", () => {
+    assert.ok(NOTES_HELPER_TEXT.includes("preferences, frustrations"));
+  });
+  it("does NOT contain 'Always considered by nAia'", () => {
+    assert.ok(!NOTES_HELPER_TEXT.includes("Always considered by nAia"));
+  });
+});
+
+// ─── R32 (check L): buildProfileSignals does not include currentGoal field ──────
+
+describe("R32 — buildProfileSignals does not output a currentGoal scoring field", () => {
+  it("result has no currentGoal key", () => {
+    const signals = buildProfileSignals({
+      currentGoal: ["understand-my-style", "use-what-i-own"],
+      stylePersonalities: ["classic-polished"],
+    });
+    assert.ok(signals !== undefined && signals !== null, "signals should be defined");
+    assert.ok(!("currentGoal" in (signals as object)), "currentGoal must not appear in scoring signals");
+  });
+});
+
+// ─── R33: render deduplication contract ──────────────────────────────────────
+// Mirrors the two template expressions in step.$step.tsx:
+//   progress label : `${step} OF ${totalSteps}`
+//   question eyebrow: getGroupLabel(step)
+// Verifies that each display point carries distinct, non-overlapping information.
+
+describe("R33 — progress area and eyebrow carry distinct information", () => {
+  const total = getTotalSteps();
+
+  it("progress label for step 2 is '2 OF 8' (absolute position only)", () => {
+    const label = `${2} OF ${total}`;
+    assert.equal(label, "2 OF 8");
+  });
+
+  it("progress label for step 2 does NOT contain the journey-group label", () => {
+    const label = `${2} OF ${total}`;
+    assert.ok(!label.includes("WHAT MATTERS TO YOU"), `progress label must not contain group: "${label}"`);
+  });
+
+  it("eyebrow for step 2 is 'WHAT MATTERS TO YOU' (group label only)", () => {
+    assert.equal(getGroupLabel(2), "WHAT MATTERS TO YOU");
+  });
+
+  it("eyebrow for step 2 does NOT contain 'OF 8'", () => {
+    const eyebrow = getGroupLabel(2);
+    assert.ok(!eyebrow.includes("OF 8"), `eyebrow must not contain step count: "${eyebrow}"`);
+  });
+
+  // Exhaust all 8 steps: progress never leaks a group label; eyebrow never leaks a step count
+  for (let s = 1; s <= 8; s++) {
+    it(`step ${s}: progress label contains only "${s} OF ${total}"`, () => {
+      const label = `${s} OF ${total}`;
+      const group = getGroupLabel(s);
+      assert.ok(!label.includes(group), `progress label at step ${s} must not contain group "${group}"`);
+    });
+
+    it(`step ${s}: eyebrow does not contain step count`, () => {
+      const eyebrow = getGroupLabel(s);
+      // Must not contain any "N OF 8" pattern
+      assert.ok(!/\d+ OF \d+/.test(eyebrow), `eyebrow at step ${s} must not contain step count: "${eyebrow}"`);
+    });
+  }
 });

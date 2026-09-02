@@ -268,3 +268,22 @@ export function getQuestionByStep(step: number): QuizQuestion | undefined {
 export function getTotalSteps(): number {
   return quizQuestions.length;
 }
+
+// Journey group labels — contiguous grouping that respects the existing question order.
+// Group boundaries must remain aligned with the actual question order above.
+export const JOURNEY_GROUPS: ReadonlyArray<{ label: string; steps: readonly number[] }> = [
+  { label: "WHAT MATTERS TO YOU",      steps: [1, 2, 3] },
+  { label: "YOUR STYLE IN REAL LIFE",  steps: [4, 5, 6] },
+  { label: "WHAT NAIA SHOULD RESPECT", steps: [7, 8]    },
+];
+
+export function getGroupLabel(step: number): string {
+  const group = JOURNEY_GROUPS.find(g => (g.steps as readonly number[]).includes(step));
+  return group?.label ?? "";
+}
+
+// Notes to nAia — canonical helper text (outside the 8-step flow; always optional).
+// "Always considered by nAia" must NOT appear here — downstream use is not guaranteed every time.
+export const NOTES_HELPER_TEXT =
+  "Tell nAia anything that would help it understand how you actually like to dress — " +
+  "preferences, frustrations, changes in your life, or things you want considered.";

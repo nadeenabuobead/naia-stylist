@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useLoaderData, useNavigate } from "react-router";
 import { data, redirect, type LoaderFunctionArgs } from "react-router";
 import type { OnboardingAnswers } from "~/lib/onboarding/quiz-data";
-import { getQuestionByStep, getTotalSteps, quizQuestions } from "~/lib/onboarding/quiz-data";
+import { getQuestionByStep, getTotalSteps, quizQuestions, getGroupLabel } from "~/lib/onboarding/quiz-data";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { prisma } from "~/lib/prisma.server";
 import { readPendingSave, clearPendingSave } from "~/lib/pending-save.server";
@@ -406,7 +406,7 @@ export default function OnboardingStep() {
 
       <div className="ob-topbar">
         <div className="ob-topbar-logo">nAia</div>
-        <Link to="/" className="ob-topbar-close">Exit Session</Link>
+        <Link to="/" className="ob-topbar-close">Continue Later</Link>
       </div>
 
       <div className="ob-progress">
@@ -421,7 +421,7 @@ export default function OnboardingStep() {
             );
           })}
         </div>
-        <div className="ob-progress-label">Step {step} of {totalSteps}</div>
+        <div className="ob-progress-label">{step} OF {totalSteps}</div>
       </div>
 
       {hasPendingLook && step === 1 && (
@@ -439,7 +439,7 @@ export default function OnboardingStep() {
       )}
 
       <main className="ob-main">
-        <div className="ob-step-label">Step {step} of {totalSteps}</div>
+        <div className="ob-step-label">{getGroupLabel(step)}</div>
         <h2 className="ob-headline">{question.title}</h2>
         {question.subtitle && <p className="ob-subtitle">{question.subtitle}</p>}
 
