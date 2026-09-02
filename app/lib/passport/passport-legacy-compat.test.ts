@@ -1256,7 +1256,7 @@ describe("V: Notes to nAia — overview editability", () => {
   it("V.B: overview renders ADD A NOTE when hasNote is false", () => {
     const ovIdx = passport.indexOf("// ── OVERVIEW");
     assert.ok(ovIdx !== -1, "OVERVIEW section comment must exist");
-    const ovBlock = passport.slice(ovIdx, ovIdx + 4200);
+    const ovBlock = passport.slice(ovIdx, ovIdx + 13000);
     assert.ok(
       ovBlock.includes('"ADD A NOTE"'),
       'Overview Notes section must include the "ADD A NOTE" string for the empty-state CTA',
@@ -1282,7 +1282,7 @@ describe("V: Notes to nAia — overview editability", () => {
   it("V.D: overview renders EDIT NOTE when hasNote is true", () => {
     const ovIdx = passport.indexOf("// ── OVERVIEW");
     assert.ok(ovIdx !== -1, "OVERVIEW section comment must exist");
-    const ovBlock = passport.slice(ovIdx, ovIdx + 4200);
+    const ovBlock = passport.slice(ovIdx, ovIdx + 13000);
     assert.ok(
       ovBlock.includes('"EDIT NOTE"'),
       'Overview Notes section must include the "EDIT NOTE" string for the filled-state CTA',
@@ -1293,7 +1293,7 @@ describe("V: Notes to nAia — overview editability", () => {
   it("V.E: Notes CTA calls editSection(\"notes\") — opens the existing flow editor", () => {
     const ovIdx = passport.indexOf("// ── OVERVIEW");
     assert.ok(ovIdx !== -1, "OVERVIEW section comment must exist");
-    const ovBlock = passport.slice(ovIdx, ovIdx + 4200);
+    const ovBlock = passport.slice(ovIdx, ovIdx + 13000);
     // The button onClick must call editSection("notes")
     assert.ok(
       ovBlock.includes('editSection("notes")'),
@@ -1390,7 +1390,7 @@ describe("V: Notes to nAia — overview editability", () => {
     );
     // The overview Notes CTA calls editSection, not startUpdate
     const ovIdx = passport.indexOf("// ── OVERVIEW");
-    const ovBlock = passport.slice(ovIdx, ovIdx + 4200);
+    const ovBlock = passport.slice(ovIdx, ovIdx + 13000);
     // Notes CTA now uses sp-btn-outline (was sp-ov-notes-cta — changed in Phase 5 polish)
     const addNoteIdx = ovBlock.indexOf('"ADD A NOTE"');
     assert.ok(addNoteIdx !== -1, "ADD A NOTE string must exist in overview");
@@ -1663,7 +1663,7 @@ describe("W: Rev 6 Update Answers cleanup", () => {
   it("W.S: ADD A NOTE and EDIT NOTE CTAs exist in the overview Notes block", () => {
     const ovIdx = passport.indexOf("// ── OVERVIEW");
     assert.ok(ovIdx !== -1, "OVERVIEW section must exist");
-    const ovBlock = passport.slice(ovIdx, ovIdx + 4000);
+    const ovBlock = passport.slice(ovIdx, ovIdx + 13000);
     assert.ok(ovBlock.includes('"ADD A NOTE"'), "Overview Notes block must include ADD A NOTE CTA");
     assert.ok(ovBlock.includes('"EDIT NOTE"'), "Overview Notes block must include EDIT NOTE CTA");
     // Both must be inside a sp-btn-outline button (was sp-ov-notes-cta — changed in Phase 5 polish)
@@ -1696,11 +1696,11 @@ describe("W: Rev 6 Update Answers cleanup", () => {
     // Picker must use visibleSections, not SECTIONS directly
     assert.ok(pickerBlock.includes("visibleSections"), "picker must iterate visibleSections");
     assert.ok(!pickerBlock.includes("SECTIONS.map"), "picker must not directly iterate SECTIONS (uses visibleSections)");
-    // Overview must also use visibleSections
-    const ovIdx = passport.indexOf("Full detail");
-    assert.ok(ovIdx !== -1, "Full detail comment must exist in overview");
-    const ovBlock = passport.slice(ovIdx, ovIdx + 600);
-    assert.ok(ovBlock.includes("visibleSections"), "overview must iterate visibleSections");
+    // Legacy path (non-Rev6) overview uses visibleSections for its flat list
+    const legacyOvIdx = passport.indexOf("Full detail — visible sections for this customer type");
+    assert.ok(legacyOvIdx !== -1, "legacy overview flat list must have Full detail comment");
+    const legacyOvBlock = passport.slice(legacyOvIdx, legacyOvIdx + 400);
+    assert.ok(legacyOvBlock.includes("visibleSections"), "legacy overview must iterate visibleSections");
   });
 });
 
@@ -1864,7 +1864,7 @@ describe("Y: Polish fixes — Sizes optional summary + Notes CTA", () => {
   it("Y.E: ADD A NOTE button uses sp-btn-outline class", () => {
     const ovIdx = passport.indexOf("// ── OVERVIEW");
     assert.ok(ovIdx !== -1, "OVERVIEW block must exist");
-    const ovBlock = passport.slice(ovIdx, ovIdx + 5000);
+    const ovBlock = passport.slice(ovIdx, ovIdx + 13000);
     // Find the Notes CTA button
     const notesCTAIdx = ovBlock.indexOf('"ADD A NOTE"');
     assert.ok(notesCTAIdx !== -1, "ADD A NOTE string must exist in overview");
@@ -1877,7 +1877,7 @@ describe("Y: Polish fixes — Sizes optional summary + Notes CTA", () => {
   // Y.F: EDIT NOTE uses the same sp-btn-outline class (same button element, conditional label)
   it("Y.F: EDIT NOTE is in the same button as ADD A NOTE — sp-btn-outline", () => {
     const ovIdx = passport.indexOf("// ── OVERVIEW");
-    const ovBlock = passport.slice(ovIdx, ovIdx + 5000);
+    const ovBlock = passport.slice(ovIdx, ovIdx + 13000);
     const editNoteIdx = ovBlock.indexOf('"EDIT NOTE"');
     assert.ok(editNoteIdx !== -1, "EDIT NOTE string must exist in overview");
     // Same button: search backwards for sp-btn-outline
@@ -1888,7 +1888,7 @@ describe("Y: Polish fixes — Sizes optional summary + Notes CTA", () => {
   // Y.G: both CTAs call editSection("notes")
   it("Y.G: Notes CTA button calls editSection(\"notes\")", () => {
     const ovIdx = passport.indexOf("// ── OVERVIEW");
-    const ovBlock = passport.slice(ovIdx, ovIdx + 5000);
+    const ovBlock = passport.slice(ovIdx, ovIdx + 13000);
     // The button that contains ADD A NOTE / EDIT NOTE must have editSection("notes")
     const notesCTAIdx = ovBlock.indexOf('"ADD A NOTE"');
     const buttonContext = ovBlock.slice(Math.max(0, notesCTAIdx - 300), notesCTAIdx + 50);

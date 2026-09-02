@@ -1564,7 +1564,280 @@ export default function PassportPage() {
   // ── OVERVIEW ─────────────────────────────────────────────────────────────────
 
   if (mode.kind === "overview") {
-    const hasNote = !!((savedAnswers as Record<string, unknown>)["final-notes"] as string | undefined)?.trim();
+    const a = savedAnswers as Record<string, unknown>;
+    const hasNote = !!((a["final-notes"] as string | undefined)?.trim());
+    const getArr = (key: string) => (Array.isArray(a[key]) ? a[key] as string[] : []);
+
+    // ── Rev 6 — premium editorial dossier ──────────────────────────────────
+    if (isRev6) {
+      const favColors   = getArr("favorite-colors").filter(id => !LEGACY_COLOUR_IDS.has(id));
+      const avoidColors = getArr("avoid-colors");
+      const fitConcerns = getArr("fit-concerns");
+      const fitNote     = (a["fit-concerns-note"] as string | undefined)?.trim() ?? "";
+      const dressingPrefs = getArr("dressing-preferences");
+      const noteText    = (a["final-notes"] as string | undefined)?.trim() ?? "";
+      const sizesDetail = getSectionDetail(getEffectiveDef(getSectionDef("sizes"), true), savedAnswers);
+
+      return (
+        <MyNaiaLayout>
+          <Link to="/my-naia" className="sp-back">← Overview</Link>
+
+          <div className="sp-shell">
+            <div className="sp-shell-eyebrow">Style Passport</div>
+            <h1 className="sp-shell-title">Your Style Passport</h1>
+            <p className="sp-shell-desc">
+              Your Style Passport keeps the preferences that shape your nAia experience in one
+              place. Update it whenever your style, life or priorities evolve.
+            </p>
+          </div>
+
+          <div className="sp-status-block">
+            <div className="sp-status-label">Status</div>
+            <p className="sp-status-text">
+              {isComplete
+                ? "Your Style Passport is up to date."
+                : "A few details are still missing."}
+            </p>
+            <div className="sp-status-date" suppressHydrationWarning>Last updated · {formatDate(profileUpdatedAt)}</div>
+          </div>
+
+          <div className="sp-ov-dossier">
+
+            {/* Row 1: Current Focus | What Makes an Outfit Work */}
+            <div className="sp-ov-grid">
+              <div className="sp-ov-grid-cell">
+                <div className="sp-ov-section-header-row">
+                  <span className="sp-ov-section-header">Current Focus</span>
+                  <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("goals")}>EDIT</button>
+                </div>
+                {getArr("current-goal").length > 0 ? (
+                  <div className="sp-ov-focus-statements">
+                    {getArr("current-goal").map(id => (
+                      <div key={id} className="sp-ov-focus-statement">
+                        {lbl("current-goal", id).toUpperCase()}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="sp-ov-dossier-empty">Optional — not yet set</span>
+                )}
+              </div>
+
+              <div className="sp-ov-grid-cell">
+                <div className="sp-ov-section-header-row">
+                  <span className="sp-ov-section-header">What Makes an Outfit Work</span>
+                  <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("outfit-gives")}>EDIT</button>
+                </div>
+                {getArr("successful-outfit-gives").length > 0 ? (
+                  <div className="sp-ov-tags">
+                    {getArr("successful-outfit-gives").map(id => (
+                      <span key={id} className="sp-ov-tag">{lbl("successful-outfit-gives", id).toUpperCase()}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="sp-ov-dossier-empty">Optional — not yet set</span>
+                )}
+              </div>
+            </div>
+
+            {/* Row 2: Style | Lifestyle */}
+            <div className="sp-ov-grid">
+              <div className="sp-ov-grid-cell">
+                <div className="sp-ov-section-header-row">
+                  <span className="sp-ov-section-header">Style</span>
+                  <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("identity")}>EDIT</button>
+                </div>
+                {getArr("style-personalities").length > 0 ? (
+                  <div className="sp-ov-tags">
+                    {getArr("style-personalities").map(id => (
+                      <span key={id} className="sp-ov-tag">{lbl("style-personalities", id).toUpperCase()}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="sp-ov-dossier-empty sp-detail-missing">Not yet completed</span>
+                )}
+              </div>
+
+              <div className="sp-ov-grid-cell">
+                <div className="sp-ov-section-header-row">
+                  <span className="sp-ov-section-header">Lifestyle</span>
+                  <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("life")}>EDIT</button>
+                </div>
+                {getArr("lifestyle").length > 0 ? (
+                  <div className="sp-ov-tags">
+                    {getArr("lifestyle").map(id => (
+                      <span key={id} className="sp-ov-tag">{lbl("lifestyle", id).toUpperCase()}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="sp-ov-dossier-empty sp-detail-missing">Not yet completed</span>
+                )}
+              </div>
+            </div>
+
+            {/* Row 3: Colour Palette (full width) */}
+            <div className="sp-ov-wide">
+              <div className="sp-ov-section-header-row">
+                <span className="sp-ov-section-header">Colour Palette</span>
+                <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("colours")}>EDIT</button>
+              </div>
+              {(favColors.length > 0 || avoidColors.length > 0) ? (
+                <div className="sp-ov-colour-section">
+                  {favColors.length > 0 && (
+                    <div className="sp-ov-colour-group">
+                      <div className="sp-ov-colour-group-label">You Love Wearing</div>
+                      <div className="sp-ov-colour-grid">
+                        {favColors.map(id => (
+                          <div key={id} className="sp-ov-colour-row">
+                            <span className="sp-ov-swatch" style={{ background: COLOR_HEX[id] ?? "#888" }} />
+                            <span className="sp-ov-colour-name">{lbl("favorite-colors", id)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {avoidColors.length > 0 && (
+                    <div className="sp-ov-colour-group sp-ov-colour-group--avoid">
+                      <div className="sp-ov-colour-group-label">You Usually Avoid</div>
+                      <div className="sp-ov-colour-grid">
+                        {avoidColors.map(id => (
+                          <div key={id} className="sp-ov-colour-row">
+                            <span className="sp-ov-swatch" style={{ background: COLOR_HEX[id] ?? "#888" }} />
+                            <span className="sp-ov-colour-name">{lbl("avoid-colors", id)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <span className="sp-ov-dossier-empty sp-detail-missing">Not yet completed</span>
+              )}
+            </div>
+
+            {/* Row 4: Silhouette | Fit Concerns */}
+            <div className="sp-ov-grid">
+              <div className="sp-ov-grid-cell">
+                <div className="sp-ov-section-header-row">
+                  <span className="sp-ov-section-header">Silhouette</span>
+                  <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("fit")}>EDIT</button>
+                </div>
+                {getArr("silhouette").length > 0 ? (
+                  <div className="sp-ov-tags">
+                    {getArr("silhouette").map(id => (
+                      <span key={id} className="sp-ov-tag">{lbl("silhouette", id).toUpperCase()}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="sp-ov-dossier-empty sp-detail-missing">Not yet completed</span>
+                )}
+              </div>
+
+              <div className="sp-ov-grid-cell">
+                <div className="sp-ov-section-header-row">
+                  <span className="sp-ov-section-header">Fit Concerns</span>
+                  <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("fit-concerns")}>EDIT</button>
+                </div>
+                {(fitConcerns.length > 0 || fitNote) ? (
+                  <div className="sp-ov-fit-list">
+                    {fitConcerns.map(id => (
+                      <div key={id} className="sp-ov-fit-item">{lbl("fit-concerns", id)}</div>
+                    ))}
+                    {fitNote && <div className="sp-ov-fit-item">{fitNote}</div>}
+                  </div>
+                ) : (
+                  <span className="sp-ov-dossier-empty">Optional — none added</span>
+                )}
+              </div>
+            </div>
+
+            {/* Row 5: Dressing Requirements (full width) */}
+            <div className="sp-ov-wide">
+              <div className="sp-ov-section-header-row">
+                <span className="sp-ov-section-header">Dressing Requirements</span>
+                <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("dressing")}>EDIT</button>
+              </div>
+              {dressingPrefs.length > 0 ? (
+                <div className="sp-ov-tags">
+                  {dressingPrefs.map(id => (
+                    <span key={id} className="sp-ov-tag sp-ov-tag--boundary">
+                      {lbl("dressing-preferences", id).toUpperCase()}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <span className="sp-ov-dossier-empty">Optional — none added</span>
+              )}
+            </div>
+
+            {/* Row 6: Notes to nAia (full width) */}
+            <div className="sp-ov-wide">
+              <div className="sp-ov-section-header">Notes to nAia</div>
+              {noteText ? (
+                <p className="sp-ov-notes-quoted">"{noteText}"</p>
+              ) : (
+                <span className="sp-ov-dossier-empty" style={{ display: "block", marginBottom: "12px" }}>Optional — add a note</span>
+              )}
+              <button
+                type="button"
+                className="sp-btn-outline"
+                onClick={() => editSection("notes")}
+                style={{ marginTop: noteText ? "12px" : "0" }}
+              >
+                {hasNote ? "EDIT NOTE" : "ADD A NOTE"}
+              </button>
+            </div>
+
+            {/* Optional enrichment: Sizes & Visual Analysis */}
+            <div className="sp-ov-enrich-area">
+              <div className="sp-ov-enrich-eyebrow">Make Your Passport More Precise</div>
+              <div className="sp-ov-enrich-cards">
+
+                <div className="sp-ov-enrich-card">
+                  <div className="sp-ov-enrich-card-title">Sizes &amp; Measurements</div>
+                  <p className="sp-ov-enrich-card-desc">
+                    For more precise fit and shopping guidance.
+                  </p>
+                  {sizesDetail}
+                  <button
+                    type="button"
+                    className="sp-btn-outline"
+                    onClick={() => editSection("sizes")}
+                    style={{ marginTop: sizesDetail ? "12px" : "0" }}
+                  >
+                    {sizesDetail ? "UPDATE SIZES" : "ADD SIZES & MEASUREMENTS"}
+                  </button>
+                </div>
+
+                <div className="sp-ov-enrich-card">
+                  <VisualAnalysisChapter selfieChapter={selfieChapter ?? null} />
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+          <div className="sp-actions">
+            {!isLegacyCustomer && !isComplete && (
+              <button type="button" className="sp-btn-primary" onClick={startContinue}>
+                Continue Passport
+              </button>
+            )}
+            <button type="button" className="sp-btn-outline" onClick={startUpdate}>
+              Update Answers
+            </button>
+          </div>
+
+          {!isLegacyCustomer && !isComplete && missingSections[0] && (
+            <div className="sp-state-note">
+              You'll resume at <strong>{missingSections[0].label}</strong>. All previous answers are preserved.
+            </div>
+          )}
+        </MyNaiaLayout>
+      );
+    }
+
+    // ── Legacy (non-Rev6) — existing flat layout unchanged ─────────────────
     return (
       <MyNaiaLayout>
         <Link to="/my-naia" className="sp-back">← Overview</Link>
@@ -1578,27 +1851,21 @@ export default function PassportPage() {
           </p>
         </div>
 
-        {isLegacyCustomer && (
-          <div className="sp-refresh-banner">
-            <div className="sp-refresh-banner-title">Your Style Passport has evolved</div>
-            <p className="sp-refresh-banner-desc">
-              A few quick answers will bring it up to date with the current version of nAia.
-              Your existing preferences are preserved.
-            </p>
-            <button type="button" className="sp-btn-primary" onClick={startRefresh}>
-              Refresh your Style Passport
-            </button>
-          </div>
-        )}
+        <div className="sp-refresh-banner">
+          <div className="sp-refresh-banner-title">Your Style Passport has evolved</div>
+          <p className="sp-refresh-banner-desc">
+            A few quick answers will bring it up to date with the current version of nAia.
+            Your existing preferences are preserved.
+          </p>
+          <button type="button" className="sp-btn-primary" onClick={startRefresh}>
+            Refresh your Style Passport
+          </button>
+        </div>
 
         <div className="sp-status-block">
           <div className="sp-status-label">Status</div>
           <p className="sp-status-text">
-            {isLegacyCustomer
-              ? "Refresh recommended — your passport predates the current version."
-              : isComplete
-                ? "Your Style Passport is up to date."
-                : "A few details are still missing."}
+            Refresh recommended — your passport predates the current version.
           </p>
           <div className="sp-status-date" suppressHydrationWarning>Last updated · {formatDate(profileUpdatedAt)}</div>
         </div>
@@ -1606,72 +1873,26 @@ export default function PassportPage() {
         {/* Full detail — visible sections for this customer type + Notes */}
         <div className="sp-ov-sections">
           {visibleSections.map(def => {
-            const detail = getSectionDetail(getEffectiveDef(def, isRev6), savedAnswers);
-            const sizesEmpty = isRev6 && def.id === "sizes" && detail === null;
+            const detail = getSectionDetail(getEffectiveDef(def, false), savedAnswers);
             return (
               <div key={def.id} className="sp-ov-section">
-                {isRev6 ? (
-                  <div className="sp-ov-section-header-row">
-                    <span className="sp-ov-section-header">{def.label}</span>
-                    <button
-                      type="button"
-                      className="sp-ov-edit-btn"
-                      onClick={() => editSection(def.id)}
-                    >
-                      EDIT
-                    </button>
-                  </div>
-                ) : (
-                  <div className="sp-ov-section-header">{def.label}</div>
-                )}
-                {sizesEmpty ? (
-                  <div className="sp-ov-sizes-empty">
-                    <p className="sp-ov-sizes-empty-text">No sizes or measurements added yet.</p>
-                    <p className="sp-ov-sizes-empty-hint">Add these for more precise fit and shopping guidance.</p>
-                    <button
-                      type="button"
-                      className="sp-btn-outline"
-                      onClick={() => editSection("sizes")}
-                    >
-                      ADD SIZES &amp; MEASUREMENTS
-                    </button>
-                  </div>
-                ) : detail}
+                <div className="sp-ov-section-header">{def.label}</div>
+                {detail}
               </div>
             );
           })}
           <div className="sp-ov-section sp-ov-section--notes">
             <div className="sp-ov-section-header">{NOTES_SECTION.label}</div>
             {getSectionDetail(NOTES_SECTION, savedAnswers)}
-            <button
-              type="button"
-              className="sp-btn-outline"
-              onClick={() => editSection("notes")}
-            >
-              {hasNote ? "EDIT NOTE" : "ADD A NOTE"}
-            </button>
           </div>
-
-          {/* ── VISUAL ANALYSIS chapter ────────────────────────────────────── */}
           <VisualAnalysisChapter selfieChapter={selfieChapter ?? null} />
         </div>
 
         <div className="sp-actions">
-          {!isLegacyCustomer && !isComplete && (
-            <button type="button" className="sp-btn-primary" onClick={startContinue}>
-              Continue Passport
-            </button>
-          )}
           <button type="button" className="sp-btn-outline" onClick={startUpdate}>
             Update Answers
           </button>
         </div>
-
-        {!isLegacyCustomer && !isComplete && missingSections[0] && (
-          <div className="sp-state-note">
-            You'll resume at <strong>{missingSections[0].label}</strong>. All previous answers are preserved.
-          </div>
-        )}
       </MyNaiaLayout>
     );
   }

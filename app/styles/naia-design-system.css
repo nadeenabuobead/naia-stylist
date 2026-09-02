@@ -1804,6 +1804,203 @@ a.mn-action:focus-visible,
   margin-top: 6px;
 }
 
+/* ── Passport overview — premium dossier layout (sp-ov-dossier) ── */
+.sp-ov-dossier { margin-bottom: 40px; }
+
+/* Two-column grid row */
+.sp-ov-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid rgba(40, 21, 12, 0.10);
+}
+.sp-ov-grid-cell { padding: 28px 0; }
+.sp-ov-grid-cell:first-child {
+  padding-right: 32px;
+  border-right: 1px solid rgba(40, 21, 12, 0.10);
+}
+.sp-ov-grid-cell:last-child { padding-left: 32px; }
+.sp-ov-grid-cell:only-child {
+  padding-right: 0;
+  border-right: none;
+  grid-column: 1 / -1;
+}
+
+/* Full-width section row */
+.sp-ov-wide {
+  padding: 28px 0;
+  border-bottom: 1px solid rgba(40, 21, 12, 0.10);
+}
+.sp-ov-wide:last-of-type { border-bottom: none; }
+
+/* Tags / chips */
+.sp-ov-tags { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
+.sp-ov-tag {
+  display: inline-block;
+  font-family: var(--naia-ff-ui);
+  font-size: 10px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--naia-ink);
+  border: 1px solid rgba(40, 21, 12, 0.22);
+  padding: 6px 12px;
+  line-height: 1;
+}
+.sp-ov-tag--boundary {
+  border-color: rgba(40, 21, 12, 0.50);
+  font-weight: 500;
+}
+
+/* Current Focus editorial statements */
+.sp-ov-focus-statements { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+.sp-ov-focus-statement {
+  font-family: var(--naia-ff-ui);
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--naia-ink);
+  padding: 10px 14px;
+  background: rgba(40, 21, 12, 0.04);
+  border-left: 2px solid var(--naia-accent);
+  line-height: 1.45;
+}
+
+/* Colour palette */
+.sp-ov-colour-section { display: flex; gap: 40px; flex-wrap: wrap; padding-top: 4px; }
+.sp-ov-colour-group { flex: 1; min-width: 160px; }
+.sp-ov-colour-group-label {
+  font-family: var(--naia-ff-ui);
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: rgba(40, 21, 12, 0.40);
+  margin-bottom: 14px;
+}
+.sp-ov-colour-grid { display: flex; flex-direction: column; gap: 10px; }
+.sp-ov-colour-row { display: flex; align-items: center; gap: 12px; }
+.sp-ov-swatch {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border: 1px solid rgba(40, 21, 12, 0.15);
+}
+.sp-ov-colour-name {
+  font-family: var(--naia-ff-body);
+  font-size: 14px;
+  color: var(--naia-ink);
+  letter-spacing: 0.2px;
+}
+.sp-ov-colour-group--avoid .sp-ov-colour-name { color: rgba(40, 21, 12, 0.48); }
+.sp-ov-colour-group--avoid .sp-ov-swatch { opacity: 0.50; }
+
+/* Fit concerns list */
+.sp-ov-fit-list { display: flex; flex-direction: column; padding-top: 4px; }
+.sp-ov-fit-item {
+  font-family: var(--naia-ff-body);
+  font-size: 14px;
+  color: var(--naia-ink);
+  line-height: 1.5;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(40, 21, 12, 0.06);
+}
+.sp-ov-fit-item:last-child { border-bottom: none; }
+
+/* Notes quoted */
+.sp-ov-notes-quoted {
+  font-family: var(--naia-ff-body);
+  font-size: 16px;
+  font-style: italic;
+  color: var(--naia-ink);
+  line-height: 1.65;
+  margin: 0 0 16px;
+  padding: 14px 18px;
+  background: rgba(40, 21, 12, 0.03);
+  border-left: 1px solid rgba(40, 21, 12, 0.18);
+  white-space: pre-wrap;
+}
+
+/* Dossier empty state */
+.sp-ov-dossier-empty {
+  font-family: var(--naia-ff-body);
+  font-size: 14px;
+  font-style: italic;
+  color: rgba(40, 21, 12, 0.38);
+  display: block;
+  padding-top: 4px;
+}
+
+/* Optional enrichment area */
+.sp-ov-enrich-area {
+  padding: 32px 0 28px;
+  border-top: 1px solid rgba(40, 21, 12, 0.10);
+  margin-top: 8px;
+}
+.sp-ov-enrich-eyebrow {
+  font-family: var(--naia-ff-ui);
+  font-size: 9px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: rgba(40, 21, 12, 0.32);
+  margin-bottom: 20px;
+}
+.sp-ov-enrich-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.sp-ov-enrich-card {
+  padding: 22px;
+  border: 1px solid rgba(40, 21, 12, 0.12);
+  background: var(--naia-surface);
+}
+.sp-ov-enrich-card-title {
+  font-family: var(--naia-ff-ui);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--naia-ink);
+  margin-bottom: 8px;
+}
+.sp-ov-enrich-card-desc {
+  font-family: var(--naia-ff-body);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--naia-muted);
+  line-height: 1.55;
+  margin: 0 0 14px;
+}
+/* Suppress inner section wrapper when VisualAnalysisChapter renders inside enrich card */
+.sp-ov-enrich-card .sp-ov-section {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 0;
+}
+.sp-ov-enrich-card .sp-ov-section-header { font-size: 10px; letter-spacing: 2px; }
+
+/* dossier section-header-row reuse */
+.sp-ov-grid-cell .sp-ov-section-header-row,
+.sp-ov-wide .sp-ov-section-header-row { margin-bottom: 16px; }
+
+/* Sizes detail inside enrich card — compact */
+.sp-ov-enrich-card .sp-ov-field {
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(40,21,12,0.06);
+}
+
+@media (max-width: 640px) {
+  .sp-ov-grid { grid-template-columns: 1fr; }
+  .sp-ov-grid-cell:first-child {
+    padding-right: 0;
+    border-right: none;
+    border-bottom: 1px solid rgba(40, 21, 12, 0.08);
+    padding-bottom: 20px;
+    margin-bottom: 4px;
+  }
+  .sp-ov-grid-cell:last-child { padding-left: 0; }
+  .sp-ov-enrich-cards { grid-template-columns: 1fr; }
+  .sp-ov-colour-section { flex-direction: column; gap: 24px; }
+}
+
 /* ── Passport overview — full detail view (sp-ov-*) ── */
 .sp-ov-sections {
   display: flex;
