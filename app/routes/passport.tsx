@@ -1045,6 +1045,10 @@ export default function PassportPage() {
   // Stores the exact flowEdits snapshot that was successfully persisted for each refresh
   // stepIndex. Used by Back navigation so it never depends on revalidation timing.
   const committedEditsRef = useRef<Record<number, OnboardingAnswers>>({});
+  // True when editSection() pushed a { passport: "edit" } history entry that has not
+  // yet been consumed. In-page exits must call history.back() (not setMode) so the
+  // entry is consumed and no phantom Back step is left behind.
+  const editPushedRef = useRef(false);
 
   // Missing sections uses visible sections for this customer type.
   // Optional sections never trigger as "missing". Primary sub-field uses effective (Rev 6-filtered) def.
@@ -1085,7 +1089,10 @@ export default function PassportPage() {
   useEffect(() => {
     function onPopState(e: PopStateEvent) {
       const state = e.state as { passport?: string } | null;
-      if (!state?.passport) setMode({ kind: "overview" });
+      if (!state?.passport) {
+        editPushedRef.current = false;
+        setMode({ kind: "overview" });
+      }
     }
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -1098,7 +1105,7 @@ export default function PassportPage() {
 
     if (pendingNext === "exit") {
       setPendingNext(null);
-      setMode({ kind: "overview" });
+      exitToOverview();
     } else if (pendingNext === "next" && mode.kind === "flow") {
       setPendingNext(null);
       if (mode.index + 1 >= mode.queue.length) {
@@ -1151,7 +1158,26 @@ export default function PassportPage() {
     setMode({ kind: "picker" });
   }
 
+  function exitToOverview() {
+    if (editPushedRef.current) {
+      // Consume the { passport: "edit" } entry we pushed so no phantom Back step
+      // is left behind. The popstate handler will call setMode({ kind: "overview" }).
+      editPushedRef.current = false;
+      window.history.back();
+    } else {
+      setMode({ kind: "overview" });
+    }
+  }
+
   function editSection(id: SectionId) {
+    // Push a history entry when launched from the overview so the browser's native
+    // Back button also resolves to the overview (via the existing popstate handler).
+    // When launched from the picker, the picker already pushed its own entry —
+    // pushing again would layer an extra entry and confuse popstate routing.
+    if (mode.kind === "overview") {
+      window.history.pushState({ passport: "edit" }, "");
+      editPushedRef.current = true;
+    }
     initEdits(id);
     setMode({ kind: "flow", queue: [id], index: 0 });
   }
@@ -1378,7 +1404,7 @@ export default function PassportPage() {
 
     if (def.subFields.length === 0) {
       if (intent === "exit") {
-        setMode({ kind: "overview" });
+        exitToOverview();
       } else if (mode.kind === "flow") {
         if (mode.index + 1 >= mode.queue.length) {
           setMode({ ...mode, done: true });
@@ -1395,7 +1421,7 @@ export default function PassportPage() {
 
     if (patch === null) {
       if (intent === "exit") {
-        setMode({ kind: "overview" });
+        exitToOverview();
       } else if (mode.kind === "flow") {
         if (mode.index + 1 >= mode.queue.length) {
           setMode({ ...mode, done: true });
@@ -1819,7 +1845,7 @@ export default function PassportPage() {
   if (mode.kind === "flow" && mode.done) {
     return (
       <MyNaiaLayout>
-        <button type="button" className="sp-back" onClick={() => setMode({ kind: "overview" })}>
+        <button type="button" className="sp-back" onClick={exitToOverview}>
           ← Style Passport
         </button>
 
@@ -1832,7 +1858,7 @@ export default function PassportPage() {
         </div>
 
         <div className="sp-actions">
-          <button type="button" className="sp-btn-primary" onClick={() => setMode({ kind: "overview" })}>
+          <button type="button" className="sp-btn-primary" onClick={exitToOverview}>
             Return to Passport
           </button>
         </div>
@@ -2168,7 +2194,13 @@ export default function PassportPage() {
           disabled={isBusy}
           onClick={() => {
             if (mode.index === 0) {
-              navigate(-1);
+              if (mode.queue.length === 1) {
+                // Single-section edit: return to overview and consume any pushed
+                // edit history entry so no phantom Back step is left behind.
+                exitToOverview();
+              } else {
+                navigate(-1);
+              }
             } else {
               const prevId = mode.queue[mode.index - 1];
               initEdits(prevId);

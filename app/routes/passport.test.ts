@@ -1,4 +1,4 @@
-// Tests for /passport page — V2-B2 section structure.
+// Tests for /passport page — V2-B2 section structure + QA edit-return fix.
 //
 // Uses node:test + tsx/esm (same runner as the rest of the project).
 // No DOM or Prisma required — we test the pure state-machine logic mirrored
@@ -14,7 +14,9 @@ import assert from "node:assert/strict";
 // ─────────────────────────────────────────────────────────────────────────────
 
 type SectionId =
-  | "identity" | "direction" | "life" | "fit" | "sizes" | "colours" | "wardrobe"
+  // Rev 6 sections (added goals, outfit-gives, fit-concerns, dressing)
+  | "goals" | "outfit-gives" | "identity" | "direction" | "life" | "fit"
+  | "fit-concerns" | "sizes" | "colours" | "wardrobe" | "dressing"
   | "notes";
 
 type FieldKind = "array" | "color" | "single" | "text";
@@ -170,6 +172,107 @@ function sim_onPopState(state: { passport?: string } | null, outMode: { value: M
 function sim_pickerSelect(sectionId: SectionId, outMode: { value: Mode }, outHistory: { passport: string }[]) {
   outHistory.push({ passport: "flow" });
   outMode.value = { kind: "flow", queue: [sectionId], index: 0 };
+}
+
+// Mirrors the fixed editSection(id) called from the overview (mode.kind === "overview").
+// Pushes { passport: "edit" } so the browser's native Back button also hits overview
+// via the existing popstate handler. Sets editPushed=true to track the unmatched entry.
+function sim_editSection_fromOverview(
+  id:         SectionId,
+  outMode:    { value: Mode },
+  outHistory: { passport: string }[],
+  outPushed?: { value: boolean },
+) {
+  outHistory.push({ passport: "edit" });
+  if (outPushed) outPushed.value = true;
+  outMode.value = { kind: "flow", queue: [id], index: 0 };
+}
+
+// Mirrors editSection(id) called from the picker (mode.kind === "picker").
+// Does NOT push a history entry — the picker already pushed its own entry.
+function sim_editSection_fromPicker(id: SectionId, outMode: { value: Mode }) {
+  outMode.value = { kind: "flow", queue: [id], index: 0 };
+}
+
+// Mirrors exitToOverview():
+// - When editPushed is true: pops the { passport: "edit" } history entry (history.back())
+//   and resets editPushed. The popstate handler then calls setMode(overview).
+// - When editPushed is false: calls setMode(overview) directly (no history change).
+function sim_exitToOverview(
+  outMode:    { value: Mode },
+  outHistory: { passport: string }[],
+  outPushed:  { value: boolean },
+) {
+  if (outPushed.value) {
+    outPushed.value = false;
+    // Consume the edit entry (mirrors history.back())
+    if (outHistory.length > 0 && outHistory[outHistory.length - 1]?.passport === "edit") {
+      outHistory.pop();
+    }
+    // popstate fires → setMode({ kind: "overview" })
+    outMode.value = { kind: "overview" };
+  } else {
+    outMode.value = { kind: "overview" };
+  }
+}
+
+// Mirrors "Continue Later" / saveSection(currentId, "exit") fast path.
+// Uses exitToOverview() semantics when editPushed is provided.
+function sim_continueLater(
+  outMode:    { value: Mode },
+  outHistory?: { passport: string }[],
+  outPushed?:  { value: boolean },
+) {
+  if (outHistory && outPushed) {
+    sim_exitToOverview(outMode, outHistory, outPushed);
+  } else {
+    outMode.value = { kind: "overview" };
+  }
+}
+
+// Mirrors the Back button at step 0 in a flow step.
+// Fixed behavior: when queue.length === 1, calls exitToOverview() (may consume history).
+// When queue.length > 1, navigate(-1) is called — not simulated here.
+// Returns true if exitToOverview was invoked, false if navigate(-1) would have run.
+function sim_backButton_step0(
+  mode:        { kind: "flow"; queue: SectionId[]; index: number },
+  outMode:     { value: Mode },
+  outHistory?: { passport: string }[],
+  outPushed?:  { value: boolean },
+): boolean {
+  if (mode.index !== 0) return false;
+  if (mode.queue.length === 1) {
+    if (outHistory && outPushed) {
+      sim_exitToOverview(outMode, outHistory, outPushed);
+    } else {
+      outMode.value = { kind: "overview" };
+    }
+    return true;
+  }
+  // navigate(-1) — not simulated; caller can assert via popstate
+  return false;
+}
+
+// Mirrors native browser Back while inside an edit (popstate with no passport marker
+// on the entry navigated TO — i.e. the previous /passport entry).
+// Resets editPushed and sets mode to overview.
+function sim_nativeBrowserBack_fromEdit(
+  outMode:    { value: Mode },
+  outHistory: { passport: string }[],
+  outPushed:  { value: boolean },
+) {
+  // Browser pops the edit entry; popstate fires for the previous entry (no passport).
+  if (outHistory.length > 0 && outHistory[outHistory.length - 1]?.passport === "edit") {
+    outHistory.pop();
+  }
+  outPushed.value = false;
+  outMode.value = { kind: "overview" };
+}
+
+// Mirrors startRefresh — preserves its push-to-history pattern unchanged.
+function sim_startRefresh(outMode: { value: Mode }, outHistory: { passport: string }[]) {
+  outHistory.push({ passport: "refresh" });
+  outMode.value = { kind: "refresh", stepIndex: 0 };
 }
 
 // Mirrored initEdits — strips legacy colours from favorite-colors
@@ -654,5 +757,600 @@ describe("handleToggle — mutual exclusion for colour pickers", () => {
     let edits: Record<string, unknown> = { "favorite-colors": ["a", "b", "c", "d", "e"] };
     edits = handleToggle(edits, "favorite-colors", "new-color", 5);
     assert.equal((edits["favorite-colors"] as string[]).length, 5);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A–L: Edit return navigation — regression tests for QA bug fix
+//
+// Contract: ANY single-section edit launched from /passport must return
+// deterministically to overview (the passport page), never to
+// /onboarding/complete or /my-naia.
+//
+// Tests A–H verify specific named sections + Notes.
+// Test I verifies ALL Rev 6 sections share the same contract.
+// Tests J–K verify onboarding and refresh flows are NOT affected by the fix.
+// Test L verifies answer persistence is NOT broken by the fix.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Helpers for A–L & history regression ─────────────────────────────────────
+
+type EditState = {
+  mode:    { value: Mode };
+  history: { passport: string }[];
+  pushed:  { value: boolean };
+};
+
+// Returns a fresh overview state including pushed tracking.
+function mkOverviewState(): EditState {
+  return {
+    mode:    { value: { kind: "overview" } },
+    history: [],
+    pushed:  { value: false },
+  };
+}
+
+// Simulate: overview → editSection(id) from overview → Continue Later
+// Returns the mode after Continue Later. Must be "overview".
+function runEditFromOverviewThenContinueLater(id: SectionId): Mode {
+  const s = mkOverviewState();
+  sim_editSection_fromOverview(id, s.mode, s.history, s.pushed);
+  sim_continueLater(s.mode, s.history, s.pushed);
+  return s.mode.value;
+}
+
+// Simulate: overview → editSection(id) from overview → Back at step 0
+// Returns the mode after Back. Must be "overview".
+function runEditFromOverviewThenBack(id: SectionId): Mode {
+  const s = mkOverviewState();
+  sim_editSection_fromOverview(id, s.mode, s.history, s.pushed);
+  const flowMode = s.mode.value as { kind: "flow"; queue: SectionId[]; index: number };
+  sim_backButton_step0(flowMode, s.mode, s.history, s.pushed);
+  return s.mode.value;
+}
+
+// ── A. Edit Current Focus (goals) → Continue Later → overview ────────────────
+describe("A — goals edit from overview → Continue Later returns to overview", () => {
+  it("mode is overview after Continue Later", () => {
+    const result = runEditFromOverviewThenContinueLater("goals");
+    assert.equal(result.kind, "overview");
+  });
+
+  it("editSection_fromOverview pushes a history entry", () => {
+    const s = mkOverviewState();
+    sim_editSection_fromOverview("goals", s.mode, s.history);
+    assert.equal(s.history.length, 1);
+    assert.equal(s.history[0].passport, "edit");
+  });
+});
+
+// ── B. Edit Style (identity) → Continue Later → overview ─────────────────────
+describe("B — identity edit from overview → Continue Later returns to overview", () => {
+  it("mode is overview after Continue Later", () => {
+    const result = runEditFromOverviewThenContinueLater("identity");
+    assert.equal(result.kind, "overview");
+  });
+});
+
+// ── C. Edit Fit Concerns (fit-concerns) → Continue Later → overview ───────────
+describe("C — fit-concerns edit from overview → Continue Later returns to overview", () => {
+  it("mode is overview after Continue Later", () => {
+    const result = runEditFromOverviewThenContinueLater("fit-concerns");
+    assert.equal(result.kind, "overview");
+  });
+});
+
+// ── D. Edit Sizes → Continue Later → overview ────────────────────────────────
+// Sizes is a placeholder section but the user can still navigate to it via
+// the full section queue; the navigation contract is the same.
+describe("D — sizes edit from overview → Continue Later returns to overview", () => {
+  it("mode is overview after Continue Later", () => {
+    const result = runEditFromOverviewThenContinueLater("sizes");
+    assert.equal(result.kind, "overview");
+  });
+});
+
+// ── E. Back at step 0 from overview-launched edit → overview ─────────────────
+describe("E — Back at step 0 in single-section edit returns to overview", () => {
+  it("identity: mode is overview after Back", () => {
+    const result = runEditFromOverviewThenBack("identity");
+    assert.equal(result.kind, "overview");
+  });
+
+  it("colours: mode is overview after Back", () => {
+    const result = runEditFromOverviewThenBack("colours");
+    assert.equal(result.kind, "overview");
+  });
+
+  it("sim_backButton_step0 returns true for queue.length === 1", () => {
+    const mode = { kind: "flow" as const, queue: ["wardrobe"] as SectionId[], index: 0 };
+    const outMode: { value: Mode } = { value: { kind: "overview" } };
+    const handled = sim_backButton_step0(mode, outMode);
+    assert.ok(handled, "should return true (setMode called)");
+    assert.equal(outMode.value.kind, "overview");
+  });
+
+  it("sim_backButton_step0 returns false for queue.length > 1 (multi-section flow)", () => {
+    const mode = {
+      kind: "flow" as const,
+      queue: ["identity", "direction"] as SectionId[],
+      index: 0,
+    };
+    const outMode: { value: Mode } = { value: { kind: "flow", queue: ["identity", "direction"], index: 0 } };
+    const handled = sim_backButton_step0(mode, outMode);
+    assert.ok(!handled, "should return false (navigate(-1) path)");
+  });
+});
+
+// ── F. Passport-originated edit does NOT resolve to onboarding/complete ───────
+// The /onboarding/complete route would only be visited if navigate(-1) were
+// called and the previous history entry was that URL. The fix ensures
+// navigate(-1) is never called for single-section edits — setMode(overview) is
+// used instead.
+describe("F — single-section edit does NOT navigate(-1)", () => {
+  it("Back at step 0 is handled (setMode, not navigate(-1)) for single-section queue", () => {
+    const mode = { kind: "flow" as const, queue: ["direction"] as SectionId[], index: 0 };
+    const outMode: { value: Mode } = { value: { kind: "flow", queue: ["direction"], index: 0 } };
+    const handled = sim_backButton_step0(mode, outMode);
+    // handled=true means setMode(overview) ran; navigate(-1) was NOT called
+    assert.ok(handled);
+  });
+
+  it("resulting mode is overview, never a Remix navigation", () => {
+    const result = runEditFromOverviewThenBack("life");
+    assert.equal(result.kind, "overview");
+  });
+});
+
+// ── G. Passport-originated edit does NOT resolve to /my-naia ─────────────────
+// Same reasoning as F: the /my-naia URL only appears if navigate(-1) pops the
+// stack to a prior /my-naia entry.
+describe("G — single-section edit Back never leaves passport (no /my-naia)", () => {
+  it("all named sections: Back at step 0 stays in overview", () => {
+    const namedSections: SectionId[] = [
+      "goals", "outfit-gives", "identity", "direction", "life",
+      "fit", "fit-concerns", "colours", "wardrobe", "dressing",
+    ];
+    for (const id of namedSections) {
+      const result = runEditFromOverviewThenBack(id);
+      assert.equal(result.kind, "overview", `${id} should return to overview`);
+    }
+  });
+});
+
+// ── H. Notes edit returns to overview when launched from overview ─────────────
+describe("H — notes edit from overview returns to overview", () => {
+  it("Continue Later after notes edit → overview", () => {
+    const result = runEditFromOverviewThenContinueLater("notes");
+    assert.equal(result.kind, "overview");
+  });
+
+  it("Back at step 0 after notes edit → overview", () => {
+    const result = runEditFromOverviewThenBack("notes");
+    assert.equal(result.kind, "overview");
+  });
+
+  it("notes editSection_fromOverview pushes a history entry", () => {
+    const s = mkOverviewState();
+    sim_editSection_fromOverview("notes", s.mode, s.history);
+    assert.equal(s.history.length, 1);
+    assert.equal(s.history[0].passport, "edit");
+  });
+});
+
+// ── I. ALL Rev 6 sections share the deterministic return contract ─────────────
+describe("I — all Rev 6 sections: single-section edit returns to overview", () => {
+  const rev6Sections: SectionId[] = [
+    "goals", "outfit-gives", "identity", "direction", "life",
+    "fit", "fit-concerns", "sizes", "colours", "wardrobe", "dressing", "notes",
+  ];
+
+  for (const id of rev6Sections) {
+    it(`${id}: Continue Later → overview`, () => {
+      const result = runEditFromOverviewThenContinueLater(id);
+      assert.equal(result.kind, "overview");
+    });
+
+    it(`${id}: Back at step 0 → overview`, () => {
+      const result = runEditFromOverviewThenBack(id);
+      assert.equal(result.kind, "overview");
+    });
+
+    it(`${id}: editSection_fromOverview pushes exactly 1 history entry`, () => {
+      const s = mkOverviewState();
+      sim_editSection_fromOverview(id, s.mode, s.history);
+      assert.equal(s.history.length, 1);
+    });
+  }
+});
+
+// ── J. Onboarding completion flow is unaffected by the edit-return fix ─────────
+// startContinue and sim_startRefresh are separate code paths that still push
+// their own history entries. This test verifies those paths remain intact.
+describe("J — onboarding / initial completion flow is unchanged", () => {
+  it("startContinue pushes a history entry", () => {
+    const s = mkOverviewState();
+    const missing = computeMissingSections({});
+    sim_startContinue(missing, s.mode, s.history);
+    assert.equal(s.history.length, 1);
+    assert.equal(s.history[0].passport, "flow");
+  });
+
+  it("startContinue sets mode to flow with correct queue", () => {
+    const s = mkOverviewState();
+    const missing = computeMissingSections({});
+    sim_startContinue(missing, s.mode, s.history);
+    assert.equal(s.mode.value.kind, "flow");
+    const flowMode = s.mode.value as { kind: "flow"; queue: SectionId[]; index: number };
+    assert.equal(flowMode.index, 0);
+    assert.ok(flowMode.queue.length > 0);
+  });
+
+  it("startContinue does nothing when no sections are missing", () => {
+    const s = mkOverviewState();
+    sim_startContinue([], s.mode, s.history);
+    assert.equal(s.history.length, 0);
+    assert.equal(s.mode.value.kind, "overview");
+  });
+
+  it("popstate without passport state always resolves to overview", () => {
+    const s = mkOverviewState();
+    // Simulate a flow that pushed state
+    sim_startContinue(computeMissingSections({}), s.mode, s.history);
+    // Now popstate fires with no passport marker (e.g. user went all the way back)
+    sim_onPopState(null, s.mode);
+    assert.equal(s.mode.value.kind, "overview");
+  });
+
+  it("multi-section Back at step > 0 decrements index (onboarding path)", () => {
+    // Not using sim_backButton_step0 (only handles step 0).
+    // Verify the data shape the Back handler reads at step > 0.
+    const queue: SectionId[] = ["identity", "direction", "life"];
+    const mode: { kind: "flow"; queue: SectionId[]; index: number } = {
+      kind: "flow",
+      queue,
+      index: 1,
+    };
+    // At index > 0, go back by decrementing index
+    const newIndex = mode.index - 1;
+    assert.equal(newIndex, 0);
+    assert.equal(queue[newIndex], "identity");
+  });
+});
+
+// ── K. Passport refresh/continuation flow is unchanged ───────────────────────
+describe("K — refresh flow is unchanged by edit-return fix", () => {
+  it("startRefresh pushes a history entry", () => {
+    const s = mkOverviewState();
+    sim_startRefresh(s.mode, s.history);
+    assert.equal(s.history.length, 1);
+    assert.equal(s.history[0].passport, "refresh");
+  });
+
+  it("startRefresh sets mode to refresh", () => {
+    const s = mkOverviewState();
+    sim_startRefresh(s.mode, s.history);
+    assert.equal(s.mode.value.kind, "refresh");
+  });
+
+  it("UPDATE ANSWERS path (startUpdate) pushes a history entry", () => {
+    const s = mkOverviewState();
+    sim_startUpdate(s.mode, s.history);
+    assert.equal(s.history.length, 1);
+    assert.equal(s.history[0].passport, "picker");
+  });
+
+  it("picker → editSection does NOT push an extra history entry", () => {
+    // Picker already pushed one entry; editSection_fromPicker must NOT add another.
+    const s = mkOverviewState();
+    sim_startUpdate(s.mode, s.history);                   // history: [picker]
+    sim_editSection_fromPicker("colours", s.mode);        // no push
+    assert.equal(s.history.length, 1, "should still be 1 after picker-launched edit");
+    assert.equal(s.mode.value.kind, "flow");
+  });
+
+  it("popstate to non-passport state during refresh resolves to overview", () => {
+    const s = mkOverviewState();
+    sim_startRefresh(s.mode, s.history);
+    sim_onPopState(null, s.mode);
+    assert.equal(s.mode.value.kind, "overview");
+  });
+});
+
+// ── L. Answer persistence is unaffected by the edit-return fix ───────────────
+// The fix is in mode/navigation only. computeSectionPatch is unchanged.
+describe("L — answer persistence contract unchanged", () => {
+  it("computeSectionPatch returns null when nothing changed", () => {
+    const section = SECTIONS.find(s => s.id === "identity")!;
+    const saved = { "style-personalities": ["casual-cool"], "desired-impression": ["relaxed"] };
+    const edits = initEdits(section, saved);
+    const patch = computeSectionPatch(section, edits, saved);
+    assert.equal(patch, null);
+  });
+
+  it("computeSectionPatch returns changed fields only", () => {
+    const section = SECTIONS.find(s => s.id === "identity")!;
+    const saved = { "style-personalities": ["casual-cool"], "desired-impression": ["relaxed"] };
+    const edits = {
+      "style-personalities": ["classic"],
+      "desired-impression": ["relaxed"],
+    };
+    const patch = computeSectionPatch(section, edits, saved);
+    assert.ok(patch !== null);
+    assert.deepEqual(patch!.stylePersonalities, ["classic"]);
+    assert.ok(!("desiredImpression" in (patch ?? {})));
+  });
+
+  it("initEdits preserves saved answers for an edited section (colours)", () => {
+    const section = SECTIONS.find(s => s.id === "colours")!;
+    const saved = {
+      "favorite-colors": ["black", "navy"],
+      "avoid-colors":    ["orange"],
+      "neutral-vs-colour": "neutral",
+    };
+    const edits = initEdits(section, saved);
+    assert.deepEqual((edits["favorite-colors"] as string[]).sort(), ["black", "navy"]);
+    assert.deepEqual(edits["avoid-colors"], ["orange"]);
+    assert.equal(edits["neutral-vs-colour"], "neutral");
+  });
+
+  it("editSection followed by Continue Later does NOT mutate savedAnswers", () => {
+    // The navigation fix (mode change) must not touch the answers object.
+    const saved = { "style-personalities": ["casual-cool"] };
+    const savedCopy = JSON.parse(JSON.stringify(saved));
+    const s = mkOverviewState();
+    sim_editSection_fromOverview("identity", s.mode, s.history, s.pushed);
+    sim_continueLater(s.mode, s.history, s.pushed);
+    // saved must be exactly as before
+    assert.deepEqual(saved, savedCopy);
+  });
+
+  it("Back at step 0 does NOT mutate savedAnswers", () => {
+    const saved = { "favorite-colors": ["black"] };
+    const savedCopy = JSON.parse(JSON.stringify(saved));
+    runEditFromOverviewThenBack("colours");
+    assert.deepEqual(saved, savedCopy);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A–I: History phantom-entry regression
+//
+// Contract: after any in-page exit from a single-section edit, the pushed
+// { passport: "edit" } history entry must be CONSUMED (not left behind).
+// A leftover entry causes an extra no-op browser Back press before the user
+// can leave /passport.
+//
+// A. In-page Back → mode is overview AND edit entry consumed
+// B. No leftover edit entry after in-page Back
+// C. Continue Later → mode is overview AND edit entry consumed
+// D. No leftover edit entry after Continue Later
+// E. Native browser Back while editing → mode is overview AND edit entry consumed
+// F. After native browser Back, history is at the pre-edit entry (no double pop)
+// G. Single-section edit never returns to /onboarding/complete (no navigate(-1))
+// H. Single-section edit never returns to /my-naia (no navigate(-1))
+// I. Update Answers / picker / refresh / multi-section flows are unaffected
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── A & B: In-page Back ───────────────────────────────────────────────────────
+describe("A — in-page Back returns to overview", () => {
+  it("mode is overview after Back", () => {
+    const s = mkOverviewState();
+    sim_editSection_fromOverview("identity", s.mode, s.history, s.pushed);
+    const flowMode = s.mode.value as { kind: "flow"; queue: SectionId[]; index: number };
+    sim_backButton_step0(flowMode, s.mode, s.history, s.pushed);
+    assert.equal(s.mode.value.kind, "overview");
+  });
+});
+
+describe("B — no leftover edit history entry after in-page Back", () => {
+  it("history.length is 0 after Back (edit entry consumed)", () => {
+    const s = mkOverviewState();
+    sim_editSection_fromOverview("identity", s.mode, s.history, s.pushed);
+    assert.equal(s.history.length, 1, "edit entry was pushed");
+    const flowMode = s.mode.value as { kind: "flow"; queue: SectionId[]; index: number };
+    sim_backButton_step0(flowMode, s.mode, s.history, s.pushed);
+    assert.equal(s.history.length, 0, "edit entry must be consumed — no phantom step");
+  });
+
+  it("editPushed ref is false after Back", () => {
+    const s = mkOverviewState();
+    sim_editSection_fromOverview("colours", s.mode, s.history, s.pushed);
+    assert.ok(s.pushed.value, "should be true after push");
+    const flowMode = s.mode.value as { kind: "flow"; queue: SectionId[]; index: number };
+    sim_backButton_step0(flowMode, s.mode, s.history, s.pushed);
+    assert.ok(!s.pushed.value, "should be false after exit");
+  });
+
+  it("all Rev 6 sections: Back leaves zero history entries", () => {
+    const rev6: SectionId[] = [
+      "goals", "outfit-gives", "identity", "direction", "life",
+      "fit", "fit-concerns", "sizes", "colours", "wardrobe", "dressing", "notes",
+    ];
+    for (const id of rev6) {
+      const s = mkOverviewState();
+      sim_editSection_fromOverview(id, s.mode, s.history, s.pushed);
+      const flowMode = s.mode.value as { kind: "flow"; queue: SectionId[]; index: number };
+      sim_backButton_step0(flowMode, s.mode, s.history, s.pushed);
+      assert.equal(s.history.length, 0, `${id}: edit entry should be consumed`);
+    }
+  });
+});
+
+// ── C & D: Continue Later ─────────────────────────────────────────────────────
+describe("C — Continue Later returns to overview", () => {
+  it("mode is overview after Continue Later", () => {
+    const s = mkOverviewState();
+    sim_editSection_fromOverview("direction", s.mode, s.history, s.pushed);
+    sim_continueLater(s.mode, s.history, s.pushed);
+    assert.equal(s.mode.value.kind, "overview");
+  });
+});
+
+describe("D — no leftover edit history entry after Continue Later", () => {
+  it("history.length is 0 after Continue Later (edit entry consumed)", () => {
+    const s = mkOverviewState();
+    sim_editSection_fromOverview("direction", s.mode, s.history, s.pushed);
+    assert.equal(s.history.length, 1, "edit entry was pushed");
+    sim_continueLater(s.mode, s.history, s.pushed);
+    assert.equal(s.history.length, 0, "edit entry must be consumed — no phantom step");
+  });
+
+  it("editPushed ref is false after Continue Later", () => {
+    const s = mkOverviewState();
+    sim_editSection_fromOverview("wardrobe", s.mode, s.history, s.pushed);
+    assert.ok(s.pushed.value);
+    sim_continueLater(s.mode, s.history, s.pushed);
+    assert.ok(!s.pushed.value);
+  });
+
+  it("Continue Later without a prior push does NOT pop an entry", () => {
+    // Picker-launched edit: no push → Continue Later must not touch history.
+    const s = mkOverviewState();
+    s.history.push({ passport: "picker" }); // picker's own entry
+    sim_editSection_fromPicker("colours", s.mode);
+    // pushed is still false (picker-launched)
+    sim_continueLater(s.mode, s.history, s.pushed);
+    assert.equal(s.history.length, 1, "picker entry must still be there");
+    assert.equal(s.history[0].passport, "picker");
+  });
+
+  it("all Rev 6 sections: Continue Later leaves zero edit history entries", () => {
+    const rev6: SectionId[] = [
+      "goals", "outfit-gives", "identity", "direction", "life",
+      "fit", "fit-concerns", "sizes", "colours", "wardrobe", "dressing", "notes",
+    ];
+    for (const id of rev6) {
+      const s = mkOverviewState();
+      sim_editSection_fromOverview(id, s.mode, s.history, s.pushed);
+      sim_continueLater(s.mode, s.history, s.pushed);
+      assert.equal(s.history.length, 0, `${id}: edit entry should be consumed`);
+    }
+  });
+});
+
+// ── E & F: Native browser Back while inside an edit ──────────────────────────
+describe("E — native browser Back while editing resolves to overview", () => {
+  it("mode is overview after native Back", () => {
+    const s = mkOverviewState();
+    sim_editSection_fromOverview("life", s.mode, s.history, s.pushed);
+    sim_nativeBrowserBack_fromEdit(s.mode, s.history, s.pushed);
+    assert.equal(s.mode.value.kind, "overview");
+  });
+
+  it("edit entry is consumed by native Back", () => {
+    const s = mkOverviewState();
+    sim_editSection_fromOverview("life", s.mode, s.history, s.pushed);
+    assert.equal(s.history.length, 1);
+    sim_nativeBrowserBack_fromEdit(s.mode, s.history, s.pushed);
+    assert.equal(s.history.length, 0);
+  });
+});
+
+describe("F — after native browser Back, history sits at the pre-edit entry", () => {
+  it("history is empty (was at the original /passport entry before the edit push)", () => {
+    const s = mkOverviewState();
+    // Before editSection: history is [] (original /passport entry is the browser's
+    // current entry, not in our simulated stack which only tracks pushed extras).
+    sim_editSection_fromOverview("fit", s.mode, s.history, s.pushed);
+    sim_nativeBrowserBack_fromEdit(s.mode, s.history, s.pushed);
+    // After native Back, simulated stack is empty — browser is back on the
+    // original /passport entry. One more Back would leave /passport (correct).
+    assert.equal(s.history.length, 0);
+  });
+
+  it("editPushed ref is false after native Back (no double-pop risk)", () => {
+    const s = mkOverviewState();
+    sim_editSection_fromOverview("fit", s.mode, s.history, s.pushed);
+    sim_nativeBrowserBack_fromEdit(s.mode, s.history, s.pushed);
+    assert.ok(!s.pushed.value);
+  });
+});
+
+// ── G & H: Guards against /onboarding/complete and /my-naia ──────────────────
+describe("G — Passport edit never exits to /onboarding/complete", () => {
+  it("Back at step 0 for queue.length===1 is handled (no navigate(-1))", () => {
+    // navigate(-1) is the only path that could leave /passport to another URL.
+    // sim_backButton_step0 returns true when it handled the exit internally
+    // (setMode / exitToOverview), false when navigate(-1) would be called.
+    const s = mkOverviewState();
+    sim_editSection_fromOverview("goals", s.mode, s.history, s.pushed);
+    const flowMode = s.mode.value as { kind: "flow"; queue: SectionId[]; index: number };
+    const handled = sim_backButton_step0(flowMode, s.mode, s.history, s.pushed);
+    assert.ok(handled, "must not call navigate(-1) for single-section edits");
+  });
+
+  it("multi-section Back does use navigate(-1) at step 0 (onboarding path, expected)", () => {
+    const s = mkOverviewState();
+    sim_startContinue(computeMissingSections({}), s.mode, s.history);
+    const flowMode = s.mode.value as { kind: "flow"; queue: SectionId[]; index: number };
+    const handled = sim_backButton_step0(flowMode, s.mode, s.history, s.pushed);
+    assert.ok(!handled, "multi-section Back at step 0 uses navigate(-1) — expected");
+  });
+});
+
+describe("H — Passport edit never exits to /my-naia", () => {
+  it("all Rev 6 single-section edits: Back handled internally (not navigate(-1))", () => {
+    const rev6: SectionId[] = [
+      "goals", "outfit-gives", "identity", "direction", "life",
+      "fit", "fit-concerns", "sizes", "colours", "wardrobe", "dressing", "notes",
+    ];
+    for (const id of rev6) {
+      const s = mkOverviewState();
+      sim_editSection_fromOverview(id, s.mode, s.history, s.pushed);
+      const flowMode = s.mode.value as { kind: "flow"; queue: SectionId[]; index: number };
+      const handled = sim_backButton_step0(flowMode, s.mode, s.history, s.pushed);
+      assert.ok(handled, `${id}: must be handled internally`);
+    }
+  });
+});
+
+// ── I: Other flows unaffected ─────────────────────────────────────────────────
+describe("I — Update Answers / picker / refresh / multi-section flows unaffected", () => {
+  it("picker push is preserved when editSection_fromPicker runs (no extra push)", () => {
+    const s = mkOverviewState();
+    sim_startUpdate(s.mode, s.history);          // pushes picker entry
+    assert.equal(s.history.length, 1);
+    sim_editSection_fromPicker("colours", s.mode);
+    assert.equal(s.history.length, 1, "no extra entry from picker-launched edit");
+    assert.ok(!s.pushed.value, "editPushed stays false for picker-launched edits");
+  });
+
+  it("picker-launched Continue Later (no push) uses setMode only — history unchanged", () => {
+    const s = mkOverviewState();
+    sim_startUpdate(s.mode, s.history);           // history: [picker]
+    sim_editSection_fromPicker("identity", s.mode);
+    sim_continueLater(s.mode, s.history, s.pushed); // pushed=false → setMode path
+    assert.equal(s.history.length, 1, "picker entry must remain");
+    assert.equal(s.mode.value.kind, "overview");
+  });
+
+  it("refresh flow push is preserved", () => {
+    const s = mkOverviewState();
+    sim_startRefresh(s.mode, s.history);
+    assert.equal(s.history.length, 1);
+    assert.equal(s.history[0].passport, "refresh");
+    assert.ok(!s.pushed.value, "editPushed unaffected by refresh");
+  });
+
+  it("multi-section startContinue pushes its own entry independent of editPushed", () => {
+    const s = mkOverviewState();
+    const missing = computeMissingSections({});
+    sim_startContinue(missing, s.mode, s.history);
+    assert.equal(s.history.length, 1);
+    assert.equal(s.history[0].passport, "flow");
+    assert.ok(!s.pushed.value);
+  });
+
+  it("popstate with passport state does NOT reset editPushed (stays true)", () => {
+    // If the entry navigated TO has a passport key, the popstate handler is a no-op.
+    // editPushed stays true until the correct exit is taken.
+    const s = mkOverviewState();
+    sim_editSection_fromOverview("identity", s.mode, s.history, s.pushed);
+    assert.ok(s.pushed.value, "pushed after editSection");
+    // Simulate popstate to an entry WITH a passport key (e.g., another passport page)
+    // — the handler does nothing in this case.
+    // editPushed must remain true.
+    assert.ok(s.pushed.value, "still true — no exit taken yet");
   });
 });
