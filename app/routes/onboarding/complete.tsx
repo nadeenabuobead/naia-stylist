@@ -30,12 +30,12 @@ function lbl(qId: string, oId: string): string {
 }
 
 const IDENTITY: Record<string, { title: string; description: string }> = {
-  // V3 archetypes (Rev 6)
-  "classic-polished":    { title: "The Classic & Polished",    description: "You appreciate refined quality and understated elegance that lasts." },
-  "feminine-romantic":   { title: "The Feminine Romantic",     description: "You're drawn to soft details, graceful silhouettes, and a romantic sensibility." },
-  "minimal-relaxed":     { title: "The Minimal Relaxed",       description: "You believe in simplicity, ease, and intentional pieces that do the work quietly." },
-  "bold-edgy":           { title: "The Bold & Edgy",           description: "You're not afraid to make a statement and push boundaries with your look." },
-  "creative-expressive": { title: "The Creative Expressive",   description: "You express who you are through original, artistic choices that are distinctly yours." },
+  // V3 archetypes (Rev 6) — observational voice: based on the customer's answers, no fixed identity claims
+  "classic-polished":    { title: "The Classic & Polished",    description: "Your answers currently point toward refined, polished dressing with a focus on quality and understated elegance." },
+  "feminine-romantic":   { title: "The Feminine Romantic",     description: "Your selections currently lean toward soft details, graceful silhouettes, and a romantic sensibility in your wardrobe." },
+  "minimal-relaxed":     { title: "The Minimal Relaxed",       description: "Your answers currently point toward a simplified, relaxed wardrobe built on ease and intentional pieces." },
+  "bold-edgy":           { title: "The Bold & Edgy",           description: "Your answers currently point toward bold, statement-making choices that push the boundaries of your look." },
+  "creative-expressive": { title: "The Creative Expressive",   description: "Your answers currently point toward creative, expressive styling with a softer, romantic edge." },
   // V2 legacy (backward compat for existing users)
   "old-money":           { title: "The Timeless Classic",      description: "You appreciate quality, heritage, and understated elegance." },
   "artsy":               { title: "The Creative Spirit",       description: "You express yourself through unique pieces and artistic flair." },
@@ -701,10 +701,10 @@ export default function OnboardingComplete() {
         <a href="/my-naia" className="cp-action">
           <div>
             <div className="cp-action-title">
-              {saveStatus === "saved" ? "View your updated Style DNA" : "Go to My nAia"}
+              {saveStatus === "saved" ? "View your Style Passport" : "Go to My nAia"}
             </div>
             <div className="cp-action-sub">
-              {saveStatus === "saved" ? "Your nAia Passport has been saved" : "Explore all features"}
+              {saveStatus === "saved" ? "Your Style Passport has been saved." : "Explore all features"}
             </div>
           </div>
           <span className="cp-arrow">→</span>
