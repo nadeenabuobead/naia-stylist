@@ -827,7 +827,7 @@ export function shouldRevalidate({
 }
 
 const MIN_LOADING_MS = 4800;
-const loadingMessages = ["Reading the runways...", "Consulting your mood...", "Matching textures and fabrics...", "Finalizing your look..."];
+const loadingMessages = ["Reading the runways...", "Reading what you need from the outfit...", "Matching textures and fabrics...", "Finalizing your look..."];
 
 const REV3_STATE_LABELS: Record<string, string> = {
   "feel-good": "I feel good",

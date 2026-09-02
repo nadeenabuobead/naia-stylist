@@ -15,8 +15,8 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
 ];
 
-// Rev 3 UI — exactly 9 approved customer-facing IDs.
-// Canonical IDs (date-night, special-event) are internal only; girls-night/not-sure removed from UI.
+// Rev 3 UI — exactly 8 approved customer-facing IDs.
+// Canonical IDs (date-night, special-event) are internal only; girls-night/not-sure/other removed from UI.
 const occasions = [
   { id: "work",            label: "Work or meetings" },
   { id: "dinner",          label: "Dinner" },
@@ -26,15 +26,24 @@ const occasions = [
   { id: "family",          label: "Family gathering" },
   { id: "travel",          label: "Travel day" },
   { id: "active-busy-day", label: "Active / busy day" },
-  { id: "other",           label: "Something else" },
 ];
 
-// Rev 3 UI IDs → canonical engine IDs (applied at action time, before session storage)
+// Rev 3 UI IDs → canonical engine IDs (applied at action time, before session storage).
+// "other" → "not-sure" kept for internal/legacy session compatibility even though "other" is
+// no longer a visible UI option — historical sessions or manually crafted requests must not
+// produce an unrecognized canonical value.
 const REV3_OCCASION_MAP: Record<string, string> = {
   "date": "date-night",
   "event": "special-event",
   "active-busy-day": "everyday",
   "other": "not-sure",
+};
+
+// Reverse map: canonical engine ID → Rev 3 UI ID (for session hydration on Back navigation).
+// "everyday" is intentionally omitted — it maps to itself AND to active-busy-day, so ambiguous.
+const OCCASION_REVERSE_MAP: Record<string, string> = {
+  "date-night": "date",
+  "special-event": "event",
 };
 
 const formalityOptions = [
@@ -66,7 +75,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return redirect(isRev3 ? "/style-me/physical-need" : "/style-me/comfort");
   }
 
-  return data({ isRev3 });
+  // Hydrate previously selected occasion and formality for Back navigation.
+  const storedOccasion = session.get("styleMeOccasion") as string | undefined;
+  const prevOccasion = storedOccasion
+    ? (OCCASION_REVERSE_MAP[storedOccasion] ?? storedOccasion)
+    : null;
+  const prevFormality = (session.get("styleMeFormalityConditional") as string | undefined) ?? null;
+
+  return data({ isRev3, prevOccasion, prevFormality });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -102,9 +118,9 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function StyleMeOccasion() {
-  const { isRev3 } = useLoaderData<typeof loader>();
-  const [selected, setSelected] = useState<string | null>(null);
-  const [selectedFormality, setSelectedFormality] = useState<string | null>(null);
+  const { isRev3, prevOccasion, prevFormality } = useLoaderData<typeof loader>();
+  const [selected, setSelected] = useState<string | null>(prevOccasion);
+  const [selectedFormality, setSelectedFormality] = useState<string | null>(prevFormality);
 
   // Normalize Rev 3 UI ID before checking formality occasions (which use canonical IDs).
   const normalizedForFormality = selected ? (REV3_OCCASION_MAP[selected] ?? selected) : null;

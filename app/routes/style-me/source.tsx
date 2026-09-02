@@ -18,27 +18,17 @@ export const links: LinksFunction = () => [
 
 const VALID_SOURCE_IDS = new Set(["naia-piece", "my-closet", "both"]);
 
-// Rev 3 UI source options — "specific-piece" maps to source=both + anchorMode=manual in action.
+// Rev 3 UI source options — 2 options only for fresh Rev 3 flow.
 const REV3_SOURCE_OPTIONS = [
   {
     id: "my-closet",
-    label: "Only My Closet",
-    description: "Style a look from what I already own.",
+    label: "ONLY MY CLOSET",
+    description: "Build the look using pieces I already own.",
   },
   {
     id: "both",
-    label: "My Closet + suggestions if genuinely useful",
-    description: "Start with my closet; let nAia add a NADINE piece if it really adds something.",
-  },
-  {
-    id: "specific-piece",
-    label: "Style one specific piece",
-    description: "Choose a piece and build the look around it.",
-  },
-  {
-    id: "naia-piece",
-    label: "Start with something new",
-    description: "Build the look around a NADINE piece nAia selects for me.",
+    label: "MY CLOSET + BRANDS",
+    description: "Start with what I own, and bring in brand pieces only if they genuinely add something.",
   },
 ];
 
@@ -90,7 +80,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // No source chosen, or source is NADINE-only (which redirects to result in the action) —
   // show the source selection screen.
   if (!source || !VALID_SOURCE_IDS.has(source) || source === "naia-piece") {
-    return data({ step: "source" as const, isRev3 });
+    const prevSource = (session.get("styleMeSourcePrev") as string | undefined) ?? null;
+    return data({ step: "source" as const, isRev3, prevSource });
   }
 
   // Source is a closet type — check prerequisites before showing the anchor step.
@@ -131,7 +122,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return data({ step: "empty-closet" as const, source });
   }
 
-  return data({ step: "anchor-method" as const, source });
+  const anchorMethodPrev = (session.get("styleMeAnchorMethodPrev") as string | undefined) ?? null;
+  return data({ step: "anchor-method" as const, source, prevMethod: anchorMethodPrev });
 }
 
 // ── Action ────────────────────────────────────────────────────────────────────
@@ -161,10 +153,12 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ error: "Please select what we're styling" }, { status: 400 });
     }
     session.set("styleMeSource", source);
-    // Clear stale anchor keys whenever source changes.
+    // Clear stale anchor keys and hydration keys whenever source changes.
     session.unset("styleMeNadineAnchorHandle");
     session.unset("styleMeClosetAnchorId");
     session.unset("styleMeAnchorMode");
+    session.unset("styleMeSourcePrev");
+    session.unset("styleMeAnchorMethodPrev");
 
     // NADINE-only: engine auto-selects the best piece from session signals.
     if (source === "naia-piece") {
@@ -181,6 +175,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
   // ── Choose anchor method (auto vs manual) ────────────────────────────────────
   if (intent === "set-anchor-method") {
+    // Clear hydration key — a new method is being committed.
+    session.unset("styleMeAnchorMethodPrev");
     const method = formData.get("method") as string;
 
     if (method === "auto") {
@@ -253,12 +249,16 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === "back") {
     const from = formData.get("from") as string;
     if (from === "anchor-method") {
-      // Going back to source selection — clear source and anchorMode.
+      // Going back to source selection — save source for hydration before clearing.
+      const prevSrc = session.get("styleMeSource") as string | undefined;
+      if (prevSrc) session.set("styleMeSourcePrev", prevSrc);
       session.unset("styleMeSource");
       session.unset("styleMeAnchorMode");
       session.unset("styleMeClosetAnchorId");
     } else if (from === "closet-anchor") {
-      // Going back to anchor method — clear anchorMode only.
+      // Save anchor method for hydration before clearing (so AnchorMethodStep restores selection).
+      const prevAnchorMode = session.get("styleMeAnchorMode") as string | undefined;
+      if (prevAnchorMode) session.set("styleMeAnchorMethodPrev", prevAnchorMode);
       session.unset("styleMeAnchorMode");
     }
     return redirect("/style-me/source", {
@@ -295,7 +295,10 @@ export default function StyleMeSource() {
       <div className="sm-inner sm-inner--wide">
         {step === "source" && <SourceStep />}
         {step === "anchor-method" && (
-          <AnchorMethodStep source={(loaderData as { source: string }).source} />
+          <AnchorMethodStep
+            source={(loaderData as { source: string }).source}
+            prevMethod={(loaderData as { prevMethod?: string | null }).prevMethod ?? null}
+          />
         )}
         {step === "closet-anchor" && (
           <ClosetAnchorStep
@@ -317,15 +320,16 @@ export default function StyleMeSource() {
 // ── Step: source selection ────────────────────────────────────────────────────
 
 function SourceStep() {
-  const [selected, setSelected] = useState<string | null>(null);
   const loaderData = useLoaderData<typeof loader>();
   const isRev3 = "isRev3" in loaderData ? (loaderData as { isRev3?: boolean }).isRev3 : false;
+  const prevSource = "prevSource" in loaderData ? (loaderData as { prevSource?: string | null }).prevSource : null;
+  const [selected, setSelected] = useState<string | null>(prevSource ?? null);
   const options = isRev3 ? REV3_SOURCE_OPTIONS : sourceOptions;
 
   return (
     <>
       <p className="sm-step-label">Your Anchor</p>
-      <h1 className="sm-heading">What are we building the look around?</h1>
+      <h1 className="sm-heading">What should nAia work with today?</h1>
       <p className="sm-sub">Choose your anchor for today.</p>
       <Form method="post">
         <input type="hidden" name="_action" value="set-source" />
@@ -354,26 +358,41 @@ function SourceStep() {
   );
 }
 
-// ── Step: anchor method choice (LET nAia CHOOSE vs I HAVE A PIECE IN MIND) ───
+// ── Step: anchor method choice (YES — I HAVE A PIECE IN MIND / NO — LET nAia CHOOSE) ───
+// Two-step picker: customer selects, then presses Continue.
+// prevMethod hydrates the selection when returning from the Closet picker (Back).
 
-function AnchorMethodStep({ source }: { source: string }) {
+function AnchorMethodStep({ source, prevMethod }: { source: string; prevMethod: string | null }) {
+  const [selected, setSelected] = useState<string | null>(prevMethod);
   const label = source === "both" ? "NADINE + My Closet" : "My Closet";
   return (
     <>
       <p className="sm-step-label">{label}</p>
-      <h1 className="sm-heading">How should nAia choose your anchor piece?</h1>
+      <h1 className="sm-heading">Do you already have a piece in mind?</h1>
       <p className="sm-sub">Your anchor is the piece everything else gets styled around.</p>
       <Form method="post">
         <input type="hidden" name="_action" value="set-anchor-method" />
+        <input type="hidden" name="method" value={selected ?? ""} />
         <div className="sm-source-pills">
-          <button type="submit" name="method" value="auto" className="sm-source-pill">
-            <span className="sm-source-pill-name">LET nAia CHOOSE</span>
-            <span className="sm-source-pill-desc">Choose the best piece from my Closet for today.</span>
+          <button
+            type="button"
+            onClick={() => setSelected("manual")}
+            className={`sm-source-pill${selected === "manual" ? " sm-pill--on" : ""}`}
+          >
+            <span className="sm-source-pill-name">YES — I HAVE A PIECE IN MIND</span>
+            <span className="sm-source-pill-desc">Let me choose what I want the look built around.</span>
           </button>
-          <button type="submit" name="method" value="manual" className="sm-source-pill">
-            <span className="sm-source-pill-name">I HAVE A PIECE IN MIND</span>
-            <span className="sm-source-pill-desc">I know what I want to wear — help me style it.</span>
+          <button
+            type="button"
+            onClick={() => setSelected("auto")}
+            className={`sm-source-pill${selected === "auto" ? " sm-pill--on" : ""}`}
+          >
+            <span className="sm-source-pill-name">NO — LET nAia CHOOSE</span>
+            <span className="sm-source-pill-desc">Choose the best starting point for this look.</span>
           </button>
+        </div>
+        <div className="sm-step-buttons">
+          <button type="submit" disabled={!selected} className="sm-continue">Continue</button>
         </div>
       </Form>
       <Form method="post" style={{ marginTop: "4px" }}>

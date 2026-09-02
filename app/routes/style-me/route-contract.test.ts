@@ -1045,6 +1045,23 @@ describe("StyleMe Rev 3 Pre-QA cleanup — regression tests", () => {
     );
   });
 
+  // M2. loadingMessages array contains new Rev 3 message; "Consulting your mood" removed
+  it("M2: loadingMessages array does not contain 'Consulting your mood'", () => {
+    const text = src("result.tsx");
+    const arrayLine = text.slice(text.indexOf("const loadingMessages"), text.indexOf("const loadingMessages") + 200);
+    assert.ok(
+      !arrayLine.includes("Consulting your mood"),
+      "loadingMessages must not contain legacy mood message",
+    );
+  });
+  it("M3: loadingMessages array contains Rev 3 replacement message", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("Reading what you need from the outfit"),
+      "loadingMessages must contain the Rev 3 replacement message",
+    );
+  });
+
   // N. new loading copy exact string
   it("N: loading copy exact string is 'Building your look around what you need today, the occasion, and your wardrobe.'", () => {
     const text = src("result.tsx");

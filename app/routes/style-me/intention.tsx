@@ -3,11 +3,19 @@
 // Max 2 selections. Writes styleMeIntentions to session cookie.
 // SCORING NOTE: translated in result.tsx to canonical engine signals before engine input.
 
-import { Form, Link, redirect, useNavigation } from "react-router";
-import type { ActionFunctionArgs } from "react-router";
+import { Form, Link, redirect, useLoaderData } from "react-router";
+import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";
+import { useState } from "react";
 import { getSession, commitSession } from "~/lib/session.server.js";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { SESSION_QUESTIONS, SESSION_QUESTION_IDS as SQ } from "~/lib/ai/signal-contract.js";
+import { SmPage } from "~/components/style-me/SmPage";
+import { SmContinue } from "~/components/style-me/SmContinue";
+import naiaStyles from "~/styles/naia-design-system.css?url";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: naiaStyles },
+];
 
 const INTENTION_QUESTION = SESSION_QUESTIONS.find((q) => q.id === SQ.INTENTIONS)!;
 const MAX_SELECTIONS = INTENTION_QUESTION.maxSelections ?? 2;
@@ -27,6 +35,16 @@ const INTENTION_OPTIONS: Array<{ id: string; label: string }> = [
 ];
 
 const VALID_INTENTION_IDS = new Set(INTENTION_OPTIONS.map((o) => o.id));
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const session = await getSession(request.headers.get("Cookie"));
+  const raw = session.get(INTENTION_QUESTION.storageKey) as string | undefined;
+  let selected: string[] = [];
+  if (raw) {
+    try { selected = JSON.parse(raw); } catch { selected = []; }
+  }
+  return { selected };
+}
 
 export async function action({ request }: ActionFunctionArgs) {
   const customer = await getCurrentNaiaCustomer(request);
@@ -52,44 +70,44 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function IntentionPage() {
-  const navigation = useNavigation();
-  const isSubmitting = navigation.state !== "idle";
+  const { selected: initialSelected } = useLoaderData<typeof loader>();
+  const [selected, setSelected] = useState<string[]>(initialSelected);
+
+  const toggle = (id: string) => {
+    setSelected((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= MAX_SELECTIONS) return prev;
+      return [...prev, id];
+    });
+  };
 
   return (
-    <div className="sp-page">
-      <div className="sp-header">
-        <Link to="/style-me/state" className="sp-back">← Back</Link>
-        <p className="sp-step">Step 2 of 5</p>
-      </div>
+    <SmPage step={2}>
+      <p className="sm-step-label">Your Intention</p>
+      <h1 className="sm-heading">What do you want your clothes to do today?</h1>
+      <p className="sm-sub">Choose up to {MAX_SELECTIONS}.</p>
 
-      <div className="sp-content">
-        <h1 className="sp-heading">What do you want your clothes to do today?</h1>
-        <p className="sp-subheading">Choose up to {MAX_SELECTIONS}.</p>
-
-        <Form method="post" className="sp-form">
-          <div className="sp-options sp-options--intention" role="group" aria-label="What do you want your clothes to do today?">
-            {INTENTION_OPTIONS.map((option) => (
-              <label key={option.id} className="sp-option sp-option--chip">
-                <input
-                  type="checkbox"
-                  name="intentions"
-                  value={option.id}
-                  className="sp-option__checkbox"
-                />
-                <span className="sp-option__label">{option.label}</span>
-              </label>
-            ))}
-          </div>
-
-          <button
-            type="submit"
-            className="sp-btn-primary"
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? "Saving…" : "Next"}
-          </button>
-        </Form>
-      </div>
-    </div>
+      <Form method="post">
+        <div className="sm-pills">
+          {INTENTION_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => toggle(option.id)}
+              className={`sm-pill${selected.includes(option.id) ? " sm-pill--on" : ""}`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        {selected.map((id) => (
+          <input key={id} type="hidden" name="intentions" value={id} />
+        ))}
+        <div className="sm-step-buttons">
+          <Link to="/style-me/state" className="sm-btn-back">← Back</Link>
+          <SmContinue disabled={selected.length === 0} />
+        </div>
+      </Form>
+    </SmPage>
   );
 }

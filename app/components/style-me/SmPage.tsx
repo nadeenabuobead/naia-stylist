@@ -2,7 +2,7 @@ import { Link } from "react-router";
 import type { ReactNode } from "react";
 
 interface SmPageProps {
-  backTo: string;
+  backTo?: string;
   backLabel?: string;
   children: ReactNode;
   wide?: boolean;
@@ -36,7 +36,7 @@ export function SmPage({ backTo, backLabel = "← Back", children, wide, step, t
         </>
       )}
       <div className={wide ? "sm-inner sm-inner--wide" : "sm-inner"}>
-        {!hasStep && <Link to={backTo} className="sm-back">{backLabel}</Link>}
+        {!hasStep && backTo && <Link to={backTo} className="sm-back">{backLabel}</Link>}
         {children}
       </div>
     </div>

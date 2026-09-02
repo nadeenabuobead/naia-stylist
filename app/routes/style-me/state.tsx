@@ -1,13 +1,21 @@
 // app/routes/style-me/state.tsx
-// Rev 3 Screen 1 — "How are you arriving today?"
+// Rev 3 Screen 1 — "How are you feeling today?"
 // Single select, 10 IDs. Writes styleMeState to session cookie.
 // ZERO product scoring: state is wording context only (never maps to emotion/body/product field).
 
-import { Form, Link, redirect, useNavigation } from "react-router";
-import type { ActionFunctionArgs } from "react-router";
+import { Form, Link, redirect, useLoaderData } from "react-router";
+import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";
+import { useState } from "react";
 import { getSession, commitSession } from "~/lib/session.server.js";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { SESSION_QUESTIONS, SESSION_QUESTION_IDS as SQ } from "~/lib/ai/signal-contract.js";
+import { SmPage } from "~/components/style-me/SmPage";
+import { SmContinue } from "~/components/style-me/SmContinue";
+import naiaStyles from "~/styles/naia-design-system.css?url";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: naiaStyles },
+];
 
 const STATE_QUESTION = SESSION_QUESTIONS.find((q) => q.id === SQ.STATE)!;
 
@@ -18,13 +26,19 @@ const STATE_OPTIONS: Array<{ id: string; label: string }> = [
   { id: "not-feeling-like-myself",  label: "I don't really feel like myself" },
   { id: "physically-uncomfortable", label: "Physically uncomfortable" },
   { id: "self-conscious",           label: "Self-conscious" },
-  { id: "going-through-change",     label: "I'm going through a change / something" },
+  { id: "going-through-change",     label: "I'm going through something" },
   { id: "want-reset",               label: "I want a reset" },
   { id: "nothing-in-particular",    label: "Nothing in particular" },
-  { id: "other",                    label: "Something else" },
+  { id: "other",                    label: "Other" },
 ];
 
 const VALID_STATE_IDS = new Set(STATE_OPTIONS.map((o) => o.id));
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const session = await getSession(request.headers.get("Cookie"));
+  const selected = session.get(STATE_QUESTION.storageKey) as string | undefined;
+  return { selected: selected ?? null };
+}
 
 export async function action({ request }: ActionFunctionArgs) {
   const customer = await getCurrentNaiaCustomer(request);
@@ -34,7 +48,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const selected = formData.get("state");
 
   if (typeof selected !== "string" || !VALID_STATE_IDS.has(selected)) {
-    return { error: "Please select how you're arriving today." };
+    return { error: "Please select how you're feeling today." };
   }
 
   const session = await getSession(request.headers.get("Cookie"));
@@ -46,44 +60,34 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function StatePage() {
-  const navigation = useNavigation();
-  const isSubmitting = navigation.state !== "idle";
+  const { selected: initialSelected } = useLoaderData<typeof loader>();
+  const [selected, setSelected] = useState<string | null>(initialSelected);
 
   return (
-    <div className="sp-page">
-      <div className="sp-header">
-        <Link to="/style-me" className="sp-back">← Back</Link>
-        <p className="sp-step">Step 1 of 5</p>
-      </div>
+    <SmPage step={1}>
+      <p className="sm-step-label">Your State</p>
+      <h1 className="sm-heading">How are you feeling today?</h1>
+      <p className="sm-sub">No right answer — just honest.</p>
 
-      <div className="sp-content">
-        <h1 className="sp-heading">How are you arriving today?</h1>
-        <p className="sp-subheading">No right answer — just honest.</p>
-
-        <Form method="post" className="sp-form">
-          <div className="sp-options sp-options--state" role="radiogroup" aria-label="How are you arriving today?">
-            {STATE_OPTIONS.map((option) => (
-              <label key={option.id} className="sp-option sp-option--state">
-                <input
-                  type="radio"
-                  name="state"
-                  value={option.id}
-                  className="sp-option__radio"
-                />
-                <span className="sp-option__label">{option.label}</span>
-              </label>
-            ))}
-          </div>
-
-          <button
-            type="submit"
-            className="sp-btn-primary"
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? "Saving…" : "Next"}
-          </button>
-        </Form>
-      </div>
-    </div>
+      <Form method="post">
+        <div className="sm-pills">
+          {STATE_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setSelected(option.id)}
+              className={`sm-pill${selected === option.id ? " sm-pill--on" : ""}`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <input type="hidden" name="state" value={selected ?? ""} />
+        <div className="sm-step-buttons">
+          <Link to="/style-me" className="sm-btn-back">← Back</Link>
+          <SmContinue disabled={!selected} />
+        </div>
+      </Form>
+    </SmPage>
   );
 }
