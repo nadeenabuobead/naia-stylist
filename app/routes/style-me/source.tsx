@@ -81,6 +81,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // including stale sessions that already carry source="both" or "naia-piece".
   if (isRev3 && source !== "my-closet") {
     session.set("styleMeSource", "my-closet");
+    session.set("styleMeMode", "naia");
     return redirect("/style-me/source", {
       headers: { "Set-Cookie": await commitSession(session) },
     });
@@ -149,6 +150,7 @@ export async function action({ request }: ActionFunctionArgs) {
     if (rawSource === "specific-piece") {
       session.set("styleMeSource", "both");
       session.set("styleMeAnchorMode", "manual");
+      session.set("styleMeMode", "naia");
       session.unset("styleMeNadineAnchorHandle");
       session.unset("styleMeClosetAnchorId");
       return redirect("/style-me/source", {
@@ -161,6 +163,8 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ error: "Please select what we're styling" }, { status: 400 });
     }
     session.set("styleMeSource", source);
+    // All source selections from this page originate from the nAia app.
+    session.set("styleMeMode", "naia");
     // Clear stale anchor keys and hydration keys whenever source changes.
     session.unset("styleMeNadineAnchorHandle");
     session.unset("styleMeClosetAnchorId");

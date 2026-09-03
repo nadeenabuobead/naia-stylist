@@ -134,16 +134,32 @@ export async function resolveActionAnchor(
 // no Passport profile signals are used here.
 // Ties broken by: anchor-capable category first, then recency (createdAt DESC).
 
-const ANCHOR_CAPABLE_CATEGORIES = new Set(["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"]);
+export const ANCHOR_CAPABLE_CATEGORIES = new Set(["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"]);
+
+export type ClosetScoringProfile = {
+  favoriteColors?: string[] | null;
+  avoidColors?: string[] | null;
+  stylePersonalities?: string[] | null;
+};
 
 /**
- * Scores a single Closet item against the current StyleMe session signals.
- * Pure function — no DB access, exported for unit testing.
- * Category is excluded from the score; it is a sort tiebreaker in autoSelectClosetAnchor.
+ * Scores a single Closet item against the current StyleMe session signals,
+ * optional Passport profile, and optional garment relationship evidence.
+ *
+ * Scoring tiers:
+ *   Session signals  — strongest (occasion match +10, mood/feeling +3/+2)
+ *   Passport profile — colour/personality bonuses (+2/+1), avoid-colour penalty (-4)
+ *   Relationships    — soft supporting evidence only; never overrides Passport truth
+ *     favourite / wear-often → +2
+ *     regret                 → -4
+ *     rarely-wear            → -2
+ *     everything else        → 0 (neutral — love-style-struggle, like, unsure, occasion-only)
  */
 export function scoreClosetItemForSession(
-  item: { occasions: string[]; styleTags: string[]; category: string },
+  item: { occasions: string[]; styleTags: string[]; category: string; colors?: string[]; primaryColor?: string | null },
   signals: { occasion: string; moods: string[]; desiredFeelings: string[] },
+  profile?: ClosetScoringProfile | null,
+  relationships?: string[] | null,
 ): number {
   let score = 0;
 
@@ -157,7 +173,81 @@ export function scoreClosetItemForSession(
     if (item.styleTags.includes(feeling)) score += 2;
   }
 
+  // ── Passport profile signals ──────────────────────────────────────────────
+  if (profile) {
+    const itemColors = [
+      ...(item.colors ?? []).map((c) => c.toLowerCase()),
+      ...(item.primaryColor ? [item.primaryColor.toLowerCase()] : []),
+    ];
+
+    if (profile.favoriteColors?.length && itemColors.length) {
+      const favLower = profile.favoriteColors.map((c) => c.toLowerCase());
+      if (itemColors.some((c) => favLower.includes(c))) score += 2;
+    }
+
+    if (profile.avoidColors?.length && itemColors.length) {
+      const avoidLower = profile.avoidColors.map((c) => c.toLowerCase());
+      if (itemColors.some((c) => avoidLower.includes(c))) score -= 4;
+    }
+
+    if (profile.stylePersonalities?.length) {
+      const personalityLower = profile.stylePersonalities.map((p) => p.toLowerCase());
+      for (const tag of item.styleTags) {
+        if (personalityLower.some((p) => tag.toLowerCase().includes(p))) {
+          score += 1;
+          break;
+        }
+      }
+    }
+  }
+
+  // ── Garment relationship evidence (soft) ──────────────────────────────────
+  if (relationships?.length) {
+    if (relationships.includes("favourite") || relationships.includes("wear-often")) score += 2;
+    if (relationships.includes("regret")) score -= 4;
+    else if (relationships.includes("rarely-wear")) score -= 2;
+    // love-style-struggle / like / unsure / occasion-only → neutral (0)
+  }
+
   return score;
+}
+
+/**
+ * Loads all Closet items for the customer (up to 50, newest-first) and returns
+ * them as ClosetAnchorInput[], resolving signed image URLs where needed.
+ * Used by computeStyleMeResult for the multi-item Closet scan.
+ */
+export async function loadAllClosetItemsForEngine(
+  customerId: string,
+): Promise<ClosetAnchorInput[]> {
+  const items = await prisma.closetItem.findMany({
+    where: { customerId },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+
+  type ClosetDbItem = (typeof items)[number];
+  const cfg = getCloudinaryConfig();
+  return items.map((item: ClosetDbItem) => {
+    let imageUrl = item.imageUrl;
+    if (cfg && item.imagePublicId && item.imageFormat) {
+      imageUrl = buildPrivateDownloadUrl(cfg, item.imagePublicId, item.imageFormat, "private");
+    }
+    return {
+      type: "closet" as const,
+      id: item.id,
+      name: item.name ?? null,
+      category: item.category,
+      colors: item.colors,
+      primaryColor: item.primaryColor ?? null,
+      pattern: item.pattern ?? null,
+      material: item.material ?? null,
+      styleTags: item.styleTags,
+      occasions: item.occasions,
+      imageUrl,
+      garmentRelationships: item.garmentRelationships,
+    };
+  });
 }
 
 /**

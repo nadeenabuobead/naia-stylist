@@ -13,11 +13,20 @@ import type {
   StyleMeProfileSignals,
   StyleMeRecommendationResult,
   AnchorInput,
+  ClosetAnchorInput,
   NormalizedClosetAnchor,
   NormalizedNadineAnchor,
   NormalizedStyleAnchor,
   StyleMeSessionInput,
+  StyleMeMode,
+  OutfitSlot,
 } from "./styleme-recommendation.types.js";
+import {
+  loadAllClosetItemsForEngine,
+  ANCHOR_CAPABLE_CATEGORIES,
+  scoreClosetItemForSession,
+  type ClosetScoringProfile,
+} from "./styleme-anchor.server.js";
 import { getProductByHandle } from "./naia-catalog.js";
 import { resolveVerifiedMedia, VIRTUAL_TRY_ON_ENABLED } from "./naia-product-media.js";
 import type { VerifiedMediaEntry } from "./naia-product-media.js";
@@ -109,6 +118,7 @@ export function buildEngineInput(params: {
   profile?: StyleMeProfileSignals;
   anchor?: AnchorInput | null;
   recentlyShownHandles?: string[];
+  mode?: StyleMeMode;
   // Rev 3 — Psychology-First wording context (Group 5). Zero engine scoring.
   state?: string;
   stateOtherText?: string; // free text when state === "other"; context only
@@ -132,8 +142,24 @@ export function buildEngineInput(params: {
     profile: params.profile,
     anchor: params.anchor ?? null,
     recentlyShownHandles: params.recentlyShownHandles ?? [],
+    mode: params.mode,
   };
 }
+
+// ── Closet category → outfit slot mapping ─────────────────────────────────────
+
+const CLOSET_CATEGORY_TO_SLOT: Record<string, OutfitSlot> = {
+  TOPS: "top",
+  BOTTOMS: "bottom",
+  DRESSES: "dress",
+  OUTERWEAR: "outerwear",
+  SHOES: "shoe",
+  BAGS: "bag",
+  ACCESSORIES: "accessory",
+  JEWELRY: "jewelry",
+  ACTIVEWEAR: "top",
+  LOUNGEWEAR: "top",
+};
 
 // ── StyleSource enum → session source string ──────────────────────────────────
 
@@ -377,6 +403,7 @@ function buildMetadataJson(result: StyleMeCustomerResult): string {
         title: d.product?.title ?? null,
         productUrl: d.product?.productUrl ?? null,
         productImageUrl: d.product?.productImageUrl ?? null,
+        outfitPieces: d.outfitPieces ?? [],
       })),
     }),
   };
@@ -445,6 +472,8 @@ async function callClaudeForWording(
   finalNotes: string | null | undefined,
   anchor?: { label: string | null; slot: string | null; colors: string[] } | null,
   stateOtherText?: string | null,
+  mode?: StyleMeMode,
+  naiaClosetGarments?: Array<{ slot: string; label: string | null }>,
 ): Promise<StyleMeWording | null> {
   const occasionLabel = occasion.replace(/-/g, " ");
   const moodStr = moods.join(", ");
@@ -455,12 +484,26 @@ async function callClaudeForWording(
     ? finalNotes.replace(/"/g, "'").replace(/\n/g, " ").trim()
     : null;
 
+  const naiaContext =
+    mode === "naia" && naiaClosetGarments?.length
+      ? `The look is built from the customer's own Closet: ${naiaClosetGarments
+          .map((g) => `${g.label ?? g.slot} (${g.slot})`)
+          .join(", ")}.`
+      : null;
+
   const context =
-    outcome === "no-eligible-product"
+    naiaContext ??
+    (outcome === "no-eligible-product"
       ? "No specific nAia piece was selected for this session."
       : primaryTitle
       ? `The selected piece is: ${primaryTitle}. Styling guidance: ${styleMeExplanation ?? "(none provided)"}`
-      : "The customer is dressing from their own closet.";
+      : "The customer is dressing from their own closet.");
+
+  const systemPrompt =
+    mode === "naia"
+      ? STYLEME_WORDING_SYSTEM_PROMPT +
+        "\n9. This look is built entirely from the customer's own Closet — no brand products. Do not reference product brand names, shopping links, or purchasing. Treat the Closet pieces as the primary styling elements."
+      : STYLEME_WORDING_SYSTEM_PROMPT;
 
   const completionContext =
     completionPieces.length > 0
@@ -487,7 +530,7 @@ async function callClaudeForWording(
   try {
     const result = await Promise.race<ClaudeWordingResponse | null>([
       callClaudeJSON<ClaudeWordingResponse>({
-        system: STYLEME_WORDING_SYSTEM_PROMPT,
+        system: systemPrompt,
         messages: [
           {
             role: "user",
@@ -847,6 +890,7 @@ function buildCompletionPiece(
   bodyNeeds: string[],
   moods: string[],
   coverageConditional: string | null,
+  mode?: StyleMeMode,
 ): StyleMeCompletionPiece {
   const occ = TOP_VOCAB[occasion] ? occasion : "not-sure";
   const colour = resolveCompletionColour(slot, preferredColors, anchorColors);
@@ -902,7 +946,8 @@ function buildCompletionPiece(
       proportionNote = " Keep the fit clean and close to the body.";
     }
     const detailSuffix = detailNote ? ` ${detailNote}` : "";
-    return { slot: "top", description: `${cap} ${qualifier}${garment} ${baseMaterial}.${proportionNote}${detailSuffix}` };
+    const topDesc = `${cap} ${qualifier}${garment} ${baseMaterial}.${proportionNote}${detailSuffix}`;
+    return { slot: "top", description: mode === "naia" ? `If you're adding a top — ${topDesc[0].toLowerCase()}${topDesc.slice(1)}` : topDesc };
   }
 
   // Bottom: resolve garment, hemline suffix, and detail note separately
@@ -928,9 +973,10 @@ function buildCompletionPiece(
     proportionNote = " Keep the silhouette clean and intentional.";
   }
   const detailSuffix = detailNote ? ` ${detailNote}` : "";
+  const bottomDesc = `${cap} ${qualifier}${garment} ${baseMaterial}${hemlineSuffix}.${proportionNote}${detailSuffix}`;
   return {
     slot: "bottom",
-    description: `${cap} ${qualifier}${garment} ${baseMaterial}${hemlineSuffix}.${proportionNote}${detailSuffix}`,
+    description: mode === "naia" ? `If you're adding a bottom — ${bottomDesc[0].toLowerCase()}${bottomDesc.slice(1)}` : bottomDesc,
   };
 }
 
@@ -939,6 +985,7 @@ export function buildCompletionLayer(
   primaryProduct: StyleMePrimaryProduct | null,
   session: StyleMeSessionInput,
   additionalItems: Array<{ slot: string }> = [],
+  mode?: StyleMeMode,
 ): StyleMeCompletionPiece[] {
   const filledSlots = getFilledClothingSlots(anchor, primaryProduct, additionalItems);
   const missingSlots = getMissingEssentialSlots(filledSlots);
@@ -963,6 +1010,7 @@ export function buildCompletionLayer(
       session.bodyNeeds,
       session.moods,
       session.coverageConditional,
+      mode,
     ),
   );
 }
@@ -1047,6 +1095,220 @@ export function buildProfileHint(profile?: StyleMeProfileSignals): string {
 // ── Rev 3 result directions (Group 5) ─────────────────────────────────────────
 // Partitions evaluatedProducts into MOST YOU / FRESH / PUSH ME.
 // Profile alignment score = points from signals whose question is a Profile question
+// ── Multi-Closet garment scan ─────────────────────────────────────────────────
+// Finds the best Closet item for each outfit slot not already covered by the
+// anchor or primary NADINE product. Runs in both nAia and NADINE modes.
+// At most one item per slot. The anchor is always excluded by ID.
+// Items with zero session signal score are never surfaced.
+
+export function selectAdditionalClosetGarments(
+  anchor: NormalizedStyleAnchor | null,
+  primaryProduct: StyleMePrimaryProduct | null,
+  session: StyleMeSessionInput,
+  closetItems: ClosetAnchorInput[],
+  profile?: ClosetScoringProfile | null,
+): Array<{ slot: OutfitSlot; id: string; label: string | null; imageUrl: string | null }> {
+  const anchorId = anchor?.type === "closet" ? (anchor as NormalizedClosetAnchor).id : null;
+
+  // Slots already covered by the anchor (all slot types) and by the primary (clothing only)
+  const filledClothingSlots = getFilledClothingSlots(anchor, primaryProduct, []);
+  const coveredSlots = new Set<string>(filledClothingSlots);
+  if (anchor?.type === "closet") coveredSlots.add((anchor as NormalizedClosetAnchor).slot);
+  if (anchor?.type === "nadine") coveredSlots.add((anchor as NormalizedNadineAnchor).slot);
+
+  const signals = {
+    occasion: session.occasion,
+    moods: session.moods,
+    desiredFeelings: session.desiredFeelings,
+  };
+
+  // Accumulate best candidate per slot
+  const bestBySlot = new Map<
+    OutfitSlot,
+    { item: ClosetAnchorInput; score: number }
+  >();
+
+  for (const item of closetItems) {
+    if (item.id === anchorId) continue;
+
+    const slot = CLOSET_CATEGORY_TO_SLOT[item.category as string];
+    if (!slot) continue;
+    if (coveredSlots.has(slot)) continue;
+
+    const score = scoreClosetItemForSession(
+      { occasions: item.occasions, styleTags: item.styleTags, category: item.category, colors: item.colors, primaryColor: item.primaryColor },
+      signals,
+      profile,
+      item.garmentRelationships,
+    );
+    if (score <= 0) continue;
+
+    const existing = bestBySlot.get(slot);
+    if (!existing || score > existing.score) {
+      bestBySlot.set(slot, { item, score });
+    }
+  }
+
+  return Array.from(bestBySlot.entries()).map(([slot, { item }]) => ({
+    slot,
+    id: item.id,
+    label: item.name,
+    imageUrl: item.imageUrl,
+  }));
+}
+
+// ── nAia-mode directions ──────────────────────────────────────────────────────
+// Builds MOST YOU / FRESH / PUSH ME from the customer's Closet items only.
+// The anchor item is excluded from direction candidates — it is already featured.
+// No product links, no "Shop This Direction" (productUrl is always null).
+
+// Slot priority for choosing the "lead" piece in a direction — most outfit-defining first.
+const DIRECTION_SLOT_PRIORITY: OutfitSlot[] = [
+  "bottom", "dress", "top", "outerwear", "shoe", "bag", "accessory", "jewelry",
+];
+
+export function computeNaiaResultDirections(
+  closetItems: ClosetAnchorInput[],
+  anchorId: string | null,
+  session: Pick<StyleMeSessionInput, "occasion" | "moods" | "desiredFeelings">,
+  profile?: ClosetScoringProfile | null,
+): ResultDirection[] {
+  const signals = {
+    occasion: session.occasion,
+    moods: session.moods,
+    desiredFeelings: session.desiredFeelings,
+  };
+
+  type ScoredItem = { item: ClosetAnchorInput; score: number };
+
+  // Score all non-anchor items and group by slot (best first within each slot).
+  const bySlot = new Map<OutfitSlot, ScoredItem[]>();
+  for (const item of closetItems) {
+    if (item.id === anchorId) continue;
+    const slot = CLOSET_CATEGORY_TO_SLOT[item.category as string] as OutfitSlot | undefined;
+    if (!slot) continue;
+    const score = scoreClosetItemForSession(
+      { occasions: item.occasions, styleTags: item.styleTags, category: item.category, colors: item.colors, primaryColor: item.primaryColor },
+      signals,
+      profile,
+      item.garmentRelationships,
+    );
+    if (score <= 0) continue;
+    const list = bySlot.get(slot) ?? [];
+    list.push({ item, score });
+    bySlot.set(slot, list);
+  }
+  for (const list of bySlot.values()) list.sort((a, b) => b.score - a.score);
+
+  if (bySlot.size === 0) return [];
+
+  // Build an outfit for a direction by picking one item per slot.
+  // rankFn(slotItems, slot) → index into the sorted list (clamped to valid range).
+  const buildOutfit = (
+    rankFn: (items: ScoredItem[], slot: OutfitSlot) => number,
+  ): Array<{ slot: OutfitSlot; item: ClosetAnchorInput; score: number }> =>
+    Array.from(bySlot.entries()).map(([slot, items]) => {
+      const idx = Math.min(Math.max(0, rankFn(items, slot as OutfitSlot)), items.length - 1);
+      return { slot: slot as OutfitSlot, item: items[idx].item, score: items[idx].score };
+    });
+
+  // The slot with the most options — best candidate for variation between directions.
+  const variationSlot = DIRECTION_SLOT_PRIORITY.find(
+    (sl) => (bySlot.get(sl)?.length ?? 0) >= 2,
+  ) ?? null;
+
+  // MOST YOU: best per slot.
+  const mostYouItems = buildOutfit(() => 0);
+
+  // FRESH: swap the variationSlot to its 2nd-best, keep others at 1st.
+  const freshItems = buildOutfit((items, slot) => (slot === variationSlot ? 1 : 0));
+
+  // PUSH ME: use the lowest-scoring item per slot (still positive).
+  const pushMeItems = buildOutfit((items) => items.length - 1);
+
+  // Convert an outfit array to the direction shape.
+  const toOutfitPieces = (
+    outfit: Array<{ slot: OutfitSlot; item: ClosetAnchorInput }>,
+  ) => outfit.map(({ slot, item }) => ({
+    slot,
+    id: item.id,
+    label: item.name,
+    imageUrl: item.imageUrl,
+  }));
+
+  // Lead piece for a direction: highest-priority slot in the outfit.
+  const leadItem = (
+    outfit: Array<{ slot: OutfitSlot; item: ClosetAnchorInput }>,
+  ): { slot: OutfitSlot; item: ClosetAnchorInput } | undefined => {
+    for (const sl of DIRECTION_SLOT_PRIORITY) {
+      const found = outfit.find((o) => o.slot === sl);
+      if (found) return found;
+    }
+    return outfit[0];
+  };
+
+  const makeProduct = (
+    outfit: Array<{ slot: OutfitSlot; item: ClosetAnchorInput }>,
+  ): StyleMePrimaryProduct | null => {
+    const lead = leadItem(outfit);
+    if (!lead) return null;
+    return {
+      handle: lead.item.id,
+      title: lead.item.name ?? lead.slot,
+      slot: lead.slot,
+      shopifyProductId: null,
+      productImageUrl: lead.item.imageUrl,
+      liveUrl: null,
+      productUrl: null,
+      stylingNotes: `Your ${lead.item.name ?? lead.slot} leads this look.`,
+    };
+  };
+
+  const directions: ResultDirection[] = [];
+
+  directions.push({
+    label: "most-you",
+    displayLabel: "MOST YOU",
+    product: makeProduct(mostYouItems),
+    directionalNote: "The combination from your Closet that aligns most closely with today's signals.",
+    outfitPieces: toOutfitPieces(mostYouItems),
+  });
+
+  // Only add FRESH if it produces a meaningfully different outfit from MOST YOU.
+  const freshDiffers = freshItems.some(
+    (f, i) => f.item.id !== mostYouItems[i]?.item.id,
+  );
+  if (freshDiffers) {
+    const freshLead = leadItem(freshItems);
+    const freshNote = freshLead && variationSlot && freshLead.slot === variationSlot
+      ? `A different angle — swaps the ${variationSlot} for a new combination.`
+      : "Familiar energy, styled from a different selection in your Closet.";
+    directions.push({
+      label: "fresh",
+      displayLabel: "FRESH",
+      product: makeProduct(freshItems),
+      directionalNote: freshNote,
+      outfitPieces: toOutfitPieces(freshItems),
+    });
+  }
+
+  // Only add PUSH ME if it differs from both MOST YOU and FRESH.
+  const pushMeDiffers = pushMeItems.some(
+    (p, i) => p.item.id !== mostYouItems[i]?.item.id,
+  );
+  if (pushMeDiffers) {
+    directions.push({
+      label: "push-me",
+      displayLabel: "PUSH ME",
+      product: makeProduct(pushMeItems),
+      directionalNote: "The further reach — pieces from your Closet at the outer edge of today's signals.",
+      outfitPieces: toOutfitPieces(pushMeItems),
+    });
+  }
+
+  return directions;
+}
+
 // (i.e. questionId does NOT start with "sq-").
 // Session score = totalScore minus profile score.
 // MOST YOU: highest totalScore overall.
@@ -1182,9 +1444,20 @@ export async function computeStyleMeResult(
   _runRec: (input: StyleMeEngineInput) => StyleMeRecommendationResult = runRecommendation,
   _resolveMedia: (handle: string) => VerifiedMediaEntry | undefined = resolveVerifiedMedia,
   _tryOnEnabled: boolean = VIRTUAL_TRY_ON_ENABLED,
+  _loadClosetItems?: () => Promise<ClosetAnchorInput[]>,
 ): Promise<StyleMeCustomerResult> {
   const recommendation = _runRec(engineInput);
   const { session } = engineInput;
+  const mode: StyleMeMode = engineInput.mode ?? "nadine";
+
+  // Memoised Closet loader — avoids duplicate DB queries when called multiple times.
+  let closetItemsCache: ClosetAnchorInput[] | null = null;
+  const getClosetItems = _loadClosetItems
+    ? async (): Promise<ClosetAnchorInput[]> => {
+        if (!closetItemsCache) closetItemsCache = await _loadClosetItems!();
+        return closetItemsCache;
+      }
+    : null;
   const { primary, anchor } = recommendation;
 
   // Source semantics enforcement:
@@ -1254,13 +1527,21 @@ export async function computeStyleMeResult(
     };
   };
   const isRev3Session = !!(session.state ?? session.intentions?.length);
-  const resultDirections: ResultDirection[] = isRev3Session
-    ? computeResultDirections(
+  let resultDirections: ResultDirection[] = [];
+  if (isRev3Session) {
+    if (mode === "naia" && getClosetItems) {
+      const allItems = await getClosetItems();
+      const anchorId =
+        anchor?.type === "closet" ? (anchor as NormalizedClosetAnchor).id : null;
+      resultDirections = computeNaiaResultDirections(allItems, anchorId, session, engineInput.profile);
+    } else {
+      resultDirections = computeResultDirections(
         recommendation.evaluatedProducts,
         resolveSingleProduct,
         buildProfileHint(engineInput.profile),
-      )
-    : [];
+      );
+    }
+  }
 
   // Alternatives — up to 2, from engine output only; order preserved.
   // Suppressed for my-closet (customer piece is the primary; no NADINE complement surfaces).
@@ -1311,13 +1592,26 @@ export async function computeStyleMeResult(
     };
   }
 
+  // Multi-Closet garment scan — populates selectedClosetGarments with compatible
+  // Closet items for empty outfit slots. Runs in both nAia and NADINE modes when
+  // _loadClosetItems is provided. nAia mode returns [] from the engine; NADINE mode
+  // returns undefined. Both are handled correctly here.
+  if (getClosetItems) {
+    const allItems = await getClosetItems();
+    recommendation.selectedClosetGarments = selectAdditionalClosetGarments(
+      anchor ?? null,
+      primaryProduct,
+      session,
+      allItems,
+      engineInput.profile,
+    );
+  }
+
   // Outfit completion — identifies clothing slots still uncovered after the anchor,
   // primary NADINE recommendation, and any additional Closet garments in the look.
-  // selectedClosetGarments carries Closet items beyond the anchor that the engine
-  // determined are part of the selected outfit. Computed before wording so the
-  // explanation can reference the full outfit.
-  const additionalClosetItems: Array<{ slot: string }> = recommendation.selectedClosetGarments ?? [];
-  const completionLayer = buildCompletionLayer(anchor ?? null, primaryProduct, session, additionalClosetItems);
+  // Computed before wording so the explanation can reference the full outfit.
+  const additionalClosetItems = recommendation.selectedClosetGarments ?? [];
+  const completionLayer = buildCompletionLayer(anchor ?? null, primaryProduct, session, additionalClosetItems, mode);
 
   // Anchor summary — passed to both Claude and deterministic fallback so the
   // anchor's colour, slot, and label are available for inclusion in Why This Works.
@@ -1334,6 +1628,17 @@ export async function computeStyleMeResult(
     return null;
   })();
 
+  // Build nAia Closet garment labels for Claude wording in nAia mode
+  const naiaClosetGarmentLabels: Array<{ slot: string; label: string | null }> =
+    mode === "naia"
+      ? [
+          ...(anchor?.type === "closet"
+            ? [{ slot: (anchor as NormalizedClosetAnchor).slot as string, label: (anchor as NormalizedClosetAnchor).label }]
+            : []),
+          ...additionalClosetItems.map((cg) => ({ slot: cg.slot, label: cg.label })),
+        ]
+      : [];
+
   // Claude wording call — falls back to deterministic if it fails
   const claudeWording = await callClaudeForWording(
     session.moods,
@@ -1348,6 +1653,8 @@ export async function computeStyleMeResult(
     engineInput.profile?.finalNotes ?? null,
     anchorSummary,
     session.state === "other" ? (session.stateOtherText ?? null) : null,
+    mode,
+    naiaClosetGarmentLabels.length ? naiaClosetGarmentLabels : undefined,
   );
 
   const wording =
@@ -1428,26 +1735,55 @@ export function buildDbPayload(result: StyleMeCustomerResult): StyleMeDbPayload 
     });
   }
 
-  // Finishing layer is always persisted regardless of outcome.
-  // no-eligible-product and closet-led both need shoes, bag and accessories.
-  items.push({
-    itemType: "SHOES",
-    productTitle: null,
-    productImageUrl: null,
-    shopifyProductId: null,
-    closetItemId: null,
-    stylingNotes: finishingLayer.shoes,
-    productUrl: null,
-  });
-  items.push({
-    itemType: "BAG",
-    productTitle: null,
-    productImageUrl: null,
-    shopifyProductId: null,
-    closetItemId: null,
-    stylingNotes: finishingLayer.bag,
-    productUrl: null,
-  });
+  // Additional Closet garments from the multi-item scan.
+  // Each gets the "Already Yours" badge in the UI (closetItemId is set).
+  // Guard against accidentally re-adding the anchor.
+  const anchorClosetId =
+    result.rawRecommendation.anchor?.type === "closet"
+      ? (result.rawRecommendation.anchor as NormalizedClosetAnchor).id
+      : null;
+  const closetCoveredSlots = new Set<string>();
+  if (anchorClosetId) {
+    const anchorSlot = (result.rawRecommendation.anchor as NormalizedClosetAnchor).slot;
+    if (anchorSlot) closetCoveredSlots.add(anchorSlot as string);
+  }
+  for (const cg of result.rawRecommendation.selectedClosetGarments ?? []) {
+    if (cg.id === anchorClosetId) continue;
+    closetCoveredSlots.add(cg.slot);
+    items.push({
+      itemType: slotToItemType(cg.slot),
+      productTitle: cg.label,
+      productImageUrl: cg.imageUrl,
+      shopifyProductId: null,
+      closetItemId: cg.id,
+      stylingNotes: `Style your ${cg.label ?? cg.slot} to complete the look.`,
+      productUrl: null,
+    });
+  }
+
+  // Finishing layer — persisted for any slot not already covered by a Closet item.
+  if (!closetCoveredSlots.has("shoe")) {
+    items.push({
+      itemType: "SHOES",
+      productTitle: null,
+      productImageUrl: null,
+      shopifyProductId: null,
+      closetItemId: null,
+      stylingNotes: finishingLayer.shoes,
+      productUrl: null,
+    });
+  }
+  if (!closetCoveredSlots.has("bag")) {
+    items.push({
+      itemType: "BAG",
+      productTitle: null,
+      productImageUrl: null,
+      shopifyProductId: null,
+      closetItemId: null,
+      stylingNotes: finishingLayer.bag,
+      productUrl: null,
+    });
+  }
   items.push({
     itemType: "ACCESSORY",
     productTitle: null,

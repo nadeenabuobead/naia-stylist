@@ -112,9 +112,16 @@ export interface ClosetAnchorInput {
   styleTags: string[];
   occasions: string[];
   imageUrl: string;
+  garmentRelationships?: string[];
 }
 
 export type AnchorInput = NadineAnchorInput | ClosetAnchorInput;
+
+// ─── Website context ──────────────────────────────────────────────────────────
+// "naia"   → nAia website: Closet-only output, no NADINE catalogue consulted.
+// "nadine" → NADINE website: Closet + NADINE catalogue (default for backward compat).
+
+export type StyleMeMode = "naia" | "nadine";
 
 // ─── Engine input ─────────────────────────────────────────────────────────────
 
@@ -123,6 +130,7 @@ export interface StyleMeEngineInput {
   profile?: StyleMeProfileSignals;
   anchor?: AnchorInput | null;
   recentlyShownHandles?: string[];
+  mode?: StyleMeMode;
 }
 
 // ─── Normalized anchors ───────────────────────────────────────────────────────
@@ -276,7 +284,11 @@ export interface StyleMeRecommendationResult {
     excludedCandidates: number;
   };
   // Additional Closet garments included in the resulting look beyond the anchor.
-  // Each entry carries only the clothing slot — ownership/display data stays in
-  // the Closet item itself and must not be copied into the completion layer.
-  selectedClosetGarments?: Array<{ slot: string }>;
+  // Populated by the orchestrator (computeStyleMeResult), not by the engine itself.
+  selectedClosetGarments?: Array<{
+    slot: string;
+    id: string;
+    label: string | null;
+    imageUrl: string | null;
+  }>;
 }

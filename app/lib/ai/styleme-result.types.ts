@@ -59,11 +59,19 @@ export interface StyleMeWording {
 
 export type ResultDirectionLabel = "most-you" | "fresh" | "push-me";
 
+export interface DirectionOutfitPiece {
+  slot: string;
+  id: string;
+  label: string | null;
+  imageUrl: string | null;
+}
+
 export interface ResultDirection {
   label: ResultDirectionLabel;
   displayLabel: string;  // "MOST YOU" | "FRESH" | "PUSH ME"
   product: StyleMePrimaryProduct | null;
   directionalNote: string;
+  outfitPieces?: DirectionOutfitPiece[];
 }
 
 // ── Full customer result (server-side only) ─────────────────────────────────
@@ -122,6 +130,7 @@ export interface StyleMeMetadata {
     title: string | null;
     productUrl: string | null;
     productImageUrl: string | null;
+    outfitPieces?: Array<{ slot: string; id: string; label: string | null; imageUrl: string | null }>;
   }>;
 }
 

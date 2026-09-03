@@ -37,6 +37,8 @@ export async function action({ request }: ActionFunctionArgs) {
   session.set("styleMeNadineAnchorHandle", handle);
   // Clear stale closet anchor if any.
   session.unset("styleMeClosetAnchorId");
+  // Mark as NADINE-website session: Closet + NADINE catalogue recommendations.
+  session.set("styleMeMode", "nadine");
 
   return redirect("/style-me/mood", {
     headers: { "Set-Cookie": await commitSession(session) },

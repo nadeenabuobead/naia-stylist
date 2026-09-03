@@ -14,7 +14,7 @@ import {
   buildDbPayload,
   styleSourceToSessionSource,
 } from "~/lib/ai/styleme-result.server";
-import { resolveActionAnchor } from "~/lib/ai/styleme-anchor.server";
+import { resolveActionAnchor, loadAllClosetItemsForEngine } from "~/lib/ai/styleme-anchor.server";
 import { parseSuggestionMetadata } from "~/lib/ai/styleme-result.types";
 import { issueImageToken } from "~/lib/dev-tryon-image-tokens.server";
 import { isTryOnEligible } from "~/lib/ai/tryon-product-eligibility";
@@ -463,6 +463,9 @@ export async function action({ request }: ActionFunctionArgs) {
         ? [...bodyNeeds, ...translatedSmcmIds]
         : bodyNeeds;
 
+      const cookieSession = await getSession(request.headers.get("Cookie"));
+      const styleMeMode = (cookieSession.get("styleMeMode") as "naia" | "nadine" | undefined) ?? "naia";
+
       const engineInput = buildEngineInput({
         moods,
         desiredFeelings,
@@ -474,6 +477,7 @@ export async function action({ request }: ActionFunctionArgs) {
         practicalIds: isRev3Generate ? effectivePracticalIds : practicalIds,
         source: sessionSource,
         profile: buildEphemeralContextSignals(buildProfileSignals(naiaCustomer?.onboardingProfile), journeyCtx),
+        mode: styleMeMode,
         // Rev 3 wording context — never affects engine scoring
         ...(isRev3Generate && {
           state: rev3StateAction ?? session.state ?? undefined,
@@ -486,7 +490,17 @@ export async function action({ request }: ActionFunctionArgs) {
         anchor,
       });
 
-      const styleResult = await computeStyleMeResult(engineInput);
+      const loadClosetItems = naiaCustomer
+        ? () => loadAllClosetItemsForEngine(naiaCustomer.id)
+        : undefined;
+
+      const styleResult = await computeStyleMeResult(
+        engineInput,
+        undefined,
+        undefined,
+        undefined,
+        loadClosetItems,
+      );
       const dbPayload = buildDbPayload(styleResult);
 
       const suggestion = await prisma.outfitSuggestion.create({
@@ -553,6 +567,9 @@ export async function action({ request }: ActionFunctionArgs) {
         try { journeyCtx = await buildCustomerJourneyContext(naiaCustomer.id); } catch { /* graceful */ }
       }
 
+      const regenCookieSession = await getSession(request.headers.get("Cookie"));
+      const regenMode = (regenCookieSession.get("styleMeMode") as "naia" | "nadine" | undefined) ?? "naia";
+
       const engineInput = buildEngineInput({
         moods: session.currentMood ? [session.currentMood] : [],
         desiredFeelings: session.desiredFeeling ? [session.desiredFeeling] : [],
@@ -564,10 +581,21 @@ export async function action({ request }: ActionFunctionArgs) {
         practicalIds: session.practicalIds ?? [],
         source: sessionSource,
         profile: buildEphemeralContextSignals(buildProfileSignals(naiaCustomer?.onboardingProfile), journeyCtx),
+        mode: regenMode,
         anchor: anchorResult.anchor,
       });
 
-      const styleResult = await computeStyleMeResult(engineInput);
+      const regenLoadClosetItems = naiaCustomer
+        ? () => loadAllClosetItemsForEngine(naiaCustomer.id)
+        : undefined;
+
+      const styleResult = await computeStyleMeResult(
+        engineInput,
+        undefined,
+        undefined,
+        undefined,
+        regenLoadClosetItems,
+      );
       const dbPayload = buildDbPayload(styleResult);
 
       const suggestion = await prisma.outfitSuggestion.create({
@@ -1459,8 +1487,29 @@ export default function StyleMeResult() {
                     <img
                       src={dir.productImageUrl}
                       alt={dir.title ?? dir.displayLabel}
-                      style={{ width: "100%", maxWidth: "200px", height: "auto", objectFit: "contain", borderRadius: "4px", marginBottom: "8px", background: "var(--naia-warm)" }}
+                      style={{ width: "100%", maxWidth: "160px", height: "auto", objectFit: "contain", borderRadius: "4px", marginBottom: "8px", background: "var(--naia-warm)" }}
                     />
+                  )}
+                  {dir.outfitPieces && dir.outfitPieces.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "8px" }}>
+                      {dir.outfitPieces.map((piece) => (
+                        <div key={piece.id} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          {piece.imageUrl && (
+                            <img
+                              src={piece.imageUrl}
+                              alt={piece.label ?? piece.slot}
+                              style={{ width: "36px", height: "36px", objectFit: "cover", borderRadius: "4px", flexShrink: 0, background: "var(--naia-warm)" }}
+                            />
+                          )}
+                          <span style={{ fontFamily: "var(--naia-ff-body)", fontSize: "13px", color: "var(--naia-ink)" }}>
+                            {piece.label ?? piece.slot}
+                          </span>
+                          <span style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "10px", letterSpacing: "1px", textTransform: "uppercase", color: "var(--naia-accent)", marginLeft: "auto" }}>
+                            Already Yours
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   )}
                   <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", marginBottom: dir.productUrl ? "10px" : "0" }}>
                     {dir.directionalNote}

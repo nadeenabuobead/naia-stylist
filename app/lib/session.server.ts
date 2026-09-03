@@ -35,6 +35,8 @@ const STYLEME_SESSION_KEYS = [
   "styleMeStateOtherText",
   "styleMeIntentions",
   "styleMeCoverageConditional",
+  // Website context — "naia" (Closet-only) or "nadine" (Closet + NADINE catalogue)
+  "styleMeMode",
 ] as const;
 
 export async function clearStyleMeSession(request: Request): Promise<string> {

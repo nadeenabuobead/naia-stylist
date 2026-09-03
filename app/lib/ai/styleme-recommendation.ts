@@ -1651,6 +1651,66 @@ export function runRecommendation(
     }
   }
 
+  // nAia mode: skip the NADINE catalogue entirely. The orchestrator (computeStyleMeResult)
+  // handles multi-Closet slot filling and direction building from the Closet.
+  if (input.mode === "naia") {
+    const hasClosetAnchor = anchor !== null && anchor.type === "closet";
+    return {
+      outcome: hasClosetAnchor ? "closet-led" : "no-eligible-product",
+      anchor,
+      primary: null,
+      alternatives: [],
+      outfitPlan: {
+        anchorSlot: anchor?.type === "closet"
+          ? (anchor as NormalizedClosetAnchor).slot
+          : anchor?.type === "nadine"
+          ? (anchor as NormalizedNadineAnchor).slot
+          : null,
+        recommendedSlot: null,
+        compatibilityStatus: hasClosetAnchor ? "closet-led" : "compatible",
+        notes: [],
+      },
+      evaluatedProducts: [],
+      coverage: { totalCatalogProducts: 0, eligibleCandidates: 0, excludedCandidates: 0 },
+      selectedClosetGarments: [],
+    };
+  }
+
+  // NADINE mode with an explicit NADINE anchor: the customer arrived from a specific
+  // NADINE product page and selected that exact product. Return it directly as primary
+  // without evaluating the catalogue — no substitution, no alternatives.
+  if (input.mode === "nadine" && anchor?.type === "nadine") {
+    const na = anchor as NormalizedNadineAnchor;
+    const product = getAllCatalogProducts().find((p) => p.handle === na.handle);
+    if (product) {
+      const slot = itemTypeToSlot(product.parsed.identity.itemType);
+      return {
+        outcome: "nadine-recommendation",
+        anchor: null,
+        primary: {
+          handle: na.handle,
+          title: product.parsed.identity.verifiedTitle,
+          slot,
+          totalScore: 100,
+          positiveEvidence: [],
+          negativeEvidence: [],
+          anchorCompatibility: { status: "compatible", isHardExclusion: false },
+          provisionalEvidenceUsed: false,
+        },
+        alternatives: [],
+        outfitPlan: {
+          anchorSlot: null,
+          recommendedSlot: slot,
+          compatibilityStatus: "compatible",
+          notes: [],
+        },
+        evaluatedProducts: [],
+        coverage: { totalCatalogProducts: 0, eligibleCandidates: 0, excludedCandidates: 0 },
+        selectedClosetGarments: [],
+      };
+    }
+  }
+
   // Firm-no colour set
   const firmNoColorIds: Set<string> = new Set(profile?.firmNoColors ?? []);
 
