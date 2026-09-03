@@ -77,9 +77,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const source = session.get("styleMeSource") as string | undefined;
 
-  // No source chosen, or source is NADINE-only (which redirects to result in the action) —
-  // show the source selection screen.
-  if (!source || !VALID_SOURCE_IDS.has(source) || source === "naia-piece") {
+  // Rev3: standalone StyleMe is closet-only — bypass source selection entirely.
+  if (isRev3 && (!source || !VALID_SOURCE_IDS.has(source) || source === "naia-piece")) {
+    session.set("styleMeSource", "my-closet");
+    return redirect("/style-me/source", {
+      headers: { "Set-Cookie": await commitSession(session) },
+    });
+  }
+
+  // Legacy: show source selection screen when no valid source is set.
+  if (!isRev3 && (!source || !VALID_SOURCE_IDS.has(source) || source === "naia-piece")) {
     const prevSource = (session.get("styleMeSourcePrev") as string | undefined) ?? null;
     return data({ step: "source" as const, isRev3, prevSource });
   }
@@ -249,7 +256,17 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === "back") {
     const from = formData.get("from") as string;
     if (from === "anchor-method") {
-      // Going back to source selection — save source for hydration before clearing.
+      const isRev3Back = !!session.get("styleMeState");
+      if (isRev3Back) {
+        // Rev3 has no source-selection screen — go back to the previous flow step.
+        session.unset("styleMeSource");
+        session.unset("styleMeAnchorMode");
+        session.unset("styleMeClosetAnchorId");
+        return redirect("/style-me/occasion", {
+          headers: { "Set-Cookie": await commitSession(session) },
+        });
+      }
+      // Legacy: save source for hydration before clearing.
       const prevSrc = session.get("styleMeSource") as string | undefined;
       if (prevSrc) session.set("styleMeSourcePrev", prevSrc);
       session.unset("styleMeSource");
