@@ -732,16 +732,16 @@ describe("Session Desired Feeling — answer behaviours", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("Session Body Needs — answer behaviours", () => {
-  // Locked canonical Body Need vocabulary (9 engine IDs + 2 Rev 3 context-only IDs).
+  // Locked canonical Body Need vocabulary (9 engine IDs + 3 Rev 3 context-only IDs).
   const CANONICAL_BN_IDS = [
     "waist-definition", "soft-and-forgiving-around-waist", "relaxed",
     "more-coverage", "structured", "elongates", "balances",
     "comfortable-elevated", "nothing-specific",
     // Rev 3 context-only (CONTEXTUAL, no activatedFields, no scoring)
-    "softer-easier-fabrics", "still-want-shape",
+    "softer-easier-fabrics", "still-want-shape", "structured-shape",
   ];
 
-  it("canonical body need vocabulary contains exactly 11 IDs (9 engine + 2 Rev 3 context-only)", () => {
+  it("canonical body need vocabulary contains exactly 12 IDs (9 engine + 3 Rev 3 context-only)", () => {
     const bnAnswers = getAnswersByQuestion(SQ.BODY_NEEDS);
     assert.equal(bnAnswers.length, CANONICAL_BN_IDS.length);
     for (const id of CANONICAL_BN_IDS) {

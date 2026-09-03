@@ -140,6 +140,15 @@ describe("R3.3 — ANSWER_REGISTRY: Context-only Physical Need entries", () => {
     assert.ok(entry!.behaviours.includes("CONTEXTUAL"));
     assert.deepEqual(entry!.activatedFields, []);
   });
+
+  it('"structured-shape" is registered under sq-body-needs as CONTEXTUAL', () => {
+    const entry = ANSWER_REGISTRY.find(
+      (m) => m.id === "structured-shape" && m.questionId === SQ.BODY_NEEDS,
+    );
+    assert.ok(entry, "structured-shape must be in ANSWER_REGISTRY");
+    assert.ok(entry!.behaviours.includes("CONTEXTUAL"));
+    assert.deepEqual(entry!.activatedFields, []);
+  });
 });
 
 // ── R3.4 — SESSION_QUESTION_IDS: sq-state + sq-intentions registered ──────────
@@ -915,9 +924,9 @@ describe("R3.19 — Physical Need mapping verification (Rev 3 IDs)", () => {
     "utf8",
   );
 
-  it("Rev 3 Physical Need route has 8 options", () => {
+  it("Rev 3 Physical Need route has 9 options", () => {
     const count = (physicalNeedSrc.match(/id: "/g) ?? []).length;
-    assert.equal(count, 8, "Must have exactly 8 physical need option IDs");
+    assert.equal(count, 9, "Must have exactly 9 physical need option IDs");
   });
 
   it("nothing-specific is present as exclusive option", () => {
@@ -1283,7 +1292,7 @@ describe("R3.21 — State UI: exact 10 approved IDs and labels", () => {
 
 // ── R3.22 — Intention UI: exact approved IDs and labels ───────────────────────
 
-describe("R3.22 — Intention UI: exact 11 approved IDs and labels", () => {
+describe("R3.22 — Intention UI: exact 12 approved IDs and labels", () => {
   const intentionSrc = readFileSync(join(ROOT, "app/routes/style-me/intention.tsx"), "utf8");
 
   const APPROVED_LABELS: Record<string, string> = {
@@ -1296,6 +1305,7 @@ describe("R3.22 — Intention UI: exact 11 approved IDs and labels", () => {
     "feel-attractive":   "Make me feel attractive",
     "give-energy":       "Give me energy",
     "feel-softer":       "Help me feel softer",
+    "feel-sharper":      "Help me feel sharper",
     "feel-less-exposed": "Help me feel less exposed",
     "express-myself":    "Let me express myself",
   };
@@ -1322,9 +1332,9 @@ describe("R3.22 — Intention UI: exact 11 approved IDs and labels", () => {
   });
 });
 
-// ── R3.23 — Physical Need UI: exact 8 approved IDs ───────────────────────────
+// ── R3.23 — Physical Need UI: exact 9 approved IDs ───────────────────────────
 
-describe("R3.23 — Physical Need UI: exact 8 approved IDs, correct labels", () => {
+describe("R3.23 — Physical Need UI: exact 9 approved IDs, correct labels", () => {
   const physSrc = readFileSync(join(ROOT, "app/routes/style-me/physical-need.tsx"), "utf8");
 
   const APPROVED_IDS = [
@@ -1335,6 +1345,7 @@ describe("R3.23 — Physical Need UI: exact 8 approved IDs, correct labels", () 
     "loose-comfortable",
     "still-want-shape",
     "waist-definition",
+    "structured-shape",
     "nothing-specific",
   ];
 
@@ -1346,6 +1357,7 @@ describe("R3.23 — Physical Need UI: exact 8 approved IDs, correct labels", () 
     "loose-comfortable":     "Loose and comfortable",
     "still-want-shape":      "I still want shape",
     "waist-definition":      "I want waist definition",
+    "structured-shape":      "I want a sharper / more structured shape",
     "nothing-specific":      "Nothing specific",
   };
 

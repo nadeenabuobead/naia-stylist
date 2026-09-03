@@ -29,6 +29,7 @@ const PHYSICAL_NEED_OPTIONS: Array<{ id: string; label: string }> = [
   { id: "loose-comfortable",     label: "Loose and comfortable" },
   { id: "still-want-shape",      label: "I still want shape" },
   { id: "waist-definition",      label: "I want waist definition" },
+  { id: "structured-shape",      label: "I want a sharper / more structured shape" },
   { id: "nothing-specific",      label: "Nothing specific" },
 ];
 
@@ -103,7 +104,7 @@ export default function PhysicalNeedPage() {
   return (
     <SmPage step={3}>
       <p className="sm-step-label">Physical Comfort</p>
-      <h1 className="sm-heading">Any physical comfort needs right now?</h1>
+      <h1 className="sm-heading">Any fit or comfort needs right now?</h1>
       <p className="sm-sub">Choose up to {MAX_SELECTIONS}.</p>
 
       <Form method="post">

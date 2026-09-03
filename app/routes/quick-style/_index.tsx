@@ -79,7 +79,7 @@ const occasionOpts = [
   { id: "work", label: "Work / meetings" },
   { id: "dinner", label: "Dinner" },
   { id: "date-night", label: "Date night" },
-  { id: "girls-night", label: "Girls' night" },
+  { id: "girls-night", label: "Evening out" },
   { id: "family", label: "Family gathering" },
   { id: "special-event", label: "Special event" },
   { id: "travel", label: "Travel day" },

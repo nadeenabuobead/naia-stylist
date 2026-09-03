@@ -1248,6 +1248,13 @@ export const ANSWER_REGISTRY: readonly AnswerMapping[] = [
     rankingWeight: "active",
   },
   {
+    id: "feel-sharper",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [PRODUCT_TEMPLATE_FIELDS.DESIRED_FEELING_MATCH],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.STRONG_RANK],
+    rankingWeight: "active",
+  },
+  {
     id: "feel-less-exposed",
     questionId: SQ.INTENTIONS,
     activatedFields: [
@@ -1266,8 +1273,9 @@ export const ANSWER_REGISTRY: readonly AnswerMapping[] = [
   },
 
   // ── Session: Body Needs — Rev 3 context-only Physical Needs ──────────────────
-  // softer-easier-fabrics + still-want-shape pass through BODY_NEED_NORMALIZATION_MAP
-  // unchanged (no canonical mapping); they remain as wording context for the AI.
+  // softer-easier-fabrics / still-want-shape / structured-shape pass through
+  // BODY_NEED_NORMALIZATION_MAP unchanged (no canonical mapping); they remain as
+  // wording context for the AI.
   {
     id: "softer-easier-fabrics",
     questionId: SQ.BODY_NEEDS,
@@ -1277,6 +1285,13 @@ export const ANSWER_REGISTRY: readonly AnswerMapping[] = [
   },
   {
     id: "still-want-shape",
+    questionId: SQ.BODY_NEEDS,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],
+    rankingWeight: "none",
+  },
+  {
+    id: "structured-shape",
     questionId: SQ.BODY_NEEDS,
     activatedFields: [],
     behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],

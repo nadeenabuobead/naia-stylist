@@ -30,6 +30,7 @@ const INTENTION_OPTIONS: Array<{ id: string; label: string }> = [
   { id: "feel-attractive",    label: "Make me feel attractive" },
   { id: "give-energy",        label: "Give me energy" },
   { id: "feel-softer",        label: "Help me feel softer" },
+  { id: "feel-sharper",       label: "Help me feel sharper" },
   { id: "feel-less-exposed",  label: "Help me feel less exposed" },
   { id: "express-myself",     label: "Let me express myself" },
 ];

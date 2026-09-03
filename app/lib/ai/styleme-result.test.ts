@@ -3034,7 +3034,7 @@ describe("§V.E — STYLEME_WORDING_SYSTEM_PROMPT: tone spec and prohibited phra
   it("V.E.4 — system prompt instructs confidenceBoost as styling observation not emotional", () => {
     assert.ok(STYLEME_WORDING_SYSTEM_PROMPT.includes("styling observation"),
       "system prompt must instruct styling observation");
-    assert.ok(STYLEME_WORDING_SYSTEM_PROMPT.includes("about the garment, not how she will feel"),
+    assert.ok(STYLEME_WORDING_SYSTEM_PROMPT.includes("about the garment, not how the customer will feel"),
       "system prompt must prohibit emotional payoff");
   });
 });

@@ -1,7 +1,7 @@
 // app/routes/style-me/result.tsx
 import { Form, Link, useLoaderData, useFetcher } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type ShouldRevalidateFunctionArgs, type LinksFunction } from "react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, type Dispatch, type SetStateAction, type CSSProperties } from "react";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
 import { prisma } from "~/lib/prisma.server";
@@ -881,7 +881,7 @@ const FEELING_LABELS: Record<string, string> = {
 };
 const OCCASION_LABELS: Record<string, string> = {
   "everyday": "Everyday", "work": "Work", "dinner": "Dinner", "date-night": "Date night",
-  "girls-night": "Girls' night", "family": "Family", "special-event": "Special event",
+  "girls-night": "Evening out", "family": "Family", "special-event": "Special event",
   "travel": "Travel", "not-sure": "Not sure yet",
 };
 
@@ -929,6 +929,10 @@ export default function StyleMeResult() {
   const [selectedChangeTypes, setSelectedChangeTypes] = useState<string[]>(existingOutcome?.changeTypes ?? []);
   const [otherChangeNote, setOtherChangeNote] = useState<string>(existingOutcome?.otherChangeNote ?? "");
   const [goalOutcome, setGoalOutcome] = useState<string | null>(existingOutcome?.goalOutcome ?? null);
+  const [whatWorked, setWhatWorked] = useState<string[]>(existingOutcome?.whatWorked ?? []);
+  const [whatFeltOff, setWhatFeltOff] = useState<string[]>(existingOutcome?.whatFeltOff ?? []);
+  const [didntWearReasons, setDidntWearReasons] = useState<string[]>(existingOutcome?.didntWearReasons ?? []);
+  const [reasonOtherNote, setReasonOtherNote] = useState<string>(existingOutcome?.reasonOtherNote ?? "");
   const [outcomeSaved, setOutcomeSaved] = useState<boolean>(existingOutcome != null);
   const [isOutcomeEditing, setIsOutcomeEditing] = useState(false);
   const [selectedResultDirection, setSelectedResultDirection] = useState<string | null>(existingOutcome?.selectedDirection ?? null);
@@ -1525,6 +1529,7 @@ export default function StyleMeResult() {
         {/* Only shown for authenticated customers with a saved suggestion. No modal, no popup. */}
         {loaderData.isAuthenticated && suggestion.id && (() => {
           const currentSuggestionId = suggestion.id;
+
           const submitOutcome = () => {
             if (!outcomeStatus) return;
             outcomeFetcher.submit(
@@ -1535,6 +1540,10 @@ export default function StyleMeResult() {
                 otherChangeNote: otherChangeNote.trim() || null,
                 goalOutcome,
                 selectedDirection: selectedResultDirection,
+                whatWorked,
+                whatFeltOff,
+                didntWearReasons,
+                reasonOtherNote: reasonOtherNote.trim() || null,
               }),
               { method: "post", action: "/api/styleme-outcome", encType: "application/json" },
             );
@@ -1546,18 +1555,129 @@ export default function StyleMeResult() {
             );
           };
 
+          const toggleReason = (
+            arr: string[],
+            setter: Dispatch<SetStateAction<string[]>>,
+            id: string,
+            max: number,
+          ) => {
+            setter(prev =>
+              prev.includes(id) ? prev.filter(x => x !== id) : prev.length < max ? [...prev, id] : prev
+            );
+          };
+
+          // Section 0: all selected-button styles use --naia-bg for text (light on dark)
+          const selBtnStyle = (active: boolean): CSSProperties => ({
+            fontFamily: "var(--naia-ff-ui)",
+            fontSize: "10px",
+            letterSpacing: "1.5px",
+            textTransform: "uppercase",
+            padding: "8px 14px",
+            border: "1px solid",
+            borderColor: active ? "var(--naia-ink)" : "rgba(34,21,22,0.2)",
+            background: active ? "var(--naia-ink)" : "transparent",
+            color: active ? "var(--naia-bg)" : "var(--naia-ink)",
+            cursor: "pointer",
+            borderRadius: "2px",
+          });
+
+          const reasonBtnStyle = (active: boolean, capped: boolean): CSSProperties => ({
+            fontFamily: "var(--naia-ff-ui)",
+            fontSize: "10px",
+            letterSpacing: "1px",
+            padding: "6px 10px",
+            border: "1px solid",
+            borderColor: active ? "var(--naia-ink)" : "rgba(34,21,22,0.15)",
+            background: active ? "var(--naia-ink)" : "transparent",
+            color: active ? "var(--naia-bg)" : "var(--naia-ink)",
+            cursor: "pointer",
+            borderRadius: "2px",
+            opacity: !active && capped ? 0.4 : 1,
+          });
+
           const changeTypeLabels: Record<string, string> = {
-            shoes: "Shoes",
-            top: "Top",
-            bottom: "Bottom",
-            layer: "Layer",
+            shoes: "Different shoes",
+            top: "Different top",
+            bottom: "Different bottom",
+            layer: "Layer / outerwear",
             "more-coverage": "More coverage",
-            "less-formal": "Less formal",
-            "more-comfortable": "More comfortable",
+            "less-formal": "Dressed it down",
+            "more-comfortable": "Made it comfier",
             "different-colour": "Different colour",
             "different-fit": "Different fit",
             other: "Other",
           };
+
+          const whatWorkedLabels: Record<string, string> = {
+            "felt-like-me":   "Felt like me",
+            "felt-confident": "Felt confident",
+            "comfortable":    "Comfortable",
+            "got-compliments":"Got compliments",
+            "occasion-right": "Right for the occasion",
+            "other":          "Other",
+          };
+
+          const whatFeltOffLabels: Record<string, string> = {
+            "didnt-feel-like-me": "Didn't feel like me",
+            "uncomfortable":      "Uncomfortable",
+            "fit-issue":          "Fit issue",
+            "wrong-colour":       "Wrong colour",
+            "too-formal":         "Too formal",
+            "too-casual":         "Too casual",
+            "other":              "Other",
+          };
+
+          const didntWearLabels: Record<string, string> = {
+            "weather":            "Weather",
+            "plans-changed":      "Plans changed",
+            "comfort-concern":    "Comfort concern",
+            "style-mood-changed": "Mood changed",
+            "not-ready":          "Didn't feel ready",
+            "other":              "Other",
+          };
+
+          const noteArea = (
+            value: string,
+            onChange: (v: string) => void,
+          ) => (
+            <textarea
+              maxLength={280}
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              rows={2}
+              style={{
+                marginTop: "10px",
+                width: "100%",
+                boxSizing: "border-box",
+                fontFamily: "var(--naia-ff-body)",
+                fontSize: "13px",
+                color: "var(--naia-ink)",
+                background: "transparent",
+                border: "1px solid rgba(34,21,22,0.2)",
+                borderRadius: "2px",
+                padding: "8px",
+                resize: "vertical",
+              }}
+            />
+          );
+
+          const goalLabel = outcomeStatus === "changed-something"
+            ? "Did the look give you what you wanted after the change?"
+            : "Did the look give you what you wanted today?";
+
+          const workedQuestion = outcomeStatus === "changed-something"
+            ? "What worked after the change? (up to 3)"
+            : "What worked? (up to 3)";
+
+          const feltOffQuestion = outcomeStatus === "changed-something"
+            ? "What still felt off? (up to 3)"
+            : "What felt off? (up to 3)";
+
+          const submitDisabled =
+            outcomeFetcher.state === "submitting" ||
+            !outcomeStatus ||
+            (outcomeStatus === "changed-something" && selectedChangeTypes.length === 0) ||
+            (outcomeStatus === "didnt-wear-it" && didntWearReasons.length === 0);
 
           if (outcomeSaved && outcomeFetcher.state === "idle" && !isOutcomeEditing) {
             return (
@@ -1587,39 +1707,47 @@ export default function StyleMeResult() {
               <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", color: "var(--naia-ink)", marginBottom: "12px" }}>
                 What happened with this look?
               </p>
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "16px" }}>
+
+              {/* Section 1 — top-level status */}
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "20px" }}>
                 {(["wore-it", "changed-something", "didnt-wear-it"] as const).map((s) => (
                   <button
                     key={s}
                     type="button"
                     onClick={() => {
                       setOutcomeStatus(s);
-                      if (s === "wore-it") { setSelectedChangeTypes([]); setOtherChangeNote(""); }
-                      if (s === "didnt-wear-it") { setSelectedChangeTypes([]); setOtherChangeNote(""); setGoalOutcome(null); }
+                      // Clear incompatible stale fields
+                      if (s === "wore-it") {
+                        setSelectedChangeTypes([]);
+                        setOtherChangeNote("");
+                        setDidntWearReasons([]);
+                        setReasonOtherNote("");
+                      }
+                      if (s === "changed-something") {
+                        setDidntWearReasons([]);
+                        setReasonOtherNote("");
+                      }
+                      if (s === "didnt-wear-it") {
+                        setSelectedChangeTypes([]);
+                        setOtherChangeNote("");
+                        setGoalOutcome(null);
+                        setWhatWorked([]);
+                        setWhatFeltOff([]);
+                        setReasonOtherNote("");
+                      }
                     }}
-                    style={{
-                      fontFamily: "var(--naia-ff-ui)",
-                      fontSize: "10px",
-                      letterSpacing: "1.5px",
-                      textTransform: "uppercase",
-                      padding: "8px 14px",
-                      border: "1px solid",
-                      borderColor: outcomeStatus === s ? "var(--naia-ink)" : "rgba(34,21,22,0.2)",
-                      background: outcomeStatus === s ? "var(--naia-ink)" : "transparent",
-                      color: outcomeStatus === s ? "var(--naia-paper)" : "var(--naia-ink)",
-                      cursor: "pointer",
-                      borderRadius: "2px",
-                    }}
+                    style={selBtnStyle(outcomeStatus === s)}
                   >
                     {s === "wore-it" ? "Wore it" : s === "changed-something" ? "Changed something" : "Didn't wear it"}
                   </button>
                 ))}
               </div>
 
+              {/* Section 3 — CHANGED SOMETHING: change types */}
               {outcomeStatus === "changed-something" && (
                 <div style={{ marginBottom: "16px" }}>
                   <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "13px", color: "var(--naia-muted)", marginBottom: "8px" }}>
-                    What did you change? (up to 5)
+                    How did you change the look? (up to 5)
                   </p>
                   <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                     {Object.entries(changeTypeLabels).map(([id, label]) => (
@@ -1627,71 +1755,58 @@ export default function StyleMeResult() {
                         key={id}
                         type="button"
                         onClick={() => toggleChangeType(id)}
-                        style={{
-                          fontFamily: "var(--naia-ff-ui)",
-                          fontSize: "10px",
-                          letterSpacing: "1px",
-                          padding: "6px 10px",
-                          border: "1px solid",
-                          borderColor: selectedChangeTypes.includes(id) ? "var(--naia-accent)" : "rgba(34,21,22,0.15)",
-                          background: selectedChangeTypes.includes(id) ? "var(--naia-accent)" : "transparent",
-                          color: selectedChangeTypes.includes(id) ? "#fff" : "var(--naia-ink)",
-                          cursor: "pointer",
-                          borderRadius: "2px",
-                          opacity: !selectedChangeTypes.includes(id) && selectedChangeTypes.length >= 5 ? 0.4 : 1,
-                        }}
+                        style={reasonBtnStyle(selectedChangeTypes.includes(id), !selectedChangeTypes.includes(id) && selectedChangeTypes.length >= 5)}
                       >
                         {label}
                       </button>
                     ))}
                   </div>
-                  {selectedChangeTypes.includes("other") && (
-                    <textarea
-                      placeholder="Anything else? (optional, 280 chars)"
-                      maxLength={280}
-                      value={otherChangeNote}
-                      onChange={(e) => setOtherChangeNote(e.target.value)}
-                      rows={2}
-                      style={{
-                        marginTop: "10px",
-                        width: "100%",
-                        fontFamily: "var(--naia-ff-body)",
-                        fontSize: "13px",
-                        color: "var(--naia-ink)",
-                        background: "transparent",
-                        border: "1px solid rgba(34,21,22,0.2)",
-                        borderRadius: "2px",
-                        padding: "8px",
-                        resize: "vertical",
-                      }}
-                    />
-                  )}
+                  {selectedChangeTypes.includes("other") && noteArea(otherChangeNote, setOtherChangeNote)}
                 </div>
               )}
 
+              {/* Section 4 — DIDN'T WEAR IT: what got in the way */}
+              {outcomeStatus === "didnt-wear-it" && (
+                <div style={{ marginBottom: "16px" }}>
+                  <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "13px", color: "var(--naia-muted)", marginBottom: "8px" }}>
+                    What got in the way? (up to 3)
+                  </p>
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                    {Object.entries(didntWearLabels).map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => toggleReason(didntWearReasons, setDidntWearReasons, id, 3)}
+                        style={reasonBtnStyle(didntWearReasons.includes(id), !didntWearReasons.includes(id) && didntWearReasons.length >= 3)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {didntWearReasons.includes("other") && noteArea(reasonOtherNote, setReasonOtherNote)}
+                </div>
+              )}
+
+              {/* Sections 2 & 3 — goalOutcome (wore-it or changed-something) */}
               {(outcomeStatus === "wore-it" || outcomeStatus === "changed-something") && (
                 <div style={{ marginBottom: "16px" }}>
                   <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "13px", color: "var(--naia-muted)", marginBottom: "8px" }}>
-                    Did the outfit give you what you wanted today?
+                    {goalLabel}
                   </p>
                   <div style={{ display: "flex", gap: "8px" }}>
                     {(["yes", "somewhat", "no"] as const).map((g) => (
                       <button
                         key={g}
                         type="button"
-                        onClick={() => setGoalOutcome(prev => prev === g ? null : g)}
-                        style={{
-                          fontFamily: "var(--naia-ff-ui)",
-                          fontSize: "10px",
-                          letterSpacing: "1px",
-                          padding: "6px 12px",
-                          border: "1px solid",
-                          borderColor: goalOutcome === g ? "var(--naia-ink)" : "rgba(34,21,22,0.2)",
-                          background: goalOutcome === g ? "var(--naia-ink)" : "transparent",
-                          color: goalOutcome === g ? "var(--naia-paper)" : "var(--naia-ink)",
-                          cursor: "pointer",
-                          borderRadius: "2px",
+                        onClick={() => {
+                          const next = goalOutcome === g ? null : g;
+                          setGoalOutcome(next);
+                          // Clear incompatible reason arrays
+                          if (next === "yes") { setWhatFeltOff([]); setReasonOtherNote(""); }
+                          if (next === "somewhat" || next === "no") { setWhatWorked([]); setReasonOtherNote(""); }
+                          if (next === null) { setWhatWorked([]); setWhatFeltOff([]); setReasonOtherNote(""); }
                         }}
+                        style={selBtnStyle(goalOutcome === g)}
                       >
                         {g === "yes" ? "Yes" : g === "somewhat" ? "Somewhat" : "No"}
                       </button>
@@ -1700,12 +1815,57 @@ export default function StyleMeResult() {
                 </div>
               )}
 
+              {/* Section 2 — whatWorked (goalOutcome === yes) */}
+              {(outcomeStatus === "wore-it" || outcomeStatus === "changed-something") && goalOutcome === "yes" && (
+                <div style={{ marginBottom: "16px" }}>
+                  <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "13px", color: "var(--naia-muted)", marginBottom: "8px" }}>
+                    {workedQuestion}
+                  </p>
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                    {Object.entries(whatWorkedLabels).map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => toggleReason(whatWorked, setWhatWorked, id, 3)}
+                        style={reasonBtnStyle(whatWorked.includes(id), !whatWorked.includes(id) && whatWorked.length >= 3)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {whatWorked.includes("other") && noteArea(reasonOtherNote, setReasonOtherNote)}
+                </div>
+              )}
+
+              {/* Section 2 — whatFeltOff (goalOutcome === somewhat or no) */}
+              {(outcomeStatus === "wore-it" || outcomeStatus === "changed-something") && (goalOutcome === "somewhat" || goalOutcome === "no") && (
+                <div style={{ marginBottom: "16px" }}>
+                  <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "13px", color: "var(--naia-muted)", marginBottom: "8px" }}>
+                    {feltOffQuestion}
+                  </p>
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                    {Object.entries(whatFeltOffLabels).map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => toggleReason(whatFeltOff, setWhatFeltOff, id, 3)}
+                        style={reasonBtnStyle(whatFeltOff.includes(id), !whatFeltOff.includes(id) && whatFeltOff.length >= 3)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {whatFeltOff.includes("other") && noteArea(reasonOtherNote, setReasonOtherNote)}
+                </div>
+              )}
+
+              {/* Submit / Cancel row */}
               <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
                 {outcomeStatus && (
                   <button
                     type="button"
                     onClick={submitOutcome}
-                    disabled={outcomeFetcher.state === "submitting" || (outcomeStatus === "changed-something" && selectedChangeTypes.length === 0)}
+                    disabled={submitDisabled}
                     style={{
                       fontFamily: "var(--naia-ff-ui)",
                       fontSize: "10px",
@@ -1715,8 +1875,8 @@ export default function StyleMeResult() {
                       border: "1px solid var(--naia-ink)",
                       background: "transparent",
                       color: "var(--naia-ink)",
-                      cursor: (outcomeStatus === "changed-something" && selectedChangeTypes.length === 0) ? "not-allowed" : "pointer",
-                      opacity: (outcomeStatus === "changed-something" && selectedChangeTypes.length === 0) ? 0.4 : 1,
+                      cursor: submitDisabled ? "not-allowed" : "pointer",
+                      opacity: submitDisabled ? 0.4 : 1,
                       borderRadius: "2px",
                     }}
                   >

@@ -2668,7 +2668,7 @@ function TabRecommendation({ data, kpis, phase4b2, advanced, rel, sampleMode, da
           <div style={s.kpiGrid}>
             <KpiCard label="Total In-Session Reviews" value={liveSignals.sessionReview.totalReviews} />
             <KpiCard label="Avg Overall Feeling" value={liveSignals.sessionReview.avgOverallFeeling != null ? `${liveSignals.sessionReview.avgOverallFeeling}/5` : "—"} />
-            <KpiCard label="Felt Like Her — Yes" value={liveSignals.sessionReview.feltLikeHerYes} />
+            <KpiCard label="Felt Like Themselves — Yes" value={liveSignals.sessionReview.feltLikeHerYes} />
             <KpiCard label="Desired Feeling Achieved" value={liveSignals.sessionReview.desiredFeelingAchievedYes} tooltip="Customers who said their desired feeling was achieved." />
             <KpiCard label="Would Wear Again — Definitely" value={liveSignals.sessionReview.wouldWearAgainDefinitely} tooltip="Stated intent — not verified repeat wear. 'Definitely' response to would-wear-again question." />
           </div>
