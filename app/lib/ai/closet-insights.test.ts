@@ -256,19 +256,26 @@ describe("CI.10 — mixed palette", () => {
 
 // ── CI.11 — colour normalization ──────────────────────────────────────────────
 describe("CI.11 — colour normalization", () => {
-  it("matches Black quiz ID to Black Closet display value", () => {
+  it("matches Black quiz ID to Black Closet display value — merged into palette claim when dominant", () => {
+    // All 5 items are Black → Black is palette leader AND a favourite → merged
     const items = makeItems(5, { primaryColor: "Black" });
     const profile: ClosetInsightProfile = {
       ...emptyProfile,
       favoriteColors: ["black"],
     };
     const result = computeClosetInsights(items, profile);
-    const fav = result.insights.find((i) => i.id === "favourite-colour-black");
-    assert.ok(fav, "should emit favourite-colour-black");
-    assert.ok(fav!.claim.includes("Black"), `claim: ${fav!.claim}`);
+    // No separate favourite-colour-black insight — it's merged into palette-distribution
+    assert.equal(result.insights.find((i) => i.id === "favourite-colour-black"), undefined,
+      "should NOT emit separate favourite-colour-black when Black is palette leader");
+    const palette = result.insights.find((i) => i.type === "palette-distribution");
+    assert.ok(palette, "palette-distribution should exist");
+    assert.ok(palette!.claim.includes("Black"), `claim: ${palette!.claim}`);
+    assert.ok(palette!.claim.toLowerCase().includes("favourite"), `palette claim should mention 'favourite': ${palette!.claim}`);
   });
 
   it("matches grey, navy, green, pink, yellow, orange quiz IDs to their Closet display values", () => {
+    // When all 5 items share the same colour, that colour is the palette leader AND a favourite.
+    // The palette-distribution claim absorbs the favourite fact; no separate favourite insight fires.
     const colourPairs: [string, string][] = [
       ["grey", "Grey"], ["navy", "Navy"], ["green", "Green"],
       ["pink", "Pink"], ["yellow", "Yellow"], ["orange", "Orange"],
@@ -277,9 +284,12 @@ describe("CI.11 — colour normalization", () => {
       const items = makeItems(5, { primaryColor: displayValue });
       const profile: ClosetInsightProfile = { ...emptyProfile, favoriteColors: [quizId] };
       const result = computeClosetInsights(items, profile);
-      const fav = result.insights.find((i) => i.id === `favourite-colour-${quizId}`);
-      assert.ok(fav, `should emit insight for ${quizId}`);
-      assert.ok(fav!.claim.includes(displayValue), `claim should mention ${displayValue}: ${fav!.claim}`);
+      // No separate favourite insight — merged into palette-distribution
+      assert.equal(result.insights.find((i) => i.id === `favourite-colour-${quizId}`), undefined,
+        `${quizId} is palette leader — separate favourite insight must be suppressed`);
+      const palette = result.insights.find((i) => i.type === "palette-distribution");
+      assert.ok(palette, `palette-distribution should exist for ${quizId}`);
+      assert.ok(palette!.claim.includes(displayValue), `claim should mention ${displayValue}: ${palette!.claim}`);
     }
   });
 
@@ -781,9 +791,10 @@ describe("CI.32 — favourite colour 1 of 5: factual, singular grammar", () => {
   });
 });
 
-// ── CI.33 — favourite colour 3/5: "well represented", plural grammar ──────────
-describe("CI.33 — favourite colour 3 of 5: 'well represented', plural grammar", () => {
-  it("says 'well represented' when count=3 and uses plural 'are'", () => {
+// ── CI.33 — favourite colour 3/5 dominant: merged into palette claim ──────────
+describe("CI.33 — favourite colour 3 of 5 dominant: merged into palette-distribution", () => {
+  it("merges into palette claim when Grey is dominant AND a favourite — no separate insight", () => {
+    // Grey = 3/5 = 60% ≥ 40%, count ≥ 2 → palette leader = Grey. Grey is also a favourite.
     const items = [
       makeItem({ id: "1", primaryColor: "Grey" }),
       makeItem({ id: "2", primaryColor: "Grey" }),
@@ -793,12 +804,14 @@ describe("CI.33 — favourite colour 3 of 5: 'well represented', plural grammar"
     ];
     const profile: ClosetInsightProfile = { ...emptyProfile, favoriteColors: ["grey"] };
     const result = computeClosetInsights(items, profile);
-    const fav = result.insights.find((i) => i.id === "favourite-colour-grey");
-    assert.ok(fav, "should emit favourite-colour-grey insight");
-    const claim = fav!.claim;
-    assert.ok(claim.includes("well represented"), `should say 'well represented' for 3 of 5: ${claim}`);
-    assert.ok(claim.includes("are grey"), `should use plural 'are': ${claim}`);
-    assert.ok(claim.includes("3"), `should mention count 3: ${claim}`);
+    // No separate favourite-colour-grey — merged into palette-distribution
+    assert.equal(result.insights.find((i) => i.id === "favourite-colour-grey"), undefined,
+      "should NOT emit separate favourite-colour-grey when Grey is palette leader");
+    const palette = result.insights.find((i) => i.type === "palette-distribution");
+    assert.ok(palette, "palette-distribution should exist");
+    assert.ok(palette!.claim.includes("Grey"), `claim: ${palette!.claim}`);
+    assert.ok(palette!.claim.toLowerCase().includes("favourite"), `palette claim should mention 'favourite': ${palette!.claim}`);
+    assert.ok(palette!.claim.includes("3"), `claim should mention count 3: ${palette!.claim}`);
   });
 
   it("does not say 'well represented' when count=2 and ratio < 0.3", () => {
@@ -818,6 +831,118 @@ describe("CI.33 — favourite colour 3 of 5: 'well represented', plural grammar"
     const fav = result.insights.find((i) => i.id === "favourite-colour-grey");
     assert.ok(fav, "should emit favourite-colour-grey insight");
     assert.ok(!fav!.claim.includes("well represented"), `should not say 'well represented' for 2 of 8: ${fav!.claim}`);
+  });
+});
+
+// ── CI.35 — unrecognized season values → no season insight ────────────────────
+describe("CI.35 — unrecognized season values produce no season insight", () => {
+  it("does not emit season-coverage when items have only unrecognized season strings", () => {
+    // Items have a non-null season array with an unrecognized value.
+    // This should NOT count as season-tagged.
+    const items = Array.from({ length: 8 }, (_, i) =>
+      makeItem({ id: `item-${i + 1}`, seasons: [""] as string[] }),
+    );
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.equal(result.dataQuality.seasonTaggedItems, 0,
+      "empty-string season values must not be counted as tagged");
+    assert.equal(result.dataQuality.seasonEligible, false);
+    assert.equal(result.insights.find((i) => i.type === "season-coverage"), undefined,
+      "should not emit season insight");
+  });
+
+  it("does not emit season-coverage when items have null seasons", () => {
+    const items = makeItems(8, { seasons: null });
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.equal(result.dataQuality.seasonTaggedItems, 0);
+    assert.equal(result.insights.find((i) => i.type === "season-coverage"), undefined);
+  });
+});
+
+// ── CI.36 — unrecognized occasion values → no occasion insight ────────────────
+describe("CI.36 — unrecognized occasion values produce no occasion insight", () => {
+  it("does not emit occasion-coverage when items have only unrecognized occasion strings", () => {
+    const items = Array.from({ length: 8 }, (_, i) =>
+      makeItem({ id: `item-${i + 1}`, occasions: [""] as string[] }),
+    );
+    const profile: ClosetInsightProfile = { ...emptyProfile, lifestyle: ["events"] };
+    const result = computeClosetInsights(items, profile);
+    assert.equal(result.dataQuality.occasionTaggedItems, 0,
+      "empty-string occasion values must not be counted as tagged");
+    assert.equal(result.dataQuality.occasionEligible, false);
+    assert.equal(result.insights.find((i) => i.type === "occasion-coverage"), undefined,
+      "should not emit occasion insight");
+  });
+
+  it("counts only items with recognized occasion values", () => {
+    const items = [
+      makeItem({ id: "1", occasions: ["Work"] }),       // recognized
+      makeItem({ id: "2", occasions: [""] }),            // unrecognized — must not count
+      makeItem({ id: "3", occasions: ["Casual"] }),      // recognized
+      makeItem({ id: "4", occasions: null }),             // null — must not count
+      makeItem({ id: "5", occasions: ["unknown-val"] }), // unrecognized — must not count
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.equal(result.dataQuality.occasionTaggedItems, 2,
+      "only 2 items have recognized occasion values");
+  });
+});
+
+// ── CI.37 — dominant colour + favourite: merged, no duplicate ─────────────────
+describe("CI.37 — dominant colour that is also a favourite is merged into palette claim", () => {
+  it("palette claim mentions 'favourite' when dominant colour is a favourite", () => {
+    const items = [
+      makeItem({ id: "1", primaryColor: "Navy" }),
+      makeItem({ id: "2", primaryColor: "Navy" }),
+      makeItem({ id: "3", primaryColor: "Navy" }),
+      makeItem({ id: "4", primaryColor: "Black" }),
+      makeItem({ id: "5", primaryColor: "Black" }),
+    ];
+    const profile: ClosetInsightProfile = { ...emptyProfile, favoriteColors: ["navy"] };
+    const result = computeClosetInsights(items, profile);
+    const palette = result.insights.find((i) => i.type === "palette-distribution");
+    assert.ok(palette, "palette-distribution should exist");
+    assert.ok(palette!.claim.toLowerCase().includes("favourite"),
+      `palette claim should mention 'favourite': ${palette!.claim}`);
+    assert.equal(result.insights.find((i) => i.id === "favourite-colour-navy"), undefined,
+      "should not emit separate favourite-colour-navy — already in palette");
+  });
+
+  it("non-dominant favourite still gets its own insight", () => {
+    // Navy = 3/5 dominant + favourite. Black is NOT a favourite.
+    // Add Green as a non-dominant favourite → Green gets its own insight.
+    const items = [
+      makeItem({ id: "1", primaryColor: "Navy" }),
+      makeItem({ id: "2", primaryColor: "Navy" }),
+      makeItem({ id: "3", primaryColor: "Navy" }),
+      makeItem({ id: "4", primaryColor: "Black" }),
+      makeItem({ id: "5", primaryColor: "Black" }),
+    ];
+    const profile: ClosetInsightProfile = { ...emptyProfile, favoriteColors: ["navy", "green"] };
+    const result = computeClosetInsights(items, profile);
+    // Navy merged into palette — no separate insight
+    assert.equal(result.insights.find((i) => i.id === "favourite-colour-navy"), undefined,
+      "navy merged into palette — no separate insight");
+    // Green has 0 items → separate absence insight
+    const green = result.insights.find((i) => i.id === "favourite-colour-green");
+    assert.ok(green, "should emit separate favourite-colour-green");
+    assert.ok(green!.claim.includes("isn't currently represented"), `claim: ${green!.claim}`);
+  });
+
+  it("palette passportEffects records the merged favouriteColors effect", () => {
+    const items = [
+      makeItem({ id: "1", primaryColor: "Black" }),
+      makeItem({ id: "2", primaryColor: "Black" }),
+      makeItem({ id: "3", primaryColor: "Black" }),
+      makeItem({ id: "4", primaryColor: "Grey" }),
+      makeItem({ id: "5", primaryColor: "Grey" }),
+    ];
+    const profile: ClosetInsightProfile = { ...emptyProfile, favoriteColors: ["black"] };
+    const result = computeClosetInsights(items, profile);
+    const palette = result.insights.find((i) => i.type === "palette-distribution");
+    assert.ok(palette, "palette-distribution should exist");
+    const effect = palette!.passportEffects.find((e) => e.field === "favoriteColors" && e.matchedId === "black");
+    assert.ok(effect, "palette-distribution should carry the favoriteColors passport effect");
+    assert.equal(effect!.effect, "framing");
   });
 });
 

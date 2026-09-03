@@ -107,6 +107,17 @@ const LIFESTYLE_TOKEN_TO_CLOSET_OCCASION: Readonly<Record<string, readonly strin
 
 const CANONICAL_SEASONS = ["Spring", "Summer", "Fall", "Winter"] as const;
 
+// Recognized occasion/season values from the Closet data model.
+// Items must have at least one recognized value to count as tagged.
+// This prevents empty strings, unrecognized legacy values, or accidental
+// non-null arrays from being counted as "recorded information".
+const VALID_CLOSET_OCCASIONS = new Set([
+  "Casual", "Date", "Dinner", "Formal", "Party", "Travel", "Weekend", "Work",
+]);
+const VALID_CLOSET_SEASONS = new Set([
+  "Spring", "Summer", "Fall", "Winter", "All Season",
+]);
+
 // ── Engine ────────────────────────────────────────────────────────────────────
 
 export function computeClosetInsights(
@@ -118,10 +129,14 @@ export function computeClosetInsights(
   const colouredItems = items.filter((i) => i.primaryColor !== null).length;
   const colourCoverageRatio = totalItems > 0 ? colouredItems / totalItems : 0;
 
-  const occasionTaggedItems = items.filter((i) => (i.occasions?.length ?? 0) > 0).length;
+  const occasionTaggedItems = items.filter(
+    (i) => (i.occasions ?? []).some((o) => VALID_CLOSET_OCCASIONS.has(o)),
+  ).length;
   const occasionCoverageRatio = totalItems > 0 ? occasionTaggedItems / totalItems : 0;
 
-  const seasonTaggedItems = items.filter((i) => (i.seasons?.length ?? 0) > 0).length;
+  const seasonTaggedItems = items.filter(
+    (i) => (i.seasons ?? []).some((s) => VALID_CLOSET_SEASONS.has(s)),
+  ).length;
   const seasonCoverageRatio = totalItems > 0 ? seasonTaggedItems / totalItems : 0;
 
   const compositionEligible = totalItems >= 5;
@@ -276,10 +291,33 @@ export function computeClosetInsights(
     const topCount = qualifying[0]?.[1] ?? 0;
     const topTied = qualifying.filter(([, count]) => count === topCount);
 
+    // Identify if the clear palette leader is also a favourite colour — when
+    // true we merge both facts into the palette claim and skip the separate
+    // favourite-colour-comparison insight to avoid duplicating the same count.
+    let paletteLeaderColour: string | null = null;
+    let paletteLeaderFavId: string | null = null;
+    if (topTied.length === 1) {
+      const candidate = topTied[0][0];
+      for (const favId of (profile?.favoriteColors ?? [])) {
+        if (PASSPORT_COLOUR_TO_CLOSET[favId] === candidate) {
+          paletteLeaderColour = candidate;
+          paletteLeaderFavId = favId;
+          break;
+        }
+      }
+      if (paletteLeaderColour === null) paletteLeaderColour = candidate;
+    }
+
     let paletteClaim: string;
+    const palettePassportEffects: PassportEffect[] = [];
     if (topTied.length === 1) {
       const [dominantColour, dominantCount] = topTied[0];
-      paletteClaim = `${dominantColour} is your most represented colour — ${dominantCount} of your ${colouredItems} recorded pieces are ${dominantColour.toLowerCase()}.`;
+      if (paletteLeaderFavId !== null) {
+        paletteClaim = `${dominantColour} is your most represented colour and one of your favourites — ${dominantCount} of your ${colouredItems} recorded pieces are ${dominantColour.toLowerCase()}.`;
+        palettePassportEffects.push({ field: "favoriteColors", matchedId: paletteLeaderFavId, effect: "framing" });
+      } else {
+        paletteClaim = `${dominantColour} is your most represented colour — ${dominantCount} of your ${colouredItems} recorded pieces are ${dominantColour.toLowerCase()}.`;
+      }
     } else {
       paletteClaim = `Your palette is spread across multiple colours — no single colour dominates among your ${colouredItems} recorded pieces.`;
     }
@@ -294,13 +332,15 @@ export function computeClosetInsights(
           value: `${colouredItems} items with recorded colour across ${colourCounts.size} ${colourCounts.size === 1 ? "colour" : "colours"}`,
         },
       ],
-      passportEffects: [],
+      passportEffects: palettePassportEffects,
     });
 
-    // Favourite colour comparisons (one insight per mappable fav colour)
+    // Favourite colour comparisons — one insight per mappable fav colour.
+    // Skip the colour that was already merged into palette-distribution above.
     for (const favId of (profile?.favoriteColors ?? [])) {
       const closetColour = PASSPORT_COLOUR_TO_CLOSET[favId];
       if (!closetColour) continue;
+      if (closetColour === paletteLeaderColour && paletteLeaderFavId !== null) continue;
 
       const count = colourCounts.get(closetColour) ?? 0;
       const favClaim = buildFavouriteColourClaim(closetColour, count, colouredItems);
