@@ -22,7 +22,8 @@ const occasions = [
   { id: "dinner",          label: "Dinner" },
   { id: "date",            label: "Date" },
   { id: "everyday",        label: "Everyday or casual plans" },
-  { id: "event",           label: "Event or occasion" },
+  { id: "event",           label: "Event / celebration" },
+  { id: "night-out",       label: "Night out / party" },
   { id: "family",          label: "Family gathering" },
   { id: "travel",          label: "Travel day" },
   { id: "active-busy-day", label: "Active / busy day" },
@@ -35,6 +36,7 @@ const occasions = [
 const REV3_OCCASION_MAP: Record<string, string> = {
   "date": "date-night",
   "event": "special-event",
+  "night-out": "girls-night",
   "active-busy-day": "everyday",
   "other": "not-sure",
 };

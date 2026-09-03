@@ -29,8 +29,8 @@ const STATE_OPTIONS: Array<{ id: string; label: string }> = [
   { id: "physically-uncomfortable", label: "Physically uncomfortable" },
   { id: "self-conscious",           label: "Self-conscious" },
   { id: "going-through-change",     label: "I'm going through something" },
-  { id: "want-reset",               label: "I want a reset" },
-  { id: "nothing-in-particular",    label: "Nothing in particular" },
+  { id: "want-reset",               label: "I feel like I need a reset" },
+  { id: "nothing-in-particular",    label: "I feel pretty neutral" },
   { id: "other",                    label: "Other" },
 ];
 

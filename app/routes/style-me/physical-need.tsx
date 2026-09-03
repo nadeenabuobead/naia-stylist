@@ -103,7 +103,7 @@ export default function PhysicalNeedPage() {
 
   return (
     <SmPage step={3}>
-      <p className="sm-step-label">Physical Comfort</p>
+      <p className="sm-step-label">Fit / Comfort</p>
       <h1 className="sm-heading">Any fit or comfort needs right now?</h1>
       <p className="sm-sub">Choose up to {MAX_SELECTIONS}.</p>
 

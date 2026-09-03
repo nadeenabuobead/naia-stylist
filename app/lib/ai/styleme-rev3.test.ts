@@ -617,6 +617,13 @@ describe("R3.12 — occasion.tsx: Rev 3 occasion IDs and normalization", () => {
     );
   });
 
+  it('"night-out" maps to "girls-night" in normalization', () => {
+    assert.ok(
+      occasionSrc.includes('"night-out": "girls-night"') || occasionSrc.includes("'night-out': 'girls-night'"),
+      'REV3_OCCASION_MAP must map night-out → girls-night',
+    );
+  });
+
   it('"active-busy-day" maps to "everyday" in normalization', () => {
     assert.ok(
       occasionSrc.includes('"active-busy-day": "everyday"') || occasionSrc.includes("'active-busy-day': 'everyday'"),
@@ -1254,8 +1261,8 @@ describe("R3.21 — State UI: exact 10 approved IDs and labels", () => {
     "physically-uncomfortable":   "Physically uncomfortable",
     "self-conscious":             "Self-conscious",
     "going-through-change":       "I'm going through something",
-    "want-reset":                 "I want a reset",
-    "nothing-in-particular":      "Nothing in particular",
+    "want-reset":                 "I feel like I need a reset",
+    "nothing-in-particular":      "I feel pretty neutral",
     "other":                      "Other",
   };
 
@@ -1396,7 +1403,7 @@ describe("R3.24 — Occasion UI: exactly 9 approved Rev 3 customer-facing IDs", 
   const occasionSrc = readFileSync(join(ROOT, "app/routes/style-me/occasion.tsx"), "utf8");
 
   const APPROVED_OCCASION_IDS = [
-    "work", "dinner", "date", "everyday", "event", "family", "travel", "active-busy-day",
+    "work", "dinner", "date", "everyday", "event", "night-out", "family", "travel", "active-busy-day",
   ];
 
   for (const id of APPROVED_OCCASION_IDS) {
