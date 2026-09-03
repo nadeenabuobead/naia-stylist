@@ -408,6 +408,27 @@ export default function OnboardingComplete() {
     }
   }, [feedbackPending]);
 
+  const saveAboutYou = useCallback(async () => {
+    if (aboutYouStatus === "saving" || aboutYouStatus === "saved") return;
+    setAboutYouStatus("saving");
+    const patch: Record<string, string> = {};
+    if (aboutYouAge) patch.ageRange = aboutYouAge;
+    if (aboutYouGender) patch.gender = aboutYouGender;
+    if (aboutYouGender === "another-gender" && aboutYouGenderNote.trim()) {
+      patch.genderSelfDescription = aboutYouGenderNote.trim();
+    }
+    try {
+      await fetch("/api/save-about-you", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      setAboutYouStatus("saved");
+    } catch {
+      setAboutYouStatus("idle");
+    }
+  }, [aboutYouStatus, aboutYouAge, aboutYouGender, aboutYouGenderNote]);
+
   if (!displayAnswers) return <div style={{ minHeight: "100vh", background: "#f4f4f1" }} />;
 
   const a = displayAnswers;
@@ -434,27 +455,6 @@ export default function OnboardingComplete() {
   const avoidColors     = a["avoid-colors"]           ?? [];
   const support         = a["style-support"]          ?? [];
   const notes           = a["final-notes"];
-
-  const saveAboutYou = useCallback(async () => {
-    if (aboutYouStatus === "saving" || aboutYouStatus === "saved") return;
-    setAboutYouStatus("saving");
-    const patch: Record<string, string> = {};
-    if (aboutYouAge) patch.ageRange = aboutYouAge;
-    if (aboutYouGender) patch.gender = aboutYouGender;
-    if (aboutYouGender === "another-gender" && aboutYouGenderNote.trim()) {
-      patch.genderSelfDescription = aboutYouGenderNote.trim();
-    }
-    try {
-      await fetch("/api/save-about-you", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
-      });
-      setAboutYouStatus("saved");
-    } catch {
-      setAboutYouStatus("idle");
-    }
-  }, [aboutYouStatus, aboutYouAge, aboutYouGender, aboutYouGenderNote]);
 
   const primaryPersonality = personalities[0];
   const identity = primaryPersonality

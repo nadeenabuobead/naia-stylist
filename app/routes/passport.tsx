@@ -1466,7 +1466,16 @@ export default function PassportPage() {
       return;
     }
 
-    const patch = computeSectionPatch(def, flowEdits, savedAnswers);
+    let patch = computeSectionPatch(def, flowEdits, savedAnswers);
+    if (sectionId === "about-you") {
+      const genderDraft = (flowEdits as Record<string, unknown>)["gender"] as string | undefined;
+      if (genderDraft !== "another-gender") {
+        const savedDesc = (savedAnswers as Record<string, unknown>)["gender-self-description"] as string | undefined;
+        if (savedDesc?.trim()) {
+          patch = { ...(patch ?? {}), genderSelfDescription: null };
+        }
+      }
+    }
 
     if (patch === null) {
       if (intent === "exit") {
@@ -2476,6 +2485,10 @@ export default function PassportPage() {
       {currentId !== "sizes" && (() => {
         const effectiveSubFields = getEffectiveDef(currentDef, isRev6).subFields;
         return effectiveSubFields.map(sf => {
+          if (sf.draftKey === "gender-self-description" &&
+              ((flowEdits as Record<string, unknown>)["gender"] as string | undefined) !== "another-gender") {
+            return null;
+          }
           const capHint = (sf.kind === "array" || sf.kind === "color") && MAX_SELECTIONS[sf.questionId]
             ? (QUESTION_BY_ID[sf.questionId]?.subtitle ?? `Choose up to ${MAX_SELECTIONS[sf.questionId]}`)
             : null;
