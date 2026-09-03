@@ -11,7 +11,6 @@
 // and calls Claude — it performs no auth or ownership checks.
 
 import { analyzeImage } from "./claude.server.js";
-import { buildSignedDeliveryUrl, getCloudinaryConfig } from "../cloudinary-admin.server";
 import {
   GARMENT_PATTERN_VALUES,
   GARMENT_OCCASION_VALUES,
@@ -100,20 +99,19 @@ function normalizeStructureHint(raw: unknown): string | null {
   return VALID_STRUCTURE_HINTS.has(lower) ? lower : null;
 }
 
+// downloadUrl must be an authenticated server-side download URL (buildPrivateDownloadUrl),
+// NOT a CDN URL (res.cloudinary.com/…/private/…). Private Cloudinary assets are not
+// accessible via CDN delivery — Claude's API servers cannot fetch them that way.
+// The endpoint builds downloadUrl at step 5 and passes it through L2, L3, and here.
 export async function previewAnalyzeGarment(
-  publicId: string,
+  downloadUrl: string,
 ): Promise<GarmentPreview | null> {
-  const cfg = getCloudinaryConfig();
-  if (!cfg) return null;
-
-  const imageUrl = buildSignedDeliveryUrl(cfg, publicId, null);
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PREVIEW_TIMEOUT_MS);
 
   try {
     const text = await analyzeImage({
-      imageUrl,
+      imageUrl: downloadUrl,
       prompt: buildPreviewPrompt(),
       model: PREVIEW_MODEL,
       signal: controller.signal,

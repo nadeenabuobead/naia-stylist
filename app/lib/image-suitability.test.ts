@@ -14,14 +14,23 @@
 //   T9  VTO body RETRY_IMAGE with valid subCode → RETRY_IMAGE
 //   T10 VTO body: API throws → RETRY_IMAGE/assessment_failed (fail-closed)
 //   T11 VTO body: unknown subCode falls back to assessment_failed
+//   T12 prompt taxonomy: TOPS taxonomy includes corset, bustier, bodysuit, waistcoat
+//   T13 prompt taxonomy: only included when category is declared
+//   T14 prompt taxonomy: correct taxonomy included per category
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   screenGarmentSuitability,
   screenVtoBodyPhoto,
 } from "./image-suitability.server.js";
 import type { AnalyzeForSuitabilityFn } from "./image-suitability.server.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const src = readFileSync(join(__dirname, "image-suitability.server.ts"), "utf8");
 
 const FAKE_URL = "https://res.cloudinary.com/example/private/v1/test.jpg";
 
@@ -178,5 +187,55 @@ describe("T11: VTO body unknown subCode falls back to assessment_failed", () => 
     const result = await screenVtoBodyPhoto(FAKE_URL, makeAnalyzer(vtoJson("RETRY_IMAGE", "invented_code")));
     assert.equal(result.status, "RETRY_IMAGE");
     assert.equal((result as { status: "RETRY_IMAGE"; subCode: string }).subCode, "assessment_failed");
+  });
+});
+
+// ── T12–T14: Category taxonomy regression tests ───────────────────────────────
+// These tests guard against the false-positive where a corset/bustier is rejected
+// as TOPS because the suitability prompt did not know about TOPS fashion subtypes.
+
+describe("T12: TOPS taxonomy prompt includes fashion subtypes", () => {
+  it("includes corset in TOPS taxonomy", () => {
+    assert.ok(src.includes("corsets"), "TOPS taxonomy must include corsets");
+  });
+  it("includes bustier in TOPS taxonomy", () => {
+    assert.ok(src.includes("bustiers"), "TOPS taxonomy must include bustiers");
+  });
+  it("includes bodysuit in TOPS taxonomy", () => {
+    assert.ok(src.includes("bodysuits"), "TOPS taxonomy must include bodysuits");
+  });
+  it("includes waistcoat/vest in TOPS taxonomy", () => {
+    assert.ok(src.includes("waistcoats") && src.includes("vests"), "TOPS taxonomy must include waistcoats and vests");
+  });
+  it("includes overshirt in TOPS taxonomy", () => {
+    assert.ok(src.includes("overshirts"), "TOPS taxonomy must include overshirts");
+  });
+});
+
+describe("T13: taxonomy note only included when category is declared", () => {
+  it("taxonomyLine is empty string when no category declared", () => {
+    // The source must guard taxonomyLine on declaredCategory being truthy.
+    const taxIdx = src.indexOf("taxonomyLine");
+    assert.ok(taxIdx !== -1, "must define taxonomyLine");
+    const taxDef = src.slice(taxIdx, taxIdx + 120);
+    assert.ok(
+      taxDef.includes("declaredCategory") && taxDef.includes("CATEGORY_TAXONOMY"),
+      "taxonomyLine must depend on both declaredCategory and CATEGORY_TAXONOMY",
+    );
+  });
+});
+
+describe("T14: taxonomy covers other falsely-rejected subtypes", () => {
+  it("OUTERWEAR includes blazers", () => {
+    assert.ok(src.includes("blazers"), "OUTERWEAR taxonomy must include blazers");
+  });
+  it("BAGS includes clutches and crossbody bags", () => {
+    assert.ok(src.includes("clutches") && src.includes("crossbody bags"), "BAGS taxonomy must include clutches and crossbody bags");
+  });
+  it("SHOES taxonomy covers all footwear types", () => {
+    const shoesIdx = src.indexOf("SHOES:");
+    assert.ok(shoesIdx !== -1, "SHOES key must exist in taxonomy");
+    const shoesEntry = src.slice(shoesIdx, shoesIdx + 100);
+    assert.ok(shoesEntry.includes("loafers") || shoesEntry.includes("sandals"), "SHOES must list common subtypes");
   });
 });

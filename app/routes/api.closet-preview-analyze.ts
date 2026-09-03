@@ -134,8 +134,9 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   // 8. Preview analysis — non-blocking timeout internal to previewAnalyzeGarment.
-  //    Returns null on failure (timeout, parse error, Claude error).
-  const preview = await previewAnalyzeGarment(publicId);
+  //    Pass the already-verified downloadUrl so Claude can fetch the private asset
+  //    via the authenticated download API (CDN delivery does not serve private assets).
+  const preview = await previewAnalyzeGarment(downloadUrl);
   if (!preview) {
     return data({ error: "Analysis failed" }, { status: 500 });
   }

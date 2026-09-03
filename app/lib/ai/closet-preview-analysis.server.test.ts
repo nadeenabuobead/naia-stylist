@@ -22,17 +22,27 @@ describe("previewAnalyzeGarment: module contracts", () => {
     assert.ok(src.includes("export async function previewAnalyzeGarment"), "must export previewAnalyzeGarment");
   });
 
-  it("uses buildSignedDeliveryUrl to build the image URL", () => {
-    assert.ok(src.includes("buildSignedDeliveryUrl"), "must use buildSignedDeliveryUrl for the signed image URL");
+  it("accepts downloadUrl parameter (not publicId) — private assets need authenticated API URL, not CDN URL", () => {
+    // previewAnalyzeGarment must receive the pre-built authenticated download URL from the
+    // endpoint. It must NOT build its own CDN URL — private Cloudinary assets cannot be
+    // fetched by Claude via res.cloudinary.com/…/private/… (CDN does not serve private type).
+    assert.ok(
+      src.includes("downloadUrl: string"),
+      "function signature must accept downloadUrl: string, not publicId",
+    );
+    assert.ok(
+      !src.includes("buildSignedDeliveryUrl"),
+      "must NOT use buildSignedDeliveryUrl — CDN URLs cannot serve private assets",
+    );
   });
 
-  it("calls getCloudinaryConfig and returns null if not configured", () => {
-    // The import is the first occurrence; the actual call is later in the function body.
-    const callIdx = src.indexOf("cfg = getCloudinaryConfig()");
-    assert.ok(callIdx !== -1, "must call getCloudinaryConfig() and store the result");
-    const retNullIdx = src.indexOf("return null", callIdx);
-    assert.ok(retNullIdx !== -1, "must return null when Cloudinary is not configured");
-    assert.ok(retNullIdx < callIdx + 100, "null-return for missing config must immediately follow the config check");
+  it("does not call getCloudinaryConfig — URL is built by the caller", () => {
+    // The endpoint builds downloadUrl at step 5 and passes it through; this module
+    // no longer needs Cloudinary config.
+    assert.ok(
+      !src.includes("getCloudinaryConfig"),
+      "must NOT call getCloudinaryConfig — the caller owns URL construction",
+    );
   });
 
   it("uses a timeout to bound analysis duration", () => {

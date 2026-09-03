@@ -75,12 +75,33 @@ const VALID_VTO_SUB_CODES = new Set<string>([
 
 // ── Prompts ───────────────────────────────────────────────────────────────────
 
+// Fashion taxonomy used for category-mismatch evaluation.
+// Keeps the suitability check calibrated to fashion conventions rather than
+// literal interpretations that would reject valid subtypes (e.g. corset → TOPS).
+const CATEGORY_TAXONOMY: Record<string, string> = {
+  TOPS: "shirts, blouses, t-shirts, sweaters, knitwear, tank tops, camisoles, tube tops, corsets, bustiers, bodysuits, waistcoats, vests, overshirts, crop tops",
+  BOTTOMS: "trousers, jeans, shorts, skirts, leggings, culottes, wide-leg pants",
+  DRESSES: "dresses, gowns, jumpsuits, playsuits",
+  OUTERWEAR: "coats, blazers, jackets, bombers, parkas, trench coats",
+  SHOES: "all footwear including heels, boots, sneakers, sandals, loafers, mules",
+  BAGS: "handbags, totes, backpacks, clutches, crossbody bags, belt bags",
+  ACCESSORIES: "belts, scarves, hats, gloves, hair accessories, sunglasses",
+  JEWELRY: "necklaces, earrings, bracelets, rings, watches, brooches",
+  ACTIVEWEAR: "sports bras, gym leggings, joggers, gym tops, athletic shorts",
+  SWIMWEAR: "swimsuits, bikinis, swim trunks, cover-ups",
+  LOUNGEWEAR: "pyjamas, robes, lounge sets, slippers",
+};
+
 function buildGarmentPrompt(declaredCategory?: string): string {
   const categoryLine = declaredCategory
     ? `\nThe user indicated this item is a: ${declaredCategory}.`
     : "";
+  const taxonomyLine =
+    declaredCategory && CATEGORY_TAXONOMY[declaredCategory]
+      ? `\nFor reference, ${declaredCategory} includes: ${CATEGORY_TAXONOMY[declaredCategory]}.`
+      : "";
   return `\
-You are a fashion image quality assessor for a personal styling app.${categoryLine}
+You are a fashion image quality assessor for a personal styling app.${categoryLine}${taxonomyLine}
 
 A garment may be presented in any of these valid contexts: isolated on a plain or styled background, worn by a person, displayed on a mannequin, or photographed as a flat-lay. All presentation styles are acceptable — evaluate the garment itself, not how it is presented.
 

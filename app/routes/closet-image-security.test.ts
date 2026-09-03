@@ -27,6 +27,7 @@
 //   T22 preview endpoint: Layer 2 moderation runs before analysis
 //   T23 preview endpoint: Layer 3 suitability runs before analysis (L2→L3→analysis order)
 //   T24 preview endpoint: requiresReupload:true on asset-deleting failures; NEEDS_CLARIFICATION preserves asset
+//   T25 preview endpoint: passes downloadUrl (not publicId) to previewAnalyzeGarment (CDN cannot serve private assets)
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -375,7 +376,7 @@ describe("T21: preview endpoint does not persist data; deletes assets only on sa
       preview.includes("deleteCloudinaryAsset"),
       "preview endpoint must delete assets on safety failures (SAFETY_REJECT, RETRY_IMAGE, MODERATION_UNAVAILABLE)",
     );
-    // On the success path, previewAnalyzeGarment(publicId) is called — use the call form, not the import.
+    // On the success path, previewAnalyzeGarment(downloadUrl) is called — use the call form, not the import.
     const analysisCallIdx = preview.indexOf("previewAnalyzeGarment(");
     const lastDeleteIdx   = preview.lastIndexOf("deleteCloudinaryAsset");
     assert.ok(
@@ -441,5 +442,28 @@ describe("T24: preview endpoint returns requiresReupload on asset-deleting failu
     const block = preview.slice(clarIdx, clarIdx + 300);
     assert.ok(!block.includes("deleteCloudinaryAsset"), "NEEDS_CLARIFICATION must not delete the asset");
     assert.ok(!block.includes("requiresReupload: true"), "NEEDS_CLARIFICATION must not set requiresReupload:true (asset preserved for manual submit)");
+  });
+});
+
+describe("T25: preview endpoint passes downloadUrl (not publicId) to previewAnalyzeGarment", () => {
+  it("previewAnalyzeGarment receives downloadUrl — private assets cannot be fetched via CDN URL", () => {
+    // Root cause of AI read failure: buildSignedDeliveryUrl generates a CDN URL
+    // (res.cloudinary.com/…/private/…) that Claude's API cannot fetch for private assets.
+    // The fix: reuse the authenticated downloadUrl already built at step 5.
+    assert.ok(
+      preview.includes("previewAnalyzeGarment(downloadUrl)"),
+      "endpoint must call previewAnalyzeGarment(downloadUrl), not previewAnalyzeGarment(publicId)",
+    );
+  });
+
+  it("previewAnalyzeGarment module does NOT use buildSignedDeliveryUrl", () => {
+    const previewSrc = readFileSync(
+      join(__dirname, "../lib/ai/closet-preview-analysis.server.ts"),
+      "utf8",
+    );
+    assert.ok(
+      !previewSrc.includes("buildSignedDeliveryUrl"),
+      "closet-preview-analysis.server.ts must not use buildSignedDeliveryUrl — CDN does not serve private assets",
+    );
   });
 });
