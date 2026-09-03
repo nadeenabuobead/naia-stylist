@@ -1,4 +1,11 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
+import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLocation } from "react-router";
+import { useEffect } from "react";
+
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+  return null;
+}
 
 export function meta() {
   return [{ title: "nAia" }];
@@ -51,6 +58,7 @@ export default function App() {
       </head>
       <body>
         <script dangerouslySetInnerHTML={{ __html: `(function(){document.cookie='naia_customer_data=; path=/; max-age=0; SameSite=Lax';try{sessionStorage.removeItem('naia_token');}catch(e){}if(window.self!==window.top){document.addEventListener('click',function(e){var a=e.target.closest('a');if(a&&a.href&&a.href.startsWith(window.location.origin)){e.preventDefault();window.location.href=a.href;}});}})();` }} />
+        <ScrollToTop />
         <Outlet />
         <ScrollRestoration />
         <Scripts />

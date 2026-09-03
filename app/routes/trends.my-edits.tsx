@@ -312,11 +312,8 @@ export default function MyTrendEdits() {
       <div className="tme-page">
         {/* Hero */}
         <div className="tme-hero">
-          <div className="tme-hero-eyebrow">personal edit</div>
-          <h1 className="tme-hero-title">
-            my trend <em>edits.</em>
-          </h1>
-          <p className="tme-hero-sub">
+          <h1 className="sp-shell-title">MY TREND <span className="sp-shell-accent">edits.</span></h1>
+          <p className="sp-shell-desc">
             Each Trend Report, read against your Style Passport and Closet — showing what is relevant to you, what to skip, and how to wear it.
           </p>
         </div>
