@@ -132,6 +132,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     primaryColor: item.primaryColor,
     occasions: item.occasions.length > 0 ? item.occasions : null,
     seasons: item.seasons.length > 0 ? item.seasons : null,
+    garmentRelationships: item.garmentRelationships,
+    silhouette: item.silhouette,
+    fitProfile: item.fitProfile,
+    formality: item.formality,
+    stylePersonality: item.stylePersonality,
+    pattern: item.pattern,
   }));
   const insightProfile: ClosetInsightProfile | null = customer.onboardingProfile
     ? {
@@ -144,6 +150,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         desiredImpression: customer.onboardingProfile.desiredImpression,
         desiredFeelings: customer.onboardingProfile.desiredFeelings,
         becoming: customer.onboardingProfile.becoming,
+        passportSilhouette: customer.onboardingProfile.silhouette,
+        passportStructure: customer.onboardingProfile.structure ?? null,
+        passportFitPreferences: customer.onboardingProfile.fitPreferences,
       }
     : null;
   const closetInsights = computeClosetInsights(insightItems, insightProfile);

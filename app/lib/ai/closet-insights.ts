@@ -1,5 +1,5 @@
 // app/lib/ai/closet-insights.ts
-// V2-A4 — deterministic, on-demand Closet Insights engine.
+// V2-A4 + V1 relationship/formality — deterministic, on-demand Closet Insights engine.
 // Pure function: no DB, no LLM, no side effects. Takes a snapshot of closet
 // items and a Passport profile, returns structured claims backed by Closet evidence.
 
@@ -13,25 +13,38 @@ export interface ClosetItemSnapshot {
   primaryColor: string | null;
   occasions: string[] | null;
   seasons: string[] | null;
+  // V1 relationship + AI fields
+  garmentRelationships: string[];
+  silhouette: string | null;
+  fitProfile: string | null;
+  formality: string | null;
+  stylePersonality: string | null;
+  pattern: string | null;
 }
 
 // All fields are consumed directly from Prisma's OnboardingProfile.
-// Fields that V2-A4 does not act on (stylePersonalities, desiredImpression,
-// desiredFeelings, becoming) are carried as forward-compatibility stubs.
 export interface ClosetInsightProfile {
   lifestyle: string[];
   styleStruggles: string[];
   styleSupport: string[];
   favoriteColors: string[];
   avoidColors: string[];
-  // Forward-compatible only — produce no V2-A4 Closet claims
+  // Forward-compatible — not yet actioned in Closet claims
   stylePersonalities: string[];
   desiredImpression: string[];
   desiredFeelings: string[];
   becoming: string[];
+  // Passport body/silhouette preferences — forward-compatible stubs for V1
+  passportSilhouette: string[];
+  passportStructure: string | null;
+  passportFitPreferences: string[];
 }
 
 export type InsightType =
+  | "wear-behaviour"
+  | "friction-signal"
+  | "low-use-signal"
+  | "formality-distribution"
   | "category-concentration"
   | "palette-distribution"
   | "favourite-colour-comparison"
@@ -66,10 +79,16 @@ export interface ClosetDataQuality {
   occasionCoverageRatio: number;
   seasonTaggedItems: number;
   seasonCoverageRatio: number;
+  relationshipTaggedItems: number;
+  relationshipCoverageRatio: number;
+  formalityTaggedItems: number;
+  formalityCoverageRatio: number;
   compositionEligible: boolean;
   paletteEligible: boolean;
   occasionEligible: boolean;
   seasonEligible: boolean;
+  relationshipEligible: boolean;
+  formalityEligible: boolean;
 }
 
 export interface ClosetInsightsResult {
@@ -81,8 +100,6 @@ export interface ClosetInsightsResult {
 
 // Maps Passport favoriteColors/avoidColors quiz option IDs → Closet primaryColor
 // display strings. Only deterministic exact-match mappings are included.
-// Combined IDs (white-cream, beige-brown, red-burgundy), aesthetic IDs (prints,
-// colorful), and IDs without a Closet counterpart are intentionally omitted.
 const PASSPORT_COLOUR_TO_CLOSET: Readonly<Record<string, string>> = {
   "black":  "Black",
   "grey":   "Grey",
@@ -94,8 +111,7 @@ const PASSPORT_COLOUR_TO_CLOSET: Readonly<Record<string, string>> = {
 };
 
 // Feature-local bridge: PROFILE_LIFESTYLE_OCCASION_MAP catalog tokens →
-// Closet item occasion display strings (the OCCASIONS constant in closet._index.tsx).
-// Not a modification of any existing constant; scoped to this module only.
+// Closet item occasion display strings.
 const LIFESTYLE_TOKEN_TO_CLOSET_OCCASION: Readonly<Record<string, readonly string[]>> = {
   "dinner":      ["Dinner", "Party", "Formal"],
   "date-night":  ["Date"],
@@ -107,16 +123,37 @@ const LIFESTYLE_TOKEN_TO_CLOSET_OCCASION: Readonly<Record<string, readonly strin
 
 const CANONICAL_SEASONS = ["Spring", "Summer", "Fall", "Winter"] as const;
 
-// Recognized occasion/season values from the Closet data model.
-// Items must have at least one recognized value to count as tagged.
-// This prevents empty strings, unrecognized legacy values, or accidental
-// non-null arrays from being counted as "recorded information".
 const VALID_CLOSET_OCCASIONS = new Set([
   "Casual", "Date", "Dinner", "Formal", "Party", "Travel", "Weekend", "Work",
 ]);
 const VALID_CLOSET_SEASONS = new Set([
   "Spring", "Summer", "Fall", "Winter", "All Season",
 ]);
+
+// Recognized garment relationship values (mirrors GARMENT_RELATIONSHIP_IDS in first-naia-read.ts)
+const VALID_GARMENT_RELATIONSHIPS = new Set([
+  "favourite", "wear-often", "love-style-struggle", "like",
+  "unsure", "rarely-wear", "regret", "occasion-only",
+]);
+const POSITIVE_RELATIONSHIPS = new Set(["favourite", "wear-often"]);
+const FRICTION_RELATIONSHIPS = new Set(["love-style-struggle", "unsure"]);
+const NEGATIVE_RELATIONSHIPS = new Set(["rarely-wear", "regret"]);
+
+// Priority ordering for curation — higher number = shown first.
+// Max 4 insights are returned per call.
+const INSIGHT_PRIORITY: Readonly<Record<string, number>> = {
+  "wear-behaviour":           10,
+  "friction-signal":           9,
+  "low-use-signal":            8,
+  "occasion-coverage":         7,
+  "formality-distribution":    6,
+  "category-concentration":    4,
+  "palette-distribution":      3,
+  "favourite-colour-comparison": 2,
+  "avoided-colour-mismatch":   2,
+  "season-coverage":           1,
+};
+const MAX_INSIGHTS = 4;
 
 // ── Engine ────────────────────────────────────────────────────────────────────
 
@@ -139,10 +176,20 @@ export function computeClosetInsights(
   ).length;
   const seasonCoverageRatio = totalItems > 0 ? seasonTaggedItems / totalItems : 0;
 
+  const relationshipTaggedItems = items.filter(
+    (i) => (i.garmentRelationships ?? []).some((r) => VALID_GARMENT_RELATIONSHIPS.has(r)),
+  ).length;
+  const relationshipCoverageRatio = totalItems > 0 ? relationshipTaggedItems / totalItems : 0;
+
+  const formalityTaggedItems = items.filter((i) => i.formality !== null).length;
+  const formalityCoverageRatio = totalItems > 0 ? formalityTaggedItems / totalItems : 0;
+
   const compositionEligible = totalItems >= 5;
   const paletteEligible = compositionEligible && colourCoverageRatio >= 0.6;
   const occasionEligible = compositionEligible && occasionCoverageRatio >= 0.6;
   const seasonEligible = compositionEligible && seasonCoverageRatio >= 0.6;
+  const relationshipEligible = compositionEligible && relationshipCoverageRatio >= 0.6;
+  const formalityEligible = compositionEligible && formalityCoverageRatio >= 0.6;
 
   const dataQuality: ClosetDataQuality = {
     totalItems,
@@ -152,10 +199,16 @@ export function computeClosetInsights(
     occasionCoverageRatio,
     seasonTaggedItems,
     seasonCoverageRatio,
+    relationshipTaggedItems,
+    relationshipCoverageRatio,
+    formalityTaggedItems,
+    formalityCoverageRatio,
     compositionEligible,
     paletteEligible,
     occasionEligible,
     seasonEligible,
+    relationshipEligible,
+    formalityEligible,
   };
 
   if (!compositionEligible) {
@@ -164,7 +217,100 @@ export function computeClosetInsights(
 
   const insights: ClosetInsight[] = [];
 
-  // ── 1. Occasion coverage ───────────────────────────────────────────────────
+  // ── 1. Wear behaviour (relationship coverage ≥60%) ────────────────────────
+  if (relationshipEligible) {
+    const taggedItems = items.filter(
+      (i) => (i.garmentRelationships ?? []).some((r) => VALID_GARMENT_RELATIONSHIPS.has(r)),
+    );
+    const positiveItems = taggedItems.filter((i) =>
+      (i.garmentRelationships ?? []).some((r) => POSITIVE_RELATIONSHIPS.has(r)),
+    ).length;
+    const frictionItems = taggedItems.filter((i) =>
+      (i.garmentRelationships ?? []).some((r) => FRICTION_RELATIONSHIPS.has(r)),
+    ).length;
+    const negativeItems = taggedItems.filter((i) =>
+      (i.garmentRelationships ?? []).some((r) => NEGATIVE_RELATIONSHIPS.has(r)),
+    ).length;
+
+    const taggedCount = taggedItems.length;
+    const positiveRatio = positiveItems / taggedCount;
+    const frictionRatio = frictionItems / taggedCount;
+    const negativeRatio = negativeItems / taggedCount;
+
+    let claim: string;
+    if (positiveRatio >= 0.5 && frictionRatio <= 0.2) {
+      const pieceWord = positiveItems === 1 ? "piece" : "pieces";
+      claim = `${positiveItems} of your ${taggedCount} tagged ${pieceWord} are favourites or ones you wear often — a clear core is forming in your Closet.`;
+    } else if (positiveRatio >= 0.5) {
+      claim = `${positiveItems} of your ${taggedCount} tagged pieces are favourites or ones you wear often, alongside ${frictionItems} you're still working out how to style.`;
+    } else if (negativeRatio >= 0.4) {
+      claim = `${negativeItems} of your ${taggedCount} tagged pieces aren't getting much wear — that's a signal worth noticing.`;
+    } else if (frictionRatio > positiveRatio && frictionRatio >= 0.33) {
+      claim = `${frictionItems} of your ${taggedCount} tagged pieces are ones you love but haven't figured out how to style yet — more than your clear favourites right now.`;
+    } else {
+      const parts: string[] = [];
+      if (positiveItems > 0) {
+        parts.push(`${positiveItems} ${positiveItems === 1 ? "piece" : "pieces"} you wear regularly`);
+      }
+      if (frictionItems > 0) parts.push(`${frictionItems} you find harder to style`);
+      if (negativeItems > 0) parts.push(`${negativeItems} that rarely get worn`);
+      claim = parts.length > 0
+        ? `Your tagged pieces are spread — ${parts.join(", ")}.`
+        : `You've tagged ${taggedCount} of your ${totalItems} pieces with how you feel about them.`;
+    }
+
+    insights.push({
+      id: "wear-behaviour",
+      type: "wear-behaviour",
+      claim,
+      evidence: [
+        {
+          field: "garmentRelationships",
+          value: `${taggedCount} of ${totalItems} items tagged; ${positiveItems} positive, ${frictionItems} friction, ${negativeItems} low-use`,
+        },
+      ],
+      passportEffects: [],
+    });
+  }
+
+  // ── 2. Friction signal (≥2 love-style-struggle, no coverage gate) ──────────
+  {
+    const struggleCount = items.filter(
+      (i) => (i.garmentRelationships ?? []).includes("love-style-struggle"),
+    ).length;
+    if (struggleCount >= 2) {
+      const pieceWord = struggleCount === 1 ? "piece" : "pieces";
+      insights.push({
+        id: "friction-signal",
+        type: "friction-signal",
+        claim: `You have ${struggleCount} ${pieceWord} you love but struggle to style. The issue is often how they connect to the rest of your Closet, not whether they belong there.`,
+        evidence: [
+          { field: "garmentRelationships", value: `${struggleCount} items tagged love-style-struggle` },
+        ],
+        passportEffects: [],
+      });
+    }
+  }
+
+  // ── 3. Low-use signal (≥2 rarely-wear/regret items AND ≥8 total) ───────────
+  {
+    const lowUseCount = items.filter(
+      (i) => (i.garmentRelationships ?? []).some((r) => r === "rarely-wear" || r === "regret"),
+    ).length;
+    if (lowUseCount >= 2 && totalItems >= 8) {
+      insights.push({
+        id: "low-use-signal",
+        type: "low-use-signal",
+        claim: `${lowUseCount} of your pieces aren't getting much wear. nAia can help you work out whether they need better styling context or simply aren't earning their place.`,
+        evidence: [
+          { field: "garmentRelationships", value: `${lowUseCount} items tagged rarely-wear or regret` },
+        ],
+        passportEffects: [],
+      });
+    }
+  }
+
+  // ── 4. Occasion coverage ───────────────────────────────────────────────────
   if (occasionEligible && profile?.lifestyle?.length) {
     const lifestyleIds = profile.lifestyle;
     const relevantOccasions = new Set<string>();
@@ -237,7 +383,47 @@ export function computeClosetInsights(
     }
   }
 
-  // ── 2. Category concentration ──────────────────────────────────────────────
+  // ── 5. Formality distribution (AI coverage ≥60%) ──────────────────────────
+  if (formalityEligible) {
+    const formalityCounts = new Map<string, number>();
+    for (const item of items) {
+      if (item.formality !== null) {
+        formalityCounts.set(item.formality, (formalityCounts.get(item.formality) ?? 0) + 1);
+      }
+    }
+
+    const casual = (formalityCounts.get("casual") ?? 0) + (formalityCounts.get("smart-casual") ?? 0);
+    const structured = (formalityCounts.get("business-casual") ?? 0) + (formalityCounts.get("business-formal") ?? 0);
+    const occasion = (formalityCounts.get("occasion") ?? 0) + (formalityCounts.get("evening") ?? 0);
+
+    let claim: string;
+    if (casual >= structured && casual >= occasion && casual / formalityTaggedItems >= 0.6) {
+      claim = `Most of your analysed pieces are casual or smart-casual — ${casual} of ${formalityTaggedItems} nAia has assessed.`;
+    } else if (structured >= casual && structured >= occasion && structured / formalityTaggedItems >= 0.6) {
+      claim = `Your Closet leans toward structured, work-ready pieces — ${structured} of ${formalityTaggedItems} assessed pieces are business-casual or formal.`;
+    } else if (occasion >= casual && occasion >= structured && occasion / formalityTaggedItems >= 0.4) {
+      claim = `A notable share of your assessed pieces are occasion or evening — ${occasion} of ${formalityTaggedItems}.`;
+    } else {
+      const topGroup = casual >= structured && casual >= occasion
+        ? `casual (${casual})`
+        : structured >= occasion
+          ? `structured (${structured})`
+          : `occasion (${occasion})`;
+      claim = `Your Closet's formality is mixed across ${formalityTaggedItems} assessed pieces — ${topGroup} leads.`;
+    }
+
+    insights.push({
+      id: "formality-distribution",
+      type: "formality-distribution",
+      claim,
+      evidence: [
+        { field: "formality", value: `${formalityTaggedItems} of ${totalItems} items have formality data` },
+      ],
+      passportEffects: [],
+    });
+  }
+
+  // ── 6. Category concentration ──────────────────────────────────────────────
   {
     const categoryCounts = new Map<string, number>();
     for (const item of items) {
@@ -273,7 +459,7 @@ export function computeClosetInsights(
     }
   }
 
-  // ── 3. Palette insights ────────────────────────────────────────────────────
+  // ── 7. Palette insights ────────────────────────────────────────────────────
   if (paletteEligible) {
     const colourCounts = new Map<string, number>();
     for (const item of items) {
@@ -282,8 +468,6 @@ export function computeClosetInsights(
       }
     }
 
-    // Find qualifying dominant colours: ≥2 items AND ≥40% of coloured items.
-    // If multiple colours tie at the top count, no single dominant is declared.
     const qualifying = Array.from(colourCounts.entries())
       .filter(([, count]) => count >= 2 && count / colouredItems >= 0.4)
       .sort((a, b) => b[1] - a[1]);
@@ -291,9 +475,6 @@ export function computeClosetInsights(
     const topCount = qualifying[0]?.[1] ?? 0;
     const topTied = qualifying.filter(([, count]) => count === topCount);
 
-    // Identify if the clear palette leader is also a favourite colour — when
-    // true we merge both facts into the palette claim and skip the separate
-    // favourite-colour-comparison insight to avoid duplicating the same count.
     let paletteLeaderColour: string | null = null;
     let paletteLeaderFavId: string | null = null;
     if (topTied.length === 1) {
@@ -335,8 +516,6 @@ export function computeClosetInsights(
       passportEffects: palettePassportEffects,
     });
 
-    // Favourite colour comparisons — one insight per mappable fav colour.
-    // Skip the colour that was already merged into palette-distribution above.
     for (const favId of (profile?.favoriteColors ?? [])) {
       const closetColour = PASSPORT_COLOUR_TO_CLOSET[favId];
       if (!closetColour) continue;
@@ -358,7 +537,6 @@ export function computeClosetInsights(
       });
     }
 
-    // Avoided colour mismatches — only fires when the avoided colour is present
     for (const avoidId of (profile?.avoidColors ?? [])) {
       const closetColour = PASSPORT_COLOUR_TO_CLOSET[avoidId];
       if (!closetColour) continue;
@@ -380,7 +558,7 @@ export function computeClosetInsights(
     }
   }
 
-  // ── 4. Season coverage ─────────────────────────────────────────────────────
+  // ── 8. Season coverage ─────────────────────────────────────────────────────
   if (seasonEligible) {
     const uncoveredSeasons: string[] = [];
     for (const season of CANONICAL_SEASONS) {
@@ -409,7 +587,9 @@ export function computeClosetInsights(
     }
   }
 
-  return { dataQuality, insights };
+  // ── Curation: sort by priority, return top MAX_INSIGHTS ───────────────────
+  insights.sort((a, b) => (INSIGHT_PRIORITY[b.type] ?? 0) - (INSIGHT_PRIORITY[a.type] ?? 0));
+  return { dataQuality, insights: insights.slice(0, MAX_INSIGHTS) };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

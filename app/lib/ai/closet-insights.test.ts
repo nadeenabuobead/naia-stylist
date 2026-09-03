@@ -19,6 +19,12 @@ function makeItem(overrides: Partial<ClosetItemSnapshot> = {}): ClosetItemSnapsh
     primaryColor: overrides.primaryColor ?? null,
     occasions: overrides.occasions ?? null,
     seasons: overrides.seasons ?? null,
+    garmentRelationships: overrides.garmentRelationships ?? [],
+    silhouette: overrides.silhouette ?? null,
+    fitProfile: overrides.fitProfile ?? null,
+    formality: overrides.formality ?? null,
+    stylePersonality: overrides.stylePersonality ?? null,
+    pattern: overrides.pattern ?? null,
   };
 }
 
@@ -38,6 +44,9 @@ const emptyProfile: ClosetInsightProfile = {
   desiredImpression: [],
   desiredFeelings: [],
   becoming: [],
+  passportSilhouette: [],
+  passportStructure: null,
+  passportFitPreferences: [],
 };
 
 // ── CI.1 — 0 items → ineligible ───────────────────────────────────────────────
@@ -970,6 +979,280 @@ describe("CI.34 — lifestyle fallback wording is not overclaiming", () => {
   });
 });
 
+// ── CI.38 — wear-behaviour fires at ≥60% relationship coverage ────────────────
+describe("CI.38 — wear-behaviour fires at ≥60% relationship coverage", () => {
+  it("emits wear-behaviour when 3 of 5 items are tagged (60%)", () => {
+    const items = [
+      makeItem({ id: "1", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "2", garmentRelationships: ["wear-often"] }),
+      makeItem({ id: "3", garmentRelationships: ["wear-often"] }),
+      makeItem({ id: "4" }),
+      makeItem({ id: "5" }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.equal(result.dataQuality.relationshipTaggedItems, 3);
+    assert.equal(result.dataQuality.relationshipEligible, true);
+    const wb = result.insights.find((i) => i.type === "wear-behaviour");
+    assert.ok(wb, "wear-behaviour should fire at 60% coverage");
+    assert.ok(wb!.claim.includes("3"), `claim should mention count 3: ${wb!.claim}`);
+    assert.ok(
+      wb!.claim.toLowerCase().includes("favourites") ||
+      wb!.claim.toLowerCase().includes("regularly"),
+      `claim: ${wb!.claim}`,
+    );
+  });
+
+  it("does NOT emit wear-behaviour when only 2 of 5 items are tagged (40%)", () => {
+    const items = [
+      makeItem({ id: "1", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "2", garmentRelationships: ["wear-often"] }),
+      makeItem({ id: "3" }),
+      makeItem({ id: "4" }),
+      makeItem({ id: "5" }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.equal(result.dataQuality.relationshipEligible, false);
+    assert.equal(result.insights.find((i) => i.type === "wear-behaviour"), undefined);
+  });
+});
+
+// ── CI.39 — wear-behaviour wording reflects the actual distribution ────────────
+describe("CI.39 — wear-behaviour wording cases", () => {
+  it("uses strong-core wording when ≥50% positive and ≤20% friction", () => {
+    const items = [
+      makeItem({ id: "1", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "2", garmentRelationships: ["wear-often"] }),
+      makeItem({ id: "3", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "4", garmentRelationships: ["like"] }),
+      makeItem({ id: "5", garmentRelationships: ["like"] }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    const wb = result.insights.find((i) => i.type === "wear-behaviour");
+    assert.ok(wb, "wear-behaviour should fire");
+    assert.ok(
+      wb!.claim.toLowerCase().includes("core") || wb!.claim.toLowerCase().includes("often"),
+      `strong-core phrasing expected: ${wb!.claim}`,
+    );
+  });
+
+  it("uses spread wording when positive and friction are roughly equal", () => {
+    const items = [
+      makeItem({ id: "1", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "2", garmentRelationships: ["wear-often"] }),
+      makeItem({ id: "3", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "4", garmentRelationships: ["unsure"] }),
+      makeItem({ id: "5", garmentRelationships: ["like"] }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    const wb = result.insights.find((i) => i.type === "wear-behaviour");
+    assert.ok(wb, "wear-behaviour should fire");
+    // Mixed case — claim should describe the spread
+    assert.ok(
+      wb!.claim.includes("2") || wb!.claim.toLowerCase().includes("spread") || wb!.claim.toLowerCase().includes("mix"),
+      `spread phrasing expected: ${wb!.claim}`,
+    );
+  });
+});
+
+// ── CI.40 — friction-signal fires at ≥2 love-style-struggle (no coverage gate) ─
+describe("CI.40 — friction-signal fires at ≥2 struggle items regardless of coverage", () => {
+  it("fires when exactly 2 items are tagged love-style-struggle (40% of 5)", () => {
+    const items = [
+      makeItem({ id: "1", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "2", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "3" }),
+      makeItem({ id: "4" }),
+      makeItem({ id: "5" }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.equal(result.dataQuality.relationshipEligible, false, "coverage is only 40% — relationshipEligible should be false");
+    const friction = result.insights.find((i) => i.type === "friction-signal");
+    assert.ok(friction, "friction-signal should fire even below the coverage threshold");
+    assert.ok(friction!.claim.includes("2"), `claim: ${friction!.claim}`);
+    assert.ok(
+      friction!.claim.toLowerCase().includes("struggle") || friction!.claim.toLowerCase().includes("style"),
+      `claim: ${friction!.claim}`,
+    );
+  });
+
+  it("does NOT fire when only 1 item is tagged love-style-struggle", () => {
+    const items = makeItems(5, { garmentRelationships: [] });
+    items[0] = makeItem({ id: "item-1", garmentRelationships: ["love-style-struggle"] });
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.equal(result.insights.find((i) => i.type === "friction-signal"), undefined,
+      "friction-signal must not fire for count=1");
+  });
+});
+
+// ── CI.41 — low-use-signal fires at ≥2 rarely-wear/regret AND ≥8 total items ──
+describe("CI.41 — low-use-signal gating", () => {
+  it("fires when 2 of 8 items are rarely-wear or regret", () => {
+    const items = [
+      ...makeItems(6),
+      makeItem({ id: "item-7", garmentRelationships: ["rarely-wear"] }),
+      makeItem({ id: "item-8", garmentRelationships: ["regret"] }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.equal(result.dataQuality.totalItems, 8);
+    const lowUse = result.insights.find((i) => i.type === "low-use-signal");
+    assert.ok(lowUse, "low-use-signal should fire with 2 low-use items in an 8-item Closet");
+    assert.ok(lowUse!.claim.includes("2"), `claim: ${lowUse!.claim}`);
+  });
+
+  it("does NOT fire when total items < 8 even with 2 rarely-worn", () => {
+    const items = [
+      ...makeItems(5),
+      makeItem({ id: "item-6", garmentRelationships: ["rarely-wear"] }),
+      makeItem({ id: "item-7", garmentRelationships: ["regret"] }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.equal(result.dataQuality.totalItems, 7);
+    assert.equal(result.insights.find((i) => i.type === "low-use-signal"), undefined,
+      "low-use-signal must not fire below 8 total items");
+  });
+
+  it("does NOT fire when only 1 item is low-use regardless of closet size", () => {
+    const items = [
+      ...makeItems(8),
+      makeItem({ id: "item-9", garmentRelationships: ["rarely-wear"] }),
+    ];
+    items[0] = makeItem({ id: "item-1", garmentRelationships: ["rarely-wear"] });
+    // only 1 unique low-use item in a 9-item closet — wait, item-1 and item-9 both have rarely-wear
+    // that's 2. Let me redo this test properly.
+    // Actually the above gives 2 — use a different fixture
+    const items2 = [
+      ...Array.from({ length: 9 }, (_, i) => makeItem({ id: `item-${i + 1}` })),
+    ];
+    items2[0] = makeItem({ id: "item-1", garmentRelationships: ["rarely-wear"] });
+    const result = computeClosetInsights(items2, emptyProfile);
+    assert.equal(result.insights.find((i) => i.type === "low-use-signal"), undefined,
+      "low-use-signal must not fire for count=1");
+  });
+});
+
+// ── CI.42 — formality-distribution fires at ≥60% AI coverage ─────────────────
+describe("CI.42 — formality-distribution fires at ≥60% AI formality coverage", () => {
+  it("emits formality-distribution when 4 of 5 items have formality data", () => {
+    const items = [
+      makeItem({ id: "1", formality: "casual" }),
+      makeItem({ id: "2", formality: "casual" }),
+      makeItem({ id: "3", formality: "casual" }),
+      makeItem({ id: "4", formality: "smart-casual" }),
+      makeItem({ id: "5", formality: null }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.equal(result.dataQuality.formalityEligible, true);
+    const fd = result.insights.find((i) => i.type === "formality-distribution");
+    assert.ok(fd, "formality-distribution should fire");
+    assert.ok(
+      fd!.claim.toLowerCase().includes("casual") || fd!.claim.includes("4"),
+      `claim: ${fd!.claim}`,
+    );
+  });
+
+  it("does NOT fire when fewer than 60% of items have formality data", () => {
+    const items = [
+      makeItem({ id: "1", formality: "casual" }),
+      makeItem({ id: "2", formality: "casual" }),
+      makeItem({ id: "3", formality: null }),
+      makeItem({ id: "4", formality: null }),
+      makeItem({ id: "5", formality: null }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.equal(result.dataQuality.formalityEligible, false);
+    assert.equal(result.insights.find((i) => i.type === "formality-distribution"), undefined);
+  });
+});
+
+// ── CI.43 — curation: max 4 insights, priority order maintained ───────────────
+describe("CI.43 — curation: max 4 insights returned in priority order", () => {
+  it("never returns more than 4 insights", () => {
+    // Trigger as many insight types as possible
+    const items = [
+      makeItem({ id: "1", primaryColor: "Black", occasions: ["Dinner"], seasons: ["Fall"], garmentRelationships: ["favourite"], formality: "casual" }),
+      makeItem({ id: "2", primaryColor: "Black", occasions: ["Party"], seasons: ["Winter"], garmentRelationships: ["wear-often"], formality: "casual" }),
+      makeItem({ id: "3", primaryColor: "Black", occasions: ["Formal"], seasons: ["Spring"], garmentRelationships: ["love-style-struggle"], formality: "casual" }),
+      makeItem({ id: "4", primaryColor: "Grey", occasions: ["Work"], seasons: ["Summer"], garmentRelationships: ["love-style-struggle"], formality: "smart-casual" }),
+      makeItem({ id: "5", primaryColor: "Grey", occasions: ["Work"], seasons: ["Fall"], garmentRelationships: ["unsure"], formality: "business-casual" }),
+    ];
+    const profile: ClosetInsightProfile = {
+      ...emptyProfile,
+      lifestyle: ["events", "office"],
+      favoriteColors: ["black", "grey"],
+      avoidColors: ["orange"],
+    };
+    const result = computeClosetInsights(items, profile);
+    assert.ok(result.insights.length <= 4, `should return at most 4 insights, got ${result.insights.length}`);
+  });
+
+  it("wear-behaviour appears before colour insights when both fire", () => {
+    const items = [
+      makeItem({ id: "1", primaryColor: "Black", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "2", primaryColor: "Black", garmentRelationships: ["wear-often"] }),
+      makeItem({ id: "3", primaryColor: "Black", garmentRelationships: ["wear-often"] }),
+      makeItem({ id: "4", primaryColor: "Grey", garmentRelationships: ["like"] }),
+      makeItem({ id: "5", primaryColor: "Grey", garmentRelationships: ["like"] }),
+    ];
+    const profile: ClosetInsightProfile = { ...emptyProfile, favoriteColors: ["grey"] };
+    const result = computeClosetInsights(items, profile);
+    const wbIdx = result.insights.findIndex((i) => i.type === "wear-behaviour");
+    const colourIdx = result.insights.findIndex(
+      (i) => i.type === "palette-distribution" || i.type === "favourite-colour-comparison",
+    );
+    assert.ok(wbIdx !== -1, "wear-behaviour should fire");
+    assert.ok(colourIdx !== -1, "a colour insight should fire");
+    assert.ok(wbIdx < colourIdx, `wear-behaviour (idx ${wbIdx}) should precede colour insight (idx ${colourIdx})`);
+  });
+});
+
+// ── CI.44 — new profile fields are forward-compat (no insight effect) ─────────
+describe("CI.44 — passportSilhouette, passportStructure, passportFitPreferences have no effect", () => {
+  it("adding Passport body fields does not change any insight output", () => {
+    const items = makeItems(5);
+    const base = computeClosetInsights(items, emptyProfile);
+    const withPassport = computeClosetInsights(items, {
+      ...emptyProfile,
+      passportSilhouette: ["fitted", "waist-defined"],
+      passportStructure: "tailored",
+      passportFitPreferences: ["fitted", "tailored"],
+    });
+    assert.deepEqual(withPassport.insights, base.insights);
+  });
+});
+
+// ── CI.45 — unrecognized relationship values are ignored ───────────────────────
+describe("CI.45 — unrecognized garmentRelationship values produce no relationship insights", () => {
+  it("empty-string relationship values do not count toward coverage", () => {
+    const items = Array.from({ length: 5 }, (_, i) =>
+      makeItem({ id: `item-${i + 1}`, garmentRelationships: [""] }),
+    );
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.equal(result.dataQuality.relationshipTaggedItems, 0,
+      "unrecognized relationship values must not count as tagged");
+    assert.equal(result.dataQuality.relationshipEligible, false);
+    assert.equal(result.insights.find((i) => i.type === "wear-behaviour"), undefined);
+    assert.equal(result.insights.find((i) => i.type === "friction-signal"), undefined);
+  });
+
+  it("love-style-struggle still counts for friction-signal even when coverage is via unrecognized values", () => {
+    // 2 items with valid struggle tag, 3 items with unrecognized tag
+    // → coverage=40% (below threshold) but friction-signal should still fire
+    const items = [
+      makeItem({ id: "1", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "2", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "3", garmentRelationships: ["unknown-tag"] }),
+      makeItem({ id: "4", garmentRelationships: ["unknown-tag"] }),
+      makeItem({ id: "5", garmentRelationships: ["unknown-tag"] }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.equal(result.dataQuality.relationshipTaggedItems, 2,
+      "only recognized values count toward coverage");
+    assert.equal(result.dataQuality.relationshipEligible, false);
+    const friction = result.insights.find((i) => i.type === "friction-signal");
+    assert.ok(friction, "friction-signal should still fire for 2 struggle items");
+  });
+});
+
 // ── CI.31 — prohibited inferences never appear ────────────────────────────────
 describe("CI.31 — prohibited inference strings", () => {
   it("no claim contains 'your style is', 'you tend to', 'would suit', 'would look', 'you should buy', 'need to buy'", () => {
@@ -999,6 +1282,9 @@ describe("CI.31 — prohibited inference strings", () => {
       desiredImpression: ["powerful"],
       desiredFeelings: ["confident"],
       becoming: ["more-polished"],
+      passportSilhouette: [],
+      passportStructure: null,
+      passportFitPreferences: [],
     };
 
     const result = computeClosetInsights(items, profile);
