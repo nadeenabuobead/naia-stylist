@@ -39,7 +39,7 @@ import type {
   GarmentIntelligence,
 } from "./garment-intelligence.types";
 
-const GARMENT_ANALYSIS_MODEL = "claude-sonnet-4-5-20251001";
+const GARMENT_ANALYSIS_MODEL = "claude-haiku-4-5";
 const GARMENT_ANALYSIS_TIMEOUT_MS = 15_000;
 
 // ── Extraction prompt ─────────────────────────────────────────────────────────

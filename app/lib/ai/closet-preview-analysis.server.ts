@@ -18,7 +18,7 @@ import {
   GARMENT_SEASON_VALUES,
 } from "./garment-intelligence.types";
 
-const PREVIEW_MODEL = "claude-sonnet-4-5-20251001";
+const PREVIEW_MODEL = "claude-haiku-4-5";
 const PREVIEW_TIMEOUT_MS = 20_000;
 
 const CLOSET_CATEGORIES = new Set([
