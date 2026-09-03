@@ -28,6 +28,8 @@ const RECOGNISED_FIELDS = new Set([
   "measurementUnit", "bodyShape", "fitConcerns", "preferredCoverage",
   // Passport Rev 6
   "currentGoal", "successfulOutfitGives", "dressingPreferences", "fitConcernsNote",
+  // About You (contextual profile; not used to infer recommendations)
+  "ageRange", "gender", "genderSelfDescription",
 ]);
 
 const ARRAY_FIELDS = [
@@ -83,6 +85,8 @@ const SILHOUETTE_VALID_IDS = new Set([
   // V3 — Rev 6 canonical
   "waist-defined", "straight-simple", "loose-flowing", "structured-tailored", "not-sure",
   // "fitted", "relaxed", "oversized" are shared V2/V3
+  // Gender-inclusive additions (Group A)
+  "boxy", "tapered",
 ]);
 const SILHOUETTE_MAX = 3; // Rev 6 raises max from 2 to 3
 
@@ -113,9 +117,20 @@ const SUCCESSFUL_OUTFIT_GIVES_MAX = 3;
 
 // Rev 6: dressing preferences valid IDs (must match APPROVED_DRESSING_PREFERENCE_IDS in signal-contract)
 const DRESSING_PREF_VALID_IDS = new Set([
-  "dresses-modestly", "usually-wears-abayas", "arms-covered",
-  "chest-neckline-covered", "legs-covered", "longer-tops",
-  "no-cropped-tops", "looser-fitting", "wears-hijab",
+  "dresses-modestly", "usually-wears-abayas", "kanduras-thobes",
+  "wears-hijab", "arms-covered", "avoid-sleeveless",
+  "chest-neckline-covered", "prefer-higher-necklines",
+  "legs-covered", "prefer-full-length-trousers", "avoid-shorts",
+  "longer-tops", "no-cropped-tops", "looser-fitting",
+  "no-dressing-requirements",
+]);
+
+// About You: valid age-range and gender option IDs
+const AGE_RANGE_VALID_IDS = new Set([
+  "18-24", "25-34", "35-44", "45-54", "55-64", "65-plus", "prefer-not-to-say",
+]);
+const GENDER_VALID_IDS = new Set([
+  "woman", "man", "another-gender", "prefer-not-to-say",
 ]);
 
 // Rev 6: fit concerns — legacy IDs (backward compat) + new Rev 6 IDs
@@ -476,6 +491,30 @@ export async function action({ request }) {
     }
   }
 
+  // About You: ageRange — optional single-select
+  if (Object.hasOwn(body, "ageRange")) {
+    const v = body["ageRange"];
+    if (v !== null && v !== "" && !AGE_RANGE_VALID_IDS.has(v)) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+
+  // About You: gender — optional single-select
+  if (Object.hasOwn(body, "gender")) {
+    const v = body["gender"];
+    if (v !== null && v !== "" && !GENDER_VALID_IDS.has(v)) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+
+  // About You: genderSelfDescription — optional free text (max 200 chars); only meaningful when gender=another-gender
+  if (Object.hasOwn(body, "genderSelfDescription")) {
+    const v = body["genderSelfDescription"];
+    if (v !== null && typeof v === "string" && v.length > 200) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+
   const op = customer.onboardingProfile;
 
   // V2-D/V2-F: clothing sizing system change safety (affects topSize/bottomSize/dressSize only)
@@ -529,6 +568,9 @@ export async function action({ request }) {
   }
   if (Object.hasOwn(body, "fitConcerns") && body["fitConcerns"].includes("no-fit-problems")) {
     body["fitConcerns"] = ["no-fit-problems"];
+  }
+  if (Object.hasOwn(body, "dressingPreferences") && body["dressingPreferences"].includes("no-dressing-requirements")) {
+    body["dressingPreferences"] = ["no-dressing-requirements"];
   }
 
   // All submitted values are validated and normalized. Absent keys fall back to the saved DB value
@@ -631,6 +673,10 @@ export async function action({ request }) {
     successfulOutfitGives: pickArr("successfulOutfitGives", op?.successfulOutfitGives),
     dressingPreferences:   pickArr("dressingPreferences",   op?.dressingPreferences),
     fitConcernsNote:       resolvedFitConcernsNote,
+    // About You
+    ageRange:             pickText("ageRange",             op?.ageRange),
+    gender:               pickText("gender",               op?.gender),
+    genderSelfDescription: pickText("genderSelfDescription", op?.genderSelfDescription),
     completed:           true,
   };
 

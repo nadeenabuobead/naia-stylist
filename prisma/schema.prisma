@@ -147,6 +147,11 @@ model OnboardingProfile {
   dressingPreferences   String[]  @default([])   // feeds Group 2 hard-exclusion engine
   fitConcernsNote       String?                   // free-text "other" from fit screen
   profileVersion        Int?                      // null=legacy; 6=Rev 6 confirmed
+
+  // About You — contextual profile information (not used to infer style/recommendations)
+  ageRange              String?
+  gender                String?
+  genderSelfDescription String?
 }
 
 // ============================================
@@ -948,6 +953,12 @@ model StyleMeOutcome {
   otherChangeNote  String?   @db.Text      // max 280 chars; only when "other" in changeTypes
   goalOutcome      String?   // yes | somewhat | no; null when outcomeStatus=didnt-wear-it
   selectedDirection String?  // most-you | fresh | push-me; null when no direction shown or selected
+
+  // QA redesign fields — additive, default empty
+  whatWorked       String[]  @default([])  // positive reasons; max 3; active when wore-it/changed-something + goalOutcome=yes
+  whatFeltOff      String[]  @default([])  // negative reasons; max 3; active when wore-it/changed-something + goalOutcome=somewhat/no
+  didntWearReasons String[]  @default([])  // reasons for not wearing; max 3, min 1; active when didnt-wear-it
+  reasonOtherNote  String?   @db.Text      // max 280 chars; for "other" in whatWorked/whatFeltOff/didntWearReasons
 
   submittedAt DateTime @default(now())
   updatedAt   DateTime @updatedAt

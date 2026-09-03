@@ -226,29 +226,36 @@ describe("R14 — current-goal max selections = 2", () => {
   });
 });
 
-// ─── R15: dressing-preferences has all 9 IDs ─────────────────────────────────
+// ─── R15: dressing-preferences has all 15 IDs ────────────────────────────────
 
-describe("R15 — dressing-preferences has all 9 required option IDs", () => {
+describe("R15 — dressing-preferences has all 15 required option IDs", () => {
   const requiredIds = [
     "dresses-modestly",
     "usually-wears-abayas",
+    "kanduras-thobes",
+    "wears-hijab",
     "arms-covered",
+    "avoid-sleeveless",
     "chest-neckline-covered",
+    "prefer-higher-necklines",
     "legs-covered",
+    "prefer-full-length-trousers",
+    "avoid-shorts",
     "longer-tops",
     "no-cropped-tops",
     "looser-fitting",
-    "wears-hijab",
+    "no-dressing-requirements",
   ];
-  it("all 9 IDs present", () => {
+  it("all 15 IDs present", () => {
     const ids = optionIds("dressing-preferences");
     for (const id of requiredIds) {
       assert.ok(ids.includes(id), `Missing dressing-preference ID: ${id}`);
     }
   });
-  it("no exclusiveIds on dressing-preferences", () => {
+  it("no-dressing-requirements is the exclusive toggle", () => {
     const q = getScreen("dressing-preferences");
-    assert.ok(!q.exclusiveIds || q.exclusiveIds.length === 0);
+    assert.ok(q.exclusiveIds?.includes("no-dressing-requirements"),
+      "no-dressing-requirements must be in exclusiveIds");
   });
 });
 

@@ -60,6 +60,8 @@ const SILHOUETTE_VALID_IDS = new Set([
   "loose-flowing", "structured-tailored", "not-sure",
   // V2 IDs (backward compat)
   "structured", "straight-clean", "waist-definition",
+  // Gender-inclusive additions (Group A)
+  "boxy", "tapered",
 ]);
 
 const FAVOURITE_COLORS_MAX = 5;
@@ -70,9 +72,12 @@ const FIT_CONCERN_EXCLUSIVE_IDS = new Set(["no-fit-problems"]);
 const FIT_CONCERN_NOTE_TRIGGER = "other";
 
 const DRESSING_PREF_VALID_IDS = new Set([
-  "dresses-modestly", "usually-wears-abayas", "arms-covered",
-  "chest-neckline-covered", "legs-covered", "longer-tops",
-  "no-cropped-tops", "looser-fitting", "wears-hijab",
+  "dresses-modestly", "usually-wears-abayas", "kanduras-thobes",
+  "wears-hijab", "arms-covered", "avoid-sleeveless",
+  "chest-neckline-covered", "prefer-higher-necklines",
+  "legs-covered", "prefer-full-length-trousers", "avoid-shorts",
+  "longer-tops", "no-cropped-tops", "looser-fitting",
+  "no-dressing-requirements",
 ]);
 
 // ─── SV1: currentGoal validation ─────────────────────────────────────────────
@@ -238,8 +243,8 @@ describe("SV7 — fitConcerns server-side validation", () => {
 // ─── SV8: dressingPreferences validation ──────────────────────────────────────
 
 describe("SV8 — dressingPreferences server-side validation", () => {
-  it("approved set has exactly 9 IDs", () => {
-    assert.equal(DRESSING_PREF_VALID_IDS.size, 9);
+  it("approved set has exactly 15 IDs", () => {
+    assert.equal(DRESSING_PREF_VALID_IDS.size, 15);
   });
 
   it("quiz screen IDs match server approved set exactly", () => {

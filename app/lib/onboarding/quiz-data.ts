@@ -153,14 +153,16 @@ export const quizQuestions: QuizQuestion[] = [
     maxSelections: 3,
     exclusiveIds: ["not-sure"],
     options: [
-      { id: "fitted",             label: "Fitted"              },
-      { id: "waist-defined",      label: "Waist-defined"       },
-      { id: "straight-simple",    label: "Straight & Simple"   },
-      { id: "relaxed",            label: "Relaxed"             },
-      { id: "oversized",          label: "Oversized"           },
-      { id: "loose-flowing",      label: "Loose & Flowing"     },
+      { id: "fitted",             label: "Fitted"               },
+      { id: "waist-defined",      label: "Waist-defined"        },
+      { id: "straight-simple",    label: "Straight-cut"         },
+      { id: "relaxed",            label: "Relaxed"              },
+      { id: "oversized",          label: "Oversized"            },
+      { id: "boxy",               label: "Boxy"                 },
+      { id: "tapered",            label: "Tapered"              },
+      { id: "loose-flowing",      label: "Loose / Wide"         },
       { id: "structured-tailored",label: "Structured / Tailored"},
-      { id: "not-sure",           label: "Not sure yet"        },
+      { id: "not-sure",           label: "Not sure yet"         },
     ],
   },
 
@@ -179,9 +181,9 @@ export const quizQuestions: QuizQuestion[] = [
       maxLength: 500,
     },
     options: [
-      { id: "tops-pull-bust",        label: "Tops often pull around my bust"                   },
-      { id: "waistbands-gape",       label: "Waistbands often gape"                            },
-      { id: "tight-hips-thighs",     label: "Trousers can feel tight through my hips / thighs" },
+      { id: "tops-pull-bust",        label: "Tops, shirts or jackets can feel tight across my chest / back" },
+      { id: "waistbands-gape",       label: "Waistbands often gape"                                          },
+      { id: "tight-hips-thighs",     label: "Trousers can feel tight through my seat, hips or thighs"       },
       { id: "uncomfortable-rise",    label: "Trouser rises can feel uncomfortable"              },
       { id: "shoulder-sleeve-fit",   label: "Shoulder or sleeve fit can be difficult"           },
       { id: "often-too-short",       label: "Clothes are often too short"                      },
@@ -200,16 +202,23 @@ export const quizQuestions: QuizQuestion[] = [
     type: "multi",
     title: "Are there any dressing requirements nAia should always respect?",
     subtitle: "Optional. Select anything nAia should always keep in mind when styling you.",
+    exclusiveIds: ["no-dressing-requirements"],
     options: [
-      { id: "dresses-modestly",           label: "I dress modestly"                     },
-      { id: "usually-wears-abayas",       label: "I usually wear abayas"               },
-      { id: "arms-covered",               label: "I keep my arms covered"               },
-      { id: "chest-neckline-covered",     label: "I keep my chest / neckline covered"   },
-      { id: "legs-covered",               label: "I keep my legs covered"               },
-      { id: "longer-tops",                label: "I prefer longer tops"                 },
-      { id: "no-cropped-tops",            label: "No cropped tops"                      },
-      { id: "looser-fitting",             label: "I prefer looser-fitting clothes"      },
-      { id: "wears-hijab",                label: "I wear hijab"                         },
+      { id: "dresses-modestly",             label: "I dress modestly"                      },
+      { id: "usually-wears-abayas",         label: "I usually wear abayas"                },
+      { id: "kanduras-thobes",              label: "I usually wear kanduras / thobes"      },
+      { id: "wears-hijab",                  label: "I wear hijab"                          },
+      { id: "arms-covered",                 label: "I keep my arms covered"                },
+      { id: "avoid-sleeveless",             label: "I avoid sleeveless styles"             },
+      { id: "chest-neckline-covered",       label: "I keep my chest / neckline covered"    },
+      { id: "prefer-higher-necklines",      label: "I prefer higher necklines"             },
+      { id: "legs-covered",                 label: "I keep my legs covered"                },
+      { id: "prefer-full-length-trousers",  label: "I prefer full-length trousers"         },
+      { id: "avoid-shorts",                 label: "I avoid shorts"                        },
+      { id: "longer-tops",                  label: "I prefer longer tops / shirts"         },
+      { id: "no-cropped-tops",              label: "I avoid cropped tops"                  },
+      { id: "looser-fitting",               label: "I prefer looser-fitting clothes"       },
+      { id: "no-dressing-requirements",     label: "No specific dressing requirements"     },
     ],
   },
 ];
@@ -236,6 +245,10 @@ export type OnboardingAnswers = {
   "shopping-priorities"?: string[];
   "trend-appetite"?: string;        // single-choice stored as string
   "final-notes"?: string;
+  // About You — contextual account/profile information (passport edit only, not onboarding)
+  "age-range"?: string;
+  "gender"?: string;
+  "gender-self-description"?: string;
   // Passport-only fields (section editing only, not in onboarding flow)
   "typical-day"?: string;
   "structure"?: string;

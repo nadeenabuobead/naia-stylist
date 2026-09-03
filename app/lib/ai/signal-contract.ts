@@ -485,6 +485,9 @@ export const PROFILE_SILHOUETTE_SMCM_MAP: Readonly<Record<string, string>> = {
   "straight-simple":    "straight-clean",  // new SMCM token; zero catalog products — catalog reality
   "loose-flowing":      "relaxed",
   "structured-tailored": "structured",
+  // Gender-inclusive additions (Group A)
+  "boxy":               "relaxed",         // volume-forward; closest SMCM equivalent
+  "tapered":            "straight-clean",  // narrowed at hem; structured-clean silhouette
 };
 
 // Passport Coverage quiz IDs that softly support the "more-coverage" Body Need.
@@ -1917,13 +1920,19 @@ export const PROVISIONAL_EVIDENCE: readonly ProductFieldEvidence[] = [
 export const APPROVED_DRESSING_PREFERENCE_IDS: ReadonlySet<string> = new Set([
   "dresses-modestly",
   "usually-wears-abayas",
+  "kanduras-thobes",
+  "wears-hijab",
   "arms-covered",
+  "avoid-sleeveless",
   "chest-neckline-covered",
+  "prefer-higher-necklines",
   "legs-covered",
+  "prefer-full-length-trousers",
+  "avoid-shorts",
   "longer-tops",
   "no-cropped-tops",
   "looser-fitting",
-  "wears-hijab",
+  "no-dressing-requirements",
 ]);
 
 // ── Dressing metadata types ───────────────────────────────────────────────────

@@ -1240,6 +1240,9 @@ describe("Profile Silhouette — approved mappings only", () => {
     ["straight-simple", "straight-clean"],
     ["loose-flowing", "relaxed"],
     ["structured-tailored", "structured"],
+    // Gender-inclusive additions (Group A)
+    ["boxy", "relaxed"],
+    ["tapered", "straight-clean"],
   ];
 
   for (const [id, target] of approved) {
@@ -1248,8 +1251,8 @@ describe("Profile Silhouette — approved mappings only", () => {
     });
   }
 
-  it("has exactly 9 approved entries", () => {
-    assert.equal(Object.keys(PROFILE_SILHOUETTE_SMCM_MAP).length, 9);
+  it("has exactly 11 approved entries", () => {
+    assert.equal(Object.keys(PROFILE_SILHOUETTE_SMCM_MAP).length, 11);
   });
 
   it("V3: fitted maps to 'fitted' NOT 'structured' (critical Group 1 invariant)", () => {
@@ -1877,13 +1880,16 @@ describe("Group 1 V3 — SMCM token safety invariants", () => {
 
 describe("Group 2 — APPROVED_DRESSING_PREFERENCE_IDS contract", () => {
   const EXPECTED_IDS = [
-    "dresses-modestly", "usually-wears-abayas", "arms-covered",
-    "chest-neckline-covered", "legs-covered", "longer-tops",
-    "no-cropped-tops", "looser-fitting", "wears-hijab",
+    "dresses-modestly", "usually-wears-abayas", "kanduras-thobes",
+    "wears-hijab", "arms-covered", "avoid-sleeveless",
+    "chest-neckline-covered", "prefer-higher-necklines",
+    "legs-covered", "prefer-full-length-trousers", "avoid-shorts",
+    "longer-tops", "no-cropped-tops", "looser-fitting",
+    "no-dressing-requirements",
   ];
 
-  it("has exactly 9 approved dressing-preference IDs", () => {
-    assert.equal(APPROVED_DRESSING_PREFERENCE_IDS.size, 9);
+  it("has exactly 15 approved dressing-preference IDs", () => {
+    assert.equal(APPROVED_DRESSING_PREFERENCE_IDS.size, 15);
   });
 
   for (const id of EXPECTED_IDS) {

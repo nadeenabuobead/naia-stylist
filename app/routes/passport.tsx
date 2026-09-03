@@ -117,6 +117,38 @@ const PASSPORT_ONLY_QUESTIONS: Record<string, QuizQuestion> = {
     placeholder: "e.g. I have very narrow shoulders and wide hips, or sleeves are always too short.",
     maxLength: 500,
   },
+  "age-range": {
+    id: "age-range",
+    type: "single",
+    title: "How old are you?",
+    options: [
+      { id: "18-24",            label: "18–24"            },
+      { id: "25-34",            label: "25–34"            },
+      { id: "35-44",            label: "35–44"            },
+      { id: "45-54",            label: "45–54"            },
+      { id: "55-64",            label: "55–64"            },
+      { id: "65-plus",          label: "65+"              },
+      { id: "prefer-not-to-say",label: "Prefer not to say"},
+    ],
+  },
+  "gender": {
+    id: "gender",
+    type: "single",
+    title: "How do you describe your gender?",
+    options: [
+      { id: "woman",            label: "Woman"            },
+      { id: "man",              label: "Man"              },
+      { id: "another-gender",   label: "Another gender"   },
+      { id: "prefer-not-to-say",label: "Prefer not to say"},
+    ],
+  },
+  "gender-self-description": {
+    id: "gender-self-description",
+    type: "text",
+    title: "If you selected 'Another gender', you can describe your gender here (optional).",
+    placeholder: "Optional — describe your gender in your own words.",
+    maxLength: 200,
+  },
 };
 
 // Add passport-only questions to lookup tables
@@ -140,7 +172,7 @@ function lbl(qId: string, oId: string): string {
 type SectionId =
   | "goals" | "outfit-gives" | "identity" | "direction" | "life" | "fit"
   | "fit-concerns" | "sizes" | "colours" | "wardrobe"
-  | "dressing" | "notes";
+  | "dressing" | "notes" | "about-you";
 
 type FieldKind = "array" | "color" | "single" | "text";
 type DraftKey = keyof OnboardingAnswers;
@@ -286,6 +318,19 @@ const SECTIONS: SectionDef[] = [
       { draftKey: "body-shape" as DraftKey, apiKey: "bodyShape", subLabel: "How would you describe your proportions?", kind: "single" as FieldKind, questionId: "body-shape", hiddenForRev6: true },
       { draftKey: "fit-concerns" as DraftKey, apiKey: "fitConcerns", subLabel: "Fit considerations", kind: "array" as FieldKind, questionId: "fit-concerns", hiddenForRev6: true },
       { draftKey: "fit-concerns-note" as DraftKey, apiKey: "fitConcernsNote", subLabel: "Additional fit notes", kind: "text" as FieldKind, questionId: "fit-concerns-note", hiddenForRev6: true },
+    ],
+  },
+  // ABOUT YOU — optional contextual info (not used to infer style or recommendations)
+  {
+    id: "about-you",
+    label: "About You",
+    question: "A few optional details to help nAia understand your context.",
+    helper: "Optional. This information is not used to infer style or restrict recommendations.",
+    optional: true,
+    subFields: [
+      { draftKey: "age-range" as DraftKey, apiKey: "ageRange", subLabel: "Age range", kind: "single" as FieldKind, questionId: "age-range" },
+      { draftKey: "gender" as DraftKey, apiKey: "gender", subLabel: "Gender", kind: "single" as FieldKind, questionId: "gender" },
+      { draftKey: "gender-self-description" as DraftKey, apiKey: "genderSelfDescription", subLabel: "Gender (in your own words)", kind: "text" as FieldKind, questionId: "gender-self-description" },
     ],
   },
   // HIDDEN FOR REV 6: Style Direction (blank editors, superseded emotional profile)
@@ -706,6 +751,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if ((op as any).currentGoal?.length)           savedAnswers["current-goal"]           = (op as any).currentGoal;
   if ((op as any).successfulOutfitGives?.length) savedAnswers["successful-outfit-gives"]= (op as any).successfulOutfitGives;
   if ((op as any).dressingPreferences?.length)   savedAnswers["dressing-preferences"]   = (op as any).dressingPreferences;
+  // About You
+  if ((op as any).ageRange)              savedAnswers["age-range"]              = (op as any).ageRange;
+  if ((op as any).gender)                savedAnswers["gender"]                 = (op as any).gender;
+  if ((op as any).genderSelfDescription) savedAnswers["gender-self-description"]= (op as any).genderSelfDescription;
 
   const sa = await prisma.selfieAnalysis.findUnique({
     where: { customerId: customer.id },
@@ -1809,6 +1858,37 @@ export default function PassportPage() {
                     style={{ marginTop: sizesDetail ? "12px" : "0" }}
                   >
                     {sizesDetail ? "UPDATE SIZES" : "ADD SIZES & MEASUREMENTS"}
+                  </button>
+                </div>
+
+                <div className="sp-ov-enrich-card">
+                  <div className="sp-ov-enrich-card-title">About You</div>
+                  <p className="sp-ov-enrich-card-desc">
+                    Optional context — not used to infer your style or restrict recommendations.
+                  </p>
+                  {(() => {
+                    const ageLabel = (savedAnswers["age-range"] as string | undefined)
+                      ? lbl("age-range", savedAnswers["age-range"] as string)
+                      : null;
+                    const genderLabel = (savedAnswers["gender"] as string | undefined)
+                      ? lbl("gender", savedAnswers["gender"] as string)
+                      : null;
+                    const genderNote = (savedAnswers["gender-self-description"] as string | undefined)?.trim() ?? null;
+                    const parts = [ageLabel, genderLabel].filter(Boolean);
+                    return parts.length > 0 ? (
+                      <div className="sp-ov-enrich-detail">
+                        {parts.join(" · ")}
+                        {genderNote && <span className="sp-ov-enrich-detail-note"> — {genderNote}</span>}
+                      </div>
+                    ) : null;
+                  })()}
+                  <button
+                    type="button"
+                    className="sp-btn-outline"
+                    onClick={() => editSection("about-you")}
+                    style={{ marginTop: savedAnswers["age-range"] || savedAnswers["gender"] ? "12px" : "0" }}
+                  >
+                    {savedAnswers["age-range"] || savedAnswers["gender"] ? "UPDATE" : "ADD ABOUT YOU"}
                   </button>
                 </div>
 
