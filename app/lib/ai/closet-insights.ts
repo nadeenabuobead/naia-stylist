@@ -250,12 +250,21 @@ export function computeClosetInsights(
     const positiveItems = taggedItems.filter((i) =>
       (i.garmentRelationships ?? []).some((r) => POSITIVE_RELATIONSHIPS.has(r)),
     ).length;
-    const frictionItems = taggedItems.filter((i) =>
-      (i.garmentRelationships ?? []).some((r) => FRICTION_RELATIONSHIPS.has(r)),
+    // Friction and negative split by individual tag so claims don't conflate distinct meanings.
+    const struggleItems = taggedItems.filter((i) =>
+      (i.garmentRelationships ?? []).includes("love-style-struggle"),
     ).length;
-    const negativeItems = taggedItems.filter((i) =>
-      (i.garmentRelationships ?? []).some((r) => NEGATIVE_RELATIONSHIPS.has(r)),
+    const unsureItems = taggedItems.filter((i) =>
+      (i.garmentRelationships ?? []).includes("unsure"),
     ).length;
+    const rarelyWearItems = taggedItems.filter((i) =>
+      (i.garmentRelationships ?? []).includes("rarely-wear"),
+    ).length;
+    const regretItems = taggedItems.filter((i) =>
+      (i.garmentRelationships ?? []).includes("regret"),
+    ).length;
+    const frictionItems = struggleItems + unsureItems;
+    const negativeItems = rarelyWearItems + regretItems;
 
     const taggedCount = taggedItems.length;
     const positiveRatio = positiveItems / taggedCount;
@@ -271,28 +280,57 @@ export function computeClosetInsights(
         claim = `${positiveItems} of the ${taggedCount} ${pieceWord} you've tagged are favourites or ones you wear often — a clear core is forming in your Closet.`;
       } else {
         const notes: string[] = [];
-        if (frictionItems > 0) {
-          notes.push(`${frictionItems} ${frictionItems === 1 ? "is" : "are"} harder to style`);
+        if (struggleItems > 0) {
+          notes.push(`${struggleItems} ${struggleItems === 1 ? "is" : "are"} harder to style`);
         }
-        if (negativeItems > 0) {
-          notes.push(`${negativeItems} ${negativeItems === 1 ? "isn't" : "aren't"} getting much wear yet`);
+        if (unsureItems > 0) {
+          notes.push(`${unsureItems} you're still unsure about`);
         }
-        claim = `${positiveItems} of the ${taggedCount} pieces you've tagged are favourites or regular wears — ${notes.join(", and ")}.`;
+        if (rarelyWearItems > 0) {
+          notes.push(`${rarelyWearItems} ${rarelyWearItems === 1 ? "rarely gets" : "rarely get"} worn`);
+        }
+        if (regretItems > 0) {
+          notes.push(regretItems === 1 ? "1 is a purchase you regret" : `${regretItems} are purchases you regret`);
+        }
+        claim = `${positiveItems} of the ${taggedCount} pieces you've tagged are favourites or regular wears — ${joinInsightNotes(notes)}.`;
       }
     } else if (negativeRatio >= 0.4) {
-      const pieceWord = negativeItems === 1 ? "piece" : "pieces";
-      claim = `${negativeItems} of the ${taggedCount} ${pieceWord} you've tagged aren't getting much wear — that's a signal worth noticing.`;
+      const parts: string[] = [];
+      if (rarelyWearItems > 0) {
+        parts.push(`${rarelyWearItems} ${rarelyWearItems === 1 ? "rarely gets" : "rarely get"} worn`);
+      }
+      if (regretItems > 0) {
+        parts.push(regretItems === 1 ? "1 is a purchase you regret" : `${regretItems} are purchases you regret`);
+      }
+      const negDesc = joinInsightNotes(parts);
+      claim = `${negativeItems} of the ${taggedCount} ${negativeItems === 1 ? "piece" : "pieces"} you've tagged ${negativeItems === 1 ? "isn't earning its place" : "aren't earning their place"} — ${negDesc}.`;
     } else if (frictionRatio > positiveRatio && frictionRatio >= 0.33) {
-      claim = `${frictionItems} of the ${taggedCount} pieces you've tagged are ones you love but haven't figured out how to style yet — more than your clear favourites right now.`;
+      if (struggleItems > 0 && unsureItems > 0) {
+        claim = `${struggleItems} of the ${taggedCount} pieces you've tagged are harder to style, and ${unsureItems} you're still unsure about — more uncertain pieces than clear favourites right now.`;
+      } else if (struggleItems > 0) {
+        claim = `${struggleItems} of the ${taggedCount} pieces you've tagged are ones you love but haven't figured out how to style yet — more than your clear favourites right now.`;
+      } else {
+        claim = `${unsureItems} of the ${taggedCount} pieces you've tagged are ones you're still unsure about — more uncertainty than clarity in your Closet right now.`;
+      }
     } else {
       const parts: string[] = [];
       if (positiveItems > 0) {
         parts.push(`${positiveItems} ${positiveItems === 1 ? "piece" : "pieces"} you wear regularly`);
       }
-      if (frictionItems > 0) parts.push(`${frictionItems} you find harder to style`);
-      if (negativeItems > 0) parts.push(`${negativeItems} that rarely get worn`);
+      if (struggleItems > 0) {
+        parts.push(`${struggleItems} ${struggleItems === 1 ? "is" : "are"} harder to style`);
+      }
+      if (unsureItems > 0) {
+        parts.push(`${unsureItems} you're still unsure about`);
+      }
+      if (rarelyWearItems > 0) {
+        parts.push(`${rarelyWearItems} that rarely ${rarelyWearItems === 1 ? "gets" : "get"} worn`);
+      }
+      if (regretItems > 0) {
+        parts.push(regretItems === 1 ? "1 that's a purchase you regret" : `${regretItems} that are purchases you regret`);
+      }
       claim = parts.length > 0
-        ? `The pieces you've tagged are spread — ${parts.join(", ")}.`
+        ? `The pieces you've tagged are spread — ${joinInsightNotes(parts)}.`
         : `You've tagged ${taggedCount} of the ${totalItems} pieces you've added with how you feel about them.`;
     }
 
@@ -303,7 +341,7 @@ export function computeClosetInsights(
       evidence: [
         {
           field: "garmentRelationships",
-          value: `${taggedCount} of ${totalItems} items tagged; ${positiveItems} positive, ${frictionItems} friction, ${negativeItems} low-use`,
+          value: `${taggedCount} of ${totalItems} items tagged; ${positiveItems} positive, ${struggleItems} struggle, ${unsureItems} unsure, ${rarelyWearItems} rarely-wear, ${regretItems} regret`,
         },
       ],
       passportEffects: [],
@@ -705,6 +743,13 @@ function curateDiverse(candidates: ClosetInsight[]): ClosetInsight[] {
   }
 
   return result;
+}
+
+function joinInsightNotes(notes: string[]): string {
+  if (notes.length === 0) return "";
+  if (notes.length === 1) return notes[0];
+  if (notes.length === 2) return `${notes[0]} and ${notes[1]}`;
+  return `${notes.slice(0, -1).join(", ")}, and ${notes[notes.length - 1]}`;
 }
 
 function buildFavouriteColourClaim(colour: string, count: number, total: number): string {
