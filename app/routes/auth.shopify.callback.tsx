@@ -52,6 +52,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const state = url.searchParams.get("state");
 
   // ── Validate all required parameters present ──
+  // TEMP DIAGNOSTIC — remove after root-cause confirmed
+  console.log("[auth-cb-diag]", JSON.stringify({
+    hasCode: !!code,
+    hasState: !!state,
+    hasStoredState: !!storedState,
+    hasStoredVerifier: !!storedVerifier,
+    hasStoredNonce: !!storedNonce,
+    hasCookieHeader: !!request.headers.get("Cookie"),
+    cookieHeaderLen: request.headers.get("Cookie")?.length ?? 0,
+    requestHost: url.hostname,
+  }));
   if (!code || !state || !storedState || !storedVerifier || !storedNonce) {
     return fail(400, "Missing OAuth parameters");
   }
