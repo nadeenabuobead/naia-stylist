@@ -96,4 +96,6 @@ export default [
   route("api/tryon-status/:jobId", "routes/api.tryon-status.$jobId.tsx"),
   // Style Memory V1 — StyleMe outcome capture (UPSERT per OutfitSuggestion)
   route("api/styleme-outcome", "routes/api.styleme-outcome.tsx"),
+  // TEMP: one-time migration for 20260904000000_closet_customer_note — remove after confirming column
+  route("api/migrate-closet-note", "routes/api.migrate-closet-note.ts"),
 ] satisfies RouteConfig;
