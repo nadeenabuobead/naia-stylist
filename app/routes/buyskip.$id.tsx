@@ -306,9 +306,6 @@ export default function BuyOrSkipResult() {
         <div className="bos-result-hero-content">
           <div className="bos-verdict">
             {displayVerdict}
-            {typeof confidence === "number" && confidence > 0 && (
-              <span className="bos-verdict-match"> — {confidence}% MATCH</span>
-            )}
           </div>
           {finalThought && (
             <p className="bos-result-summary">{finalThought}</p>
@@ -523,48 +520,6 @@ export default function BuyOrSkipResult() {
                 ✓ {fa.fillsGap}
               </p>
             )}
-          </div>
-        )}
-
-        {/* ── NADINE section — only shown when AI returns a genuine complement ── */}
-        {naiaMatch && (
-          <div className="bos-result-section bos-result-section--nadine">
-            <div className="bos-result-section-label">Pair It With NADINE</div>
-            <div className="bos-naia-inner">
-              {typeof naiaMatch === "object" && naiaMatch.imageUrl && (
-                <a
-                  href={typeof naiaMatch === "object" && naiaMatch.url ? naiaMatch.url : undefined}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="bos-naia-img-link"
-                  aria-label={`Shop ${typeof naiaMatch === "object" ? naiaMatch.title : naiaMatch}`}
-                >
-                  <img
-                    src={naiaMatch.imageUrl}
-                    alt={typeof naiaMatch === "object" ? naiaMatch.title : String(naiaMatch)}
-                    className="bos-naia-img"
-                  />
-                </a>
-              )}
-              <div className="bos-naia-details">
-                <div className="bos-naia-title">
-                  {typeof naiaMatch === "object" ? naiaMatch.title : naiaMatch}
-                </div>
-                {typeof naiaMatch === "object" && naiaMatch.reason && (
-                  <div className="bos-naia-reason">{naiaMatch.reason}</div>
-                )}
-                {typeof naiaMatch === "object" && naiaMatch.url && (
-                  <a
-                    href={naiaMatch.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="bos-naia-link"
-                  >
-                    Shop This Piece →
-                  </a>
-                )}
-              </div>
-            </div>
           </div>
         )}
 

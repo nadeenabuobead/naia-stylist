@@ -108,9 +108,6 @@ export default function BuyingDecisions() {
                   {d.verdict}
                 </div>
                 {d.category && <div className="bos-decision-category">{d.category}</div>}
-                {typeof d.confidence === "number" && d.confidence > 0 && (
-                  <div className="bos-decision-confidence">{d.confidence}% confidence</div>
-                )}
                 {d.outcomeSummary && (
                   <div className="bos-decision-outcome" data-testid="bos-decision-outcome">
                     {d.outcomeSummary}
