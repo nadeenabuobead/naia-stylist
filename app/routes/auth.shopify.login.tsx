@@ -58,14 +58,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Mobile Safari's bounce-tracking mitigation can drop cookies set in a
   // 302 response that immediately redirects away; a 200 + script gives the
   // browser time to commit the cookie before navigating to Shopify.
-  // TEMP DIAGNOSTIC — remove after root-cause confirmed
-  console.log("[auth-login-diag]", JSON.stringify({
-    hasStorefrontHost: !!storefrontHost,
-    storefrontHostLen: storefrontHost.length,
-    redirectUri,
-    hasSfFlag: url.searchParams.has("_sf"),
-    requestHost: url.hostname,
-  }));
   const safeUrl = JSON.stringify(authUrl);
   return new Response(
     `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">`
