@@ -83,7 +83,6 @@ export default [
   route("api/analyze-item", "routes/api.analyze-item.jsx"),
   route("api/cloudinary-signature", "routes/api.cloudinary-signature.jsx"),
   route("api/save-style-profile", "routes/api.save-style-profile.jsx"),
-  route("api/admin/migrate-about-you", "routes/api.admin.migrate-about-you.jsx"),
   route("api/customer-account-identity", "routes/api.customer-account-identity.jsx"),
   route("api/designer-dashboard", "routes/api.designer-dashboard.jsx"),
   route("api/seed-staging", "routes/api.seed-staging.jsx"),
