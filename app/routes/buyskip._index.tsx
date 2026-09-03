@@ -276,7 +276,7 @@ export default function BuyOrSkip() {
 
       {/* Section shell */}
       <div className="sp-shell">
-        <h1 className="sp-shell-title">Should I Buy This?</h1>
+        <h1 className="sp-shell-title">SHOULD I BUY <span className="sp-shell-accent">this?</span></h1>
         <p className="sp-shell-desc">
           Considering a piece from another brand? Share it with nAia and receive an honest read based
           on your style, wardrobe, lifestyle and whether you already own something similar.

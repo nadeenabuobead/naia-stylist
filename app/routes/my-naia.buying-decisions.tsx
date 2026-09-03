@@ -53,7 +53,7 @@ export default function BuyingDecisions() {
 
       <div className="sp-shell">
         <div className="sp-shell-eyebrow">Buy or Skip</div>
-        <h1 className="sp-shell-title">My Decisions</h1>
+        <h1 className="sp-shell-title">MY <span className="sp-shell-accent">decisions.</span></h1>
         <p className="sp-shell-desc">
           Every item nAia has assessed for you. Tap any decision to review the full recommendation.
         </p>

@@ -61,7 +61,7 @@
 
   /* ── Monospace (StyleMe journey labels / buttons) ───────────── */
   --naia-ff-mono: 'Courier New', Courier, monospace;
-  --naia-ds-build: 6;
+  --naia-ds-build: 7;
 
   /* ── Lovable token system (feat/lovable-full-site source of truth)
      Used verbatim by ported Lovable components.
@@ -1372,6 +1372,14 @@ a.mn-action:focus-visible,
 }
 @media (min-width: 640px) { .sp-shell-title { font-size: 3rem; } }
 @media (min-width: 1024px) { .sp-shell-title { font-size: 4.25rem; } }
+.sp-shell-accent {
+  font-family: var(--ff-editorial);
+  font-style: italic;
+  font-weight: 400;
+  color: var(--lipstick);
+  text-transform: none;
+  letter-spacing: 0;
+}
 .sp-shell-desc {
   font-family: var(--naia-ff-body);
   font-style: italic;

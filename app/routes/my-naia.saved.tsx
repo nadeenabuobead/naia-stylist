@@ -108,7 +108,7 @@ export default function SavedLooks() {
 
       <div className="sp-shell">
         <div className="sp-shell-eyebrow">Your Style Archive</div>
-        <h1 className="sp-shell-title">Saved Looks</h1>
+        <h1 className="sp-shell-title">SAVED <span className="sp-shell-accent">looks.</span></h1>
         <p className="sp-shell-desc">
           Looks you've kept from your styling sessions. Return to them any time to revisit the pieces and the finishing touches that made them yours.
         </p>

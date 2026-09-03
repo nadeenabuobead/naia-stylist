@@ -1644,7 +1644,7 @@ export default function PassportPage() {
           <Link to="/my-naia" className="sp-back">← Overview</Link>
 
           <div className="sp-shell">
-            <h1 className="sp-shell-title">Your Style Passport</h1>
+            <h1 className="sp-shell-title">STYLE <span className="sp-shell-accent">passport.</span></h1>
             <p className="sp-shell-desc">
               Your Style Passport keeps the preferences that shape your nAia experience in one
               place. Update it whenever your style, life or priorities evolve.
@@ -1998,7 +1998,7 @@ export default function PassportPage() {
 
         <div className="sp-shell">
           <div className="sp-shell-eyebrow">Update Answers</div>
-          <h2 className="sp-shell-title">Which section would you like to edit?</h2>
+          <h2 className="sp-shell-title">EDIT <span className="sp-shell-accent">passport.</span></h2>
           <p className="sp-shell-desc">
             Choose any section below. All other answers stay exactly as they are.
           </p>
@@ -2040,7 +2040,7 @@ export default function PassportPage() {
         </button>
 
         <div className="sp-shell">
-          <h1 className="sp-shell-title">Your Style Passport is up to date</h1>
+          <h1 className="sp-shell-title">STYLE <span className="sp-shell-accent">passport.</span></h1>
           <p className="sp-shell-desc">
             nAia now has your current preferences. Every suggestion from here will reflect the
             updated version of your Passport.
@@ -2160,7 +2160,7 @@ export default function PassportPage() {
         </button>
 
         <div className="sp-shell">
-          <h1 className="sp-shell-title">Your Style Passport is up to date</h1>
+          <h1 className="sp-shell-title">STYLE <span className="sp-shell-accent">passport.</span></h1>
           <p className="sp-shell-desc">
             nAia has your latest preferences. You can revisit any answer at any time.
           </p>

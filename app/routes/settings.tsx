@@ -107,7 +107,7 @@ export default function Settings() {
 
       <div className="sp-shell">
         <div className="sp-shell-eyebrow">Settings & Privacy</div>
-        <h1 className="sp-shell-title">Your Account</h1>
+        <h1 className="sp-shell-title">YOUR <span className="sp-shell-accent">account.</span></h1>
       </div>
 
       {/* Account Details */}

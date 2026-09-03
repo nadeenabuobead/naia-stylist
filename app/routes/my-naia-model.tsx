@@ -145,7 +145,7 @@ export default function MyNaiaModelRoute() {
 
       <div className="sp-shell">
         <div className="sp-shell-eyebrow">Personalisation · Virtual Try-On</div>
-        <h1 className="sp-shell-title">My nAia Model</h1>
+        <h1 className="sp-shell-title">MY nAia <span className="sp-shell-accent">model.</span></h1>
         <p className="sp-shell-desc">
           Photos added to My nAia Model are stored privately so nAia can reuse them for your styling
           and try-on experiences. You can replace or remove them at any time.

@@ -90,7 +90,7 @@ export default function StyleMeIndex() {
       <Link to="/my-naia" className="sp-back">← Overview</Link>
 
       <div className="sp-shell">
-        <h1 className="sp-shell-title">Style Me</h1>
+        <h1 className="sp-shell-title">STYLE <span className="sp-shell-accent">me.</span></h1>
         <p className="sp-shell-desc">
           Tell nAia what you need today and receive a considered look built from your own Closet.
           Answer a few questions and let nAia do the rest.

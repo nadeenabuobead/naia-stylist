@@ -1276,7 +1276,7 @@ export default function Closet() {
         </Link>
 
         {/* Option A page header */}
-        <h1 className="cl-headline">My Closet</h1>
+        <h1 className="cl-headline">DIGITAL <span className="sp-shell-accent">closet.</span></h1>
         <p className="cl-sub">Upload, save, and style your pieces.</p>
 
         {/* Option A: Total Pieces / Categories / Brands */}
@@ -1318,7 +1318,7 @@ export default function Closet() {
         {showAddForm && (
           <div className="cl-form">
             <div className="cl-form-header">
-              <h3 className="cl-form-title">Add to My Closet</h3>
+              <h3 className="cl-form-title">ADD TO YOUR <span className="sp-shell-accent">closet.</span></h3>
               <button type="button" className="cl-form-cancel" onClick={resetAddForm}>Cancel</button>
             </div>
 
