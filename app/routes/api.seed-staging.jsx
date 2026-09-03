@@ -116,27 +116,6 @@ export async function action({ request }) {
 
   const act = body?._action ?? "createCustomer";
 
-  // ── applyClosetNote (STAGING_FIX_SECRET only) ─────────────────────────────
-  // Applies migration 20260904000000_closet_customer_note.
-  // Requires STAGING_FIX_SECRET via x-fix-secret header (not x-seed-secret).
-  // Idempotent: uses IF NOT EXISTS so safe to call more than once.
-  // Remove this action once migration is confirmed on staging.
-  if (act === "applyClosetNote") {
-    const fixSecret = request.headers.get("x-fix-secret");
-    if (!process.env.STAGING_FIX_SECRET || fixSecret !== process.env.STAGING_FIX_SECRET) {
-      return new Response("Forbidden", { status: 403 });
-    }
-    try {
-      await prisma.$executeRaw`ALTER TABLE "ClosetItem" ADD COLUMN IF NOT EXISTS "customerNote" TEXT`;
-      const cols = await prisma.$queryRaw`
-        SELECT column_name, data_type
-        FROM information_schema.columns
-        WHERE table_name = 'ClosetItem' AND column_name = 'customerNote'`;
-      return Response.json({ ok: true, applied: true, columns: cols });
-    } catch (err) {
-      return Response.json({ ok: false, error: String(err) }, { status: 500 });
-    }
-  }
 
   // All other actions require x-seed-secret
   const secret = request.headers.get("x-seed-secret");
