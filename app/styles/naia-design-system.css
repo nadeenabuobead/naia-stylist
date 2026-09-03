@@ -1372,7 +1372,7 @@ a.mn-action:focus-visible,
   font-size: 15px;
   line-height: 1.7;
   color: rgba(40, 21, 12, 0.65);
-  max-width: 800px;
+  max-width: none;
   margin: 0;
 }
 
