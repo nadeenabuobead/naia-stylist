@@ -61,7 +61,7 @@
 
   /* ── Monospace (StyleMe journey labels / buttons) ───────────── */
   --naia-ff-mono: 'Courier New', Courier, monospace;
-  --naia-ds-build: 7;
+  --naia-ds-build: 8;
 
   /* ── Lovable token system (feat/lovable-full-site source of truth)
      Used verbatim by ported Lovable components.
