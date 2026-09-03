@@ -1,5 +1,5 @@
-import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
-import { prisma } from "~/lib/prisma.server";
+import { requireCurrentNaiaCustomer } from "../lib/naia-session.server";
+import prisma from "../db.server";
 
 const AGE_RANGE_VALID = new Set([
   "18-24", "25-34", "35-44", "45-54", "55-64", "65-plus", "prefer-not-to-say",
