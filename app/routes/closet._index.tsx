@@ -676,8 +676,10 @@ const css = `
   .mn-page-sections>.mn-back-link{display:block;margin-bottom:1.75rem}
 
   /* ── Option A cl-* page content — calibrated for 880 px column ── */
-  /* Title: matches sp-shell-title exactly (naia-design-system.css). */
-  .cl-headline{font-family:var(--naia-ff-display);font-size:clamp(3rem,7vw,6rem);font-weight:200;color:var(--naia-ink);line-height:0.88;letter-spacing:0.02em;text-transform:uppercase;margin:0 0 24px}
+  /* Title: mirrors sp-shell-title breakpoints (2rem → 3rem → 4.25rem). */
+  .cl-headline{font-family:var(--naia-ff-display);font-size:2rem;font-weight:200;color:var(--naia-ink);line-height:0.92;letter-spacing:0.02em;text-transform:uppercase;margin:0 0 24px}
+  @media(min-width:640px){.cl-headline{font-size:3rem}}
+  @media(min-width:1024px){.cl-headline{font-size:4.25rem}}
   /* Subtitle — shared editorial intro style */
   .cl-sub{font-family:var(--naia-ff-body);font-style:italic;font-size:1.05rem;line-height:1.75;color:rgba(40,21,12,0.65);margin:0 0 28px}
   /* Stats — 3-col grid. Padding 20px (was 24px) to tighten card density. */
