@@ -1362,12 +1362,12 @@ a.mn-action:focus-visible,
 .sp-shell-title {
   font-family: var(--naia-ff-display);
   font-weight: 200;
-  font-size: clamp(2rem, 4vw, 3.5rem);
+  font-size: clamp(3rem, 7vw, 6rem);
   text-transform: uppercase;
   letter-spacing: 0.02em;
+  line-height: 0.88;
   color: var(--naia-ink);
-  line-height: 0.95;
-  margin: 0 0 16px;
+  margin: 0 0 24px;
 }
 .sp-shell-desc {
   font-family: var(--naia-ff-body);
@@ -1375,8 +1375,7 @@ a.mn-action:focus-visible,
   font-size: 1.05rem;
   line-height: 1.75;
   color: rgba(40, 21, 12, 0.65);
-  width: 100%;
-  max-width: 70rem;
+  max-width: none;
   margin: 0;
 }
 

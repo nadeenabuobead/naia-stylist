@@ -314,8 +314,7 @@ export default function MyTrendEdits() {
         <div className="tme-hero">
           <div className="tme-hero-eyebrow">personal edit</div>
           <h1 className="tme-hero-title">
-            my trend<br />
-            <em>edits.</em>
+            my trend <em>edits.</em>
           </h1>
           <p className="tme-hero-sub">
             Each Trend Report, read against your Style Passport and Closet — showing what is relevant to you, what to skip, and how to wear it.

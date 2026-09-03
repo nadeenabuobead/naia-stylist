@@ -99,7 +99,7 @@ function detectImageFormatFromBytes(header: Uint8Array): string | null {
 }
 
 export function meta() {
-  return [{ title: "Digital Closet | nAia" }];
+  return [{ title: "My Closet | nAia" }];
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -677,9 +677,9 @@ const css = `
 
   /* ── Option A cl-* page content — calibrated for 880 px column ── */
   /* Title: matches sp-shell-title exactly (naia-design-system.css). */
-  .cl-headline{font-family:var(--naia-ff-display);font-size:clamp(24px,3.5vw,36px);font-weight:200;color:var(--naia-ink);line-height:1.05;margin-bottom:14px}
-  /* Subtitle */
-  .cl-sub{font-family:var(--ff-ui);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:28px}
+  .cl-headline{font-family:var(--naia-ff-display);font-size:clamp(3rem,7vw,6rem);font-weight:200;color:var(--naia-ink);line-height:0.88;letter-spacing:0.02em;text-transform:uppercase;margin:0 0 24px}
+  /* Subtitle — shared editorial intro style */
+  .cl-sub{font-family:var(--naia-ff-body);font-style:italic;font-size:1.05rem;line-height:1.75;color:rgba(40,21,12,0.65);margin:0 0 28px}
   /* Stats — 3-col grid. Padding 20px (was 24px) to tighten card density. */
   .cl-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:28px}
   .cl-stat{background:var(--bg-50, var(--c-surface));padding:20px;border:1px solid var(--fg-10, var(--c-border))}
@@ -1274,8 +1274,8 @@ export default function Closet() {
         </Link>
 
         {/* Option A page header */}
-        <h1 className="cl-headline">Digital Closet</h1>
-        <p className="cl-sub">Upload, save, and style your pieces</p>
+        <h1 className="cl-headline">My Closet</h1>
+        <p className="cl-sub">Upload, save, and style your pieces.</p>
 
         {/* Option A: Total Pieces / Categories / Brands */}
         <div className="cl-stats">
