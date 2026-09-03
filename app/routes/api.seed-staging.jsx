@@ -37,6 +37,35 @@ export async function loader({ request }) {
     return new Response("Forbidden", { status: 403 });
   }
 
+  // ── setProfileVersion (GET) ──────────────────────────────────────────────
+  // Accepts STAGING_FIX_SECRET (or STAGING_SEED_SECRET) via ?fixSecret=...
+  const actionParam = url.searchParams.get("_action");
+  if (actionParam === "setProfileVersion") {
+    const fixSecret = url.searchParams.get("fixSecret");
+    const validFix =
+      (process.env.STAGING_FIX_SECRET && fixSecret === process.env.STAGING_FIX_SECRET) ||
+      fixSecret === process.env.STAGING_SEED_SECRET;
+    if (!validFix) return new Response("Forbidden", { status: 403 });
+    const cid     = url.searchParams.get("shopifyCustomerId");
+    const byEmail = url.searchParams.get("email");
+    const ver     = Number(url.searchParams.get("version") ?? "6");
+    if (!cid && !byEmail) return Response.json({ error: "shopifyCustomerId or email required" }, { status: 400 });
+    const customer = await prisma.customer.findFirst({
+      where: cid ? { shopifyCustomerId: cid } : { email: byEmail },
+      include: { onboardingProfile: { select: { id: true, completed: true, profileVersion: true } } },
+    });
+    if (!customer) return Response.json({ error: "customer not found" }, { status: 404 });
+    const op = customer.onboardingProfile;
+    if (!op) return Response.json({ error: "no onboarding profile" }, { status: 404 });
+    const before = { profileVersion: op.profileVersion };
+    const after = await prisma.onboardingProfile.update({
+      where: { id: op.id },
+      data: { profileVersion: ver },
+      select: { id: true, completed: true, profileVersion: true },
+    });
+    return Response.json({ ok: true, shopifyCustomerId: customer.shopifyCustomerId, before, after });
+  }
+
   const shopifyCustomerId = url.searchParams.get("id");
   const email             = url.searchParams.get("email");
   const to                = url.searchParams.get("to") ?? "/my-naia";
@@ -328,6 +357,26 @@ export async function action({ request }) {
     // Cascade delete via customer FK removes sessions, events, analyses, etc.
     await prisma.customer.delete({ where: { id: customer.id } });
     return Response.json({ cleaned: true, customerId: customer.id });
+  }
+
+  // ── setProfileVersion ─────────────────────────────────────────────────────
+  if (act === "setProfileVersion") {
+    const { shopifyCustomerId: cid, email: byEmail, version = 6 } = body ?? {};
+    if (!cid && !byEmail) return Response.json({ error: "shopifyCustomerId or email required" }, { status: 400 });
+    const customer = await prisma.customer.findFirst({
+      where: cid ? { shopifyCustomerId: String(cid) } : { email: String(byEmail) },
+      include: { onboardingProfile: { select: { id: true, completed: true, profileVersion: true } } },
+    });
+    if (!customer) return Response.json({ error: "customer not found" }, { status: 404 });
+    const op = customer.onboardingProfile;
+    if (!op) return Response.json({ error: "no onboarding profile" }, { status: 404 });
+    const before = { profileVersion: op.profileVersion };
+    const after = await prisma.onboardingProfile.update({
+      where: { id: op.id },
+      data: { profileVersion: Number(version) },
+      select: { id: true, completed: true, profileVersion: true },
+    });
+    return Response.json({ ok: true, shopifyCustomerId: customer.shopifyCustomerId, before, after });
   }
 
   return Response.json({ error: "Unknown _action" }, { status: 400 });

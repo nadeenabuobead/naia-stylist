@@ -1438,6 +1438,9 @@ export default function PassportPage() {
     setSaveStatus("saving");
     try {
       const requestBody: Record<string, unknown> = { ...patch, baseProfileUpdatedAt: profileUpdatedAt };
+      if (isLegacyCustomer) {
+        requestBody.onboardingComplete = true;
+      }
       if (sectionId === "fit") {
         requestBody.editedField = sizeEditedField ?? "bodyFocusAreas";
       }

@@ -651,10 +651,12 @@ export async function action({ request }) {
     const missingRev6 = requiredRev6
       .filter(([, v]) => !Array.isArray(v) || v.length === 0)
       .map(([k]) => k);
-    if (missingRev6.length > 0) {
+    if (missingRev6.length > 0 && !op?.completed) {
       return Response.json({ error: "incomplete_rev6_profile", missingFields: missingRev6 }, { status: 400 });
     }
-    profileData.profileVersion = 6;
+    if (missingRev6.length === 0) {
+      profileData.profileVersion = 6;
+    }
   }
 
   if (op) {
