@@ -10,8 +10,6 @@ import {
   getCloudinaryConfig,
 } from "../lib/cloudinary-admin.server";
 import { emitBuySkipSubmitted, recordJourneyEventAwaited } from "../lib/ai/journey-events.server";
-import { getAllCatalogProducts } from "../lib/ai/naia-catalog";
-import { NAIA_VERIFIED_MEDIA_MAP } from "../lib/ai/naia-product-media";
 import { quizQuestions } from "../lib/onboarding/quiz-data";
 import { moderateImageContent } from "../lib/image-moderation.server";
 import { screenGarmentSuitability } from "../lib/image-suitability.server";
@@ -27,29 +25,6 @@ const CORS = {
  */
 
 // ANALYZE ITEM ACTION (for Buy/Skip)
-
-// Build NAIA_PRODUCTS from canonical catalog — single source of truth.
-const ITEM_TYPE_TO_CATEGORY = { TOP: "Top", BOTTOM: "Bottom", OUTERWEAR: "Outerwear", DRESS: "Dress", SET: "Dress" };
-const NAIA_PRODUCTS = getAllCatalogProducts().map(p => ({
-  title: p.parsed.identity.verifiedTitle,
-  category: ITEM_TYPE_TO_CATEGORY[p.parsed.identity.itemType] ?? "Top",
-  itemType: p.parsed.identity.itemType,
-  silhouette: p.parsed.identity.silhouette ?? null,
-  handle: p.handle,
-  url: p.parsed.identity.liveUrl ?? `https://naiabynadine.com/products/${p.handle}`,
-  imageUrl: NAIA_VERIFIED_MEDIA_MAP.get(p.handle)?.resolvedUrl ?? null,
-}));
-
-const COMPLEMENTARY_CATEGORIES = {
-  "Top":       ["Bottom", "Outerwear"],
-  "Bottom":    ["Top", "Outerwear"],
-  "Dress":     ["Outerwear"],
-  "Outerwear": ["Top", "Bottom", "Dress"],
-  "Shoes":     ["Top", "Bottom", "Dress", "Outerwear"],
-  "Bag":       ["Top", "Bottom", "Dress", "Outerwear"],
-  "Accessory": ["Top", "Bottom", "Dress", "Outerwear"],
-  "Jewelry":   ["Top", "Bottom", "Dress", "Outerwear"],
-};
 
 // Maps uploaded-item category (Buy or Skip values) to compatible Closet enum values
 const CLOSET_COMPATIBLE_CATEGORIES = {
@@ -287,19 +262,34 @@ async function analyzeItem(request) {
       where: { id: naiaCustomer.id },
       select: {
         closetItems: {
-          take: 20,
+          take: 40,
           orderBy: { createdAt: "desc" },
-          select: { name: true, category: true, primaryColor: true }
+          select: {
+            name: true,
+            category: true,
+            primaryColor: true,
+            garmentRelationships: true,
+            silhouette: true,
+            fitProfile: true,
+            formality: true,
+            sleeveLength: true,
+            necklineCoverage: true,
+            shoulderCoverage: true,
+            midriffExposed: true,
+            customerNote: true,
+          }
         }
       }
     });
-    const closetItems = closetData?.closetItems || [];
+    // Sort: items with any relationship signal first (preserving DB recency order within each group),
+    // then untagged items. This ensures relationship-bearing items appear in the eligible window.
+    const rawClosetItems = closetData?.closetItems || [];
+    const closetItems = [
+      ...rawClosetItems.filter(i => i.garmentRelationships?.length > 0),
+      ...rawClosetItems.filter(i => !i.garmentRelationships?.length),
+    ];
 
     const normalizedCategory = (category || "").trim();
-    const allowed = COMPLEMENTARY_CATEGORIES[normalizedCategory] || ["Top", "Bottom", "Dress", "Outerwear"];
-    const eligibleProducts = NAIA_PRODUCTS.filter(p => allowed.includes(p.category));
-    const fallbackProducts = eligibleProducts.length > 0 ? eligibleProducts : NAIA_PRODUCTS;
-
     const compatibleClosetCategories = CLOSET_COMPATIBLE_CATEGORIES[normalizedCategory] || ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"];
     const eligibleClosetItems = closetItems.filter(i => compatibleClosetCategories.includes(i.category));
 
@@ -331,13 +321,14 @@ async function analyzeItem(request) {
               { type: "image", source: { type: "url", url: privateImageUrl } },
               {
                 type: "text",
-                text: `You are assessing a clothing item for a specific customer. Every verdict, match percentage, summary, and section must be grounded in this customer's actual Passport, Closet, and form inputs. Generic statements that could apply to any customer are not acceptable. Every point stated ONCE only — never repeated across sections.
+                text: `You are assessing a clothing item for a specific customer. Every verdict, summary, and section must be grounded in this customer's actual Passport, Closet, and form inputs. Generic statements that could apply to any customer are not acceptable. Every point stated ONCE only — never repeated across sections.
 
 ITEM DETAILS:
 - Category: ${category||"unknown"}
 - Customer-selected colour: ${Array.isArray(color) ? color.join(", ") : color||"unknown"}
 - Brand: ${brand || "unknown"}
 ${safeSize ? `- Size the customer is considering: ${safeSize}` : ""}
+Price information was not provided — do not assess monetary value or make value judgements based on brand or price.
 
 ${styleProfile ? `CUSTOMER PASSPORT — use every available field across the entire recommendation:
 
@@ -348,6 +339,7 @@ STYLE IDENTITY
 - Fashion risk comfort (1–10): ${styleProfile.comfortLevel ?? "not specified"}
 ${styleProfile.becoming?.length > 0 ? `- Style aspiration: ${styleProfile.becoming.map(id => optionLabel("becoming", id)).join(", ")}` : ""}
 ${styleProfile.styleSupport?.length > 0 ? `- Style support goals: ${styleProfile.styleSupport.map(id => optionLabel("style-support", id)).join(", ")}` : ""}
+${styleProfile.successfulOutfitGives?.length > 0 ? `- What their best outfits give them: ${styleProfile.successfulOutfitGives.map(id => optionLabel("successful-outfit-gives", id)).join(", ")}` : ""}
 
 LIFESTYLE & OCCASIONS
 - Primary lifestyle: ${styleProfile.lifestyle?.join(", ") || "not specified"}
@@ -356,14 +348,15 @@ LIFESTYLE & OCCASIONS
 
 COLOUR PALETTE
 - Favourite colours: ${styleProfile.favoriteColors?.join(", ")}
-- Colours she avoids: ${styleProfile.avoidColors?.length > 0 ? styleProfile.avoidColors.join(", ") : "none specified"}
-→ COLOUR RULE: For the uploaded item's colour, explain specifically whether it complements her palette, usefully expands it, or conflicts with avoided colours. How does it coordinate with confirmed Closet pieces? Treat favourites as preferences, not exclusions. Never reject a neutral without naming how it works or clashes with this specific palette.
+- Colours the customer avoids: ${styleProfile.avoidColors?.length > 0 ? styleProfile.avoidColors.join(", ") : "none specified"}
+→ COLOUR RULE: For the uploaded item's colour, explain specifically whether it complements the customer's palette, usefully expands it, or conflicts with avoided colours. How does it coordinate with confirmed Closet pieces? Treat favourites as preferences, not exclusions. Never reject a neutral without naming how it works or clashes with this specific palette.
 
-FIT & BODY
+FIT, SILHOUETTE & BODY
+- Preferred silhouettes: ${styleProfile.silhouette?.length > 0 ? styleProfile.silhouette.map(id => optionLabel("silhouette", id)).join(", ") : "not specified"}
+- Fit preferences: ${styleProfile.fitPreferences?.length > 0 ? styleProfile.fitPreferences.join(", ") : "not on record"}
 - Usual top size: ${styleProfile.topSize || "not on record"}${styleProfile.sizingSystem ? ` (${styleProfile.sizingSystem.toUpperCase()} sizing)` : ""}
 - Usual bottom size: ${styleProfile.bottomSize || "not on record"}
 - Usual dress size: ${styleProfile.dressSize || "not on record"}
-- Fit preferences: ${styleProfile.fitPreferences?.length > 0 ? styleProfile.fitPreferences.join(", ") : "not on record"}
 - Areas to highlight: ${styleProfile.bodyFocusAreas?.length > 0 ? styleProfile.bodyFocusAreas.join(", ") : "not on record"}
 - Areas to minimise: ${styleProfile.bodyAvoidAreas?.length > 0 ? styleProfile.bodyAvoidAreas.join(", ") : "not on record"}
 - Style struggles: ${styleProfile.styleStruggles?.length > 0 ? styleProfile.styleStruggles.join(", ") : "not specified"}
@@ -374,24 +367,53 @@ ${styleProfile.bustMeasurement || styleProfile.waistMeasurement || styleProfile.
 ${styleProfile.height ? `- Height: ${styleProfile.height}` : ""}
 ${styleProfile.finalNotes?.trim() ? `- Customer's personal note: ${sanitize(styleProfile.finalNotes)}` : ""}
 
-→ FIT CERTAINTY RULE: Never write "This will fit you", "This is your size", or any equivalent certainty claim based solely on the customer's size or measurement data. Exact-fit conclusions require garment measurements AND a verified size chart comparison. If size/measurement data is on the Passport, offer to verify against the brand's size chart — do not assert fit certainty.
-→ BODY SHAPE RULE: Self-described proportions, if noted, may inform general styling directions but must never generate universal "flattering for X shape" claims or generic shape-based advice.
-→ FIT RULE — use available signals in this priority order; never collapse them all into "fit cannot be confirmed":
-  1. Fit preferences on record → reference them by name: "Your Passport shows you prefer [preference], so this [item detail] may feel [more/less] secure/comfortable."
-  2. Highlight / minimise areas on record → apply them: "Your Passport shows you prefer greater [area] coverage — this [cut] is a direct conflict / strong match."
-  3. Size on record for this category → use it to reason about sizing for this item type.
-  4. Measurement fallback ONLY for measurements genuinely absent. Never write "Fit cannot be confirmed from your current Passport" as the opening when fit preferences, size, or coverage data exist.
+DRESSING REQUIREMENTS — explicit constraints, not style preferences:
+${styleProfile.dressingPreferences?.length > 0
+  ? styleProfile.dressingPreferences.map(id => optionLabel("dressing-preferences", id)).join(", ")
+  : "none specified"}
+→ DRESSING RULE: These are hard requirements. Check the uploaded item AND every suggested closet pairing against them. An item that violates a dressing requirement — exposed arms when arms-covered is required, sleeveless when avoid-sleeveless is specified, cropped when no-cropped-tops is specified, shorts when avoid-shorts is specified — must not receive a BUY verdict and must be flagged explicitly. Apply to the item's visible construction: sleeve length, neckline coverage, hem length, midriff exposure.
 
-→ FIT vs COVERAGE SEPARATION RULE — these are two distinct assessments and must never be conflated:
-  - FIT PREFERENCE (fitted/relaxed/oversized) = silhouette shape preference. Use only to evaluate whether the garment's cut and silhouette aligns with what the customer prefers.
-  - COVERAGE / COMFORT PREFERENCE = how much skin is exposed and how rigid the construction feels. Use only to evaluate sheerness, cutouts, exposed neckline/back/midriff, structured boning, or constraining construction.
-  Example of a WRONG conflation: "Your relaxed fit preference conflicts with the corset's boning." Correct: "Your fit preference leans relaxed — this structured corset silhouette is a direct contrast. Separately, the exposed midriff cutout conflicts with your coverage preference."
+→ FIT CERTAINTY RULE: Never write "This will fit you" or any equivalent certainty claim based solely on size or measurement data. Exact-fit conclusions require garment measurements AND a verified size chart comparison.
+→ BODY SHAPE RULE: Self-described proportions may inform general styling directions but must never generate universal "flattering for X shape" claims.
+→ FIT RULE — priority order (never collapse into "fit cannot be confirmed"):
+  1. Preferred silhouettes on record → cite by name: "Their Passport shows a preference for [silhouette] — this item aligns/conflicts."
+  2. Fit preferences on record → "Their Passport shows they prefer [preference], so this [item detail] may feel [more/less] secure."
+  3. Highlight/minimise areas → apply directly.
+  4. Size on record for this category → use for sizing reasoning.
+  5. Measurements → fallback only when genuinely absent.
+
+→ FIT vs COVERAGE SEPARATION RULE — always assessed separately, never conflated:
+  - SILHOUETTE/FIT PREFERENCE = shape and cut alignment with the customer's stated preference.
+  - COVERAGE/DRESSING REQUIREMENT = skin exposure and garment construction constraints.
 
 PERSONALIZATION MANDATE
-- BUY: every positive claim must cite a Passport or form field. Name the style personality, reference the lifestyle occasions, apply fit preferences and colour palette. No praise that applies to any customer.
-- SKIP FOR NOW / SKIP: every blocker must cite a Passport or form field. "Your Passport shows you prefer… so this item…" is the required structure.` : "No style profile on record — give a general analysis."}
+- BUY: every positive claim must cite a Passport or form field by name. Name the style personality, reference the lifestyle occasions, apply silhouette preference, fit preferences, and colour palette.
+- SKIP FOR NOW / SKIP: every blocker must cite a Passport or form field. Structure: "Their Passport shows [field] — this item [conflict/concern]."` : "No style profile on record — give a general analysis."}
 
-CUSTOMER'S INPUTS:
+${(() => {
+  const CURRENT_GOAL_CONTEXT = {
+    "understand-my-style":        "understand their personal style better",
+    "feel-more-like-myself":      "feel more like themselves when dressed",
+    "use-what-i-own":             "make the most of what they already own — avoid adding more without a genuine gap",
+    "easier-getting-dressed":     "make getting dressed easier and faster",
+    "stop-regret-purchases":      "stop buying things they end up not wearing",
+    "more-cohesive-wardrobe":     "build a more cohesive wardrobe",
+    "dress-for-my-life":          "dress better for their actual life and occasions",
+    "refresh-my-style":           "refresh their style",
+    "specific-event-trip-change": "dress well for a specific event, trip, or life change",
+  };
+  const goals = (styleProfile?.currentGoal ?? [])
+    .filter(id => id !== "not-sure-yet" && CURRENT_GOAL_CONTEXT[id]);
+  if (goals.length === 0) return "";
+  const labels = goals.map(id => CURRENT_GOAL_CONTEXT[id]);
+  const goalLine = labels.length === 1 ? labels[0] : labels.slice(0, -1).join(", ") + " and " + labels[labels.length - 1];
+  return `CURRENT FOCUS — what the customer is actively working on right now:
+They want to ${goalLine}.
+→ Let this inform the direction and framing of your reasoning — not override the item evidence. Weight the questions most relevant to this focus: e.g. if they want to stop regret purchases, be more attentive to lifestyle fit, redundancy, and fit uncertainty. If they want to use what they own, assess whether this item fills a genuine gap not already covered by their Closet.
+→ Do NOT use CURRENT FOCUS to generate an automatic BUY or SKIP. The verdict must come from the item + Passport + Closet evidence.
+
+`;
+})()}CUSTOMER'S INPUTS:
 
 OCCASION: ${safeOccasion || "(not provided)"}
 ${safeOccasion ? `→ Does this item suit "${safeOccasion}"? One concrete reason referencing the item's formality and that occasion's dress code. If yes, one styling tip. If no, what adjustment would help.` : "→ Suggest the most suitable occasions given this customer's actual lifestyle contexts."}
@@ -400,73 +422,94 @@ WHAT THEY LIKE: ${safeWhatLike || "(not provided)"}
 ${safeWhatLike ? `→ Agree, partly agree, or disagree? One concrete reason based on the item's actual construction — do not restate what they said.` : ""}
 
 WHAT THEY ARE UNSURE ABOUT: ${safeUnsureAbout || "(not provided)"}
-${safeUnsureAbout ? `→ Justified, partly justified, or not supported? Use "partly justified" when the concern is about fit or sizing and measurements are not on the Passport. Use "justified" only when the issue is clearly visible from the item itself. Be direct. Then offer 2–3 specific practical solutions — e.g. for a strapless concern: supportive strapless bra, grip strips, tailoring the bodice, a styling layer, or trying on before committing.` : ""}
+${safeUnsureAbout ? `→ Justified, partly justified, or not supported? Use "partly justified" when the concern is about fit or sizing and measurements are not on the Passport. Be direct. Then offer 2–3 specific practical solutions.` : ""}
 
 BEFORE YOU BUY — exactly 2 points (25–40 words each). Do NOT begin either point with a label — the card headings already show these:
-1. FIT & PRACTICAL SOLUTION — Open with what IS known from the Passport (fit preferences, coverage preferences, size for this category), referencing them by name. Example: "Your Passport shows you prefer [preference], so this [item detail] may feel [more/less] secure." Only then add what to verify with measurements if specific measurements are missing. Never open with "Fit cannot be confirmed."
+1. FIT & PRACTICAL SOLUTION — Open with what IS known from the Passport (preferred silhouettes, fit preferences, coverage, size for this category). Reference by name. Never open with "Fit cannot be confirmed."
 2. WEARABILITY — Name at least one of the customer's actual lifestyle contexts (${styleProfile?.lifestyle?.join(", ") || "lifestyle not specified"}) and state directly whether this item suits those contexts and how realistically frequent the wear would be. Never use language like "if your lifestyle includes such events."
-No brand-sizing claims — do not state or imply how this brand sizes relative to others.
+No brand-sizing claims.
 
 REPETITION RULE: Each colour, concern or trait appears ONCE. Never repeat Final Condition reasoning in any earlier section.
 
 VERDICT-AWARE PERSONALIZATION RULE:
-- BUY: every claim must cite a Passport or form field — name the style personality/personalities, reference the actual lifestyle occasions, apply fit preferences and palette. No generic praise.
-- SKIP FOR NOW: lead with specific blockers for THIS customer — cite fit preferences, lifestyle occasions, palette, or coverage needs by name. Structure: "Your Passport shows you prefer… so this item…"
-- SKIP: name the specific conflict with this customer's Passport or form data. No softening.
-The "betterDirection" field must describe a product type grounded in this customer's style personality, lifestyle occasions, fit preferences, and any identified Closet gap.
+- BUY: every claim must cite a Passport or form field — name the style personality/personalities, reference actual lifestyle occasions, apply silhouette preference, fit preferences and palette. No generic praise.
+- SKIP FOR NOW: lead with specific blockers — cite silhouette preference, fit preferences, lifestyle occasions, palette, or dressing requirements by name.
+- SKIP: name the specific conflict with the customer's Passport or form data. No softening.
+The "betterDirection" field must describe a product type (silhouette, fabric, fit profile, coverage) that would serve this customer better — no brand names.
 
 ${eligibleClosetItems.length > 0 ? `COMPATIBLE CLOSET CANDIDATES (pairings must come ONLY from this list):
-${eligibleClosetItems.map(i => `- ${i.name} (${i.category}${i.primaryColor ? ", "+i.primaryColor : ""})`).join("\n")}` : "NO COMPATIBLE CLOSET ITEMS — leave closetPairings as an empty array."}
+${eligibleClosetItems.map(i => {
+  const rels = i.garmentRelationships?.length > 0 ? ` [${i.garmentRelationships.join(", ")}]` : "";
+  const garmentDetail = [
+    i.silhouette ? `silhouette: ${i.silhouette}` : null,
+    i.fitProfile ? `fit: ${i.fitProfile}` : null,
+    i.formality ? `formality: ${i.formality}` : null,
+    i.sleeveLength && i.sleeveLength !== "n/a" ? `sleeves: ${i.sleeveLength}` : null,
+    i.necklineCoverage && i.necklineCoverage !== "n/a" ? `neckline: ${i.necklineCoverage}` : null,
+  ].filter(Boolean).join(", ");
+  const noteStr = i.customerNote ? ` | Note: "${i.customerNote}"` : "";
+  return `- ${i.name} (${i.category}${i.primaryColor ? ", "+i.primaryColor : ""}${rels})${garmentDetail ? " | "+garmentDetail : ""}${noteStr}`;
+}).join("\n")}` : "NO COMPATIBLE CLOSET ITEMS — leave closetPairings as an empty array."}
 
-CLOSET PAIRING RULE: For each pairing, state: (a) which of the customer's actual lifestyle occasions this combined outfit suits, (b) how the two pieces' colours coordinate, (c) how their proportions balance. Generic "both pieces share an aesthetic" is not acceptable.
+CLOSET RELATIONSHIP SIGNALS — observed wear behaviour that complements the Passport. It does not override explicit Passport information. If behaviour and Passport disagree, note both rather than silently resolving. One item or a single relationship is evidence, not proof:
+- [favourite] / [wear-often] → proven territory. If the uploaded item is structurally very similar (same silhouette, colour, formality), flag genuine redundancy. If it clearly complements, flag as strong evidence of likely use.
+- [love-style-struggle] → ambiguous. The uploaded item may compound styling difficulty OR resolve it by creating viable outfits with the existing piece. Examine whether it pairs well structurally.
+- [like] → moderate positive signal.
+- [occasion-only] → assess whether the uploaded item expands or duplicates that use case.
+- [unsure] → lower certainty; do not anchor a positive pairing on an unsure item.
+- [rarely-wear] / [regret] → negative behavioural evidence. If the uploaded item is structurally similar, name this as a warning signal. Do not use as a positive pairing anchor.
+Items with no relationship tags have no behavioural evidence — treat as neutral.
 
-NAIA COLLECTION (pick naiaMatch ONLY from this list, exact title):
-${fallbackProducts.map(p => `- ${p.title} [${p.category}${p.silhouette ? ` — ${p.silhouette}` : ""}]`).join("\n")}
+CLOSET PAIRING RULE: For each pairing state: (a) which of the customer's actual lifestyle occasions this outfit suits, (b) how the two pieces' colours coordinate, (c) how their proportions balance. Every pairing must also pass the DRESSING REQUIREMENT TEST — a pairing that violates a dressing requirement is invalid. Generic "both pieces share an aesthetic" is not acceptable.
 
-NADINE PHYSICAL COMPATIBILITY RULES — apply before writing the reason:
-- OUTERWEAR pieces (e.g. trench coat, kimono jacket, zip jacket) are worn ON TOP of another garment, never tucked into or underneath it.
-- BOTTOM pieces (e.g. trousers, skirt) are worn on the lower body. A bottom cannot "layer over" a neckline, drape over shoulders, or be worn over the top half.
-- TOP pieces (e.g. peplum top, crew-neck, shirt) sit on the upper body. A top cannot be "paired beneath" a skirt in the sense of tucking — state "worn with" instead.
-- DRESS pieces replace the top+bottom combination entirely — do not describe pairing a dress as a top or bottom component.
-- Never describe a garment doing something physically impossible for its category.
-NADINE PAIRING RULE: State exactly how the NADINE piece is worn with the uploaded item given the categories above (e.g. "Wear the [NADINE top] under the [uploaded outerwear]", "Pair with [NADINE trousers] for the lower half") and add one colour coordination fact between the two pieces. Physical facts only, no mood language. Return null if no product can realistically be worn with this item as a coherent outfit for this customer.
-
-CONSISTENCY REQUIREMENT: All advice must point in the same direction. closetPairings, naiaMatch, and buyIf/skipIf must reflect the same logic. Never recommend a NADINE piece that contradicts advice given elsewhere.
+CONSISTENCY REQUIREMENT: All advice must point in the same direction. closetPairings and buyIf/skipIf must reflect the same logic.
 
 STRICT RULES:
-1. closetPairings: ONLY from the compatible Closet candidates list. Apply OCCASION TEST (does the combined outfit suit the labeled occasion?) and BALANCE TEST (does this piece support the styling advice?). Return [] if no piece passes both.
-2. naiaMatch: ONLY from the nAia collection list — exact title. A NADINE piece that shares the same dominant visual element (bold print, dramatic silhouette) competes rather than complements — return null. Do not recommend substitutes.
-3. occasions: ${safeOccasion ? `Include "${safeOccasion}" ONLY if the item genuinely suits it.` : "Suggest appropriate occasions given this customer's lifestyle."}
-4. Never invent or hallucinate Passport fields, body data, lifestyle habits, owned pieces, or measurements not listed above.
-5. VOICE RULE — nAia is an independent decision tool, not a retailer, influencer, or salesperson. The following are prohibited in every field of your response: "you deserve it", "treat yourself", "must-have", "you need this", "you're going to look amazing", "obsessed", "gorgeous", "trust me", "game-changer", "last chance", "before it's gone", "hurry", "selling fast", "running out", and any equivalent artificial urgency, scarcity pressure, emotional purchase pressure, or celebratory sales language. State the case for BUY, SKIP FOR NOW, or SKIP with calm, specific, evidence-based reasoning only.
+1. closetPairings: ONLY from the compatible Closet candidates list. Apply OCCASION TEST, BALANCE TEST, and DRESSING REQUIREMENT TEST. Return [] if no piece passes all three.
+2. occasions: ${safeOccasion ? `Include "${safeOccasion}" ONLY if the item genuinely suits it.` : "Suggest appropriate occasions given this customer's lifestyle."}
+3. Never invent or hallucinate Passport fields, body data, lifestyle habits, owned pieces, or measurements not listed above.
+4. VOICE RULE — nAia is an independent decision tool, not a retailer, influencer, or salesperson. Prohibited in every field: "you deserve it", "treat yourself", "must-have", "you need this", "you're going to look amazing", "obsessed", "gorgeous", "trust me", "game-changer", "last chance", "before it's gone", "hurry", "selling fast", "running out", and any equivalent artificial urgency, scarcity pressure, or celebratory sales language. State the case for BUY, SKIP FOR NOW, or SKIP with calm, specific, evidence-based reasoning only.
+5. No brand-based value claims. Price was not provided.
 
 Respond ONLY with valid JSON, no markdown:
 {
   "itemType": "specific type e.g. Maxi Skirt, Blazer, Midi Dress",
   "detectedColor": "AI colour read from the image — ALL CAPS e.g. BEIGE / CREAM",
-  "verdict": "BUY" — item suits this customer well | "SKIP FOR NOW" — potential but blocked by fit confirmation, specific styling condition, or practical hurdle (not definitively unsuitable) | "SKIP" — genuinely unsuitable for this customer with no realistic path,
+  "verdict": "BUY" | "SKIP FOR NOW" | "SKIP",
   "confidence": 0-100,
   "styleDNAMatch": "≤20 words — name at least one of their style personalities explicitly and state whether this item aligns or conflicts with it",
   "detailedAnalysis": {
-    "silhouette": "≤20 words — relate this cut to the customer's fit preferences and highlight/minimise areas from their Passport",
+    "silhouette": "≤20 words — relate this cut to the customer's preferred silhouettes and fit preferences from their Passport",
     "color": "≤20 words — how this colour works with their specific favourite colours and coordinates with confirmed Closet pieces",
-    "versatility": "≤15 words — realistic assessment given their actual lifestyle occasions"
+    "versatility": "≤15 words — realistic assessment given their actual lifestyle occasions",
+    "dressingRequirementsCheck": "≤20 words — explicit confirmation or conflict with dressing requirements; 'no requirements specified' if none on Passport"
   },
-  "occasionFit": ${safeOccasion ? `{ "occasion": "natural noun phrase — activity only, no item category (e.g. 'evening dining', 'brunch', 'casual outings', 'work meetings')", "fits": true or false, "explanation": "≤20 words — concrete reason referencing the item's formality and this customer's lifestyle", "stylingTip": "≤15 words — one specific action" }` : "null"},
+  "occasionFit": ${safeOccasion ? `{ "occasion": "natural noun phrase — activity only (e.g. 'evening dining', 'brunch', 'work meetings')", "fits": true or false, "explanation": "≤20 words — concrete reason referencing the item's formality and this customer's lifestyle", "stylingTip": "≤15 words — one specific action" }` : "null"},
   "whatLikeEval": ${safeWhatLike ? `{ "aspect": "${safeWhatLike.slice(0,80)}", "agreement": "agree" or "partly agree" or "disagree", "explanation": "≤20 words — based on item's actual construction" }` : "null"},
   "concernEval": ${safeUnsureAbout ? `{ "concern": "${safeUnsureAbout.slice(0,80)}", "justified": "justified" or "partly justified" or "not supported", "explanation": "≤20 words — direct assessment referencing Passport data where available", "solutions": ["specific practical solution 1", "specific practical solution 2"] }` : "null"},
-  "closetPairings": [{ "occasion": "specific lifestyle occasion from this customer's Passport e.g. work meetings, date nights", "name": "exact item name from the candidate list above", "reason": "≤12 words — colour coordination fact + how proportions balance between the two pieces" }],
-  "fillsGap": null | "≤20 words — the specific wardrobe gap this item fills for this customer given their Closet and lifestyle occasions",
+  "closetPairings": [{ "occasion": "specific lifestyle occasion from this customer's Passport e.g. work meetings, dinner", "name": "exact item name from the candidate list above", "reason": "≤12 words — colour coordination fact + how proportions balance" }],
+  "fillsGap": null | "≤20 words — the specific wardrobe gap this item fills for this customer given their Closet and lifestyle",
   "occasions": [],
-  "naiaMatch": null | { "title": "exact title from NAIA COLLECTION list", "reason": "≤25 words — how the NADINE piece is worn with this item (layers over / adds coverage / contrasts length) + one colour coordination fact. Physical facts only." },
+  "productSnapshot": {
+    "observedSilhouette": "token or null — one of: a-line / straight / column / fitted / flared / wrap / shift / oversized / balloon / asymmetric",
+    "observedFitProfile": "token or null — one of: fitted / body-skimming / tailored / structured / relaxed / loose / oversized / flowy",
+    "observedFormality": "token or null — one of: casual / smart-casual / business-casual / business-formal / occasion / evening",
+    "observedSleeveLength": "token or null — one of: full / three-quarter / short / sleeveless / n/a",
+    "observedNecklineCoverage": "token or null — one of: high / crew / mock / cowl-high / v-neck / low / off-shoulder / wrap-variable / n/a",
+    "observedShoulderCoverage": true or false or null,
+    "observedMidriffExposed": true or false or null,
+    "observedMaterial": "token or null — e.g. denim / silk / cotton / linen / leather / wool / knit / synthetic / satin",
+    "observedPattern": "token or null — one of: solid / stripe / check / floral / abstract / animal-print / geometric / textured / print",
+    "observationConfidence": "high — clearly visible / medium — partially visible / low — image quality limits assessment"
+  },
   "beforeYouBuy": [
-    "25–40 words — open with what fit data IS known (reference preferences, coverage, or size by name), then state what to verify if measurements are missing. No label prefix.",
+    "25–40 words — open with preferred silhouettes or fit data known from the Passport, then state what to verify if measurements are missing. No label prefix.",
     "25–40 words — name at least one of the customer's actual lifestyle occasions and state directly whether this item suits those occasions and how realistic repeat wear is. No label prefix."
   ],
   "buyIf": "≤20 words — the one concrete condition specific to this customer that justifies buying",
   "skipIf": "≤20 words — the one concrete condition specific to this customer that makes this a mistake",
-  "betterDirection": null for BUY | "1–3 sentences — describe the product type (silhouette, fabric, fit profile) that would serve this customer better for their lifestyle occasions, referencing their style personality and any identified Closet gap. No brand names. Constructive redirect.",
-  "finalThought": "ONE sentence ≤30 words — name their style personality or lifestyle context, include the entered occasion if provided, state the main condition. Example: 'A strong match for your minimalist style and brunch occasions, but only buy if strapless styles fit and feel secure on you.'"
+  "betterDirection": null for BUY | "1–3 sentences — describe the product type (silhouette, fabric, fit profile, coverage) that would serve this customer better for their lifestyle occasions. No brand names.",
+  "finalThought": "ONE sentence ≤30 words — name their style personality or lifestyle context, include the entered occasion if provided, state the main condition."
 }`
               }
             ]
@@ -531,22 +574,13 @@ Respond ONLY with valid JSON, no markdown:
     if (analysis.closetPairings.length === 0 && eligibleClosetItems.length > 0) {
       const namedEligible = eligibleClosetItems.filter(i => i.name != null && i.name.trim() !== "");
       if (namedEligible.length > 0) {
-        const idx = hashForIndex((imageUrl || "") + normalizedCategory) % namedEligible.length;
+        const idx = hashForIndex((publicId || "") + normalizedCategory) % namedEligible.length;
         const fallbackItem = namedEligible[idx];
         analysis.closetPairings = [{
           name: fallbackItem.name,
           reason: "A complementary piece from your Closet to build this look around."
         }];
       }
-    }
-
-    // Validate naiaMatch title against eligible catalog; overwrite URL and imageUrl from server-side data.
-    // If AI returned null (no genuine complement) or an unrecognised title, keep null — section is hidden.
-    const matchedProduct = fallbackProducts.find(p => p.title === analysis.naiaMatch?.title);
-    if (matchedProduct) {
-      analysis.naiaMatch = { title: matchedProduct.title, url: matchedProduct.url, imageUrl: matchedProduct.imageUrl ?? null, reason: analysis.naiaMatch?.reason || null };
-    } else {
-      analysis.naiaMatch = null;
     }
 
     // ── 8. Persist analysis (awaited; DB-backed idempotency via unique key) ───
@@ -596,8 +630,7 @@ Respond ONLY with valid JSON, no markdown:
               closetPairings:        analysis.closetPairings       ?? [],
               fillsGap:              analysis.fillsGap              ?? null,
               occasions:             analysis.occasions             ?? [],
-              naiaMatch:             analysis.naiaMatch             ?? null,
-              naiaMatchRelationship: typeof analysis.naiaMatchRelationship === "string" ? analysis.naiaMatchRelationship : "alternative",
+              productSnapshot:       analysis.productSnapshot       ?? null,
               beforeYouBuy:          Array.isArray(analysis.beforeYouBuy) ? analysis.beforeYouBuy.filter(s => typeof s === "string" && s.trim()) : [],
               buyIf:                 typeof analysis.buyIf  === "string" && analysis.buyIf.trim()  ? analysis.buyIf.trim()  : null,
               skipIf:                typeof analysis.skipIf === "string" && analysis.skipIf.trim() ? analysis.skipIf.trim() : null,
@@ -649,6 +682,94 @@ Respond ONLY with valid JSON, no markdown:
 }
 
 
+// OUTCOME ACTION — record or update what the customer decided
+// Client sends kebab-case values; server maps them to DB enums.
+// Ownership is enforced: analysis must belong to the authenticated customer.
+// No Profile or Closet fields are mutated — outcome is customer-reported evidence only.
+
+const DECISION_MAP = {
+  "bought-it":      "BOUGHT_IT",
+  "didnt-buy-it":   "DIDNT_BUY_IT",
+  "still-deciding": "STILL_DECIDING",
+};
+
+const POST_OUTCOME_MAP = {
+  "love-it":     "LOVE_IT",
+  "its-okay":    "ITS_OKAY",
+  "returned-it": "RETURNED_IT",
+};
+
+async function recordOutcome(request) {
+  // ── 1. Auth — session only ─────────────────────────────────────────────────
+  const naiaCustomer = await getCurrentNaiaCustomer(request);
+  if (!naiaCustomer) {
+    return json({ error: "not_authenticated" }, { status: 401 });
+  }
+  if (naiaCustomer.shopifyCustomerId === "guest") {
+    return json({ error: "not_authenticated" }, { status: 401 });
+  }
+
+  // ── 2. Parse body ──────────────────────────────────────────────────────────
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid_body", message: "Request body must be valid JSON." }, { status: 400 });
+  }
+
+  // analysisId and decision are from the body; customerId is never accepted from the client.
+  const { analysisId, decision, postPurchaseOutcome } = body;
+
+  // ── 3. Validate analysisId ─────────────────────────────────────────────────
+  if (!analysisId || typeof analysisId !== "string" || analysisId.trim().length === 0) {
+    return json({ error: "invalid_input", message: "analysisId is required." }, { status: 400 });
+  }
+
+  // ── 4. Validate decision ───────────────────────────────────────────────────
+  const dbDecision = DECISION_MAP[decision];
+  if (!dbDecision) {
+    return json({ error: "invalid_decision", message: `Invalid decision: "${decision}". Must be one of bought-it, didnt-buy-it, still-deciding.` }, { status: 400 });
+  }
+
+  // ── 5. Validate postPurchaseOutcome ────────────────────────────────────────
+  let dbPostOutcome = null;
+  if (postPurchaseOutcome !== undefined && postPurchaseOutcome !== null) {
+    if (dbDecision !== "BOUGHT_IT") {
+      return json({ error: "invalid_input", message: "postPurchaseOutcome is only valid with decision 'bought-it'." }, { status: 400 });
+    }
+    dbPostOutcome = POST_OUTCOME_MAP[postPurchaseOutcome];
+    if (!dbPostOutcome) {
+      return json({ error: "invalid_post_outcome", message: `Invalid postPurchaseOutcome: "${postPurchaseOutcome}". Must be one of love-it, its-okay, returned-it.` }, { status: 400 });
+    }
+  }
+
+  // ── 6. Ownership check — load analysis owned by this customer ──────────────
+  // Never trust customerId from the client. Ownership is derived through the analysis.
+  const analysis = await prisma.buyOrSkipAnalysis.findUnique({
+    where: { id: analysisId.trim() },
+    select: { id: true, customerId: true },
+  });
+
+  if (!analysis) {
+    return json({ error: "not_found", message: "Analysis not found." }, { status: 404 });
+  }
+
+  if (analysis.customerId !== naiaCustomer.id) {
+    return json({ error: "forbidden", message: "Access denied." }, { status: 403 });
+  }
+
+  // ── 7. Upsert outcome (create first time; update on repeat) ───────────────
+  // analysisId is unique — one outcome per analysis, no duplicate rows.
+  const outcome = await prisma.buySkipOutcome.upsert({
+    where:  { analysisId: analysis.id },
+    create: { analysisId: analysis.id, decision: dbDecision, postPurchaseOutcome: dbPostOutcome },
+    update: { decision: dbDecision, postPurchaseOutcome: dbPostOutcome },
+  });
+
+  return json({ success: true, outcomeId: outcome.id });
+}
+
+
 // DEPRECATED loader — Batch 1 (2026-07-29)
 // WishlistItem model does not exist in schema.prisma; this loader crashed with P2021.
 // Saved Looks (style-me/result.tsx intent=save) is the current nAia-owned save mechanism.
@@ -668,6 +789,9 @@ export async function action({ request }) {
   const url = new URL(request.url);
   if (url.searchParams.get("action") === "analyze") {
     return analyzeItem(request);
+  }
+  if (url.searchParams.get("action") === "outcome") {
+    return recordOutcome(request);
   }
   
   if (request.method === "OPTIONS") {

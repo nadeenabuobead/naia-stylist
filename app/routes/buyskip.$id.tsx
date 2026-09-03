@@ -1,5 +1,6 @@
-import { Link, useLoaderData, type LinksFunction, type LoaderFunctionArgs } from "react-router";
+import { Link, useLoaderData, useFetcher, type LinksFunction, type LoaderFunctionArgs } from "react-router";
 import { data, redirect } from "react-router";
+import { useState, useEffect } from "react";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -47,6 +48,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       colorNote: true,
       itemSize: true,
       fullAnalysis: true,
+      outcome: {
+        select: {
+          decision: true,
+          postPurchaseOutcome: true,
+        },
+      },
     },
   });
 
@@ -104,6 +111,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     vtoEnabled,
     vtoSupported,
     naiaModelIsReady,
+    outcome: analysis.outcome ?? null,
   });
 }
 
@@ -112,9 +120,72 @@ function cap(s: string | null | undefined): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+// ── Outcome helpers ───────────────────────────────────────────────────────────
+const OUTCOME_DECISION_LABELS: Record<string, string> = {
+  "bought-it":      "I BOUGHT IT",
+  "didnt-buy-it":   "I DIDN'T BUY IT",
+  "still-deciding": "STILL DECIDING",
+};
+const OUTCOME_POST_LABELS: Record<string, string> = {
+  "love-it":     "LOVE IT",
+  "its-okay":    "IT'S OKAY",
+  "returned-it": "RETURNED IT",
+};
+
+function dbDecisionToClient(d: string): string {
+  if (d === "BOUGHT_IT") return "bought-it";
+  if (d === "DIDNT_BUY_IT") return "didnt-buy-it";
+  if (d === "STILL_DECIDING") return "still-deciding";
+  return "";
+}
+function dbPostOutcomeToClient(p: string | null | undefined): string | null {
+  if (p === "LOVE_IT") return "love-it";
+  if (p === "ITS_OKAY") return "its-okay";
+  if (p === "RETURNED_IT") return "returned-it";
+  return null;
+}
+
 export default function BuyOrSkipResult() {
   const analysis = useLoaderData<typeof loader>();
   const fa = analysis.fullAnalysis;
+
+  // ── Outcome UX state ──────────────────────────────────────────────────────
+  const loaderOutcome = (analysis as any).outcome as { decision: string; postPurchaseOutcome: string | null } | null ?? null;
+  const outcomeFetcher = useFetcher<{ success?: boolean; error?: string }>();
+
+  const [outcomeDecision, setOutcomeDecision] = useState<string | null>(
+    loaderOutcome ? dbDecisionToClient(loaderOutcome.decision) : null,
+  );
+  const [outcomePost, setOutcomePost] = useState<string | null>(
+    loaderOutcome ? dbPostOutcomeToClient(loaderOutcome.postPurchaseOutcome) : null,
+  );
+  // Start in editing mode when no saved outcome exists
+  const [isOutcomeEditing, setIsOutcomeEditing] = useState<boolean>(!loaderOutcome);
+
+  // Collapse to summary on successful save
+  useEffect(() => {
+    if (outcomeFetcher.data?.success) {
+      setIsOutcomeEditing(false);
+    }
+  }, [outcomeFetcher.data]);
+
+  const isOutcomeSaving = outcomeFetcher.state === "submitting" || outcomeFetcher.state === "loading";
+  const outcomeSaveError = outcomeFetcher.data && !outcomeFetcher.data.success
+    ? (outcomeFetcher.data.error ?? "Could not save. Please try again.")
+    : null;
+
+  function handleOutcomeSave() {
+    if (!outcomeDecision) return;
+    const body: Record<string, string> = { analysisId: analysis.id, decision: outcomeDecision };
+    if (outcomeDecision === "bought-it" && outcomePost) {
+      body.postPurchaseOutcome = outcomePost;
+    }
+    outcomeFetcher.submit(body, {
+      method: "POST",
+      action: "/api/wishlist?action=outcome",
+      encType: "application/json",
+    });
+  }
 
   // ── Derived display values ────────────────────────────────────────────────
   // displayVerdict is the single canonical verdict string used for BOTH the badge
@@ -194,7 +265,7 @@ export default function BuyOrSkipResult() {
 
       <div className="sp-shell">
         <div className="sp-shell-eyebrow">Should I Buy This?</div>
-        <h1 className="sp-shell-title">nAia's <span className="sp-shell-accent">recommendation.</span></h1>
+        <h1 className="sp-shell-title">nAia's Recommendation</h1>
         <p className="sp-shell-desc">{formattedDate}</p>
       </div>
 
@@ -235,9 +306,6 @@ export default function BuyOrSkipResult() {
         <div className="bos-result-hero-content">
           <div className="bos-verdict">
             {displayVerdict}
-            {typeof confidence === "number" && confidence > 0 && (
-              <span className="bos-verdict-match"> — {confidence}% MATCH</span>
-            )}
           </div>
           {finalThought && (
             <p className="bos-result-summary">{finalThought}</p>
@@ -455,48 +523,6 @@ export default function BuyOrSkipResult() {
           </div>
         )}
 
-        {/* ── NADINE section — only shown when AI returns a genuine complement ── */}
-        {naiaMatch && (
-          <div className="bos-result-section bos-result-section--nadine">
-            <div className="bos-result-section-label">Pair It With NADINE</div>
-            <div className="bos-naia-inner">
-              {typeof naiaMatch === "object" && naiaMatch.imageUrl && (
-                <a
-                  href={typeof naiaMatch === "object" && naiaMatch.url ? naiaMatch.url : undefined}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="bos-naia-img-link"
-                  aria-label={`Shop ${typeof naiaMatch === "object" ? naiaMatch.title : naiaMatch}`}
-                >
-                  <img
-                    src={naiaMatch.imageUrl}
-                    alt={typeof naiaMatch === "object" ? naiaMatch.title : String(naiaMatch)}
-                    className="bos-naia-img"
-                  />
-                </a>
-              )}
-              <div className="bos-naia-details">
-                <div className="bos-naia-title">
-                  {typeof naiaMatch === "object" ? naiaMatch.title : naiaMatch}
-                </div>
-                {typeof naiaMatch === "object" && naiaMatch.reason && (
-                  <div className="bos-naia-reason">{naiaMatch.reason}</div>
-                )}
-                {typeof naiaMatch === "object" && naiaMatch.url && (
-                  <a
-                    href={naiaMatch.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="bos-naia-link"
-                  >
-                    Shop This Piece →
-                  </a>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* ── Final Condition ───────────────────────────────────────────────── */}
         {(buyIf || skipIf) && (
           <div className="bos-result-section bos-final-condition">
@@ -524,6 +550,95 @@ export default function BuyOrSkipResult() {
             <Link to="/buyskip" className="bos-better-direction-btn">Analyze a Better Option</Link>
           </div>
         )}
+
+        {/* ── What Happened? — optional customer-reported outcome ────────── */}
+        <div className="bos-outcome" data-testid="bos-outcome">
+          <div className="bos-outcome-q">WHAT HAPPENED?</div>
+
+          {/* Summary view — shown when outcome is saved and not editing */}
+          {!isOutcomeEditing && outcomeDecision && (
+            <div className="bos-outcome-summary" data-testid="bos-outcome-summary">
+              <div className="bos-outcome-summary-decision" data-testid="bos-outcome-summary-decision">
+                {OUTCOME_DECISION_LABELS[outcomeDecision] ?? outcomeDecision}
+              </div>
+              {outcomeDecision === "bought-it" && outcomePost && (
+                <div className="bos-outcome-summary-post" data-testid="bos-outcome-summary-post">
+                  {OUTCOME_POST_LABELS[outcomePost] ?? outcomePost}
+                </div>
+              )}
+              {outcomeFetcher.data?.success && (
+                <div className="bos-outcome-summary-saved" data-testid="bos-outcome-saved-msg">SAVED</div>
+              )}
+              <button
+                type="button"
+                className="bos-outcome-edit-btn"
+                onClick={() => setIsOutcomeEditing(true)}
+                data-testid="bos-outcome-edit"
+              >
+                EDIT
+              </button>
+            </div>
+          )}
+
+          {/* Form view — shown when no saved outcome, or when editing */}
+          {isOutcomeEditing && (
+            <div data-testid="bos-outcome-form">
+              <div className="bos-outcome-options">
+                {(["bought-it", "didnt-buy-it", "still-deciding"] as const).map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    className={`bos-outcome-option${outcomeDecision === d ? " bos-outcome-option--selected" : ""}`}
+                    onClick={() => {
+                      setOutcomeDecision(d);
+                      if (d !== "bought-it") setOutcomePost(null);
+                    }}
+                    data-testid={`bos-outcome-${d}`}
+                  >
+                    {OUTCOME_DECISION_LABELS[d]}
+                  </button>
+                ))}
+              </div>
+
+              {/* Post-purchase follow-up — only when bought-it is selected */}
+              {outcomeDecision === "bought-it" && (
+                <div className="bos-outcome-followup" data-testid="bos-outcome-followup">
+                  <div className="bos-outcome-followup-q">AND HOW DID IT WORK OUT?</div>
+                  <div className="bos-outcome-options">
+                    {(["love-it", "its-okay", "returned-it"] as const).map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        className={`bos-outcome-option${outcomePost === p ? " bos-outcome-option--selected" : ""}`}
+                        onClick={() => setOutcomePost(p)}
+                        data-testid={`bos-outcome-post-${p}`}
+                      >
+                        {OUTCOME_POST_LABELS[p]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="bos-outcome-save-row">
+                <button
+                  type="button"
+                  className="sp-btn-outline"
+                  onClick={handleOutcomeSave}
+                  disabled={!outcomeDecision || isOutcomeSaving}
+                  data-testid="bos-outcome-save"
+                >
+                  {isOutcomeSaving ? "SAVING..." : "SAVE"}
+                </button>
+                {outcomeSaveError && (
+                  <span className="bos-outcome-error-msg" data-testid="bos-outcome-error">
+                    {outcomeSaveError}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         <div className="sp-actions" style={{ marginTop: "40px" }}>
           <Link to="/buyskip" className="sp-btn-primary">Assess Another Piece</Link>
