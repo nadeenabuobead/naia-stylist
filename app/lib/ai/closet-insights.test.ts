@@ -745,6 +745,106 @@ describe("CI.30 — dataQuality fields", () => {
   });
 });
 
+// ── CI.32 — favourite colour 1/5: no "well represented", singular grammar ─────
+describe("CI.32 — favourite colour 1 of 5: factual, singular grammar", () => {
+  it("does not say 'well represented' for count=1 and uses singular 'is'", () => {
+    const items = [
+      makeItem({ id: "1", primaryColor: "Grey" }),
+      makeItem({ id: "2", primaryColor: "Black" }),
+      makeItem({ id: "3", primaryColor: "Black" }),
+      makeItem({ id: "4", primaryColor: "Black" }),
+      makeItem({ id: "5", primaryColor: "Black" }),
+    ];
+    const profile: ClosetInsightProfile = { ...emptyProfile, favoriteColors: ["grey"] };
+    const result = computeClosetInsights(items, profile);
+    const fav = result.insights.find((i) => i.id === "favourite-colour-grey");
+    assert.ok(fav, "should emit favourite-colour-grey insight");
+    const claim = fav!.claim;
+    assert.ok(!claim.includes("well represented"), `should not say 'well represented' for 1 of 5: ${claim}`);
+    assert.ok(claim.includes(" is grey"), `should use singular 'is': ${claim}`);
+    assert.ok(claim.includes("1"), `should mention count 1: ${claim}`);
+  });
+
+  it("uses singular 'piece' for count=1", () => {
+    const items = [
+      makeItem({ id: "1", primaryColor: "Navy" }),
+      makeItem({ id: "2", primaryColor: "Black" }),
+      makeItem({ id: "3", primaryColor: "Black" }),
+      makeItem({ id: "4", primaryColor: "Black" }),
+      makeItem({ id: "5", primaryColor: "Black" }),
+    ];
+    const profile: ClosetInsightProfile = { ...emptyProfile, favoriteColors: ["navy"] };
+    const result = computeClosetInsights(items, profile);
+    const fav = result.insights.find((i) => i.id === "favourite-colour-navy");
+    assert.ok(fav, "should emit favourite-colour-navy insight");
+    assert.ok(fav!.claim.includes("piece") && !fav!.claim.includes("pieces"), `should say 'piece' not 'pieces': ${fav!.claim}`);
+  });
+});
+
+// ── CI.33 — favourite colour 3/5: "well represented", plural grammar ──────────
+describe("CI.33 — favourite colour 3 of 5: 'well represented', plural grammar", () => {
+  it("says 'well represented' when count=3 and uses plural 'are'", () => {
+    const items = [
+      makeItem({ id: "1", primaryColor: "Grey" }),
+      makeItem({ id: "2", primaryColor: "Grey" }),
+      makeItem({ id: "3", primaryColor: "Grey" }),
+      makeItem({ id: "4", primaryColor: "Black" }),
+      makeItem({ id: "5", primaryColor: "Black" }),
+    ];
+    const profile: ClosetInsightProfile = { ...emptyProfile, favoriteColors: ["grey"] };
+    const result = computeClosetInsights(items, profile);
+    const fav = result.insights.find((i) => i.id === "favourite-colour-grey");
+    assert.ok(fav, "should emit favourite-colour-grey insight");
+    const claim = fav!.claim;
+    assert.ok(claim.includes("well represented"), `should say 'well represented' for 3 of 5: ${claim}`);
+    assert.ok(claim.includes("are grey"), `should use plural 'are': ${claim}`);
+    assert.ok(claim.includes("3"), `should mention count 3: ${claim}`);
+  });
+
+  it("does not say 'well represented' when count=2 and ratio < 0.3", () => {
+    // 2 grey of 8 coloured = 25% < 30% → no "well represented"
+    const items = [
+      makeItem({ id: "1", primaryColor: "Grey" }),
+      makeItem({ id: "2", primaryColor: "Grey" }),
+      makeItem({ id: "3", primaryColor: "Black" }),
+      makeItem({ id: "4", primaryColor: "Black" }),
+      makeItem({ id: "5", primaryColor: "Black" }),
+      makeItem({ id: "6", primaryColor: "Black" }),
+      makeItem({ id: "7", primaryColor: "White" }),
+      makeItem({ id: "8", primaryColor: "White" }),
+    ];
+    const profile: ClosetInsightProfile = { ...emptyProfile, favoriteColors: ["grey"] };
+    const result = computeClosetInsights(items, profile);
+    const fav = result.insights.find((i) => i.id === "favourite-colour-grey");
+    assert.ok(fav, "should emit favourite-colour-grey insight");
+    assert.ok(!fav!.claim.includes("well represented"), `should not say 'well represented' for 2 of 8: ${fav!.claim}`);
+  });
+});
+
+// ── CI.34 — lifestyle fallback claim is neutral ────────────────────────────────
+describe("CI.34 — lifestyle fallback wording is not overclaiming", () => {
+  it("does not produce 'Your lifestyle calls for specific occasion dressing' for any profile", () => {
+    const overclaimPhrase = "Your lifestyle calls for specific occasion dressing";
+    const items = makeItems(5, { occasions: ["Casual"] as string[] });
+    const profiles: ClosetInsightProfile[] = [
+      { ...emptyProfile, lifestyle: ["events"] },
+      { ...emptyProfile, lifestyle: ["office"] },
+      { ...emptyProfile, lifestyle: ["travel"] },
+      { ...emptyProfile, lifestyle: ["everyday"] },
+      { ...emptyProfile, lifestyle: ["events", "office", "travel"] },
+    ];
+    for (const profile of profiles) {
+      const result = computeClosetInsights(items, profile);
+      for (const insight of result.insights) {
+        assert.ok(
+          !insight.claim.includes(overclaimPhrase),
+          `Claim must not say "${overclaimPhrase}": ${insight.claim}`,
+        );
+      }
+    }
+  });
+});
+
 // ── CI.31 — prohibited inferences never appear ────────────────────────────────
 describe("CI.31 — prohibited inference strings", () => {
   it("no claim contains 'your style is', 'you tend to', 'would suit', 'would look', 'you should buy', 'need to buy'", () => {

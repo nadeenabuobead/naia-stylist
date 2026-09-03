@@ -172,7 +172,10 @@ export function computeClosetInsights(
         (i.occasions ?? []).some((occ) => relevantOccasions.has(occ)),
       ).length;
 
-      const occasionList = [...relevantOccasions].sort().join(", ");
+      const allSortedOccasions = [...relevantOccasions].sort();
+      const occasionList = allSortedOccasions.length > 3
+        ? `${allSortedOccasions.slice(0, 3).join(", ")}, and more`
+        : allSortedOccasions.join(", ");
       const hasEventStruggle = (profile.styleStruggles ?? []).includes("event");
       const hasEventOutfitsSupport = (profile.styleSupport ?? []).includes("event-outfits");
 
@@ -300,10 +303,7 @@ export function computeClosetInsights(
       if (!closetColour) continue;
 
       const count = colourCounts.get(closetColour) ?? 0;
-      const favClaim =
-        count > 0
-          ? `${closetColour} is one of your favourite colours and it's well represented — ${count} of your ${colouredItems} recorded pieces are ${closetColour.toLowerCase()}.`
-          : `${closetColour} is one of your favourite colours, but it isn't currently represented among your ${colouredItems} recorded pieces.`;
+      const favClaim = buildFavouriteColourClaim(closetColour, count, colouredItems);
 
       insights.push({
         id: `favourite-colour-${favId}`,
@@ -374,6 +374,19 @@ export function computeClosetInsights(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+function buildFavouriteColourClaim(colour: string, count: number, total: number): string {
+  const lower = colour.toLowerCase();
+  const verb = count === 1 ? "is" : "are";
+  const pieceWord = count === 1 ? "piece" : "pieces";
+  if (count === 0) {
+    return `${colour} is one of your favourite colours, but it isn't currently represented among your ${total} recorded pieces.`;
+  }
+  if (count >= 2 && count / total >= 0.3) {
+    return `${colour} is one of your favourite colours and it's well represented — ${count} of your ${total} recorded ${pieceWord} ${verb} ${lower}.`;
+  }
+  return `${colour} is one of your favourite colours — ${count} of your ${total} recorded ${pieceWord} ${verb} ${lower}.`;
+}
+
 function buildLifestyleContext(lifestyleIds: string[]): string {
   const hasEvents = lifestyleIds.includes("events");
   const hasOffice = lifestyleIds.some((id) => id === "office" || id === "hybrid");
@@ -391,5 +404,5 @@ function buildLifestyleContext(lifestyleIds: string[]): string {
   if (hasTravel) {
     return "Travel is a regular part of your lifestyle";
   }
-  return "Your lifestyle calls for specific occasion dressing";
+  return "Based on your lifestyle preferences";
 }
