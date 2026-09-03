@@ -479,9 +479,9 @@ describe("CI.19 — multi-value lifestyle", () => {
   });
 });
 
-// ── CI.20 — season wording scopes to recorded information ─────────────────────
+// ── CI.20 — season wording scopes to added pieces ────────────────────────────
 describe("CI.20 — season claim wording", () => {
-  it("claim says 'recorded season information' not just 'items'", () => {
+  it("claim scopes to season information on pieces you've added, not the whole wardrobe", () => {
     const items = [
       makeItem({ id: "1", seasons: ["Spring"] }),
       makeItem({ id: "2", seasons: ["Summer"] }),
@@ -494,8 +494,12 @@ describe("CI.20 — season claim wording", () => {
     const season = result.insights.find((i) => i.type === "season-coverage");
     assert.ok(season, "should emit season insight");
     assert.ok(
-      season!.claim.includes("recorded season information"),
-      `claim must say 'recorded season information': ${season!.claim}`,
+      season!.claim.includes("season information"),
+      `claim must mention 'season information': ${season!.claim}`,
+    );
+    assert.ok(
+      season!.claim.toLowerCase().includes("you've added") || season!.claim.toLowerCase().includes("your closet"),
+      `claim must scope to added pieces: ${season!.claim}`,
     );
     assert.ok(season!.claim.includes("Fall"), `should mention Fall: ${season!.claim}`);
     assert.ok(season!.claim.includes("Winter"), `should mention Winter: ${season!.claim}`);
@@ -1250,6 +1254,286 @@ describe("CI.45 — unrecognized garmentRelationship values produce no relations
     assert.equal(result.dataQuality.relationshipEligible, false);
     const friction = result.insights.find((i) => i.type === "friction-signal");
     assert.ok(friction, "friction-signal should still fire for 2 struggle items");
+  });
+});
+
+// ── CI.46 — consolidated relationship summary ─────────────────────────────────
+describe("CI.46 — consolidated relationship summary absorbs friction and low-use when coverage ≥60%", () => {
+  it("emits ONE wear-behaviour insight; friction-signal and low-use-signal do NOT fire separately", () => {
+    const items = [
+      makeItem({ id: "1", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "2", garmentRelationships: ["wear-often"] }),
+      makeItem({ id: "3", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "4", garmentRelationships: ["wear-often"] }),
+      makeItem({ id: "5", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "6", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "7", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "8", garmentRelationships: ["rarely-wear"] }),
+      makeItem({ id: "9", garmentRelationships: ["regret"] }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.ok(result.dataQuality.relationshipEligible, "100% coverage — eligible");
+    const wb = result.insights.find((i) => i.type === "wear-behaviour");
+    assert.ok(wb, "wear-behaviour should fire");
+    assert.equal(result.insights.find((i) => i.type === "friction-signal"), undefined,
+      "friction-signal must not fire when wear-behaviour is active (coverage ≥60%)");
+    assert.equal(result.insights.find((i) => i.type === "low-use-signal"), undefined,
+      "low-use-signal must not fire when wear-behaviour is active (coverage ≥60%)");
+  });
+
+  it("consolidated claim references harder-to-style and low-use buckets in one sentence when all three fire", () => {
+    const items = [
+      makeItem({ id: "1", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "2", garmentRelationships: ["wear-often"] }),
+      makeItem({ id: "3", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "4", garmentRelationships: ["wear-often"] }),
+      makeItem({ id: "5", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "6", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "7", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "8", garmentRelationships: ["rarely-wear"] }),
+      makeItem({ id: "9", garmentRelationships: ["regret"] }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    const wb = result.insights.find((i) => i.type === "wear-behaviour");
+    assert.ok(wb);
+    // Claim must reference the positive core
+    assert.ok(
+      wb!.claim.includes("5") || wb!.claim.toLowerCase().includes("favourite") || wb!.claim.toLowerCase().includes("regular"),
+      `claim should reference the positive core: ${wb!.claim}`,
+    );
+    // Claim must reference the friction bucket
+    assert.ok(
+      wb!.claim.toLowerCase().includes("harder") || wb!.claim.toLowerCase().includes("style"),
+      `consolidated claim should reference styling friction: ${wb!.claim}`,
+    );
+    // Claim must reference the low-use bucket
+    assert.ok(
+      wb!.claim.toLowerCase().includes("wear") || wb!.claim.toLowerCase().includes("getting"),
+      `consolidated claim should reference low-use signal: ${wb!.claim}`,
+    );
+  });
+});
+
+// ── CI.47 — standalone friction when coverage <60% ───────────────────────────
+describe("CI.47 — standalone friction-signal fires when coverage <60% but ≥2 struggle items", () => {
+  it("emits friction-signal standalone without wear-behaviour", () => {
+    const items = [
+      makeItem({ id: "1", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "2", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "3" }),
+      makeItem({ id: "4" }),
+      makeItem({ id: "5" }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.equal(result.dataQuality.relationshipEligible, false, "40% — not eligible for wear-behaviour");
+    assert.equal(result.insights.find((i) => i.type === "wear-behaviour"), undefined,
+      "wear-behaviour must not fire when coverage <60%");
+    const friction = result.insights.find((i) => i.type === "friction-signal");
+    assert.ok(friction, "friction-signal should fire standalone");
+    assert.ok(friction!.claim.includes("2"), `claim should reference count: ${friction!.claim}`);
+  });
+
+  it("does NOT emit friction-signal standalone when coverage ≥60% (absorbed into wear-behaviour)", () => {
+    const items = [
+      makeItem({ id: "1", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "2", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "3", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "4", garmentRelationships: ["wear-often"] }),
+      makeItem({ id: "5" }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.equal(result.dataQuality.relationshipEligible, true, "80% — eligible");
+    assert.ok(result.insights.find((i) => i.type === "wear-behaviour"), "wear-behaviour should fire");
+    assert.equal(result.insights.find((i) => i.type === "friction-signal"), undefined,
+      "friction-signal must not fire separately when wear-behaviour is active");
+  });
+});
+
+// ── CI.48 — partial Closet wording in all insight types ───────────────────────
+describe("CI.48 — all insights scope claims to pieces you've added, not the real wardrobe", () => {
+  it("category-concentration claim scopes to uploaded pieces", () => {
+    const items = [
+      ...makeItems(4, { category: "TOPS" }),
+      makeItem({ id: "x", category: "BOTTOMS" }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    const cat = result.insights.find((i) => i.type === "category-concentration");
+    assert.ok(cat, "category-concentration should fire at 80%");
+    const lower = cat!.claim.toLowerCase();
+    assert.ok(
+      lower.includes("you've added") || lower.includes("in your closet") || lower.includes("work with"),
+      `must scope to uploaded items: ${cat!.claim}`,
+    );
+    assert.ok(!lower.includes("your wardrobe"), `must not reference the whole wardrobe: ${cat!.claim}`);
+  });
+
+  it("friction-signal standalone claim scopes to pieces you've added", () => {
+    const items = [
+      makeItem({ id: "1", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "2", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "3" }),
+      makeItem({ id: "4" }),
+      makeItem({ id: "5" }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    const friction = result.insights.find((i) => i.type === "friction-signal");
+    assert.ok(friction, "friction-signal should fire standalone");
+    assert.ok(
+      friction!.claim.toLowerCase().includes("you've added") || friction!.claim.toLowerCase().includes("in your closet"),
+      `must scope to uploaded items: ${friction!.claim}`,
+    );
+  });
+
+  it("low-use-signal standalone claim scopes to pieces you've added", () => {
+    const items = [
+      ...makeItems(6),
+      makeItem({ id: "item-7", garmentRelationships: ["rarely-wear"] }),
+      makeItem({ id: "item-8", garmentRelationships: ["regret"] }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    const lowUse = result.insights.find((i) => i.type === "low-use-signal");
+    assert.ok(lowUse, "low-use-signal should fire");
+    assert.ok(
+      lowUse!.claim.toLowerCase().includes("you've added") || lowUse!.claim.toLowerCase().includes("in your closet"),
+      `must scope to uploaded items: ${lowUse!.claim}`,
+    );
+  });
+});
+
+// ── CI.49 — formal uploaded Closet + everyday lifestyle ───────────────────────
+describe("CI.49 — formal Closet + everyday lifestyle: formality adds context without gap claim", () => {
+  it("formality claim frames visibility without implying the user needs more casual pieces", () => {
+    const items = Array.from({ length: 10 }, (_, i) =>
+      makeItem({ id: `item-${i + 1}`, formality: i < 8 ? "business-formal" : "casual" }),
+    );
+    const profile: ClosetInsightProfile = { ...emptyProfile, lifestyle: ["everyday"] };
+    const result = computeClosetInsights(items, profile);
+    const fd = result.insights.find((i) => i.type === "formality-distribution");
+    assert.ok(fd, "formality-distribution should fire");
+    const lower = fd!.claim.toLowerCase();
+    assert.ok(!lower.includes("need more"), `must not say 'need more': ${fd!.claim}`);
+    assert.ok(!lower.includes("add more"), `must not say 'add more': ${fd!.claim}`);
+    assert.ok(!lower.includes("missing"), `must not say 'missing': ${fd!.claim}`);
+    assert.ok(!lower.includes("gap"), `must not say 'gap': ${fd!.claim}`);
+    assert.ok(
+      lower.includes("naia") || lower.includes("visibility") || lower.includes("sees") || lower.includes("assessed"),
+      `claim should frame what nAia currently sees: ${fd!.claim}`,
+    );
+  });
+});
+
+// ── CI.50 — lifestyle family curation: occasion beats formality in round 1 ────
+describe("CI.50 — diversity curation: occasion-coverage takes the lifestyle slot before formality-distribution", () => {
+  it("when both fire, occasion appears before formality and total stays ≤4", () => {
+    const items = [
+      makeItem({ id: "1", primaryColor: "Black", occasions: ["Dinner"], formality: "business-formal", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "2", primaryColor: "Black", occasions: ["Dinner"], formality: "business-formal", garmentRelationships: ["wear-often"] }),
+      makeItem({ id: "3", primaryColor: "Black", occasions: ["Dinner"], formality: "business-formal", garmentRelationships: ["wear-often"] }),
+      makeItem({ id: "4", primaryColor: "Grey",  occasions: ["Work"],   formality: "business-casual", garmentRelationships: ["like"] }),
+      makeItem({ id: "5", primaryColor: "Grey",  occasions: ["Work"],   formality: "business-casual", garmentRelationships: ["like"] }),
+    ];
+    const profile: ClosetInsightProfile = {
+      ...emptyProfile,
+      lifestyle: ["events"],
+      favoriteColors: ["black"],
+    };
+    const result = computeClosetInsights(items, profile);
+    assert.ok(result.insights.length <= 4, `should not exceed 4 insights, got ${result.insights.length}`);
+    const occIdx = result.insights.findIndex((i) => i.type === "occasion-coverage");
+    const fmtIdx = result.insights.findIndex((i) => i.type === "formality-distribution");
+    if (occIdx !== -1 && fmtIdx !== -1) {
+      assert.ok(occIdx < fmtIdx, `occasion (idx ${occIdx}) should precede formality (idx ${fmtIdx})`);
+    }
+  });
+});
+
+// ── CI.51 — mixed formality: human-readable labels, no internal variable leakage
+describe("CI.51 — mixed formality distribution uses human-readable bucket labels", () => {
+  it("mixed fallback claim does not expose 'structured (N)' as a raw variable", () => {
+    // 3 work-ready, 2 casual, 1 occasion — no bucket reaches dominant threshold
+    const items = [
+      makeItem({ id: "1", formality: "business-casual" }),
+      makeItem({ id: "2", formality: "business-formal" }),
+      makeItem({ id: "3", formality: "business-casual" }),
+      makeItem({ id: "4", formality: "casual" }),
+      makeItem({ id: "5", formality: "casual" }),
+      makeItem({ id: "6", formality: "occasion" }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    const fd = result.insights.find((i) => i.type === "formality-distribution");
+    assert.ok(fd, "formality-distribution should fire");
+    assert.ok(
+      !fd!.claim.includes("structured ("),
+      `must not expose raw internal variable 'structured (N)': ${fd!.claim}`,
+    );
+    assert.ok(
+      fd!.claim.toLowerCase().includes("work-ready") ||
+      fd!.claim.toLowerCase().includes("everyday") ||
+      fd!.claim.toLowerCase().includes("casual") ||
+      fd!.claim.toLowerCase().includes("occasion"),
+      `claim should use human-readable formality labels: ${fd!.claim}`,
+    );
+  });
+
+  it("dominant casual claim does not use 'structured' as a label", () => {
+    const items = Array.from({ length: 5 }, (_, i) =>
+      makeItem({ id: `item-${i + 1}`, formality: "casual" }),
+    );
+    const result = computeClosetInsights(items, emptyProfile);
+    const fd = result.insights.find((i) => i.type === "formality-distribution");
+    assert.ok(fd, "formality-distribution should fire");
+    assert.ok(!fd!.claim.includes("structured"), `casual-dominant claim must not say 'structured': ${fd!.claim}`);
+  });
+});
+
+// ── CI.52 — category at 50% does not qualify ─────────────────────────────────
+describe("CI.52 — category at exactly 50% does not qualify as notable concentration", () => {
+  it("does not emit category-concentration when top category is 50% of 10 items", () => {
+    const items = [
+      ...makeItems(5, { category: "TOPS" }),
+      ...makeItems(3, { category: "BOTTOMS" }).map((i, idx) => ({ ...i, id: `b-${idx}` })),
+      ...makeItems(2, { category: "SHOES" }).map((i, idx) => ({ ...i, id: `s-${idx}` })),
+    ];
+    // TOPS: 5/10 = 50% — below the 60% threshold
+    const result = computeClosetInsights(items, emptyProfile);
+    assert.equal(result.insights.find((i) => i.type === "category-concentration"), undefined,
+      "50% is not a notable skew — category-concentration must not fire");
+  });
+
+  it("fires when a single category holds exactly 60% of 10 items", () => {
+    const items = [
+      ...makeItems(6, { category: "TOPS" }),
+      ...makeItems(4, { category: "BOTTOMS" }).map((i, idx) => ({ ...i, id: `b-${idx}` })),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    const cat = result.insights.find((i) => i.type === "category-concentration");
+    assert.ok(cat, "60% should qualify as notable concentration");
+    assert.ok(cat!.claim.toLowerCase().includes("tops"), `claim: ${cat!.claim}`);
+  });
+});
+
+// ── CI.53 — diversity curation: colour insight not displaced by relationship ──
+describe("CI.53 — diversity curation: colour insight gets its own slot even when relationship fires", () => {
+  it("palette-distribution appears alongside wear-behaviour rather than being displaced", () => {
+    // All 5 items Black, all tagged → 1 relationship insight (consolidated), 1 colour insight
+    const items = [
+      makeItem({ id: "1", primaryColor: "Black", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "2", primaryColor: "Black", garmentRelationships: ["wear-often"] }),
+      makeItem({ id: "3", primaryColor: "Black", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "4", primaryColor: "Black", garmentRelationships: ["love-style-struggle"] }),
+      makeItem({ id: "5", primaryColor: "Black", garmentRelationships: ["rarely-wear"] }),
+    ];
+    const profile: ClosetInsightProfile = { ...emptyProfile, favoriteColors: ["black"] };
+    const result = computeClosetInsights(items, profile);
+    // Only ONE relationship insight should appear (consolidated)
+    const relationshipInsights = result.insights.filter((i) =>
+      i.type === "wear-behaviour" || i.type === "friction-signal" || i.type === "low-use-signal",
+    );
+    assert.equal(relationshipInsights.length, 1, "only one consolidated relationship insight");
+    // Palette must be present — colour family gets its own curation slot
+    const palette = result.insights.find((i) => i.type === "palette-distribution");
+    assert.ok(palette, "palette-distribution should appear — colour family gets its own slot");
+    assert.ok(palette!.claim.toLowerCase().includes("black"), `claim: ${palette!.claim}`);
   });
 });
 
