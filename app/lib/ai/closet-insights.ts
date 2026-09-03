@@ -263,8 +263,15 @@ export function computeClosetInsights(
     const regretItems = taggedItems.filter((i) =>
       (i.garmentRelationships ?? []).includes("regret"),
     ).length;
+    // Items carrying BOTH rarely-wear AND regret — counted once as a unit, described together.
+    const bothNegItems = taggedItems.filter((i) => {
+      const rels = i.garmentRelationships ?? [];
+      return rels.includes("rarely-wear") && rels.includes("regret");
+    }).length;
+    const rarelyWearOnlyItems = rarelyWearItems - bothNegItems;
+    const regretOnlyItems = regretItems - bothNegItems;
     const frictionItems = struggleItems + unsureItems;
-    const negativeItems = rarelyWearItems + regretItems;
+    const negativeItems = rarelyWearItems + regretItems - bothNegItems; // unique items
 
     const taggedCount = taggedItems.length;
     const positiveRatio = positiveItems / taggedCount;
@@ -286,21 +293,27 @@ export function computeClosetInsights(
         if (unsureItems > 0) {
           notes.push(`${unsureItems} you're still unsure about`);
         }
-        if (rarelyWearItems > 0) {
-          notes.push(`${rarelyWearItems} ${rarelyWearItems === 1 ? "rarely gets" : "rarely get"} worn`);
+        if (bothNegItems > 0) {
+          notes.push(bothNegItems === 1 ? "1 is rarely worn and a purchase you regret" : `${bothNegItems} are rarely worn and purchases you regret`);
         }
-        if (regretItems > 0) {
-          notes.push(regretItems === 1 ? "1 is a purchase you regret" : `${regretItems} are purchases you regret`);
+        if (rarelyWearOnlyItems > 0) {
+          notes.push(`${rarelyWearOnlyItems} ${rarelyWearOnlyItems === 1 ? "rarely gets" : "rarely get"} worn`);
+        }
+        if (regretOnlyItems > 0) {
+          notes.push(regretOnlyItems === 1 ? "1 is a purchase you regret" : `${regretOnlyItems} are purchases you regret`);
         }
         claim = `${positiveItems} of the ${taggedCount} pieces you've tagged are favourites or regular wears — ${joinInsightNotes(notes)}.`;
       }
     } else if (negativeRatio >= 0.4) {
       const parts: string[] = [];
-      if (rarelyWearItems > 0) {
-        parts.push(`${rarelyWearItems} ${rarelyWearItems === 1 ? "rarely gets" : "rarely get"} worn`);
+      if (bothNegItems > 0) {
+        parts.push(bothNegItems === 1 ? "1 is rarely worn and a purchase you regret" : `${bothNegItems} are rarely worn and purchases you regret`);
       }
-      if (regretItems > 0) {
-        parts.push(regretItems === 1 ? "1 is a purchase you regret" : `${regretItems} are purchases you regret`);
+      if (rarelyWearOnlyItems > 0) {
+        parts.push(`${rarelyWearOnlyItems} ${rarelyWearOnlyItems === 1 ? "rarely gets" : "rarely get"} worn`);
+      }
+      if (regretOnlyItems > 0) {
+        parts.push(regretOnlyItems === 1 ? "1 is a purchase you regret" : `${regretOnlyItems} are purchases you regret`);
       }
       const negDesc = joinInsightNotes(parts);
       claim = `${negativeItems} of the ${taggedCount} ${negativeItems === 1 ? "piece" : "pieces"} you've tagged ${negativeItems === 1 ? "isn't earning its place" : "aren't earning their place"} — ${negDesc}.`;
@@ -323,11 +336,14 @@ export function computeClosetInsights(
       if (unsureItems > 0) {
         parts.push(`${unsureItems} you're still unsure about`);
       }
-      if (rarelyWearItems > 0) {
-        parts.push(`${rarelyWearItems} that rarely ${rarelyWearItems === 1 ? "gets" : "get"} worn`);
+      if (bothNegItems > 0) {
+        parts.push(bothNegItems === 1 ? "1 that's rarely worn and a purchase you regret" : `${bothNegItems} that are rarely worn and purchases you regret`);
       }
-      if (regretItems > 0) {
-        parts.push(regretItems === 1 ? "1 that's a purchase you regret" : `${regretItems} that are purchases you regret`);
+      if (rarelyWearOnlyItems > 0) {
+        parts.push(`${rarelyWearOnlyItems} that rarely ${rarelyWearOnlyItems === 1 ? "gets" : "get"} worn`);
+      }
+      if (regretOnlyItems > 0) {
+        parts.push(regretOnlyItems === 1 ? "1 that's a purchase you regret" : `${regretOnlyItems} that are purchases you regret`);
       }
       claim = parts.length > 0
         ? `The pieces you've tagged are spread — ${joinInsightNotes(parts)}.`
