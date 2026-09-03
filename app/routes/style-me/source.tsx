@@ -77,8 +77,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const source = session.get("styleMeSource") as string | undefined;
 
-  // Rev3: standalone StyleMe is closet-only — bypass source selection entirely.
-  if (isRev3 && (!source || !VALID_SOURCE_IDS.has(source) || source === "naia-piece")) {
+  // Rev3: standalone StyleMe is closet-only — force to my-closet unconditionally,
+  // including stale sessions that already carry source="both" or "naia-piece".
+  if (isRev3 && source !== "my-closet") {
     session.set("styleMeSource", "my-closet");
     return redirect("/style-me/source", {
       headers: { "Set-Cookie": await commitSession(session) },
