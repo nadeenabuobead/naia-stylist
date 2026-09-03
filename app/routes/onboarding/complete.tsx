@@ -273,6 +273,21 @@ const css = `
   .cp-status-error{color:var(--accent);background:rgba(139,32,53,.06)}
   .cp-status-conflict{color:#7a4a00;background:rgba(180,120,0,.06)}
   .cp-status-btn{padding:6px 14px;border:1px solid currentColor;background:transparent;font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:inherit;cursor:pointer}
+  .ay-wrap{background:rgba(59,5,16,.02);border:1px solid rgba(59,5,16,.08);padding:28px;margin-bottom:32px}
+  .ay-heading{font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+  .ay-hint{font-family:var(--ff-body);font-size:14px;font-style:italic;color:var(--muted);margin-bottom:24px}
+  .ay-q-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--deep);margin-bottom:10px}
+  .ay-pills{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+  .ay-pill{padding:6px 14px;border:1px solid rgba(59,5,16,.2);background:transparent;font-family:var(--ff-body);font-size:15px;color:var(--deep);cursor:pointer;transition:border-color .15s,background .15s}
+  .ay-pill:hover{border-color:var(--accent)}
+  .ay-pill-sel{border-color:var(--accent);background:rgba(139,32,53,.06);color:var(--accent)}
+  .ay-text{width:100%;padding:10px 14px;border:1px solid rgba(59,5,16,.2);background:transparent;font-family:var(--ff-body);font-size:15px;color:var(--deep);margin-bottom:20px;resize:vertical}
+  .ay-text:focus{outline:none;border-color:var(--accent)}
+  .ay-actions{display:flex;align-items:center;gap:20px}
+  .ay-save{padding:10px 28px;border:1px solid var(--accent);background:var(--accent);font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:#fff;cursor:pointer}
+  .ay-save:disabled{opacity:.5;cursor:not-allowed}
+  .ay-skip{font-family:var(--ff-body);font-size:14px;color:var(--muted);cursor:pointer;background:none;border:none;text-decoration:underline;padding:0}
+  .ay-saved{font-family:var(--ff-mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);padding:16px 0}
 `;
 
 type SaveStatus = "saving" | "saved" | "error" | "conflict";
@@ -287,6 +302,10 @@ export default function OnboardingComplete() {
   const [feedbackState, setFeedbackState] = useState<Record<string, "accurate" | "not-quite">>({});
   const [feedbackPending, setFeedbackPending] = useState<Set<string>>(new Set());
   const [feedbackError, setFeedbackError] = useState<Set<string>>(new Set());
+  const [aboutYouAge, setAboutYouAge] = useState("");
+  const [aboutYouGender, setAboutYouGender] = useState("");
+  const [aboutYouGenderNote, setAboutYouGenderNote] = useState("");
+  const [aboutYouStatus, setAboutYouStatus] = useState<"idle" | "saving" | "saved" | "skipped">("idle");
 
   // POST only the sparse session patch (keys the user actually changed this session).
   // Absent keys fall back to the saved DB value via the API's pick* helpers.
@@ -415,6 +434,27 @@ export default function OnboardingComplete() {
   const avoidColors     = a["avoid-colors"]           ?? [];
   const support         = a["style-support"]          ?? [];
   const notes           = a["final-notes"];
+
+  const saveAboutYou = useCallback(async () => {
+    if (aboutYouStatus === "saving" || aboutYouStatus === "saved") return;
+    setAboutYouStatus("saving");
+    const patch: Record<string, string> = {};
+    if (aboutYouAge) patch.ageRange = aboutYouAge;
+    if (aboutYouGender) patch.gender = aboutYouGender;
+    if (aboutYouGender === "another-gender" && aboutYouGenderNote.trim()) {
+      patch.genderSelfDescription = aboutYouGenderNote.trim();
+    }
+    try {
+      await fetch("/api/save-about-you", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      setAboutYouStatus("saved");
+    } catch {
+      setAboutYouStatus("idle");
+    }
+  }, [aboutYouStatus, aboutYouAge, aboutYouGender, aboutYouGenderNote]);
 
   const primaryPersonality = personalities[0];
   const identity = primaryPersonality
@@ -686,6 +726,87 @@ export default function OnboardingComplete() {
             <div className="cp-naia-label">How nAia will use this</div>
             <p className="cp-naia-text">{buildNaiaNote(a)}</p>
           </div>
+        )}
+
+        {/* About You — optional, collected at end of onboarding for Rev 6 users */}
+        {isRev6 && aboutYouStatus !== "skipped" && (
+          aboutYouStatus === "saved" ? (
+            <div className="ay-saved">About You saved — you can update this in your Passport any time.</div>
+          ) : (
+            <div className="ay-wrap">
+              <div className="ay-heading">About You</div>
+              <p className="ay-hint">Optional — not used to choose styles or make assumptions about what you wear.</p>
+
+              <div className="ay-q-label">How old are you?</div>
+              <div className="ay-pills">
+                {[
+                  { id: "18-24", label: "18–24" }, { id: "25-34", label: "25–34" },
+                  { id: "35-44", label: "35–44" }, { id: "45-54", label: "45–54" },
+                  { id: "55-64", label: "55–64" }, { id: "65-plus", label: "65+" },
+                  { id: "prefer-not-to-say", label: "Prefer not to say" },
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    className={`ay-pill${aboutYouAge === opt.id ? " ay-pill-sel" : ""}`}
+                    onClick={() => setAboutYouAge(a => a === opt.id ? "" : opt.id)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="ay-q-label">How do you describe your gender?</div>
+              <div className="ay-pills">
+                {[
+                  { id: "woman", label: "Woman" }, { id: "man", label: "Man" },
+                  { id: "another-gender", label: "Another gender" },
+                  { id: "prefer-not-to-say", label: "Prefer not to say" },
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    className={`ay-pill${aboutYouGender === opt.id ? " ay-pill-sel" : ""}`}
+                    onClick={() => setAboutYouGender(g => g === opt.id ? "" : opt.id)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              {aboutYouGender === "another-gender" && (
+                <>
+                  <div className="ay-q-label">Describe your gender in your own words (optional)</div>
+                  <textarea
+                    className="ay-text"
+                    rows={2}
+                    maxLength={200}
+                    placeholder="Optional — describe your gender in your own words."
+                    value={aboutYouGenderNote}
+                    onChange={e => setAboutYouGenderNote(e.target.value)}
+                  />
+                </>
+              )}
+
+              <div className="ay-actions">
+                <button
+                  type="button"
+                  className="ay-save"
+                  disabled={aboutYouStatus === "saving" || (!aboutYouAge && !aboutYouGender)}
+                  onClick={saveAboutYou}
+                >
+                  {aboutYouStatus === "saving" ? "Saving…" : "Save"}
+                </button>
+                <button
+                  type="button"
+                  className="ay-skip"
+                  onClick={() => setAboutYouStatus("skipped")}
+                >
+                  Skip for now
+                </button>
+              </div>
+            </div>
+          )
         )}
 
         {/* CTAs */}
