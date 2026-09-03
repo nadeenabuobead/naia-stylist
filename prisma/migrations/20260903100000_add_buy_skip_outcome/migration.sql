@@ -1,11 +1,18 @@
--- CreateEnum
-CREATE TYPE "BuySkipDecision" AS ENUM ('BOUGHT_IT', 'DIDNT_BUY_IT', 'STILL_DECIDING');
+-- CreateEnum (idempotent: type may already exist on staging from a prior db push)
+DO $$ BEGIN
+  CREATE TYPE "BuySkipDecision" AS ENUM ('BOUGHT_IT', 'DIDNT_BUY_IT', 'STILL_DECIDING');
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
 
--- CreateEnum
-CREATE TYPE "BuySkipPostOutcome" AS ENUM ('LOVE_IT', 'ITS_OKAY', 'RETURNED_IT');
+DO $$ BEGIN
+  CREATE TYPE "BuySkipPostOutcome" AS ENUM ('LOVE_IT', 'ITS_OKAY', 'RETURNED_IT');
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
 
 -- CreateTable
-CREATE TABLE "BuySkipOutcome" (
+CREATE TABLE IF NOT EXISTS "BuySkipOutcome" (
     "id" TEXT NOT NULL,
     "analysisId" TEXT NOT NULL,
     "decision" "BuySkipDecision" NOT NULL,
@@ -17,7 +24,12 @@ CREATE TABLE "BuySkipOutcome" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "BuySkipOutcome_analysisId_key" ON "BuySkipOutcome"("analysisId");
+CREATE UNIQUE INDEX IF NOT EXISTS "BuySkipOutcome_analysisId_key" ON "BuySkipOutcome"("analysisId");
 
--- AddForeignKey
-ALTER TABLE "BuySkipOutcome" ADD CONSTRAINT "BuySkipOutcome_analysisId_fkey" FOREIGN KEY ("analysisId") REFERENCES "BuyOrSkipAnalysis"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- AddForeignKey (safe: errors if constraint already exists, so guard it)
+DO $$ BEGIN
+  ALTER TABLE "BuySkipOutcome" ADD CONSTRAINT "BuySkipOutcome_analysisId_fkey"
+    FOREIGN KEY ("analysisId") REFERENCES "BuyOrSkipAnalysis"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
