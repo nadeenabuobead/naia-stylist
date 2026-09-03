@@ -6,9 +6,10 @@
 // customer can confirm rather than fill in. Distinct from analyzeClosetGarment
 // (which runs post-save to populate the full Tier 2/3 intelligence fields).
 //
-// Security: callers must validate publicId ownership and asset existence
-// before calling previewAnalyzeGarment. This module only builds signed URLs
-// and calls Claude — it performs no auth or ownership checks.
+// Security: callers must validate publicId ownership and asset existence, build
+// the authenticated downloadUrl (buildPrivateDownloadUrl), and run L2/L3 checks
+// before calling previewAnalyzeGarment. This module calls Claude — it performs
+// no auth, ownership, or URL-construction of its own.
 
 import { analyzeImage } from "./claude.server.js";
 import {
