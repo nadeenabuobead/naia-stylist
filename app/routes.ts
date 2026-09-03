@@ -25,6 +25,7 @@ export default [
   route("style-me/result", "routes/style-me/result.tsx"),
   route("api/customer-auth", "routes/api.customer-auth.jsx"),
   route("api/closet", "routes/api.closet.jsx"),
+  route("api/closet-preview-analyze", "routes/api.closet-preview-analyze.ts"),
   route("api/style", "routes/api.style.jsx"),
   route("api/outfit-history", "routes/api.outfit-history.jsx"),
   route("api/outfit-rating", "routes/api.outfit-rating.jsx"),

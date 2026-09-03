@@ -30,15 +30,28 @@ const OCCASIONS = ["Casual", "Work", "Dinner", "Party", "Formal", "Date", "Weeke
 const SEASONS = ["Spring", "Summer", "Fall", "Winter", "All Season"];
 const PATTERNS = ["Solid", "Stripes", "Floral", "Plaid", "Animal Print", "Geometric", "Abstract", "Other"];
 
-const GENERAL_PHOTO_TIPS = [
-  "Photograph one item only",
-  "Use a plain, contrasting background",
-  "Use bright, even lighting",
-  "Keep the image sharp and in focus",
-  "Make sure the entire item is visible",
-  "Do not crop any important part",
-  "Avoid hands, people, clutter or other items covering it",
+const PHOTO_TIPS_COMPACT = [
+  "One item only",
+  "Full item visible",
+  "Plain background",
+  "Good lighting",
 ];
+
+// Maps AI vocabulary pattern tokens (lowercase) to the UI pill display labels.
+const PATTERN_AI_TO_UI: Readonly<Record<string, string>> = {
+  "solid":        "Solid",
+  "stripes":      "Stripes",
+  "floral":       "Floral",
+  "plaid":        "Plaid",
+  "check":        "Plaid",
+  "animal-print": "Animal Print",
+  "geometric":    "Geometric",
+  "abstract":     "Abstract",
+  "polka-dot":    "Other",
+  "houndstooth":  "Other",
+  "paisley":      "Other",
+  "graphic":      "Other",
+};
 
 const CATEGORY_PHOTO_TIPS: Record<string, { title: string; tips: string[] }> = {
   TOPS:      { title: "For clothing", tips: ["Lay it flat or hang it straight", "Show the full neckline, sleeves, waist and hem", "Do not fold or bunch the garment"] },
@@ -160,13 +173,14 @@ export async function action({ request }: ActionFunctionArgs) {
     const brand = formData.get("brand") as string;
     const occasions = JSON.parse((formData.get("occasions") as string) || "[]");
     const seasons = JSON.parse((formData.get("seasons") as string) || "[]");
+    const customerNote = (formData.get("customerNote") as string)?.trim() || null;
     const rawRelationships = JSON.parse((formData.get("garmentRelationships") as string) || "[]");
     const relationshipsResult = normalizeGarmentRelationships(rawRelationships);
     if (!relationshipsResult.ok) {
       return data({ error: relationshipsResult.error }, { status: 400 });
     }
     const garmentRelationships = relationshipsResult.value;
-    if (!name || !category) return data({ error: "Name and category required" }, { status: 400 });
+    if (!category) return data({ error: "Category required" }, { status: 400 });
     if (!publicId) return data({ error: "Image upload reference required." }, { status: 400 });
 
     // ── Server-side upload validation ─────────────────────────────────────────
@@ -335,7 +349,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const newItem = await prisma.closetItem.create({
       data: {
         customer: { connect: { id: customer.id } },
-        name,
+        name: name || null,
         category,
         imageUrl: null,                // private upload — null for new records
         imagePublicId: publicId,
@@ -350,6 +364,7 @@ export async function action({ request }: ActionFunctionArgs) {
         tryOnCustomerHint: stageA.customerHint,
         tryOnInternalNote: stageA.internalNote,
         garmentRelationships,
+        customerNote,
         // Garment intelligence — pending immediately; analysis fires below
         analysisStatus: "pending",
       },
@@ -394,9 +409,10 @@ export async function action({ request }: ActionFunctionArgs) {
     const category  = (formData.get("category")    as string)?.trim();
     const primaryColor = (formData.get("primaryColor") as string)?.trim();
     const newPublicId  = (formData.get("newPublicId")  as string)?.trim();
+    const editCustomerNote = (formData.get("customerNote") as string)?.trim() || null;
 
-    if (!itemId || !name || !category) {
-      return data({ error: "Item ID, name, and category are required." }, { status: 400 });
+    if (!itemId || !category) {
+      return data({ error: "Item ID and category are required." }, { status: 400 });
     }
 
     const existing = await prisma.closetItem.findUnique({ where: { id: itemId } });
@@ -420,7 +436,7 @@ export async function action({ request }: ActionFunctionArgs) {
         // Set pending then rerun analysis on the existing image with the updated category.
         await prisma.closetItem.update({
           where: { id: itemId },
-          data: { name, category, primaryColor: primaryColor || null, garmentRelationships: editGarmentRelationships, analysisStatus: "pending" },
+          data: { name: name || null, category, primaryColor: primaryColor || null, garmentRelationships: editGarmentRelationships, customerNote: editCustomerNote, analysisStatus: "pending" },
         });
         await analyzeClosetGarment({
           closetItemId: itemId,
@@ -434,7 +450,7 @@ export async function action({ request }: ActionFunctionArgs) {
       } else {
         await prisma.closetItem.update({
           where: { id: itemId },
-          data: { name, category, primaryColor: primaryColor || null, garmentRelationships: editGarmentRelationships },
+          data: { name: name || null, category, primaryColor: primaryColor || null, garmentRelationships: editGarmentRelationships, customerNote: editCustomerNote },
         });
       }
       return data({ success: true });
@@ -605,7 +621,7 @@ export async function action({ request }: ActionFunctionArgs) {
     await prisma.closetItem.update({
       where: { id: itemId },
       data: {
-        name,
+        name: name || null,
         category,
         primaryColor: primaryColor || null,
         imageUrl: null,
@@ -616,6 +632,7 @@ export async function action({ request }: ActionFunctionArgs) {
         tryOnCustomerHint: editStageA.customerHint,
         tryOnInternalNote: editStageA.internalNote,
         garmentRelationships: editGarmentRelationships,
+        customerNote: editCustomerNote,
         // Image replaced — stale intelligence is no longer current; reanalysis below.
         analysisStatus: "pending",
       },
@@ -762,6 +779,30 @@ const css = `
   .cl-edit-current{flex:0 0 100px;height:100px;border-radius:6px;overflow:hidden;background:var(--bg-50,#f5f5f5);display:flex;align-items:center;justify-content:center;font-size:32px;opacity:.3}
   .cl-edit-current img{width:100%;height:100%;object-fit:cover;opacity:1}
   .cl-edit-upload-side{flex:1;display:flex;flex-direction:column;gap:6px}
+  /* ── AI reading / preview state ─────────────────────────────────────────── */
+  .cl-analyzing{text-align:center;padding:48px 0}
+  .cl-analyzing-spinner{width:24px;height:24px;border:2px solid var(--fg-10,var(--c-border));border-top-color:var(--fg,var(--c-ink));border-radius:50%;animation:cl-spin .75s linear infinite;margin:0 auto 14px}
+  .cl-analyzing-text{font-family:var(--ff-body);font-size:15px;font-style:italic;color:var(--fg-60,var(--c-muted))}
+  @keyframes cl-spin{to{transform:rotate(360deg)}}
+  /* AI summary block */
+  .cl-ai-summary{padding:0 0 20px;margin-bottom:20px;border-bottom:1px solid var(--fg-10,var(--c-border))}
+  .cl-ai-name{font-family:var(--ff-display);font-size:20px;font-weight:900;color:var(--fg,var(--c-ink));text-transform:uppercase;letter-spacing:.4px;line-height:1.1;margin-bottom:5px}
+  .cl-ai-meta{font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60,var(--c-muted))}
+  .cl-ai-replace{background:none;border:none;cursor:pointer;font-family:var(--ff-ui);font-size:8px;letter-spacing:1.5px;text-transform:uppercase;color:var(--fg-60,var(--c-muted));padding:0;margin-top:8px;text-decoration:underline;text-underline-offset:2px;display:block}
+  .cl-ai-replace:hover{color:var(--fg,var(--c-ink))}
+  /* Edit details toggle */
+  .cl-details-toggle{background:none;border:1px solid var(--fg-10,var(--c-border));cursor:pointer;font-family:var(--ff-ui);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60,var(--c-muted));padding:8px 16px;margin-bottom:24px;transition:border-color .15s,color .15s}
+  .cl-details-toggle:hover{border-color:var(--fg,var(--c-ink));color:var(--fg,var(--c-ink))}
+  /* Customer note */
+  .cl-textarea{width:100%;padding:12px;border:1px solid var(--fg-10,var(--c-border));font-size:14px;font-family:var(--ff-body);background:var(--bg,var(--c-surface));color:var(--fg,var(--c-ink));outline:none;margin-bottom:20px;resize:vertical;min-height:80px;line-height:1.6}
+  .cl-textarea:focus{border-color:var(--fg,var(--c-ink))}
+  .cl-note-examples{font-family:var(--ff-body);font-size:11px;font-style:italic;color:var(--fg-60,var(--c-muted));margin-bottom:10px;line-height:1.55}
+  /* Compact photo tips */
+  .cl-photo-tips{display:flex;flex-wrap:wrap;gap:4px 18px;margin-bottom:12px}
+  .cl-photo-tip{font-family:var(--ff-ui);font-size:8px;letter-spacing:1.5px;text-transform:uppercase;color:var(--fg-60,var(--c-muted))}
+  .cl-photo-tip::before{content:"– "}
+  /* Fallback notice */
+  .cl-fallback-notice{font-family:var(--ff-body);font-size:13px;font-style:italic;color:var(--fg-60,var(--c-muted));margin-bottom:20px;padding:12px;background:var(--bg-50,var(--c-surface));border:1px solid var(--fg-10,var(--c-border))}
 `;
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -783,7 +824,10 @@ export default function Closet() {
   const [activeCategory, setActiveCategory] = useState("ALL");
   const [query, setQuery] = useState("");
 
-  const [uploading, setUploading] = useState(false);
+  // addStep drives the multi-step upload flow:
+  //   idle → uploading → analyzing → analyzed | fallback
+  type AddStep = "idle" | "uploading" | "analyzing" | "analyzed" | "fallback";
+  const [addStep, setAddStep] = useState<AddStep>("idle");
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [newCategory, setNewCategory] = useState("TOPS");
@@ -797,6 +841,9 @@ export default function Closet() {
   const [newOccasions, setNewOccasions] = useState<string[]>([]);
   const [newSeasons, setNewSeasons] = useState<string[]>([]);
   const [newRelationships, setNewRelationships] = useState<string[]>([]);
+  const [newNote, setNewNote] = useState("");
+  const [aiSummaryLine, setAiSummaryLine] = useState("");
+  const [showEditDetails, setShowEditDetails] = useState(false);
 
   // ── Edit state ────────────────────────────────────────────────────────────
   const editFetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -813,6 +860,7 @@ export default function Closet() {
   const [editUploading, setEditUploading] = useState(false);
   const [editUploadError, setEditUploadError] = useState<string | null>(null);
   const [editRelationships, setEditRelationships] = useState<string[]>([]);
+  const [editNote, setEditNote] = useState("");
 
   // Revoke both blob preview URLs when the component unmounts.
   useEffect(() => {
@@ -913,27 +961,55 @@ export default function Closet() {
     return null;
   }
 
+  async function fetchPreviewAnalysis(publicId: string) {
+    setAddStep("analyzing");
+    try {
+      const res = await fetch("/api/closet-preview-analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ publicId }),
+      });
+      if (!res.ok) throw new Error("analysis_failed");
+      const preview = await res.json() as any;
+
+      // Pre-fill name, category, color, pattern from AI detection.
+      if (preview.name) setNewName(preview.name);
+      if (preview.category && CATEGORIES.includes(preview.category)) setNewCategory(preview.category);
+      if (preview.primaryColor) setNewColor(preview.primaryColor);
+      if (preview.pattern) {
+        const uiPattern = (PATTERN_AI_TO_UI as Record<string, string>)[preview.pattern] ?? preview.pattern;
+        setNewPattern(uiPattern);
+      }
+      setAiSummaryLine(preview.summaryLine || "");
+      setAddStep("analyzed");
+    } catch {
+      // Show the fallback manual form — do not block the customer.
+      setAddStep("fallback");
+    }
+  }
+
   async function uploadToCloudinary(file: File) {
-    setUploading(true);
+    setAddStep("uploading");
     setUploadError(null);
 
     // Client-side validation: MIME, size, magic bytes, decode, dimensions
     const validationError = await validateImageFile(file);
     if (validationError) {
       setUploadError(validationError);
-      setUploading(false);
+      setAddStep("idle");
       return;
     }
 
     try {
       const sigRes = await fetch("/api/cloudinary-signature", { credentials: "same-origin" });
-      if (sigRes.status === 401) { setUploadError("Your session has expired. Please sign in again."); setUploading(false); return; }
-      if (!sigRes.ok) { setUploadError("Upload service unavailable. Please try again."); setUploading(false); return; }
+      if (sigRes.status === 401) { setUploadError("Your session has expired. Please sign in again."); setAddStep("idle"); return; }
+      if (!sigRes.ok) { setUploadError("Upload service unavailable. Please try again."); setAddStep("idle"); return; }
       const sig = await sigRes.json() as any;
 
       if (file.size > sig.maxFileSizeBytes) {
         setUploadError(`Image must be under ${Math.round(sig.maxFileSizeBytes / 1024 / 1024)} MB.`);
-        setUploading(false);
+        setAddStep("idle");
         return;
       }
 
@@ -951,13 +1027,13 @@ export default function Closet() {
       if (!cloudRes.ok) {
         const errData = await cloudRes.json().catch(() => ({} as any));
         setUploadError((errData as any).error?.message || "Upload failed. Please try again.");
-        setUploading(false);
+        setAddStep("idle");
         return;
       }
       const cloudData = await cloudRes.json() as any;
       if (!cloudData.public_id) {
         setUploadError("Upload failed. Please try another photo.");
-        setUploading(false);
+        setAddStep("idle");
         return;
       }
       // Private assets are not accessible via secure_url — use a local blob URL for preview.
@@ -966,10 +1042,12 @@ export default function Closet() {
       blobUrlRef.current = blobUrl;
       setNewImageUrl(blobUrl);
       setNewPublicId(cloudData.public_id);
+
+      // Trigger AI preview analysis — transitions addStep to "analyzing" then "analyzed"/"fallback".
+      await fetchPreviewAnalysis(cloudData.public_id);
     } catch {
       setUploadError("Upload failed. Please check your connection and try again.");
-    } finally {
-      setUploading(false);
+      setAddStep("idle");
     }
   }
 
@@ -981,7 +1059,7 @@ export default function Closet() {
   }
 
   function handleAdd() {
-    if (!newName || !newPublicId) return;
+    if (!newPublicId) return;
     addPendingRef.current = true;
     addFetcher.submit(
       {
@@ -995,6 +1073,7 @@ export default function Closet() {
         occasions: JSON.stringify(newOccasions),
         seasons: JSON.stringify(newSeasons),
         garmentRelationships: JSON.stringify(newRelationships),
+        customerNote: newNote,
       },
       { method: "post" }
     );
@@ -1003,6 +1082,7 @@ export default function Closet() {
   }
 
   function resetAddForm() {
+    setAddStep("idle");
     setNewName("");
     if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
     setNewImageUrl("");
@@ -1013,6 +1093,9 @@ export default function Closet() {
     setNewOccasions([]);
     setNewSeasons([]);
     setNewRelationships([]);
+    setNewNote("");
+    setAiSummaryLine("");
+    setShowEditDetails(false);
     setUploadError(null);
     setShowAddForm(false);
   }
@@ -1087,6 +1170,7 @@ export default function Closet() {
     setEditImageUrl("");
     setEditUploadError(null);
     setEditRelationships(item.garmentRelationships ?? []);
+    setEditNote(item.customerNote ?? "");
     if (editBlobUrlRef.current) { URL.revokeObjectURL(editBlobUrlRef.current); editBlobUrlRef.current = null; }
   }
 
@@ -1100,10 +1184,11 @@ export default function Closet() {
     setEditImageUrl("");
     setEditUploadError(null);
     setEditRelationships([]);
+    setEditNote("");
   }
 
   function handleEditSubmit() {
-    if (!editingItemId || !editName || !editCategory) return;
+    if (!editingItemId || !editCategory) return;
     editFetcher.submit(
       {
         intent: "edit",
@@ -1113,6 +1198,7 @@ export default function Closet() {
         primaryColor: editColor,
         newPublicId: editPublicId,   // empty string = meta-only edit; publicId = photo replacement
         garmentRelationships: JSON.stringify(editRelationships),
+        customerNote: editNote,
       },
       { method: "post" }
     );
@@ -1133,6 +1219,9 @@ export default function Closet() {
       if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
       setNewImageUrl("");
       setNewPublicId("");
+      setAddStep("idle");
+      setAiSummaryLine("");
+      setShowEditDetails(false);
     }
     // On error, keep form open — addFetcher.data?.error renders below the submit button.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1207,169 +1296,313 @@ export default function Closet() {
           </button>
         )}
 
-        {/* Option A: Add to Wardrobe inline form */}
+        {/* Add to My Closet inline form */}
         {showAddForm && (
           <div className="cl-form">
             <div className="cl-form-header">
-              <h3 className="cl-form-title">Add to Wardrobe</h3>
+              <h3 className="cl-form-title">Add to My Closet</h3>
               <button type="button" className="cl-form-cancel" onClick={resetAddForm}>Cancel</button>
             </div>
 
-            {/* Photo guide integrated inside Add to Wardrobe panel */}
-            <div className="cl-guide">
-              <div className="cl-guide-header">Photo guide</div>
-              <div className="cl-guide-cols">
-                <div>
-                  <div className="cl-guide-col-label">General</div>
-                  <ul className="cl-guide-tips">
-                    {GENERAL_PHOTO_TIPS.map((tip, i) => <li key={i}>{tip}</li>)}
-                  </ul>
+            {/* ── Step 1: Upload zone (idle / uploading states) ── */}
+            {(addStep === "idle" || addStep === "uploading") && (
+              <>
+                <div className="cl-photo-tips">
+                  {PHOTO_TIPS_COMPACT.map(tip => <span key={tip} className="cl-photo-tip">{tip}</span>)}
                 </div>
-                {CATEGORY_PHOTO_TIPS[newCategory] && (
-                  <div>
-                    <div className="cl-guide-col-label">{CATEGORY_PHOTO_TIPS[newCategory].title}</div>
-                    <ul className="cl-guide-tips">
-                      {CATEGORY_PHOTO_TIPS[newCategory].tips.map((tip, i) => <li key={i}>{tip}</li>)}
-                    </ul>
+                <p className="cl-upload-notice" style={{ marginBottom: "8px" }}>
+                  Upload photos of clothing items only. Do not upload selfies, face photos, mirror photos, or personal images.
+                </p>
+                <label className="cl-upload-box" style={{ cursor: addStep === "uploading" ? "default" : "pointer" }}>
+                  {addStep === "uploading"
+                    ? <span className="cl-upload-hint">Uploading…</span>
+                    : <span className="cl-upload-hint">Click to upload photo</span>
+                  }
+                  <input
+                    ref={addFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={e => e.target.files?.[0] && uploadToCloudinary(e.target.files[0])}
+                    style={{ display: "none" }}
+                    disabled={addStep === "uploading"}
+                  />
+                </label>
+                {uploadError && <p className="cl-upload-error" style={{ marginTop: "8px" }}>{uploadError}</p>}
+              </>
+            )}
+
+            {/* ── Step 2: AI reading state ── */}
+            {addStep === "analyzing" && (
+              <>
+                {newImageUrl && (
+                  <div style={{ marginBottom: "20px", textAlign: "center" }}>
+                    <img src={newImageUrl} alt="uploaded piece" style={{ maxHeight: "160px", objectFit: "contain", border: "1px solid var(--fg-10,var(--c-border))" }} />
                   </div>
                 )}
-              </div>
-              <div>
-                <div className="cl-guide-ex good">
-                  <span className="cl-guide-ex-mark">✓</span>
-                  <span>Single item · plain background · fully visible · well lit</span>
+                <div className="cl-analyzing">
+                  <div className="cl-analyzing-spinner" aria-hidden="true" />
+                  <p className="cl-analyzing-text">nAia is reading your piece…</p>
                 </div>
-                <div className="cl-guide-ex avoid">
-                  <span className="cl-guide-ex-mark">✗</span>
-                  <span>Multiple items or cluttered background</span>
-                </div>
-                <div className="cl-guide-ex avoid">
-                  <span className="cl-guide-ex-mark">✗</span>
-                  <span>Item cropped, blurry or poorly lit</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="cl-label">Photo</div>
-            <label className="cl-upload-box">
-              {newImageUrl
-                ? <img src={newImageUrl} alt="preview" style={{ maxHeight: "200px", objectFit: "cover" }} />
-                : uploading
-                  ? <span className="cl-upload-hint">Uploading…</span>
-                  : <span className="cl-upload-hint">Click to upload photo</span>
-              }
-              <input
-                ref={addFileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={e => e.target.files?.[0] && uploadToCloudinary(e.target.files[0])}
-                style={{ display: "none" }}
-              />
-            </label>
-            <p className="cl-upload-notice">
-              Upload photos of clothing items only. Do not upload selfies, face photos, mirror photos, body scans, or personal images.
-            </p>
-            {uploadError && <p className="cl-upload-error">{uploadError}</p>}
-
-            <div className="cl-label">Name *</div>
-            <input
-              className="cl-input"
-              type="text"
-              placeholder="e.g. Black silk blazer"
-              value={newName}
-              onChange={e => setNewName(e.target.value)}
-            />
-
-            <div className="cl-label">Category *</div>
-            <div className="cl-pills">
-              {CATEGORIES.map(c => (
-                <button key={c} type="button" onClick={() => setNewCategory(c)} className={`cl-pill${newCategory === c ? " on" : ""}`}>
-                  {c.charAt(0) + c.slice(1).toLowerCase()}
-                </button>
-              ))}
-            </div>
-
-            <div className="cl-label">Color</div>
-            <div className="cl-pills">
-              {COLORS.map(c => (
-                <button key={c} type="button" onClick={() => setNewColor(c)} className={`cl-pill${newColor === c ? " on" : ""}`}>{c}</button>
-              ))}
-            </div>
-
-            <div className="cl-label">Pattern</div>
-            <div className="cl-pills">
-              {PATTERNS.map(p => (
-                <button key={p} type="button" onClick={() => setNewPattern(p)} className={`cl-pill${newPattern === p ? " on" : ""}`}>{p}</button>
-              ))}
-            </div>
-
-            <div className="cl-label">Occasions</div>
-            <div className="cl-pills">
-              {OCCASIONS.map(o => (
-                <button key={o} type="button" onClick={() => toggleOccasion(o)} className={`cl-pill${newOccasions.includes(o) ? " on" : ""}`}>{o}</button>
-              ))}
-            </div>
-
-            <div className="cl-label">Season</div>
-            <div className="cl-pills">
-              {SEASONS.map(s => (
-                <button key={s} type="button" onClick={() => toggleSeason(s)} className={`cl-pill${newSeasons.includes(s) ? " on" : ""}`}>{s}</button>
-              ))}
-            </div>
-
-            <div className="cl-label">Brand (optional)</div>
-            <input
-              className="cl-input"
-              type="text"
-              placeholder="Brand name"
-              value={newBrand}
-              onChange={e => setNewBrand(e.target.value)}
-            />
-
-            <div className="cl-label">How do you feel about it? (optional, up to {GARMENT_RELATIONSHIP_MAX})</div>
-            <div className="cl-pills">
-              {Object.entries(GARMENT_RELATIONSHIP_LABELS).map(([id, label]) => {
-                const selected = newRelationships.includes(id);
-                const atMax = newRelationships.length >= GARMENT_RELATIONSHIP_MAX;
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setNewRelationships(prev =>
-                      prev.includes(id) ? prev.filter(x => x !== id) : atMax ? prev : [...prev, id]
-                    )}
-                    className={`cl-pill${selected ? " on" : ""}`}
-                    disabled={!selected && atMax}
-                    style={!selected && atMax ? { opacity: 0.4 } : undefined}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-
-            <button
-              type="button"
-              className="cl-submit"
-              onClick={handleAdd}
-              disabled={!newName || !newPublicId || uploading || addFetcher.state === "submitting"}
-            >
-              {uploading ? "Uploading…" : addFetcher.state === "submitting" ? "Saving…" : "Add to Wardrobe"}
-            </button>
-
-            {addFetcher.data?.error && !(addFetcher.data?.retryImage && newPublicId) && (
-              <p className="cl-error">{addFetcher.data.error}</p>
+              </>
             )}
-            {addFetcher.data?.retryImage && !newPublicId && (
-              <button
-                type="button"
-                className="cl-submit"
-                style={{ marginTop: "8px", background: "var(--naia-ink, var(--fg, #111))" }}
-                disabled={uploading}
-                onClick={() => addFileInputRef.current?.click()}
-              >
-                CHOOSE ANOTHER PHOTO
-              </button>
+
+            {/* ── Step 3: AI summary + human signals (analyzed state) ── */}
+            {addStep === "analyzed" && (
+              <>
+                {/* Photo thumbnail */}
+                {newImageUrl && (
+                  <div style={{ marginBottom: "16px", display: "flex", gap: "16px", alignItems: "flex-start" }}>
+                    <img src={newImageUrl} alt="uploaded piece" style={{ width: "80px", height: "80px", objectFit: "contain", border: "1px solid var(--fg-10,var(--c-border))", flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}>
+                      {/* AI summary */}
+                      <div className="cl-ai-summary" style={{ border: "none", padding: 0, margin: 0 }}>
+                        {newName && <div className="cl-ai-name">{newName}</div>}
+                        {aiSummaryLine && <div className="cl-ai-meta">{aiSummaryLine}</div>}
+                      </div>
+                      <button type="button" className="cl-ai-replace" onClick={() => { resetAddForm(); setShowAddForm(true); }}>
+                        Replace photo
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Edit details — optional collapsible */}
+                <button
+                  type="button"
+                  className="cl-details-toggle"
+                  onClick={() => setShowEditDetails(prev => !prev)}
+                >
+                  {showEditDetails ? "▲ Hide Details" : "▼ Edit Details"}
+                </button>
+
+                {showEditDetails && (
+                  <div style={{ marginBottom: "4px" }}>
+                    <div className="cl-label">Name</div>
+                    <input
+                      className="cl-input"
+                      type="text"
+                      placeholder="e.g. Black silk blazer"
+                      value={newName}
+                      onChange={e => setNewName(e.target.value)}
+                    />
+
+                    <div className="cl-label">Category</div>
+                    <div className="cl-pills">
+                      {CATEGORIES.map(c => (
+                        <button key={c} type="button" onClick={() => setNewCategory(c)} className={`cl-pill${newCategory === c ? " on" : ""}`}>
+                          {c.charAt(0) + c.slice(1).toLowerCase()}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="cl-label">Color</div>
+                    <div className="cl-pills">
+                      {COLORS.map(c => (
+                        <button key={c} type="button" onClick={() => setNewColor(c === newColor ? "" : c)} className={`cl-pill${newColor.toLowerCase() === c.toLowerCase() ? " on" : ""}`}>{c}</button>
+                      ))}
+                    </div>
+
+                    <div className="cl-label">Pattern</div>
+                    <div className="cl-pills">
+                      {PATTERNS.map(p => (
+                        <button key={p} type="button" onClick={() => setNewPattern(p === newPattern ? "" : p)} className={`cl-pill${newPattern === p ? " on" : ""}`}>{p}</button>
+                      ))}
+                    </div>
+
+                    <div className="cl-label">Occasions</div>
+                    <div className="cl-pills">
+                      {OCCASIONS.map(o => (
+                        <button key={o} type="button" onClick={() => toggleOccasion(o)} className={`cl-pill${newOccasions.includes(o) ? " on" : ""}`}>{o}</button>
+                      ))}
+                    </div>
+
+                    <div className="cl-label">Season</div>
+                    <div className="cl-pills">
+                      {SEASONS.map(s => (
+                        <button key={s} type="button" onClick={() => toggleSeason(s)} className={`cl-pill${newSeasons.includes(s) ? " on" : ""}`}>{s}</button>
+                      ))}
+                    </div>
+
+                    <div className="cl-label">Brand (optional)</div>
+                    <input
+                      className="cl-input"
+                      type="text"
+                      placeholder="Brand name"
+                      value={newBrand}
+                      onChange={e => setNewBrand(e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {/* Human signals */}
+                <div className="cl-label" style={{ marginTop: showEditDetails ? "20px" : 0 }}>
+                  How do you feel about it?{" "}
+                  <span style={{ fontWeight: "normal", textTransform: "none", letterSpacing: 0 }}>
+                    Optional · up to {GARMENT_RELATIONSHIP_MAX}
+                  </span>
+                </div>
+                <div className="cl-pills">
+                  {Object.entries(GARMENT_RELATIONSHIP_LABELS).map(([id, label]) => {
+                    const selected = newRelationships.includes(id);
+                    const atMax = newRelationships.length >= GARMENT_RELATIONSHIP_MAX;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setNewRelationships(prev =>
+                          prev.includes(id) ? prev.filter(x => x !== id) : atMax ? prev : [...prev, id]
+                        )}
+                        className={`cl-pill${selected ? " on" : ""}`}
+                        disabled={!selected && atMax}
+                        style={!selected && atMax ? { opacity: 0.4 } : undefined}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="cl-label">Anything nAia should know?</div>
+                <p className="cl-note-examples">
+                  e.g. Runs tight around my arms · I only wear this for work · The colour looks different in person
+                </p>
+                <textarea
+                  className="cl-textarea"
+                  placeholder="Optional note for nAia…"
+                  value={newNote}
+                  onChange={e => setNewNote(e.target.value)}
+                />
+
+                <button
+                  type="button"
+                  className="cl-submit"
+                  onClick={handleAdd}
+                  disabled={!newPublicId || addFetcher.state === "submitting"}
+                >
+                  {addFetcher.state === "submitting" ? "Saving…" : "Add to My Closet"}
+                </button>
+
+                {addFetcher.data?.error && !(addFetcher.data?.retryImage && newPublicId) && (
+                  <p className="cl-error">{addFetcher.data.error}</p>
+                )}
+              </>
+            )}
+
+            {/* ── Fallback: AI analysis failed — show editable form ── */}
+            {addStep === "fallback" && (
+              <>
+                {newImageUrl && (
+                  <div style={{ marginBottom: "16px" }}>
+                    <img src={newImageUrl} alt="uploaded piece" style={{ maxHeight: "120px", objectFit: "contain", border: "1px solid var(--fg-10,var(--c-border))" }} />
+                  </div>
+                )}
+                <p className="cl-fallback-notice">
+                  nAia couldn't read this piece automatically. Fill in a few details to add it.
+                </p>
+
+                <div className="cl-label">Name</div>
+                <input
+                  className="cl-input"
+                  type="text"
+                  placeholder="e.g. Black silk blazer"
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                />
+
+                <div className="cl-label">Category</div>
+                <div className="cl-pills">
+                  {CATEGORIES.map(c => (
+                    <button key={c} type="button" onClick={() => setNewCategory(c)} className={`cl-pill${newCategory === c ? " on" : ""}`}>
+                      {c.charAt(0) + c.slice(1).toLowerCase()}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="cl-label">Color</div>
+                <div className="cl-pills">
+                  {COLORS.map(c => (
+                    <button key={c} type="button" onClick={() => setNewColor(c === newColor ? "" : c)} className={`cl-pill${newColor === c ? " on" : ""}`}>{c}</button>
+                  ))}
+                </div>
+
+                <div className="cl-label">Pattern</div>
+                <div className="cl-pills">
+                  {PATTERNS.map(p => (
+                    <button key={p} type="button" onClick={() => setNewPattern(p === newPattern ? "" : p)} className={`cl-pill${newPattern === p ? " on" : ""}`}>{p}</button>
+                  ))}
+                </div>
+
+                <div className="cl-label">Brand (optional)</div>
+                <input
+                  className="cl-input"
+                  type="text"
+                  placeholder="Brand name"
+                  value={newBrand}
+                  onChange={e => setNewBrand(e.target.value)}
+                />
+
+                <div className="cl-label">
+                  How do you feel about it?{" "}
+                  <span style={{ fontWeight: "normal", textTransform: "none", letterSpacing: 0 }}>
+                    Optional · up to {GARMENT_RELATIONSHIP_MAX}
+                  </span>
+                </div>
+                <div className="cl-pills">
+                  {Object.entries(GARMENT_RELATIONSHIP_LABELS).map(([id, label]) => {
+                    const selected = newRelationships.includes(id);
+                    const atMax = newRelationships.length >= GARMENT_RELATIONSHIP_MAX;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setNewRelationships(prev =>
+                          prev.includes(id) ? prev.filter(x => x !== id) : atMax ? prev : [...prev, id]
+                        )}
+                        className={`cl-pill${selected ? " on" : ""}`}
+                        disabled={!selected && atMax}
+                        style={!selected && atMax ? { opacity: 0.4 } : undefined}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="cl-label">Anything nAia should know?</div>
+                <p className="cl-note-examples">
+                  e.g. Runs tight around my arms · I only wear this for work · The colour looks different in person
+                </p>
+                <textarea
+                  className="cl-textarea"
+                  placeholder="Optional note for nAia…"
+                  value={newNote}
+                  onChange={e => setNewNote(e.target.value)}
+                />
+
+                <button
+                  type="button"
+                  className="cl-submit"
+                  onClick={handleAdd}
+                  disabled={!newPublicId || addFetcher.state === "submitting"}
+                >
+                  {addFetcher.state === "submitting" ? "Saving…" : "Add to My Closet"}
+                </button>
+
+                {addFetcher.data?.error && !(addFetcher.data?.retryImage && newPublicId) && (
+                  <p className="cl-error">{addFetcher.data.error}</p>
+                )}
+                {addFetcher.data?.retryImage && !newPublicId && (
+                  <button
+                    type="button"
+                    className="cl-submit"
+                    style={{ marginTop: "8px", background: "var(--naia-ink, var(--fg, #111))" }}
+                    disabled={addStep === "uploading"}
+                    onClick={() => addFileInputRef.current?.click()}
+                  >
+                    CHOOSE ANOTHER PHOTO
+                  </button>
+                )}
+              </>
             )}
           </div>
         )}
@@ -1437,7 +1670,12 @@ export default function Closet() {
               ))}
             </div>
 
-            <div className="cl-label">How do you feel about it? (optional, up to {GARMENT_RELATIONSHIP_MAX})</div>
+            <div className="cl-label">
+              How do you feel about it?{" "}
+              <span style={{ fontWeight: "normal", textTransform: "none", letterSpacing: 0 }}>
+                Optional · up to {GARMENT_RELATIONSHIP_MAX}
+              </span>
+            </div>
             <div className="cl-pills">
               {Object.entries(GARMENT_RELATIONSHIP_LABELS).map(([id, label]) => {
                 const selected = editRelationships.includes(id);
@@ -1459,6 +1697,17 @@ export default function Closet() {
               })}
             </div>
 
+            <div className="cl-label">Anything nAia should know?</div>
+            <p className="cl-note-examples">
+              e.g. Runs tight around my arms · I only wear this for work · The colour looks different in person
+            </p>
+            <textarea
+              className="cl-textarea"
+              placeholder="Optional note for nAia…"
+              value={editNote}
+              onChange={e => setEditNote(e.target.value)}
+            />
+
             {editFetcher.data?.error && (
               <p className="cl-error" style={{ marginTop: "8px" }}>{editFetcher.data.error}</p>
             )}
@@ -1467,7 +1716,7 @@ export default function Closet() {
               type="button"
               className="cl-submit"
               onClick={handleEditSubmit}
-              disabled={!editName || !editCategory || editUploading || editFetcher.state === "submitting"}
+              disabled={!editCategory || editUploading || editFetcher.state === "submitting"}
             >
               {editFetcher.state === "submitting" ? "Saving…" : "Save Changes"}
             </button>

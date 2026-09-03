@@ -233,6 +233,10 @@ model ClosetItem {
   // Multi-select, max 2. See GARMENT_RELATIONSHIP_IDS in first-naia-read.ts.
   garmentRelationships  String[]  @default([])
 
+  // Customer note — optional free-text signal (migration 20260904000000)
+  // Anything the customer wants nAia to know: fit quirks, wear context, styling notes.
+  customerNote          String?
+
   // Relationships
   outfitItems   OutfitItem[]
   savedLookItems         SavedLookItem[]

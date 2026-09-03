@@ -20,6 +20,10 @@
 //   T15 edit photo replacement runs Layer 3 (screenGarmentSuitability)
 //   T16 edit: new asset deleted on pipeline failure (before DB update)
 //   T17 edit: old asset deleted ONLY after DB update succeeds
+//   T18 preview endpoint: ownership validated before analysis
+//   T19 preview endpoint: asset verified (type=private) before analysis
+//   T20 preview endpoint: only POST accepted (loader returns 405)
+//   T21 preview endpoint: does not persist data or delete assets
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -312,5 +316,61 @@ describe("T17: edit deletes old asset only after DB update succeeds", () => {
     assert.ok(photoUpdateIdx !== -1, "edit block must have a photo-replacement DB update call");
     assert.ok(deleteOldIdx !== -1, "edit block must call deleteCloudinaryAsset(oldPublicId, ...) for old-asset cleanup");
     assert.ok(photoUpdateIdx < deleteOldIdx, "old-asset deleteCloudinaryAsset must appear AFTER the DB update");
+  });
+});
+
+// ── T18–T21: Preview endpoint security contracts ──────────────────────────────
+
+const preview = readFileSync(join(__dirname, "api.closet-preview-analyze.ts"), "utf8");
+
+describe("T18: preview endpoint validates publicId ownership before analysis", () => {
+  it("calls validatePublicIdOwnership before previewAnalyzeGarment", () => {
+    const ownershipIdx = preview.indexOf("validatePublicIdOwnership");
+    const analysisIdx  = preview.indexOf("previewAnalyzeGarment");
+    assert.ok(ownershipIdx !== -1, "preview endpoint must import and call validatePublicIdOwnership");
+    assert.ok(analysisIdx  !== -1, "preview endpoint must call previewAnalyzeGarment");
+    assert.ok(ownershipIdx < analysisIdx, "ownership check must appear before analysis call");
+  });
+});
+
+describe("T19: preview endpoint verifies asset is type=private before analysis", () => {
+  it("calls verifyCloudinaryAsset before previewAnalyzeGarment", () => {
+    const verifyIdx  = preview.indexOf("verifyCloudinaryAsset");
+    const privateIdx = preview.indexOf('"private"');
+    const analysisIdx = preview.indexOf("previewAnalyzeGarment");
+    assert.ok(verifyIdx   !== -1, "preview endpoint must call verifyCloudinaryAsset");
+    assert.ok(privateIdx  !== -1, 'preview endpoint must reference "private" delivery type');
+    assert.ok(analysisIdx !== -1, "preview endpoint must call previewAnalyzeGarment");
+    assert.ok(verifyIdx   < analysisIdx, "asset verification must appear before analysis call");
+    assert.ok(verifyIdx   < privateIdx || privateIdx < analysisIdx, "private-type check must be in scope before analysis call");
+  });
+});
+
+describe("T20: preview endpoint rejects non-POST requests via loader", () => {
+  it("exports a loader that returns 405", () => {
+    assert.ok(
+      preview.includes("export async function loader"),
+      "preview endpoint must export a loader (GET handler)",
+    );
+    assert.ok(
+      preview.includes("status: 405"),
+      "loader must return status 405 to block GET requests",
+    );
+  });
+});
+
+describe("T21: preview endpoint does not persist data or delete assets", () => {
+  it("never calls deleteCloudinaryAsset", () => {
+    assert.ok(
+      !preview.includes("deleteCloudinaryAsset"),
+      "preview endpoint must never delete assets — it is read-only",
+    );
+  });
+
+  it("never calls prisma directly", () => {
+    assert.ok(
+      !preview.includes("prisma."),
+      "preview endpoint must not write to the DB — it is read-only",
+    );
   });
 });
