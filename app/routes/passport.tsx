@@ -1644,7 +1644,6 @@ export default function PassportPage() {
           <Link to="/my-naia" className="sp-back">← Overview</Link>
 
           <div className="sp-shell">
-            <div className="sp-shell-eyebrow">Style Passport</div>
             <h1 className="sp-shell-title">Your Style Passport</h1>
             <p className="sp-shell-desc">
               Your Style Passport keeps the preferences that shape your nAia experience in one
@@ -1935,7 +1934,6 @@ export default function PassportPage() {
         <Link to="/my-naia" className="sp-back">← Overview</Link>
 
         <div className="sp-shell">
-          <div className="sp-shell-eyebrow">Style Passport</div>
           <h1 className="sp-shell-title">Your Style Passport</h1>
           <p className="sp-shell-desc">
             Your Style Passport keeps the preferences that shape your nAia experience in one
@@ -2042,7 +2040,6 @@ export default function PassportPage() {
         </button>
 
         <div className="sp-shell">
-          <div className="sp-shell-eyebrow">Style Passport</div>
           <h1 className="sp-shell-title">Your Style Passport is up to date</h1>
           <p className="sp-shell-desc">
             nAia now has your current preferences. Every suggestion from here will reflect the
@@ -2163,7 +2160,6 @@ export default function PassportPage() {
         </button>
 
         <div className="sp-shell">
-          <div className="sp-shell-eyebrow">Style Passport</div>
           <h1 className="sp-shell-title">Your Style Passport is up to date</h1>
           <p className="sp-shell-desc">
             nAia has your latest preferences. You can revisit any answer at any time.

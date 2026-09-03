@@ -90,11 +90,10 @@ export default function StyleMeIndex() {
       <Link to="/my-naia" className="sp-back">← Overview</Link>
 
       <div className="sp-shell">
-        <div className="sp-shell-eyebrow">StyleMe</div>
         <h1 className="sp-shell-title">Style Me</h1>
         <p className="sp-shell-desc">
-          Tell nAia about the occasion and receive a considered look built from NADINE pieces and
-          your own Closet. Answer a few questions and let nAia do the rest.
+          Tell nAia what you need today and receive a considered look built from your own Closet.
+          Answer a few questions and let nAia do the rest.
         </p>
       </div>
 

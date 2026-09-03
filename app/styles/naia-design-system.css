@@ -1362,17 +1362,21 @@ a.mn-action:focus-visible,
 .sp-shell-title {
   font-family: var(--naia-ff-display);
   font-weight: 200;
-  font-size: clamp(24px, 3.5vw, 36px);
+  font-size: clamp(2rem, 4vw, 3.5rem);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
   color: var(--naia-ink);
-  line-height: 1.05;
-  margin: 0 0 14px;
+  line-height: 0.95;
+  margin: 0 0 16px;
 }
 .sp-shell-desc {
   font-family: var(--naia-ff-body);
-  font-size: 15px;
-  line-height: 1.7;
+  font-style: italic;
+  font-size: 1.05rem;
+  line-height: 1.75;
   color: rgba(40, 21, 12, 0.65);
-  max-width: none;
+  width: 100%;
+  max-width: 70rem;
   margin: 0;
 }
 

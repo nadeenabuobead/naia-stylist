@@ -276,7 +276,6 @@ export default function BuyOrSkip() {
 
       {/* Section shell */}
       <div className="sp-shell">
-        <div className="sp-shell-eyebrow">Should I Buy This?</div>
         <h1 className="sp-shell-title">Should I Buy This?</h1>
         <p className="sp-shell-desc">
           Considering a piece from another brand? Share it with nAia and receive an honest read based
