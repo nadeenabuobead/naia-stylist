@@ -970,7 +970,23 @@ export default function Closet() {
         credentials: "same-origin",
         body: JSON.stringify({ publicId }),
       });
-      if (!res.ok) throw new Error("analysis_failed");
+      if (!res.ok) {
+        // Try to read a structured error — safety failures set requiresReupload:true
+        // and have already deleted the asset, so we must reset back to idle.
+        let errBody: { error?: string; requiresReupload?: boolean } = {};
+        try { errBody = await res.json(); } catch { /* ignore parse failure */ }
+        if (errBody.requiresReupload) {
+          // Asset was deleted server-side — clear local state and prompt re-upload.
+          if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
+          setNewImageUrl("");
+          setNewPublicId("");
+          setUploadError(errBody.error ?? "This photo could not be accepted. Please try a different image.");
+          setAddStep("idle");
+          return;
+        }
+        // Non-reupload failure (analysis error, NEEDS_CLARIFICATION) — show fallback form.
+        throw new Error("analysis_failed");
+      }
       const preview = await res.json() as any;
 
       // Pre-fill name, category, color, pattern from AI detection.

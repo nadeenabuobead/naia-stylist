@@ -23,7 +23,10 @@
 //   T18 preview endpoint: ownership validated before analysis
 //   T19 preview endpoint: asset verified (type=private) before analysis
 //   T20 preview endpoint: only POST accepted (loader returns 405)
-//   T21 preview endpoint: does not persist data or delete assets
+//   T21 preview endpoint: no DB writes; deletes assets only on L2/L3 safety failure
+//   T22 preview endpoint: Layer 2 moderation runs before analysis
+//   T23 preview endpoint: Layer 3 suitability runs before analysis (L2→L3→analysis order)
+//   T24 preview endpoint: requiresReupload:true on asset-deleting failures; NEEDS_CLARIFICATION preserves asset
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -359,18 +362,84 @@ describe("T20: preview endpoint rejects non-POST requests via loader", () => {
   });
 });
 
-describe("T21: preview endpoint does not persist data or delete assets", () => {
-  it("never calls deleteCloudinaryAsset", () => {
-    assert.ok(
-      !preview.includes("deleteCloudinaryAsset"),
-      "preview endpoint must never delete assets — it is read-only",
-    );
-  });
-
+describe("T21: preview endpoint does not persist data; deletes assets only on safety failure", () => {
   it("never calls prisma directly", () => {
     assert.ok(
       !preview.includes("prisma."),
-      "preview endpoint must not write to the DB — it is read-only",
+      "preview endpoint must not write to the DB",
     );
+  });
+
+  it("deleteCloudinaryAsset only appears in Layer 2/3 failure branches (not on success)", () => {
+    assert.ok(
+      preview.includes("deleteCloudinaryAsset"),
+      "preview endpoint must delete assets on safety failures (SAFETY_REJECT, RETRY_IMAGE, MODERATION_UNAVAILABLE)",
+    );
+    // On the success path, previewAnalyzeGarment(publicId) is called — use the call form, not the import.
+    const analysisCallIdx = preview.indexOf("previewAnalyzeGarment(");
+    const lastDeleteIdx   = preview.lastIndexOf("deleteCloudinaryAsset");
+    assert.ok(
+      lastDeleteIdx < analysisCallIdx,
+      "deleteCloudinaryAsset must never appear after the previewAnalyzeGarment( call (not on success path)",
+    );
+  });
+});
+
+describe("T22: preview endpoint runs Layer 2 moderation before analysis", () => {
+  it("imports and calls moderateImageContent", () => {
+    assert.ok(preview.includes("moderateImageContent"), "must import and call moderateImageContent (Layer 2)");
+  });
+
+  it("moderateImageContent appears before previewAnalyzeGarment in source", () => {
+    const modIdx      = preview.indexOf("moderateImageContent(");
+    const analysisIdx = preview.indexOf("previewAnalyzeGarment(");
+    assert.ok(modIdx      !== -1, "moderateImageContent call must exist");
+    assert.ok(analysisIdx !== -1, "previewAnalyzeGarment call must exist");
+    assert.ok(modIdx < analysisIdx, "Layer 2 moderation must appear before analysis call");
+  });
+});
+
+describe("T23: preview endpoint runs Layer 3 suitability before analysis", () => {
+  it("imports and calls screenGarmentSuitability", () => {
+    assert.ok(preview.includes("screenGarmentSuitability"), "must import and call screenGarmentSuitability (Layer 3)");
+  });
+
+  it("screenGarmentSuitability appears before previewAnalyzeGarment in source", () => {
+    const suitIdx     = preview.indexOf("screenGarmentSuitability(");
+    const analysisIdx = preview.indexOf("previewAnalyzeGarment(");
+    assert.ok(suitIdx     !== -1, "screenGarmentSuitability call must exist");
+    assert.ok(analysisIdx !== -1, "previewAnalyzeGarment call must exist");
+    assert.ok(suitIdx < analysisIdx, "Layer 3 suitability must appear before analysis call");
+  });
+
+  it("Layer 2 appears before Layer 3 (ordering preserved)", () => {
+    const modIdx  = preview.indexOf("moderateImageContent(");
+    const suitIdx = preview.indexOf("screenGarmentSuitability(");
+    assert.ok(modIdx < suitIdx, "Layer 2 must precede Layer 3 in preview endpoint");
+  });
+});
+
+describe("T24: preview endpoint returns requiresReupload on asset-deleting failures", () => {
+  it("SAFETY_REJECT branch sets requiresReupload:true", () => {
+    const rejectIdx = preview.indexOf("SAFETY_REJECT");
+    assert.ok(rejectIdx !== -1, "SAFETY_REJECT must be handled");
+    const block = preview.slice(rejectIdx, rejectIdx + 300);
+    assert.ok(block.includes("requiresReupload: true"), "SAFETY_REJECT must return requiresReupload:true");
+  });
+
+  it("RETRY_IMAGE branch sets requiresReupload:true", () => {
+    const retryIdx = preview.indexOf("RETRY_IMAGE");
+    assert.ok(retryIdx !== -1, "RETRY_IMAGE must be handled");
+    // RETRY_IMAGE block includes a PREVIEW_GUIDANCE dictionary — 1000 chars to reach the return.
+    const block = preview.slice(retryIdx, retryIdx + 1000);
+    assert.ok(block.includes("requiresReupload: true"), "RETRY_IMAGE must return requiresReupload:true");
+  });
+
+  it("NEEDS_CLARIFICATION branch preserves asset (no delete) and does not set requiresReupload", () => {
+    const clarIdx = preview.indexOf("NEEDS_CLARIFICATION");
+    assert.ok(clarIdx !== -1, "NEEDS_CLARIFICATION must be handled");
+    const block = preview.slice(clarIdx, clarIdx + 300);
+    assert.ok(!block.includes("deleteCloudinaryAsset"), "NEEDS_CLARIFICATION must not delete the asset");
+    assert.ok(!block.includes("requiresReupload: true"), "NEEDS_CLARIFICATION must not set requiresReupload:true (asset preserved for manual submit)");
   });
 });
