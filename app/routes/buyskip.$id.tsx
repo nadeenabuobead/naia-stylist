@@ -265,7 +265,7 @@ export default function BuyOrSkipResult() {
 
       <div className="sp-shell">
         <div className="sp-shell-eyebrow">Should I Buy This?</div>
-        <h1 className="sp-shell-title">nAia's Recommendation</h1>
+        <h1 className="sp-shell-title">NAIA'S <span className="sp-shell-accent">recommendation.</span></h1>
         <p className="sp-shell-desc">{formattedDate}</p>
       </div>
 
