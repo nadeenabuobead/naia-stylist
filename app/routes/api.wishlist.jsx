@@ -470,6 +470,7 @@ STRICT RULES:
 3. Never invent or hallucinate Passport fields, body data, lifestyle habits, owned pieces, or measurements not listed above.
 4. VOICE RULE — nAia is an independent decision tool, not a retailer, influencer, or salesperson. Prohibited in every field: "you deserve it", "treat yourself", "must-have", "you need this", "you're going to look amazing", "obsessed", "gorgeous", "trust me", "game-changer", "last chance", "before it's gone", "hurry", "selling fast", "running out", and any equivalent artificial urgency, scarcity pressure, or celebratory sales language. State the case for BUY, SKIP FOR NOW, or SKIP with calm, specific, evidence-based reasoning only.
 5. No brand-based value claims. Price was not provided.
+6. SECOND-PERSON VOICE — Every customer-facing output field must address the customer directly using 'you' and 'your'. Never use 'they', 'their', 'the customer', 'she', 'he', or any third-person pronoun in any field shown to the customer. For style references, prefer 'your classic-polished style' over 'your classic-polished identity'.
 
 Respond ONLY with valid JSON, no markdown:
 {
@@ -477,18 +478,18 @@ Respond ONLY with valid JSON, no markdown:
   "detectedColor": "AI colour read from the image — ALL CAPS e.g. BEIGE / CREAM",
   "verdict": "BUY" | "SKIP FOR NOW" | "SKIP",
   "confidence": 0-100,
-  "styleDNAMatch": "≤20 words — name at least one of their style personalities explicitly and state whether this item aligns or conflicts with it",
+  "styleDNAMatch": "≤20 words — address the customer directly using 'you/your'. Name at least one of your style personalities explicitly and state whether this item aligns or conflicts with it",
   "detailedAnalysis": {
-    "silhouette": "≤20 words — relate this cut to the customer's preferred silhouettes and fit preferences from their Passport",
-    "color": "≤20 words — how this colour works with their specific favourite colours and coordinates with confirmed Closet pieces",
-    "versatility": "≤15 words — realistic assessment given their actual lifestyle occasions",
-    "dressingRequirementsCheck": "≤20 words — explicit confirmation or conflict with dressing requirements; 'no requirements specified' if none on Passport"
+    "silhouette": "≤20 words — address the customer directly using 'you/your'. Relate this cut to your preferred silhouettes and fit preferences from your Passport",
+    "color": "≤20 words — address the customer directly using 'you/your'. How this colour works with your specific favourite colours and coordinates with your confirmed Closet pieces",
+    "versatility": "≤15 words — address the customer directly using 'you/your'. Realistic assessment given your actual lifestyle occasions",
+    "dressingRequirementsCheck": "≤20 words — address the customer directly using 'you/your'. Explicit confirmation or conflict with your dressing requirements; 'no requirements specified' if none on Passport"
   },
-  "occasionFit": ${safeOccasion ? `{ "occasion": "natural noun phrase — activity only (e.g. 'evening dining', 'brunch', 'work meetings')", "fits": true or false, "explanation": "≤20 words — concrete reason referencing the item's formality and this customer's lifestyle", "stylingTip": "≤15 words — one specific action" }` : "null"},
+  "occasionFit": ${safeOccasion ? `{ "occasion": "natural noun phrase — activity only (e.g. 'evening dining', 'brunch', 'work meetings')", "fits": true or false, "explanation": "≤20 words — address the customer directly using 'you/your'. Concrete reason referencing the item's formality and your lifestyle", "stylingTip": "≤15 words — one specific action" }` : "null"},
   "whatLikeEval": ${safeWhatLike ? `{ "aspect": "${safeWhatLike.slice(0,80)}", "agreement": "agree" or "partly agree" or "disagree", "explanation": "≤20 words — based on item's actual construction" }` : "null"},
-  "concernEval": ${safeUnsureAbout ? `{ "concern": "${safeUnsureAbout.slice(0,80)}", "justified": "justified" or "partly justified" or "not supported", "explanation": "≤20 words — direct assessment referencing Passport data where available", "solutions": ["specific practical solution 1", "specific practical solution 2"] }` : "null"},
-  "closetPairings": [{ "occasion": "specific lifestyle occasion from this customer's Passport e.g. work meetings, dinner", "name": "exact item name from the candidate list above", "reason": "≤12 words — colour coordination fact + how proportions balance" }],
-  "fillsGap": null | "≤20 words — the specific wardrobe gap this item fills for this customer given their Closet and lifestyle",
+  "concernEval": ${safeUnsureAbout ? `{ "concern": "${safeUnsureAbout.slice(0,80)}", "justified": "justified" or "partly justified" or "not supported", "explanation": "≤20 words — address the customer directly using 'you/your'. Direct assessment referencing your Passport data where available", "solutions": ["specific practical solution 1", "specific practical solution 2"] }` : "null"},
+  "closetPairings": [{ "occasion": "specific lifestyle occasion from your Passport e.g. work meetings, dinner", "name": "exact item name from the candidate list above", "reason": "≤12 words — colour coordination fact + how proportions balance" }],
+  "fillsGap": null | "≤20 words — address the customer directly using 'you/your'. The specific wardrobe gap this item fills for you given your Closet and lifestyle",
   "occasions": [],
   "productSnapshot": {
     "observedSilhouette": "token or null — one of: a-line / straight / column / fitted / flared / wrap / shift / oversized / balloon / asymmetric",
@@ -503,13 +504,13 @@ Respond ONLY with valid JSON, no markdown:
     "observationConfidence": "high — clearly visible / medium — partially visible / low — image quality limits assessment"
   },
   "beforeYouBuy": [
-    "25–40 words — open with preferred silhouettes or fit data known from the Passport, then state what to verify if measurements are missing. No label prefix.",
-    "25–40 words — name at least one of the customer's actual lifestyle occasions and state directly whether this item suits those occasions and how realistic repeat wear is. No label prefix."
+    "25–40 words — address the customer directly using 'you/your'. Open with their preferred silhouettes or fit data from the Passport, then state what to verify if measurements are missing. No label prefix.",
+    "25–40 words — address the customer directly using 'you/your'. Name at least one of your actual lifestyle occasions and state directly whether this item suits those occasions and how realistic repeat wear is. No label prefix."
   ],
-  "buyIf": "≤20 words — the one concrete condition specific to this customer that justifies buying",
-  "skipIf": "≤20 words — the one concrete condition specific to this customer that makes this a mistake",
-  "betterDirection": null for BUY | "1–3 sentences — describe the product type (silhouette, fabric, fit profile, coverage) that would serve this customer better for their lifestyle occasions. No brand names.",
-  "finalThought": "ONE sentence ≤30 words — name their style personality or lifestyle context, include the entered occasion if provided, state the main condition."
+  "buyIf": "≤20 words — address the customer directly using 'you/your'. The one concrete condition that justifies buying for you",
+  "skipIf": "≤20 words — address the customer directly using 'you/your'. The one concrete condition that makes this a mistake for you",
+  "betterDirection": null for BUY | "1–3 sentences — address the customer directly using 'you/your'. Describe the product type (silhouette, fabric, fit profile, coverage) that would serve you better for your lifestyle occasions. No brand names.",
+  "finalThought": "ONE sentence ≤30 words — address the customer directly using 'you/your'. Name your style personality or lifestyle context, include the entered occasion if provided, state the main condition."
 }`
               }
             ]

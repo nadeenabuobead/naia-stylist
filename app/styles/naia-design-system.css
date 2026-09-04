@@ -2594,6 +2594,41 @@ a.mn-action:focus-visible,
 .bos-better-direction-btn { display: inline-block; font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; padding: 12px 24px; border: 1px solid var(--naia-ink); color: var(--naia-ink); text-decoration: none; transition: background 0.18s, color 0.18s; }
 .bos-better-direction-btn:hover { background: var(--naia-ink); color: var(--naia-bg); }
 
+/* ── Buy or Skip outcome buttons ─────────────────────────────── */
+.bos-outcome-q { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--naia-muted); margin-bottom: 14px; }
+.bos-outcome-followup-q { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--naia-muted); margin: 20px 0 12px; }
+.bos-outcome-options { display: flex; flex-wrap: wrap; gap: 10px; }
+.bos-outcome-option {
+  display: inline-flex;
+  align-items: center;
+  padding: 11px 22px;
+  background: transparent;
+  color: var(--naia-ink);
+  font-family: var(--naia-ff-ui);
+  font-size: 9px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  border: 1px solid rgba(40, 21, 12, 0.25);
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: border-color 0.13s, background 0.13s, color 0.13s;
+}
+.bos-outcome-option:hover { border-color: var(--naia-ink); }
+.bos-outcome-option--selected {
+  background: var(--naia-accent);
+  color: var(--naia-bg);
+  border-color: var(--naia-accent);
+}
+.bos-outcome-option--selected:hover { background: var(--naia-accent); border-color: var(--naia-accent); opacity: 0.9; }
+.bos-outcome-save-row { margin-top: 20px; }
+.bos-outcome-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.bos-outcome-summary-decision { font-family: var(--naia-ff-ui); font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--naia-ink); }
+.bos-outcome-summary-post { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 1.8px; text-transform: uppercase; color: var(--naia-muted); }
+.bos-outcome-summary-saved { font-family: var(--naia-ff-ui); font-size: 8px; letter-spacing: 2px; text-transform: uppercase; color: var(--naia-accent); }
+.bos-outcome-edit-btn { background: none; border: none; padding: 0; font-family: var(--naia-ff-ui); font-size: 8px; letter-spacing: 2px; text-transform: uppercase; color: rgba(40,21,12,0.45); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; transition: color 0.13s; }
+.bos-outcome-edit-btn:hover { color: var(--naia-ink); }
+.bos-outcome-error-msg { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: #c0392b; margin-left: 12px; }
+
 @media (max-width: 640px) {
   .bos-source-grid { grid-template-columns: 1fr; }
   .bos-upload-row { grid-template-columns: 1fr; }
