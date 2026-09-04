@@ -10,7 +10,7 @@
 //   - No body data is sent or received by this component; see useTryOn.ts.
 //   - resultUrl comes from the server only; this component never constructs or stores it.
 
-import { useState, useEffect } from "react";
+import { Link } from "react-router";
 import { useTryOn, type VtoSource } from "~/hooks/useTryOn";
 import { PROVIDER_DISCLAIMER } from "~/lib/ai/virtual-try-on.types";
 
@@ -46,26 +46,17 @@ interface InnerProps {
 function VtoExperienceInner({ vtoSource, garmentTitle, naiaModelIsReady }: InnerProps) {
   const { state, trigger, reset } = useTryOn(vtoSource);
 
-  // Derive the proxy prefix from the current URL after mount so the href is
-  // correct regardless of whether React Router's basename mechanism fires.
-  // SSR renders with the bare path; the effect corrects it before first click.
-  const [modelHref, setModelHref] = useState("/my-naia-model");
-  useEffect(() => {
-    const m = window.location.pathname.match(/^(\/apps\/[^/]+)\//);
-    if (m) setModelHref(`${m[1]}/my-naia-model`);
-  }, []);
-
   // Model not set up — CTA to configure
   if (!naiaModelIsReady) {
     return (
       <div style={{ marginTop: "16px" }}>
-        <a
-          href={modelHref}
+        <Link
+          to="/my-naia-model"
           className="sm-result-action-btn sm-result-action-btn--accent"
           style={{ fontSize: "8px", letterSpacing: "2px", padding: "10px 20px", display: "inline-block" }}
         >
           See This On Me — Set Up nAia Model
-        </a>
+        </Link>
       </div>
     );
   }
