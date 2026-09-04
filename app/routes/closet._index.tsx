@@ -1337,8 +1337,11 @@ export default function Closet() {
                 <div className="cl-photo-tips">
                   {PHOTO_TIPS_COMPACT.map(tip => <span key={tip} className="cl-photo-tip">{tip}</span>)}
                 </div>
-                <p className="cl-upload-notice" style={{ marginBottom: "8px" }}>
+                <p className="cl-upload-notice" style={{ marginBottom: "2px" }}>
                   Upload photos of clothing items only. Do not upload selfies, face photos, mirror photos, or personal images.
+                </p>
+                <p className="cl-upload-notice" style={{ marginBottom: "8px" }}>
+                  JPG, PNG, WEBP or HEIC · min 300 × 300 px · max 5 MB
                 </p>
                 <label className="cl-upload-box" style={{ cursor: addStep === "uploading" ? "default" : "pointer" }}>
                   {addStep === "uploading"
@@ -1669,6 +1672,9 @@ export default function Closet() {
                     disabled={editUploading || editFetcher.state === "submitting"}
                   />
                 </label>
+                <p className="cl-upload-notice" style={{ marginTop: "4px", marginBottom: "0" }}>
+                  JPG, PNG, WEBP or HEIC · min 300 × 300 px · max 5 MB
+                </p>
                 {editUploadError && <p className="cl-error">{editUploadError}</p>}
               </div>
             </div>
