@@ -582,7 +582,7 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
     },
     theBalanceToProtect: {
       "clean-polished":
-        "The tailored piece works as a separates tool, not as part of a matched set. A suit in this context reads as a costume rather than a wardrobe investment.",
+        "The tailored piece works as a separates tool, not as part of a matched set. A matched suit takes the direction more formal and removes the contrast this approach depends on.",
       "fluid-ease":
         "The tailored piece stays softer than structured suiting. Rigid fabric with no movement reduces the contrast the direction depends on — the anchor should hold its line without pressing.",
       "expressive":
@@ -596,7 +596,7 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
     ],
     leaveOutCandidates: [
       {
-        text: "A suit worn as a matched set — it reads as a costume rather than a wardrobe investment.",
+        text: "A suit worn as a matched set — it takes the direction more formal and removes the proportion contrast this approach depends on.",
         vocab: ["suit", "matched", "set", "uniform"],
       },
       {
@@ -713,11 +713,11 @@ const STYLE_DNA_SUPPLEMENT: Partial<Record<string, Partial<Record<string, string
   "spring-2026-soft-structure": {
     "relaxed-fits": "You lean toward ease in construction — proportion and fabric that move without pressing.",
     "structured":   "You respond to clean definition — one clear shape, nothing competing with it.",
-    "midi-length":  "You consistently reach for lengths that create line rather than interrupt it.",
+    "midi-length":  "Your Passport notes a preference for lengths that create line rather than interrupt it.",
     "refined":      "You are drawn to composed, held-back looks — one anchor, everything else restrained.",
-    "powerful":     "You build presence through proportion and cut, not through volume or decoration.",
-    "confident":    "You build presence through proportion and cut, not through volume or decoration.",
-    "effortless":   "You reach for looks that feel complete without effort — one piece doing most of the work.",
+    "powerful":     "Your Passport signals building presence through proportion and cut — this direction works exactly that way.",
+    "confident":    "Your Passport signals building presence through proportion and cut — this direction works exactly that way.",
+    "effortless":   "Your Passport signals a preference for looks that feel complete without effort — one piece doing most of the work.",
     "interesting":  "You are drawn to one considered gesture per look rather than layered effects.",
     "creative":     "You are drawn to one considered gesture per look rather than layered effects.",
     "elegant":      "You favour restraint — a calm base that gives one anchor piece room to register.",
@@ -726,20 +726,20 @@ const STYLE_DNA_SUPPLEMENT: Partial<Record<string, Partial<Record<string, string
     "relaxed-fits": "You respond to ease — which is what makes one tailored piece work so well against a relaxed counterpart.",
     "structured":   "You respond to precision and clean definition — exactly what one well-cut separates piece delivers.",
     "refined":      "You are drawn to composed looks that achieve more with less obvious effort.",
-    "powerful":     "You build presence through structure and line, not through volume.",
-    "confident":    "You build presence through structure and line, not through volume.",
-    "effortless":   "You reach for looks that read as considered without appearing dressed-up.",
+    "powerful":     "Your Passport signals building presence through structure and line — not through volume.",
+    "confident":    "Your Passport signals building presence through structure and line — not through volume.",
+    "effortless":   "Your Passport signals a preference for looks that feel considered without appearing dressed-up.",
     "interesting":  "You are drawn to proportion contrast as the main styling decision.",
     "creative":     "You are drawn to proportion contrast as the main styling decision.",
   },
   "spring-2026-colour-direction": {
-    "relaxed-fits": "You reach for unfussy pieces that work together without a formula — which is the whole base for this method.",
-    "structured":   "You reach for composed, clean foundations — exactly the condition this method requires.",
+    "relaxed-fits": "Your Passport signals unfussy pieces that work together without a formula — the quiet base this method requires.",
+    "structured":   "Your Passport signals composed, clean foundations — exactly the starting condition this method requires.",
     "interesting":  "You are drawn to one considered note per look rather than layered effects.",
     "creative":     "You are drawn to one considered note per look rather than layered effects.",
     "elegant":      "You favour restraint — a calm base that gives a single colour note room to read.",
-    "put-together": "You reach for looks that feel finished without appearing overdressed.",
-    "effortless":   "You reach for one low-commitment change that makes a familiar look feel different.",
+    "put-together": "Your Passport signals looking finished without appearing overdressed — a quiet base with one accent achieves exactly that.",
+    "effortless":   "Your Passport signals a preference for low-commitment changes — that is exactly what this method offers.",
   },
 };
 
@@ -1089,7 +1089,7 @@ function buildEvidenceItemRoleNote(item: ShopperClosetItemEvidence, slug: string
   }
   if (slug === "spring-2026-colour-direction") {
     const notes: Partial<Record<string, string>> = {
-      TOPS:        "The potential base or accent in this direction. Position it deliberately and keep the rest of the outfit quiet.",
+      TOPS:        "The neutral base this direction builds from. Keep the outfit at this tone and introduce one deliberate accent through a bag, flat, or scarf.",
       BAGS:        "An entry point into this direction at the accessory level. One accent note against a calm base.",
       SHOES:       "The accent note at ground level. Keep the rest of the outfit quiet so one colour reads.",
       ACCESSORIES: "A low-commitment entry into this direction. One considered piece against a quiet base.",
@@ -1106,6 +1106,12 @@ function buildEvidenceItemRoleNote(item: ShopperClosetItemEvidence, slug: string
 // ---------------------------------------------------------------------------
 
 const CLOTHING_CATS_FOR_PAIRING = new Set(["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"]);
+
+// Returns the grammatically correct form of "to be" for clothing items whose
+// names are inherently plural (trousers, jeans, etc.).
+function clothingVerb(name: string): "is" | "are" {
+  return /\b(trousers|pants|jeans|shorts|leggings|slacks)\b/i.test(name) ? "are" : "is";
+}
 
 function categoriesAreWearablePair(catA: string, catB: string): boolean {
   if (!CLOTHING_CATS_FOR_PAIRING.has(catA) || !CLOTHING_CATS_FOR_PAIRING.has(catB)) return true;
@@ -1172,6 +1178,11 @@ function buildALookToTry(
       return `Your ${name} with your ${secName}. A clean pointed flat and no further additions — one proportion statement per look.${ctxClose(true)}`;
     }
     if (slug === "modern-tailoring-spring-2026") {
+      const hasBottom = top.category === "BOTTOMS" || second.category === "BOTTOMS";
+      const hasDress = top.category === "DRESSES" || second.category === "DRESSES";
+      if (!hasBottom && !hasDress) {
+        return `Your ${name} with your ${secName}, worn with wide-leg denim or a fluid trouser below. Clean flat; keep everything else — bag, jewellery — minimal so the proportion contrast reads.${ctxClose(true)}`;
+      }
       return `Your ${name} with your ${secName}. Clean flat or simple leather shoe; keep everything else — bag, jewellery — minimal so the proportion contrast reads.${ctxClose(true)}`;
     }
     if (slug === "spring-2026-colour-direction") {
@@ -1335,7 +1346,7 @@ function buildBestRouteIn(
       return `Your ${name} is the entry point — worn open, it establishes the proportioned, layered silhouette this direction is built around. The shape does the work; the principle is to keep everything underneath simple and contained.`;
     }
     if (top.category === "BOTTOMS") {
-      return `Your ${name} is the proportioned anchor — its cut is already the kind of grounded, fluid bottom this direction needs. Start there: one clearly proportioned piece, and everything above it quieter.`;
+      return `Your ${name} ${clothingVerb(name)} the proportioned anchor — that cut is already the kind of grounded, fluid bottom this direction needs. Start there: one clearly proportioned piece, and everything above it quieter.`;
     }
     if (top.category === "DRESSES") {
       return `Your ${name} covers the full direction on its own — one proportioned silhouette without further intervention. The principle is restraint: start and finish here, and keep accessories minimal.`;
@@ -1348,14 +1359,14 @@ function buildBestRouteIn(
     if (second) {
       const pairOk = categoriesAreWearablePair(topEffCat, getEffectiveCategory(second, slug));
       if (pairOk) {
-        return `Your ${name} is the tailored anchor. Your ${second.name!} is the relaxed counterpart. The principle is contrast between the two — the structured piece and the easy piece — not matching formality across the outfit.`;
+        return `Your ${name} ${clothingVerb(name)} the tailored anchor. Your ${second.name!} ${clothingVerb(second.name!)} the relaxed counterpart. The principle is contrast between the two — the structured piece and the easy piece — not matching formality across the outfit.`;
       }
     }
     if (topEffCat === "OUTERWEAR") {
       return `Your ${name} is the tailored separates anchor this direction is built around. The principle is contrast: one structured piece worn against something relaxed — a knit, a jersey, something without formality. The tailored piece carries the register; the counterpart stays easy.`;
     }
     if (topEffCat === "BOTTOMS") {
-      return `Your ${name} is the tailored anchor — its cut creates the proportion contrast this direction needs. The counterpart should be relaxed: a fine knit or soft jersey above. The contrast between structured bottom and easy top is the complete styling principle.`;
+      return `Your ${name} ${clothingVerb(name)} the tailored anchor — that cut creates the proportion contrast this direction needs. The counterpart should be relaxed: a fine knit or soft jersey above. The contrast between structured bottom and easy top is the complete styling principle.`;
     }
     return `Your ${name} already gives you the softer, more expressive side of this direction. What is missing is one clean tailored anchor — a blazer, waistcoat, or wide-leg trouser — to create the contrast Modern Tailoring depends on.`;
   }

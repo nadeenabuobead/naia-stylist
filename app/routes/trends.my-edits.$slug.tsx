@@ -453,6 +453,50 @@ const css = `
     .tmd-nadine-card-inner { flex-direction: column; }
     .tmd-nadine-card-image-col { width: 100%; height: 260px; }
   }
+
+  /* ── ALREADY YOURS strip (sections 03 / 04) ───────────────────────────── */
+  .tmd-already-yours {
+    margin-top: 18px;
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .tmd-already-yours-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.5rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #7a1e28;
+    white-space: nowrap;
+    padding-top: 6px;
+  }
+  .tmd-already-yours-items {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .tmd-already-yours-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(240,235,226,0.5);
+    padding: 5px 10px 5px 5px;
+    border: 1px solid rgba(26,17,9,0.08);
+  }
+  .tmd-already-yours-img {
+    width: 38px;
+    height: 38px;
+    object-fit: cover;
+    display: block;
+    flex-shrink: 0;
+  }
+  .tmd-already-yours-name {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 0.82rem;
+    font-weight: 300;
+    color: rgba(26,17,9,0.72);
+  }
 `;
 
 export function ErrorBoundary() {
@@ -663,12 +707,42 @@ export default function MyTrendEditDetail() {
             <div className="tmd-section">
               <div className="tmd-section-label">03 / Your route in</div>
               <p className="tmd-body">{edit.yourBestRouteIn}</p>
+              {edit.evidenceClosetItems.length > 0 && (
+                <div className="tmd-already-yours">
+                  <span className="tmd-already-yours-label">Already yours</span>
+                  <div className="tmd-already-yours-items">
+                    {edit.evidenceClosetItems.map((item: EvidenceClosetItem, i: number) => (
+                      <div key={i} className="tmd-already-yours-item">
+                        {item.imageUrl && (
+                          <img src={item.imageUrl} alt={item.name} className="tmd-already-yours-img" />
+                        )}
+                        <span className="tmd-already-yours-name">{item.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* 04 / A LOOK TO TRY */}
             <div className="tmd-section">
               <div className="tmd-section-label">04 / A look to try</div>
               <p className="tmd-body">{edit.aLookToTry}</p>
+              {edit.evidenceClosetItems.length > 0 && (
+                <div className="tmd-already-yours">
+                  <span className="tmd-already-yours-label">Already yours</span>
+                  <div className="tmd-already-yours-items">
+                    {edit.evidenceClosetItems.map((item: EvidenceClosetItem, i: number) => (
+                      <div key={i} className="tmd-already-yours-item">
+                        {item.imageUrl && (
+                          <img src={item.imageUrl} alt={item.name} className="tmd-already-yours-img" />
+                        )}
+                        <span className="tmd-already-yours-name">{item.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="tmd-divider" />

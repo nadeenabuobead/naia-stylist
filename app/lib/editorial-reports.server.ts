@@ -69,14 +69,16 @@ export async function getPublishedEditorialReports(): Promise<TrendReportData[]>
 }
 
 export async function getEditorialReportBySlug(slug: string): Promise<TrendReportData | null> {
-  // Check if ANY DB record exists for this slug (regardless of status).
-  // If it does, the admin publishing status is authoritative — return null for
-  // DRAFT/ARCHIVED rather than falling through to the static array.
   const anyRow = await prisma.editorialTrendReport.findUnique({ where: { slug } });
   if (anyRow) {
-    return anyRow.status === "PUBLISHED" ? dbToTrendReportData(anyRow) : null;
+    if (anyRow.status === "PUBLISHED") return dbToTrendReportData(anyRow);
+    // DB record exists but is not published — fall back to the static array as a
+    // safety net. This prevents a staging DB row in DRAFT/ARCHIVED status from
+    // blocking public access when the static array still marks the report as published.
+    // Once the admin explicitly publishes or the seed is run, the DB row takes over.
+    return trendReports.find((r) => r.slug === slug && r.published) ?? null;
   }
-  // No DB record at all — fall back to static array (pre-seed safety net).
+  // No DB record — static array fallback.
   return trendReports.find((r) => r.slug === slug && r.published) ?? null;
 }
 

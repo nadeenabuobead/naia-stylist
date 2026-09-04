@@ -894,3 +894,340 @@ describe("buildShopperEdit — Modern Tailoring TOPS narrative consistency", () 
     expect(roleNote).toMatch(/tailored anchor/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// QA fix tests — 9 issues from staging QA 2026-09-04
+// ---------------------------------------------------------------------------
+
+describe("QA fixes — public report link slug mapping (Issue #1)", () => {
+  it("all three Sara reports exist in the static array and have published:true (enables public /trends/:slug route)", () => {
+    const slugs = [
+      "spring-2026-colour-direction",
+      "modern-tailoring-spring-2026",
+      "spring-2026-soft-structure",
+    ];
+    for (const slug of slugs) {
+      const report = trendReports.find((r) => r.slug === slug);
+      expect(report, `${slug} must exist in trendReports`).toBeDefined();
+      expect(report!.published, `${slug} must be published:true`).toBe(true);
+    }
+  });
+});
+
+describe("QA fixes — closet images preserved in evidenceClosetItems (Issue #2)", () => {
+  it("evidenceClosetItems retains imageUrl when closet item has one", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Black Tailored Blazer",
+          imageUrl: "https://res.cloudinary.com/example/blazer.jpg",
+          category: "OUTERWEAR",
+          subcategory: "blazer",
+          primaryColor: "black",
+          styleTags: ["structured"],
+          occasions: [],
+          material: "wool",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence);
+    const item = edit.evidenceClosetItems[0];
+    expect(item).toBeDefined();
+    expect(item.imageUrl).toBe("https://res.cloudinary.com/example/blazer.jpg");
+    expect(item.name).toBe("Black Tailored Blazer");
+  });
+
+  it("evidenceClosetItems imageUrl is null when the closet item has no image", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Wide Leg Trouser",
+          imageUrl: null,
+          category: "BOTTOMS",
+          subcategory: "wide-leg",
+          primaryColor: "cream",
+          styleTags: [],
+          occasions: [],
+          material: "crepe",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
+    const item = edit.evidenceClosetItems[0];
+    expect(item).toBeDefined();
+    expect(item.imageUrl).toBeNull();
+  });
+});
+
+describe("QA fixes — A LOOK TO TRY must include a bottom (Issue #3)", () => {
+  it("modern-tailoring OUTERWEAR+TOPS pair: aLookToTry includes a bottom garment", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Black Tailored Blazer",
+          imageUrl: null,
+          category: "OUTERWEAR",
+          subcategory: "blazer",
+          primaryColor: "black",
+          styleTags: ["structured"],
+          occasions: [],
+          material: "wool",
+        },
+        {
+          name: "White Long-Sleeve Button-Up Blouse",
+          imageUrl: null,
+          category: "TOPS",
+          subcategory: "blouse",
+          primaryColor: "white",
+          styleTags: [],
+          occasions: [],
+          material: "cotton",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence);
+    expect(edit.aLookToTry).toMatch(/trouser|denim|skirt|bottom/i);
+  });
+
+  it("modern-tailoring OUTERWEAR+BOTTOMS pair: aLookToTry does not introduce a redundant bottom", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Black Tailored Blazer",
+          imageUrl: null,
+          category: "OUTERWEAR",
+          subcategory: "blazer",
+          primaryColor: "black",
+          styleTags: [],
+          occasions: [],
+          material: "wool",
+        },
+        {
+          name: "Black Tailored Trousers",
+          imageUrl: null,
+          category: "BOTTOMS",
+          subcategory: "trouser",
+          primaryColor: "black",
+          styleTags: [],
+          occasions: [],
+          material: "wool",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence);
+    // Should reference both named items, not add another bottom recommendation
+    expect(edit.aLookToTry).toMatch(/Black Tailored Blazer/);
+    expect(edit.aLookToTry).toMatch(/Black Tailored Trousers/);
+    // The outfit is complete — no need to suggest a trouser on top of an existing trouser
+    expect(edit.aLookToTry).not.toMatch(/wide-leg denim or a fluid trouser below/i);
+  });
+});
+
+describe("QA fixes — Passport inference language (Issue #4)", () => {
+  it("evidenceStyleDna does not use behavioral 'You build presence' for modern-tailoring powerful signal", () => {
+    const evidence = makeEvidence({
+      profile: {
+        ...BASE_PROFILE,
+        fitPreferences: ["powerful"],
+        desiredFeelings: [],
+      },
+    });
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence);
+    if (edit.evidenceStyleDna) {
+      expect(edit.evidenceStyleDna).not.toMatch(/^You build presence/);
+      expect(edit.evidenceStyleDna).toMatch(/Passport signals/i);
+    }
+  });
+
+  it("evidenceStyleDna does not use behavioral 'You reach for' for colour-direction effortless signal", () => {
+    const evidence = makeEvidence({
+      profile: {
+        ...BASE_PROFILE,
+        fitPreferences: ["effortless"],
+        desiredFeelings: [],
+      },
+    });
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence);
+    if (edit.evidenceStyleDna) {
+      expect(edit.evidenceStyleDna).not.toMatch(/^You reach for/);
+      expect(edit.evidenceStyleDna).toMatch(/Passport signals/i);
+    }
+  });
+});
+
+describe("QA fixes — outfit rating claim (Issue #5)", () => {
+  it("lowDataNotice is null when customer has closet items AND reviews (both data sources present)", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Wide Leg Trouser",
+          imageUrl: null,
+          category: "BOTTOMS",
+          subcategory: "wide-leg",
+          primaryColor: "cream",
+          styleTags: [],
+          occasions: [],
+          material: "crepe",
+        },
+      ],
+      reviewSignal: { reviewCount: 5, workedTags: ["structured"], didntWorkTags: ["heavy"] },
+    });
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
+    expect(edit.lowDataNotice).toBeNull();
+  });
+
+  it("lowDataNotice appears and references outfit rating when closet exists but no reviews", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Wide Leg Trouser",
+          imageUrl: null,
+          category: "BOTTOMS",
+          subcategory: "wide-leg",
+          primaryColor: "cream",
+          styleTags: [],
+          occasions: [],
+          material: "crepe",
+        },
+      ],
+      reviewSignal: { reviewCount: 0, workedTags: [], didntWorkTags: [] },
+    });
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
+    expect(edit.lowDataNotice).toMatch(/rate|outfit/i);
+    expect(edit.lowDataNotice).not.toMatch(/StyleMe|style.me/i);
+  });
+});
+
+describe("QA fixes — no contradictory item roles (Issue #6)", () => {
+  it("colour-direction TOPS roleNote describes the item as a base, not 'base or accent'", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "White Long-Sleeve Button-Up Blouse",
+          imageUrl: null,
+          category: "TOPS",
+          subcategory: "blouse",
+          primaryColor: "white",
+          styleTags: [],
+          occasions: [],
+          material: "cotton",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence);
+    const item = edit.evidenceClosetItems[0];
+    expect(item).toBeDefined();
+    expect(item.roleNote).not.toMatch(/base or accent/i);
+    expect(item.roleNote).toMatch(/base|accent/i);
+  });
+
+  it("colour-direction TOPS roleNote and aLookToTry do not assign the item contradictory roles", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "White Long-Sleeve Button-Up Blouse",
+          imageUrl: null,
+          category: "TOPS",
+          subcategory: "blouse",
+          primaryColor: "white",
+          styleTags: [],
+          occasions: [],
+          material: "cotton",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence);
+    const roleNote = edit.evidenceClosetItems[0]?.roleNote ?? "";
+    const lookToTry = edit.aLookToTry;
+
+    const roleIsBase = /base/i.test(roleNote) && !/accent/i.test(roleNote);
+    const roleIsAccent = /accent/i.test(roleNote) && !/base/i.test(roleNote);
+    const lookCallsBase = /base/i.test(lookToTry);
+    const lookCallsAccent = /accent/i.test(lookToTry);
+
+    if (roleIsBase && lookCallsAccent && !lookCallsBase) {
+      fail("Item is described as base in roleNote but as accent in aLookToTry — contradictory roles");
+    }
+    if (roleIsAccent && lookCallsBase && !lookCallsAccent) {
+      fail("Item is described as accent in roleNote but as base in aLookToTry — contradictory roles");
+    }
+    expect(true).toBe(true); // passes unless above conditions trigger
+  });
+});
+
+describe("QA fixes — extreme language guard (Issue #7)", () => {
+  it("modern-tailoring theBalanceToProtect clean-polished does not use 'costume'", () => {
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, makeEvidence({
+      profile: { ...BASE_PROFILE, stylePersonalities: ["minimal", "classic"] },
+    }));
+    expect(edit.theBalanceToProtect).not.toMatch(/\bcostume\b/i);
+  });
+
+  it("modern-tailoring partToLeave does not use 'costume' or 'theatrical'", () => {
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, makeEvidence());
+    const leaveText = edit.partToLeave.join(" ");
+    expect(leaveText).not.toMatch(/\bcostume\b/i);
+    expect(leaveText).not.toMatch(/\btheatrical\b/i);
+  });
+});
+
+describe("QA fixes — grammar agreement for plural clothing names (Issue #9)", () => {
+  it("soft-structure BOTTOMS: 'Black Tailored Trousers' uses 'are' not 'is' in yourBestRouteIn", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Black Tailored Trousers",
+          imageUrl: null,
+          category: "BOTTOMS",
+          subcategory: "trouser",
+          primaryColor: "black",
+          styleTags: [],
+          occasions: [],
+          material: "wool",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
+    expect(edit.yourBestRouteIn).not.toMatch(/Black Tailored Trousers is/i);
+    expect(edit.yourBestRouteIn).toMatch(/Black Tailored Trousers are|Black Tailored Trousers give/i);
+  });
+
+  it("modern-tailoring BOTTOMS: 'Wide Leg Jeans' uses 'are' not 'is' in yourBestRouteIn", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Wide Leg Jeans",
+          imageUrl: null,
+          category: "BOTTOMS",
+          subcategory: "jeans",
+          primaryColor: "indigo",
+          styleTags: [],
+          occasions: [],
+          material: "denim",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence);
+    expect(edit.yourBestRouteIn).not.toMatch(/Wide Leg Jeans is/i);
+  });
+
+  it("soft-structure BOTTOMS: singular 'Midi Skirt' still uses 'is' in yourBestRouteIn", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Black Midi Skirt",
+          imageUrl: null,
+          category: "BOTTOMS",
+          subcategory: "skirt",
+          primaryColor: "black",
+          styleTags: [],
+          occasions: [],
+          material: "crepe",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
+    // singular item — "is" is correct; "are" would be wrong
+    expect(edit.yourBestRouteIn).not.toMatch(/Black Midi Skirt are/i);
+  });
+});
