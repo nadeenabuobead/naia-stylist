@@ -1080,8 +1080,9 @@ export default function StyleMeResult() {
     return (
       <div className="sm-loading-wrap">
         <div className="sm-loading-inner">
-          <h2 style={{ fontFamily: "var(--naia-ff-display)", fontSize: "32px", fontWeight: 900, fontStyle: "italic", color: "var(--naia-ink)", marginBottom: "16px" }}>
-            nAia is styling you...
+          <h2 style={{ fontSize: "36px", lineHeight: 1.1, marginBottom: "16px", fontFamily: "var(--ff-editorial)", fontStyle: "italic", fontWeight: 400, color: "var(--naia-ink)" }}>
+            <span style={{ color: "var(--lipstick)" }}>nAia</span>
+            {" is styling you..."}
           </h2>
           <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--naia-muted)", marginBottom: "40px" }}>
             Building your look around what you need today, the occasion, and your wardrobe.
