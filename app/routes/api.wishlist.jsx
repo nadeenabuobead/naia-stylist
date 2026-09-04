@@ -26,6 +26,21 @@ const CORS = {
 
 // ANALYZE ITEM ACTION (for Buy/Skip)
 
+// Human-readable labels for lifestyle tag IDs — prevents raw tokens like
+// "work-office" or "dinners-going-out" from appearing in LLM-generated output.
+const LIFESTYLE_LABELS = {
+  "work-office":              "office / workdays",
+  "everyday-casual":          "everyday casual",
+  "dinners-going-out":        "dinners out",
+  "events-special-occasions": "special occasions and events",
+  "family-parenting":         "family life",
+  "active-busy-days":         "active days",
+};
+function labelLifestyle(ids) {
+  if (!ids || ids.length === 0) return null;
+  return ids.map(id => LIFESTYLE_LABELS[id] ?? id).join(", ");
+}
+
 // Maps uploaded-item category (Buy or Skip values) to compatible Closet enum values
 const CLOSET_COMPATIBLE_CATEGORIES = {
   "Top":       ["BOTTOMS", "OUTERWEAR"],
@@ -342,7 +357,7 @@ ${styleProfile.styleSupport?.length > 0 ? `- Style support goals: ${styleProfile
 ${styleProfile.successfulOutfitGives?.length > 0 ? `- What their best outfits give them: ${styleProfile.successfulOutfitGives.map(id => optionLabel("successful-outfit-gives", id)).join(", ")}` : ""}
 
 LIFESTYLE & OCCASIONS
-- Primary lifestyle: ${styleProfile.lifestyle?.join(", ") || "not specified"}
+- Primary lifestyle: ${labelLifestyle(styleProfile.lifestyle) || "not specified"}
 - Typical day: ${styleProfile.typicalDay || "not specified"}
 → LIFESTYLE RULE: The wearability conclusion must name these actual occasions and state whether the item suits them specifically. Never write "may have limited wear if you don't attend such events." State the real match or mismatch using the occasions listed above.
 
@@ -426,7 +441,7 @@ ${safeUnsureAbout ? `→ Justified, partly justified, or not supported? Use "par
 
 BEFORE YOU BUY — exactly 2 points (25–40 words each). Do NOT begin either point with a label — the card headings already show these:
 1. FIT & PRACTICAL SOLUTION — Open with what IS known from the Passport (preferred silhouettes, fit preferences, coverage, size for this category). Reference by name. Never open with "Fit cannot be confirmed."
-2. WEARABILITY — Name at least one of the customer's actual lifestyle contexts (${styleProfile?.lifestyle?.join(", ") || "lifestyle not specified"}) and state directly whether this item suits those contexts and how realistically frequent the wear would be. Never use language like "if your lifestyle includes such events."
+2. WEARABILITY — Name at least one of the customer's actual lifestyle contexts (${labelLifestyle(styleProfile?.lifestyle) || "lifestyle not specified"}) and state directly whether this item suits those contexts and how realistically frequent the wear would be. Never use language like "if your lifestyle includes such events."
 No brand-sizing claims.
 
 REPETITION RULE: Each colour, concern or trait appears ONCE. Never repeat Final Condition reasoning in any earlier section.
@@ -489,7 +504,7 @@ Respond ONLY with valid JSON, no markdown:
   "whatLikeEval": ${safeWhatLike ? `{ "aspect": "${safeWhatLike.slice(0,80)}", "agreement": "agree" or "partly agree" or "disagree", "explanation": "≤20 words — based on item's actual construction" }` : "null"},
   "concernEval": ${safeUnsureAbout ? `{ "concern": "${safeUnsureAbout.slice(0,80)}", "justified": "justified" or "partly justified" or "not supported", "explanation": "≤20 words — address the customer directly using 'you/your'. Direct assessment referencing your Passport data where available", "solutions": ["specific practical solution 1", "specific practical solution 2"] }` : "null"},
   "closetPairings": [{ "occasion": "specific lifestyle occasion from your Passport e.g. work meetings, dinner", "name": "exact item name from the candidate list above", "reason": "≤12 words — colour coordination fact + how proportions balance" }],
-  "fillsGap": null | "≤20 words — address the customer directly using 'you/your'. The specific wardrobe gap this item fills for you given your Closet and lifestyle",
+  "fillsGap": null | "≤20 words — address the customer directly using 'you/your'. Scope strictly to what is visible in the Closet data: e.g. 'Among the pieces you've added, nAia doesn't currently see a similar [type].' FORBIDDEN: 'you lack', 'you don't own', 'your wardrobe is missing', or any absolute ownership claim. nAia only sees what the customer has uploaded — not uploaded ≠ not owned. Set to null if no genuine gap is visible in the Closet data.",
   "occasions": [],
   "productSnapshot": {
     "observedSilhouette": "token or null — one of: a-line / straight / column / fitted / flared / wrap / shift / oversized / balloon / asymmetric",

@@ -2595,6 +2595,7 @@ a.mn-action:focus-visible,
 .bos-better-direction-btn:hover { background: var(--naia-ink); color: var(--naia-bg); }
 
 /* ── Buy or Skip outcome buttons ─────────────────────────────── */
+.bos-outcome { margin-top: 36px; }
 .bos-outcome-q { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--naia-muted); margin-bottom: 14px; }
 .bos-outcome-followup-q { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--naia-muted); margin: 20px 0 12px; }
 .bos-outcome-options { display: flex; flex-wrap: wrap; gap: 10px; }
