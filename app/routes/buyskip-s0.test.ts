@@ -356,6 +356,147 @@ describe("T14: schema declares imagePublicId and imageFormat", () => {
   });
 });
 
+// ── T16: Layered construction rule ────────────────────────────────────────────
+describe("T16: prompt contains LAYERED CONSTRUCTION RULE for overlay garments", () => {
+  it("prompt contains LAYERED CONSTRUCTION RULE label", () => {
+    assert.ok(
+      api.includes("LAYERED CONSTRUCTION RULE"),
+      "prompt must contain a LAYERED CONSTRUCTION RULE",
+    );
+  });
+
+  it("rule distinguishes underlying base construction from overlay", () => {
+    assert.ok(
+      api.includes("UNDERLYING/BASE") || api.includes("underlying/base") || api.includes("underlying construction"),
+      "rule must address the underlying/base construction separately from overlay",
+    );
+  });
+
+  it("rule prohibits waist-obscuring classification based on overlay alone", () => {
+    assert.ok(
+      api.includes("waist-defined") || api.includes("waist-obscuring"),
+      "rule must address waist-defined vs waist-obscuring classification under overlay garments",
+    );
+  });
+
+  it("rule requires qualified language when visual evidence is ambiguous", () => {
+    assert.ok(
+      api.includes("qualified language") && api.includes("ambiguous"),
+      "rule must require qualified language when visual evidence is ambiguous",
+    );
+  });
+});
+
+// ── T17: Fashion language calibration ─────────────────────────────────────────
+describe("T17: prompt contains FASHION LANGUAGE CALIBRATION rule", () => {
+  it("prompt contains FASHION LANGUAGE CALIBRATION label", () => {
+    assert.ok(
+      api.includes("FASHION LANGUAGE CALIBRATION"),
+      "prompt must contain a FASHION LANGUAGE CALIBRATION rule",
+    );
+  });
+
+  it("rule restricts avant-garde to items with genuine visual evidence", () => {
+    assert.ok(
+      api.includes("avant-garde"),
+      "FASHION LANGUAGE CALIBRATION must name avant-garde as a term to reserve",
+    );
+  });
+
+  it("rule restricts theatrical to items with genuine visual evidence", () => {
+    assert.ok(
+      api.includes("theatrical"),
+      "FASHION LANGUAGE CALIBRATION must name theatrical as a term to restrict",
+    );
+  });
+
+  it("rule provides proportionate alternatives — statement, embellished, occasion-led", () => {
+    assert.ok(
+      api.includes("statement") && api.includes("embellished") && api.includes("occasion-led"),
+      "rule must provide proportionate language alternatives (statement, embellished, occasion-led)",
+    );
+  });
+});
+
+// ── T18: Occasion-specific items can earn BUY ────────────────────────────────
+describe("T18: prompt states occasion-specific items can earn BUY", () => {
+  it("OCCASION CALIBRATION RULE is present", () => {
+    assert.ok(
+      api.includes("OCCASION CALIBRATION RULE"),
+      "prompt must contain an OCCASION CALIBRATION RULE",
+    );
+  });
+
+  it("rule states a purchase does not need to serve every lifestyle context", () => {
+    assert.ok(
+      api.includes("does NOT need to serve every lifestyle context"),
+      "prompt must state a purchase does not need to serve every lifestyle context",
+    );
+  });
+
+  it("rule evaluates meaningful real part of the customer's life", () => {
+    assert.ok(
+      api.includes("meaningful real part"),
+      "rule must instruct evaluating whether item serves a meaningful real part of the customer's life",
+    );
+  });
+
+  it("rule permits occasion-specific items to earn BUY with realistic use", () => {
+    assert.ok(
+      api.includes("occasion-specific item") || api.includes("occasion piece"),
+      "rule must explicitly state an occasion-specific item can earn BUY",
+    );
+  });
+});
+
+// ── T19: stop-regret-purchases calibration ────────────────────────────────────
+describe("T19: stop-regret-purchases goal does not auto-push statement/occasion pieces to SKIP", () => {
+  it("prompt clarifies stop-regret-purchases increases scrutiny but not auto-SKIP for occasion pieces", () => {
+    assert.ok(
+      api.includes("'stop-regret-purchases' does NOT"),
+      "prompt must clarify stop-regret-purchases does NOT automatically push statement or occasion pieces toward SKIP",
+    );
+  });
+
+  it("prompt reframes the goal as realistic pattern of wear, not universal context coverage", () => {
+    assert.ok(
+      api.includes("realistic pattern of wear") || api.includes("realistic use"),
+      "prompt must reframe stop-regret-purchases as evaluating realistic pattern of wear",
+    );
+  });
+});
+
+// ── T20: VERDICT SEVERITY RULE ────────────────────────────────────────────────
+describe("T20: prompt contains VERDICT SEVERITY RULE distinguishing SKIP from SKIP FOR NOW", () => {
+  it("VERDICT SEVERITY RULE is present", () => {
+    assert.ok(
+      api.includes("VERDICT SEVERITY RULE"),
+      "prompt must contain a VERDICT SEVERITY RULE",
+    );
+  });
+
+  it("rule defines what hard SKIP requires", () => {
+    assert.ok(
+      api.includes("Hard SKIP requires"),
+      "VERDICT SEVERITY RULE must state what hard SKIP requires",
+    );
+  });
+
+  it("rule directs uncertain wear frequency toward SKIP FOR NOW not SKIP", () => {
+    assert.ok(
+      api.includes("wear frequency is uncertain"),
+      "VERDICT SEVERITY RULE must address uncertain wear frequency as SKIP FOR NOW territory",
+    );
+  });
+
+  it("rule defaults uncertain cases with real merit to SKIP FOR NOW", () => {
+    assert.ok(
+      api.includes("Default to SKIP FOR NOW"),
+      "rule must say to default to SKIP FOR NOW when item has real merit but uncertainty blocks recommendation",
+    );
+  });
+});
+
 // ── T15: Constitution H — anti-sales VOICE RULE ───────────────────────────────
 describe("T15: Buy/Skip prompt contains anti-sales VOICE RULE (Constitution H)", () => {
   it("prompt contains a numbered VOICE RULE entry", () => {
