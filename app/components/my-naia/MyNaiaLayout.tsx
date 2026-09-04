@@ -21,11 +21,8 @@ const MY_NAIA_NAV: NavGroup[] = [
     title: "Account",
     items: [
       { to: "/my-naia/saved", label: "Saved" },
-      { to: "/my-naia/orders", label: "Orders" },
       { to: "/passport", label: "Personalisation" },
       { to: "/my-naia-model", label: "My nAia Model", indent: true },
-      { to: "/my-naia/what-naia-notices", label: "What nAia Is Noticing", indent: true },
-      { to: "/my-naia/plan-usage", label: "Plan & Usage" },
       { to: "/settings", label: "Settings & Privacy" },
     ],
   },
