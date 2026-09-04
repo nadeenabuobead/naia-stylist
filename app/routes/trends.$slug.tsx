@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useLoaderData, type LoaderFunctionArgs } from "react-router";
+import { Link, useLoaderData, useRouteError, type LoaderFunctionArgs } from "react-router";
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "../lib/storefront-config";
 import type { TrendReportData } from "../lib/trend-reports";
 import { getEditorialReportBySlug, getPublishedEditorialReports } from "../lib/editorial-reports.server";
@@ -762,6 +762,11 @@ const css = `
 `;
 
 export function ErrorBoundary() {
+  const error = useRouteError();
+  const is404 = error instanceof Response && error.status === 404;
+  const detail = !is404
+    ? (error instanceof Error ? `${error.name}: ${error.message}` : String(error))
+    : null;
   return (
     <div className="psl-page">
       <link rel="stylesheet" href={FONTS} />
@@ -797,6 +802,7 @@ export function ErrorBoundary() {
           report<br />
           <em>not found.</em>
         </h1>
+        {detail && <p style={{ marginTop: "16px", fontSize: "0.75rem", fontFamily: "monospace", opacity: 0.6, maxWidth: "480px" }}>{detail}</p>}
         <Link to="/trend-reports" className="psl-lens-btn" style={{ display: "inline-block", marginTop: "32px" }}>
           ← back to trend reports
         </Link>

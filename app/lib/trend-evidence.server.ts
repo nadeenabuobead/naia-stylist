@@ -1,5 +1,6 @@
 import prisma from "../db.server";
 import type { TrendReportData } from "./trend-reports";
+import { buildPrivateDownloadUrl, getCloudinaryConfig } from "./cloudinary-admin.server";
 
 // ---------------------------------------------------------------------------
 // Evidence bundle — assembled server-side, scoped to exactly one customer,
@@ -77,6 +78,8 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
         select: {
           name: true,
           imageUrl: true,
+          imagePublicId: true,
+          imageFormat: true,
           category: true,
           subcategory: true,
           primaryColor: true,
@@ -122,6 +125,8 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
     }
   }
 
+  const cloudinaryCfg = getCloudinaryConfig();
+
   return {
     hasProfile,
     profile: hasProfile && profile ? {
@@ -137,7 +142,10 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
     } : null,
     closetItems: customer.closetItems.map((item) => ({
       name: item.name,
-      imageUrl: item.imageUrl ?? null,
+      imageUrl: item.imageUrl
+        ?? (item.imagePublicId && item.imageFormat && cloudinaryCfg
+            ? buildPrivateDownloadUrl(cloudinaryCfg, item.imagePublicId, item.imageFormat, "private")
+            : null),
       category: item.category,
       subcategory: item.subcategory ?? null,
       primaryColor: item.primaryColor ?? null,
