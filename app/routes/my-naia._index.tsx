@@ -186,7 +186,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           id: true, createdAt: true, currentMood: true, desiredFeeling: true, occasion: true, styleFrom: true,
           suggestions: {
             take: 1, select: { id: true, heroImageUrl: true, outfitName: true, savedAsLook: true,
-              items: { take: 1, select: { closetItemId: true, productTitle: true, productImageUrl: true, closetItem: { select: { name: true, imageUrl: true } } } } }
+              items: { take: 1, select: { closetItemId: true, productTitle: true, productImageUrl: true, closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true } } } } }
           },
           review: { select: { id: true } },
         },
@@ -242,6 +242,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
     };
   });
 
+  // Resolve each StyleMe session's thumbnail server-side so the component never receives a stale/broken URL.
+  // Priority: heroImageUrl → closet signed URL (private asset) → productImageUrl (NADINE or legacy) → closet legacy imageUrl → null
+  const sessionsWithThumb = sessions.map((s) => {
+    const suggestion = s.suggestions[0];
+    const firstItem = suggestion?.items?.[0];
+    let resolvedThumb: string | null = null;
+
+    if (suggestion?.heroImageUrl) {
+      resolvedThumb = suggestion.heroImageUrl;
+    } else if (firstItem) {
+      const ci = firstItem.closetItem;
+      if (firstItem.closetItemId && ci?.imagePublicId && ci?.imageFormat && cloudinaryConfig) {
+        const ownership = validatePublicIdOwnership(ci.imagePublicId, customerId);
+        if (ownership.ok) {
+          resolvedThumb = buildPrivateDownloadUrl(cloudinaryConfig, ci.imagePublicId, ci.imageFormat, "private");
+        }
+      }
+      if (!resolvedThumb && firstItem.productImageUrl) resolvedThumb = firstItem.productImageUrl;
+      if (!resolvedThumb && firstItem.closetItem?.imageUrl) resolvedThumb = firstItem.closetItem.imageUrl;
+    }
+
+    return { ...s, resolvedThumb };
+  });
+
   const p = customer.onboardingProfile;
   // VIEW only when profileVersion=6 (atomically set on Rev 6 onboarding/refresh completion).
   // Legacy customers (completed=true, profileVersion=null) → CONTINUE (need refresh).
@@ -253,7 +277,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return {
     firstName: customer.firstName ?? null,
     profile: p,
-    sessions, trendReport, buyOrSkipHistory, reviewCount, closetCount,
+    sessions: sessionsWithThumb, trendReport, buyOrSkipHistory, reviewCount, closetCount,
     passportState,
   };
 }
@@ -459,19 +483,13 @@ export default function MyNaiaOverview() {
                           }}
                           aria-label={`View look — ${suggestion?.outfitName ?? "nAia Look"}`}
                         >
-                          {(() => {
-                            const thumb = suggestion?.heroImageUrl
-                              ?? suggestion?.items?.[0]?.productImageUrl
-                              ?? suggestion?.items?.[0]?.closetItem?.imageUrl
-                              ?? null;
-                            return thumb ? (
-                              <img src={thumb} alt={suggestion?.outfitName ?? ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                            ) : (
-                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.25, color: "var(--fg)" }} aria-hidden="true">
-                                <path d="M12 3 4.5 7.5v9L12 21l7.5-4.5v-9L12 3z" /><path d="m4.5 7.5 7.5 4.5 7.5-4.5M12 12v9" />
-                              </svg>
-                            );
-                          })()}
+                          {session.resolvedThumb ? (
+                            <img src={session.resolvedThumb} alt={suggestion?.outfitName ?? ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          ) : (
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.25, color: "var(--fg)" }} aria-hidden="true">
+                              <path d="M12 3 4.5 7.5v9L12 21l7.5-4.5v-9L12 3z" /><path d="m4.5 7.5 7.5 4.5 7.5-4.5M12 12v9" />
+                            </svg>
+                          )}
                           {suggestion?.savedAsLook && (
                             <span style={{ position: "absolute", left: "0.75rem", top: "0.75rem", fontSize: "0.55rem", textTransform: "uppercase", letterSpacing: "0.3em", background: "var(--bg)", padding: "0.25rem 0.5rem", color: "var(--fg-80)" }}>Saved</span>
                           )}
