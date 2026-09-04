@@ -2398,7 +2398,7 @@ describe("§21 Gap corrections — SET coverage, signals, why-this-works, compat
       outfitPlan: { anchorSlot: "shoe" as const, recommendedSlot: null, compatibilityStatus: "compatible" as const, notes: [] },
       evaluatedProducts: [],
       coverage: { totalCatalogProducts: 11, eligibleCandidates: 11, excludedCandidates: 0 },
-      selectedClosetGarments: [{ slot: "top" }],
+      selectedClosetGarments: [{ slot: "top", id: "cg-top-test", label: "White Tee", imageUrl: null }],
     });
     const result = await computeStyleMeResult(input, mockRec);
     assert.equal(result.completionLayer.length, 1, `expected 1 completion piece (BOTTOM only), got ${result.completionLayer.length}`);
@@ -3099,7 +3099,7 @@ describe("§V.10 — legacy schema compatibility: parseSuggestionMetadata", () =
       songReason: "matched",
       evidenceCodes: [],
       resultDirections: [
-        { label: "most-you", displayLabel: "MOST YOU", directionalNote: "Strongest alignment.", handle: "collar-shirt", title: "Becoming Seen", productUrl: null, productImageUrl: null },
+        { label: "most-you", displayLabel: "MOST LIKE ME", directionalNote: "Strongest alignment.", handle: "collar-shirt", title: "Becoming Seen", productUrl: null, productImageUrl: null },
       ],
     });
     const meta = parseSuggestionMetadata(payload);

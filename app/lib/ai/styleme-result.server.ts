@@ -947,7 +947,7 @@ function buildCompletionPiece(
     }
     const detailSuffix = detailNote ? ` ${detailNote}` : "";
     const topDesc = `${cap} ${qualifier}${garment} ${baseMaterial}.${proportionNote}${detailSuffix}`;
-    return { slot: "top", description: mode === "naia" ? `If you're adding a top — ${topDesc[0].toLowerCase()}${topDesc.slice(1)}` : topDesc };
+    return { slot: "top", description: topDesc };
   }
 
   // Bottom: resolve garment, hemline suffix, and detail note separately
@@ -974,10 +974,7 @@ function buildCompletionPiece(
   }
   const detailSuffix = detailNote ? ` ${detailNote}` : "";
   const bottomDesc = `${cap} ${qualifier}${garment} ${baseMaterial}${hemlineSuffix}.${proportionNote}${detailSuffix}`;
-  return {
-    slot: "bottom",
-    description: mode === "naia" ? `If you're adding a bottom — ${bottomDesc[0].toLowerCase()}${bottomDesc.slice(1)}` : bottomDesc,
-  };
+  return { slot: "bottom", description: bottomDesc };
 }
 
 export function buildCompletionLayer(
@@ -1268,7 +1265,7 @@ export function computeNaiaResultDirections(
 
   directions.push({
     label: "most-you",
-    displayLabel: "MOST YOU",
+    displayLabel: "MOST LIKE ME",
     product: makeProduct(mostYouItems),
     directionalNote: "The combination from your Closet that aligns most closely with today's signals.",
     outfitPieces: toOutfitPieces(mostYouItems),
@@ -1285,7 +1282,7 @@ export function computeNaiaResultDirections(
       : "Familiar energy, styled from a different selection in your Closet.";
     directions.push({
       label: "fresh",
-      displayLabel: "FRESH",
+      displayLabel: "FRESH TWIST",
       product: makeProduct(freshItems),
       directionalNote: freshNote,
       outfitPieces: toOutfitPieces(freshItems),
@@ -1299,7 +1296,7 @@ export function computeNaiaResultDirections(
   if (pushMeDiffers) {
     directions.push({
       label: "push-me",
-      displayLabel: "PUSH ME",
+      displayLabel: "TRY SOMETHING NEW",
       product: makeProduct(pushMeItems),
       directionalNote: "The further reach — pieces from your Closet at the outer edge of today's signals.",
       outfitPieces: toOutfitPieces(pushMeItems),
@@ -1360,7 +1357,7 @@ export function computeResultDirections(
   const directions: ResultDirection[] = [
     {
       label: "most-you",
-      displayLabel: "MOST YOU",
+      displayLabel: "MOST LIKE ME",
       product: mostYouProduct,
       directionalNote: `Strongest alignment with ${profileHint} — the direction that tracks closest to your Profile.`,
     },
@@ -1394,7 +1391,7 @@ export function computeResultDirections(
     : `The bolder alignment — this ${pushMeSlot} sits furthest from your established ${profileHint}.`;
   directions.push({
     label: "push-me",
-    displayLabel: "PUSH ME",
+    displayLabel: "TRY SOMETHING NEW",
     product: pushMeProduct,
     directionalNote: pushMeNote,
   });
@@ -1428,7 +1425,7 @@ export function computeResultDirections(
       : `Still within ${profileHint}, but a different proportion balance through the ${freshSlot}.`;
     directions.splice(1, 0, {
       label: "fresh",
-      displayLabel: "FRESH",
+      displayLabel: "FRESH TWIST",
       product: freshProduct,
       directionalNote: freshNote,
     });
@@ -1784,15 +1781,17 @@ export function buildDbPayload(result: StyleMeCustomerResult): StyleMeDbPayload 
       productUrl: null,
     });
   }
-  items.push({
-    itemType: "ACCESSORY",
-    productTitle: null,
-    productImageUrl: null,
-    shopifyProductId: null,
-    closetItemId: null,
-    stylingNotes: finishingLayer.accessories,
-    productUrl: null,
-  });
+  if (!closetCoveredSlots.has("accessory") && !closetCoveredSlots.has("jewelry")) {
+    items.push({
+      itemType: "ACCESSORY",
+      productTitle: null,
+      productImageUrl: null,
+      shopifyProductId: null,
+      closetItemId: null,
+      stylingNotes: finishingLayer.accessories,
+      productUrl: null,
+    });
+  }
 
   return {
     outfitName: result.outfitName,

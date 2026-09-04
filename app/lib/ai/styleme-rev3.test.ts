@@ -427,9 +427,9 @@ describe("R3.6 — computeResultDirections: direction algorithm", () => {
     const products = [makeProduct("a", 20, 15), makeProduct("b", 10, 2)];
     const directions = computeResultDirections(products, mockResolve);
     for (const d of directions) {
-      if (d.label === "most-you") assert.equal(d.displayLabel, "MOST YOU");
-      if (d.label === "push-me") assert.equal(d.displayLabel, "PUSH ME");
-      if (d.label === "fresh") assert.equal(d.displayLabel, "FRESH");
+      if (d.label === "most-you") assert.equal(d.displayLabel, "MOST LIKE ME");
+      if (d.label === "push-me") assert.equal(d.displayLabel, "TRY SOMETHING NEW");
+      if (d.label === "fresh") assert.equal(d.displayLabel, "FRESH TWIST");
     }
   });
 
