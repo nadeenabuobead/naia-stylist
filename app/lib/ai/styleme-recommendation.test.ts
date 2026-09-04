@@ -1022,25 +1022,25 @@ describe("§7  Anchor-category matrix: all anchor slot types", () => {
 // ─── §8  Diversity and tie-breaking ───────────────────────────────────────────
 
 describe("§8  Diversity and tie-breaking", () => {
-  it("8.1  diversity adjustment (-1) is applied to recently-shown handles", () => {
+  it("8.1  diversity adjustments: index-0 gets REGENERATE_PRIMARY_PENALTY, index-1+ gets DIVERSITY_PENALTY", () => {
     const result = run(
       makeSession({ moods: ["confident"], occasion: "dinner" }),
       { stylePersonalities: ["artsy"] },
       { recentlyShown: ["collar-shirt", "asymmetrical-pants"] },
     );
-    const cEv = result.evaluatedProducts.find((e) => e.handle === "collar-shirt");
-    assert.ok(cEv);
-    assert.equal(cEv!.diversityAdjustment, SCORING_WEIGHTS.DIVERSITY_PENALTY);
+    // index-0 (primary shown last time) gets strong penalty to guarantee a different result
+    const primaryEv = result.evaluatedProducts.find((e) => e.handle === "collar-shirt");
+    assert.ok(primaryEv);
+    assert.equal(primaryEv!.diversityAdjustment, SCORING_WEIGHTS.REGENERATE_PRIMARY_PENALTY);
+    // index-1 (alternative shown last time) gets mild penalty only
+    const altEv = result.evaluatedProducts.find((e) => e.handle === "asymmetrical-pants");
+    assert.ok(altEv);
+    assert.equal(altEv!.diversityAdjustment, SCORING_WEIGHTS.DIVERSITY_PENALTY);
   });
 
-  it("8.2  recently-shown handle is not suppressed if it still has highest score", () => {
-    // If a recently-shown product scores significantly higher than alternatives,
-    // it should still win (diversity is a tie-break only, not a hard exclusion).
-    // Reuses test 2.4's scenario (verified +4 raw margin, +3 after the -1 penalty)
-    // rather than the original double-top scenario, which — after the
-    // playful->adventurous mood rename left double-top's catalog data unchanged
-    // (see 2.1's comment) — ties with midi-dress and is no longer a reliable
-    // fixture for "wins by a large margin."
+  it("8.2  alternative-shown handle (index 1+) is not suppressed if it has highest score", () => {
+    // The REGENERATE_PRIMARY_PENALTY applies only to index 0.
+    // An alternative (index 1+) gets only -1 and can still win if it scores highest.
     const result = run(
       makeSession({
         moods: ["confident", "powerful"],
@@ -1048,10 +1048,10 @@ describe("§8  Diversity and tie-breaking", () => {
         occasion: "work",
       }),
       {},
-      { recentlyShown: ["asymmetrical-pants"] }, // should still win despite diversity penalty
+      // asymmetrical-pants at index 1 → only DIVERSITY_PENALTY (-1), should still win
+      { recentlyShown: ["collar-shirt", "asymmetrical-pants"] },
     );
     assert.equal(result.outcome, "nadine-recommendation");
-    // asymmetrical-pants should win by large enough margin to overcome -1 diversity penalty
     assert.equal(result.primary?.handle, "asymmetrical-pants");
   });
 
@@ -1993,19 +1993,19 @@ describe("§14  Session-specific tie-break and diversity behavior", () => {
   });
 
   // ── DT.4  Diversity penalty is visible in diversityAdjustment ────────────
-  it("DT.4  diversityAdjustment is set to DIVERSITY_PENALTY for recently-shown product", () => {
+  it("DT.4  diversityAdjustment is REGENERATE_PRIMARY_PENALTY for index-0 recently-shown product", () => {
     const session = makeValidSession({ moods: ["confident"], desiredFeelings: ["more-elevated"], occasion: "dinner" });
     const r1 = run(session);
     if (!r1.primary) return; // skip if no recommendation
     const shown = r1.primary.handle;
     const r2 = run(session, undefined, { recentlyShown: [shown] });
     const ev = r2.evaluatedProducts.find((e) => e.handle === shown)!;
-    assert.equal(ev.diversityAdjustment, SCORING_WEIGHTS.DIVERSITY_PENALTY,
-      "diversity adjustment must be applied to recently shown product");
+    assert.equal(ev.diversityAdjustment, SCORING_WEIGHTS.REGENERATE_PRIMARY_PENALTY,
+      "index-0 primary handle must receive REGENERATE_PRIMARY_PENALTY, not the mild DIVERSITY_PENALTY");
   });
 
-  // ── DT.5  Diversity penalty cannot suppress a strongly-scoring product ────
-  it("DT.5  DIVERSITY_PENALTY (−1) does not drop a strong match below MIN_TOTAL_SCORE", () => {
+  // ── DT.5  Primary penalty forces a different product to be selected ───────
+  it("DT.5  REGENERATE_PRIMARY_PENALTY causes a different product to win on regenerate", () => {
     const session = makeValidSession({
       moods: ["confident"], desiredFeelings: ["more-elevated"], bodyNeeds: ["nothing-specific"],
       occasion: "dinner", formalityConditional: "formality-smart",
@@ -2013,15 +2013,19 @@ describe("§14  Session-specific tie-break and diversity behavior", () => {
     const profile: StyleMeProfileSignals = { stylePersonalities: ["corporate-chic"] };
     const r1 = run(session, profile);
     if (!r1.primary) return;
-    const handle = r1.primary.handle;
-    const score1 = r1.evaluatedProducts.find((e) => e.handle === handle)!.totalScore;
-    if (score1 < THRESHOLDS.MIN_TOTAL_SCORE + 1) return; // skip marginal cases
-    const r2 = run(session, profile, { recentlyShown: [handle] });
-    const ev2 = r2.evaluatedProducts.find((e) => e.handle === handle)!;
-    assert.equal(ev2.totalScore, score1 + SCORING_WEIGHTS.DIVERSITY_PENALTY,
-      "total score should drop by exactly DIVERSITY_PENALTY");
-    assert.ok(ev2.totalScore >= THRESHOLDS.MIN_TOTAL_SCORE,
-      `penalized score ${ev2.totalScore} must still meet MIN_TOTAL_SCORE ${THRESHOLDS.MIN_TOTAL_SCORE}`);
+    const prevHandle = r1.primary.handle;
+    const r2 = run(session, profile, { recentlyShown: [prevHandle] });
+    // If there are other eligible products, the primary must change
+    const otherAboveThreshold = r2.evaluatedProducts.filter(
+      (e) => !e.isHardExcluded && e.handle !== prevHandle && e.totalScore >= THRESHOLDS.MIN_TOTAL_SCORE,
+    );
+    if (otherAboveThreshold.length > 0) {
+      assert.notEqual(r2.primary?.handle, prevHandle,
+        "REGENERATE_PRIMARY_PENALTY must force a different primary when alternatives exist");
+    }
+    // The penalized product must have REGENERATE_PRIMARY_PENALTY applied
+    const ev2 = r2.evaluatedProducts.find((e) => e.handle === prevHandle)!;
+    assert.equal(ev2.diversityAdjustment, SCORING_WEIGHTS.REGENERATE_PRIMARY_PENALTY);
   });
 
   // ── DT.6  semanticTieBreak is populated on all evaluated products ─────────

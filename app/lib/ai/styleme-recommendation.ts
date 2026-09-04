@@ -57,6 +57,7 @@ export const SCORING_WEIGHTS = {
   LIGHT_RANK: 1,
   DEPRIORITISE: -3,
   DIVERSITY_PENALTY: -1,
+  REGENERATE_PRIMARY_PENALTY: -100,
   DUAL_MOOD_BONUS: 2,
   LIKE_MYSELF_SP_BONUS: 2,
   STYLING_EFFORT_LOW: 1,
@@ -1798,8 +1799,11 @@ export function runRecommendation(
       recentlyShownHandles,
     );
 
-    // Diversity adjustment
-    const diversityAdj = recentlyShownHandles.includes(product.handle)
+    // Diversity adjustment — primary recently-shown handle (index 0) gets a strong
+    // penalty so it is never selected again unless it is the only eligible product.
+    const diversityAdj = recentlyShownHandles[0] === product.handle
+      ? SCORING_WEIGHTS.REGENERATE_PRIMARY_PENALTY
+      : recentlyShownHandles.includes(product.handle)
       ? SCORING_WEIGHTS.DIVERSITY_PENALTY
       : 0;
 
