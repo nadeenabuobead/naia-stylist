@@ -3,6 +3,12 @@ import type { LinksFunction, LoaderFunctionArgs } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
 import { getPublishedEditorialReports } from "~/lib/editorial-reports.server";
+import { reportVisual, type TreatmentType } from "~/lib/report-visual";
+import {
+  getCloudinaryConfig,
+  validatePublicIdOwnership,
+  buildPrivateDownloadUrl,
+} from "~/lib/cloudinary-admin.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
@@ -170,7 +176,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
   const customerId = customer.id;
 
-  const [sessions, editorialReports, buyOrSkipHistory, reviewCount, closetCount] =
+  const [sessions, editorialReports, buyOrSkipRaw, reviewCount, closetCount] =
     await Promise.all([
       prisma.stylingSession.findMany({
         where: { customerId },
@@ -190,7 +196,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         where: { customerId },
         take: 3,
         orderBy: { createdAt: "desc" },
-        select: { id: true, productName: true, verdict: true, createdAt: true, imageUrl: true, category: true },
+        select: { id: true, productName: true, verdict: true, createdAt: true, imageUrl: true, imagePublicId: true, imageFormat: true, category: true, fullAnalysis: true },
       }),
       prisma.postOutfitReview.count({ where: { customerId } }),
       prisma.closetItem.count({ where: { customerId } }),
@@ -198,8 +204,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const latestEditorial = editorialReports[0] ?? null;
   const trendReport = latestEditorial
-    ? { slug: latestEditorial.slug, title: latestEditorial.title, season: latestEditorial.season, summary: latestEditorial.summary }
+    ? {
+        slug: latestEditorial.slug,
+        title: latestEditorial.title,
+        season: latestEditorial.season,
+        summary: latestEditorial.summary,
+        visual: latestEditorial.visual ?? null,
+      }
     : null;
+
+  // Resolve BOS display name (fullAnalysis.itemType) and signed image URL per record.
+  const cloudinaryConfig = getCloudinaryConfig();
+  const buyOrSkipHistory = buyOrSkipRaw.map((a) => {
+    const fa = a.fullAnalysis as Record<string, unknown> | null;
+    const displayName: string | null =
+      (typeof fa?.itemType === "string" && fa.itemType.trim() ? fa.itemType.trim() : null)
+      ?? a.productName
+      ?? null;
+
+    let itemImageUrl: string | null = null;
+    if (a.imagePublicId && a.imageFormat && cloudinaryConfig) {
+      const ownership = validatePublicIdOwnership(a.imagePublicId, customerId);
+      if (ownership.ok) {
+        itemImageUrl = buildPrivateDownloadUrl(cloudinaryConfig, a.imagePublicId, a.imageFormat, "private");
+      }
+    } else if (a.imageUrl) {
+      itemImageUrl = a.imageUrl;
+    }
+
+    return {
+      id: a.id,
+      createdAt: a.createdAt,
+      verdict: a.verdict,
+      category: a.category,
+      displayName,
+      itemImageUrl,
+    };
+  });
 
   const p = customer.onboardingProfile;
   // VIEW only when profileVersion=6 (atomically set on Rev 6 onboarding/refresh completion).
@@ -528,10 +569,10 @@ export default function MyNaiaOverview() {
                       <p style={{ marginTop: "0.75rem", maxWidth: "36rem", fontSize: "0.9rem", lineHeight: 1.75, color: "var(--fg-80)" }}>{trendReport.summary}</p>
                     )}
                   </div>
-                  <div style={{ aspectRatio: "4/5", background: "color-mix(in oklab, var(--bg) 92%, white)", border: "1px solid var(--fg-10)", display: "grid", placeItems: "center" }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.25 }} aria-hidden="true">
-                      <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z" />
-                    </svg>
+                  <div style={{ aspectRatio: "4/5", background: "color-mix(in oklab, var(--bg) 92%, white)", border: "1px solid var(--fg-10)", overflow: "hidden" }}>
+                    {trendReport.visual?.treatment
+                      ? reportVisual(trendReport.visual.treatment as TreatmentType, "featured")
+                      : null}
                   </div>
                 </div>
               </div>
@@ -552,10 +593,10 @@ export default function MyNaiaOverview() {
               <ul style={{ listStyle: "none", padding: 0, margin: 0, borderTop: "1px solid var(--fg-12)" }}>
                 {buyOrSkipHistory.map((d) => (
                   <li key={d.id} style={{ display: "flex", gap: "1rem", padding: "1.25rem 0", borderBottom: "1px solid var(--fg-12)", alignItems: "center" }}>
-                    {d.imageUrl ? (
+                    {d.itemImageUrl ? (
                       <img
-                        src={d.imageUrl}
-                        alt={d.productName ?? d.category ?? "Item"}
+                        src={d.itemImageUrl}
+                        alt={d.displayName ?? d.category ?? "Item"}
                         style={{ width: "56px", height: "56px", objectFit: "cover", flexShrink: 0, border: "1px solid var(--fg-10)" }}
                       />
                     ) : (
@@ -567,7 +608,7 @@ export default function MyNaiaOverview() {
                     )}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: "0.95rem", lineHeight: 1.4, color: "var(--fg-90, var(--fg))", fontWeight: 400 }}>
-                        {d.productName ?? (d.category ? d.category : "Item")}
+                        {d.displayName ?? (d.category ? d.category : "Item")}
                       </div>
                       <div style={{ marginTop: "0.25rem", fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.28em", color: "var(--fg-55)" }}>{fmtDate(d.createdAt)}</div>
                     </div>

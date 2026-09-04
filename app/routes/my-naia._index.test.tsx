@@ -37,8 +37,8 @@ vi.mock("react-router", async (importOriginal) => {
     firstName: null as string | null,
     profile: null as unknown,
     sessions: [] as unknown[],
-    trendReport: null as { slug: string; title: string; season: string; summary: string } | null,
-    buyOrSkipHistory: [] as Array<{ id: string; productName: string | null; verdict: string; createdAt: string; imageUrl?: string | null; category?: string | null }>,
+    trendReport: null as { slug: string; title: string; season: string; summary: string; visual?: { treatment: string } | null } | null,
+    buyOrSkipHistory: [] as Array<{ id: string; displayName: string | null; verdict: string; createdAt: string; itemImageUrl?: string | null; category?: string | null }>,
     reviewCount: 0,
     closetCount: 0,
     passportState: "start" as const,
@@ -67,6 +67,16 @@ vi.mock("~/db.server", () => ({
 
 vi.mock("~/lib/editorial-reports.server", () => ({
   getPublishedEditorialReports: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("~/lib/cloudinary-admin.server", () => ({
+  getCloudinaryConfig: vi.fn().mockReturnValue(null),
+  validatePublicIdOwnership: vi.fn().mockReturnValue({ ok: false }),
+  buildPrivateDownloadUrl: vi.fn().mockReturnValue("https://signed.example.com/image.jpg"),
+}));
+
+vi.mock("~/lib/report-visual", () => ({
+  reportVisual: vi.fn().mockReturnValue(null),
 }));
 
 vi.mock("~/styles/naia-design-system.css?url", () => ({ default: "/styles.css" }));
@@ -147,8 +157,8 @@ type LoaderShape = {
   firstName: string | null;
   profile: unknown;
   sessions: unknown[];
-  trendReport: { slug: string; title: string; season: string; summary: string } | null;
-  buyOrSkipHistory: Array<{ id: string; productName: string | null; verdict: string; createdAt: string; imageUrl?: string | null; category?: string | null }>;
+  trendReport: { slug: string; title: string; season: string; summary: string; visual?: { treatment: string } | null } | null;
+  buyOrSkipHistory: Array<{ id: string; displayName: string | null; verdict: string; createdAt: string; itemImageUrl?: string | null; category?: string | null }>;
   reviewCount: number;
   closetCount: number;
   passportState?: "start" | "continue" | "view";
@@ -345,35 +355,61 @@ describe("my-naia component — static structure", () => {
     }
   });
 
-  it("buy or skip shows item image when imageUrl present", () => {
+  it("buy or skip shows item image when itemImageUrl present", () => {
     const html = render({
       buyOrSkipHistory: [{
         id: "bos-1",
-        productName: "Tweed Skirt",
+        displayName: "Tweed Maxi Skirt",
         verdict: "BUY",
         createdAt: "2026-09-04T10:00:00Z",
-        imageUrl: "https://res.cloudinary.com/example/image/upload/v1/item.jpg",
+        itemImageUrl: "https://res.cloudinary.com/example/image/upload/v1/item.jpg",
         category: "Bottom",
       }],
     });
-    expect(html).toContain("Tweed Skirt");
+    expect(html).toContain("Tweed Maxi Skirt");
     expect(html).toContain("https://res.cloudinary.com/example/image/upload/v1/item.jpg");
     expect(html).toContain("BUY");
   });
 
-  it("buy or skip falls back to category when productName is null", () => {
+  it("buy or skip falls back to category when displayName is null", () => {
     const html = render({
       buyOrSkipHistory: [{
         id: "bos-2",
-        productName: null,
+        displayName: null,
         verdict: "SKIP",
         createdAt: "2026-09-04T09:00:00Z",
-        imageUrl: null,
+        itemImageUrl: null,
         category: "Dress",
       }],
     });
     expect(html).toContain("Dress");
     expect(html).not.toContain("Unnamed item");
+  });
+
+  it("buy or skip shows displayName over category when both present", () => {
+    const html = render({
+      buyOrSkipHistory: [{
+        id: "bos-3",
+        displayName: "Pearl Net Overlay Maxi Dress",
+        verdict: "BUY",
+        createdAt: "2026-09-04T08:00:00Z",
+        itemImageUrl: null,
+        category: "Dress",
+      }],
+    });
+    expect(html).toContain("Pearl Net Overlay Maxi Dress");
+  });
+
+  it("trend teaser renders without error when visual.treatment is present", () => {
+    expect(() => render({
+      trendReport: {
+        slug: "spring-2026-soft-structure",
+        title: "Spring 2026 Soft Structure",
+        season: "Spring 2026",
+        summary: "A nAia edit.",
+        visual: { treatment: "soft-structure" },
+      },
+    })).not.toThrow();
   });
 });
 
