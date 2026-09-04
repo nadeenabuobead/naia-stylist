@@ -792,7 +792,8 @@ const css = `
   .cl-edit-upload-side{flex:1;display:flex;flex-direction:column;gap:6px}
   /* ── AI reading / preview state ─────────────────────────────────────────── */
   .cl-analyzing{text-align:center;padding:48px 0}
-  .cl-analyzing-spinner{width:24px;height:24px;border:2px solid var(--fg-10,var(--c-border));border-top-color:var(--fg,var(--c-ink));border-radius:50%;animation:cl-spin .75s linear infinite;margin:0 auto 14px}
+  .cl-analyzing-spinner{width:24px;height:24px;border:2px solid var(--fg-10,var(--c-border));border-top-color:var(--fg,var(--c-ink));border-radius:50%;animation:cl-spin .75s linear infinite;margin:0 auto 20px}
+  .cl-analyzing-heading{font-family:var(--ff-editorial);font-size:28px;font-style:italic;font-weight:400;line-height:1.1;color:var(--naia-ink,var(--c-ink));margin:0 0 12px}
   .cl-analyzing-text{font-family:var(--ff-body);font-size:15px;font-style:italic;color:var(--fg-60,var(--c-muted))}
   @keyframes cl-spin{to{transform:rotate(360deg)}}
   /* AI summary block */
@@ -855,6 +856,22 @@ export default function Closet() {
   const [newNote, setNewNote] = useState("");
   const [aiSummaryLine, setAiSummaryLine] = useState("");
   const [showEditDetails, setShowEditDetails] = useState(false);
+
+  // ── Analysing rotating messages ───────────────────────────────────────────
+  const analysingMessages = [
+    "Analysing the photo…",
+    "Reading fabric and texture…",
+    "Identifying colour and pattern…",
+    "Checking how it fits your wardrobe…",
+    "Almost there…",
+  ];
+  const [analysingMsgIndex, setAnalysingMsgIndex] = useState(0);
+  useEffect(() => {
+    if (addStep !== "analyzing") return;
+    setAnalysingMsgIndex(0);
+    const t = setInterval(() => setAnalysingMsgIndex((i) => (i + 1) % analysingMessages.length), 1800);
+    return () => clearInterval(t);
+  }, [addStep]);
 
   // ── Edit state ────────────────────────────────────────────────────────────
   const editFetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -1371,7 +1388,11 @@ export default function Closet() {
                 )}
                 <div className="cl-analyzing">
                   <div className="cl-analyzing-spinner" aria-hidden="true" />
-                  <p className="cl-analyzing-text">nAia is reading your piece…</p>
+                  <h2 className="cl-analyzing-heading">
+                    <span style={{ color: "var(--lipstick)" }}>nAia</span>
+                    {" is reading your piece…"}
+                  </h2>
+                  <p className="cl-analyzing-text">{analysingMessages[analysingMsgIndex]}</p>
                 </div>
               </>
             )}
