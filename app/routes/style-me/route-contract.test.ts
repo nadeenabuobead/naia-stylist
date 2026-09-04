@@ -601,15 +601,21 @@ describe("StyleMe Result Actions — cleanup pass", () => {
 
   // ── Adjust Vibe ──────────────────────────────────────────────────
 
-  it("Adjust Vibe links to /style-me/feeling", () => {
+  it("Adjust Vibe submits intent=adjust-vibe via POST (preserves session, returns to vibe steps)", () => {
     const text = src("result.tsx");
     assert.ok(
-      text.includes('to="/style-me/feeling"'),
-      "result.tsx must contain a link to /style-me/feeling",
+      text.includes('value="adjust-vibe"'),
+      "result.tsx must include a hidden field with value='adjust-vibe'",
     );
     assert.ok(
       text.includes("Adjust Vibe"),
       "result.tsx must render 'Adjust Vibe' label",
+    );
+    // Must NOT be a plain link to /style-me/feeling (that route is legacy-only and would
+    // send Rev 3 users through the full flow from scratch)
+    assert.ok(
+      !text.includes('to="/style-me/feeling"'),
+      "Adjust Vibe must not be a plain Link to /style-me/feeling",
     );
   });
 
