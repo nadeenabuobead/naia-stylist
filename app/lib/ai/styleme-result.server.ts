@@ -195,20 +195,143 @@ const GENERIC_FINISHING: StyleMeFinishingLayer = {
   shoes: "Choose footwear that feels comfortable and complements your outfit's tone.",
   bag: "A structured bag in a neutral or tonal shade will ground the look.",
   accessories: "Keep accessories minimal — one or two considered pieces work best.",
-  hair: "Style your hair in a way that feels intentional and true to you today.",
+  hair: "Loose and natural, or a simple half-up — whatever feels most considered today.",
   colourDirection: "Build your palette around neutrals, adding one thoughtful accent.",
 };
 
-export function buildFinishingLayer(handle: string | null): StyleMeFinishingLayer {
-  if (!handle) return GENERIC_FINISHING;
+type HairLayerContext = {
+  occasion: string;
+  formalityConditional: string | null;
+  formalityScore?: number;
+  hairDirectionTokens?: string[];
+};
+
+// Derives a specific, actionable hair direction from outfit context.
+// Never invents hair length, texture, curl pattern, or density.
+// Gender-neutral unless gender presentation is explicitly known.
+function deriveHairDirection(ctx: HairLayerContext): string {
+  const { occasion, formalityConditional, formalityScore = 0.5, hairDirectionTokens = [] } = ctx;
+
+  // Formality tier
+  const isDressy =
+    formalityConditional === "formality-polished" ||
+    formalityConditional === "formality-occasion" ||
+    (formalityConditional == null && formalityScore >= 0.7);
+  const isSmart =
+    !isDressy &&
+    (formalityConditional === "formality-smart" ||
+      (formalityConditional == null && formalityScore >= 0.45));
+
+  // Structural neckline/collar constraint — matches both kebab shortcodes and catalog prose forms
+  const tokenStr = hairDirectionTokens.join(" ").toLowerCase();
+  const needsUp =
+    /hair-up-recommended|neckline-should-remain-visible|collar-should-remain-visible|lapel-should-remain-visible|hair away from the neckline|hair-swept-back|tuck-behind-ears|ponytail\/bun|ponytail or bun|sleek ponytail|hair tucked behind/.test(tokenStr);
+  const needsSweptBack =
+    !needsUp && /tucked-back|swept-back/.test(tokenStr);
+  const balanceShoulder =
+    !needsUp && !needsSweptBack && /balance-volume-around-shoulders/.test(tokenStr);
+
+  // Structural constraints take priority — give a specific direction within the right formality register
+  if (needsUp) {
+    if (isDressy) return "A polished low bun or sleek chignon — keeps the neckline clean and the look refined.";
+    if (isSmart) return "A sleek ponytail or low bun — keep hair away from the neckline.";
+    return "Hair swept up or back — a loose bun or ponytail keeps the collar visible.";
+  }
+
+  if (needsSweptBack) {
+    if (isDressy) return "Hair swept back elegantly — tucked behind the ears or secured at the nape.";
+    if (isSmart) return "Hair tucked behind the ears or lightly swept back.";
+    return "Tuck hair behind the ears or keep it loosely swept back.";
+  }
+
+  if (balanceShoulder) {
+    if (isDressy) return "Keep hair close to the head — a low bun or smooth finish balances the shoulder line.";
+    if (isSmart) return "A low bun or ponytail balances the silhouette around the shoulders.";
+    return "Hair up or close to the head works well with this silhouette.";
+  }
+
+  // No structural constraint — use occasion × formality
+  const occ = occasion || "not-sure";
+
+  if (occ === "work") {
+    if (isDressy) return "Polished low bun or a sleek, straight blow-out.";
+    if (isSmart) return "Neat ponytail, low bun, or worn loose and polished.";
+    return "Loose and natural, or a neat ponytail to keep it professional.";
+  }
+
+  if (occ === "date-night") {
+    if (isDressy) return "Soft blow-out or a low bun with a few face-framing pieces left loose.";
+    if (isSmart) return "Loose waves or a relaxed half-up — natural but considered.";
+    return "Loose with a centre part, or half-up with easy texture.";
+  }
+
+  if (occ === "special-event") {
+    if (isDressy) return "An elegant updo or polished blow-out — keep the finish refined.";
+    if (isSmart) return "Soft updo or smooth waves — a little more polish than everyday.";
+    return "Loose waves or a simple low bun — relaxed but put-together.";
+  }
+
+  if (occ === "dinner") {
+    if (isDressy) return "Soft blow-out or an elegant low bun — keep the finish intentional.";
+    if (isSmart) return "Loose waves or half-up — polished without being overly formal.";
+    return "Loose and natural, or half-up with soft waves.";
+  }
+
+  if (occ === "girls-night") {
+    if (isDressy) return "Loose, voluminous waves or a chic low bun.";
+    if (isSmart) return "Textured loose waves or a half-up — relaxed but intentional.";
+    return "Loose and lived-in — soft waves or air-dried texture.";
+  }
+
+  if (occ === "family") {
+    if (isDressy) return "Neat low bun or smooth and pulled back.";
+    if (isSmart) return "Half-up or loose — clean and easy.";
+    return "Loose and natural, or a quick half-up.";
+  }
+
+  if (occ === "travel") {
+    if (isDressy) return "A neat, low bun — practical and intentional.";
+    if (isSmart) return "Easy low bun or loose ponytail — functional and considered.";
+    return "Quick bun or loose and natural — whatever travels well.";
+  }
+
+  if (occ === "everyday") {
+    if (isDressy) return "Neat and pulled-back — a low bun or sleek ponytail.";
+    if (isSmart) return "Centre-part straight or wavy, or a simple half-up.";
+    return "Wear it natural — loose, half-up, or a quick bun.";
+  }
+
+  // Fallback: not-sure or unrecognised occasion
+  if (isDressy) return "Keep the finish polished — a low bun, sleek ponytail, or smooth blow-out.";
+  if (isSmart) return "Loose waves or a simple half-up — clean and considered.";
+  return "Loose and natural, or a simple half-up — whatever feels most considered today.";
+}
+
+export function buildFinishingLayer(
+  handle: string | null,
+  ctx: HairLayerContext = { occasion: "not-sure", formalityConditional: null },
+): StyleMeFinishingLayer {
+  if (!handle) {
+    return {
+      ...GENERIC_FINISHING,
+      hair: deriveHairDirection(ctx),
+    };
+  }
   const product = getProductByHandle(handle);
-  if (!product) return GENERIC_FINISHING;
+  if (!product) {
+    return {
+      ...GENERIC_FINISHING,
+      hair: deriveHairDirection(ctx),
+    };
+  }
   const prose = product.parsed.prose;
+  const formalityScore = product.parsed.scalars.formalityScore;
+  const hairDirectionTokens = prose.hairStylingDirection ?? [];
   return {
     shoes: prose.shoeDirection || GENERIC_FINISHING.shoes,
     bag: extractBagSentence(prose.accessoriesDirection) || GENERIC_FINISHING.bag,
     accessories: stripBagLanguage(prose.accessoriesDirection) || GENERIC_FINISHING.accessories,
-    hair: prose.hairStylingNote || GENERIC_FINISHING.hair,
+    hair: deriveHairDirection({ ...ctx, formalityScore, hairDirectionTokens }),
     colourDirection: prose.colorDirection || GENERIC_FINISHING.colourDirection,
   };
 }
@@ -1481,8 +1604,11 @@ export async function computeStyleMeResult(
   const styleMeExplanation = catalogProduct?.parsed.prose.styleMeExplanation ?? null;
   const primaryTitle = catalogProduct?.parsed.identity.verifiedTitle ?? primary?.title ?? null;
 
-  // Finishing layer from catalog prose
-  const finishingLayer = buildFinishingLayer(primaryHandle);
+  // Finishing layer from catalog prose — pass session context for contextual hair direction
+  const finishingLayer = buildFinishingLayer(primaryHandle, {
+    occasion: session.occasion,
+    formalityConditional: session.formalityConditional ?? null,
+  });
 
   // Closet anchor label and image (used for both closet-led and nadine anchors)
   let closetAnchorLabel: string | null = null;
