@@ -2036,10 +2036,16 @@ export default function StyleMeResult() {
             <button type="submit" className="sm-result-action-btn">Adjust Vibe</button>
           </Form>
           <button
-            onClick={() => generateFetcher.submit({ intent: "regenerate", sessionId: loaderData.sessionId }, { method: "post" })}
+            type="button"
+            disabled={generateFetcher.state !== "idle"}
+            onClick={() => {
+              const sid = (suggestion as any)?.sessionId ?? loaderData.sessionId;
+              if (!sid) return;
+              generateFetcher.submit({ intent: "regenerate", sessionId: sid }, { method: "post" });
+            }}
             className="sm-result-action-btn sm-result-action-btn--primary"
           >
-            New Look, Same Vibe
+            {generateFetcher.state !== "idle" ? "Finding your look…" : "New Look, Same Vibe"}
           </button>
           {suggestionMeta?.outcome !== "closet-led" && (
             <a href={primaryNaiaItem?.productUrl || "https://naiabynadine.com"} className="sm-result-action-btn">Shop nAia</a>
