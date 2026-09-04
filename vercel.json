@@ -1,5 +1,5 @@
 {
   "framework": "react-router",
   "installCommand": "npm install",
-  "buildCommand": "if [ \"$VERCEL_ENV\" = production ]; then npx prisma migrate resolve --applied 20260903100000_add_buy_skip_outcome && npx prisma migrate deploy && npx prisma generate && npm run build; else sh scripts/build-preview.sh; fi"
+  "buildCommand": "if [ \"$VERCEL_ENV\" = production ]; then npx prisma migrate deploy && npx prisma generate && npm run build; else sh scripts/build-preview.sh; fi"
 }
