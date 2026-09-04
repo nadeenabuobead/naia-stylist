@@ -10,6 +10,7 @@
 //   - No body data is sent or received by this component; see useTryOn.ts.
 //   - resultUrl comes from the server only; this component never constructs or stores it.
 
+import { Link } from "react-router";
 import { useTryOn, type VtoSource } from "~/hooks/useTryOn";
 import { PROVIDER_DISCLAIMER } from "~/lib/ai/virtual-try-on.types";
 
@@ -49,13 +50,13 @@ function VtoExperienceInner({ vtoSource, garmentTitle, naiaModelIsReady }: Inner
   if (!naiaModelIsReady) {
     return (
       <div style={{ marginTop: "16px" }}>
-        <a
-          href="/my-naia-model"
+        <Link
+          to="/my-naia-model"
           className="sm-result-action-btn sm-result-action-btn--accent"
           style={{ fontSize: "8px", letterSpacing: "2px", padding: "10px 20px", display: "inline-block" }}
         >
           See This On Me — Set Up nAia Model
-        </a>
+        </Link>
       </div>
     );
   }
