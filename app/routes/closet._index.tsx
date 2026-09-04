@@ -704,9 +704,7 @@ const css = `
   /* Add to Wardrobe form */
   .cl-form{background:var(--bg-50, var(--c-panel));padding:32px;margin-bottom:28px;border:1px solid var(--fg-10, var(--c-border))}
   .cl-form-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
-  .cl-form-title{font-family:var(--naia-ff-display);font-size:2rem;font-weight:200;font-style:normal;text-transform:uppercase;letter-spacing:0.02em;line-height:0.92;color:var(--naia-ink)}
-  @media(min-width:640px){.cl-form-title{font-size:3rem}}
-  @media(min-width:1024px){.cl-form-title{font-size:4.25rem}}
+  .cl-form-title{font-family:var(--naia-ff-display);font-size:1.5rem;font-weight:200;font-style:normal;text-transform:uppercase;letter-spacing:0.02em;line-height:1;color:var(--naia-ink)}
   .cl-form-cancel{background:none;border:none;cursor:pointer;font-family:var(--ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted))}
   .cl-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:10px}
   .cl-input{width:100%;padding:12px;border:1px solid var(--fg-10, var(--c-border));font-size:15px;font-family:var(--ff-ui);background:var(--bg, var(--c-surface));color:var(--fg, var(--c-ink));outline:none;margin-bottom:20px}
