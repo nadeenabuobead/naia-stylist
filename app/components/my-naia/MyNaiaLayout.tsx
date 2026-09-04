@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useLocation } from "react-router";
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "~/lib/storefront-config";
 
-type NavItem = { to: string; label: string; exact?: boolean; indent?: boolean };
+type NavItem = { to?: string; label: string; exact?: boolean; indent?: boolean; isHeading?: boolean };
 type NavGroup = { title: string; items: NavItem[] };
 
 const MY_NAIA_NAV: NavGroup[] = [
@@ -21,7 +21,7 @@ const MY_NAIA_NAV: NavGroup[] = [
     title: "Account",
     items: [
       { to: "/my-naia/saved", label: "Saved" },
-      { to: "/passport", label: "Personalisation" },
+      { label: "Personalisation", isHeading: true },
       { to: "/my-naia-model", label: "My nAia Model", indent: true },
       { to: "/settings", label: "Settings & Privacy" },
     ],
@@ -29,6 +29,7 @@ const MY_NAIA_NAV: NavGroup[] = [
 ];
 
 function isActive(pathname: string, item: NavItem) {
+  if (!item.to) return false;
   return item.exact ? pathname === item.to : pathname.startsWith(item.to);
 }
 
@@ -170,11 +171,18 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                 <div className="mn-mobile-nav-group-title">{group.title}</div>
                 <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
                   {group.items.map((item) => {
+                    if (item.isHeading) {
+                      return (
+                        <li key={item.label}>
+                          <div className="mn-mobile-nav-group-title">{item.label}</div>
+                        </li>
+                      );
+                    }
                     const active = isActive(pathname, item);
                     return (
                       <li key={item.to}>
                         <Link
-                          to={item.to}
+                          to={item.to!}
                           onClick={() => setMobileOpen(false)}
                           className={[
                             "mn-mobile-nav-link",
@@ -205,6 +213,13 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                 <nav aria-label={group.title}>
                   <ol className="mn-sidebar-nav">
                     {group.items.map((item) => {
+                      if (item.isHeading) {
+                        return (
+                          <li key={item.label} className="mn-sidebar-nav-item">
+                            <div className="mn-sidebar-group-title" style={{ marginTop: "8px" }}>{item.label}</div>
+                          </li>
+                        );
+                      }
                       const active = isActive(pathname, item);
                       return (
                         <li
@@ -215,7 +230,7 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                           ].join(" ")}
                         >
                           <Link
-                            to={item.to}
+                            to={item.to!}
                             className={[
                               "mn-sidebar-nav-link",
                               active ? "mn-active" : "",
