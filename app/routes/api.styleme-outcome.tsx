@@ -126,6 +126,10 @@ export async function action({ request }: ActionFunctionArgs) {
         otherChangeNote:  record.otherChangeNote,
         goalOutcome:      record.goalOutcome,
         selectedDirection: record.selectedDirection,
+        whatWorked:        record.whatWorked,
+        whatFeltOff:       record.whatFeltOff,
+        didntWearReasons:  record.didntWearReasons,
+        reasonOtherNote:   record.reasonOtherNote,
       },
     }, { status: 200 });
   } catch {

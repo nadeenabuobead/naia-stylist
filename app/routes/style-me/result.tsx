@@ -328,6 +328,20 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
+    if (intent === "adjust-vibe") {
+      // Return the customer to vibe-only questions with existing answers prefilled.
+      // Source, focal item and Passport context are preserved in the cookie — only
+      // state / intentions / physical-need / occasion are re-asked.
+      // A flag tells occasion.tsx to skip the source step on the way back.
+      const cookieSession = await getSession(request.headers.get("Cookie"));
+      cookieSession.set("styleMeAdjustVibe", "true");
+      const isRev3 = !!cookieSession.get("styleMeState");
+      const entryPoint = isRev3 ? "/style-me/state" : "/style-me/mood";
+      return redirect(entryPoint, {
+        headers: { "Set-Cookie": await commitSession(cookieSession) },
+      });
+    }
+
     if (intent === "generate") {
       const session = await prisma.stylingSession.findUnique({ where: { id: sessionId } });
       if (!session) return data({ error: "Session not found" }, { status: 404 });
@@ -570,6 +584,24 @@ export async function action({ request }: ActionFunctionArgs) {
       const regenCookieSession = await getSession(request.headers.get("Cookie"));
       const regenMode = (regenCookieSession.get("styleMeMode") as "naia" | "nadine" | undefined) ?? "naia";
 
+      // Collect handles from the most-recent suggestion so the engine applies a
+      // diversity penalty and avoids returning the exact same outfit.
+      const prevSuggestion = await prisma.outfitSuggestion.findFirst({
+        where: { sessionId },
+        orderBy: { createdAt: "desc" },
+        select: { moodDescription: true },
+      });
+      const prevMeta = prevSuggestion ? parseSuggestionMetadata(prevSuggestion.moodDescription) : null;
+      const recentlyShownHandles: string[] = [];
+      if (prevMeta?.primaryHandle) recentlyShownHandles.push(prevMeta.primaryHandle);
+      if (prevMeta?.alternatives) {
+        for (const alt of prevMeta.alternatives) {
+          if (alt.handle && !recentlyShownHandles.includes(alt.handle)) {
+            recentlyShownHandles.push(alt.handle);
+          }
+        }
+      }
+
       const engineInput = buildEngineInput({
         moods: session.currentMood ? [session.currentMood] : [],
         desiredFeelings: session.desiredFeeling ? [session.desiredFeeling] : [],
@@ -583,6 +615,12 @@ export async function action({ request }: ActionFunctionArgs) {
         profile: buildEphemeralContextSignals(buildProfileSignals(naiaCustomer?.onboardingProfile), journeyCtx),
         mode: regenMode,
         anchor: anchorResult.anchor,
+        recentlyShownHandles,
+        // Rev 3 wording context — stored on session, never affects scoring
+        ...(session.state && {
+          state: session.state,
+          intentions: session.intentions ?? [],
+        }),
       });
 
       const regenLoadClosetItems = naiaCustomer
@@ -909,7 +947,7 @@ const FEELING_LABELS: Record<string, string> = {
 };
 const OCCASION_LABELS: Record<string, string> = {
   "everyday": "Everyday", "work": "Work", "dinner": "Dinner", "date-night": "Date night",
-  "girls-night": "Evening out", "family": "Family", "special-event": "Special event",
+  "girls-night": "Evening out", "family": "Family gathering", "special-event": "Special event",
   "travel": "Travel", "not-sure": "Not sure yet",
 };
 
@@ -1391,9 +1429,18 @@ export default function StyleMeResult() {
             }
             return true;
           }).map((item: any) => (
-            <div key={item.id} className="sm-item-card sm-item-card--secondary">
+            <div key={item.id} className={`sm-item-card${item.closetItemId ? "" : " sm-item-card--secondary"}`}>
+              {item.closetItemId && (
+                <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "10px", letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--naia-accent)", marginBottom: "8px" }}>Already Yours</p>
+              )}
+              {item.closetItemId && item.productImageUrl && (
+                <img src={item.productImageUrl} alt={item.productTitle ?? undefined} className="sm-item-img" />
+              )}
               <p className="sm-item-type-label">{item.itemType === "BAG" ? "Bag" : item.itemType === "SHOES" ? "Shoes" : "Accessories"}</p>
-              <p className="sm-item-notes--secondary">{item.stylingNotes}</p>
+              {item.closetItemId && item.productTitle && (
+                <p className="sm-item-product-label">{item.productTitle}</p>
+              )}
+              <p className={item.closetItemId ? "sm-item-notes" : "sm-item-notes--secondary"}>{item.stylingNotes}</p>
             </div>
           ))}
           {suggestion.hairstyleRec && (
@@ -1983,7 +2030,10 @@ export default function StyleMeResult() {
             <input type="hidden" name="intent" value="start-over" />
             <button type="submit" className="sm-result-action-btn">Start Over</button>
           </Form>
-          <Link to="/style-me/feeling" className="sm-result-action-btn">Adjust Vibe</Link>
+          <Form method="post">
+            <input type="hidden" name="intent" value="adjust-vibe" />
+            <button type="submit" className="sm-result-action-btn">Adjust Vibe</button>
+          </Form>
           <button
             onClick={() => generateFetcher.submit({ intent: "regenerate", sessionId: loaderData.sessionId }, { method: "post" })}
             className="sm-result-action-btn sm-result-action-btn--primary"

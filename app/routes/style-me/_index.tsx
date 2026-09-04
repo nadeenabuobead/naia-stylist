@@ -21,7 +21,7 @@ const MOOD_LABELS: Record<string, string> = {
 };
 const OCCASION_LABELS: Record<string, string> = {
   "everyday": "Everyday", "work": "Work", "dinner": "Dinner", "date-night": "Date night",
-  "girls-night": "Girls' night", "family": "Family", "special-event": "Special event",
+  "girls-night": "Girls' night", "family": "Family gathering", "special-event": "Special event",
   "travel": "Travel", "not-sure": "Not sure yet",
 };
 

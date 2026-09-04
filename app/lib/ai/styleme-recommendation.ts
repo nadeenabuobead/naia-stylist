@@ -74,6 +74,13 @@ export const FORMALITY_RANGES: Readonly<
   "formality-occasion": { target: 5, min: 4, max: 5 },
 } as const;
 
+// Occasions that skip the explicit formality question get an implicit formality
+// floor applied during scoring so high-formality products are still downgraded.
+export const OCCASION_IMPLICIT_FORMALITY: Readonly<Record<string, string>> = {
+  "everyday": "formality-relaxed",
+  "travel": "formality-relaxed",
+} as const;
+
 // ─── Slot exclusion table ─────────────────────────────────────────────────────
 // If anchor slot is KEY, the recommendation slots in VALUE[] are hard-excluded.
 // Rules encoded:
@@ -995,8 +1002,12 @@ function scoreProduct(
   }
 
   // ── 6. Formality ──────────────────────────────────────────────────────────
-  if (session.formalityConditional !== null) {
-    const range = FORMALITY_RANGES[session.formalityConditional];
+  // Occasions that skip the formality question (everyday, travel) receive an
+  // implicit "formality-relaxed" floor so high-formality items are still downgraded.
+  const effectiveFormalityId =
+    session.formalityConditional ?? OCCASION_IMPLICIT_FORMALITY[session.occasion] ?? null;
+  if (effectiveFormalityId !== null) {
+    const range = FORMALITY_RANGES[effectiveFormalityId];
     if (range !== undefined) {
       const fs = scalars.formalityScore;
       let points: number;
@@ -1024,7 +1035,7 @@ function scoreProduct(
       addEntry(acc, makeEntry(
         PRODUCT_TEMPLATE_FIELDS.FORMALITY_SCORE,
         String(fs),
-        session.formalityConditional,
+        effectiveFormalityId,
         effect,
         points,
         handle,

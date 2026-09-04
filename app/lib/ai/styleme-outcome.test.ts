@@ -35,6 +35,10 @@ function makeRecord(overrides: Partial<StyleMeOutcomeRecord> = {}): StyleMeOutco
     otherChangeNote: null,
     goalOutcome: null,
     selectedDirection: null,
+    whatWorked: [],
+    whatFeltOff: [],
+    didntWearReasons: [],
+    reasonOtherNote: null,
     submittedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     ...overrides,
@@ -48,6 +52,10 @@ function makeSummary(overrides: Partial<StyleMeOutcomeSummary> = {}): StyleMeOut
     otherChangeNote: null,
     goalOutcome: null,
     selectedDirection: null,
+    whatWorked: [],
+    whatFeltOff: [],
+    didntWearReasons: [],
+    reasonOtherNote: null,
     ...overrides,
   };
 }
@@ -229,6 +237,7 @@ describe("SM.12 — changeTypes cleared for didnt-wear-it", () => {
     const result = validateOutcomeInput({
       outcomeStatus: "didnt-wear-it", changeTypes: ["bottom"],
       goalOutcome: null, otherChangeNote: null, selectedDirection: null,
+      didntWearReasons: ["weather"],  // min 1 required
     });
     assert.equal(result.ok, true);
     if (result.ok) assert.deepEqual(result.normalized.changeTypes, []);
@@ -241,6 +250,7 @@ describe("SM.13 — goalOutcome cleared for didnt-wear-it", () => {
     const result = validateOutcomeInput({
       outcomeStatus: "didnt-wear-it", changeTypes: [],
       goalOutcome: "yes", otherChangeNote: null, selectedDirection: null,
+      didntWearReasons: ["weather"],  // min 1 required
     });
     assert.equal(result.ok, true);
     if (result.ok) assert.equal(result.normalized.goalOutcome, null);
@@ -407,6 +417,7 @@ describe("SM.24 — wore-it → didnt-wear-it clears conditional fields via norm
     const result = validateOutcomeInput({
       outcomeStatus: "didnt-wear-it", changeTypes: ["shoes"],
       goalOutcome: "yes", otherChangeNote: "some note", selectedDirection: null,
+      didntWearReasons: ["weather"],  // min 1 required
     });
     assert.equal(result.ok, true);
     if (result.ok) {
@@ -437,12 +448,19 @@ describe("SM.26 — UI pre-fill: StyleMeOutcomeSummary fields match state initia
       otherChangeNote: null,
       goalOutcome: "somewhat",
       selectedDirection: "fresh",
+      whatWorked: [],
+      whatFeltOff: ["fit-issue"],
+      didntWearReasons: [],
+      reasonOtherNote: null,
     });
     // These are the exact fields used as state seed values in result.tsx
     assert.ok(OUTCOME_STATUS_IDS.includes(summary.outcomeStatus as any));
     assert.ok(summary.changeTypes.every((t) => CHANGE_TYPE_IDS.includes(t as any)));
     assert.ok(["yes", "somewhat", "no", null].includes(summary.goalOutcome));
     assert.ok(["most-you", "fresh", "push-me", null].includes(summary.selectedDirection));
+    assert.ok(Array.isArray(summary.whatWorked));
+    assert.ok(Array.isArray(summary.whatFeltOff));
+    assert.ok(Array.isArray(summary.didntWearReasons));
   });
 });
 
@@ -551,5 +569,271 @@ describe("SM.34 — session provenance recoverable after reload", () => {
     assert.equal(typeof record.suggestionId, "string");
     assert.equal(record.sessionId, "sess-abc");
     assert.equal(record.suggestionId, "sug-xyz");
+  });
+});
+
+// ── QA Redesign — SM.35–SM.43 ─────────────────────────────────────────────────
+
+import {
+  WHAT_WORKED_IDS,
+  WHAT_FELT_OFF_IDS,
+  DIDNT_WEAR_REASON_IDS,
+  REASON_ARRAY_MAX,
+  REASON_OTHER_NOTE_MAX,
+} from "./outcome-contract.ts";
+
+// ── SM.35 — whatWorked persists for wore-it + yes ─────────────────────────────
+describe("SM.35 — whatWorked accepted for wore-it + goalOutcome yes", () => {
+  it("valid whatWorked IDs are normalized through", () => {
+    const result = validateOutcomeInput({
+      outcomeStatus: "wore-it", changeTypes: [],
+      otherChangeNote: null, goalOutcome: "yes", selectedDirection: null,
+      whatWorked: ["felt-like-me", "comfortable"],
+      whatFeltOff: [], didntWearReasons: [], reasonOtherNote: null,
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.deepEqual(result.normalized.whatWorked, ["felt-like-me", "comfortable"]);
+      assert.deepEqual(result.normalized.whatFeltOff, []);
+    }
+  });
+
+  it("whatWorked is cleared when goalOutcome is not yes", () => {
+    const result = validateOutcomeInput({
+      outcomeStatus: "wore-it", changeTypes: [],
+      otherChangeNote: null, goalOutcome: "no", selectedDirection: null,
+      whatWorked: ["felt-like-me"],
+      whatFeltOff: [], didntWearReasons: [], reasonOtherNote: null,
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.deepEqual(result.normalized.whatWorked, []);
+  });
+});
+
+// ── SM.36 — whatFeltOff persists for wore-it + somewhat/no ───────────────────
+describe("SM.36 — whatFeltOff accepted for wore-it + goalOutcome somewhat or no", () => {
+  it("accepted for somewhat", () => {
+    const result = validateOutcomeInput({
+      outcomeStatus: "wore-it", changeTypes: [],
+      otherChangeNote: null, goalOutcome: "somewhat", selectedDirection: null,
+      whatWorked: [], whatFeltOff: ["fit-issue", "wrong-colour"],
+      didntWearReasons: [], reasonOtherNote: null,
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.deepEqual(result.normalized.whatFeltOff, ["fit-issue", "wrong-colour"]);
+  });
+
+  it("whatFeltOff cleared when goalOutcome is yes", () => {
+    const result = validateOutcomeInput({
+      outcomeStatus: "wore-it", changeTypes: [],
+      otherChangeNote: null, goalOutcome: "yes", selectedDirection: null,
+      whatWorked: [], whatFeltOff: ["fit-issue"],
+      didntWearReasons: [], reasonOtherNote: null,
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.deepEqual(result.normalized.whatFeltOff, []);
+  });
+});
+
+// ── SM.37 — didntWearReasons: at least 1 required for didnt-wear-it ──────────
+describe("SM.37 — didntWearReasons: min 1 required for didnt-wear-it", () => {
+  it("rejects empty didntWearReasons for didnt-wear-it", () => {
+    const result = validateOutcomeInput({
+      outcomeStatus: "didnt-wear-it", changeTypes: [],
+      otherChangeNote: null, goalOutcome: null, selectedDirection: null,
+      whatWorked: [], whatFeltOff: [],
+      didntWearReasons: [], reasonOtherNote: null,
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error, "didnt-wear-it-requires-reason");
+  });
+
+  it("accepts valid didntWearReasons array", () => {
+    const result = validateOutcomeInput({
+      outcomeStatus: "didnt-wear-it", changeTypes: [],
+      otherChangeNote: null, goalOutcome: null, selectedDirection: null,
+      whatWorked: [], whatFeltOff: [],
+      didntWearReasons: ["weather", "plans-changed"], reasonOtherNote: null,
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.deepEqual(result.normalized.didntWearReasons, ["weather", "plans-changed"]);
+  });
+});
+
+// ── SM.38 — didntWearReasons max 3 enforced ───────────────────────────────────
+describe("SM.38 — didntWearReasons max 3 enforced", () => {
+  it("rejects 4 didntWearReasons", () => {
+    const result = validateOutcomeInput({
+      outcomeStatus: "didnt-wear-it", changeTypes: [],
+      otherChangeNote: null, goalOutcome: null, selectedDirection: null,
+      whatWorked: [], whatFeltOff: [],
+      didntWearReasons: ["weather", "plans-changed", "comfort-concern", "not-ready"],
+      reasonOtherNote: null,
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error, "too-many-didnt-wear-reason");
+  });
+
+  it("accepts exactly 3 didntWearReasons", () => {
+    const result = validateOutcomeInput({
+      outcomeStatus: "didnt-wear-it", changeTypes: [],
+      otherChangeNote: null, goalOutcome: null, selectedDirection: null,
+      whatWorked: [], whatFeltOff: [],
+      didntWearReasons: ["weather", "plans-changed", "comfort-concern"],
+      reasonOtherNote: null,
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.normalized.didntWearReasons.length, 3);
+  });
+});
+
+// ── SM.39 — reasonOtherNote: only kept when "other" is in active array ────────
+describe("SM.39 — reasonOtherNote kept only when 'other' is in the active reason array", () => {
+  it("keeps note when 'other' in whatWorked + goalOutcome yes", () => {
+    const result = validateOutcomeInput({
+      outcomeStatus: "wore-it", changeTypes: [],
+      otherChangeNote: null, goalOutcome: "yes", selectedDirection: null,
+      whatWorked: ["other"], whatFeltOff: [],
+      didntWearReasons: [], reasonOtherNote: "Matched my energy perfectly",
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.normalized.reasonOtherNote, "Matched my energy perfectly");
+  });
+
+  it("drops note when 'other' is NOT in active array", () => {
+    const result = validateOutcomeInput({
+      outcomeStatus: "wore-it", changeTypes: [],
+      otherChangeNote: null, goalOutcome: "yes", selectedDirection: null,
+      whatWorked: ["felt-confident"], whatFeltOff: [],
+      didntWearReasons: [], reasonOtherNote: "Some note",
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.normalized.reasonOtherNote, null);
+  });
+
+  it("keeps note when 'other' in didntWearReasons", () => {
+    const result = validateOutcomeInput({
+      outcomeStatus: "didnt-wear-it", changeTypes: [],
+      otherChangeNote: null, goalOutcome: null, selectedDirection: null,
+      whatWorked: [], whatFeltOff: [],
+      didntWearReasons: ["other"], reasonOtherNote: "Changed my mind",
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.normalized.reasonOtherNote, "Changed my mind");
+  });
+});
+
+// ── SM.40 — whatWorked/whatFeltOff cleared for didnt-wear-it ─────────────────
+describe("SM.40 — whatWorked and whatFeltOff cleared for didnt-wear-it", () => {
+  it("normalizes didnt-wear-it: clears whatWorked, whatFeltOff, goalOutcome", () => {
+    const result = validateOutcomeInput({
+      outcomeStatus: "didnt-wear-it", changeTypes: [],
+      otherChangeNote: null, goalOutcome: "yes", selectedDirection: null,
+      whatWorked: ["felt-confident"], whatFeltOff: ["fit-issue"],
+      didntWearReasons: ["weather"], reasonOtherNote: null,
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.deepEqual(result.normalized.whatWorked, []);
+      assert.deepEqual(result.normalized.whatFeltOff, []);
+      assert.equal(result.normalized.goalOutcome, null);
+    }
+  });
+});
+
+// ── SM.41 — changed-something: whatWorked/whatFeltOff follow goalOutcome ──────
+describe("SM.41 — changed-something: whatWorked/whatFeltOff follow goalOutcome", () => {
+  it("whatWorked persists for changed-something + yes", () => {
+    const result = validateOutcomeInput({
+      outcomeStatus: "changed-something",
+      changeTypes: ["shoes"],
+      otherChangeNote: null, goalOutcome: "yes", selectedDirection: null,
+      whatWorked: ["felt-confident", "comfortable"], whatFeltOff: [],
+      didntWearReasons: [], reasonOtherNote: null,
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.deepEqual(result.normalized.whatWorked, ["felt-confident", "comfortable"]);
+      assert.deepEqual(result.normalized.didntWearReasons, []);
+    }
+  });
+
+  it("whatFeltOff persists for changed-something + no", () => {
+    const result = validateOutcomeInput({
+      outcomeStatus: "changed-something",
+      changeTypes: ["shoes"],
+      otherChangeNote: null, goalOutcome: "no", selectedDirection: null,
+      whatWorked: [], whatFeltOff: ["uncomfortable"],
+      didntWearReasons: [], reasonOtherNote: null,
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.deepEqual(result.normalized.whatFeltOff, ["uncomfortable"]);
+  });
+});
+
+// ── SM.42 — invalid reason IDs rejected ──────────────────────────────────────
+describe("SM.42 — invalid reason IDs rejected", () => {
+  it("rejects unknown whatWorked ID", () => {
+    const result = validateOutcomeInput({
+      outcomeStatus: "wore-it", changeTypes: [],
+      otherChangeNote: null, goalOutcome: "yes", selectedDirection: null,
+      whatWorked: ["invented-positive"], whatFeltOff: [],
+      didntWearReasons: [], reasonOtherNote: null,
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error, "invalid-what-worked-id");
+  });
+
+  it("rejects unknown didntWearReason ID", () => {
+    const result = validateOutcomeInput({
+      outcomeStatus: "didnt-wear-it", changeTypes: [],
+      otherChangeNote: null, goalOutcome: null, selectedDirection: null,
+      whatWorked: [], whatFeltOff: [],
+      didntWearReasons: ["bad-reason"], reasonOtherNote: null,
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error, "invalid-didnt-wear-reason-id");
+  });
+});
+
+// ── SM.43 — stable ID sets for new reason arrays ──────────────────────────────
+describe("SM.43 — new reason ID sets are non-empty and bounded", () => {
+  it("WHAT_WORKED_IDS has exactly 6 values", () => {
+    assert.equal(WHAT_WORKED_IDS.length, 6);
+  });
+
+  it("WHAT_FELT_OFF_IDS has exactly 7 values", () => {
+    assert.equal(WHAT_FELT_OFF_IDS.length, 7);
+  });
+
+  it("DIDNT_WEAR_REASON_IDS has exactly 6 values", () => {
+    assert.equal(DIDNT_WEAR_REASON_IDS.length, 6);
+  });
+
+  it("REASON_ARRAY_MAX is 3", () => {
+    assert.equal(REASON_ARRAY_MAX, 3);
+  });
+
+  it("REASON_OTHER_NOTE_MAX is 280", () => {
+    assert.equal(REASON_OTHER_NOTE_MAX, 280);
+  });
+});
+
+// ── SM.44 — no Passport/Closet mutation from new fields ───────────────────────
+describe("SM.44 — no Passport or Closet mutation from QA reason fields", () => {
+  it("StyleMeOutcomeInput with all new fields has no profile mutation keys", () => {
+    const input: StyleMeOutcomeInput = {
+      outcomeStatus: "wore-it", changeTypes: [],
+      otherChangeNote: null, goalOutcome: "yes", selectedDirection: null,
+      whatWorked: ["felt-confident"],
+      whatFeltOff: [],
+      didntWearReasons: [],
+      reasonOtherNote: null,
+    };
+    const keys = Object.keys(input);
+    assert.ok(!keys.includes("onboardingProfile"));
+    assert.ok(!keys.includes("profileMutation"));
+    assert.ok(!keys.includes("dressingPreferences"));
+    assert.ok(!keys.includes("garmentRelationships"));
   });
 });

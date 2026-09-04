@@ -114,6 +114,16 @@ export async function action({ request }: ActionFunctionArgs) {
     session.unset("styleMeFormalityConditional");
   }
 
+  // When the customer used "Adjust Vibe" from the result page, source and focal
+  // item are already in the cookie — skip the source step and go straight to result.
+  const adjustVibe = session.get("styleMeAdjustVibe") as string | undefined;
+  if (adjustVibe) {
+    session.unset("styleMeAdjustVibe");
+    return redirect("/style-me/result", {
+      headers: { "Set-Cookie": await commitSession(session) },
+    });
+  }
+
   return redirect("/style-me/source", {
     headers: { "Set-Cookie": await commitSession(session) },
   });

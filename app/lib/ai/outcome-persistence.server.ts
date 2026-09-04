@@ -41,6 +41,10 @@ function toRecord(r: any): StyleMeOutcomeRecord {
     otherChangeNote:  r.otherChangeNote ?? null,
     goalOutcome:      r.goalOutcome     ?? null,
     selectedDirection: r.selectedDirection ?? null,
+    whatWorked:        Array.isArray(r.whatWorked)        ? r.whatWorked        : [],
+    whatFeltOff:       Array.isArray(r.whatFeltOff)       ? r.whatFeltOff       : [],
+    didntWearReasons:  Array.isArray(r.didntWearReasons)  ? r.didntWearReasons  : [],
+    reasonOtherNote:   r.reasonOtherNote  ?? null,
     submittedAt:      r.submittedAt instanceof Date ? r.submittedAt.toISOString() : r.submittedAt,
     updatedAt:        r.updatedAt   instanceof Date ? r.updatedAt.toISOString()   : r.updatedAt,
   };
@@ -54,6 +58,10 @@ function toSummary(r: any): StyleMeOutcomeSummary {
     otherChangeNote:  r.otherChangeNote  ?? null,
     goalOutcome:      r.goalOutcome      ?? null,
     selectedDirection: r.selectedDirection ?? null,
+    whatWorked:        Array.isArray(r.whatWorked)        ? r.whatWorked        : [],
+    whatFeltOff:       Array.isArray(r.whatFeltOff)       ? r.whatFeltOff       : [],
+    didntWearReasons:  Array.isArray(r.didntWearReasons)  ? r.didntWearReasons  : [],
+    reasonOtherNote:   r.reasonOtherNote  ?? null,
   };
 }
 
@@ -74,6 +82,10 @@ async function _upsertOutcome(
     otherChangeNote:  input.otherChangeNote,
     goalOutcome:      input.goalOutcome,
     selectedDirection: input.selectedDirection,
+    whatWorked:        input.whatWorked       ?? [],
+    whatFeltOff:       input.whatFeltOff      ?? [],
+    didntWearReasons:  input.didntWearReasons ?? [],
+    reasonOtherNote:   input.reasonOtherNote  ?? null,
   };
 
   const r = await db.styleMeOutcome.upsert({
@@ -85,6 +97,10 @@ async function _upsertOutcome(
       otherChangeNote:  input.otherChangeNote,
       goalOutcome:      input.goalOutcome,
       selectedDirection: input.selectedDirection,
+      whatWorked:        input.whatWorked       ?? [],
+      whatFeltOff:       input.whatFeltOff      ?? [],
+      didntWearReasons:  input.didntWearReasons ?? [],
+      reasonOtherNote:   input.reasonOtherNote  ?? null,
     },
   });
   return toRecord(r);

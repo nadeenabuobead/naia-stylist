@@ -1100,20 +1100,19 @@ describe("§9  Provisional evidence marking", () => {
 
 describe("§10  Edge cases", () => {
   it("10.1  outcome is no-eligible-product when all products score below threshold", () => {
-    // Avoid all dominant colors → all products get -3; no positive signals → all score ≤ -3 < 2
+    // Avoid all dominant colors → all products get -3 (negative evidence).
+    // occasion "not-sure" has no matching products in the catalog (no occasion bonus) and no
+    // implicit formality floor, so all products score -3 with 0 positive evidence → below threshold.
     const result = run(
       makeSession({
         todayColours: {
           preferred: [],
           avoid: ["beige-brown", "red-burgundy", "black", "prints", "white-cream"],
         },
-        occasion: "travel",
+        occasion: "not-sure",
         moods: [],
       }),
     );
-    // With only negative color evidence, all products should fall below threshold
-    // (eligible products have occasion match for travel products, but -3 color penalty → net 1 < 2)
-    // and non-travel products score -3 < 2
     assert.ok(
       ["no-eligible-product", "closet-led"].includes(result.outcome),
       `expected no-eligible-product but got ${result.outcome}`,
@@ -1129,7 +1128,7 @@ describe("§10  Edge cases", () => {
           preferred: [],
           avoid: ["beige-brown", "red-burgundy", "black", "prints", "white-cream"],
         },
-        occasion: "travel",
+        occasion: "not-sure",
         moods: [],
       }),
     );
@@ -3067,15 +3066,17 @@ describe("§G2 Dressing-preference hard exclusions — contract", () => {
   const allProducts = getAllCatalogProducts();
   const dm = (handle: string) => allProducts.find((p) => p.handle === handle)?.dressingMetadata;
 
-  it("APPROVED_DRESSING_PREFERENCE_IDS has exactly 9 IDs", () => {
-    assert.equal(APPROVED_DRESSING_PREFERENCE_IDS.size, 9);
+  it("APPROVED_DRESSING_PREFERENCE_IDS has exactly 15 IDs", () => {
+    assert.equal(APPROVED_DRESSING_PREFERENCE_IDS.size, 15);
   });
 
-  it("all 9 approved IDs are present in the set", () => {
+  it("all 15 approved IDs are present in the set", () => {
     const expected = [
-      "dresses-modestly", "usually-wears-abayas", "arms-covered",
-      "chest-neckline-covered", "legs-covered", "longer-tops",
-      "no-cropped-tops", "looser-fitting", "wears-hijab",
+      "dresses-modestly", "usually-wears-abayas", "kanduras-thobes",
+      "wears-hijab", "arms-covered", "avoid-sleeveless",
+      "chest-neckline-covered", "prefer-higher-necklines", "legs-covered",
+      "prefer-full-length-trousers", "avoid-shorts", "longer-tops",
+      "no-cropped-tops", "looser-fitting", "no-dressing-requirements",
     ];
     for (const id of expected) {
       assert.ok(APPROVED_DRESSING_PREFERENCE_IDS.has(id), `${id} missing from approved set`);

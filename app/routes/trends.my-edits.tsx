@@ -76,14 +76,16 @@ const css = `
   }
   .tme-hero-title {
     font-family: 'Oswald', sans-serif;
-    font-size: clamp(3rem, 7vw, 6rem);
+    font-size: 2rem;
     font-weight: 200;
-    line-height: 0.88;
+    line-height: 0.92;
     letter-spacing: 0.02em;
     text-transform: uppercase;
     margin: 0 0 24px;
     color: #1a1109;
   }
+  @media (min-width: 640px) { .tme-hero-title { font-size: 3rem; } }
+  @media (min-width: 1024px) { .tme-hero-title { font-size: 4.25rem; } }
   .tme-hero-title em {
     font-family: 'Cormorant Garamond', serif;
     font-style: italic;

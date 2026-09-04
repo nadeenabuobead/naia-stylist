@@ -172,6 +172,7 @@ describe("§O.2 — validateOutcomeInput: didnt-wear-it path", () => {
       changeTypes: ["shoes"],
       goalOutcome: "yes",
       selectedDirection: "fresh",
+      didntWearReasons: ["weather"],  // min 1 required
     });
     assert.ok(r.ok);
     if (!r.ok) return;
@@ -456,7 +457,7 @@ describe("§O.7 — Result page integration", () => {
 
   it("outcome widget renders goal outcome question with locked copy", () => {
     assert.ok(
-      resultSrc.includes("Did the outfit give you what you wanted today?"),
+      resultSrc.includes("Did the look give you what you wanted today?"),
       "must use locked copy for goal question",
     );
   });
