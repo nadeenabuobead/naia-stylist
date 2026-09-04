@@ -2113,9 +2113,9 @@ export function buildShopperEdit(
     // Both closet items and reviews present — no notice needed
     if (hasCloset && hasReviews) return null;
 
-    // Has closet items but no reviews — nudge toward rating outfits
+    // Has closet items but no reviews — nudge toward logging post-wear feedback
     if (hasCloset && !hasReviews) {
-      return "Rate your next outfit in nAia and it sharpens the Hold Off section of this edit — the more patterns you log, the more specific nAia can be.";
+      return "Tell nAia how it went after you wear a look, and future edits can become more specific about what to hold off on.";
     }
 
     // No closet items — give a specific next action based on what Passport evidence is available

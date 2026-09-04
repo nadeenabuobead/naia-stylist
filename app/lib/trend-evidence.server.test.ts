@@ -1076,7 +1076,7 @@ describe("QA fixes — outfit rating claim (Issue #5)", () => {
     expect(edit.lowDataNotice).toBeNull();
   });
 
-  it("lowDataNotice appears and references outfit rating when closet exists but no reviews", () => {
+  it("lowDataNotice appears and references post-wear logging when closet exists but no reviews", () => {
     const evidence = makeEvidence({
       closetItems: [
         {
@@ -1093,7 +1093,8 @@ describe("QA fixes — outfit rating claim (Issue #5)", () => {
       reviewSignal: { reviewCount: 0, workedTags: [], didntWorkTags: [] },
     });
     const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
-    expect(edit.lowDataNotice).toMatch(/rate|outfit/i);
+    expect(edit.lowDataNotice).toMatch(/how it went|wear a look|future edits/i);
+    expect(edit.lowDataNotice).not.toMatch(/rate your/i);
     expect(edit.lowDataNotice).not.toMatch(/StyleMe|style.me/i);
   });
 });
