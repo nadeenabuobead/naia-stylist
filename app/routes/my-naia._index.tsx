@@ -2,6 +2,7 @@ import { useLoaderData, Link } from "react-router";
 import type { LinksFunction, LoaderFunctionArgs } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
+import { getPublishedEditorialReports } from "~/lib/editorial-reports.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
@@ -42,16 +43,134 @@ function fmtDate(d: string | Date): string {
 }
 
 const VERDICT_LABELS: Record<string, string> = {
-  BUY: "Buy — strong addition",
-  SKIP: "Skip it",
-  MAYBE: "Buy, but only if…",
+  BUY: "BUY",
+  SKIP: "SKIP",
+  MAYBE: "MAYBE",
 };
+
+const STYLE_PERSONALITY_LABELS: Record<string, string> = {
+  "classic-polished":    "Classic & Polished",
+  "feminine-romantic":   "Feminine & Romantic",
+  "minimal-relaxed":     "Minimal & Relaxed",
+  "bold-edgy":           "Bold & Edgy",
+  "creative-expressive": "Creative & Expressive",
+};
+
+const CURRENT_GOAL_LABELS: Record<string, string> = {
+  "understand-my-style":       "Understand my personal style",
+  "feel-more-like-myself":     "Feel more like myself in what I wear",
+  "use-what-i-own":            "Get more from what I already own",
+  "easier-getting-dressed":    "Make getting dressed easier",
+  "stop-regret-purchases":     "Stop buying things I never wear",
+  "more-cohesive-wardrobe":    "Build a more cohesive wardrobe",
+  "dress-for-my-life":         "Dress better for my actual life",
+  "refresh-my-style":          "Refresh my style",
+  "specific-event-trip-change":"Dress for a specific event or change",
+};
+
+const SILHOUETTE_LABELS: Record<string, string> = {
+  "fitted":               "Fitted",
+  "waist-defined":        "Waist-defined",
+  "straight-simple":      "Straight-cut",
+  "relaxed":              "Relaxed",
+  "oversized":            "Oversized",
+  "boxy":                 "Boxy",
+  "tapered":              "Tapered",
+  "loose-flowing":        "Loose / Wide",
+  "structured-tailored":  "Structured / Tailored",
+};
+
+const OUTFIT_GIVES_LABELS: Record<string, string> = {
+  "feel-like-myself":    "I feel completely like myself",
+  "confidence":          "Confidence",
+  "feel-put-together":   "I feel put-together",
+  "comfort-ease":        "Comfort and ease",
+  "sense-of-expression": "Creative expression",
+  "feel-attractive":     "I feel attractive",
+  "sense-of-power":      "A sense of power",
+  "effortlessness":      "Effortlessness",
+};
+
+const LIFESTYLE_LABELS: Record<string, string> = {
+  "work-office":               "Work / Office",
+  "everyday-casual":           "Everyday Casual",
+  "dinners-going-out":         "Dinners & Going Out",
+  "events-special-occasions":  "Events & Special Occasions",
+  "family-parenting":          "Family & Parenting",
+  "travel":                    "Travel",
+  "active-busy-days":          "Active & Busy Days",
+};
+
+function humanizeId(id: string): string {
+  return id.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function labelFrom(map: Record<string, string>, id: string): string {
+  return map[id] ?? humanizeId(id);
+}
+
+function PassportSnapshot({ profile }: { profile: Record<string, unknown> }) {
+  const signals: Array<{ label: string; value: string }> = [];
+
+  const personalities = (profile.stylePersonalities as string[] | undefined) ?? [];
+  const validPersonalities = personalities.filter(p => p !== "not-sure");
+  if (validPersonalities.length > 0) {
+    signals.push({ label: "Style direction", value: validPersonalities.map(p => labelFrom(STYLE_PERSONALITY_LABELS, p)).join(" · ") });
+  }
+
+  const goals = (profile.currentGoal as string[] | undefined) ?? [];
+  const validGoals = goals.filter(g => g !== "not-sure-yet");
+  if (validGoals.length > 0) {
+    const first = validGoals[0];
+    const label = CURRENT_GOAL_LABELS[first] ?? humanizeId(first);
+    signals.push({ label: "Right now", value: label.charAt(0).toLowerCase() + label.slice(1) });
+  }
+
+  const gives = (profile.successfulOutfitGives as string[] | undefined) ?? [];
+  const validGives = gives.filter(g => g !== "not-sure").slice(0, 2);
+  if (validGives.length > 0) {
+    signals.push({ label: "Great outfit gives", value: validGives.map(g => labelFrom(OUTFIT_GIVES_LABELS, g)).join(" · ") });
+  }
+
+  const colours = (profile.favoriteColors as string[] | undefined) ?? [];
+  if (colours.length > 0) {
+    signals.push({ label: "Favourite colours", value: colours.slice(0, 4).join(", ") });
+  }
+
+  const silhouettes = (profile.silhouette as string[] | undefined) ?? [];
+  const validSilhouettes = silhouettes.filter(s => s !== "not-sure");
+  if (validSilhouettes.length > 0) {
+    signals.push({ label: "Fit direction", value: validSilhouettes.slice(0, 2).map(s => labelFrom(SILHOUETTE_LABELS, s)).join(" · ") });
+  }
+
+  const lifestyle = (profile.lifestyle as string[] | undefined) ?? [];
+  if (lifestyle.length > 0 && signals.length < 5) {
+    signals.push({ label: "Dresses for", value: lifestyle.slice(0, 3).map(l => labelFrom(LIFESTYLE_LABELS, l)).join(", ") });
+  }
+
+  if (signals.length === 0) return null;
+
+  return (
+    <ul style={{ listStyle: "none", padding: 0, margin: "0 0 1.25rem", borderTop: "1px solid var(--fg-12)" }}>
+      {signals.slice(0, 5).map(s => (
+        <li key={s.label} style={{ display: "flex", gap: "1rem", padding: "0.875rem 0", borderBottom: "1px solid var(--fg-12)" }}>
+          <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg-55)", width: "8rem", flexShrink: 0, paddingTop: "0.125rem" }}>
+            {s.label}
+          </div>
+          <div style={{ fontSize: "0.9rem", lineHeight: 1.625, color: "var(--fg-85)" }}>
+            {s.value}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
   const customerId = customer.id;
 
-  const [sessions, trendReport, buyOrSkipHistory, reviewCount, closetCount] =
+  const [sessions, editorialReports, buyOrSkipHistory, reviewCount, closetCount] =
     await Promise.all([
       prisma.stylingSession.findMany({
         where: { customerId },
@@ -66,20 +185,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
           review: { select: { id: true } },
         },
       }),
-      prisma.trendReport.findFirst({
-        where: { publishedAt: { lte: new Date() } },
-        orderBy: { publishedAt: "desc" },
-        select: { title: true, slug: true, summary: true },
-      }),
+      getPublishedEditorialReports(),
       prisma.buyOrSkipAnalysis.findMany({
         where: { customerId },
         take: 3,
         orderBy: { createdAt: "desc" },
-        select: { id: true, productName: true, verdict: true, createdAt: true },
+        select: { id: true, productName: true, verdict: true, createdAt: true, imageUrl: true, category: true },
       }),
       prisma.postOutfitReview.count({ where: { customerId } }),
       prisma.closetItem.count({ where: { customerId } }),
     ]);
+
+  const latestEditorial = editorialReports[0] ?? null;
+  const trendReport = latestEditorial
+    ? { slug: latestEditorial.slug, title: latestEditorial.title, season: latestEditorial.season, summary: latestEditorial.summary }
+    : null;
 
   const p = customer.onboardingProfile;
   // VIEW only when profileVersion=6 (atomically set on Rev 6 onboarding/refresh completion).
@@ -122,7 +242,7 @@ export default function MyNaiaOverview() {
           <div className="mn-eyebrow">Welcome back</div>
           <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "0.75rem", fontSize: "clamp(2.25rem,6vw,3.75rem)", lineHeight: 0.95, letterSpacing: "0.02em", textTransform: "uppercase" }}>
             <span style={{ fontFamily: "var(--ff-editorial)", fontStyle: "italic", color: "var(--lipstick)", textTransform: "none", fontWeight: 400 }}>
-              {firstName ? `${firstName}.` : "Welcome."}
+              {firstName ? `Welcome, ${firstName}.` : "Welcome."}
             </span>
           </h2>
         </section>
@@ -201,18 +321,16 @@ export default function MyNaiaOverview() {
               </div>
             )}
             {passportState === "view" && (
-              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
-                <div>
-                  <div style={{ fontSize: "0.95rem", lineHeight: 1.625, color: "var(--fg-90, var(--fg))", marginBottom: "0.375rem" }}>
-                    Your Style Passport is complete.
-                  </div>
-                  <p style={{ fontSize: "0.82rem", color: "var(--fg-55)", lineHeight: 1.625 }}>
-                    nAia is personalised to you. Update your answers any time as your style evolves.
+              <div>
+                {profile && <PassportSnapshot profile={profile as Record<string, unknown>} />}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
+                  <p style={{ fontSize: "0.82rem", color: "var(--fg-55)", lineHeight: 1.625, margin: 0 }}>
+                    Update your answers any time as your style evolves.
                   </p>
+                  <Link to="/passport" className="mn-see-link" style={{ flexShrink: 0 }}>
+                    VIEW STYLE PASSPORT
+                  </Link>
                 </div>
-                <Link to="/passport" className="mn-see-link" style={{ flexShrink: 0 }}>
-                  VIEW STYLE PASSPORT
-                </Link>
               </div>
             )}
           </div>
@@ -269,10 +387,10 @@ export default function MyNaiaOverview() {
           </div>
         </section>
 
-        {/* Recent Looks */}
+        {/* Latest StyleMe */}
         <section className="mn-section">
           <div className="mn-section-head">
-            <div className="mn-eyebrow">Recent Looks</div>
+            <div className="mn-eyebrow">Latest StyleMe</div>
             <Link to="/my-naia/saved" className="mn-see-link">View All Looks</Link>
           </div>
           <div className="mn-section-body">
@@ -402,7 +520,9 @@ export default function MyNaiaOverview() {
                 <style>{`@media(min-width:1024px){.mn-trend-grid{grid-template-columns:1.3fr 1fr!important;gap:2.5rem!important}}`}</style>
                 <div className="mn-trend-grid" style={{ display: "grid" }}>
                   <div>
-                    <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg-55)" }}>Ready · Latest</div>
+                    <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg-55)" }}>
+                      {trendReport.season ? `${trendReport.season} · ` : ""}Latest Personalised Edit
+                    </div>
                     <h3 style={{ fontFamily: "var(--ff-display)", fontWeight: 300, marginTop: "0.5rem", fontSize: "clamp(1.25rem,3vw,1.875rem)", lineHeight: 1.1, letterSpacing: "0.02em", textTransform: "uppercase" }}>{trendReport.title}</h3>
                     {trendReport.summary && (
                       <p style={{ marginTop: "0.75rem", maxWidth: "36rem", fontSize: "0.9rem", lineHeight: 1.75, color: "var(--fg-80)" }}>{trendReport.summary}</p>
@@ -431,16 +551,32 @@ export default function MyNaiaOverview() {
             {buyOrSkipHistory.length > 0 ? (
               <ul style={{ listStyle: "none", padding: 0, margin: 0, borderTop: "1px solid var(--fg-12)" }}>
                 {buyOrSkipHistory.map((d) => (
-                  <li key={d.id} style={{ display: "grid", gap: "0.5rem", padding: "1.25rem 0", borderBottom: "1px solid var(--fg-12)" }}>
-                    <style>{`@media(min-width:640px){.mn-decision-row-inner{grid-template-columns:1.4fr 1fr!important}}`}</style>
-                    <div className="mn-decision-row-inner" style={{ display: "grid" }}>
-                      <div>
-                        <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.28em", color: "var(--fg-55)" }}>{fmtDate(d.createdAt)}</div>
-                        <div style={{ marginTop: "0.25rem", fontSize: "0.95rem", lineHeight: 1.625, color: "var(--fg-90, var(--fg))" }}>{d.productName ?? "Unnamed item"}</div>
+                  <li key={d.id} style={{ display: "flex", gap: "1rem", padding: "1.25rem 0", borderBottom: "1px solid var(--fg-12)", alignItems: "center" }}>
+                    {d.imageUrl ? (
+                      <img
+                        src={d.imageUrl}
+                        alt={d.productName ?? d.category ?? "Item"}
+                        style={{ width: "56px", height: "56px", objectFit: "cover", flexShrink: 0, border: "1px solid var(--fg-10)" }}
+                      />
+                    ) : (
+                      <div style={{ width: "56px", height: "56px", flexShrink: 0, background: "color-mix(in oklab, var(--bg) 88%, black)", border: "1px solid var(--fg-10)", display: "grid", placeItems: "center" }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3 }} aria-hidden="true">
+                          <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" />
+                        </svg>
                       </div>
-                      <div style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.28em", color: "var(--lipstick)" }}>
-                        {VERDICT_LABELS[d.verdict] ?? d.verdict}
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: "0.95rem", lineHeight: 1.4, color: "var(--fg-90, var(--fg))", fontWeight: 400 }}>
+                        {d.productName ?? (d.category ? d.category : "Item")}
                       </div>
+                      <div style={{ marginTop: "0.25rem", fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.28em", color: "var(--fg-55)" }}>{fmtDate(d.createdAt)}</div>
+                    </div>
+                    <div style={{
+                      fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.28em", flexShrink: 0,
+                      color: d.verdict === "BUY" ? "var(--lipstick)" : d.verdict === "SKIP" ? "var(--fg-55)" : "var(--fg-70)",
+                      fontWeight: 600,
+                    }}>
+                      {VERDICT_LABELS[d.verdict] ?? d.verdict}
                     </div>
                   </li>
                 ))}

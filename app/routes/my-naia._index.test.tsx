@@ -34,11 +34,11 @@ vi.mock("react-router", async (importOriginal) => {
   }) =>
     createElement("a", { href: to, className, style, onClick, "aria-current": ariaCurrent, "aria-label": ariaLabel }, children as any);
   const mockUseLoaderData = vi.fn(() => ({
-    firstName: null,
-    profile: null,
-    sessions: [],
-    trendReport: null,
-    buyOrSkipHistory: [],
+    firstName: null as string | null,
+    profile: null as unknown,
+    sessions: [] as unknown[],
+    trendReport: null as { slug: string; title: string; season: string; summary: string } | null,
+    buyOrSkipHistory: [] as Array<{ id: string; productName: string | null; verdict: string; createdAt: string; imageUrl?: string | null; category?: string | null }>,
     reviewCount: 0,
     closetCount: 0,
     passportState: "start" as const,
@@ -59,11 +59,14 @@ vi.mock("~/lib/naia-session.server", () => ({
 vi.mock("~/db.server", () => ({
   default: {
     stylingSession: { findMany: vi.fn().mockResolvedValue([]) },
-    trendReport:    { findFirst: vi.fn().mockResolvedValue(null) },
     buyOrSkipAnalysis: { findMany: vi.fn().mockResolvedValue([]) },
     postOutfitReview: { count: vi.fn().mockResolvedValue(0) },
     closetItem:     { count: vi.fn().mockResolvedValue(0) },
   },
+}));
+
+vi.mock("~/lib/editorial-reports.server", () => ({
+  getPublishedEditorialReports: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("~/styles/naia-design-system.css?url", () => ({ default: "/styles.css" }));
@@ -144,8 +147,8 @@ type LoaderShape = {
   firstName: string | null;
   profile: unknown;
   sessions: unknown[];
-  trendReport: unknown;
-  buyOrSkipHistory: unknown[];
+  trendReport: { slug: string; title: string; season: string; summary: string } | null;
+  buyOrSkipHistory: Array<{ id: string; productName: string | null; verdict: string; createdAt: string; imageUrl?: string | null; category?: string | null }>;
   reviewCount: number;
   closetCount: number;
   passportState?: "start" | "continue" | "view";
@@ -228,14 +231,19 @@ describe("my-naia component — static structure", () => {
     expect(html).toContain("Welcome back");
   });
 
-  it("renders first name when provided", () => {
+  it("renders 'Welcome, Name.' greeting when firstName provided", () => {
     const html = render({ firstName: "Alia" });
-    expect(html).toContain("Alia.");
+    expect(html).toContain("Welcome, Alia.");
   });
 
   it("renders Welcome. when no first name", () => {
     const html = render({ firstName: null });
     expect(html).toContain("Welcome.");
+  });
+
+  it("does not render 'Welcome,' when firstName is null", () => {
+    const html = render({ firstName: null });
+    expect(html).not.toContain("Welcome, ");
   });
 
   it("shows attention item when profile is null", () => {
@@ -282,15 +290,90 @@ describe("my-naia component — static structure", () => {
   it("trend teaser 'Open My Trend Edit' links to /trends/my-edits/:slug", () => {
     const html = render({
       trendReport: {
-        id: "tr-1",
         slug: "spring-2026-soft-structure",
         title: "Spring 2026 Soft Structure",
+        season: "Spring 2026",
         summary: "A nAia edit.",
-        publishedAt: new Date("2026-06-30"),
       },
     });
     expect(html).toContain('href="/trends/my-edits/spring-2026-soft-structure"');
     expect(html).toContain("Open My Trend Edit");
+  });
+
+  it("trend teaser shows season label when present", () => {
+    const html = render({
+      trendReport: {
+        slug: "autumn-2026-quiet-luxury",
+        title: "Autumn 2026 Quiet Luxury",
+        season: "Autumn 2026",
+        summary: "A nAia edit.",
+      },
+    });
+    expect(html).toContain("Autumn 2026");
+  });
+
+  it("shows no trend edit when trendReport is null", () => {
+    const html = render({ trendReport: null });
+    expect(html).toContain("personalised trend edit will appear here");
+  });
+
+  it("passport snapshot renders style direction when profile has stylePersonalities", () => {
+    const html = render({
+      passportState: "view",
+      profile: { stylePersonalities: ["classic-polished", "minimal-relaxed"], currentGoal: [], silhouette: [], favoriteColors: [], lifestyle: [], successfulOutfitGives: [] },
+    });
+    expect(html).toContain("Classic &amp; Polished");
+    expect(html).toContain("Minimal &amp; Relaxed");
+  });
+
+  it("passport snapshot shows favourite colours", () => {
+    const html = render({
+      passportState: "view",
+      profile: { stylePersonalities: [], currentGoal: [], silhouette: [], favoriteColors: ["Navy", "Cream", "Olive"], lifestyle: [], successfulOutfitGives: [] },
+    });
+    expect(html).toContain("Navy");
+    expect(html).toContain("Cream");
+  });
+
+  it("passport snapshot is not rendered in start or continue states", () => {
+    for (const state of ["start", "continue"] as const) {
+      const html = render({
+        passportState: state,
+        profile: { stylePersonalities: ["classic-polished"], currentGoal: [], silhouette: [], favoriteColors: ["Navy"], lifestyle: [], successfulOutfitGives: [] },
+      });
+      expect(html, `state=${state}`).not.toContain("Style direction");
+    }
+  });
+
+  it("buy or skip shows item image when imageUrl present", () => {
+    const html = render({
+      buyOrSkipHistory: [{
+        id: "bos-1",
+        productName: "Tweed Skirt",
+        verdict: "BUY",
+        createdAt: "2026-09-04T10:00:00Z",
+        imageUrl: "https://res.cloudinary.com/example/image/upload/v1/item.jpg",
+        category: "Bottom",
+      }],
+    });
+    expect(html).toContain("Tweed Skirt");
+    expect(html).toContain("https://res.cloudinary.com/example/image/upload/v1/item.jpg");
+    expect(html).toContain("BUY");
+  });
+
+  it("buy or skip falls back to category when productName is null", () => {
+    const html = render({
+      buyOrSkipHistory: [{
+        id: "bos-2",
+        productName: null,
+        verdict: "SKIP",
+        createdAt: "2026-09-04T09:00:00Z",
+        imageUrl: null,
+        category: "Dress",
+      }],
+    });
+    expect(html).toContain("Dress");
+    expect(html).not.toContain("Unnamed item");
   });
 });
 
