@@ -44,14 +44,21 @@ const STAGE_B_PROMPT_TEMPLATE = (categoryLabel: string) => `\
 You are assessing whether a fashion photo is suitable for virtual try-on.
 The customer selected category: ${categoryLabel}.
 
+Product photos, studio shots, and flat lays on plain backgrounds are all valid image types.
+You are assessing whether the item can be identified for try-on, not judging photography style.
+
 Evaluate this image on these criteria:
-1. Is there exactly one clear primary fashion item visible (not multiple items in the same photo)?
-2. Is the complete item visible in the frame (not cropped or cut off at the edges)?
+1. Is there exactly one clear primary fashion item visible (not multiple separate garments in the same photo)?
+2. Is substantially all of the item visible in the frame? The item may fill the frame or touch the edges — only fail if a key part (such as the hem, neckline, or full waistband) is genuinely cut off and missing, not merely close to the edge.
 3. Is the item not heavily obstructed by other objects or people?
 4. Is the image reasonably in focus (not excessively blurry)?
-5. Are the item's edges and boundaries reasonably visible?
+5. Are the item's key edges and silhouette reasonably distinguishable? A dark item on a light background or a light item on a dark background automatically meets this criterion due to contrast.
 6. Does the item visually match the selected category "${categoryLabel}"?
 7. Is this a wearable fashion item (clothing, shoes, or bag) rather than a non-fashion object?
+
+Only mark an image as not eligible if a genuine problem would prevent identifying the item for try-on.
+Do not fail images for minor framing imperfections, the photo style being unusual, or slight edge proximity.
+When in doubt, pass the image — a false rejection is worse than a false pass.
 
 If the image is not eligible, also write a brief, calm customer guidance message that names the specific problem and the solution. Keep it under 2 sentences. Do not use technical jargon.
 
