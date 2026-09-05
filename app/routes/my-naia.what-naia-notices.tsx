@@ -49,13 +49,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-type LoaderData = Awaited<ReturnType<typeof loader>>["data"];
+interface TendencyItem {
+  id: string;
+  dimension: string;
+  value: string;
+  observationFamily: string;
+  claimText: string | null;
+  rationaleText: string | null;
+  customerFeedback: string | null;
+}
 
-function ObservationCard({
-  tendency,
-}: {
-  tendency: LoaderData["confirmed"][number];
-}) {
+function ObservationCard({ tendency }: { tendency: TendencyItem }) {
   const feedbackFetcher = useFetcher<{ ok?: boolean; error?: string }>();
   const isPending  = feedbackFetcher.state === "submitting";
   const savedFeedback = feedbackFetcher.data?.ok
