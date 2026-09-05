@@ -23,6 +23,7 @@ const MY_NAIA_NAV: NavGroup[] = [
       { to: "/my-naia/saved", label: "Saved" },
       { label: "Personalisation", isHeading: true },
       { to: "/my-naia-model", label: "My nAia Model", indent: true },
+      { to: "/my-naia/what-naia-notices", label: "What nAia Is Noticing", indent: true },
       { to: "/settings", label: "Settings & Privacy" },
     ],
   },
