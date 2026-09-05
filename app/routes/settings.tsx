@@ -31,6 +31,14 @@ import {
   deleteNaiaModelPhoto,
   withdrawSaveModelConsent,
 } from "~/lib/ai/my-naia-model.server";
+import {
+  deleteCustomerVtoResults,
+  customerHasVtoResults,
+} from "~/lib/ai/fashn-tryon-service.server";
+import {
+  deleteCustomerBosImages,
+  customerHasBosImages,
+} from "~/lib/buy-or-skip-privacy.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 
@@ -47,7 +55,7 @@ export function meta() {
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
 
-  const [selfieRecord, modelRecord] = await Promise.all([
+  const [selfieRecord, modelRecord, hasVtoResults, hasBosImages] = await Promise.all([
     prisma.selfieAnalysis.findUnique({
       where: { customerId: customer.id },
       select: { photoPublicId: true, photoDeletedAt: true, analysisStatus: true, analysisResult: true },
@@ -56,6 +64,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       where: { customerId: customer.id },
       select: { facePublicId: true, bodyPublicId: true, saveModelConsentAt: true },
     }),
+    customerHasVtoResults(customer.id),
+    customerHasBosImages(customer.id),
   ]);
 
   // Derive public-safe booleans — private IDs never leave the server.
@@ -65,11 +75,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const hasBody     = modelRecord !== null && modelRecord.bodyPublicId !== null;
 
   return data({
-    firstName: customer.firstName,
-    lastName:  customer.lastName,
-    email:     customer.email,
-    selfie:    selfieRecord !== null ? { hasPhoto, hasAnalysis }  : null,
-    model:     modelRecord  !== null ? { hasFace,  hasBody }      : null,
+    firstName:     customer.firstName,
+    lastName:      customer.lastName,
+    email:         customer.email,
+    selfie:        selfieRecord !== null ? { hasPhoto, hasAnalysis } : null,
+    model:         modelRecord  !== null ? { hasFace,  hasBody }     : null,
+    hasVtoResults,
+    hasBosImages,
   });
 }
 
@@ -82,6 +94,8 @@ const VALID_INTENTS = new Set([
   "delete-model-face",
   "delete-model-body",
   "delete-model-all",
+  "delete-vto-results",
+  "delete-bos-images",
 ]);
 
 type Intent =
@@ -90,7 +104,9 @@ type Intent =
   | "delete-selfie-both"
   | "delete-model-face"
   | "delete-model-body"
-  | "delete-model-all";
+  | "delete-model-all"
+  | "delete-vto-results"
+  | "delete-bos-images";
 
 const SUCCESS_MESSAGES: Record<Intent, string> = {
   "delete-selfie-photo":    "Your selfie photo has been permanently removed.",
@@ -99,6 +115,8 @@ const SUCCESS_MESSAGES: Record<Intent, string> = {
   "delete-model-face":      "Your saved face photo has been removed from your nAia Model.",
   "delete-model-body":      "Your saved body photo has been removed from your nAia Model.",
   "delete-model-all":       "Your saved nAia Model photos and consent have been permanently removed.",
+  "delete-vto-results":     "Your saved Virtual Try-On preview images have been permanently removed.",
+  "delete-bos-images":      "Your Buy or Skip uploaded images have been removed. Your decision history has been kept.",
 };
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -144,6 +162,17 @@ export async function action({ request }: ActionFunctionArgs) {
       await withdrawSaveModelConsent(customer.id);
       break;
     }
+    case "delete-vto-results": {
+      // Removes all COMPLETED VTO result images from Cloudinary. Job records are preserved.
+      // Partial Cloudinary failures are non-blocking — failedAssets can be retried.
+      await deleteCustomerVtoResults(customer.id);
+      break;
+    }
+    case "delete-bos-images": {
+      // Removes uploaded garment images from BOS analyses. Verdict and history are preserved.
+      await deleteCustomerBosImages(customer.id);
+      break;
+    }
   }
 
   return data({ ok: true as const, intent: typed, message: SUCCESS_MESSAGES[typed] });
@@ -182,6 +211,16 @@ const CONFIRM: Record<Intent, { title: string; body: string; cta: string }> = {
     body:  "Both your saved face and body photos will be permanently deleted and your consent to save them will be withdrawn. Virtual previews will no longer be available until you upload new photos. Your styling history and Closet are not affected.",
     cta:   "Remove all model photos",
   },
+  "delete-vto-results": {
+    title: "Remove Virtual Try-On preview images",
+    body:  "All generated Virtual Try-On preview images will be permanently deleted. Your nAia Model face and body photos are not affected — only the generated previews are removed. Your try-on history (dates and products tried) remains on your account.",
+    cta:   "Remove preview images",
+  },
+  "delete-bos-images": {
+    title: "Remove Buy or Skip uploaded images",
+    body:  "The garment photos you uploaded for Buy or Skip analyses will be permanently deleted. Your Buy or Skip decisions, verdicts, and reasoning are kept — only the uploaded images are removed.",
+    cta:   "Remove uploaded images",
+  },
 };
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -213,7 +252,7 @@ function ControlRow({
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function Settings() {
-  const { firstName, lastName, email, selfie, model } = useLoaderData<typeof loader>();
+  const { firstName, lastName, email, selfie, model, hasVtoResults, hasBosImages } = useLoaderData<typeof loader>();
   const fetcher     = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   const [pending, setPending] = useState<Intent | null>(null);
@@ -356,6 +395,44 @@ export default function Settings() {
           Go to My Closet
         </Link>
       </section>
+
+      {/* ── Virtual Try-On Preview Images ─────────────────────────────────── */}
+      {hasVtoResults && (
+        <section className="bos-section">
+          <div className="set-section-eyebrow">Virtual Try-On</div>
+          <h2 className="set-section-title">Virtual Try-On Preview Images</h2>
+          <p className="sp-shell-desc" style={{ marginBottom: "20px" }}>
+            Generated try-on preview images are stored privately on your account. Removing them does not affect your nAia Model photos or your try-on history.
+          </p>
+          <div className="set-controls">
+            <ControlRow
+              intent="delete-vto-results"
+              label="Remove Virtual Try-On preview images"
+              description="Permanently deletes all generated try-on previews. Your nAia Model and try-on history are kept."
+              onOpen={setPending}
+            />
+          </div>
+        </section>
+      )}
+
+      {/* ── Buy or Skip Uploaded Images ───────────────────────────────────── */}
+      {hasBosImages && (
+        <section className="bos-section">
+          <div className="set-section-eyebrow">Buy or Skip</div>
+          <h2 className="set-section-title">Buy or Skip Uploaded Images</h2>
+          <p className="sp-shell-desc" style={{ marginBottom: "20px" }}>
+            Photos you uploaded for Buy or Skip analyses are stored privately. Removing them keeps your decisions and recommendations but deletes the uploaded images.
+          </p>
+          <div className="set-controls">
+            <ControlRow
+              intent="delete-bos-images"
+              label="Remove Buy or Skip uploaded images"
+              description="Permanently removes your uploaded garment photos. Your Buy or Skip decisions and history are kept."
+              onOpen={setPending}
+            />
+          </div>
+        </section>
+      )}
 
       {/* ── How nAia personalises your experience ────────────────────────── */}
       <section className="bos-section">

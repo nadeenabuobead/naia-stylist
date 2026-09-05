@@ -9,11 +9,14 @@ import { emitClosetItemAdded, recordJourneyEventAwaited } from "~/lib/ai/journey
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import { verifyCloudinaryAsset, deleteCloudinaryAsset, buildPrivateDownloadUrl, getCloudinaryConfig, validatePublicIdOwnership } from "~/lib/cloudinary-admin.server";
+import { deleteClosetItemWithImage } from "~/lib/closet-item-deletion.server";
 import { analyzeClosetGarment } from "~/lib/ai/closet-garment-analysis.server";
 import { computeClosetInsights, type ClosetInsightProfile } from "~/lib/ai/closet-insights";
 import { normalizeGarmentRelationships, GARMENT_RELATIONSHIP_LABELS, GARMENT_RELATIONSHIP_MAX } from "~/lib/ai/first-naia-read";
 import { moderateImageContent } from "~/lib/image-moderation.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
+import { extractClosetEvidence } from "~/lib/ai/taste-extraction.server";
+import { writeSourceEvidence } from "~/lib/ai/taste-reconcile.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
 import { VtoExperience } from "~/components/VtoExperience";
 
@@ -402,13 +405,21 @@ export async function action({ request }: ActionFunctionArgs) {
       userSeasons:      seasons.length > 0 ? seasons : [],
     }).catch(() => {});
 
+    // Taste evidence — extract from garmentRelationships on new item
+    try {
+      const evRows = extractClosetEvidence({ id: newItem.id, customerId: customer.id, category: newItem.category, garmentRelationships: newItem.garmentRelationships, updatedAt: newItem.updatedAt });
+      await writeSourceEvidence(customer.id, "CLOSET_RELATIONSHIP", newItem.id, evRows);
+    } catch (err) {
+      console.error("taste-evidence: failed to write closet create evidence", err);
+    }
+
     return data({ success: true });
   }
 
   if (intent === "delete") {
     const itemId = formData.get("itemId") as string;
-    const deleted = await prisma.closetItem.deleteMany({ where: { id: itemId, customerId: customer.id } });
-    if (deleted.count === 0) return data({ error: "Item not found" }, { status: 403 });
+    const result = await deleteClosetItemWithImage(itemId, customer.id);
+    if (!result.deleted) return data({ error: "Item not found" }, { status: 403 });
     return data({ success: true });
   }
 
@@ -461,6 +472,13 @@ export async function action({ request }: ActionFunctionArgs) {
           where: { id: itemId },
           data: { name: name || null, category, primaryColor: primaryColor || null, garmentRelationships: editGarmentRelationships, customerNote: editCustomerNote },
         });
+      }
+      // Taste evidence — re-extract after edit (relationships or category may have changed)
+      try {
+        const evRows = extractClosetEvidence({ id: itemId, customerId: customer.id, category, garmentRelationships: editGarmentRelationships, updatedAt: new Date() });
+        await writeSourceEvidence(customer.id, "CLOSET_RELATIONSHIP", itemId, evRows);
+      } catch (err) {
+        console.error("taste-evidence: failed to write closet edit evidence", err);
       }
       return data({ success: true });
     }
@@ -664,6 +682,14 @@ export async function action({ request }: ActionFunctionArgs) {
       userOccasions: existing.occasions ?? [],
       userSeasons:   existing.seasons   ?? [],
     }).catch(() => {});
+
+    // Taste evidence — re-extract after photo replacement (relationships may have changed)
+    try {
+      const evRows = extractClosetEvidence({ id: itemId, customerId: customer.id, category, garmentRelationships: editGarmentRelationships, updatedAt: new Date() });
+      await writeSourceEvidence(customer.id, "CLOSET_RELATIONSHIP", itemId, evRows);
+    } catch (err) {
+      console.error("taste-evidence: failed to write closet photo-replace evidence", err);
+    }
 
     return data({ success: true });
   }

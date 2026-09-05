@@ -1,5 +1,6 @@
 import { authenticateCustomer } from "../customer-auth.server";
 import prisma from "../db.server";
+import { deleteClosetItemWithImage } from "../lib/closet-item-deletion.server.js";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -129,11 +130,10 @@ export async function action({ request }) {
     if (!itemId) {
       return Response.json({ error: "itemId required" }, { status: 400, headers: CORS });
     }
-    // deleteMany with both id and customerId prevents cross-customer deletion.
-    const deleted = await prisma.closetItem.deleteMany({
-      where: { id: itemId, customerId: customer.id },
-    });
-    if (deleted.count === 0) {
+    // deleteClosetItemWithImage verifies ownership, removes the private Cloudinary
+    // asset (idempotent), then deletes the DB record.
+    const result = await deleteClosetItemWithImage(itemId, customer.id);
+    if (!result.deleted) {
       return Response.json({ error: "Item not found" }, { status: 404, headers: CORS });
     }
     return Response.json({ deleted: true }, { headers: CORS });

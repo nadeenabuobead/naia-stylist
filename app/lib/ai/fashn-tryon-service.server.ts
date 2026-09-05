@@ -19,8 +19,11 @@ import {
   buildPrivateDownloadUrl,
   uploadCloudinaryPrivate,
   getCloudinaryConfig,
+  deleteCloudinaryAsset,
   type CloudinaryConfig,
+  type DeleteAssetFn,
 } from "../cloudinary-admin.server.js";
+import prisma from "../../db.server.js";
 import {
   runFashnTryOn,
   isValidModelImageDataUrl,
@@ -626,4 +629,64 @@ export async function executeTryOn(
   }
 
   return { ok: true, jobId: completedJob.id, resultUrl, isNewJob: true };
+}
+
+// ── VTO result privacy deletion ───────────────────────────────────────────────
+//
+// Removes the persisted Cloudinary result images for all COMPLETED VTO jobs
+// belonging to the authenticated customer. Job records and history are preserved.
+//
+// Public ID pattern (confirmed): naia-tryon/{customerId}/{jobId}
+// Only COMPLETED jobs have uploaded result assets — other statuses never call
+// uploadTryOnResult and have nothing stored in Cloudinary.
+//
+// Privacy contract:
+//   - customerId is always the authenticated customer's ID (server-enforced).
+//   - Only that customer's COMPLETED job rows are queried.
+//   - "not found" from Cloudinary is treated as ok (idempotent).
+//   - Job records, status, and history are not mutated.
+//   - After deletion the result URL derived from the same jobId will 404 from
+//     Cloudinary — no stored reference needs clearing because the publicId is derived.
+
+export interface DeleteVtoResultsResult {
+  deletedCount:  number;   // assets successfully removed from Cloudinary
+  skippedCount:  number;   // assets Cloudinary could not delete (orphaned)
+  failedAssets:  string[]; // publicIds that failed (for retry / audit)
+}
+
+export async function deleteCustomerVtoResults(
+  customerId: string,
+  _deleteAsset: DeleteAssetFn = deleteCloudinaryAsset,
+): Promise<DeleteVtoResultsResult> {
+  // Only COMPLETED jobs have uploaded Cloudinary result assets.
+  const completedJobs = await prisma.virtualTryOnJob.findMany({
+    where: { customerId, status: "COMPLETED" },
+    select: { id: true },
+  });
+
+  let deletedCount  = 0;
+  let skippedCount  = 0;
+  const failedAssets: string[] = [];
+
+  for (const job of completedJobs) {
+    const publicId = deriveTryOnResultPublicId(customerId, job.id);
+    const result   = await _deleteAsset(publicId, "private");
+    if (result.ok) {
+      deletedCount++;
+    } else {
+      skippedCount++;
+      failedAssets.push(publicId);
+    }
+  }
+
+  return { deletedCount, skippedCount, failedAssets };
+}
+
+// ── VTO result state check for loader ────────────────────────────────────────
+
+export async function customerHasVtoResults(customerId: string): Promise<boolean> {
+  const count = await prisma.virtualTryOnJob.count({
+    where: { customerId, status: "COMPLETED" },
+  });
+  return count > 0;
 }
