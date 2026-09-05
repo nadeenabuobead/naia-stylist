@@ -1197,12 +1197,22 @@ describe("M — Saved navigation removed; StyleMe VIEW SAVED LOOKS; save fix; BO
     );
   });
 
-  it("MyNaiaNavigation.tsx ACCOUNT group contains MY nAia MODEL, PLAN & USAGE, SETTINGS & PRIVACY", () => {
+  it("MyNaiaNavigation.tsx PERSONALISATION group has MY nAia MODEL + WHAT nAia IS NOTICING", () => {
     const src = route("../components/my-naia/MyNaiaNavigation.tsx");
-    assert.ok(src.includes('"MY nAia MODEL"'), "MY nAia MODEL remains");
-    assert.ok(src.includes('"PLAN & USAGE"'), "PLAN & USAGE added under ACCOUNT");
+    assert.ok(src.includes('"PERSONALISATION"'), "PERSONALISATION group exists");
+    assert.ok(src.includes('"MY nAia MODEL"'), "MY nAia MODEL in PERSONALISATION");
+    assert.ok(src.includes('"WHAT nAia IS NOTICING"'), "WHAT nAia IS NOTICING in PERSONALISATION");
+    assert.ok(src.includes('"/my-naia/what-naia-notices"'), "WHAT nAia IS NOTICING links correctly");
+  });
+
+  it("MyNaiaNavigation.tsx ACCOUNT group has PLAN & USAGE + SETTINGS & PRIVACY only", () => {
+    const src = route("../components/my-naia/MyNaiaNavigation.tsx");
+    assert.ok(src.includes('"ACCOUNT"'), "ACCOUNT group exists");
+    assert.ok(src.includes('"PLAN & USAGE"'), "PLAN & USAGE in ACCOUNT");
     assert.ok(src.includes('"/my-naia/plan-usage"'), "PLAN & USAGE links to /my-naia/plan-usage");
-    assert.ok(src.includes('"SETTINGS & PRIVACY"'), "SETTINGS & PRIVACY remains");
+    assert.ok(src.includes('"SETTINGS & PRIVACY"'), "SETTINGS & PRIVACY in ACCOUNT");
+    assert.ok(!src.includes('"MY nAia MODEL"') || src.indexOf('"PERSONALISATION"') < src.indexOf('"MY nAia MODEL"'),
+              "MY nAia MODEL is under PERSONALISATION, not ACCOUNT");
   });
 
   it("my-naia/saved route is still registered in routes.ts", () => {

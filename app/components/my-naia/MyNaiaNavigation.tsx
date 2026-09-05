@@ -24,9 +24,15 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    title: "ACCOUNT",
+    title: "PERSONALISATION",
     items: [
       { label: "MY nAia MODEL",             path: "/my-naia-model" },
+      { label: "WHAT nAia IS NOTICING",     path: "/my-naia/what-naia-notices" },
+    ],
+  },
+  {
+    title: "ACCOUNT",
+    items: [
       { label: "PLAN & USAGE",              path: "/my-naia/plan-usage" },
       { label: "SETTINGS & PRIVACY",        path: "/settings" },
     ],
