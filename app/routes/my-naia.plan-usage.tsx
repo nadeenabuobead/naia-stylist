@@ -133,7 +133,7 @@ export default function PlanUsagePage() {
   const trendValue = personalisedTrend.monthlyLimit > 0 ? "1 included per month" : "Not included in your plan";
 
   return (
-    <MyNaiaLayout activeNav="overview">
+    <MyNaiaLayout>
       <div className="mn-content">
 
         <Section title="Your Plan">
