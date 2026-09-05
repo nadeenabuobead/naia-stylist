@@ -236,9 +236,9 @@ describe("my-naia component — static structure", () => {
     expect(html).toContain("Note");
   });
 
-  it("welcome back eyebrow is present", () => {
+  it("welcome back eyebrow is absent (removed — greeting stands alone)", () => {
     const html = render();
-    expect(html).toContain("Welcome back");
+    expect(html).not.toContain("Welcome back");
   });
 
   it("renders 'Welcome, Name.' greeting when firstName provided", () => {

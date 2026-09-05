@@ -186,7 +186,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           id: true, createdAt: true, currentMood: true, desiredFeeling: true, occasion: true, styleFrom: true,
           suggestions: {
             take: 1, select: { id: true, heroImageUrl: true, outfitName: true, savedAsLook: true,
-              items: { take: 1, select: { closetItemId: true, productTitle: true, productImageUrl: true, closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true } } } } }
+              items: { take: 5, select: { itemType: true, closetItemId: true, productTitle: true, productImageUrl: true, closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true } } } } }
           },
           review: { select: { id: true } },
         },
@@ -242,25 +242,40 @@ export async function loader({ request }: LoaderFunctionArgs) {
     };
   });
 
-  // Resolve each StyleMe session's thumbnail server-side so the component never receives a stale/broken URL.
-  // Priority: heroImageUrl → closet signed URL (private asset) → productImageUrl (NADINE or legacy) → closet legacy imageUrl → null
+  // Resolve each StyleMe session's thumbnail server-side.
+  // Pick the most visually representative item by type priority so different sessions show different looks.
+  // Priority: heroImageUrl → best item by type (DRESS>OUTERWEAR>TOP>BOTTOM>SHOES>BAG>ACCESSORY)
+  // Within an item: closet signed URL (private) → productImageUrl (NADINE) → closet legacy imageUrl
+  const ITEM_TYPE_PRIORITY = ["DRESS", "OUTERWEAR", "TOP", "BOTTOM", "SHOES", "BAG", "ACCESSORY"];
   const sessionsWithThumb = sessions.map((s) => {
     const suggestion = s.suggestions[0];
-    const firstItem = suggestion?.items?.[0];
+    const allItems = suggestion?.items ?? [];
     let resolvedThumb: string | null = null;
 
     if (suggestion?.heroImageUrl) {
       resolvedThumb = suggestion.heroImageUrl;
-    } else if (firstItem) {
-      const ci = firstItem.closetItem;
-      if (firstItem.closetItemId && ci?.imagePublicId && ci?.imageFormat && cloudinaryConfig) {
-        const ownership = validatePublicIdOwnership(ci.imagePublicId, customerId);
-        if (ownership.ok) {
-          resolvedThumb = buildPrivateDownloadUrl(cloudinaryConfig, ci.imagePublicId, ci.imageFormat, "private");
+    } else if (allItems.length > 0) {
+      // Sort by type priority; items with any image source come before image-less items
+      const sorted = [...allItems].sort((a, b) => {
+        const hasA = !!(a.productImageUrl || a.closetItem?.imagePublicId || a.closetItem?.imageUrl);
+        const hasB = !!(b.productImageUrl || b.closetItem?.imagePublicId || b.closetItem?.imageUrl);
+        if (hasA !== hasB) return hasA ? -1 : 1;
+        const pa = ITEM_TYPE_PRIORITY.indexOf(a.itemType) === -1 ? 99 : ITEM_TYPE_PRIORITY.indexOf(a.itemType);
+        const pb = ITEM_TYPE_PRIORITY.indexOf(b.itemType) === -1 ? 99 : ITEM_TYPE_PRIORITY.indexOf(b.itemType);
+        return pa - pb;
+      });
+      const bestItem = sorted[0];
+      if (bestItem) {
+        const ci = bestItem.closetItem;
+        if (bestItem.closetItemId && ci?.imagePublicId && ci?.imageFormat && cloudinaryConfig) {
+          const ownership = validatePublicIdOwnership(ci.imagePublicId, customerId);
+          if (ownership.ok) {
+            resolvedThumb = buildPrivateDownloadUrl(cloudinaryConfig, ci.imagePublicId, ci.imageFormat, "private");
+          }
         }
+        if (!resolvedThumb && bestItem.productImageUrl) resolvedThumb = bestItem.productImageUrl;
+        if (!resolvedThumb && bestItem.closetItem?.imageUrl) resolvedThumb = bestItem.closetItem.imageUrl;
       }
-      if (!resolvedThumb && firstItem.productImageUrl) resolvedThumb = firstItem.productImageUrl;
-      if (!resolvedThumb && firstItem.closetItem?.imageUrl) resolvedThumb = firstItem.closetItem.imageUrl;
     }
 
     return { ...s, resolvedThumb };
@@ -304,8 +319,7 @@ export default function MyNaiaOverview() {
 
         {/* Welcome */}
         <section>
-          <div className="mn-eyebrow">Welcome back</div>
-          <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, marginTop: "0.75rem", fontSize: "clamp(2.25rem,6vw,3.75rem)", lineHeight: 0.95, letterSpacing: "0.02em", textTransform: "uppercase" }}>
+          <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, fontSize: "clamp(2.25rem,6vw,3.75rem)", lineHeight: 0.95, letterSpacing: "0.02em", textTransform: "uppercase" }}>
             <span style={{ fontFamily: "var(--ff-editorial)", fontStyle: "italic", color: "var(--lipstick)", textTransform: "none", fontWeight: 400 }}>
               {firstName ? `Welcome, ${firstName}.` : "Welcome."}
             </span>
@@ -610,33 +624,35 @@ export default function MyNaiaOverview() {
             {buyOrSkipHistory.length > 0 ? (
               <ul style={{ listStyle: "none", padding: 0, margin: 0, borderTop: "1px solid var(--fg-12)" }}>
                 {buyOrSkipHistory.map((d) => (
-                  <li key={d.id} style={{ display: "flex", gap: "1rem", padding: "1.25rem 0", borderBottom: "1px solid var(--fg-12)", alignItems: "center" }}>
-                    {d.itemImageUrl ? (
-                      <img
-                        src={d.itemImageUrl}
-                        alt={d.displayName ?? d.category ?? "Item"}
-                        style={{ width: "56px", height: "56px", objectFit: "cover", flexShrink: 0, border: "1px solid var(--fg-10)" }}
-                      />
-                    ) : (
-                      <div style={{ width: "56px", height: "56px", flexShrink: 0, background: "color-mix(in oklab, var(--bg) 88%, black)", border: "1px solid var(--fg-10)", display: "grid", placeItems: "center" }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3 }} aria-hidden="true">
-                          <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" />
-                        </svg>
+                  <li key={d.id} style={{ borderBottom: "1px solid var(--fg-12)" }}>
+                    <Link to={`/buyskip/${d.id}`} style={{ display: "flex", gap: "1rem", padding: "1.25rem 0", alignItems: "center", textDecoration: "none", color: "inherit" }}>
+                      {d.itemImageUrl ? (
+                        <img
+                          src={d.itemImageUrl}
+                          alt={d.displayName ?? d.category ?? "Item"}
+                          style={{ width: "56px", height: "56px", objectFit: "cover", flexShrink: 0, border: "1px solid var(--fg-10)" }}
+                        />
+                      ) : (
+                        <div style={{ width: "56px", height: "56px", flexShrink: 0, background: "color-mix(in oklab, var(--bg) 88%, black)", border: "1px solid var(--fg-10)", display: "grid", placeItems: "center" }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3 }} aria-hidden="true">
+                            <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" />
+                          </svg>
+                        </div>
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: "0.95rem", lineHeight: 1.4, color: "var(--fg-90, var(--fg))", fontWeight: 400 }}>
+                          {d.displayName ?? (d.category ? d.category : "Item")}
+                        </div>
+                        <div style={{ marginTop: "0.25rem", fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.28em", color: "var(--fg-55)" }}>{fmtDate(d.createdAt)}</div>
                       </div>
-                    )}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: "0.95rem", lineHeight: 1.4, color: "var(--fg-90, var(--fg))", fontWeight: 400 }}>
-                        {d.displayName ?? (d.category ? d.category : "Item")}
+                      <div style={{
+                        fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.28em", flexShrink: 0,
+                        color: d.verdict === "BUY" ? "var(--lipstick)" : d.verdict === "SKIP" ? "var(--fg-55)" : "var(--fg-70)",
+                        fontWeight: 600,
+                      }}>
+                        {VERDICT_LABELS[d.verdict] ?? d.verdict}
                       </div>
-                      <div style={{ marginTop: "0.25rem", fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.28em", color: "var(--fg-55)" }}>{fmtDate(d.createdAt)}</div>
-                    </div>
-                    <div style={{
-                      fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.28em", flexShrink: 0,
-                      color: d.verdict === "BUY" ? "var(--lipstick)" : d.verdict === "SKIP" ? "var(--fg-55)" : "var(--fg-70)",
-                      fontWeight: 600,
-                    }}>
-                      {VERDICT_LABELS[d.verdict] ?? d.verdict}
-                    </div>
+                    </Link>
                   </li>
                 ))}
               </ul>
@@ -653,7 +669,6 @@ export default function MyNaiaOverview() {
         <section className="mn-section">
           <div className="mn-section-head">
             <div className="mn-eyebrow">Plan &amp; Usage</div>
-            <Link to="/my-naia/plan-usage" className="mn-see-link">Manage Plan</Link>
           </div>
           <div className="mn-section-body">
             <div style={{ display: "grid", gap: "1.5rem", gridTemplateColumns: "repeat(auto-fill, minmax(10rem, 1fr))" }}>
