@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from "crypto";
 import prisma from "../db.server";
 import { emitClosetItemAdded, recordJourneyEvent } from "../lib/ai/journey-events.server";
+import { extractStyleMeEvidence, extractPostWearEvidence, extractClosetEvidence, extractBuySkipEvidence } from "../lib/ai/taste-extraction.server";
+import { writeSourceEvidence, reconcileObservations } from "../lib/ai/taste-reconcile.server";
 
 // Staging-only fixture and diagnostic endpoint.
 // Requires STAGING_SEED_SECRET env var + matching x-seed-secret header.
@@ -116,6 +118,109 @@ export async function action({ request }) {
 
   const act = body?._action ?? "createCustomer";
 
+  // ── backfillTaste — accepts STAGING_FIX_SECRET or STAGING_SEED_SECRET ──────
+  // Idempotent backfill of TasteEvidence + StyleTendency for one customer.
+  // Returns detailed counts and tendency states.
+  if (act === "backfillTaste" || act === "tendencyReport") {
+    const { fixSecret, customerId, shopifyCustomerId, email } = body ?? {};
+    const validFix =
+      (process.env.STAGING_FIX_SECRET && fixSecret === process.env.STAGING_FIX_SECRET) ||
+      (process.env.STAGING_SEED_SECRET && fixSecret === process.env.STAGING_SEED_SECRET);
+    if (!validFix) return new Response("Forbidden", { status: 403 });
+
+    // Resolve customer
+    let customer = null;
+    if (customerId) {
+      customer = await prisma.customer.findUnique({ where: { id: String(customerId) }, select: { id: true, shopifyCustomerId: true, email: true } });
+    } else if (shopifyCustomerId) {
+      customer = await prisma.customer.findUnique({ where: { shopifyCustomerId: String(shopifyCustomerId) }, select: { id: true, shopifyCustomerId: true, email: true } });
+    } else if (email) {
+      customer = await prisma.customer.findFirst({ where: { email: String(email) }, select: { id: true, shopifyCustomerId: true, email: true } });
+    }
+    if (!customer) return Response.json({ error: "customer not found" }, { status: 404 });
+    const cid = customer.id;
+
+    if (act === "tendencyReport") {
+      // Return current tendency states without running backfill
+      const tendencies = await prisma.styleTendency.findMany({
+        where: { customerId: cid },
+        orderBy: [{ observationKey: "asc" }, { generation: "desc" }],
+        select: { observationKey: true, dimension: true, value: true, generation: true, state: true, wSupport: true, wContradict: true, wNet: true, effectiveSupport: true, distinctRecords: true, distinctSources: true, dominantPolarity: true, observationFamily: true, claimText: true, customerFeedback: true, customerFeedbackAt: true },
+      });
+      const evidenceCounts = await prisma.tasteEvidence.groupBy({ by: ["source"], where: { customerId: cid }, _count: { id: true } });
+      return Response.json({ customerId: cid, tendencies, evidenceBySource: Object.fromEntries(evidenceCounts.map(r => [r.source, r._count.id])) });
+    }
+
+    // ── backfillTaste ─────────────────────────────────────────────────────────
+    const report = { styleme: 0, postwear: 0, closet: 0, buyskip: 0, errors: [] };
+
+    // StyleMe outcomes
+    const outcomes = await prisma.styleMeOutcome.findMany({
+      where: { customerId: cid },
+      include: { suggestion: { include: { session: { select: { currentMood: true, occasion: true } } } } },
+    });
+    for (const outcome of outcomes) {
+      try {
+        const rows = extractStyleMeEvidence(outcome, { currentMood: outcome.suggestion?.session?.currentMood ?? null, occasion: outcome.suggestion?.session?.occasion ?? null });
+        await writeSourceEvidence(cid, "STYLEME_OUTCOME", outcome.id, rows);
+        report.styleme += rows.length;
+      } catch (e) { report.errors.push(`styleme:${outcome.id}:${e.message?.slice(0, 60)}`); }
+    }
+
+    // PostWear reviews
+    const reviews = await prisma.postOutfitReview.findMany({
+      where: { customerId: cid },
+      include: { session: { select: { currentMood: true, occasion: true } } },
+    });
+    for (const review of reviews) {
+      try {
+        const rows = extractPostWearEvidence(review, { currentMood: review.session?.currentMood ?? null, occasion: review.session?.occasion ?? null });
+        await writeSourceEvidence(cid, "POST_OUTFIT_REVIEW", review.id, rows);
+        report.postwear += rows.length;
+      } catch (e) { report.errors.push(`postwear:${review.id}:${e.message?.slice(0, 60)}`); }
+    }
+
+    // Closet items
+    const items = await prisma.closetItem.findMany({
+      where: { customerId: cid },
+      select: { id: true, customerId: true, category: true, garmentRelationships: true, updatedAt: true },
+    });
+    for (const item of items) {
+      try {
+        const rows = extractClosetEvidence(item);
+        await writeSourceEvidence(cid, "CLOSET_RELATIONSHIP", item.id, rows);
+        report.closet += rows.length;
+      } catch (e) { report.errors.push(`closet:${item.id}:${e.message?.slice(0, 60)}`); }
+    }
+
+    // BuySkip outcomes
+    const analyses = await prisma.buyOrSkipAnalysis.findMany({
+      where: { customerId: cid },
+      include: { outcomes: { select: { id: true, postPurchaseOutcome: true, createdAt: true } } },
+    });
+    for (const analysis of analyses) {
+      for (const outcome of analysis.outcomes) {
+        try {
+          const rows = extractBuySkipEvidence({ id: outcome.id, customerId: cid, postPurchaseOutcome: outcome.postPurchaseOutcome, category: analysis.category, createdAt: outcome.createdAt });
+          await writeSourceEvidence(cid, "BUYSKIP_OUTCOME", outcome.id, rows);
+          report.buyskip += rows.length;
+        } catch (e) { report.errors.push(`buyskip:${outcome.id}:${e.message?.slice(0, 60)}`); }
+      }
+    }
+
+    // Final reconcile
+    await reconcileObservations(cid);
+
+    // Read back tendencies
+    const tendencies = await prisma.styleTendency.findMany({
+      where: { customerId: cid },
+      orderBy: [{ observationKey: "asc" }, { generation: "desc" }],
+      select: { observationKey: true, dimension: true, value: true, generation: true, state: true, wSupport: true, wContradict: true, wNet: true, effectiveSupport: true, distinctRecords: true, distinctSources: true, dominantPolarity: true, observationFamily: true, claimText: true, customerFeedback: true, customerFeedbackAt: true },
+    });
+    const evidenceCounts = await prisma.tasteEvidence.groupBy({ by: ["source"], where: { customerId: cid }, _count: { id: true } });
+
+    return Response.json({ ok: true, customerId: cid, evidenceWritten: report, evidenceBySource: Object.fromEntries(evidenceCounts.map(r => [r.source, r._count.id])), tendencies });
+  }
 
   // All other actions require x-seed-secret
   const secret = request.headers.get("x-seed-secret");
