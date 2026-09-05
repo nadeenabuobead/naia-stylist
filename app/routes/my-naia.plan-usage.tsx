@@ -7,7 +7,6 @@ import { useLoaderData, Link } from "react-router";
 import type { LoaderFunctionArgs, LinksFunction } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { getEntitlementSummary } from "~/lib/plan/entitlement.server";
-import { formatResetDate, getBillingWindow } from "~/lib/plan/billing-window.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
@@ -38,9 +37,8 @@ function PlanBadge({ plan }: { plan: "FREE" | "PAID" }) {
   );
 }
 
-function UsageBar({ used, limit }: { used: number; limit: number }) {
+function UsageBar({ used, limit, exhausted }: { used: number; limit: number; exhausted: boolean }) {
   const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
-  const atLimit = used >= limit;
   return (
     <div style={{ marginTop: "0.5rem" }}>
       <div style={{
@@ -52,7 +50,7 @@ function UsageBar({ used, limit }: { used: number; limit: number }) {
         <div style={{
           height: "100%",
           width: `${pct}%`,
-          background: atLimit ? "var(--c-alert, #c0392b)" : "var(--fg-55)",
+          background: exhausted ? "var(--c-alert, #c0392b)" : "var(--fg-55)",
           borderRadius: "2px",
           transition: "width 0.3s ease",
         }} />
@@ -76,24 +74,30 @@ function MetricRow({ label, value, sub, bar }: {
   label: string;
   value: string;
   sub?: string;
-  bar?: { used: number; limit: number };
+  bar?: { used: number; limit: number; exhausted: boolean };
 }) {
   return (
-    <div style={{ paddingBottom: "1.25rem", borderBottom: "1px solid var(--fg-08, var(--fg-10))" }}>
+    <div style={{ paddingBottom: "1rem", borderBottom: "1px solid var(--fg-08, var(--fg-10))" }}>
       <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg-55)" }}>
         {label}
       </div>
-      <div style={{ marginTop: "0.4rem", fontFamily: "var(--ff-display)", fontWeight: 300, fontSize: "1.35rem", letterSpacing: "0.02em", textTransform: "uppercase", color: "var(--fg)" }}>
+      <div style={{ marginTop: "0.35rem", fontFamily: "var(--ff-display)", fontWeight: 300, fontSize: "1.25rem", letterSpacing: "0.02em", textTransform: "uppercase", color: "var(--fg)" }}>
         {value}
       </div>
       {sub && (
-        <div style={{ marginTop: "0.3rem", fontSize: "0.68rem", color: "var(--fg-55)", letterSpacing: "0.05em" }}>
+        <div style={{ marginTop: "0.25rem", fontSize: "0.68rem", color: "var(--fg-55)", letterSpacing: "0.05em" }}>
           {sub}
         </div>
       )}
-      {bar && <UsageBar used={bar.used} limit={bar.limit} />}
+      {bar && <UsageBar used={bar.used} limit={bar.limit} exhausted={bar.exhausted} />}
     </div>
   );
+}
+
+// Returns graceful copy when historical usage exceeds the current plan limit.
+function monthlyUsageValue(used: number, limit: number, unit: string): string {
+  if (used > limit) return `${used} ${unit} used · ${limit} included this month`;
+  return `${used} of ${limit} used`;
 }
 
 // ── Page component ─────────────────────────────────────────────────────────────
@@ -103,7 +107,8 @@ export default function PlanUsagePage() {
   const { plan, styleMe, buySkip, vto, closet, personalisedTrend, windowLabel } = summary;
 
   // ── StyleMe copy ──────────────────────────────────────────────────────────
-  const styleMeValue = `${styleMe.monthlyUsed} of ${styleMe.monthlyLimit} used`;
+  const styleMeValue = monthlyUsageValue(styleMe.monthlyUsed, styleMe.monthlyLimit, "sessions");
+  const styleMeExhausted = styleMe.monthlyUsed >= styleMe.monthlyLimit;
   const styleMeSub = styleMe.welcomeAvailable
     ? `Welcome session available · Resets ${styleMe.resetDate}`
     : `Resets ${styleMe.resetDate}`;
@@ -111,29 +116,52 @@ export default function PlanUsagePage() {
   // ── Buy or Skip copy ──────────────────────────────────────────────────────
   let buySkipValue: string;
   let buySkipSub: string | undefined;
+  let buySkipBar: { used: number; limit: number; exhausted: boolean } | undefined;
   if (plan === "FREE") {
-    buySkipValue = buySkip.introAvailable ? "1 introductory check available" : "Introductory check used";
-    buySkipSub = undefined;
+    buySkipValue = buySkip.introAvailable
+      ? "1 intro check available"
+      : "Intro check used";
+    buySkipSub = "One-time · not part of your monthly allowance";
+    buySkipBar = undefined;
   } else {
-    buySkipValue = `${buySkip.monthlyUsed} of ${buySkip.monthlyLimit} used`;
+    const bsUsed = buySkip.monthlyUsed ?? 0;
+    const bsLimit = buySkip.monthlyLimit ?? 0;
+    buySkipValue = monthlyUsageValue(bsUsed, bsLimit, "checks");
     buySkipSub = `Resets ${buySkip.resetDate}`;
+    buySkipBar = { used: bsUsed, limit: bsLimit, exhausted: bsUsed >= bsLimit };
   }
 
   // ── VTO copy ──────────────────────────────────────────────────────────────
   const vtoUsedDisplay = vto.monthlyCompleted;
-  const vtoInFlightNote = vto.monthlyInFlight > 0 ? ` · ${vto.monthlyInFlight} generating` : "";
-  const vtoValue = `${vtoUsedDisplay} of ${vto.monthlyLimit} used`;
-  const vtoSub = `${vtoInFlightNote ? vtoInFlightNote.replace(" · ", "") + " · " : ""}Resets ${vto.resetDate}`.trim().replace(/^· /, "");
+  const vtoExhausted = vtoUsedDisplay >= vto.monthlyLimit;
+  const vtoValue = monthlyUsageValue(vtoUsedDisplay, vto.monthlyLimit, "try-ons");
+  const inFlightNote = vto.monthlyInFlight > 0 ? `${vto.monthlyInFlight} generating · ` : "";
+  const vtoSub = `${inFlightNote}Resets ${vto.resetDate}`;
 
   // ── Closet copy ───────────────────────────────────────────────────────────
-  const closetValue = `${closet.currentCount} of ${closet.limit} items`;
+  const closetExhausted = closet.currentCount >= closet.limit;
+  const closetValue = closet.currentCount > closet.limit
+    ? `${closet.currentCount} items · ${closet.limit} included in plan`
+    : `${closet.currentCount} of ${closet.limit} items`;
   const closetSub = closet.atCapacity ? "Closet full — remove items to add more" : undefined;
 
   // ── Trend Edit copy ───────────────────────────────────────────────────────
-  const trendValue = personalisedTrend.monthlyLimit > 0 ? "1 included per month" : "Not included in your plan";
+  const trendValue = personalisedTrend.monthlyLimit > 0
+    ? "1 included per month"
+    : "Not included in your plan";
 
   return (
     <MyNaiaLayout>
+      <Link to="/my-naia" className="sp-back">← Overview</Link>
+
+      <div className="sp-shell">
+        <div className="sp-shell-eyebrow">Your Account</div>
+        <h1 className="sp-shell-title">Plan &amp; <span className="sp-shell-accent">usage.</span></h1>
+        <p className="sp-shell-desc">
+          See what&rsquo;s included in your plan and where you are this month.
+        </p>
+      </div>
+
       <div className="mn-content">
 
         <Section title="Your Plan">
@@ -146,37 +174,29 @@ export default function PlanUsagePage() {
         </Section>
 
         <Section title="Usage This Month">
-          <div style={{ display: "flex", flexDirection: "column", gap: "0" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
             <MetricRow
               label="StyleMe"
               value={styleMeValue}
               sub={styleMeSub}
-              bar={{ used: styleMe.monthlyUsed, limit: styleMe.monthlyLimit }}
+              bar={{ used: styleMe.monthlyUsed, limit: styleMe.monthlyLimit, exhausted: styleMeExhausted }}
             />
-            <div style={{ paddingTop: "1.25rem" }}>
-              <MetricRow
-                label="Buy or Skip"
-                value={buySkipValue}
-                sub={buySkipSub}
-                bar={plan === "PAID" && buySkip.monthlyUsed != null && buySkip.monthlyLimit != null
-                  ? { used: buySkip.monthlyUsed, limit: buySkip.monthlyLimit }
-                  : undefined}
-              />
-            </div>
-            <div style={{ paddingTop: "1.25rem" }}>
-              <MetricRow
-                label="Virtual Try-On"
-                value={vtoValue}
-                sub={vtoSub || undefined}
-                bar={{ used: vtoUsedDisplay, limit: vto.monthlyLimit }}
-              />
-            </div>
-            <div style={{ paddingTop: "1.25rem" }}>
-              <MetricRow
-                label="Personalised Trend Edit"
-                value={trendValue}
-              />
-            </div>
+            <MetricRow
+              label="Buy or Skip"
+              value={buySkipValue}
+              sub={buySkipSub}
+              bar={buySkipBar}
+            />
+            <MetricRow
+              label="Virtual Try-On"
+              value={vtoValue}
+              sub={vtoSub}
+              bar={{ used: vtoUsedDisplay, limit: vto.monthlyLimit, exhausted: vtoExhausted }}
+            />
+            <MetricRow
+              label="Personalised Trend Edit"
+              value={trendValue}
+            />
           </div>
         </Section>
 
@@ -185,10 +205,10 @@ export default function PlanUsagePage() {
             label="Items"
             value={closetValue}
             sub={closetSub}
-            bar={{ used: closet.currentCount, limit: closet.limit }}
+            bar={{ used: closet.currentCount, limit: closet.limit, exhausted: closetExhausted }}
           />
           {closet.atCapacity && (
-            <div style={{ marginTop: "1rem" }}>
+            <div style={{ marginTop: "0.75rem" }}>
               <Link to="/closet" style={{ fontSize: "0.72rem", letterSpacing: "0.1em", textTransform: "uppercase", textDecoration: "underline", color: "var(--fg-55)" }}>
                 Manage Closet
               </Link>
