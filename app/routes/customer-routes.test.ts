@@ -1197,10 +1197,11 @@ describe("M — Saved navigation removed; StyleMe VIEW SAVED LOOKS; save fix; BO
     );
   });
 
-  it("MyNaiaNavigation.tsx ACCOUNT group still contains MY nAia MODEL, ORDERS, SETTINGS & PRIVACY", () => {
+  it("MyNaiaNavigation.tsx ACCOUNT group contains MY nAia MODEL, PLAN & USAGE, SETTINGS & PRIVACY", () => {
     const src = route("../components/my-naia/MyNaiaNavigation.tsx");
     assert.ok(src.includes('"MY nAia MODEL"'), "MY nAia MODEL remains");
-    assert.ok(src.includes('"ORDERS"'), "ORDERS remains");
+    assert.ok(src.includes('"PLAN & USAGE"'), "PLAN & USAGE added under ACCOUNT");
+    assert.ok(src.includes('"/my-naia/plan-usage"'), "PLAN & USAGE links to /my-naia/plan-usage");
     assert.ok(src.includes('"SETTINGS & PRIVACY"'), "SETTINGS & PRIVACY remains");
   });
 
