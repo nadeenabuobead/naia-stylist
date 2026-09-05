@@ -1182,6 +1182,145 @@ describe("L — Saved V1: tabs removed, saved looks only", () => {
   });
 });
 
+// ── N — nAia StyleMe Architecture: Closet-only contract + legacy detection ────
+//
+// The current nAia StyleMe architecture is Closet-only:
+//   - SavedLookItem.closetItemId is set for every item; shopifyProductId is null.
+//   - Legacy NADINE-inclusive looks have shopifyProductId on one or more items.
+//   - The audit script (scripts/audit-legacy-saved-looks.ts) identifies and
+//     removes legacy staging records without touching production data.
+
+describe("N — nAia Closet-only architecture: save contract + legacy detection", () => {
+  it("result.tsx intent=save maps closetItemId from OutfitItem to SavedLookItem", () => {
+    const src = route("style-me/result.tsx");
+    assert.ok(
+      src.includes("closetItemId: item.closetItemId || null"),
+      "closetItemId copied from OutfitItem to SavedLookItem"
+    );
+  });
+
+  it("result.tsx intent=save maps shopifyProductId (null for Closet-only items)", () => {
+    const src = route("style-me/result.tsx");
+    assert.ok(
+      src.includes("shopifyProductId: item.shopifyProductId || null"),
+      "shopifyProductId copied — null for current nAia closet items"
+    );
+  });
+
+  it("result.tsx intent=save reads items from suggestion.items (OutfitSuggestion)", () => {
+    const src = route("style-me/result.tsx");
+    // The save path must not pull items from external sources — only the
+    // suggestion's own items (already validated by ownership check on the session).
+    assert.ok(
+      src.includes("suggestion.items.map"),
+      "save maps from suggestion.items, not from external sources"
+    );
+  });
+
+  it("my-naia.saved.tsx loader selects closetItem with imagePublicId + imageFormat for private image resolution", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(src.includes("imagePublicId: true"), "imagePublicId selected on closetItem");
+    assert.ok(src.includes("imageFormat: true"), "imageFormat selected on closetItem");
+    assert.ok(src.includes("imageUrl: true"), "imageUrl selected (legacy fallback)");
+  });
+
+  it("my-naia.saved.tsx private Cloudinary path guards on closetItemId before signing", () => {
+    const src = route("my-naia.saved.tsx");
+    // The signed-URL path must be gated on closetItemId being present — only closet
+    // items have Cloudinary-managed images; NADINE catalogue items use productImageUrl.
+    assert.ok(
+      src.includes("item.closetItemId && item.closetItem"),
+      "signed URL path gated on closetItemId + closetItem presence"
+    );
+    assert.ok(
+      src.includes("buildPrivateDownloadUrl"),
+      "buildPrivateDownloadUrl called for closet items"
+    );
+  });
+
+  it("my-naia.saved.tsx exposes shopifyProductId on items — enables legacy detection in UI", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(
+      src.includes("shopifyProductId: item.shopifyProductId"),
+      "shopifyProductId exposed on serialised items"
+    );
+  });
+
+  it("my-naia.saved.tsx productImageUrl stage-1 resolution fires before closet signed-URL path", () => {
+    const src = route("my-naia.saved.tsx");
+    const productUrlIdx = src.indexOf("item.productImageUrl ?? null");
+    const closetSignIdx = src.indexOf("item.closetItemId && item.closetItem");
+    assert.ok(productUrlIdx > 0, "productImageUrl ?? null present in loader");
+    assert.ok(closetSignIdx > 0, "closetItemId gated path present");
+    assert.ok(
+      productUrlIdx < closetSignIdx,
+      "productImageUrl resolution precedes closet signed-URL path (stage 1 → stage 2)"
+    );
+  });
+
+  // ── Audit script contract ─────────────────────────────────────────────────
+
+  it("audit-legacy-saved-looks.ts exists as a standalone script (not an app route)", () => {
+    const scriptPath = join(ROOT, "scripts/audit-legacy-saved-looks.ts");
+    assert.ok(existsSync(scriptPath), "audit script present at scripts/audit-legacy-saved-looks.ts");
+    const src = readFileSync(scriptPath, "utf8");
+    // Must NOT be an HTTP route — no loader/action exports
+    assert.ok(!src.includes("export async function loader"), "no route loader export");
+    assert.ok(!src.includes("export async function action"), "no route action export");
+  });
+
+  it("audit script uses shopifyProductId as the discriminating field for legacy detection", () => {
+    const src = readFileSync(join(ROOT, "scripts/audit-legacy-saved-looks.ts"), "utf8");
+    assert.ok(
+      src.includes("shopifyProductId !== null"),
+      "legacy check: shopifyProductId !== null"
+    );
+    assert.ok(
+      src.includes("shopifyProductId"),
+      "shopifyProductId referenced as discriminating field"
+    );
+  });
+
+  it("audit script does not issue a global deleteMany without a where clause", () => {
+    const src = readFileSync(join(ROOT, "scripts/audit-legacy-saved-looks.ts"), "utf8");
+    // Every deleteMany must be scoped to a where: { ... in: ids } clause.
+    assert.ok(
+      !src.includes("deleteMany()"),
+      "no unscoped deleteMany() calls"
+    );
+    assert.ok(
+      src.includes("where: { savedLookId: { in: ids } }"),
+      "item deleteMany scoped to confirmed legacy ids"
+    );
+    assert.ok(
+      src.includes("where: { id: { in: ids } }"),
+      "look deleteMany scoped to confirmed legacy ids"
+    );
+  });
+
+  it("audit script has --delete flag; dry-run is the default", () => {
+    const src = readFileSync(join(ROOT, "scripts/audit-legacy-saved-looks.ts"), "utf8");
+    assert.ok(src.includes("--delete"), "--delete flag present");
+    assert.ok(
+      src.includes('!process.argv.includes("--delete")'),
+      "DRY_RUN defaults to true when --delete is absent"
+    );
+  });
+
+  it("audit script never touches looks where ALL items have closetItemId (current architecture)", () => {
+    const src = readFileSync(join(ROOT, "scripts/audit-legacy-saved-looks.ts"), "utf8");
+    // Must push to `current` when hasNadineItem is false and hasClosetItem is true.
+    assert.ok(src.includes("current.push(look)"), "current-architecture looks preserved");
+    assert.ok(src.includes("legacy.push(look)"), "legacy looks separated for deletion");
+    // The deletion only touches legacy[] — not current[]
+    const deleteBlock = src.slice(src.indexOf("if (!DRY_RUN"));
+    assert.ok(
+      !deleteBlock.includes("current"),
+      "delete block does not reference current-architecture looks"
+    );
+  });
+});
+
 // ── M — Navigation, StyleMe link, save-action fix, BOS image fix ──────────────
 
 describe("M — Saved navigation removed; StyleMe VIEW SAVED LOOKS; save fix; BOS images", () => {
