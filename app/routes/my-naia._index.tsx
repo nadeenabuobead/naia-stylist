@@ -352,7 +352,6 @@ function buildOverviewPlanCards(e: EntitlementSummary): { label: string; value: 
     { label: "Buy or Skip", value: buySkipValue },
     { label: "Virtual Try-On", value: vtoValue },
     { label: "My Closet", value: closetValue },
-    { label: "Personalised Trend Edit", value: trendValue },
   ];
 }
 
@@ -646,7 +645,7 @@ export default function MyNaiaOverview() {
               </p>
             ) : (
               <p className="mn-state-note">
-                Rate your looks and nAia will begin sharing what it notices as patterns form.
+                Keep reviewing your looks and telling nAia what worked. As patterns become clear, nAia will begin sharing what it notices.
               </p>
             )}
           </div>

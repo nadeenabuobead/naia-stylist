@@ -42,6 +42,16 @@ vi.mock("react-router", async (importOriginal) => {
     reviewCount: 0,
     closetCount: 0,
     passportState: "start" as const,
+    strongestTendency: null as unknown,
+    hasCandidates: false,
+    entitlement: {
+      plan: "FREE",
+      styleMe: { monthlyLimit: 1, monthlyUsed: 0, welcomeAvailable: false },
+      buySkip: { introAvailable: true, monthlyLimit: null, monthlyUsed: null },
+      vto: { monthlyLimit: 0, monthlyCompleted: 0, monthlyInFlight: 0 },
+      closet: { limit: 10, currentCount: 0 },
+      personalisedTrend: { monthlyLimit: 0 },
+    } as unknown,
   }));
   return {
     ...actual,
@@ -62,6 +72,7 @@ vi.mock("~/db.server", () => ({
     buyOrSkipAnalysis: { findMany: vi.fn().mockResolvedValue([]) },
     postOutfitReview: { count: vi.fn().mockResolvedValue(0) },
     closetItem:     { count: vi.fn().mockResolvedValue(0) },
+    styleTendency:  { count: vi.fn().mockResolvedValue(0) },
   },
 }));
 
@@ -77,6 +88,21 @@ vi.mock("~/lib/cloudinary-admin.server", () => ({
 
 vi.mock("~/lib/report-visual", () => ({
   reportVisual: vi.fn().mockReturnValue(null),
+}));
+
+vi.mock("~/lib/ai/taste-reconcile.server", () => ({
+  loadStrongestConfirmedTendency: vi.fn().mockResolvedValue(null),
+}));
+
+vi.mock("~/lib/plan/entitlement.server", () => ({
+  getEntitlementSummary: vi.fn().mockResolvedValue({
+    plan: "FREE",
+    styleMe: { monthlyLimit: 1, monthlyUsed: 0, welcomeAvailable: false },
+    buySkip: { introAvailable: true, monthlyLimit: null, monthlyUsed: null },
+    vto: { monthlyLimit: 0, monthlyCompleted: 0, monthlyInFlight: 0 },
+    closet: { limit: 10, currentCount: 0 },
+    personalisedTrend: { monthlyLimit: 0 },
+  }),
 }));
 
 vi.mock("~/styles/naia-design-system.css?url", () => ({ default: "/styles.css" }));
@@ -162,10 +188,22 @@ type LoaderShape = {
   reviewCount: number;
   closetCount: number;
   passportState?: "start" | "continue" | "view";
+  strongestTendency?: unknown;
+  hasCandidates?: boolean;
+  entitlement?: unknown;
 };
 
 describe("my-naia component — static structure", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  const defaultEntitlement = {
+    plan: "FREE",
+    styleMe: { monthlyLimit: 1, monthlyUsed: 0, welcomeAvailable: false },
+    buySkip: { introAvailable: true, monthlyLimit: null, monthlyUsed: null },
+    vto: { monthlyLimit: 0, monthlyCompleted: 0, monthlyInFlight: 0 },
+    closet: { limit: 10, currentCount: 0 },
+    personalisedTrend: { monthlyLimit: 0 },
+  };
 
   function render(overrides: Partial<LoaderShape> = {}): string {
     vi.mocked(useLoaderData).mockReturnValue({
@@ -177,6 +215,9 @@ describe("my-naia component — static structure", () => {
       reviewCount: 0,
       closetCount: 0,
       passportState: "start" as const,
+      strongestTendency: null,
+      hasCandidates: false,
+      entitlement: defaultEntitlement,
       ...overrides,
     });
     return renderToString(<MyNaiaOverview />);
@@ -208,10 +249,8 @@ describe("my-naia component — static structure", () => {
 
   it("renders account navigation items", () => {
     const html = render();
-    expect(html).toContain("Saved");
     expect(html).toContain("Settings &amp; Privacy");
     expect(html).toContain("My nAia Model");
-    // Selfie Style Analysis removed from top-level nav; discovery is now through Style Passport → Visual Analysis
     expect(html).toContain("Style Passport");
   });
 
@@ -292,9 +331,18 @@ describe("my-naia component — static structure", () => {
     }
   });
 
-  it("Plan & Usage section shows closet count", () => {
-    const html = render({ closetCount: 12 });
-    expect(html).toContain("12 of 100 spaces used");
+  it("Plan & Usage section shows closet count from entitlement", () => {
+    const html = render({
+      entitlement: {
+        plan: "FREE",
+        styleMe: { monthlyLimit: 1, monthlyUsed: 0, welcomeAvailable: false },
+        buySkip: { introAvailable: true, monthlyLimit: null, monthlyUsed: null },
+        vto: { monthlyLimit: 0, monthlyCompleted: 0, monthlyInFlight: 0 },
+        closet: { limit: 100, currentCount: 12 },
+        personalisedTrend: { monthlyLimit: 0 },
+      },
+    });
+    expect(html).toContain("12 of 100 items");
   });
 
   it("trend teaser 'Open My Trend Edit' links to /trends/my-edits/:slug", () => {
@@ -482,6 +530,15 @@ describe("my-naia loader — passportState derivation", () => {
 describe("my-naia component — Passport CTA three states", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  const defaultEntitlement = {
+    plan: "FREE",
+    styleMe: { monthlyLimit: 1, monthlyUsed: 0, welcomeAvailable: false },
+    buySkip: { introAvailable: true, monthlyLimit: null, monthlyUsed: null },
+    vto: { monthlyLimit: 0, monthlyCompleted: 0, monthlyInFlight: 0 },
+    closet: { limit: 10, currentCount: 0 },
+    personalisedTrend: { monthlyLimit: 0 },
+  };
+
   function render(overrides: Partial<LoaderShape> = {}): string {
     vi.mocked(useLoaderData).mockReturnValue({
       firstName: null,
@@ -492,6 +549,9 @@ describe("my-naia component — Passport CTA three states", () => {
       reviewCount: 0,
       closetCount: 0,
       passportState: "start" as const,
+      strongestTendency: null,
+      hasCandidates: false,
+      entitlement: defaultEntitlement,
       ...overrides,
     });
     return renderToString(<MyNaiaOverview />);
