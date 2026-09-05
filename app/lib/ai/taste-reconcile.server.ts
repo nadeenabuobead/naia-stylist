@@ -25,6 +25,7 @@ import {
   REEMERGENCE_DISTINCT_RECORDS,
   REEMERGENCE_WNET_MINIMUM,
 } from "./taste-contract.js";
+import { applyFeedbackWithDeps } from "./taste-feedback-engine.js";
 
 // ── Write source evidence (delete-and-reinsert + reconcile) ───────────────────
 
@@ -406,38 +407,16 @@ export async function applyTasteObservationFeedback(
   tendencyId: string,
   feedback: "accurate" | "not-quite",
 ): Promise<{ ok: boolean; errorCode?: string }> {
-  const tendency = await prisma.styleTendency.findFirst({
-    where: { id: tendencyId, customerId },
-  });
-
-  if (!tendency) return { ok: false, errorCode: "NOT_FOUND" };
-  if (tendency.state === "REJECTED") return { ok: false, errorCode: "ALREADY_REJECTED" };
-
-  if (feedback === "not-quite") {
-    await prisma.styleTendency.update({
-      where: { id: tendencyId },
-      data: {
-        state:             "REJECTED",
-        customerFeedback:  "not-quite",
-        customerFeedbackAt: new Date(),
-        updatedAt:         new Date(),
-      },
-    });
-    // Re-run reconciliation to update post-correction tracking
-    await reconcileObservations(customerId);
-  } else {
-    // accurate — store feedback but don't change state
-    await prisma.styleTendency.update({
-      where: { id: tendencyId },
-      data: {
-        customerFeedback:  "accurate",
-        customerFeedbackAt: new Date(),
-        updatedAt:         new Date(),
-      },
-    });
-  }
-
-  return { ok: true };
+  return applyFeedbackWithDeps(
+    {
+      findTendency:  (id, cid) => prisma.styleTendency.findFirst({ where: { id, customerId: cid } }),
+      writeFeedback: (id, data) => prisma.styleTendency.update({ where: { id }, data }).then(() => undefined),
+      runReconcile:  (cid) => reconcileObservations(cid),
+    },
+    customerId,
+    tendencyId,
+    feedback,
+  );
 }
 
 // ── Load CONFIRMED observations for overview ───────────────────────────────────
