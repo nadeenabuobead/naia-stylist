@@ -100,5 +100,6 @@ export default [
   route("api/styleme-outcome", "routes/api.styleme-outcome.tsx"),
   // Phase 5D — Taste & Evidence Layer V1
   route("api/taste-observation-feedback", "routes/api.taste-observation-feedback.tsx"),
+  route("api/taste-admin", "routes/api.taste-admin.jsx"),
 
 ] satisfies RouteConfig;
