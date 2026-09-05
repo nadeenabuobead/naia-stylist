@@ -127,15 +127,13 @@ export default function WhatNaiaNotices() {
           What nAia Is Noticing
         </h1>
 
-        <p style={{ marginBottom: "32px", lineHeight: 1.6, opacity: 0.75, maxWidth: "560px" }}>
-          Your Style Passport captures what you've told nAia about yourself — your preferences,
-          your lifestyle, the things you already know.
+        <p style={{ marginBottom: "6px", lineHeight: 1.6, opacity: 0.75, maxWidth: "560px" }}>
+          Your Style Passport captures what you already know about your style. This page is where
+          nAia shares patterns it learns from your reviews, outcomes and the way you describe the
+          clothes you own.
         </p>
-        <p style={{ marginBottom: "40px", lineHeight: 1.6, opacity: 0.75, maxWidth: "560px" }}>
-          These observations are different. They come from how you've actually used nAia — what
-          you've reviewed, worn, changed, and kept coming back to. nAia builds these patterns
-          from your session feedback, post-wear reviews, and the way you've described the pieces
-          in your closet.
+        <p style={{ marginBottom: "40px", lineHeight: 1.6, opacity: 0.5, fontSize: "14px", maxWidth: "560px" }}>
+          These observations stay separate from your Passport and can evolve as you do.
         </p>
 
         {confirmed.length > 0 ? (
@@ -147,7 +145,7 @@ export default function WhatNaiaNotices() {
           </>
         ) : candidateCount > 0 ? (
           // State B — evidence accumulating but nothing CONFIRMED
-          <div className="sp-card" style={{ padding: "32px 24px", textAlign: "center" }}>
+          <div className="sp-card" style={{ padding: "28px 24px" }}>
             <p style={{ lineHeight: 1.6, opacity: 0.75 }}>
               nAia has picked up something, but not quite enough to say it with confidence yet.
               Keep rating and reviewing your looks — it should become clearer shortly.
@@ -155,11 +153,16 @@ export default function WhatNaiaNotices() {
           </div>
         ) : (
           // State A — no evidence yet
-          <div className="sp-card" style={{ padding: "32px 24px", textAlign: "center" }}>
-            <p style={{ lineHeight: 1.6, opacity: 0.75 }}>
-              Rate your looks, review what you wore, and add a few thoughts to pieces in your
-              closet. Once there's enough of a pattern, nAia will begin sharing what it's
-              noticing here.
+          <div className="sp-card" style={{ padding: "28px 24px" }}>
+            <p
+              className="sp-overline"
+              style={{ marginBottom: "12px", opacity: 0.5, fontSize: "11px", letterSpacing: "0.1em" }}
+            >
+              STILL LEARNING
+            </p>
+            <p style={{ lineHeight: 1.65, opacity: 0.7, maxWidth: "460px" }}>
+              Keep reviewing your looks and telling nAia what worked — as patterns become clear,
+              they'll begin appearing here.
             </p>
           </div>
         )}
