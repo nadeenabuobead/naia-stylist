@@ -1185,34 +1185,55 @@ describe("L — Saved V1: tabs removed, saved looks only", () => {
 // ── M — Navigation, StyleMe link, save-action fix, BOS image fix ──────────────
 
 describe("M — Saved navigation removed; StyleMe VIEW SAVED LOOKS; save fix; BOS images", () => {
-  it("MyNaiaNavigation.tsx no longer lists SAVED in the ACCOUNT group", () => {
-    const src = route("../components/my-naia/MyNaiaNavigation.tsx");
-    assert.ok(
-      !src.includes('"SAVED"') && !src.includes("'SAVED'"),
-      "SAVED label absent from nav"
-    );
-    assert.ok(
-      !src.includes('path: "/my-naia/saved"'),
-      "my-naia/saved path absent from nav items"
-    );
+  // MyNaiaLayout.tsx owns MY_NAIA_NAV — the actual live sidebar for desktop and mobile.
+  // MyNaiaNavigation.tsx is an unused dead file; tests must assert against the live source.
+
+  it("MyNaiaLayout.tsx MY_NAIA_NAV (live sidebar) does not list Saved", () => {
+    const src = route("../components/my-naia/MyNaiaLayout.tsx");
+    assert.ok(src.includes("MY_NAIA_NAV"), "MY_NAIA_NAV constant present in layout");
+    assert.ok(!src.includes('"Saved"') && !src.includes("'Saved'"), "Saved label absent from MY_NAIA_NAV");
+    assert.ok(!src.includes('to: "/my-naia/saved"'), "my-naia/saved path absent from nav items");
   });
 
-  it("MyNaiaNavigation.tsx PERSONALISATION group has MY nAia MODEL + WHAT nAia IS NOTICING", () => {
-    const src = route("../components/my-naia/MyNaiaNavigation.tsx");
-    assert.ok(src.includes('"PERSONALISATION"'), "PERSONALISATION group exists");
-    assert.ok(src.includes('"MY nAia MODEL"'), "MY nAia MODEL in PERSONALISATION");
-    assert.ok(src.includes('"WHAT nAia IS NOTICING"'), "WHAT nAia IS NOTICING in PERSONALISATION");
-    assert.ok(src.includes('"/my-naia/what-naia-notices"'), "WHAT nAia IS NOTICING links correctly");
+  it("MyNaiaLayout.tsx has three top-level groups: Main, Personalisation, Account", () => {
+    const src = route("../components/my-naia/MyNaiaLayout.tsx");
+    assert.ok(src.includes('"Main"'), "Main group present");
+    assert.ok(src.includes('"Personalisation"'), "Personalisation group present");
+    assert.ok(src.includes('"Account"'), "Account group present");
   });
 
-  it("MyNaiaNavigation.tsx ACCOUNT group has PLAN & USAGE + SETTINGS & PRIVACY only", () => {
-    const src = route("../components/my-naia/MyNaiaNavigation.tsx");
-    assert.ok(src.includes('"ACCOUNT"'), "ACCOUNT group exists");
-    assert.ok(src.includes('"PLAN & USAGE"'), "PLAN & USAGE in ACCOUNT");
-    assert.ok(src.includes('"/my-naia/plan-usage"'), "PLAN & USAGE links to /my-naia/plan-usage");
-    assert.ok(src.includes('"SETTINGS & PRIVACY"'), "SETTINGS & PRIVACY in ACCOUNT");
-    assert.ok(!src.includes('"MY nAia MODEL"') || src.indexOf('"PERSONALISATION"') < src.indexOf('"MY nAia MODEL"'),
-              "MY nAia MODEL is under PERSONALISATION, not ACCOUNT");
+  it("MyNaiaLayout.tsx Main group contains all six primary routes", () => {
+    const src = route("../components/my-naia/MyNaiaLayout.tsx");
+    assert.ok(src.includes('"Overview"'), "Overview present");
+    assert.ok(src.includes('"Style Passport"'), "Style Passport present");
+    assert.ok(src.includes('"My Closet"'), "My Closet present");
+    assert.ok(src.includes('"StyleMe"'), "StyleMe present");
+    assert.ok(src.includes('"Buy or Skip"'), "Buy or Skip present");
+    assert.ok(src.includes('"My Trend Edits"'), "My Trend Edits present");
+  });
+
+  it("MyNaiaLayout.tsx Personalisation group has My nAia Model + What nAia Is Noticing", () => {
+    const src = route("../components/my-naia/MyNaiaLayout.tsx");
+    assert.ok(src.includes('"My nAia Model"'), "My nAia Model present");
+    assert.ok(src.includes('"/my-naia-model"'), "My nAia Model links to /my-naia-model");
+    assert.ok(src.includes('"What nAia Is Noticing"'), "What nAia Is Noticing present");
+    assert.ok(src.includes('"/my-naia/what-naia-notices"'), "What nAia Is Noticing links correctly");
+  });
+
+  it("MyNaiaLayout.tsx Account group has Plan & Usage + Settings & Privacy — Orders hidden", () => {
+    const src = route("../components/my-naia/MyNaiaLayout.tsx");
+    assert.ok(src.includes('"Plan & Usage"'), "Plan & Usage present in Account");
+    assert.ok(src.includes('"/my-naia/plan-usage"'), "Plan & Usage links to /my-naia/plan-usage");
+    assert.ok(src.includes('"Settings & Privacy"'), "Settings & Privacy present");
+    assert.ok(!src.includes('"Orders"'), "Orders not listed (hidden until wired)");
+  });
+
+  it("MyNaiaLayout.tsx desktop sidebar and mobile panel both render MY_NAIA_NAV — same source", () => {
+    const src = route("../components/my-naia/MyNaiaLayout.tsx");
+    const navRefs = src.split("MY_NAIA_NAV.map").length - 1;
+    assert.ok(src.includes("mn-sidebar"), "desktop sidebar present");
+    assert.ok(src.includes("mn-mobile-nav"), "mobile nav panel present");
+    assert.ok(navRefs >= 2, `MY_NAIA_NAV.map used ${navRefs} times — both surfaces use the same source`);
   });
 
   it("my-naia/saved route is still registered in routes.ts", () => {
