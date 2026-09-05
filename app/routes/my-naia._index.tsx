@@ -243,39 +243,52 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 
   // Resolve each StyleMe session's thumbnail server-side.
-  // Pick the most visually representative item by type priority so different sessions show different looks.
-  // Priority: heroImageUrl → best item by type (DRESS>OUTERWEAR>TOP>BOTTOM>SHOES>BAG>ACCESSORY)
-  // Within an item: closet signed URL (private) → productImageUrl (NADINE) → closet legacy imageUrl
+  // Cross-session deduplication: track which items have already been shown so the same
+  // physical piece (closetItemId / productImageUrl) is not repeated across the three cards.
+  // Within a session: prefer items not yet shown; among those, apply type priority
+  // (DRESS>OUTERWEAR>TOP>BOTTOM>SHOES>BAG>ACCESSORY). Fall back to top-priority item
+  // only if every candidate has already been used for a previous card.
   const ITEM_TYPE_PRIORITY = ["DRESS", "OUTERWEAR", "TOP", "BOTTOM", "SHOES", "BAG", "ACCESSORY"];
+  function itemKey(item: { closetItemId?: string | null; productImageUrl?: string | null }) {
+    if (item.closetItemId) return `c:${item.closetItemId}`;
+    if (item.productImageUrl) return `n:${item.productImageUrl}`;
+    return null;
+  }
+  const shownKeys = new Set<string>();
+
   const sessionsWithThumb = sessions.map((s) => {
     const suggestion = s.suggestions[0];
-    const allItems = suggestion?.items ?? [];
+    // Only consider items that have at least one resolvable image source
+    const candidates = (suggestion?.items ?? []).filter(
+      (i) => !!(i.productImageUrl || i.closetItem?.imagePublicId || i.closetItem?.imageUrl)
+    );
     let resolvedThumb: string | null = null;
 
     if (suggestion?.heroImageUrl) {
       resolvedThumb = suggestion.heroImageUrl;
-    } else if (allItems.length > 0) {
-      // Sort by type priority; items with any image source come before image-less items
-      const sorted = [...allItems].sort((a, b) => {
-        const hasA = !!(a.productImageUrl || a.closetItem?.imagePublicId || a.closetItem?.imageUrl);
-        const hasB = !!(b.productImageUrl || b.closetItem?.imagePublicId || b.closetItem?.imageUrl);
-        if (hasA !== hasB) return hasA ? -1 : 1;
+    } else if (candidates.length > 0) {
+      const byPriority = [...candidates].sort((a, b) => {
         const pa = ITEM_TYPE_PRIORITY.indexOf(a.itemType) === -1 ? 99 : ITEM_TYPE_PRIORITY.indexOf(a.itemType);
         const pb = ITEM_TYPE_PRIORITY.indexOf(b.itemType) === -1 ? 99 : ITEM_TYPE_PRIORITY.indexOf(b.itemType);
         return pa - pb;
       });
-      const bestItem = sorted[0];
-      if (bestItem) {
-        const ci = bestItem.closetItem;
-        if (bestItem.closetItemId && ci?.imagePublicId && ci?.imageFormat && cloudinaryConfig) {
-          const ownership = validatePublicIdOwnership(ci.imagePublicId, customerId);
-          if (ownership.ok) {
-            resolvedThumb = buildPrivateDownloadUrl(cloudinaryConfig, ci.imagePublicId, ci.imageFormat, "private");
-          }
+      // Prefer an item not already shown in an earlier card; fall back to best-by-type
+      const bestItem =
+        byPriority.find((i) => { const k = itemKey(i); return k === null || !shownKeys.has(k); })
+        ?? byPriority[0];
+
+      const k = itemKey(bestItem);
+      if (k) shownKeys.add(k);
+
+      const ci = bestItem.closetItem;
+      if (bestItem.closetItemId && ci?.imagePublicId && ci?.imageFormat && cloudinaryConfig) {
+        const ownership = validatePublicIdOwnership(ci.imagePublicId, customerId);
+        if (ownership.ok) {
+          resolvedThumb = buildPrivateDownloadUrl(cloudinaryConfig, ci.imagePublicId, ci.imageFormat, "private");
         }
-        if (!resolvedThumb && bestItem.productImageUrl) resolvedThumb = bestItem.productImageUrl;
-        if (!resolvedThumb && bestItem.closetItem?.imageUrl) resolvedThumb = bestItem.closetItem.imageUrl;
       }
+      if (!resolvedThumb && bestItem.productImageUrl) resolvedThumb = bestItem.productImageUrl;
+      if (!resolvedThumb && bestItem.closetItem?.imageUrl) resolvedThumb = bestItem.closetItem.imageUrl;
     }
 
     return { ...s, resolvedThumb };
