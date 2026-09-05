@@ -28,6 +28,8 @@ import {
   upsertOutcome,
   loadOutcomeForSuggestion,
 } from "~/lib/ai/outcome-persistence.server";
+import { extractStyleMeEvidence } from "~/lib/ai/taste-extraction.server";
+import { writeSourceEvidence } from "~/lib/ai/taste-reconcile.server";
 
 // ── GET — load existing outcome ───────────────────────────────────────────────
 
@@ -118,6 +120,18 @@ export async function action({ request }: ActionFunctionArgs) {
       sessionId,
       normalized,
     );
+
+    // Taste evidence — fire after successful save; non-blocking
+    try {
+      const evidenceRows = extractStyleMeEvidence(record, {
+        currentMood: suggestion.session.currentMood ?? null,
+        occasion:    suggestion.session.occasion    ?? null,
+      });
+      await writeSourceEvidence(customer.id, "STYLEME_OUTCOME", record.id, evidenceRows);
+    } catch (err) {
+      console.error("taste-evidence: failed to write StyleMe evidence", err);
+    }
+
     return data({
       ok: true,
       outcome: {

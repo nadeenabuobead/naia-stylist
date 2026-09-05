@@ -3,6 +3,7 @@ import type { LinksFunction, LoaderFunctionArgs } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
 import { getPublishedEditorialReports } from "~/lib/editorial-reports.server";
+import { loadStrongestConfirmedTendency } from "~/lib/ai/taste-reconcile.server";
 import { reportVisual, type TreatmentType } from "~/lib/report-visual";
 import {
   getCloudinaryConfig,
@@ -176,7 +177,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
   const customerId = customer.id;
 
-  const [sessions, editorialReports, buyOrSkipRaw, reviewCount, closetCount] =
+  const [sessions, editorialReports, buyOrSkipRaw, reviewCount, closetCount, strongestTendency, candidateCount] =
     await Promise.all([
       prisma.stylingSession.findMany({
         where: { customerId },
@@ -200,6 +201,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }),
       prisma.postOutfitReview.count({ where: { customerId } }),
       prisma.closetItem.count({ where: { customerId } }),
+      loadStrongestConfirmedTendency(customerId),
+      prisma.styleTendency.count({
+        where: { customerId, state: "CANDIDATE", customerFeedback: { not: "not-quite" } },
+      }),
     ]);
 
   const latestEditorial = editorialReports[0] ?? null;
@@ -307,11 +312,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     profile: p,
     sessions: sessionsWithThumb, trendReport, buyOrSkipHistory, reviewCount, closetCount,
     passportState,
+    strongestTendency: strongestTendency ?? null,
+    hasCandidates: candidateCount > 0,
   };
 }
 
 export default function MyNaiaOverview() {
-  const { firstName, profile, sessions, trendReport, buyOrSkipHistory, reviewCount, closetCount, passportState } =
+  const { firstName, profile, sessions, trendReport, buyOrSkipHistory, reviewCount, closetCount, passportState, strongestTendency, hasCandidates } =
     useLoaderData<typeof loader>();
 
   const quote = getDailyQuote();
@@ -567,28 +574,40 @@ export default function MyNaiaOverview() {
         <section className="mn-section">
           <div className="mn-section-head">
             <div className="mn-eyebrow">What nAia Is Beginning To Notice</div>
+            {strongestTendency && (
+              <Link to="/my-naia/what-naia-notices" className="mn-see-link">See All</Link>
+            )}
           </div>
           <div className="mn-section-body">
-            {reviewCount >= 3 ? (
+            {strongestTendency ? (
               <>
                 <ul style={{ listStyle: "none", padding: 0, margin: 0, borderTop: "1px solid var(--fg-12)" }}>
                   <li style={{ padding: "1.25rem 0", borderBottom: "1px solid var(--fg-12)" }}>
                     <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--lipstick)" }}>Style Intelligence</div>
                     <p style={{ marginTop: "0.5rem", fontSize: "0.95rem", lineHeight: 1.75, color: "var(--fg-85)" }}>
-                      Based on {reviewCount} post-wear reviews, nAia is building a picture of what consistently works for you.
+                      {strongestTendency.claimText}
                     </p>
+                    {strongestTendency.rationaleText && (
+                      <p style={{ marginTop: "0.5rem", fontSize: "0.82rem", lineHeight: 1.65, color: "var(--fg-55)" }}>
+                        {strongestTendency.rationaleText}
+                      </p>
+                    )}
                   </li>
                 </ul>
                 <p style={{ marginTop: "1.25rem", display: "flex", alignItems: "flex-start", gap: "0.5rem", fontSize: "0.78rem", lineHeight: 1.625, color: "var(--fg-55)" }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: "0.125rem", flexShrink: 0 }} aria-hidden="true">
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                   </svg>
-                  nAia only shares what it is beginning to notice once there is enough gentle evidence.
+                  nAia only shares what it has confirmed once there is enough gentle evidence. <Link to="/my-naia/what-naia-notices" style={{ color: "inherit", textDecoration: "underline" }}>View all observations</Link>.
                 </p>
               </>
+            ) : hasCandidates ? (
+              <p className="mn-state-note">
+                nAia is picking up something — keep rating and reviewing your looks and it will share what it notices as patterns form.
+              </p>
             ) : (
               <p className="mn-state-note">
-                Review {Math.max(0, 3 - reviewCount)} more {3 - reviewCount === 1 ? "look" : "looks"} and nAia will begin sharing what it&#8217;s observing about your style.
+                Rate your looks and nAia will begin sharing what it notices as patterns form.
               </p>
             )}
           </div>

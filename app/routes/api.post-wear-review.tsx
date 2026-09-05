@@ -20,6 +20,9 @@ import {
 } from "~/lib/ai/feedback-persistence.server";
 import type { PostWearAnswers, WoreItAnswer, FeelingAnswer, ComfortAnswer, WearAgainAnswer } from "~/lib/ai/feedback-contract";
 import { emitPostWearSubmitted, recordJourneyEvent } from "~/lib/ai/journey-events.server";
+import { extractPostWearEvidence } from "~/lib/ai/taste-extraction.server";
+import { writeSourceEvidence } from "~/lib/ai/taste-reconcile.server";
+import prisma from "~/db.server";
 
 // ── Allowed answer values ─────────────────────────────────────────────────────
 
@@ -92,6 +95,23 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const result = await upsertPostWearReview(sessionId, customer.id, answers);
     if (!result.ok) return data({ error: result.errorCode ?? "failed" }, { status: 500 });
+
+    // Taste evidence — load the saved review and extract evidence
+    try {
+      const savedReview = await prisma.postOutfitReview.findFirst({
+        where: { sessionId, customerId: customer.id },
+        include: { session: { select: { currentMood: true, occasion: true } } },
+      });
+      if (savedReview) {
+        const evidenceRows = extractPostWearEvidence(savedReview, {
+          currentMood: savedReview.session?.currentMood ?? null,
+          occasion:    savedReview.session?.occasion    ?? null,
+        });
+        await writeSourceEvidence(customer.id, "POST_OUTFIT_REVIEW", savedReview.id, evidenceRows);
+      }
+    } catch (err) {
+      console.error("taste-evidence: failed to write PostWear evidence", err);
+    }
 
     // Fire-and-forget — never let event emission block the response
     try {

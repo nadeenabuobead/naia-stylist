@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { data as json } from "react-router";
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import prisma from "../db.server";
+import { extractBuySkipEvidence } from "../lib/ai/taste-extraction.server";
+import { writeSourceEvidence } from "../lib/ai/taste-reconcile.server";
 import {
   verifyCloudinaryAsset,
   validatePublicIdOwnership,
@@ -769,7 +771,7 @@ async function recordOutcome(request) {
   // Never trust customerId from the client. Ownership is derived through the analysis.
   const analysis = await prisma.buyOrSkipAnalysis.findUnique({
     where: { id: analysisId.trim() },
-    select: { id: true, customerId: true },
+    select: { id: true, customerId: true, category: true },
   });
 
   if (!analysis) {
@@ -787,6 +789,20 @@ async function recordOutcome(request) {
     create: { analysisId: analysis.id, decision: dbDecision, postPurchaseOutcome: dbPostOutcome },
     update: { decision: dbDecision, postPurchaseOutcome: dbPostOutcome },
   });
+
+  // Taste evidence — extract from BuySkipOutcome
+  try {
+    const evRows = extractBuySkipEvidence({
+      id:                  outcome.id,
+      customerId:          naiaCustomer.id,
+      postPurchaseOutcome: outcome.postPurchaseOutcome ?? null,
+      category:            analysis.category ?? null,
+      createdAt:           outcome.createdAt ?? new Date(),
+    });
+    await writeSourceEvidence(naiaCustomer.id, "BUYSKIP_OUTCOME", outcome.id, evRows);
+  } catch (err) {
+    console.error("taste-evidence: failed to write BuySkip evidence", err);
+  }
 
   return json({ success: true, outcomeId: outcome.id });
 }

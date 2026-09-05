@@ -37,14 +37,20 @@ model Session {
 // USER & AUTHENTICATION
 // ============================================
 
+enum CustomerPlan {
+  FREE
+  PAID
+}
+
 model Customer {
-  id                String   @id @default(cuid())
-  shopifyCustomerId String   @unique
-  email             String?  @unique
+  id                String       @id @default(cuid())
+  shopifyCustomerId String       @unique
+  email             String?      @unique
   firstName         String?
   lastName          String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  plan              CustomerPlan @default(FREE)
 
   // Relationships
   onboardingProfile   OnboardingProfile?
@@ -64,6 +70,8 @@ model Customer {
   selfieAnalysis         SelfieAnalysis?
   naiaObservationFeedback NaiaObservationFeedback[]
   styleMemoryOutcomes     StyleMeOutcome[]
+  tasteEvidence           TasteEvidence[]
+  styleTendencies         StyleTendency[]
 }
 
 // ============================================
@@ -268,6 +276,15 @@ model StylingSession {
   customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())
 
+  // Continuation lineage — set when this session was started via Adjust Vibe.
+  // null = root StyleMe (counts toward quota).
+  // non-null = continuation of parentSessionId (does NOT count toward quota).
+  // Historical sessions pre-dating this field default to null; they cannot
+  // be reliably distinguished from roots. New Adjust Vibe sessions are linked correctly.
+  parentSessionId String?
+  parentSession   StylingSession?  @relation("SessionContinuation", fields: [parentSessionId], references: [id], onDelete: SetNull)
+  continuations   StylingSession[] @relation("SessionContinuation")
+
   // Input Context
   currentMood     String?   // How she's feeling now
   desiredFeeling  String?   // How she wants to feel
@@ -278,7 +295,7 @@ model StylingSession {
   specificNeeds   String?   // Any specific requirements
   bodyPreference  String?   // Body fit preferences
   styleDNA        String?   // Style DNA preferences (JSON array)
-  
+
   // Rev 3 — Psychology-First StyleMe (Group 5)
   state           String?        // Rev 3 state answer ID (wording context only)
   intentions      String[]  @default([])  // Rev 3 intention answer IDs (up to 2)
@@ -290,13 +307,13 @@ model StylingSession {
   // Weather/Context
   weather         String?
   timeOfDay       String?   // morning, afternoon, evening
-  
+
   // Output
   suggestions     OutfitSuggestion[]
-  
+
   // Selected Suggestion
   selectedSuggestionId String?
-  
+
   // Follow-up
   review          PostOutfitReview?
   events                 StylingEvent[]
@@ -995,4 +1012,90 @@ model StyleMeOutcome {
 
   @@index([customerId])
   @@index([sessionId])
+}
+
+// ============================================
+// TASTE EVIDENCE + STYLE TENDENCY — Phase 5D
+// ============================================
+
+model TasteEvidence {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Source identity — used for delete-and-reinsert on source record update
+  source         String   // STYLEME_OUTCOME | POST_OUTFIT_REVIEW | CLOSET_RELATIONSHIP | BUYSKIP_OUTCOME
+  sourceRecordId String   // ID of the originating record
+
+  // Canonical evidence signal
+  dimension String   // self-expression | comfort | formality | fit | garment-category
+  value     String   // dimension-specific value (e.g. "self-expression", "too-formal", "DRESSES")
+  polarity  String   // positive | negative
+
+  // Weighted strength — clamped to [0.1, 1.0]
+  strength Float
+
+  // Optional session context for future CONTEXTUAL_PREFERENCE family (V2)
+  context Json?
+
+  // Server-generated provenance — never exposed raw to customers
+  provenance Json
+
+  occurredAt DateTime
+  createdAt  DateTime @default(now())
+
+  @@unique([customerId, source, sourceRecordId, dimension, value, polarity])
+  @@index([customerId, dimension, value])
+  @@index([customerId, source])
+  @@index([customerId, source, sourceRecordId])
+}
+
+model StyleTendency {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Stable identity
+  observationKey String   // tendency-v1|{dimension}:{value}
+  dimension      String
+  value          String
+
+  // Generation — increments when a REJECTED observation re-emerges
+  generation Int @default(1)
+
+  // Computed observation state
+  dominantPolarity  String   // positive | negative
+  observationFamily String   // WORKS_WELL | FRICTION
+  state             String   // CANDIDATE | CONFIRMED | SUPPRESSED | REJECTED
+
+  // Evidence accounting — recomputed on every reconcile
+  wSupport         Float @default(0)
+  wContradict      Float @default(0)
+  wNet             Float @default(0)
+  distinctRecords  Int   @default(0)
+  distinctSources  Int   @default(0)
+  effectiveSupport Float @default(0)
+
+  // Post-correction tracking for re-emergence
+  wSupportSinceCorrection        Float @default(0)
+  distinctRecordsSinceCorrection Int   @default(0)
+
+  lastEvidenceAt DateTime?
+
+  // Server-generated display text
+  claimText     String?
+  rationaleText String?
+  claimVersion  Int @default(1)
+
+  // Customer correction — permanently preserved
+  customerFeedback   String?   // accurate | not-quite
+  customerFeedbackAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([customerId, observationKey, generation])
+  @@index([customerId, state])
+  @@index([customerId, observationFamily])
+  @@index([customerId, observationKey])
 }
