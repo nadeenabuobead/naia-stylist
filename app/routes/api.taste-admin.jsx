@@ -96,16 +96,16 @@ export async function action({ request }) {
 
     const analyses = await prisma.buyOrSkipAnalysis.findMany({
       where: { customerId: cid },
-      include: { outcomes: { select: { id: true, postPurchaseOutcome: true, createdAt: true } } },
+      include: { outcome: { select: { id: true, postPurchaseOutcome: true, createdAt: true } } },
     });
     for (const analysis of analyses) {
-      for (const outcome of analysis.outcomes) {
-        try {
-          const rows = extractBuySkipEvidence({ id: outcome.id, customerId: cid, postPurchaseOutcome: outcome.postPurchaseOutcome, category: analysis.category, createdAt: outcome.createdAt });
-          await writeSourceEvidence(cid, "BUYSKIP_OUTCOME", outcome.id, rows);
-          report.buyskip += rows.length;
-        } catch (e) { report.errors.push(`buyskip:${outcome.id}:${e.message?.slice(0, 60)}`); }
-      }
+      if (!analysis.outcome) continue;
+      const outcome = analysis.outcome;
+      try {
+        const rows = extractBuySkipEvidence({ id: outcome.id, customerId: cid, postPurchaseOutcome: outcome.postPurchaseOutcome, category: analysis.category, createdAt: outcome.createdAt });
+        await writeSourceEvidence(cid, "BUYSKIP_OUTCOME", outcome.id, rows);
+        report.buyskip += rows.length;
+      } catch (e) { report.errors.push(`buyskip:${outcome.id}:${e.message?.slice(0, 60)}`); }
     }
 
     await reconcileObservations(cid);
