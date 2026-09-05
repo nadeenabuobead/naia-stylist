@@ -127,6 +127,12 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
 
   const cloudinaryCfg = getCloudinaryConfig();
 
+  // Temporary diagnostic — remove after staging confirmation
+  if (customer.closetItems.length > 0) {
+    const first = customer.closetItems[0] as Record<string, unknown>;
+    console.log("[TrendEvidence] closetItem[0] imageUrl:", first.imageUrl, "imagePublicId:", first.imagePublicId, "imageFormat:", first.imageFormat, "cloudinaryCfg:", cloudinaryCfg ? "SET" : "NULL");
+  }
+
   return {
     hasProfile,
     profile: hasProfile && profile ? {
