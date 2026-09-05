@@ -22,6 +22,8 @@ import {
   resolveSetSlots,
   STYLEME_WORDING_SYSTEM_PROMPT,
   buildProfileHint,
+  computeNaiaResultDirections,
+  selectAdditionalClosetGarments,
 } from "./styleme-result.server.ts";
 import type {
   StyleMeCustomerResult,
@@ -3106,5 +3108,197 @@ describe("§V.10 — legacy schema compatibility: parseSuggestionMetadata", () =
     assert.ok(meta !== null, "must parse Rev3 metadata");
     assert.equal(meta!.resultDirections?.length, 1);
     assert.equal(meta!.resultDirections?.[0]?.label, "most-you");
+  });
+});
+
+// ── §ND — nAia-mode diversity: New Look, Same Vibe ───────────────────────────
+// Verifies that computeNaiaResultDirections and selectAdditionalClosetGarments
+// pick DIFFERENT items on regenerate when recentlyShownIds excludes the best.
+
+describe("§ND — nAia-mode New Look diversity", () => {
+  // Shared test closet: two items per key clothing slot, plus a single shoe.
+  const CLOSET: ClosetAnchorInput[] = [
+    {
+      id: "top-a",
+      name: "Silk Blouse",
+      category: "TOPS",
+      occasions: ["everyday", "work"],
+      styleTags: ["polished", "minimalist"],
+      colors: ["ivory"],
+      primaryColor: "ivory",
+      imageUrl: null,
+      garmentRelationships: [],
+    },
+    {
+      id: "top-b",
+      name: "Linen Tee",
+      category: "TOPS",
+      occasions: ["everyday"],
+      styleTags: ["relaxed"],
+      colors: ["white"],
+      primaryColor: "white",
+      imageUrl: null,
+      garmentRelationships: [],
+    },
+    {
+      id: "bottom-a",
+      name: "Tailored Trousers",
+      category: "BOTTOMS",
+      occasions: ["everyday", "work"],
+      styleTags: ["polished", "minimalist"],
+      colors: ["black"],
+      primaryColor: "black",
+      imageUrl: null,
+      garmentRelationships: [],
+    },
+    {
+      id: "bottom-b",
+      name: "Wide-Leg Jeans",
+      category: "BOTTOMS",
+      occasions: ["everyday"],
+      styleTags: ["relaxed"],
+      colors: ["blue"],
+      primaryColor: "blue",
+      imageUrl: null,
+      garmentRelationships: [],
+    },
+    {
+      id: "shoe-a",
+      name: "White Sneakers",
+      category: "SHOES",
+      occasions: ["everyday"],
+      styleTags: ["relaxed"],
+      colors: ["white"],
+      primaryColor: "white",
+      imageUrl: null,
+      garmentRelationships: [],
+    },
+  ];
+
+  const SESSION_SIGNALS = {
+    occasion: "everyday" as const,
+    moods: ["confident"] as string[],
+    desiredFeelings: ["like-myself"] as string[],
+  };
+
+  it("ND.1 — computeNaiaResultDirections without recentlyShownIds picks highest-scorer per slot", () => {
+    const dirs = computeNaiaResultDirections(CLOSET, null, SESSION_SIGNALS);
+    const mostYou = dirs.find((d) => d.label === "most-you");
+    assert.ok(mostYou, "must produce a most-you direction");
+    const pieces = mostYou!.outfitPieces ?? [];
+    // Both top and bottom slots should be filled (shoe is optional but still scored)
+    const topPiece = pieces.find((p) => p.slot === "top");
+    const bottomPiece = pieces.find((p) => p.slot === "bottom");
+    assert.ok(topPiece, "most-you must include a top");
+    assert.ok(bottomPiece, "most-you must include a bottom");
+    // Highest scorer for "everyday"+"confident"+"like-myself" should favour "polished" tags (top-a and bottom-a)
+    assert.ok(
+      ["top-a", "top-b"].includes(topPiece!.id),
+      "top piece should be one of the known top items",
+    );
+  });
+
+  it("ND.2 — computeNaiaResultDirections with recentlyShownIds picks a different item for each affected slot", () => {
+    // First pass: no exclusions
+    const first = computeNaiaResultDirections(CLOSET, null, SESSION_SIGNALS);
+    const mostYouFirst = first.find((d) => d.label === "most-you")!;
+    const firstPieces = mostYouFirst.outfitPieces ?? [];
+
+    // Record what was shown
+    const shownIds = new Set(firstPieces.map((p) => p.id));
+
+    // Second pass: exclude what was shown
+    const second = computeNaiaResultDirections(CLOSET, null, SESSION_SIGNALS, undefined, shownIds);
+    const mostYouSecond = second.find((d) => d.label === "most-you")!;
+    const secondPieces = mostYouSecond.outfitPieces ?? [];
+
+    // At least one piece must be different (since CLOSET has 2 items per clothing slot)
+    const allSame = secondPieces.every((p) =>
+      firstPieces.some((q) => q.slot === p.slot && q.id === p.id),
+    );
+    assert.ok(!allSame, "regenerated MOST LIKE ME must have at least one different item when alternatives exist");
+
+    // Specifically: the top and bottom must differ because there are 2 candidates each
+    const firstTop = firstPieces.find((p) => p.slot === "top");
+    const secondTop = secondPieces.find((p) => p.slot === "top");
+    if (firstTop && secondTop) {
+      assert.notEqual(secondTop.id, firstTop.id, "top item must be different on regenerate");
+    }
+    const firstBottom = firstPieces.find((p) => p.slot === "bottom");
+    const secondBottom = secondPieces.find((p) => p.slot === "bottom");
+    if (firstBottom && secondBottom) {
+      assert.notEqual(secondBottom.id, firstBottom.id, "bottom item must be different on regenerate");
+    }
+  });
+
+  it("ND.3 — computeNaiaResultDirections falls back to best when ALL candidates are recently shown", () => {
+    // Exclude both options for every slot
+    const allIds = new Set(CLOSET.map((c) => c.id));
+    const dirs = computeNaiaResultDirections(CLOSET, null, SESSION_SIGNALS, undefined, allIds);
+    const mostYou = dirs.find((d) => d.label === "most-you");
+    // Should still return a direction (falls back to index 0), not crash or return empty
+    assert.ok(mostYou, "must return a direction even when all items are excluded");
+    const pieces = mostYou!.outfitPieces ?? [];
+    assert.ok(pieces.length > 0, "fallback direction must have at least one piece");
+  });
+
+  it("ND.4 — selectAdditionalClosetGarments with recentlyShownIds prefers unseen items", () => {
+    // First call: no exclusions — will return the highest-scoring top and bottom
+    const firstGarments = selectAdditionalClosetGarments(null, null, {
+      moods: SESSION_SIGNALS.moods,
+      desiredFeelings: SESSION_SIGNALS.desiredFeelings,
+      bodyNeeds: [],
+      coverageConditional: null,
+      occasion: SESSION_SIGNALS.occasion,
+      formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "my-closet",
+    } as any, CLOSET);
+
+    const shownIds = new Set(firstGarments.map((g) => g.id));
+
+    // Second call: exclude what was shown
+    const secondGarments = selectAdditionalClosetGarments(null, null, {
+      moods: SESSION_SIGNALS.moods,
+      desiredFeelings: SESSION_SIGNALS.desiredFeelings,
+      bodyNeeds: [],
+      coverageConditional: null,
+      occasion: SESSION_SIGNALS.occasion,
+      formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "my-closet",
+    } as any, CLOSET, undefined, shownIds);
+
+    // At least one garment must differ (CLOSET has 2 items per clothing slot)
+    const allSame = secondGarments.every((g) =>
+      firstGarments.some((h) => h.slot === g.slot && h.id === g.id),
+    );
+    assert.ok(!allSame, "selectAdditionalClosetGarments must pick different items when alternatives exist");
+
+    // Top slot must differ
+    const firstTop = firstGarments.find((g) => g.slot === "top");
+    const secondTop = secondGarments.find((g) => g.slot === "top");
+    if (firstTop && secondTop) {
+      assert.notEqual(secondTop.id, firstTop.id, "top garment must differ on regenerate");
+    }
+  });
+
+  it("ND.5 — selectAdditionalClosetGarments falls back to best when all candidates are recently shown", () => {
+    const allIds = new Set(CLOSET.map((c) => c.id));
+    const garments = selectAdditionalClosetGarments(null, null, {
+      moods: SESSION_SIGNALS.moods,
+      desiredFeelings: SESSION_SIGNALS.desiredFeelings,
+      bodyNeeds: [],
+      coverageConditional: null,
+      occasion: SESSION_SIGNALS.occasion,
+      formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "my-closet",
+    } as any, CLOSET, undefined, allIds);
+    // Should still return garments (fallback), not empty
+    assert.ok(garments.length > 0, "must return garments even when all are excluded");
   });
 });

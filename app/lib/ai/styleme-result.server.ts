@@ -118,6 +118,7 @@ export function buildEngineInput(params: {
   profile?: StyleMeProfileSignals;
   anchor?: AnchorInput | null;
   recentlyShownHandles?: string[];
+  recentlyShownClosetIds?: string[];
   mode?: StyleMeMode;
   // Rev 3 — Psychology-First wording context (Group 5). Zero engine scoring.
   state?: string;
@@ -142,6 +143,7 @@ export function buildEngineInput(params: {
     profile: params.profile,
     anchor: params.anchor ?? null,
     recentlyShownHandles: params.recentlyShownHandles ?? [],
+    recentlyShownClosetIds: params.recentlyShownClosetIds,
     mode: params.mode,
   };
 }
@@ -1227,6 +1229,7 @@ export function selectAdditionalClosetGarments(
   session: StyleMeSessionInput,
   closetItems: ClosetAnchorInput[],
   profile?: ClosetScoringProfile | null,
+  recentlyShownIds?: Set<string>,
 ): Array<{ slot: OutfitSlot; id: string; label: string | null; imageUrl: string | null }> {
   const anchorId = anchor?.type === "closet" ? (anchor as NormalizedClosetAnchor).id : null;
 
@@ -1242,11 +1245,8 @@ export function selectAdditionalClosetGarments(
     desiredFeelings: session.desiredFeelings,
   };
 
-  // Accumulate best candidate per slot
-  const bestBySlot = new Map<
-    OutfitSlot,
-    { item: ClosetAnchorInput; score: number }
-  >();
+  // Collect ALL candidates per slot, sorted best-first
+  const candidatesBySlot = new Map<OutfitSlot, Array<{ item: ClosetAnchorInput; score: number }>>();
 
   for (const item of closetItems) {
     if (item.id === anchorId) continue;
@@ -1263,18 +1263,23 @@ export function selectAdditionalClosetGarments(
     );
     if (score <= 0) continue;
 
-    const existing = bestBySlot.get(slot);
-    if (!existing || score > existing.score) {
-      bestBySlot.set(slot, { item, score });
-    }
+    const list = candidatesBySlot.get(slot) ?? [];
+    list.push({ item, score });
+    candidatesBySlot.set(slot, list);
   }
 
-  return Array.from(bestBySlot.entries()).map(([slot, { item }]) => ({
-    slot,
-    id: item.id,
-    label: item.name,
-    imageUrl: item.imageUrl,
-  }));
+  for (const list of candidatesBySlot.values()) list.sort((a, b) => b.score - a.score);
+
+  const result: Array<{ slot: OutfitSlot; id: string; label: string | null; imageUrl: string | null }> = [];
+
+  for (const [slot, candidates] of candidatesBySlot.entries()) {
+    // Prefer the highest-scoring item not in the recently-shown set; fall back to best.
+    const fresh = recentlyShownIds ? candidates.find((c) => !recentlyShownIds.has(c.item.id)) : null;
+    const chosen = fresh ?? candidates[0];
+    result.push({ slot, id: chosen.item.id, label: chosen.item.name, imageUrl: chosen.item.imageUrl });
+  }
+
+  return result;
 }
 
 // ── nAia-mode directions ──────────────────────────────────────────────────────
@@ -1292,6 +1297,7 @@ export function computeNaiaResultDirections(
   anchorId: string | null,
   session: Pick<StyleMeSessionInput, "occasion" | "moods" | "desiredFeelings">,
   profile?: ClosetScoringProfile | null,
+  recentlyShownIds?: Set<string>,
 ): ResultDirection[] {
   const signals = {
     occasion: session.occasion,
@@ -1337,8 +1343,14 @@ export function computeNaiaResultDirections(
     (sl) => (bySlot.get(sl)?.length ?? 0) >= 2,
   ) ?? null;
 
-  // MOST YOU: best per slot.
-  const mostYouItems = buildOutfit(() => 0);
+  // MOST YOU: best per slot that wasn't shown last time; fall back to best if all shown.
+  const mostYouItems = buildOutfit((items) => {
+    if (recentlyShownIds) {
+      const fresh = items.findIndex((it) => !recentlyShownIds.has(it.item.id));
+      if (fresh !== -1) return fresh;
+    }
+    return 0;
+  });
 
   // FRESH: swap the variationSlot to its 2nd-best, keep others at 1st.
   const freshItems = buildOutfit((items, slot) => (slot === variationSlot ? 1 : 0));
@@ -1656,7 +1668,10 @@ export async function computeStyleMeResult(
       const allItems = await getClosetItems();
       const anchorId =
         anchor?.type === "closet" ? (anchor as NormalizedClosetAnchor).id : null;
-      resultDirections = computeNaiaResultDirections(allItems, anchorId, session, engineInput.profile);
+      const recentClosetSet = engineInput.recentlyShownClosetIds?.length
+        ? new Set(engineInput.recentlyShownClosetIds)
+        : undefined;
+      resultDirections = computeNaiaResultDirections(allItems, anchorId, session, engineInput.profile, recentClosetSet);
     } else {
       resultDirections = computeResultDirections(
         recommendation.evaluatedProducts,
@@ -1721,12 +1736,16 @@ export async function computeStyleMeResult(
   // returns undefined. Both are handled correctly here.
   if (getClosetItems) {
     const allItems = await getClosetItems();
+    const recentClosetSetForGarments = engineInput.recentlyShownClosetIds?.length
+      ? new Set(engineInput.recentlyShownClosetIds)
+      : undefined;
     recommendation.selectedClosetGarments = selectAdditionalClosetGarments(
       anchor ?? null,
       primaryProduct,
       session,
       allItems,
       engineInput.profile,
+      recentClosetSetForGarments,
     );
   }
 

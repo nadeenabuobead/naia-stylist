@@ -130,6 +130,10 @@ export interface StyleMeEngineInput {
   profile?: StyleMeProfileSignals;
   anchor?: AnchorInput | null;
   recentlyShownHandles?: string[];
+  // Closet item IDs shown in the previous nAia-mode suggestion.
+  // Passed to selectAdditionalClosetGarments and computeNaiaResultDirections
+  // so they prefer items not already seen, producing a meaningfully different look.
+  recentlyShownClosetIds?: string[];
   mode?: StyleMeMode;
 }
 

@@ -592,6 +592,8 @@ export async function action({ request }: ActionFunctionArgs) {
         select: { moodDescription: true },
       });
       const prevMeta = prevSuggestion ? parseSuggestionMetadata(prevSuggestion.moodDescription) : null;
+
+      // NADINE mode: penalise previously shown product handles so the engine picks a different primary.
       const recentlyShownHandles: string[] = [];
       if (prevMeta?.primaryHandle) recentlyShownHandles.push(prevMeta.primaryHandle);
       if (prevMeta?.alternatives) {
@@ -599,6 +601,15 @@ export async function action({ request }: ActionFunctionArgs) {
           if (alt.handle && !recentlyShownHandles.includes(alt.handle)) {
             recentlyShownHandles.push(alt.handle);
           }
+        }
+      }
+
+      // nAia mode: collect closet item IDs from the MOST LIKE ME direction of the previous suggestion.
+      // selectAdditionalClosetGarments and computeNaiaResultDirections will prefer items not in this set.
+      const recentlyShownClosetIds: string[] = [];
+      if (prevMeta?.resultDirections?.[0]?.outfitPieces) {
+        for (const piece of prevMeta.resultDirections[0].outfitPieces) {
+          if (piece.id) recentlyShownClosetIds.push(piece.id);
         }
       }
 
@@ -616,6 +627,7 @@ export async function action({ request }: ActionFunctionArgs) {
         mode: regenMode,
         anchor: anchorResult.anchor,
         recentlyShownHandles,
+        ...(recentlyShownClosetIds.length > 0 && { recentlyShownClosetIds }),
         // Rev 3 wording context — stored on session, never affects scoring
         ...(session.state && {
           state: session.state,
