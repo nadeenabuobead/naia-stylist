@@ -1067,3 +1067,101 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     assert.ok(src.includes("bos-byb-block-verdict"), "verdict class for justified/unsupported display");
   });
 });
+
+// ── L — Saved V1: single Saved Looks experience ───────────────────────────────
+
+describe("L — Saved V1: tabs removed, saved looks only", () => {
+  it("my-naia.saved.tsx no longer renders a Products tab", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(!src.includes('"products"') && !src.includes("'products'"), "products tab key absent");
+    assert.ok(!src.includes("No products saved yet"), "products empty-state copy absent");
+    assert.ok(
+      !src.includes("Products you favourite during styling sessions"),
+      "old products placeholder copy absent"
+    );
+  });
+
+  it("my-naia.saved.tsx no longer renders a Virtual Previews tab", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(!src.includes('"previews"') && !src.includes("'previews'"), "previews tab key absent");
+    assert.ok(!src.includes("No virtual previews saved yet"), "previews empty-state copy absent");
+    assert.ok(
+      !src.includes("Virtual try-on previews you keep will appear here"),
+      "old previews placeholder copy absent"
+    );
+  });
+
+  it("my-naia.saved.tsx no longer imports or uses useState for tab switching", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(!src.includes("Tab>"), "Tab type absent");
+    assert.ok(!src.includes("const TABS"), "TABS constant absent");
+    assert.ok(!src.includes("sv-tabs"), "tab nav container class absent");
+    assert.ok(!src.includes("sv-tab--active"), "tab active class absent");
+  });
+
+  it("my-naia.saved.tsx empty state tells the customer to use StyleMe", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(src.includes("No saved looks yet"), "clear empty-state heading");
+    assert.ok(src.includes('to="/style-me"'), "links to StyleMe from empty state");
+    assert.ok(src.includes("Start StyleMe"), "CTA label present");
+  });
+
+  it("my-naia.saved.tsx loader is customer-scoped via requireCurrentNaiaCustomer", () => {
+    const src = route("my-naia.saved.tsx");
+    const authIdx  = src.indexOf("requireCurrentNaiaCustomer");
+    const queryIdx = src.indexOf("prisma.savedLook.findMany");
+    assert.ok(authIdx !== -1,  "requireCurrentNaiaCustomer present");
+    assert.ok(queryIdx !== -1, "prisma.savedLook.findMany present");
+    assert.ok(authIdx < queryIdx, "auth guard called before DB query");
+  });
+
+  it("my-naia.saved.tsx loader scopes query to customer.id", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(
+      src.includes("customerId: customer.id"),
+      "findMany where clause is scoped to authenticated customer"
+    );
+  });
+
+  it("my-naia.saved.tsx action delete is scoped to both lookId AND customer.id", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(src.includes('intent === "delete"'), "delete intent handled");
+    assert.ok(
+      src.includes("id: lookId, customerId: customer.id"),
+      "deleteMany scoped to lookId and customerId — prevents cross-customer deletion"
+    );
+  });
+
+  it("my-naia.saved.tsx LookCard renders a Remove button with intent=delete", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(src.includes('value="delete"'), "Remove button submits intent delete");
+    assert.ok(src.includes('name="lookId"'), "lookId hidden input present");
+    assert.ok(src.includes(">Remove<"), "Remove button label present");
+  });
+
+  it("my-naia.saved.tsx image fallback coalesces productImageUrl → closetItem.imageUrl → null", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(
+      src.includes("item.productImageUrl ?? item.closetItem?.imageUrl ?? null"),
+      "image waterfall fallback preserved for private closet images"
+    );
+  });
+
+  it("my-naia.saved.tsx finishing touches rendered only when fields are non-null", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(src.includes("look.perfumeRec &&"),  "perfumeRec conditional render");
+    assert.ok(src.includes("look.hairstyleRec &&"), "hairstyleRec conditional render");
+    assert.ok(src.includes("look.songRec &&"),      "songRec conditional render");
+    assert.ok(
+      src.includes("(look.perfumeRec || look.hairstyleRec || look.songRec)"),
+      "finishing touches block only rendered when at least one field is populated"
+    );
+  });
+
+  it("my-naia.saved.tsx pending-save cookie recovery paths exist in style-me/result.tsx", () => {
+    const src = route("style-me/result.tsx");
+    assert.ok(src.includes('intent === "save-pending"'), "save-pending intent handled");
+    assert.ok(src.includes('intent === "clear-pending"'), "clear-pending intent handled");
+    assert.ok(src.includes("pending"), "pending cookie flow present");
+  });
+});

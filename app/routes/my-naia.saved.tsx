@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";
 import { Form, Link, useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
@@ -90,17 +89,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 type LoaderData = Awaited<ReturnType<typeof loader>>;
 type Look = LoaderData["looks"][number];
 
-type Tab = "looks" | "products" | "previews";
-
-const TABS: { key: Tab; label: string }[] = [
-  { key: "looks",    label: "Looks" },
-  { key: "products", label: "Products" },
-  { key: "previews", label: "Virtual Previews" },
-];
-
 export default function SavedLooks() {
   const { looks } = useLoaderData<typeof loader>();
-  const [tab, setTab] = useState<Tab>("looks");
 
   return (
     <MyNaiaLayout>
@@ -114,55 +104,21 @@ export default function SavedLooks() {
         </p>
       </div>
 
-      <nav className="sv-tabs" aria-label="Saved looks sections">
-        {TABS.map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            className={`sv-tab${tab === key ? " sv-tab--active" : ""}`}
-            onClick={() => setTab(key)}
-            aria-current={tab === key ? "true" : undefined}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
-
-      {tab === "looks" && (
-        looks.length === 0 ? (
-          <div className="sv-empty">
-            <p className="sv-empty-text">You haven't saved any looks yet.</p>
-            <p className="sv-empty-hint">
-              When nAia creates a look you love, save it to keep it here.
-            </p>
-            <Link to="/style-me" className="sp-btn-primary" style={{ display: "inline-block" }}>
-              Start StyleMe
-            </Link>
-          </div>
-        ) : (
-          <div className="sv-grid">
-            {looks.map((look) => (
-              <LookCard key={look.id} look={look} />
-            ))}
-          </div>
-        )
-      )}
-
-      {tab === "products" && (
+      {looks.length === 0 ? (
         <div className="sv-empty">
-          <p className="sv-empty-text">No products saved yet.</p>
+          <p className="sv-empty-text">No saved looks yet.</p>
           <p className="sv-empty-hint">
-            Products you favourite during styling sessions will appear here.
+            When nAia styles you and you find a look you love, save it — it will live here.
           </p>
+          <Link to="/style-me" className="sp-btn-primary" style={{ display: "inline-block" }}>
+            Start StyleMe
+          </Link>
         </div>
-      )}
-
-      {tab === "previews" && (
-        <div className="sv-empty">
-          <p className="sv-empty-text">No virtual previews saved yet.</p>
-          <p className="sv-empty-hint">
-            Virtual try-on previews you keep will appear here once your nAia Model is active.
-          </p>
+      ) : (
+        <div className="sv-grid">
+          {looks.map((look) => (
+            <LookCard key={look.id} look={look} />
+          ))}
         </div>
       )}
     </MyNaiaLayout>
@@ -174,12 +130,10 @@ function LookCard({ look }: { look: Look }) {
   const thumbItems = imagedItems.slice(0, 3);
 
   const formattedDate = fmtUtcDate(look.createdAt);
-
   const metaParts = [look.occasion, formattedDate].filter(Boolean).join(" · ");
 
   return (
     <article className="sv-card">
-      {/* Thumbnail */}
       <div className="sv-card-thumb">
         {thumbItems.length > 0 ? (
           <div className="sv-card-thumb-placeholder">
@@ -198,7 +152,6 @@ function LookCard({ look }: { look: Look }) {
         )}
       </div>
 
-      {/* Title */}
       {look.originalSessionId ? (
         <Link
           to={`/style-me/result?sessionId=${look.originalSessionId}`}
@@ -212,29 +165,23 @@ function LookCard({ look }: { look: Look }) {
         </span>
       )}
 
-      {/* Meta */}
       {metaParts && <p className="sv-card-meta">{metaParts}</p>}
 
-      {/* Finishing touches */}
       {(look.perfumeRec || look.hairstyleRec || look.songRec) && (
         <div className="sv-card-finishing">
-          {look.perfumeRec  && <FinishingLine label="Scent" value={look.perfumeRec} />}
-          {look.hairstyleRec && <FinishingLine label="Hair"  value={look.hairstyleRec} />}
-          {look.songRec     && <FinishingLine label="Song"  value={look.songRec} />}
+          {look.perfumeRec && <FinishingLine label="Scent" value={look.perfumeRec} />}
+          {look.hairstyleRec && <FinishingLine label="Hair" value={look.hairstyleRec} />}
+          {look.songRec && <FinishingLine label="Song" value={look.songRec} />}
         </div>
       )}
 
-      {/* Wear tracking */}
       {look.timesWorn > 0 && (
         <p className="sv-card-wear">
           Worn {look.timesWorn} time{look.timesWorn !== 1 ? "s" : ""}
-          {look.lastWorn
-            ? ` · Last worn ${fmtUtcDate(look.lastWorn!, true)}`
-            : ""}
+          {look.lastWorn ? ` · Last worn ${fmtUtcDate(look.lastWorn!, true)}` : ""}
         </p>
       )}
 
-      {/* Actions */}
       <div className="sv-card-actions">
         {look.originalSessionId ? (
           <Link
@@ -246,7 +193,6 @@ function LookCard({ look }: { look: Look }) {
         ) : (
           <span className="sv-card-action sv-card-action--disabled">Open</span>
         )}
-        <span className="sv-card-action sv-card-action--disabled">Try the look</span>
         <Form method="post" style={{ display: "inline" }}>
           <input type="hidden" name="intent" value="delete" />
           <input type="hidden" name="lookId" value={look.id} />
