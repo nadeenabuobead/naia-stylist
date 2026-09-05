@@ -2,6 +2,11 @@ import { Link, useLoaderData, type LinksFunction, type LoaderFunctionArgs } from
 import { data } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
+import {
+  getCloudinaryConfig,
+  validatePublicIdOwnership,
+  buildPrivateDownloadUrl,
+} from "~/lib/cloudinary-admin.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 
@@ -40,6 +45,7 @@ function buildOutcomeSummary(
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const naiaCustomer = await requireCurrentNaiaCustomer(request);
+  const cloudinaryConfig = getCloudinaryConfig();
 
   const analyses = await prisma.buyOrSkipAnalysis.findMany({
     where: { customerId: naiaCustomer.id },
@@ -49,6 +55,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       id: true,
       createdAt: true,
       imageUrl: true,
+      imagePublicId: true,
+      imageFormat: true,
       verdict: true,
       confidence: true,
       category: true,
@@ -60,16 +68,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 
   return data({
-    decisions: analyses.map(a => ({
-      id: a.id,
-      createdAt: a.createdAt.toISOString(),
-      imageUrl: a.imageUrl,
-      verdict: a.verdict,
-      confidence: a.confidence,
-      category: a.category,
-      reasoning: a.reasoning,
-      outcomeSummary: buildOutcomeSummary(a.outcome),
-    })),
+    decisions: analyses.map(a => {
+      // Prefer private signed URL; fall back to stored imageUrl for pre-S0 analyses.
+      let resolvedImageUrl: string | null = null;
+      if (a.imagePublicId && a.imageFormat && cloudinaryConfig) {
+        const ownership = validatePublicIdOwnership(a.imagePublicId, naiaCustomer.id);
+        if (ownership.ok) {
+          resolvedImageUrl = buildPrivateDownloadUrl(
+            cloudinaryConfig, a.imagePublicId, a.imageFormat, "private",
+          );
+        }
+      }
+      if (!resolvedImageUrl && a.imageUrl) resolvedImageUrl = a.imageUrl;
+
+      return {
+        id: a.id,
+        createdAt: a.createdAt.toISOString(),
+        resolvedImageUrl,
+        verdict: a.verdict,
+        confidence: a.confidence,
+        category: a.category,
+        reasoning: a.reasoning,
+        outcomeSummary: buildOutcomeSummary(a.outcome),
+      };
+    }),
   });
 }
 
@@ -98,8 +120,8 @@ export default function BuyingDecisions() {
           {decisions.map(d => (
             <Link key={d.id} to={`/buyskip/${d.id}`} className="bos-decision-card">
               <div className="bos-decision-thumb-wrap">
-                {d.imageUrl
-                  ? <img src={d.imageUrl} alt="Assessed item" className="bos-decision-thumb" />
+                {d.resolvedImageUrl
+                  ? <img src={d.resolvedImageUrl} alt="Assessed item" className="bos-decision-thumb" />
                   : <div className="bos-decision-thumb-placeholder">◇</div>
                 }
               </div>

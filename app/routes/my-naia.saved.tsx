@@ -2,6 +2,11 @@ import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "reac
 import { Form, Link, useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
+import {
+  getCloudinaryConfig,
+  validatePublicIdOwnership,
+  buildPrivateDownloadUrl,
+} from "~/lib/cloudinary-admin.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 
@@ -38,6 +43,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
+  const cloudinaryConfig = getCloudinaryConfig();
 
   const savedLooks = await prisma.savedLook.findMany({
     where: { customerId: customer.id },
@@ -46,43 +52,89 @@ export async function loader({ request }: LoaderFunctionArgs) {
       items: {
         orderBy: { id: "asc" },
         include: {
-          closetItem: { select: { imageUrl: true } },
+          closetItem: { select: { imageUrl: true, imagePublicId: true, imageFormat: true } },
         },
       },
     },
   });
 
+  // Fetch original OutfitSuggestion data: session link + item images as fallback
+  // for SavedLookItems whose productImageUrl was not copied at save time.
   const suggestionIds = savedLooks.map((l) => l.fromSuggestionId).filter(Boolean) as string[];
-  const suggestionSessionMap = new Map<string, string>();
+  type SuggItem = { itemType: string; closetItemId: string | null; shopifyProductId: string | null; productImageUrl: string | null };
+  const suggestionMap = new Map<string, { sessionId: string; items: SuggItem[] }>();
+
   if (suggestionIds.length > 0) {
     const suggestions = await prisma.outfitSuggestion.findMany({
       where: { id: { in: suggestionIds } },
-      select: { id: true, sessionId: true },
+      select: {
+        id: true,
+        sessionId: true,
+        items: {
+          select: { itemType: true, closetItemId: true, shopifyProductId: true, productImageUrl: true },
+        },
+      },
     });
-    for (const s of suggestions) suggestionSessionMap.set(s.id, s.sessionId);
+    for (const s of suggestions) suggestionMap.set(s.id, { sessionId: s.sessionId, items: s.items });
   }
 
   return {
-    looks: savedLooks.map((look) => ({
-      id: look.id,
-      name: look.name,
-      occasion: look.occasion,
-      notes: look.notes,
-      perfumeRec: look.perfumeRec,
-      hairstyleRec: look.hairstyleRec,
-      songRec: look.songRec,
-      timesWorn: look.timesWorn,
-      lastWorn: look.lastWorn?.toISOString() ?? null,
-      fromSuggestionId: look.fromSuggestionId,
-      originalSessionId: look.fromSuggestionId ? (suggestionSessionMap.get(look.fromSuggestionId) ?? null) : null,
-      createdAt: look.createdAt.toISOString(),
-      items: look.items.map((item) => ({
-        id: item.id,
-        itemType: item.itemType,
-        productImageUrl: item.productImageUrl ?? item.closetItem?.imageUrl ?? null,
-        shopifyProductId: item.shopifyProductId,
-      })),
-    })),
+    looks: savedLooks.map((look) => {
+      const suggData = look.fromSuggestionId ? suggestionMap.get(look.fromSuggestionId) : undefined;
+
+      return {
+        id: look.id,
+        name: look.name,
+        occasion: look.occasion,
+        notes: look.notes,
+        perfumeRec: look.perfumeRec,
+        hairstyleRec: look.hairstyleRec,
+        songRec: look.songRec,
+        timesWorn: look.timesWorn,
+        lastWorn: look.lastWorn?.toISOString() ?? null,
+        fromSuggestionId: look.fromSuggestionId,
+        originalSessionId: suggData?.sessionId ?? null,
+        createdAt: look.createdAt.toISOString(),
+        items: look.items.map((item) => {
+          // 1. Stored productImageUrl (present for NADINE items saved after the fix)
+          let resolvedImageUrl: string | null = item.productImageUrl ?? null;
+
+          // 2. Closet item: private signed URL > legacy imageUrl
+          if (!resolvedImageUrl && item.closetItemId && item.closetItem) {
+            const ci = item.closetItem;
+            if (ci.imagePublicId && ci.imageFormat && cloudinaryConfig) {
+              const ownership = validatePublicIdOwnership(ci.imagePublicId, customer.id);
+              if (ownership.ok) {
+                resolvedImageUrl = buildPrivateDownloadUrl(
+                  cloudinaryConfig, ci.imagePublicId, ci.imageFormat, "private",
+                );
+              }
+            }
+            if (!resolvedImageUrl && ci.imageUrl) resolvedImageUrl = ci.imageUrl;
+          }
+
+          // 3. Fallback: recover productImageUrl from the original OutfitSuggestion items.
+          //    Matches by shopifyProductId for NADINE items; by closetItemId for closet items
+          //    as a last resort when the signed URL could not be built.
+          if (!resolvedImageUrl && suggData) {
+            let match: SuggItem | undefined;
+            if (item.shopifyProductId) {
+              match = suggData.items.find((i) => i.shopifyProductId === item.shopifyProductId);
+            } else if (item.closetItemId) {
+              match = suggData.items.find((i) => i.closetItemId === item.closetItemId);
+            }
+            if (match?.productImageUrl) resolvedImageUrl = match.productImageUrl;
+          }
+
+          return {
+            id: item.id,
+            itemType: item.itemType,
+            resolvedImageUrl,
+            shopifyProductId: item.shopifyProductId,
+          };
+        }),
+      };
+    }),
   };
 }
 
@@ -100,7 +152,7 @@ export default function SavedLooks() {
         <div className="sp-shell-eyebrow">Your Style Archive</div>
         <h1 className="sp-shell-title">SAVED <span className="sp-shell-accent">looks.</span></h1>
         <p className="sp-shell-desc">
-          Looks you've kept from your styling sessions. Return to them any time to revisit the pieces and the finishing touches that made them yours.
+          Looks you've saved from StyleMe, kept here so you can return to the pieces and finishing touches anytime.
         </p>
       </div>
 
@@ -126,7 +178,7 @@ export default function SavedLooks() {
 }
 
 function LookCard({ look }: { look: Look }) {
-  const imagedItems = look.items.filter((i) => i.productImageUrl);
+  const imagedItems = look.items.filter((i) => i.resolvedImageUrl);
   const thumbItems = imagedItems.slice(0, 3);
 
   const formattedDate = fmtUtcDate(look.createdAt);
@@ -139,15 +191,13 @@ function LookCard({ look }: { look: Look }) {
           <div className="sv-card-thumb-placeholder">
             {thumbItems.map((item) => (
               <div key={item.id} className="sv-card-thumb-img-tile">
-                <img src={item.productImageUrl!} alt={item.itemType} />
+                <img src={item.resolvedImageUrl!} alt={item.itemType} />
               </div>
             ))}
           </div>
         ) : (
-          <div className="sv-card-thumb-placeholder">
-            <span style={{ fontFamily: "var(--naia-ff-body)", fontSize: "13px", fontStyle: "italic", color: "var(--naia-muted)" }}>
-              No items
-            </span>
+          <div className="sv-card-thumb-placeholder sv-card-thumb-placeholder--unavailable">
+            <span className="sv-card-thumb-unavailable">Pieces unavailable</span>
           </div>
         )}
       </div>

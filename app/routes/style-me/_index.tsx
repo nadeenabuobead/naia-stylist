@@ -128,7 +128,7 @@ export default function StyleMeIndex() {
           <div className="sml-header">
             <div className="sml-section-label" style={{ marginBottom: 0 }}>Previous StyleMe Looks</div>
             <div className="sml-header-links">
-              <Link to="/my-naia/saved" className="sml-header-link">View Saved</Link>
+              <Link to="/my-naia/saved" className="sml-header-link">View Saved Looks</Link>
             </div>
           </div>
           <ul className="sml-grid" style={{ listStyle: "none", margin: 0, padding: 0 }}>

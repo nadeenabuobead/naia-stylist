@@ -27,7 +27,6 @@ const NAV_GROUPS: NavGroup[] = [
     title: "ACCOUNT",
     items: [
       { label: "MY nAia MODEL",             path: "/my-naia-model" },
-      { label: "SAVED",                     path: "/my-naia/saved" },
       { label: "ORDERS",                    path: null },
       { label: "SETTINGS & PRIVACY",        path: "/settings" },
     ],

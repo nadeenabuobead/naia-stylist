@@ -461,32 +461,50 @@ describe("H — Digital Closet: composed shell + content invariants", () => {
   });
 });
 
-describe("I — BUG-5: closet-sourced saved look items carry imageUrl from closetItem join", () => {
-  it("my-naia.saved.tsx loader joins closetItem.imageUrl on SavedLookItem records", () => {
+describe("I — BUG-5 (updated): saved look items resolve images via private Cloudinary + suggestion fallback", () => {
+  it("my-naia.saved.tsx loader selects imageUrl, imagePublicId, imageFormat from closetItem", () => {
     const src = route("my-naia.saved.tsx");
     assert.ok(src.includes("closetItem"), "loader includes closetItem relation");
-    assert.ok(src.includes("select: { imageUrl: true }"), "selects imageUrl from closetItem");
+    assert.ok(src.includes("imagePublicId"), "selects imagePublicId from closetItem");
+    assert.ok(src.includes("imageFormat"), "selects imageFormat from closetItem");
+    assert.ok(src.includes("imageUrl"), "retains imageUrl for legacy closet items");
   });
 
-  it("my-naia.saved.tsx mapper falls back to closetItem.imageUrl when productImageUrl is null", () => {
+  it("my-naia.saved.tsx loader imports and uses buildPrivateDownloadUrl for closet items", () => {
     const src = route("my-naia.saved.tsx");
+    assert.ok(src.includes("buildPrivateDownloadUrl"), "imports and calls buildPrivateDownloadUrl");
+    assert.ok(src.includes("validatePublicIdOwnership"), "validates ownership before signing");
+    assert.ok(src.includes("getCloudinaryConfig"), "reads Cloudinary config server-side");
+  });
+
+  it("my-naia.saved.tsx loader fetches OutfitSuggestion items as fallback for missing productImageUrl", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(src.includes("outfitSuggestion.findMany"), "queries OutfitSuggestion for fallback images");
+    assert.ok(src.includes("shopifyProductId"), "matches fallback by shopifyProductId");
+    assert.ok(src.includes("suggestionMap"), "builds suggestion lookup map");
+  });
+
+  it("my-naia.saved.tsx LookCard uses resolvedImageUrl (server-resolved, not raw productImageUrl)", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(src.includes("resolvedImageUrl"), "LookCard reads resolvedImageUrl from loader data");
+    assert.ok(src.includes("i.resolvedImageUrl"), "filters items by resolvedImageUrl presence");
+  });
+
+  it("my-naia.saved.tsx LookCard renders intentional unavailable state when no image can be recovered", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(src.includes("Pieces unavailable"), "shows intentional unavailable message, not generic No items");
     assert.ok(
-      src.includes("item.productImageUrl ?? item.closetItem?.imageUrl ?? null"),
-      "mapper coalesces productImageUrl → closetItem.imageUrl → null"
+      src.includes("sv-card-thumb-placeholder--unavailable"),
+      "unavailable state uses distinct class"
     );
-  });
-
-  it("my-naia.saved.tsx LookCard filters to items with productImageUrl (now non-null for closet items)", () => {
-    const src = route("my-naia.saved.tsx");
-    assert.ok(src.includes("productImageUrl"), "LookCard uses productImageUrl for thumbnails");
   });
 
   it("my-naia._index.tsx loader selects productImageUrl and closetItem.imageUrl on SavedLook items", () => {
     const src = route("my-naia._index.tsx");
     assert.ok(src.includes("productImageUrl: true"), "selects productImageUrl from SavedLookItem");
     assert.ok(
-      src.includes("closetItem: { select: { name: true, imageUrl: true } }"),
-      "joins closetItem with imageUrl for overview thumbnails"
+      src.includes("closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true } }"),
+      "joins closetItem with private image fields for overview thumbnails"
     );
   });
 
@@ -1139,12 +1157,10 @@ describe("L — Saved V1: tabs removed, saved looks only", () => {
     assert.ok(src.includes(">Remove<"), "Remove button label present");
   });
 
-  it("my-naia.saved.tsx image fallback coalesces productImageUrl → closetItem.imageUrl → null", () => {
+  it("my-naia.saved.tsx image resolution is done server-side and exposed as resolvedImageUrl", () => {
     const src = route("my-naia.saved.tsx");
-    assert.ok(
-      src.includes("item.productImageUrl ?? item.closetItem?.imageUrl ?? null"),
-      "image waterfall fallback preserved for private closet images"
-    );
+    assert.ok(src.includes("resolvedImageUrl"), "loader exposes resolvedImageUrl per item");
+    assert.ok(src.includes("buildPrivateDownloadUrl"), "private signed URL generated server-side");
   });
 
   it("my-naia.saved.tsx finishing touches rendered only when fields are non-null", () => {
@@ -1163,5 +1179,96 @@ describe("L — Saved V1: tabs removed, saved looks only", () => {
     assert.ok(src.includes('intent === "save-pending"'), "save-pending intent handled");
     assert.ok(src.includes('intent === "clear-pending"'), "clear-pending intent handled");
     assert.ok(src.includes("pending"), "pending cookie flow present");
+  });
+});
+
+// ── M — Navigation, StyleMe link, save-action fix, BOS image fix ──────────────
+
+describe("M — Saved navigation removed; StyleMe VIEW SAVED LOOKS; save fix; BOS images", () => {
+  it("MyNaiaNavigation.tsx no longer lists SAVED in the ACCOUNT group", () => {
+    const src = route("../components/my-naia/MyNaiaNavigation.tsx");
+    assert.ok(
+      !src.includes('"SAVED"') && !src.includes("'SAVED'"),
+      "SAVED label absent from nav"
+    );
+    assert.ok(
+      !src.includes('path: "/my-naia/saved"'),
+      "my-naia/saved path absent from nav items"
+    );
+  });
+
+  it("MyNaiaNavigation.tsx ACCOUNT group still contains MY nAia MODEL, ORDERS, SETTINGS & PRIVACY", () => {
+    const src = route("../components/my-naia/MyNaiaNavigation.tsx");
+    assert.ok(src.includes('"MY nAia MODEL"'), "MY nAia MODEL remains");
+    assert.ok(src.includes('"ORDERS"'), "ORDERS remains");
+    assert.ok(src.includes('"SETTINGS & PRIVACY"'), "SETTINGS & PRIVACY remains");
+  });
+
+  it("my-naia/saved route is still registered in routes.ts", () => {
+    const src = route("../../app/routes.ts");
+    assert.ok(
+      src.includes('"my-naia/saved"') || src.includes("'my-naia/saved'"),
+      "route still registered — page exists even though it's not in the sidebar nav"
+    );
+  });
+
+  it("style-me/_index.tsx shows VIEW SAVED LOOKS linking to /my-naia/saved", () => {
+    const src = route("style-me/_index.tsx");
+    assert.ok(src.includes("View Saved Looks"), "link label is View Saved Looks");
+    assert.ok(src.includes('to="/my-naia/saved"'), "links to /my-naia/saved");
+    assert.ok(!src.includes(">View Saved<"), "old View Saved label absent");
+  });
+
+  it("style-me/result.tsx save action copies productImageUrl from OutfitItem to SavedLookItem (intent=save)", () => {
+    const src = route("style-me/result.tsx");
+    assert.ok(
+      src.includes("productImageUrl: item.productImageUrl || null"),
+      "productImageUrl copied in intent=save path"
+    );
+  });
+
+  it("style-me/result.tsx save action copies productImageUrl in intent=save-pending path", () => {
+    const src = route("style-me/result.tsx");
+    const saveIdx    = src.indexOf('intent === "save"');
+    const pendingIdx = src.indexOf('intent === "save-pending"');
+    const copySnippet = "productImageUrl: item.productImageUrl || null";
+    // Count occurrences — both paths must copy productImageUrl
+    const occurrences = src.split(copySnippet).length - 1;
+    assert.ok(pendingIdx > saveIdx, "save-pending comes after save in source");
+    assert.ok(occurrences >= 2, "productImageUrl copied in both save paths (intent=save and intent=save-pending)");
+  });
+
+  it("my-naia.buying-decisions.tsx loader selects imagePublicId and imageFormat", () => {
+    const src = route("my-naia.buying-decisions.tsx");
+    assert.ok(src.includes("imagePublicId"), "imagePublicId selected");
+    assert.ok(src.includes("imageFormat"), "imageFormat selected");
+  });
+
+  it("my-naia.buying-decisions.tsx generates signed private URL for S0+ analyses", () => {
+    const src = route("my-naia.buying-decisions.tsx");
+    assert.ok(src.includes("buildPrivateDownloadUrl"), "builds private signed URL");
+    assert.ok(src.includes("validatePublicIdOwnership"), "validates ownership before signing");
+    assert.ok(src.includes("getCloudinaryConfig"), "reads Cloudinary config server-side");
+  });
+
+  it("my-naia.buying-decisions.tsx falls back to imageUrl for pre-S0 analyses", () => {
+    const src = route("my-naia.buying-decisions.tsx");
+    assert.ok(
+      src.includes("a.imageUrl"),
+      "imageUrl fallback present for analyses without imagePublicId"
+    );
+  });
+
+  it("my-naia.buying-decisions.tsx exposes resolvedImageUrl (not raw imageUrl) to the UI", () => {
+    const src = route("my-naia.buying-decisions.tsx");
+    assert.ok(src.includes("resolvedImageUrl"), "loader maps to resolvedImageUrl");
+    assert.ok(src.includes("d.resolvedImageUrl"), "UI renders d.resolvedImageUrl");
+    assert.ok(!src.includes("<img src={d.imageUrl}"), "raw imageUrl not used directly in img tag");
+  });
+
+  it("my-naia.buying-decisions.tsx customer scoping unchanged", () => {
+    const src = route("my-naia.buying-decisions.tsx");
+    assert.ok(src.includes("customerId: naiaCustomer.id"), "query scoped to authenticated customer");
+    assert.ok(src.includes("requireCurrentNaiaCustomer"), "auth guard present");
   });
 });
