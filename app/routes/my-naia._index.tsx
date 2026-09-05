@@ -5,6 +5,7 @@ import prisma from "~/db.server";
 import { getPublishedEditorialReports } from "~/lib/editorial-reports.server";
 import { loadStrongestConfirmedTendency } from "~/lib/ai/taste-reconcile.server";
 import { reportVisual, type TreatmentType } from "~/lib/report-visual";
+import { getEntitlementSummary } from "~/lib/plan/entitlement.server";
 import {
   getCloudinaryConfig,
   validatePublicIdOwnership,
@@ -177,7 +178,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
   const customerId = customer.id;
 
-  const [sessions, editorialReports, buyOrSkipRaw, reviewCount, closetCount, strongestTendency, candidateCount] =
+  const [sessions, editorialReports, buyOrSkipRaw, reviewCount, closetCount, strongestTendency, candidateCount, entitlement] =
     await Promise.all([
       prisma.stylingSession.findMany({
         where: { customerId },
@@ -205,6 +206,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       prisma.styleTendency.count({
         where: { customerId, state: "CANDIDATE", customerFeedback: { not: "not-quite" } },
       }),
+      getEntitlementSummary(customerId, customer.plan),
     ]);
 
   const latestEditorial = editorialReports[0] ?? null;
@@ -314,11 +316,48 @@ export async function loader({ request }: LoaderFunctionArgs) {
     passportState,
     strongestTendency: strongestTendency ?? null,
     hasCandidates: candidateCount > 0,
+    entitlement,
   };
 }
 
+import type { EntitlementSummary } from "~/lib/plan/entitlement.server";
+
+function buildOverviewPlanCards(e: EntitlementSummary): { label: string; value: string }[] {
+  const planLabel = e.plan === "PAID" ? "Paid Plan" : "Free Plan";
+
+  const styleMeRemaining = Math.max(0, e.styleMe.monthlyLimit - e.styleMe.monthlyUsed);
+  const styleMeValue = e.styleMe.welcomeAvailable
+    ? `${styleMeRemaining} session${styleMeRemaining !== 1 ? "s" : ""} + welcome`
+    : `${styleMeRemaining} session${styleMeRemaining !== 1 ? "s" : ""} remaining`;
+
+  let buySkipValue: string;
+  if (e.plan === "FREE") {
+    buySkipValue = e.buySkip.introAvailable ? "1 intro check" : "Intro used";
+  } else {
+    const bRemaining = Math.max(0, (e.buySkip.monthlyLimit ?? 0) - (e.buySkip.monthlyUsed ?? 0));
+    buySkipValue = `${bRemaining} check${bRemaining !== 1 ? "s" : ""} remaining`;
+  }
+
+  const vtoReserved = e.vto.monthlyCompleted + e.vto.monthlyInFlight;
+  const vtoRemaining = Math.max(0, e.vto.monthlyLimit - vtoReserved);
+  const vtoValue = `${vtoRemaining} try-on${vtoRemaining !== 1 ? "s" : ""} remaining`;
+
+  const closetValue = `${e.closet.currentCount} of ${e.closet.limit} items`;
+
+  const trendValue = e.personalisedTrend.monthlyLimit > 0 ? "1 included" : "Not included";
+
+  return [
+    { label: "Current Plan", value: planLabel },
+    { label: "StyleMe", value: styleMeValue },
+    { label: "Buy or Skip", value: buySkipValue },
+    { label: "Virtual Try-On", value: vtoValue },
+    { label: "My Closet", value: closetValue },
+    { label: "Personalised Trend Edit", value: trendValue },
+  ];
+}
+
 export default function MyNaiaOverview() {
-  const { firstName, profile, sessions, trendReport, buyOrSkipHistory, reviewCount, closetCount, passportState, strongestTendency, hasCandidates } =
+  const { firstName, profile, sessions, trendReport, buyOrSkipHistory, reviewCount, closetCount, passportState, strongestTendency, hasCandidates, entitlement } =
     useLoaderData<typeof loader>();
 
   const quote = getDailyQuote();
@@ -701,17 +740,11 @@ export default function MyNaiaOverview() {
         <section className="mn-section">
           <div className="mn-section-head">
             <div className="mn-eyebrow">Plan &amp; Usage</div>
+            <Link to="/my-naia/plan-usage" className="mn-see-link">Full details</Link>
           </div>
           <div className="mn-section-body">
             <div style={{ display: "grid", gap: "1.5rem", gridTemplateColumns: "repeat(auto-fill, minmax(10rem, 1fr))" }}>
-              {[
-                { label: "Current Plan", value: "The Atelier Plan" },
-                { label: "StyleMe", value: "5 sessions remaining" },
-                { label: "Buy or Skip", value: "3 checks remaining" },
-                { label: "Virtual Try-On", value: "3 try-ons remaining" },
-                { label: "My Closet", value: `${closetCount} of 100 spaces used` },
-                { label: "Personalised Trend Edit", value: "Available this month" },
-              ].map((c) => (
+              {buildOverviewPlanCards(entitlement).map((c) => (
                 <div key={c.label}>
                   <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg-55)" }}>{c.label}</div>
                   <div style={{ marginTop: "0.5rem", fontFamily: "var(--ff-display)", fontWeight: 300, fontSize: "1.5rem", letterSpacing: "0.02em", textTransform: "uppercase", color: "var(--fg)" }}>{c.value}</div>

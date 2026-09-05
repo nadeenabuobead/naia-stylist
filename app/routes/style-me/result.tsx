@@ -23,6 +23,7 @@ import { VtoExperience } from "~/components/VtoExperience";
 import { RecommendationFeedbackWidget } from "~/components/RecommendationFeedbackWidget";
 import { loadSessionFeedback } from "~/lib/ai/feedback-persistence.server";
 import { loadOutcomeForSuggestion } from "~/lib/ai/outcome-persistence.server";
+import { checkEntitlement } from "~/lib/plan/entitlement.server";
 import { buildCustomerJourneyContext, buildEphemeralContextSignals } from "~/lib/ai/journey-context.server";
 import { emitSessionStarted, emitRecommendationServed, emitLookSaved, emitInSessionReviewSubmitted, recordJourneyEvent, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -253,6 +254,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
       resolvedCustomerId = guest.id;
     }
 
+    // Quota guard — behind ENTITLEMENT_ENFORCEMENT flag; disabled in production until
+    // billing and upgrade flow exist. Concurrency note: this check is read-before-write
+    // and is NOT atomic. Before enabling in production, wrap in a Serializable transaction.
+    const isEnforced = process.env.ENTITLEMENT_ENFORCEMENT === "true";
+    if (isEnforced && naiaCustomer) {
+      const entCheck = await checkEntitlement(naiaCustomer.id, naiaCustomer.plan, "styleMe");
+      if (!entCheck.allowed) {
+        return data(
+          { isLoading: false, isAuthenticated: true, naiaModelIsReady, devTryOnEnabled, vtoEnabled,
+            tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null,
+            currentMood: null, desiredFeeling: null, occasion: null, suggestion: null,
+            pendingState: null as "needs_passport" | "ready_to_save" | null,
+            existingOutfitFeedback: null, existingOutcome: null,
+            error: "You've used all your StyleMe sessions for this month." },
+          { status: 429 },
+        );
+      }
+    }
+
+    // If this session was started via Adjust Vibe, the source session ID was stored
+    // in the cookie by the adjust-vibe action. We link it here so the new session
+    // is marked as a continuation and excluded from StyleMe quota counts.
+    const adjustVibeSourceId = (cookieSession.get("styleMeAdjustVibeSourceId") as string | undefined) ?? null;
+    if (adjustVibeSourceId) cookieSession.unset("styleMeAdjustVibeSourceId");
+
     const moodFirst = mood ?? null;
     const stylingSession = await prisma.stylingSession.create({
       data: {
@@ -265,6 +291,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         practicalIds,
         styleFrom: source === "my-closet" ? "CLOSET" : source === "naia-piece" ? "NAIA" : "BOTH",
         closetAnchorId: (source === "my-closet" || source === "both") ? (closetAnchorId ?? null) : null,
+        parentSessionId: adjustVibeSourceId,
         // Rev 3 — Psychology-First (Group 5). Wording context only; zero product scoring.
         ...(isRev3Session && {
           state: rev3State,
@@ -332,9 +359,11 @@ export async function action({ request }: ActionFunctionArgs) {
       // Return the customer to vibe-only questions with existing answers prefilled.
       // Source, focal item and Passport context are preserved in the cookie — only
       // state / intentions / physical-need / occasion are re-asked.
-      // A flag tells occasion.tsx to skip the source step on the way back.
+      // styleMeAdjustVibeSourceId carries the originating session ID so the new
+      // StylingSession created on return is linked via parentSessionId (quota continuations).
       const cookieSession = await getSession(request.headers.get("Cookie"));
       cookieSession.set("styleMeAdjustVibe", "true");
+      if (sessionId) cookieSession.set("styleMeAdjustVibeSourceId", sessionId);
       const isRev3 = !!cookieSession.get("styleMeState");
       const entryPoint = isRev3 ? "/style-me/state" : "/style-me/mood";
       return redirect(entryPoint, {

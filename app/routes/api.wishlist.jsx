@@ -13,6 +13,7 @@ import {
 } from "../lib/cloudinary-admin.server";
 import { emitBuySkipSubmitted, recordJourneyEventAwaited } from "../lib/ai/journey-events.server";
 import { quizQuestions } from "../lib/onboarding/quiz-data";
+import { checkEntitlement } from "../lib/plan/entitlement.server";
 import { moderateImageContent } from "../lib/image-moderation.server";
 import { screenGarmentSuitability } from "../lib/image-suitability.server";
 
@@ -98,6 +99,19 @@ async function analyzeItem(request) {
   // It must never receive BuyOrSkipAnalysis writes.
   if (naiaCustomer.shopifyCustomerId === "guest") {
     return json({ error: "not_authenticated" }, { status: 401 });
+  }
+
+  // ── 1b. Quota guard — behind ENTITLEMENT_ENFORCEMENT flag ────────────────
+  // Concurrency note: read-before-write; NOT atomic. Wrap in Serializable
+  // transaction before enabling in public production.
+  if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {
+    const entCheck = await checkEntitlement(naiaCustomer.id, naiaCustomer.plan, "buySkip");
+    if (!entCheck.allowed) {
+      const message = entCheck.reason === "intro_used"
+        ? "You've used your introductory Buy or Skip check."
+        : "You've used all your Buy or Skip checks for this month.";
+      return json({ error: "quota_exceeded", message }, { status: 429 });
+    }
   }
 
   // ── 2. Parse body ──────────────────────────────────────────────────────────

@@ -19,6 +19,7 @@ import { extractClosetEvidence } from "~/lib/ai/taste-extraction.server";
 import { writeSourceEvidence } from "~/lib/ai/taste-reconcile.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
 import { VtoExperience } from "~/components/VtoExperience";
+import { checkEntitlement } from "~/lib/plan/entitlement.server";
 
 // Option B shell: MyNaiaLayout + naiaStyles (NADINE header, My nAia navigation)
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
@@ -194,6 +195,16 @@ export async function action({ request }: ActionFunctionArgs) {
     const garmentRelationships = relationshipsResult.value;
     if (!category) return data({ error: "Category required" }, { status: 400 });
     if (!publicId) return data({ error: "Image upload reference required." }, { status: 400 });
+
+    // ── Closet capacity enforcement (immediate — no flag required) ────────────
+    // Storage entitlement: customer can free capacity by deleting items.
+    const capacityCheck = await checkEntitlement(customer.id, customer.plan, "closet");
+    if (!capacityCheck.allowed) {
+      return data(
+        { error: "Your closet is full. Remove some items to add new ones." },
+        { status: 403 },
+      );
+    }
 
     // ── Server-side upload validation ─────────────────────────────────────────
     // All checks run BEFORE any DB write. Rejected uploads have their Cloudinary

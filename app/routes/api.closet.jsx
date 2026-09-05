@@ -1,6 +1,7 @@
 import { authenticateCustomer } from "../customer-auth.server";
 import prisma from "../db.server";
 import { deleteClosetItemWithImage } from "../lib/closet-item-deletion.server.js";
+import { checkEntitlement } from "../lib/plan/entitlement.server";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -75,6 +76,10 @@ export async function action({ request }) {
     if (!name?.trim()) {
       return Response.json({ error: "Name required" }, { status: 400, headers: CORS });
     }
+    const capacityCheck = await checkEntitlement(customer.id, customer.plan, "closet");
+    if (!capacityCheck.allowed) {
+      return Response.json({ error: "Your closet is full. Remove some items to add new ones." }, { status: 403, headers: CORS });
+    }
     const item = await prisma.closetItem.create({
       data: {
         customerId: customer.id,
@@ -91,6 +96,11 @@ export async function action({ request }) {
     const { items } = body;
     if (!Array.isArray(items)) {
       return Response.json({ error: "Items array required" }, { status: 400, headers: CORS });
+    }
+
+    const capacityCheck = await checkEntitlement(customer.id, customer.plan, "closet");
+    if (!capacityCheck.allowed) {
+      return Response.json({ error: "Your closet is full. Remove some items to add new ones.", merged: 0 }, { status: 403, headers: CORS });
     }
 
     const existing = await prisma.closetItem.findMany({
