@@ -54,6 +54,8 @@ export default [
     route("trend-reports/:id", "routes/app.trend-reports.$id.tsx"),
   ]),
   route("my-naia", "routes/my-naia._index.tsx"),
+  route("my-naia/what-naia-notices", "routes/my-naia.what-naia-notices.tsx"),
+  route("my-naia/plan-usage", "routes/my-naia.plan-usage.tsx"),
   route("my-naia/saved", "routes/my-naia.saved.tsx"),
   route("my-naia/buying-decisions", "routes/my-naia.buying-decisions.tsx"),
   route("my-naia-model", "routes/my-naia-model.tsx"),
@@ -96,5 +98,7 @@ export default [
   route("api/tryon-status/:jobId", "routes/api.tryon-status.$jobId.tsx"),
   // Style Memory V1 — StyleMe outcome capture (UPSERT per OutfitSuggestion)
   route("api/styleme-outcome", "routes/api.styleme-outcome.tsx"),
+  // Phase 5D — Taste & Evidence Layer V1
+  route("api/taste-observation-feedback", "routes/api.taste-observation-feedback.tsx"),
 
 ] satisfies RouteConfig;
