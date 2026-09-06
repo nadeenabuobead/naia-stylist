@@ -42,7 +42,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  return redirect("/style-me?filter=saved");
+  return redirect("/style-me");
   // Legacy body kept below — unreachable but preserved for reference
   const customer = await requireCurrentNaiaCustomer(request);
   const cloudinaryConfig = getCloudinaryConfig();

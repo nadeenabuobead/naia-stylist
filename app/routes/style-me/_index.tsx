@@ -1,4 +1,4 @@
-import { Form, Link, useLoaderData, useSearchParams } from "react-router";
+import { Form, Link, useLoaderData } from "react-router";
 import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs, type LinksFunction } from "react-router";
 import { clearStyleMeSession } from "~/lib/session.server";
 import { getCurrentNaiaCustomer, requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
@@ -100,7 +100,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const customerId = customer?.id ?? null;
 
   if (!customerId) {
-    return data({ hasProfile: false, hasClosetItems: false, recentSessions: [] as SessionRecord[], savedSessions: [] as SessionRecord[] });
+    return data({ hasProfile: false, hasClosetItems: false, recentSessions: [] as SessionRecord[] });
   }
 
   const [profile, closetCount, recentRaw, savedLooks] = await Promise.all([
@@ -109,7 +109,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       select: { stylePersonalities: true },
     }),
     prisma.closetItem.count({ where: { customerId } }),
-    // ALL LOOKS: 20 most recent — acceptable for performance in V1
+    // 20 most recent sessions — acceptable for performance in V1
     prisma.stylingSession.findMany({
       where: { customerId },
       take: 20,
@@ -122,21 +122,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
         },
       },
     }),
-    // SAVED: all saved looks — no take limit; must not be capped by session count
+    // Saved state per suggestion — no take limit; annotates every card regardless of age
     prisma.savedLook.findMany({
       where: { customerId },
-      orderBy: { createdAt: "desc" },
       select: { id: true, fromSuggestionId: true },
     }),
   ]);
 
-  // savedMap: suggestionId → savedLookId — used to annotate isSaved on recentSessions
+  // savedMap: suggestionId → savedLookId — used to annotate isSaved on each card
   const savedMap = new Map<string, string>();
   for (const sl of savedLooks) {
     if (sl.fromSuggestionId) savedMap.set(sl.fromSuggestionId, sl.id);
   }
 
-  // ALL LOOKS — 20 most recent sessions with save state
   const recentSessions: SessionRecord[] = recentRaw.map((s) => {
     const sugg = s.suggestions[0] ?? null;
     const suggestionId = sugg?.id ?? null;
@@ -153,53 +151,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     };
   });
 
-  // SAVED — independent of recentSessions; built from all SavedLooks regardless of age.
-  // Fetches the linked OutfitSuggestion (for outfitName) and its StylingSession
-  // (for date/mood/occasion) so old looks outside the top-20 are always included.
-  let savedSessions: SessionRecord[] = [];
-  const suggestionIds = savedLooks
-    .map((sl) => sl.fromSuggestionId)
-    .filter(Boolean) as string[];
-
-  if (suggestionIds.length > 0) {
-    const suggestions = await prisma.outfitSuggestion.findMany({
-      where: { id: { in: suggestionIds } },
-      select: {
-        id: true,
-        outfitName: true,
-        session: {
-          select: { id: true, currentMood: true, occasion: true, createdAt: true },
-        },
-      },
-    });
-    const suggMap = new Map(suggestions.map((s) => [s.id, s]));
-
-    savedSessions = savedLooks
-      .map((sl): SessionRecord | null => {
-        if (!sl.fromSuggestionId) return null;
-        const sugg = suggMap.get(sl.fromSuggestionId);
-        if (!sugg) return null;
-        return {
-          id: sugg.session.id,
-          mood: sugg.session.currentMood,
-          occasion: sugg.session.occasion,
-          createdAt: sugg.session.createdAt.toISOString(),
-          outfitName: sugg.outfitName,
-          suggestionId: sugg.id,
-          isSaved: true,
-          savedLookId: sl.id,
-        };
-      })
-      .filter((s): s is SessionRecord => s !== null);
-  }
-
   return data({
     hasProfile: !!profile,
     stylePersonalities: profile?.stylePersonalities ?? [],
     hasClosetItems: closetCount > 0,
     closetCount,
     recentSessions,
-    savedSessions,
   });
 }
 
@@ -215,12 +172,7 @@ type SessionRecord = {
 };
 
 export default function StyleMeIndex() {
-  const { recentSessions, savedSessions } = useLoaderData<typeof loader>();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const filter = searchParams.get("filter") === "saved" ? "saved" : "all";
-
-  // SAVED uses its own independent list — not a subset of the 20 most recent
-  const displayed = filter === "saved" ? savedSessions : recentSessions;
+  const { recentSessions } = useLoaderData<typeof loader>();
 
   return (
     <MyNaiaLayout>
@@ -261,57 +213,11 @@ export default function StyleMeIndex() {
 
       {/* Your StyleMe Looks */}
       <section className="bos-section">
-        <div className="sml-header">
-          <div className="sml-section-label" style={{ marginBottom: 0 }}>Your StyleMe Looks</div>
-          <div style={{ display: "flex", gap: "1.5rem", alignItems: "center" }}>
-            <button
-              type="button"
-              onClick={() => setSearchParams({})}
-              aria-pressed={filter === "all"}
-              style={{
-                background: "none",
-                border: "none",
-                borderBottom: filter === "all" ? "2px solid var(--lipstick)" : "2px solid transparent",
-                padding: "0 0 4px",
-                cursor: "pointer",
-                fontFamily: "var(--naia-ff-ui)",
-                fontSize: "0.6rem",
-                letterSpacing: "0.2em",
-                textTransform: "uppercase",
-                color: filter === "all" ? "var(--lipstick)" : "var(--naia-muted)",
-                fontWeight: filter === "all" ? 600 : 400,
-                transition: "color 0.15s, border-color 0.15s",
-              }}
-            >
-              All Looks
-            </button>
-            <button
-              type="button"
-              onClick={() => setSearchParams({ filter: "saved" })}
-              aria-pressed={filter === "saved"}
-              style={{
-                background: "none",
-                border: "none",
-                borderBottom: filter === "saved" ? "2px solid var(--lipstick)" : "2px solid transparent",
-                padding: "0 0 4px",
-                cursor: "pointer",
-                fontFamily: "var(--naia-ff-ui)",
-                fontSize: "0.6rem",
-                letterSpacing: "0.2em",
-                textTransform: "uppercase",
-                color: filter === "saved" ? "var(--lipstick)" : "var(--naia-muted)",
-                fontWeight: filter === "saved" ? 600 : 400,
-                transition: "color 0.15s, border-color 0.15s",
-              }}
-            >
-              Saved
-            </button>
-          </div>
-        </div>
+        <div className="sml-section-label">Your StyleMe Looks</div>
 
-        {displayed.length > 0 ? (
+        {recentSessions.length > 0 ? (
           <ul className="sml-grid" style={{ listStyle: "none", margin: 0, padding: 0 }}>
-            {displayed.map((session) => (
+            {recentSessions.map((session) => (
               <li key={session.id}>
                 <SessionCard session={session} />
               </li>
@@ -319,16 +225,7 @@ export default function StyleMeIndex() {
           </ul>
         ) : (
           <div className="sml-empty">
-            {filter === "saved" ? (
-              <>
-                <p className="sml-section-label" style={{ marginBottom: "0.5rem" }}>No Saved Looks Yet</p>
-                <p className="sml-empty-text">
-                  Save a StyleMe look you want to come back to, and it will appear here.
-                </p>
-              </>
-            ) : (
-              <p className="sml-empty-text">Your first StyleMe session begins with a single occasion.</p>
-            )}
+            <p className="sml-empty-text">Your first StyleMe session begins with a single occasion.</p>
           </div>
         )}
       </section>

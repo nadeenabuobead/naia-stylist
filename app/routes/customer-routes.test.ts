@@ -1523,12 +1523,11 @@ describe("O — StyleMe + Saved merge: history section, filter tabs, save/unsave
     assert.ok(!src.includes("Previous StyleMe Looks"), "old title-case label removed");
   });
 
-  it("style-me/_index.tsx UI renders All Looks and Saved filter buttons", () => {
+  it("style-me/_index.tsx UI does not render All Looks / Saved filter tabs — one unified history", () => {
     const src = route("style-me/_index.tsx");
-    assert.ok(src.includes("All Looks"), "All Looks filter button present");
-    assert.ok(src.includes("Saved"), "Saved filter button present");
-    assert.ok(src.includes("useSearchParams"), "uses useSearchParams for filter state");
-    assert.ok(src.includes('filter: "saved"'), "sets filter=saved param for Saved tab");
+    assert.ok(!src.includes("All Looks"), "All Looks filter button removed");
+    assert.ok(!src.includes("useSearchParams"), "useSearchParams removed — no filter state");
+    assert.ok(!src.includes('filter: "saved"'), "filter=saved param removed");
   });
 
   it("style-me/_index.tsx SessionCard renders View Look link and save/remove action", () => {
@@ -1538,11 +1537,15 @@ describe("O — StyleMe + Saved merge: history section, filter tabs, save/unsave
     assert.ok(src.includes(">Save<"), "Save action label present");
   });
 
-  it("my-naia.saved.tsx loader redirects to /style-me?filter=saved", () => {
+  it("my-naia.saved.tsx loader redirects to /style-me (no filter param)", () => {
     const src = route("my-naia.saved.tsx");
     assert.ok(
-      src.includes('redirect("/style-me?filter=saved")'),
-      "loader redirects to /style-me?filter=saved"
+      src.includes('redirect("/style-me")'),
+      "loader redirects to /style-me"
+    );
+    assert.ok(
+      !src.includes('redirect("/style-me?filter=saved")'),
+      "no longer redirects to filter=saved"
     );
   });
 
@@ -1557,49 +1560,24 @@ describe("O — StyleMe + Saved merge: history section, filter tabs, save/unsave
   // Regression: a saved look older than the latest 20 sessions must still appear in SAVED.
   // The SAVED filter must be built from a dedicated SavedLook query, not filtered from
   // the 20-session recentSessions list.
-  it("loader exposes savedSessions independently of recentSessions (SAVED not capped at 20)", () => {
+  it("loader returns single recentSessions list — no savedSessions field", () => {
     const src = route("style-me/_index.tsx");
-    // Both fields are returned from the loader
-    assert.ok(src.includes("savedSessions,"), "loader returns savedSessions field");
     assert.ok(src.includes("recentSessions,"), "loader returns recentSessions field");
-    // savedSessions is built from savedLooks, not from recentRaw/recentSessions
-    assert.ok(
-      src.includes("savedSessions = savedLooks"),
-      "savedSessions mapped from the full savedLooks list"
-    );
-    // recentRaw/recentSessions uses take:20; savedLooks fetch has no take limit
-    assert.ok(src.includes("take: 20"), "recentRaw capped at 20 for performance");
-    // savedLook.findMany must NOT have take: immediately after it (no take cap on saved)
-    const savedFetchBlock = src.slice(src.indexOf("// SAVED: all saved looks"));
-    assert.ok(
-      !savedFetchBlock.slice(0, savedFetchBlock.indexOf("take: 20")).includes("take:"),
-      "savedLook.findMany has no take: cap before take:20 of recentRaw"
-    );
+    assert.ok(!src.includes("savedSessions,"), "savedSessions removed from loader return");
+    assert.ok(!src.includes("savedSessions = savedLooks"), "savedSessions computation removed");
+    assert.ok(src.includes("take: 20"), "recentSessions capped at 20 for performance");
   });
 
-  it("component uses savedSessions for SAVED filter, not recentSessions filtered by isSaved", () => {
+  it("component renders recentSessions directly — no filter switching", () => {
     const src = route("style-me/_index.tsx");
-    // Must use savedSessions directly for the saved tab
-    assert.ok(
-      src.includes("filter === \"saved\" ? savedSessions : recentSessions"),
-      "displayed is savedSessions when filter=saved, not recentSessions.filter(isSaved)"
-    );
-    // Must NOT filter isSaved from recentSessions for the saved tab
+    assert.ok(src.includes("recentSessions.map"), "recentSessions iterated directly");
     assert.ok(
       !src.includes("recentSessions.filter((s) => s.isSaved)"),
       "saved tab does not derive from recentSessions.filter(isSaved)"
     );
-  });
-
-  it("savedSessions loader path fetches OutfitSuggestion with session relation for full session data", () => {
-    const src = route("style-me/_index.tsx");
     assert.ok(
-      src.includes("prisma.outfitSuggestion.findMany"),
-      "outfitSuggestion.findMany called for savedSessions"
-    );
-    assert.ok(
-      src.includes("session: {") && src.includes("currentMood: true") && src.includes("occasion: true"),
-      "OutfitSuggestion.session relation selected for currentMood/occasion/createdAt"
+      !src.includes("filter === \"saved\""),
+      "no filter condition in component"
     );
   });
 });
@@ -1620,35 +1598,39 @@ describe("P — Saved UX cleanup + StyleMe historical image hydration", () => {
     assert.ok(!src.includes("savedAsLook"), "savedAsLook badge removed from overview cards");
   });
 
-  it("style-me/_index.tsx filter tabs use editorial styling (no chunky button classes)", () => {
+  it("style-me/_index.tsx has no filter tab buttons or tab styling (tabs removed)", () => {
     const src = route("style-me/_index.tsx");
-    // Editorial tab styling cues: uppercase + letterSpacing + no border/background
-    assert.ok(src.includes("textTransform") && src.includes("uppercase"), "tabs use uppercase text");
-    assert.ok(src.includes("letterSpacing"), "tabs use letter spacing");
-    assert.ok(src.includes("var(--lipstick)"), "active tab uses lipstick/burgundy color");
-    assert.ok(src.includes("var(--naia-muted)"), "inactive tab uses muted color");
-    assert.ok(src.includes("borderBottom"), "active tab has underline via borderBottom");
-    // Must NOT use chunky pill/button CSS classes
-    assert.ok(!src.includes("sml-header-link"), "old sml-header-link class removed from tab buttons");
+    assert.ok(!src.includes("All Looks"), "All Looks tab removed");
+    assert.ok(!src.includes("useSearchParams"), "useSearchParams removed");
+    assert.ok(!src.includes("sml-header-link"), "old sml-header-link class absent");
+    assert.ok(!src.includes('filter: "saved"'), "filter=saved param absent");
   });
 
-  it("style-me/_index.tsx SAVED empty state uses eyebrow + correct copy", () => {
+  it("style-me/_index.tsx has no SAVED-specific empty state (single empty state only)", () => {
     const src = route("style-me/_index.tsx");
     assert.ok(
-      src.includes("Save a StyleMe look you want to come back to, and it will appear here."),
-      "SAVED empty-state copy is correct"
+      !src.includes("No Saved Looks Yet"),
+      "SAVED-specific empty state heading removed"
     );
     assert.ok(
-      !src.includes("No saved looks yet. After a StyleMe session"),
-      "old generic empty-state copy removed"
+      !src.includes("Save a StyleMe look you want to come back to"),
+      "SAVED-specific empty state copy removed"
+    );
+    assert.ok(
+      src.includes("Your first StyleMe session begins with a single occasion."),
+      "single unified empty state present"
     );
   });
 
-  it("my-naia.saved.tsx loader still redirects to /style-me?filter=saved (backward-compat)", () => {
+  it("my-naia.saved.tsx loader redirects to /style-me (no filter param — backward-compat)", () => {
     const src = route("my-naia.saved.tsx");
     assert.ok(
-      src.includes('redirect("/style-me?filter=saved")'),
-      "redirect to /style-me?filter=saved is preserved"
+      src.includes('redirect("/style-me")'),
+      "redirect to /style-me (no filter param)"
+    );
+    assert.ok(
+      !src.includes('redirect("/style-me?filter=saved")'),
+      "old filter=saved redirect removed"
     );
   });
 
@@ -1722,18 +1704,16 @@ describe("P — Saved UX cleanup + StyleMe historical image hydration", () => {
 describe("Q — StyleMe regression: saved-look loader crash fix", () => {
   const src = route("style-me/_index.tsx");
 
-  it("savedSessions outfitSuggestion select uses currentMood not mood — prevents PrismaClientValidationError at runtime", () => {
-    // The root cause of the Application Error: select: { session: { select: { mood: true } } }
-    // Prisma throws PrismaClientValidationError: Unknown field 'mood' for select statement on model 'StylingSession'
-    // because the field is currentMood. Fix: currentMood must appear in the nested session select.
-    const sessionSelectStart = src.indexOf("select: { id: true, currentMood: true");
-    assert.ok(
-      sessionSelectStart !== -1,
-      "nested session select uses currentMood: true — not mood: true"
-    );
+  it("no Prisma select uses invalid field name 'mood' on StylingSession — prevents PrismaClientValidationError", () => {
+    // StylingSession.currentMood is the real field name (not mood).
+    // Using mood: true in any session select causes PrismaClientValidationError at runtime.
     assert.ok(
       !src.includes("select: { id: true, mood: true"),
       "no select using invalid field name 'mood' for StylingSession"
+    );
+    assert.ok(
+      !src.includes("mood: true,"),
+      "no loose mood: true field in any select"
     );
   });
 
@@ -1748,22 +1728,28 @@ describe("Q — StyleMe regression: saved-look loader crash fix", () => {
     );
   });
 
-  it("savedSessions mapper reads sugg.session.currentMood not sugg.session.mood", () => {
+  it("savedSessions query removed — no sugg.session.mood reference remains (filter tabs gone)", () => {
+    // savedSessions computation is removed along with filter tabs.
+    // Verify no invalid StylingSession field access survives.
     assert.ok(
-      src.includes("mood: sugg.session.currentMood"),
-      "savedSessions map reads sugg.session.currentMood"
+      !src.includes("sugg.session.mood"),
+      "no sugg.session.mood reference in source"
     );
     assert.ok(
-      !src.includes("mood: sugg.session.mood"),
-      "no reference to sugg.session.mood"
+      !src.includes("savedSessions"),
+      "savedSessions completely removed from _index.tsx"
     );
   });
 
-  it("unauthenticated early return includes savedSessions field — prevents undefined on filter tab", () => {
+  it("unauthenticated early return is lean — no savedSessions field (tabs removed)", () => {
     const earlyReturn = src.slice(src.indexOf("if (!customerId)"), src.indexOf("if (!customerId)") + 200);
     assert.ok(
-      earlyReturn.includes("savedSessions"),
-      "early unauthenticated return provides savedSessions:[]"
+      !earlyReturn.includes("savedSessions"),
+      "early return does not reference savedSessions (field removed with tabs)"
+    );
+    assert.ok(
+      earlyReturn.includes("recentSessions"),
+      "early return still provides recentSessions:[]"
     );
   });
 
