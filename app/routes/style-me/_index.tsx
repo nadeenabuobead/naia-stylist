@@ -93,12 +93,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return data({ hasProfile: false, hasClosetItems: false, recentSessions: [] as SessionRecord[] });
   }
 
-  const [profile, closetCount, sessions, savedLooks] = await Promise.all([
+  const [profile, closetCount, recentRaw, savedLooks] = await Promise.all([
     prisma.onboardingProfile.findUnique({
       where: { customerId },
       select: { stylePersonalities: true },
     }),
     prisma.closetItem.count({ where: { customerId } }),
+    // ALL LOOKS: 20 most recent — acceptable for performance in V1
     prisma.stylingSession.findMany({
       where: { customerId },
       take: 20,
@@ -107,20 +108,79 @@ export async function loader({ request }: LoaderFunctionArgs) {
         suggestions: {
           take: 1,
           orderBy: { createdAt: "desc" },
-          select: { id: true, heroImageUrl: true, outfitName: true },
+          select: { id: true, outfitName: true },
         },
       },
     }),
+    // SAVED: all saved looks — no take limit; must not be capped by session count
     prisma.savedLook.findMany({
       where: { customerId },
+      orderBy: { createdAt: "desc" },
       select: { id: true, fromSuggestionId: true },
     }),
   ]);
 
-  // Map: suggestionId → savedLookId
+  // savedMap: suggestionId → savedLookId — used to annotate isSaved on recentSessions
   const savedMap = new Map<string, string>();
   for (const sl of savedLooks) {
     if (sl.fromSuggestionId) savedMap.set(sl.fromSuggestionId, sl.id);
+  }
+
+  // ALL LOOKS — 20 most recent sessions with save state
+  const recentSessions: SessionRecord[] = recentRaw.map((s) => {
+    const sugg = s.suggestions[0] ?? null;
+    const suggestionId = sugg?.id ?? null;
+    const savedLookId = suggestionId ? (savedMap.get(suggestionId) ?? null) : null;
+    return {
+      id: s.id,
+      mood: s.mood,
+      occasion: s.occasion,
+      createdAt: s.createdAt.toISOString(),
+      outfitName: sugg?.outfitName ?? null,
+      suggestionId,
+      isSaved: savedLookId !== null,
+      savedLookId,
+    };
+  });
+
+  // SAVED — independent of recentSessions; built from all SavedLooks regardless of age.
+  // Fetches the linked OutfitSuggestion (for outfitName) and its StylingSession
+  // (for date/mood/occasion) so old looks outside the top-20 are always included.
+  let savedSessions: SessionRecord[] = [];
+  const suggestionIds = savedLooks
+    .map((sl) => sl.fromSuggestionId)
+    .filter(Boolean) as string[];
+
+  if (suggestionIds.length > 0) {
+    const suggestions = await prisma.outfitSuggestion.findMany({
+      where: { id: { in: suggestionIds } },
+      select: {
+        id: true,
+        outfitName: true,
+        session: {
+          select: { id: true, mood: true, occasion: true, createdAt: true },
+        },
+      },
+    });
+    const suggMap = new Map(suggestions.map((s) => [s.id, s]));
+
+    savedSessions = savedLooks
+      .map((sl) => {
+        if (!sl.fromSuggestionId) return null;
+        const sugg = suggMap.get(sl.fromSuggestionId);
+        if (!sugg) return null;
+        return {
+          id: sugg.session.id,
+          mood: sugg.session.mood,
+          occasion: sugg.session.occasion,
+          createdAt: sugg.session.createdAt.toISOString(),
+          outfitName: sugg.outfitName,
+          suggestionId: sugg.id,
+          isSaved: true,
+          savedLookId: sl.id,
+        } satisfies SessionRecord;
+      })
+      .filter((s): s is SessionRecord => s !== null);
   }
 
   return data({
@@ -128,21 +188,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     stylePersonalities: profile?.stylePersonalities ?? [],
     hasClosetItems: closetCount > 0,
     closetCount,
-    recentSessions: sessions.map((s) => {
-      const sugg = s.suggestions[0] ?? null;
-      const suggestionId = sugg?.id ?? null;
-      const savedLookId = suggestionId ? (savedMap.get(suggestionId) ?? null) : null;
-      return {
-        id: s.id,
-        mood: s.mood,
-        occasion: s.occasion,
-        createdAt: s.createdAt.toISOString(),
-        outfitName: sugg?.outfitName ?? null,
-        suggestionId,
-        isSaved: savedLookId !== null,
-        savedLookId,
-      } satisfies SessionRecord;
-    }),
+    recentSessions,
+    savedSessions,
   });
 }
 
@@ -158,13 +205,12 @@ type SessionRecord = {
 };
 
 export default function StyleMeIndex() {
-  const { recentSessions } = useLoaderData<typeof loader>();
+  const { recentSessions, savedSessions } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const filter = searchParams.get("filter") === "saved" ? "saved" : "all";
 
-  const displayed = filter === "saved"
-    ? recentSessions.filter((s) => s.isSaved)
-    : recentSessions;
+  // SAVED uses its own independent list — not a subset of the 20 most recent
+  const displayed = filter === "saved" ? savedSessions : recentSessions;
 
   return (
     <MyNaiaLayout>

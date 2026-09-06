@@ -1553,4 +1553,53 @@ describe("O — StyleMe + Saved merge: history section, filter tabs, save/unsave
       "my-naia/saved route still registered — redirect must resolve"
     );
   });
+
+  // Regression: a saved look older than the latest 20 sessions must still appear in SAVED.
+  // The SAVED filter must be built from a dedicated SavedLook query, not filtered from
+  // the 20-session recentSessions list.
+  it("loader exposes savedSessions independently of recentSessions (SAVED not capped at 20)", () => {
+    const src = route("style-me/_index.tsx");
+    // Both fields are returned from the loader
+    assert.ok(src.includes("savedSessions,"), "loader returns savedSessions field");
+    assert.ok(src.includes("recentSessions,"), "loader returns recentSessions field");
+    // savedSessions is built from savedLooks, not from recentRaw/recentSessions
+    assert.ok(
+      src.includes("savedSessions = savedLooks"),
+      "savedSessions mapped from the full savedLooks list"
+    );
+    // recentRaw/recentSessions uses take:20; savedLooks fetch has no take limit
+    assert.ok(src.includes("take: 20"), "recentRaw capped at 20 for performance");
+    // savedLook.findMany must NOT have take: immediately after it (no take cap on saved)
+    const savedFetchBlock = src.slice(src.indexOf("// SAVED: all saved looks"));
+    assert.ok(
+      !savedFetchBlock.slice(0, savedFetchBlock.indexOf("take: 20")).includes("take:"),
+      "savedLook.findMany has no take: cap before take:20 of recentRaw"
+    );
+  });
+
+  it("component uses savedSessions for SAVED filter, not recentSessions filtered by isSaved", () => {
+    const src = route("style-me/_index.tsx");
+    // Must use savedSessions directly for the saved tab
+    assert.ok(
+      src.includes("filter === \"saved\" ? savedSessions : recentSessions"),
+      "displayed is savedSessions when filter=saved, not recentSessions.filter(isSaved)"
+    );
+    // Must NOT filter isSaved from recentSessions for the saved tab
+    assert.ok(
+      !src.includes("recentSessions.filter((s) => s.isSaved)"),
+      "saved tab does not derive from recentSessions.filter(isSaved)"
+    );
+  });
+
+  it("savedSessions loader path fetches OutfitSuggestion with session relation for full session data", () => {
+    const src = route("style-me/_index.tsx");
+    assert.ok(
+      src.includes("prisma.outfitSuggestion.findMany"),
+      "outfitSuggestion.findMany called for savedSessions"
+    );
+    assert.ok(
+      src.includes("session: {") && src.includes("mood: true") && src.includes("occasion: true"),
+      "OutfitSuggestion.session relation selected for mood/occasion/createdAt"
+    );
+  });
 });
