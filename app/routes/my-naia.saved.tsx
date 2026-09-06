@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";
-import { Form, Link, useLoaderData } from "react-router";
+import { redirect, Form, Link, useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
 import {
@@ -42,6 +42,8 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  return redirect("/style-me?filter=saved");
+  // Legacy body kept below — unreachable but preserved for reference
   const customer = await requireCurrentNaiaCustomer(request);
   const cloudinaryConfig = getCloudinaryConfig();
 

@@ -1,7 +1,7 @@
-import { Form, Link, useLoaderData } from "react-router";
+import { Form, Link, useLoaderData, useSearchParams } from "react-router";
 import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs, type LinksFunction } from "react-router";
 import { clearStyleMeSession } from "~/lib/session.server";
-import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import { getCurrentNaiaCustomer, requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { prisma } from "~/lib/prisma.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
@@ -26,6 +26,59 @@ const OCCASION_LABELS: Record<string, string> = {
 };
 
 export async function action({ request }: ActionFunctionArgs) {
+  const formData = await request.formData();
+  const intent = formData.get("intent") as string | null;
+
+  if (intent === "save-look") {
+    const customer = await requireCurrentNaiaCustomer(request);
+    const suggestionId = formData.get("suggestionId") as string;
+    if (!suggestionId) return data({ error: "Missing suggestionId" }, { status: 400 });
+
+    const suggestion = await prisma.outfitSuggestion.findUnique({
+      where: { id: suggestionId },
+      include: { session: true, items: true },
+    });
+    if (!suggestion || suggestion.session.customerId !== customer.id) {
+      return data({ error: "Not found" }, { status: 404 });
+    }
+
+    // Idempotent — return existing if already saved
+    const existing = await prisma.savedLook.findFirst({
+      where: { fromSuggestionId: suggestionId, customerId: customer.id },
+      select: { id: true },
+    });
+    if (existing) return data({ ok: true, savedLookId: existing.id });
+
+    const savedLook = await prisma.savedLook.create({
+      data: {
+        customerId: customer.id,
+        name: suggestion.outfitName,
+        fromSuggestionId: suggestion.id,
+        items: {
+          create: suggestion.items.map((item) => ({
+            itemType: item.itemType,
+            closetItemId: item.closetItemId || null,
+            shopifyProductId: item.shopifyProductId || null,
+            productImageUrl: item.productImageUrl || null,
+          })),
+        },
+      },
+    });
+    return data({ ok: true, savedLookId: savedLook.id });
+  }
+
+  if (intent === "remove-from-saved") {
+    const customer = await requireCurrentNaiaCustomer(request);
+    const savedLookId = formData.get("savedLookId") as string;
+    if (!savedLookId) return data({ error: "Missing savedLookId" }, { status: 400 });
+    // Scoped to customer — cannot remove another customer's look
+    await prisma.savedLook.deleteMany({
+      where: { id: savedLookId, customerId: customer.id },
+    });
+    return data({ ok: true });
+  }
+
+  // Default: start a new StyleMe session
   const clearedCookie = await clearStyleMeSession(request);
   return redirect("/style-me/state", {
     headers: { "Set-Cookie": clearedCookie },
@@ -40,37 +93,56 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return data({ hasProfile: false, hasClosetItems: false, recentSessions: [] as SessionRecord[] });
   }
 
-  const [profile, closetCount, recentSessions] = await Promise.all([
+  const [profile, closetCount, sessions, savedLooks] = await Promise.all([
     prisma.onboardingProfile.findUnique({
       where: { customerId },
-      select: { stylePersonalities: true }
+      select: { stylePersonalities: true },
     }),
     prisma.closetItem.count({ where: { customerId } }),
     prisma.stylingSession.findMany({
       where: { customerId },
-      take: 3,
+      take: 20,
       orderBy: { createdAt: "desc" },
       include: {
         suggestions: {
           take: 1,
-          select: { heroImageUrl: true, outfitName: true }
-        }
-      }
-    })
+          orderBy: { createdAt: "desc" },
+          select: { id: true, heroImageUrl: true, outfitName: true },
+        },
+      },
+    }),
+    prisma.savedLook.findMany({
+      where: { customerId },
+      select: { id: true, fromSuggestionId: true },
+    }),
   ]);
+
+  // Map: suggestionId → savedLookId
+  const savedMap = new Map<string, string>();
+  for (const sl of savedLooks) {
+    if (sl.fromSuggestionId) savedMap.set(sl.fromSuggestionId, sl.id);
+  }
 
   return data({
     hasProfile: !!profile,
     stylePersonalities: profile?.stylePersonalities ?? [],
     hasClosetItems: closetCount > 0,
     closetCount,
-    recentSessions: recentSessions.map((s) => ({
-      id: s.id,
-      mood: s.mood,
-      occasion: s.occasion,
-      createdAt: s.createdAt.toISOString(),
-      outfitName: s.suggestions[0]?.outfitName ?? null,
-    })),
+    recentSessions: sessions.map((s) => {
+      const sugg = s.suggestions[0] ?? null;
+      const suggestionId = sugg?.id ?? null;
+      const savedLookId = suggestionId ? (savedMap.get(suggestionId) ?? null) : null;
+      return {
+        id: s.id,
+        mood: s.mood,
+        occasion: s.occasion,
+        createdAt: s.createdAt.toISOString(),
+        outfitName: sugg?.outfitName ?? null,
+        suggestionId,
+        isSaved: savedLookId !== null,
+        savedLookId,
+      } satisfies SessionRecord;
+    }),
   });
 }
 
@@ -80,10 +152,19 @@ type SessionRecord = {
   occasion: string | null;
   createdAt: string;
   outfitName: string | null;
+  suggestionId: string | null;
+  isSaved: boolean;
+  savedLookId: string | null;
 };
 
 export default function StyleMeIndex() {
   const { recentSessions } = useLoaderData<typeof loader>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filter = searchParams.get("filter") === "saved" ? "saved" : "all";
+
+  const displayed = filter === "saved"
+    ? recentSessions.filter((s) => s.isSaved)
+    : recentSessions;
 
   return (
     <MyNaiaLayout>
@@ -122,31 +203,50 @@ export default function StyleMeIndex() {
         </p>
       </section>
 
-      {/* Previous StyleMe Looks */}
-      {recentSessions.length > 0 ? (
-        <section className="bos-section">
-          <div className="sml-header">
-            <div className="sml-section-label" style={{ marginBottom: 0 }}>Previous StyleMe Looks</div>
-            <div className="sml-header-links">
-              <Link to="/my-naia/saved" className="sml-header-link">View Saved Looks</Link>
-            </div>
+      {/* Your StyleMe Looks */}
+      <section className="bos-section">
+        <div className="sml-header">
+          <div className="sml-section-label" style={{ marginBottom: 0 }}>Your StyleMe Looks</div>
+          <div className="sml-header-links">
+            <button
+              type="button"
+              className={filter === "all" ? "sml-header-link sml-header-link--active" : "sml-header-link"}
+              onClick={() => setSearchParams({})}
+              aria-pressed={filter === "all"}
+            >
+              All Looks
+            </button>
+            <button
+              type="button"
+              className={filter === "saved" ? "sml-header-link sml-header-link--active" : "sml-header-link"}
+              onClick={() => setSearchParams({ filter: "saved" })}
+              aria-pressed={filter === "saved"}
+            >
+              Saved
+            </button>
           </div>
+        </div>
+
+        {displayed.length > 0 ? (
           <ul className="sml-grid" style={{ listStyle: "none", margin: 0, padding: 0 }}>
-            {recentSessions.map((session) => (
+            {displayed.map((session) => (
               <li key={session.id}>
                 <SessionCard session={session} />
               </li>
             ))}
           </ul>
-        </section>
-      ) : (
-        <section className="bos-section">
-          <div className="sml-section-label">Previous StyleMe Looks</div>
+        ) : (
           <div className="sml-empty">
-            <p className="sml-empty-text">Your first StyleMe session begins with a single occasion.</p>
+            {filter === "saved" ? (
+              <p className="sml-empty-text">
+                No saved looks yet. After a StyleMe session, save a look to find it here.
+              </p>
+            ) : (
+              <p className="sml-empty-text">Your first StyleMe session begins with a single occasion.</p>
+            )}
           </div>
-        </section>
-      )}
+        )}
+      </section>
     </MyNaiaLayout>
   );
 }
@@ -177,11 +277,27 @@ function SessionCard({ session }: { session: SessionRecord }) {
         </div>
       )}
       <div className="sv-card-actions">
-        <Link to={`/style-me/result?sessionId=${session.id}`} className="sv-card-action">
+        <Link
+          to={`/style-me/result?sessionId=${session.id}`}
+          className="sv-card-action"
+        >
           View Look
         </Link>
-        <span className="sv-card-action sv-card-action--disabled">Refine</span>
-        <span className="sv-card-action sv-card-action--disabled">Try the look</span>
+        {session.suggestionId && (
+          session.isSaved ? (
+            <Form method="post" style={{ display: "contents" }}>
+              <input type="hidden" name="intent" value="remove-from-saved" />
+              <input type="hidden" name="savedLookId" value={session.savedLookId!} />
+              <button type="submit" className="sv-card-action">Remove from Saved</button>
+            </Form>
+          ) : (
+            <Form method="post" style={{ display: "contents" }}>
+              <input type="hidden" name="intent" value="save-look" />
+              <input type="hidden" name="suggestionId" value={session.suggestionId} />
+              <button type="submit" className="sv-card-action">Save</button>
+            </Form>
+          )
+        )}
       </div>
     </article>
   );

@@ -1383,11 +1383,10 @@ describe("M — Saved navigation removed; StyleMe VIEW SAVED LOOKS; save fix; BO
     );
   });
 
-  it("style-me/_index.tsx shows VIEW SAVED LOOKS linking to /my-naia/saved", () => {
+  it("style-me/_index.tsx no longer shows a standalone VIEW SAVED LOOKS link (merged into filter tabs)", () => {
     const src = route("style-me/_index.tsx");
-    assert.ok(src.includes("View Saved Looks"), "link label is View Saved Looks");
-    assert.ok(src.includes('to="/my-naia/saved"'), "links to /my-naia/saved");
-    assert.ok(!src.includes(">View Saved<"), "old View Saved label absent");
+    assert.ok(!src.includes("View Saved Looks"), "standalone View Saved Looks link removed");
+    assert.ok(!src.includes('to="/my-naia/saved"'), "no link to /my-naia/saved from style-me");
   });
 
   it("style-me/result.tsx save action copies productImageUrl from OutfitItem to SavedLookItem (intent=save)", () => {
@@ -1441,5 +1440,117 @@ describe("M — Saved navigation removed; StyleMe VIEW SAVED LOOKS; save fix; BO
     const src = route("my-naia.buying-decisions.tsx");
     assert.ok(src.includes("customerId: naiaCustomer.id"), "query scoped to authenticated customer");
     assert.ok(src.includes("requireCurrentNaiaCustomer"), "auth guard present");
+  });
+});
+
+// ── O — StyleMe + Saved merge ─────────────────────────────────────────────────
+
+describe("O — StyleMe + Saved merge: history section, filter tabs, save/unsave actions, redirect", () => {
+  it("style-me/_index.tsx loader fetches up to 20 sessions (not 3)", () => {
+    const src = route("style-me/_index.tsx");
+    assert.ok(src.includes("take: 20"), "loader fetches take:20 sessions");
+    assert.ok(!src.includes("take: 3"), "old take:3 removed");
+  });
+
+  it("style-me/_index.tsx loader selects suggestion id for save-state linkage", () => {
+    const src = route("style-me/_index.tsx");
+    assert.ok(src.includes("id: true"), "suggestion id selected in include");
+    assert.ok(src.includes("suggestionId"), "suggestionId exposed in serialised session record");
+  });
+
+  it("style-me/_index.tsx loader fetches SavedLooks and computes isSaved per session", () => {
+    const src = route("style-me/_index.tsx");
+    assert.ok(src.includes("prisma.savedLook.findMany"), "savedLook.findMany in loader");
+    assert.ok(src.includes("savedMap"), "savedMap constructed from loaded SavedLooks");
+    assert.ok(src.includes("isSaved:"), "isSaved field present in serialised record");
+    assert.ok(src.includes("savedLookId:"), "savedLookId field present in serialised record");
+  });
+
+  it("style-me/_index.tsx action handles intent=save-look (creates SavedLook + items)", () => {
+    const src = route("style-me/_index.tsx");
+    assert.ok(src.includes('"save-look"'), "save-look intent branch present");
+    assert.ok(src.includes("prisma.savedLook.create"), "SavedLook create in save-look path");
+    assert.ok(src.includes("fromSuggestionId: suggestion.id"), "fromSuggestionId set on create");
+    assert.ok(
+      src.includes("productImageUrl: item.productImageUrl || null"),
+      "productImageUrl copied from OutfitItem"
+    );
+  });
+
+  it("style-me/_index.tsx save-look action is idempotent — returns existing if already saved", () => {
+    const src = route("style-me/_index.tsx");
+    assert.ok(src.includes("prisma.savedLook.findFirst"), "findFirst check before create");
+    assert.ok(src.includes("if (existing) return"), "early-return on existing SavedLook");
+  });
+
+  it("style-me/_index.tsx save-look action verifies customer ownership before save", () => {
+    const src = route("style-me/_index.tsx");
+    const saveSection = src.slice(src.indexOf('"save-look"'));
+    assert.ok(
+      saveSection.includes("suggestion.session.customerId !== customer.id"),
+      "ownership check: customerId must match"
+    );
+  });
+
+  it("style-me/_index.tsx action handles intent=remove-from-saved (deletes SavedLook only)", () => {
+    const src = route("style-me/_index.tsx");
+    assert.ok(src.includes('"remove-from-saved"'), "remove-from-saved intent branch present");
+    assert.ok(src.includes("prisma.savedLook.deleteMany"), "savedLook.deleteMany in remove path");
+    // Must NOT delete the styling session or outfit suggestion
+    assert.ok(
+      !src.includes("prisma.stylingSession.delete"),
+      "remove-from-saved does not delete StylingSession"
+    );
+    assert.ok(
+      !src.includes("prisma.outfitSuggestion.delete"),
+      "remove-from-saved does not delete OutfitSuggestion"
+    );
+  });
+
+  it("style-me/_index.tsx remove-from-saved is scoped to the authenticated customer", () => {
+    const src = route("style-me/_index.tsx");
+    const removeSection = src.slice(src.indexOf('"remove-from-saved"'));
+    assert.ok(
+      removeSection.includes("customerId: customer.id"),
+      "deleteMany where-clause scoped to customer"
+    );
+  });
+
+  it("style-me/_index.tsx UI renders 'Your StyleMe Looks' section label", () => {
+    const src = route("style-me/_index.tsx");
+    assert.ok(src.includes("Your StyleMe Looks"), "section label updated to Your StyleMe Looks");
+    assert.ok(!src.includes("PREVIOUS STYLEME LOOKS"), "old label removed");
+    assert.ok(!src.includes("Previous StyleMe Looks"), "old title-case label removed");
+  });
+
+  it("style-me/_index.tsx UI renders All Looks and Saved filter buttons", () => {
+    const src = route("style-me/_index.tsx");
+    assert.ok(src.includes("All Looks"), "All Looks filter button present");
+    assert.ok(src.includes("Saved"), "Saved filter button present");
+    assert.ok(src.includes("useSearchParams"), "uses useSearchParams for filter state");
+    assert.ok(src.includes('filter: "saved"'), "sets filter=saved param for Saved tab");
+  });
+
+  it("style-me/_index.tsx SessionCard renders View Look link and save/remove action", () => {
+    const src = route("style-me/_index.tsx");
+    assert.ok(src.includes("View Look"), "View Look link present on card");
+    assert.ok(src.includes("Remove from Saved"), "Remove from Saved action present");
+    assert.ok(src.includes(">Save<"), "Save action label present");
+  });
+
+  it("my-naia.saved.tsx loader redirects to /style-me?filter=saved", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(
+      src.includes('redirect("/style-me?filter=saved")'),
+      "loader redirects to /style-me?filter=saved"
+    );
+  });
+
+  it("my-naia.saved.tsx route is still registered in routes.ts", () => {
+    const src = readFileSync(join(ROOT, "app/routes.ts"), "utf8");
+    assert.ok(
+      src.includes("my-naia/saved") || src.includes("my-naia.saved"),
+      "my-naia/saved route still registered — redirect must resolve"
+    );
   });
 });
