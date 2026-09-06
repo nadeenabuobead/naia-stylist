@@ -1598,8 +1598,8 @@ describe("O — StyleMe + Saved merge: history section, filter tabs, save/unsave
       "outfitSuggestion.findMany called for savedSessions"
     );
     assert.ok(
-      src.includes("session: {") && src.includes("mood: true") && src.includes("occasion: true"),
-      "OutfitSuggestion.session relation selected for mood/occasion/createdAt"
+      src.includes("session: {") && src.includes("currentMood: true") && src.includes("occasion: true"),
+      "OutfitSuggestion.session relation selected for currentMood/occasion/createdAt"
     );
   });
 });
@@ -1716,5 +1716,64 @@ describe("P — Saved UX cleanup + StyleMe historical image hydration", () => {
       hydrateSection.includes("productImageUrl: buildPrivateDownloadUrl"),
       "only productImageUrl is overridden on the item — everything else preserved"
     );
+  });
+});
+
+describe("Q — StyleMe regression: saved-look loader crash fix", () => {
+  const src = route("style-me/_index.tsx");
+
+  it("savedSessions outfitSuggestion select uses currentMood not mood — prevents PrismaClientValidationError at runtime", () => {
+    // The root cause of the Application Error: select: { session: { select: { mood: true } } }
+    // Prisma throws PrismaClientValidationError: Unknown field 'mood' for select statement on model 'StylingSession'
+    // because the field is currentMood. Fix: currentMood must appear in the nested session select.
+    const sessionSelectStart = src.indexOf("select: { id: true, currentMood: true");
+    assert.ok(
+      sessionSelectStart !== -1,
+      "nested session select uses currentMood: true — not mood: true"
+    );
+    assert.ok(
+      !src.includes("select: { id: true, mood: true"),
+      "no select using invalid field name 'mood' for StylingSession"
+    );
+  });
+
+  it("recentSessions mapper reads s.currentMood not s.mood — prevents undefined mood on every card", () => {
+    assert.ok(
+      src.includes("mood: s.currentMood"),
+      "recentRaw.map reads s.currentMood"
+    );
+    assert.ok(
+      !src.includes("mood: s.mood"),
+      "no reference to s.mood (field does not exist on StylingSession)"
+    );
+  });
+
+  it("savedSessions mapper reads sugg.session.currentMood not sugg.session.mood", () => {
+    assert.ok(
+      src.includes("mood: sugg.session.currentMood"),
+      "savedSessions map reads sugg.session.currentMood"
+    );
+    assert.ok(
+      !src.includes("mood: sugg.session.mood"),
+      "no reference to sugg.session.mood"
+    );
+  });
+
+  it("unauthenticated early return includes savedSessions field — prevents undefined on filter tab", () => {
+    const earlyReturn = src.slice(src.indexOf("if (!customerId)"), src.indexOf("if (!customerId)") + 200);
+    assert.ok(
+      earlyReturn.includes("savedSessions"),
+      "early unauthenticated return provides savedSessions:[]"
+    );
+  });
+
+  it("save-look and remove-from-saved action branches are wrapped in try/catch — prevents Application Error on Prisma failure", () => {
+    const saveBranch = src.slice(src.indexOf('"save-look"'), src.indexOf('"remove-from-saved"'));
+    assert.ok(saveBranch.includes("try {"), "save-look branch has try block");
+    assert.ok(saveBranch.includes("catch (e)"), "save-look branch has catch block");
+
+    const removeBranch = src.slice(src.indexOf('"remove-from-saved"'));
+    assert.ok(removeBranch.includes("try {"), "remove-from-saved branch has try block");
+    assert.ok(removeBranch.includes("catch (e)"), "remove-from-saved branch has catch block");
   });
 });

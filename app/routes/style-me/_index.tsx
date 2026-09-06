@@ -30,52 +30,62 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = formData.get("intent") as string | null;
 
   if (intent === "save-look") {
-    const customer = await requireCurrentNaiaCustomer(request);
-    const suggestionId = formData.get("suggestionId") as string;
-    if (!suggestionId) return data({ error: "Missing suggestionId" }, { status: 400 });
+    try {
+      const customer = await requireCurrentNaiaCustomer(request);
+      const suggestionId = formData.get("suggestionId") as string;
+      if (!suggestionId) return data({ error: "Missing suggestionId" }, { status: 400 });
 
-    const suggestion = await prisma.outfitSuggestion.findUnique({
-      where: { id: suggestionId },
-      include: { session: true, items: true },
-    });
-    if (!suggestion || suggestion.session.customerId !== customer.id) {
-      return data({ error: "Not found" }, { status: 404 });
-    }
+      const suggestion = await prisma.outfitSuggestion.findUnique({
+        where: { id: suggestionId },
+        include: { session: true, items: true },
+      });
+      if (!suggestion || suggestion.session.customerId !== customer.id) {
+        return data({ error: "Not found" }, { status: 404 });
+      }
 
-    // Idempotent — return existing if already saved
-    const existing = await prisma.savedLook.findFirst({
-      where: { fromSuggestionId: suggestionId, customerId: customer.id },
-      select: { id: true },
-    });
-    if (existing) return data({ ok: true, savedLookId: existing.id });
+      // Idempotent — return existing if already saved
+      const existing = await prisma.savedLook.findFirst({
+        where: { fromSuggestionId: suggestionId, customerId: customer.id },
+        select: { id: true },
+      });
+      if (existing) return data({ ok: true, savedLookId: existing.id });
 
-    const savedLook = await prisma.savedLook.create({
-      data: {
-        customerId: customer.id,
-        name: suggestion.outfitName,
-        fromSuggestionId: suggestion.id,
-        items: {
-          create: suggestion.items.map((item) => ({
-            itemType: item.itemType,
-            closetItemId: item.closetItemId || null,
-            shopifyProductId: item.shopifyProductId || null,
-            productImageUrl: item.productImageUrl || null,
-          })),
+      const savedLook = await prisma.savedLook.create({
+        data: {
+          customerId: customer.id,
+          name: suggestion.outfitName,
+          fromSuggestionId: suggestion.id,
+          items: {
+            create: suggestion.items.map((item) => ({
+              itemType: item.itemType,
+              closetItemId: item.closetItemId || null,
+              shopifyProductId: item.shopifyProductId || null,
+              productImageUrl: item.productImageUrl || null,
+            })),
+          },
         },
-      },
-    });
-    return data({ ok: true, savedLookId: savedLook.id });
+      });
+      return data({ ok: true, savedLookId: savedLook.id });
+    } catch (e) {
+      console.error("save-look action error:", e);
+      return data({ error: "Failed to save look" }, { status: 500 });
+    }
   }
 
   if (intent === "remove-from-saved") {
-    const customer = await requireCurrentNaiaCustomer(request);
-    const savedLookId = formData.get("savedLookId") as string;
-    if (!savedLookId) return data({ error: "Missing savedLookId" }, { status: 400 });
-    // Scoped to customer — cannot remove another customer's look
-    await prisma.savedLook.deleteMany({
-      where: { id: savedLookId, customerId: customer.id },
-    });
-    return data({ ok: true });
+    try {
+      const customer = await requireCurrentNaiaCustomer(request);
+      const savedLookId = formData.get("savedLookId") as string;
+      if (!savedLookId) return data({ error: "Missing savedLookId" }, { status: 400 });
+      // Scoped to customer — cannot remove another customer's look
+      await prisma.savedLook.deleteMany({
+        where: { id: savedLookId, customerId: customer.id },
+      });
+      return data({ ok: true });
+    } catch (e) {
+      console.error("remove-from-saved action error:", e);
+      return data({ error: "Failed to remove saved look" }, { status: 500 });
+    }
   }
 
   // Default: start a new StyleMe session
@@ -90,7 +100,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const customerId = customer?.id ?? null;
 
   if (!customerId) {
-    return data({ hasProfile: false, hasClosetItems: false, recentSessions: [] as SessionRecord[] });
+    return data({ hasProfile: false, hasClosetItems: false, recentSessions: [] as SessionRecord[], savedSessions: [] as SessionRecord[] });
   }
 
   const [profile, closetCount, recentRaw, savedLooks] = await Promise.all([
@@ -133,7 +143,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const savedLookId = suggestionId ? (savedMap.get(suggestionId) ?? null) : null;
     return {
       id: s.id,
-      mood: s.mood,
+      mood: s.currentMood,
       occasion: s.occasion,
       createdAt: s.createdAt.toISOString(),
       outfitName: sugg?.outfitName ?? null,
@@ -158,27 +168,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
         id: true,
         outfitName: true,
         session: {
-          select: { id: true, mood: true, occasion: true, createdAt: true },
+          select: { id: true, currentMood: true, occasion: true, createdAt: true },
         },
       },
     });
     const suggMap = new Map(suggestions.map((s) => [s.id, s]));
 
     savedSessions = savedLooks
-      .map((sl) => {
+      .map((sl): SessionRecord | null => {
         if (!sl.fromSuggestionId) return null;
         const sugg = suggMap.get(sl.fromSuggestionId);
         if (!sugg) return null;
         return {
           id: sugg.session.id,
-          mood: sugg.session.mood,
+          mood: sugg.session.currentMood,
           occasion: sugg.session.occasion,
           createdAt: sugg.session.createdAt.toISOString(),
           outfitName: sugg.outfitName,
           suggestionId: sugg.id,
           isSaved: true,
           savedLookId: sl.id,
-        } satisfies SessionRecord;
+        };
       })
       .filter((s): s is SessionRecord => s !== null);
   }
