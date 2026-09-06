@@ -29,62 +29,41 @@ export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
   const intent = formData.get("intent") as string | null;
 
-  if (intent === "save-look") {
+  if (intent === "delete-session") {
     try {
       const customer = await requireCurrentNaiaCustomer(request);
-      const suggestionId = formData.get("suggestionId") as string;
-      if (!suggestionId) return data({ error: "Missing suggestionId" }, { status: 400 });
+      const sessionId = formData.get("sessionId") as string;
+      if (!sessionId) return data({ error: "Missing sessionId" }, { status: 400 });
 
-      const suggestion = await prisma.outfitSuggestion.findUnique({
-        where: { id: suggestionId },
-        include: { session: true, items: true },
+      // Verify ownership before any delete
+      const session = await prisma.stylingSession.findUnique({
+        where: { id: sessionId },
+        select: { customerId: true, suggestions: { select: { id: true } } },
       });
-      if (!suggestion || suggestion.session.customerId !== customer.id) {
+      if (!session || session.customerId !== customer.id) {
         return data({ error: "Not found" }, { status: 404 });
       }
 
-      // Idempotent — return existing if already saved
-      const existing = await prisma.savedLook.findFirst({
-        where: { fromSuggestionId: suggestionId, customerId: customer.id },
-        select: { id: true },
-      });
-      if (existing) return data({ ok: true, savedLookId: existing.id });
-
-      const savedLook = await prisma.savedLook.create({
-        data: {
-          customerId: customer.id,
-          name: suggestion.outfitName,
-          fromSuggestionId: suggestion.id,
-          items: {
-            create: suggestion.items.map((item) => ({
-              itemType: item.itemType,
-              closetItemId: item.closetItemId || null,
-              shopifyProductId: item.shopifyProductId || null,
-              productImageUrl: item.productImageUrl || null,
-            })),
+      // SavedLook.fromSuggestionId is a plain string (no FK cascade) — must delete manually
+      const suggestionIds = session.suggestions.map((s) => s.id);
+      if (suggestionIds.length > 0) {
+        await prisma.savedLook.deleteMany({
+          where: {
+            customerId: customer.id,
+            fromSuggestionId: { in: suggestionIds },
           },
-        },
-      });
-      return data({ ok: true, savedLookId: savedLook.id });
-    } catch (e) {
-      console.error("save-look action error:", e);
-      return data({ error: "Failed to save look" }, { status: 500 });
-    }
-  }
+        });
+      }
 
-  if (intent === "remove-from-saved") {
-    try {
-      const customer = await requireCurrentNaiaCustomer(request);
-      const savedLookId = formData.get("savedLookId") as string;
-      if (!savedLookId) return data({ error: "Missing savedLookId" }, { status: 400 });
-      // Scoped to customer — cannot remove another customer's look
-      await prisma.savedLook.deleteMany({
-        where: { id: savedLookId, customerId: customer.id },
-      });
+      // Delete the session — cascades to: OutfitSuggestion → OutfitItem + StyleMeOutcome,
+      // PostOutfitReview, StylingEvent. RecommendationFeedback.sessionId is SetNull (stays).
+      // ClosetItem records are not touched.
+      await prisma.stylingSession.delete({ where: { id: sessionId } });
+
       return data({ ok: true });
     } catch (e) {
-      console.error("remove-from-saved action error:", e);
-      return data({ error: "Failed to remove saved look" }, { status: 500 });
+      console.error("delete-session action error:", e);
+      return data({ error: "Failed to delete session" }, { status: 500 });
     }
   }
 
@@ -103,13 +82,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return data({ hasProfile: false, hasClosetItems: false, recentSessions: [] as SessionRecord[] });
   }
 
-  const [profile, closetCount, recentRaw, savedLooks] = await Promise.all([
+  const [profile, closetCount, recentRaw] = await Promise.all([
     prisma.onboardingProfile.findUnique({
       where: { customerId },
       select: { stylePersonalities: true },
     }),
     prisma.closetItem.count({ where: { customerId } }),
-    // 20 most recent sessions — acceptable for performance in V1
     prisma.stylingSession.findMany({
       where: { customerId },
       take: 20,
@@ -122,32 +100,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
         },
       },
     }),
-    // Saved state per suggestion — no take limit; annotates every card regardless of age
-    prisma.savedLook.findMany({
-      where: { customerId },
-      select: { id: true, fromSuggestionId: true },
-    }),
   ]);
-
-  // savedMap: suggestionId → savedLookId — used to annotate isSaved on each card
-  const savedMap = new Map<string, string>();
-  for (const sl of savedLooks) {
-    if (sl.fromSuggestionId) savedMap.set(sl.fromSuggestionId, sl.id);
-  }
 
   const recentSessions: SessionRecord[] = recentRaw.map((s) => {
     const sugg = s.suggestions[0] ?? null;
-    const suggestionId = sugg?.id ?? null;
-    const savedLookId = suggestionId ? (savedMap.get(suggestionId) ?? null) : null;
     return {
       id: s.id,
       mood: s.currentMood,
       occasion: s.occasion,
       createdAt: s.createdAt.toISOString(),
       outfitName: sugg?.outfitName ?? null,
-      suggestionId,
-      isSaved: savedLookId !== null,
-      savedLookId,
+      suggestionId: sugg?.id ?? null,
     };
   });
 
@@ -167,8 +130,6 @@ type SessionRecord = {
   createdAt: string;
   outfitName: string | null;
   suggestionId: string | null;
-  isSaved: boolean;
-  savedLookId: string | null;
 };
 
 export default function StyleMeIndex() {
@@ -243,6 +204,16 @@ function SessionCard({ session }: { session: SessionRecord }) {
   const occasionLabel = session.occasion ? (OCCASION_LABELS[session.occasion] ?? session.occasion) : null;
   const moodLabel = session.mood ? (MOOD_LABELS[session.mood] ?? session.mood) : null;
 
+  function handleDelete(e: React.FormEvent) {
+    if (
+      !window.confirm(
+        "Delete this look?\n\nThis will remove the look from your StyleMe history. Your Closet will not be affected.",
+      )
+    ) {
+      e.preventDefault();
+    }
+  }
+
   return (
     <article className="sml-card">
       <div className="sml-card-date">{formattedDate}</div>
@@ -265,21 +236,11 @@ function SessionCard({ session }: { session: SessionRecord }) {
         >
           View Look
         </Link>
-        {session.suggestionId && (
-          session.isSaved ? (
-            <Form method="post" style={{ display: "contents" }}>
-              <input type="hidden" name="intent" value="remove-from-saved" />
-              <input type="hidden" name="savedLookId" value={session.savedLookId!} />
-              <button type="submit" className="sv-card-action">Remove from Saved</button>
-            </Form>
-          ) : (
-            <Form method="post" style={{ display: "contents" }}>
-              <input type="hidden" name="intent" value="save-look" />
-              <input type="hidden" name="suggestionId" value={session.suggestionId} />
-              <button type="submit" className="sv-card-action">Save</button>
-            </Form>
-          )
-        )}
+        <Form method="post" style={{ display: "contents" }} onSubmit={handleDelete}>
+          <input type="hidden" name="intent" value="delete-session" />
+          <input type="hidden" name="sessionId" value={session.id} />
+          <button type="submit" className="sv-card-action">Delete</button>
+        </Form>
       </div>
     </article>
   );

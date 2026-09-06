@@ -1443,153 +1443,146 @@ describe("M — Saved navigation removed; StyleMe VIEW SAVED LOOKS; save fix; BO
   });
 });
 
-// ── O — StyleMe + Saved merge ─────────────────────────────────────────────────
+// ── O — StyleMe history: unified list, delete action, no Saved UI ─────────────
 
-describe("O — StyleMe + Saved merge: history section, filter tabs, save/unsave actions, redirect", () => {
-  it("style-me/_index.tsx loader fetches up to 20 sessions (not 3)", () => {
-    const src = route("style-me/_index.tsx");
+describe("O — StyleMe history: unified list, delete action, no Saved UI", () => {
+  const src = route("style-me/_index.tsx");
+
+  it("loader fetches up to 20 sessions with latest suggestion for View Look", () => {
     assert.ok(src.includes("take: 20"), "loader fetches take:20 sessions");
     assert.ok(!src.includes("take: 3"), "old take:3 removed");
+    assert.ok(src.includes("id: true"), "suggestion id selected");
+    assert.ok(src.includes("suggestionId"), "suggestionId in session record");
   });
 
-  it("style-me/_index.tsx loader selects suggestion id for save-state linkage", () => {
-    const src = route("style-me/_index.tsx");
-    assert.ok(src.includes("id: true"), "suggestion id selected in include");
-    assert.ok(src.includes("suggestionId"), "suggestionId exposed in serialised session record");
+  it("loader does NOT fetch SavedLooks — isSaved/savedLookId removed from session record", () => {
+    assert.ok(!src.includes("prisma.savedLook.findMany"), "savedLook.findMany removed from loader");
+    assert.ok(!src.includes("savedMap"), "savedMap removed — no save-state annotation");
+    assert.ok(!src.includes("isSaved:"), "isSaved field removed from session record");
+    assert.ok(!src.includes("savedLookId:"), "savedLookId removed from session record");
   });
 
-  it("style-me/_index.tsx loader fetches SavedLooks and computes isSaved per session", () => {
-    const src = route("style-me/_index.tsx");
-    assert.ok(src.includes("prisma.savedLook.findMany"), "savedLook.findMany in loader");
-    assert.ok(src.includes("savedMap"), "savedMap constructed from loaded SavedLooks");
-    assert.ok(src.includes("isSaved:"), "isSaved field present in serialised record");
-    assert.ok(src.includes("savedLookId:"), "savedLookId field present in serialised record");
+  it("action handles intent=delete-session — deletes session by id", () => {
+    assert.ok(src.includes('"delete-session"'), "delete-session intent branch present");
+    assert.ok(src.includes("prisma.stylingSession.delete"), "stylingSession.delete in action");
+    assert.ok(src.includes("where: { id: sessionId }"), "deletes by sessionId");
   });
 
-  it("style-me/_index.tsx action handles intent=save-look (creates SavedLook + items)", () => {
-    const src = route("style-me/_index.tsx");
-    assert.ok(src.includes('"save-look"'), "save-look intent branch present");
-    assert.ok(src.includes("prisma.savedLook.create"), "SavedLook create in save-look path");
-    assert.ok(src.includes("fromSuggestionId: suggestion.id"), "fromSuggestionId set on create");
+  it("delete-session verifies customer ownership before deleting", () => {
+    const deleteSection = src.slice(src.indexOf('"delete-session"'));
     assert.ok(
-      src.includes("productImageUrl: item.productImageUrl || null"),
-      "productImageUrl copied from OutfitItem"
+      deleteSection.includes("session.customerId !== customer.id"),
+      "ownership check: customerId must match before delete"
     );
   });
 
-  it("style-me/_index.tsx save-look action is idempotent — returns existing if already saved", () => {
-    const src = route("style-me/_index.tsx");
-    assert.ok(src.includes("prisma.savedLook.findFirst"), "findFirst check before create");
-    assert.ok(src.includes("if (existing) return"), "early-return on existing SavedLook");
-  });
-
-  it("style-me/_index.tsx save-look action verifies customer ownership before save", () => {
-    const src = route("style-me/_index.tsx");
-    const saveSection = src.slice(src.indexOf('"save-look"'));
+  it("delete-session is authenticated via requireCurrentNaiaCustomer", () => {
+    const deleteSection = src.slice(src.indexOf('"delete-session"'));
     assert.ok(
-      saveSection.includes("suggestion.session.customerId !== customer.id"),
-      "ownership check: customerId must match"
+      deleteSection.includes("requireCurrentNaiaCustomer"),
+      "delete-session requires authenticated customer"
     );
   });
 
-  it("style-me/_index.tsx action handles intent=remove-from-saved (deletes SavedLook only)", () => {
-    const src = route("style-me/_index.tsx");
-    assert.ok(src.includes('"remove-from-saved"'), "remove-from-saved intent branch present");
-    assert.ok(src.includes("prisma.savedLook.deleteMany"), "savedLook.deleteMany in remove path");
-    // Must NOT delete the styling session or outfit suggestion
+  it("delete-session cleans up linked SavedLook records (fromSuggestionId has no FK cascade)", () => {
+    const deleteSection = src.slice(src.indexOf('"delete-session"'));
     assert.ok(
-      !src.includes("prisma.stylingSession.delete"),
-      "remove-from-saved does not delete StylingSession"
+      deleteSection.includes("prisma.savedLook.deleteMany"),
+      "SavedLook cleanup before session delete"
     );
+    assert.ok(
+      deleteSection.includes("fromSuggestionId: { in: suggestionIds }"),
+      "SavedLooks matched via fromSuggestionId of session's suggestions"
+    );
+    assert.ok(
+      deleteSection.includes("customerId: customer.id"),
+      "SavedLook cleanup scoped to authenticated customer"
+    );
+  });
+
+  it("delete-session does NOT delete ClosetItem records", () => {
+    assert.ok(
+      !src.includes("prisma.closetItem.delete"),
+      "no ClosetItem delete in action"
+    );
+    assert.ok(
+      !src.includes("prisma.closetItem.deleteMany"),
+      "no ClosetItem deleteMany in action"
+    );
+  });
+
+  it("delete-session does NOT delete OutfitSuggestion directly — cascade handles it", () => {
+    // OutfitSuggestion has onDelete:Cascade from StylingSession — no manual delete needed
     assert.ok(
       !src.includes("prisma.outfitSuggestion.delete"),
-      "remove-from-saved does not delete OutfitSuggestion"
+      "no direct OutfitSuggestion delete — handled by DB cascade"
     );
   });
 
-  it("style-me/_index.tsx remove-from-saved is scoped to the authenticated customer", () => {
-    const src = route("style-me/_index.tsx");
-    const removeSection = src.slice(src.indexOf('"remove-from-saved"'));
-    assert.ok(
-      removeSection.includes("customerId: customer.id"),
-      "deleteMany where-clause scoped to customer"
-    );
+  it("delete-session is wrapped in try/catch — graceful error response, not Application Error", () => {
+    const deleteSection = src.slice(src.indexOf('"delete-session"'));
+    assert.ok(deleteSection.includes("try {"), "delete-session has try block");
+    assert.ok(deleteSection.includes("catch (e)"), "delete-session has catch block");
   });
 
-  it("style-me/_index.tsx UI renders 'Your StyleMe Looks' section label", () => {
-    const src = route("style-me/_index.tsx");
-    assert.ok(src.includes("Your StyleMe Looks"), "section label updated to Your StyleMe Looks");
+  it("UI renders 'Your StyleMe Looks' section label", () => {
+    assert.ok(src.includes("Your StyleMe Looks"), "section label present");
     assert.ok(!src.includes("PREVIOUS STYLEME LOOKS"), "old label removed");
-    assert.ok(!src.includes("Previous StyleMe Looks"), "old title-case label removed");
   });
 
-  it("style-me/_index.tsx UI does not render All Looks / Saved filter tabs — one unified history", () => {
-    const src = route("style-me/_index.tsx");
-    assert.ok(!src.includes("All Looks"), "All Looks filter button removed");
-    assert.ok(!src.includes("useSearchParams"), "useSearchParams removed — no filter state");
+  it("UI has no Save, Saved, or Remove from Saved controls", () => {
+    assert.ok(!src.includes(">Save<"), "Save button removed");
+    assert.ok(!src.includes("Remove from Saved"), "Remove from Saved removed");
+    assert.ok(!src.includes('"save-look"'), "save-look intent removed");
+    assert.ok(!src.includes('"remove-from-saved"'), "remove-from-saved intent removed");
+  });
+
+  it("UI has no ALL LOOKS / SAVED filter tabs or useSearchParams", () => {
+    assert.ok(!src.includes("All Looks"), "All Looks tab removed");
+    assert.ok(!src.includes("useSearchParams"), "useSearchParams removed");
     assert.ok(!src.includes('filter: "saved"'), "filter=saved param removed");
   });
 
-  it("style-me/_index.tsx SessionCard renders View Look link and save/remove action", () => {
-    const src = route("style-me/_index.tsx");
-    assert.ok(src.includes("View Look"), "View Look link present on card");
-    assert.ok(src.includes("Remove from Saved"), "Remove from Saved action present");
-    assert.ok(src.includes(">Save<"), "Save action label present");
+  it("SessionCard renders View Look link and Delete button", () => {
+    assert.ok(src.includes("View Look"), "View Look link present");
+    assert.ok(src.includes(">Delete<"), "Delete button present");
+    assert.ok(src.includes('"delete-session"'), "Delete submits delete-session intent");
   });
 
-  it("my-naia.saved.tsx loader redirects to /style-me (no filter param)", () => {
-    const src = route("my-naia.saved.tsx");
+  it("Delete button shows browser confirm before submitting", () => {
+    assert.ok(src.includes("window.confirm"), "window.confirm called on delete submit");
     assert.ok(
-      src.includes('redirect("/style-me")'),
-      "loader redirects to /style-me"
+      src.includes("Delete this look?"),
+      "confirm message: 'Delete this look?'"
     );
     assert.ok(
-      !src.includes('redirect("/style-me?filter=saved")'),
-      "no longer redirects to filter=saved"
+      src.includes("Your Closet will not be affected"),
+      "confirm message clarifies Closet is unaffected"
     );
+    assert.ok(src.includes("e.preventDefault()"), "form prevented when user cancels confirm");
   });
 
-  it("my-naia.saved.tsx route is still registered in routes.ts", () => {
-    const src = readFileSync(join(ROOT, "app/routes.ts"), "utf8");
-    assert.ok(
-      src.includes("my-naia/saved") || src.includes("my-naia.saved"),
-      "my-naia/saved route still registered — redirect must resolve"
-    );
+  it("my-naia.saved.tsx redirects to /style-me (no filter param)", () => {
+    const s = route("my-naia.saved.tsx");
+    assert.ok(s.includes('redirect("/style-me")'), "redirects to /style-me");
+    assert.ok(!s.includes('redirect("/style-me?filter=saved")'), "no filter=saved param");
   });
 
-  // Regression: a saved look older than the latest 20 sessions must still appear in SAVED.
-  // The SAVED filter must be built from a dedicated SavedLook query, not filtered from
-  // the 20-session recentSessions list.
-  it("loader returns single recentSessions list — no savedSessions field", () => {
-    const src = route("style-me/_index.tsx");
-    assert.ok(src.includes("recentSessions,"), "loader returns recentSessions field");
-    assert.ok(!src.includes("savedSessions,"), "savedSessions removed from loader return");
-    assert.ok(!src.includes("savedSessions = savedLooks"), "savedSessions computation removed");
-    assert.ok(src.includes("take: 20"), "recentSessions capped at 20 for performance");
-  });
-
-  it("component renders recentSessions directly — no filter switching", () => {
-    const src = route("style-me/_index.tsx");
-    assert.ok(src.includes("recentSessions.map"), "recentSessions iterated directly");
+  it("my-naia.saved.tsx route still registered in routes.ts for backward-compat redirect", () => {
+    const s = readFileSync(join(ROOT, "app/routes.ts"), "utf8");
     assert.ok(
-      !src.includes("recentSessions.filter((s) => s.isSaved)"),
-      "saved tab does not derive from recentSessions.filter(isSaved)"
-    );
-    assert.ok(
-      !src.includes("filter === \"saved\""),
-      "no filter condition in component"
+      s.includes("my-naia/saved") || s.includes("my-naia.saved"),
+      "my-naia/saved route still registered"
     );
   });
 });
 
-// ── P — Saved/filter UX cleanup + historical StyleMe image fix ─────────────────
+// ── P — StyleMe historical image hydration ────────────────────────────────────
 
-describe("P — Saved UX cleanup + StyleMe historical image hydration", () => {
-  // ── UX: no duplicate Saved entry points ──
+describe("P — StyleMe historical image hydration", () => {
   it("my-naia._index.tsx 'View All Looks' links to /style-me (not /my-naia/saved)", () => {
     const src = route("my-naia._index.tsx");
     assert.ok(!src.includes('to="/my-naia/saved"'), 'no link to /my-naia/saved in overview');
-    // View All Looks must point to the StyleMe history page
     assert.ok(src.includes('to="/style-me"'), 'View All Looks links to /style-me');
   });
 
@@ -1598,40 +1591,31 @@ describe("P — Saved UX cleanup + StyleMe historical image hydration", () => {
     assert.ok(!src.includes("savedAsLook"), "savedAsLook badge removed from overview cards");
   });
 
-  it("style-me/_index.tsx has no filter tab buttons or tab styling (tabs removed)", () => {
+  it("style-me/_index.tsx has no Saved UI — no Save/Saved/Remove controls or filter tabs", () => {
     const src = route("style-me/_index.tsx");
     assert.ok(!src.includes("All Looks"), "All Looks tab removed");
+    assert.ok(!src.includes(">Save<"), "Save button absent");
+    assert.ok(!src.includes(">Saved<"), "Saved label absent from UI");
+    assert.ok(!src.includes("Remove from Saved"), "Remove from Saved absent");
     assert.ok(!src.includes("useSearchParams"), "useSearchParams removed");
-    assert.ok(!src.includes("sml-header-link"), "old sml-header-link class absent");
-    assert.ok(!src.includes('filter: "saved"'), "filter=saved param absent");
+    assert.ok(!src.includes('"save-look"'), "save-look intent absent");
+    assert.ok(!src.includes('"remove-from-saved"'), "remove-from-saved intent absent");
   });
 
-  it("style-me/_index.tsx has no SAVED-specific empty state (single empty state only)", () => {
+  it("style-me/_index.tsx single unified empty state — no Saved-specific copy", () => {
     const src = route("style-me/_index.tsx");
-    assert.ok(
-      !src.includes("No Saved Looks Yet"),
-      "SAVED-specific empty state heading removed"
-    );
-    assert.ok(
-      !src.includes("Save a StyleMe look you want to come back to"),
-      "SAVED-specific empty state copy removed"
-    );
+    assert.ok(!src.includes("No Saved Looks Yet"), "SAVED empty state heading removed");
+    assert.ok(!src.includes("Save a StyleMe look"), "SAVED empty state copy removed");
     assert.ok(
       src.includes("Your first StyleMe session begins with a single occasion."),
       "single unified empty state present"
     );
   });
 
-  it("my-naia.saved.tsx loader redirects to /style-me (no filter param — backward-compat)", () => {
+  it("my-naia.saved.tsx loader redirects to /style-me (backward-compat, no filter)", () => {
     const src = route("my-naia.saved.tsx");
-    assert.ok(
-      src.includes('redirect("/style-me")'),
-      "redirect to /style-me (no filter param)"
-    );
-    assert.ok(
-      !src.includes('redirect("/style-me?filter=saved")'),
-      "old filter=saved redirect removed"
-    );
+    assert.ok(src.includes('redirect("/style-me")'), "redirect to /style-me");
+    assert.ok(!src.includes('redirect("/style-me?filter=saved")'), "no filter=saved");
   });
 
   it("MyNaiaLayout.tsx has no Saved nav item", () => {
@@ -1640,7 +1624,6 @@ describe("P — Saved UX cleanup + StyleMe historical image hydration", () => {
     assert.ok(!src.includes('"/my-naia/saved"'), "/my-naia/saved path absent from nav items");
   });
 
-  // ── Image fix: historical StyleMe result ──
   it("style-me/result.tsx imports Cloudinary helpers for signed URL generation", () => {
     const src = route("style-me/result.tsx");
     assert.ok(src.includes("getCloudinaryConfig"), "getCloudinaryConfig imported");
@@ -1650,18 +1633,17 @@ describe("P — Saved UX cleanup + StyleMe historical image hydration", () => {
 
   it("style-me/result.tsx sessionId loader includes closetItem relation on OutfitItem", () => {
     const src = route("style-me/result.tsx");
-    // The closetItem relation must be selected so imagePublicId/imageFormat are available
     assert.ok(
       src.includes("closetItem: { select: { imageUrl: true, imagePublicId: true, imageFormat: true } }"),
       "closetItem with image fields selected inside suggestions.include.items.include"
     );
   });
 
-  it("style-me/result.tsx hydrates closet items with fresh signed URL (priority 1: imagePublicId+imageFormat)", () => {
+  it("style-me/result.tsx hydrates closet items with fresh signed URL", () => {
     const src = route("style-me/result.tsx");
     assert.ok(
       src.includes("buildPrivateDownloadUrl(") && src.includes("ci.imagePublicId") && src.includes("ci.imageFormat"),
-      "fresh signed URL built from imagePublicId + imageFormat for historical closet items"
+      "fresh signed URL built from imagePublicId + imageFormat"
     );
     assert.ok(
       src.includes("validatePublicIdOwnership(ci.imagePublicId, session.customerId)"),
@@ -1669,97 +1651,71 @@ describe("P — Saved UX cleanup + StyleMe historical image hydration", () => {
     );
   });
 
-  it("style-me/result.tsx falls back to legacy imageUrl when imagePublicId unavailable (priority 2)", () => {
+  it("style-me/result.tsx falls back to legacy imageUrl when imagePublicId unavailable", () => {
     const src = route("style-me/result.tsx");
     assert.ok(
       src.includes("if (ci.imageUrl) return { ...item, productImageUrl: ci.imageUrl }"),
-      "legacy imageUrl used as fallback when signed URL cannot be built"
+      "legacy imageUrl used as fallback"
     );
   });
 
-  it("style-me/result.tsx image hydration only runs for items with closetItemId (not NADINE items)", () => {
+  it("style-me/result.tsx image hydration only runs for closet items (not NADINE items)", () => {
     const src = route("style-me/result.tsx");
     const hydrateSection = src.slice(src.indexOf("Hydrate closet item images"));
     assert.ok(
       hydrateSection.includes("if (item.closetItemId && item.closetItem)"),
-      "image hydration gated on closetItemId being set — NADINE items unchanged"
+      "hydration gated on closetItemId — NADINE items unchanged"
     );
   });
 
-  it("style-me/result.tsx image hydration does not regenerate or replace the outfit", () => {
+  it("style-me/result.tsx image hydration does not regenerate the outfit", () => {
     const src = route("style-me/result.tsx");
     const hydrateSection = src.slice(src.indexOf("Hydrate closet item images"));
-    // Hydration only mutates productImageUrl on items — no re-compute, no new suggestion create
     assert.ok(
       !hydrateSection.slice(0, hydrateSection.indexOf("return data")).includes("computeStyleMeResult"),
       "no outfit regeneration in image hydration path"
     );
     assert.ok(
       hydrateSection.includes("productImageUrl: buildPrivateDownloadUrl"),
-      "only productImageUrl is overridden on the item — everything else preserved"
+      "only productImageUrl overridden — everything else preserved"
     );
   });
 });
 
-describe("Q — StyleMe regression: saved-look loader crash fix", () => {
+// ── Q — StyleMe: field-name + delete regression guards ────────────────────────
+
+describe("Q — StyleMe regression: currentMood fix + delete-session safety", () => {
   const src = route("style-me/_index.tsx");
 
-  it("no Prisma select uses invalid field name 'mood' on StylingSession — prevents PrismaClientValidationError", () => {
-    // StylingSession.currentMood is the real field name (not mood).
-    // Using mood: true in any session select causes PrismaClientValidationError at runtime.
-    assert.ok(
-      !src.includes("select: { id: true, mood: true"),
-      "no select using invalid field name 'mood' for StylingSession"
-    );
-    assert.ok(
-      !src.includes("mood: true,"),
-      "no loose mood: true field in any select"
-    );
+  it("recentSessions mapper reads s.currentMood not s.mood — StylingSession has no mood field", () => {
+    assert.ok(src.includes("mood: s.currentMood"), "recentRaw.map reads s.currentMood");
+    assert.ok(!src.includes("mood: s.mood"), "no s.mood reference (field does not exist)");
+    assert.ok(!src.includes("mood: true,"), "no mood:true in any Prisma select");
+    assert.ok(!src.includes("select: { id: true, mood: true"), "no invalid StylingSession select");
   });
 
-  it("recentSessions mapper reads s.currentMood not s.mood — prevents undefined mood on every card", () => {
-    assert.ok(
-      src.includes("mood: s.currentMood"),
-      "recentRaw.map reads s.currentMood"
-    );
-    assert.ok(
-      !src.includes("mood: s.mood"),
-      "no reference to s.mood (field does not exist on StylingSession)"
-    );
+  it("savedSessions and save-look removed — no stale field references remain", () => {
+    assert.ok(!src.includes("savedSessions"), "savedSessions completely removed");
+    assert.ok(!src.includes("sugg.session.mood"), "no sugg.session.mood reference");
+    assert.ok(!src.includes('"save-look"'), "save-look intent removed");
+    assert.ok(!src.includes('"remove-from-saved"'), "remove-from-saved intent removed");
   });
 
-  it("savedSessions query removed — no sugg.session.mood reference remains (filter tabs gone)", () => {
-    // savedSessions computation is removed along with filter tabs.
-    // Verify no invalid StylingSession field access survives.
-    assert.ok(
-      !src.includes("sugg.session.mood"),
-      "no sugg.session.mood reference in source"
-    );
-    assert.ok(
-      !src.includes("savedSessions"),
-      "savedSessions completely removed from _index.tsx"
-    );
+  it("unauthenticated early return does not reference removed fields", () => {
+    const earlyReturn = src.slice(src.indexOf("if (!customerId)"), src.indexOf("if (!customerId)") + 220);
+    assert.ok(!earlyReturn.includes("savedSessions"), "no savedSessions in early return");
+    assert.ok(!earlyReturn.includes("isSaved"), "no isSaved in early return");
+    assert.ok(earlyReturn.includes("recentSessions"), "recentSessions still in early return");
   });
 
-  it("unauthenticated early return is lean — no savedSessions field (tabs removed)", () => {
-    const earlyReturn = src.slice(src.indexOf("if (!customerId)"), src.indexOf("if (!customerId)") + 200);
+  it("delete-session action: SafeLook cleanup runs before session delete — correct order", () => {
+    const src2 = route("style-me/_index.tsx");
+    const deleteSection = src2.slice(src2.indexOf('"delete-session"'));
+    const savedLookPos = deleteSection.indexOf("prisma.savedLook.deleteMany");
+    const sessionDeletePos = deleteSection.indexOf("prisma.stylingSession.delete");
     assert.ok(
-      !earlyReturn.includes("savedSessions"),
-      "early return does not reference savedSessions (field removed with tabs)"
+      savedLookPos !== -1 && sessionDeletePos !== -1 && savedLookPos < sessionDeletePos,
+      "SavedLook cleanup runs BEFORE stylingSession.delete"
     );
-    assert.ok(
-      earlyReturn.includes("recentSessions"),
-      "early return still provides recentSessions:[]"
-    );
-  });
-
-  it("save-look and remove-from-saved action branches are wrapped in try/catch — prevents Application Error on Prisma failure", () => {
-    const saveBranch = src.slice(src.indexOf('"save-look"'), src.indexOf('"remove-from-saved"'));
-    assert.ok(saveBranch.includes("try {"), "save-look branch has try block");
-    assert.ok(saveBranch.includes("catch (e)"), "save-look branch has catch block");
-
-    const removeBranch = src.slice(src.indexOf('"remove-from-saved"'));
-    assert.ok(removeBranch.includes("try {"), "remove-from-saved branch has try block");
-    assert.ok(removeBranch.includes("catch (e)"), "remove-from-saved branch has catch block");
   });
 });
