@@ -1603,3 +1603,118 @@ describe("O — StyleMe + Saved merge: history section, filter tabs, save/unsave
     );
   });
 });
+
+// ── P — Saved/filter UX cleanup + historical StyleMe image fix ─────────────────
+
+describe("P — Saved UX cleanup + StyleMe historical image hydration", () => {
+  // ── UX: no duplicate Saved entry points ──
+  it("my-naia._index.tsx 'View All Looks' links to /style-me (not /my-naia/saved)", () => {
+    const src = route("my-naia._index.tsx");
+    assert.ok(!src.includes('to="/my-naia/saved"'), 'no link to /my-naia/saved in overview');
+    // View All Looks must point to the StyleMe history page
+    assert.ok(src.includes('to="/style-me"'), 'View All Looks links to /style-me');
+  });
+
+  it("my-naia._index.tsx does not render the savedAsLook badge (dead field)", () => {
+    const src = route("my-naia._index.tsx");
+    assert.ok(!src.includes("savedAsLook"), "savedAsLook badge removed from overview cards");
+  });
+
+  it("style-me/_index.tsx filter tabs use editorial styling (no chunky button classes)", () => {
+    const src = route("style-me/_index.tsx");
+    // Editorial tab styling cues: uppercase + letterSpacing + no border/background
+    assert.ok(src.includes("textTransform") && src.includes("uppercase"), "tabs use uppercase text");
+    assert.ok(src.includes("letterSpacing"), "tabs use letter spacing");
+    assert.ok(src.includes("var(--lipstick)"), "active tab uses lipstick/burgundy color");
+    assert.ok(src.includes("var(--naia-muted)"), "inactive tab uses muted color");
+    assert.ok(src.includes("borderBottom"), "active tab has underline via borderBottom");
+    // Must NOT use chunky pill/button CSS classes
+    assert.ok(!src.includes("sml-header-link"), "old sml-header-link class removed from tab buttons");
+  });
+
+  it("style-me/_index.tsx SAVED empty state uses eyebrow + correct copy", () => {
+    const src = route("style-me/_index.tsx");
+    assert.ok(
+      src.includes("Save a StyleMe look you want to come back to, and it will appear here."),
+      "SAVED empty-state copy is correct"
+    );
+    assert.ok(
+      !src.includes("No saved looks yet. After a StyleMe session"),
+      "old generic empty-state copy removed"
+    );
+  });
+
+  it("my-naia.saved.tsx loader still redirects to /style-me?filter=saved (backward-compat)", () => {
+    const src = route("my-naia.saved.tsx");
+    assert.ok(
+      src.includes('redirect("/style-me?filter=saved")'),
+      "redirect to /style-me?filter=saved is preserved"
+    );
+  });
+
+  it("MyNaiaLayout.tsx has no Saved nav item", () => {
+    const src = route("../components/my-naia/MyNaiaLayout.tsx");
+    assert.ok(!src.includes('"Saved"') && !src.includes("'Saved'"), "Saved label absent from nav");
+    assert.ok(!src.includes('"/my-naia/saved"'), "/my-naia/saved path absent from nav items");
+  });
+
+  // ── Image fix: historical StyleMe result ──
+  it("style-me/result.tsx imports Cloudinary helpers for signed URL generation", () => {
+    const src = route("style-me/result.tsx");
+    assert.ok(src.includes("getCloudinaryConfig"), "getCloudinaryConfig imported");
+    assert.ok(src.includes("buildPrivateDownloadUrl"), "buildPrivateDownloadUrl imported");
+    assert.ok(src.includes("validatePublicIdOwnership"), "validatePublicIdOwnership imported");
+  });
+
+  it("style-me/result.tsx sessionId loader includes closetItem relation on OutfitItem", () => {
+    const src = route("style-me/result.tsx");
+    // The closetItem relation must be selected so imagePublicId/imageFormat are available
+    assert.ok(
+      src.includes("closetItem: { select: { imageUrl: true, imagePublicId: true, imageFormat: true } }"),
+      "closetItem with image fields selected inside suggestions.include.items.include"
+    );
+  });
+
+  it("style-me/result.tsx hydrates closet items with fresh signed URL (priority 1: imagePublicId+imageFormat)", () => {
+    const src = route("style-me/result.tsx");
+    assert.ok(
+      src.includes("buildPrivateDownloadUrl(") && src.includes("ci.imagePublicId") && src.includes("ci.imageFormat"),
+      "fresh signed URL built from imagePublicId + imageFormat for historical closet items"
+    );
+    assert.ok(
+      src.includes("validatePublicIdOwnership(ci.imagePublicId, session.customerId)"),
+      "ownership validated before signing"
+    );
+  });
+
+  it("style-me/result.tsx falls back to legacy imageUrl when imagePublicId unavailable (priority 2)", () => {
+    const src = route("style-me/result.tsx");
+    assert.ok(
+      src.includes("if (ci.imageUrl) return { ...item, productImageUrl: ci.imageUrl }"),
+      "legacy imageUrl used as fallback when signed URL cannot be built"
+    );
+  });
+
+  it("style-me/result.tsx image hydration only runs for items with closetItemId (not NADINE items)", () => {
+    const src = route("style-me/result.tsx");
+    const hydrateSection = src.slice(src.indexOf("Hydrate closet item images"));
+    assert.ok(
+      hydrateSection.includes("if (item.closetItemId && item.closetItem)"),
+      "image hydration gated on closetItemId being set — NADINE items unchanged"
+    );
+  });
+
+  it("style-me/result.tsx image hydration does not regenerate or replace the outfit", () => {
+    const src = route("style-me/result.tsx");
+    const hydrateSection = src.slice(src.indexOf("Hydrate closet item images"));
+    // Hydration only mutates productImageUrl on items — no re-compute, no new suggestion create
+    assert.ok(
+      !hydrateSection.slice(0, hydrateSection.indexOf("return data")).includes("computeStyleMeResult"),
+      "no outfit regeneration in image hydration path"
+    );
+    assert.ok(
+      hydrateSection.includes("productImageUrl: buildPrivateDownloadUrl"),
+      "only productImageUrl is overridden on the item — everything else preserved"
+    );
+  });
+});

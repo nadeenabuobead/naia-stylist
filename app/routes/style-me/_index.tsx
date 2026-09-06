@@ -253,20 +253,46 @@ export default function StyleMeIndex() {
       <section className="bos-section">
         <div className="sml-header">
           <div className="sml-section-label" style={{ marginBottom: 0 }}>Your StyleMe Looks</div>
-          <div className="sml-header-links">
+          <div style={{ display: "flex", gap: "1.5rem", alignItems: "center" }}>
             <button
               type="button"
-              className={filter === "all" ? "sml-header-link sml-header-link--active" : "sml-header-link"}
               onClick={() => setSearchParams({})}
               aria-pressed={filter === "all"}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: filter === "all" ? "2px solid var(--lipstick)" : "2px solid transparent",
+                padding: "0 0 4px",
+                cursor: "pointer",
+                fontFamily: "var(--naia-ff-ui)",
+                fontSize: "0.6rem",
+                letterSpacing: "0.2em",
+                textTransform: "uppercase",
+                color: filter === "all" ? "var(--lipstick)" : "var(--naia-muted)",
+                fontWeight: filter === "all" ? 600 : 400,
+                transition: "color 0.15s, border-color 0.15s",
+              }}
             >
               All Looks
             </button>
             <button
               type="button"
-              className={filter === "saved" ? "sml-header-link sml-header-link--active" : "sml-header-link"}
               onClick={() => setSearchParams({ filter: "saved" })}
               aria-pressed={filter === "saved"}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: filter === "saved" ? "2px solid var(--lipstick)" : "2px solid transparent",
+                padding: "0 0 4px",
+                cursor: "pointer",
+                fontFamily: "var(--naia-ff-ui)",
+                fontSize: "0.6rem",
+                letterSpacing: "0.2em",
+                textTransform: "uppercase",
+                color: filter === "saved" ? "var(--lipstick)" : "var(--naia-muted)",
+                fontWeight: filter === "saved" ? 600 : 400,
+                transition: "color 0.15s, border-color 0.15s",
+              }}
             >
               Saved
             </button>
@@ -284,9 +310,12 @@ export default function StyleMeIndex() {
         ) : (
           <div className="sml-empty">
             {filter === "saved" ? (
-              <p className="sml-empty-text">
-                No saved looks yet. After a StyleMe session, save a look to find it here.
-              </p>
+              <>
+                <p className="sml-section-label" style={{ marginBottom: "0.5rem" }}>No Saved Looks Yet</p>
+                <p className="sml-empty-text">
+                  Save a StyleMe look you want to come back to, and it will appear here.
+                </p>
+              </>
             ) : (
               <p className="sml-empty-text">Your first StyleMe session begins with a single occasion.</p>
             )}

@@ -3,6 +3,11 @@ import { Form, Link, useLoaderData, useFetcher } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type ShouldRevalidateFunctionArgs, type LinksFunction } from "react-router";
 import { useState, useEffect, type Dispatch, type SetStateAction, type CSSProperties } from "react";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import {
+  getCloudinaryConfig,
+  validatePublicIdOwnership,
+  buildPrivateDownloadUrl,
+} from "~/lib/cloudinary-admin.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
 import { prisma } from "~/lib/prisma.server";
 import { getSession, commitSession, clearStyleMeSession } from "~/lib/session.server";
@@ -89,7 +94,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
       const session = await prisma.stylingSession.findUnique({
         where: { id: sessionId },
-        include: { suggestions: { include: { items: true }, orderBy: { createdAt: "desc" }, take: 1 } },
+        include: {
+          suggestions: {
+            include: {
+              items: {
+                include: {
+                  // Closet item fields needed for fresh signed-URL resolution on historical loads.
+                  // productImageUrl stored at generation time may be an expired signed URL.
+                  closetItem: { select: { imageUrl: true, imagePublicId: true, imageFormat: true } },
+                },
+              },
+            },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+        },
       });
       if (!session || session.customerId !== naiaCustomer.id) {
         return data(
@@ -122,6 +141,36 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const existingOutcome = currentSuggestionId
         ? await loadOutcomeForSuggestion(currentSuggestionId, naiaCustomer.id)
         : null;
+
+      // Hydrate closet item images with fresh signed URLs for historical loads.
+      // productImageUrl stored at generation time can be an expired Cloudinary signed URL.
+      // Priority: 1) fresh private signed URL (imagePublicId+imageFormat), 2) legacy imageUrl, 3) persisted productImageUrl.
+      const cloudinaryConfig = getCloudinaryConfig();
+      const rawSuggestion = session.suggestions[0] ?? null;
+      const hydratedSuggestion = rawSuggestion
+        ? {
+            ...rawSuggestion,
+            items: rawSuggestion.items.map((item) => {
+              if (item.closetItemId && item.closetItem) {
+                const ci = item.closetItem;
+                if (ci.imagePublicId && ci.imageFormat && cloudinaryConfig) {
+                  const ownership = validatePublicIdOwnership(ci.imagePublicId, session.customerId);
+                  if (ownership.ok) {
+                    return {
+                      ...item,
+                      productImageUrl: buildPrivateDownloadUrl(
+                        cloudinaryConfig, ci.imagePublicId, ci.imageFormat, "private",
+                      ),
+                    };
+                  }
+                }
+                if (ci.imageUrl) return { ...item, productImageUrl: ci.imageUrl };
+              }
+              return item;
+            }),
+          }
+        : null;
+
       return data({
         isLoading: false,
         isAuthenticated: !!naiaCustomer,
@@ -136,7 +185,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         desiredFeeling: session.desiredFeeling,
         rev3State: session.state ?? null,
         rev3Intentions: session.intentions ?? [],
-        suggestion: session.suggestions[0] || null,
+        suggestion: hydratedSuggestion,
         pendingState: null as "needs_passport" | "ready_to_save" | null,
         existingOutfitFeedback: existingOutfitFeedback ? { id: existingOutfitFeedback.id, rating: existingOutfitFeedback.rating, reasonCodes: existingOutfitFeedback.reasonCodes } : null,
         existingOutcome,

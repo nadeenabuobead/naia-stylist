@@ -187,7 +187,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         select: {
           id: true, createdAt: true, currentMood: true, desiredFeeling: true, occasion: true, styleFrom: true,
           suggestions: {
-            take: 1, select: { id: true, heroImageUrl: true, outfitName: true, savedAsLook: true,
+            take: 1, select: { id: true, heroImageUrl: true, outfitName: true,
               items: { take: 5, select: { itemType: true, closetItemId: true, productTitle: true, productImageUrl: true, closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true } } } } }
           },
           review: { select: { id: true } },
@@ -528,7 +528,7 @@ export default function MyNaiaOverview() {
         <section className="mn-section">
           <div className="mn-section-head">
             <div className="mn-eyebrow">Latest StyleMe</div>
-            <Link to="/my-naia/saved" className="mn-see-link">View All Looks</Link>
+            <Link to="/style-me" className="mn-see-link">View All Looks</Link>
           </div>
           <div className="mn-section-body">
             {sessions.length === 0 ? (
@@ -561,9 +561,6 @@ export default function MyNaiaOverview() {
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.25, color: "var(--fg)" }} aria-hidden="true">
                               <path d="M12 3 4.5 7.5v9L12 21l7.5-4.5v-9L12 3z" /><path d="m4.5 7.5 7.5 4.5 7.5-4.5M12 12v9" />
                             </svg>
-                          )}
-                          {suggestion?.savedAsLook && (
-                            <span style={{ position: "absolute", left: "0.75rem", top: "0.75rem", fontSize: "0.55rem", textTransform: "uppercase", letterSpacing: "0.3em", background: "var(--bg)", padding: "0.25rem 0.5rem", color: "var(--fg-80)" }}>Saved</span>
                           )}
                         </Link>
                         <div className="mn-look-date" style={{ marginTop: "0.75rem" }}>
