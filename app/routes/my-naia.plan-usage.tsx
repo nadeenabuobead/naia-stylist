@@ -16,7 +16,7 @@ export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
   const summary = await getEntitlementSummary(customer.id, customer.membershipStatus);
-  return { summary };
+  return { summary, membershipPricing: MEMBERSHIP_PRICING, addonCatalog: ADDON_CATALOG };
 }
 
 // ── Display helpers ────────────────────────────────────────────────────────────
@@ -82,10 +82,10 @@ function usageLabel(used: number, limit: number, unit: string): string {
 // ── Page component ─────────────────────────────────────────────────────────────
 
 export default function PlanUsagePage() {
-  const { summary } = useLoaderData<typeof loader>();
+  const { summary, membershipPricing, addonCatalog } = useLoaderData<typeof loader>();
   const { membershipStatus, styleMe, buySkip, vto, closet, personalisedTrend } = summary;
   const isMember = membershipStatus === "MEMBER";
-  const pricing = `AED ${MEMBERSHIP_PRICING.monthly.amount}/month · AED ${MEMBERSHIP_PRICING.annual.amount}/year`;
+  const pricing = `AED ${membershipPricing.monthly.amount}/month · AED ${membershipPricing.annual.amount}/year`;
 
   // ── StyleMe
   const smValue = usageLabel(styleMe.monthlyUsed, styleMe.monthlyLimit, "sessions");
@@ -199,7 +199,7 @@ export default function PlanUsagePage() {
         {/* ── Add-ons ────────────────────────────────────────────────── */}
         <Section title="Add-ons" right="Coming soon">
           <div style={{ display: "flex", flexDirection: "column" }}>
-            {ADDON_CATALOG.map((addon, i) => (
+            {addonCatalog.map((addon, i) => (
               <div key={addon.label}>
                 {addon.separator && (
                   <div style={{ borderTop: "1px solid var(--fg-10)", margin: "0.5rem 0" }} />
@@ -210,7 +210,7 @@ export default function PlanUsagePage() {
                   justifyContent: "space-between",
                   gap: "1rem",
                   padding: "0.55rem 0",
-                  borderBottom: i < ADDON_CATALOG.length - 1 && !ADDON_CATALOG[i + 1]?.separator
+                  borderBottom: i < addonCatalog.length - 1 && !addonCatalog[i + 1]?.separator
                     ? "1px solid var(--fg-05, var(--fg-10))"
                     : "none",
                 }}>
