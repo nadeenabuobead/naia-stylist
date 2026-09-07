@@ -37,6 +37,7 @@ const CATEGORY_LABELS: Record<ClosetItemCategory, string> = {
   outerwear:   "jacket, coat, or blazer",
   shoes:       "shoes, boots, heels, or sneakers",
   bags:        "bag, purse, or backpack",
+  accessories: "accessory (scarf, belt, or earring)",
   unsupported: "fashion item",
 };
 

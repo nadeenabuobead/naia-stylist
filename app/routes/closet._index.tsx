@@ -103,6 +103,34 @@ function detectImageFormatFromBytes(header: Uint8Array): string | null {
   return null;
 }
 
+// Re-evaluate Stage A eligibility for ACCESSORIES/JEWELRY items after garment analysis.
+// Stage A runs at upload time when subcategory is unknown; this updates it once analysis sets it.
+async function refreshAccessoryEligibility(
+  itemId: string,
+  category: string,
+  metadata: { width?: number; height?: number; format?: string; bytes?: number },
+): Promise<void> {
+  if (!["ACCESSORIES", "JEWELRY"].includes(category)) return;
+  const refreshed = await prisma.closetItem.findUnique({
+    where: { id: itemId },
+    select: { subcategory: true },
+  });
+  const stageA = assessClosetEligibility({
+    prismaCategory: category,
+    subcategory: refreshed?.subcategory ?? null,
+    ...metadata,
+  });
+  await prisma.closetItem.update({
+    where: { id: itemId },
+    data: {
+      tryOnEligibility:  stageA.eligible,
+      tryOnAssessedAt:   new Date(stageA.assessedAt),
+      tryOnCustomerHint: stageA.customerHint,
+      tryOnInternalNote: stageA.internalNote,
+    },
+  });
+}
+
 export function meta() {
   return [{ title: "My Closet | nAia" }];
 }
@@ -417,6 +445,14 @@ export async function action({ request }: ActionFunctionArgs) {
       userSeasons:      seasons.length > 0 ? seasons : [],
     }).catch(() => {});
 
+    // Re-evaluate eligibility now that subcategory is set (ACCESSORIES/JEWELRY only).
+    await refreshAccessoryEligibility(newItem.id, category, {
+      width: serverWidth ?? undefined,
+      height: serverHeight ?? undefined,
+      format: serverFormat,
+      bytes: serverBytes,
+    }).catch(() => {});
+
     // Taste evidence — extract from garmentRelationships on new item
     try {
       const evRows = extractClosetEvidence({ id: newItem.id, customerId: customer.id, category: newItem.category, garmentRelationships: newItem.garmentRelationships, updatedAt: newItem.updatedAt });
@@ -479,6 +515,9 @@ export async function action({ request }: ActionFunctionArgs) {
           userOccasions: existing.occasions ?? [],
           userSeasons:   existing.seasons   ?? [],
         }).catch(() => {});
+        // Re-evaluate eligibility now that subcategory is set (ACCESSORIES/JEWELRY only).
+        // No pixel metadata available here — skip photo quality re-check.
+        await refreshAccessoryEligibility(itemId, category, {}).catch(() => {});
       } else {
         await prisma.closetItem.update({
           where: { id: itemId },
@@ -693,6 +732,14 @@ export async function action({ request }: ActionFunctionArgs) {
       userPattern:   existing.pattern   || null,
       userOccasions: existing.occasions ?? [],
       userSeasons:   existing.seasons   ?? [],
+    }).catch(() => {});
+
+    // Re-evaluate eligibility now that subcategory is set (ACCESSORIES/JEWELRY only).
+    await refreshAccessoryEligibility(itemId, category, {
+      width:  editWidth  ?? undefined,
+      height: editHeight ?? undefined,
+      format: editFormat,
+      bytes:  editBytes,
     }).catch(() => {});
 
     // Taste evidence — re-extract after photo replacement (relationships may have changed)
@@ -1905,7 +1952,11 @@ export default function Closet() {
                     <button type="button" className="cl-edit-btn" onClick={() => openEdit(item)}>
                       Edit
                     </button>
-                    {vtoEnabled && item.imagePublicId && VTO_CATEGORY_GATE.has(item.category) && (
+                    {vtoEnabled && item.imagePublicId && (
+                      VTO_CATEGORY_GATE.has(item.category) ||
+                      (["ACCESSORIES", "JEWELRY"].includes(item.category) &&
+                        (item.tryOnEligibility === "pending-assessment" || item.tryOnEligibility === "ready-for-try-on"))
+                    ) && (
                       <VtoExperience
                         source="closet"
                         closetItemId={item.id}

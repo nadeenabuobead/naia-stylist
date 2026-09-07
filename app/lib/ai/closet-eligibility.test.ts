@@ -99,6 +99,71 @@ describe("Stage A — unsupported categories → not-supported", () => {
   });
 });
 
+// ── Stage A: accessory subcategory gate ───────────────────────────────────────
+
+describe("Stage A — ACCESSORIES/JEWELRY with allowlisted subcategory → pending-assessment", () => {
+  it("ACCESSORIES + subcategory 'scarf' → pending-assessment, category 'accessories'", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACCESSORIES", subcategory: "scarf", ...GOOD });
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "accessories");
+    assert.equal(result.customerHint, null);
+  });
+
+  it("ACCESSORIES + subcategory 'belt' → pending-assessment", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACCESSORIES", subcategory: "belt", ...GOOD });
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "accessories");
+  });
+
+  it("JEWELRY + subcategory 'earrings' → pending-assessment", () => {
+    const result = assessClosetEligibility({ prismaCategory: "JEWELRY", subcategory: "earrings", ...GOOD });
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "accessories");
+  });
+
+  it("ACCESSORIES + non-allowlisted subcategory 'hat' → blocked (not-supported)", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACCESSORIES", subcategory: "hat", ...GOOD });
+    assert.equal(result.eligible, "not-supported");
+    assert.equal(result.category, "unsupported");
+  });
+
+  it("JEWELRY + non-allowlisted subcategory 'ring' → blocked (not-supported)", () => {
+    const result = assessClosetEligibility({ prismaCategory: "JEWELRY", subcategory: "ring", ...GOOD });
+    assert.equal(result.eligible, "not-supported");
+    assert.equal(result.category, "unsupported");
+  });
+
+  it("ACCESSORIES + null subcategory → blocked (not-supported)", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACCESSORIES", subcategory: null, ...GOOD });
+    assert.equal(result.eligible, "not-supported");
+    assert.equal(result.category, "unsupported");
+  });
+
+  it("ACCESSORIES + missing subcategory → blocked (not-supported)", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACCESSORIES", ...GOOD });
+    assert.equal(result.eligible, "not-supported");
+    assert.equal(result.category, "unsupported");
+  });
+
+  it("TOPS eligibility unchanged when subcategory field is present", () => {
+    const result = assessClosetEligibility({ prismaCategory: "TOPS", subcategory: "scarf", ...GOOD });
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "tops");
+  });
+
+  it("SHOES eligibility unchanged by subcategory field", () => {
+    const result = assessClosetEligibility({ prismaCategory: "SHOES", subcategory: "belt", ...GOOD });
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "shoes");
+  });
+
+  it("BAGS eligibility unchanged by subcategory field", () => {
+    const result = assessClosetEligibility({ prismaCategory: "BAGS", subcategory: "earrings", ...GOOD });
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "bags");
+  });
+});
+
 // ── Stage A: dimension checks ─────────────────────────────────────────────────
 
 describe("Stage A — dimension issues → needs-clearer-photo with customerHint", () => {

@@ -20,7 +20,16 @@ export type ClosetItemCategory =
   | "outerwear"
   | "shoes"
   | "bags"
+  | "accessories" // scarf, belt, earrings subcategories only (VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST)
   | "unsupported"; // jewelry, hats, underwear, swimwear, activewear, other, unknown
+
+// Staging allowlist: subcategory values that are eligible for VTO under ACCESSORIES/JEWELRY.
+// Stored values are lowercased by garment analysis (closet-garment-analysis.server.ts line 133).
+export const VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST: ReadonlySet<string> = new Set([
+  "scarf",
+  "belt",
+  "earrings",
+]);
 
 // Prisma ClosetCategory enum values → ClosetItemCategory
 export const PRISMA_CATEGORY_MAP: Record<string, ClosetItemCategory> = {
@@ -38,9 +47,9 @@ export const PRISMA_CATEGORY_MAP: Record<string, ClosetItemCategory> = {
   OTHER:      "unsupported",
 };
 
-// Supported categories for virtual try-on (clothing + shoes + bags)
+// Supported categories for virtual try-on (clothing + shoes + bags + allowlisted accessories)
 const SUPPORTED_CATEGORIES = new Set<ClosetItemCategory>([
-  "tops", "bottoms", "dresses", "outerwear", "shoes", "bags",
+  "tops", "bottoms", "dresses", "outerwear", "shoes", "bags", "accessories",
 ]);
 
 // ── Eligibility ───────────────────────────────────────────────────────────────
@@ -73,6 +82,10 @@ export type ClosetVisualIssue =
 export interface AssessClosetEligibilityInput {
   // User-selected Prisma ClosetCategory enum value (e.g. "TOPS", "SHOES")
   prismaCategory: string;
+  // AI-extracted subcategory (lowercase, from garment analysis).
+  // Used to distinguish eligible subcategories under ACCESSORIES/JEWELRY.
+  // Must be provided AFTER garment analysis completes — re-evaluate eligibility then.
+  subcategory?: string | null;
   // Pixel dimensions from Cloudinary response
   width?: number;
   height?: number;
@@ -161,7 +174,20 @@ export function assessClosetEligibility(
   input: AssessClosetEligibilityInput,
 ): ClosetEligibilityResult {
   const now = new Date().toISOString();
-  const category = PRISMA_CATEGORY_MAP[input.prismaCategory] ?? "unsupported";
+  let category: ClosetItemCategory = PRISMA_CATEGORY_MAP[input.prismaCategory] ?? "unsupported";
+
+  // ── 0. Subcategory gate for ACCESSORIES / JEWELRY ─────────────────────────
+  // Garment analysis runs after Stage A, so subcategory is only available on
+  // a post-analysis re-evaluation pass. If the subcategory matches the staging
+  // allowlist, promote the category so the item proceeds through to FASHN.
+  if (
+    category === "unsupported" &&
+    (input.prismaCategory === "ACCESSORIES" || input.prismaCategory === "JEWELRY") &&
+    typeof input.subcategory === "string" &&
+    VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST.has(input.subcategory.trim().toLowerCase())
+  ) {
+    category = "accessories";
+  }
 
   // ── 1. Category check ─────────────────────────────────────────────────────
   if (!SUPPORTED_CATEGORIES.has(category)) {
