@@ -36,6 +36,15 @@ const VTO_SUPPORTED_MAIN_CATEGORIES: ReadonlySet<string> = new Set([
   "TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS",
 ]);
 
+// Match subcategory against the allowlist using substring search so that AI-generated
+// descriptive values like "hoop earrings" or "ivory scarf" still resolve correctly.
+function isAllowlistedSubcategory(sub: string): boolean {
+  for (const term of VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST) {
+    if (sub.includes(term)) return true;
+  }
+  return false;
+}
+
 /**
  * Single shared authorization rule for VTO.
  * Used by the UI rendering gate (closet._index.tsx) AND the server trigger route
@@ -43,7 +52,7 @@ const VTO_SUPPORTED_MAIN_CATEGORIES: ReadonlySet<string> = new Set([
  *
  * Returns true when:
  *   A. category is a main supported category (TOPS/BOTTOMS/DRESSES/OUTERWEAR/SHOES/BAGS), OR
- *   B. category is ACCESSORIES/JEWELRY AND subcategory is in VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST.
+ *   B. category is ACCESSORIES/JEWELRY AND subcategory contains an allowlisted term.
  * Returns false for everything else (ACTIVEWEAR, SWIMWEAR, LOUNGEWEAR, OTHER, unknown).
  */
 export function isVtoCategoryAllowed(
@@ -53,7 +62,7 @@ export function isVtoCategoryAllowed(
   if (VTO_SUPPORTED_MAIN_CATEGORIES.has(category)) return true;
   if (category === "ACCESSORIES" || category === "JEWELRY") {
     if (typeof subcategory !== "string") return false;
-    return VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST.has(subcategory.trim().toLowerCase());
+    return isAllowlistedSubcategory(subcategory.trim().toLowerCase());
   }
   return false;
 }
@@ -211,7 +220,7 @@ export function assessClosetEligibility(
     category === "unsupported" &&
     (input.prismaCategory === "ACCESSORIES" || input.prismaCategory === "JEWELRY") &&
     typeof input.subcategory === "string" &&
-    VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST.has(input.subcategory.trim().toLowerCase())
+    isAllowlistedSubcategory(input.subcategory.trim().toLowerCase())
   ) {
     category = "accessories";
   }

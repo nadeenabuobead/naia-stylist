@@ -121,6 +121,16 @@ describe("Stage A — ACCESSORIES/JEWELRY with allowlisted subcategory → pendi
     assert.equal(result.eligible, "pending-assessment");
     assert.equal(result.category, "accessories");
   });
+  it("JEWELRY + subcategory 'hoop earrings' → pending-assessment (AI-generated descriptive value)", () => {
+    const result = assessClosetEligibility({ prismaCategory: "JEWELRY", subcategory: "hoop earrings", ...GOOD });
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "accessories");
+  });
+  it("JEWELRY + subcategory 'gold hoop earrings' → pending-assessment (AI-generated descriptive value)", () => {
+    const result = assessClosetEligibility({ prismaCategory: "JEWELRY", subcategory: "gold hoop earrings", ...GOOD });
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "accessories");
+  });
 
   it("ACCESSORIES + non-allowlisted subcategory 'hat' → blocked (not-supported)", () => {
     const result = assessClosetEligibility({ prismaCategory: "ACCESSORIES", subcategory: "hat", ...GOOD });
@@ -199,6 +209,18 @@ describe("isVtoCategoryAllowed — ACCESSORIES with allowlisted subcategory", ()
 describe("isVtoCategoryAllowed — JEWELRY with allowlisted subcategory", () => {
   it("JEWELRY + 'earrings' → allowed", () => {
     assert.equal(isVtoCategoryAllowed("JEWELRY", "earrings"), true);
+  });
+  it("JEWELRY + 'hoop earrings' → allowed (AI-generated descriptive value)", () => {
+    assert.equal(isVtoCategoryAllowed("JEWELRY", "hoop earrings"), true);
+  });
+  it("JEWELRY + 'gold earrings' → allowed (AI-generated descriptive value)", () => {
+    assert.equal(isVtoCategoryAllowed("JEWELRY", "gold earrings"), true);
+  });
+  it("JEWELRY + 'stud earrings' → allowed (AI-generated descriptive value)", () => {
+    assert.equal(isVtoCategoryAllowed("JEWELRY", "stud earrings"), true);
+  });
+  it("JEWELRY + 'HOOP EARRINGS' → allowed (case-folded)", () => {
+    assert.equal(isVtoCategoryAllowed("JEWELRY", "HOOP EARRINGS"), true);
   });
 });
 
