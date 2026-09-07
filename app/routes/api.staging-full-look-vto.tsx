@@ -1,5 +1,6 @@
 // app/routes/api.staging-full-look-vto.tsx
 // STAGING QA PROTOTYPE — full-look multi-product Try-On Max.
+// generation_mode "balanced" is a deliberate QA choice, not FASHN-attributed.
 //
 // POST /api/staging-full-look-vto
 //
@@ -74,7 +75,10 @@ export async function loader() {
 
 export async function action({ request }: ActionFunctionArgs) {
   // ── 0. Staging guard ─────────────────────────────────────────────────────
-  if (process.env.VERCEL_ENV === "production") return stagingOnly();
+  // NAIA_PROJECT_VARIANT is set to "staging" on naia-stylist-staging only.
+  // VERCEL_ENV is "production" on both the real project AND promoted staging
+  // deployments, so it is not a reliable discriminator.
+  if (process.env.NAIA_PROJECT_VARIANT !== "staging") return stagingOnly();
 
   // ── 1. Auth ──────────────────────────────────────────────────────────────
   const customer = await getCurrentNaiaCustomer(request);

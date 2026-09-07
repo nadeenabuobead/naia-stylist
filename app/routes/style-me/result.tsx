@@ -44,6 +44,7 @@ export function meta() {
 export async function loader({ request }: LoaderFunctionArgs) {
   const devTryOnEnabled = process.env.DEV_TRYON_UI_ENABLED === 'true';
   const vtoEnabled = process.env.VTO_UI_ENABLED === "true";
+  const isStagingProject = process.env.NAIA_PROJECT_VARIANT === "staging";
   try {
     const url = new URL(request.url);
     const sessionId = url.searchParams.get("sessionId");
@@ -77,6 +78,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             naiaModelIsReady: false,
             devTryOnEnabled,
             vtoEnabled,
+            isStagingProject,
             tryOnFixtureTokens,
             sessionId: null,
             mood: null,
@@ -118,6 +120,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             naiaModelIsReady: false,
             devTryOnEnabled,
             vtoEnabled,
+            isStagingProject,
             tryOnFixtureTokens,
             sessionId: null,
             mood: null,
@@ -177,6 +180,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         naiaModelIsReady,
         devTryOnEnabled,
         vtoEnabled,
+        isStagingProject,
         tryOnFixtureTokens,
         sessionId: session.id,
         mood: session.currentMood,
@@ -234,6 +238,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         naiaModelIsReady,
         devTryOnEnabled,
         vtoEnabled,
+        isStagingProject,
         tryOnFixtureTokens,
         sessionId: pendingSuggestion.sessionId,
         mood: pendingSuggestion.session.currentMood,
@@ -312,6 +317,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       if (!entCheck.allowed) {
         return data(
           { isLoading: false, isAuthenticated: true, naiaModelIsReady, devTryOnEnabled, vtoEnabled,
+            isStagingProject,
             tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null,
             currentMood: null, desiredFeeling: null, occasion: null, suggestion: null,
             pendingState: null as "needs_passport" | "ready_to_save" | null,
@@ -354,6 +360,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         isLoading: true,
         isAuthenticated: !!naiaCustomer,
         naiaModelIsReady,
+        isStagingProject,
         sessionId: stylingSession.id,
         mood: moodFirst,
         currentMood: moodFirst,
@@ -383,7 +390,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     );
   } catch (err: any) {
     console.error("Result loader error:", err);
-    return data({ isLoading: false, isAuthenticated: false, naiaModelIsReady: false, devTryOnEnabled, vtoEnabled, tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null, currentMood: null, desiredFeeling: null, occasion: null, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, existingOutfitFeedback: null, existingOutcome: null, error: err?.message || "Something went wrong" });
+    return data({ isLoading: false, isAuthenticated: false, naiaModelIsReady: false, devTryOnEnabled, vtoEnabled, isStagingProject, tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null, currentMood: null, desiredFeeling: null, occasion: null, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, existingOutfitFeedback: null, existingOutcome: null, error: err?.message || "Something went wrong" });
   }
 }
 
@@ -593,7 +600,7 @@ export async function action({ request }: ActionFunctionArgs) {
         undefined,
         loadClosetItems,
       );
-      const dbPayload = buildDbPayload(styleResult);
+      const dbPayload = buildDbPayload(styleResult, session.occasion ?? "everyday");
 
       const suggestion = await prisma.outfitSuggestion.create({
         data: {
@@ -724,7 +731,7 @@ export async function action({ request }: ActionFunctionArgs) {
         undefined,
         regenLoadClosetItems,
       );
-      const dbPayload = buildDbPayload(styleResult);
+      const dbPayload = buildDbPayload(styleResult, session.occasion ?? "everyday");
 
       const suggestion = await prisma.outfitSuggestion.create({
         data: {
@@ -1069,6 +1076,13 @@ export default function StyleMeResult() {
   const generateFetcher = useFetcher<{ suggestion?: any; error?: string }>();
   const saveFetcher = useFetcher<{ saved?: boolean; error?: string; code?: string; pending?: boolean; next?: string; cleared?: boolean; alreadySaved?: boolean }>();
   const [msgIndex, setMsgIndex] = useState(0);
+  // ── Staging QA: full-look VTO trigger ────────────────────────────────────
+  type FullLookQAState =
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "done"; outputDataUrl: string; items: Array<{ itemType: string; label: string }>; skipped: string[]; prompt: string }
+    | { status: "error"; message: string };
+  const [fullLookQA, setFullLookQA] = useState<FullLookQAState>({ status: "idle" });
   const [isSaved, setIsSaved] = useState(false);
   const [pendingDismissed, setPendingDismissed] = useState(false);
   const [isInitialGeneration] = useState(() => loaderData.isLoading);
@@ -2143,6 +2157,120 @@ export default function StyleMeResult() {
             <a href={primaryNaiaItem?.productUrl || "https://naiabynadine.com"} className="sm-result-action-btn">Shop nAia</a>
           )}
         </div>
+
+      {/* ── Staging QA: Full-Look VTO trigger ── */}
+      {loaderData.isStagingProject && suggestion?.id && (
+        <div style={{
+          margin: "2rem auto",
+          maxWidth: 640,
+          padding: "1.25rem 1.5rem",
+          background: "#1a1a2e",
+          border: "2px dashed #e040fb",
+          borderRadius: 10,
+          color: "#fff",
+          fontFamily: "monospace",
+          fontSize: 13,
+        }}>
+          <div style={{ marginBottom: "0.75rem", fontWeight: 700, color: "#e040fb", letterSpacing: 1 }}>
+            ⚗ STAGING QA — FULL-LOOK VTO TEST
+          </div>
+          <div style={{ marginBottom: "0.75rem", opacity: 0.7, fontSize: 12 }}>
+            suggestionId: {suggestion.id}
+          </div>
+          {fullLookQA.status === "idle" && (
+            <button
+              type="button"
+              onClick={async () => {
+                setFullLookQA({ status: "loading" });
+                try {
+                  const res = await fetch("/api/staging-full-look-vto", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      suggestionId: suggestion!.id,
+                      virtualTryOnConsentAt: new Date().toISOString(),
+                    }),
+                  });
+                  const json = await res.json();
+                  if (json.ok) {
+                    setFullLookQA({
+                      status: "done",
+                      outputDataUrl: json.outputDataUrl,
+                      items: json.items ?? [],
+                      skipped: json.skipped ?? [],
+                      prompt: json.prompt ?? "",
+                    });
+                  } else {
+                    setFullLookQA({ status: "error", message: json.message ?? json.code ?? "Unknown error" });
+                  }
+                } catch (e: unknown) {
+                  setFullLookQA({ status: "error", message: e instanceof Error ? e.message : String(e) });
+                }
+              }}
+              style={{
+                background: "#e040fb",
+                color: "#fff",
+                border: "none",
+                borderRadius: 6,
+                padding: "0.5rem 1.25rem",
+                fontFamily: "monospace",
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              TEST FULL-LOOK VTO
+            </button>
+          )}
+          {fullLookQA.status === "loading" && (
+            <div style={{ opacity: 0.75 }}>Sending to FASHN tryon-max… (may take up to 90 s)</div>
+          )}
+          {fullLookQA.status === "error" && (
+            <div>
+              <div style={{ color: "#ff5252", marginBottom: "0.5rem" }}>Error: {fullLookQA.message}</div>
+              <button
+                type="button"
+                onClick={() => setFullLookQA({ status: "idle" })}
+                style={{ background: "transparent", color: "#e040fb", border: "1px solid #e040fb", borderRadius: 4, padding: "0.25rem 0.75rem", fontFamily: "monospace", cursor: "pointer" }}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          {fullLookQA.status === "done" && (
+            <div>
+              <img
+                src={fullLookQA.outputDataUrl}
+                alt="Full-look VTO result"
+                style={{ width: "100%", borderRadius: 8, marginBottom: "0.75rem", display: "block" }}
+              />
+              <div style={{ marginBottom: "0.5rem", color: "#b9f6ca" }}>
+                Items ({fullLookQA.items.length}):
+                {fullLookQA.items.map((it, i) => (
+                  <span key={i} style={{ display: "inline-block", margin: "2px 4px", background: "#263238", borderRadius: 4, padding: "1px 6px" }}>
+                    {it.itemType}: {it.label}
+                  </span>
+                ))}
+              </div>
+              {fullLookQA.skipped.length > 0 && (
+                <div style={{ color: "#ffcc02", marginBottom: "0.5rem" }}>
+                  Skipped: {fullLookQA.skipped.join(", ")}
+                </div>
+              )}
+              <div style={{ opacity: 0.6, fontSize: 11, wordBreak: "break-word" }}>
+                Prompt: {fullLookQA.prompt}
+              </div>
+              <button
+                type="button"
+                onClick={() => setFullLookQA({ status: "idle" })}
+                style={{ marginTop: "0.75rem", background: "transparent", color: "#e040fb", border: "1px solid #e040fb", borderRadius: 4, padding: "0.25rem 0.75rem", fontFamily: "monospace", cursor: "pointer" }}
+              >
+                Reset
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       </main>
 
