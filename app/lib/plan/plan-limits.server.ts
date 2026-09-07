@@ -1,6 +1,11 @@
 // app/lib/plan/plan-limits.server.ts
 // Central authoritative source for all plan entitlement limits.
 // No React component, route, or action may hardcode limits — they call getLimits().
+//
+// VTO staging override: set VTO_MONTHLY_LIMIT_OVERRIDE=<n> in the environment to
+// raise the effective VTO limit for all plans (e.g. staging QA). When absent,
+// the plan's natural vtoPerMonth applies. Production behavior is unchanged when
+// the env var is unset.
 
 import type { CustomerPlan } from "@prisma/client";
 
@@ -32,7 +37,7 @@ const LIMITS: Record<CustomerPlan, EntitlementLimits> = {
     welcomeStyleMe: false,
     buySkipIntroLifetime: false,
     buySkipPerMonth: 5,
-    vtoPerMonth: 3,
+    vtoPerMonth: 10,
     personalisedTrendPerMonth: 1,
     publicTrendReports: true,
   },
@@ -40,4 +45,17 @@ const LIMITS: Record<CustomerPlan, EntitlementLimits> = {
 
 export function getLimits(plan: CustomerPlan): EntitlementLimits {
   return LIMITS[plan];
+}
+
+// Returns the effective VTO monthly limit for display and enforcement.
+// When VTO_MONTHLY_LIMIT_OVERRIDE is a valid positive integer, it overrides
+// the plan's natural limit for all tiers — use this on staging only.
+// Production behavior is unchanged when the env var is absent.
+export function getEffectiveVtoLimit(plan: CustomerPlan): number {
+  const override = process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+  if (override) {
+    const parsed = parseInt(override, 10);
+    if (Number.isInteger(parsed) && parsed > 0) return parsed;
+  }
+  return LIMITS[plan].vtoPerMonth;
 }

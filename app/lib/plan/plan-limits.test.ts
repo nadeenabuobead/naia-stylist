@@ -8,10 +8,14 @@
 // PL-05  FREE has buySkipIntroLifetime = true, PAID has buySkipIntroLifetime = false
 // PL-06  FREE has buySkipPerMonth = 0 (no recurring monthly), PAID has 5
 // PL-07  publicTrendReports is true for both plans
+// PL-08  getEffectiveVtoLimit FREE without override = 1
+// PL-09  getEffectiveVtoLimit PAID without override = 10
+// PL-10  VTO_MONTHLY_LIMIT_OVERRIDE=20 overrides limit for both plans
+// PL-11  invalid or empty VTO_MONTHLY_LIMIT_OVERRIDE falls back to plan limit
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { getLimits } from "./plan-limits.server";
+import { getLimits, getEffectiveVtoLimit } from "./plan-limits.server";
 
 describe("plan-limits", () => {
   it("PL-01 FREE limits match spec", () => {
@@ -27,7 +31,7 @@ describe("plan-limits", () => {
     assert.equal(p.closetItems, 250);
     assert.equal(p.styleMePerMonth, 8);
     assert.equal(p.buySkipPerMonth, 5);
-    assert.equal(p.vtoPerMonth, 3);
+    assert.equal(p.vtoPerMonth, 10);
     assert.equal(p.personalisedTrendPerMonth, 1);
   });
 
@@ -54,5 +58,49 @@ describe("plan-limits", () => {
   it("PL-07 publicTrendReports is true for both plans", () => {
     assert.equal(getLimits("FREE").publicTrendReports, true);
     assert.equal(getLimits("PAID").publicTrendReports, true);
+  });
+
+  it("PL-08 getEffectiveVtoLimit FREE without override equals plan vtoPerMonth (1)", () => {
+    const prev = process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+    delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+    try {
+      assert.equal(getEffectiveVtoLimit("FREE"), 1);
+    } finally {
+      if (prev !== undefined) process.env.VTO_MONTHLY_LIMIT_OVERRIDE = prev;
+    }
+  });
+
+  it("PL-09 getEffectiveVtoLimit PAID without override equals plan vtoPerMonth (10)", () => {
+    const prev = process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+    delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+    try {
+      assert.equal(getEffectiveVtoLimit("PAID"), 10);
+    } finally {
+      if (prev !== undefined) process.env.VTO_MONTHLY_LIMIT_OVERRIDE = prev;
+    }
+  });
+
+  it("PL-10 VTO_MONTHLY_LIMIT_OVERRIDE=20 overrides limit for both plans", () => {
+    const prev = process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+    process.env.VTO_MONTHLY_LIMIT_OVERRIDE = "20";
+    try {
+      assert.equal(getEffectiveVtoLimit("FREE"), 20);
+      assert.equal(getEffectiveVtoLimit("PAID"), 20);
+    } finally {
+      if (prev === undefined) delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+      else process.env.VTO_MONTHLY_LIMIT_OVERRIDE = prev;
+    }
+  });
+
+  it("PL-11 invalid VTO_MONTHLY_LIMIT_OVERRIDE falls back to plan limit", () => {
+    const prev = process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+    process.env.VTO_MONTHLY_LIMIT_OVERRIDE = "not-a-number";
+    try {
+      assert.equal(getEffectiveVtoLimit("FREE"), 1);
+      assert.equal(getEffectiveVtoLimit("PAID"), 10);
+    } finally {
+      if (prev === undefined) delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+      else process.env.VTO_MONTHLY_LIMIT_OVERRIDE = prev;
+    }
   });
 });

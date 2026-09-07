@@ -12,7 +12,10 @@
 // ENT-07  qualifying StyleMe query excludes no-eligible-product outcome
 // ENT-08  VTO in-flight uses lastActivityAt stale threshold, not unlimited window
 // ENT-09  VTO completed counts only COMPLETED status
-// ENT-10  VTO quota check = completed + inFlight >= limit
+// ENT-10  VTO quota check = completed + inFlight >= effectiveVtoLimit
+// ENT-24  entitlement service imports getEffectiveVtoLimit
+// ENT-25  getEntitlementSummary uses effectiveVtoLimit for monthlyLimit display
+// ENT-26  checkEntitlement VTO case uses effectiveVtoLimit for enforcement
 // ENT-11  BuySkip qualifying verdicts are BUY, SKIP, MAYBE only (not INCOMPLETE)
 // ENT-12  BuySkip FREE uses lifetime count (no window filter)
 // ENT-13  BuySkip PAID uses monthly window filter
@@ -125,10 +128,35 @@ describe("ENT-09 — VTO completed counts COMPLETED status only", () => {
   });
 });
 
-describe("ENT-10 — VTO quota = completed + inFlight >= limit", () => {
-  it("entitlement check adds completed and inFlight before comparing to limit", () => {
+describe("ENT-10 — VTO quota = completed + inFlight >= effectiveVtoLimit", () => {
+  it("entitlement check adds completed and inFlight before comparing to effectiveVtoLimit", () => {
     assert.ok(entSvc.includes("completed + inFlight") || entSvc.includes("vtoCompleted + vtoInFlight"),
               "must sum completed and inFlight for quota check");
+    assert.ok(entSvc.includes("effectiveVtoLimit"),
+              "must use effectiveVtoLimit (not limits.vtoPerMonth) for enforcement");
+  });
+});
+
+describe("ENT-24 — entitlement service imports getEffectiveVtoLimit", () => {
+  it("imports getEffectiveVtoLimit from plan-limits", () => {
+    assert.ok(entSvc.includes("getEffectiveVtoLimit"),
+              "must import and use getEffectiveVtoLimit");
+  });
+});
+
+describe("ENT-25 — getEntitlementSummary uses effectiveVtoLimit for display", () => {
+  it("monthlyLimit in VTO summary uses effectiveVtoLimit", () => {
+    assert.ok(entSvc.includes("monthlyLimit: effectiveVtoLimit"),
+              "vto.monthlyLimit must be effectiveVtoLimit, not limits.vtoPerMonth");
+  });
+});
+
+describe("ENT-26 — checkEntitlement VTO enforcement uses effectiveVtoLimit", () => {
+  it("VTO enforcement check compares against effectiveVtoLimit", () => {
+    assert.ok(entSvc.includes("completed + inFlight >= effectiveVtoLimit"),
+              "enforcement must use effectiveVtoLimit");
+    assert.ok(!entSvc.includes("completed + inFlight >= limits.vtoPerMonth"),
+              "must not compare against raw limits.vtoPerMonth");
   });
 });
 

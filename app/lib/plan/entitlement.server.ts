@@ -18,7 +18,7 @@
 
 import type { CustomerPlan } from "@prisma/client";
 import prisma from "~/db.server";
-import { getLimits } from "./plan-limits.server";
+import { getLimits, getEffectiveVtoLimit } from "./plan-limits.server";
 import { getBillingWindow, formatResetDate } from "./billing-window.server";
 
 // ── VTO stale threshold ────────────────────────────────────────────────────────
@@ -97,6 +97,7 @@ export async function getEntitlementSummary(
   plan: CustomerPlan,
 ): Promise<EntitlementSummary> {
   const limits = getLimits(plan);
+  const effectiveVtoLimit = getEffectiveVtoLimit(plan);
   const window = getBillingWindow();
   const resetDate = formatResetDate(window);
   const staleThreshold = new Date(Date.now() - VTO_IN_FLIGHT_STALE_MS);
@@ -199,7 +200,7 @@ export async function getEntitlementSummary(
     },
 
     vto: {
-      monthlyLimit: limits.vtoPerMonth,
+      monthlyLimit: effectiveVtoLimit,
       monthlyCompleted: vtoCompleted,
       monthlyInFlight: vtoInFlight,
       resetDate,
@@ -295,6 +296,7 @@ export async function checkEntitlement(
     }
 
     case "vto": {
+      const effectiveVtoLimit = getEffectiveVtoLimit(plan);
       const [completed, inFlight] = await Promise.all([
         prisma.virtualTryOnJob.count({
           where: {
@@ -311,7 +313,7 @@ export async function checkEntitlement(
           },
         }),
       ]);
-      if (completed + inFlight >= limits.vtoPerMonth) {
+      if (completed + inFlight >= effectiveVtoLimit) {
         return { allowed: false, reason: "quota_exceeded" };
       }
       return { allowed: true };
