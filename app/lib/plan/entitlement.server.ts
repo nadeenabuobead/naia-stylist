@@ -18,7 +18,7 @@
 
 import type { CustomerPlan } from "@prisma/client";
 import prisma from "~/db.server";
-import { getLimits, getEffectiveVtoLimit } from "./plan-limits.server";
+import { getLimits, getEffectiveVtoLimit, getEffectiveStyleMeLimit } from "./plan-limits.server";
 import { getBillingWindow, formatResetDate } from "./billing-window.server";
 
 // ── VTO stale threshold ────────────────────────────────────────────────────────
@@ -98,6 +98,7 @@ export async function getEntitlementSummary(
 ): Promise<EntitlementSummary> {
   const limits = getLimits(plan);
   const effectiveVtoLimit = getEffectiveVtoLimit(plan);
+  const effectiveStyleMeLimit = getEffectiveStyleMeLimit(plan);
   const window = getBillingWindow();
   const resetDate = formatResetDate(window);
   const staleThreshold = new Date(Date.now() - VTO_IN_FLIGHT_STALE_MS);
@@ -185,7 +186,7 @@ export async function getEntitlementSummary(
     windowLabel: window.label,
 
     styleMe: {
-      monthlyLimit: limits.styleMePerMonth,
+      monthlyLimit: effectiveStyleMeLimit,
       monthlyUsed: Math.max(0, styleMeMonthlyUsed),
       welcomeAvailable,
       resetDate,
@@ -247,6 +248,7 @@ export async function checkEntitlement(
     }
 
     case "styleMe": {
+      const effectiveStyleMeLimit = getEffectiveStyleMeLimit(plan);
       const qualifyingWhere = qualifyingStyleMeWhere(customerId);
       const [firstEver, monthlyCount] = await Promise.all([
         plan === "FREE"
@@ -271,7 +273,7 @@ export async function checkEntitlement(
         firstEver.createdAt < window.end;
       const monthlyUsed = Math.max(0, monthlyCount - (welcomeInThisWindow ? 1 : 0));
 
-      if (monthlyUsed < limits.styleMePerMonth) return { allowed: true };
+      if (monthlyUsed < effectiveStyleMeLimit) return { allowed: true };
       return { allowed: false, reason: "quota_exceeded" };
     }
 

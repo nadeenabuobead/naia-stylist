@@ -4,6 +4,9 @@
 // Source-code contract tests (no live DB) + unit tests for pure logic.
 //
 // ENT-01  schema has CustomerPlan enum with FREE and PAID values
+// ENT-27  entitlement service imports getEffectiveStyleMeLimit
+// ENT-28  getEntitlementSummary uses effectiveStyleMeLimit for styleMe.monthlyLimit display
+// ENT-29  checkEntitlement styleMe case uses effectiveStyleMeLimit for enforcement
 // ENT-02  Customer model has plan field with CustomerPlan type and FREE default
 // ENT-03  StylingSession has parentSessionId nullable self-reference
 // ENT-04  entitlement service imports from plan-limits and billing-window
@@ -302,5 +305,39 @@ describe("ENT-23 — loader reads parentSessionId from cookie", () => {
     assert.ok(resultTsx.includes("adjustVibeSourceId"), "must read adjustVibeSourceId from cookie");
     assert.ok(resultTsx.includes("parentSessionId: adjustVibeSourceId"),
               "must pass parentSessionId to StylingSession.create");
+  });
+});
+
+// ── StyleMe staging override ──────────────────────────────────────────────────
+
+describe("ENT-27 — entitlement service imports getEffectiveStyleMeLimit", () => {
+  it("imports getEffectiveStyleMeLimit from plan-limits", () => {
+    assert.ok(entSvc.includes("getEffectiveStyleMeLimit"),
+              "must import and use getEffectiveStyleMeLimit");
+  });
+});
+
+describe("ENT-28 — getEntitlementSummary uses effectiveStyleMeLimit for display", () => {
+  it("styleMe.monthlyLimit uses effectiveStyleMeLimit, not limits.styleMePerMonth", () => {
+    assert.ok(entSvc.includes("monthlyLimit: effectiveStyleMeLimit"),
+              "styleMe.monthlyLimit must be effectiveStyleMeLimit");
+    assert.ok(!entSvc.includes("monthlyLimit: limits.styleMePerMonth"),
+              "must not reference limits.styleMePerMonth directly for monthlyLimit");
+  });
+});
+
+describe("ENT-29 — checkEntitlement styleMe enforcement uses effectiveStyleMeLimit", () => {
+  it("styleMe case compares monthlyUsed against effectiveStyleMeLimit", () => {
+    assert.ok(entSvc.includes("monthlyUsed < effectiveStyleMeLimit"),
+              "enforcement must use effectiveStyleMeLimit");
+    assert.ok(!entSvc.includes("monthlyUsed < limits.styleMePerMonth"),
+              "must not compare against raw limits.styleMePerMonth");
+  });
+
+  it("plan-limits.server.ts exports getEffectiveStyleMeLimit", () => {
+    assert.ok(planLimits.includes("export function getEffectiveStyleMeLimit"),
+              "must export getEffectiveStyleMeLimit from plan-limits.server.ts");
+    assert.ok(planLimits.includes("STYLEME_MONTHLY_LIMIT_OVERRIDE"),
+              "must read STYLEME_MONTHLY_LIMIT_OVERRIDE env var");
   });
 });

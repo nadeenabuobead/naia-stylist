@@ -12,10 +12,14 @@
 // PL-09  getEffectiveVtoLimit PAID without override = 10
 // PL-10  VTO_MONTHLY_LIMIT_OVERRIDE=20 overrides limit for both plans
 // PL-11  invalid or empty VTO_MONTHLY_LIMIT_OVERRIDE falls back to plan limit
+// PL-12  getEffectiveStyleMeLimit FREE without override = 1
+// PL-13  getEffectiveStyleMeLimit PAID without override = 8
+// PL-14  STYLEME_MONTHLY_LIMIT_OVERRIDE=100 overrides limit for both plans
+// PL-15  invalid STYLEME_MONTHLY_LIMIT_OVERRIDE falls back to plan limit
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { getLimits, getEffectiveVtoLimit } from "./plan-limits.server";
+import { getLimits, getEffectiveVtoLimit, getEffectiveStyleMeLimit } from "./plan-limits.server";
 
 describe("plan-limits", () => {
   it("PL-01 FREE limits match spec", () => {
@@ -101,6 +105,50 @@ describe("plan-limits", () => {
     } finally {
       if (prev === undefined) delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
       else process.env.VTO_MONTHLY_LIMIT_OVERRIDE = prev;
+    }
+  });
+
+  it("PL-12 getEffectiveStyleMeLimit FREE without override equals plan styleMePerMonth (1)", () => {
+    const prev = process.env.STYLEME_MONTHLY_LIMIT_OVERRIDE;
+    delete process.env.STYLEME_MONTHLY_LIMIT_OVERRIDE;
+    try {
+      assert.equal(getEffectiveStyleMeLimit("FREE"), 1);
+    } finally {
+      if (prev !== undefined) process.env.STYLEME_MONTHLY_LIMIT_OVERRIDE = prev;
+    }
+  });
+
+  it("PL-13 getEffectiveStyleMeLimit PAID without override equals plan styleMePerMonth (8)", () => {
+    const prev = process.env.STYLEME_MONTHLY_LIMIT_OVERRIDE;
+    delete process.env.STYLEME_MONTHLY_LIMIT_OVERRIDE;
+    try {
+      assert.equal(getEffectiveStyleMeLimit("PAID"), 8);
+    } finally {
+      if (prev !== undefined) process.env.STYLEME_MONTHLY_LIMIT_OVERRIDE = prev;
+    }
+  });
+
+  it("PL-14 STYLEME_MONTHLY_LIMIT_OVERRIDE=100 overrides limit for both plans", () => {
+    const prev = process.env.STYLEME_MONTHLY_LIMIT_OVERRIDE;
+    process.env.STYLEME_MONTHLY_LIMIT_OVERRIDE = "100";
+    try {
+      assert.equal(getEffectiveStyleMeLimit("FREE"), 100);
+      assert.equal(getEffectiveStyleMeLimit("PAID"), 100);
+    } finally {
+      if (prev === undefined) delete process.env.STYLEME_MONTHLY_LIMIT_OVERRIDE;
+      else process.env.STYLEME_MONTHLY_LIMIT_OVERRIDE = prev;
+    }
+  });
+
+  it("PL-15 invalid STYLEME_MONTHLY_LIMIT_OVERRIDE falls back to plan limit", () => {
+    const prev = process.env.STYLEME_MONTHLY_LIMIT_OVERRIDE;
+    process.env.STYLEME_MONTHLY_LIMIT_OVERRIDE = "not-a-number";
+    try {
+      assert.equal(getEffectiveStyleMeLimit("FREE"), 1);
+      assert.equal(getEffectiveStyleMeLimit("PAID"), 8);
+    } finally {
+      if (prev === undefined) delete process.env.STYLEME_MONTHLY_LIMIT_OVERRIDE;
+      else process.env.STYLEME_MONTHLY_LIMIT_OVERRIDE = prev;
     }
   });
 });
