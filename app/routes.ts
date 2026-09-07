@@ -95,6 +95,8 @@ export default [
   route("api/track_event", "routes/api.track_event.jsx"),
   // VTO M1 — customer-facing virtual try-on trigger
   route("api/trigger-tryon", "routes/api.trigger-tryon.tsx"),
+  // Full-look VTO — staging QA prototype only (blocked in production)
+  route("api/staging-full-look-vto", "routes/api.staging-full-look-vto.tsx"),
   // VTO M2 — session-auth job status polling and result delivery
   route("api/tryon-status/:jobId", "routes/api.tryon-status.$jobId.tsx"),
   // Style Memory V1 — StyleMe outcome capture (UPSERT per OutfitSuggestion)
