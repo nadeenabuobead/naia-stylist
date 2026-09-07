@@ -259,7 +259,7 @@ export default function Settings() {
   const revalidator = useRevalidator();
   const [pending, setPending] = useState<Intent | null>(null);
 
-  const fullName    = [firstName, lastName].filter(Boolean).join(" ") || "—";
+  const fullName    = [firstName, lastName].filter(Boolean).join(" ") || null;
   const isSubmitting = fetcher.state !== "idle";
   const actionData  = fetcher.data;
 
@@ -288,18 +288,19 @@ export default function Settings() {
         <div className="set-section-eyebrow">Account Details</div>
         <h2 className="set-section-title">Account Details</h2>
         <dl className="sp-detail-list">
-          <div className="sp-detail-row">
-            <dt className="sp-detail-label">Name</dt>
-            <dd className="sp-detail-value">{fullName}</dd>
-          </div>
-          <div className="sp-detail-row">
-            <dt className="sp-detail-label">Email</dt>
-            <dd className="sp-detail-value">{email || "—"}</dd>
-          </div>
+          {fullName && (
+            <div className="sp-detail-row">
+              <dt className="sp-detail-label">Name</dt>
+              <dd className="sp-detail-value">{fullName}</dd>
+            </div>
+          )}
+          {email && (
+            <div className="sp-detail-row">
+              <dt className="sp-detail-label">Email</dt>
+              <dd className="sp-detail-value">{email}</dd>
+            </div>
+          )}
         </dl>
-        <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "13px", fontStyle: "italic", color: "var(--naia-muted)", marginTop: "12px" }}>
-          To update your name or email, please visit your NADINE account settings.
-        </p>
       </section>
 
       {/* ── Selfie Style Analysis ─────────────────────────────────────────── */}
@@ -449,7 +450,8 @@ export default function Settings() {
         <div className="set-section-eyebrow">HOW YOUR INFORMATION IS USED</div>
         <h2 className="set-section-title">Personalisation</h2>
         <p className="sp-shell-desc">
-          nAia personalises your styling experience using information you provide directly — your Style Passport, your Closet, your post-wear feedback, and your interactions with StyleMe. Your data is never sold or shared with third parties for marketing.
+          {/* Data-sharing / marketing claims require sign-off from the Privacy Policy — omitted until approved. */}
+          nAia personalises your styling experience using information you provide directly — your Style Passport, your Closet, your post-wear feedback, and your interactions with StyleMe.
         </p>
       </section>
 

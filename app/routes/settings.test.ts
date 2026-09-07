@@ -390,10 +390,21 @@ describe("L — explicit destructive button labels", () => {
 // ── M. Account details ────────────────────────────────────────────────────────
 
 describe("M — account details", () => {
-  it("name field falls back to '—' when no name is on record", () => {
+  it("name row is conditionally rendered — hidden when name is absent", () => {
     assert.ok(
-      src.includes('|| "—"') || src.includes("|| '—'"),
-      "name has a dash fallback for missing data",
+      src.includes("{fullName && ("),
+      "name row is wrapped in a conditional on fullName",
+    );
+    assert.ok(
+      !src.includes('|| "—"') && !src.includes("|| '—'"),
+      "no dash fallback — absent name means hidden row, not placeholder",
+    );
+  });
+
+  it("email row is conditionally rendered — hidden when email is absent", () => {
+    assert.ok(
+      src.includes("{email && ("),
+      "email row is wrapped in a conditional on email",
     );
   });
 
@@ -404,10 +415,21 @@ describe("M — account details", () => {
     assert.ok(!loaderSrc.includes('formData.get("email")'), "email not from formData");
   });
 
-  it("note directs customers to NADINE account settings for name/email changes", () => {
+  it("no NADINE sync note — no claim that NADINE updates propagate here", () => {
     assert.ok(
-      src.includes("NADINE account settings"),
-      "page notes that name/email are managed in NADINE",
+      !src.includes("NADINE account settings"),
+      "no misleading NADINE sync note",
+    );
+  });
+
+  it("unverified marketing / data-sharing claim is absent", () => {
+    assert.ok(
+      !src.includes("never sold"),
+      "unverified 'never sold' claim removed pending policy review",
+    );
+    assert.ok(
+      !src.includes("third parties for marketing"),
+      "unverified third-party marketing claim removed",
     );
   });
 });
