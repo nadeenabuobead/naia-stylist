@@ -14,11 +14,6 @@ export function meta() {
   return [{ title: "StyleMe | nAia" }];
 }
 
-const MOOD_LABELS: Record<string, string> = {
-  "confident": "Confident", "tired": "Low-energy", "overwhelmed": "Overwhelmed",
-  "adventurous": "Adventurous", "romantic": "Romantic", "powerful": "Powerful",
-  "need-reset": "Need a reset", "feel-good": "Feel good",
-};
 const OCCASION_LABELS: Record<string, string> = {
   "everyday": "Everyday", "work": "Work", "dinner": "Dinner", "date-night": "Date night",
   "girls-night": "Girls' night", "family": "Family gathering", "special-event": "Special event",
@@ -106,7 +101,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const sugg = s.suggestions[0] ?? null;
     return {
       id: s.id,
-      mood: s.currentMood,
       occasion: s.occasion,
       createdAt: s.createdAt.toISOString(),
       outfitName: sugg?.outfitName ?? null,
@@ -125,7 +119,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 type SessionRecord = {
   id: string;
-  mood: string | null;
   occasion: string | null;
   createdAt: string;
   outfitName: string | null;
@@ -202,7 +195,6 @@ function SessionCard({ session }: { session: SessionRecord }) {
   });
 
   const occasionLabel = session.occasion ? (OCCASION_LABELS[session.occasion] ?? session.occasion) : null;
-  const moodLabel = session.mood ? (MOOD_LABELS[session.mood] ?? session.mood) : null;
 
   function handleDelete(e: React.FormEvent) {
     if (
@@ -224,11 +216,6 @@ function SessionCard({ session }: { session: SessionRecord }) {
         {session.outfitName || (occasionLabel ? `${occasionLabel} look` : "Styled look")}
       </Link>
       {occasionLabel && <p className="sml-card-occasion">{occasionLabel}</p>}
-      {moodLabel && (
-        <div className="sml-card-tags">
-          <span className="sml-card-tag">{moodLabel}</span>
-        </div>
-      )}
       <div className="sv-card-actions">
         <Link
           to={`/style-me/result?sessionId=${session.id}`}

@@ -1543,10 +1543,16 @@ describe("O — StyleMe history: unified list, delete action, no Saved UI", () =
     assert.ok(!src.includes('filter: "saved"'), "filter=saved param removed");
   });
 
-  it("SessionCard renders View Look link and Delete button", () => {
+  it("SessionCard renders View Look link and Delete button — no mood badge", () => {
     assert.ok(src.includes("View Look"), "View Look link present");
     assert.ok(src.includes(">Delete<"), "Delete button present");
     assert.ok(src.includes('"delete-session"'), "Delete submits delete-session intent");
+    assert.ok(!src.includes("moodLabel"), "moodLabel removed — no mood badge on cards");
+    assert.ok(!src.includes("sml-card-tag"), "sml-card-tag removed — mood badge element gone");
+    assert.ok(!src.includes("MOOD_LABELS"), "MOOD_LABELS lookup removed from history cards");
+    // mood field removed from SessionRecord and loader; StylingSession.currentMood untouched
+    assert.ok(!src.includes("mood: s.currentMood"), "mood not serialised into SessionRecord");
+    assert.ok(!src.includes("mood: string | null"), "mood removed from SessionRecord type");
   });
 
   it("Delete button shows browser confirm before submitting", () => {
@@ -1687,9 +1693,12 @@ describe("P — StyleMe historical image hydration", () => {
 describe("Q — StyleMe regression: currentMood fix + delete-session safety", () => {
   const src = route("style-me/_index.tsx");
 
-  it("recentSessions mapper reads s.currentMood not s.mood — StylingSession has no mood field", () => {
-    assert.ok(src.includes("mood: s.currentMood"), "recentRaw.map reads s.currentMood");
+  it("mood field removed from history cards — no invalid StylingSession field references remain", () => {
+    // Mood badge removed from cards; StylingSession.currentMood is still persisted on the model.
+    // History loader no longer serialises mood into SessionRecord — no s.mood or s.currentMood.
     assert.ok(!src.includes("mood: s.mood"), "no s.mood reference (field does not exist)");
+    assert.ok(!src.includes("mood: s.currentMood"), "mood not serialised into history cards");
+    assert.ok(!src.includes("MOOD_LABELS"), "MOOD_LABELS removed from history card renderer");
     assert.ok(!src.includes("mood: true,"), "no mood:true in any Prisma select");
     assert.ok(!src.includes("select: { id: true, mood: true"), "no invalid StylingSession select");
   });
