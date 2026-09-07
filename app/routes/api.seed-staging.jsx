@@ -465,6 +465,28 @@ export async function action({ request }) {
     return Response.json({ cleaned: true, customerId: customer.id });
   }
 
+  // ── setMembershipStatus ───────────────────────────────────────────────────
+  // Flip one specific customer's membershipStatus for staging QA.
+  // Accepts { shopifyCustomerId } or { email } + { status: "NONE" | "MEMBER" }.
+  // Never touches production — hard-blocked above.
+  if (act === "setMembershipStatus") {
+    const { shopifyCustomerId: cid, email: byEmail, status } = body ?? {};
+    if (!cid && !byEmail) return Response.json({ error: "shopifyCustomerId or email required" }, { status: 400 });
+    if (status !== "NONE" && status !== "MEMBER") return Response.json({ error: "status must be NONE or MEMBER" }, { status: 400 });
+    const customer = await prisma.customer.findFirst({
+      where: cid ? { shopifyCustomerId: String(cid) } : { email: String(byEmail) },
+      select: { id: true, shopifyCustomerId: true, email: true, membershipStatus: true },
+    });
+    if (!customer) return Response.json({ error: "customer not found" }, { status: 404 });
+    const before = { membershipStatus: customer.membershipStatus };
+    const after = await prisma.customer.update({
+      where: { id: customer.id },
+      data: { membershipStatus: status },
+      select: { id: true, shopifyCustomerId: true, email: true, membershipStatus: true },
+    });
+    return Response.json({ ok: true, before, after });
+  }
+
   // ── setProfileVersion ─────────────────────────────────────────────────────
   if (act === "setProfileVersion") {
     const { shopifyCustomerId: cid, email: byEmail, version = 6 } = body ?? {};
