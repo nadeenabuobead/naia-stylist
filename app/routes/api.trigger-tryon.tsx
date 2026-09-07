@@ -33,6 +33,7 @@ import {
   validatePublicIdOwnership,
 } from "~/lib/cloudinary-admin.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
+import { VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST } from "~/lib/ai/closet-eligibility";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -187,13 +188,21 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     const item = await prisma.closetItem.findUnique({
       where: { id: closetItemId.trim() },
-      select: { id: true, customerId: true, category: true, imagePublicId: true, imageFormat: true },
+      select: { id: true, customerId: true, category: true, subcategory: true, imagePublicId: true, imageFormat: true },
     });
     if (!item || item.customerId !== customer.id) {
       return badRequest("not_found", "Closet item not found.");
     }
     if (!item.imagePublicId || !item.imageFormat) {
       return badRequest("not_eligible", "No image available for this item.");
+    }
+    // Subcategory gate — ACCESSORIES and JEWELRY require an allowlisted subcategory.
+    // VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST is the single shared source of truth.
+    if (item.category === "ACCESSORIES" || item.category === "JEWELRY") {
+      const sub = typeof item.subcategory === "string" ? item.subcategory.trim().toLowerCase() : null;
+      if (!sub || !VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST.has(sub)) {
+        return badRequest("not_eligible", "Virtual try-on is not available for this item type.");
+      }
     }
     const cfg = getCloudinaryConfig();
     if (!cfg) return serverError("Virtual try-on is temporarily unavailable.");

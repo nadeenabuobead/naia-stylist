@@ -1289,3 +1289,104 @@ describe("F — ownership protection enforced for Closet and Buy/Skip", () => {
     );
   });
 });
+
+// ── G: Accessory subcategory gate in trigger route ────────────────────────────
+// ACCESSORIES and JEWELRY categories require an allowlisted subcategory server-side.
+// Shared source of truth: VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST from closet-eligibility.ts
+
+describe("G — server-side accessory subcategory gate", () => {
+  const closetPath = route.slice(route.indexOf("source === \"closet\""));
+
+  it("route imports VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST from closet-eligibility (shared source of truth)", () => {
+    assert.ok(
+      route.includes("VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST"),
+      "trigger route must import VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST",
+    );
+    assert.ok(
+      route.includes("closet-eligibility"),
+      "VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST must be imported from closet-eligibility",
+    );
+  });
+
+  it("closet DB query selects subcategory field", () => {
+    const selectBlock = closetPath.slice(
+      closetPath.indexOf("select:"),
+      closetPath.indexOf("select:") + 200,
+    );
+    assert.ok(
+      selectBlock.includes("subcategory"),
+      "closet DB query must select subcategory so the server can enforce the allowlist",
+    );
+  });
+
+  it("ACCESSORIES items are blocked when subcategory is not in the allowlist", () => {
+    assert.ok(
+      closetPath.includes("item.category === \"ACCESSORIES\"") ||
+      closetPath.includes("\"ACCESSORIES\""),
+      "trigger route must gate on ACCESSORIES category",
+    );
+    assert.ok(
+      closetPath.includes("VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST"),
+      "ACCESSORIES gate must use VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST",
+    );
+  });
+
+  it("JEWELRY items are blocked when subcategory is not in the allowlist", () => {
+    assert.ok(
+      closetPath.includes("item.category === \"JEWELRY\"") ||
+      closetPath.includes("\"JEWELRY\""),
+      "trigger route must gate on JEWELRY category",
+    );
+  });
+
+  it("allowed scarf subcategory passes the gate and reaches screenGarmentSuitability", () => {
+    // Confirm the allowlist check precedes screenGarmentSuitability (gate before photo check)
+    const allowlistCheckPos = closetPath.indexOf("VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST");
+    const suitabilityPos    = closetPath.indexOf("screenGarmentSuitability");
+    assert.ok(
+      allowlistCheckPos > -1,
+      "VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST check must exist in the closet path",
+    );
+    assert.ok(
+      suitabilityPos > -1,
+      "screenGarmentSuitability must still be called in the closet path",
+    );
+    assert.ok(
+      allowlistCheckPos < suitabilityPos,
+      "subcategory gate must precede screenGarmentSuitability (category blocked before photo check)",
+    );
+  });
+
+  it("belt and earrings share the same allowlist gate — no parallel duplicate conditions", () => {
+    // The gate must use the shared Set, not inline string comparisons per subcategory.
+    assert.ok(
+      closetPath.includes("VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST.has("),
+      "gate must call .has() on VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST, not inline string checks",
+    );
+  });
+
+  it("missing subcategory (null) under ACCESSORIES/JEWELRY is blocked", () => {
+    // The gate must check for falsy sub before calling .has()
+    assert.ok(
+      closetPath.includes("!sub") || closetPath.includes("sub === null"),
+      "null or empty subcategory must be rejected before the .has() check",
+    );
+  });
+
+  it("existing clothing/shoes/bags are not subject to the subcategory gate", () => {
+    // The gate must be conditional on ACCESSORIES || JEWELRY only
+    const gateBlock = closetPath.slice(
+      closetPath.indexOf("item.category === \"ACCESSORIES\""),
+      closetPath.indexOf("VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST.has(") + 60,
+    );
+    assert.ok(
+      gateBlock.includes("ACCESSORIES") || gateBlock.includes("JEWELRY"),
+      "subcategory gate must be scoped to ACCESSORIES/JEWELRY only",
+    );
+    // TOPS/BOTTOMS/DRESSES/etc. must not appear inside the gate block
+    assert.ok(
+      !gateBlock.includes("TOPS") && !gateBlock.includes("BOTTOMS") && !gateBlock.includes("DRESSES"),
+      "subcategory gate must not mention clothing categories — it applies only to ACCESSORIES/JEWELRY",
+    );
+  });
+});
