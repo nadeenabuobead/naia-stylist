@@ -222,36 +222,6 @@ export async function action({ request }) {
     return Response.json({ ok: true, customerId: cid, evidenceWritten: report, evidenceBySource: Object.fromEntries(evidenceCounts.map(r => [r.source, r._count.id])), tendencies });
   }
 
-  // ── setMembershipStatus ───────────────────────────────────────────────────
-  // Flip one specific customer's membershipStatus for staging QA.
-  // Accepts { shopifyCustomerId } or { email } + { status: "NONE" | "MEMBER" }.
-  // Accepts STAGING_FIX_SECRET (production-targeted) or STAGING_SEED_SECRET.
-  // Must be before the shared x-seed-secret guard: STAGING_SEED_SECRET is
-  // preview-only, but STAGING_FIX_SECRET is available in the production env.
-  // Never touches production — hard-blocked at top of action().
-  if (act === "setMembershipStatus") {
-    const { shopifyCustomerId: cid, email: byEmail, status, fixSecret } = body ?? {};
-    const seedHeader = request.headers.get("x-seed-secret");
-    const validAuth =
-      (process.env.STAGING_FIX_SECRET && fixSecret === process.env.STAGING_FIX_SECRET) ||
-      (process.env.STAGING_SEED_SECRET && (fixSecret === process.env.STAGING_SEED_SECRET || seedHeader === process.env.STAGING_SEED_SECRET));
-    if (!validAuth) return new Response("Forbidden", { status: 403 });
-    if (!cid && !byEmail) return Response.json({ error: "shopifyCustomerId or email required" }, { status: 400 });
-    if (status !== "NONE" && status !== "MEMBER") return Response.json({ error: "status must be NONE or MEMBER" }, { status: 400 });
-    const customer = await prisma.customer.findFirst({
-      where: cid ? { shopifyCustomerId: String(cid) } : { email: String(byEmail) },
-      select: { id: true, shopifyCustomerId: true, email: true, membershipStatus: true },
-    });
-    if (!customer) return Response.json({ error: "customer not found" }, { status: 404 });
-    const before = { membershipStatus: customer.membershipStatus };
-    const after = await prisma.customer.update({
-      where: { id: customer.id },
-      data: { membershipStatus: status },
-      select: { id: true, shopifyCustomerId: true, email: true, membershipStatus: true },
-    });
-    return Response.json({ ok: true, before, after });
-  }
-
   // All other actions require x-seed-secret
   const secret = request.headers.get("x-seed-secret");
   if (!process.env.STAGING_SEED_SECRET || secret !== process.env.STAGING_SEED_SECRET) {
