@@ -21,11 +21,6 @@ const BASE_URL = "https://api.fashn.ai";
 const POLL_INTERVAL_MS = 2_000;
 const MAX_POLL_ATTEMPTS = 45; // 90s ceiling at 2s interval
 
-// ── In-process rate limit (development / single-instance only) ────────────────
-// NOT suitable for multi-instance production deployments.
-const DEV_RATE_LIMIT_MS = 10_000;
-const _customerLastRun = new Map<string, number>();
-
 // ── URL safety ────────────────────────────────────────────────────────────────
 
 const PRIVATE_PREFIXES = [
@@ -156,15 +151,7 @@ export async function runFashnTryOn(
       return err("INVALID_PRODUCT_IMAGE");
     }
 
-    // ── 3. In-process rate limit (development only) ───────────────────────────
-    const now = Date.now();
-    const lastRun = _customerLastRun.get(input.customerId);
-    if (lastRun !== undefined && now - lastRun < DEV_RATE_LIMIT_MS) {
-      return err("RATE_LIMITED");
-    }
-    _customerLastRun.set(input.customerId, now);
-
-    // ── 4. Submit to FASHN ────────────────────────────────────────────────────
+    // ── 3. Submit to FASHN ────────────────────────────────────────────────────
     try {
       const runRes = await _fetch(`${BASE_URL}/v1/run`, {
         method: "POST",
@@ -274,11 +261,6 @@ export async function submitTryOnToProvider(
   if (!hasVirtualTryOnConsent(input.consent)) return submitErr("CONSENT_REQUIRED");
   if (!isValidModelImageDataUrl(input.modelImageDataUrl)) return submitErr("INVALID_MODEL_IMAGE");
   if (!isAllowedProductImageUrl(input.productImageUrl)) return submitErr("INVALID_PRODUCT_IMAGE");
-
-  const now = Date.now();
-  const lastRun = _customerLastRun.get(input.customerId);
-  if (lastRun !== undefined && now - lastRun < DEV_RATE_LIMIT_MS) return submitErr("RATE_LIMITED");
-  _customerLastRun.set(input.customerId, now);
 
   try {
     const runRes = await _fetch(`${BASE_URL}/v1/run`, {

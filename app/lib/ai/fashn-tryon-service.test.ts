@@ -318,13 +318,27 @@ describe("§5 executeTryOn lifecycle", () => {
     assert.ok(!fashnCalled, "FASHN must not be called for existing completed job");
   });
 
-  it("EX03 cooldown blocks submission", async () => {
+  it("EX03 post-completion cooldown blocks submission with COOLDOWN code", async () => {
     const deps = makeDeps({
-      _checkCooldown: async () => ({ ok: false, retryAfterMs: 5000 }),
+      _checkCooldown: async () => ({ ok: false, reason: "COOLDOWN" as const, retryAfterMs: 500 }),
     });
     const result = await executeTryOn(BASE_PARAMS, deps);
     assert.ok(!result.ok);
     assert.ok(!result.ok && result.code === "COOLDOWN");
+    assert.ok(!result.ok && result.customerMessage.includes("wait a moment"));
+  });
+
+  it("EX03a active-job cooldown returns ACTIVE_JOB code with generating message", async () => {
+    let fashnCalled = false;
+    const deps = makeDeps({
+      _checkCooldown: async () => ({ ok: false, reason: "ACTIVE_JOB" as const }),
+      _fashnTryOn: async () => { fashnCalled = true; return { ok: false, code: "PROVIDER_FAILED" as const, customerMessage: "fail" }; },
+    });
+    const result = await executeTryOn(BASE_PARAMS, deps);
+    assert.ok(!result.ok);
+    assert.ok(!result.ok && result.code === "ACTIVE_JOB");
+    assert.ok(!result.ok && result.customerMessage.includes("still generating"));
+    assert.equal(fashnCalled, false, "FASHN must not be called when active job exists");
   });
 
   it("EX04 active existing job blocks new creation", async () => {
@@ -586,5 +600,51 @@ describe("§7 Body moderation gate", () => {
     );
     // Moderation gate passed — result is the normal happy-path ok=true
     assert.ok(result.ok, `APPROVED must pass moderation gate; got: ${JSON.stringify(result)}`);
+  });
+});
+
+// ── §8 Cooldown reliability (submitTryOnJob) ──────────────────────────────────
+//
+// Verifies the three distinct throttle outcomes and that no FASHN call is made
+// when the cooldown guard fires — ensuring zero provider credits are consumed.
+
+describe("§8 Cooldown reliability", () => {
+  it("SJ-CD01 active-job cooldown returns ACTIVE_JOB code with generating message, no FASHN call", async () => {
+    let fashnCalled = false;
+    const deps = makeSubmitDeps({
+      _checkCooldown: async () => ({ ok: false, reason: "ACTIVE_JOB" as const }),
+      _submitToProvider: async () => { fashnCalled = true; return { ok: true, predictionId: "x" }; },
+    });
+    const result = await submitTryOnJob(SUBMIT_BASE, deps);
+    assert.ok(!result.ok);
+    assert.ok(!result.ok && result.code === "ACTIVE_JOB");
+    assert.ok(!result.ok && result.customerMessage.includes("still generating"),
+      `expected 'still generating' message; got: ${!result.ok ? result.customerMessage : ""}`);
+    assert.equal(fashnCalled, false, "FASHN must not be called when active job is blocking");
+  });
+
+  it("SJ-CD02 post-completion cooldown returns COOLDOWN code with wait-a-moment message, no FASHN call", async () => {
+    let fashnCalled = false;
+    const deps = makeSubmitDeps({
+      _checkCooldown: async () => ({ ok: false, reason: "COOLDOWN" as const, retryAfterMs: 500 }),
+      _submitToProvider: async () => { fashnCalled = true; return { ok: true, predictionId: "x" }; },
+    });
+    const result = await submitTryOnJob(SUBMIT_BASE, deps);
+    assert.ok(!result.ok);
+    assert.ok(!result.ok && result.code === "COOLDOWN");
+    assert.ok(!result.ok && result.customerMessage.includes("wait a moment"),
+      `expected 'wait a moment' message; got: ${!result.ok ? result.customerMessage : ""}`);
+    assert.equal(fashnCalled, false, "FASHN must not be called during short cooldown");
+  });
+
+  it("SJ-CD03 approved cooldown passes through and reaches FASHN submission", async () => {
+    let fashnCalled = false;
+    const deps = makeSubmitDeps({
+      _checkCooldown: async () => ({ ok: true }),
+      _submitToProvider: async () => { fashnCalled = true; return { ok: true, predictionId: "pred-123" }; },
+    });
+    const result = await submitTryOnJob(SUBMIT_BASE, deps);
+    assert.ok(result.ok, `should succeed; got: ${JSON.stringify(result)}`);
+    assert.equal(fashnCalled, true, "FASHN must be called when cooldown is clear");
   });
 });

@@ -651,24 +651,35 @@ export function validateJobTransition(
 }
 
 // ── VirtualTryOnJob — cooldown check ─────────────────────────────────────────
+//
+// Two distinct rejection reasons:
+//   ACTIVE_JOB — a CREATED/SUBMITTED/PROCESSING job already exists for this
+//                customer; starting another would double-charge the provider.
+//   COOLDOWN   — a short (2 s) post-completion buffer against accidental
+//                double-taps. Does not fire between different items when the
+//                user pauses even briefly between tries.
 
-const COOLDOWN_MS = 10_000;
+const COOLDOWN_MS = 2_000;
+
+export type CooldownResult =
+  | { ok: true }
+  | { ok: false; reason: "ACTIVE_JOB" | "COOLDOWN"; retryAfterMs?: number };
 
 export async function checkCustomerCooldown(
   customerId: string,
   cooldownMs: number = COOLDOWN_MS,
   _findJobFn: FindJobFn = _findJob,
-): Promise<{ ok: boolean; retryAfterMs?: number }> {
+): Promise<CooldownResult> {
   const recentJob = await _findJobFn({ customerId }); // ordered by lastActivityAt desc
   if (!recentJob) return { ok: true };
 
   if ((ACTIVE_STATUSES as readonly string[]).includes(recentJob.status)) {
-    return { ok: false, retryAfterMs: 0 }; // Blocked by an active job
+    return { ok: false, reason: "ACTIVE_JOB" };
   }
 
   const elapsed = Date.now() - recentJob.lastActivityAt.getTime();
   if (elapsed < cooldownMs) {
-    return { ok: false, retryAfterMs: cooldownMs - elapsed };
+    return { ok: false, reason: "COOLDOWN", retryAfterMs: cooldownMs - elapsed };
   }
   return { ok: true };
 }

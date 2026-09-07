@@ -4,6 +4,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
 import {
   runFashnTryOn,
   isAllowedProductImageUrl,
@@ -305,57 +306,42 @@ describe("runFashnTryOn — input validation", () => {
   });
 });
 
-// ── runFashnTryOn — rate limiting ─────────────────────────────────────────────
+// ── runFashnTryOn — rate limiting removed ────────────────────────────────────
+//
+// The in-process _customerLastRun Map (DEV_RATE_LIMIT_MS) has been removed.
+// Throttling is now handled exclusively by the DB-backed checkCustomerCooldown
+// (2 s post-completion) and active-job protection in the CREATED/SUBMITTED/
+// PROCESSING state machine — both of which are reliable across Vercel instances.
 
-describe("runFashnTryOn — rate limiting", () => {
-  it("FA.11 — same customerId is rate-limited on a second call within the window", async () => {
-    const customerId = `cust-rl-${Date.now()}`;
-    let runCallCount = 0;
-    const _fetch = async (url: string | URL | Request) => {
-      const u = url.toString();
-      if (u.includes("/v1/run")) { runCallCount++; return makeRunResponse("pred-rl"); }
-      return makeStatusResponse("completed", ["data:image/png;base64,OUT"]);
-    };
-
-    const first = await runFashnTryOn(makeInput({ customerId }), {
-      _fetch: _fetch as typeof fetch,
-      _sleep: noSleep,
-      _getApiKey: () => "k",
-    });
-    assert.equal(first.ok, true, "first call should succeed");
-
-    const second = await runFashnTryOn(makeInput({ customerId }), {
-      _fetch: _fetch as typeof fetch,
-      _sleep: noSleep,
-      _getApiKey: () => "k",
-    });
-    assert.equal(second.ok, false);
-    if (second.ok) throw new Error("unreachable");
-    assert.equal(second.code, "RATE_LIMITED");
-    assert.equal(runCallCount, 1, "fetch must only be called once (no second run)");
+describe("runFashnTryOn — rate limiting removed", () => {
+  it("FA.11 — source contract: _customerLastRun Map is gone from fashn-try-on.server.ts", () => {
+    const src: string = readFileSync(
+      new URL("./fashn-try-on.server.ts", import.meta.url).pathname,
+      "utf8",
+    );
+    assert.ok(!src.includes("_customerLastRun"), "_customerLastRun Map must be removed");
+    assert.ok(!src.includes("DEV_RATE_LIMIT_MS"), "DEV_RATE_LIMIT_MS must be removed");
   });
 
-  it("FA.12 — different customerIds are not rate-limited against each other", async () => {
+  it("FA.12 — consecutive calls from same customerId both reach FASHN (no in-process block)", async () => {
     let runCallCount = 0;
     const _fetch = async (url: string | URL | Request) => {
       const u = url.toString();
-      if (u.includes("/v1/run")) { runCallCount++; return makeRunResponse(`pred-multi-${runCallCount}`); }
+      if (u.includes("/v1/run")) { runCallCount++; return makeRunResponse(`pred-${runCallCount}`); }
       return makeStatusResponse("completed", ["data:image/png;base64,OUT"]);
     };
+    const customerId = "cust-nrl-same";
 
-    const custA = `cust-rl-a-${Date.now()}`;
-    const custB = `cust-rl-b-${Date.now()}`;
-
-    const resA = await runFashnTryOn(makeInput({ customerId: custA }), {
+    const first = await runFashnTryOn(makeInput({ customerId }), {
       _fetch: _fetch as typeof fetch, _sleep: noSleep, _getApiKey: () => "k",
     });
-    const resB = await runFashnTryOn(makeInput({ customerId: custB }), {
+    const second = await runFashnTryOn(makeInput({ customerId }), {
       _fetch: _fetch as typeof fetch, _sleep: noSleep, _getApiKey: () => "k",
     });
 
-    assert.equal(resA.ok, true);
-    assert.equal(resB.ok, true);
-    assert.equal(runCallCount, 2);
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.equal(runCallCount, 2, "both calls must reach FASHN POST — no in-process block");
   });
 });
 

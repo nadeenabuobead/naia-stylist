@@ -238,8 +238,8 @@ export interface SubmitJobDeps {
 
 const SUBMIT_ERRORS = {
   NOT_READY:      "This garment is not available for virtual try-on yet.",
-  COOLDOWN:       "Virtual try-on is temporarily unavailable. Please try again in a moment.",
-  ACTIVE_JOB:     "Generation in progress. Try again shortly.",
+  COOLDOWN:       "Please wait a moment before starting another virtual try-on.",
+  ACTIVE_JOB:     "Your preview is still generating. Please wait for it to finish before starting another try-on.",
   NOT_CONFIGURED: "Virtual try-on is temporarily unavailable.",
   STATE_ERROR:    "Virtual try-on is temporarily unavailable.",
 } as const;
@@ -290,6 +290,9 @@ export async function submitTryOnJob(
   // 2. Per-customer cooldown
   const cooldown = await _checkCooldown(params.internalCustomerId);
   if (!cooldown.ok) {
+    if (cooldown.reason === "ACTIVE_JOB") {
+      return { ok: false, code: "ACTIVE_JOB", customerMessage: SUBMIT_ERRORS.ACTIVE_JOB };
+    }
     return { ok: false, code: "COOLDOWN", customerMessage: SUBMIT_ERRORS.COOLDOWN };
   }
 
@@ -399,11 +402,11 @@ export async function submitTryOnJob(
 // ── executeTryOn ──────────────────────────────────────────────────────────────
 
 const SERVICE_ERRORS = {
-  NOT_READY:    "This garment is not available for virtual try-on yet.",
-  COOLDOWN:     "Virtual try-on is temporarily unavailable. Please try again in a moment.",
-  ACTIVE_JOB:   "Generation in progress. Try again shortly.",
+  NOT_READY:      "This garment is not available for virtual try-on yet.",
+  COOLDOWN:       "Please wait a moment before starting another virtual try-on.",
+  ACTIVE_JOB:     "Your preview is still generating. Please wait for it to finish before starting another try-on.",
   NOT_CONFIGURED: "Virtual try-on is temporarily unavailable.",
-  STATE_ERROR:  "Virtual try-on is temporarily unavailable.",
+  STATE_ERROR:    "Virtual try-on is temporarily unavailable.",
 } as const;
 
 export interface ExecuteTryOnParams {
@@ -441,7 +444,7 @@ export type CreateOrFindJobFn = (
 
 export type CheckCooldownFn = (
   customerId: string,
-) => Promise<{ ok: boolean; retryAfterMs?: number }>;
+) => Promise<{ ok: true } | { ok: false; reason: "ACTIVE_JOB" | "COOLDOWN"; retryAfterMs?: number }>;
 
 export type TryOnAdapterFn = (input: VirtualTryOnInput) => Promise<VirtualTryOnResult>;
 
@@ -502,6 +505,9 @@ export async function executeTryOn(
   // 2. Check per-customer cooldown
   const cooldown = await _checkCooldown(params.internalCustomerId);
   if (!cooldown.ok) {
+    if (cooldown.reason === "ACTIVE_JOB") {
+      return { ok: false, code: "ACTIVE_JOB", customerMessage: SERVICE_ERRORS.ACTIVE_JOB };
+    }
     return { ok: false, code: "COOLDOWN", customerMessage: SERVICE_ERRORS.COOLDOWN };
   }
 

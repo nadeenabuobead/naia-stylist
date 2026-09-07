@@ -5,6 +5,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
 import {
   // Photo URL validation
   validateCloudinaryPhotoUrl,
@@ -474,11 +475,12 @@ describe("advanceTryOnJob", () => {
 
   it("JB.12 — checkCustomerCooldown: blocked by active job; allowed when no job exists", async () => {
     const activeJob = makeJob({ status: "PROCESSING", lastActivityAt: new Date() });
-    const blocked = await checkCustomerCooldown(CUST, 10_000, async () => activeJob);
+    const blocked = await checkCustomerCooldown(CUST, 2_000, async () => activeJob);
     assert.equal(blocked.ok, false);
-    assert.equal(blocked.retryAfterMs, 0);
+    if (blocked.ok) throw new Error("unreachable");
+    assert.equal(blocked.reason, "ACTIVE_JOB");
 
-    const allowed = await checkCustomerCooldown(CUST, 10_000, async () => null);
+    const allowed = await checkCustomerCooldown(CUST, 2_000, async () => null);
     assert.equal(allowed.ok, true);
   });
 });
@@ -873,12 +875,61 @@ describe("CC — concurrency-safe job creation", () => {
   it("CC.7 — checkCustomerCooldown returns ok=false with retryAfterMs when within cooldown window", async () => {
     const recentJob = makeJob({
       status: "COMPLETED",
-      lastActivityAt: new Date(Date.now() - 3_000),  // 3 s ago
+      lastActivityAt: new Date(Date.now() - 500),  // 500 ms ago — within 2 s window
     });
-    const result = await checkCustomerCooldown(CUST, 10_000, async () => recentJob);
+    const result = await checkCustomerCooldown(CUST, 2_000, async () => recentJob);
     assert.equal(result.ok, false);
+    if (result.ok) throw new Error("unreachable");
+    assert.equal(result.reason, "COOLDOWN");
     assert.ok(result.retryAfterMs !== undefined && result.retryAfterMs > 0);
-    assert.ok(result.retryAfterMs! <= 7_100, "retryAfterMs should be roughly 7 s");
+    assert.ok(result.retryAfterMs! <= 1_600, "retryAfterMs should be roughly 1.5 s");
+  });
+
+  it("CC.8 — request >2 s after completed job is allowed", async () => {
+    const oldJob = makeJob({
+      status: "COMPLETED",
+      lastActivityAt: new Date(Date.now() - 2_500), // 2.5 s ago — past the 2 s window
+    });
+    const result = await checkCustomerCooldown(CUST, 2_000, async () => oldJob);
+    assert.equal(result.ok, true, "should be allowed after the 2 s window has elapsed");
+  });
+
+  it("CC.9 — request <2 s after completed job is blocked with COOLDOWN (not ACTIVE_JOB)", async () => {
+    const recentJob = makeJob({
+      status: "COMPLETED",
+      lastActivityAt: new Date(Date.now() - 200), // 200 ms ago — well within window
+    });
+    const result = await checkCustomerCooldown(CUST, 2_000, async () => recentJob);
+    assert.equal(result.ok, false);
+    if (result.ok) throw new Error("unreachable");
+    assert.equal(result.reason, "COOLDOWN", "completed-job block must use COOLDOWN, not ACTIVE_JOB");
+  });
+
+  it("CC.10 — COOLDOWN_MS constant is 2 000 ms (no 10 s post-completion block)", () => {
+    // Source-code contract: keeps the default visible even if the function is overridden in tests.
+    const src = readFileSync(
+      new URL("./my-naia-model.server.ts", import.meta.url).pathname,
+      "utf8",
+    );
+    assert.ok(
+      src.includes("const COOLDOWN_MS = 2_000"),
+      "COOLDOWN_MS must be 2_000ms; 10_000ms caused false 'temporarily unavailable' errors",
+    );
+    assert.ok(
+      !src.includes("const COOLDOWN_MS = 10_000"),
+      "COOLDOWN_MS must no longer be 10_000ms",
+    );
+  });
+
+  it("CC.11 — in-process _customerLastRun Map does not exist in fashn-try-on.server.ts", () => {
+    // Source-code contract: the per-instance Map was unreliable on serverless (fresh Map per cold
+    // start) and is now removed. The DB-backed cooldown check is the only throttle.
+    const src = readFileSync(
+      new URL("./fashn-try-on.server.ts", import.meta.url).pathname,
+      "utf8",
+    );
+    assert.ok(!src.includes("_customerLastRun"), "_customerLastRun Map must be removed");
+    assert.ok(!src.includes("DEV_RATE_LIMIT_MS"), "DEV_RATE_LIMIT_MS must be removed");
   });
 });
 
@@ -1112,8 +1163,10 @@ describe("PE — private-download endpoint and delivery enforcement", () => {
       })[0];
 
     const result = await checkCustomerCooldown(CUST, 10_000, orderedFindFn);
-    // jobNewer is returned (later createdAt wins the tie) — still within 10s cooldown window.
+    // jobNewer is returned (later createdAt wins the tie) — still within the explicitly-passed 10s cooldown window.
     assert.equal(result.ok, false, "within cooldown when lastActivityAt is 3 s ago");
+    if (result.ok) throw new Error("unreachable");
+    assert.equal(result.reason, "COOLDOWN");
     assert.ok(result.retryAfterMs !== undefined && result.retryAfterMs > 0, "retryAfterMs must be positive");
     assert.ok(result.retryAfterMs! <= 7_200, "retryAfterMs must be no more than ~7 s remaining");
   });

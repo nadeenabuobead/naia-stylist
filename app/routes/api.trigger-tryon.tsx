@@ -264,7 +264,6 @@ export async function action({ request }: ActionFunctionArgs) {
         return badRequest("product_not_eligible", result.customerMessage);
 
       case "COOLDOWN":
-      case "RATE_LIMITED":
         return tooMany(result.customerMessage);
 
       case "ACTIVE_JOB_EXISTS":
