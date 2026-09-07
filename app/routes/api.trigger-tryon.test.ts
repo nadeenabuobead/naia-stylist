@@ -1103,18 +1103,20 @@ describe("A — Closet item reaches VTO without Stage-B ready-for-try-on state",
     );
   });
 
-  it("VTO_CATEGORY_GATE includes clothing categories but excludes bags and accessories", () => {
+  it("VTO_CATEGORY_GATE includes clothing + shoes + bags but excludes accessories and jewelry", () => {
     const closetRoute = readFileSync(join(__dirname, "closet._index.tsx"), "utf8");
     const gateBlock = closetRoute.slice(
       closetRoute.indexOf("VTO_CATEGORY_GATE"),
       closetRoute.indexOf("VTO_CATEGORY_GATE") + 200,
     );
-    assert.ok(gateBlock.includes("TOPS"), "VTO_CATEGORY_GATE must include TOPS");
-    assert.ok(gateBlock.includes("BOTTOMS"), "VTO_CATEGORY_GATE must include BOTTOMS");
-    assert.ok(gateBlock.includes("DRESSES"), "VTO_CATEGORY_GATE must include DRESSES");
+    assert.ok(gateBlock.includes("TOPS"),      "VTO_CATEGORY_GATE must include TOPS");
+    assert.ok(gateBlock.includes("BOTTOMS"),   "VTO_CATEGORY_GATE must include BOTTOMS");
+    assert.ok(gateBlock.includes("DRESSES"),   "VTO_CATEGORY_GATE must include DRESSES");
     assert.ok(gateBlock.includes("OUTERWEAR"), "VTO_CATEGORY_GATE must include OUTERWEAR");
-    assert.ok(!gateBlock.includes("BAGS"), "VTO_CATEGORY_GATE must exclude BAGS");
+    assert.ok(gateBlock.includes("SHOES"),     "VTO_CATEGORY_GATE must include SHOES (Phase 4A5-ext staging)");
+    assert.ok(gateBlock.includes("BAGS"),      "VTO_CATEGORY_GATE must include BAGS (Phase 4A5-ext staging)");
     assert.ok(!gateBlock.includes("ACCESSORIES"), "VTO_CATEGORY_GATE must exclude ACCESSORIES");
+    assert.ok(!gateBlock.includes("JEWELRY"),     "VTO_CATEGORY_GATE must exclude JEWELRY");
   });
 });
 

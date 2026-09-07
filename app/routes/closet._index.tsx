@@ -28,7 +28,8 @@ const CATEGORIES = ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS", 
 
 // Categories where VTO makes visual sense — coarse UI gate only.
 // Server-side suitability check (screenGarmentSuitability) is the real gate at trigger time.
-const VTO_CATEGORY_GATE = new Set(["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"]);
+// SHOES and BAGS added 2026-09-07 for staging QA (Phase 4A5-ext). ACCESSORIES and JEWELRY remain excluded.
+const VTO_CATEGORY_GATE = new Set(["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS"]);
 const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver", "Multicolor"];
 const OCCASIONS = ["Casual", "Work", "Dinner", "Party", "Formal", "Date", "Weekend", "Travel"];
 const SEASONS = ["Spring", "Summer", "Fall", "Winter", "All Season"];
