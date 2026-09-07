@@ -28,8 +28,8 @@ function generateRawToken() {
 // Staging GET login helper: /api/seed-staging?secret=…&id=…&email=…&to=…
 // Sets the __naia_tok cookie and redirects — allows browser-based test login.
 export async function loader({ request }) {
-  // Hard block in production — no secret check, no DB access, no side effects.
-  if (process.env.VERCEL_ENV === "production") {
+  // Hard block in non-staging — no secret check, no DB access, no side effects.
+  if (process.env.NAIA_PROJECT_VARIANT !== "staging") {
     return new Response("Not Found", { status: 404 });
   }
 
@@ -104,8 +104,8 @@ export async function loader({ request }) {
 }
 
 export async function action({ request }) {
-  // Hard block in production — before reading headers, body, or touching DB.
-  if (process.env.VERCEL_ENV === "production") {
+  // Hard block in non-staging — before reading headers, body, or touching DB.
+  if (process.env.NAIA_PROJECT_VARIANT !== "staging") {
     return new Response("Not Found", { status: 404 });
   }
 
