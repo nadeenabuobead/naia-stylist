@@ -26,9 +26,18 @@ export type ClosetItemCategory =
 // Staging allowlist: subcategory values that are eligible for VTO under ACCESSORIES/JEWELRY.
 // Stored values are lowercased by garment analysis (closet-garment-analysis.server.ts line 133).
 export const VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST: ReadonlySet<string> = new Set([
+  // Scarves / belts
   "scarf",
   "belt",
+  // Earrings — stem matches "earrings", "hoop earrings", "stud earrings", etc.
   "earrings",
+  // Hats / headwear — stem matches "hat" catches sun/bucket/cowboy/wide-brim/fedora hat, etc.
+  //                 — "cap" catches baseball cap, trucker cap, snapback cap, etc.
+  //                 — "beanie" / "beret" don't contain "hat" or "cap" so are listed separately
+  "hat",
+  "cap",
+  "beanie",
+  "beret",
 ]);
 
 // Main Prisma ClosetCategory values that are VTO-eligible without a subcategory check.

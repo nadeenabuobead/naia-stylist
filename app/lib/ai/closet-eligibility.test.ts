@@ -132,10 +132,15 @@ describe("Stage A — ACCESSORIES/JEWELRY with allowlisted subcategory → pendi
     assert.equal(result.category, "accessories");
   });
 
-  it("ACCESSORIES + non-allowlisted subcategory 'hat' → blocked (not-supported)", () => {
+  it("ACCESSORIES + subcategory 'hat' → pending-assessment", () => {
     const result = assessClosetEligibility({ prismaCategory: "ACCESSORIES", subcategory: "hat", ...GOOD });
-    assert.equal(result.eligible, "not-supported");
-    assert.equal(result.category, "unsupported");
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "accessories");
+  });
+  it("ACCESSORIES + subcategory 'baseball cap' → pending-assessment (AI-generated descriptive value)", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACCESSORIES", subcategory: "baseball cap", ...GOOD });
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "accessories");
   });
 
   it("JEWELRY + non-allowlisted subcategory 'ring' → blocked (not-supported)", () => {
@@ -224,10 +229,58 @@ describe("isVtoCategoryAllowed — JEWELRY with allowlisted subcategory", () => 
   });
 });
 
-describe("isVtoCategoryAllowed — rejected cases (FASHN must never be reached)", () => {
-  it("ACCESSORIES + 'hat' → rejected", () => {
-    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "hat"), false);
+describe("isVtoCategoryAllowed — ACCESSORIES with hat/headwear subcategory", () => {
+  it("ACCESSORIES + 'hat' → allowed", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "hat"), true);
   });
+  it("ACCESSORIES + 'sun hat' → allowed (AI-generated descriptive value)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "sun hat"), true);
+  });
+  it("ACCESSORIES + 'bucket hat' → allowed (AI-generated descriptive value)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "bucket hat"), true);
+  });
+  it("ACCESSORIES + 'cowboy hat' → allowed (AI-generated descriptive value)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "cowboy hat"), true);
+  });
+  it("ACCESSORIES + 'wide-brim hat' → allowed (AI-generated descriptive value)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "wide-brim hat"), true);
+  });
+  it("ACCESSORIES + 'cap' → allowed", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "cap"), true);
+  });
+  it("ACCESSORIES + 'baseball cap' → allowed (AI-generated descriptive value)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "baseball cap"), true);
+  });
+  it("ACCESSORIES + 'trucker cap' → allowed (AI-generated descriptive value)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "trucker cap"), true);
+  });
+  it("ACCESSORIES + 'beanie' → allowed", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "beanie"), true);
+  });
+  it("ACCESSORIES + 'knit beanie' → allowed (AI-generated descriptive value)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "knit beanie"), true);
+  });
+  it("ACCESSORIES + 'beret' → allowed", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "beret"), true);
+  });
+  it("ACCESSORIES + 'wool beret' → allowed (AI-generated descriptive value)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "wool beret"), true);
+  });
+  it("ACCESSORIES + 'BASEBALL CAP' → allowed (case-folded)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "BASEBALL CAP"), true);
+  });
+  it("ACCESSORIES + 'sunglasses' → still rejected (non-hat accessory)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "sunglasses"), false);
+  });
+  it("ACCESSORIES + 'watch' → still rejected (non-hat accessory)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "watch"), false);
+  });
+  it("ACCESSORIES + 'bracelet' → still rejected (non-hat accessory)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "bracelet"), false);
+  });
+});
+
+describe("isVtoCategoryAllowed — rejected cases (FASHN must never be reached)", () => {
   it("ACCESSORIES + 'sunglasses' → rejected", () => {
     assert.equal(isVtoCategoryAllowed("ACCESSORIES", "sunglasses"), false);
   });

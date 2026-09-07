@@ -1331,10 +1331,14 @@ describe("G-behavioral — isVtoCategoryAllowed (shared trigger + UI authorizati
     assert.equal(isVtoCategoryAllowed("JEWELRY", "earrings"), true);
   });
 
-  // ── rejected cases — FASHN submission must never be reached ─────────────────
-  it("ACCESSORIES + 'hat' → rejected before FASHN", () => {
-    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "hat"), false, "hat must be rejected");
+  it("ACCESSORIES + 'hat' → accepted (hat/headwear now allowlisted)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "hat"), true);
   });
+  it("ACCESSORIES + 'baseball cap' → accepted (hat/headwear now allowlisted)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "baseball cap"), true);
+  });
+
+  // ── rejected cases — FASHN submission must never be reached ─────────────────
   it("ACCESSORIES + 'sunglasses' → rejected before FASHN", () => {
     assert.equal(isVtoCategoryAllowed("ACCESSORIES", "sunglasses"), false);
   });
