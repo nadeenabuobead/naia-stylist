@@ -105,7 +105,7 @@ async function analyzeItem(request) {
   // Concurrency note: read-before-write; NOT atomic. Wrap in Serializable
   // transaction before enabling in public production.
   if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {
-    const entCheck = await checkEntitlement(naiaCustomer.id, naiaCustomer.plan, "buySkip");
+    const entCheck = await checkEntitlement(naiaCustomer.id, naiaCustomer.membershipStatus, "buySkip");
     if (!entCheck.allowed) {
       const message = entCheck.reason === "intro_used"
         ? "You've used your introductory Buy or Skip check."

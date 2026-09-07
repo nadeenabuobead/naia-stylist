@@ -1,15 +1,12 @@
 // app/lib/plan/entitlement.test.ts
-// Tests for the entitlement service and plan architecture.
+// Tests for the entitlement service and membership architecture.
 //
 // Source-code contract tests (no live DB) + unit tests for pure logic.
 //
-// ENT-01  schema has CustomerPlan enum with FREE and PAID values
-// ENT-27  entitlement service imports getEffectiveStyleMeLimit
-// ENT-28  getEntitlementSummary uses effectiveStyleMeLimit for styleMe.monthlyLimit display
-// ENT-29  checkEntitlement styleMe case uses effectiveStyleMeLimit for enforcement
-// ENT-02  Customer model has plan field with CustomerPlan type and FREE default
+// ENT-01  schema has MembershipStatus enum with NONE and MEMBER values
+// ENT-02  Customer model has membershipStatus field with MembershipStatus type and NONE default
 // ENT-03  StylingSession has parentSessionId nullable self-reference
-// ENT-04  entitlement service imports from plan-limits and billing-window
+// ENT-04  entitlement service imports from plan-limits and usage-window
 // ENT-05  qualifying StyleMe query filters parentSessionId: null (root sessions only)
 // ENT-06  qualifying StyleMe query requires at least one non-null moodDescription
 // ENT-07  qualifying StyleMe query excludes no-eligible-product outcome
@@ -20,18 +17,21 @@
 // ENT-25  getEntitlementSummary uses effectiveVtoLimit for monthlyLimit display
 // ENT-26  checkEntitlement VTO case uses effectiveVtoLimit for enforcement
 // ENT-11  BuySkip qualifying verdicts are BUY, SKIP, MAYBE only (not INCOMPLETE)
-// ENT-12  BuySkip FREE uses lifetime count (no window filter)
-// ENT-13  BuySkip PAID uses monthly window filter
-// ENT-14  closet guard checks plan limit from getLimits, not a hardcoded number
-// ENT-15  StyleMe welcome calculation: FREE first-ever qualifying session excluded from monthly
-// ENT-16  StyleMe PAID has no welcome subtraction — all sessions count toward monthly
+// ENT-12  BuySkip always uses monthly window filter (no lifetime intro path)
+// ENT-13  BuySkip window query uses window.start and window.end
+// ENT-14  closet guard checks plan limit from getMembershipAllowances, not a hardcoded number
 // ENT-17  Overview helper buildOverviewPlanCards uses entitlement, not closetCount directly
 // ENT-18  Closet enforcement is immediate (no ENTITLEMENT_ENFORCEMENT flag check)
 // ENT-19  Monthly guards (StyleMe, BuySkip, VTO) check ENTITLEMENT_ENFORCEMENT flag
-// ENT-20  migration file exists for plan_entitlement
+// ENT-20  migration file exists for membership_status
 // ENT-21  plan-usage route registered in routes.ts
 // ENT-22  adjust-vibe action stores styleMeAdjustVibeSourceId in cookie
 // ENT-23  result.tsx loader reads styleMeAdjustVibeSourceId and passes parentSessionId to create
+// ENT-27  entitlement service imports getEffectiveStyleMeLimit
+// ENT-28  getEntitlementSummary uses effectiveStyleMeLimit for styleMe.monthlyLimit display
+// ENT-29  checkEntitlement styleMe case uses effectiveStyleMeLimit for enforcement
+// ENT-30  membershipStatus field not plan field used in entitlement service
+// ENT-31  overview no longer references e.plan or CustomerPlan
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -49,7 +49,6 @@ function readFile(rel: string): string {
 const schema     = readFile("prisma/schema.prisma");
 const entSvc     = readFile("app/lib/plan/entitlement.server.ts");
 const planLimits = readFile("app/lib/plan/plan-limits.server.ts");
-const bWindow    = readFile("app/lib/plan/billing-window.server.ts");
 const resultTsx  = readFile("app/routes/style-me/result.tsx");
 const overview   = readFile("app/routes/my-naia._index.tsx");
 const closetRt   = readFile("app/routes/closet._index.tsx");
@@ -60,20 +59,23 @@ const routes     = readFile("app/routes.ts");
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
-describe("ENT-01 — CustomerPlan enum in schema", () => {
-  it("has FREE and PAID values", () => {
-    assert.ok(schema.includes("enum CustomerPlan"), "CustomerPlan enum missing");
-    assert.ok(schema.includes("FREE"), "FREE value missing");
-    assert.ok(schema.includes("PAID"), "PAID value missing");
+describe("ENT-01 — MembershipStatus enum in schema", () => {
+  it("has NONE and MEMBER values", () => {
+    assert.ok(schema.includes("enum MembershipStatus"), "MembershipStatus enum missing");
+    assert.ok(schema.includes("NONE"), "NONE value missing");
+    assert.ok(schema.includes("MEMBER"), "MEMBER value missing");
+    assert.ok(!schema.includes("enum CustomerPlan"), "old CustomerPlan enum must be removed");
   });
 });
 
-describe("ENT-02 — Customer.plan field", () => {
-  it("has CustomerPlan type with FREE default", () => {
-    assert.ok(schema.includes("plan              CustomerPlan @default(FREE)") ||
-              schema.includes("plan  CustomerPlan @default(FREE)") ||
-              (schema.includes("plan") && schema.includes("CustomerPlan") && schema.includes("@default(FREE)")),
-              "Customer.plan field with FREE default missing");
+describe("ENT-02 — Customer.membershipStatus field", () => {
+  it("has MembershipStatus type with NONE default", () => {
+    assert.ok(
+      schema.includes("membershipStatus") && schema.includes("MembershipStatus") && schema.includes("@default(NONE)"),
+      "Customer.membershipStatus field with NONE default missing"
+    );
+    assert.ok(!schema.includes("plan              CustomerPlan") && !schema.includes("plan  CustomerPlan"),
+      "old Customer.plan field with CustomerPlan must be removed");
   });
 });
 
@@ -87,9 +89,10 @@ describe("ENT-03 — StylingSession.parentSessionId", () => {
 // ── Service imports ───────────────────────────────────────────────────────────
 
 describe("ENT-04 — entitlement service imports", () => {
-  it("imports from plan-limits and billing-window", () => {
+  it("imports from plan-limits and usage-window (not billing-window)", () => {
     assert.ok(entSvc.includes("plan-limits.server"), "should import plan-limits");
-    assert.ok(entSvc.includes("billing-window.server"), "should import billing-window");
+    assert.ok(entSvc.includes("usage-window.server"), "should import usage-window");
+    assert.ok(!entSvc.includes("billing-window.server"), "must not import old billing-window");
   });
 });
 
@@ -169,7 +172,6 @@ describe("ENT-11 — BuySkip qualifying verdicts", () => {
   it("entitlement service counts BUY, SKIP, MAYBE and excludes INCOMPLETE", () => {
     assert.ok(entSvc.includes('"BUY"') && entSvc.includes('"SKIP"') && entSvc.includes('"MAYBE"'),
               "must include BUY, SKIP, MAYBE");
-    // INCOMPLETE should not appear in the verdict filter arrays
     const verdictFilter = entSvc.match(/verdict.*in.*\[([^\]]+)\]/g) ?? [];
     verdictFilter.forEach(f => {
       assert.ok(!f.includes("INCOMPLETE"), `verdict filter must not include INCOMPLETE: ${f}`);
@@ -177,25 +179,25 @@ describe("ENT-11 — BuySkip qualifying verdicts", () => {
   });
 });
 
-describe("ENT-12 — BuySkip FREE uses lifetime count", () => {
-  it("FREE intro check has no window (createdAt) filter", () => {
-    // The FREE path uses buySkipIntroLifetime; the PAID path uses window.
-    // Verify the service distinguishes them.
-    assert.ok(entSvc.includes("buySkipIntroLifetime") || entSvc.includes("introBuySkipUsed"),
-              "must have a lifetime intro check path");
+describe("ENT-12 — BuySkip uses monthly window filter (no lifetime intro path)", () => {
+  it("entitlement service has no lifetime/intro buy-skip path", () => {
+    assert.ok(!entSvc.includes("buySkipIntroLifetime") && !entSvc.includes("introBuySkipUsed"),
+              "intro/lifetime BuySkip path must be removed");
+    assert.ok(entSvc.includes("window.start") && entSvc.includes("window.end"),
+              "BuySkip must use usage window");
   });
 });
 
-describe("ENT-13 — BuySkip PAID uses monthly window filter", () => {
-  it("PAID monthly BuySkip query uses window.start and window.end", () => {
+describe("ENT-13 — BuySkip window query uses window.start and window.end", () => {
+  it("monthly BuySkip query uses window.start and window.end", () => {
     assert.ok(entSvc.includes("window.start") && entSvc.includes("window.end"),
-              "must use billing window for monthly counts");
+              "must use usage window for BuySkip monthly counts");
   });
 });
 
 // ── Closet enforcement ────────────────────────────────────────────────────────
 
-describe("ENT-14 — closet guard uses getLimits, not hardcoded number", () => {
+describe("ENT-14 — closet guard uses getMembershipAllowances, not hardcoded number", () => {
   it("closet._index.tsx imports checkEntitlement and calls it before create", () => {
     assert.ok(closetRt.includes("checkEntitlement"), "closet._index.tsx must call checkEntitlement");
     assert.ok(!closetRt.includes("count >= 50") && !closetRt.includes("count >= 100"),
@@ -205,10 +207,8 @@ describe("ENT-14 — closet guard uses getLimits, not hardcoded number", () => {
 
 describe("ENT-18 — closet enforcement is immediate (no flag)", () => {
   it("closet routes do not gate on ENTITLEMENT_ENFORCEMENT env var", () => {
-    // The closet guard runs unconditionally — no flag check
     const closetRtGuardIdx = closetRt.indexOf("checkEntitlement");
     const envFlagIdx = closetRt.indexOf("ENTITLEMENT_ENFORCEMENT");
-    // Either flag doesn't appear, or the guard appears before any flag check
     assert.ok(envFlagIdx === -1 || closetRtGuardIdx < envFlagIdx,
               "closet enforcement must not be behind ENTITLEMENT_ENFORCEMENT flag");
     const apiGuardIdx = closetApi.indexOf("checkEntitlement");
@@ -237,25 +237,6 @@ describe("ENT-19 — monthly guards check ENTITLEMENT_ENFORCEMENT flag", () => {
   });
 });
 
-// ── Welcome StyleMe calculation ───────────────────────────────────────────────
-
-describe("ENT-15 — welcome StyleMe excluded from monthly for FREE", () => {
-  it("entitlement service subtracts welcome session when it falls in current window", () => {
-    assert.ok(entSvc.includes("welcomeInThisWindow"), "must detect welcome session in current window");
-    assert.ok(entSvc.includes("welcomeInThisWindow ? 1 : 0"),
-              "must subtract 1 from monthly count when welcome is in window");
-  });
-});
-
-describe("ENT-16 — PAID StyleMe has no welcome subtraction", () => {
-  it("PAID plan skips first-ever session query and welcome logic", () => {
-    assert.ok(entSvc.includes('plan === "FREE"') || entSvc.includes("plan === 'FREE'"),
-              "must be plan-aware for welcome logic");
-    assert.ok(entSvc.includes("welcomeStyleMe: false") || planLimits.includes("welcomeStyleMe: false"),
-              "PAID limits must have welcomeStyleMe: false");
-  });
-});
-
 // ── Overview ─────────────────────────────────────────────────────────────────
 
 describe("ENT-17 — Overview uses entitlement, not hardcoded values", () => {
@@ -273,14 +254,27 @@ describe("ENT-17 — Overview uses entitlement, not hardcoded values", () => {
   });
 });
 
+describe("ENT-31 — overview no longer references old plan fields", () => {
+  it("buildOverviewPlanCards does not reference e.plan or CustomerPlan", () => {
+    assert.ok(!overview.includes('e.plan === "PAID"') && !overview.includes("e.plan === 'PAID'"),
+              "must not reference e.plan PAID");
+    assert.ok(!overview.includes('e.plan === "FREE"') && !overview.includes("e.plan === 'FREE'"),
+              "must not reference e.plan FREE");
+    assert.ok(!overview.includes("welcomeAvailable"),
+              "welcome session logic must be removed from overview");
+    assert.ok(!overview.includes("introAvailable"),
+              "intro buy-skip logic must be removed from overview");
+  });
+});
+
 // ── Migration and route registration ─────────────────────────────────────────
 
-describe("ENT-20 — migration file exists", () => {
-  it("plan_entitlement migration exists with required statements", () => {
-    const migration = readFile("prisma/migrations/20260905100000_plan_entitlement/migration.sql");
-    assert.ok(migration.includes("CustomerPlan"), "migration must create CustomerPlan enum");
+describe("ENT-20 — migration file exists for membership_status", () => {
+  it("membership_status migration exists with required statements", () => {
+    const migration = readFile("prisma/migrations/20260907000000_membership_status/migration.sql");
+    assert.ok(migration.includes("MembershipStatus"), "migration must create MembershipStatus enum");
+    assert.ok(migration.includes("membershipStatus"), "migration must add membershipStatus column");
     assert.ok(migration.includes("Customer"), "migration must alter Customer table");
-    assert.ok(migration.includes("parentSessionId"), "migration must add parentSessionId");
   });
 });
 
@@ -339,5 +333,20 @@ describe("ENT-29 — checkEntitlement styleMe enforcement uses effectiveStyleMeL
               "must export getEffectiveStyleMeLimit from plan-limits.server.ts");
     assert.ok(planLimits.includes("STYLEME_MONTHLY_LIMIT_OVERRIDE"),
               "must read STYLEME_MONTHLY_LIMIT_OVERRIDE env var");
+  });
+});
+
+describe("ENT-30 — entitlement service uses membershipStatus not plan", () => {
+  it("entitlement service parameter and field is membershipStatus", () => {
+    assert.ok(entSvc.includes("membershipStatus: MembershipStatus"),
+              "parameter must use MembershipStatus type");
+    assert.ok(!entSvc.includes("CustomerPlan"),
+              "must not reference old CustomerPlan type");
+    assert.ok(!entSvc.includes('plan === "FREE"') && !entSvc.includes("plan === 'FREE'"),
+              "must not branch on FREE plan");
+    assert.ok(!entSvc.includes("welcomeInThisWindow"),
+              "welcome session logic must be removed");
+    assert.ok(!entSvc.includes("buySkipIntroLifetime"),
+              "intro buySkip logic must be removed");
   });
 });

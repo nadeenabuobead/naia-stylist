@@ -37,20 +37,20 @@ model Session {
 // USER & AUTHENTICATION
 // ============================================
 
-enum CustomerPlan {
-  FREE
-  PAID
+enum MembershipStatus {
+  NONE
+  MEMBER
 }
 
 model Customer {
-  id                String       @id @default(cuid())
-  shopifyCustomerId String       @unique
-  email             String?      @unique
+  id                String           @id @default(cuid())
+  shopifyCustomerId String           @unique
+  email             String?          @unique
   firstName         String?
   lastName          String?
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
-  plan              CustomerPlan @default(FREE)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  membershipStatus  MembershipStatus @default(NONE)
 
   // Relationships
   onboardingProfile   OnboardingProfile?

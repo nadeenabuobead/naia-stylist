@@ -76,7 +76,7 @@ export async function action({ request }) {
     if (!name?.trim()) {
       return Response.json({ error: "Name required" }, { status: 400, headers: CORS });
     }
-    const capacityCheck = await checkEntitlement(customer.id, customer.plan, "closet");
+    const capacityCheck = await checkEntitlement(customer.id, customer.membershipStatus, "closet");
     if (!capacityCheck.allowed) {
       return Response.json({ error: "Your closet is full. Remove some items to add new ones." }, { status: 403, headers: CORS });
     }
@@ -98,7 +98,7 @@ export async function action({ request }) {
       return Response.json({ error: "Items array required" }, { status: 400, headers: CORS });
     }
 
-    const capacityCheck = await checkEntitlement(customer.id, customer.plan, "closet");
+    const capacityCheck = await checkEntitlement(customer.id, customer.membershipStatus, "closet");
     if (!capacityCheck.allowed) {
       return Response.json({ error: "Your closet is full. Remove some items to add new ones.", merged: 0 }, { status: 403, headers: CORS });
     }

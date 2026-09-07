@@ -146,17 +146,40 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
   if (!customer) return redirect("/auth/shopify/login");
 
+  // Reconcile stale tryOnEligibility for ACCESSORIES/JEWELRY items whose subcategory is
+  // now allowlisted. These were assessed before the accessory subcategory gate existed and
+  // may have tryOnEligibility="not-supported" even though isVtoCategoryAllowed now returns true.
+  // After the first load post-deploy this produces no rows and no DB writes.
+  const staleIds = customer.closetItems
+    .filter(
+      (item) =>
+        item.tryOnEligibility === "not-supported" &&
+        (item.category === "ACCESSORIES" || item.category === "JEWELRY") &&
+        isVtoCategoryAllowed(item.category, item.subcategory),
+    )
+    .map((item) => item.id);
+  if (staleIds.length > 0) {
+    await prisma.closetItem.updateMany({
+      where: { id: { in: staleIds } },
+      data: { tryOnEligibility: "pending-assessment", tryOnAssessedAt: new Date(), tryOnCustomerHint: null },
+    });
+  }
+  const reconciledIds = new Set(staleIds);
+
   // Generate signed display URLs for all private closet items (local HMAC, no network).
   // Legacy items with imageUrl (public delivery) retain their imageUrl as fallback.
   const cfg = getCloudinaryConfig();
   const items = customer.closetItems.map((item) => {
+    const base = reconciledIds.has(item.id)
+      ? { ...item, tryOnEligibility: "pending-assessment" as const, tryOnCustomerHint: null }
+      : item;
     let displayImageUrl: string | null = null;
     if (item.imagePublicId && item.imageFormat && cfg) {
       displayImageUrl = buildPrivateDownloadUrl(cfg, item.imagePublicId, item.imageFormat, "private");
     } else if (item.imageUrl) {
       displayImageUrl = item.imageUrl;
     }
-    return { ...item, displayImageUrl };
+    return { ...base, displayImageUrl };
   });
 
   const insightItems = items.map((item) => ({
@@ -227,7 +250,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // ── Closet capacity enforcement (immediate — no flag required) ────────────
     // Storage entitlement: customer can free capacity by deleting items.
-    const capacityCheck = await checkEntitlement(customer.id, customer.plan, "closet");
+    const capacityCheck = await checkEntitlement(customer.id, customer.membershipStatus, "closet");
     if (!capacityCheck.allowed) {
       return data(
         { error: "Your closet is full. Remove some items to add new ones." },
@@ -1914,7 +1937,15 @@ export default function Closet() {
         ) : (
           <div className="cl-grid">
             {filtered.map((item: any) => {
-              const elig = eligibilityStatus(item.tryOnEligibility, item.tryOnCustomerHint);
+              const accessoryNowAllowed =
+                (item.category === "ACCESSORIES" || item.category === "JEWELRY") &&
+                isVtoCategoryAllowed(item.category, item.subcategory);
+              const elig = eligibilityStatus(
+                accessoryNowAllowed && item.tryOnEligibility === "not-supported"
+                  ? "pending-assessment"
+                  : item.tryOnEligibility,
+                item.tryOnCustomerHint,
+              );
               return (
                 <div key={item.id} className="cl-card">
                   <div className="cl-card-img">

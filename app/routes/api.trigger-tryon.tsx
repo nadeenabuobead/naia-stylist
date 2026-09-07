@@ -84,7 +84,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // The existing Serializable transaction in createOrFindTryOnJob already blocks
   // concurrent duplicate active-job creation, making this check race-resistant.
   if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {
-    const entCheck = await checkEntitlement(customer.id, customer.plan, "vto");
+    const entCheck = await checkEntitlement(customer.id, customer.membershipStatus, "vto");
     if (!entCheck.allowed) {
       return data(
         { ok: false, code: "quota_exceeded", message: "You've used all your Virtual Try-On sessions for this month." },

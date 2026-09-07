@@ -308,7 +308,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // and is NOT atomic. Before enabling in production, wrap in a Serializable transaction.
     const isEnforced = process.env.ENTITLEMENT_ENFORCEMENT === "true";
     if (isEnforced && naiaCustomer) {
-      const entCheck = await checkEntitlement(naiaCustomer.id, naiaCustomer.plan, "styleMe");
+      const entCheck = await checkEntitlement(naiaCustomer.id, naiaCustomer.membershipStatus, "styleMe");
       if (!entCheck.allowed) {
         return data(
           { isLoading: false, isAuthenticated: true, naiaModelIsReady, devTryOnEnabled, vtoEnabled,
@@ -1010,7 +1010,7 @@ const REV3_STATE_LABELS: Record<string, string> = {
   "self-conscious": "Self-conscious",
   "going-through-change": "I'm going through a change / something",
   "want-reset": "I want a reset",
-  "nothing-in-particular": "Nothing in particular",
+  "nothing-in-particular": "I feel pretty neutral",
   "other": "Something else",
 };
 const REV3_INTENTION_LABELS: Record<string, string> = {

@@ -206,7 +206,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       prisma.styleTendency.count({
         where: { customerId, state: "CANDIDATE", customerFeedback: { not: "not-quite" } },
       }),
-      getEntitlementSummary(customerId, customer.plan),
+      getEntitlementSummary(customerId, customer.membershipStatus),
     ]);
 
   const latestEditorial = editorialReports[0] ?? null;
@@ -323,35 +323,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
 import type { EntitlementSummary } from "~/lib/plan/entitlement.server";
 
 function buildOverviewPlanCards(e: EntitlementSummary): { label: string; value: string }[] {
-  const planLabel = e.plan === "PAID" ? "Paid Plan" : "Free Plan";
-
-  const styleMeRemaining = Math.max(0, e.styleMe.monthlyLimit - e.styleMe.monthlyUsed);
-  const styleMeValue = e.styleMe.welcomeAvailable
-    ? `${styleMeRemaining} session${styleMeRemaining !== 1 ? "s" : ""} + welcome`
-    : `${styleMeRemaining} session${styleMeRemaining !== 1 ? "s" : ""} remaining`;
-
-  let buySkipValue: string;
-  if (e.plan === "FREE") {
-    buySkipValue = e.buySkip.introAvailable ? "1 intro check" : "Intro used";
-  } else {
-    const bRemaining = Math.max(0, (e.buySkip.monthlyLimit ?? 0) - (e.buySkip.monthlyUsed ?? 0));
-    buySkipValue = `${bRemaining} check${bRemaining !== 1 ? "s" : ""} remaining`;
-  }
-
-  const vtoReserved = e.vto.monthlyCompleted + e.vto.monthlyInFlight;
-  const vtoRemaining = Math.max(0, e.vto.monthlyLimit - vtoReserved);
-  const vtoValue = `${vtoRemaining} try-on${vtoRemaining !== 1 ? "s" : ""} remaining`;
-
-  const closetValue = `${e.closet.currentCount} of ${e.closet.limit} items`;
-
-  const trendValue = e.personalisedTrend.monthlyLimit > 0 ? "1 included" : "Not included";
+  const smRemaining = Math.max(0, e.styleMe.monthlyLimit - e.styleMe.monthlyUsed);
+  const bsRemaining = Math.max(0, e.buySkip.monthlyLimit - e.buySkip.monthlyUsed);
+  const vtoRemaining = Math.max(0, e.vto.monthlyLimit - e.vto.monthlyCompleted - e.vto.monthlyInFlight);
 
   return [
-    { label: "Current Plan", value: planLabel },
-    { label: "StyleMe", value: styleMeValue },
-    { label: "Buy or Skip", value: buySkipValue },
-    { label: "Virtual Try-On", value: vtoValue },
-    { label: "My Closet", value: closetValue },
+    { label: "StyleMe", value: `${smRemaining} session${smRemaining !== 1 ? "s" : ""} remaining` },
+    { label: "Buy or Skip", value: `${bsRemaining} check${bsRemaining !== 1 ? "s" : ""} remaining` },
+    { label: "Virtual Try-On", value: `${vtoRemaining} try-on${vtoRemaining !== 1 ? "s" : ""} remaining` },
+    { label: "Trend Edit", value: e.personalisedTrend.monthlyLimit > 0 ? "1 included this month" : "Not included" },
+    { label: "My Closet", value: `${e.closet.currentCount} of ${e.closet.limit} items` },
   ];
 }
 
@@ -735,18 +716,24 @@ export default function MyNaiaOverview() {
         {/* Plan & Usage */}
         <section className="mn-section">
           <div className="mn-section-head">
-            <div className="mn-eyebrow">Plan &amp; Usage</div>
+            <div className="mn-eyebrow">Plan &amp; Usage — nAia Membership</div>
             <Link to="/my-naia/plan-usage" className="mn-see-link">Full details</Link>
           </div>
           <div className="mn-section-body">
-            <div style={{ display: "grid", gap: "1.5rem", gridTemplateColumns: "repeat(auto-fill, minmax(10rem, 1fr))" }}>
-              {buildOverviewPlanCards(entitlement).map((c) => (
-                <div key={c.label}>
-                  <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg-55)" }}>{c.label}</div>
-                  <div style={{ marginTop: "0.5rem", fontFamily: "var(--ff-display)", fontWeight: 300, fontSize: "1.5rem", letterSpacing: "0.02em", textTransform: "uppercase", color: "var(--fg)" }}>{c.value}</div>
-                </div>
-              ))}
-            </div>
+            {entitlement.membershipStatus === "MEMBER" ? (
+              <div style={{ display: "grid", gap: "1.5rem", gridTemplateColumns: "repeat(auto-fill, minmax(10rem, 1fr))" }}>
+                {buildOverviewPlanCards(entitlement).map((c) => (
+                  <div key={c.label}>
+                    <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg-55)" }}>{c.label}</div>
+                    <div style={{ marginTop: "0.5rem", fontFamily: "var(--ff-display)", fontWeight: 300, fontSize: "1.5rem", letterSpacing: "0.02em", textTransform: "uppercase", color: "var(--fg)" }}>{c.value}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mn-state-note">
+                Explore <Link to="/my-naia/plan-usage" style={{ color: "var(--lipstick)", textDecoration: "underline", textUnderlineOffset: "4px" }}>nAia Membership</Link> to unlock monthly allowances.
+              </p>
+            )}
           </div>
         </section>
 
