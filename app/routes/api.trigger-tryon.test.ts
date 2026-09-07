@@ -24,6 +24,7 @@ import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isVtoCategoryAllowed } from "../lib/ai/closet-eligibility.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "../..");
@@ -1290,103 +1291,151 @@ describe("F — ownership protection enforced for Closet and Buy/Skip", () => {
   });
 });
 
-// ── G: Accessory subcategory gate in trigger route ────────────────────────────
-// ACCESSORIES and JEWELRY categories require an allowlisted subcategory server-side.
-// Shared source of truth: VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST from closet-eligibility.ts
+// ── G: Full VTO category authorization — behavioral + structural ──────────────
+//
+// G-behavioral: call isVtoCategoryAllowed directly — these exercise the actual
+//   authorization function used by both the trigger route and the UI gate.
+//   Rejected cases prove FASHN can never be reached for that category/subcategory
+//   combination because the shared function returns false.
+//
+// G-structural: source-code assertions that the trigger route wires the shared
+//   helper correctly and returns before submitTryOnJob when the function is false.
 
-describe("G — server-side accessory subcategory gate", () => {
+describe("G-behavioral — isVtoCategoryAllowed (shared trigger + UI authorization rule)", () => {
+  // ── accepted cases ───────────────────────────────────────────────────────────
+  it("TOPS → accepted past category gate", () => {
+    assert.equal(isVtoCategoryAllowed("TOPS"), true, "TOPS must be accepted");
+  });
+  it("BOTTOMS → accepted", () => {
+    assert.equal(isVtoCategoryAllowed("BOTTOMS"), true);
+  });
+  it("DRESSES → accepted", () => {
+    assert.equal(isVtoCategoryAllowed("DRESSES"), true);
+  });
+  it("OUTERWEAR → accepted", () => {
+    assert.equal(isVtoCategoryAllowed("OUTERWEAR"), true);
+  });
+  it("SHOES → accepted", () => {
+    assert.equal(isVtoCategoryAllowed("SHOES"), true);
+  });
+  it("BAGS → accepted", () => {
+    assert.equal(isVtoCategoryAllowed("BAGS"), true);
+  });
+  it("ACCESSORIES + 'scarf' → accepted", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "scarf"), true);
+  });
+  it("ACCESSORIES + 'belt' → accepted", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "belt"), true);
+  });
+  it("JEWELRY + 'earrings' → accepted", () => {
+    assert.equal(isVtoCategoryAllowed("JEWELRY", "earrings"), true);
+  });
+
+  // ── rejected cases — FASHN submission must never be reached ─────────────────
+  it("ACCESSORIES + 'hat' → rejected before FASHN", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "hat"), false, "hat must be rejected");
+  });
+  it("ACCESSORIES + 'sunglasses' → rejected before FASHN", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "sunglasses"), false);
+  });
+  it("JEWELRY + 'ring' → rejected before FASHN", () => {
+    assert.equal(isVtoCategoryAllowed("JEWELRY", "ring"), false, "ring must be rejected");
+  });
+  it("JEWELRY + 'necklace' → rejected before FASHN", () => {
+    assert.equal(isVtoCategoryAllowed("JEWELRY", "necklace"), false);
+  });
+  it("ACCESSORIES + null subcategory → rejected before FASHN", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", null), false, "null subcategory must be rejected");
+  });
+  it("JEWELRY + null subcategory → rejected before FASHN", () => {
+    assert.equal(isVtoCategoryAllowed("JEWELRY", null), false);
+  });
+  it("ACCESSORIES + undefined subcategory → rejected before FASHN", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", undefined), false);
+  });
+  it("ACTIVEWEAR → rejected before FASHN", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR"), false, "ACTIVEWEAR must be rejected");
+  });
+  it("SWIMWEAR → rejected before FASHN", () => {
+    assert.equal(isVtoCategoryAllowed("SWIMWEAR"), false);
+  });
+  it("LOUNGEWEAR → rejected before FASHN", () => {
+    assert.equal(isVtoCategoryAllowed("LOUNGEWEAR"), false);
+  });
+  it("OTHER → rejected before FASHN", () => {
+    assert.equal(isVtoCategoryAllowed("OTHER"), false);
+  });
+  it("unknown future category → rejected before FASHN", () => {
+    assert.equal(isVtoCategoryAllowed("SPORTSWEAR"), false);
+  });
+});
+
+describe("G-structural — trigger route wires isVtoCategoryAllowed correctly", () => {
   const closetPath = route.slice(route.indexOf("source === \"closet\""));
 
-  it("route imports VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST from closet-eligibility (shared source of truth)", () => {
+  it("route imports isVtoCategoryAllowed from closet-eligibility (shared source of truth)", () => {
     assert.ok(
-      route.includes("VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST"),
-      "trigger route must import VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST",
+      route.includes("isVtoCategoryAllowed"),
+      "trigger route must import isVtoCategoryAllowed",
     );
     assert.ok(
       route.includes("closet-eligibility"),
-      "VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST must be imported from closet-eligibility",
+      "isVtoCategoryAllowed must be imported from closet-eligibility",
     );
   });
 
-  it("closet DB query selects subcategory field", () => {
+  it("closet DB query selects subcategory so the server can apply the full rule", () => {
     const selectBlock = closetPath.slice(
       closetPath.indexOf("select:"),
       closetPath.indexOf("select:") + 200,
     );
     assert.ok(
       selectBlock.includes("subcategory"),
-      "closet DB query must select subcategory so the server can enforce the allowlist",
+      "closet DB query must select subcategory",
     );
   });
 
-  it("ACCESSORIES items are blocked when subcategory is not in the allowlist", () => {
+  it("isVtoCategoryAllowed is called in the closet path before screenGarmentSuitability", () => {
+    const gatePos       = closetPath.indexOf("isVtoCategoryAllowed(");
+    const suitabilityPos = closetPath.indexOf("screenGarmentSuitability");
+    assert.ok(gatePos > -1, "isVtoCategoryAllowed must be called in the closet path");
+    assert.ok(suitabilityPos > -1, "screenGarmentSuitability must still be called");
     assert.ok(
-      closetPath.includes("item.category === \"ACCESSORIES\"") ||
-      closetPath.includes("\"ACCESSORIES\""),
-      "trigger route must gate on ACCESSORIES category",
-    );
-    assert.ok(
-      closetPath.includes("VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST"),
-      "ACCESSORIES gate must use VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST",
-    );
-  });
-
-  it("JEWELRY items are blocked when subcategory is not in the allowlist", () => {
-    assert.ok(
-      closetPath.includes("item.category === \"JEWELRY\"") ||
-      closetPath.includes("\"JEWELRY\""),
-      "trigger route must gate on JEWELRY category",
+      gatePos < suitabilityPos,
+      "isVtoCategoryAllowed gate must precede screenGarmentSuitability",
     );
   });
 
-  it("allowed scarf subcategory passes the gate and reaches screenGarmentSuitability", () => {
-    // Confirm the allowlist check precedes screenGarmentSuitability (gate before photo check)
-    const allowlistCheckPos = closetPath.indexOf("VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST");
-    const suitabilityPos    = closetPath.indexOf("screenGarmentSuitability");
+  it("isVtoCategoryAllowed is called before submitTryOnJob — rejected items never reach FASHN", () => {
+    const gatePos   = route.indexOf("isVtoCategoryAllowed(");
+    const submitPos = route.indexOf("submitTryOnJob(");
+    assert.ok(gatePos > -1, "isVtoCategoryAllowed must appear in the route");
+    assert.ok(submitPos > -1, "submitTryOnJob must appear in the route");
     assert.ok(
-      allowlistCheckPos > -1,
-      "VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST check must exist in the closet path",
-    );
-    assert.ok(
-      suitabilityPos > -1,
-      "screenGarmentSuitability must still be called in the closet path",
-    );
-    assert.ok(
-      allowlistCheckPos < suitabilityPos,
-      "subcategory gate must precede screenGarmentSuitability (category blocked before photo check)",
+      gatePos < submitPos,
+      "isVtoCategoryAllowed check must precede submitTryOnJob — rejected items never reach FASHN",
     );
   });
 
-  it("belt and earrings share the same allowlist gate — no parallel duplicate conditions", () => {
-    // The gate must use the shared Set, not inline string comparisons per subcategory.
-    assert.ok(
-      closetPath.includes("VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST.has("),
-      "gate must call .has() on VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST, not inline string checks",
-    );
-  });
-
-  it("missing subcategory (null) under ACCESSORIES/JEWELRY is blocked", () => {
-    // The gate must check for falsy sub before calling .has()
-    assert.ok(
-      closetPath.includes("!sub") || closetPath.includes("sub === null"),
-      "null or empty subcategory must be rejected before the .has() check",
-    );
-  });
-
-  it("existing clothing/shoes/bags are not subject to the subcategory gate", () => {
-    // The gate must be conditional on ACCESSORIES || JEWELRY only
+  it("route returns not_eligible when isVtoCategoryAllowed returns false", () => {
     const gateBlock = closetPath.slice(
-      closetPath.indexOf("item.category === \"ACCESSORIES\""),
-      closetPath.indexOf("VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST.has(") + 60,
+      closetPath.indexOf("isVtoCategoryAllowed("),
+      closetPath.indexOf("isVtoCategoryAllowed(") + 150,
     );
     assert.ok(
-      gateBlock.includes("ACCESSORIES") || gateBlock.includes("JEWELRY"),
-      "subcategory gate must be scoped to ACCESSORIES/JEWELRY only",
+      gateBlock.includes("not_eligible"),
+      "closet path must return not_eligible when isVtoCategoryAllowed is false",
     );
-    // TOPS/BOTTOMS/DRESSES/etc. must not appear inside the gate block
+  });
+
+  it("item.subcategory is passed into isVtoCategoryAllowed — rule uses stored AI value", () => {
+    const gateBlock = closetPath.slice(
+      closetPath.indexOf("isVtoCategoryAllowed("),
+      closetPath.indexOf("isVtoCategoryAllowed(") + 80,
+    );
     assert.ok(
-      !gateBlock.includes("TOPS") && !gateBlock.includes("BOTTOMS") && !gateBlock.includes("DRESSES"),
-      "subcategory gate must not mention clothing categories — it applies only to ACCESSORIES/JEWELRY",
+      gateBlock.includes("item.subcategory"),
+      "isVtoCategoryAllowed must receive item.subcategory from DB, not a hardcoded value",
     );
   });
 });

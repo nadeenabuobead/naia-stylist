@@ -4,7 +4,7 @@ import { useLoaderData, useFetcher, Link } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type LinksFunction } from "react-router";
 import prisma from "../db.server";
 import { requireCurrentNaiaCustomer, getCurrentNaiaCustomer } from "~/lib/naia-session.server";
-import { assessClosetEligibility, CLOSET_ELIGIBILITY_DISPLAY, type ClosetTryOnEligibility } from "~/lib/ai/closet-eligibility";
+import { assessClosetEligibility, CLOSET_ELIGIBILITY_DISPLAY, isVtoCategoryAllowed, type ClosetTryOnEligibility } from "~/lib/ai/closet-eligibility";
 import { emitClosetItemAdded, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -1952,11 +1952,7 @@ export default function Closet() {
                     <button type="button" className="cl-edit-btn" onClick={() => openEdit(item)}>
                       Edit
                     </button>
-                    {vtoEnabled && item.imagePublicId && (
-                      VTO_CATEGORY_GATE.has(item.category) ||
-                      (["ACCESSORIES", "JEWELRY"].includes(item.category) &&
-                        (item.tryOnEligibility === "pending-assessment" || item.tryOnEligibility === "ready-for-try-on"))
-                    ) && (
+                    {vtoEnabled && item.imagePublicId && isVtoCategoryAllowed(item.category, item.subcategory) && (
                       <VtoExperience
                         source="closet"
                         closetItemId={item.id}

@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   assessClosetEligibility,
+  isVtoCategoryAllowed,
   PRISMA_CATEGORY_MAP,
   CLOSET_ELIGIBILITY_DISPLAY,
   STAGE_A_CUSTOMER_HINTS,
@@ -161,6 +162,82 @@ describe("Stage A — ACCESSORIES/JEWELRY with allowlisted subcategory → pendi
     const result = assessClosetEligibility({ prismaCategory: "BAGS", subcategory: "earrings", ...GOOD });
     assert.equal(result.eligible, "pending-assessment");
     assert.equal(result.category, "bags");
+  });
+});
+
+// ── isVtoCategoryAllowed — behavioral function tests ─────────────────────────
+// These call the shared authorization function directly.
+// The same function is used by the UI gate (closet._index.tsx) AND the trigger
+// route (api.trigger-tryon.tsx), so these tests cover both.
+
+describe("isVtoCategoryAllowed — main supported categories", () => {
+  for (const cat of ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS"] as const) {
+    it(`${cat} → allowed (no subcategory needed)`, () => {
+      assert.equal(isVtoCategoryAllowed(cat), true);
+    });
+    it(`${cat} with irrelevant subcategory → still allowed`, () => {
+      assert.equal(isVtoCategoryAllowed(cat, "anything"), true);
+    });
+  }
+});
+
+describe("isVtoCategoryAllowed — ACCESSORIES with allowlisted subcategory", () => {
+  it("ACCESSORIES + 'scarf' → allowed", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "scarf"), true);
+  });
+  it("ACCESSORIES + 'belt' → allowed", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "belt"), true);
+  });
+  it("ACCESSORIES + subcategory with extra whitespace → allowed (trimmed)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "  scarf  "), true);
+  });
+  it("ACCESSORIES + uppercase subcategory → allowed (case-folded)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "BELT"), true);
+  });
+});
+
+describe("isVtoCategoryAllowed — JEWELRY with allowlisted subcategory", () => {
+  it("JEWELRY + 'earrings' → allowed", () => {
+    assert.equal(isVtoCategoryAllowed("JEWELRY", "earrings"), true);
+  });
+});
+
+describe("isVtoCategoryAllowed — rejected cases (FASHN must never be reached)", () => {
+  it("ACCESSORIES + 'hat' → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "hat"), false);
+  });
+  it("ACCESSORIES + 'sunglasses' → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "sunglasses"), false);
+  });
+  it("JEWELRY + 'ring' → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("JEWELRY", "ring"), false);
+  });
+  it("JEWELRY + 'necklace' → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("JEWELRY", "necklace"), false);
+  });
+  it("ACCESSORIES + null subcategory → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", null), false);
+  });
+  it("ACCESSORIES + undefined subcategory → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", undefined), false);
+  });
+  it("JEWELRY + null subcategory → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("JEWELRY", null), false);
+  });
+  it("ACTIVEWEAR → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR"), false);
+  });
+  it("SWIMWEAR → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("SWIMWEAR"), false);
+  });
+  it("LOUNGEWEAR → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("LOUNGEWEAR"), false);
+  });
+  it("OTHER → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("OTHER"), false);
+  });
+  it("unknown future category → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("SPORTSWEAR"), false);
   });
 });
 

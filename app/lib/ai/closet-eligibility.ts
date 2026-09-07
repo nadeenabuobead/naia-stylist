@@ -31,6 +31,33 @@ export const VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST: ReadonlySet<string> = new Set(
   "earrings",
 ]);
 
+// Main Prisma ClosetCategory values that are VTO-eligible without a subcategory check.
+const VTO_SUPPORTED_MAIN_CATEGORIES: ReadonlySet<string> = new Set([
+  "TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS",
+]);
+
+/**
+ * Single shared authorization rule for VTO.
+ * Used by the UI rendering gate (closet._index.tsx) AND the server trigger route
+ * (api.trigger-tryon.tsx) so both can never drift independently.
+ *
+ * Returns true when:
+ *   A. category is a main supported category (TOPS/BOTTOMS/DRESSES/OUTERWEAR/SHOES/BAGS), OR
+ *   B. category is ACCESSORIES/JEWELRY AND subcategory is in VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST.
+ * Returns false for everything else (ACTIVEWEAR, SWIMWEAR, LOUNGEWEAR, OTHER, unknown).
+ */
+export function isVtoCategoryAllowed(
+  category: string,
+  subcategory?: string | null,
+): boolean {
+  if (VTO_SUPPORTED_MAIN_CATEGORIES.has(category)) return true;
+  if (category === "ACCESSORIES" || category === "JEWELRY") {
+    if (typeof subcategory !== "string") return false;
+    return VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST.has(subcategory.trim().toLowerCase());
+  }
+  return false;
+}
+
 // Prisma ClosetCategory enum values → ClosetItemCategory
 export const PRISMA_CATEGORY_MAP: Record<string, ClosetItemCategory> = {
   TOPS:       "tops",
