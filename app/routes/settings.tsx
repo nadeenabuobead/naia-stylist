@@ -229,11 +229,13 @@ function ControlRow({
   intent,
   label,
   description,
+  buttonLabel,
   onOpen,
 }: {
   intent: Intent;
   label: string;
   description: string;
+  buttonLabel: string;
   onOpen: (k: Intent) => void;
 }) {
   return (
@@ -243,7 +245,7 @@ function ControlRow({
         <p className="set-control-desc">{description}</p>
       </div>
       <button type="button" className="sp-btn-outline" onClick={() => onOpen(intent)}>
-        Continue
+        {buttonLabel}
       </button>
     </div>
   );
@@ -278,7 +280,7 @@ export default function Settings() {
 
       <div className="sp-shell">
         <div className="sp-shell-eyebrow">Settings & Privacy</div>
-        <h1 className="sp-shell-title">YOUR <span className="sp-shell-accent">account.</span></h1>
+        <h1 className="sp-shell-title">Settings & <span className="sp-shell-accent">privacy.</span></h1>
       </div>
 
       {/* ── Account Details ───────────────────────────────────────────────── */}
@@ -314,6 +316,7 @@ export default function Settings() {
                 intent="delete-selfie-photo"
                 label="Remove selfie photo"
                 description="Permanently deletes your uploaded selfie. Your style analysis result is kept."
+                buttonLabel="Remove selfie photo"
                 onOpen={setPending}
               />
             )}
@@ -322,6 +325,7 @@ export default function Settings() {
                 intent="delete-selfie-analysis"
                 label="Remove Selfie Style Analysis"
                 description="Permanently deletes your analysis result. Your selfie photo is kept."
+                buttonLabel="Remove analysis"
                 onOpen={setPending}
               />
             )}
@@ -330,6 +334,7 @@ export default function Settings() {
                 intent="delete-selfie-both"
                 label="Remove selfie photo and analysis"
                 description="Permanently deletes both your selfie photo and your style analysis."
+                buttonLabel="Remove both"
                 onOpen={setPending}
               />
             )}
@@ -356,6 +361,7 @@ export default function Settings() {
                 intent="delete-model-face"
                 label="Remove saved face photo"
                 description="Permanently deletes your face photo from your nAia Model. Your body photo is kept."
+                buttonLabel="Remove face photo"
                 onOpen={setPending}
               />
             )}
@@ -364,6 +370,7 @@ export default function Settings() {
                 intent="delete-model-body"
                 label="Remove saved body photo"
                 description="Permanently deletes your body photo from your nAia Model. Your face photo is kept."
+                buttonLabel="Remove body photo"
                 onOpen={setPending}
               />
             )}
@@ -372,6 +379,7 @@ export default function Settings() {
                 intent="delete-model-all"
                 label="Remove all saved nAia Model photos"
                 description="Permanently deletes both your face and body photos and withdraws consent to save them."
+                buttonLabel="Remove all photos"
                 onOpen={setPending}
               />
             )}
@@ -409,6 +417,7 @@ export default function Settings() {
               intent="delete-vto-results"
               label="Remove Virtual Try-On preview images"
               description="Permanently deletes all generated try-on previews. Your nAia Model and try-on history are kept."
+              buttonLabel="Remove previews"
               onOpen={setPending}
             />
           </div>
@@ -428,6 +437,7 @@ export default function Settings() {
               intent="delete-bos-images"
               label="Remove Buy or Skip uploaded images"
               description="Permanently removes your uploaded garment photos. Your Buy or Skip decisions and history are kept."
+              buttonLabel="Remove uploaded images"
               onOpen={setPending}
             />
           </div>
@@ -436,7 +446,7 @@ export default function Settings() {
 
       {/* ── How nAia personalises your experience ────────────────────────── */}
       <section className="bos-section">
-        <div className="set-section-eyebrow">How nAia works</div>
+        <div className="set-section-eyebrow">HOW YOUR INFORMATION IS USED</div>
         <h2 className="set-section-title">Personalisation</h2>
         <p className="sp-shell-desc">
           nAia personalises your styling experience using information you provide directly — your Style Passport, your Closet, your post-wear feedback, and your interactions with StyleMe. Your data is never sold or shared with third parties for marketing.
@@ -448,14 +458,14 @@ export default function Settings() {
         <div className="set-section-eyebrow">Your Data & Privacy</div>
         <h2 className="set-section-title">Your Data</h2>
         <p className="sp-shell-desc" style={{ marginBottom: "20px" }}>
-          To request a copy of your data or to request account deletion, contact us at{" "}
+          Use the options below to request a copy of your data or to request deletion of your account. Requests are processed within 30 days in accordance with our Privacy Policy. For other queries, contact{" "}
           <a
-            href="mailto:privacy@naiabynadine.com?subject=Data%20request%20—%20nAia"
+            href="mailto:privacy@naiabynadine.com"
             style={{ color: "var(--naia-accent)" }}
           >
             privacy@naiabynadine.com
           </a>
-          . Requests are processed within 30 days in accordance with our Privacy Policy.
+          .
         </p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
           <a
@@ -477,6 +487,8 @@ export default function Settings() {
 
       {/* ── Sign Out ─────────────────────────────────────────────────────── */}
       <section className="bos-section">
+        <div className="set-section-eyebrow">Account</div>
+        <h2 className="set-section-title">Sign Out</h2>
         <Form method="post" action="/auth/logout">
           <button type="submit" className="sp-btn-ghost">Sign Out</button>
         </Form>

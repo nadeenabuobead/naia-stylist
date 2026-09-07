@@ -296,3 +296,173 @@ describe("J — selfie and model clearly separated", () => {
     assert.ok(!src.includes("delete-closet"),            "no fake delete-closet intent");
   });
 });
+
+// ── K. Hero and section copy ──────────────────────────────────────────────────
+
+describe("K — hero and section copy", () => {
+  it("hero title is 'Settings & privacy.' not 'YOUR account.'", () => {
+    assert.ok(
+      src.includes("Settings & <span"),
+      "hero title starts with 'Settings &'",
+    );
+    assert.ok(
+      src.includes("privacy."),
+      "hero title ends with 'privacy.'",
+    );
+    assert.ok(
+      !src.includes("YOUR account."),
+      "old 'YOUR account.' hero title is gone",
+    );
+  });
+
+  it("personalisation eyebrow is 'HOW YOUR INFORMATION IS USED'", () => {
+    assert.ok(
+      src.includes("HOW YOUR INFORMATION IS USED"),
+      "personalisation eyebrow updated",
+    );
+    assert.ok(
+      !src.includes(">How nAia works<"),
+      "old 'How nAia works' eyebrow is gone",
+    );
+  });
+
+  it("sign out section has a heading", () => {
+    const signOutIdx = src.indexOf("Sign Out");
+    assert.ok(signOutIdx > -1, "Sign Out appears in the file");
+    const signOutSection = src.slice(src.lastIndexOf("Sign Out", src.indexOf('action="/auth/logout"')) - 200, src.indexOf('action="/auth/logout"'));
+    assert.ok(
+      signOutSection.includes("set-section-eyebrow") || signOutSection.includes("set-section-title"),
+      "Sign Out section has a heading element",
+    );
+  });
+});
+
+// ── L. Destructive button labels ──────────────────────────────────────────────
+
+describe("L — explicit destructive button labels", () => {
+  it("ControlRow component accepts a buttonLabel prop", () => {
+    assert.ok(
+      src.includes("buttonLabel"),
+      "ControlRow has buttonLabel prop",
+    );
+    assert.ok(
+      !src.includes(">Continue<") && !src.includes('"Continue"'),
+      "generic 'Continue' label is gone",
+    );
+  });
+
+  it("Remove face photo button label is 'Remove face photo'", () => {
+    assert.ok(
+      src.includes('buttonLabel="Remove face photo"'),
+      "face photo ControlRow has explicit buttonLabel",
+    );
+  });
+
+  it("Remove body photo button label is 'Remove body photo'", () => {
+    assert.ok(
+      src.includes('buttonLabel="Remove body photo"'),
+      "body photo ControlRow has explicit buttonLabel",
+    );
+  });
+
+  it("Remove all photos button label is 'Remove all photos'", () => {
+    assert.ok(
+      src.includes('buttonLabel="Remove all photos"'),
+      "remove-all ControlRow has explicit buttonLabel",
+    );
+  });
+
+  it("VTO button label is 'Remove previews'", () => {
+    assert.ok(
+      src.includes('buttonLabel="Remove previews"'),
+      "VTO ControlRow has explicit buttonLabel",
+    );
+  });
+
+  it("BOS button label is 'Remove uploaded images'", () => {
+    assert.ok(
+      src.includes('buttonLabel="Remove uploaded images"'),
+      "BOS ControlRow has explicit buttonLabel",
+    );
+  });
+});
+
+// ── M. Account details ────────────────────────────────────────────────────────
+
+describe("M — account details", () => {
+  it("name field falls back to '—' when no name is on record", () => {
+    assert.ok(
+      src.includes('|| "—"') || src.includes("|| '—'"),
+      "name has a dash fallback for missing data",
+    );
+  });
+
+  it("email comes from loader (customer.email), not client input", () => {
+    const loaderIdx = src.indexOf("export async function loader");
+    const loaderSrc = src.slice(loaderIdx, src.indexOf("export async function action"));
+    assert.ok(loaderSrc.includes("customer.email"), "loader reads customer.email");
+    assert.ok(!loaderSrc.includes('formData.get("email")'), "email not from formData");
+  });
+
+  it("note directs customers to NADINE account settings for name/email changes", () => {
+    assert.ok(
+      src.includes("NADINE account settings"),
+      "page notes that name/email are managed in NADINE",
+    );
+  });
+});
+
+// ── N. Data requests ──────────────────────────────────────────────────────────
+
+describe("N — data request buttons are mailto links", () => {
+  it("data export button is a mailto link, not a form submit", () => {
+    assert.ok(
+      src.includes("mailto:privacy@naiabynadine.com?subject=Data%20export%20request"),
+      "data export button is a mailto link",
+    );
+  });
+
+  it("account deletion request is a mailto link, not a form submit", () => {
+    assert.ok(
+      src.includes("mailto:privacy@naiabynadine.com?subject=Account%20deletion%20request"),
+      "account deletion is a mailto link",
+    );
+  });
+
+  it("page does not claim to automatically process requests", () => {
+    assert.ok(
+      !src.includes("Your request has been submitted"),
+      "no false automatic-submission claim",
+    );
+    assert.ok(
+      !src.includes("We will process your request"),
+      "no false processing claim",
+    );
+  });
+
+  it("data section copy positions buttons as primary mechanism", () => {
+    assert.ok(
+      src.includes("Use the options below"),
+      "buttons are described as the primary mechanism",
+    );
+  });
+});
+
+// ── O. Routing targets ────────────────────────────────────────────────────────
+
+describe("O — routing targets", () => {
+  it("Go to My Closet links to /closet (covered by storefront rewrite)", () => {
+    assert.ok(src.includes('to="/closet"'), "My Closet link uses /closet");
+  });
+
+  it("sign out posts to /auth/logout (covered by storefront /auth/:path* rewrite)", () => {
+    assert.ok(src.includes('action="/auth/logout"'), "sign out targets /auth/logout");
+  });
+
+  it("no hardcoded absolute URLs that would break through the storefront proxy", () => {
+    assert.ok(
+      !src.includes("naia-stylist-staging.vercel.app"),
+      "no hardcoded staging domain in component",
+    );
+  });
+});
