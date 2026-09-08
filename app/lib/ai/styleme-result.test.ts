@@ -31,7 +31,10 @@ import {
   callClaudeForNaiaSelection,
   garmentNameIsPlural,
   computeOutfitSignature,
+  buildCandidateOccasionEvidence,
+  selectOccasionAwareFallback,
 } from "./styleme-result.server.ts";
+import type { CandidateOccasionEvidence } from "./styleme-result.server.ts";
 import type { OutfitCandidate } from "./styleme-result.server.ts";
 import { scoreClosetItemForSession, autoSelectClosetAnchor } from "./styleme-anchor.server.ts";
 import type { AutoSelectItem } from "./styleme-anchor.server.ts";
@@ -6216,5 +6219,774 @@ describe("§OC.15b — Passport × occasion: smart-casual + 'powerful' profile �
 
     assert.strictEqual(result.outfitName, "Smart Navy",
       "Outfit name must match the wording generated for the selected candidate A");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// §FA — Fix A + Fix B: occasion-aware fallback + factual selection evidence
+// ══════════════════════════════════════════════════════════════════════════════
+//
+// §FA.1  buildCandidateOccasionEvidence unit tests
+// §FA.2  selectOccasionAwareFallback unit tests (tie-break included)
+// §FA.3  Sara: everyday + work-only blazer, model FAILS → fallback = C
+// §FA.4  Sara: everyday + everyday-blazer, model FAILS → fallback = A
+// §FA.5  Sara: work/polished + work-only blazer, model FAILS → fallback = A
+// §FA.6  Omar: everyday + work-only jacket, model FAILS → fallback = C
+// §FA.7  Omar: smart-casual + smart-casual jacket, model FAILS → fallback = A
+// §FA.8  Fix B: occasion evidence payload received by model call
+// §FA.9  Tie-break: equal scores, candidate with fewer non-matching pieces wins
+// §FA.10 No valid candidates: sameCombination path, not Candidate A
+//
+// Shared logic applies to female and male fixtures — no gender-specific code.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── §FA.1 buildCandidateOccasionEvidence ──────────────────────────────────────
+
+describe("§FA.1 — buildCandidateOccasionEvidence: piece-level occasion status", () => {
+  const baseItem = (id: string, occasions: string[]): ClosetAnchorInput => ({
+    type: "closet", id, name: `Item ${id}`,
+    category: "TOPS", colors: ["black"], primaryColor: "black",
+    pattern: null, material: null, styleTags: [], occasions, imageUrl: "",
+  });
+
+  it("FA.1.1 — piece with occasion in list → 'match'", () => {
+    const candidate: OutfitCandidate = { id: "A", pieces: [{ closetId: "i1", slot: "top", label: "Top", colors: [] }] };
+    const allItems = [baseItem("i1", ["everyday", "work"])];
+    const ev = buildCandidateOccasionEvidence([candidate], allItems, "everyday");
+    const piece = ev.get("A")!.pieces[0];
+    assert.strictEqual(piece.occasionStatus, "match");
+    assert.deepStrictEqual(piece.itemOccasions, ["everyday", "work"]);
+  });
+
+  it("FA.1.2 — piece with non-empty occasions that exclude today → 'not-listed'", () => {
+    const candidate: OutfitCandidate = { id: "A", pieces: [{ closetId: "i2", slot: "outerwear", label: "Blazer", colors: [] }] };
+    const allItems = [baseItem("i2", ["work", "smart-casual"])];
+    const ev = buildCandidateOccasionEvidence([candidate], allItems, "everyday");
+    const piece = ev.get("A")!.pieces[0];
+    assert.strictEqual(piece.occasionStatus, "not-listed");
+    assert.deepStrictEqual(piece.itemOccasions, ["work", "smart-casual"]);
+  });
+
+  it("FA.1.3 — piece with empty occasions array → 'no-metadata'", () => {
+    const candidate: OutfitCandidate = { id: "A", pieces: [{ closetId: "i3", slot: "bag", label: "Bag", colors: [] }] };
+    const allItems = [baseItem("i3", [])];
+    const ev = buildCandidateOccasionEvidence([candidate], allItems, "everyday");
+    assert.strictEqual(ev.get("A")!.pieces[0].occasionStatus, "no-metadata");
+  });
+
+  it("FA.1.4 — piece not in allItems (anchor already excluded) → 'no-metadata'", () => {
+    const candidate: OutfitCandidate = { id: "A", pieces: [{ closetId: "missing", slot: "bottom", label: "Trousers", colors: [] }] };
+    const ev = buildCandidateOccasionEvidence([candidate], [], "everyday");
+    assert.strictEqual(ev.get("A")!.pieces[0].occasionStatus, "no-metadata");
+  });
+
+  it("FA.1.5 — normalized fields: coverage ratio, base+shoe match, optional count", () => {
+    const candidate: OutfitCandidate = {
+      id: "A",
+      pieces: [
+        { closetId: "top", slot: "top", label: "Top", colors: [] },          // base, match
+        { closetId: "blz", slot: "outerwear", label: "Blazer", colors: [] }, // optional, not-listed
+        { closetId: "sho", slot: "shoe", label: "Loafers", colors: [] },     // shoe, match
+      ],
+    };
+    const allItems = [
+      baseItem("top", ["everyday", "work"]),
+      baseItem("blz", ["work", "smart-casual"]),
+      baseItem("sho", ["everyday"]),
+    ];
+    const ev = buildCandidateOccasionEvidence([candidate], allItems, "everyday");
+    const e = ev.get("A")!;
+    // Backward-compat aliases still correct
+    assert.strictEqual(e.occasionScore, 20, "Two matched pieces × 10 = 20");
+    assert.strictEqual(e.nonMatchingPieceCount, 1, "One not-listed piece");
+    // New normalized fields
+    assert.strictEqual(e.knownOccasionPieces, 3, "All 3 pieces have occasion metadata");
+    assert.strictEqual(e.matchingOccasionPieces, 2, "Two pieces match everyday");
+    assert.strictEqual(e.explicitNonMatchCount, 1, "Blazer is not-listed for everyday");
+    assert.ok(Math.abs(e.occasionCoverageRatio - 2 / 3) < 0.001, "Coverage ratio = 2/3");
+    assert.strictEqual(e.baseAndShoeMatchCount, 2, "Top (base) + loafers (shoe) match");
+    assert.strictEqual(e.optionalPieceCount, 1, "Blazer is optional");
+    // Piece roles
+    const topPiece = e.pieces.find((p) => p.closetId === "top");
+    const blzPiece = e.pieces.find((p) => p.closetId === "blz");
+    const shoPiece = e.pieces.find((p) => p.closetId === "sho");
+    assert.strictEqual(topPiece?.pieceRole, "base");
+    assert.strictEqual(blzPiece?.pieceRole, "optional");
+    assert.strictEqual(shoPiece?.pieceRole, "shoe");
+  });
+
+  it("FA.1.6 — builds evidence for all supplied candidates independently", () => {
+    const candidateA: OutfitCandidate = {
+      id: "A",
+      pieces: [
+        { closetId: "top", slot: "top", label: "Top", colors: [] },
+        { closetId: "blz", slot: "outerwear", label: "Blazer", colors: [] },
+      ],
+    };
+    const candidateC: OutfitCandidate = {
+      id: "C",
+      pieces: [{ closetId: "top", slot: "top", label: "Top", colors: [] }],
+    };
+    const allItems = [baseItem("top", ["everyday"]), baseItem("blz", ["work"])];
+    const ev = buildCandidateOccasionEvidence([candidateA, candidateC], allItems, "everyday");
+    // A: top(match)+blazer(not-listed) — 1 known match, 1 explicit non-match, ratio=0.5, optional=1
+    assert.strictEqual(ev.get("A")!.explicitNonMatchCount, 1);
+    assert.ok(Math.abs(ev.get("A")!.occasionCoverageRatio - 0.5) < 0.001);
+    assert.strictEqual(ev.get("A")!.optionalPieceCount, 1);
+    // C: top(match) only — 1 known match, 0 non-match, ratio=1.0, optional=0
+    assert.strictEqual(ev.get("C")!.explicitNonMatchCount, 0);
+    assert.ok(Math.abs(ev.get("C")!.occasionCoverageRatio - 1.0) < 0.001);
+    assert.strictEqual(ev.get("C")!.optionalPieceCount, 0);
+  });
+
+  it("FA.1.7 — no-metadata piece is neutral: does not increase explicitNonMatchCount", () => {
+    const candidate: OutfitCandidate = {
+      id: "A",
+      pieces: [
+        { closetId: "top", slot: "top", label: "Top", colors: [] },         // match
+        { closetId: "unk", slot: "outerwear", label: "Unknown", colors: [] }, // no-metadata
+      ],
+    };
+    const allItems = [
+      baseItem("top", ["everyday"]),
+      baseItem("unk", []),  // empty occasions → no-metadata
+    ];
+    const ev = buildCandidateOccasionEvidence([candidate], allItems, "everyday");
+    const e = ev.get("A")!;
+    assert.strictEqual(e.explicitNonMatchCount, 0, "no-metadata must NOT count as explicit non-match");
+    assert.strictEqual(e.knownOccasionPieces, 1, "Only 1 piece has known occasion metadata");
+    assert.ok(Math.abs(e.occasionCoverageRatio - 1.0) < 0.001, "Coverage ratio uses only known pieces");
+  });
+});
+
+// ── §FA.2 selectOccasionAwareFallback: 4-step normalized ranking ──────────────
+//
+// Step 1: fewer explicitNonMatchCount wins
+// Step 2: higher occasionCoverageRatio wins
+// Step 3: higher baseAndShoeMatchCount wins
+// Step 4: fewer optionalPieceCount wins (no reward for extra optional tagged layer)
+// Step 5: first candidate retained (deterministic)
+
+describe("§FA.2 — selectOccasionAwareFallback: 4-step normalized ranking", () => {
+  type EvidenceOpts = {
+    explicitNonMatchCount: number;
+    occasionCoverageRatio: number;
+    baseAndShoeMatchCount: number;
+    optionalPieceCount: number;
+  };
+
+  const makeEvidence = (id: string, opts: EvidenceOpts): [string, CandidateOccasionEvidence] => [
+    id,
+    {
+      candidateId: id, pieces: [],
+      knownOccasionPieces: 3,
+      matchingOccasionPieces: Math.round(opts.occasionCoverageRatio * 3),
+      explicitNonMatchCount: opts.explicitNonMatchCount,
+      occasionCoverageRatio: opts.occasionCoverageRatio,
+      baseAndShoeMatchCount: opts.baseAndShoeMatchCount,
+      optionalPieceCount: opts.optionalPieceCount,
+      occasionScore: Math.round(opts.occasionCoverageRatio * 3) * 10,  // backward compat
+      nonMatchingPieceCount: opts.explicitNonMatchCount,
+    },
+  ];
+
+  const makeCandidates = (ids: string[]): OutfitCandidate[] =>
+    ids.map((id) => ({ id, pieces: [] }));
+
+  it("FA.2.1 — step 1: fewer explicit non-matches wins", () => {
+    const candidates = makeCandidates(["A", "C"]);
+    const ev = new Map([
+      makeEvidence("A", { explicitNonMatchCount: 1, occasionCoverageRatio: 1.0, baseAndShoeMatchCount: 3, optionalPieceCount: 1 }),
+      makeEvidence("C", { explicitNonMatchCount: 0, occasionCoverageRatio: 1.0, baseAndShoeMatchCount: 3, optionalPieceCount: 0 }),
+    ]);
+    assert.strictEqual(selectOccasionAwareFallback(candidates, ev).id, "C",
+      "C has 0 explicit non-matches vs A's 1 — step 1 selects C");
+  });
+
+  it("FA.2.2 — step 2: higher coverage ratio wins", () => {
+    // A: same nonMatch as C but higher ratio (extra matched optional vs C's non-matching bag)
+    // A: [shirt(m), shoe(m), bag(not), blazer(m)] → nonMatch=1, ratio=3/4=0.75, baseShoe=2, opt=2
+    // C: [shirt(m), shoe(m), bag(not)]            → nonMatch=1, ratio=2/3=0.67, baseShoe=2, opt=1
+    const candidates = makeCandidates(["A", "C"]);
+    const ev = new Map([
+      makeEvidence("A", { explicitNonMatchCount: 1, occasionCoverageRatio: 0.75, baseAndShoeMatchCount: 2, optionalPieceCount: 2 }),
+      makeEvidence("C", { explicitNonMatchCount: 1, occasionCoverageRatio: 0.67, baseAndShoeMatchCount: 2, optionalPieceCount: 1 }),
+    ]);
+    assert.strictEqual(selectOccasionAwareFallback(candidates, ev).id, "A",
+      "A has higher coverage ratio — step 2 selects A (extra matching optional genuinely improves ratio)");
+  });
+
+  it("FA.2.3 — step 3: higher base+shoe match count wins", () => {
+    const candidates = makeCandidates(["A", "C"]);
+    const ev = new Map([
+      makeEvidence("A", { explicitNonMatchCount: 0, occasionCoverageRatio: 1.0, baseAndShoeMatchCount: 3, optionalPieceCount: 1 }),
+      makeEvidence("C", { explicitNonMatchCount: 0, occasionCoverageRatio: 1.0, baseAndShoeMatchCount: 2, optionalPieceCount: 0 }),
+    ]);
+    assert.strictEqual(selectOccasionAwareFallback(candidates, ev).id, "A",
+      "A has 3 base+shoe matches vs C's 2 — step 3 selects A");
+  });
+
+  it("FA.2.4 — step 4: A and C tied on steps 1-3; A has extra optional piece → C wins", () => {
+    // THIS IS THE KEY ANTI-BIAS TEST: even if A's extra optional piece has an occasion match,
+    // if steps 1-3 are tied, C wins because fewer optional pieces is preferred.
+    const candidates = makeCandidates(["A", "C"]);
+    const ev = new Map([
+      makeEvidence("A", { explicitNonMatchCount: 0, occasionCoverageRatio: 1.0, baseAndShoeMatchCount: 2, optionalPieceCount: 1 }),
+      makeEvidence("C", { explicitNonMatchCount: 0, occasionCoverageRatio: 1.0, baseAndShoeMatchCount: 2, optionalPieceCount: 0 }),
+    ]);
+    assert.strictEqual(selectOccasionAwareFallback(candidates, ev).id, "C",
+      "Steps 1-3 tied; A has one extra optional piece — step 4 selects C (no reward for extra tagged layer)");
+  });
+
+  it("FA.2.5 — step 5: all tied → first candidate retained (deterministic)", () => {
+    const candidates = makeCandidates(["A", "C"]);
+    const ev = new Map([
+      makeEvidence("A", { explicitNonMatchCount: 0, occasionCoverageRatio: 1.0, baseAndShoeMatchCount: 2, optionalPieceCount: 0 }),
+      makeEvidence("C", { explicitNonMatchCount: 0, occasionCoverageRatio: 1.0, baseAndShoeMatchCount: 2, optionalPieceCount: 0 }),
+    ]);
+    assert.strictEqual(selectOccasionAwareFallback(candidates, ev).id, "A",
+      "All equal — first candidate retained");
+  });
+
+  it("FA.2.6 — single candidate: returns it regardless", () => {
+    const candidates = makeCandidates(["A"]);
+    const ev = new Map([
+      makeEvidence("A", { explicitNonMatchCount: 1, occasionCoverageRatio: 0.5, baseAndShoeMatchCount: 1, optionalPieceCount: 1 }),
+    ]);
+    assert.strictEqual(selectOccasionAwareFallback(candidates, ev).id, "A");
+  });
+});
+
+// ── §FA.3 Sara: everyday + work-only blazer, model FAILS → fallback = C ──────
+
+describe("§FA.3 — Sara integration: everyday + work-only blazer, model failure → occasion-aware fallback = C", () => {
+  it("FEMALE FIXTURE: model returns null (any failure mode) → deterministic fallback selects C not A", async () => {
+    // Custom blazer: styleTags: ["confident"] → scores +3 for mood match → enters Candidate A
+    // BUT occasions: ["work", "smart-casual"] → "not-listed" for everyday.
+    // Candidate A: anchor + top + blazer + loafers
+    //   - top: everyday match = +10; blazer: no everyday = 0; loafers: everyday match = +10
+    //   - occasionScore = 20, nonMatching = 1 (blazer)
+    // Candidate C: anchor + top + loafers
+    //   - occasionScore = 20, nonMatching = 0
+    // Equal score → tie-break → C wins (fewer non-matching pieces).
+
+    const workOnlyBlazer: ClosetAnchorInput = {
+      type: "closet", id: "f-ow-blazer-fa3", name: "Structured Black Blazer",
+      category: "OUTERWEAR", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null,
+      styleTags: ["confident"],          // matches mood → scores +3 → enters candidate
+      occasions: ["work", "smart-casual"], // NOT everyday → "not-listed" in evidence
+      imageUrl: "",
+    };
+    const fa3Closet = [FEMALE_CLOSET_ITEMS[0], workOnlyBlazer, FEMALE_CLOSET_ITEMS[2]];
+
+    const nullMock: typeof callClaudeForNaiaSelection = async () => null;
+
+    const engineInput = {
+      session: FEMALE_EVERYDAY_SESSION,
+      anchor: {
+        type: "closet" as const,
+        id: "f-anchor-skirt-fa3", name: "Black A-Line Midi Skirt",
+        category: "BOTTOMS", colors: ["black"], primaryColor: "black",
+        pattern: null, material: null, styleTags: ["minimal"],
+        occasions: ["everyday", "work"], imageUrl: "",
+      },
+      mode: "naia" as const,
+      profile: { becoming: ["powerful"] },
+      recentlyShownClosetIds: [],
+    };
+
+    const result = await computeStyleMeResult(
+      engineInput, undefined, undefined, false,
+      async () => fa3Closet, nullMock,
+    );
+
+    const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
+
+    // Blazer must NOT appear — fallback chose C (occasion-aware, not Candidate A by default)
+    assert.ok(
+      !persistedIds.includes("f-ow-blazer-fa3"),
+      `Work-only blazer must not be in fallback result for everyday session; got: ${persistedIds.join(", ")}`,
+    );
+  });
+});
+
+// ── §FA.4 Sara: everyday + everyday-blazer, model FAILS → fallback = C ────────
+// IMPORTANT: Even when the blazer is tagged everyday, the deterministic fallback
+// prefers the edited version (C) when base outfit coverage is equivalent.
+// The live model may still choose A; this is the FAILURE FALLBACK only.
+
+describe("§FA.4 — Sara integration: everyday + everyday-tagged blazer, model failure → fallback = C", () => {
+  it("FEMALE FIXTURE: blazer tagged everyday → base outfits equally covered → fallback prefers edited C", async () => {
+    // Everyday blazer DOES have the occasion tag — so it scores > 0 and enters Candidate A.
+    // BUT: all base + shoe pieces match everyday in BOTH A and C.
+    // A: top(base,match) + loafers(shoe,match) + blazer(opt,match) → ratio=3/3=1.0, nonMatch=0, baseShoe=2, opt=1
+    // C: top(base,match) + loafers(shoe,match)                    → ratio=2/2=1.0, nonMatch=0, baseShoe=2, opt=0
+    // Steps 1-3 all tied → step 4: C wins (fewer optional pieces).
+    // The blazer's everyday tag does NOT automatically make A the better fallback.
+
+    const everydayBlazer: ClosetAnchorInput = {
+      type: "closet", id: "f-ow-blazer-everyday-fa4", name: "Everyday Black Blazer",
+      category: "OUTERWEAR", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null, styleTags: ["confident"],
+      occasions: ["everyday", "work"], imageUrl: "",  // everyday listed → match in evidence
+    };
+    const fa4Closet: ClosetAnchorInput[] = [FEMALE_CLOSET_ITEMS[0], everydayBlazer, FEMALE_CLOSET_ITEMS[2]];
+
+    const nullMock: typeof callClaudeForNaiaSelection = async () => null;
+
+    const engineInput = {
+      session: FEMALE_EVERYDAY_SESSION,
+      anchor: {
+        type: "closet" as const,
+        id: "f-anchor-skirt-fa4", name: "Black Midi Skirt",
+        category: "BOTTOMS", colors: ["black"], primaryColor: "black",
+        pattern: null, material: null, styleTags: ["minimal"],
+        occasions: ["everyday", "work"], imageUrl: "",
+      },
+      mode: "naia" as const,
+      profile: { becoming: ["powerful"] },
+      recentlyShownClosetIds: [],
+    };
+
+    const result = await computeStyleMeResult(
+      engineInput, undefined, undefined, false,
+      async () => fa4Closet, nullMock,
+    );
+
+    const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
+
+    // Blazer must NOT appear — deterministic fallback prefers the edited version (C)
+    // when coverage is equivalent. The live model may choose A for a "powerful" Passport.
+    assert.ok(
+      !persistedIds.includes("f-ow-blazer-everyday-fa4"),
+      `Even an everyday-tagged blazer must not bias the fallback when base coverage is equivalent; got: ${persistedIds.join(", ")}`,
+    );
+  });
+});
+
+// ── §FA.5 Sara: work/polished + work-matching blazer, model FAILS → fallback = C ──
+// Even for a work session where the blazer's work occasion tag matches:
+// If all base + shoe pieces also match (top=work, loafers=work), the base outfit is already
+// fully work-covered. Steps 1-3 are tied → step 4: C wins (fewer optional pieces).
+// The live model may legitimately choose A for work/polished; this is the FAILURE FALLBACK.
+
+describe("§FA.5 — Sara integration: work/polished + work-matching blazer, model failure → fallback = C", () => {
+  it("FEMALE FIXTURE: work session + blazer matches work → base already fully covered → fallback = C", async () => {
+    // FEMALE_CLOSET_ITEMS for work session:
+    //   top (everyday,work) → work → match (base)
+    //   blazer (work,smart-casual) → work → match (optional)
+    //   loafers (everyday,work) → work → match (shoe)
+    // A: nonMatch=0, ratio=3/3=1.0, baseShoe=2, optional=1
+    // C: nonMatch=0, ratio=2/2=1.0, baseShoe=2, optional=0
+    // Steps 1-3 tied → step 4: C wins.
+
+    const workSession = { ...FEMALE_EVERYDAY_SESSION, occasion: "work", formalityConditional: "formality-polished" };
+    const nullMock: typeof callClaudeForNaiaSelection = async () => null;
+
+    const engineInput = {
+      session: workSession,
+      anchor: {
+        type: "closet" as const,
+        id: "f-anchor-skirt-fa5", name: "Black Midi Skirt",
+        category: "BOTTOMS", colors: ["black"], primaryColor: "black",
+        pattern: null, material: null, styleTags: ["minimal"],
+        occasions: ["work", "everyday"], imageUrl: "",
+      },
+      mode: "naia" as const,
+      profile: { becoming: ["powerful"] },
+      recentlyShownClosetIds: [],
+    };
+
+    const result = await computeStyleMeResult(
+      engineInput, undefined, undefined, false,
+      async () => FEMALE_CLOSET_ITEMS, nullMock,
+    );
+
+    const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
+
+    // Blazer must NOT appear — base outfit is fully work-covered without it.
+    // The live model may choose A; the deterministic fallback prefers the edited version.
+    assert.ok(
+      !persistedIds.includes("f-ow-blazer"),
+      `Work blazer must not bias fallback when base+shoe are already work-covered; got: ${persistedIds.join(", ")}`,
+    );
+  });
+});
+
+// ── §FA.6 Omar: everyday + work-only jacket, model FAILS → fallback = C ───────
+
+describe("§FA.6 — Omar integration: everyday + work-only jacket, model failure → fallback = C", () => {
+  it("MALE FIXTURE: jacket occasions = [smart-casual, work], everyday session → C is fallback", async () => {
+    // Custom jacket: styleTags: ["confident"] → scores +3 for mood → enters Candidate A
+    // BUT occasions: ["smart-casual", "work"] → NOT everyday → "not-listed" in evidence.
+    // A: shirt(10) + jacket(0) + loafers(10) = 20, nonMatching 1
+    // C: shirt(10) + loafers(10) = 20, nonMatching 0
+    // Equal score → tie-break → C wins.
+
+    const workOnlyJacket: ClosetAnchorInput = {
+      type: "closet", id: "m-ow-jacket-fa6", name: "Navy Sport Jacket",
+      category: "OUTERWEAR", colors: ["navy"], primaryColor: "navy",
+      pattern: null, material: null,
+      styleTags: ["confident"],            // matches mood → enters candidate
+      occasions: ["smart-casual", "work"], // NOT everyday → not-listed
+      imageUrl: "",
+    };
+    const fa6Closet = [MALE_CLOSET_ITEMS[0], workOnlyJacket, MALE_CLOSET_ITEMS[2]];
+
+    const nullMock: typeof callClaudeForNaiaSelection = async () => null;
+
+    const engineInput = {
+      session: MALE_EVERYDAY_SESSION,
+      anchor: {
+        type: "closet" as const,
+        id: "m-anchor-chinos", name: "Slim Fit Navy Chinos",
+        category: "BOTTOMS", colors: ["navy"], primaryColor: "navy",
+        pattern: null, material: null, styleTags: ["classic", "smart-casual"],
+        occasions: ["everyday", "smart-casual"], imageUrl: "",
+      },
+      mode: "naia" as const,
+      profile: { becoming: ["powerful"] },
+      recentlyShownClosetIds: [],
+    };
+
+    const result = await computeStyleMeResult(
+      engineInput, undefined, undefined, false,
+      async () => fa6Closet, nullMock,
+    );
+
+    const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
+
+    assert.ok(
+      !persistedIds.includes("m-ow-jacket-fa6"),
+      `Work/smart-casual-only jacket must not be fallback for everyday session; got: ${persistedIds.join(", ")}`,
+    );
+  });
+});
+
+// ── §FA.7 Omar: smart-casual + matching jacket, model FAILS → fallback = C ───
+// Even for a smart-casual session where the jacket's occasions match:
+// shirt=smart-casual, loafers=smart-casual, jacket=smart-casual → all match.
+// Steps 1-3 tied → step 4: C wins (fewer optional pieces).
+// The live model may legitimately choose A; this is the FAILURE FALLBACK.
+
+describe("§FA.7 — Omar integration: smart-casual + matching jacket, model failure → fallback = C", () => {
+  it("MALE FIXTURE: jacket matches smart-casual → base already covered → deterministic fallback = C", async () => {
+    // MALE_CLOSET_ITEMS for smart-casual session:
+    //   shirt (everyday, smart-casual) → smart-casual → match (base)
+    //   jacket (smart-casual, work) → smart-casual → match (optional)
+    //   loafers (everyday, smart-casual) → smart-casual → match (shoe)
+    // A: nonMatch=0, ratio=3/3=1.0, baseShoe=2, optional=1
+    // C: nonMatch=0, ratio=2/2=1.0, baseShoe=2, optional=0
+    // Steps 1-3 tied → step 4: C wins.
+
+    const smartCasualSession = { ...MALE_EVERYDAY_SESSION, occasion: "smart-casual", formalityConditional: null as string | null };
+    const nullMock: typeof callClaudeForNaiaSelection = async () => null;
+
+    const engineInput = {
+      session: smartCasualSession,
+      anchor: {
+        type: "closet" as const,
+        id: "m-anchor-chinos", name: "Slim Fit Navy Chinos",
+        category: "BOTTOMS", colors: ["navy"], primaryColor: "navy",
+        pattern: null, material: null, styleTags: ["classic", "smart-casual"],
+        occasions: ["everyday", "smart-casual"], imageUrl: "",
+      },
+      mode: "naia" as const,
+      profile: { becoming: ["powerful"] },
+      recentlyShownClosetIds: [],
+    };
+
+    const result = await computeStyleMeResult(
+      engineInput, undefined, undefined, false,
+      async () => MALE_CLOSET_ITEMS, nullMock,
+    );
+
+    const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
+
+    // Jacket must NOT appear — base outfit already fully covered for smart-casual.
+    // The live model may choose A; the deterministic fallback prefers the edited version.
+    assert.ok(
+      !persistedIds.includes("m-ow-jacket"),
+      `Smart-casual jacket must not bias fallback when base+shoe already covered; got: ${persistedIds.join(", ")}`,
+    );
+  });
+});
+
+// ── §FA.8 Fix B: occasion evidence payload received by model ─────────────────
+
+describe("§FA.8 — Fix B: occasion evidence is passed into the model selection call", () => {
+  // Uses same custom blazer as FA.3: styleTags:["confident"] → enters candidate, but occasions:["work","smart-casual"]
+  const FA8_WORK_ONLY_BLAZER: ClosetAnchorInput = {
+    type: "closet", id: "f-ow-blazer-fa8", name: "Structured Black Blazer",
+    category: "OUTERWEAR", colors: ["black"], primaryColor: "black",
+    pattern: null, material: null,
+    styleTags: ["confident"],           // mood match → scores +3 → enters candidate
+    occasions: ["work", "smart-casual"], // NOT everyday → "not-listed" in evidence
+    imageUrl: "",
+  };
+
+  it("FEMALE FIXTURE: work-only blazer → model receives 'not-listed' occasion status for the blazer piece", async () => {
+    let capturedEvidence: Map<string, CandidateOccasionEvidence> | undefined;
+
+    const capturingMock: typeof callClaudeForNaiaSelection = async (candidates, session, profile, evidence) => {
+      capturedEvidence = evidence;
+      return null; // not testing model success here
+    };
+
+    const fa8Closet = [FEMALE_CLOSET_ITEMS[0], FA8_WORK_ONLY_BLAZER, FEMALE_CLOSET_ITEMS[2]];
+
+    const engineInput = {
+      session: FEMALE_EVERYDAY_SESSION,
+      anchor: {
+        type: "closet" as const,
+        id: "f-anchor-skirt-fa8", name: "Black Midi Skirt",
+        category: "BOTTOMS", colors: ["black"], primaryColor: "black",
+        pattern: null, material: null, styleTags: ["minimal"],
+        occasions: ["everyday", "work"], imageUrl: "",
+      },
+      mode: "naia" as const,
+      profile: null,
+      recentlyShownClosetIds: [],
+    };
+
+    await computeStyleMeResult(
+      engineInput, undefined, undefined, false,
+      async () => fa8Closet, capturingMock,
+    );
+
+    assert.ok(capturedEvidence, "Evidence map must be passed to the selection call");
+
+    // Find the candidate that includes the work-only blazer
+    let blazerPieceEvidence: { occasionStatus: string; itemOccasions: string[] } | undefined;
+    for (const [, ev] of capturedEvidence) {
+      const blazerPiece = ev.pieces.find((p) => p.closetId === "f-ow-blazer-fa8");
+      if (blazerPiece) { blazerPieceEvidence = blazerPiece; break; }
+    }
+
+    assert.ok(blazerPieceEvidence, "Evidence for the blazer piece must be present in at least one candidate");
+    assert.strictEqual(
+      blazerPieceEvidence.occasionStatus,
+      "not-listed",
+      "Work-only blazer must have occasionStatus 'not-listed' for everyday session",
+    );
+    assert.deepStrictEqual(
+      blazerPieceEvidence.itemOccasions,
+      ["work", "smart-casual"],
+      "Evidence must carry the actual occasions from the closet item",
+    );
+  });
+
+  it("FEMALE FIXTURE: everyday-tagged top → model receives 'match' occasion status for the top piece", async () => {
+    let capturedEvidence: Map<string, CandidateOccasionEvidence> | undefined;
+    const capturingMock: typeof callClaudeForNaiaSelection = async (candidates, session, profile, evidence) => {
+      capturedEvidence = evidence;
+      return null;
+    };
+
+    const fa8bCloset = [FEMALE_CLOSET_ITEMS[0], FA8_WORK_ONLY_BLAZER, FEMALE_CLOSET_ITEMS[2]];
+
+    const engineInput = {
+      session: FEMALE_EVERYDAY_SESSION,
+      anchor: {
+        type: "closet" as const,
+        id: "f-anchor-skirt-fa8b", name: "Black Midi Skirt",
+        category: "BOTTOMS", colors: ["black"], primaryColor: "black",
+        pattern: null, material: null, styleTags: ["minimal"],
+        occasions: ["everyday", "work"], imageUrl: "",
+      },
+      mode: "naia" as const,
+      profile: null,
+      recentlyShownClosetIds: [],
+    };
+
+    await computeStyleMeResult(
+      engineInput, undefined, undefined, false,
+      async () => fa8bCloset, capturingMock,
+    );
+
+    assert.ok(capturedEvidence, "Evidence map must be passed");
+    let topPieceEvidence: { occasionStatus: string } | undefined;
+    for (const [, ev] of capturedEvidence) {
+      const topPiece = ev.pieces.find((p) => p.closetId === "f-top-white");
+      if (topPiece) { topPieceEvidence = topPiece; break; }
+    }
+    assert.ok(topPieceEvidence, "Evidence for top must be present in at least one candidate");
+    assert.strictEqual(topPieceEvidence.occasionStatus, "match", "Everyday-tagged top must have 'match' status");
+  });
+});
+
+// ── §FA.NEW.1 A legitimately wins via coverage ratio (step 2) ────────────────
+// When C has an explicit non-matching optional piece and A compensates with a matched one,
+// A's coverage ratio improves relative to C → A wins on step 2.
+
+describe("§FA.NEW.1 — A legitimately wins: extra matching optional improves coverage ratio over C", () => {
+  it("FEMALE FIXTURE: C has non-matching bag; A replaces nothing but includes occasion-matched blazer → A wins", async () => {
+    // Scenario:
+    //   base closet for both A and C: top(everyday→match), loafers(everyday→match), bag(not-listed)
+    //   A additionally has: blazer(everyday→match, optional)
+    //
+    // A: top(base,m), loafers(shoe,m), bag(opt,not-listed), blazer(opt,m)
+    //    known=4, matching=3, nonMatch=1, ratio=3/4=0.75, baseShoe=2, opt=2
+    // C: top(base,m), loafers(shoe,m), bag(opt,not-listed)
+    //    known=3, matching=2, nonMatch=1, ratio=2/3≈0.67, baseShoe=2, opt=1
+    //
+    // Step 1: tie (1 non-match each — the bag)
+    // Step 2: A ratio 0.75 > C ratio 0.67 → A wins legitimately
+    //
+    // "Real additional session evidence": blazer's match genuinely offsets the bag's non-match
+    // in A's ratio, giving A an evidence advantage over C.
+
+    // Bag: styleTags:["confident"] → +3 mood score → enters candidate (score > 0)
+    // BUT occasions:["work","smart-casual"] → NOT everyday → explicit non-match in both A and C
+    const notListedBag: ClosetAnchorInput = {
+      type: "closet", id: "f-bag-fn1", name: "Leather Tote",
+      category: "BAGS", colors: ["tan"], primaryColor: "tan",
+      pattern: null, material: null, styleTags: ["confident"],
+      occasions: ["work", "smart-casual"],  // NOT everyday → not-listed in both A and C
+      imageUrl: "",
+    };
+    // Blazer: styleTags:["confident"] → enters candidate AND occasions:["everyday"] → match
+    const everydayBlazer: ClosetAnchorInput = {
+      type: "closet", id: "f-ow-blazer-fn1", name: "Everyday Blazer",
+      category: "OUTERWEAR", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null, styleTags: ["confident"],
+      occasions: ["everyday", "work"],      // everyday → match
+      imageUrl: "",
+    };
+    const fn1Closet = [FEMALE_CLOSET_ITEMS[0], everydayBlazer, FEMALE_CLOSET_ITEMS[2], notListedBag];
+
+    const nullMock: typeof callClaudeForNaiaSelection = async () => null;
+
+    const engineInput = {
+      session: FEMALE_EVERYDAY_SESSION,
+      anchor: {
+        type: "closet" as const,
+        id: "f-anchor-skirt-fn1", name: "Black Midi Skirt",
+        category: "BOTTOMS", colors: ["black"], primaryColor: "black",
+        pattern: null, material: null, styleTags: ["minimal"],
+        occasions: ["everyday", "work"], imageUrl: "",
+      },
+      mode: "naia" as const,
+      profile: null,
+      recentlyShownClosetIds: [],
+    };
+
+    const result = await computeStyleMeResult(
+      engineInput, undefined, undefined, false,
+      async () => fn1Closet, nullMock,
+    );
+
+    const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
+
+    // A should win: blazer's match compensates for the bag's non-match, improving coverage ratio
+    assert.ok(
+      persistedIds.includes("f-ow-blazer-fn1"),
+      `Blazer must appear when it genuinely improves coverage ratio over C (bag is non-match in both); got: ${persistedIds.join(", ")}`,
+    );
+  });
+});
+
+// ── §FA.NEW.2 No-metadata is neutral: does not hurt A in step 1 ──────────────
+
+describe("§FA.NEW.2 — No-metadata optional layer is neutral: same fallback outcome as if absent", () => {
+  it("FEMALE FIXTURE: optional layer with no occasions metadata → fallback = C (tie-break only, not mismatch)", async () => {
+    // Blazer has EMPTY occasions array → "no-metadata" → neutral (NOT explicit non-match).
+    // A: top(base,m), loafers(shoe,m), blazer(opt,no-metadata)
+    //    known=2 (top+loafers), matching=2, nonMatch=0, ratio=1.0, baseShoe=2, opt=1
+    // C: top(base,m), loafers(shoe,m)
+    //    known=2, matching=2, nonMatch=0, ratio=1.0, baseShoe=2, opt=0
+    // Steps 1-3 tied → step 4: C wins (fewer optional pieces).
+    // Key point: A is NOT penalised for the no-metadata blazer — it's neutral, not a mismatch.
+
+    const noMetaBlazer: ClosetAnchorInput = {
+      type: "closet", id: "f-ow-blazer-fn2", name: "Unknown Blazer",
+      category: "OUTERWEAR", colors: ["grey"], primaryColor: "grey",
+      pattern: null, material: null, styleTags: ["confident"],
+      occasions: [],  // empty → no-metadata → neutral
+      imageUrl: "",
+    };
+    const fn2Closet = [FEMALE_CLOSET_ITEMS[0], noMetaBlazer, FEMALE_CLOSET_ITEMS[2]];
+
+    const nullMock: typeof callClaudeForNaiaSelection = async () => null;
+
+    const engineInput = {
+      session: FEMALE_EVERYDAY_SESSION,
+      anchor: {
+        type: "closet" as const,
+        id: "f-anchor-skirt-fn2", name: "Black Midi Skirt",
+        category: "BOTTOMS", colors: ["black"], primaryColor: "black",
+        pattern: null, material: null, styleTags: ["minimal"],
+        occasions: ["everyday", "work"], imageUrl: "",
+      },
+      mode: "naia" as const,
+      profile: null,
+      recentlyShownClosetIds: [],
+    };
+
+    const result = await computeStyleMeResult(
+      engineInput, undefined, undefined, false,
+      async () => fn2Closet, nullMock,
+    );
+
+    const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
+
+    // C wins the tie — but NOT because no-metadata blazer harmed A.
+    // If A had a blazer with explicit non-match instead, A would have lost on step 1.
+    // Here it's a clean tie-break resolved by step 4.
+    assert.ok(
+      !persistedIds.includes("f-ow-blazer-fn2"),
+      `No-metadata blazer should not appear (C wins tie-break, step 4); got: ${persistedIds.join(", ")}`,
+    );
+  });
+});
+
+// ── §FA.9 Tie-break: equal occasion scores, more-edited candidate preferred ──
+
+describe("§FA.9 — Tie-break: equal scores, candidate with fewer non-matching pieces wins", () => {
+  it("A and C identical score; A has one non-matching outerwear piece; C does not → C is fallback", async () => {
+    // Custom blazer: styleTags: ["confident"] → scores +3 for mood → enters Candidate A
+    // BUT occasions: ["work"] only → "not-listed" for everyday session.
+    // A: top(10) + blazer(0 occasion) + loafers(10) = 20, nonMatching 1 (blazer)
+    // C: top(10) + loafers(10) = 20,                      nonMatching 0
+    // Equal score → tie-break → C wins (A's extra piece adds no occasion evidence).
+
+    const tieBreakBlazer: ClosetAnchorInput = {
+      type: "closet", id: "f-ow-blazer-fa9", name: "Work Blazer",
+      category: "OUTERWEAR", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null,
+      styleTags: ["confident"],  // mood match → enters candidate (+3)
+      occasions: ["work"],       // NOT everyday → not-listed in evidence
+      imageUrl: "",
+    };
+    const fa9Closet = [FEMALE_CLOSET_ITEMS[0], tieBreakBlazer, FEMALE_CLOSET_ITEMS[2]];
+
+    const nullMock: typeof callClaudeForNaiaSelection = async () => null;
+
+    const engineInput = {
+      session: FEMALE_EVERYDAY_SESSION,
+      anchor: {
+        type: "closet" as const,
+        id: "f-anchor-fa9", name: "Black Midi Skirt",
+        category: "BOTTOMS", colors: ["black"], primaryColor: "black",
+        pattern: null, material: null, styleTags: ["minimal"],
+        occasions: ["everyday", "work"], imageUrl: "",
+      },
+      mode: "naia" as const,
+      profile: null,
+      recentlyShownClosetIds: [],
+    };
+
+    const result = await computeStyleMeResult(
+      engineInput, undefined, undefined, false,
+      async () => fa9Closet, nullMock,
+    );
+
+    const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
+
+    assert.ok(
+      !persistedIds.includes("f-ow-blazer-fa9"),
+      `Work-only blazer must not appear in tie-break fallback result; got: ${persistedIds.join(", ")}`,
+    );
   });
 });

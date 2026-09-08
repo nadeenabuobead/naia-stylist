@@ -820,10 +820,182 @@ async function callClaudeForWording(
   }
 }
 
+// ── nAia candidate occasion evidence ─────────────────────────────────────────
+// Per-piece and per-candidate occasion fit computed from Closet item metadata.
+// Used for (a) factual model context in the selection prompt, (b) occasion-aware
+// fallback selection, and (c) staging diagnostics.
+// Limitation: formality signals (formalityConditional) are not currently stored
+// in item occasions arrays and therefore do not contribute to occasionScore.
+
+type PieceOccasionStatus =
+  | "match"        // item.occasions includes session.occasion
+  | "not-listed"   // item.occasions is non-empty but does not include session.occasion
+  | "no-metadata"; // item.occasions is empty — treated as neutral, NOT as a mismatch
+
+// Structural role of a piece: affects how it is weighted in the fallback comparison.
+// base  = core clothing that defines the outfit (top, bottom, dress, set)
+// shoe  = footwear
+// optional = discretionary layers and accessories (outerwear, bag, accessory, jewelry)
+export type PieceRole = "base" | "shoe" | "optional";
+
+const BASE_CLOTHING_SLOTS = new Set(["top", "bottom", "dress", "set"]);
+const SHOE_SLOTS = new Set(["shoe"]);
+
+function getPieceRole(slot: string): PieceRole {
+  if (BASE_CLOTHING_SLOTS.has(slot)) return "base";
+  if (SHOE_SLOTS.has(slot)) return "shoe";
+  return "optional";
+}
+
+interface CandidatePieceEvidence {
+  closetId: string;
+  slot: string;
+  label: string | null;
+  itemOccasions: string[];
+  occasionStatus: PieceOccasionStatus;
+  pieceRole: PieceRole;
+}
+
+export interface CandidateOccasionEvidence {
+  candidateId: string;
+  pieces: CandidatePieceEvidence[];
+  // ── Normalized comparison fields (Fix A revised formula) ──────────────────
+  /** Pieces with a non-empty occasions array (known metadata). */
+  knownOccasionPieces: number;
+  /** Pieces where occasionStatus === "match". */
+  matchingOccasionPieces: number;
+  /** Pieces where occasionStatus === "not-listed" (explicit non-match). "no-metadata" is neutral. */
+  explicitNonMatchCount: number;
+  /** matchingOccasionPieces / knownOccasionPieces; 1.0 when no pieces have known metadata. */
+  occasionCoverageRatio: number;
+  /** Base clothing and shoe pieces where occasionStatus === "match". */
+  baseAndShoeMatchCount: number;
+  /** Count of outerwear, bag, accessory, and jewelry pieces. */
+  optionalPieceCount: number;
+  // ── Backward-compat aliases (kept for reference, not used in ranking) ─────
+  /** @deprecated Use matchingOccasionPieces * 10 for display; not used in ranking. */
+  occasionScore: number;
+  /** @deprecated Alias for explicitNonMatchCount. */
+  nonMatchingPieceCount: number;
+}
+
+export function buildCandidateOccasionEvidence(
+  candidates: OutfitCandidate[],
+  allItems: ClosetAnchorInput[],
+  occasion: string,
+): Map<string, CandidateOccasionEvidence> {
+  const itemMap = new Map(allItems.map((i) => [i.id, i]));
+  const result = new Map<string, CandidateOccasionEvidence>();
+
+  for (const candidate of candidates) {
+    const pieces: CandidatePieceEvidence[] = candidate.pieces.map((p) => {
+      const item = itemMap.get(p.closetId);
+      const itemOccasions: string[] = item?.occasions ?? [];
+      const occasionStatus: PieceOccasionStatus =
+        itemOccasions.length === 0
+          ? "no-metadata"
+          : itemOccasions.includes(occasion)
+            ? "match"
+            : "not-listed";
+      const pieceRole = getPieceRole(p.slot as string);
+      return { closetId: p.closetId, slot: p.slot as string, label: p.label, itemOccasions, occasionStatus, pieceRole };
+    });
+
+    const knownOccasionPieces = pieces.filter((pe) => pe.itemOccasions.length > 0).length;
+    const matchingOccasionPieces = pieces.filter((pe) => pe.occasionStatus === "match").length;
+    const explicitNonMatchCount = pieces.filter((pe) => pe.occasionStatus === "not-listed").length;
+    const occasionCoverageRatio = knownOccasionPieces === 0 ? 1.0 : matchingOccasionPieces / knownOccasionPieces;
+    const baseAndShoeMatchCount = pieces.filter(
+      (pe) => pe.occasionStatus === "match" && (pe.pieceRole === "base" || pe.pieceRole === "shoe"),
+    ).length;
+    const optionalPieceCount = pieces.filter((pe) => pe.pieceRole === "optional").length;
+
+    result.set(candidate.id, {
+      candidateId: candidate.id,
+      pieces,
+      knownOccasionPieces,
+      matchingOccasionPieces,
+      explicitNonMatchCount,
+      occasionCoverageRatio,
+      baseAndShoeMatchCount,
+      optionalPieceCount,
+      occasionScore: matchingOccasionPieces * 10,      // backward compat
+      nonMatchingPieceCount: explicitNonMatchCount,     // backward compat
+    });
+  }
+  return result;
+}
+
+// Deterministic fallback — selects the candidate with the best occasion quality
+// using a normalized comparison. Never defaults unconditionally to the first candidate.
+//
+// Ranking formula (each step is a tiebreaker for the previous):
+// 1. Fewer explicit non-matches (piece.occasions exists but excludes session.occasion).
+//    "no-metadata" is neutral — it does NOT count as a mismatch.
+// 2. Higher occasion coverage ratio (matching / known; 1.0 when no known metadata).
+//    An extra matched optional piece only improves the ratio if it offsets another mismatch.
+// 3. Higher base+shoe match count (core garment occasion fit outweighs discretionary layers).
+// 4. Fewer optional pieces (don't reward adding an extra outerwear/bag that happens to be tagged;
+//    an extra matched optional in an otherwise tied outfit is not additional evidence).
+// 5. First candidate retained (deterministic).
+export function selectOccasionAwareFallback(
+  candidates: OutfitCandidate[],
+  evidenceMap: Map<string, CandidateOccasionEvidence>,
+): OutfitCandidate {
+  return candidates.reduce((best, c) => {
+    const eC = evidenceMap.get(c.id);
+    const eBest = evidenceMap.get(best.id);
+    if (!eC) return best;
+    if (!eBest) return c;
+    // 1. Fewer explicit non-matches wins
+    if (eC.explicitNonMatchCount < eBest.explicitNonMatchCount) return c;
+    if (eC.explicitNonMatchCount > eBest.explicitNonMatchCount) return best;
+    // 2. Higher coverage ratio wins (×1000 to avoid float precision edge cases)
+    const cRatio = Math.round(eC.occasionCoverageRatio * 1000);
+    const bRatio = Math.round(eBest.occasionCoverageRatio * 1000);
+    if (cRatio > bRatio) return c;
+    if (cRatio < bRatio) return best;
+    // 3. Higher base+shoe match count wins
+    if (eC.baseAndShoeMatchCount > eBest.baseAndShoeMatchCount) return c;
+    if (eC.baseAndShoeMatchCount < eBest.baseAndShoeMatchCount) return best;
+    // 4. Fewer optional pieces wins (no implicit reward for extra optional layer with an occasion tag)
+    if (eC.optionalPieceCount < eBest.optionalPieceCount) return c;
+    return best; // 5. First candidate retained
+  }, candidates[0]);
+}
+
+// Staging-only: logs normalized selection evidence without altering the selection path.
+// No-op on production.
+function logNaiaSelectionDiag(data: {
+  sessionOccasion: string;
+  formalityConditional: string | null;
+  candidateCount: number;
+  evidenceSummary: Array<{
+    id: string;
+    knownOccasionPieces: number;
+    matchingOccasionPieces: number;
+    explicitNonMatches: number;
+    occasionCoverageRatio: number;
+    baseAndShoeMatchCount: number;
+    optionalPieceCount: number;
+    deterministicFallbackRank: string;
+    pieces: Array<{ slot: string; pieceRole: string; label: string | null; occasionStatus: string }>;
+  }>;
+  modelCallAttempted: boolean;
+  modelReturnedId?: string | null;
+  modelValidationPassed?: boolean;
+  fallbackUsed: boolean;
+  fallbackReason?: string;
+  finalCandidateId: string;
+}): void {
+  if (process.env.VERCEL_ENV === "production") return;
+  console.log("[nAia-selection-diag]", JSON.stringify(data));
+}
+
 // ── nAia candidate selection Claude call ─────────────────────────────────────
 // Single Claude call that selects the best outfit candidate AND generates all
 // outfit wording plus per-piece notes. No second AI round trip.
-// Returns null on failure; caller falls back to Candidate A + deterministic wording.
+// Returns null on failure; caller uses selectOccasionAwareFallback.
 
 interface NaiaSelectionResponse {
   selectedCandidate: string;
@@ -838,6 +1010,7 @@ export async function callClaudeForNaiaSelection(
   candidates: OutfitCandidate[],
   session: StyleMeSessionInput,
   profile?: StyleMeProfileSignals | null,
+  occasionEvidence?: Map<string, CandidateOccasionEvidence>,
 ): Promise<{
   candidate: OutfitCandidate;
   wording: StyleMeWording;
@@ -866,10 +1039,26 @@ export async function callClaudeForNaiaSelection(
 
   const candidateDescs = candidates
     .map((c) => {
-      const lines = c.pieces.map(
-        (p) =>
-          `  - ${p.label ?? p.slot} (${p.slot})${p.colors[0] ? `, ${p.colors[0]}` : ""} [id:${p.closetId}]`,
-      );
+      const evidence = occasionEvidence?.get(c.id);
+      const lines = c.pieces.map((p) => {
+        const pe = evidence?.pieces.find((e) => e.closetId === p.closetId);
+        const roleTag = pe ? `, ${pe.pieceRole}` : "";
+        const base = `  - ${p.label ?? p.slot} (${p.slot}${roleTag})${p.colors[0] ? `, ${p.colors[0]}` : ""} [id:${p.closetId}]`;
+        if (!pe) return base;
+        const occNote =
+          pe.occasionStatus === "match"
+            ? ` | today's ${session.occasion}: listed`
+            : pe.occasionStatus === "not-listed"
+              ? ` | today's ${session.occasion}: not listed (on record: ${pe.itemOccasions.join(", ")})`
+              : ` | today's ${session.occasion}: no occasion metadata`;
+        return base + occNote;
+      });
+      if (evidence) {
+        lines.push(
+          `  Occasion evidence for ${session.occasion}: ${evidence.matchingOccasionPieces} of ${evidence.knownOccasionPieces} pieces with known metadata listed` +
+          ` (coverage ${Math.round(evidence.occasionCoverageRatio * 100)}%; ${evidence.explicitNonMatchCount} explicit non-match${evidence.explicitNonMatchCount !== 1 ? "es" : ""}).`,
+        );
+      }
       return `Candidate ${c.id}:\n${lines.join("\n")}`;
     })
     .join("\n\n");
@@ -2252,20 +2441,71 @@ export async function computeStyleMeResult(
       // No new combination available — keep previous outfit visible; no model call.
       sameCombination = true;
     } else {
+      // Build per-piece occasion evidence from Closet metadata.
+      // Used for factual model context, occasion-aware fallback, and staging diagnostics.
+      const occasionEvidence = buildCandidateOccasionEvidence(
+        filteredCandidates,
+        allItems,
+        session.occasion,
+      );
+
       // Single selection-and-wording call only. No second AI round trip on failure.
-      const naiaResult = await _callNaiaSelection(filteredCandidates, session, engineInput.profile);
+      const naiaResult = await _callNaiaSelection(
+        filteredCandidates,
+        session,
+        engineInput.profile,
+        occasionEvidence,
+      );
 
-      // Validate chosen candidate; null → deterministic fallback to first filtered candidate.
-      const finalCandidate = naiaResult?.candidate ?? filteredCandidates[0];
+      // Determine final candidate: model selection or occasion-aware fallback.
+      // The fallback uses whole-outfit occasion score (not always candidate A).
+      let finalCandidate: OutfitCandidate;
+      let fallbackUsed: boolean;
+      let fallbackReason: string | undefined;
 
-      if (naiaResult && finalCandidate.id === naiaResult.candidate.id) {
+      if (naiaResult) {
+        finalCandidate = naiaResult.candidate;
+        fallbackUsed = false;
         naiaWordingOverride = naiaResult.wording;
         closetAnchorNote = naiaResult.perPieceNotes.get(anchorId) ?? null;
         setPieces(finalCandidate, naiaResult.perPieceNotes);
       } else {
-        // Claude failed — deterministic fallback; no wording override.
+        // Model call failed, timed out, or returned an invalid response.
+        // Fallback: candidate with highest whole-outfit occasion score.
+        // Tie-break: prefer fewer non-matching pieces (more-edited look).
+        fallbackUsed = true;
+        fallbackReason = "model-call-failed-or-invalid";
+        finalCandidate = selectOccasionAwareFallback(filteredCandidates, occasionEvidence);
         setPieces(finalCandidate, undefined);
       }
+
+      logNaiaSelectionDiag({
+        sessionOccasion: session.occasion,
+        formalityConditional: session.formalityConditional ?? null,
+        candidateCount: filteredCandidates.length,
+        evidenceSummary: filteredCandidates.map((c) => {
+          const e = occasionEvidence.get(c.id)!;
+          return {
+            id: c.id,
+            knownOccasionPieces: e.knownOccasionPieces,
+            matchingOccasionPieces: e.matchingOccasionPieces,
+            explicitNonMatches: e.explicitNonMatchCount,
+            occasionCoverageRatio: Math.round(e.occasionCoverageRatio * 100) / 100,
+            baseAndShoeMatchCount: e.baseAndShoeMatchCount,
+            optionalPieceCount: e.optionalPieceCount,
+            deterministicFallbackRank: c.id === finalCandidate.id ? "selected" : "not-selected",
+            pieces: e.pieces.map((p) => ({
+              slot: p.slot, pieceRole: p.pieceRole, label: p.label, occasionStatus: p.occasionStatus,
+            })),
+          };
+        }),
+        modelCallAttempted: true,
+        modelReturnedId: naiaResult?.candidate.id ?? null,
+        modelValidationPassed: naiaResult ? true : undefined,
+        fallbackUsed,
+        fallbackReason,
+        finalCandidateId: finalCandidate.id,
+      });
     }
   } else if (getClosetItems) {
     // NADINE mode (or nAia mode without a closet anchor): standard garment scan.
