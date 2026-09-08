@@ -1,6 +1,5 @@
 import { createHash, randomBytes } from "crypto";
 import prisma from "../db.server";
-import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import { emitClosetItemAdded, recordJourneyEvent } from "../lib/ai/journey-events.server";
 import { extractStyleMeEvidence, extractPostWearEvidence, extractClosetEvidence, extractBuySkipEvidence } from "../lib/ai/taste-extraction.server";
 import { writeSourceEvidence, reconcileObservations } from "../lib/ai/taste-reconcile.server";
@@ -35,21 +34,6 @@ export async function loader({ request }) {
   }
 
   const url = new URL(request.url);
-
-  // ── myStatus (GET) — no secret needed, reads caller's own session ─────────
-  // Visit /api/seed-staging?_action=myStatus while logged in to see your
-  // shopifyCustomerId, email, and membershipStatus.
-  if (url.searchParams.get("_action") === "myStatus") {
-    const customer = await getCurrentNaiaCustomer(request);
-    if (!customer) return Response.json({ error: "not authenticated" }, { status: 401 });
-    return Response.json({
-      id: customer.id,
-      shopifyCustomerId: customer.shopifyCustomerId,
-      email: customer.email,
-      membershipStatus: customer.membershipStatus,
-    });
-  }
-
   const secret = url.searchParams.get("secret");
   if (!process.env.STAGING_SEED_SECRET || secret !== process.env.STAGING_SEED_SECRET) {
     return new Response("Forbidden", { status: 403 });
