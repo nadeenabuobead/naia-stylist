@@ -404,12 +404,14 @@ export async function action({ request }: ActionFunctionArgs) {
     if (suitability.status === "NEEDS_CLARIFICATION") {
       // Asset is preserved — same publicId can be resubmitted once the user corrects the field.
       const subCode = (suitability as { status: "NEEDS_CLARIFICATION"; subCode: string }).subCode;
-      const CLARIFICATION_GUIDANCE: Record<string, string> = {
-        color_indeterminate:   "The colour of this item is unclear in the photo. Please update the Colour field and try again.",
-        category_mismatch:     "The item does not appear to match the selected category. Please update the Category and try again.",
-        item_not_identifiable: "The item type is unclear. Please update the Category and try again.",
-      };
-      return data({ error: CLARIFICATION_GUIDANCE[subCode] ?? "Please review the details below and try again." }, { status: 422 });
+      // category_mismatch is non-blocking: the user's category choice takes precedence.
+      if (subCode !== "category_mismatch") {
+        const CLARIFICATION_GUIDANCE: Record<string, string> = {
+          color_indeterminate:   "The colour of this item is unclear in the photo. Please update the Colour field and try again.",
+          item_not_identifiable: "The item type is unclear. Please update the Category and try again.",
+        };
+        return data({ error: CLARIFICATION_GUIDANCE[subCode] ?? "Please review the details below and try again." }, { status: 422 });
+      }
     }
     // ──────────────────────────────────────────────────────────────────────────
 
@@ -699,12 +701,14 @@ export async function action({ request }: ActionFunctionArgs) {
     if (editSuitability.status === "NEEDS_CLARIFICATION") {
       // Asset is preserved — same publicId can be resubmitted once the user corrects the field.
       const subCode = (editSuitability as { status: "NEEDS_CLARIFICATION"; subCode: string }).subCode;
-      const EDIT_CLARIFICATION_GUIDANCE: Record<string, string> = {
-        color_indeterminate:   "The colour of this item is unclear in the photo. Please update the Colour field and try again.",
-        category_mismatch:     "The item does not appear to match the selected category. Please update the Category and try again.",
-        item_not_identifiable: "The item type is unclear. Please update the Category and try again.",
-      };
-      return data({ error: EDIT_CLARIFICATION_GUIDANCE[subCode] ?? "Please review the details below and try again." }, { status: 422 });
+      // category_mismatch is non-blocking: the user's category choice takes precedence.
+      if (subCode !== "category_mismatch") {
+        const EDIT_CLARIFICATION_GUIDANCE: Record<string, string> = {
+          color_indeterminate:   "The colour of this item is unclear in the photo. Please update the Colour field and try again.",
+          item_not_identifiable: "The item type is unclear. Please update the Category and try again.",
+        };
+        return data({ error: EDIT_CLARIFICATION_GUIDANCE[subCode] ?? "Please review the details below and try again." }, { status: 422 });
+      }
     }
 
     // All checks passed — compute eligibility then update DB.
