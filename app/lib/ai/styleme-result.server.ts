@@ -892,10 +892,20 @@ export async function callClaudeForNaiaSelection(
           `Candidate ${other.id} replaces it with the ${onlyInOther.label ?? onlyInOther.slot} (${onlyInOther.slot}).`,
         );
       } else if (onlyInRef && !onlyInOther) {
-        notes.push(
-          `Candidate ${ref.id} includes ${onlyInRef.label ?? onlyInRef.slot}; ` +
-          `Candidate ${other.id} is the cleaner look without it.`,
-        );
+        if (onlyInRef.slot === "outerwear") {
+          notes.push(
+            `Candidate ${ref.id} includes ${onlyInRef.label ?? onlyInRef.slot}; Candidate ${other.id} presents the same base without it. ` +
+            `Compare the complete outfits against today's occasion, explicit formality, intention and Passport identity. ` +
+            `Choose the version in which the layer meaningfully improves the outfit for today's brief without pushing the overall look into a more formal or structured register than requested. ` +
+            `If the layer adds useful structure while remaining appropriate for the occasion, keep it. ` +
+            `If it adds unnecessary formality or does not meaningfully improve the look, choose the edited version.`,
+          );
+        } else {
+          notes.push(
+            `Candidate ${ref.id} includes ${onlyInRef.label ?? onlyInRef.slot}; ` +
+            `Candidate ${other.id} is the edited look without it.`,
+          );
+        }
       }
     }
     return (notes.length > 0 ? notes.join(" ") + " " : "") +
@@ -905,7 +915,8 @@ export async function callClaudeForNaiaSelection(
   const systemPrompt =
     STYLEME_WORDING_SYSTEM_PROMPT +
     "\n9. This look is built entirely from the customer's own Closet — no brand products. Do not reference product brand names, shopping links, or purchasing. Treat the Closet pieces as the primary styling elements." +
-    "\n10. When writing perPieceNotes, use the correct grammatical number for each garment name. Known plural garments include: trousers, jeans, shorts, leggings, chinos, joggers, loafers, sneakers, trainers, boots, heels, flats, slides, earrings, sunglasses, cufflinks. When the number is uncertain, use a participial phrase ('Adding a contrast note…', 'Grounding the look…') to avoid subject-verb mismatch. Do not use generic phrases like 'completes the look', 'forms the upper half', or 'brings the outfit into appropriate territory'.";
+    "\n10. When writing perPieceNotes, use the correct grammatical number for each garment name. Known plural garments include: trousers, jeans, shorts, leggings, chinos, joggers, loafers, sneakers, trainers, boots, heels, flats, slides, earrings, sunglasses, cufflinks. When the number is uncertain, use a participial phrase ('Adding a contrast note…', 'Grounding the look…') to avoid subject-verb mismatch. Do not use generic phrases like 'completes the look', 'forms the upper half', or 'brings the outfit into appropriate territory'." +
+    "\n11. Choose the candidate that best satisfies today's occasion, formality signal, and explicit intention — while expressing the customer's Passport identity through that lens. Priority order: (1) hard constraints (coverage, fit needs, hard boundaries); (2) today's occasion and any explicit formality signal; (3) today's stated intention (e.g. 'feel like myself'); (4) Passport aspirations (becoming, style-support). Passport aspirations are part of the selection decision, not just explanation colour — but they must be interpreted within today's context. 'Powerful' or 'refined' for an everyday brief should produce an everyday expression of those qualities, not a look that overshoots the occasion into a formal or workwear register.";
 
   const userMessage =
     `Select the best complete outfit for this customer and write all wording for it.\n` +

@@ -5951,3 +5951,270 @@ describe("§OC.13 — Clothing-swap gate: 0-score alternative never appears in C
       "Candidate B must be null when the only alternative scores 0 for the session occasion");
   });
 });
+
+// ── §OC.14 — Passport × occasion: "powerful" profile, everyday → layerless expression
+// Sara Test 1 regression scenario.
+// Verifies the INTEGRATION PATH only. The prompt instruction (rule 11) is what causes
+// Claude to interpret "powerful" as an everyday expression for an everyday brief in production;
+// this test proves the plumbing between candidate generation, mock selection, and result
+// assembly works correctly.
+// It does NOT verify Claude's actual styling quality — live QA is required for that.
+
+describe("§OC.14 — Passport × occasion: everyday + 'powerful' profile → occasion-appropriate expression (female)", async () => {
+  it("FEMALE FIXTURE: blazer in closet + becoming:[powerful] + everyday → C offered; mock selects C → no outerwear in result", async () => {
+    // Sara's closet: top + everyday-eligible blazer + loafers + bag
+    const everydayBlazer: ClosetAnchorInput = {
+      type: "closet", id: "f-ow-blazer-oc14", name: "Black Tailored Blazer",
+      category: "OUTERWEAR", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null, styleTags: ["tailored", "polished"],
+      occasions: ["everyday", "work"], imageUrl: "",   // scores +10 for everyday → in candidateA
+    };
+    const oc14Closet: ClosetAnchorInput[] = [FEMALE_CLOSET_ITEMS[0], everydayBlazer, FEMALE_CLOSET_ITEMS[2]];
+
+    // Profile with "powerful" aspiration — the profile that led to the blazer selection in production
+    const powerfulProfile = { becoming: ["powerful"] };
+
+    // Mock: applies the hierarchy (everyday + no formality → everyday expression of "powerful")
+    // NOTE: rule 11 in the system prompt is what causes Claude to interpret aspirations through the occasion lens.
+    const mockSelection: typeof callClaudeForNaiaSelection = async (candidates) => {
+      const candidateC = candidates.find((c) => c.id === "C");
+      if (!candidateC) return null;   // C not available — fallback to A handled by caller
+      return {
+        candidate: candidateC,
+        wording: {
+          outfitName: "Everyday Black",
+          whyThisWorks: "Clean top and skirt for a relaxed everyday look that still feels like you.",
+          confidenceBoost: "The clean silhouette carries the casual brief.",
+          perfumeNote: null,
+        },
+        perPieceNotes: new Map(candidateC.pieces.map((p) => [p.closetId, `Note for ${p.label ?? p.slot}`])),
+      };
+    };
+
+    const closetAnchor: ClosetAnchorInput = {
+      type: "closet", id: "f-anchor-skirt-oc14", name: "Black A-Line Midi Skirt",
+      category: "BOTTOMS", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null, styleTags: ["minimal", "classic"],
+      occasions: ["everyday", "work"], imageUrl: "",
+    };
+
+    const engineInput = {
+      session: FEMALE_EVERYDAY_SESSION,
+      anchor: closetAnchor,
+      mode: "naia" as const,
+      profile: powerfulProfile,
+      recentlyShownClosetIds: [],
+    };
+
+    const result = await computeStyleMeResult(
+      engineInput, undefined, undefined, false,
+      async () => oc14Closet, mockSelection,
+    );
+
+    const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
+
+    // Blazer must NOT appear — mock selected C (everyday expression of powerful = layerless)
+    assert.ok(!persistedIds.includes("f-ow-blazer-oc14"),
+      `Blazer must not be in the result when C was selected for an everyday session; got: ${persistedIds.join(", ")}`);
+
+    // Outfit name belongs to C's wording
+    assert.strictEqual(result.outfitName, "Everyday Black",
+      "Outfit name must match the wording generated for the selected candidate C");
+  });
+});
+
+describe("§OC.15 — Passport × occasion: everyday + 'powerful' profile → occasion-appropriate expression (male)", async () => {
+  it("MALE FIXTURE: jacket in closet + becoming:[powerful] + everyday → C offered; mock selects C → no outerwear in result", async () => {
+    // Omar's closet: shirt + everyday-eligible blazer + loafers
+    const everydayBlazerM: ClosetAnchorInput = {
+      type: "closet", id: "m-ow-jacket-oc15", name: "Navy Sport Jacket",
+      category: "OUTERWEAR", colors: ["navy"], primaryColor: "navy",
+      pattern: null, material: null, styleTags: ["tailored", "smart-casual"],
+      occasions: ["everyday", "smart-casual"], imageUrl: "",  // scores +10 for everyday
+    };
+    const oc15Closet: ClosetAnchorInput[] = [MALE_CLOSET_ITEMS[0], everydayBlazerM, MALE_CLOSET_ITEMS[2]];
+
+    const powerfulProfile = { becoming: ["powerful"] };
+
+    const mockSelection: typeof callClaudeForNaiaSelection = async (candidates) => {
+      const candidateC = candidates.find((c) => c.id === "C");
+      if (!candidateC) return null;
+      return {
+        candidate: candidateC,
+        wording: {
+          outfitName: "Everyday Edit",
+          whyThisWorks: "Shirt and chinos without layering for a relaxed everyday look.",
+          confidenceBoost: "The clean silhouette carries the brief.",
+          perfumeNote: null,
+        },
+        perPieceNotes: new Map(candidateC.pieces.map((p) => [p.closetId, `Note for ${p.label ?? p.slot}`])),
+      };
+    };
+
+    const closetAnchor: ClosetAnchorInput = {
+      type: "closet", id: "m-anchor-chinos-oc15", name: "Slim Fit Navy Chinos",
+      category: "BOTTOMS", colors: ["navy"], primaryColor: "navy",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["everyday", "smart-casual"], imageUrl: "",
+    };
+
+    const engineInput = {
+      session: MALE_EVERYDAY_SESSION,
+      anchor: closetAnchor,
+      mode: "naia" as const,
+      profile: powerfulProfile,
+      recentlyShownClosetIds: [],
+    };
+
+    const result = await computeStyleMeResult(
+      engineInput, undefined, undefined, false,
+      async () => oc15Closet, mockSelection,
+    );
+
+    const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
+
+    assert.ok(!persistedIds.includes("m-ow-jacket-oc15"),
+      `Jacket must not be in the result when C was selected for an everyday session; got: ${persistedIds.join(", ")}`);
+
+    assert.strictEqual(result.outfitName, "Everyday Edit");
+  });
+});
+
+// ── §OC.14b — Passport × occasion: work/polished + "powerful" profile → structured expression valid
+// Proves the hierarchy is bidirectional: same Passport, same closet, but work/polished occasion
+// → mock selects A (with blazer) → blazer IS in result.
+// The occasion change, not the Passport change, is what drives the different selection.
+
+describe("§OC.14b — Passport × occasion: work/polished + 'powerful' profile → structured expression valid (female)", async () => {
+  it("FEMALE FIXTURE: blazer in closet + becoming:[powerful] + work/polished → A offered; mock selects A → blazer in result", async () => {
+    const everydayBlazer: ClosetAnchorInput = {
+      type: "closet", id: "f-ow-blazer-oc14b", name: "Black Tailored Blazer",
+      category: "OUTERWEAR", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null, styleTags: ["tailored", "polished"],
+      occasions: ["everyday", "work"], imageUrl: "",
+    };
+    const oc14bCloset: ClosetAnchorInput[] = [FEMALE_CLOSET_ITEMS[0], everydayBlazer, FEMALE_CLOSET_ITEMS[2]];
+
+    // Same "powerful" Passport as §OC.14 — only the session occasion changes
+    const powerfulProfile = { becoming: ["powerful"] };
+
+    // Mock: work/polished + "powerful" → blazer adds useful structure, stays in register → select A
+    const mockSelection: typeof callClaudeForNaiaSelection = async (candidates) => {
+      const candidateA = candidates.find((c) => c.id === "A");
+      if (!candidateA) return null;
+      return {
+        candidate: candidateA,
+        wording: {
+          outfitName: "Polished at Work",
+          whyThisWorks: "The blazer carries the work/polished brief while the Passport's drive for refinement stays grounded in the occasion.",
+          confidenceBoost: "The blazer is already giving the structure — keep the rest clean.",
+          perfumeNote: null,
+        },
+        perPieceNotes: new Map(candidateA.pieces.map((p) => [p.closetId, `Note for ${p.label ?? p.slot}`])),
+      };
+    };
+
+    const closetAnchor: ClosetAnchorInput = {
+      type: "closet", id: "f-anchor-skirt-oc14b", name: "Black A-Line Midi Skirt",
+      category: "BOTTOMS", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null, styleTags: ["minimal", "classic"],
+      occasions: ["everyday", "work"], imageUrl: "",
+    };
+
+    const workPolishedSession = {
+      ...FEMALE_EVERYDAY_SESSION,
+      occasion: "work",
+      formalityConditional: "formality-polished",
+    };
+
+    const engineInput = {
+      session: workPolishedSession,
+      anchor: closetAnchor,
+      mode: "naia" as const,
+      profile: powerfulProfile,
+      recentlyShownClosetIds: [],
+    };
+
+    const result = await computeStyleMeResult(
+      engineInput, undefined, undefined, false,
+      async () => oc14bCloset, mockSelection,
+    );
+
+    const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
+
+    // Blazer MUST appear — mock selected A (work/polished legitimately warrants the layer)
+    assert.ok(persistedIds.includes("f-ow-blazer-oc14b"),
+      `Blazer must be in the result when A was selected for a work/polished session; got: ${persistedIds.join(", ")}`);
+
+    assert.strictEqual(result.outfitName, "Polished at Work",
+      "Outfit name must match the wording generated for the selected candidate A");
+  });
+});
+
+// ── §OC.15b — Passport × occasion: smart-casual + "powerful" profile → structured expression valid (male)
+
+describe("§OC.15b — Passport × occasion: smart-casual + 'powerful' profile → structured expression valid (male)", async () => {
+  it("MALE FIXTURE: jacket in closet + becoming:[powerful] + smart-casual → A offered; mock selects A → jacket in result", async () => {
+    const smartCasualJacket: ClosetAnchorInput = {
+      type: "closet", id: "m-ow-jacket-oc15b", name: "Navy Sport Jacket",
+      category: "OUTERWEAR", colors: ["navy"], primaryColor: "navy",
+      pattern: null, material: null, styleTags: ["tailored", "smart-casual"],
+      occasions: ["everyday", "smart-casual"], imageUrl: "",
+    };
+    const oc15bCloset: ClosetAnchorInput[] = [MALE_CLOSET_ITEMS[0], smartCasualJacket, MALE_CLOSET_ITEMS[2]];
+
+    // Same "powerful" Passport as §OC.15 — only the session occasion changes
+    const powerfulProfile = { becoming: ["powerful"] };
+
+    // Mock: smart-casual + "powerful" → jacket adds appropriate structure for this occasion → select A
+    const mockSelection: typeof callClaudeForNaiaSelection = async (candidates) => {
+      const candidateA = candidates.find((c) => c.id === "A");
+      if (!candidateA) return null;
+      return {
+        candidate: candidateA,
+        wording: {
+          outfitName: "Smart Navy",
+          whyThisWorks: "The sport jacket fits the smart-casual occasion and expresses the Passport's drive for refinement within that register.",
+          confidenceBoost: "The jacket is doing exactly what a smart-casual occasion asks of it.",
+          perfumeNote: null,
+        },
+        perPieceNotes: new Map(candidateA.pieces.map((p) => [p.closetId, `Note for ${p.label ?? p.slot}`])),
+      };
+    };
+
+    const closetAnchor: ClosetAnchorInput = {
+      type: "closet", id: "m-anchor-chinos-oc15b", name: "Slim Fit Navy Chinos",
+      category: "BOTTOMS", colors: ["navy"], primaryColor: "navy",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["everyday", "smart-casual"], imageUrl: "",
+    };
+
+    const smartCasualSession = {
+      ...MALE_EVERYDAY_SESSION,
+      occasion: "smart-casual",
+      formalityConditional: null as string | null,
+    };
+
+    const engineInput = {
+      session: smartCasualSession,
+      anchor: closetAnchor,
+      mode: "naia" as const,
+      profile: powerfulProfile,
+      recentlyShownClosetIds: [],
+    };
+
+    const result = await computeStyleMeResult(
+      engineInput, undefined, undefined, false,
+      async () => oc15bCloset, mockSelection,
+    );
+
+    const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
+
+    // Jacket MUST appear — mock selected A (smart-casual occasion legitimately warrants the layer)
+    assert.ok(persistedIds.includes("m-ow-jacket-oc15b"),
+      `Jacket must be in the result when A was selected for a smart-casual session; got: ${persistedIds.join(", ")}`);
+
+    assert.strictEqual(result.outfitName, "Smart Navy",
+      "Outfit name must match the wording generated for the selected candidate A");
+  });
+});
