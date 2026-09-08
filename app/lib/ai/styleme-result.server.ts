@@ -45,7 +45,7 @@ import type {
   StyleMeCompletionPiece,
   ResultDirection,
 } from "./styleme-result.types.js";
-import { getMappingById } from "./signal-contract.js";
+import { getMappingById, PRODUCT_TEMPLATE_FIELDS } from "./signal-contract.js";
 import type { ProductEvaluation } from "./styleme-recommendation.types.js";
 
 // ── Passport option label resolver ───────────────────────────────────────────
@@ -154,6 +154,7 @@ const CLOSET_CATEGORY_TO_SLOT: Record<string, OutfitSlot> = {
   TOPS: "top",
   BOTTOMS: "bottom",
   DRESSES: "dress",
+  SETS: "set",
   OUTERWEAR: "outerwear",
   SHOES: "shoe",
   BAGS: "bag",
@@ -162,6 +163,10 @@ const CLOSET_CATEGORY_TO_SLOT: Record<string, OutfitSlot> = {
   ACTIVEWEAR: "top",
   LOUNGEWEAR: "top",
 };
+
+// Maximum total pieces in a styled outfit (anchor + primary NADINE product + additional closet garments).
+// Optional slots are selected by relevance score until this cap is reached.
+export const MAX_OUTFIT_PIECES = 5;
 
 // ── StyleSource enum → session source string ──────────────────────────────────
 
@@ -1230,14 +1235,30 @@ export function selectAdditionalClosetGarments(
   closetItems: ClosetAnchorInput[],
   profile?: ClosetScoringProfile | null,
   recentlyShownIds?: Set<string>,
-): Array<{ slot: OutfitSlot; id: string; label: string | null; imageUrl: string | null }> {
+): Array<{ slot: OutfitSlot; id: string; label: string | null; imageUrl: string | null; colors: string[] }> {
   const anchorId = anchor?.type === "closet" ? (anchor as NormalizedClosetAnchor).id : null;
 
-  // Slots already covered by the anchor (all slot types) and by the primary (clothing only)
+  // Slots already covered by the anchor (all slot types) and by the primary (clothing only).
   const filledClothingSlots = getFilledClothingSlots(anchor, primaryProduct, []);
   const coveredSlots = new Set<string>(filledClothingSlots);
   if (anchor?.type === "closet") coveredSlots.add((anchor as NormalizedClosetAnchor).slot);
   if (anchor?.type === "nadine") coveredSlots.add((anchor as NormalizedNadineAnchor).slot);
+  // A dress or set in coveredSlots (from anchor or primary) covers both top and bottom —
+  // block all conflicting garments so no invalid base combination can be produced.
+  // Note: for Closet SET anchors, resolveSetSlots returns empty (no component metadata),
+  // so "set" only appears via the explicit anchor.slot add above — this condition still fires.
+  if (coveredSlots.has("dress") || coveredSlots.has("set")) {
+    coveredSlots.add("top");
+    coveredSlots.add("bottom");
+    coveredSlots.add("dress");
+    coveredSlots.add("set");
+  }
+  // If separates are fully committed (top AND bottom both covered), dress/set candidates
+  // would be redundant base garments — block them too.
+  if (coveredSlots.has("top") && coveredSlots.has("bottom")) {
+    coveredSlots.add("dress");
+    coveredSlots.add("set");
+  }
 
   const signals = {
     occasion: session.occasion,
@@ -1245,7 +1266,7 @@ export function selectAdditionalClosetGarments(
     desiredFeelings: session.desiredFeelings,
   };
 
-  // Collect ALL candidates per slot, sorted best-first
+  // Collect all candidates per slot, scored and sorted best-first.
   const candidatesBySlot = new Map<OutfitSlot, Array<{ item: ClosetAnchorInput; score: number }>>();
 
   for (const item of closetItems) {
@@ -1270,13 +1291,95 @@ export function selectAdditionalClosetGarments(
 
   for (const list of candidatesBySlot.values()) list.sort((a, b) => b.score - a.score);
 
-  const result: Array<{ slot: OutfitSlot; id: string; label: string | null; imageUrl: string | null }> = [];
+  // ── Base-architecture exclusivity ──────────────────────────────────────────
+  // Enforce selection-order-independence: if candidates include both a separates
+  // slot (top or bottom) AND a one-piece slot (dress or set), only the architecture
+  // consistent with the committed base (anchor + primary) survives.
+  // This prevents outfits like BOTTOM-anchor + TOP-candidate + DRESS-candidate.
+  const hasSeparatesInCandidates = candidatesBySlot.has("top") || candidatesBySlot.has("bottom");
+  const hasOnepieceInCandidates = candidatesBySlot.has("dress") || candidatesBySlot.has("set");
 
-  for (const [slot, candidates] of candidatesBySlot.entries()) {
-    // Prefer the highest-scoring item not in the recently-shown set; fall back to best.
+  if (hasSeparatesInCandidates && hasOnepieceInCandidates) {
+    const committedSeparates = coveredSlots.has("top") || coveredSlots.has("bottom");
+    const committedOnepiece = coveredSlots.has("dress") || coveredSlots.has("set");
+
+    if (committedSeparates && !committedOnepiece) {
+      // Separates base already established — one-piece candidates are incompatible.
+      candidatesBySlot.delete("dress");
+      candidatesBySlot.delete("set");
+    } else if (committedOnepiece) {
+      // One-piece base established (belt-and-suspenders; coveredSlots expansion should
+      // have already filtered these from candidates).
+      candidatesBySlot.delete("top");
+      candidatesBySlot.delete("bottom");
+    } else {
+      // No committed clothing base — resolve by highest candidate score.
+      const bestSeparates = Math.max(
+        0,
+        ...(candidatesBySlot.get("top") ?? []).map((c) => c.score),
+        ...(candidatesBySlot.get("bottom") ?? []).map((c) => c.score),
+      );
+      const bestOnepiece = Math.max(
+        0,
+        ...(candidatesBySlot.get("dress") ?? []).map((c) => c.score),
+        ...(candidatesBySlot.get("set") ?? []).map((c) => c.score),
+      );
+      if (bestOnepiece > bestSeparates) {
+        candidatesBySlot.delete("top");
+        candidatesBySlot.delete("bottom");
+      } else {
+        candidatesBySlot.delete("dress");
+        candidatesBySlot.delete("set");
+      }
+    }
+  }
+
+  // ── Outfit size cap + prioritised optional selection ───────────────────────
+  // Total outfit pieces = anchor + primary NADINE product + additional closet garments.
+  // Stay within MAX_OUTFIT_PIECES. Base garments (top/bottom/dress/set) are always
+  // included first; optional finishing pieces are ranked by score and selected greedily.
+  // At most one combined finishing piece from accessory + jewelry.
+  const BASE_SLOTS_SET = new Set<string>(["top", "bottom", "dress", "set"]);
+  const committedCount = (anchor ? 1 : 0) + (primaryProduct ? 1 : 0);
+  const maxAdditional = Math.max(0, MAX_OUTFIT_PIECES - committedCount);
+
+  const result: Array<{ slot: OutfitSlot; id: string; label: string | null; imageUrl: string | null; colors: string[] }> = [];
+
+  // Phase 1: base garments — unconditionally included (they complete the outfit architecture).
+  for (const slot of ["top", "bottom", "dress", "set"] as OutfitSlot[]) {
+    const candidates = candidatesBySlot.get(slot);
+    if (!candidates) continue;
     const fresh = recentlyShownIds ? candidates.find((c) => !recentlyShownIds.has(c.item.id)) : null;
     const chosen = fresh ?? candidates[0];
-    result.push({ slot, id: chosen.item.id, label: chosen.item.name, imageUrl: chosen.item.imageUrl });
+    result.push({ slot, id: chosen.item.id, label: chosen.item.name, imageUrl: chosen.item.imageUrl, colors: chosen.item.colors ?? [] });
+  }
+
+  // Phase 2: optional finishing pieces — shoes first (never crowded by accessories/bags),
+  // then remaining by score with a secondary slot tiebreaker. At most one accessory+jewelry.
+  const optionalWinners: Array<{ slot: OutfitSlot; item: ClosetAnchorInput; score: number }> = [];
+  for (const [slot, candidates] of candidatesBySlot.entries()) {
+    if (BASE_SLOTS_SET.has(slot)) continue;
+    const fresh = recentlyShownIds ? candidates.find((c) => !recentlyShownIds.has(c.item.id)) : null;
+    const chosen = fresh ?? candidates[0];
+    optionalWinners.push({ slot, item: chosen.item, score: chosen.score });
+  }
+
+  // Shoes take absolute priority over bags/accessories regardless of score.
+  const OPTIONAL_SLOT_ORDER: Record<string, number> = { outerwear: 1, bag: 2, accessory: 3, jewelry: 3 };
+  const optShoes = optionalWinners.filter((o) => o.slot === "shoe");
+  const optRest = optionalWinners
+    .filter((o) => o.slot !== "shoe")
+    .sort((a, b) => b.score - a.score || (OPTIONAL_SLOT_ORDER[a.slot] ?? 9) - (OPTIONAL_SLOT_ORDER[b.slot] ?? 9));
+  const orderedOptionals = [...optShoes, ...optRest];
+
+  let finishingSlotUsed = false;
+  for (const opt of orderedOptionals) {
+    if (result.length >= maxAdditional) break;
+    if (opt.slot === "accessory" || opt.slot === "jewelry") {
+      if (finishingSlotUsed) continue; // at most one combined finishing piece
+      finishingSlotUsed = true;
+    }
+    result.push({ slot: opt.slot, id: opt.item.id, label: opt.item.name, imageUrl: opt.item.imageUrl, colors: opt.item.colors ?? [] });
   }
 
   return result;
@@ -1328,15 +1431,82 @@ export function computeNaiaResultDirections(
 
   if (bySlot.size === 0) return [];
 
-  // Build an outfit for a direction by picking one item per slot.
+  // ── Base-architecture exclusivity ──────────────────────────────────────────
+  // The anchor's clothing slot determines which additional clothing candidates survive.
+  // Without this, a bottom-anchor direction can accidentally include a dress candidate.
+  const anchorItem = anchorId ? closetItems.find((i) => i.id === anchorId) : null;
+  const anchorSlotForArch = anchorItem
+    ? (CLOSET_CATEGORY_TO_SLOT[anchorItem.category as string] as OutfitSlot | undefined) ?? null
+    : null;
+
+  const hasSepInMap = bySlot.has("top") || bySlot.has("bottom");
+  const hasOneInMap = bySlot.has("dress") || bySlot.has("set");
+  if (hasSepInMap && hasOneInMap) {
+    const committedSep = anchorSlotForArch === "top" || anchorSlotForArch === "bottom";
+    const committedOne = anchorSlotForArch === "dress" || anchorSlotForArch === "set";
+    if (committedSep) {
+      bySlot.delete("dress");
+      bySlot.delete("set");
+    } else if (committedOne) {
+      bySlot.delete("top");
+      bySlot.delete("bottom");
+    } else {
+      // No committed clothing anchor — resolve by highest-scoring candidate.
+      const bestSep = Math.max(0, ...(bySlot.get("top") ?? []).map((c) => c.score), ...(bySlot.get("bottom") ?? []).map((c) => c.score));
+      const bestOne = Math.max(0, ...(bySlot.get("dress") ?? []).map((c) => c.score), ...(bySlot.get("set") ?? []).map((c) => c.score));
+      if (bestOne > bestSep) {
+        bySlot.delete("top");
+        bySlot.delete("bottom");
+      } else {
+        bySlot.delete("dress");
+        bySlot.delete("set");
+      }
+    }
+  }
+
+  // ── Piece cap and slot priority ────────────────────────────────────────────
+  // Direction outfitPieces = additional pieces only (anchor shown separately).
+  // Cap = MAX_OUTFIT_PIECES - 1 (the anchor occupies the +1 slot).
+  const MAX_DIR_PIECES = MAX_OUTFIT_PIECES - 1;
+  const DIR_BASE_SLOTS = new Set<string>(["top", "bottom", "dress", "set"]);
+
+  // Build an outfit for a direction by picking one item per slot, then capping.
   // rankFn(slotItems, slot) → index into the sorted list (clamped to valid range).
   const buildOutfit = (
     rankFn: (items: ScoredItem[], slot: OutfitSlot) => number,
-  ): Array<{ slot: OutfitSlot; item: ClosetAnchorInput; score: number }> =>
-    Array.from(bySlot.entries()).map(([slot, items]) => {
+  ): Array<{ slot: OutfitSlot; item: ClosetAnchorInput; score: number }> => {
+    const pieces: Array<{ slot: OutfitSlot; item: ClosetAnchorInput; score: number }> = [];
+
+    // Phase 1: base clothing — unconditionally included.
+    for (const slot of ["top", "bottom", "dress", "set"] as OutfitSlot[]) {
+      const items = bySlot.get(slot);
+      if (!items) continue;
+      const idx = Math.min(Math.max(0, rankFn(items, slot)), items.length - 1);
+      pieces.push({ slot, item: items[idx].item, score: items[idx].score });
+    }
+
+    // Phase 2: optional — shoes before bags/accessories; at most one accessory+jewelry.
+    const optionals: Array<{ slot: OutfitSlot; item: ClosetAnchorInput; score: number }> = [];
+    for (const [slot, items] of bySlot.entries()) {
+      if (DIR_BASE_SLOTS.has(slot)) continue;
       const idx = Math.min(Math.max(0, rankFn(items, slot as OutfitSlot)), items.length - 1);
-      return { slot: slot as OutfitSlot, item: items[idx].item, score: items[idx].score };
-    });
+      optionals.push({ slot: slot as OutfitSlot, item: items[idx].item, score: items[idx].score });
+    }
+    const dirShoes = optionals.filter((o) => o.slot === "shoe");
+    const dirRest = optionals.filter((o) => o.slot !== "shoe").sort((a, b) => b.score - a.score);
+
+    let dirFinishingUsed = false;
+    for (const opt of [...dirShoes, ...dirRest]) {
+      if (pieces.length >= MAX_DIR_PIECES) break;
+      if (opt.slot === "accessory" || opt.slot === "jewelry") {
+        if (dirFinishingUsed) continue;
+        dirFinishingUsed = true;
+      }
+      pieces.push(opt);
+    }
+
+    return pieces;
+  };
 
   // The slot with the most options — best candidate for variation between directions.
   const variationSlot = DIRECTION_SLOT_PRIORITY.find(
@@ -1466,7 +1636,15 @@ export function computeResultDirections(
   profileHint: string = "your established Profile preferences",
 ): ResultDirection[] {
   const eligible = evaluatedProducts.filter(
-    (p) => !p.isHardExcluded && p.totalScore > 0,
+    (p) =>
+      !p.isHardExcluded &&
+      p.totalScore > 0 &&
+      // Products penalised for formality mismatch are outside the occasion envelope.
+      // They must not appear in any direction, including TRY SOMETHING NEW — that
+      // direction is for profile deviation, not occasion bypassing.
+      !p.negativeEvidence.some(
+        (e) => e.field === PRODUCT_TEMPLATE_FIELDS.FORMALITY_SCORE && e.effect === "DEPRIORITISE",
+      ),
   );
   if (eligible.length === 0) return [];
 
@@ -1832,9 +2010,111 @@ export async function computeStyleMeResult(
   };
 }
 
+// ── Per-piece stylingNotes helper ─────────────────────────────────────────────
+// Produces a slot-aware, garment-specific note explaining why THIS piece belongs
+// in THIS look.  Never generic "Style your X to complete the look."
+
+function buildClosetGarmentNote(
+  slot: string,
+  label: string | null,
+  anchorSlot: string | null,
+  primarySlot: string | null,
+  primaryTitle: string | null,
+  colors: string[],
+  anchorLabel: string | null,
+  anchorColors: string[],
+  occasion: string,
+): string {
+  const name = label ?? slot;
+  const primaryColor = colors[0] ?? null;
+  const anchorColor = anchorColors[0] ?? null;
+  // True when this piece's primary colour matches the anchor's — enables colour-continuity copy.
+  const colorMatchesAnchor = !!(
+    primaryColor && anchorColor &&
+    primaryColor.toLowerCase() === anchorColor.toLowerCase()
+  );
+  // If the name already contains the colour word, use "Your [name]" (avoids "The black Black Loafers").
+  const nameContainsColor = !!(primaryColor && name.toLowerCase().includes(primaryColor.toLowerCase()));
+  const colorRef = (colorMatchesAnchor && !nameContainsColor) ? `The ${primaryColor} ` : "Your ";
+  const occasion2 = (occasion === "dinner" || occasion === "date") ? "evening"
+    : occasion === "work" ? "work"
+    : "everyday";
+
+  // Shoes: "ground" is the same base form for singular and plural labels.
+  if (slot === "shoe") {
+    if (colorMatchesAnchor && anchorLabel) {
+      return `${colorRef}${name} carry the ${anchorLabel}'s colour through to the ground.`;
+    }
+    if (anchorLabel) return `Your ${name} ground the look built around the ${anchorLabel}.`;
+    return `Your ${name} ground the look and set the ${occasion2} tone.`;
+  }
+
+  if (slot === "bag") {
+    if (colorMatchesAnchor && anchorLabel) {
+      return `${colorRef}${name} echoes the ${anchorLabel}'s colour, keeping the palette cohesive.`;
+    }
+    if (!colorMatchesAnchor && primaryColor && anchorLabel) {
+      return `Your ${name} introduces a ${primaryColor} note alongside the ${anchorLabel} base.`;
+    }
+    if (anchorLabel) return `Your ${name} travels with the ${anchorLabel} look.`;
+    return `Your ${name} travels with the look.`;
+  }
+
+  if (slot === "accessory" || slot === "jewelry") {
+    const isLikelyPlural = name.trim().toLowerCase().endsWith("s");
+    const finishVerb = isLikelyPlural ? "add" : "adds";
+    const colorContrast = primaryColor && anchorColor && !colorMatchesAnchor;
+    if (colorContrast && anchorLabel) {
+      return `Your ${name} ${finishVerb} a ${primaryColor} accent against the ${anchorLabel}'s palette.`;
+    }
+    if (colorMatchesAnchor && anchorLabel) {
+      return `${colorRef}${name} ${finishVerb} a tonal note above the ${anchorLabel}.`;
+    }
+    if (anchorLabel) return `Your ${name} ${finishVerb} the finishing detail above the ${anchorLabel} base.`;
+    return `Your ${name} ${finishVerb} a finishing detail.`;
+  }
+
+  if (slot === "outerwear") {
+    if (anchorLabel) return `Your ${name} layers over the ${anchorLabel} and takes the look into its final register.`;
+    return `Your ${name} layers over the outfit and sets its final register.`;
+  }
+
+  if (slot === "top") {
+    if (colorMatchesAnchor && anchorLabel && (anchorSlot === "bottom" || anchorSlot === "dress")) {
+      return `${colorRef}${name} repeats the ${anchorLabel}'s colour, keeping the base consistent for ${occasion2} plans.`;
+    }
+    if (anchorSlot === "bottom" && anchorLabel) {
+      return `Your ${name} pairs with the ${anchorLabel} to complete the clothing base.`;
+    }
+    if (primarySlot === "bottom" && primaryTitle) {
+      return `Your ${name} pairs with the ${primaryTitle} as the upper half of this combination.`;
+    }
+    return `Your ${name} completes the upper half of the look.`;
+  }
+
+  if (slot === "bottom") {
+    if (colorMatchesAnchor && anchorLabel && anchorSlot === "top") {
+      return `${colorRef}${name} matches the ${anchorLabel}'s colour, keeping the base consistent.`;
+    }
+    if (anchorSlot === "top" && anchorLabel) {
+      return `Your ${name} pairs with the ${anchorLabel} to ground the clothing base.`;
+    }
+    if (primarySlot === "top" && primaryTitle) {
+      return `Your ${name} grounds the ${primaryTitle} as the lower half of this combination.`;
+    }
+    return `Your ${name} grounds the look.`;
+  }
+
+  if (slot === "dress" || slot === "set") {
+    return `Your ${name} forms the clothing base for this look.`;
+  }
+
+  return `Your ${name} completes the look.`;
+}
+
 // ── DB payload builder ────────────────────────────────────────────────────────
 
-export function buildDbPayload(result: StyleMeCustomerResult): StyleMeDbPayload {
+export function buildDbPayload(result: StyleMeCustomerResult, occasion?: string): StyleMeDbPayload {
   const { outcome, primaryProduct, finishingLayer, song } = result;
   const items: StyleMeDbItem[] = [];
 
@@ -1872,7 +2152,16 @@ export function buildDbPayload(result: StyleMeCustomerResult): StyleMeDbPayload 
       productImageUrl: a.imageUrl ?? null,
       shopifyProductId: null,
       closetItemId: a.id,
-      stylingNotes: result.pairingNote ?? `Style your ${a.label} with intention.`,
+      stylingNotes: result.pairingNote ?? (() => {
+        const slotNote: Partial<Record<string, string>> = {
+          dress:     `Your ${a.label} carries the full silhouette — build accessories around it.`,
+          set:       `Your ${a.label} defines the base — style accessories around it.`,
+          top:       `Your ${a.label} sets the tone — build the rest of the outfit from here.`,
+          bottom:    `Your ${a.label} grounds the look — balance it with your chosen top.`,
+          outerwear: `Your ${a.label} leads the outfit — everything layers beneath it.`,
+        };
+        return slotNote[a.slot] ?? `Your ${a.label} anchors the look.`;
+      })(),
       productUrl: null,
     });
   }
@@ -1889,6 +2178,24 @@ export function buildDbPayload(result: StyleMeCustomerResult): StyleMeDbPayload 
     const anchorSlot = (result.rawRecommendation.anchor as NormalizedClosetAnchor).slot;
     if (anchorSlot) closetCoveredSlots.add(anchorSlot as string);
   }
+  const anchorSlotForNotes =
+    result.rawRecommendation.anchor?.type === "closet"
+      ? ((result.rawRecommendation.anchor as NormalizedClosetAnchor).slot as string)
+      : result.rawRecommendation.anchor?.type === "nadine"
+      ? ((result.rawRecommendation.anchor as NormalizedNadineAnchor).slot as string)
+      : null;
+  const anchorLabelForNotes =
+    result.rawRecommendation.anchor?.type === "closet"
+      ? ((result.rawRecommendation.anchor as NormalizedClosetAnchor).label ?? null)
+      : result.rawRecommendation.anchor?.type === "nadine"
+      ? ((result.rawRecommendation.anchor as NormalizedNadineAnchor).title ?? null)
+      : null;
+  const anchorColorsForNotes =
+    result.rawRecommendation.anchor?.type === "closet"
+      ? ((result.rawRecommendation.anchor as NormalizedClosetAnchor).colors ?? [])
+      : result.rawRecommendation.anchor?.type === "nadine"
+      ? ((result.rawRecommendation.anchor as NormalizedNadineAnchor).colors ?? [])
+      : [];
   for (const cg of result.rawRecommendation.selectedClosetGarments ?? []) {
     if (cg.id === anchorClosetId) continue;
     closetCoveredSlots.add(cg.slot);
@@ -1898,7 +2205,17 @@ export function buildDbPayload(result: StyleMeCustomerResult): StyleMeDbPayload 
       productImageUrl: cg.imageUrl,
       shopifyProductId: null,
       closetItemId: cg.id,
-      stylingNotes: `Style your ${cg.label ?? cg.slot} to complete the look.`,
+      stylingNotes: buildClosetGarmentNote(
+        cg.slot,
+        cg.label,
+        anchorSlotForNotes,
+        result.primaryProduct?.slot ?? null,
+        result.primaryProduct?.title ?? null,
+        cg.colors ?? [],
+        anchorLabelForNotes,
+        anchorColorsForNotes,
+        occasion ?? "everyday",
+      ),
       productUrl: null,
     });
   }

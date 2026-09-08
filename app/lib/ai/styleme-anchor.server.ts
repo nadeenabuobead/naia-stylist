@@ -206,7 +206,12 @@ export function scoreClosetItemForSession(
     if (relationships.includes("favourite") || relationships.includes("wear-often")) score += 2;
     if (relationships.includes("regret")) score -= 4;
     else if (relationships.includes("rarely-wear")) score -= 2;
-    // love-style-struggle / like / unsure / occasion-only → neutral (0)
+    // love-style-struggle / like / unsure → neutral (0)
+    // occasion-only: soft downrank for routine/casual sessions — not a hard block
+    if (relationships.includes("occasion-only") &&
+        (signals.occasion === "everyday" || signals.occasion === "travel")) {
+      score -= 2;
+    }
   }
 
   return score;
@@ -255,30 +260,51 @@ export async function loadAllClosetItemsForEngine(
  * against the session signals, and returns the highest-scoring item as a
  * ClosetAnchorInput plus its raw DB id.
  *
- * Returns null when the customer has no Closet items.
+ * Returns null when the customer has no Closet items or no item that explicitly
+ * serves the requested occasion (mood/relationship bonuses alone are not enough).
  * Never selects by array order or at random — every item is explicitly scored
  * and the winner is deterministic for a given set of signals.
+ *
+ * _fetchItems is a DI seam for testing — omit in production (defaults to Prisma).
  */
+export type AutoSelectItem = {
+  id: string;
+  name: string | null;
+  category: string;
+  colors: string[];
+  primaryColor: string | null;
+  pattern: string | null;
+  material: string | null;
+  styleTags: string[];
+  occasions: string[];
+  imageUrl: string | null;
+  garmentRelationships: string[];
+};
+
 export async function autoSelectClosetAnchor(
   customerId: string,
   signals: { occasion: string; moods: string[]; desiredFeelings: string[] },
+  _fetchItems?: (customerId: string) => Promise<AutoSelectItem[]>,
 ): Promise<{ anchor: ClosetAnchorInput; id: string } | null> {
-  const items = await prisma.closetItem.findMany({
-    where: { customerId },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-  });
+  const items: AutoSelectItem[] = _fetchItems
+    ? await _fetchItems(customerId)
+    : await prisma.closetItem.findMany({
+        where: { customerId },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      });
 
   if (items.length === 0) return null;
 
-  type DbItem = (typeof items)[number];
-  type ScoredItem = { item: DbItem; score: number; isAnchorCapable: boolean };
+  type ScoredItem = { item: AutoSelectItem; score: number; isAnchorCapable: boolean };
 
-  const mapped: ScoredItem[] = items.map((item: DbItem) => ({
+  const mapped: ScoredItem[] = items.map((item) => ({
     item,
     score: scoreClosetItemForSession(
       { occasions: item.occasions, styleTags: item.styleTags, category: item.category },
       signals,
+      undefined,
+      item.garmentRelationships,
     ),
     isAnchorCapable: ANCHOR_CAPABLE_CATEGORIES.has(item.category),
   }));
@@ -291,7 +317,21 @@ export async function autoSelectClosetAnchor(
     return 0;
   });
 
-  const winner = scored[0].item;
+  // Walk candidates in score order and return the first that is occasion-compatible.
+  // Incompatibility requires explicit evidence: the item has occasion tags for OTHER
+  // occasions AND the customer tagged it as occasion-only.
+  // Items with no occasion tags at all are treated as versatile (incomplete metadata,
+  // not a block). A higher-scoring incompatible item must not prevent a lower-scoring
+  // compatible item from being selected.
+  const isOccasionCompatible = (item: AutoSelectItem): boolean =>
+    item.occasions.includes(signals.occasion)      // explicit match
+    || item.occasions.length === 0                 // no tags → versatile
+    || !item.garmentRelationships.includes("occasion-only"); // other-occasion tags, no restriction
+
+  const winnerEntry = scored.find(s => s.score > 0 && isOccasionCompatible(s.item));
+  if (!winnerEntry) return null;
+
+  const winner = winnerEntry.item;
   return {
     anchor: {
       type: "closet",
@@ -304,7 +344,7 @@ export async function autoSelectClosetAnchor(
       material: winner.material ?? null,
       styleTags: winner.styleTags,
       occasions: winner.occasions,
-      imageUrl: winner.imageUrl,
+      imageUrl: winner.imageUrl ?? "",
     },
     id: winner.id,
   };

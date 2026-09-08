@@ -294,5 +294,6 @@ export interface StyleMeRecommendationResult {
     id: string;
     label: string | null;
     imageUrl: string | null;
+    colors?: string[];
   }>;
 }

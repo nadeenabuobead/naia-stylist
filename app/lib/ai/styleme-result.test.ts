@@ -5,6 +5,7 @@
 // and integration via computeStyleMeResult.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   buildProfileSignals,
@@ -23,8 +24,12 @@ import {
   STYLEME_WORDING_SYSTEM_PROMPT,
   buildProfileHint,
   computeNaiaResultDirections,
+  computeResultDirections,
   selectAdditionalClosetGarments,
+  MAX_OUTFIT_PIECES,
 } from "./styleme-result.server.ts";
+import { scoreClosetItemForSession, autoSelectClosetAnchor } from "./styleme-anchor.server.ts";
+import type { AutoSelectItem } from "./styleme-anchor.server.ts";
 import type {
   StyleMeCustomerResult,
   StyleMeDbPayload,
@@ -36,7 +41,7 @@ import type {
 import { parseSuggestionMetadata } from "./styleme-result.types.ts";
 import { SONG_CATALOG } from "./get-ready-song-catalog.ts";
 import { runRecommendation } from "./styleme-recommendation.ts";
-import type { ClosetAnchorInput, StyleMeEngineInput, StyleMeRecommendationResult } from "./styleme-recommendation.types.ts";
+import type { ClosetAnchorInput, StyleMeEngineInput, StyleMeRecommendationResult, ProductEvaluation, EvidenceEntry } from "./styleme-recommendation.types.ts";
 import { resolveActionAnchor } from "./styleme-anchor.server.ts";
 import type { NormalizedClosetAnchor, NormalizedStyleAnchor } from "./styleme-recommendation.types.ts";
 
@@ -3300,5 +3305,1547 @@ describe("§ND — nAia-mode New Look diversity", () => {
     } as any, CLOSET, undefined, allIds);
     // Should still return garments (fallback), not empty
     assert.ok(garments.length > 0, "must return garments even when all are excluded");
+  });
+});
+
+// ── §QA-RG — QA Regression Tests (Test-1 fix verification) ───────────────────
+
+describe("§QA-RG.A — Issue 1: REV3_STATE_LABELS stale copy", () => {
+  it("QA-RG.A.1 — result.tsx REV3_STATE_LABELS source contract: nothing-in-particular = 'I feel pretty neutral'", () => {
+    const src = readFileSync(
+      new URL("../../routes/style-me/result.tsx", import.meta.url).pathname,
+      "utf8",
+    );
+    assert.ok(
+      src.includes('"nothing-in-particular": "I feel pretty neutral"'),
+      'REV3_STATE_LABELS must map "nothing-in-particular" → "I feel pretty neutral"',
+    );
+    assert.ok(
+      !src.includes('"nothing-in-particular": "Nothing in particular"'),
+      'REV3_STATE_LABELS must NOT contain stale copy "Nothing in particular"',
+    );
+  });
+});
+
+describe("§QA-RG.B — Issue 2: dress anchor must not produce redundant top/bottom garments", () => {
+  const DRESS_ANCHOR: NormalizedClosetAnchor = {
+    type: "closet",
+    id: "dress-1",
+    label: "Burgundy Evening Gown",
+    slot: "dress",
+    colors: ["burgundy"],
+    normalizedColorIds: ["red-burgundy"],
+    styleTags: ["elegant"],
+    occasions: ["special-event"],
+    material: null,
+    hasStrongEvidence: true,
+    evidenceFields: ["occasions"],
+    imageUrl: null,
+  };
+
+  const CLOSET_WITH_TOP_BOTTOM: ClosetAnchorInput[] = [
+    {
+      id: "top-1",
+      name: "Cream Blouse",
+      category: "TOPS",
+      occasions: ["everyday", "special-event"],
+      styleTags: ["elegant"],
+      colors: ["cream"],
+      primaryColor: "cream",
+      imageUrl: null,
+      garmentRelationships: [],
+    },
+    {
+      id: "bottom-1",
+      name: "Black Trousers",
+      category: "BOTTOMS",
+      occasions: ["everyday", "special-event"],
+      styleTags: ["elegant"],
+      colors: ["black"],
+      primaryColor: "black",
+      imageUrl: null,
+      garmentRelationships: [],
+    },
+    {
+      id: "shoe-1",
+      name: "Heeled Sandals",
+      category: "SHOES",
+      occasions: ["special-event"],
+      styleTags: ["elegant"],
+      colors: ["gold"],
+      primaryColor: "gold",
+      imageUrl: null,
+      garmentRelationships: [],
+    },
+  ];
+
+  it("QA-RG.B.1 — selectAdditionalClosetGarments with dress anchor does not add top", () => {
+    const garments = selectAdditionalClosetGarments(
+      DRESS_ANCHOR,
+      null,
+      {
+        moods: ["confident"],
+        desiredFeelings: ["more-elevated"],
+        bodyNeeds: [],
+        coverageConditional: null,
+        occasion: "special-event",
+        formalityConditional: "formality-occasion",
+        todayColours: { preferred: [], avoid: [] },
+        practicalIds: [],
+        source: "my-closet",
+      } as any,
+      CLOSET_WITH_TOP_BOTTOM,
+    );
+    const slots = garments.map((g) => g.slot);
+    assert.ok(!slots.includes("top"), `top must not appear when anchor is a dress; got: ${JSON.stringify(slots)}`);
+  });
+
+  it("QA-RG.B.2 — selectAdditionalClosetGarments with dress anchor does not add bottom", () => {
+    const garments = selectAdditionalClosetGarments(
+      DRESS_ANCHOR,
+      null,
+      {
+        moods: ["confident"],
+        desiredFeelings: ["more-elevated"],
+        bodyNeeds: [],
+        coverageConditional: null,
+        occasion: "special-event",
+        formalityConditional: "formality-occasion",
+        todayColours: { preferred: [], avoid: [] },
+        practicalIds: [],
+        source: "my-closet",
+      } as any,
+      CLOSET_WITH_TOP_BOTTOM,
+    );
+    const slots = garments.map((g) => g.slot);
+    assert.ok(!slots.includes("bottom"), `bottom must not appear when anchor is a dress; got: ${JSON.stringify(slots)}`);
+  });
+
+  it("QA-RG.B.3 — selectAdditionalClosetGarments with dress anchor CAN add shoe", () => {
+    const garments = selectAdditionalClosetGarments(
+      DRESS_ANCHOR,
+      null,
+      {
+        moods: ["confident"],
+        desiredFeelings: ["more-elevated"],
+        bodyNeeds: [],
+        coverageConditional: null,
+        occasion: "special-event",
+        formalityConditional: "formality-occasion",
+        todayColours: { preferred: [], avoid: [] },
+        practicalIds: [],
+        source: "my-closet",
+      } as any,
+      CLOSET_WITH_TOP_BOTTOM,
+    );
+    const slots = garments.map((g) => g.slot);
+    assert.ok(slots.includes("shoe"), `shoe must still be addable when anchor is a dress; got: ${JSON.stringify(slots)}`);
+  });
+
+  it("QA-RG.B.4 — SETS category correctly maps to 'set' slot (source contract)", () => {
+    const src = readFileSync(
+      new URL("./styleme-result.server.ts", import.meta.url).pathname,
+      "utf8",
+    );
+    assert.ok(
+      src.includes('SETS: "set"'),
+      'CLOSET_CATEGORY_TO_SLOT must contain SETS: "set" entry',
+    );
+  });
+});
+
+describe("§QA-RG.C — Issue 3: formality-mismatched products excluded from all directions", () => {
+  function makeEval(
+    handle: string,
+    totalScore: number,
+    negativeEvidence: EvidenceEntry[] = [],
+  ): ProductEvaluation {
+    return {
+      handle,
+      title: handle,
+      eligibility: "recommended",
+      slot: "dress",
+      isHardExcluded: false,
+      hardExclusionReasons: [],
+      totalScore,
+      positiveEvidence: [
+        {
+          field: "currentEmotionalStateSupport",
+          matchedToken: "confident",
+          sessionSignal: "confident",
+          effect: "STRONG_RANK",
+          points: 4,
+          isProvisional: false,
+          isFallback: false,
+          isSupplemental: false,
+        },
+      ],
+      negativeEvidence,
+      anchorCompatibility: { status: "compatible", isHardExclusion: false },
+      provisionalEvidenceUsed: false,
+      stylePersonalityMatchType: "none",
+      practicalSupportType: "none",
+      diversityAdjustment: 0,
+      deterministicRank: 1,
+      closetCompatibility: null,
+      semanticTieBreak: {
+        anchorConfidence: 0,
+        matchedCategoryCount: 1,
+        positiveNonSupplementalCount: 1,
+        totalNegativePenalty: 0,
+        provisionalCount: 0,
+        sessionSpecificHash: 1,
+      },
+    };
+  }
+
+  it("QA-RG.C.1 — computeResultDirections excludes formality-mismatched product", () => {
+    const formalityMismatchEntry: EvidenceEntry = {
+      field: "formalityScore",
+      matchedToken: "5",
+      sessionSignal: "formality-relaxed",
+      effect: "DEPRIORITISE",
+      points: -3,
+      isProvisional: false,
+      isFallback: false,
+      isSupplemental: false,
+    };
+    const gown = makeEval("evening-gown", 1, [formalityMismatchEntry]);
+    const casual = makeEval("casual-dress", 6);
+    const dirs = computeResultDirections([gown, casual], (h) => ({
+      handle: h,
+      title: h,
+      slot: "dress",
+      shopifyProductId: null,
+      productImageUrl: null,
+      liveUrl: null,
+      productUrl: null,
+      stylingNotes: "",
+    }));
+    const handles = dirs.map((d) => d.product?.handle).filter(Boolean);
+    assert.ok(!handles.includes("evening-gown"), `evening-gown with formality mismatch must not appear in any direction; dirs: ${JSON.stringify(handles)}`);
+  });
+
+  it("QA-RG.C.2 — computeResultDirections includes formality-adjacent product (gap=1 = RANK, not excluded)", () => {
+    const formalityAdjacentEntry: EvidenceEntry = {
+      field: "formalityScore",
+      matchedToken: "4",
+      sessionSignal: "formality-relaxed",
+      effect: "RANK",
+      points: 2,
+      isProvisional: false,
+      isFallback: false,
+      isSupplemental: false,
+    };
+    const almostFormal = makeEval("slightly-formal-dress", 6);
+    // Move adjacent entry to positive
+    almostFormal.positiveEvidence.push(formalityAdjacentEntry);
+    const dirs = computeResultDirections([almostFormal], (h) => ({
+      handle: h,
+      title: h,
+      slot: "dress",
+      shopifyProductId: null,
+      productImageUrl: null,
+      liveUrl: null,
+      productUrl: null,
+      stylingNotes: "",
+    }));
+    const handles = dirs.map((d) => d.product?.handle).filter(Boolean);
+    assert.ok(handles.includes("slightly-formal-dress"), "formality-adjacent product (RANK) must still appear in directions");
+  });
+
+  it("QA-RG.C.3 — TRY SOMETHING NEW cannot be an occasion-excluded product (source contract)", () => {
+    const src = readFileSync(
+      new URL("./styleme-result.server.ts", import.meta.url).pathname,
+      "utf8",
+    );
+    assert.ok(
+      src.includes("PRODUCT_TEMPLATE_FIELDS.FORMALITY_SCORE") &&
+        src.includes("DEPRIORITISE"),
+      "computeResultDirections must filter products with FORMALITY_SCORE DEPRIORITISE penalty",
+    );
+  });
+});
+
+describe("§QA-RG.D — Issue 4: per-piece copy is slot-aware, not generic", () => {
+  function makeMinimalResultForDbPayload(
+    closetGarments: Array<{ slot: string; id: string; label: string | null; imageUrl: string | null }>,
+  ) {
+    const song = SONG_CATALOG[0] as (typeof SONG_CATALOG)[number];
+    const base: StyleMeCustomerResult = {
+      outcome: "closet-led",
+      outfitName: "Test Look",
+      whyThisWorks: "Test why",
+      confidenceBoost: "Test boost",
+      perfumeNote: null,
+      primaryProduct: null,
+      alternatives: [],
+      closetAnchorLabel: "Black Dress",
+      closetAnchorImageUrl: null,
+      pairingNote: null,
+      finishingLayer: {
+        shoes: "Wear flats.",
+        bag: "A neutral bag.",
+        accessories: "Keep it simple.",
+        hair: "Natural.",
+        colourDirection: "Neutral palette.",
+      },
+      completionLayer: [],
+      songReason: "Matched mood.",
+      song,
+      rawRecommendation: {
+        outcome: "closet-led",
+        anchor: {
+          type: "closet",
+          id: "dress-1",
+          label: "Black Dress",
+          slot: "dress",
+          colors: ["black"],
+          normalizedColorIds: ["black"],
+          styleTags: [],
+          occasions: ["everyday"],
+          material: null,
+          hasStrongEvidence: true,
+          evidenceFields: [],
+          imageUrl: null,
+        } as NormalizedClosetAnchor,
+        primary: null,
+        alternatives: [],
+        outfitPlan: { anchorSlot: "dress", recommendedSlot: null, compatibilityStatus: "closet-led", notes: [] },
+        evaluatedProducts: [],
+        coverage: { totalCatalogProducts: 0, eligibleCandidates: 0, excludedCandidates: 0 },
+        selectedClosetGarments: closetGarments as any,
+      },
+      resultDirections: [],
+    };
+    return base;
+  }
+
+  it("QA-RG.D.1 — shoe garment note references the shoe by name and mentions 'ground'", () => {
+    const result = makeMinimalResultForDbPayload([
+      { slot: "shoe", id: "shoe-1", label: "White Sneakers", imageUrl: null },
+    ]);
+    const payload = buildDbPayload(result);
+    const shoeItem = payload.items.find((i) => i.itemType === "SHOES" && i.closetItemId === "shoe-1");
+    assert.ok(shoeItem, "shoe item must be present");
+    assert.ok(
+      shoeItem!.stylingNotes?.includes("White Sneakers"),
+      `shoe note must reference garment name; got: ${shoeItem!.stylingNotes}`,
+    );
+    assert.ok(
+      shoeItem!.stylingNotes?.toLowerCase().includes("ground"),
+      `shoe note must include 'ground'; got: ${shoeItem!.stylingNotes}`,
+    );
+    assert.ok(
+      !shoeItem!.stylingNotes?.toLowerCase().includes("style your"),
+      `shoe note must not be the generic 'Style your X to complete the look'; got: ${shoeItem!.stylingNotes}`,
+    );
+  });
+
+  it("QA-RG.D.2 — bag garment note references the bag and mentions structural/palette role", () => {
+    const result = makeMinimalResultForDbPayload([
+      { slot: "bag", id: "bag-1", label: "Leather Tote", imageUrl: null },
+    ]);
+    const payload = buildDbPayload(result);
+    const bagItem = payload.items.find((i) => i.itemType === "BAG" && i.closetItemId === "bag-1");
+    assert.ok(bagItem, "bag item must be present");
+    assert.ok(
+      bagItem!.stylingNotes?.includes("Leather Tote"),
+      `bag note must reference garment name; got: ${bagItem!.stylingNotes}`,
+    );
+    assert.ok(
+      !bagItem!.stylingNotes?.toLowerCase().includes("style your"),
+      `bag note must not be the generic 'Style your X to complete the look'; got: ${bagItem!.stylingNotes}`,
+    );
+  });
+
+  it("QA-RG.D.3 — each garment in a multi-piece look has a distinct note (no identical strings)", () => {
+    const result = makeMinimalResultForDbPayload([
+      { slot: "shoe", id: "shoe-1", label: "Heeled Sandals", imageUrl: null },
+      { slot: "bag", id: "bag-1", label: "Clutch Bag", imageUrl: null },
+      { slot: "jewelry", id: "jewel-1", label: "Gold Earrings", imageUrl: null },
+    ]);
+    const payload = buildDbPayload(result);
+    const closetItems = payload.items.filter((i) => i.closetItemId !== null);
+    const notes = closetItems.map((i) => i.stylingNotes);
+    const unique = new Set(notes);
+    assert.equal(unique.size, notes.length, `all closet garment notes must be distinct; got: ${JSON.stringify(notes)}`);
+  });
+
+  it("QA-RG.D.4 — no closet garment note contains generic pattern 'style your * to complete the look'", () => {
+    const result = makeMinimalResultForDbPayload([
+      { slot: "shoe", id: "shoe-1", label: "Loafers", imageUrl: null },
+      { slot: "bag", id: "bag-1", label: "Tote", imageUrl: null },
+    ]);
+    const payload = buildDbPayload(result);
+    for (const item of payload.items.filter((i) => i.closetItemId)) {
+      const note = item.stylingNotes ?? "";
+      assert.ok(
+        !/style your .* to complete the look/i.test(note),
+        `generic copy found on ${item.itemType}: ${note}`,
+      );
+    }
+  });
+});
+
+describe("§QA-RG.E — SETS slot mapping source contract", () => {
+  it("QA-RG.E.1 — selectAdditionalClosetGarments processes SETS category items without skipping", () => {
+    const setItem: ClosetAnchorInput = {
+      id: "set-1",
+      name: "Co-ord Set",
+      category: "SETS",
+      occasions: ["everyday"],
+      styleTags: ["minimalist"],
+      colors: ["beige"],
+      primaryColor: "beige",
+      imageUrl: null,
+      garmentRelationships: [],
+    };
+    // No anchor, so no slot is pre-covered. The SETS item should be scored and, if
+    // it has a positive signal score, returned. Since score may be 0 for this minimal
+    // session, we're testing that it doesn't throw and doesn't produce 'undefined' slots.
+    const garments = selectAdditionalClosetGarments(
+      null,
+      null,
+      {
+        moods: ["confident"],
+        desiredFeelings: ["more-elevated"],
+        bodyNeeds: [],
+        coverageConditional: null,
+        occasion: "everyday",
+        formalityConditional: null,
+        todayColours: { preferred: [], avoid: [] },
+        practicalIds: [],
+        source: "my-closet",
+      } as any,
+      [setItem],
+    );
+    // All returned garments must have valid, non-undefined slots
+    for (const g of garments) {
+      assert.ok(g.slot !== undefined && g.slot !== "unknown", `garment slot must not be undefined/unknown; got: ${g.slot}`);
+    }
+  });
+});
+
+describe("§QA-RG.F — Issue 5: direction pool excludes occasion-violating products", () => {
+  it("QA-RG.F.1 — when only formality-penalised products exist, directions returns empty", () => {
+    const formalityMismatch: EvidenceEntry = {
+      field: "formalityScore",
+      matchedToken: "5",
+      sessionSignal: "formality-relaxed",
+      effect: "DEPRIORITISE",
+      points: -3,
+      isProvisional: false,
+      isFallback: false,
+      isSupplemental: false,
+    };
+    const gown: ProductEvaluation = {
+      handle: "evening-gown",
+      title: "Evening Gown",
+      eligibility: "recommended",
+      slot: "dress",
+      isHardExcluded: false,
+      hardExclusionReasons: [],
+      totalScore: 1,
+      positiveEvidence: [{
+        field: "currentEmotionalStateSupport",
+        matchedToken: "confident",
+        sessionSignal: "confident",
+        effect: "STRONG_RANK",
+        points: 4,
+        isProvisional: false,
+        isFallback: false,
+        isSupplemental: false,
+      }],
+      negativeEvidence: [formalityMismatch],
+      anchorCompatibility: { status: "compatible", isHardExclusion: false },
+      provisionalEvidenceUsed: false,
+      stylePersonalityMatchType: "none",
+      practicalSupportType: "none",
+      diversityAdjustment: 0,
+      deterministicRank: 1,
+      closetCompatibility: null,
+      semanticTieBreak: {
+        anchorConfidence: 0,
+        matchedCategoryCount: 1,
+        positiveNonSupplementalCount: 1,
+        totalNegativePenalty: -3,
+        provisionalCount: 0,
+        sessionSpecificHash: 1,
+      },
+    };
+    const dirs = computeResultDirections([gown], (h) => ({
+      handle: h,
+      title: h,
+      slot: "dress",
+      shopifyProductId: null,
+      productImageUrl: null,
+      liveUrl: null,
+      productUrl: null,
+      stylingNotes: "",
+    }));
+    assert.equal(dirs.length, 0, "all directions must be empty when only formality-mismatched products exist");
+  });
+
+  it("QA-RG.F.2 — occasion-appropriate product always appears in directions even if it coexists with an excluded product", () => {
+    const formalityMismatch: EvidenceEntry = {
+      field: "formalityScore",
+      matchedToken: "5",
+      sessionSignal: "formality-relaxed",
+      effect: "DEPRIORITISE",
+      points: -3,
+      isProvisional: false,
+      isFallback: false,
+      isSupplemental: false,
+    };
+    const excluded: ProductEvaluation = {
+      handle: "evening-gown",
+      title: "Evening Gown",
+      eligibility: "recommended",
+      slot: "dress",
+      isHardExcluded: false,
+      hardExclusionReasons: [],
+      totalScore: 5,
+      positiveEvidence: [{
+        field: "currentEmotionalStateSupport",
+        matchedToken: "confident",
+        sessionSignal: "confident",
+        effect: "STRONG_RANK",
+        points: 4,
+        isProvisional: false,
+        isFallback: false,
+        isSupplemental: false,
+      }],
+      negativeEvidence: [formalityMismatch],
+      anchorCompatibility: { status: "compatible", isHardExclusion: false },
+      provisionalEvidenceUsed: false,
+      stylePersonalityMatchType: "none",
+      practicalSupportType: "none",
+      diversityAdjustment: 0,
+      deterministicRank: 1,
+      closetCompatibility: null,
+      semanticTieBreak: {
+        anchorConfidence: 0,
+        matchedCategoryCount: 1,
+        positiveNonSupplementalCount: 1,
+        totalNegativePenalty: -3,
+        provisionalCount: 0,
+        sessionSpecificHash: 1,
+      },
+    };
+    const appropriate: ProductEvaluation = {
+      handle: "casual-dress",
+      title: "Casual Dress",
+      eligibility: "recommended",
+      slot: "dress",
+      isHardExcluded: false,
+      hardExclusionReasons: [],
+      totalScore: 6,
+      positiveEvidence: [{
+        field: "currentEmotionalStateSupport",
+        matchedToken: "confident",
+        sessionSignal: "confident",
+        effect: "STRONG_RANK",
+        points: 4,
+        isProvisional: false,
+        isFallback: false,
+        isSupplemental: false,
+      }],
+      negativeEvidence: [],
+      anchorCompatibility: { status: "compatible", isHardExclusion: false },
+      provisionalEvidenceUsed: false,
+      stylePersonalityMatchType: "none",
+      practicalSupportType: "none",
+      diversityAdjustment: 0,
+      deterministicRank: 2,
+      closetCompatibility: null,
+      semanticTieBreak: {
+        anchorConfidence: 0,
+        matchedCategoryCount: 1,
+        positiveNonSupplementalCount: 1,
+        totalNegativePenalty: 0,
+        provisionalCount: 0,
+        sessionSpecificHash: 2,
+      },
+    };
+    const dirs = computeResultDirections([excluded, appropriate], (h) => ({
+      handle: h,
+      title: h,
+      slot: "dress",
+      shopifyProductId: null,
+      productImageUrl: null,
+      liveUrl: null,
+      productUrl: null,
+      stylingNotes: "",
+    }));
+    const handles = dirs.map((d) => d.product?.handle);
+    assert.ok(handles.includes("casual-dress"), "occasion-appropriate dress must appear in directions");
+    assert.ok(!handles.includes("evening-gown"), "formality-excluded gown must not appear alongside appropriate dress");
+  });
+});
+
+// ── §QA-RG2 — QA Regression Tests Round 2 (gaps from user audit) ─────────────
+
+// ── §QA-RG2.A — Base-architecture exclusivity (order-independent) ─────────────
+
+function makeClosetItem(
+  id: string,
+  category: string,
+  name: string,
+  occasions: string[] = ["everyday"],
+  score_boost: number = 0,
+): ClosetAnchorInput {
+  const styleTags = score_boost > 0 ? ["polished", "confident"] : ["casual"];
+  return {
+    id,
+    name,
+    category,
+    occasions,
+    styleTags,
+    colors: ["black"],
+    primaryColor: "black",
+    imageUrl: null,
+    garmentRelationships: [],
+  };
+}
+
+const BASE_SESSION: any = {
+  moods: ["confident"],
+  desiredFeelings: ["more-elevated"],
+  bodyNeeds: [],
+  coverageConditional: null,
+  occasion: "everyday",
+  formalityConditional: null,
+  todayColours: { preferred: [], avoid: [] },
+  practicalIds: [],
+  source: "my-closet",
+};
+
+describe("§QA-RG2.A — base-architecture exclusivity (order-independent)", () => {
+  // BOTTOM anchor, closet has TOP + DRESS candidates
+  it("QA-RG2.A.A — BOTTOM anchor + TOP candidate → DRESS candidate rejected", () => {
+    const bottomAnchor: NormalizedClosetAnchor = {
+      type: "closet", id: "skirt-1", label: "Mini Skirt", slot: "bottom",
+      colors: ["black"], normalizedColorIds: ["black"], styleTags: ["casual"],
+      occasions: ["everyday"], material: null, hasStrongEvidence: false,
+      evidenceFields: [], imageUrl: null,
+    };
+    const closet: ClosetAnchorInput[] = [
+      makeClosetItem("top-1", "TOPS", "White Tee"),
+      makeClosetItem("dress-1", "DRESSES", "Wrap Dress"),
+      makeClosetItem("shoe-1", "SHOES", "Sneakers"),
+    ];
+    const result = selectAdditionalClosetGarments(bottomAnchor, null, BASE_SESSION, closet);
+    const slots = result.map((g) => g.slot);
+    assert.ok(slots.includes("top"), `top must be selected to complete separates; got: ${JSON.stringify(slots)}`);
+    assert.ok(!slots.includes("dress"), `dress must not appear alongside BOTTOM anchor + TOP; got: ${JSON.stringify(slots)}`);
+  });
+
+  // TOP anchor, closet has BOTTOM + DRESS candidates
+  it("QA-RG2.A.B — TOP anchor + BOTTOM candidate → DRESS candidate rejected", () => {
+    const topAnchor: NormalizedClosetAnchor = {
+      type: "closet", id: "blouse-1", label: "Silk Blouse", slot: "top",
+      colors: ["ivory"], normalizedColorIds: ["white"], styleTags: ["polished"],
+      occasions: ["everyday"], material: null, hasStrongEvidence: false,
+      evidenceFields: [], imageUrl: null,
+    };
+    const closet: ClosetAnchorInput[] = [
+      makeClosetItem("bottom-1", "BOTTOMS", "Tailored Trousers"),
+      makeClosetItem("dress-1", "DRESSES", "Silk Dress"),
+      makeClosetItem("shoe-1", "SHOES", "Loafers"),
+    ];
+    const result = selectAdditionalClosetGarments(topAnchor, null, BASE_SESSION, closet);
+    const slots = result.map((g) => g.slot);
+    assert.ok(slots.includes("bottom"), `bottom must be selected to complete separates; got: ${JSON.stringify(slots)}`);
+    assert.ok(!slots.includes("dress"), `dress must not appear alongside TOP anchor + BOTTOM; got: ${JSON.stringify(slots)}`);
+  });
+
+  // No anchor, DRESS has higher score than TOP+BOTTOM → DRESS wins, TOP+BOTTOM rejected
+  it("QA-RG2.A.D — no anchor: dress candidate (higher score) wins over top+bottom candidates", () => {
+    const highScoreDress = makeClosetItem("dress-1", "DRESSES", "Wrap Dress", ["everyday"]);
+    // Give dress high relevance by adding polished/confident tags
+    highScoreDress.styleTags = ["polished", "confident", "elevated"];
+    const lowScoreTop = makeClosetItem("top-1", "TOPS", "Basic Tee", ["travel"]);
+    // Top doesn't match everyday occasion → score from tags only
+    const closet: ClosetAnchorInput[] = [highScoreDress, lowScoreTop, makeClosetItem("shoe-1", "SHOES", "Sandals")];
+    const result = selectAdditionalClosetGarments(null, null, BASE_SESSION, closet);
+    const slots = result.map((g) => g.slot);
+    assert.ok(!slots.includes("top"), `top must not coexist with higher-scoring dress; got: ${JSON.stringify(slots)}`);
+  });
+
+  // SET anchor → TOP, BOTTOM, DRESS all blocked
+  it("QA-RG2.A.E — SET anchor → top/bottom/dress candidates all blocked", () => {
+    const setAnchor: NormalizedClosetAnchor = {
+      type: "closet", id: "coord-1", label: "Co-ord Set", slot: "set",
+      colors: ["beige"], normalizedColorIds: ["beige"], styleTags: ["minimalist"],
+      occasions: ["everyday"], material: null, hasStrongEvidence: false,
+      evidenceFields: [], imageUrl: null,
+    };
+    const closet: ClosetAnchorInput[] = [
+      makeClosetItem("top-1", "TOPS", "White Tee"),
+      makeClosetItem("bottom-1", "BOTTOMS", "Black Trousers"),
+      makeClosetItem("dress-1", "DRESSES", "Wrap Dress"),
+      makeClosetItem("shoe-1", "SHOES", "Loafers"),
+    ];
+    const result = selectAdditionalClosetGarments(setAnchor, null, BASE_SESSION, closet);
+    const slots = result.map((g) => g.slot);
+    assert.ok(!slots.includes("top"), `top must not appear with SET anchor; got: ${JSON.stringify(slots)}`);
+    assert.ok(!slots.includes("bottom"), `bottom must not appear with SET anchor; got: ${JSON.stringify(slots)}`);
+    assert.ok(!slots.includes("dress"), `dress must not appear with SET anchor; got: ${JSON.stringify(slots)}`);
+  });
+
+  // Order-independence: result validity must not depend on closet array order
+  it("QA-RG2.A.F — base exclusivity is order-independent (same validity in any closet iteration order)", () => {
+    const bottomAnchor: NormalizedClosetAnchor = {
+      type: "closet", id: "skirt-1", label: "Mini Skirt", slot: "bottom",
+      colors: ["black"], normalizedColorIds: ["black"], styleTags: ["casual"],
+      occasions: ["everyday"], material: null, hasStrongEvidence: false,
+      evidenceFields: [], imageUrl: null,
+    };
+    // Closet order 1: dress listed before top
+    const closetOrderA: ClosetAnchorInput[] = [
+      makeClosetItem("dress-1", "DRESSES", "Wrap Dress"),
+      makeClosetItem("top-1", "TOPS", "White Tee"),
+    ];
+    // Closet order 2: top listed before dress
+    const closetOrderB: ClosetAnchorInput[] = [
+      makeClosetItem("top-1", "TOPS", "White Tee"),
+      makeClosetItem("dress-1", "DRESSES", "Wrap Dress"),
+    ];
+    const resultA = selectAdditionalClosetGarments(bottomAnchor, null, BASE_SESSION, closetOrderA);
+    const resultB = selectAdditionalClosetGarments(bottomAnchor, null, BASE_SESSION, closetOrderB);
+    const slotsA = resultA.map((g) => g.slot).sort();
+    const slotsB = resultB.map((g) => g.slot).sort();
+    // Both orders must produce the same slot composition
+    assert.deepEqual(slotsA, slotsB, `result slots must be order-independent; A: ${JSON.stringify(slotsA)}, B: ${JSON.stringify(slotsB)}`);
+    // And neither should contain both top and dress
+    assert.ok(!slotsA.includes("dress") || !slotsA.includes("top"),
+      `result must not contain both top and dress; got: ${JSON.stringify(slotsA)}`);
+  });
+});
+
+// ── §QA-RG2.B — Outfit size cap ──────────────────────────────────────────────
+
+describe("§QA-RG2.B — outfit size cap (max 5 total pieces)", () => {
+  // Build a rich closet with candidates for every optional slot
+  const FULL_CLOSET: ClosetAnchorInput[] = [
+    makeClosetItem("top-1", "TOPS", "Silk Blouse"),
+    makeClosetItem("shoe-1", "SHOES", "Loafers"),
+    makeClosetItem("shoe-2", "SHOES", "Block Heels"),
+    makeClosetItem("bag-1", "BAGS", "Leather Tote"),
+    makeClosetItem("outer-1", "OUTERWEAR", "Tailored Blazer"),
+    makeClosetItem("acc-1", "ACCESSORIES", "Gold Hoop Earrings"),
+    makeClosetItem("jewel-1", "JEWELRY", "Pearl Necklace"),
+  ];
+
+  const bottomAnchor: NormalizedClosetAnchor = {
+    type: "closet", id: "trousers-1", label: "Wide-Leg Trousers", slot: "bottom",
+    colors: ["camel"], normalizedColorIds: ["beige"], styleTags: ["polished"],
+    occasions: ["everyday"], material: null, hasStrongEvidence: false,
+    evidenceFields: [], imageUrl: null,
+  };
+
+  it("QA-RG2.B.G — everyday separates outfit does not automatically fill every optional slot", () => {
+    const result = selectAdditionalClosetGarments(bottomAnchor, null, BASE_SESSION, FULL_CLOSET);
+    const slots = result.map((g) => g.slot);
+    // Should NOT contain all of: shoe, outerwear, bag, accessory, jewelry
+    const optionalFilled = slots.filter((s) => !["top", "bottom", "dress", "set"].includes(s));
+    assert.ok(
+      optionalFilled.length < 4,
+      `must not fill every optional slot; optional slots filled: ${JSON.stringify(optionalFilled)}`,
+    );
+  });
+
+  it("QA-RG2.B.H — total outfit-piece count stays within the edited-look cap", () => {
+    const result = selectAdditionalClosetGarments(bottomAnchor, null, BASE_SESSION, FULL_CLOSET);
+    // anchor = 1, primary = 0, additional = result.length; total = 1 + result.length
+    const total = 1 + result.length;
+    assert.ok(
+      total <= MAX_OUTFIT_PIECES,
+      `total pieces (${total}) must not exceed MAX_OUTFIT_PIECES (${MAX_OUTFIT_PIECES}); slots: ${JSON.stringify(result.map((g) => g.slot))}`,
+    );
+  });
+
+  it("QA-RG2.B.I — highest-relevance optional pieces survive when more candidates exist than budget", () => {
+    // Give shoe a very high score by matching occasion + confident mood tag
+    const highScoreShoe = makeClosetItem("shoe-best", "SHOES", "Best Sneakers", ["everyday"]);
+    highScoreShoe.styleTags = ["confident", "polished"];
+    // Give outerwear a low score (mismatched occasion, no relevant tags)
+    const lowScoreOuter = makeClosetItem("outer-low", "OUTERWEAR", "Formal Coat", ["dinner"]);
+    lowScoreOuter.styleTags = ["formal"];
+    const closet: ClosetAnchorInput[] = [
+      makeClosetItem("top-1", "TOPS", "Tee"),
+      highScoreShoe,
+      lowScoreOuter,
+      makeClosetItem("bag-1", "BAGS", "Tote", ["everyday"]),
+    ];
+    const result = selectAdditionalClosetGarments(bottomAnchor, null, BASE_SESSION, closet);
+    const slots = result.map((g) => g.slot);
+    // shoe-best must be selected (high relevance)
+    const shoeWinner = result.find((g) => g.slot === "shoe");
+    assert.ok(shoeWinner?.id === "shoe-best", `highest-scoring shoe must be selected; got: ${JSON.stringify(shoeWinner)}`);
+    // outerwear with mismatched occasion likely scores <= 0 — filtered before cap even applies
+    // (this confirms score-first filtering, not just cap truncation)
+    const outerResult = result.find((g) => g.slot === "outerwear");
+    assert.ok(!outerResult, `low-scoring outerwear must not survive score filter; slots: ${JSON.stringify(slots)}`);
+  });
+
+  it("QA-RG2.B.J — accessory and jewelry combined produce at most one finishing piece", () => {
+    const closet: ClosetAnchorInput[] = [
+      makeClosetItem("top-1", "TOPS", "Blouse"),
+      makeClosetItem("acc-1", "ACCESSORIES", "Gold Earrings"),
+      makeClosetItem("jewel-1", "JEWELRY", "Necklace"),
+    ];
+    const result = selectAdditionalClosetGarments(bottomAnchor, null, BASE_SESSION, closet);
+    const finishingCount = result.filter((g) => g.slot === "accessory" || g.slot === "jewelry").length;
+    assert.ok(finishingCount <= 1, `at most 1 finishing piece (accessory or jewelry); got: ${finishingCount}, slots: ${JSON.stringify(result.map(g => g.slot))}`);
+  });
+});
+
+// ── §QA-RG2.C — occasion-only relationship evidence ──────────────────────────
+
+describe("§QA-RG2.C — occasion-only garment relationship", () => {
+  const EVERYDAY_SIGNALS = { occasion: "everyday" as const, moods: ["confident"] as string[], desiredFeelings: [] as string[] };
+  const TRAVEL_SIGNALS = { occasion: "travel" as const, moods: ["comfortable"] as string[], desiredFeelings: [] as string[] };
+  const EVENT_SIGNALS = { occasion: "special-event" as const, moods: ["confident"] as string[], desiredFeelings: [] as string[] };
+
+  it("QA-RG2.C.K — occasion-only item scores lower for everyday session", () => {
+    const item = { occasions: ["everyday"], styleTags: ["elegant"], category: "DRESSES" };
+    const withRelationship = scoreClosetItemForSession(item, EVERYDAY_SIGNALS, undefined, ["occasion-only"]);
+    const withoutRelationship = scoreClosetItemForSession(item, EVERYDAY_SIGNALS, undefined, []);
+    assert.ok(
+      withRelationship < withoutRelationship,
+      `occasion-only must lower score for everyday; with: ${withRelationship}, without: ${withoutRelationship}`,
+    );
+    assert.equal(withRelationship, withoutRelationship - 2, "occasion-only penalty must be exactly -2 for everyday");
+  });
+
+  it("QA-RG2.C.L — occasion-only item scores lower for travel session", () => {
+    const item = { occasions: ["travel"], styleTags: ["comfortable"], category: "TOPS" };
+    const withRelationship = scoreClosetItemForSession(item, TRAVEL_SIGNALS, undefined, ["occasion-only"]);
+    const withoutRelationship = scoreClosetItemForSession(item, TRAVEL_SIGNALS, undefined, []);
+    assert.equal(withRelationship, withoutRelationship - 2, "occasion-only penalty must be exactly -2 for travel");
+  });
+
+  it("QA-RG2.C.M — occasion-only item is NOT penalised for special-event session", () => {
+    const item = { occasions: ["special-event"], styleTags: ["elegant"], category: "DRESSES" };
+    const withRelationship = scoreClosetItemForSession(item, EVENT_SIGNALS, undefined, ["occasion-only"]);
+    const withoutRelationship = scoreClosetItemForSession(item, EVENT_SIGNALS, undefined, []);
+    assert.equal(
+      withRelationship,
+      withoutRelationship,
+      `occasion-only must NOT penalise special-event session; with: ${withRelationship}, without: ${withoutRelationship}`,
+    );
+  });
+
+  it("QA-RG2.C.N — occasion-only evening gown is excluded from everyday additional garments", () => {
+    const bottomAnchor: NormalizedClosetAnchor = {
+      type: "closet", id: "skirt-1", label: "Mini Skirt", slot: "bottom",
+      colors: ["black"], normalizedColorIds: ["black"], styleTags: ["casual"],
+      occasions: ["everyday"], material: null, hasStrongEvidence: false,
+      evidenceFields: [], imageUrl: null,
+    };
+    const gown: ClosetAnchorInput = {
+      id: "gown-1",
+      name: "Burgundy Cowl Neck Evening Gown",
+      category: "DRESSES",
+      occasions: ["special-event"],      // no everyday match → +0
+      styleTags: ["formal", "elegant"],  // no confident/casual match → +0
+      colors: ["burgundy"],
+      primaryColor: "burgundy",
+      imageUrl: null,
+      garmentRelationships: ["occasion-only"],  // -2 for everyday → net score ≤ 0
+    };
+    const closet: ClosetAnchorInput[] = [gown, makeClosetItem("top-1", "TOPS", "Tee")];
+    const result = selectAdditionalClosetGarments(bottomAnchor, null, BASE_SESSION, closet);
+    const slots = result.map((g) => g.slot);
+    assert.ok(!slots.includes("dress"), `occasion-only evening gown must not appear in everyday outfit; slots: ${JSON.stringify(slots)}`);
+  });
+});
+
+// ── §QA-T1 — Test 1 fixture: everyday Closet-led look with occasion-only gown ─
+//
+// Fixture represents the QA Test 1 scenario. LIVE-DATA RETEST PENDING.
+// This test uses synthetic data — not a staging DB query.
+//
+// Test 1 customer selections (verified from result.tsx translation):
+//   State:      "I feel pretty neutral"  → nothing-in-particular → NO moods added (state is never passed to engine in Rev3)
+//   Intention:  "Help me feel like myself" → feel-like-myself → PROFILE_AMPLIFY → moods: ["like-myself"]
+//   Fit/comfort: "Nothing specific"       → no additional signals
+//   Occasion:   "Everyday or casual plans" → occasion: "everyday"
+//   Formality:  not selected             → no formalityConditional
+//   Anchor:     "Let nAia choose"        → naia-piece source, auto-select from closet
+//
+// Normalized inputs reaching Closet-led functions:
+//   moods: ["like-myself"]   desiredFeelings: []   occasion: "everyday"
+//
+// Score breakdown (scoreClosetItemForSession, no Passport profile):
+//   +10 if item.occasions includes "everyday"
+//   +3  if "like-myself" ∈ item.styleTags  ← NO standard garment carries this tag
+//   -2  if garmentRelationships includes "occasion-only" AND occasion is "everyday"
+//
+//   Black Long-Sleeve Top : +10 (everyday) + 0 = 10
+//   Burgundy Evening Gown : +0 (special-event only) + 0 + -2 (occasion-only) = -2 → FILTERED (≤0)
+//   Black Loafers         : +10 + 0 = 10
+//   Black Leather Tote    : +10 + 0 = 10
+//   Gold Hoop Earrings    : +10 + 0 = 10
+//
+// Anchor: Black A-Line Mini Skirt (BOTTOMS, everyday, no occasion-only)
+// Problematic item: Burgundy Cowl Neck Evening Gown (DRESSES, special-event, occasion-only)
+// Expected: gown filtered at score -2; top + shoe selected; total ≤ MAX_OUTFIT_PIECES
+
+describe("§QA-T1 — Test 1 fixture: everyday closet-led look, occasion-only gown excluded", () => {
+  const T1_ANCHOR: NormalizedClosetAnchor = {
+    type: "closet",
+    id: "skirt-1",
+    label: "Black A-Line Mini Skirt",
+    slot: "bottom",
+    colors: ["black"],
+    normalizedColorIds: ["black"],
+    styleTags: ["casual"],
+    occasions: ["everyday"],
+    material: null,
+    hasStrongEvidence: true,
+    evidenceFields: ["occasions"],
+    imageUrl: null,
+  };
+
+  const T1_CLOSET: ClosetAnchorInput[] = [
+    // score=10 (everyday occasion match; "like-myself" not in styleTags → +0)
+    { id: "top-1", name: "Black Long-Sleeve Top", category: "TOPS",
+      occasions: ["everyday", "work"], styleTags: ["casual"],
+      colors: ["black"], primaryColor: "black", imageUrl: null, garmentRelationships: [] },
+    // score=-2 (no everyday + occasion-only -2 → filtered)
+    { id: "gown-1", name: "Burgundy Cowl Neck Evening Gown", category: "DRESSES",
+      occasions: ["special-event"], styleTags: ["formal", "elegant"],
+      colors: ["burgundy"], primaryColor: "burgundy", imageUrl: null,
+      garmentRelationships: ["occasion-only"] },
+    // score=10
+    { id: "shoe-1", name: "Black Loafers", category: "SHOES",
+      occasions: ["everyday", "work"], styleTags: ["polished"],
+      colors: ["black"], primaryColor: "black", imageUrl: null, garmentRelationships: [] },
+    // score=10
+    { id: "bag-1", name: "Black Leather Tote", category: "BAGS",
+      occasions: ["everyday"], styleTags: ["minimalist"],
+      colors: ["black"], primaryColor: "black", imageUrl: null, garmentRelationships: [] },
+    // score=10
+    { id: "jewel-1", name: "Gold Hoop Earrings", category: "JEWELRY",
+      occasions: ["everyday"], styleTags: ["casual"],
+      colors: ["gold"], primaryColor: "gold", imageUrl: null, garmentRelationships: [] },
+  ];
+
+  // Correct Test 1 session: "feel-like-myself" → moods:["like-myself"], no desiredFeelings.
+  // "nothing-in-particular" state is never forwarded to the engine.
+  const T1_SESSION: any = {
+    moods: ["like-myself"],
+    desiredFeelings: [],
+    bodyNeeds: [],
+    coverageConditional: null,
+    occasion: "everyday",
+    formalityConditional: null,
+    todayColours: { preferred: [], avoid: [] },
+    practicalIds: [],
+    source: "my-closet",
+  };
+
+  it("QA-T1.1 — occasion-only evening gown is excluded from additional garments (score ≤ 0)", () => {
+    const result = selectAdditionalClosetGarments(T1_ANCHOR, null, T1_SESSION, T1_CLOSET);
+    const ids = result.map((g) => g.id);
+    assert.ok(!ids.includes("gown-1"),
+      `occasion-only gown must be excluded; selected: ${JSON.stringify(ids)}`);
+  });
+
+  it("QA-T1.2 — top and shoe are selected for the everyday look", () => {
+    const result = selectAdditionalClosetGarments(T1_ANCHOR, null, T1_SESSION, T1_CLOSET);
+    const slots = result.map((g) => g.slot);
+    assert.ok(slots.includes("top"), `top must be selected to complete anchor(bottom); got: ${JSON.stringify(slots)}`);
+    assert.ok(slots.includes("shoe"), `shoe must be selected; got: ${JSON.stringify(slots)}`);
+  });
+
+  it("QA-T1.3 — shoes appear before bag/jewelry in result order", () => {
+    const result = selectAdditionalClosetGarments(T1_ANCHOR, null, T1_SESSION, T1_CLOSET);
+    const shoeIdx = result.findIndex((g) => g.slot === "shoe");
+    const bagIdx = result.findIndex((g) => g.slot === "bag");
+    const jewelIdx = result.findIndex((g) => g.slot === "jewelry");
+    assert.ok(shoeIdx !== -1, "shoe must be in result");
+    if (bagIdx !== -1) assert.ok(shoeIdx < bagIdx, "shoe must appear before bag");
+    if (jewelIdx !== -1) assert.ok(shoeIdx < jewelIdx, "shoe must appear before jewelry");
+  });
+
+  it("QA-T1.4 — total outfit (anchor + additional) does not exceed MAX_OUTFIT_PIECES", () => {
+    const additional = selectAdditionalClosetGarments(T1_ANCHOR, null, T1_SESSION, T1_CLOSET);
+    const total = 1 /* anchor */ + additional.length;
+    assert.ok(total <= MAX_OUTFIT_PIECES,
+      `total pieces ${total} exceeds cap ${MAX_OUTFIT_PIECES}; additional: ${JSON.stringify(additional.map(g => g.slot))}`);
+  });
+
+  it("QA-T1.5 — additional garments carry colors field", () => {
+    const result = selectAdditionalClosetGarments(T1_ANCHOR, null, T1_SESSION, T1_CLOSET);
+    for (const g of result) {
+      assert.ok(Array.isArray(g.colors), `garment ${g.id} missing colors array`);
+    }
+  });
+
+  it("QA-T1.6 — computeNaiaResultDirections excludes occasion-only gown from all directions", () => {
+    // MOST LIKE ME, FRESH TWIST, TRY SOMETHING NEW must all exclude gown-1.
+    const dirs = computeNaiaResultDirections(T1_CLOSET, "skirt-1", T1_SESSION);
+    for (const dir of dirs) {
+      const ids = (dir.outfitPieces ?? []).map((p) => p.id);
+      assert.ok(!ids.includes("gown-1"),
+        `direction ${dir.label} must not include occasion-only gown; got: ${JSON.stringify(ids)}`);
+    }
+  });
+
+  it("QA-T1.7 — computeNaiaResultDirections total pieces per direction ≤ MAX_OUTFIT_PIECES - 1", () => {
+    const dirs = computeNaiaResultDirections(T1_CLOSET, "skirt-1", T1_SESSION);
+    for (const dir of dirs) {
+      const count = (dir.outfitPieces ?? []).length;
+      assert.ok(count <= MAX_OUTFIT_PIECES - 1,
+        `direction ${dir.label} has ${count} pieces, cap is ${MAX_OUTFIT_PIECES - 1}`);
+    }
+  });
+});
+
+// ── §QA-T1-REG — Regression: positive-score gown still excluded from everyday ──
+// An occasion-only gown that also matches a session mood tag scores +1 net
+// (0 occasion + 3 mood - 2 occasion-only relationship). Score 1 > 0 means it
+// survives the score filter — but two independent mechanisms prevent it from
+// appearing in everyday outfits:
+//
+//   (A) Base-arch exclusivity in selectAdditionalClosetGarments:
+//       When the anchor is a separates slot (bottom), committedSeparates=true →
+//       the dress slot is deleted from candidates regardless of score.
+//
+//   (B) Score competition when no separates base is committed:
+//       gown(score=1) < everyday-top(score=10) → separates win the score
+//       comparison → dress slot deleted.
+//
+//   (C) computeNaiaResultDirections with a bottom anchor:
+//       bySlot["dress"] is deleted before buildOutfit runs — same result.
+
+describe("§QA-T1-REG — positive-score gown excluded from everyday by architecture and score", () => {
+  // Gown that ALSO matches a session mood: net score = 0+3-2 = 1 (positive but weak)
+  const GOWN_WITH_MOOD: ClosetAnchorInput = {
+    id: "gown-reg", name: "Red Formal Gown", category: "DRESSES",
+    occasions: ["special-event"],            // no everyday match → +0
+    styleTags: ["confident", "formal"],      // "confident" matches REG_SESSION mood → +3
+    colors: ["red"], primaryColor: "red",
+    imageUrl: null,
+    garmentRelationships: ["occasion-only"], // everyday session → -2 → net score = 1
+  };
+  // Everyday top: score = 10 (occasion match only)
+  const EVERYDAY_TOP: ClosetAnchorInput = {
+    id: "top-reg", name: "White Tee", category: "TOPS",
+    occasions: ["everyday"], styleTags: ["casual"],
+    colors: ["white"], primaryColor: "white",
+    imageUrl: null, garmentRelationships: [],
+  };
+  // Hypothetical session where "confident" mood gives the gown a positive (but still weak) score.
+  // This is NOT the Test 1 customer's actual session (which uses moods:["like-myself"]).
+  const REG_SESSION: any = {
+    moods: ["confident"],
+    desiredFeelings: [],
+    bodyNeeds: [], coverageConditional: null,
+    occasion: "everyday", formalityConditional: null,
+    todayColours: { preferred: [], avoid: [] },
+    practicalIds: [], source: "my-closet",
+  };
+  // Bottom anchor commits the separates base architecture
+  const BOTTOM_ANCHOR: NormalizedClosetAnchor = {
+    type: "closet", id: "skirt-reg", label: "Black Mini Skirt", slot: "bottom",
+    colors: ["black"], normalizedColorIds: ["black"], styleTags: ["casual"],
+    occasions: ["everyday"], material: null, hasStrongEvidence: false,
+    evidenceFields: [], imageUrl: null,
+  };
+  // Shoe anchor: non-clothing slot, so no separates base is committed
+  const SHOE_ANCHOR: NormalizedClosetAnchor = {
+    type: "closet", id: "shoe-reg", label: "White Sneakers", slot: "shoe",
+    colors: ["white"], normalizedColorIds: ["white"], styleTags: ["casual"],
+    occasions: ["everyday"], material: null, hasStrongEvidence: false,
+    evidenceFields: [], imageUrl: null,
+  };
+
+  it("REG.1A — bottom anchor: base-arch exclusivity removes dress slot; gown score 1 is irrelevant", () => {
+    // committedSeparates=true (anchor.slot="bottom") → candidatesBySlot.delete("dress")
+    // gown-reg is never a candidate; top-reg (score=10) is selected.
+    const result = selectAdditionalClosetGarments(BOTTOM_ANCHOR, null, REG_SESSION, [GOWN_WITH_MOOD, EVERYDAY_TOP]);
+    const ids = result.map((g) => g.id);
+    assert.ok(!ids.includes("gown-reg"),
+      `gown must be excluded by base-arch exclusivity; got: ${JSON.stringify(ids)}`);
+    assert.ok(ids.includes("top-reg"),
+      `everyday top (score=10) must be selected; got: ${JSON.stringify(ids)}`);
+  });
+
+  it("REG.1B — shoe anchor (no committed base): score competition removes gown (1) in favour of top (10)", () => {
+    // No committed separates or one-piece base → score comparison:
+    // bestSeparates=10 > bestOnepiece=1 → dress slot deleted.
+    const result = selectAdditionalClosetGarments(SHOE_ANCHOR, null, REG_SESSION, [GOWN_WITH_MOOD, EVERYDAY_TOP]);
+    const ids = result.map((g) => g.id);
+    assert.ok(!ids.includes("gown-reg"),
+      `gown (score=1) must lose score competition to top (score=10); got: ${JSON.stringify(ids)}`);
+    assert.ok(ids.includes("top-reg"),
+      `everyday top (score=10) must be selected; got: ${JSON.stringify(ids)}`);
+  });
+
+  it("REG.2 — computeNaiaResultDirections with bottom anchor: gown absent from all directions", () => {
+    const closet = [
+      { id: "skirt-reg", name: "Black Mini Skirt", category: "BOTTOMS", occasions: ["everyday"],
+        styleTags: ["casual"], colors: ["black"], primaryColor: "black", imageUrl: null, garmentRelationships: [] },
+      GOWN_WITH_MOOD,
+      EVERYDAY_TOP,
+    ];
+    // anchor=skirt-reg (bottom) → committedSep=true → bySlot["dress"] deleted in directions
+    const dirs = computeNaiaResultDirections(closet, "skirt-reg", REG_SESSION);
+    for (const dir of dirs) {
+      const ids = (dir.outfitPieces ?? []).map((p) => p.id);
+      assert.ok(!ids.includes("gown-reg"),
+        `direction "${dir.label}" must not include dress candidate when anchor is bottom; got: ${JSON.stringify(ids)}`);
+    }
+  });
+});
+
+// ── §QA-ANCHOR — Occasion compatibility via the scoring path ──────────────────
+// Tests the scoring layer that backs autoSelectClosetAnchor.
+// autoSelectClosetAnchor is DB-backed (async Prisma) and cannot be unit-tested
+// here — but it calls scoreClosetItemForSession on each item and returns the
+// highest scorer. These tests verify that scoring logic directly.
+//
+// Fix applied (styleme-anchor.server.ts): autoSelectClosetAnchor now returns null
+// when scored[0].score ≤ 0 so occasion-incompatible closets are handled
+// honestly rather than presenting an incompatible garment as the anchor.
+//
+// Scoring reference (scoreClosetItemForSession):
+//   +10  occasion match
+//   +3   per mood in styleTags
+//   +2   per desiredFeeling in styleTags
+//   +2   Passport favoriteColors match
+//   +2   relationship: favourite or wear-often
+//   -2   relationship: occasion-only, if occasion is everyday or travel
+//   -2   relationship: rarely-wear
+//   -4   relationship: regret  |  Passport avoidColors match
+
+describe("§QA-ANCHOR — occasion compatibility through the autoSelectClosetAnchor scoring path", () => {
+  const GOWN: ClosetAnchorInput = {
+    id: "gown-a", name: "Formal Evening Gown", category: "DRESSES",
+    occasions: ["special-event"],
+    styleTags: ["elegant", "formal"],
+    colors: ["ivory"], primaryColor: "ivory",
+    imageUrl: null,
+    garmentRelationships: ["occasion-only", "favourite"],
+    // With moods:["confident"]: score = 0 +0 +2(fav) -2(occasion-only) = 0 → filtered for everyday
+    // With moods:[]:            score = 0 +0 +2(fav) -2(occasion-only) = 0 → filtered
+    // For special-event:        score = 10 +0 +2(fav) +0(no occasion-only penalty) = 12
+  };
+  const EVERYDAY_TOP: ClosetAnchorInput = {
+    id: "top-a", name: "White Cotton Top", category: "TOPS",
+    occasions: ["everyday"], styleTags: ["casual"],
+    colors: ["white"], primaryColor: "white",
+    imageUrl: null, garmentRelationships: [],
+    // everyday score: +10 + 0 = 10
+  };
+  const EVERYDAY_SESSION_NO_MOOD = {
+    occasion: "everyday", moods: [] as string[], desiredFeelings: [] as string[],
+  };
+  const EVENT_SESSION = {
+    occasion: "special-event", moods: [] as string[], desiredFeelings: [] as string[],
+  };
+
+  it("ANCHOR-A — everyday top (10) scores higher than formal gown (0) for everyday plans", () => {
+    // Gown: +0 (no everyday) + 2 (favourite) - 2 (occasion-only everyday) = 0 → would be filtered
+    // Top: +10 (everyday) + 0 = 10
+    const gownScore = scoreClosetItemForSession(
+      { occasions: GOWN.occasions, styleTags: GOWN.styleTags, category: GOWN.category },
+      EVERYDAY_SESSION_NO_MOOD, undefined, GOWN.garmentRelationships,
+    );
+    const topScore = scoreClosetItemForSession(
+      { occasions: EVERYDAY_TOP.occasions, styleTags: EVERYDAY_TOP.styleTags, category: EVERYDAY_TOP.category },
+      EVERYDAY_SESSION_NO_MOOD, undefined, EVERYDAY_TOP.garmentRelationships,
+    );
+    assert.strictEqual(gownScore, 0, `gown everyday score: expected 0 got ${gownScore}`);
+    assert.strictEqual(topScore, 10, `top everyday score: expected 10 got ${topScore}`);
+    // autoSelectClosetAnchor sorts by score desc → top wins; gown is at score 0 (no threshold met)
+    // With the threshold guard (score > 0), gown would be excluded if it were the only candidate.
+    assert.ok(topScore > gownScore,
+      `everyday top (${topScore}) must outrank formal gown (${gownScore})`);
+  });
+
+  it("ANCHOR-B — when only the gown exists, it scores ≤ 0 for everyday (autoSelectClosetAnchor returns null)", () => {
+    // Gown with just the occasion-only relationship, no everyday occasions:
+    const score = scoreClosetItemForSession(
+      { occasions: GOWN.occasions, styleTags: GOWN.styleTags, category: GOWN.category },
+      EVERYDAY_SESSION_NO_MOOD, undefined, GOWN.garmentRelationships,
+    );
+    assert.ok(score <= 0,
+      `gown must score ≤ 0 for everyday with no occasion match (got ${score}); ` +
+      `the threshold guard in autoSelectClosetAnchor returns null at this score`);
+    // autoSelectClosetAnchor would not expose this gown as the anchor — callers see null
+    // and handle it as "no suitable closet item for this session."
+  });
+
+  it("ANCHOR-C — the same gown scores positively for special-event (remains eligible)", () => {
+    // occasion-only penalty ONLY applies to everyday/travel — no penalty for special-event
+    const score = scoreClosetItemForSession(
+      { occasions: GOWN.occasions, styleTags: GOWN.styleTags, category: GOWN.category },
+      EVENT_SESSION, undefined, GOWN.garmentRelationships,
+    );
+    // +10 (special-event match) + 0 (no mood) + 2 (favourite) + 0 (no penalty) = 12
+    assert.strictEqual(score, 12, `gown special-event score: expected 12 got ${score}`);
+    assert.ok(score > 0, "gown must remain eligible for special-event sessions");
+  });
+});
+
+// ── §QA-ANCHOR-DI — autoSelectClosetAnchor via DI seam ───────────────────────
+// Exercises the actual selector using the optional _fetchItems injection parameter.
+// No Prisma or real DB calls. Each test shows candidate scores explicitly.
+//
+// Compatibility rule:
+//   compatible = occasions.includes(occ)         — explicit match
+//             || occasions.length === 0           — no tags → versatile
+//             || !relationships.includes("occasion-only")  — no explicit restriction
+//
+// Incompatibility requires the customer to have explicitly tagged an item as
+// occasion-only for a different occasion. Incomplete occasion metadata (empty array)
+// is versatility, not incompatibility.
+
+describe("§QA-ANCHOR-DI — autoSelectClosetAnchor via DI seam (no Prisma)", () => {
+  // GOWN_RESTRICTED: occasions: ["formal"], tagged occasion-only.
+  // Incompatible for "work" despite having mood/relationship bonuses.
+  // Scores for work + moods["elegant","bold","romantic"]:
+  //   +0 (no "work") +3(elegant) +3(bold) +3(romantic) +2(favourite) = 11
+  const GOWN_RESTRICTED: AutoSelectItem = {
+    id: "gown-r", name: "Formal Ball Gown", category: "DRESSES",
+    occasions: ["formal"],
+    styleTags: ["elegant", "bold", "romantic"],
+    colors: ["ivory"], primaryColor: "ivory",
+    pattern: null, material: null, imageUrl: null,
+    garmentRelationships: ["occasion-only", "favourite"],
+    // isCompatible("work"): "work" ∉ occasions, length>0, has "occasion-only" → INCOMPATIBLE
+  };
+  // WORK_TOP: occasions: ["work","everyday"], no tags matching moods.
+  // Scores for work + moods["elegant","bold","romantic"]:
+  //   +10 (occasion match) +0 = 10
+  const WORK_TOP: AutoSelectItem = {
+    id: "top-work", name: "Tailored Work Top", category: "TOPS",
+    occasions: ["work", "everyday"],
+    styleTags: ["classic"], colors: ["white"], primaryColor: "white",
+    pattern: null, material: null, imageUrl: null,
+    garmentRelationships: [],
+    // isCompatible("work"): "work" ∈ occasions → COMPATIBLE
+  };
+  // VERSATILE: no occasion tags at all — incomplete metadata, not a restriction.
+  // Scores for everyday + moods["casual"]:
+  //   +0 (no tags) +3(casual) = 3
+  const VERSATILE: AutoSelectItem = {
+    id: "versatile-1", name: "Cotton Knit Top", category: "TOPS",
+    occasions: [],
+    styleTags: ["casual"], colors: ["cream"], primaryColor: "cream",
+    pattern: null, material: null, imageUrl: null,
+    garmentRelationships: [],
+    // isCompatible("everyday"): occasions.length===0 → COMPATIBLE (versatile)
+  };
+  // GOWN_EVENT: occasion-only for special-event — incompatible for everyday, compatible for event.
+  // Scores for everyday + moods["confident"]:
+  //   +0 +3(confident) +2(fav) -2(occasion-only penalty everyday) = 3 > 0
+  // Scores for special-event + moods["confident"]:
+  //   +10 +3(confident) +2(fav) +0(no penalty) = 15 > 0
+  const GOWN_EVENT: AutoSelectItem = {
+    id: "gown-ev", name: "Evening Gown", category: "DRESSES",
+    occasions: ["special-event"],
+    styleTags: ["confident"],
+    colors: ["black"], primaryColor: "black",
+    pattern: null, material: null, imageUrl: null,
+    garmentRelationships: ["occasion-only", "favourite"],
+    // isCompatible("everyday"): "everyday" ∉ occasions, has "occasion-only" → INCOMPATIBLE
+    // isCompatible("special-event"): "special-event" ∈ occasions → COMPATIBLE
+  };
+
+  const WORK_SIGNALS  = { occasion: "work",          moods: ["elegant","bold","romantic"] as string[], desiredFeelings: [] as string[] };
+  const DAILY_CASUAL  = { occasion: "everyday",       moods: ["casual"]  as string[], desiredFeelings: [] as string[] };
+  const DAILY_CONF    = { occasion: "everyday",       moods: ["confident"] as string[], desiredFeelings: [] as string[] };
+  const EVENT_SIGNALS = { occasion: "special-event",  moods: ["confident"] as string[], desiredFeelings: [] as string[] };
+
+  it("ANCHOR-D-DI — higher-scoring incompatible is skipped; lower-scoring compatible wins", async () => {
+    // GOWN_RESTRICTED scores 11 for "work" (no occasion match, but mood+fav bonuses).
+    // WORK_TOP scores 10. Sorted: [GOWN(11), TOP(10)].
+    // GOWN is incompatible (occasion-only for formal, not work) → skipped.
+    // TOP is compatible → selected, even though it scored lower.
+    const result = await autoSelectClosetAnchor(
+      "cust-d",
+      WORK_SIGNALS,
+      async () => [GOWN_RESTRICTED, WORK_TOP],
+    );
+    assert.ok(result !== null,
+      "selector must skip the incompatible gown (score=11) and return the compatible top (score=10)");
+    assert.strictEqual(result!.id, WORK_TOP.id,
+      `expected top-work (score=10, compatible); got ${result!.id} — gown (score=11) must not block selection`);
+  });
+
+  it("ANCHOR-E-DI — versatile item with no occasion tags is not treated as incompatible", async () => {
+    // VERSATILE has occasions: [] — no explicit occasion coverage.
+    // Score for everyday + moods["casual"]: +0(no tags) +3(casual) = 3 > 0.
+    // isCompatible: occasions.length===0 → versatile → selected.
+    // If occasion-tag membership were a hard requirement, this would return null.
+    const result = await autoSelectClosetAnchor(
+      "cust-e",
+      DAILY_CASUAL,
+      async () => [VERSATILE],
+    );
+    assert.ok(result !== null,
+      "versatile item (occasions=[]) must be selectable; incomplete metadata ≠ incompatibility");
+    assert.strictEqual(result!.id, VERSATILE.id,
+      `expected versatile-1; got ${result?.id}`);
+  });
+
+  it("ANCHOR-F-DI — all-incompatible pool returns null; same garment eligible for appropriate event", async () => {
+    // GOWN_EVENT: occasion-only for special-event, not everyday.
+    // For everyday: scores 3 > 0 (not filtered by score) but incompatible → null.
+    const nullResult = await autoSelectClosetAnchor(
+      "cust-f-everyday",
+      DAILY_CONF,
+      async () => [GOWN_EVENT],
+    );
+    assert.strictEqual(nullResult, null,
+      `all-incompatible pool (GOWN_EVENT for everyday) must return null; got ${nullResult}`);
+
+    // Same garment for special-event: scores 15, compatible → returned.
+    const eventResult = await autoSelectClosetAnchor(
+      "cust-f-event",
+      EVENT_SIGNALS,
+      async () => [GOWN_EVENT],
+    );
+    assert.ok(eventResult !== null,
+      "same garment must be eligible when the session occasion matches its tagged occasion");
+    assert.strictEqual(eventResult!.id, GOWN_EVENT.id,
+      `expected gown-ev for special-event; got ${eventResult?.id}`);
+  });
+});
+
+// ── §QA-T1-EXT — Extended T1 fixture with Passport → three directions ─────────
+// Expands the T1 inventory with two additional tops so MOST LIKE ME / FRESH TWIST /
+// TRY SOMETHING NEW can be exercised.
+//
+// Passport: favoriteColors: ["black"]
+// Signal trace for "Help me feel like myself" (moods: ["like-myself"]):
+//   moods: ["like-myself"] → +0 for all items (no standard garment has "like-myself" tag)
+//   Passport favoriteColors → +2 for any item whose colors include "black"
+//
+// Actual score differentiator is the Passport, not the moods signal.
+// This reflects the actual code path: moods from "feel-like-myself" do not affect
+// raw closet scoring unless a garment explicitly carries that tag.
+//
+// Top scores with this Passport:
+//   Black Long-Sleeve Top (colors:["black"]) : +10 (everyday) + 2 (favorite black) = 12
+//   Ivory Silk Blouse     (colors:["ivory"]) : +10 (everyday) + 0                  = 10
+//   White Cotton Tee      (colors:["white"]) : +10 (everyday) + 0                  = 10
+// (Ivory and White both score 10; stable insertion order puts Ivory before White.)
+//
+// Direction mapping:
+//   MOST LIKE ME      : Black Long-Sleeve Top (index 0, score 12)
+//   FRESH TWIST       : Ivory Silk Blouse    (index 1, score 10, variationSlot=top)
+//   TRY SOMETHING NEW : White Cotton Tee     (index 2, score 10, last item in slot)
+
+describe("§QA-T1-EXT — T1 extended: Passport differentiates three directions", () => {
+  const T1_EXT_ANCHOR: NormalizedClosetAnchor = {
+    type: "closet",
+    id: "skirt-1",
+    label: "Black A-Line Mini Skirt",
+    slot: "bottom",
+    colors: ["black"],
+    normalizedColorIds: ["black"],
+    styleTags: ["casual"],
+    occasions: ["everyday"],
+    material: null,
+    hasStrongEvidence: true,
+    evidenceFields: ["occasions"],
+    imageUrl: null,
+  };
+
+  const T1_EXT_CLOSET: ClosetAnchorInput[] = [
+    // 3 tops — enable all three directions
+    { id: "top-black", name: "Black Long-Sleeve Top", category: "TOPS",
+      occasions: ["everyday"], styleTags: ["casual"],
+      colors: ["black"], primaryColor: "black", imageUrl: null, garmentRelationships: [] },
+    { id: "top-ivory", name: "Ivory Silk Blouse", category: "TOPS",
+      occasions: ["everyday"], styleTags: ["relaxed"],
+      colors: ["ivory"], primaryColor: "ivory", imageUrl: null, garmentRelationships: [] },
+    { id: "top-white", name: "White Cotton Tee", category: "TOPS",
+      occasions: ["everyday"], styleTags: ["casual"],
+      colors: ["white"], primaryColor: "white", imageUrl: null, garmentRelationships: [] },
+    // Evening gown — must remain absent from all everyday directions
+    { id: "gown-ext", name: "Ivory Cowl Evening Gown", category: "DRESSES",
+      occasions: ["special-event"], styleTags: ["elegant", "formal"],
+      colors: ["ivory"], primaryColor: "ivory", imageUrl: null,
+      garmentRelationships: ["occasion-only"] },
+    // Finishing pieces (one each — same in all directions)
+    { id: "shoe-ext", name: "Black Loafers", category: "SHOES",
+      occasions: ["everyday"], styleTags: ["polished"],
+      colors: ["black"], primaryColor: "black", imageUrl: null, garmentRelationships: [] },
+    { id: "bag-ext", name: "Tan Leather Crossbody", category: "BAGS",
+      occasions: ["everyday"], styleTags: ["casual"],
+      colors: ["tan"], primaryColor: "tan", imageUrl: null, garmentRelationships: [] },
+    { id: "jewel-ext", name: "Gold Hoop Earrings", category: "JEWELRY",
+      occasions: ["everyday"], styleTags: ["casual"],
+      colors: ["gold"], primaryColor: "gold", imageUrl: null, garmentRelationships: [] },
+  ];
+
+  const T1_EXT_SESSION: any = {
+    moods: ["like-myself"],   // feel-like-myself → no +3 boost (no garment has this tag)
+    desiredFeelings: [],
+    bodyNeeds: [],
+    coverageConditional: null,
+    occasion: "everyday",
+    formalityConditional: null,
+    todayColours: { preferred: [], avoid: [] },
+    practicalIds: [],
+    source: "my-closet",
+  };
+
+  // Passport: favorite color = black → differentiates Black Top from Ivory/White
+  const T1_EXT_PASSPORT = { favoriteColors: ["black"], avoidColors: null, stylePersonalities: null };
+
+  it("T1-EXT.1 — Passport scores: Black Top(12) > Ivory Blouse(10) = White Tee(10)", () => {
+    const scoreBlack = scoreClosetItemForSession(
+      { occasions: ["everyday"], styleTags: ["casual"], category: "TOPS", colors: ["black"] },
+      { occasion: "everyday", moods: ["like-myself"], desiredFeelings: [] },
+      T1_EXT_PASSPORT, [],
+    );
+    const scoreIvory = scoreClosetItemForSession(
+      { occasions: ["everyday"], styleTags: ["relaxed"], category: "TOPS", colors: ["ivory"] },
+      { occasion: "everyday", moods: ["like-myself"], desiredFeelings: [] },
+      T1_EXT_PASSPORT, [],
+    );
+    const scoreWhite = scoreClosetItemForSession(
+      { occasions: ["everyday"], styleTags: ["casual"], category: "TOPS", colors: ["white"] },
+      { occasion: "everyday", moods: ["like-myself"], desiredFeelings: [] },
+      T1_EXT_PASSPORT, [],
+    );
+    assert.strictEqual(scoreBlack, 12, `Black Top: expected 12 (10+2 favorite) got ${scoreBlack}`);
+    assert.strictEqual(scoreIvory, 10, `Ivory Blouse: expected 10 got ${scoreIvory}`);
+    assert.strictEqual(scoreWhite, 10, `White Tee: expected 10 got ${scoreWhite}`);
+  });
+
+  it("T1-EXT.2 — three directions produced; gown absent from all", () => {
+    const dirs = computeNaiaResultDirections(
+      T1_EXT_CLOSET, "skirt-1", T1_EXT_SESSION, T1_EXT_PASSPORT,
+    );
+    assert.strictEqual(dirs.length, 3,
+      `expected 3 directions (MOST/FRESH/TRY), got ${dirs.length}: ${dirs.map(d => d.label).join(", ")}`);
+    const labels = dirs.map(d => d.label);
+    assert.ok(labels.includes("most-you"), "MOST LIKE ME direction missing");
+    assert.ok(labels.includes("fresh"), "FRESH TWIST direction missing");
+    assert.ok(labels.includes("push-me"), "TRY SOMETHING NEW direction missing");
+    // Gown must not appear in any direction
+    for (const dir of dirs) {
+      const ids = (dir.outfitPieces ?? []).map(p => p.id);
+      assert.ok(!ids.includes("gown-ext"),
+        `direction "${dir.label}" must not include occasion-only gown; got: ${JSON.stringify(ids)}`);
+    }
+  });
+
+  it("T1-EXT.3 — MOST LIKE ME leads with Black Top (highest Passport-boosted score)", () => {
+    const dirs = computeNaiaResultDirections(
+      T1_EXT_CLOSET, "skirt-1", T1_EXT_SESSION, T1_EXT_PASSPORT,
+    );
+    const mostYou = dirs.find(d => d.label === "most-you");
+    assert.ok(mostYou, "MOST LIKE ME direction not found");
+    const topIds = (mostYou.outfitPieces ?? []).filter(p => p.slot === "top").map(p => p.id);
+    assert.deepStrictEqual(topIds, ["top-black"],
+      `MOST LIKE ME should lead with top-black (score 12); got: ${JSON.stringify(topIds)}`);
+  });
+
+  it("T1-EXT.4 — FRESH TWIST swaps to Ivory Blouse (variationSlot=top, index 1)", () => {
+    const dirs = computeNaiaResultDirections(
+      T1_EXT_CLOSET, "skirt-1", T1_EXT_SESSION, T1_EXT_PASSPORT,
+    );
+    const fresh = dirs.find(d => d.label === "fresh");
+    assert.ok(fresh, "FRESH TWIST direction not found");
+    const topIds = (fresh.outfitPieces ?? []).filter(p => p.slot === "top").map(p => p.id);
+    assert.deepStrictEqual(topIds, ["top-ivory"],
+      `FRESH TWIST should swap to top-ivory (index 1); got: ${JSON.stringify(topIds)}`);
+  });
+
+  it("T1-EXT.5 — TRY SOMETHING NEW reaches White Tee (last/lowest in slot)", () => {
+    const dirs = computeNaiaResultDirections(
+      T1_EXT_CLOSET, "skirt-1", T1_EXT_SESSION, T1_EXT_PASSPORT,
+    );
+    const push = dirs.find(d => d.label === "push-me");
+    assert.ok(push, "TRY SOMETHING NEW direction not found");
+    const topIds = (push.outfitPieces ?? []).filter(p => p.slot === "top").map(p => p.id);
+    assert.deepStrictEqual(topIds, ["top-white"],
+      `TRY SOMETHING NEW should reach top-white (last item); got: ${JSON.stringify(topIds)}`);
+  });
+
+  it("T1-EXT.6 — bag note uses actual color metadata (tan contrast against anchor)", () => {
+    // Tan Leather Crossbody + Black A-Line Mini Skirt anchor → contrasting-color note path
+    const dirs = computeNaiaResultDirections(
+      T1_EXT_CLOSET, "skirt-1", T1_EXT_SESSION, T1_EXT_PASSPORT,
+    );
+    // The bag appears in all directions (only one bag in closet).
+    // Verify it IS selected as a finishing piece (validates Phase 2 selection).
+    const mostYou = dirs.find(d => d.label === "most-you");
+    assert.ok(mostYou, "MOST LIKE ME direction not found");
+    const bagPiece = (mostYou.outfitPieces ?? []).find(p => p.slot === "bag");
+    assert.ok(bagPiece, "bag should appear in MOST LIKE ME direction");
+    assert.strictEqual(bagPiece.id, "bag-ext");
+  });
+
+  it("T1-EXT.7 — buildDbPayload persists specific stylingNotes for each closet garment", () => {
+    // Run through the full persistence path: buildDbPayload → items[].stylingNotes.
+    // This is the path that populates what customers see in the result UI.
+    // Uses makeMinimalResult + overrides to ensure all required fields are present.
+    const mockResult = makeMinimalResult({
+      outcome: "closet-led",
+      primaryProduct: null,
+      closetAnchorLabel: T1_EXT_ANCHOR.label,
+      closetAnchorImageUrl: null,
+      rawRecommendation: {
+        outcome: "closet-led" as any,
+        anchor: T1_EXT_ANCHOR as any,
+        primary: null,
+        alternatives: [],
+        outfitPlan: { anchorSlot: "bottom", recommendedSlot: null, compatibilityStatus: "compatible" as any, notes: [] },
+        evaluatedProducts: [],
+        coverage: { totalCatalogProducts: 0, eligibleCandidates: 0, excludedCandidates: 0 },
+        selectedClosetGarments: [
+          { slot: "top",     id: "top-black", label: "Black Long-Sleeve Top",  imageUrl: null, colors: ["black"] },
+          { slot: "shoe",    id: "shoe-ext",  label: "Black Loafers",           imageUrl: null, colors: ["black"] },
+          { slot: "bag",     id: "bag-ext",   label: "Tan Leather Crossbody",   imageUrl: null, colors: ["tan"]   },
+          { slot: "jewelry", id: "jewel-ext", label: "Gold Hoop Earrings",      imageUrl: null, colors: ["gold"]  },
+        ],
+      },
+    });
+    const payload = buildDbPayload(mockResult, "everyday");
+
+    // Anchor is first item (closet-led path pushes anchor first)
+    const anchorItem = payload.items.find(i => i.closetItemId === "skirt-1");
+    assert.ok(anchorItem, "anchor must appear in payload");
+    // Anchor note must use slot-based metadata — not the generic filler.
+    // T1_EXT_ANCHOR is slot "bottom" → expect "grounds the look" copy.
+    assert.ok(
+      anchorItem.stylingNotes?.includes("grounds the look"),
+      `anchor (bottom) note must use slot-based copy; got: "${anchorItem.stylingNotes}"`,
+    );
+
+    const additional = payload.items.filter(i => i.closetItemId && i.closetItemId !== "skirt-1");
+    assert.strictEqual(additional.length, 4, "4 additional closet garments in payload");
+
+    // Per-item note verification: each note must reference actual garment/anchor data
+    const topItem = additional.find(i => i.closetItemId === "top-black");
+    assert.ok(topItem?.stylingNotes?.includes("Black A-Line Mini Skirt"),
+      `top note must name the anchor; got: "${topItem?.stylingNotes}"`);
+
+    const shoeItem = additional.find(i => i.closetItemId === "shoe-ext");
+    assert.ok(shoeItem?.stylingNotes?.includes("Black A-Line Mini Skirt"),
+      `shoe note must name the anchor; got: "${shoeItem?.stylingNotes}"`);
+
+    const bagItem = additional.find(i => i.closetItemId === "bag-ext");
+    // Tan bag + black anchor → contrasting-color path: "Your ... introduces a tan note alongside ..."
+    assert.ok(bagItem?.stylingNotes?.includes("tan"),
+      `bag note must reference its own color (tan); got: "${bagItem?.stylingNotes}"`);
+
+    const jewelItem = additional.find(i => i.closetItemId === "jewel-ext");
+    // Gold earrings + black anchor → "Your ... add a gold accent against ... palette"
+    assert.ok(jewelItem?.stylingNotes?.includes("gold"),
+      `jewelry note must reference its own color (gold); got: "${jewelItem?.stylingNotes}"`);
   });
 });

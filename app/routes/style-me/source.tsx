@@ -132,7 +132,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const anchorMethodPrev = (session.get("styleMeAnchorMethodPrev") as string | undefined) ?? null;
-  return data({ step: "anchor-method" as const, source, prevMethod: anchorMethodPrev });
+  // Flash: read once and clear so it doesn't persist on refresh.
+  const autoAnchorFail = session.get("styleMeAutoAnchorFail") === "1";
+  session.unset("styleMeAutoAnchorFail");
+  return data(
+    { step: "anchor-method" as const, source, prevMethod: anchorMethodPrev, autoAnchorFail },
+    { headers: { "Set-Cookie": await commitSession(session) } },
+  );
 }
 
 // ── Action ────────────────────────────────────────────────────────────────────
@@ -210,6 +216,8 @@ export async function action({ request }: ActionFunctionArgs) {
       });
 
       if (!selected) {
+        // Set a one-time note so the anchor-method screen explains what happened.
+        session.set("styleMeAutoAnchorFail", "1");
         return redirect("/style-me/source", {
           headers: { "Set-Cookie": await commitSession(session) },
         });
@@ -320,6 +328,7 @@ export default function StyleMeSource() {
           <AnchorMethodStep
             source={(loaderData as { source: string }).source}
             prevMethod={(loaderData as { prevMethod?: string | null }).prevMethod ?? null}
+            autoAnchorFail={(loaderData as { autoAnchorFail?: boolean }).autoAnchorFail ?? false}
           />
         )}
         {step === "closet-anchor" && (
@@ -384,13 +393,18 @@ function SourceStep() {
 // Two-step picker: customer selects, then presses Continue.
 // prevMethod hydrates the selection when returning from the Closet picker (Back).
 
-function AnchorMethodStep({ source, prevMethod }: { source: string; prevMethod: string | null }) {
+function AnchorMethodStep({ source, prevMethod, autoAnchorFail }: { source: string; prevMethod: string | null; autoAnchorFail?: boolean }) {
   const [selected, setSelected] = useState<string | null>(prevMethod);
   const label = source === "both" ? "NADINE + My Closet" : "My Closet";
   return (
     <>
       <p className="sm-step-label">{label}</p>
       <h1 className="sm-heading">Do you already have a piece in mind?</h1>
+      {autoAnchorFail && (
+        <p className="sm-sub" style={{ fontStyle: "normal", color: "var(--naia-accent)", marginBottom: "12px" }}>
+          nAia couldn't find a clear starting point for this session — pick a piece yourself to get started.
+        </p>
+      )}
       <p className="sm-sub">Your anchor is the piece everything else gets styled around.</p>
       <Form method="post">
         <input type="hidden" name="_action" value="set-anchor-method" />
