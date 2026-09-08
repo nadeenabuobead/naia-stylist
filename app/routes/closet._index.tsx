@@ -24,7 +24,7 @@ import { checkEntitlement } from "~/lib/plan/entitlement.server";
 // Option B shell: MyNaiaLayout + naiaStyles (NADINE header, My nAia navigation)
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
 
-const CATEGORIES = ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "ACTIVEWEAR", "SHOES", "BAGS", "ACCESSORIES", "JEWELRY", "SWIMWEAR", "LOUNGEWEAR", "OTHER"];
+const CATEGORIES = ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "ACTIVEWEAR", "SHOES", "BAGS", "ACCESSORIES", "JEWELRY", "LOUNGEWEAR", "OTHER"];
 
 // Categories where VTO makes visual sense — coarse UI gate only.
 // Server-side suitability check (screenGarmentSuitability) is the real gate at trigger time.
