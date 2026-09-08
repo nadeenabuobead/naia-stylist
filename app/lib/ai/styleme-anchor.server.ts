@@ -251,6 +251,7 @@ export async function loadAllClosetItemsForEngine(
       occasions: item.occasions,
       imageUrl,
       garmentRelationships: item.garmentRelationships,
+      formality: item.formality ?? null,
     };
   });
 }

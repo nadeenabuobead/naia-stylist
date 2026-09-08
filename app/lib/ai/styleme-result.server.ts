@@ -583,7 +583,7 @@ export function garmentNameIsPlural(name: string): boolean {
 // ── nAia outfit candidate types ──────────────────────────────────────────────
 
 export type OutfitCandidate = {
-  id: "A" | "B" | "C";
+  id: "A" | "B" | "C" | "D";
   pieces: Array<{ closetId: string; slot: string; label: string | null; colors: string[] }>;
 };
 
@@ -593,11 +593,13 @@ export function computeOutfitSignature(closetIds: string[]): string {
   return [...closetIds].sort().join("|");
 }
 
-// Builds up to three validated outfit candidates for nAia closet mode.
+// Builds up to four validated outfit candidates for nAia closet mode.
 // Candidate A — full primary selection (may include discretionary outerwear when eligible).
-// Candidate B — clothing swap: same outfit as A but with a different clothing item for one slot.
+// Candidate B — session-register-aligned multi-slot alternative (best in-target items per slot).
 // Candidate C — no-outerwear variant of A (only when anchor is not outerwear and A has outerwear).
-// B and C are independent; both can coexist when a clothing alt AND discretionary outerwear exist.
+// Candidate D — no-outerwear variant of B; only when B differs from A in core slots and has
+//               outerwear inherited from A — ensures the pool can surface B's register-aligned
+//               core outfit WITHOUT the discretionary layer.
 // Claude selects the candidate that best serves the session brief; the server re-validates.
 // Constraints: never removes a manual outerwear anchor; validates via the same scoring gate.
 export function buildNaiaOutfitCandidates(
@@ -606,7 +608,7 @@ export function buildNaiaOutfitCandidates(
   allItems: ClosetAnchorInput[],
   profile: StyleMeProfileSignals | undefined,
   recentlyShownIds: Set<string> | undefined,
-): [OutfitCandidate, OutfitCandidate | null, OutfitCandidate | null] {
+): [OutfitCandidate, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null] {
   const profile_ = profile as ClosetScoringProfile | undefined;
   const signals = { occasion: session.occasion, moods: session.moods, desiredFeelings: session.desiredFeelings };
 
@@ -635,31 +637,107 @@ export function buildNaiaOutfitCandidates(
     pieces: [anchorPiece, ...fullSelection.map(toPiece)],
   };
 
-  // ── Candidate B: find a genuinely different clothing item for one slot ────
-  const CLOTHING_SLOTS = new Set(["top", "bottom", "dress", "set"]);
+  // ── Candidate B: session-formality-aligned complete alternative ─────────────
+  // Rather than swapping one slot at a time (which can't produce a materially
+  // different outfit), B is rebuilt slot-by-slot: for each open slot the best
+  // formality-target-aligned item is selected independently. This allows B to
+  // vary both bottom AND shoes (or any other combination) when the session brief
+  // supports it, producing a genuinely distinct complete outfit.
+  //
+  // Sort rule (per slot): items within the session target formality range first,
+  // then by raw session score — making B the best register-appropriate alternative.
+  //
+  // If every chosen alt is the same as A's item in that slot (no meaningful
+  // alternative exists), B falls back to swapping the single highest-variance slot.
+  const B_SLOTS = new Set(["top", "bottom", "dress", "set", "shoe"]);
+  const bTargetRange = getTargetFormalityRange(session.occasion, session.formalityConditional ?? null);
   let candidateB: OutfitCandidate | null = null;
-  for (const selected of fullSelection.filter((g) => CLOTHING_SLOTS.has(g.slot))) {
-    const scoredAlts: Array<{ item: ClosetAnchorInput; score: number }> = [];
+
+  // Map slot → item chosen by A (to detect differences)
+  const aItemBySlot = new Map(
+    candidateA.pieces
+      .filter((p) => B_SLOTS.has(p.slot))
+      .map((p) => [p.slot, p.closetId]),
+  );
+
+  // For each open slot, find the best formality-target-aligned alternative.
+  const bPiecesMap = new Map<string, OutfitCandidate["pieces"][0]>();
+  let bDiffersFromA = false;
+
+  for (const slot of B_SLOTS) {
+    // Anchor occupies its own slot — keep it unchanged in B.
+    if (slot === (anchor.slot as string)) {
+      const anchorPieceInA = candidateA.pieces.find((p) => p.slot === slot);
+      if (anchorPieceInA) bPiecesMap.set(slot, anchorPieceInA);
+      continue;
+    }
+    // Not every outfit needs every slot; skip slots not in A.
+    const aItemId = aItemBySlot.get(slot);
+    if (!aItemId) continue;
+
+    // Score all candidate items for this slot.
+    const scoredAlts: Array<{ item: ClosetAnchorInput; score: number; formalityRank: number | null }> = [];
     for (const item of allItems) {
-      if (item.id === anchor.id || item.id === selected.id) continue;
-      if (CLOSET_CATEGORY_TO_SLOT[item.category as string] !== selected.slot) continue;
+      if (item.id === anchor.id) continue;
+      if (CLOSET_CATEGORY_TO_SLOT[item.category as string] !== slot) continue;
       const score = scoreClosetItemForSession(
         { occasions: item.occasions, styleTags: item.styleTags, category: item.category, colors: item.colors, primaryColor: item.primaryColor },
         signals,
         profile_,
         item.garmentRelationships,
       );
-      if (score > 0) scoredAlts.push({ item, score });
+      if (score <= 0) continue;
+      const formalityRank = item.formality ? (FORMALITY_RANK[item.formality] ?? null) : null;
+      scoredAlts.push({ item, score, formalityRank });
     }
     if (scoredAlts.length === 0) continue;
 
-    scoredAlts.sort((a, b) => b.score - a.score);
+    // Sort: within-target formality first, then by session score.
+    scoredAlts.sort((a, b) => {
+      const aInTarget = a.formalityRank !== null &&
+        a.formalityRank >= bTargetRange.min && a.formalityRank <= bTargetRange.max;
+      const bInTarget = b.formalityRank !== null &&
+        b.formalityRank >= bTargetRange.min && b.formalityRank <= bTargetRange.max;
+      if (aInTarget && !bInTarget) return -1;
+      if (bInTarget && !aInTarget) return 1;
+      return b.score - a.score;
+    });
+
     const best = scoredAlts[0].item;
-    const altPiece: OutfitCandidate["pieces"][0] = {
-      closetId: best.id, slot: selected.slot as string, label: best.name, colors: best.colors,
-    };
-    candidateB = { id: "B", pieces: candidateA.pieces.map((p) => (p.closetId === selected.id ? altPiece : p)) };
-    break;
+    bPiecesMap.set(slot, { closetId: best.id, slot, label: best.name, colors: best.colors });
+    if (best.id !== aItemId) bDiffersFromA = true;
+  }
+
+  if (bDiffersFromA) {
+    // Reconstruct B from the per-slot winners, keeping non-open-slot pieces (e.g. outerwear) from A.
+    const nonBSlotPieces = candidateA.pieces.filter(
+      (p) => !B_SLOTS.has(p.slot) || p.closetId === anchor.id,
+    );
+    const bSlotPieces = Array.from(bPiecesMap.values()).filter(
+      (p) => p.closetId !== anchor.id || p.slot === (anchor.slot as string),
+    );
+    candidateB = { id: "B", pieces: [...bSlotPieces, ...nonBSlotPieces] };
+  } else {
+    // No slot had a different best-fit item — fall back to the first slot with any alternative.
+    for (const selected of fullSelection.filter((g) => B_SLOTS.has(g.slot))) {
+      const fallbackAlts = allItems
+        .filter((item) =>
+          item.id !== anchor.id &&
+          item.id !== selected.id &&
+          CLOSET_CATEGORY_TO_SLOT[item.category as string] === selected.slot &&
+          scoreClosetItemForSession(
+            { occasions: item.occasions, styleTags: item.styleTags, category: item.category, colors: item.colors, primaryColor: item.primaryColor },
+            signals, profile_, item.garmentRelationships,
+          ) > 0,
+        );
+      if (fallbackAlts.length === 0) continue;
+      const fallback = fallbackAlts[0];
+      const altPiece: OutfitCandidate["pieces"][0] = {
+        closetId: fallback.id, slot: selected.slot as string, label: fallback.name, colors: fallback.colors,
+      };
+      candidateB = { id: "B", pieces: candidateA.pieces.map((p) => (p.closetId === selected.id ? altPiece : p)) };
+      break;
+    }
   }
 
   // ── Candidate C: no-outerwear variant of A ────────────────────────────────
@@ -675,7 +753,26 @@ export function buildNaiaOutfitCandidates(
     }
   }
 
-  return [candidateA, candidateB, candidateC];
+  // ── Candidate D: no-outerwear variant of B ────────────────────────────────
+  // Generated when B inherits discretionary outerwear from A and B's core slots differ
+  // from A's core slots. This ensures the pool can offer the session-register-aligned
+  // base outfit WITHOUT the optional layer — e.g. jeans+sneakers when B = jeans+sneakers+blazer
+  // and C only covers trousers+loafers (A's core). D = B-without-outerwear is only meaningful
+  // when it's distinct from C (otherwise the same outfit is already in the pool).
+  let candidateD: OutfitCandidate | null = null;
+  if (candidateB !== null && anchor.slot !== "outerwear" && !coverageRequiresLayer) {
+    const outerwearInB = candidateB.pieces.find((p) => p.slot === "outerwear" && p.closetId !== anchor.id);
+    if (outerwearInB) {
+      const dPieces = candidateB.pieces.filter((p) => p.closetId !== outerwearInB.closetId);
+      const dSig = computeOutfitSignature(dPieces.map((p) => p.closetId));
+      const cSig = candidateC ? computeOutfitSignature(candidateC.pieces.map((p) => p.closetId)) : null;
+      if (dSig !== cSig) {
+        candidateD = { id: "D", pieces: dPieces };
+      }
+    }
+  }
+
+  return [candidateA, candidateB, candidateC, candidateD];
 }
 
 // ── StyleMe wording system prompt (Constitution V1 — locked) ─────────────────
@@ -847,6 +944,220 @@ function getPieceRole(slot: string): PieceRole {
   return "optional";
 }
 
+// ── Whole-outfit formality evaluation ────────────────────────────────────────
+// Ordinal scale: casual(1) … evening(6). Used to judge outfit register against
+// the session's occasion and any explicit formality signal. Gender-neutral.
+export const FORMALITY_RANK: Record<string, number> = {
+  "casual":           1,
+  "smart-casual":     2,
+  "business-casual":  3,
+  "business-formal":  4,
+  "occasion":         5,
+  "evening":          6,
+};
+
+// Per-occasion expected base+shoe formality range (inclusive ordinal bounds).
+// "everyday" covers ranks 1–2 (casual → smart-casual); "work" covers 2–4; etc.
+const OCCASION_FORMALITY_TARGET: Record<string, { min: number; max: number }> = {
+  "everyday":  { min: 1, max: 2 },
+  "work":      { min: 2, max: 4 },
+  "dinner":    { min: 2, max: 5 },
+  "date":      { min: 2, max: 3 },
+  "event":     { min: 3, max: 6 },
+  "night-out": { min: 2, max: 6 },
+  "family":    { min: 1, max: 2 },
+  "travel":    { min: 1, max: 2 },
+  "active":    { min: 1, max: 1 },
+};
+
+// formalityConditional narrows the target range (intersection, not expansion).
+const FORMALITY_CONDITIONAL_ADJUSTMENTS: Record<string, { min: number; max: number }> = {
+  "formality-relaxed": { min: 1, max: 2 },
+  "formality-smart":   { min: 2, max: 3 },
+  "formality-polished":{ min: 3, max: 4 },
+  "formality-occasion":{ min: 4, max: 6 },
+};
+
+export function getTargetFormalityRange(
+  occasion: string,
+  formalityConditional: string | null,
+): { min: number; max: number } {
+  const base = OCCASION_FORMALITY_TARGET[occasion] ?? { min: 1, max: 4 };
+  if (!formalityConditional) return base;
+  const adj = FORMALITY_CONDITIONAL_ADJUSTMENTS[formalityConditional];
+  if (!adj) return base;
+  return { min: Math.max(base.min, adj.min), max: Math.min(base.max, adj.max) };
+}
+
+// Per-slot formality contribution weight (0 = excluded from register judgment).
+// Outerwear is meaningful but slightly discounted — it can be removed and is often
+// transitional. Bag/accessory/jewelry carry no outfit-register signal.
+const PIECE_FORMALITY_WEIGHT: Record<string, number> = {
+  top: 1.0, bottom: 1.0, dress: 1.0, set: 1.0,
+  shoe: 1.0,
+  outerwear: 0.7,
+  bag: 0, accessory: 0, jewelry: 0, unknown: 0,
+};
+
+// Whole-outfit suitability evaluation: formality register + occasion coverage.
+// This is the single shared ranker used for candidate pre-sorting, model evidence,
+// deterministic fallback, and diagnostics. No garment-name exceptions.
+export interface OutfitSuitabilityScore {
+  // Formality register — includes outerwear (at reduced weight)
+  pieceFormalities: Array<{ slot: string; formality: string | null; weight: number }>;
+  // Weighted-average formality rank across all contributing pieces (null = no data).
+  // Used as the diagnostic display value and formalityFit determination.
+  outfitFormalityRank: number | null;
+  targetFormalityRange: { min: number; max: number };
+  formalityFit: "within-target" | "overdressed" | "underdressed" | "unknown";
+  // Weighted-average distance from nearest target edge (0 = within; + = steps above; − = steps below)
+  formalityOvershoot: number;
+  // Occasion coverage (mirrors existing per-candidate evidence)
+  occasionCoverageRatio: number;
+  explicitNonMatchCount: number;
+  baseAndShoeOccasionMatchCount: number;
+  optionalPieceCount: number;
+  // Composite ranking score (higher = better fit for session brief)
+  compositeScore: number;
+  reasons: string[];
+}
+
+export function evaluateCompleteOutfit(
+  candidate: OutfitCandidate,
+  allItems: ClosetAnchorInput[],
+  session: Pick<StyleMeSessionInput, "occasion" | "formalityConditional" | "moods" | "desiredFeelings">,
+): OutfitSuitabilityScore {
+  const itemMap = new Map(allItems.map((i) => [i.id, i]));
+  const targetFormalityRange = getTargetFormalityRange(
+    session.occasion,
+    session.formalityConditional ?? null,
+  );
+
+  // Build per-piece formality data for all contributing slots.
+  const pieceFormalities = candidate.pieces.map((p) => {
+    const item = itemMap.get(p.closetId);
+    const weight = PIECE_FORMALITY_WEIGHT[p.slot] ?? 0;
+    return { slot: p.slot, formality: item?.formality ?? null, weight };
+  });
+
+  // Outerwear and zero-weight pieces (bag, accessory, jewelry) count as "optional burden"
+  // for compositeScore tie-breaking. Outerwear is removable and should not tip a close
+  // comparison over a cleaner base outfit, even when it contributes to formality register.
+  const optionalPieceCount = pieceFormalities.filter((p) => p.slot === "outerwear" || p.weight === 0).length;
+
+  // Per-piece weighted formality penalty — normalized so piece count alone does not
+  // inflate the penalty. Each piece with known formality contributes independently:
+  //   overdressed → stronger penalty  (−3 per step above targetMax)
+  //   underdressed → lighter penalty  (−1.5 per step below targetMin)
+  //   within target → 0 contribution
+  // Adding more within-target pieces never increases the penalty.
+  let totalKnownWeight = 0;
+  let weightedRankSum = 0;
+  let weightedPenaltySum = 0;
+
+  for (const pf of pieceFormalities) {
+    if (pf.weight === 0 || pf.formality === null) continue;
+    const rank = FORMALITY_RANK[pf.formality] ?? null;
+    if (rank === null) continue;
+    totalKnownWeight += pf.weight;
+    weightedRankSum += rank * pf.weight;
+    const deviation =
+      rank > targetFormalityRange.max ? rank - targetFormalityRange.max
+      : rank < targetFormalityRange.min ? rank - targetFormalityRange.min
+      : 0;
+    const contribution =
+      deviation > 0 ? deviation * pf.weight * -3    // overdressed
+      : deviation < 0 ? deviation * pf.weight * 1.5 // underdressed (negative deviation × positive multiplier = negative)
+      : 0;
+    weightedPenaltySum += contribution;
+  }
+
+  // Weighted average rank for diagnostic display and formalityFit determination.
+  const outfitFormalityRank = totalKnownWeight > 0 ? weightedRankSum / totalKnownWeight : null;
+  // Normalized penalty (per unit of contributing formality weight).
+  const normalizedFormalityPenalty = totalKnownWeight > 0 ? weightedPenaltySum / totalKnownWeight : 0;
+
+  let formalityFit: OutfitSuitabilityScore["formalityFit"] = "unknown";
+  let formalityOvershoot = 0;
+  if (outfitFormalityRank !== null) {
+    if (outfitFormalityRank >= targetFormalityRange.min && outfitFormalityRank <= targetFormalityRange.max) {
+      formalityFit = "within-target";
+    } else if (outfitFormalityRank > targetFormalityRange.max) {
+      formalityFit = "overdressed";
+      formalityOvershoot = outfitFormalityRank - targetFormalityRange.max;
+    } else {
+      formalityFit = "underdressed";
+      formalityOvershoot = -(targetFormalityRange.min - outfitFormalityRank);
+    }
+  }
+
+  // Occasion coverage — replicates buildCandidateOccasionEvidence logic for the
+  // composite score; both systems share a definition of "match"/"not-listed".
+  const pieces = candidate.pieces.map((p) => {
+    const item = itemMap.get(p.closetId);
+    const itemOccasions: string[] = item?.occasions ?? [];
+    const occasionStatus =
+      itemOccasions.length === 0
+        ? "no-metadata"
+        : itemOccasions.includes(session.occasion)
+          ? "match"
+          : "not-listed";
+    const pieceRole = getPieceRole(p.slot);
+    return { occasionStatus, pieceRole };
+  });
+
+  const knownOccasionPieces = pieces.filter((p) => p.occasionStatus !== "no-metadata").length;
+  const matchingOccasionPieces = pieces.filter((p) => p.occasionStatus === "match").length;
+  const explicitNonMatchCount = pieces.filter((p) => p.occasionStatus === "not-listed").length;
+  const occasionCoverageRatio = knownOccasionPieces === 0 ? 1.0 : matchingOccasionPieces / knownOccasionPieces;
+  const baseAndShoeOccasionMatchCount = pieces.filter(
+    (p) => p.occasionStatus === "match" && (p.pieceRole === "base" || p.pieceRole === "shoe"),
+  ).length;
+
+  // compositeScore: occasion coverage (0–10) + normalized formality penalty (≤0) + coverage penalties.
+  // occasionCoverageRatio is already 0–1; ×10 gives 0–10.
+  const compositeScore =
+    occasionCoverageRatio * 10 +
+    normalizedFormalityPenalty +
+    explicitNonMatchCount * -2 +
+    optionalPieceCount * -0.5;
+
+  const reasons: string[] = [];
+  if (formalityFit === "overdressed") {
+    reasons.push(
+      `Outfit register (weighted rank ${outfitFormalityRank?.toFixed(2)}) exceeds target ` +
+      `${targetFormalityRange.min}–${targetFormalityRange.max} for ${session.occasion} ` +
+      `by ${formalityOvershoot.toFixed(2)} steps.`,
+    );
+  } else if (formalityFit === "within-target") {
+    reasons.push(`Outfit register within target range for ${session.occasion}.`);
+  } else if (formalityFit === "underdressed") {
+    reasons.push(
+      `Outfit register (weighted rank ${outfitFormalityRank?.toFixed(2)}) below target ` +
+      `${targetFormalityRange.min}–${targetFormalityRange.max} for ${session.occasion}.`,
+    );
+  } else {
+    reasons.push("Insufficient formality metadata — using occasion coverage only.");
+  }
+  if (explicitNonMatchCount > 0) {
+    reasons.push(
+      `${explicitNonMatchCount} piece${explicitNonMatchCount !== 1 ? "s" : ""} not listed for ${session.occasion}.`,
+    );
+  }
+  if (normalizedFormalityPenalty < 0 && formalityFit === "within-target") {
+    reasons.push(
+      `Formality note: individual piece(s) outside target register contribute penalty (${normalizedFormalityPenalty.toFixed(2)}).`,
+    );
+  }
+
+  return {
+    pieceFormalities, outfitFormalityRank, targetFormalityRange,
+    formalityFit, formalityOvershoot,
+    occasionCoverageRatio, explicitNonMatchCount, baseAndShoeOccasionMatchCount,
+    optionalPieceCount, compositeScore, reasons,
+  };
+}
+
 interface CandidatePieceEvidence {
   closetId: string;
   slot: string;
@@ -978,8 +1289,13 @@ function logNaiaSelectionDiag(data: {
     occasionCoverageRatio: number;
     baseAndShoeMatchCount: number;
     optionalPieceCount: number;
+    // Whole-outfit suitability fields (null when formality data insufficient)
+    formalityFit: string;
+    outfitFormalityRank: number | null;
+    targetFormalityRange: { min: number; max: number };
+    compositeScore: number;
     deterministicFallbackRank: string;
-    pieces: Array<{ slot: string; pieceRole: string; label: string | null; occasionStatus: string }>;
+    pieces: Array<{ slot: string; pieceRole: string; label: string | null; occasionStatus: string; formality: string | null }>;
   }>;
   modelCallAttempted: boolean;
   modelReturnedId?: string | null;
@@ -1011,6 +1327,8 @@ export async function callClaudeForNaiaSelection(
   session: StyleMeSessionInput,
   profile?: StyleMeProfileSignals | null,
   occasionEvidence?: Map<string, CandidateOccasionEvidence>,
+  allItems?: ClosetAnchorInput[],
+  outfitScores?: Map<string, OutfitSuitabilityScore>,
 ): Promise<{
   candidate: OutfitCandidate;
   wording: StyleMeWording;
@@ -1040,6 +1358,7 @@ export async function callClaudeForNaiaSelection(
   const candidateDescs = candidates
     .map((c) => {
       const evidence = occasionEvidence?.get(c.id);
+      const suit = outfitScores?.get(c.id);
       const lines = c.pieces.map((p) => {
         const pe = evidence?.pieces.find((e) => e.closetId === p.closetId);
         const roleTag = pe ? `, ${pe.pieceRole}` : "";
@@ -1058,6 +1377,19 @@ export async function callClaudeForNaiaSelection(
           `  Occasion evidence for ${session.occasion}: ${evidence.matchingOccasionPieces} of ${evidence.knownOccasionPieces} pieces with known metadata listed` +
           ` (coverage ${Math.round(evidence.occasionCoverageRatio * 100)}%; ${evidence.explicitNonMatchCount} explicit non-match${evidence.explicitNonMatchCount !== 1 ? "es" : ""}).`,
         );
+      }
+      // Outfit-level register judgment from evaluateCompleteOutfit
+      if (suit && suit.outfitFormalityRank !== null) {
+        const targetLabel = `${Object.entries(FORMALITY_RANK).find(([, r]) => r === suit.targetFormalityRange.min)?.[0] ?? suit.targetFormalityRange.min}–${Object.entries(FORMALITY_RANK).find(([, r]) => r === suit.targetFormalityRange.max)?.[0] ?? suit.targetFormalityRange.max}`;
+        const fitNote =
+          suit.formalityFit === "within-target" ? "WITHIN TARGET" :
+          suit.formalityFit === "overdressed" ? `OVERDRESSED by ${suit.formalityOvershoot.toFixed(2)} steps` :
+          `UNDERDRESSED by ${Math.abs(suit.formalityOvershoot).toFixed(2)} steps`;
+        lines.push(
+          `  Outfit register: weighted formality rank = ${suit.outfitFormalityRank.toFixed(2)}; target for ${session.occasion} = ${targetLabel}. ${fitNote}.`,
+        );
+      } else if (suit) {
+        lines.push(`  Outfit register: insufficient formality metadata — occasion coverage used only.`);
       }
       return `Candidate ${c.id}:\n${lines.join("\n")}`;
     })
@@ -2401,7 +2733,7 @@ export async function computeStyleMeResult(
       ? new Set(engineInput.recentlyShownClosetIds)
       : undefined;
 
-    const [candidateA, candidateB, candidateC] = buildNaiaOutfitCandidates(
+    const [candidateA, candidateB, candidateC, candidateD] = buildNaiaOutfitCandidates(
       anchor as NormalizedClosetAnchor,
       session,
       allItems,
@@ -2431,7 +2763,7 @@ export async function computeStyleMeResult(
     // persisted outfit. This happens before the Claude call so wording is never generated
     // for a combination that will be rejected.
     const prevIds = engineInput.prevOutfitClosetIds;
-    const allCandidates = [candidateA, candidateB, candidateC].filter((c): c is OutfitCandidate => c !== null);
+    const allCandidates = [candidateA, candidateB, candidateC, candidateD].filter((c): c is OutfitCandidate => c !== null);
     const prevSig = prevIds?.length ? computeOutfitSignature(prevIds) : null;
     const filteredCandidates = prevSig
       ? allCandidates.filter((c) => computeOutfitSignature(c.pieces.map((p) => p.closetId)) !== prevSig)
@@ -2441,24 +2773,38 @@ export async function computeStyleMeResult(
       // No new combination available — keep previous outfit visible; no model call.
       sameCombination = true;
     } else {
-      // Build per-piece occasion evidence from Closet metadata.
-      // Used for factual model context, occasion-aware fallback, and staging diagnostics.
+      // Build per-piece occasion evidence (for factual model context and backward-compat diagnostics).
       const occasionEvidence = buildCandidateOccasionEvidence(
         filteredCandidates,
         allItems,
         session.occasion,
       );
 
+      // Evaluate each candidate's whole-outfit suitability — formality register + occasion coverage.
+      // This is the single shared ranker: pre-sorts candidates for the model, drives the
+      // deterministic fallback, and populates diagnostics.
+      const outfitScores = new Map(
+        filteredCandidates.map((c) => [c.id, evaluateCompleteOutfit(c, allItems, session)]),
+      );
+
+      // Pre-sort candidates best-fit-first before giving them to the model.
+      // The model receives a list already ranked by whole-outfit suitability so it
+      // can make a fine-grained judgment among pre-validated good candidates.
+      const rankedCandidates = [...filteredCandidates].sort(
+        (a, b) => (outfitScores.get(b.id)?.compositeScore ?? 0) - (outfitScores.get(a.id)?.compositeScore ?? 0),
+      );
+
       // Single selection-and-wording call only. No second AI round trip on failure.
       const naiaResult = await _callNaiaSelection(
-        filteredCandidates,
+        rankedCandidates,
         session,
         engineInput.profile,
         occasionEvidence,
+        allItems,
+        outfitScores,
       );
 
-      // Determine final candidate: model selection or occasion-aware fallback.
-      // The fallback uses whole-outfit occasion score (not always candidate A).
+      // Determine final candidate: model selection or outfit-score fallback.
       let finalCandidate: OutfitCandidate;
       let fallbackUsed: boolean;
       let fallbackReason: string | undefined;
@@ -2471,11 +2817,10 @@ export async function computeStyleMeResult(
         setPieces(finalCandidate, naiaResult.perPieceNotes);
       } else {
         // Model call failed, timed out, or returned an invalid response.
-        // Fallback: candidate with highest whole-outfit occasion score.
-        // Tie-break: prefer fewer non-matching pieces (more-edited look).
+        // Fallback: highest compositeScore candidate (already ranked first in rankedCandidates).
         fallbackUsed = true;
         fallbackReason = "model-call-failed-or-invalid";
-        finalCandidate = selectOccasionAwareFallback(filteredCandidates, occasionEvidence);
+        finalCandidate = rankedCandidates[0];
         setPieces(finalCandidate, undefined);
       }
 
@@ -2485,6 +2830,8 @@ export async function computeStyleMeResult(
         candidateCount: filteredCandidates.length,
         evidenceSummary: filteredCandidates.map((c) => {
           const e = occasionEvidence.get(c.id)!;
+          const s = outfitScores.get(c.id)!;
+          const itemMap = new Map(allItems.map((i) => [i.id, i]));
           return {
             id: c.id,
             knownOccasionPieces: e.knownOccasionPieces,
@@ -2493,9 +2840,14 @@ export async function computeStyleMeResult(
             occasionCoverageRatio: Math.round(e.occasionCoverageRatio * 100) / 100,
             baseAndShoeMatchCount: e.baseAndShoeMatchCount,
             optionalPieceCount: e.optionalPieceCount,
+            formalityFit: s.formalityFit,
+            outfitFormalityRank: s.outfitFormalityRank,
+            targetFormalityRange: s.targetFormalityRange,
+            compositeScore: Math.round(s.compositeScore * 100) / 100,
             deterministicFallbackRank: c.id === finalCandidate.id ? "selected" : "not-selected",
             pieces: e.pieces.map((p) => ({
               slot: p.slot, pieceRole: p.pieceRole, label: p.label, occasionStatus: p.occasionStatus,
+              formality: itemMap.get(p.closetId)?.formality ?? null,
             })),
           };
         }),

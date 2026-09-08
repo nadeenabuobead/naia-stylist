@@ -113,6 +113,7 @@ export interface ClosetAnchorInput {
   occasions: string[];
   imageUrl: string;
   garmentRelationships?: string[];
+  formality?: string | null; // GarmentFormality token — null when item not yet analyzed
 }
 
 export type AnchorInput = NadineAnchorInput | ClosetAnchorInput;

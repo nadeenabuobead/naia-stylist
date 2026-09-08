@@ -33,8 +33,11 @@ import {
   computeOutfitSignature,
   buildCandidateOccasionEvidence,
   selectOccasionAwareFallback,
+  evaluateCompleteOutfit,
+  getTargetFormalityRange,
+  FORMALITY_RANK,
 } from "./styleme-result.server.ts";
-import type { CandidateOccasionEvidence } from "./styleme-result.server.ts";
+import type { CandidateOccasionEvidence, OutfitSuitabilityScore } from "./styleme-result.server.ts";
 import type { OutfitCandidate } from "./styleme-result.server.ts";
 import { scoreClosetItemForSession, autoSelectClosetAnchor } from "./styleme-anchor.server.ts";
 import type { AutoSelectItem } from "./styleme-anchor.server.ts";
@@ -6987,6 +6990,783 @@ describe("§FA.9 — Tie-break: equal scores, candidate with fewer non-matching 
     assert.ok(
       !persistedIds.includes("f-ow-blazer-fa9"),
       `Work-only blazer must not appear in tie-break fallback result; got: ${persistedIds.join(", ")}`,
+    );
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// §WO — Whole-outfit suitability evaluation + register-diverse candidate generation
+// ══════════════════════════════════════════════════════════════════════════════
+//
+// Tests the shared evaluateCompleteOutfit ranker and the formality-aware candidate
+// generation that drives it. Covers:
+//
+// §WO.1   evaluateCompleteOutfit: all business-casual base+shoe for everyday → overdressed
+// §WO.2   evaluateCompleteOutfit: all casual base+shoe for everyday → within-target
+// §WO.3   evaluateCompleteOutfit: business-casual for work → within-target
+// §WO.4   evaluateCompleteOutfit: no formality metadata → unknown; occasion coverage only
+// §WO.5   getTargetFormalityRange: everyday, work, formalityConditional variants
+// §WO.6   Sara everyday: closet with casual+formal bottoms → B is casual, B scores higher
+// §WO.7   Sara work/polished: same closet → formal candidate scores higher
+// §WO.8   Omar everyday: casual shoe available → B scores higher than formal-shoe A
+// §WO.9   Omar work/smart-casual: smart-casual shoe available → smart-casual scores higher
+// §WO.10  Fallback: model fails → evaluateCompleteOutfit ranking selects best-register match
+// §WO.11  Paired test: same Passport + same Closet; everyday vs work → different register
+//
+// No gender-specific styling logic. No garment-name exceptions.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+const makeItem = (
+  id: string,
+  category: string,
+  opts: Partial<{ occasions: string[]; styleTags: string[]; formality: string | null; name: string }> = {},
+): ClosetAnchorInput => ({
+  type: "closet", id, name: opts.name ?? id,
+  category,
+  colors: ["black"], primaryColor: "black",
+  pattern: null, material: null,
+  styleTags: opts.styleTags ?? ["classic"],
+  occasions: opts.occasions ?? ["everyday"],
+  imageUrl: "",
+  formality: opts.formality ?? null,
+});
+
+const makeCandidate = (id: "A" | "B" | "C", pieces: Array<{ id: string; slot: string }>): OutfitCandidate => ({
+  id,
+  pieces: pieces.map((p) => ({ closetId: p.id, slot: p.slot, label: p.id, colors: [] })),
+});
+
+// Session shorthands
+const everydaySession = {
+  occasion: "everyday", formalityConditional: null as string | null,
+  moods: ["confident"], desiredFeelings: ["relaxed"],
+  bodyNeeds: [], coverageConditional: null as string | null,
+  todayColours: { preferred: [], avoid: [] }, practicalIds: [],
+  source: "my-closet" as const,
+};
+const workPolishedSession = {
+  ...everydaySession,
+  occasion: "work",
+  formalityConditional: "formality-polished" as string | null,
+};
+
+// ── §WO.1 — Overdressed: business-casual outfit for everyday ─────────────────
+
+describe("§WO.1 — evaluateCompleteOutfit: business-casual outfit for everyday → overdressed", () => {
+  it("WO.1.1 — weighted avg rank 3 (business-casual) exceeds everyday max rank 2 → formalityFit=overdressed, overshoot=1", () => {
+    const top = makeItem("top1", "TOPS", { formality: "business-casual", occasions: ["everyday"] });
+    const bottom = makeItem("bot1", "BOTTOMS", { formality: "business-casual", occasions: ["everyday"] });
+    const shoe = makeItem("shoe1", "SHOES", { formality: "business-casual", occasions: ["everyday"] });
+    const candidate = makeCandidate("A", [{ id: "top1", slot: "top" }, { id: "bot1", slot: "bottom" }, { id: "shoe1", slot: "shoe" }]);
+    const score = evaluateCompleteOutfit(candidate, [top, bottom, shoe], everydaySession);
+    assert.strictEqual(score.formalityFit, "overdressed");
+    assert.strictEqual(score.formalityOvershoot, 1);
+    assert.ok(score.compositeScore < 10, "Overdressed outfit must score below full occasion-coverage baseline");
+  });
+
+  it("WO.1.2 — compositeScore is reduced by 3 per step of overshoot", () => {
+    // business-formal (rank 4) for everyday (max rank 2) → overshoot 2 → penalty -6
+    const top = makeItem("t", "TOPS", { formality: "business-formal", occasions: ["everyday"] });
+    const shoe = makeItem("s", "SHOES", { formality: "business-formal", occasions: ["everyday"] });
+    const candidate = makeCandidate("A", [{ id: "t", slot: "top" }, { id: "s", slot: "shoe" }]);
+    const score = evaluateCompleteOutfit(candidate, [top, shoe], everydaySession);
+    assert.strictEqual(score.formalityFit, "overdressed");
+    assert.strictEqual(score.formalityOvershoot, 2);
+    // compositeScore = 1.0 * 10 + 2 * -3 = 4
+    assert.ok(Math.abs(score.compositeScore - 4) < 0.1, `Expected ~4, got ${score.compositeScore}`);
+  });
+});
+
+// ── §WO.2 — Within target: casual outfit for everyday ────────────────────────
+
+describe("§WO.2 — evaluateCompleteOutfit: casual base+shoe for everyday → within-target", () => {
+  it("WO.2 — median rank 1 (casual) within everyday range 1–2 → formalityFit=within-target, no penalty", () => {
+    const top = makeItem("t", "TOPS", { formality: "casual", occasions: ["everyday"] });
+    const bottom = makeItem("b", "BOTTOMS", { formality: "casual", occasions: ["everyday"] });
+    const shoe = makeItem("s", "SHOES", { formality: "casual", occasions: ["everyday"] });
+    const candidate = makeCandidate("A", [{ id: "t", slot: "top" }, { id: "b", slot: "bottom" }, { id: "s", slot: "shoe" }]);
+    const score = evaluateCompleteOutfit(candidate, [top, bottom, shoe], everydaySession);
+    assert.strictEqual(score.formalityFit, "within-target");
+    assert.strictEqual(score.formalityOvershoot, 0);
+    // Full occasion coverage (100%) + no formality penalty → compositeScore ~10
+    assert.ok(score.compositeScore >= 9, `Expected compositeScore ≥ 9, got ${score.compositeScore}`);
+  });
+});
+
+// ── §WO.3 — Within target: business-casual outfit for work ───────────────────
+
+describe("§WO.3 — evaluateCompleteOutfit: business-casual for work → within-target", () => {
+  it("WO.3 — median rank 3 (business-casual) within work range 2–4 → within-target", () => {
+    const top = makeItem("t", "TOPS", { formality: "business-casual", occasions: ["work"] });
+    const trousers = makeItem("tr", "BOTTOMS", { formality: "business-casual", occasions: ["work"] });
+    const shoe = makeItem("s", "SHOES", { formality: "business-casual", occasions: ["work"] });
+    const candidate = makeCandidate("A", [{ id: "t", slot: "top" }, { id: "tr", slot: "bottom" }, { id: "s", slot: "shoe" }]);
+    const score = evaluateCompleteOutfit(candidate, [top, trousers, shoe], workPolishedSession);
+    assert.strictEqual(score.formalityFit, "within-target");
+  });
+});
+
+// ── §WO.4 — No formality metadata: falls back to occasion coverage ────────────
+
+describe("§WO.4 — evaluateCompleteOutfit: no formality metadata → formalityFit=unknown", () => {
+  it("WO.4 — items with null formality → outfitFormalityRank=null, formalityFit=unknown", () => {
+    const top = makeItem("t", "TOPS", { formality: null, occasions: ["everyday"] });
+    const bottom = makeItem("b", "BOTTOMS", { formality: null, occasions: ["everyday"] });
+    const candidate = makeCandidate("A", [{ id: "t", slot: "top" }, { id: "b", slot: "bottom" }]);
+    const score = evaluateCompleteOutfit(candidate, [top, bottom], everydaySession);
+    assert.strictEqual(score.formalityFit, "unknown");
+    assert.strictEqual(score.outfitFormalityRank, null);
+    // No formality penalty — score is based on occasion coverage only
+    assert.ok(score.compositeScore >= 9.5, `No-metadata outfit should not be penalised; got ${score.compositeScore}`);
+  });
+});
+
+// ── §WO.5 — getTargetFormalityRange ──────────────────────────────────────────
+
+describe("§WO.5 — getTargetFormalityRange: occasion + formalityConditional", () => {
+  it("WO.5.1 — everyday, no conditional → {min:1, max:2}", () => {
+    assert.deepStrictEqual(getTargetFormalityRange("everyday", null), { min: 1, max: 2 });
+  });
+  it("WO.5.2 — work, no conditional → {min:2, max:4}", () => {
+    assert.deepStrictEqual(getTargetFormalityRange("work", null), { min: 2, max: 4 });
+  });
+  it("WO.5.3 — everyday + formality-smart → intersection {min:2, max:2}", () => {
+    assert.deepStrictEqual(getTargetFormalityRange("everyday", "formality-smart"), { min: 2, max: 2 });
+  });
+  it("WO.5.4 — work + formality-polished → intersection {min:3, max:4}", () => {
+    assert.deepStrictEqual(getTargetFormalityRange("work", "formality-polished"), { min: 3, max: 4 });
+  });
+  it("WO.5.5 — unknown occasion → safe default {min:1, max:4}", () => {
+    const r = getTargetFormalityRange("not-a-known-occasion", null);
+    assert.ok(r.min >= 1 && r.max <= 6);
+  });
+  it("WO.5.6 — FORMALITY_RANK contains exactly 6 canonical values", () => {
+    const values = Object.values(FORMALITY_RANK).sort((a, b) => a - b);
+    assert.deepStrictEqual(values, [1, 2, 3, 4, 5, 6]);
+  });
+});
+
+// ── §WO.6 — Sara everyday: casual bottom wins over business-casual bottom ─────
+
+describe("§WO.6 — Sara everyday: closet with casual+formal bottoms → casual candidate scores higher", () => {
+  // Fixture: Sara has both tailored trousers (business-casual) and jeans (casual).
+  // Both score > 0 for everyday (both have the occasion tag).
+  // evaluateCompleteOutfit must rank the jeans outfit higher for everyday.
+  // 2-piece outfits (bottom + shoe) ensure the median formality is unambiguous —
+  // with 3 pieces, a single formal bottom raises the median only when it is the majority.
+  const saraCasualBottom = makeItem("sara-jeans", "BOTTOMS", {
+    name: "Relaxed Jeans", formality: "casual",
+    occasions: ["everyday"], styleTags: ["classic"],
+  });
+  const saraFormalBottom = makeItem("sara-trousers", "BOTTOMS", {
+    name: "Black Tailored Trousers", formality: "business-casual",
+    occasions: ["everyday"], styleTags: ["classic"],
+  });
+  const saraTop = makeItem("sara-top", "TOPS", {
+    name: "Black Long-Sleeve Top", formality: "casual",
+    occasions: ["everyday"], styleTags: ["classic"],
+  });
+  const saraCasualShoe = makeItem("sara-casual-shoe", "SHOES", {
+    name: "White Canvas Sneakers", formality: "casual",
+    occasions: ["everyday"], styleTags: ["classic"],
+  });
+  const saraFormalShoe = makeItem("sara-formal-shoe", "SHOES", {
+    name: "Black Loafers", formality: "business-casual",
+    occasions: ["everyday"], styleTags: ["classic"],
+  });
+  const allSaraItems = [saraCasualBottom, saraFormalBottom, saraTop, saraCasualShoe, saraFormalShoe];
+
+  it("WO.6.1 — casual-bottom candidate scores higher than formal-bottom candidate for everyday", () => {
+    // 2-piece outfits: bottom + shoe. Each piece shares the same formality register so
+    // the median (sorted[Math.floor(N/2)]) is unambiguous: [1,1]→1 or [3,3]→3.
+    const casualOutfit = makeCandidate("B", [
+      { id: "sara-jeans", slot: "bottom" }, { id: "sara-casual-shoe", slot: "shoe" },
+    ]);
+    const formalOutfit = makeCandidate("A", [
+      { id: "sara-trousers", slot: "bottom" }, { id: "sara-formal-shoe", slot: "shoe" },
+    ]);
+    const scoreA = evaluateCompleteOutfit(formalOutfit, allSaraItems, everydaySession);
+    const scoreB = evaluateCompleteOutfit(casualOutfit, allSaraItems, everydaySession);
+    assert.strictEqual(scoreA.formalityFit, "overdressed", "Tailored trousers + formal shoe must be overdressed for everyday");
+    assert.strictEqual(scoreB.formalityFit, "within-target", "Jeans + casual shoe must be within-target for everyday");
+    assert.ok(scoreB.compositeScore > scoreA.compositeScore,
+      `Casual outfit (${scoreB.compositeScore}) must outscore formal outfit (${scoreA.compositeScore}) for everyday`);
+  });
+
+  it("WO.6.2 — buildNaiaOutfitCandidates generates B as the casual-bottom alternative", () => {
+    // Anchor is the top; bottom slot is open for selection.
+    // A gets the highest-scored bottom (tie → stable order: jeans or trousers).
+    // B must be the other bottom — structural diversity is the assertion here.
+    const saraAnchor: NormalizedClosetAnchor = {
+      type: "closet", id: "sara-top", label: "Black Long-Sleeve Top", slot: "top",
+      colors: ["black"], normalizedColorIds: ["black"], styleTags: ["classic"],
+      occasions: ["everyday"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+    };
+    const [candidateA, candidateB] = buildNaiaOutfitCandidates(
+      saraAnchor, everydaySession, allSaraItems, undefined, undefined,
+    );
+
+    // B must exist since there are two scoring bottoms
+    assert.ok(candidateB !== null, "Candidate B must exist when two scoring bottoms are available");
+
+    // One of A/B has jeans, the other has trousers — they differ on the bottom slot
+    const aBottomId = candidateA.pieces.find((p) => p.slot === "bottom")?.closetId;
+    const bBottomId = candidateB!.pieces.find((p) => p.slot === "bottom")?.closetId;
+    assert.notStrictEqual(aBottomId, bBottomId, "Candidate A and B must have different bottoms");
+    assert.ok(
+      [aBottomId, bBottomId].includes("sara-jeans"),
+      "One candidate must include the casual jeans",
+    );
+  });
+});
+
+// ── §WO.7 — Sara work/polished: formal candidate scores higher ───────────────
+
+describe("§WO.7 — Sara work/polished: same Closet, different session → formal candidate wins", () => {
+  const saraCasualBottom = makeItem("sara-jeans", "BOTTOMS", {
+    name: "Relaxed Jeans", formality: "casual",
+    occasions: ["everyday"], styleTags: ["classic"],
+  });
+  const saraFormalBottom = makeItem("sara-trousers", "BOTTOMS", {
+    name: "Black Tailored Trousers", formality: "business-casual",
+    occasions: ["work", "everyday"], styleTags: ["classic"],
+  });
+  const saraTop = makeItem("sara-top", "TOPS", {
+    name: "Black Shirt", formality: "business-casual",
+    occasions: ["work", "everyday"], styleTags: ["classic"],
+  });
+  const saraShoe = makeItem("sara-shoe", "SHOES", {
+    name: "Black Leather Loafers", formality: "business-casual",
+    occasions: ["work"], styleTags: ["classic"],
+  });
+  const allItems = [saraCasualBottom, saraFormalBottom, saraTop, saraShoe];
+
+  it("WO.7 — business-casual outfit scores higher than casual outfit for work+polished session", () => {
+    const casualOutfit = makeCandidate("B", [
+      { id: "sara-top", slot: "top" }, { id: "sara-jeans", slot: "bottom" }, { id: "sara-shoe", slot: "shoe" },
+    ]);
+    const formalOutfit = makeCandidate("A", [
+      { id: "sara-top", slot: "top" }, { id: "sara-trousers", slot: "bottom" }, { id: "sara-shoe", slot: "shoe" },
+    ]);
+    const scoreA = evaluateCompleteOutfit(formalOutfit, allItems, workPolishedSession);
+    const scoreB = evaluateCompleteOutfit(casualOutfit, allItems, workPolishedSession);
+    assert.strictEqual(scoreA.formalityFit, "within-target", "Tailored trousers outfit must be within-target for work/polished");
+    assert.ok(
+      scoreA.compositeScore > scoreB.compositeScore,
+      `Formal candidate (${scoreA.compositeScore}) must outscore casual candidate (${scoreB.compositeScore}) for work/polished`,
+    );
+  });
+
+  it("WO.7.paired — same Closet: everyday ranks casual higher, work ranks formal higher", () => {
+    // The PAIRED TEST: identical Closet, same Passport — only the session changes.
+    // 2-piece outfits (bottom + shoe, no top) give unambiguous median formality.
+    // Casual combo: both pieces rank 1 → median 1. Formal combo: both rank 3 → median 3.
+    const pairedCasualBottom = makeItem("p-jeans", "BOTTOMS", {
+      name: "Jeans", formality: "casual", occasions: ["everyday"], styleTags: ["classic"],
+    });
+    const pairedFormalBottom = makeItem("p-trousers", "BOTTOMS", {
+      name: "Tailored Trousers", formality: "business-casual",
+      occasions: ["work", "everyday"], styleTags: ["classic"],
+    });
+    const pairedCasualShoe = makeItem("p-casual-shoe", "SHOES", {
+      name: "Sneakers", formality: "casual", occasions: ["everyday"], styleTags: ["classic"],
+    });
+    const pairedFormalShoe = makeItem("p-formal-shoe", "SHOES", {
+      name: "Loafers", formality: "business-casual", occasions: ["work"], styleTags: ["classic"],
+    });
+    const pairedItems = [pairedCasualBottom, pairedFormalBottom, pairedCasualShoe, pairedFormalShoe];
+    const jeansOutfit = makeCandidate("B", [
+      { id: "p-jeans", slot: "bottom" }, { id: "p-casual-shoe", slot: "shoe" },
+    ]);
+    const trousersOutfit = makeCandidate("A", [
+      { id: "p-trousers", slot: "bottom" }, { id: "p-formal-shoe", slot: "shoe" },
+    ]);
+    const jeansEveryday = evaluateCompleteOutfit(jeansOutfit, pairedItems, everydaySession);
+    const trousersEveryday = evaluateCompleteOutfit(trousersOutfit, pairedItems, everydaySession);
+    const jeansWork = evaluateCompleteOutfit(jeansOutfit, pairedItems, workPolishedSession);
+    const trousersWork = evaluateCompleteOutfit(trousersOutfit, pairedItems, workPolishedSession);
+
+    assert.ok(jeansEveryday.compositeScore > trousersEveryday.compositeScore,
+      "Everyday: jeans outfit must rank higher than trousers outfit");
+    assert.ok(trousersWork.compositeScore > jeansWork.compositeScore,
+      "Work/polished: trousers outfit must rank higher than jeans outfit");
+  });
+});
+
+// ── §WO.8 — Omar everyday: casual shoe available → B uses casual shoe ─────────
+
+describe("§WO.8 — Omar everyday: closet with casual+formal shoes → casual-shoe B scores higher", () => {
+  const omarTop = makeItem("omar-top", "TOPS", {
+    name: "White Oxford Shirt", formality: "smart-casual",
+    occasions: ["everyday", "smart-casual"], styleTags: ["classic"],
+  });
+  const omarCasualShoe = makeItem("omar-sneakers", "SHOES", {
+    name: "White Canvas Sneakers", formality: "casual",
+    occasions: ["everyday"], styleTags: ["classic"],
+  });
+  const omarFormalShoe = makeItem("omar-loafers", "SHOES", {
+    name: "Brown Leather Loafers", formality: "business-casual",
+    occasions: ["everyday", "smart-casual"], styleTags: ["classic"],
+  });
+  const omarAnchor: NormalizedClosetAnchor = {
+    type: "closet", id: "omar-anchor-chinos", label: "Navy Chinos", slot: "bottom",
+    colors: ["navy"], normalizedColorIds: ["navy"], styleTags: ["classic"],
+    occasions: ["everyday", "smart-casual"], material: null,
+    hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+  };
+  const allOmarItems = [omarTop, omarCasualShoe, omarFormalShoe];
+
+  it("WO.8.1 — buildNaiaOutfitCandidates generates B using casual shoe for everyday session", () => {
+    const [candidateA, candidateB] = buildNaiaOutfitCandidates(
+      omarAnchor, everydaySession, allOmarItems, undefined, undefined,
+    );
+    assert.ok(candidateB !== null, "Candidate B must exist with two scoring shoes");
+    const aShoeId = candidateA.pieces.find((p) => p.slot === "shoe")?.closetId;
+    const bShoeId = candidateB!.pieces.find((p) => p.slot === "shoe")?.closetId;
+    assert.notStrictEqual(aShoeId, bShoeId, "B must have a different shoe than A");
+    // The candidate containing the casual sneaker must have higher compositeScore for everyday
+    const scoreA = evaluateCompleteOutfit(candidateA, allOmarItems, everydaySession);
+    const scoreB = evaluateCompleteOutfit(candidateB!, allOmarItems, everydaySession);
+    const sneakerCandScore = aShoeId === "omar-sneakers" ? scoreA : scoreB;
+    const loaferCandScore = aShoeId === "omar-sneakers" ? scoreB : scoreA;
+    assert.ok(
+      sneakerCandScore.compositeScore >= loaferCandScore.compositeScore,
+      `Casual-shoe candidate (${sneakerCandScore.compositeScore}) must match or beat formal-shoe candidate (${loaferCandScore.compositeScore}) for everyday`,
+    );
+  });
+
+  it("WO.8.2 — evaluateCompleteOutfit: outfit with casual shoe scores >= outfit with formal shoe for everyday", () => {
+    const sneakerOutfit = makeCandidate("B", [
+      { id: "omar-anchor-chinos", slot: "bottom" }, { id: "omar-top", slot: "top" }, { id: "omar-sneakers", slot: "shoe" },
+    ]);
+    const loaferOutfit = makeCandidate("A", [
+      { id: "omar-anchor-chinos", slot: "bottom" }, { id: "omar-top", slot: "top" }, { id: "omar-loafers", slot: "shoe" },
+    ]);
+    const anchorItem = makeItem("omar-anchor-chinos", "BOTTOMS", {
+      formality: "smart-casual", occasions: ["everyday", "smart-casual"], styleTags: ["classic"],
+    });
+    const allWithAnchor = [anchorItem, ...allOmarItems];
+    const scoreSneaker = evaluateCompleteOutfit(sneakerOutfit, allWithAnchor, everydaySession);
+    const scoreLoafer = evaluateCompleteOutfit(loaferOutfit, allWithAnchor, everydaySession);
+    assert.ok(
+      scoreSneaker.compositeScore >= scoreLoafer.compositeScore,
+      `Sneaker outfit (${scoreSneaker.compositeScore}) must score >= loafer outfit (${scoreLoafer.compositeScore}) for everyday`,
+    );
+  });
+});
+
+// ── §WO.9 — Fallback uses evaluateCompleteOutfit ranking ─────────────────────
+
+describe("§WO.9 — Fallback: model fails → highest-compositeScore candidate is selected", () => {
+  it("WO.9 — when model returns null, the candidate with best outfit suitability is persisted", async () => {
+    // A has business-casual trousers for everyday (overdressed).
+    // B has casual jeans for everyday (within-target).
+    // With model null, B must be selected.
+    const jeans = makeItem("jeans", "BOTTOMS", {
+      formality: "casual", occasions: ["everyday"], styleTags: ["classic"],
+    });
+    const trousers = makeItem("trousers", "BOTTOMS", {
+      formality: "business-casual", occasions: ["everyday"], styleTags: ["classic"],
+    });
+    const top = makeItem("top-anch", "TOPS", {
+      formality: "casual", occasions: ["everyday"], styleTags: ["classic"],
+    });
+
+    const anchor: NormalizedClosetAnchor = {
+      type: "closet", id: "top-anch", label: "Relaxed Top", slot: "top",
+      colors: ["black"], normalizedColorIds: ["black"], styleTags: ["classic"],
+      occasions: ["everyday"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+    };
+
+    const nullMock: typeof callClaudeForNaiaSelection = async () => null;
+    const engineInput = {
+      session: everydaySession,
+      anchor: {
+        type: "closet" as const, id: "top-anch", name: "Relaxed Top",
+        category: "TOPS", colors: ["black"], primaryColor: "black",
+        pattern: null, material: null, styleTags: ["classic"],
+        occasions: ["everyday"], imageUrl: "", formality: "casual" as string | null | undefined,
+      },
+      mode: "naia" as const,
+      profile: null,
+      recentlyShownClosetIds: [],
+    };
+
+    const result = await computeStyleMeResult(
+      engineInput, undefined, undefined, false,
+      async () => [jeans, trousers, top], nullMock,
+    );
+
+    const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
+    assert.ok(
+      persistedIds.includes("jeans"),
+      `Casual jeans must be in the fallback result for everyday; got: ${persistedIds.join(", ")}`,
+    );
+    assert.ok(
+      !persistedIds.includes("trousers"),
+      `Business-casual trousers must NOT be in the fallback result for everyday; got: ${persistedIds.join(", ")}`,
+    );
+  });
+});
+
+// ── §WO.10 — Sparse closet: best available selected, no crash ─────────────────
+
+describe("§WO.10 — Sparse closet: all pieces have no formality data → evaluateCompleteOutfit uses occasion coverage", () => {
+  it("WO.10 — single candidate with no formality metadata returns compositeScore based on occasion coverage only", () => {
+    const item = makeItem("x", "BOTTOMS", { formality: null, occasions: ["everyday"] });
+    const candidate = makeCandidate("A", [{ id: "x", slot: "bottom" }]);
+    const score = evaluateCompleteOutfit(candidate, [item], everydaySession);
+    assert.strictEqual(score.formalityFit, "unknown");
+    assert.strictEqual(score.outfitFormalityRank, null);
+    assert.ok(Number.isFinite(score.compositeScore), "compositeScore must be a finite number even with no formality data");
+  });
+});
+
+// ── §WO.11 — Outerwear formality + multi-slot B ───────────────────────────────
+//
+// Tests proving the new whole-outfit evaluator includes outerwear (at weight 0.7)
+// and that Candidate B can vary BOTH bottom AND shoes simultaneously when the
+// session's formality target makes in-target alternatives available.
+//
+// WO.11.1  Formal outerwear lowers compositeScore for everyday even when weighted avg stays within target
+// WO.11.2  Same outfit without formal outerwear scores higher (no outerwear penalty)
+// WO.11.3  Formal outerwear HELPS a casual outfit for work (reduces underdressed penalty)
+// WO.11.4  Formal outerwear in casual outfit: evaluator catches the formal layer — score lower than no-outerwear
+// WO.11.5  Candidate B varies BOTH bottom AND shoes for work session (multi-slot B)
+// WO.11.6  Sara-style: D candidate (B-without-outerwear) provides casual base+no-blazer for everyday
+// WO.11.7  Omar-style: same shared B behavior when shoe has in-target alternative
+// WO.11.8  Unknown formality remains neutral (already covered by WO.4 — reference only)
+
+describe("§WO.11 — Outerwear formality weight + multi-slot B", () => {
+  // Shared fixture: casual base outfit (top+bottom+shoe, all rank 1, everyday occasions)
+  // used across multiple sub-tests, with optional formal outerwear added.
+  const casualTop = makeItem("w11-top", "TOPS", {
+    formality: "casual", occasions: ["everyday", "work"],
+  });
+  const casualBottom = makeItem("w11-bottom", "BOTTOMS", {
+    formality: "casual", occasions: ["everyday", "work"],
+  });
+  const casualShoe = makeItem("w11-shoe", "SHOES", {
+    formality: "casual", occasions: ["everyday", "work"],
+  });
+  // business-formal (rank 4) blazer — clearly overdressed for everyday (max 2)
+  const formalBlazer = makeItem("w11-blazer", "OUTERWEAR", {
+    formality: "business-formal", occasions: ["everyday", "work"],
+  });
+
+  it("WO.11.1 — formal outerwear at weight 0.7 produces normalizedFormalityPenalty even when formalityFit = within-target", () => {
+    // casual base+shoe (rank 1, weight 1.0 each) + business-formal blazer (rank 4, weight 0.7)
+    // Weighted avg: (1+1+1+4×0.7)/(3+0.7) = 5.8/3.7 ≈ 1.57 — within everyday target [1,2]
+    // But the blazer contributes deviation 2 → contribution 2×0.7×-3 = -4.2
+    // normalizedFormalityPenalty = -4.2/3.7 ≈ -1.14 → compositeScore < 10
+    const candidate = makeCandidate("A", [
+      { id: "w11-top", slot: "top" },
+      { id: "w11-bottom", slot: "bottom" },
+      { id: "w11-shoe", slot: "shoe" },
+      { id: "w11-blazer", slot: "outerwear" },
+    ]);
+    const score = evaluateCompleteOutfit(
+      candidate, [casualTop, casualBottom, casualShoe, formalBlazer], everydaySession,
+    );
+    assert.strictEqual(score.formalityFit, "within-target",
+      "Weighted avg ≈ 1.57 stays within everyday [1,2]; formalityFit must not be overdressed");
+    assert.ok(score.compositeScore < 10,
+      `Formal blazer must lower compositeScore below 10; got ${score.compositeScore}`);
+    assert.ok(
+      score.reasons.some((r) => r.startsWith("Formality note:")),
+      "reasons must include the 'individual piece(s) outside target' note when penalty exists inside within-target",
+    );
+  });
+
+  it("WO.11.2 — same outfit without formal outerwear scores higher for everyday", () => {
+    // No blazer → outfitFormalityRank = 1.0, normalizedPenalty = 0 → compositeScore = 10
+    const withBlazer = makeCandidate("A", [
+      { id: "w11-top", slot: "top" },
+      { id: "w11-bottom", slot: "bottom" },
+      { id: "w11-shoe", slot: "shoe" },
+      { id: "w11-blazer", slot: "outerwear" },
+    ]);
+    const withoutBlazer = makeCandidate("B", [
+      { id: "w11-top", slot: "top" },
+      { id: "w11-bottom", slot: "bottom" },
+      { id: "w11-shoe", slot: "shoe" },
+    ]);
+    const allItems = [casualTop, casualBottom, casualShoe, formalBlazer];
+    const scoreWith = evaluateCompleteOutfit(withBlazer, allItems, everydaySession);
+    const scoreWithout = evaluateCompleteOutfit(withoutBlazer, allItems, everydaySession);
+    assert.ok(
+      scoreWithout.compositeScore > scoreWith.compositeScore,
+      `Everyday: outfit without formal blazer (${scoreWithout.compositeScore}) must outscore outfit with blazer (${scoreWith.compositeScore})`,
+    );
+  });
+
+  it("WO.11.3 — formal outerwear HELPS a casual outfit for work/polished: reduces normalizedFormalityPenalty", () => {
+    // For work+polished [3,4]:
+    // - Casual base+shoe (rank 1): each underdressed by 2 steps, contribution -2×weight×1.5 = -3 each
+    // - Without blazer: totalWeight=3, penalty=-9, normalized=-3  → compositeScore = 10-3 = 7
+    // - Business-formal blazer (rank 4): in [3,4] → deviation=0, no penalty added
+    // - With blazer: totalWeight=3.7, penalty=-9, normalized≈-2.43 (less severe) → compositeScore = 10-2.43-0.5 ≈ 7.07
+    // → compositeScore WITH blazer (7.07) > WITHOUT blazer (7), because blazer dilutes the penalty via normalization
+    const withBlazer = makeCandidate("A", [
+      { id: "w11-top", slot: "top" },
+      { id: "w11-bottom", slot: "bottom" },
+      { id: "w11-shoe", slot: "shoe" },
+      { id: "w11-blazer", slot: "outerwear" },
+    ]);
+    const withoutBlazer = makeCandidate("B", [
+      { id: "w11-top", slot: "top" },
+      { id: "w11-bottom", slot: "bottom" },
+      { id: "w11-shoe", slot: "shoe" },
+    ]);
+    const allItems = [casualTop, casualBottom, casualShoe, formalBlazer];
+    const scoreWith = evaluateCompleteOutfit(withBlazer, allItems, workPolishedSession);
+    const scoreWithout = evaluateCompleteOutfit(withoutBlazer, allItems, workPolishedSession);
+    assert.ok(
+      scoreWith.compositeScore > scoreWithout.compositeScore,
+      `Work/polished: outfit with formal blazer (${scoreWith.compositeScore}) must outscore all-casual outfit (${scoreWithout.compositeScore})`,
+    );
+  });
+
+  it("WO.11.4 — evaluator catches formal outerwear in casual everyday outfit; pure-casual outfit scores higher", () => {
+    // This is the median-hiding case: [casual, casual, casual, business-formal-outerwear].
+    // Old median of base/shoe only: [1,1] → median 1 → no signal.
+    // New per-piece weighted evaluation: blazer contributes penalty even at 0.7 weight.
+    const withBlazer = makeCandidate("A", [
+      { id: "w11-top", slot: "top" },
+      { id: "w11-bottom", slot: "bottom" },
+      { id: "w11-shoe", slot: "shoe" },
+      { id: "w11-blazer", slot: "outerwear" },
+    ]);
+    const pureCasual = makeCandidate("B", [
+      { id: "w11-top", slot: "top" },
+      { id: "w11-bottom", slot: "bottom" },
+      { id: "w11-shoe", slot: "shoe" },
+    ]);
+    const allItems = [casualTop, casualBottom, casualShoe, formalBlazer];
+    const scoreWith = evaluateCompleteOutfit(withBlazer, allItems, everydaySession);
+    const scorePure = evaluateCompleteOutfit(pureCasual, allItems, everydaySession);
+    assert.ok(
+      scorePure.compositeScore > scoreWith.compositeScore,
+      `Everyday: pure-casual (${scorePure.compositeScore}) must outscore outfit with formal blazer (${scoreWith.compositeScore})`,
+    );
+    assert.ok(
+      Number.isFinite(scoreWith.compositeScore),
+      "compositeScore must be finite even with mixed-register outfit",
+    );
+  });
+
+  it("WO.11.5 — candidate B can vary BOTH bottom and shoes simultaneously for work session", () => {
+    // Anchor: work shirt (top). Closet has casual+formal options for BOTH bottom and shoe.
+    // For work [2,4], formal alternatives (rank 3) are in-target; casual (rank 1) are not.
+    // B's multi-slot logic picks in-target items first per slot → both bottom AND shoe differ from A.
+    const workAnchor: NormalizedClosetAnchor = {
+      type: "closet", id: "w11-anchor-shirt", label: "Work Shirt", slot: "top",
+      colors: ["white"], normalizedColorIds: ["white"], styleTags: ["classic"],
+      occasions: ["work", "everyday"], material: null,
+      hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+    };
+    const anchorShirt = makeItem("w11-anchor-shirt", "TOPS", {
+      formality: "business-casual", occasions: ["work", "everyday"],
+    });
+    const casualJeans = makeItem("w11-cj", "BOTTOMS", {
+      formality: "casual", occasions: ["work", "everyday"],
+    });
+    const formalTrousers = makeItem("w11-ft", "BOTTOMS", {
+      formality: "business-casual", occasions: ["work", "everyday"],
+    });
+    const casualSneakers = makeItem("w11-cs", "SHOES", {
+      formality: "casual", occasions: ["work", "everyday"],
+    });
+    const formalLoafers = makeItem("w11-fl", "SHOES", {
+      formality: "business-casual", occasions: ["work", "everyday"],
+    });
+    // Order: casual items first so A picks them (equal score, stable order)
+    const allItems = [anchorShirt, casualJeans, formalTrousers, casualSneakers, formalLoafers];
+    const workSession = { ...everydaySession, occasion: "work", formalityConditional: null as string | null };
+
+    const [candidateA, candidateB] = buildNaiaOutfitCandidates(
+      workAnchor, workSession, allItems, undefined, undefined,
+    );
+
+    assert.ok(candidateB !== null, "Candidate B must exist when formality-aligned alternatives exist for both slots");
+
+    const aBottomId = candidateA.pieces.find((p) => p.slot === "bottom")?.closetId;
+    const aShoeId = candidateA.pieces.find((p) => p.slot === "shoe")?.closetId;
+    const bBottomId = candidateB!.pieces.find((p) => p.slot === "bottom")?.closetId;
+    const bShoeId = candidateB!.pieces.find((p) => p.slot === "shoe")?.closetId;
+
+    assert.notStrictEqual(bBottomId, aBottomId,
+      `B must use a different bottom from A; A=${aBottomId}, B=${bBottomId}`);
+    assert.notStrictEqual(bShoeId, aShoeId,
+      `B must use a different shoe from A; A=${aShoeId}, B=${bShoeId}`);
+    // B should have the in-target (business-casual) alternatives
+    assert.strictEqual(bBottomId, "w11-ft", `B bottom must be formal-trousers for work session; got ${bBottomId}`);
+    assert.strictEqual(bShoeId, "w11-fl", `B shoe must be formal-loafers for work session; got ${bShoeId}`);
+  });
+
+  it("WO.11.6 — Sara-style: everyday pool contains casual-base+no-blazer candidate (D) and evaluateCompleteOutfit ranks it highest", () => {
+    // The real Sara failure pattern: a formal-layer-plus-formal-base combination in A leaves no
+    // pool entry for casual-base WITHOUT the formal layer — the missing D candidate.
+    //
+    // Fixture: formal items first in allItems → A picks them (equal scores, stable order):
+    //   A = formal-trousers + formal-loafers + formal-blazer
+    //   B = casual-jeans + casual-sneakers + formal-blazer  (multi-slot, both base slots changed)
+    //   C = formal-trousers + formal-loafers, no blazer     (A without outerwear)
+    //   D = casual-jeans + casual-sneakers, no blazer       (B without outerwear — previously missing)
+    //
+    // Why WO.11.6 previously showed "B differs in bottom only":
+    //   That fixture had NO outerwear. A picked casual items (first in allItems). For everyday [1,2],
+    //   B's multi-slot also preferred casual items (they're in-target), so B = A → fallback swapped
+    //   only the bottom. The shoe didn't change because casual shoe was already the in-target choice.
+    //   The fixture did not reproduce the real gap (no outerwear, no formal-first ordering).
+    //
+    // Corrected fixture: formal items first (A picks trousers+loafers+blazer); B's multi-slot for
+    // everyday [1,2] picks casual alternatives (in-target) for both bottom AND shoe simultaneously.
+
+    const saraAnchor: NormalizedClosetAnchor = {
+      type: "closet", id: "s116-top", label: "Casual Top", slot: "top",
+      colors: ["black"], normalizedColorIds: ["black"], styleTags: ["classic"],
+      occasions: ["everyday", "work"], material: null,
+      hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+    };
+    const top = makeItem("s116-top", "TOPS", {
+      formality: "casual", occasions: ["everyday", "work"],
+    });
+    const formalTrousers = makeItem("s116-trousers", "BOTTOMS", {
+      formality: "business-casual", occasions: ["everyday", "work"],
+    });
+    const casualJeans = makeItem("s116-jeans", "BOTTOMS", {
+      formality: "casual", occasions: ["everyday", "work"],
+    });
+    const formalLoafers = makeItem("s116-loafers", "SHOES", {
+      formality: "business-casual", occasions: ["everyday", "work"],
+    });
+    const casualSneakers = makeItem("s116-sneakers", "SHOES", {
+      formality: "casual", occasions: ["everyday", "work"],
+    });
+    const formalBlazer = makeItem("s116-blazer", "OUTERWEAR", {
+      formality: "business-formal", occasions: ["everyday", "work"],
+    });
+    // Formal items first → A picks them (equal scores, stable insertion order)
+    const allItems = [top, formalTrousers, casualJeans, formalLoafers, casualSneakers, formalBlazer];
+
+    const [candidateA, candidateB, candidateC, candidateD] = buildNaiaOutfitCandidates(
+      saraAnchor, everydaySession, allItems, undefined, undefined,
+    );
+
+    // ── Candidate composition ──────────────────────────────────────────────────
+    // A: formal items (first in allItems) + blazer
+    const aBottom = candidateA.pieces.find((p) => p.slot === "bottom")?.closetId;
+    const aShoe   = candidateA.pieces.find((p) => p.slot === "shoe")?.closetId;
+    const aBlazer = candidateA.pieces.find((p) => p.slot === "outerwear")?.closetId;
+    assert.strictEqual(aBottom, "s116-trousers", `A bottom must be formal trousers; got ${aBottom}`);
+    assert.strictEqual(aShoe,   "s116-loafers",  `A shoe must be formal loafers; got ${aShoe}`);
+    assert.strictEqual(aBlazer, "s116-blazer",   `A must include the blazer; got ${aBlazer}`);
+
+    // B: B's multi-slot for everyday [1,2] picks casual alternatives (in-target) for both base slots
+    assert.ok(candidateB !== null, "B must exist");
+    const bBottom = candidateB!.pieces.find((p) => p.slot === "bottom")?.closetId;
+    const bShoe   = candidateB!.pieces.find((p) => p.slot === "shoe")?.closetId;
+    const bBlazer = candidateB!.pieces.find((p) => p.slot === "outerwear")?.closetId;
+    assert.strictEqual(bBottom, "s116-jeans",    `B bottom must be casual jeans; got ${bBottom}`);
+    assert.strictEqual(bShoe,   "s116-sneakers", `B shoe must be casual sneakers; got ${bShoe}`);
+    assert.strictEqual(bBlazer, "s116-blazer",   `B inherits blazer from A; got ${bBlazer}`);
+
+    // C: A without outerwear = trousers + loafers, no blazer
+    assert.ok(candidateC !== null, "C must exist (A had outerwear)");
+    assert.ok(!candidateC!.pieces.some((p) => p.slot === "outerwear"), "C must have no outerwear");
+    assert.strictEqual(
+      candidateC!.pieces.find((p) => p.slot === "bottom")?.closetId, "s116-trousers",
+      "C must retain A's formal trousers",
+    );
+
+    // D: B without outerwear = casual jeans + casual sneakers, NO blazer (the previously missing candidate)
+    assert.ok(candidateD !== null, "D must exist — B has outerwear and B's core differs from A's core");
+    const dBottom = candidateD!.pieces.find((p) => p.slot === "bottom")?.closetId;
+    const dShoe   = candidateD!.pieces.find((p) => p.slot === "shoe")?.closetId;
+    assert.ok(!candidateD!.pieces.some((p) => p.slot === "outerwear"), "D must have no outerwear");
+    assert.strictEqual(dBottom, "s116-jeans",    `D bottom must be casual jeans; got ${dBottom}`);
+    assert.strictEqual(dShoe,   "s116-sneakers", `D shoe must be casual sneakers; got ${dShoe}`);
+
+    // ── Whole-outfit scores for everyday ──────────────────────────────────────
+    const sA = evaluateCompleteOutfit(candidateA,  allItems, everydaySession);
+    const sB = evaluateCompleteOutfit(candidateB!, allItems, everydaySession);
+    const sC = evaluateCompleteOutfit(candidateC!, allItems, everydaySession);
+    const sD = evaluateCompleteOutfit(candidateD!, allItems, everydaySession);
+
+    // D (jeans+sneakers, no blazer) must rank highest for everyday
+    assert.ok(sD.compositeScore > sA.compositeScore,
+      `D (${sD.compositeScore}) must outscore A trousers+loafers+blazer (${sA.compositeScore}) for everyday`);
+    assert.ok(sD.compositeScore > sB.compositeScore,
+      `D (${sD.compositeScore}) must outscore B jeans+sneakers+blazer (${sB.compositeScore}) for everyday`);
+    assert.ok(sD.compositeScore > sC.compositeScore,
+      `D (${sD.compositeScore}) must outscore C trousers+loafers-no-blazer (${sC.compositeScore}) for everyday`);
+    assert.strictEqual(sD.formalityFit, "within-target",
+      "D (casual jeans+sneakers) must be within-target for everyday");
+
+    // ── Work/polished: A (formal base + blazer) ranks higher than D (casual base, no blazer) ──
+    const workPolished = { ...everydaySession, occasion: "work", formalityConditional: "formality-polished" as string | null };
+    const sAWork = evaluateCompleteOutfit(candidateA,  allItems, workPolished);
+    const sDWork = evaluateCompleteOutfit(candidateD!, allItems, workPolished);
+    assert.ok(sAWork.compositeScore > sDWork.compositeScore,
+      `Work/polished: A trousers+loafers+blazer (${sAWork.compositeScore}) must outscore D jeans+sneakers (${sDWork.compositeScore})`);
+  });
+
+  it("WO.11.7 — Omar-style: work B prefers in-target shoe over casual shoe; evaluateCompleteOutfit confirms score", () => {
+    // Omar has a work anchor (bottom). Closet: casual shoe + business-casual shoe.
+    // Work session [2,4]: business-casual shoe (rank 3) in target, casual (rank 1) not.
+    // B's multi-slot picks business-casual shoe for work → differs from A.
+    // evaluateCompleteOutfit confirms the formal-shoe outfit scores higher for work.
+    const omarAnchor: NormalizedClosetAnchor = {
+      type: "closet", id: "o11-anchor-chinos", label: "Slim Chinos", slot: "bottom",
+      colors: ["navy"], normalizedColorIds: ["navy"], styleTags: ["classic"],
+      occasions: ["work", "everyday"], material: null,
+      hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+    };
+    const chinos = makeItem("o11-anchor-chinos", "BOTTOMS", {
+      formality: "business-casual", occasions: ["work", "everyday"],
+    });
+    const workShirt = makeItem("o11-shirt", "TOPS", {
+      formality: "business-casual", occasions: ["work", "everyday"],
+    });
+    const casualSneaker = makeItem("o11-sneaker", "SHOES", {
+      formality: "casual", occasions: ["work", "everyday"],
+    });
+    const formalLoafer = makeItem("o11-loafer", "SHOES", {
+      formality: "business-casual", occasions: ["work", "everyday"],
+    });
+    // Casual shoe first so A picks it
+    const allItems = [chinos, workShirt, casualSneaker, formalLoafer];
+    const workSession = { ...everydaySession, occasion: "work", formalityConditional: null as string | null };
+
+    const [candidateA, candidateB] = buildNaiaOutfitCandidates(
+      omarAnchor, workSession, allItems, undefined, undefined,
+    );
+
+    assert.ok(candidateB !== null, "B must exist with formal shoe alternative");
+    const aShoeId = candidateA.pieces.find((p) => p.slot === "shoe")?.closetId;
+    const bShoeId = candidateB!.pieces.find((p) => p.slot === "shoe")?.closetId;
+    assert.notStrictEqual(aShoeId, bShoeId, "B must differ from A in shoe slot");
+    assert.strictEqual(bShoeId, "o11-loafer", `Work: B must pick the in-target formal loafer; got ${bShoeId}`);
+
+    // evaluateCompleteOutfit confirms formal-shoe outfit scores higher for work
+    const formalShoeOutfit = makeCandidate("B", [
+      { id: "o11-anchor-chinos", slot: "bottom" },
+      { id: "o11-shirt", slot: "top" },
+      { id: "o11-loafer", slot: "shoe" },
+    ]);
+    const casualShoeOutfit = makeCandidate("A", [
+      { id: "o11-anchor-chinos", slot: "bottom" },
+      { id: "o11-shirt", slot: "top" },
+      { id: "o11-sneaker", slot: "shoe" },
+    ]);
+    const scoreFormal = evaluateCompleteOutfit(formalShoeOutfit, allItems, workSession);
+    const scoreCasual = evaluateCompleteOutfit(casualShoeOutfit, allItems, workSession);
+    assert.ok(
+      scoreFormal.compositeScore > scoreCasual.compositeScore,
+      `Work: formal-shoe outfit (${scoreFormal.compositeScore}) must outscore casual-shoe outfit (${scoreCasual.compositeScore})`,
     );
   });
 });
