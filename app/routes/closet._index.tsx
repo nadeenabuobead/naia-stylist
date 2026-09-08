@@ -386,7 +386,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // ── Layer 3: Garment suitability ───────────────────────────────────────
     const suitability = await screenGarmentSuitability(downloadUrl, { declaredCategory: category });
     const GARMENT_GUIDANCE: Record<string, string> = {
-      no_garment_visible: "No clothing item was detected. Please upload a photo of a single garment.",
+      no_garment_visible: "No fashion item was detected. Please upload a photo of a single clothing item, accessory, or piece of jewellery.",
       image_too_blurry: "Photo is too blurry. Please try a clearer photo.",
       garment_excessively_cropped: "The garment is too cropped. Please ensure the full item is visible.",
       multiple_items_ambiguous: "Multiple items detected. Please photograph one item at a time.",
@@ -682,7 +682,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // ── Layer 3: Garment suitability ──────────────────────────────────────────
     const editSuitability = await screenGarmentSuitability(editDownloadUrl, { declaredCategory: category });
     const EDIT_GARMENT_GUIDANCE: Record<string, string> = {
-      no_garment_visible:          "No clothing item was detected. Please upload a photo of a single garment.",
+      no_garment_visible:          "No fashion item was detected. Please upload a photo of a single clothing item, accessory, or piece of jewellery.",
       image_too_blurry:            "Photo is too blurry. Please try a clearer photo.",
       garment_excessively_cropped: "The garment is too cropped. Please ensure the full item is visible.",
       multiple_items_ambiguous:    "Multiple items detected. Please photograph one item at a time.",
@@ -1467,7 +1467,7 @@ export default function Closet() {
                   {PHOTO_TIPS_COMPACT.map(tip => <span key={tip} className="cl-photo-tip">{tip}</span>)}
                 </div>
                 <p className="cl-upload-notice" style={{ marginBottom: "2px" }}>
-                  Upload photos of clothing items only. Do not upload selfies, face photos, mirror photos, or personal images.
+                  Upload photos of clothing, shoes, accessories, or jewellery. Do not upload selfies, face photos, mirror photos, or personal images.
                 </p>
                 <p className="cl-upload-notice" style={{ marginBottom: "8px" }}>
                   JPG, PNG, WEBP or HEIC · min 300 × 300 px · max 5 MB
