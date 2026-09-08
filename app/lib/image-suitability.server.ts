@@ -79,15 +79,15 @@ const VALID_VTO_SUB_CODES = new Set<string>([
 // Keeps the suitability check calibrated to fashion conventions rather than
 // literal interpretations that would reject valid subtypes (e.g. corset → TOPS).
 const CATEGORY_TAXONOMY: Record<string, string> = {
-  TOPS: "shirts, blouses, t-shirts, sweaters, knitwear, tank tops, camisoles, tube tops, corsets, bustiers, bodysuits, waistcoats, vests, overshirts, crop tops",
-  BOTTOMS: "trousers, jeans, shorts, athletic shorts, sport shorts, skirts, leggings, culottes, wide-leg pants",
+  TOPS: "shirts, blouses, t-shirts, sweaters, knitwear, tank tops, camisoles, tube tops, corsets, bustiers, bodysuits, waistcoats, vests, overshirts, crop tops, gym tops, sports tops, hoodies, sweatshirts",
+  BOTTOMS: "trousers, jeans, shorts, athletic shorts, sport shorts, joggers, jogger pants, sweatpants, tracksuit bottoms, gym leggings, leggings, skirts, culottes, wide-leg pants",
   DRESSES: "dresses, gowns, jumpsuits, playsuits",
   OUTERWEAR: "coats, blazers, jackets, bombers, parkas, trench coats",
   SHOES: "all footwear including heels, boots, sneakers, sandals, loafers, mules",
   BAGS: "handbags, totes, backpacks, clutches, crossbody bags, belt bags",
   ACCESSORIES: "belts, scarves, hats, gloves, hair accessories, sunglasses",
   JEWELRY: "necklaces, earrings, bracelets, rings, watches, brooches",
-  ACTIVEWEAR: "sports bras, gym leggings, joggers, gym tops, athletic shorts",
+  ACTIVEWEAR: "sports bras, gym leggings, joggers, gym tops, athletic shorts, sweatpants, tracksuit bottoms, hoodies, zip-ups",
   SWIMWEAR: "swimsuits, bikinis, swim trunks, cover-ups",
   LOUNGEWEAR: "pyjamas, robes, lounge sets, slippers",
 };
