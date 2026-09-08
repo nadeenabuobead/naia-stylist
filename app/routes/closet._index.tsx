@@ -24,7 +24,7 @@ import { checkEntitlement } from "~/lib/plan/entitlement.server";
 // Option B shell: MyNaiaLayout + naiaStyles (NADINE header, My nAia navigation)
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
 
-const CATEGORIES = ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "ACTIVEWEAR", "SHOES", "BAGS", "ACCESSORIES", "JEWELRY", "LOUNGEWEAR"];
+const CATEGORIES = ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "ACTIVEWEAR", "SHOES", "BAGS", "ACCESSORIES", "JEWELRY", "SWIMWEAR", "LOUNGEWEAR"];
 
 // Categories where VTO makes visual sense — coarse UI gate only.
 // Server-side suitability check (screenGarmentSuitability) is the real gate at trigger time.
@@ -940,7 +940,8 @@ const css = `
 export default function Closet() {
   const { items, closetInsights, vtoEnabled, naiaModelIsReady, gender } = useLoaderData<typeof loader>();
   const isMale = gender?.toLowerCase() === "male" || gender?.toLowerCase() === "man";
-  const visibleCategories = isMale ? CATEGORIES.filter(c => c !== "DRESSES") : CATEGORIES;
+  const MALE_HIDDEN = new Set(["DRESSES", "LOUNGEWEAR"]);
+  const visibleCategories = isMale ? CATEGORIES.filter(c => !MALE_HIDDEN.has(c)) : CATEGORIES;
 
   const fetcher    = useFetcher();  // delete only
   const addFetcher = useFetcher<{ success?: boolean; error?: string; retryImage?: boolean }>();
