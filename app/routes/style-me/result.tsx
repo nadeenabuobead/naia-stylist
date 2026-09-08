@@ -674,7 +674,10 @@ export async function action({ request }: ActionFunctionArgs) {
       const prevSuggestion = await prisma.outfitSuggestion.findFirst({
         where: { sessionId },
         orderBy: { createdAt: "desc" },
-        select: { moodDescription: true },
+        select: {
+          moodDescription: true,
+          items: { select: { closetItemId: true, itemType: true } },
+        },
       });
       const prevMeta = prevSuggestion ? parseSuggestionMetadata(prevSuggestion.moodDescription) : null;
 
@@ -689,14 +692,19 @@ export async function action({ request }: ActionFunctionArgs) {
         }
       }
 
-      // nAia mode: collect closet item IDs from the MOST LIKE ME direction of the previous suggestion.
-      // selectAdditionalClosetGarments and computeNaiaResultDirections will prefer items not in this set.
+      // nAia mode: collect closet item IDs from the actual persisted outfit items of the previous
+      // suggestion so selectAdditionalClosetGarments prefers items the customer has not yet seen.
+      // Previously this read from resultDirections[0].outfitPieces, which may differ from the
+      // displayed outfit — fixed to use the authoritative persisted items.
       const recentlyShownClosetIds: string[] = [];
-      if (prevMeta?.resultDirections?.[0]?.outfitPieces) {
-        for (const piece of prevMeta.resultDirections[0].outfitPieces) {
-          if (piece.id) recentlyShownClosetIds.push(piece.id);
+      if (prevSuggestion?.items) {
+        for (const item of prevSuggestion.items) {
+          if (item.closetItemId) recentlyShownClosetIds.push(item.closetItemId);
         }
       }
+      // Gap 3: full closet-ID set from previous persisted outfit for exact combination comparison.
+      // Includes the anchor; used by computeStyleMeResult to detect duplicate New Look results.
+      const prevOutfitClosetIds = recentlyShownClosetIds.length > 0 ? recentlyShownClosetIds : undefined;
 
       const engineInput = buildEngineInput({
         moods: session.currentMood ? [session.currentMood] : [],
@@ -713,6 +721,7 @@ export async function action({ request }: ActionFunctionArgs) {
         anchor: anchorResult.anchor,
         recentlyShownHandles,
         ...(recentlyShownClosetIds.length > 0 && { recentlyShownClosetIds }),
+        ...(prevOutfitClosetIds && { prevOutfitClosetIds }),
         // Rev 3 wording context — stored on session, never affects scoring
         ...(session.state && {
           state: session.state,
@@ -731,6 +740,12 @@ export async function action({ request }: ActionFunctionArgs) {
         undefined,
         regenLoadClosetItems,
       );
+
+      // No new combination available — keep the previous suggestion visible.
+      if (styleResult.sameCombination) {
+        return data({ sameCombination: true });
+      }
+
       const dbPayload = buildDbPayload(styleResult, session.occasion ?? "everyday");
 
       const suggestion = await prisma.outfitSuggestion.create({
@@ -1073,7 +1088,7 @@ interface StyleMeGenerationLoaderData {
 
 export default function StyleMeResult() {
   const loaderData = useLoaderData<typeof loader>();
-  const generateFetcher = useFetcher<{ suggestion?: any; error?: string }>();
+  const generateFetcher = useFetcher<{ suggestion?: any; error?: string; sameCombination?: boolean }>();
   const saveFetcher = useFetcher<{ saved?: boolean; error?: string; code?: string; pending?: boolean; next?: string; cleared?: boolean; alreadySaved?: boolean }>();
   const [msgIndex, setMsgIndex] = useState(0);
   // ── Staging QA: full-look VTO trigger ────────────────────────────────────
@@ -1107,7 +1122,11 @@ export default function StyleMeResult() {
   const [reasonOtherNote, setReasonOtherNote] = useState<string>(existingOutcome?.reasonOtherNote ?? "");
   const [outcomeSaved, setOutcomeSaved] = useState<boolean>(existingOutcome != null);
   const [isOutcomeEditing, setIsOutcomeEditing] = useState(false);
-  const [selectedResultDirection, setSelectedResultDirection] = useState<string | null>(existingOutcome?.selectedDirection ?? null);
+  // Gap 4: selectedResultDirection is analytics-only feedback metadata.
+  // It is passed to /api/styleme-outcome as selectedDirection and never used
+  // to gate outfit display, styling notes, history, or VTO.
+  // VTO uses suggestion.id (from the loader's persisted suggestion), not this value.
+  const [selectedResultDirection] = useState<string | null>(existingOutcome?.selectedDirection ?? null);
 
   useEffect(() => {
     if (outcomeFetcher.data?.ok) {
@@ -1117,7 +1136,7 @@ export default function StyleMeResult() {
   }, [outcomeFetcher.data]);
 
   const generationSettled =
-    !!generateFetcher.data?.suggestion || !!generateFetcher.data?.error;
+    !!generateFetcher.data?.suggestion || !!generateFetcher.data?.error || !!generateFetcher.data?.sameCombination;
   const isLoading =
     isInitialGeneration && (!generationSettled || !minDelayPassed);
   const suggestion = generateFetcher.data?.suggestion || loaderData.suggestion;
@@ -1596,95 +1615,6 @@ export default function StyleMeResult() {
           </div>
         )}
 
-        {/* ── Rev 3: Result Directions (MOST YOU / FRESH / PUSH ME) ── */}
-        {/* Only rendered when computeResultDirections returned directions for this Rev 3 session. */}
-        {/* Legacy sessions have no resultDirections in metadata; this section is silently absent. */}
-        {suggestionMeta?.resultDirections && suggestionMeta.resultDirections.length > 0 && (
-          <div className="sm-result-section">
-            <p className="sm-result-section-head">Your Directions</p>
-            <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", marginBottom: "16px" }}>
-              Same session, different angles — choose the direction that fits today.
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              {suggestionMeta.resultDirections.map((dir) => (
-                <div
-                  key={dir.label}
-                  className="sm-item-card"
-                  style={{
-                    borderLeft: selectedResultDirection === dir.label
-                      ? "3px solid var(--naia-ink)"
-                      : "3px solid var(--naia-accent)",
-                    paddingLeft: "16px",
-                    cursor: "pointer",
-                    opacity: selectedResultDirection !== null && selectedResultDirection !== dir.label ? 0.55 : 1,
-                  }}
-                  role="button"
-                  aria-pressed={selectedResultDirection === dir.label}
-                  onClick={() => setSelectedResultDirection(prev => prev === dir.label ? null : dir.label)}
-                >
-                  <p style={{
-                    fontFamily: "var(--naia-ff-ui)",
-                    fontSize: "10px",
-                    letterSpacing: "2px",
-                    textTransform: "uppercase",
-                    color: "var(--naia-accent)",
-                    marginBottom: "4px",
-                  }}>
-                    {dir.displayLabel}
-                  </p>
-                  {dir.title && (
-                    <p style={{ fontFamily: "var(--naia-ff-display)", fontSize: "18px", fontWeight: 700, color: "var(--naia-ink)", marginBottom: "4px" }}>
-                      {dir.title}
-                    </p>
-                  )}
-                  {dir.productImageUrl && (
-                    <img
-                      src={dir.productImageUrl}
-                      alt={dir.title ?? dir.displayLabel}
-                      style={{ width: "100%", maxWidth: "160px", height: "auto", objectFit: "contain", borderRadius: "4px", marginBottom: "8px", background: "var(--naia-warm)" }}
-                    />
-                  )}
-                  {dir.outfitPieces && dir.outfitPieces.length > 0 && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "8px" }}>
-                      {dir.outfitPieces.map((piece) => (
-                        <div key={piece.id} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          {piece.imageUrl && (
-                            <img
-                              src={piece.imageUrl}
-                              alt={piece.label ?? piece.slot}
-                              style={{ width: "36px", height: "36px", objectFit: "cover", borderRadius: "4px", flexShrink: 0, background: "var(--naia-warm)" }}
-                            />
-                          )}
-                          <span style={{ fontFamily: "var(--naia-ff-body)", fontSize: "13px", color: "var(--naia-ink)" }}>
-                            {piece.label ?? piece.slot}
-                          </span>
-                          <span style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "10px", letterSpacing: "1px", textTransform: "uppercase", color: "var(--naia-accent)", marginLeft: "auto" }}>
-                            Already Yours
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "14px", fontStyle: "italic", color: "var(--naia-muted)", marginBottom: dir.productUrl ? "10px" : "0" }}>
-                    {dir.directionalNote}
-                  </p>
-                  {dir.productUrl && (
-                    <a
-                      href={dir.productUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="sm-result-action-btn"
-                      style={{ fontSize: "8px", letterSpacing: "2px", padding: "8px 16px", display: "inline-block" }}
-                    >
-                      SHOP THIS DIRECTION
-                    </a>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Why this works */}
         {suggestion.whyThisWorks && !isNoMatch && (
           <div className="sm-why-block">
@@ -2153,6 +2083,11 @@ export default function StyleMeResult() {
           >
             {generateFetcher.state !== "idle" ? "Finding your look…" : "New Look, Same Vibe"}
           </button>
+          {generateFetcher.data?.sameCombination && (
+            <p className="sm-same-combination-msg">
+              nAia couldn&rsquo;t find a different combination with your available pieces.
+            </p>
+          )}
           {suggestionMeta?.outcome !== "closet-led" && (
             <a href={primaryNaiaItem?.productUrl || "https://naiabynadine.com"} className="sm-result-action-btn">Shop nAia</a>
           )}

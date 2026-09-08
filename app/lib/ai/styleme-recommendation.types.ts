@@ -134,6 +134,9 @@ export interface StyleMeEngineInput {
   // Passed to selectAdditionalClosetGarments and computeNaiaResultDirections
   // so they prefer items not already seen, producing a meaningfully different look.
   recentlyShownClosetIds?: string[];
+  // Full set of closet IDs from the previous persisted outfit (anchor + garments).
+  // Used by computeStyleMeResult to detect duplicate combinations in New Look.
+  prevOutfitClosetIds?: string[];
   mode?: StyleMeMode;
 }
 
@@ -289,11 +292,13 @@ export interface StyleMeRecommendationResult {
   };
   // Additional Closet garments included in the resulting look beyond the anchor.
   // Populated by the orchestrator (computeStyleMeResult), not by the engine itself.
+  // stylingNotes is set in nAia mode when Claude generates per-piece notes during candidate selection.
   selectedClosetGarments?: Array<{
     slot: string;
     id: string;
     label: string | null;
     imageUrl: string | null;
     colors?: string[];
+    stylingNotes?: string;
   }>;
 }

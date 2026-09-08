@@ -522,6 +522,7 @@ function buildMetadataJson(result: StyleMeCustomerResult): string {
     songReason: result.songReason,
     evidenceCodes: [],
     completionLayer: result.completionLayer.length > 0 ? result.completionLayer : undefined,
+    ...(result.sameCombination !== undefined && { sameCombination: result.sameCombination }),
     // Rev 3 — persist direction identity so reopened sessions recover MOST YOU / FRESH / PUSH ME.
     // Stored as lightweight tuples (handle+label+note+url) — no full product object in metadata.
     ...(result.resultDirections.length > 0 && {
@@ -561,6 +562,120 @@ const BLOCKED_TERMS = [
 export function containsBlockedTerms(text: string): boolean {
   const lower = text.toLowerCase();
   return BLOCKED_TERMS.some((term) => lower.includes(term));
+}
+
+// ── Grammar helper ────────────────────────────────────────────────────────────
+// Garment names known to be grammatically plural — checked against individual
+// words in the label so multi-word names work correctly.
+// ("Black Trousers" → "trousers" → plural; "Silk Skirt" → no match → singular)
+const KNOWN_PLURAL_GARMENT_WORDS = new Set([
+  "trousers", "pants", "jeans", "shorts", "leggings", "chinos", "culottes",
+  "joggers", "loafers", "sneakers", "trainers", "boots", "heels", "flats",
+  "slides", "mules", "clogs", "pumps", "oxfords", "brogues",
+  "earrings", "sunglasses", "cufflinks",
+]);
+
+export function garmentNameIsPlural(name: string): boolean {
+  const words = name.toLowerCase().split(/\s+/);
+  return words.some((w) => KNOWN_PLURAL_GARMENT_WORDS.has(w));
+}
+
+// ── nAia outfit candidate types ──────────────────────────────────────────────
+
+export type OutfitCandidate = {
+  id: "A" | "B" | "C";
+  pieces: Array<{ closetId: string; slot: string; label: string | null; colors: string[] }>;
+};
+
+// Produces a canonical signature for a set of closet IDs so outfit combinations
+// can be compared independent of selection order.
+export function computeOutfitSignature(closetIds: string[]): string {
+  return [...closetIds].sort().join("|");
+}
+
+// Builds up to three validated outfit candidates for nAia closet mode.
+// Candidate A — full primary selection (may include discretionary outerwear when eligible).
+// Candidate B — clothing swap: same outfit as A but with a different clothing item for one slot.
+// Candidate C — no-outerwear variant of A (only when anchor is not outerwear and A has outerwear).
+// B and C are independent; both can coexist when a clothing alt AND discretionary outerwear exist.
+// Claude selects the candidate that best serves the session brief; the server re-validates.
+// Constraints: never removes a manual outerwear anchor; validates via the same scoring gate.
+export function buildNaiaOutfitCandidates(
+  anchor: NormalizedClosetAnchor,
+  session: StyleMeSessionInput,
+  allItems: ClosetAnchorInput[],
+  profile: StyleMeProfileSignals | undefined,
+  recentlyShownIds: Set<string> | undefined,
+): [OutfitCandidate, OutfitCandidate | null, OutfitCandidate | null] {
+  const profile_ = profile as ClosetScoringProfile | undefined;
+  const signals = { occasion: session.occasion, moods: session.moods, desiredFeelings: session.desiredFeelings };
+
+  const fullSelection = selectAdditionalClosetGarments(
+    anchor,
+    null,
+    session,
+    allItems,
+    profile_,
+    recentlyShownIds,
+  );
+
+  const anchorPiece: OutfitCandidate["pieces"][0] = {
+    closetId: anchor.id,
+    slot: anchor.slot as string,
+    label: anchor.label,
+    colors: anchor.colors,
+  };
+
+  const toPiece = (g: { slot: OutfitSlot; id: string; label: string | null; colors: string[] }): OutfitCandidate["pieces"][0] =>
+    ({ closetId: g.id, slot: g.slot as string, label: g.label, colors: g.colors });
+
+  // Candidate A is always the primary full selection (may include outerwear when eligible).
+  const candidateA: OutfitCandidate = {
+    id: "A",
+    pieces: [anchorPiece, ...fullSelection.map(toPiece)],
+  };
+
+  // ── Candidate B: find a genuinely different clothing item for one slot ────
+  const CLOTHING_SLOTS = new Set(["top", "bottom", "dress", "set"]);
+  let candidateB: OutfitCandidate | null = null;
+  for (const selected of fullSelection.filter((g) => CLOTHING_SLOTS.has(g.slot))) {
+    const scoredAlts: Array<{ item: ClosetAnchorInput; score: number }> = [];
+    for (const item of allItems) {
+      if (item.id === anchor.id || item.id === selected.id) continue;
+      if (CLOSET_CATEGORY_TO_SLOT[item.category as string] !== selected.slot) continue;
+      const score = scoreClosetItemForSession(
+        { occasions: item.occasions, styleTags: item.styleTags, category: item.category, colors: item.colors, primaryColor: item.primaryColor },
+        signals,
+        profile_,
+        item.garmentRelationships,
+      );
+      if (score > 0) scoredAlts.push({ item, score });
+    }
+    if (scoredAlts.length === 0) continue;
+
+    scoredAlts.sort((a, b) => b.score - a.score);
+    const best = scoredAlts[0].item;
+    const altPiece: OutfitCandidate["pieces"][0] = {
+      closetId: best.id, slot: selected.slot as string, label: best.name, colors: best.colors,
+    };
+    candidateB = { id: "B", pieces: candidateA.pieces.map((p) => (p.closetId === selected.id ? altPiece : p)) };
+    break;
+  }
+
+  // ── Candidate C: no-outerwear variant of A ────────────────────────────────
+  // Not generated when the anchor IS outerwear (cannot remove the anchor) or when the
+  // session has a hard coverage requirement — the outerwear in A may be the only layer
+  // satisfying that requirement and must not be removed.
+  let candidateC: OutfitCandidate | null = null;
+  const coverageRequiresLayer = session.coverageConditional === "coverage-non-negotiable";
+  if (anchor.slot !== "outerwear" && !coverageRequiresLayer) {
+    const outerwearInSelection = fullSelection.find((g) => g.slot === "outerwear");
+    if (outerwearInSelection) {
+      candidateC = { id: "C", pieces: candidateA.pieces.filter((p) => p.closetId !== outerwearInSelection.id) };
+    }
+  }
+
+  return [candidateA, candidateB, candidateC];
 }
 
 // ── StyleMe wording system prompt (Constitution V1 — locked) ─────────────────
@@ -699,6 +814,164 @@ async function callClaudeForWording(
       whyThisWorks,
       confidenceBoost,
       perfumeNote: result.perfumeNote ? String(result.perfumeNote) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ── nAia candidate selection Claude call ─────────────────────────────────────
+// Single Claude call that selects the best outfit candidate AND generates all
+// outfit wording plus per-piece notes. No second AI round trip.
+// Returns null on failure; caller falls back to Candidate A + deterministic wording.
+
+interface NaiaSelectionResponse {
+  selectedCandidate: string;
+  outfitName: string;
+  whyThisWorks: string;
+  confidenceBoost: string;
+  perfumeNote: string | null;
+  perPieceNotes: Array<{ id: string; note: string }>;
+}
+
+export async function callClaudeForNaiaSelection(
+  candidates: OutfitCandidate[],
+  session: StyleMeSessionInput,
+  profile?: StyleMeProfileSignals | null,
+): Promise<{
+  candidate: OutfitCandidate;
+  wording: StyleMeWording;
+  perPieceNotes: Map<string, string>;
+} | null> {
+  const occasionLabel = session.occasion.replace(/-/g, " ");
+  const moodStr = session.moods.join(", ");
+  const feelingStr = session.desiredFeelings.join(", ");
+
+  const becomingStr = (profile?.becoming ?? [])
+    .map((id) => optionLabel("becoming", id))
+    .join(", ");
+  const styleSupportStr = (profile?.styleSupport ?? [])
+    .map((id) => optionLabel("style-support", id))
+    .join(", ");
+  const safeFinalNotes = profile?.finalNotes
+    ? profile.finalNotes.replace(/"/g, "'").replace(/\n/g, " ").trim()
+    : null;
+  const profileCtx = [
+    becomingStr ? `Style aspiration: ${becomingStr}.` : "",
+    styleSupportStr ? `Style support goal: ${styleSupportStr}.` : "",
+    safeFinalNotes ? `Customer's personal note: "${safeFinalNotes}".` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const candidateDescs = candidates
+    .map((c) => {
+      const lines = c.pieces.map(
+        (p) =>
+          `  - ${p.label ?? p.slot} (${p.slot})${p.colors[0] ? `, ${p.colors[0]}` : ""} [id:${p.closetId}]`,
+      );
+      return `Candidate ${c.id}:\n${lines.join("\n")}`;
+    })
+    .join("\n\n");
+
+  const selectionHint = (() => {
+    if (candidates.length === 1) {
+      return `Only Candidate ${candidates[0].id} is available — select ${candidates[0].id}.`;
+    }
+    // Compare every non-first candidate against the first to describe what differs.
+    const ref = candidates[0];
+    const refIds = new Set(ref.pieces.map((p) => p.closetId));
+    const notes: string[] = [];
+    for (const other of candidates.slice(1)) {
+      const otherIds = new Set(other.pieces.map((p) => p.closetId));
+      const onlyInRef = ref.pieces.find((p) => !otherIds.has(p.closetId));
+      const onlyInOther = other.pieces.find((p) => !refIds.has(p.closetId));
+      if (onlyInRef && onlyInOther && onlyInRef.slot === onlyInOther.slot) {
+        notes.push(
+          `Candidate ${ref.id} uses the ${onlyInRef.label ?? onlyInRef.slot}; ` +
+          `Candidate ${other.id} replaces it with the ${onlyInOther.label ?? onlyInOther.slot} (${onlyInOther.slot}).`,
+        );
+      } else if (onlyInRef && !onlyInOther) {
+        notes.push(
+          `Candidate ${ref.id} includes ${onlyInRef.label ?? onlyInRef.slot}; ` +
+          `Candidate ${other.id} is the cleaner look without it.`,
+        );
+      }
+    }
+    return (notes.length > 0 ? notes.join(" ") + " " : "") +
+      "Choose the candidate that best suits the customer's brief and occasion.";
+  })();
+
+  const systemPrompt =
+    STYLEME_WORDING_SYSTEM_PROMPT +
+    "\n9. This look is built entirely from the customer's own Closet — no brand products. Do not reference product brand names, shopping links, or purchasing. Treat the Closet pieces as the primary styling elements." +
+    "\n10. When writing perPieceNotes, use the correct grammatical number for each garment name. Known plural garments include: trousers, jeans, shorts, leggings, chinos, joggers, loafers, sneakers, trainers, boots, heels, flats, slides, earrings, sunglasses, cufflinks. When the number is uncertain, use a participial phrase ('Adding a contrast note…', 'Grounding the look…') to avoid subject-verb mismatch. Do not use generic phrases like 'completes the look', 'forms the upper half', or 'brings the outfit into appropriate territory'.";
+
+  const userMessage =
+    `Select the best complete outfit for this customer and write all wording for it.\n` +
+    `Occasion: ${occasionLabel}. Mood: ${moodStr}. Desired feeling: ${feelingStr}.` +
+    (session.stateOtherText ? ` Current state (context only): "${session.stateOtherText}".` : "") +
+    (profileCtx ? ` ${profileCtx}` : "") +
+    `\n\n${candidateDescs}\n\n` +
+    `${selectionHint}\n\n` +
+    `Return a JSON object with exactly these fields:\n` +
+    `- selectedCandidate: ${candidates.map((c) => `"${c.id}"`).join(" or ")}\n` +
+    `- outfitName: creative name for this look (≤8 words)\n` +
+    `- whyThisWorks: 2–3 sentences explaining why this works for this customer\n` +
+    `- confidenceBoost: 1 short styling observation — about the garment, not the customer's feelings. Example: "The blazer is already giving the structure — keep the rest clean."\n` +
+    `- perfumeNote: 1 sentence of scent direction (type of notes, not a brand name)\n` +
+    `- perPieceNotes: array of { "id": "<closetId>", "note": "<one sentence>" } for every piece in the selected candidate. Each note names what that specific piece contributes to this look — its colour role, proportion, or occasion fit. Use the garment name given in the candidate list.`;
+
+  try {
+    const result = await Promise.race<NaiaSelectionResponse | null>([
+      callClaudeJSON<NaiaSelectionResponse>({
+        system: systemPrompt,
+        messages: [{ role: "user", content: userMessage }],
+        maxTokens: 900,
+        temperature: 1,
+      }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000)),
+    ]);
+
+    if (!result || typeof result !== "object") return null;
+    if (!result.outfitName || !result.whyThisWorks || !result.confidenceBoost) return null;
+    if (result.selectedCandidate !== "A" && result.selectedCandidate !== "B" && result.selectedCandidate !== "C") return null;
+
+    // Server validation: selected candidate must exist in the offered list
+    const selectedCandidate = candidates.find((c) => c.id === result.selectedCandidate);
+    if (!selectedCandidate) return null;
+
+    const outfitName = String(result.outfitName).slice(0, 80);
+    const whyThisWorks = String(result.whyThisWorks);
+    const confidenceBoost = String(result.confidenceBoost);
+
+    if (containsBlockedTerms(`${outfitName} ${whyThisWorks} ${confidenceBoost}`)) return null;
+
+    // Accept per-piece notes only for IDs in the selected candidate — discard anything else.
+    const validIds = new Set(selectedCandidate.pieces.map((p) => p.closetId));
+    const perPieceNotes = new Map<string, string>();
+    if (Array.isArray(result.perPieceNotes)) {
+      for (const entry of result.perPieceNotes) {
+        if (
+          entry &&
+          typeof entry.id === "string" &&
+          typeof entry.note === "string" &&
+          validIds.has(entry.id)
+        ) {
+          perPieceNotes.set(entry.id, String(entry.note));
+        }
+      }
+    }
+
+    return {
+      candidate: selectedCandidate,
+      wording: {
+        outfitName,
+        whyThisWorks,
+        confidenceBoost,
+        perfumeNote: result.perfumeNote ? String(result.perfumeNote) : null,
+      },
+      perPieceNotes,
     };
   } catch {
     return null;
@@ -1755,6 +2028,8 @@ export async function computeStyleMeResult(
   _resolveMedia: (handle: string) => VerifiedMediaEntry | undefined = resolveVerifiedMedia,
   _tryOnEnabled: boolean = VIRTUAL_TRY_ON_ENABLED,
   _loadClosetItems?: () => Promise<ClosetAnchorInput[]>,
+  // Gap 5 DI seam: allows tests to mock the nAia selection call and count invocations.
+  _callNaiaSelection: typeof callClaudeForNaiaSelection = callClaudeForNaiaSelection,
 ): Promise<StyleMeCustomerResult> {
   const recommendation = _runRec(engineInput);
   const { session } = engineInput;
@@ -1908,11 +2183,81 @@ export async function computeStyleMeResult(
     };
   }
 
-  // Multi-Closet garment scan — populates selectedClosetGarments with compatible
-  // Closet items for empty outfit slots. Runs in both nAia and NADINE modes when
-  // _loadClosetItems is provided. nAia mode returns [] from the engine; NADINE mode
-  // returns undefined. Both are handled correctly here.
-  if (getClosetItems) {
+  // ── Garment selection + wording ────────────────────────────────────────────
+  // nAia closet mode: use bounded candidate selection — Claude sees 1–2 validated
+  // outfit candidates and picks the one that best serves the session brief, while
+  // also generating outfit wording and per-piece notes in a single call.
+  // All other modes use the existing selectAdditionalClosetGarments + callClaudeForWording path.
+
+  const isNaiaClosetMode = mode === "naia" && anchor?.type === "closet" && !!getClosetItems;
+
+  let naiaWordingOverride: StyleMeWording | null = null;
+  let closetAnchorNote: string | null = null;
+  let sameCombination: boolean | undefined;
+
+  if (isNaiaClosetMode) {
+    const allItems = await getClosetItems!();
+    const recentClosetSet = engineInput.recentlyShownClosetIds?.length
+      ? new Set(engineInput.recentlyShownClosetIds)
+      : undefined;
+
+    const [candidateA, candidateB, candidateC] = buildNaiaOutfitCandidates(
+      anchor as NormalizedClosetAnchor,
+      session,
+      allItems,
+      engineInput.profile,
+      recentClosetSet,
+    );
+
+    const anchorId = (anchor as NormalizedClosetAnchor).id;
+
+    const setPieces = (candidate: OutfitCandidate, noteMap: Map<string, string> | undefined) => {
+      recommendation.selectedClosetGarments = candidate.pieces
+        .filter((p) => p.closetId !== anchorId)
+        .map((p) => {
+          const closetItem = allItems.find((i) => i.id === p.closetId);
+          return {
+            slot: p.slot as OutfitSlot,
+            id: p.closetId,
+            label: p.label,
+            imageUrl: closetItem?.imageUrl ?? null,
+            colors: p.colors,
+            stylingNotes: noteMap?.get(p.closetId),
+          };
+        });
+    };
+
+    // Pre-selection: remove any candidate whose complete combination matches the previous
+    // persisted outfit. This happens before the Claude call so wording is never generated
+    // for a combination that will be rejected.
+    const prevIds = engineInput.prevOutfitClosetIds;
+    const allCandidates = [candidateA, candidateB, candidateC].filter((c): c is OutfitCandidate => c !== null);
+    const prevSig = prevIds?.length ? computeOutfitSignature(prevIds) : null;
+    const filteredCandidates = prevSig
+      ? allCandidates.filter((c) => computeOutfitSignature(c.pieces.map((p) => p.closetId)) !== prevSig)
+      : allCandidates;
+
+    if (filteredCandidates.length === 0) {
+      // No new combination available — keep previous outfit visible; no model call.
+      sameCombination = true;
+    } else {
+      // Single selection-and-wording call only. No second AI round trip on failure.
+      const naiaResult = await _callNaiaSelection(filteredCandidates, session, engineInput.profile);
+
+      // Validate chosen candidate; null → deterministic fallback to first filtered candidate.
+      const finalCandidate = naiaResult?.candidate ?? filteredCandidates[0];
+
+      if (naiaResult && finalCandidate.id === naiaResult.candidate.id) {
+        naiaWordingOverride = naiaResult.wording;
+        closetAnchorNote = naiaResult.perPieceNotes.get(anchorId) ?? null;
+        setPieces(finalCandidate, naiaResult.perPieceNotes);
+      } else {
+        // Claude failed — deterministic fallback; no wording override.
+        setPieces(finalCandidate, undefined);
+      }
+    }
+  } else if (getClosetItems) {
+    // NADINE mode (or nAia mode without a closet anchor): standard garment scan.
     const allItems = await getClosetItems();
     const recentClosetSetForGarments = engineInput.recentlyShownClosetIds?.length
       ? new Set(engineInput.recentlyShownClosetIds)
@@ -1948,9 +2293,10 @@ export async function computeStyleMeResult(
     return null;
   })();
 
-  // Build nAia Closet garment labels for Claude wording in nAia mode
+  // nAia garment labels — only passed to the standard Claude call (not used in nAia closet mode,
+  // which already ran callClaudeForNaiaSelection and has naiaWordingOverride).
   const naiaClosetGarmentLabels: Array<{ slot: string; label: string | null }> =
-    mode === "naia"
+    !naiaWordingOverride && mode === "naia"
       ? [
           ...(anchor?.type === "closet"
             ? [{ slot: (anchor as NormalizedClosetAnchor).slot as string, label: (anchor as NormalizedClosetAnchor).label }]
@@ -1959,23 +2305,26 @@ export async function computeStyleMeResult(
         ]
       : [];
 
-  // Claude wording call — falls back to deterministic if it fails
-  const claudeWording = await callClaudeForWording(
-    session.moods,
-    session.desiredFeelings,
-    session.occasion,
-    effectiveOutcome,
-    primaryTitle,
-    styleMeExplanation,
-    completionLayer,
-    engineInput.profile?.becoming ?? [],
-    engineInput.profile?.styleSupport ?? [],
-    engineInput.profile?.finalNotes ?? null,
-    anchorSummary,
-    session.state === "other" ? (session.stateOtherText ?? null) : null,
-    mode,
-    naiaClosetGarmentLabels.length ? naiaClosetGarmentLabels : undefined,
-  );
+  // Gap 2: nAia closet mode uses naiaWordingOverride only — null means deterministic fallback.
+  // No second AI call is ever made in nAia closet mode, regardless of callClaudeForNaiaSelection outcome.
+  const claudeWording = isNaiaClosetMode
+    ? naiaWordingOverride
+    : await callClaudeForWording(
+        session.moods,
+        session.desiredFeelings,
+        session.occasion,
+        effectiveOutcome,
+        primaryTitle,
+        styleMeExplanation,
+        completionLayer,
+        engineInput.profile?.becoming ?? [],
+        engineInput.profile?.styleSupport ?? [],
+        engineInput.profile?.finalNotes ?? null,
+        anchorSummary,
+        session.state === "other" ? (session.stateOtherText ?? null) : null,
+        mode,
+        naiaClosetGarmentLabels.length ? naiaClosetGarmentLabels : undefined,
+      );
 
   const wording =
     claudeWording ??
@@ -2001,6 +2350,8 @@ export async function computeStyleMeResult(
     closetAnchorLabel,
     closetAnchorImageUrl,
     pairingNote,
+    closetAnchorNote,
+    sameCombination,
     finishingLayer,
     completionLayer,
     songReason,
@@ -2061,7 +2412,7 @@ function buildClosetGarmentNote(
   }
 
   if (slot === "accessory" || slot === "jewelry") {
-    const isLikelyPlural = name.trim().toLowerCase().endsWith("s");
+    const isLikelyPlural = garmentNameIsPlural(name);
     const finishVerb = isLikelyPlural ? "add" : "adds";
     const colorContrast = primaryColor && anchorColor && !colorMatchesAnchor;
     if (colorContrast && anchorLabel) {
@@ -2152,7 +2503,9 @@ export function buildDbPayload(result: StyleMeCustomerResult, occasion?: string)
       productImageUrl: a.imageUrl ?? null,
       shopifyProductId: null,
       closetItemId: a.id,
-      stylingNotes: result.pairingNote ?? (() => {
+      // Prefer Claude-generated anchor note (from nAia candidate selection), then pairing note,
+      // then slot-based deterministic fallback.
+      stylingNotes: result.closetAnchorNote ?? result.pairingNote ?? (() => {
         const slotNote: Partial<Record<string, string>> = {
           dress:     `Your ${a.label} carries the full silhouette — build accessories around it.`,
           set:       `Your ${a.label} defines the base — style accessories around it.`,
@@ -2205,7 +2558,8 @@ export function buildDbPayload(result: StyleMeCustomerResult, occasion?: string)
       productImageUrl: cg.imageUrl,
       shopifyProductId: null,
       closetItemId: cg.id,
-      stylingNotes: buildClosetGarmentNote(
+      // Prefer Claude-generated per-piece note (set in nAia candidate selection path).
+      stylingNotes: cg.stylingNotes ?? buildClosetGarmentNote(
         cg.slot,
         cg.label,
         anchorSlotForNotes,

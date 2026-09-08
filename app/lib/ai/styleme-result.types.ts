@@ -87,6 +87,11 @@ export interface StyleMeCustomerResult {
   closetAnchorLabel: string | null;
   closetAnchorImageUrl: string | null;
   pairingNote: string | null;
+  // Claude-generated anchor note for nAia closet mode (from per-piece candidate selection).
+  // Takes precedence over pairingNote and slot-based fallbacks in buildDbPayload.
+  closetAnchorNote?: string | null;
+  // Gap 3: true when no valid different combination could be found for New Look.
+  sameCombination?: boolean;
   finishingLayer: StyleMeFinishingLayer;
   completionLayer: StyleMeCompletionPiece[];
   songReason: string;
@@ -119,6 +124,8 @@ export interface StyleMeMetadata {
   songReason: string;
   evidenceCodes: string[];
   completionLayer?: StyleMeCompletionPiece[];
+  // Gap 3: present when New Look produced the same combination (no valid alternative found).
+  sameCombination?: boolean;
   // Rev 3 — Psychology-First result directions (Group 5).
   // Stored in metadata so direction identity survives session reload.
   // Absent on legacy sessions — consumers must guard with optional chaining.
