@@ -60,7 +60,7 @@ Return ONLY valid JSON — no markdown, no explanation.
 
 Rules:
 - name: short, specific. Lead with color when visible. Prefer common fashion terms (blazer, trousers, midi dress) over generic ones (jacket, pants, dress).
-- category: best single match. OUTERWEAR = jackets, coats, blazers. TOPS = shirts, blouses, sweaters, tees. DRESSES includes jumpsuits. SHOES for all footwear. Use OTHER only if truly unclassifiable.
+- category: best single match. TOPS = shirts, blouses, t-shirts, sweaters, polo shirts, hoodies, gym tops. BOTTOMS = trousers, jeans, shorts, athletic shorts, joggers, leggings, skirts, chinos. OUTERWEAR = jackets, coats, blazers, bombers. DRESSES includes jumpsuits and playsuits. ACTIVEWEAR = sports bras, gym sets, athletic wear where the athletic function is primary. SHOES for all footwear. ACCESSORIES = belts, hats, scarves, sunglasses. JEWELRY = watches, necklaces, rings, bracelets, earrings. Use OTHER only if truly unclassifiable.
 - subcategory: one word or short phrase (no brand names, no size info).
 - primaryColor: natural English color name. Avoid hex codes or technical terms.
 - Return null for any field you cannot determine reliably from the image. Do not guess.`;
