@@ -217,7 +217,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const naiaModel = vtoEnabled ? await loadNaiaModel(naiaCustomer.id) : null;
   const naiaModelIsReady = computeModelReadinessFromRecord(naiaModel).isReadyForTryOn;
 
-  return data({ items, closetInsights, vtoEnabled, naiaModelIsReady });
+  const gender = customer.onboardingProfile?.gender ?? null;
+  return data({ items, closetInsights, vtoEnabled, naiaModelIsReady, gender });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -937,7 +938,9 @@ const css = `
 //   Logic  → existing staging: Cloudinary, eligibility, journey events, delete, validation
 
 export default function Closet() {
-  const { items, closetInsights, vtoEnabled, naiaModelIsReady } = useLoaderData<typeof loader>();
+  const { items, closetInsights, vtoEnabled, naiaModelIsReady, gender } = useLoaderData<typeof loader>();
+  const isMale = gender?.toLowerCase() === "male" || gender?.toLowerCase() === "man";
+  const visibleCategories = isMale ? CATEGORIES.filter(c => c !== "DRESSES") : CATEGORIES;
 
   const fetcher    = useFetcher();  // delete only
   const addFetcher = useFetcher<{ success?: boolean; error?: string; retryImage?: boolean }>();
@@ -1551,7 +1554,7 @@ export default function Closet() {
 
                     <div className="cl-label">Category</div>
                     <div className="cl-pills">
-                      {CATEGORIES.map(c => (
+                      {visibleCategories.map(c => (
                         <button key={c} type="button" onClick={() => setNewCategory(c)} className={`cl-pill${newCategory === c ? " on" : ""}`}>
                           {c.charAt(0) + c.slice(1).toLowerCase()}
                         </button>
@@ -1824,7 +1827,7 @@ export default function Closet() {
 
             <div className="cl-label">Category</div>
             <div className="cl-pills">
-              {CATEGORIES.map(c => (
+              {visibleCategories.map(c => (
                 <button key={c} type="button" onClick={() => setEditCategory(c)} className={`cl-pill${editCategory === c ? " on" : ""}`}>{c.charAt(0) + c.slice(1).toLowerCase()}</button>
               ))}
             </div>
@@ -1892,7 +1895,7 @@ export default function Closet() {
         {/* Option A: category filters + Option B: search — combined row */}
         <div className="cl-filter-row">
           <div className="cl-filters">
-            {["ALL", ...CATEGORIES].map(cat => (
+            {["ALL", ...visibleCategories].map(cat => (
               <button
                 key={cat}
                 type="button"
