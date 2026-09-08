@@ -80,7 +80,7 @@ const VALID_VTO_SUB_CODES = new Set<string>([
 // literal interpretations that would reject valid subtypes (e.g. corset → TOPS).
 const CATEGORY_TAXONOMY: Record<string, string> = {
   TOPS: "shirts, blouses, t-shirts, sweaters, knitwear, tank tops, camisoles, tube tops, corsets, bustiers, bodysuits, waistcoats, vests, overshirts, crop tops",
-  BOTTOMS: "trousers, jeans, shorts, skirts, leggings, culottes, wide-leg pants",
+  BOTTOMS: "trousers, jeans, shorts, athletic shorts, sport shorts, skirts, leggings, culottes, wide-leg pants",
   DRESSES: "dresses, gowns, jumpsuits, playsuits",
   OUTERWEAR: "coats, blazers, jackets, bombers, parkas, trench coats",
   SHOES: "all footwear including heels, boots, sneakers, sandals, loafers, mules",
