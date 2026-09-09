@@ -77,6 +77,11 @@ export function buildProfileSignals(
     preferredCoverage?: string | null;
     coveragePreferences?: string[] | null;
     dressingPreferences?: string[] | null;  // Rev 6: feeds Group 2 hard-exclusion engine
+    structure?: string | null;
+    currentGoal?: string[] | null;
+    successfulOutfitGives?: string[] | null;
+    fitConcerns?: string[] | null;
+    fitConcernsNote?: string | null;
   } | null | undefined,
 ): StyleMeProfileSignals | undefined {
   if (!profile) return undefined;
@@ -100,6 +105,13 @@ export function buildProfileSignals(
   // dressingPreferences: always populate (even empty) so Group 2 hard-exclusion engine
   // receives the correct signal rather than falling back to its own undefined default.
   signals.dressingPreferences = profile.dressingPreferences ?? [];
+  if (profile.structure) signals.structure = profile.structure;
+  if (profile.currentGoal?.length) signals.currentGoal = profile.currentGoal;
+  if (profile.successfulOutfitGives?.length) signals.successfulOutfitGives = profile.successfulOutfitGives;
+  // fitConcerns: exclude "no-fit-problems" sentinel — its presence means no concerns
+  const activeFitConcerns = (profile.fitConcerns ?? []).filter((id) => id !== "no-fit-problems");
+  if (activeFitConcerns.length) signals.fitConcerns = activeFitConcerns;
+  if (profile.fitConcernsNote?.trim()) signals.fitConcernsNote = profile.fitConcernsNote.trim();
   return Object.keys(signals).length > 0 ? signals : undefined;
 }
 
@@ -1322,6 +1334,94 @@ interface NaiaSelectionResponse {
   perPieceNotes: Array<{ id: string; note: string }>;
 }
 
+// ── Label lookup tables for StyleMe session answers (not in quizQuestions) ───
+// These mirror the options defined in the session route files. Kept here as a
+// single source of truth for model payload formatting.
+
+export const NAIA_STATE_LABELS: Record<string, string> = {
+  "feel-good":                "I feel good",
+  "stressed-overloaded":      "Stressed / overloaded",
+  "low-energy":               "Low-energy",
+  "not-feeling-like-myself":  "I don't really feel like myself",
+  "physically-uncomfortable": "Physically uncomfortable",
+  "self-conscious":           "Self-conscious",
+  "going-through-change":     "I'm going through something",
+  "want-reset":               "I feel like I need a reset",
+  "nothing-in-particular":    "I feel pretty neutral",
+  "other":                    "Other (see note below)",
+};
+
+export const NAIA_INTENTION_LABELS: Record<string, string> = {
+  "feel-like-myself":  "Help me feel like myself",
+  "give-confidence":   "Give me confidence",
+  "ground-me":         "Ground me",
+  "make-it-easy":      "Make things feel easy",
+  "feel-put-together": "Help me feel put together",
+  "feel-attractive":   "Make me feel attractive",
+  "give-energy":       "Give me energy",
+  "feel-softer":       "Help me feel softer",
+  "feel-sharper":      "Help me feel sharper",
+  "feel-less-exposed": "Help me feel less exposed",
+  "express-myself":    "Let me express myself",
+};
+
+export const NAIA_BODY_NEED_LABELS: Record<string, string> = {
+  "waist-definition":                "Define my waist",
+  "soft-and-forgiving-around-waist": "Feel easy around my waist",
+  "more-coverage":                   "Give me more coverage",
+  "nothing-clingy":                  "Nothing clingy",
+  "relaxed":                         "Relaxed fit",
+  "structured":                      "Give me some structure",
+  "elongates":                       "Create a longer line",
+  "balances":                        "Balance my proportions",
+  "comfortable-elevated":            "Comfortable but polished",
+};
+
+export const NAIA_CURRENT_GOAL_LABELS: Record<string, string> = {
+  "understand-my-style":        "Understand my personal style",
+  "feel-more-like-myself":      "Feel more like myself in what I wear",
+  "use-what-i-own":             "Get more from what I already own",
+  "easier-getting-dressed":     "Make getting dressed easier",
+  "stop-regret-purchases":      "Stop buying things I never wear",
+  "more-cohesive-wardrobe":     "Build a more cohesive wardrobe",
+  "dress-for-my-life":          "Dress better for my actual life",
+  "refresh-my-style":           "Refresh my style",
+  "specific-event-trip-change": "Dress for a specific event or change",
+  "not-sure-yet":               "Not sure yet",
+};
+
+export const NAIA_SUCCESSFUL_OUTFIT_LABELS: Record<string, string> = {
+  "feel-like-myself":    "I feel completely like myself",
+  "confidence":          "Confidence",
+  "feel-put-together":   "I feel put-together",
+  "comfort-ease":        "Comfort and ease of movement",
+  "sense-of-expression": "A sense of creative expression",
+  "feel-attractive":     "I feel attractive",
+  "sense-of-power":      "A sense of power",
+  "effortlessness":      "Effortlessness",
+  "not-sure":            "I'm not sure yet",
+};
+
+export const NAIA_FIT_CONCERN_LABELS: Record<string, string> = {
+  "tops-pull-bust":        "Tops, shirts or jackets can feel tight across chest / back",
+  "waistbands-gape":       "Waistbands often gape",
+  "tight-hips-thighs":     "Trousers can feel tight through seat, hips or thighs",
+  "uncomfortable-rise":    "Trouser rises can feel uncomfortable",
+  "shoulder-sleeve-fit":   "Shoulder or sleeve fit can be difficult",
+  "often-too-short":       "Clothes are often too short",
+  "often-too-long":        "Clothes are often too long",
+  "less-cling-midsection": "Prefer less cling around midsection",
+  "shoe-width-comfort":    "Shoe width / comfort can be difficult",
+  "size-changes":          "Size changes",
+};
+
+export const NAIA_STRUCTURE_LABELS: Record<string, string> = {
+  "soft-fluid":         "Soft and fluid",
+  "lightly-structured": "Lightly structured",
+  "sharp-tailored":     "Sharp and tailored",
+  "balanced-structure": "A balance of soft and structured",
+};
+
 export async function callClaudeForNaiaSelection(
   candidates: OutfitCandidate[],
   session: StyleMeSessionInput,
@@ -1338,22 +1438,114 @@ export async function callClaudeForNaiaSelection(
   const moodStr = session.moods.join(", ");
   const feelingStr = session.desiredFeelings.join(", ");
 
+  // ── TODAY'S BRIEF ─────────────────────────────────────────────────────────
+  // State: resolve label; include free-text note only when state === "other"
+  const stateLabel = session.state
+    ? (NAIA_STATE_LABELS[session.state] ?? session.state.replace(/-/g, " "))
+    : null;
+  const stateNoteLine = session.state === "other" && session.stateOtherText
+    ? ` (Customer's own words: "${session.stateOtherText}")`
+    : "";
+
+  // Intentions: resolve to human-readable labels
+  const intentionsStr = (session.intentions ?? [])
+    .map((id) => NAIA_INTENTION_LABELS[id] ?? id.replace(/-/g, " "))
+    .join("; ");
+
+  // Fit / Comfort: active body needs → labels; or explicit "none selected"
+  const activeBodyNeeds = (session.bodyNeeds ?? []).filter((id) => id !== "nothing-specific");
+  const fitComfortLine = activeBodyNeeds.length > 0
+    ? activeBodyNeeds
+        .map((id) => NAIA_BODY_NEED_LABELS[id] ?? id.replace(/-/g, " "))
+        .join("; ")
+    : "None selected — do not invent waist, coverage, softness, structure, or fit-specific claims.";
+
+  // Formality modifier (if present)
+  const formalityModifier = session.formalityConditional
+    ? ` (${session.formalityConditional.replace(/^formality-/, "").replace(/-/g, " ")})`
+    : "";
+
+  const todayBlock = [
+    `TODAY'S BRIEF`,
+    `Occasion: ${occasionLabel}${formalityModifier}.`,
+    stateLabel ? `State: ${stateLabel}.${stateNoteLine}` : null,
+    `Intention: ${intentionsStr || "not specified"}.`,
+    `Fit / Comfort: ${fitComfortLine}`,
+    `Mood: ${moodStr || "not specified"}. Desired feeling: ${feelingStr || "not specified"}.`,
+  ].filter(Boolean).join("\n");
+
+  // ── STYLE PASSPORT ────────────────────────────────────────────────────────
+  const personalitiesStr = (profile?.stylePersonalities ?? [])
+    .map((id) => optionLabel("style-personalities", id)).join(", ");
+  const silhouetteStr = (profile?.silhouette ?? []).slice(0, 3)
+    .map((id) => optionLabel("silhouette", id)).join(", ");
+  const structureStr = profile?.structure
+    ? (NAIA_STRUCTURE_LABELS[profile.structure] ?? profile.structure.replace(/-/g, " "))
+    : null;
+  const favColorStr = (profile?.favoriteColors ?? [])
+    .map((c) => c.replace(/-/g, " ")).join(", ");
+  const avoidColorStr = (profile?.avoidColors ?? [])
+    .map((c) => c.replace(/-/g, " ")).join(", ");
+  const bodyFocusStr = (profile?.bodyFocusAreas ?? [])
+    .map((id) => id.replace(/-/g, " ")).join(", ");
+  const bodyAvoidStr = (profile?.bodyAvoidAreas ?? [])
+    .map((id) => id.replace(/-/g, " ")).join(", ");
   const becomingStr = (profile?.becoming ?? [])
-    .map((id) => optionLabel("becoming", id))
-    .join(", ");
+    .map((id) => optionLabel("becoming", id)).join(", ");
   const styleSupportStr = (profile?.styleSupport ?? [])
-    .map((id) => optionLabel("style-support", id))
-    .join(", ");
+    .map((id) => optionLabel("style-support", id)).join(", ");
+  const desiredImpressionStr = (profile?.desiredImpression ?? [])
+    .map((id) => optionLabel("desired-impression", id)).join(", ");
+  const lifestyleStr = (profile?.lifestyle ?? [])
+    .map((id) => optionLabel("lifestyle", id)).join(", ");
+  const currentGoalStr = (profile?.currentGoal ?? [])
+    .filter((id) => id !== "not-sure-yet")
+    .map((id) => NAIA_CURRENT_GOAL_LABELS[id] ?? id.replace(/-/g, " "))
+    .join("; ");
+  const successfulOutfitStr = (profile?.successfulOutfitGives ?? [])
+    .filter((id) => id !== "not-sure")
+    .map((id) => NAIA_SUCCESSFUL_OUTFIT_LABELS[id] ?? id.replace(/-/g, " "))
+    .join("; ");
+  const fitPreferencesStr = (profile?.fitPreferences ?? [])
+    .map((id) => optionLabel("fit-concerns", id)).join(", ");
+  const activeFitConcerns = (profile?.fitConcerns ?? []).filter((id) => id !== "no-fit-problems");
+  const fitConcernsStr = activeFitConcerns
+    .map((id) => NAIA_FIT_CONCERN_LABELS[id] ?? id.replace(/-/g, " "))
+    .join("; ");
+  const safeFitConcernsNote = profile?.fitConcernsNote
+    ? profile.fitConcernsNote.replace(/"/g, "'").replace(/\n/g, " ").trim()
+    : null;
+  const coverageStr = [
+    profile?.preferredCoverage ? optionLabel("preferred-coverage", profile.preferredCoverage) : null,
+    (profile?.coveragePreferences ?? []).map((id) => optionLabel("preferred-coverage", id)).join(", "),
+  ].filter(Boolean).join("; ");
+  const dressingStr = (profile?.dressingPreferences ?? [])
+    .map((id) => optionLabel("dressing-preferences", id)).join(", ");
   const safeFinalNotes = profile?.finalNotes
     ? profile.finalNotes.replace(/"/g, "'").replace(/\n/g, " ").trim()
     : null;
-  const profileCtx = [
-    becomingStr ? `Style aspiration: ${becomingStr}.` : "",
-    styleSupportStr ? `Style support goal: ${styleSupportStr}.` : "",
-    safeFinalNotes ? `Customer's personal note: "${safeFinalNotes}".` : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+
+  const passportBlock = [
+    `STYLE PASSPORT`,
+    `Style identity: ${personalitiesStr || "not specified"}.`,
+    silhouetteStr ? `Silhouette preference: ${silhouetteStr}.` : null,
+    structureStr ? `Structure preference: ${structureStr}.` : null,
+    favColorStr ? `Colours loved: ${favColorStr}.` : null,
+    avoidColorStr ? `Colours usually avoided: ${avoidColorStr} — prefer alternatives where available, but not a hard exclusion.` : null,
+    bodyFocusStr ? `Areas the customer prefers to highlight: ${bodyFocusStr}.` : null,
+    bodyAvoidStr ? `Areas the customer prefers not to emphasise: ${bodyAvoidStr}.` : null,
+    becomingStr ? `Becoming / aspiration: ${becomingStr}.` : null,
+    styleSupportStr ? `Style support goal: ${styleSupportStr}.` : null,
+    desiredImpressionStr ? `Desired impression: ${desiredImpressionStr}.` : null,
+    currentGoalStr ? `Current style focus (context only): ${currentGoalStr}.` : null,
+    successfulOutfitStr ? `What makes an outfit successful for this customer: ${successfulOutfitStr}.` : null,
+    lifestyleStr ? `Lifestyle context: ${lifestyleStr}.` : null,
+    fitPreferencesStr ? `Persistent fit preference: ${fitPreferencesStr}.` : null,
+    fitConcernsStr ? `Persistent fit considerations (active even when today's Fit/Comfort is "None selected"): ${fitConcernsStr}.${safeFitConcernsNote ? ` Customer note: "${safeFitConcernsNote}".` : ""}` : null,
+    coverageStr ? `Persistent coverage preference: ${coverageStr} — this is a hard boundary, stronger than today's fit/comfort selection.` : null,
+    dressingStr ? `Dressing constraint: ${dressingStr} — hard exclusion; never violate.` : null,
+    safeFinalNotes ? `Customer's own note: "${safeFinalNotes}".` : null,
+  ].filter(Boolean).join("\n");
 
   const candidateDescs = candidates
     .map((c) => {
@@ -1437,19 +1629,20 @@ export async function callClaudeForNaiaSelection(
     STYLEME_WORDING_SYSTEM_PROMPT +
     "\n9. This look is built entirely from the customer's own Closet — no brand products. Do not reference product brand names, shopping links, or purchasing. Treat the Closet pieces as the primary styling elements." +
     "\n10. When writing perPieceNotes, use the correct grammatical number for each garment name. Known plural garments include: trousers, jeans, shorts, leggings, chinos, joggers, loafers, sneakers, trainers, boots, heels, flats, slides, earrings, sunglasses, cufflinks. When the number is uncertain, use a participial phrase ('Adding a contrast note…', 'Grounding the look…') to avoid subject-verb mismatch. Do not use generic phrases like 'completes the look', 'forms the upper half', or 'brings the outfit into appropriate territory'." +
-    "\n11. Choose the candidate that best satisfies today's occasion, formality signal, and explicit intention — while expressing the customer's Passport identity through that lens. Priority order: (1) hard constraints (coverage, fit needs, hard boundaries); (2) today's occasion and any explicit formality signal; (3) today's stated intention (e.g. 'feel like myself'); (4) Passport aspirations (becoming, style-support). Passport aspirations are part of the selection decision, not just explanation colour — but they must be interpreted within today's context. 'Powerful' or 'refined' for an everyday brief should produce an everyday expression of those qualities, not a look that overshoots the occasion into a formal or workwear register.";
+    "\n11. You will receive two structured sections: TODAY'S BRIEF and STYLE PASSPORT. Use both together. Priority order: (1) hard constraints — dressing boundaries, persistent coverage preferences, firm colour avoidances; (2) today's occasion and any explicit formality signal; (3) today's stated intention; (4) today's state (context only — do not convert state into garment rules); (5) Passport identity, silhouette, and aspirations. The Passport should differentiate between equally occasion-appropriate candidates — it must not override today's occasion or make an inappropriate outfit acceptable. An everyday brief with a Classic & Polished Passport should produce an everyday outfit that feels classic and polished — not workwear." +
+    "\n12. GROUNDING RULE: Every claim in whyThisWorks, confidenceBoost, and perPieceNotes must be traceable to today's answers, the Passport, or actual garment metadata. If Fit / Comfort says 'None selected', do not mention waistbands, coverage needs, ease, softness, body-hugging, structure, or any physical comfort claim. If a Passport preference influenced the choice, you may name it explicitly: e.g. 'Jeans and sneakers keep this everyday, while the tailored blazer honours your Classic & Polished Passport.'";
 
   const userMessage =
-    `Select the best complete outfit for this customer and write all wording for it.\n` +
-    `Occasion: ${occasionLabel}. Mood: ${moodStr}. Desired feeling: ${feelingStr}.` +
-    (session.stateOtherText ? ` Current state (context only): "${session.stateOtherText}".` : "") +
-    (profileCtx ? ` ${profileCtx}` : "") +
-    `\n\n${candidateDescs}\n\n` +
+    `Select the best complete outfit for this customer and write all wording for it.\n\n` +
+    `${todayBlock}\n\n` +
+    `${passportBlock}\n\n` +
+    `${candidateDescs}\n\n` +
     `${selectionHint}\n\n` +
+    `Choose the candidate that is: (1) appropriate for today's occasion and formality; (2) compliant with all hard constraints; (3) the strongest expression of this customer's Passport identity within today's context.\n\n` +
     `Return a JSON object with exactly these fields:\n` +
     `- selectedCandidate: ${candidates.map((c) => `"${c.id}"`).join(" or ")}\n` +
     `- outfitName: creative name for this look (≤8 words)\n` +
-    `- whyThisWorks: 2–3 sentences explaining why this works for this customer\n` +
+    `- whyThisWorks: 2–3 sentences grounded in today's brief and Passport — never invent fit/comfort needs not stated above\n` +
     `- confidenceBoost: 1 short styling observation — about the garment, not the customer's feelings. Example: "The blazer is already giving the structure — keep the rest clean."\n` +
     `- perfumeNote: 1 sentence of scent direction (type of notes, not a brand name)\n` +
     `- perPieceNotes: array of { "id": "<closetId>", "note": "<one sentence>" } for every piece in the selected candidate. Each note names what that specific piece contributes to this look — its colour role, proportion, or occasion fit. Use the garment name given in the candidate list.`;
@@ -1467,7 +1660,7 @@ export async function callClaudeForNaiaSelection(
 
     if (!result || typeof result !== "object") return null;
     if (!result.outfitName || !result.whyThisWorks || !result.confidenceBoost) return null;
-    if (result.selectedCandidate !== "A" && result.selectedCandidate !== "B" && result.selectedCandidate !== "C") return null;
+    if (result.selectedCandidate !== "A" && result.selectedCandidate !== "B" && result.selectedCandidate !== "C" && result.selectedCandidate !== "D") return null;
 
     // Server validation: selected candidate must exist in the offered list
     const selectedCandidate = candidates.find((c) => c.id === result.selectedCandidate);

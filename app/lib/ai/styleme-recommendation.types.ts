@@ -91,6 +91,14 @@ export interface StyleMeProfileSignals {
   coveragePreferences?: string[];
   // Group 2 — Dressing hard constraints (hard exclusion; see DRESSING_EXCLUDES_MAP)
   dressingPreferences?: string[];
+  // Passport structure preference (soft)
+  structure?: string;
+  // Rev 6 — Goal & outcome context (context only; no item scoring)
+  currentGoal?: string[];
+  successfulOutfitGives?: string[];
+  // Rev 6 — Persistent fit concerns (survive today's "Nothing specific")
+  fitConcerns?: string[];
+  fitConcernsNote?: string;
 }
 
 // ─── Anchor inputs ────────────────────────────────────────────────────────────
