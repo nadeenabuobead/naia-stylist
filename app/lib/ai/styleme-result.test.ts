@@ -32,10 +32,10 @@ import {
   garmentNameIsPlural,
   computeOutfitSignature,
   buildCandidateOccasionEvidence,
-  selectOccasionAwareFallback,
   evaluateCompleteOutfit,
   getTargetFormalityRange,
   FORMALITY_RANK,
+  SESSION_OCCASION_TO_CLOSET_TOKENS,
   NAIA_STATE_LABELS,
   NAIA_INTENTION_LABELS,
   NAIA_BODY_NEED_LABELS,
@@ -6236,8 +6236,7 @@ describe("§OC.15b — Passport × occasion: smart-casual + 'powerful' profile �
 // §FA — Fix A + Fix B: occasion-aware fallback + factual selection evidence
 // ══════════════════════════════════════════════════════════════════════════════
 //
-// §FA.1  buildCandidateOccasionEvidence unit tests
-// §FA.2  selectOccasionAwareFallback unit tests (tie-break included)
+// §FA.1  buildCandidateOccasionEvidence unit tests (occasion normalization via SESSION_OCCASION_TO_CLOSET_TOKENS)
 // §FA.3  Sara: everyday + work-only blazer, model FAILS → fallback = C
 // §FA.4  Sara: everyday + everyday-blazer, model FAILS → fallback = A
 // §FA.5  Sara: work/polished + work-only blazer, model FAILS → fallback = A
@@ -6366,104 +6365,6 @@ describe("§FA.1 — buildCandidateOccasionEvidence: piece-level occasion status
     assert.strictEqual(e.explicitNonMatchCount, 0, "no-metadata must NOT count as explicit non-match");
     assert.strictEqual(e.knownOccasionPieces, 1, "Only 1 piece has known occasion metadata");
     assert.ok(Math.abs(e.occasionCoverageRatio - 1.0) < 0.001, "Coverage ratio uses only known pieces");
-  });
-});
-
-// ── §FA.2 selectOccasionAwareFallback: 4-step normalized ranking ──────────────
-//
-// Step 1: fewer explicitNonMatchCount wins
-// Step 2: higher occasionCoverageRatio wins
-// Step 3: higher baseAndShoeMatchCount wins
-// Step 4: fewer optionalPieceCount wins (no reward for extra optional tagged layer)
-// Step 5: first candidate retained (deterministic)
-
-describe("§FA.2 — selectOccasionAwareFallback: 4-step normalized ranking", () => {
-  type EvidenceOpts = {
-    explicitNonMatchCount: number;
-    occasionCoverageRatio: number;
-    baseAndShoeMatchCount: number;
-    optionalPieceCount: number;
-  };
-
-  const makeEvidence = (id: string, opts: EvidenceOpts): [string, CandidateOccasionEvidence] => [
-    id,
-    {
-      candidateId: id, pieces: [],
-      knownOccasionPieces: 3,
-      matchingOccasionPieces: Math.round(opts.occasionCoverageRatio * 3),
-      explicitNonMatchCount: opts.explicitNonMatchCount,
-      occasionCoverageRatio: opts.occasionCoverageRatio,
-      baseAndShoeMatchCount: opts.baseAndShoeMatchCount,
-      optionalPieceCount: opts.optionalPieceCount,
-      occasionScore: Math.round(opts.occasionCoverageRatio * 3) * 10,  // backward compat
-      nonMatchingPieceCount: opts.explicitNonMatchCount,
-    },
-  ];
-
-  const makeCandidates = (ids: string[]): OutfitCandidate[] =>
-    ids.map((id) => ({ id, pieces: [] }));
-
-  it("FA.2.1 — step 1: fewer explicit non-matches wins", () => {
-    const candidates = makeCandidates(["A", "C"]);
-    const ev = new Map([
-      makeEvidence("A", { explicitNonMatchCount: 1, occasionCoverageRatio: 1.0, baseAndShoeMatchCount: 3, optionalPieceCount: 1 }),
-      makeEvidence("C", { explicitNonMatchCount: 0, occasionCoverageRatio: 1.0, baseAndShoeMatchCount: 3, optionalPieceCount: 0 }),
-    ]);
-    assert.strictEqual(selectOccasionAwareFallback(candidates, ev).id, "C",
-      "C has 0 explicit non-matches vs A's 1 — step 1 selects C");
-  });
-
-  it("FA.2.2 — step 2: higher coverage ratio wins", () => {
-    // A: same nonMatch as C but higher ratio (extra matched optional vs C's non-matching bag)
-    // A: [shirt(m), shoe(m), bag(not), blazer(m)] → nonMatch=1, ratio=3/4=0.75, baseShoe=2, opt=2
-    // C: [shirt(m), shoe(m), bag(not)]            → nonMatch=1, ratio=2/3=0.67, baseShoe=2, opt=1
-    const candidates = makeCandidates(["A", "C"]);
-    const ev = new Map([
-      makeEvidence("A", { explicitNonMatchCount: 1, occasionCoverageRatio: 0.75, baseAndShoeMatchCount: 2, optionalPieceCount: 2 }),
-      makeEvidence("C", { explicitNonMatchCount: 1, occasionCoverageRatio: 0.67, baseAndShoeMatchCount: 2, optionalPieceCount: 1 }),
-    ]);
-    assert.strictEqual(selectOccasionAwareFallback(candidates, ev).id, "A",
-      "A has higher coverage ratio — step 2 selects A (extra matching optional genuinely improves ratio)");
-  });
-
-  it("FA.2.3 — step 3: higher base+shoe match count wins", () => {
-    const candidates = makeCandidates(["A", "C"]);
-    const ev = new Map([
-      makeEvidence("A", { explicitNonMatchCount: 0, occasionCoverageRatio: 1.0, baseAndShoeMatchCount: 3, optionalPieceCount: 1 }),
-      makeEvidence("C", { explicitNonMatchCount: 0, occasionCoverageRatio: 1.0, baseAndShoeMatchCount: 2, optionalPieceCount: 0 }),
-    ]);
-    assert.strictEqual(selectOccasionAwareFallback(candidates, ev).id, "A",
-      "A has 3 base+shoe matches vs C's 2 — step 3 selects A");
-  });
-
-  it("FA.2.4 — step 4: A and C tied on steps 1-3; A has extra optional piece → C wins", () => {
-    // THIS IS THE KEY ANTI-BIAS TEST: even if A's extra optional piece has an occasion match,
-    // if steps 1-3 are tied, C wins because fewer optional pieces is preferred.
-    const candidates = makeCandidates(["A", "C"]);
-    const ev = new Map([
-      makeEvidence("A", { explicitNonMatchCount: 0, occasionCoverageRatio: 1.0, baseAndShoeMatchCount: 2, optionalPieceCount: 1 }),
-      makeEvidence("C", { explicitNonMatchCount: 0, occasionCoverageRatio: 1.0, baseAndShoeMatchCount: 2, optionalPieceCount: 0 }),
-    ]);
-    assert.strictEqual(selectOccasionAwareFallback(candidates, ev).id, "C",
-      "Steps 1-3 tied; A has one extra optional piece — step 4 selects C (no reward for extra tagged layer)");
-  });
-
-  it("FA.2.5 — step 5: all tied → first candidate retained (deterministic)", () => {
-    const candidates = makeCandidates(["A", "C"]);
-    const ev = new Map([
-      makeEvidence("A", { explicitNonMatchCount: 0, occasionCoverageRatio: 1.0, baseAndShoeMatchCount: 2, optionalPieceCount: 0 }),
-      makeEvidence("C", { explicitNonMatchCount: 0, occasionCoverageRatio: 1.0, baseAndShoeMatchCount: 2, optionalPieceCount: 0 }),
-    ]);
-    assert.strictEqual(selectOccasionAwareFallback(candidates, ev).id, "A",
-      "All equal — first candidate retained");
-  });
-
-  it("FA.2.6 — single candidate: returns it regardless", () => {
-    const candidates = makeCandidates(["A"]);
-    const ev = new Map([
-      makeEvidence("A", { explicitNonMatchCount: 1, occasionCoverageRatio: 0.5, baseAndShoeMatchCount: 1, optionalPieceCount: 1 }),
-    ]);
-    assert.strictEqual(selectOccasionAwareFallback(candidates, ev).id, "A");
   });
 });
 
@@ -8382,6 +8283,699 @@ describe("§SPP — Full Passport context integration", () => {
     assert.ok(!keys.includes("topSize"), "topSize must not appear in profile signals");
     assert.ok(!keys.includes("bottomSize"), "bottomSize must not appear in profile signals");
     assert.ok(!keys.includes("shoeSize"), "shoeSize must not appear in profile signals");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// §REG — SESSION_OCCASION_TO_CLOSET_TOKENS: canonical normalization coverage
+// ══════════════════════════════════════════════════════════════════════════════
+//
+// Verifies:
+//   R1 — All 9 known session occasion IDs have an entry (even if empty array)
+//   R2 — "everyday" maps to tokens that include "casual" and "weekend"
+//   R3 — buildCandidateOccasionEvidence returns "match" for casual/weekend items
+//        in an "everyday" session (the live Sara failure case)
+//   R4 — Items tagged "work" are "not-listed" for "everyday" (no false positives)
+//   R5 — "dinner" and "girls-night" both map to "evening" vocabulary
+//   R6 — "travel" and "date-night" are exact-match tokens in the map
+//   R7 — "family" and "not-sure" have no closet vocabulary equivalents (empty)
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("§REG.1 — SESSION_OCCASION_TO_CLOSET_TOKENS: all 9 session occasions covered", () => {
+  const ALL_SESSION_OCCASIONS = [
+    "everyday", "work", "dinner", "date-night",
+    "special-event", "girls-night", "travel", "family", "not-sure",
+  ];
+
+  it("REG.1.1 — every known session occasion has an entry in the map", () => {
+    for (const occ of ALL_SESSION_OCCASIONS) {
+      assert.ok(
+        Object.prototype.hasOwnProperty.call(SESSION_OCCASION_TO_CLOSET_TOKENS, occ),
+        `SESSION_OCCASION_TO_CLOSET_TOKENS must have an entry for session occasion "${occ}"`,
+      );
+    }
+  });
+
+  it("REG.1.2 — 'everyday' maps to tokens that include 'casual' and 'weekend' (closet AI vocabulary)", () => {
+    const tokens = SESSION_OCCASION_TO_CLOSET_TOKENS["everyday"] ?? [];
+    assert.ok(tokens.includes("casual"), "'casual' must be in everyday tokens (closet AI uses 'casual' not 'everyday')");
+    assert.ok(tokens.includes("weekend"), "'weekend' must be in everyday tokens (closet AI uses 'weekend' for casual items)");
+  });
+
+  it("REG.1.3 — 'dinner' and 'girls-night' both map to 'evening' vocabulary", () => {
+    const dinnerTokens = SESSION_OCCASION_TO_CLOSET_TOKENS["dinner"] ?? [];
+    const girlsNightTokens = SESSION_OCCASION_TO_CLOSET_TOKENS["girls-night"] ?? [];
+    assert.ok(dinnerTokens.includes("evening"), "'dinner' must map to 'evening' closet token");
+    assert.ok(girlsNightTokens.includes("evening"), "'girls-night' must map to 'evening' closet token");
+  });
+
+  it("REG.1.4 — 'travel' and 'date-night' are direct token matches", () => {
+    const travelTokens = SESSION_OCCASION_TO_CLOSET_TOKENS["travel"] ?? [];
+    const dateNightTokens = SESSION_OCCASION_TO_CLOSET_TOKENS["date-night"] ?? [];
+    assert.ok(travelTokens.includes("travel"), "'travel' session must include 'travel' closet token");
+    assert.ok(dateNightTokens.includes("date-night"), "'date-night' session must include 'date-night' closet token");
+  });
+
+  it("REG.1.5 — 'not-sure' has no closet vocabulary equivalents (empty array)", () => {
+    assert.deepStrictEqual(
+      Array.from(SESSION_OCCASION_TO_CLOSET_TOKENS["not-sure"] ?? []), [],
+      "'not-sure' has no closet vocabulary equivalent — matching is neutral",
+    );
+  });
+
+  it("REG.1.6 — 'special-event' maps to 'special-occasion' closet vocabulary", () => {
+    const tokens = SESSION_OCCASION_TO_CLOSET_TOKENS["special-event"] ?? [];
+    assert.ok(tokens.includes("special-occasion"), "'special-event' must map to 'special-occasion' closet token");
+  });
+});
+
+describe("§REG.2 — occasion normalization via buildCandidateOccasionEvidence", () => {
+  const makeTestItem = (id: string, occasions: string[]): ClosetAnchorInput => ({
+    type: "closet", id, name: `Item ${id}`,
+    category: "TOPS", colors: ["black"], primaryColor: "black",
+    pattern: null, material: null, styleTags: [], occasions, imageUrl: "",
+  });
+
+  it("REG.2.1 — item tagged 'casual' is 'match' for 'everyday' session (the live Sara failure case)", () => {
+    const candidate: OutfitCandidate = { id: "A", pieces: [{ closetId: "jeans", slot: "bottom", label: "Jeans", colors: [] }] };
+    const allItems = [makeTestItem("jeans", ["casual"])];
+    const ev = buildCandidateOccasionEvidence([candidate], allItems, "everyday");
+    assert.strictEqual(
+      ev.get("A")!.pieces[0].occasionStatus, "match",
+      "Closet item tagged 'casual' must match 'everyday' session via normalization",
+    );
+  });
+
+  it("REG.2.2 — item tagged 'weekend' is 'match' for 'everyday' session", () => {
+    const candidate: OutfitCandidate = { id: "A", pieces: [{ closetId: "shirt", slot: "top", label: "Shirt", colors: [] }] };
+    const allItems = [makeTestItem("shirt", ["weekend"])];
+    const ev = buildCandidateOccasionEvidence([candidate], allItems, "everyday");
+    assert.strictEqual(ev.get("A")!.pieces[0].occasionStatus, "match", "weekend-tagged item must match everyday");
+  });
+
+  it("REG.2.3 — item tagged 'work' is 'not-listed' for 'everyday' session (no false positive)", () => {
+    const candidate: OutfitCandidate = { id: "A", pieces: [{ closetId: "blazer", slot: "outerwear", label: "Blazer", colors: [] }] };
+    const allItems = [makeTestItem("blazer", ["work", "smart-casual"])];
+    const ev = buildCandidateOccasionEvidence([candidate], allItems, "everyday");
+    assert.strictEqual(
+      ev.get("A")!.pieces[0].occasionStatus, "not-listed",
+      "work-only tagged item must be not-listed for everyday — no false positives",
+    );
+  });
+
+  it("REG.2.4 — item tagged 'evening' is 'match' for 'dinner' session", () => {
+    const candidate: OutfitCandidate = { id: "A", pieces: [{ closetId: "dress", slot: "dress", label: "Dress", colors: [] }] };
+    const allItems = [makeTestItem("dress", ["evening"])];
+    const ev = buildCandidateOccasionEvidence([candidate], allItems, "dinner");
+    assert.strictEqual(ev.get("A")!.pieces[0].occasionStatus, "match", "evening-tagged item must match dinner session");
+  });
+
+  it("REG.2.5 — item with no occasions is 'no-metadata' for any session (neutral)", () => {
+    const candidate: OutfitCandidate = { id: "A", pieces: [{ closetId: "scarf", slot: "bag", label: "Scarf", colors: [] }] };
+    const allItems = [makeTestItem("scarf", [])];
+    const ev = buildCandidateOccasionEvidence([candidate], allItems, "everyday");
+    assert.strictEqual(ev.get("A")!.pieces[0].occasionStatus, "no-metadata", "empty occasions → no-metadata (neutral)");
+  });
+
+  it("REG.2.6 — 'family' session: items with any occasion tag are 'not-listed', never 'match' (no tokens)", () => {
+    // "family" has no closet-vocabulary equivalents → matchesSessionOccasion returns false
+    const candidate: OutfitCandidate = { id: "A", pieces: [{ closetId: "top", slot: "top", label: "Top", colors: [] }] };
+    const allItems = [makeTestItem("top", ["casual", "weekend"])];
+    const ev = buildCandidateOccasionEvidence([candidate], allItems, "family");
+    assert.strictEqual(
+      ev.get("A")!.pieces[0].occasionStatus, "not-listed",
+      "For 'family' (no closet tokens), items with occasion metadata are not-listed — neutral scoring applies",
+    );
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// §DUP — buildNaiaOutfitCandidates: no duplicate closetId per candidate
+// ══════════════════════════════════════════════════════════════════════════════
+//
+// Root cause of live Sara regression: anchor.slot="top" is in B_SLOTS, so
+// the anchor appeared in bPiecesMap AND in nonBSlotPieces (via the old
+// || p.closetId === anchor.id condition). Both got concatenated → duplicate.
+// Fix: nonBSlotPieces now only includes pieces whose slot is NOT in B_SLOTS.
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("§DUP.1 — buildNaiaOutfitCandidates: no duplicate closetId when anchor.slot='top'", () => {
+  const topAnchor: NormalizedClosetAnchor = {
+    type: "closet", id: "sara-anchor-top", label: "Black Long-Sleeve Top", slot: "top",
+    colors: ["black"], normalizedColorIds: ["black"], styleTags: ["classic"],
+    occasions: ["casual"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+  };
+  const dupSession = {
+    occasion: "everyday", formalityConditional: null as string | null,
+    moods: ["confident"], desiredFeelings: ["relaxed"],
+    bodyNeeds: [], coverageConditional: null as string | null,
+    todayColours: { preferred: [], avoid: [] }, practicalIds: [],
+    source: "my-closet" as const,
+  };
+  const closetItems: ClosetAnchorInput[] = [
+    {
+      type: "closet", id: "sara-jeans", name: "Medium Blue Wash Jeans",
+      category: "BOTTOMS", colors: ["blue"], primaryColor: "blue",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["casual", "weekend"], imageUrl: "", formality: "casual",
+    },
+    {
+      type: "closet", id: "sara-sneakers", name: "White Cloud 5 Running Sneakers",
+      category: "SHOES", colors: ["white"], primaryColor: "white",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["casual"], imageUrl: "", formality: "casual",
+    },
+    {
+      type: "closet", id: "sara-trousers", name: "Black Tailored Trousers",
+      category: "BOTTOMS", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["work"], imageUrl: "", formality: "business-casual",
+    },
+    {
+      type: "closet", id: "sara-loafers", name: "Black Leather Penny Loafers",
+      category: "SHOES", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["work"], imageUrl: "", formality: "business-casual",
+    },
+  ];
+
+  it("DUP.1.1 — Candidate A has no duplicate closetId (anchor appears exactly once)", () => {
+    const [candidateA] = buildNaiaOutfitCandidates(topAnchor, dupSession, closetItems, undefined, undefined);
+    const ids = candidateA.pieces.map((p) => p.closetId);
+    const uniqueIds = new Set(ids);
+    assert.strictEqual(ids.length, uniqueIds.size,
+      `Candidate A must have no duplicate closetIds; got: ${ids.join(", ")}`);
+  });
+
+  it("DUP.1.2 — Candidate B has no duplicate closetId when anchor.slot is in B_SLOTS", () => {
+    const [, candidateB] = buildNaiaOutfitCandidates(topAnchor, dupSession, closetItems, undefined, undefined);
+    if (candidateB === null) return; // not generated is acceptable
+    const ids = candidateB.pieces.map((p) => p.closetId);
+    const uniqueIds = new Set(ids);
+    assert.strictEqual(ids.length, uniqueIds.size,
+      `Candidate B must have no duplicate closetIds; got: ${ids.join(", ")}`);
+    // Specifically, the anchor's closetId must appear exactly once
+    const anchorCount = ids.filter((id) => id === topAnchor.id).length;
+    assert.strictEqual(anchorCount, 1, `Anchor '${topAnchor.id}' must appear exactly once in Candidate B; got ${anchorCount}`);
+  });
+
+  it("DUP.1.3 — Candidate D has no duplicate closetId when anchor.slot is in B_SLOTS", () => {
+    const [, , , candidateD] = buildNaiaOutfitCandidates(topAnchor, dupSession, closetItems, undefined, undefined);
+    if (candidateD === null) return; // not generated is acceptable
+    const ids = candidateD.pieces.map((p) => p.closetId);
+    const uniqueIds = new Set(ids);
+    assert.strictEqual(ids.length, uniqueIds.size,
+      `Candidate D must have no duplicate closetIds; got: ${ids.join(", ")}`);
+    const anchorCount = ids.filter((id) => id === topAnchor.id).length;
+    assert.strictEqual(anchorCount, 1, `Anchor '${topAnchor.id}' must appear exactly once in Candidate D; got ${anchorCount}`);
+  });
+
+  it("DUP.1.4 — all candidates are free of duplicate closetIds (exhaustive check)", () => {
+    const all = buildNaiaOutfitCandidates(topAnchor, dupSession, closetItems, undefined, undefined);
+    for (const candidate of all) {
+      if (candidate === null) continue;
+      const ids = candidate.pieces.map((p) => p.closetId);
+      const uniqueIds = new Set(ids);
+      assert.strictEqual(ids.length, uniqueIds.size,
+        `Candidate ${candidate.id} has duplicate closetIds: ${ids.join(", ")}`);
+    }
+  });
+});
+
+describe("§DUP.2 — buildNaiaOutfitCandidates: no duplicate closetId when anchor.slot='bottom'", () => {
+  const bottomAnchor: NormalizedClosetAnchor = {
+    type: "closet", id: "anchor-jeans", label: "Relaxed Jeans", slot: "bottom",
+    colors: ["blue"], normalizedColorIds: ["blue"], styleTags: ["classic"],
+    occasions: ["casual", "weekend"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+  };
+  const dupSession2 = {
+    occasion: "everyday", formalityConditional: null as string | null,
+    moods: ["confident"], desiredFeelings: ["relaxed"],
+    bodyNeeds: [], coverageConditional: null as string | null,
+    todayColours: { preferred: [], avoid: [] }, practicalIds: [],
+    source: "my-closet" as const,
+  };
+  const closetItems2: ClosetAnchorInput[] = [
+    {
+      type: "closet", id: "top-white", name: "White Linen Shirt",
+      category: "TOPS", colors: ["white"], primaryColor: "white",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["casual", "weekend"], imageUrl: "", formality: "casual",
+    },
+    {
+      type: "closet", id: "shoe-casual", name: "White Sneakers",
+      category: "SHOES", colors: ["white"], primaryColor: "white",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["casual"], imageUrl: "", formality: "casual",
+    },
+    {
+      type: "closet", id: "top-formal", name: "Black Blazer Top",
+      category: "TOPS", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null, styleTags: ["confident"],
+      occasions: ["work"], imageUrl: "", formality: "business-casual",
+    },
+  ];
+
+  it("DUP.2.1 — all candidates are free of duplicate closetIds with bottom anchor", () => {
+    const all = buildNaiaOutfitCandidates(bottomAnchor, dupSession2, closetItems2, undefined, undefined);
+    for (const candidate of all) {
+      if (candidate === null) continue;
+      const ids = candidate.pieces.map((p) => p.closetId);
+      const uniqueIds = new Set(ids);
+      assert.strictEqual(ids.length, uniqueIds.size,
+        `Candidate ${candidate.id} has duplicate closetIds with bottom anchor: ${ids.join(", ")}`);
+    }
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// §SARA — Sara everyday regression: top anchor, model returns null
+// ══════════════════════════════════════════════════════════════════════════════
+//
+// Verified live failure chain (from [nAia-selection-diag] log):
+//   - anchor: "Black Long-Sleeve Top" (slot: "top")
+//   - session: "everyday", formalityConditional: null
+//   - B had 6 pieces (anchor "top" appeared twice — duplicate bug)
+//   - All pieces "not-listed" for everyday (occasion vocabulary mismatch)
+//   - C (-10.5, overdressed) selected over D (-10.5, within-target) — wrong tie-break
+//
+// After fix:
+//   - No duplicate in B or D
+//   - Jeans ("casual"/"weekend") + sneakers ("casual") → "match" for everyday
+//   - D (jeans+sneakers, within-target) beats C (trousers+loafers, overdressed)
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("§SARA.1 — Sara everyday regression: null model → D (jeans+sneakers) beats C (trousers+loafers)", () => {
+  const saraTopAnchor: NormalizedClosetAnchor = {
+    type: "closet", id: "sara-blk-top", label: "Black Long-Sleeve Top", slot: "top",
+    colors: ["black"], normalizedColorIds: ["black"], styleTags: ["classic"],
+    occasions: ["casual", "work"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+  };
+  const saraSession = {
+    occasion: "everyday", formalityConditional: null as string | null,
+    moods: ["like-myself"], desiredFeelings: ["comfortable"],
+    bodyNeeds: [], coverageConditional: null as string | null,
+    todayColours: { preferred: [], avoid: [] }, practicalIds: [],
+    source: "my-closet" as const,
+  };
+  const saraCloset: ClosetAnchorInput[] = [
+    {
+      type: "closet", id: "sara-jeans-live", name: "Medium Blue Wash Jeans",
+      category: "BOTTOMS", colors: ["blue"], primaryColor: "blue",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["casual", "weekend"], imageUrl: "", formality: "casual",
+    },
+    {
+      type: "closet", id: "sara-sneakers-live", name: "White Cloud 5 Running Sneakers",
+      category: "SHOES", colors: ["white"], primaryColor: "white",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["casual"], imageUrl: "", formality: "casual",
+    },
+    {
+      type: "closet", id: "sara-trousers-live", name: "Black Tailored Trousers",
+      category: "BOTTOMS", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["work"], imageUrl: "", formality: "business-casual",
+    },
+    {
+      type: "closet", id: "sara-loafers-live", name: "Black Leather Penny Loafers",
+      category: "SHOES", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["work"], imageUrl: "", formality: "business-casual",
+    },
+    {
+      type: "closet", id: "sara-blazer-live", name: "Black Tailored Blazer",
+      category: "OUTERWEAR", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null, styleTags: ["confident"],
+      occasions: ["work"], imageUrl: "", formality: "business-formal",
+    },
+    {
+      type: "closet", id: "sara-bag-live", name: "Black Leather Shoulder Bag",
+      category: "BAGS", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: [], imageUrl: "",
+    },
+  ];
+
+  const nullModel: typeof callClaudeForNaiaSelection = async () => null;
+
+  it("SARA.1.1 — buildNaiaOutfitCandidates produces no duplicate closetId in any candidate", () => {
+    const all = buildNaiaOutfitCandidates(saraTopAnchor, saraSession, saraCloset, undefined, undefined);
+    for (const candidate of all) {
+      if (candidate === null) continue;
+      const ids = candidate.pieces.map((p) => p.closetId);
+      const uniqueIds = new Set(ids);
+      assert.strictEqual(ids.length, uniqueIds.size,
+        `SARA regression: Candidate ${candidate.id} has duplicate closetIds: ${ids.join(", ")}`);
+    }
+  });
+
+  it("SARA.1.2 — occasion normalization: jeans ('casual') and sneakers ('casual') are 'match' for 'everyday'", () => {
+    const all = buildNaiaOutfitCandidates(saraTopAnchor, saraSession, saraCloset, undefined, undefined);
+    const [candidateA] = all;
+    const ev = buildCandidateOccasionEvidence(
+      all.filter((c): c is NonNullable<typeof c> => c !== null),
+      saraCloset,
+      "everyday",
+    );
+    // Check that at least one candidate has jeans and sneakers matching
+    let foundJeansMatch = false;
+    let foundSneakersMatch = false;
+    for (const candidate of all) {
+      if (candidate === null) continue;
+      const evidence = ev.get(candidate.id);
+      if (!evidence) continue;
+      for (const piece of evidence.pieces) {
+        if (piece.closetId === "sara-jeans-live" && piece.occasionStatus === "match") foundJeansMatch = true;
+        if (piece.closetId === "sara-sneakers-live" && piece.occasionStatus === "match") foundSneakersMatch = true;
+      }
+    }
+    void candidateA; // used above
+    assert.ok(foundJeansMatch, "Jeans tagged 'casual'/'weekend' must be 'match' for 'everyday' session after normalization");
+    assert.ok(foundSneakersMatch, "Sneakers tagged 'casual' must be 'match' for 'everyday' session after normalization");
+  });
+
+  it("SARA.1.3 — null model: deterministic fallback selects the casual outfit (jeans+sneakers present)", async () => {
+    const result = await computeStyleMeResult(
+      {
+        session: saraSession,
+        anchor: {
+          type: "closet" as const,
+          id: "sara-blk-top", name: "Black Long-Sleeve Top",
+          category: "TOPS", colors: ["black"], primaryColor: "black",
+          pattern: null, material: null, styleTags: ["classic"],
+          occasions: ["casual", "work"], imageUrl: "",
+        },
+        mode: "naia" as const,
+        profile: undefined,
+        recentlyShownClosetIds: [],
+      },
+      undefined, undefined, false,
+      async () => saraCloset,
+      nullModel,
+    );
+
+    const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
+
+    // The fallback must prefer the casual everyday outfit (jeans + sneakers, within-target)
+    // over the overdressed outfit (trousers + loafers, overdressed) — the live regression.
+    assert.ok(
+      persistedIds.includes("sara-jeans-live"),
+      `Null-model fallback must select the casual everyday outfit; jeans missing from: ${persistedIds.join(", ")}`,
+    );
+    assert.ok(
+      persistedIds.includes("sara-sneakers-live"),
+      `Null-model fallback must include sneakers in the casual everyday outfit; got: ${persistedIds.join(", ")}`,
+    );
+    assert.ok(
+      !persistedIds.includes("sara-trousers-live"),
+      `Null-model fallback must NOT select the overdressed outfit (trousers) for everyday; got: ${persistedIds.join(", ")}`,
+    );
+  });
+
+  it("SARA.1.4 — null model: blazer (overdressed for everyday) does not appear in fallback result", async () => {
+    const result = await computeStyleMeResult(
+      {
+        session: saraSession,
+        anchor: {
+          type: "closet" as const,
+          id: "sara-blk-top", name: "Black Long-Sleeve Top",
+          category: "TOPS", colors: ["black"], primaryColor: "black",
+          pattern: null, material: null, styleTags: ["classic"],
+          occasions: ["casual", "work"], imageUrl: "",
+        },
+        mode: "naia" as const,
+        profile: undefined,
+        recentlyShownClosetIds: [],
+      },
+      undefined, undefined, false,
+      async () => saraCloset,
+      nullModel,
+    );
+
+    const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
+    assert.ok(
+      !persistedIds.includes("sara-blazer-live"),
+      `Work-only blazer must not appear in the everyday fallback result; got: ${persistedIds.join(", ")}`,
+    );
+  });
+});
+
+describe("§SARA.2 — Sara work/polished: same closet, work session → structured outfit preferred", () => {
+  const saraTopAnchor: NormalizedClosetAnchor = {
+    type: "closet", id: "sara-wp-top", label: "Black Long-Sleeve Top", slot: "top",
+    colors: ["black"], normalizedColorIds: ["black"], styleTags: ["classic"],
+    occasions: ["casual", "work"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+  };
+  const saraWorkSession = {
+    occasion: "work", formalityConditional: "formality-polished" as string | null,
+    moods: ["confident"], desiredFeelings: ["put-together"],
+    bodyNeeds: [], coverageConditional: null as string | null,
+    todayColours: { preferred: [], avoid: [] }, practicalIds: [],
+    source: "my-closet" as const,
+  };
+  const saraWorkCloset: ClosetAnchorInput[] = [
+    {
+      type: "closet", id: "wp-jeans", name: "Relaxed Jeans",
+      category: "BOTTOMS", colors: ["blue"], primaryColor: "blue",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["casual", "weekend"], imageUrl: "", formality: "casual",
+    },
+    {
+      type: "closet", id: "wp-sneakers", name: "White Sneakers",
+      category: "SHOES", colors: ["white"], primaryColor: "white",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["casual"], imageUrl: "", formality: "casual",
+    },
+    {
+      type: "closet", id: "wp-trousers", name: "Black Tailored Trousers",
+      category: "BOTTOMS", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["work"], imageUrl: "", formality: "business-casual",
+    },
+    {
+      type: "closet", id: "wp-loafers", name: "Black Leather Loafers",
+      category: "SHOES", colors: ["black"], primaryColor: "black",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["work"], imageUrl: "", formality: "business-casual",
+    },
+  ];
+
+  it("SARA.2.1 — work/polished: structured outfit (trousers+loafers) scores higher than casual (jeans+sneakers)", () => {
+    const casualOutfit = makeCandidate("D", [
+      { id: "wp-jeans", slot: "bottom" }, { id: "wp-sneakers", slot: "shoe" },
+    ]);
+    const structuredOutfit = makeCandidate("C", [
+      { id: "wp-trousers", slot: "bottom" }, { id: "wp-loafers", slot: "shoe" },
+    ]);
+    const scoreD = evaluateCompleteOutfit(casualOutfit, saraWorkCloset, saraWorkSession);
+    const scoreC = evaluateCompleteOutfit(structuredOutfit, saraWorkCloset, saraWorkSession);
+    assert.ok(
+      scoreC.compositeScore > scoreD.compositeScore,
+      `Work/Polished: structured outfit (${scoreC.compositeScore}) must outscore casual outfit (${scoreD.compositeScore})`,
+    );
+  });
+
+  it("SARA.2.2 — work/polished: jeans+sneakers are underdressed (formalityFit !== within-target)", () => {
+    const casualOutfit = makeCandidate("D", [
+      { id: "wp-jeans", slot: "bottom" }, { id: "wp-sneakers", slot: "shoe" },
+    ]);
+    const score = evaluateCompleteOutfit(casualOutfit, saraWorkCloset, saraWorkSession);
+    assert.notStrictEqual(score.formalityFit, "within-target",
+      "Jeans+sneakers must not be within-target for work/polished session");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// §WORDING — deterministicWording: grammatical title, no raw IDs, no "mood"
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("§WORDING.1 — deterministicWording: title format for null-model fallback", () => {
+  it("WORDING.1.1 — no primaryTitle + everyday → 'Your everyday look'", () => {
+    const w = deterministicWording("closet", ["like-myself"], ["comfortable"], "everyday", null, null);
+    assert.strictEqual(w.outfitName, "Your everyday look",
+      "Fallback title must be 'Your everyday look', not raw mood ID fragments");
+  });
+
+  it("WORDING.1.2 — no primaryTitle + work → 'Your work look'", () => {
+    const w = deterministicWording("closet", ["confident"], ["put-together"], "work", null, null);
+    assert.strictEqual(w.outfitName, "Your work look",
+      "Fallback title for work must be 'Your work look'");
+  });
+
+  it("WORDING.1.3 — no primaryTitle + date-night → 'Your date night look' (hyphen replaced with space)", () => {
+    const w = deterministicWording("closet", ["romantic"], ["confident"], "date-night", null, null);
+    assert.strictEqual(w.outfitName, "Your date night look",
+      "Fallback title must replace hyphens with spaces for readability");
+  });
+
+  it("WORDING.1.4 — title does NOT contain raw mood-signal ID fragments", () => {
+    // Moods like "like-myself", "feel-powerful" must never appear in the title.
+    // The old bug: moodStr = "like myself" → outfitName = "Like myself for everyday"
+    const w = deterministicWording("closet", ["like-myself", "feel-powerful"], [], "everyday", null, null);
+    assert.ok(
+      !w.outfitName.toLowerCase().includes("like myself"),
+      `outfitName must not contain raw mood ID; got: "${w.outfitName}"`,
+    );
+    assert.ok(
+      !w.outfitName.toLowerCase().includes("feel powerful"),
+      `outfitName must not contain raw mood ID; got: "${w.outfitName}"`,
+    );
+  });
+
+  it("WORDING.1.5 — whyThisWorks does NOT contain the word 'mood' for standard fallback", () => {
+    const w = deterministicWording("closet", ["like-myself"], ["comfortable"], "everyday", null, null);
+    assert.ok(
+      !w.whyThisWorks.toLowerCase().includes("mood"),
+      `whyThisWorks must not reference 'mood' language; got: "${w.whyThisWorks}"`,
+    );
+  });
+
+  it("WORDING.1.6 — primaryTitle present → title is 'Primary Title for occasion'", () => {
+    const w = deterministicWording("closet", [], [], "everyday", "The Easy Edit", null);
+    assert.strictEqual(w.outfitName, "The Easy Edit for everyday");
+  });
+
+  it("WORDING.1.7 — no-eligible-product → 'A direction for [occasion]'", () => {
+    const w = deterministicWording("no-eligible-product", [], [], "dinner", null, null);
+    assert.ok(
+      w.outfitName.toLowerCase().startsWith("a direction"),
+      `no-eligible-product title must start with 'A direction'; got: "${w.outfitName}"`,
+    );
+    assert.ok(w.outfitName.includes("dinner"), `title must include occasion; got: "${w.outfitName}"`);
+  });
+
+  it("WORDING.1.8 — anchor label is referenced in whyThisWorks when anchor is provided", () => {
+    const w = deterministicWording(
+      "closet", [], [], "everyday", null, null, [],
+      { label: "Black Long-Sleeve Top", slot: "top", colors: ["black"] },
+    );
+    assert.ok(
+      w.whyThisWorks.includes("Black Long-Sleeve Top"),
+      `whyThisWorks must reference anchor label; got: "${w.whyThisWorks}"`,
+    );
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// §OMAR — Omar equivalent: male everyday top-anchor regression
+// ══════════════════════════════════════════════════════════════════════════════
+//
+// The same fix must apply symmetrically for a male customer (Omar).
+// anchor.slot = "top" → same duplicate bug; same occasion normalization needed.
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("§OMAR.1 — Omar everyday regression: no duplicate closetId with male top anchor", () => {
+  const omarTopAnchor: NormalizedClosetAnchor = {
+    type: "closet", id: "omar-navy-top", label: "Navy Henley Top", slot: "top",
+    colors: ["navy"], normalizedColorIds: ["navy"], styleTags: ["casual"],
+    occasions: ["casual", "weekend"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+  };
+  const omarSession = {
+    occasion: "everyday", formalityConditional: null as string | null,
+    moods: ["relaxed"], desiredFeelings: ["comfortable"],
+    bodyNeeds: [], coverageConditional: null as string | null,
+    todayColours: { preferred: [], avoid: [] }, practicalIds: [],
+    source: "my-closet" as const,
+  };
+  const omarCloset: ClosetAnchorInput[] = [
+    {
+      type: "closet", id: "omar-chinos", name: "Stone Chinos",
+      category: "BOTTOMS", colors: ["stone"], primaryColor: "stone",
+      pattern: null, material: null, styleTags: ["casual"],
+      occasions: ["casual", "weekend"], imageUrl: "", formality: "smart-casual",
+    },
+    {
+      type: "closet", id: "omar-sneakers", name: "White Leather Sneakers",
+      category: "SHOES", colors: ["white"], primaryColor: "white",
+      pattern: null, material: null, styleTags: ["casual"],
+      occasions: ["casual", "weekend"], imageUrl: "", formality: "casual",
+    },
+    {
+      type: "closet", id: "omar-trousers", name: "Navy Tailored Trousers",
+      category: "BOTTOMS", colors: ["navy"], primaryColor: "navy",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["work"], imageUrl: "", formality: "business-casual",
+    },
+    {
+      type: "closet", id: "omar-oxfords", name: "Brown Oxford Shoes",
+      category: "SHOES", colors: ["brown"], primaryColor: "brown",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["work"], imageUrl: "", formality: "business-casual",
+    },
+    {
+      type: "closet", id: "omar-jacket", name: "Navy Blazer",
+      category: "OUTERWEAR", colors: ["navy"], primaryColor: "navy",
+      pattern: null, material: null, styleTags: ["classic"],
+      occasions: ["work", "smart-casual"], imageUrl: "", formality: "business-casual",
+    },
+  ];
+
+  it("OMAR.1.1 — no duplicate closetId in any candidate with male top anchor", () => {
+    const all = buildNaiaOutfitCandidates(omarTopAnchor, omarSession, omarCloset, undefined, undefined);
+    for (const candidate of all) {
+      if (candidate === null) continue;
+      const ids = candidate.pieces.map((p) => p.closetId);
+      const uniqueIds = new Set(ids);
+      assert.strictEqual(ids.length, uniqueIds.size,
+        `OMAR regression: Candidate ${candidate.id} has duplicate closetIds: ${ids.join(", ")}`);
+    }
+  });
+
+  it("OMAR.1.2 — casual items (chinos 'casual'/'weekend', sneakers 'casual') are 'match' for everyday", () => {
+    const all = buildNaiaOutfitCandidates(omarTopAnchor, omarSession, omarCloset, undefined, undefined);
+    const ev = buildCandidateOccasionEvidence(
+      all.filter((c): c is NonNullable<typeof c> => c !== null),
+      omarCloset,
+      "everyday",
+    );
+    let foundChinosMatch = false;
+    let foundSneakersMatch = false;
+    for (const candidate of all) {
+      if (candidate === null) continue;
+      const evidence = ev.get(candidate.id);
+      if (!evidence) continue;
+      for (const piece of evidence.pieces) {
+        if (piece.closetId === "omar-chinos" && piece.occasionStatus === "match") foundChinosMatch = true;
+        if (piece.closetId === "omar-sneakers" && piece.occasionStatus === "match") foundSneakersMatch = true;
+      }
+    }
+    assert.ok(foundChinosMatch, "Omar's chinos ('casual'/'weekend') must be 'match' for everyday after normalization");
+    assert.ok(foundSneakersMatch, "Omar's sneakers ('casual') must be 'match' for everyday after normalization");
+  });
+
+  it("OMAR.1.3 — null model: casual outfit preferred over formal outfit for everyday", async () => {
+    const nullModel: typeof callClaudeForNaiaSelection = async () => null;
+    const result = await computeStyleMeResult(
+      {
+        session: omarSession,
+        anchor: {
+          type: "closet" as const,
+          id: "omar-navy-top", name: "Navy Henley Top",
+          category: "TOPS", colors: ["navy"], primaryColor: "navy",
+          pattern: null, material: null, styleTags: ["casual"],
+          occasions: ["casual", "weekend"], imageUrl: "",
+        },
+        mode: "naia" as const,
+        profile: undefined,
+        recentlyShownClosetIds: [],
+      },
+      undefined, undefined, false,
+      async () => omarCloset,
+      nullModel,
+    );
+
+    const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
+
+    // For everyday session, casual chinos+sneakers must beat formal trousers+oxfords
+    assert.ok(
+      persistedIds.includes("omar-chinos") || persistedIds.includes("omar-sneakers"),
+      `OMAR: Null-model fallback must prefer casual everyday outfit; got: ${persistedIds.join(", ")}`,
+    );
+    assert.ok(
+      !persistedIds.includes("omar-trousers") || !persistedIds.includes("omar-oxfords"),
+      `OMAR: Both formal trousers and formal oxfords must not appear together in everyday fallback; got: ${persistedIds.join(", ")}`,
+    );
   });
 });
 

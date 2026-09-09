@@ -397,26 +397,25 @@ export function deterministicWording(
   completionPieces: StyleMeCompletionPiece[] = [],
   anchor?: { label: string | null; slot: string | null; colors: string[] } | null,
 ): StyleMeWording {
-  const moodStr = moods.slice(0, 2).map((m) => m.replace(/-/g, " ")).join(" & ");
   const occasionLabel = occasion.replace(/-/g, " ");
 
   let outfitName: string;
   if (outcome === "no-eligible-product") {
-    outfitName = `${moodStr} direction`.replace(/^\w/, (c) => c.toUpperCase());
+    outfitName = `A direction for ${occasionLabel}`.replace(/^\w/, (c) => c.toUpperCase());
   } else if (primaryTitle) {
     outfitName = `${primaryTitle} for ${occasionLabel}`;
   } else {
-    outfitName = `${moodStr} for ${occasionLabel}`.replace(/^\w/, (c) => c.toUpperCase());
+    outfitName = `Your ${occasionLabel} look`.replace(/^\w/, (c) => c.toUpperCase());
   }
 
+  const anchorRef = anchor?.label ? ` Built around your ${anchor.label}.` : "";
   const baseWhy =
     outcome === "no-eligible-product"
       ? "No single piece from the catalogue matched every constraint today. The finishing layer below gives you a clear direction to work with."
       : (styleMeExplanation ??
           (desiredFeelings.includes("softer")
-            ? `This selection brings a fluid, grounded quality to your ${moodStr} mood for ${occasionLabel}.`
-            : `This selection responds to your ${moodStr} mood and your desire to feel ${desiredFeelings[0] ?? "your best"}.` +
-              ` The piece supports the way you want to move through ${occasionLabel}.`));
+            ? `A considered selection for your ${occasionLabel}, with softer fabrication and line in mind.${anchorRef}`
+            : `A considered selection for your ${occasionLabel}.${anchorRef}`));
 
   const completionNote = (() => {
     if (completionPieces.length === 0) return "";
@@ -722,8 +721,11 @@ export function buildNaiaOutfitCandidates(
 
   if (bDiffersFromA) {
     // Reconstruct B from the per-slot winners, keeping non-open-slot pieces (e.g. outerwear) from A.
+    // nonBSlotPieces: only pieces whose slot is NOT in B_SLOTS (outerwear, bag, jewelry, etc.).
+    // The anchor is in bPiecesMap when anchor.slot is in B_SLOTS, so excluding B_SLOTS here
+    // prevents the anchor from appearing twice (once via bSlotPieces and once here).
     const nonBSlotPieces = candidateA.pieces.filter(
-      (p) => !B_SLOTS.has(p.slot) || p.closetId === anchor.id,
+      (p) => !B_SLOTS.has(p.slot),
     );
     const bSlotPieces = Array.from(bPiecesMap.values()).filter(
       (p) => p.closetId !== anchor.id || p.slot === (anchor.slot as string),
@@ -982,6 +984,12 @@ const OCCASION_FORMALITY_TARGET: Record<string, { min: number; max: number }> = 
   "active":    { min: 1, max: 1 },
 };
 
+// Maps each StyleMe session occasion ID (canonical engine IDs post-mapping) to the
+// Canonical session→closet vocabulary bridge. Imported and re-exported here so
+// callers that import from styleme-result.server.ts continue to work unchanged.
+export { SESSION_OCCASION_TO_CLOSET_TOKENS } from "./styleme-occasion-tokens.js";
+import { matchesSessionOccasion } from "./styleme-occasion-tokens.js";
+
 // formalityConditional narrows the target range (intersection, not expansion).
 const FORMALITY_CONDITIONAL_ADJUSTMENTS: Record<string, { min: number; max: number }> = {
   "formality-relaxed": { min: 1, max: 2 },
@@ -1111,7 +1119,7 @@ export function evaluateCompleteOutfit(
     const occasionStatus =
       itemOccasions.length === 0
         ? "no-metadata"
-        : itemOccasions.includes(session.occasion)
+        : matchesSessionOccasion(itemOccasions, session.occasion)
           ? "match"
           : "not-listed";
     const pieceRole = getPieceRole(p.slot);
@@ -1217,7 +1225,7 @@ export function buildCandidateOccasionEvidence(
       const occasionStatus: PieceOccasionStatus =
         itemOccasions.length === 0
           ? "no-metadata"
-          : itemOccasions.includes(occasion)
+          : matchesSessionOccasion(itemOccasions, occasion)
             ? "match"
             : "not-listed";
       const pieceRole = getPieceRole(p.slot as string);
@@ -1247,44 +1255,6 @@ export function buildCandidateOccasionEvidence(
     });
   }
   return result;
-}
-
-// Deterministic fallback — selects the candidate with the best occasion quality
-// using a normalized comparison. Never defaults unconditionally to the first candidate.
-//
-// Ranking formula (each step is a tiebreaker for the previous):
-// 1. Fewer explicit non-matches (piece.occasions exists but excludes session.occasion).
-//    "no-metadata" is neutral — it does NOT count as a mismatch.
-// 2. Higher occasion coverage ratio (matching / known; 1.0 when no known metadata).
-//    An extra matched optional piece only improves the ratio if it offsets another mismatch.
-// 3. Higher base+shoe match count (core garment occasion fit outweighs discretionary layers).
-// 4. Fewer optional pieces (don't reward adding an extra outerwear/bag that happens to be tagged;
-//    an extra matched optional in an otherwise tied outfit is not additional evidence).
-// 5. First candidate retained (deterministic).
-export function selectOccasionAwareFallback(
-  candidates: OutfitCandidate[],
-  evidenceMap: Map<string, CandidateOccasionEvidence>,
-): OutfitCandidate {
-  return candidates.reduce((best, c) => {
-    const eC = evidenceMap.get(c.id);
-    const eBest = evidenceMap.get(best.id);
-    if (!eC) return best;
-    if (!eBest) return c;
-    // 1. Fewer explicit non-matches wins
-    if (eC.explicitNonMatchCount < eBest.explicitNonMatchCount) return c;
-    if (eC.explicitNonMatchCount > eBest.explicitNonMatchCount) return best;
-    // 2. Higher coverage ratio wins (×1000 to avoid float precision edge cases)
-    const cRatio = Math.round(eC.occasionCoverageRatio * 1000);
-    const bRatio = Math.round(eBest.occasionCoverageRatio * 1000);
-    if (cRatio > bRatio) return c;
-    if (cRatio < bRatio) return best;
-    // 3. Higher base+shoe match count wins
-    if (eC.baseAndShoeMatchCount > eBest.baseAndShoeMatchCount) return c;
-    if (eC.baseAndShoeMatchCount < eBest.baseAndShoeMatchCount) return best;
-    // 4. Fewer optional pieces wins (no implicit reward for extra optional layer with an occasion tag)
-    if (eC.optionalPieceCount < eBest.optionalPieceCount) return c;
-    return best; // 5. First candidate retained
-  }, candidates[0]);
 }
 
 // Staging-only: logs normalized selection evidence without altering the selection path.
@@ -1323,7 +1293,7 @@ function logNaiaSelectionDiag(data: {
 // ── nAia candidate selection Claude call ─────────────────────────────────────
 // Single Claude call that selects the best outfit candidate AND generates all
 // outfit wording plus per-piece notes. No second AI round trip.
-// Returns null on failure; caller uses selectOccasionAwareFallback.
+// Returns null on failure; caller falls back to rankedCandidates[0] (compositeScore order).
 
 interface NaiaSelectionResponse {
   selectedCandidate: string;
@@ -1647,6 +1617,12 @@ export async function callClaudeForNaiaSelection(
     `- perfumeNote: 1 sentence of scent direction (type of notes, not a brand name)\n` +
     `- perPieceNotes: array of { "id": "<closetId>", "note": "<one sentence>" } for every piece in the selected candidate. Each note names what that specific piece contributes to this look — its colour role, proportion, or occasion fit. Use the garment name given in the candidate list.`;
 
+  const diagLog = (stage: string, extra?: Record<string, unknown>) => {
+    if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+      console.log("[nAia-model-failure]", JSON.stringify({ stage, ...extra }));
+    }
+  };
+
   try {
     const result = await Promise.race<NaiaSelectionResponse | null>([
       callClaudeJSON<NaiaSelectionResponse>({
@@ -1658,19 +1634,39 @@ export async function callClaudeForNaiaSelection(
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000)),
     ]);
 
-    if (!result || typeof result !== "object") return null;
-    if (!result.outfitName || !result.whyThisWorks || !result.confidenceBoost) return null;
-    if (result.selectedCandidate !== "A" && result.selectedCandidate !== "B" && result.selectedCandidate !== "C" && result.selectedCandidate !== "D") return null;
+    if (!result || typeof result !== "object") {
+      diagLog(result === null ? "timeout-or-null" : "non-object-response");
+      return null;
+    }
+    if (!result.outfitName || !result.whyThisWorks || !result.confidenceBoost) {
+      diagLog("missing-required-fields", {
+        hasName: !!result.outfitName,
+        hasWhy: !!result.whyThisWorks,
+        hasBoost: !!result.confidenceBoost,
+        hasCandidate: !!result.selectedCandidate,
+      });
+      return null;
+    }
+    if (result.selectedCandidate !== "A" && result.selectedCandidate !== "B" && result.selectedCandidate !== "C" && result.selectedCandidate !== "D") {
+      diagLog("invalid-candidate-id", { returnedId: String(result.selectedCandidate).slice(0, 10) });
+      return null;
+    }
 
     // Server validation: selected candidate must exist in the offered list
     const selectedCandidate = candidates.find((c) => c.id === result.selectedCandidate);
-    if (!selectedCandidate) return null;
+    if (!selectedCandidate) {
+      diagLog("candidate-not-offered", { returnedId: result.selectedCandidate });
+      return null;
+    }
 
     const outfitName = String(result.outfitName).slice(0, 80);
     const whyThisWorks = String(result.whyThisWorks);
     const confidenceBoost = String(result.confidenceBoost);
 
-    if (containsBlockedTerms(`${outfitName} ${whyThisWorks} ${confidenceBoost}`)) return null;
+    if (containsBlockedTerms(`${outfitName} ${whyThisWorks} ${confidenceBoost}`)) {
+      diagLog("blocked-terms");
+      return null;
+    }
 
     // Accept per-piece notes only for IDs in the selected candidate — discard anything else.
     const validIds = new Set(selectedCandidate.pieces.map((p) => p.closetId));
@@ -1698,9 +1694,54 @@ export async function callClaudeForNaiaSelection(
       },
       perPieceNotes,
     };
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+      console.log("[nAia-model-error]", JSON.stringify(categorizeModelError(err)));
+    }
     return null;
   }
+}
+
+// Safe error categorizer — extracts only non-sensitive diagnostic fields.
+// Never logs prompts, customer data, raw provider responses, or API keys.
+function categorizeModelError(err: unknown): {
+  category: string;
+  name: string;
+  message: string;
+  httpStatus?: number;
+  errorCode?: string;
+} {
+  if (!(err instanceof Error)) {
+    return { category: "unknown", name: "UnknownError", message: "Non-Error thrown" };
+  }
+  const name = err.name ?? "Error";
+  // Truncate message to avoid leaking prompt fragments in edge cases
+  const message = String(err.message ?? "").slice(0, 200);
+  // Detect common provider/network error shapes
+  const anyErr = err as Record<string, unknown>;
+  const httpStatus = typeof anyErr["status"] === "number" ? anyErr["status"]
+    : typeof anyErr["statusCode"] === "number" ? anyErr["statusCode"]
+    : undefined;
+  const errorCode = typeof anyErr["error_code"] === "string" ? anyErr["error_code"]
+    : typeof anyErr["code"] === "string" ? anyErr["code"]
+    : undefined;
+
+  let category: string;
+  if (message.includes("JSON") || message.includes("parse")) {
+    category = "json-parse";
+  } else if (message.includes("timeout") || message.includes("timed out") || name === "TimeoutError") {
+    category = "timeout";
+  } else if (httpStatus !== undefined) {
+    category = httpStatus >= 500 ? "provider-server-error" : httpStatus === 429 ? "rate-limit" : "provider-client-error";
+  } else if (name === "AbortError") {
+    category = "timeout";
+  } else if (message.includes("fetch") || message.includes("network") || message.includes("ECONNRESET")) {
+    category = "network";
+  } else {
+    category = "unknown";
+  }
+
+  return { category, name, message, ...(httpStatus !== undefined ? { httpStatus } : {}), ...(errorCode ? { errorCode } : {}) };
 }
 
 // ── Outfit completion layer ───────────────────────────────────────────────────
@@ -2983,9 +3024,21 @@ export async function computeStyleMeResult(
       // Pre-sort candidates best-fit-first before giving them to the model.
       // The model receives a list already ranked by whole-outfit suitability so it
       // can make a fine-grained judgment among pre-validated good candidates.
-      const rankedCandidates = [...filteredCandidates].sort(
-        (a, b) => (outfitScores.get(b.id)?.compositeScore ?? 0) - (outfitScores.get(a.id)?.compositeScore ?? 0),
-      );
+      // Tiebreak order when compositeScores are equal:
+      //   1. within-target formality beats overdressed/underdressed
+      //   2. smaller formality deviation (closer to target edge)
+      //   3. array order (stable — last resort only when candidates are genuinely equivalent)
+      const formalityPriority = (s: OutfitSuitabilityScore | undefined) =>
+        s?.formalityFit === "within-target" ? 1 : 0;
+      const rankedCandidates = [...filteredCandidates].sort((a, b) => {
+        const sa = outfitScores.get(a.id);
+        const sb = outfitScores.get(b.id);
+        const scoreDiff = (sb?.compositeScore ?? 0) - (sa?.compositeScore ?? 0);
+        if (Math.abs(scoreDiff) > 0.001) return scoreDiff;
+        const fDiff = formalityPriority(sb) - formalityPriority(sa);
+        if (fDiff !== 0) return fDiff;
+        return (sa?.formalityOvershoot ?? 0) - (sb?.formalityOvershoot ?? 0);
+      });
 
       // Single selection-and-wording call only. No second AI round trip on failure.
       const naiaResult = await _callNaiaSelection(

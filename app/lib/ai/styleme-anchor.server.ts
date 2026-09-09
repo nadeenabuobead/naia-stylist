@@ -10,6 +10,7 @@ import { getAllCatalogProducts } from "./naia-catalog.js";
 import type { NadineAnchorInput, ClosetAnchorInput, AnchorInput } from "./styleme-recommendation.types.js";
 import prisma from "../../db.server.js";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "../../lib/cloudinary-admin.server.js";
+import { matchesSessionOccasion } from "./styleme-occasion-tokens.js";
 
 const VALID_HANDLES = new Set(getAllCatalogProducts().map((p) => p.handle));
 
@@ -163,7 +164,7 @@ export function scoreClosetItemForSession(
 ): number {
   let score = 0;
 
-  if (item.occasions.includes(signals.occasion)) score += 10;
+  if (matchesSessionOccasion(item.occasions, signals.occasion)) score += 10;
 
   for (const mood of signals.moods) {
     if (item.styleTags.includes(mood)) score += 3;
@@ -325,9 +326,9 @@ export async function autoSelectClosetAnchor(
   // not a block). A higher-scoring incompatible item must not prevent a lower-scoring
   // compatible item from being selected.
   const isOccasionCompatible = (item: AutoSelectItem): boolean =>
-    item.occasions.includes(signals.occasion)      // explicit match
-    || item.occasions.length === 0                 // no tags → versatile
-    || !item.garmentRelationships.includes("occasion-only"); // other-occasion tags, no restriction
+    matchesSessionOccasion(item.occasions, signals.occasion)  // normalized match
+    || item.occasions.length === 0                            // no tags → versatile
+    || !item.garmentRelationships.includes("occasion-only");  // other-occasion tags, no restriction
 
   const winnerEntry = scored.find(s => s.score > 0 && isOccasionCompatible(s.item));
   if (!winnerEntry) return null;
