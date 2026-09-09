@@ -1316,7 +1316,7 @@ function logNaiaSelectionDiag(data: {
   fallbackReason?: string;
   finalCandidateId: string;
 }): void {
-  if (process.env.VERCEL_ENV === "production") return;
+  if (process.env.NAIA_STYLEME_DIAGNOSTICS !== "true") return;
   console.log("[nAia-selection-diag]", JSON.stringify(data));
 }
 
