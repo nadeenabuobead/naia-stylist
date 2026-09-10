@@ -380,7 +380,7 @@ describe("CTA — StyleMe try-on CTA integration", () => {
       alternatives: [],
       closetAnchorLabel: null,
       pairingNote: null,
-      finishingLayer: { shoes: "x", bag: "x", accessories: "x", hair: "x", colourDirection: "x" },
+      finishingLayer: { shoes: "x", bag: "x", accessories: "x", hair: "x", beauty: null, colourDirection: "x" },
       songReason: "x",
       song,
       rawRecommendation: { outcome: "nadine-recommendation" as const, primary: null, alternatives: [], anchor: null, evidenceCodes: [] },

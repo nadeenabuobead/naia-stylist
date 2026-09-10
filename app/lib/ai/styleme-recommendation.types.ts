@@ -147,6 +147,10 @@ export interface StyleMeEngineInput {
   // Used by computeStyleMeResult to detect duplicate combinations in New Look.
   prevOutfitClosetIds?: string[];
   mode?: StyleMeMode;
+  // Finishing/presentation context only — controls whether gender-coded optional finishing
+  // categories (Hair, Beauty/Makeup) are appropriate to generate.
+  // Has ZERO influence on item scoring, candidate selection, ranking, formality, or occasion.
+  gender?: string | null;
 }
 
 // ─── Normalized anchors ───────────────────────────────────────────────────────

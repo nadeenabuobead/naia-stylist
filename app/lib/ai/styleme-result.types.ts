@@ -43,6 +43,7 @@ export interface StyleMeFinishingLayer {
   bag: string | null;
   accessories: string | null;
   hair: string | null;
+  beauty: string | null;
   colourDirection: string | null;
 }
 

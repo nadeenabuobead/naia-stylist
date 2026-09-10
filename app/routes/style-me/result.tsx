@@ -587,6 +587,8 @@ export async function action({ request }: ActionFunctionArgs) {
             : {}),
         }),
         anchor,
+        // Finishing/presentation context only — zero engine scoring.
+        gender: naiaCustomer?.onboardingProfile?.gender ?? null,
       });
 
       const loadClosetItems = naiaCustomer
@@ -727,6 +729,8 @@ export async function action({ request }: ActionFunctionArgs) {
           state: session.state,
           intentions: session.intentions ?? [],
         }),
+        // Finishing/presentation context only — zero engine scoring.
+        gender: naiaCustomer?.onboardingProfile?.gender ?? null,
       });
 
       const regenLoadClosetItems = naiaCustomer

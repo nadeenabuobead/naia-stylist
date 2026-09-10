@@ -136,6 +136,8 @@ export function buildEngineInput(params: {
   state?: string;
   stateOtherText?: string; // free text when state === "other"; context only
   intentions?: string[];
+  // Finishing/presentation context only — zero engine scoring.
+  gender?: string | null;
 }): StyleMeEngineInput {
   return {
     session: {
@@ -157,6 +159,7 @@ export function buildEngineInput(params: {
     recentlyShownHandles: params.recentlyShownHandles ?? [],
     recentlyShownClosetIds: params.recentlyShownClosetIds,
     mode: params.mode,
+    gender: params.gender ?? null,
   };
 }
 
@@ -215,6 +218,7 @@ const GENERIC_FINISHING: StyleMeFinishingLayer = {
   bag: null,
   accessories: null,
   hair: null,
+  beauty: null,
   colourDirection: null,
 };
 
@@ -223,6 +227,9 @@ type HairLayerContext = {
   formalityConditional: string | null;
   formalityScore?: number;
   hairDirectionTokens?: string[];
+  // Finishing/presentation context only — controls gender-coded optional finishing categories.
+  // Zero influence on item scoring, candidate selection, or outfit ranking.
+  gender?: string | null;
 };
 
 // Derives a specific, actionable hair direction from outfit context.
@@ -326,6 +333,66 @@ function deriveHairDirection(ctx: HairLayerContext): string {
   return "Loose and natural, or a simple half-up — whatever feels most considered today.";
 }
 
+// Derives occasion × formality beauty/makeup direction for woman customers.
+// Does not prescribe specific products, techniques, or looks — stays flexible and optional in tone.
+function deriveBeautyDirection(ctx: HairLayerContext): string {
+  const { occasion, formalityConditional, formalityScore = 0.5 } = ctx;
+  const isDressy =
+    formalityConditional === "formality-polished" ||
+    formalityConditional === "formality-occasion" ||
+    (formalityConditional == null && formalityScore >= 0.7);
+  const isSmart =
+    !isDressy &&
+    (formalityConditional === "formality-smart" ||
+      (formalityConditional == null && formalityScore >= 0.45));
+  const occ = occasion || "not-sure";
+
+  if (occ === "work") {
+    if (isDressy) return "A polished, clean finish — smooth base, defined brow, neutral lip.";
+    if (isSmart) return "Fresh and put-together — light base, groomed brows, a subtle lip.";
+    return "Keep it minimal — a tinted moisturiser and a clean lip is plenty.";
+  }
+  if (occ === "date-night") {
+    if (isDressy) return "A considered finish — glowy base, softly defined eye, a lip that suits the mood.";
+    if (isSmart) return "A little more polish — fresh skin, defined lashes, a hint of colour.";
+    return "Easy and intentional — a glowy skin finish and a simple lip.";
+  }
+  if (occ === "special-event") {
+    if (isDressy) return "A polished, finished look — clean base, defined features, lip that complements the outfit.";
+    if (isSmart) return "A little more than everyday — smooth base, a defined feature or two.";
+    return "A touch more considered — something that feels right for the occasion.";
+  }
+  if (occ === "dinner") {
+    if (isDressy) return "A refined finish — smooth base, subtle depth, a considered lip.";
+    if (isSmart) return "A step up from everyday — a little definition, a fresh glow.";
+    return "Easy but intentional — fresh skin, a bit of mascara, a simple lip.";
+  }
+  if (occ === "girls-night") {
+    if (isDressy) return "Something with a bit more finish — glowy skin, a little more definition if that feels right.";
+    if (isSmart) return "More of a look than a regular day — whatever feels fun and considered.";
+    return "Easy glam — mascara, a fun lip, or nothing. Whatever suits the mood.";
+  }
+  if (occ === "family") {
+    if (isDressy) return "A tidy, put-together finish — clean base, groomed brows.";
+    if (isSmart) return "Fresh-faced and easy — tinted SPF or a light base is plenty.";
+    return "Light and fresh — go as minimal as you like.";
+  }
+  if (occ === "travel") {
+    if (isDressy) return "A clean, polished finish — easy to wear for the journey.";
+    if (isSmart) return "Minimal and practical — tinted SPF, mascara, that's it.";
+    return "Low-maintenance — whatever you'll feel good in while on the move.";
+  }
+  if (occ === "everyday") {
+    if (isDressy) return "A polished base and subtle definition — effortless but considered.";
+    if (isSmart) return "A clean, fresh face — light base, natural lashes.";
+    return "Keep it fresh and easy — whatever you'd reach for naturally.";
+  }
+  // Fallback
+  if (isDressy) return "A polished, considered finish that complements the look.";
+  if (isSmart) return "A fresh, slightly more defined finish than everyday.";
+  return "Light and natural — whatever feels right for the day.";
+}
+
 export function buildFinishingLayer(
   handle: string | null,
   ctx: HairLayerContext = { occasion: "not-sure", formalityConditional: null },
@@ -335,13 +402,33 @@ export function buildFinishingLayer(
   const formalityScore = product?.parsed.scalars.formalityScore ?? 0.5;
   // prose tokens first; ctx.hairDirectionTokens is the extension point for future signals (selfie, closet AI)
   const hairDirectionTokens = prose?.hairStylingDirection ?? ctx.hairDirectionTokens ?? [];
+  const effectiveCtx = { ...ctx, formalityScore, hairDirectionTokens };
+
+  const gender = ctx.gender ?? null;
+  let hair: string | null = null;
+  let beauty: string | null = null;
+
+  if (gender === "woman") {
+    // woman: always generate hair (tokens refine when available); always generate beauty
+    hair = deriveHairDirection(effectiveCtx);
+    beauty = deriveBeautyDirection(effectiveCtx);
+  } else if (gender === "man") {
+    // man: hair only when product prose provides explicit grounded direction; never beauty
+    hair = hairDirectionTokens.length > 0 ? deriveHairDirection(effectiveCtx) : null;
+    beauty = null;
+  } else {
+    // another-gender / prefer-not-to-say / null/undefined:
+    // Hair and Beauty require explicit grounded evidence — do not assume female presentation.
+    hair = hairDirectionTokens.length > 0 ? deriveHairDirection(effectiveCtx) : null;
+    beauty = null;
+  }
+
   return {
     shoes: prose?.shoeDirection || GENERIC_FINISHING.shoes,
     bag: prose ? (extractBagSentence(prose.accessoriesDirection) || null) : null,
     accessories: prose ? (stripBagLanguage(prose.accessoriesDirection) || null) : null,
-    hair: hairDirectionTokens.length > 0
-      ? deriveHairDirection({ ...ctx, formalityScore, hairDirectionTokens })
-      : null,
+    hair,
+    beauty,
     colourDirection: prose?.colorDirection || null,
   };
 }
@@ -2958,10 +3045,12 @@ export async function computeStyleMeResult(
   const styleMeExplanation = catalogProduct?.parsed.prose.styleMeExplanation ?? null;
   const primaryTitle = catalogProduct?.parsed.identity.verifiedTitle ?? primary?.title ?? null;
 
-  // Finishing layer from catalog prose — pass session context for contextual hair direction
+  // Finishing layer from catalog prose — pass session + presentation context.
+  // gender is finishing/presentation only: controls hair/beauty generation, zero engine influence.
   const finishingLayer = buildFinishingLayer(primaryHandle, {
     occasion: session.occasion,
     formalityConditional: session.formalityConditional ?? null,
+    gender: engineInput.gender ?? null,
   });
 
   // Closet anchor label and image (used for both closet-led and nadine anchors)
@@ -3620,7 +3709,7 @@ export function buildDbPayload(result: StyleMeCustomerResult, occasion?: string)
     confidenceBoost: result.confidenceBoost,
     perfumeRec: result.perfumeNote,
     hairstyleRec: finishingLayer.hair || null,
-    makeupVibeRec: null,
+    makeupVibeRec: finishingLayer.beauty || null,
     songRec: `"${song.title}" by ${song.artist}`,
     songArtist: song.artist,
     items,
