@@ -392,65 +392,31 @@ function stripBagLanguage(accessoriesDir: string): string {
 function buildFallbackOutfitTitle(
   pieces: Array<{ slot: string; label: string | null; colors: string[]; material?: string | null }>,
   occasion: string,
-  context?: { intentions?: string[]; desiredFeelings?: string[] },
+  context?: { desiredFeelings?: string[] },
 ): string {
-  const intentions = context?.intentions ?? [];
   const feelings = context?.desiredFeelings ?? [];
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-  const wantsSofter   = feelings.includes("softer");
-  const wantsSharper  = feelings.includes("more-confident") || feelings.includes("sharper");
-  const wantsFeminine = feelings.includes("more-feminine");
-  const wantsEasy     = intentions.includes("make-it-easy") || intentions.includes("feel-like-myself");
-  const wantsTogether = intentions.includes("put-together");
-  const wantsGrounded = intentions.includes("ground-me");
-  const isWork    = occasion === "work";
-  const isEvening = occasion === "dinner" || occasion === "date-night";
-  const isNight   = occasion === "girls-night" || occasion === "special-event";
+  const wantsSofter  = feelings.includes("softer") || feelings.includes("more-feminine");
+  const wantsSharper = feelings.includes("more-confident") || feelings.includes("sharper");
 
-  // Collect material tokens from structured closet metadata only (not inferred from name)
-  const materials = [...new Set(
-    pieces.map((p) => p.material).filter((m): m is string => !!m).map((m) => cap(m))
-  )];
-  const [mat] = materials;
+  const mat = pieces.map((p) => p.material).filter((m): m is string => !!m)[0];
+  const colors = [...new Set(pieces.flatMap((p) => p.colors ?? []).filter(Boolean))];
 
-  // Material-present paths — natural English, no "QUALIFIER MATERIAL and COLOR" formula
   if (mat) {
-    if (wantsSofter || wantsFeminine) return `Softened ${mat}`;   // "Softened Denim"
-    if (wantsSharper)  return `${mat}, Sharpened`;                // "Denim, Sharpened"
-    if (wantsEasy && isWork) return `Polished ${mat}`;            // "Polished Denim"
-    if (wantsEasy)     return `Easy ${mat}`;                      // "Easy Denim"
-    if (wantsTogether) return `${mat}, Kept Sharp`;               // "Denim, Kept Sharp"
-    if (wantsGrounded) return `Simple ${mat}`;                    // "Simple Denim"
-    if (isWork)        return `${mat}, Quietly Sharp`;            // "Denim, Quietly Sharp"
-    if (isEvening || isNight) return `${mat} for the Evening`;    // "Denim for the Evening"
-    return `Clean ${mat}`;                                        // "Clean Denim"
+    if (wantsSofter)  return `Softened ${cap(mat)}`;
+    if (wantsSharper) return `${cap(mat)}, Sharpened`;
+    const accent = colors.find((c) => c.toLowerCase() !== mat.toLowerCase());
+    return accent ? `${cap(accent)} and ${cap(mat)}` : cap(mat);
   }
 
-  // No material — editorial tone phrases only (never "COLOR and COLOR, QUALIFIER")
-  if (wantsSofter || wantsFeminine) return "Soft Lines";
-  if (wantsSharper)  return "Clean Lines, Sharpened";
-  if (wantsEasy && isWork) return "Quietly Put Together";
-  if (wantsEasy)     return "Polished Ease";
-  if (wantsTogether) return "Quietly Put Together";
-  if (wantsGrounded) return "Grounded and Simple";
-  if (isWork)        return "Quietly Put Together";
-  if (isEvening)     return "Quietly Considered";
-  if (isNight)       return "Simply Dressed Up";
-
-  // Last resort — occasion phrase (no color formula)
-  const occasionFallbacks: Record<string, string> = {
-    "everyday":      "Simply Put Together",
-    "work":          "Quietly Put Together",
-    "dinner":        "Quietly Considered",
-    "date-night":    "A Considered Evening",
-    "girls-night":   "Simply Dressed Up",
-    "special-event": "Dressed for the Occasion",
-    "travel":        "Easy and Ready",
-    "family":        "Relaxed and Ready",
-    "not-sure":      "Clean and Simple",
-  };
-  return occasionFallbacks[occasion] ?? "Simply Put Together";
+  const [c1, c2] = colors.slice(0, 2);
+  if (c1 && c2) {
+    if (wantsSharper) return `${cap(c1)} and ${cap(c2)}, Sharpened`;
+    return `${cap(c1)} and ${cap(c2)}`;
+  }
+  if (c1) return wantsSofter ? `Softened ${cap(c1)}` : cap(c1);
+  return `A look for ${occasion.replace(/-/g, " ")}`;
 }
 
 export function deterministicWording(
@@ -473,10 +439,7 @@ export function deterministicWording(
   } else if (primaryTitle) {
     outfitName = `${primaryTitle} for ${occasionLabel}`;
   } else if (selectedGarments?.length) {
-    outfitName = buildFallbackOutfitTitle(selectedGarments, occasion, {
-      intentions: context?.intentions,
-      desiredFeelings,
-    });
+    outfitName = buildFallbackOutfitTitle(selectedGarments, occasion, { desiredFeelings });
   } else {
     outfitName = `Your ${occasionLabel} look`.replace(/^\w/, (c) => c.toUpperCase());
   }
@@ -563,65 +526,38 @@ export function deterministicWording(
 
     const sentences: string[] = [];
 
-    // Base sentence: explain the core clothing relationship
+    // Core clothing relationship
     if (topPiece && bottomPiece) {
       if (bottomMat && topColor && topBottomContrast) {
-        sentences.push(
-          `The ${bottomMat} makes the combination feel easier for ${occasionLabel} — it relaxes the ${topColor} top without making the overall look feel too casual.`,
-        );
+        sentences.push(`The ${bottomMat} gives the combination an easy base alongside the ${topColor} top.`);
       } else if (topColor && topBottomContrast) {
-        sentences.push(
-          `The ${cap(topColor)} and ${cap(bottomColor!)} are a clean pairing — the contrast between them gives the outfit its shape.`,
-        );
+        sentences.push(`The ${cap(topColor)} and ${cap(bottomColor!)} give the outfit a clean contrast.`);
       } else if (topPiece.label && bottomPiece.label) {
-        sentences.push(
-          `The ${topPiece.label} and ${bottomPiece.label} share a clean palette, which keeps the combination easy and unfussy.`,
-        );
+        sentences.push(`The ${topPiece.label} and ${bottomPiece.label} keep a consistent palette.`);
       }
     } else if (dressPiece?.label) {
-      sentences.push(
-        `The ${dressPiece.label} forms a single, complete base — nothing to balance, which is part of the ease.`,
-      );
+      sentences.push(`The ${dressPiece.label} gives the look a single, complete base.`);
     } else if (selectedGarments[0]?.label) {
-      sentences.push(`The ${selectedGarments[0].label} defines the direction for the look.`);
+      sentences.push(`The ${selectedGarments[0].label} sets the tone for the look.`);
     }
 
-    // Shoe sentence: what the shoes do to the palette
+    // Shoe contribution
     if (shoe?.label) {
       if (shoeIsLight && paletteIsDark) {
-        sentences.push(
-          `The ${shoe.label} stop the combination from feeling too heavy — they lighten things up and keep the outfit from feeling overdressed.`,
-        );
+        sentences.push(`The ${shoe.label} lighten the darker palette.`);
       } else if (shoeColor && topColor && shoeColor.toLowerCase() === topColor.toLowerCase()) {
-        sentences.push(
-          `The ${shoe.label} carry the colour through to the base, which closes the look neatly.`,
-        );
+        sentences.push(`The ${shoe.label} carry the colour through to the base.`);
       } else if (shoeColor && bottomColor && shoeColor.toLowerCase() === bottomColor.toLowerCase()) {
-        sentences.push(`The ${shoe.label} continue the colour down to the base, keeping the look cohesive.`);
-      } else {
-        sentences.push(`The ${shoe.label} finish the look at the base without competing with what's above.`);
+        sentences.push(`The ${shoe.label} continue the colour down to the base.`);
       }
     }
 
-    // Bag sentence: what the bag does
-    if (bag?.label) {
-      if (bagMatchesTop && topColor) {
-        sentences.push(
-          `The ${bag.label} quietly repeats the colour of the top, so you get a finished look without adding another colour into the mix.`,
-        );
-      } else if (bagColor && !bagMatchesTop) {
-        sentences.push(
-          `The ${bag.label} brings in a ${bagColor} note at the end — a small detail that doesn't compete with the rest.`,
-        );
-      }
+    // Bag contribution
+    if (bag?.label && bagMatchesTop && topColor) {
+      sentences.push(`The ${bag.label} repeats the ${topColor} without adding another colour.`);
     }
 
-    // Intention/feeling note — only when supported by evidence
-    if (desiredFeelings.includes("softer")) {
-      sentences.push("The overall combination keeps the construction soft.");
-    }
-
-    // Optional closing: profile identity note when feel-like-myself + profileHint is available
+    // Profile identity note when feel-like-myself + profileHint is available
     if (
       context?.intentions?.includes("feel-like-myself") &&
       context.profileHint &&
@@ -635,28 +571,25 @@ export function deterministicWording(
               .replace(/ silhouettes$/, "")
               .trim();
       if (hintClean) {
-        sentences.push(`This stays close to the ${hintClean} looks you naturally gravitate towards.`);
+        sentences.push(`The combination stays close to the ${hintClean} style you tend to gravitate towards.`);
       } else {
-        sentences.push(`This stays close to what you already know works for you.`);
+        sentences.push(`This stays close to what you already know works.`);
       }
     }
 
-    whyThisWorks = sentences.join(" ").trim() ||
-      `A clean, simple ${occasionLabel} selection.`;
+    whyThisWorks = sentences.join(" ").trim() || `A straightforward ${occasionLabel} combination.`;
 
-    // Confidence boost: one specific stylist observation about the key styling decision
+    // Confidence boost
     if (shoeIsLight && paletteIsDark && shoe?.label) {
-      confidenceBoost = `Don't add much more here — the ${shoe.label} are already giving the darker outfit enough contrast.`;
+      confidenceBoost = `The ${shoe.label} are already giving the outfit its contrast — keep the rest straightforward.`;
     } else if (topBottomContrast && bottomMat && topColor) {
-      confidenceBoost = `The contrast between the ${topColor} top and the ${bottomMat} is already doing the work — keep the rest simple.`;
+      confidenceBoost = `The ${topColor} and ${bottomMat} are the two main decisions here — keep accessories simple.`;
     } else if (topBottomContrast && topColor && bottomColor) {
-      confidenceBoost = `The ${cap(topColor)} and ${cap(bottomColor!)} contrast is already doing the work — keep the rest of the look simple.`;
+      confidenceBoost = `The ${cap(topColor)} and ${cap(bottomColor!)} contrast is doing the work — keep the rest simple.`;
     } else if (bagMatchesTop && bag?.label && topColor) {
-      confidenceBoost = `The ${bag.label} closes back into the ${topColor} — keep it there, it's doing the right thing.`;
-    } else if (bottomMat && topColor) {
-      confidenceBoost = `The ${bottomMat} and ${topColor} are the two decisions here — everything else follows from them.`;
+      confidenceBoost = `The ${bag.label} closes the palette back into the ${topColor} — keep it there.`;
     } else {
-      confidenceBoost = `The palette is already making the decisions — keep the rest of the look simple.`;
+      confidenceBoost = `Keep the accessories simple — the palette is already balanced.`;
     }
   } else {
     whyThisWorks = `${baseWhy}${completionNote}${softerNote}${anchorNote}`;
@@ -990,9 +923,7 @@ export function buildNaiaOutfitCandidates(
 // Exported so tests can assert on tone spec and prohibited-phrase coverage.
 
 export const STYLEME_WORDING_SYSTEM_PROMPT =
-  "You are nAia — an excellent personal stylist who is also emotionally intelligent and psychologically perceptive. " +
-  "You understand clothes, understand style, and understand what a person needs from getting dressed today. " +
-  "observant, calm, tasteful, decisive, understated, specific. Warm without sentimentality. Respond ONLY with valid JSON, no extra text.\n" +
+  "You are nAia — observant, calm, tasteful, decisive, understated, specific. Warm without sentimentality. Respond ONLY with valid JSON, no extra text.\n" +
   "Rules you must follow:\n" +
   "1. Base all wording strictly on the evidence provided in the user message. Do not invent product details, fit, fabric, colour, or compatibility not stated.\n" +
   "2. Do not select, rank, add, remove, or reorder products. Do not introduce any product name or handle not explicitly given to you.\n" +
@@ -1001,18 +932,9 @@ export const STYLEME_WORDING_SYSTEM_PROMPT =
   "'Absolutely!', 'Obsessed.', 'Gorgeous!', \"You're going to look amazing\", 'This is so you!', 'Trust me.', 'Game-changer.', 'perfect for you', 'matches your vibe', 'super flattering'.\n" +
   "5. Do not describe clothing as treating, curing, or improving any mental or emotional condition.\n" +
   "6. No marketing filler, clichés, or inflated superlatives.\n" +
-  "7. confidenceBoost must be a styling observation about the garment, not how the customer will feel. It may acknowledge what the customer asked for but must not promise what the clothes will make them feel. Name one styling decision or relationship in the outfit: a contrast, a proportion, what NOT to add. One sentence, perceptive, specific, slightly warm. " +
-  "Do not say: 'Confidence is your best accessory', 'Own the look', 'Keep the rest clean', 'One strong direction is enough.' " +
-  "Instead: name a specific styling observation or outfit relationship. Example: 'The blazer is already giving the structure — keep the rest clean and you won't need to do much else.'\n" +
+  "7. The confidenceBoost field must be a styling observation about the garment, not how the customer will feel. Name one styling decision or relationship in the outfit: a contrast, a proportion, what NOT to add. One sentence, specific. Example: 'The blazer is already giving the structure — keep the rest clean.'\n" +
   "8. State (how the customer is feeling today) is CONTEXT ONLY — it describes the customer's brief, not the reason clothing was chosen. Forbidden pattern: \"Because you're stressed, I chose something oversized.\" Required: justify the clothing choice through Intention, Physical Need, garment properties, or Profile evidence — never through State.\n" +
-  "9. Show real styling judgment. Write as if you are standing beside the customer, looking at the finished outfit together. Be concrete about what each piece does to the others — how the denim relaxes the top, how the shoes change the energy, how the bag closes the palette. Avoid invented vocabulary a client would need to decode — not 'visual weight', 'register', 'contrast beat', 'restrained edit', 'lower palette'. Natural language, one clear point per sentence.\n" +
-  "10. outfitName must feel like a stylist named the look — evoking its palette, material character, styling tension, or identity. Good examples: 'Neutral Ground, Sharpened', 'Quiet Authority in Wool and Denim', 'Oxford, Denim, and a Sharpened Edge', 'Easy Black in Denim'. " +
-  "Never: 'Your everyday look', '[intention] for [occasion]', a descriptive list of product names, 'A direction for...', 'Your [occasion] look'.\n" +
-  "11. whyThisWorks must connect three things: (1) what the customer wanted TODAY, (2) what this person consistently looks like at their best (PASSPORT identity), and (3) how the specific pieces in this outfit satisfy both. " +
-  "Do not list metadata. Do not produce a technical outfit summary. Write 2–4 natural sentences. Never invent fit or comfort claims not stated in the brief.\n" +
-  "12. The intention subtly shapes voice — not clothing rules. nAia may acknowledge what the customer asked for today (e.g. 'You wanted something everyday that still feels like you') but must not predict what the clothes will make them feel. 'Feel like myself' → acknowledge familiar identity without sentiment; 'more confident' → clarity and composure; 'softer' → fabric and line; 'sharper' → clean, deliberate lines; 'less exposed' → coverage handled with care, no body-shaming language.\n" +
-  "13. Per-piece notes (when present): for each piece, explain what it does to the outfit — its colour role, proportional contribution, how it changes the other pieces. " +
-  "Avoid slot templates: 'upper note', 'lower anchor', 'sets the tone', 'holds it together', 'grounds the look', 'completes the look', 'grounds the finish'. Each note should describe a specific relationship.";
+  "9. Write as someone who knows this customer well — translate their style identity naturally into the wording. Do not reference 'your Passport', 'the Passport', or 'your Profile' in customer-facing copy.";
 
 // ── Claude wording call (with 8-second timeout + graceful fallback) ───────────
 
@@ -1106,9 +1028,9 @@ async function callClaudeForWording(
               (anchorContext ? anchorContext : "") +
               (aspirationContext ? ` ${aspirationContext}` : "") +
               `\n\nReturn a JSON object with exactly these fields:\n` +
-              `- outfitName: name this look as a stylist would — evoke its palette, material character, or styling tension (≤8 words). Examples: 'Easy Black in Denim', 'Neutral Ground, Sharpened', 'Quiet in Navy and Bone'. Never: 'Your everyday look', '[intention] for [occasion]'.\n` +
-              `- whyThisWorks: 2–3 sentences connecting what the customer wanted today, who they consistently are, and how this specific piece delivers both. Explain the styling relationship — proportion, colour role, register. Never invent fit or comfort claims not stated in the brief.\n` +
-              `- confidenceBoost: what a trusted stylist says at the end — one perceptive, specific note about a styling decision or outfit relationship. Not a slogan. Not emotional affirmation. Name something real: a contrast, proportion decision, what NOT to add. Example: 'The blazer is already giving the structure — keep the rest clean and you won't need to do much else.'\n` +
+              `- outfitName: creative name for this look (≤8 words)\n` +
+              `- whyThisWorks: 2–3 sentences explaining why this works for this customer — never invent fit/comfort claims not stated above\n` +
+              `- confidenceBoost: 1 short styling observation — about the garment, not the customer's feelings. Example: "The blazer is already giving the structure — keep the rest clean."\n` +
               `- perfumeNote: 1 sentence of scent direction (type of notes, not a brand name)`,
           },
         ],
@@ -1809,7 +1731,7 @@ export async function callClaudeForNaiaSelection(
     "\n9. This look is built entirely from the customer's own Closet — no brand products. Do not reference product brand names, shopping links, or purchasing. Treat the Closet pieces as the primary styling elements." +
     "\n10. When writing perPieceNotes, use the correct grammatical number for each garment name. Known plural garments include: trousers, jeans, shorts, leggings, chinos, joggers, loafers, sneakers, trainers, boots, heels, flats, slides, earrings, sunglasses, cufflinks. When the number is uncertain, use a participial phrase ('Adding a contrast note…', 'Grounding the look…') to avoid subject-verb mismatch. Do not use generic phrases like 'completes the look', 'forms the upper half', or 'brings the outfit into appropriate territory'." +
     "\n11. You will receive two structured sections: TODAY'S BRIEF and STYLE PASSPORT. Use both together. Priority order: (1) hard constraints — dressing boundaries, persistent coverage preferences, firm colour avoidances; (2) today's occasion and any explicit formality signal; (3) today's stated intention; (4) today's state (context only — do not convert state into garment rules); (5) Passport identity, silhouette, and aspirations. The Passport should differentiate between equally occasion-appropriate candidates — it must not override today's occasion or make an inappropriate outfit acceptable. An everyday brief with a Classic & Polished Passport should produce an everyday outfit that feels classic and polished — not workwear." +
-    "\n12. GROUNDING RULE: Every claim in whyThisWorks, confidenceBoost, and perPieceNotes must be traceable to today's answers, the Passport, or actual garment metadata. If Fit / Comfort says 'None selected', do not mention waistbands, coverage needs, ease, softness, body-hugging, structure, or any physical comfort claim. If a Passport preference influenced the choice, you may name it explicitly: e.g. 'Jeans and sneakers keep this everyday, while the tailored blazer honours your Classic & Polished Passport.'";
+    "\n12. GROUNDING RULE: Every claim in whyThisWorks, confidenceBoost, and perPieceNotes must be traceable to today's answers, the Passport, or actual garment metadata. If Fit / Comfort says 'None selected', do not mention waistbands, coverage needs, ease, softness, body-hugging, structure, or any physical comfort claim. If a style identity preference influenced the choice, name it naturally: e.g. 'Jeans and sneakers keep this everyday, while the tailored blazer adds the Classic & Polished sharpness that's central to how they dress.'";
 
   const userMessage =
     `Select the best complete outfit for this customer and write all wording for it.\n\n` +
@@ -1820,11 +1742,11 @@ export async function callClaudeForNaiaSelection(
     `Choose the candidate that is: (1) appropriate for today's occasion and formality; (2) compliant with all hard constraints; (3) the strongest expression of this customer's Passport identity within today's context.\n\n` +
     `Return a JSON object with exactly these fields:\n` +
     `- selectedCandidate: ${candidates.map((c) => `"${c.id}"`).join(" or ")}\n` +
-    `- outfitName: name this look as a stylist would — evoke its palette, material character, styling tension, or identity (≤8 words). Examples: 'Easy Black in Denim', 'Neutral Ground, Sharpened', 'Quiet in Navy and Bone'. Never: 'Your everyday look', '[intention] for [occasion]', a list of garment names.\n` +
-    `- whyThisWorks: 2–4 sentences connecting TODAY (what the customer wanted) + PASSPORT (who they consistently are) + THE OUTFIT (how these specific pieces deliver both). Start with what they wanted today, explain how the pieces satisfy both their brief and their identity. Never invent fit or comfort claims not stated in TODAY'S BRIEF.\n` +
-    `- confidenceBoost: what a trusted stylist says at the end — one perceptive, specific note about a styling decision or outfit relationship. Not a slogan. Not emotional affirmation. Name something real: a contrast, a proportion decision, what NOT to add. Example: "Don't add much more here — the contrast between the black top and blue denim is already giving the outfit its shape."\n` +
+    `- outfitName: creative name for this look (≤8 words)\n` +
+    `- whyThisWorks: 2–3 sentences grounded in today's brief and the customer's style identity — never invent fit/comfort needs not stated above\n` +
+    `- confidenceBoost: 1 short styling observation — about the garment, not the customer's feelings. Example: "The blazer is already giving the structure — keep the rest clean."\n` +
     `- perfumeNote: 1 sentence of scent direction (type of notes, not a brand name)\n` +
-    `- perPieceNotes: array of { "id": "<closetId>", "note": "<1–2 sentences>" } for every piece in the selected candidate. For each piece: explain what it does to the rest of the outfit — its colour role, how it affects proportion, why it's right for this person today. Do not use slot templates ('upper note', 'lower anchor', 'sets the tone', 'grounds the look', 'holds it together'). Each note should describe a specific relationship. Use the garment name from the candidate list.`;
+    `- perPieceNotes: array of { "id": "<closetId>", "note": "<one sentence>" } for every piece in the selected candidate. Each note names what that specific piece contributes to this look — its colour role, proportion, or occasion fit. Use the garment name given in the candidate list.`;
 
   const t0 = Date.now();
   const diagLog = (stage: string, extra?: Record<string, unknown>) => {
@@ -3522,7 +3444,7 @@ function buildClosetGarmentNote(
     }
     if (anchorSlot === "bottom" && anchorLabel) {
       if (primaryColor && anchorColor && primaryColor.toLowerCase() !== anchorColor.toLowerCase()) {
-        return `Your ${name} gives the combination its definition — the contrast with the ${anchorLabel} is what keeps the look from feeling too casual.`;
+        return `Your ${name} provides contrast alongside the ${anchorLabel}.`;
       }
       return `Your ${name} works above the ${anchorLabel} and gives the upper half of the look its tone.`;
     }
@@ -3538,7 +3460,7 @@ function buildClosetGarmentNote(
     }
     if (anchorSlot === "top" && anchorLabel) {
       if (primaryColor && anchorColor && primaryColor.toLowerCase() !== anchorColor.toLowerCase()) {
-        return `Your ${name} relax the combination — the contrast with the ${anchorLabel} is what keeps the outfit from feeling too dressed-up.`;
+        return `Your ${name} bring a contrasting note below the ${anchorLabel}.`;
       }
       return `Your ${name} sits below the ${anchorLabel} and keeps the base of the look steady.`;
     }

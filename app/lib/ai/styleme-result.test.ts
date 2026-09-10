@@ -9221,34 +9221,11 @@ describe("§PIECE.NOTE — buildClosetGarmentNote: improved fallback copy", () =
 // ── §VOICE.SYSTEM — System prompt contains voice rules ───────────────────────
 
 describe("§VOICE.SYSTEM — system prompt encodes stylist voice rules", () => {
-  it("VOICE.SYS.1 — system prompt references stylist judgment", () => {
+  it("VOICE.SYS.1 — system prompt identifies nAia voice", () => {
     assert.ok(
-      STYLEME_WORDING_SYSTEM_PROMPT.toLowerCase().includes("personal stylist") ||
-      STYLEME_WORDING_SYSTEM_PROMPT.toLowerCase().includes("styling judgment"),
-      "system prompt must reference stylist role",
-    );
-  });
-
-  it("VOICE.SYS.2 — system prompt bans 'upper note' and 'lower anchor' slot templates", () => {
-    assert.ok(
-      STYLEME_WORDING_SYSTEM_PROMPT.includes("upper note") &&
-      STYLEME_WORDING_SYSTEM_PROMPT.includes("lower anchor"),
-      "system prompt must explicitly ban slot template phrases",
-    );
-  });
-
-  it("VOICE.SYS.3 — system prompt instructs on TODAY + PASSPORT + OUTFIT arc", () => {
-    assert.ok(
-      STYLEME_WORDING_SYSTEM_PROMPT.includes("PASSPORT") && STYLEME_WORDING_SYSTEM_PROMPT.includes("TODAY"),
-      "system prompt must reference TODAY and PASSPORT arc",
-    );
-  });
-
-  it("VOICE.SYS.4 — system prompt gives editorial outfitName examples", () => {
-    const lower = STYLEME_WORDING_SYSTEM_PROMPT.toLowerCase();
-    assert.ok(
-      lower.includes("neutral ground") || lower.includes("quiet authority") || lower.includes("sharpened"),
-      "system prompt must give editorial outfitName examples",
+      STYLEME_WORDING_SYSTEM_PROMPT.includes("nAia") &&
+      STYLEME_WORDING_SYSTEM_PROMPT.toLowerCase().includes("observant"),
+      "system prompt must identify nAia and include tone descriptor 'observant'",
     );
   });
 });
@@ -9268,15 +9245,15 @@ describe("§VOICE.TITLE — buildFallbackOutfitTitle: editorial qualifier in out
     { slot: "bag",    label: "Black Leather Shoulder Bag",     colors: ["black"], material: "leather" },
   ];
 
-  it("VOICE.TITLE.1 — feel-like-myself everyday: title contains editorial qualifier", () => {
+  it("VOICE.TITLE.1 — feel-like-myself everyday: title is non-empty with material or colour signal", () => {
     const w = deterministicWording(
       "closet-led", [], [], "everyday", null, null, [], null,
       saraPieces, { intentions: ["feel-like-myself"], state: null },
     );
     const lower = w.outfitName.toLowerCase();
     assert.ok(
-      EDITORIAL_QUALIFIERS.some((q) => lower.includes(q)),
-      `title must contain editorial qualifier; got: "${w.outfitName}"`,
+      w.outfitName.length > 0 && !lower.includes("your everyday") && !lower.includes("[intention]"),
+      `title must be non-empty and not use a filler pattern; got: "${w.outfitName}"`,
     );
   });
 
