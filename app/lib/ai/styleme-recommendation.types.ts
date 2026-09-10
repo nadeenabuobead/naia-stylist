@@ -308,6 +308,7 @@ export interface StyleMeRecommendationResult {
     label: string | null;
     imageUrl: string | null;
     colors?: string[];
+    material?: string | null;
     stylingNotes?: string;
   }>;
 }

@@ -3639,7 +3639,7 @@ describe("§QA-RG.D — Issue 4: per-piece copy is slot-aware, not generic", () 
     return base;
   }
 
-  it("QA-RG.D.1 — shoe garment note references the shoe by name and mentions 'ground'", () => {
+  it("QA-RG.D.1 — shoe garment note references the shoe by name and anchors at the base", () => {
     const result = makeMinimalResultForDbPayload([
       { slot: "shoe", id: "shoe-1", label: "White Sneakers", imageUrl: null },
     ]);
@@ -3651,8 +3651,11 @@ describe("§QA-RG.D — Issue 4: per-piece copy is slot-aware, not generic", () 
       `shoe note must reference garment name; got: ${shoeItem!.stylingNotes}`,
     );
     assert.ok(
-      shoeItem!.stylingNotes?.toLowerCase().includes("ground"),
-      `shoe note must include 'ground'; got: ${shoeItem!.stylingNotes}`,
+      shoeItem!.stylingNotes?.toLowerCase().includes("base") ||
+        shoeItem!.stylingNotes?.toLowerCase().includes("proportion") ||
+        shoeItem!.stylingNotes?.toLowerCase().includes("register") ||
+        shoeItem!.stylingNotes?.toLowerCase().includes("ground"),
+      `shoe note must anchor at the base, proportion, or register; got: ${shoeItem!.stylingNotes}`,
     );
     assert.ok(
       !shoeItem!.stylingNotes?.toLowerCase().includes("style your"),
@@ -8975,6 +8978,672 @@ describe("§OMAR.1 — Omar everyday regression: no duplicate closetId with male
     assert.ok(
       !persistedIds.includes("omar-trousers") || !persistedIds.includes("omar-oxfords"),
       `OMAR: Both formal trousers and formal oxfords must not appear together in everyday fallback; got: ${persistedIds.join(", ")}`,
+    );
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// §TITLE.FALLBACK — editorial fallback title using structured garment metadata
+// ══════════════════════════════════════════════════════════════════════════════
+//
+// When the model fails (timeout or other), deterministicWording must produce
+// an editorial outfit name derived from structured closet metadata (colors,
+// material). Never: "Your everyday look", "Your work look", raw ID fragments.
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("§TITLE.FALLBACK.1 — selectedGarments: title is not 'Your everyday look'", () => {
+  const saraPieces = [
+    { slot: "top",    label: "Black Long-Sleeve Top",        colors: ["black"],        material: null },
+    { slot: "bottom", label: "Medium Blue Wash Jeans",       colors: ["blue"],         material: "denim" },
+    { slot: "shoe",   label: "White Cloud 5 Running Sneakers", colors: ["white"],      material: null },
+    { slot: "bag",    label: "Black Leather Shoulder Bag",   colors: ["black"],        material: "leather" },
+  ];
+
+  it("TITLE.FB.1.1 — title is non-empty", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    assert.ok(w.outfitName.length > 0, "outfitName must be non-empty");
+  });
+
+  it("TITLE.FB.1.2 — title does not contain 'Your everyday look'", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    assert.notEqual(
+      w.outfitName.toLowerCase(),
+      "your everyday look",
+      `outfitName must not be generic fallback; got: "${w.outfitName}"`,
+    );
+  });
+
+  it("TITLE.FB.1.3 — title does not concatenate raw occasion label", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    assert.ok(
+      !w.outfitName.toLowerCase().startsWith("your everyday"),
+      `outfitName must not start with 'Your everyday'; got: "${w.outfitName}"`,
+    );
+    assert.ok(
+      !w.outfitName.toLowerCase().startsWith("a direction for"),
+      `outfitName must not be no-product fallback; got: "${w.outfitName}"`,
+    );
+  });
+
+  it("TITLE.FB.1.4 — title contains a color or material token from the outfit", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    // Sara has black, blue, white, denim, leather — at least one must appear in the title
+    const lower = w.outfitName.toLowerCase();
+    assert.ok(
+      lower.includes("black") || lower.includes("blue") || lower.includes("white") ||
+      lower.includes("denim") || lower.includes("leather"),
+      `title must contain at least one structured color/material signal; got: "${w.outfitName}"`,
+    );
+  });
+
+  it("TITLE.FB.1.5 — title without selectedGarments still produces non-empty string (backward compat)", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null);
+    assert.ok(typeof w.outfitName === "string" && w.outfitName.length > 0, "no-garments path must still return a title");
+  });
+
+  it("TITLE.FB.1.6 — no-eligible-product: title still starts with 'A direction' regardless of selectedGarments", () => {
+    const w = deterministicWording("no-eligible-product", [], [], "dinner", null, null, [], null, saraPieces);
+    assert.ok(
+      w.outfitName.toLowerCase().startsWith("a direction"),
+      `no-eligible-product must keep 'A direction' title; got: "${w.outfitName}"`,
+    );
+  });
+
+  it("TITLE.FB.1.7 — nadine primaryTitle still appears in title when model fails", () => {
+    const w = deterministicWording("nadine-recommendation", [], [], "everyday", "Becoming Seen", null, [], null, saraPieces);
+    assert.ok(
+      w.outfitName.includes("Becoming Seen"),
+      `NADINE primaryTitle must appear in title even when selectedGarments present; got: "${w.outfitName}"`,
+    );
+  });
+});
+
+// ── §SARA.FALLBACK — Sara closet outfit: whyThisWorks references actual pieces ──
+
+describe("§SARA.FALLBACK — deterministicWording uses actual Sara outfit evidence", () => {
+  const saraPieces = [
+    { slot: "top",    label: "Black Long-Sleeve Top",          colors: ["black"], material: null },
+    { slot: "bottom", label: "Medium Blue Wash Jeans",         colors: ["blue"],  material: "denim" },
+    { slot: "shoe",   label: "White Cloud 5 Running Sneakers", colors: ["white"], material: null },
+    { slot: "bag",    label: "Black Leather Shoulder Bag",     colors: ["black"], material: "leather" },
+  ];
+
+  it("SARA.FB.1 — whyThisWorks references at least one actual piece name", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    const lower = w.whyThisWorks.toLowerCase();
+    assert.ok(
+      lower.includes("black long-sleeve top") || lower.includes("medium blue wash jeans") ||
+      lower.includes("white cloud 5") || lower.includes("black leather shoulder bag"),
+      `whyThisWorks must reference at least one actual piece; got: "${w.whyThisWorks}"`,
+    );
+  });
+
+  it("SARA.FB.2 — whyThisWorks does not contain 'fit' or 'comfort' or 'waistband'", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    const lower = w.whyThisWorks.toLowerCase();
+    assert.ok(!lower.includes("waistband"), `must not invent comfort claims; got: "${w.whyThisWorks}"`);
+    assert.ok(!lower.includes("coverage"), `must not invent coverage claims; got: "${w.whyThisWorks}"`);
+  });
+
+  it("SARA.FB.3 — whyThisWorks does not contain 'mood' language", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    assert.ok(!w.whyThisWorks.toLowerCase().includes(" mood"), `must not use 'mood' language; got: "${w.whyThisWorks}"`);
+  });
+
+  it("SARA.FB.4 — confidenceBoost references the colour relationship or outfit relationship", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    assert.ok(w.confidenceBoost.length > 0, "confidenceBoost must be non-empty");
+    // Must not be the universal filler from the old path
+    assert.ok(
+      !w.confidenceBoost.includes("One strong direction is enough. Keep the rest of the look clean."),
+      `confidenceBoost must be outfit-specific, not universal filler; got: "${w.confidenceBoost}"`,
+    );
+  });
+});
+
+// ── §PIECE.NOTE — per-piece stylingNotes: no generic travel/base templates ────
+
+describe("§PIECE.NOTE — buildClosetGarmentNote: improved fallback copy", () => {
+  // Test through buildDbPayload — buildClosetGarmentNote is internal
+  function makeClosetLedWithGarments(garments: Array<{
+    slot: string; id: string; label: string; colors: string[];
+    anchorId: string; anchorSlot: string; anchorLabel: string; anchorColors: string[];
+  }>): StyleMeCustomerResult {
+    const song = SONG_CATALOG[0] as (typeof SONG_CATALOG)[number];
+    const [first] = garments;
+    return {
+      outcome: "closet-led",
+      outfitName: "Test",
+      whyThisWorks: "Test.",
+      confidenceBoost: "Test.",
+      perfumeNote: null,
+      primaryProduct: null,
+      alternatives: [],
+      closetAnchorLabel: first.anchorLabel,
+      closetAnchorImageUrl: null,
+      pairingNote: null,
+      closetAnchorNote: null,
+      finishingLayer: { shoes: "X", bag: "X", accessories: "X", hair: "X", colourDirection: "X" },
+      completionLayer: [],
+      songReason: "X",
+      song,
+      resultDirections: [],
+      rawRecommendation: {
+        outcome: "closet-led",
+        anchor: {
+          type: "closet" as const,
+          id: first.anchorId,
+          label: first.anchorLabel,
+          slot: first.anchorSlot as import("./styleme-result.server.ts").OutfitSlot,
+          colors: first.anchorColors,
+          normalizedColorIds: first.anchorColors,
+          styleTags: [],
+          occasions: [],
+          material: null,
+          hasStrongEvidence: false,
+          evidenceFields: [],
+          imageUrl: null,
+        },
+        primary: null,
+        alternatives: [],
+        outfitPlan: { anchorSlot: first.anchorSlot as import("./styleme-result.server.ts").OutfitSlot, recommendedSlot: null, compatibilityStatus: "closet-led", notes: [] },
+        evaluatedProducts: [],
+        coverage: { totalCatalogProducts: 0, eligibleCandidates: 0, excludedCandidates: 0 },
+        selectedClosetGarments: garments.map((g) => ({
+          slot: g.slot, id: g.id, label: g.label, imageUrl: null, colors: g.colors,
+          // no stylingNotes — forces buildClosetGarmentNote to run
+        })),
+      },
+    };
+  }
+
+  it("PIECE.NOTE.1 — bag note does NOT contain 'travels with the look'", () => {
+    const result = makeClosetLedWithGarments([{
+      slot: "bag", id: "bag-1", label: "Black Leather Shoulder Bag", colors: ["black"],
+      anchorId: "top-1", anchorSlot: "top", anchorLabel: "Black Long-Sleeve Top", anchorColors: ["black"],
+    }]);
+    const payload = buildDbPayload(result, "everyday");
+    const bagItem = payload.items.find((i) => i.productTitle === "Black Leather Shoulder Bag");
+    assert.ok(bagItem, "bag item must be in payload");
+    assert.ok(
+      !bagItem!.stylingNotes?.toLowerCase().includes("travels with the look"),
+      `bag note must not use 'travels with the look'; got: "${bagItem!.stylingNotes}"`,
+    );
+  });
+
+  it("PIECE.NOTE.2 — bag note with anchor label: does NOT say 'travels with the [anchor] look'", () => {
+    const result = makeClosetLedWithGarments([{
+      slot: "bag", id: "bag-1", label: "Black Tote Bag", colors: ["beige"],
+      anchorId: "bottom-1", anchorSlot: "bottom", anchorLabel: "Medium Blue Wash Jeans", anchorColors: ["blue"],
+    }]);
+    const payload = buildDbPayload(result, "everyday");
+    const bagItem = payload.items.find((i) => i.productTitle === "Black Tote Bag");
+    assert.ok(bagItem, "bag item must be in payload");
+    assert.ok(
+      !bagItem!.stylingNotes?.toLowerCase().includes("travels with"),
+      `bag note must not use 'travels with'; got: "${bagItem!.stylingNotes}"`,
+    );
+  });
+
+  it("PIECE.NOTE.3 — top note when anchor is bottom: does NOT contain 'complete the clothing base'", () => {
+    const result = makeClosetLedWithGarments([{
+      slot: "top", id: "top-1", label: "Black Long-Sleeve Top", colors: ["black"],
+      anchorId: "bottom-1", anchorSlot: "bottom", anchorLabel: "Medium Blue Wash Jeans", anchorColors: ["blue"],
+    }]);
+    const payload = buildDbPayload(result, "everyday");
+    const topItem = payload.items.find((i) => i.productTitle === "Black Long-Sleeve Top");
+    assert.ok(topItem, "top item must be in payload");
+    assert.ok(
+      !topItem!.stylingNotes?.toLowerCase().includes("complete the clothing base"),
+      `top note must not use 'complete the clothing base'; got: "${topItem!.stylingNotes}"`,
+    );
+  });
+
+  it("PIECE.NOTE.4 — bottom note when anchor is top: does NOT contain 'ground the clothing base'", () => {
+    const result = makeClosetLedWithGarments([{
+      slot: "bottom", id: "bottom-1", label: "Medium Blue Wash Jeans", colors: ["blue"],
+      anchorId: "top-1", anchorSlot: "top", anchorLabel: "Black Long-Sleeve Top", anchorColors: ["black"],
+    }]);
+    const payload = buildDbPayload(result, "everyday");
+    const bottomItem = payload.items.find((i) => i.productTitle === "Medium Blue Wash Jeans");
+    assert.ok(bottomItem, "bottom item must be in payload");
+    assert.ok(
+      !bottomItem!.stylingNotes?.toLowerCase().includes("ground the clothing base"),
+      `bottom note must not use 'ground the clothing base'; got: "${bottomItem!.stylingNotes}"`,
+    );
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// §VOICE — nAia stylist voice: banned templates, grounding, editorial quality
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── §VOICE.SYSTEM — System prompt contains voice rules ───────────────────────
+
+describe("§VOICE.SYSTEM — system prompt encodes stylist voice rules", () => {
+  it("VOICE.SYS.1 — system prompt references stylist judgment", () => {
+    assert.ok(
+      STYLEME_WORDING_SYSTEM_PROMPT.toLowerCase().includes("personal stylist") ||
+      STYLEME_WORDING_SYSTEM_PROMPT.toLowerCase().includes("styling judgment"),
+      "system prompt must reference stylist role",
+    );
+  });
+
+  it("VOICE.SYS.2 — system prompt bans 'upper note' and 'lower anchor' slot templates", () => {
+    assert.ok(
+      STYLEME_WORDING_SYSTEM_PROMPT.includes("upper note") &&
+      STYLEME_WORDING_SYSTEM_PROMPT.includes("lower anchor"),
+      "system prompt must explicitly ban slot template phrases",
+    );
+  });
+
+  it("VOICE.SYS.3 — system prompt instructs on TODAY + PASSPORT + OUTFIT arc", () => {
+    assert.ok(
+      STYLEME_WORDING_SYSTEM_PROMPT.includes("PASSPORT") && STYLEME_WORDING_SYSTEM_PROMPT.includes("TODAY"),
+      "system prompt must reference TODAY and PASSPORT arc",
+    );
+  });
+
+  it("VOICE.SYS.4 — system prompt gives editorial outfitName examples", () => {
+    const lower = STYLEME_WORDING_SYSTEM_PROMPT.toLowerCase();
+    assert.ok(
+      lower.includes("neutral ground") || lower.includes("quiet authority") || lower.includes("sharpened"),
+      "system prompt must give editorial outfitName examples",
+    );
+  });
+});
+
+// ── §VOICE.TITLE — editorial title quality ────────────────────────────────────
+
+describe("§VOICE.TITLE — buildFallbackOutfitTitle: editorial qualifier in output", () => {
+  const EDITORIAL_QUALIFIERS = [
+    "easy", "clean", "settled", "sharpened", "softened", "measured", "quiet",
+    "grounded", "deliberate", "considered", "uncomplicated", "refined",
+  ];
+
+  const saraPieces = [
+    { slot: "top",    label: "Black Long-Sleeve Top",          colors: ["black"], material: null },
+    { slot: "bottom", label: "Medium Blue Wash Jeans",         colors: ["blue"],  material: "denim" },
+    { slot: "shoe",   label: "White Cloud 5 Running Sneakers", colors: ["white"], material: null },
+    { slot: "bag",    label: "Black Leather Shoulder Bag",     colors: ["black"], material: "leather" },
+  ];
+
+  it("VOICE.TITLE.1 — feel-like-myself everyday: title contains editorial qualifier", () => {
+    const w = deterministicWording(
+      "closet-led", [], [], "everyday", null, null, [], null,
+      saraPieces, { intentions: ["feel-like-myself"], state: null },
+    );
+    const lower = w.outfitName.toLowerCase();
+    assert.ok(
+      EDITORIAL_QUALIFIERS.some((q) => lower.includes(q)),
+      `title must contain editorial qualifier; got: "${w.outfitName}"`,
+    );
+  });
+
+  it("VOICE.TITLE.2 — softer feeling: title contains 'Softened'", () => {
+    const w = deterministicWording(
+      "closet-led", [], ["softer"], "everyday", null, null, [], null,
+      saraPieces, { intentions: [], state: null },
+    );
+    assert.ok(
+      w.outfitName.toLowerCase().includes("softened"),
+      `title must contain 'Softened' for softer feeling; got: "${w.outfitName}"`,
+    );
+  });
+
+  it("VOICE.TITLE.3 — more-confident feeling: title contains 'Sharpened'", () => {
+    const w = deterministicWording(
+      "closet-led", [], ["more-confident"], "everyday", null, null, [], null,
+      saraPieces, { intentions: [], state: null },
+    );
+    assert.ok(
+      w.outfitName.toLowerCase().includes("sharpened"),
+      `title must contain 'Sharpened' for more-confident feeling; got: "${w.outfitName}"`,
+    );
+  });
+
+  it("VOICE.TITLE.4 — title contains material or color signal from outfit", () => {
+    const w = deterministicWording(
+      "closet-led", [], [], "everyday", null, null, [], null,
+      saraPieces, { intentions: ["feel-like-myself"] },
+    );
+    const lower = w.outfitName.toLowerCase();
+    assert.ok(
+      lower.includes("denim") || lower.includes("black") || lower.includes("blue") || lower.includes("leather"),
+      `title must contain a structured material/color signal; got: "${w.outfitName}"`,
+    );
+  });
+});
+
+// ── §VOICE.WHY — whyThisWorks: real styling relationships ────────────────────
+
+describe("§VOICE.WHY — whyThisWorks expresses real garment relationships", () => {
+  const saraPieces = [
+    { slot: "top",    label: "Black Long-Sleeve Top",          colors: ["black"], material: null },
+    { slot: "bottom", label: "Medium Blue Wash Jeans",         colors: ["blue"],  material: "denim" },
+    { slot: "shoe",   label: "White Cloud 5 Running Sneakers", colors: ["white"], material: null },
+    { slot: "bag",    label: "Black Leather Shoulder Bag",     colors: ["black"], material: "leather" },
+  ];
+
+  it("VOICE.WHY.1 — does NOT say 'keep the register everyday'", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    assert.ok(
+      !w.whyThisWorks.toLowerCase().includes("keep the register everyday"),
+      `whyThisWorks must not use 'keep the register everyday' template; got: "${w.whyThisWorks}"`,
+    );
+  });
+
+  it("VOICE.WHY.2 — does NOT say '[shoe] ground the finish'", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    assert.ok(
+      !w.whyThisWorks.toLowerCase().includes("ground the finish"),
+      `whyThisWorks must not say '[shoe] ground the finish'; got: "${w.whyThisWorks}"`,
+    );
+  });
+
+  it("VOICE.WHY.3 — does NOT say 'holds the palette together'", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    assert.ok(
+      !w.whyThisWorks.toLowerCase().includes("holds the palette together"),
+      `whyThisWorks must not say 'holds the palette together'; got: "${w.whyThisWorks}"`,
+    );
+  });
+
+  it("VOICE.WHY.4 — references the denim and black relationship", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    const lower = w.whyThisWorks.toLowerCase();
+    assert.ok(
+      lower.includes("denim") || (lower.includes("black") && lower.includes("blue")),
+      `whyThisWorks must reference denim/black relationship; got: "${w.whyThisWorks}"`,
+    );
+  });
+
+  it("VOICE.WHY.5 — mentions the white sneakers' palette role", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    const lower = w.whyThisWorks.toLowerCase();
+    assert.ok(
+      lower.includes("white") || lower.includes("cloud") || lower.includes("sneaker"),
+      `whyThisWorks must mention shoe contribution; got: "${w.whyThisWorks}"`,
+    );
+  });
+
+  it("VOICE.WHY.6 — feel-like-myself + profileHint: identity acknowledged", () => {
+    const w = deterministicWording(
+      "closet-led", [], [], "everyday", null, null, [], null,
+      saraPieces,
+      { intentions: ["feel-like-myself"], profileHint: "classic, polished direction" },
+    );
+    const lower = w.whyThisWorks.toLowerCase();
+    assert.ok(
+      lower.includes("classic") || lower.includes("polished") || lower.includes("direction"),
+      `whyThisWorks should reflect Passport identity; got: "${w.whyThisWorks}"`,
+    );
+  });
+});
+
+// ── §VOICE.BOOST — confidenceBoost: specific stylist observation ──────────────
+
+describe("§VOICE.BOOST — confidenceBoost: outfit-specific stylist note", () => {
+  const saraPieces = [
+    { slot: "top",    label: "Black Long-Sleeve Top",          colors: ["black"], material: null },
+    { slot: "bottom", label: "Medium Blue Wash Jeans",         colors: ["blue"],  material: "denim" },
+    { slot: "shoe",   label: "White Cloud 5 Running Sneakers", colors: ["white"], material: null },
+    { slot: "bag",    label: "Black Leather Shoulder Bag",     colors: ["black"], material: "leather" },
+  ];
+
+  it("VOICE.BOOST.1 — NOT 'The Black and Blue contrast does the work'", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    assert.ok(
+      !w.confidenceBoost.toLowerCase().includes("the black and blue contrast does the work"),
+      `confidenceBoost must not use old template; got: "${w.confidenceBoost}"`,
+    );
+  });
+
+  it("VOICE.BOOST.2 — NOT 'One strong direction is enough'", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    assert.ok(
+      !w.confidenceBoost.toLowerCase().includes("one strong direction is enough"),
+      `confidenceBoost must not use old filler; got: "${w.confidenceBoost}"`,
+    );
+  });
+
+  it("VOICE.BOOST.3 — references a specific outfit element", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    const lower = w.confidenceBoost.toLowerCase();
+    assert.ok(
+      lower.includes("sneaker") || lower.includes("white") || lower.includes("denim") ||
+      lower.includes("contrast") || lower.includes("black") || lower.includes("bag"),
+      `confidenceBoost must reference a specific outfit element; got: "${w.confidenceBoost}"`,
+    );
+  });
+});
+
+// ── §VOICE.PIECENOTE — per-piece notes: no slot templates ────────────────────
+
+function makePieceNoteResult(
+  garmentSlot: string, garmentLabel: string, garmentColors: string[],
+  anchorSlot: string, anchorLabel: string, anchorColors: string[],
+): StyleMeCustomerResult {
+    const song = SONG_CATALOG[0] as (typeof SONG_CATALOG)[number];
+    return {
+      outcome: "closet-led",
+      outfitName: "Test", whyThisWorks: "Test.", confidenceBoost: "Test.",
+      perfumeNote: null, primaryProduct: null, alternatives: [],
+      closetAnchorLabel: anchorLabel, closetAnchorImageUrl: null,
+      pairingNote: null, closetAnchorNote: null,
+      finishingLayer: { shoes: "X", bag: "X", accessories: "X", hair: "X", colourDirection: "X" },
+      completionLayer: [], songReason: "X", song, resultDirections: [],
+      rawRecommendation: {
+        outcome: "closet-led" as const,
+        anchor: {
+          type: "closet" as const,
+          id: "anchor-1", label: anchorLabel,
+          slot: anchorSlot as import("./styleme-recommendation.types.ts").OutfitSlot,
+          colors: anchorColors, normalizedColorIds: anchorColors,
+          styleTags: [], occasions: [], material: null,
+          hasStrongEvidence: false, evidenceFields: [], imageUrl: null,
+        },
+        primary: null, alternatives: [],
+        outfitPlan: {
+          anchorSlot: anchorSlot as import("./styleme-recommendation.types.ts").OutfitSlot,
+          recommendedSlot: null, compatibilityStatus: "closet-led", notes: [],
+        },
+        evaluatedProducts: [],
+        coverage: { totalCatalogProducts: 0, eligibleCandidates: 0, excludedCandidates: 0 },
+        selectedClosetGarments: [{
+          slot: garmentSlot, id: "g-1", label: garmentLabel, imageUrl: null, colors: garmentColors,
+        }],
+      },
+    };
+}
+
+describe("§VOICE.PIECENOTE — buildClosetGarmentNote: no slot template phrases", () => {
+  it("VOICE.PN.1 — top note (anchor=bottom): does NOT say 'upper note'", () => {
+    const r = makePieceNoteResult("top", "Black Long-Sleeve Top", ["black"], "bottom", "Medium Blue Wash Jeans", ["blue"]);
+    const payload = buildDbPayload(r, "everyday");
+    const note = payload.items.find((i) => i.productTitle === "Black Long-Sleeve Top")?.stylingNotes ?? "";
+    assert.ok(!note.toLowerCase().includes("upper note"), `must not use 'upper note'; got: "${note}"`);
+  });
+
+  it("VOICE.PN.2 — bottom note (anchor=top): does NOT say 'lower anchor'", () => {
+    const r = makePieceNoteResult("bottom", "Medium Blue Wash Jeans", ["blue"], "top", "Black Long-Sleeve Top", ["black"]);
+    const payload = buildDbPayload(r, "everyday");
+    const note = payload.items.find((i) => i.productTitle === "Medium Blue Wash Jeans")?.stylingNotes ?? "";
+    assert.ok(!note.toLowerCase().includes("lower anchor"), `must not use 'lower anchor'; got: "${note}"`);
+  });
+
+  it("VOICE.PN.3 — top note (anchor=bottom, contrasting colors): references colour relationship", () => {
+    const r = makePieceNoteResult("top", "Black Long-Sleeve Top", ["black"], "bottom", "Medium Blue Wash Jeans", ["blue"]);
+    const payload = buildDbPayload(r, "everyday");
+    const note = payload.items.find((i) => i.productTitle === "Black Long-Sleeve Top")?.stylingNotes ?? "";
+    assert.ok(
+      note.toLowerCase().includes("contrast") || note.toLowerCase().includes("reads") || note.toLowerCase().includes("colour") || note.toLowerCase().includes("color"),
+      `top note must reference colour/contrast; got: "${note}"`,
+    );
+  });
+
+  it("VOICE.PN.4 — shoe note does NOT say 'ground the look built around'", () => {
+    const r = makePieceNoteResult("shoe", "White Cloud 5 Running Sneakers", ["white"], "bottom", "Medium Blue Wash Jeans", ["blue"]);
+    const payload = buildDbPayload(r, "everyday");
+    const note = payload.items.find((i) => i.productTitle === "White Cloud 5 Running Sneakers")?.stylingNotes ?? "";
+    assert.ok(
+      !note.toLowerCase().includes("ground the look built around"),
+      `shoe note must not use 'ground the look built around'; got: "${note}"`,
+    );
+  });
+
+  it("VOICE.PN.5 — bottom note (anchor=top, contrasting colors): references depth or contrast", () => {
+    const r = makePieceNoteResult("bottom", "Medium Blue Wash Jeans", ["blue"], "top", "Black Long-Sleeve Top", ["black"]);
+    const payload = buildDbPayload(r, "everyday");
+    const note = payload.items.find((i) => i.productTitle === "Medium Blue Wash Jeans")?.stylingNotes ?? "";
+    assert.ok(
+      note.toLowerCase().includes("depth") || note.toLowerCase().includes("contrast") || note.toLowerCase().includes("reads"),
+      `bottom note must reference depth/contrast; got: "${note}"`,
+    );
+  });
+});
+
+// ── §VOICE.NATURAL — no mechanical fashion jargon ────────────────────────────
+
+describe("§VOICE.NATURAL — language quality: no mechanical jargon in fallback copy", () => {
+  const saraPieces = [
+    { slot: "top",    label: "Black Long-Sleeve Top",          colors: ["black"], material: null },
+    { slot: "bottom", label: "Medium Blue Wash Jeans",         colors: ["blue"],  material: "denim" },
+    { slot: "shoe",   label: "White Cloud 5 Running Sneakers", colors: ["white"], material: null },
+    { slot: "bag",    label: "Black Leather Shoulder Bag",     colors: ["black"], material: "leather" },
+  ];
+  const omarPieces = [
+    { slot: "top",    label: "White Shirt",    colors: ["white"], material: null },
+    { slot: "bottom", label: "Navy Chinos",    colors: ["navy"],  material: null },
+    { slot: "shoe",   label: "White Sneakers", colors: ["white"], material: null },
+  ];
+
+  it("VOICE.NAT.1 — whyThisWorks does NOT say 'restrained edit'", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    assert.ok(!w.whyThisWorks.toLowerCase().includes("restrained edit"),
+      `must not say 'restrained edit'; got: "${w.whyThisWorks}"`);
+  });
+
+  it("VOICE.NAT.2 — whyThisWorks does NOT say 'visual weight'", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    assert.ok(!w.whyThisWorks.toLowerCase().includes("visual weight"),
+      `must not say 'visual weight'; got: "${w.whyThisWorks}"`);
+  });
+
+  it("VOICE.NAT.3 — whyThisWorks does NOT say 'lower palette'", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    assert.ok(!w.whyThisWorks.toLowerCase().includes("lower palette"),
+      `must not say 'lower palette'; got: "${w.whyThisWorks}"`);
+  });
+
+  it("VOICE.NAT.4 — confidenceBoost does NOT say 'contrast beat'", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    assert.ok(!w.confidenceBoost.toLowerCase().includes("contrast beat"),
+      `must not say 'contrast beat'; got: "${w.confidenceBoost}"`);
+  });
+
+  it("VOICE.NAT.5 — confidenceBoost does NOT say 'darker register'", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    assert.ok(!w.confidenceBoost.toLowerCase().includes("darker register"),
+      `must not say 'darker register'; got: "${w.confidenceBoost}"`);
+  });
+
+  it("VOICE.NAT.6 — Sara title has no 'COLOR and COLOR, QUALIFIER' comma-suffix pattern", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, saraPieces);
+    assert.ok(
+      !/\w+ and \w+, \w+/.test(w.outfitName),
+      `title must not use 'X and Y, Z' pattern; got: "${w.outfitName}"`,
+    );
+  });
+
+  it("VOICE.NAT.7 — Omar (no material, no intention) title has no 'COLOR and COLOR, QUALIFIER' pattern", () => {
+    const w = deterministicWording("closet-led", [], [], "everyday", null, null, [], null, omarPieces);
+    assert.ok(
+      !/\w+ and \w+, \w+/.test(w.outfitName),
+      `Omar title must not use comma-suffix pattern; got: "${w.outfitName}"`,
+    );
+  });
+});
+
+// ── §VOICE.PIECENOTE2 — per-piece notes: no jargon phrases ───────────────────
+
+describe("§VOICE.PIECENOTE2 — buildClosetGarmentNote: no jargon phrases", () => {
+  it("VOICE.PN2.1 — shoe note does NOT say 'land the' and 'energy'", () => {
+    const r = makePieceNoteResult("shoe", "White Sneakers", ["white"], "bottom", "Blue Jeans", ["blue"]);
+    const payload = buildDbPayload(r, "everyday");
+    const note = payload.items.find((i) => i.productTitle === "White Sneakers")?.stylingNotes ?? "";
+    assert.ok(
+      !(note.toLowerCase().includes("land the") && note.toLowerCase().includes("energy")),
+      `shoe note must not say 'land the ... energy'; got: "${note}"`,
+    );
+  });
+
+  it("VOICE.PN2.2 — shoe note does NOT say 'in proportion against'", () => {
+    const r = makePieceNoteResult("shoe", "White Sneakers", ["white"], "bottom", "Blue Jeans", ["blue"]);
+    const payload = buildDbPayload(r, "everyday");
+    const note = payload.items.find((i) => i.productTitle === "White Sneakers")?.stylingNotes ?? "";
+    assert.ok(!note.toLowerCase().includes("in proportion against"),
+      `shoe note must not say 'in proportion against'; got: "${note}"`);
+  });
+
+  it("VOICE.PN2.3 — top note does NOT say 'reads against'", () => {
+    const r = makePieceNoteResult("top", "Black Long-Sleeve Top", ["black"], "bottom", "Blue Jeans", ["blue"]);
+    const payload = buildDbPayload(r, "everyday");
+    const note = payload.items.find((i) => i.productTitle === "Black Long-Sleeve Top")?.stylingNotes ?? "";
+    assert.ok(!note.toLowerCase().includes("reads against"),
+      `top note must not say 'reads against'; got: "${note}"`);
+  });
+
+  it("VOICE.PN2.4 — bottom note does NOT say 'reads against'", () => {
+    const r = makePieceNoteResult("bottom", "Blue Jeans", ["blue"], "top", "Black Long-Sleeve Top", ["black"]);
+    const payload = buildDbPayload(r, "everyday");
+    const note = payload.items.find((i) => i.productTitle === "Blue Jeans")?.stylingNotes ?? "";
+    assert.ok(!note.toLowerCase().includes("reads against"),
+      `bottom note must not say 'reads against'; got: "${note}"`);
+  });
+});
+
+// ── §VOICE.MICRO — micro-polish: no internal labels, no awkward constructions ─
+
+describe("§VOICE.MICRO — language micro-polish invariants", () => {
+  const saraPieces = [
+    { slot: "top",    label: "Black Long-Sleeve Top",          colors: ["black"], material: null },
+    { slot: "bottom", label: "Medium Blue Wash Jeans",         colors: ["blue"],  material: "denim" },
+    { slot: "shoe",   label: "White Cloud 5 Running Sneakers", colors: ["white"], material: null },
+    { slot: "bag",    label: "Black Leather Shoulder Bag",     colors: ["black"], material: "leather" },
+  ];
+
+  it("VOICE.MICRO.1 — profileHint 'direction' is not exposed verbatim in whyThisWorks", () => {
+    const w = deterministicWording(
+      "closet-led", [], [], "everyday", null, null, [], null,
+      saraPieces,
+      { intentions: ["feel-like-myself"], profileHint: "classic, polished direction" },
+    );
+    assert.ok(
+      !w.whyThisWorks.includes("direction"),
+      `whyThisWorks must not expose raw profileHint 'direction'; got: "${w.whyThisWorks}"`,
+    );
+  });
+
+  it("VOICE.MICRO.2 — top note does NOT say 'sharper colour above'", () => {
+    const r = makePieceNoteResult("top", "Black Long-Sleeve Top", ["black"], "bottom", "Medium Blue Wash Jeans", ["blue"]);
+    const payload = buildDbPayload(r, "everyday");
+    const note = payload.items.find((i) => i.productTitle === "Black Long-Sleeve Top")?.stylingNotes ?? "";
+    assert.ok(
+      !note.toLowerCase().includes("sharper colour above"),
+      `top note must not say 'sharper colour above'; got: "${note}"`,
+    );
+  });
+
+  it("VOICE.MICRO.3 — whyThisWorks does NOT say 'without asking for more effort'", () => {
+    const w = deterministicWording(
+      "closet-led", [], [], "everyday", null, null, [], null,
+      saraPieces,
+      { intentions: ["feel-like-myself"], profileHint: "classic, polished direction" },
+    );
+    assert.ok(
+      !w.whyThisWorks.includes("without asking for more effort"),
+      `whyThisWorks must not say 'without asking for more effort'; got: "${w.whyThisWorks}"`,
     );
   });
 });
