@@ -1302,18 +1302,7 @@ export default function StyleMeResult() {
       <div className="sm-result-bar">
         <Link to="/style-me" className="sm-result-btn">Back</Link>
         <span className="sm-result-wordmark">nAia</span>
-        {isSaved ? (
-          <span className="sm-result-btn sm-result-btn--accent">Saved</span>
-        ) : showPendingBanner ? (
-          <span style={{ width: "42px" }} />
-        ) : (
-          <button
-            onClick={() => saveFetcher.submit({ intent: "save", suggestionId: suggestion.id }, { method: "post" })}
-            className="sm-result-btn"
-          >
-            Save
-          </button>
-        )}
+        <span style={{ width: "42px" }} />
       </div>
 
       {/* ── Saved confirmation banner ── */}
@@ -2063,14 +2052,22 @@ export default function StyleMeResult() {
 
         {/* Actions */}
         <div className="sm-result-actions">
-          <Form method="post">
-            <input type="hidden" name="intent" value="start-over" />
-            <button type="submit" className="sm-result-action-btn">Start Over</button>
-          </Form>
-          <Form method="post">
-            <input type="hidden" name="intent" value="adjust-vibe" />
-            <button type="submit" className="sm-result-action-btn">Adjust Vibe</button>
-          </Form>
+          {/* PRIMARY — Save Look (hidden when pending-save banner is already handling save) */}
+          {!showPendingBanner && (
+            <button
+              type="button"
+              disabled={isSaved || saveFetcher.state !== "idle"}
+              onClick={() => {
+                if (!isSaved) {
+                  saveFetcher.submit({ intent: "save", suggestionId: suggestion.id }, { method: "post" });
+                }
+              }}
+              className={`sm-result-action-btn${isSaved ? " sm-result-action-btn--accent" : " sm-result-action-btn--primary"}`}
+            >
+              {saveFetcher.state !== "idle" && !isSaved ? "Saving…" : isSaved ? "Saved" : "Save Look"}
+            </button>
+          )}
+          {/* SECONDARY */}
           <button
             type="button"
             disabled={generateFetcher.state !== "idle"}
@@ -2079,10 +2076,19 @@ export default function StyleMeResult() {
               if (!sid) return;
               generateFetcher.submit({ intent: "regenerate", sessionId: sid }, { method: "post" });
             }}
-            className="sm-result-action-btn sm-result-action-btn--primary"
+            className="sm-result-action-btn"
           >
             {generateFetcher.state !== "idle" ? "Finding your look…" : "New Look, Same Vibe"}
           </button>
+          <Form method="post">
+            <input type="hidden" name="intent" value="adjust-vibe" />
+            <button type="submit" className="sm-result-action-btn">Adjust Vibe</button>
+          </Form>
+          {/* TERTIARY */}
+          <Form method="post">
+            <input type="hidden" name="intent" value="start-over" />
+            <button type="submit" className="sm-result-action-btn">Start Over</button>
+          </Form>
           {generateFetcher.data?.sameCombination && (
             <p className="sm-same-combination-msg">
               nAia couldn&rsquo;t find a different combination with your available pieces.

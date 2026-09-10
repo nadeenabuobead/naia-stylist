@@ -749,6 +749,111 @@ describe("StyleMe Result Actions — cleanup pass", () => {
   });
 });
 
+// ── StyleMe Result UI — Save Look relocation ─────────────────────────────────
+
+describe("StyleMe Result UI — Save Look relocation", () => {
+  function src(file: string): string {
+    const dir = join(import.meta.dirname ?? new URL(".", import.meta.url).pathname);
+    return readFileSync(join(dir, file), "utf8");
+  }
+
+  it("U1 — top-right Save control is removed from sm-result-bar", () => {
+    const text = src("result.tsx");
+    const barStart = text.indexOf("sm-result-bar");
+    const barEnd = text.indexOf("</div>", barStart);
+    const barBlock = text.slice(barStart, barEnd);
+    assert.ok(
+      !barBlock.includes('"save"') && !barBlock.includes("Save") && !barBlock.includes("intent: \"save\""),
+      "sm-result-bar must not contain any Save control",
+    );
+  });
+
+  it("U2 — sm-result-bar still contains Back link and wordmark", () => {
+    const text = src("result.tsx");
+    const barStart = text.indexOf("sm-result-bar");
+    const barEnd = text.indexOf("</div>", barStart);
+    const barBlock = text.slice(barStart, barEnd);
+    assert.ok(barBlock.includes("Back"), "sm-result-bar must still contain Back link");
+    assert.ok(barBlock.includes("sm-result-wordmark"), "sm-result-bar must still contain the nAia wordmark");
+  });
+
+  it("U3 — Save Look button exists in the bottom actions area", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("Save Look"),
+      "result.tsx must render 'Save Look' in the bottom actions area",
+    );
+  });
+
+  it("U4 — Save Look uses the existing save handler (intent: 'save')", () => {
+    const text = src("result.tsx");
+    // The bottom Save Look button must call saveFetcher.submit with intent: "save"
+    assert.ok(
+      text.includes("intent: \"save\"") || text.includes('intent: "save"'),
+      "Save Look must submit intent: 'save' via saveFetcher",
+    );
+    assert.ok(
+      text.includes("suggestionId: suggestion.id"),
+      "Save Look must pass suggestionId: suggestion.id to saveFetcher",
+    );
+  });
+
+  it("U5 — saved state: button shows 'Saved' with accent class when isSaved is true", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("sm-result-action-btn--accent"),
+      "saved state must apply sm-result-action-btn--accent modifier",
+    );
+    assert.ok(
+      text.includes("isSaved ? \"Saved\"") || text.includes('isSaved ? "Saved"'),
+      "saved state must render 'Saved' label when isSaved is true",
+    );
+  });
+
+  it("U6 — no duplicate Save controls: sm-result-bar has no save intent, bottom has exactly one", () => {
+    const text = src("result.tsx");
+    // Top bar block: no save intent
+    const barStart = text.indexOf("sm-result-bar");
+    const barEnd = text.indexOf("</div>", barStart);
+    const barBlock = text.slice(barStart, barEnd);
+    assert.ok(!barBlock.includes('"save"'), "sm-result-bar must not contain intent save");
+    // Whole file: exactly one occurrence of intent: "save" (from saveFetcher in bottom actions)
+    const saveIntentCount = (text.match(/intent: "save"/g) ?? []).length;
+    assert.strictEqual(saveIntentCount, 1, `intent: "save" must appear exactly once — found ${saveIntentCount}`);
+  });
+
+  it("U7 — existing Start Over action still present and uses intent=start-over", () => {
+    const text = src("result.tsx");
+    assert.ok(text.includes("Start Over"), "Start Over button must still be rendered");
+    assert.ok(text.includes('value="start-over"'), "Start Over must still submit intent=start-over");
+  });
+
+  it("U8 — existing Adjust Vibe action still present and uses intent=adjust-vibe", () => {
+    const text = src("result.tsx");
+    assert.ok(text.includes("Adjust Vibe"), "Adjust Vibe button must still be rendered");
+    assert.ok(text.includes('value="adjust-vibe"'), "Adjust Vibe must still submit intent=adjust-vibe");
+  });
+
+  it("U9 — existing New Look, Same Vibe action still present and uses intent=regenerate", () => {
+    const text = src("result.tsx");
+    assert.ok(text.includes("New Look, Same Vibe"), "New Look, Same Vibe must still be rendered");
+    assert.ok(text.includes('"regenerate"'), "New Look must still submit intent=regenerate");
+  });
+
+  it("U10 — sm-result-actions uses flex-wrap so buttons wrap on narrow viewports", () => {
+    const cssPath = join(
+      import.meta.dirname ?? new URL(".", import.meta.url).pathname,
+      "../..", "styles", "naia-design-system.css",
+    );
+    const css = readFileSync(cssPath, "utf8");
+    const actionsBlock = css.slice(css.indexOf(".sm-result-actions"), css.indexOf(".sm-result-actions") + 200);
+    assert.ok(
+      actionsBlock.includes("flex-wrap: wrap"),
+      "sm-result-actions must use flex-wrap: wrap for responsive layout",
+    );
+  });
+});
+
 // ── OutfitReactionWidget — Quick Feedback ────────────────────────────────────
 
 describe("OutfitReactionWidget — Quick Feedback", () => {
