@@ -212,10 +212,10 @@ function slotToItemType(slot: string): OutfitDbItemType {
 
 const GENERIC_FINISHING: StyleMeFinishingLayer = {
   shoes: "Choose footwear that feels comfortable and complements your outfit's tone.",
-  bag: "A structured bag in a neutral or tonal shade will ground the look.",
-  accessories: "Keep accessories minimal — one or two considered pieces work best.",
-  hair: "Loose and natural, or a simple half-up — whatever feels most considered today.",
-  colourDirection: "Build your palette around neutrals, adding one thoughtful accent.",
+  bag: null,
+  accessories: null,
+  hair: null,
+  colourDirection: null,
 };
 
 type HairLayerContext = {
@@ -330,28 +330,19 @@ export function buildFinishingLayer(
   handle: string | null,
   ctx: HairLayerContext = { occasion: "not-sure", formalityConditional: null },
 ): StyleMeFinishingLayer {
-  if (!handle) {
-    return {
-      ...GENERIC_FINISHING,
-      hair: deriveHairDirection(ctx),
-    };
-  }
-  const product = getProductByHandle(handle);
-  if (!product) {
-    return {
-      ...GENERIC_FINISHING,
-      hair: deriveHairDirection(ctx),
-    };
-  }
-  const prose = product.parsed.prose;
-  const formalityScore = product.parsed.scalars.formalityScore;
-  const hairDirectionTokens = prose.hairStylingDirection ?? [];
+  const product = handle ? getProductByHandle(handle) : null;
+  const prose = product?.parsed.prose ?? null;
+  const formalityScore = product?.parsed.scalars.formalityScore ?? 0.5;
+  // prose tokens first; ctx.hairDirectionTokens is the extension point for future signals (selfie, closet AI)
+  const hairDirectionTokens = prose?.hairStylingDirection ?? ctx.hairDirectionTokens ?? [];
   return {
-    shoes: prose.shoeDirection || GENERIC_FINISHING.shoes,
-    bag: extractBagSentence(prose.accessoriesDirection) || GENERIC_FINISHING.bag,
-    accessories: stripBagLanguage(prose.accessoriesDirection) || GENERIC_FINISHING.accessories,
-    hair: deriveHairDirection({ ...ctx, formalityScore, hairDirectionTokens }),
-    colourDirection: prose.colorDirection || GENERIC_FINISHING.colourDirection,
+    shoes: prose?.shoeDirection || GENERIC_FINISHING.shoes,
+    bag: prose ? (extractBagSentence(prose.accessoriesDirection) || null) : null,
+    accessories: prose ? (stripBagLanguage(prose.accessoriesDirection) || null) : null,
+    hair: hairDirectionTokens.length > 0
+      ? deriveHairDirection({ ...ctx, formalityScore, hairDirectionTokens })
+      : null,
+    colourDirection: prose?.colorDirection || null,
   };
 }
 
@@ -932,7 +923,7 @@ export const STYLEME_WORDING_SYSTEM_PROMPT =
   "4. Never use these blocked phrases or concepts: 'stunning piece', 'elevate your wardrobe', 'unleash your inner', 'therapy', 'therapeutic', 'treats', 'cures', 'clinical', 'diagnose', 'mental health', 'emotional healing', " +
   "'Absolutely!', 'Obsessed.', 'Gorgeous!', \"You're going to look amazing\", 'This is so you!', 'Trust me.', 'Game-changer.', 'perfect for you', 'matches your vibe', 'super flattering'.\n" +
   "5. Do not describe clothing as treating, curing, or improving any mental or emotional condition.\n" +
-  "6. No marketing filler, clichés, or inflated superlatives.\n" +
+  "6. No marketing filler, clichés, inflated superlatives, or internal process language — do not write 'Passport calls for', 'Passport leans toward', 'Passport gravitates toward', 'casual territory', 'without shifting the formality', 'in the register', or 'keeps the register'.\n" +
   "7. The confidenceBoost field must be one short styling observation or decision — about the garment, not how the customer will feel. Name what the garment is doing or state one concrete styling note. It must not predict how the customer will feel, affirm them emotionally, or produce a motivational conclusion. Example: 'The blazer is already giving the structure — keep the rest clean.'\n" +
   "8. State (how the customer is feeling today) is CONTEXT ONLY — it describes the customer's brief, not the reason clothing was chosen. Forbidden pattern: \"Because you're stressed, I chose something oversized.\" Required: justify the clothing choice through Intention, Physical Need, garment properties, or Profile evidence — never through State.";
 
@@ -3600,7 +3591,7 @@ export function buildDbPayload(result: StyleMeCustomerResult, occasion?: string)
       productUrl: null,
     });
   }
-  if (!closetCoveredSlots.has("bag")) {
+  if (!closetCoveredSlots.has("bag") && finishingLayer.bag != null) {
     items.push({
       itemType: "BAG",
       productTitle: null,
@@ -3611,7 +3602,7 @@ export function buildDbPayload(result: StyleMeCustomerResult, occasion?: string)
       productUrl: null,
     });
   }
-  if (!closetCoveredSlots.has("accessory") && !closetCoveredSlots.has("jewelry")) {
+  if (!closetCoveredSlots.has("accessory") && !closetCoveredSlots.has("jewelry") && finishingLayer.accessories != null) {
     items.push({
       itemType: "ACCESSORY",
       productTitle: null,

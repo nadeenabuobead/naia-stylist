@@ -205,36 +205,36 @@ describe("§2 buildEngineInput", () => {
 // ── §3 buildFinishingLayer ───────────────────────────────────────────────────
 
 describe("§3 buildFinishingLayer", () => {
-  it("3.1 — null handle returns generic finishing layer", () => {
+  it("3.1 — null handle: shoes non-empty, bag/accessories/hair/colourDirection null", () => {
     const layer = buildFinishingLayer(null);
-    assert.ok(layer.shoes.length > 0);
-    assert.ok(layer.bag.length > 0);
-    assert.ok(layer.accessories.length > 0);
-    assert.ok(layer.hair.length > 0);
-    assert.ok(layer.colourDirection.length > 0);
+    assert.ok(typeof layer.shoes === "string" && layer.shoes.length > 0, "shoes must always be set");
+    assert.strictEqual(layer.bag, null, "bag suppressed for closet-led");
+    assert.strictEqual(layer.accessories, null, "accessories suppressed for closet-led");
+    assert.strictEqual(layer.hair, null, "hair suppressed when no product hair tokens");
+    assert.strictEqual(layer.colourDirection, null, "colourDirection suppressed for closet-led");
   });
 
-  it("3.2 — unknown handle returns generic finishing layer", () => {
+  it("3.2 — unknown handle: shoes non-empty, no-product suppression applies", () => {
     const layer = buildFinishingLayer("no-such-product-handle");
-    assert.ok(layer.shoes.length > 0, "shoes should have fallback copy");
-    assert.ok(layer.colourDirection.length > 0, "colourDirection should have fallback copy");
+    assert.ok(typeof layer.shoes === "string" && layer.shoes.length > 0, "shoes must always be set");
+    assert.strictEqual(layer.bag, null, "bag suppressed when no product found");
+    assert.strictEqual(layer.colourDirection, null, "colourDirection suppressed when no product found");
   });
 
-  it("3.3 — known handle uses catalog prose (collar-shirt has shoeDirection)", () => {
+  it("3.3 — known handle uses catalog prose (collar-shirt has shoeDirection + colorDirection + hairTokens)", () => {
     const layer = buildFinishingLayer("collar-shirt");
-    // The catalog product for collar-shirt should have non-empty shoe direction
-    assert.ok(layer.shoes.length > 0);
-    assert.ok(layer.colourDirection.length > 0);
+    assert.ok(typeof layer.shoes === "string" && layer.shoes.length > 0, "shoes from product prose");
+    assert.ok(layer.colourDirection != null && layer.colourDirection.length > 0, "colourDirection from product prose");
+    assert.ok(layer.hair != null && layer.hair.length > 0, "hair non-null when product has hairStylingDirection tokens");
   });
 
-  it("3.4 — all 5 finishing layer fields are non-empty strings on generic fallback", () => {
-    const keys: (keyof StyleMeFinishingLayer)[] = [
-      "shoes", "bag", "accessories", "hair", "colourDirection",
-    ];
+  it("3.4 — shoes is always the one non-null generic finishing field", () => {
     const layer = buildFinishingLayer(null);
-    for (const key of keys) {
-      assert.ok(typeof layer[key] === "string" && layer[key].length > 0, `${key} is empty`);
-    }
+    assert.ok(typeof layer.shoes === "string" && layer.shoes.length > 0, "shoes must be non-empty");
+    assert.strictEqual(layer.bag, null);
+    assert.strictEqual(layer.accessories, null);
+    assert.strictEqual(layer.hair, null);
+    assert.strictEqual(layer.colourDirection, null);
   });
 });
 
@@ -398,16 +398,18 @@ describe("§7 computeStyleMeResult integration", () => {
     assert.ok(Array.isArray(result.song.occasions));
   });
 
-  it("7.3 — finishingLayer has 5 non-empty strings", async () => {
+  it("7.3 — finishingLayer.shoes is always non-empty; other fields are string or null", async () => {
     const input = makeMinimalEngineInput();
     const result = await computeStyleMeResult(input);
-    const keys: (keyof StyleMeFinishingLayer)[] = [
-      "shoes", "bag", "accessories", "hair", "colourDirection",
-    ];
-    for (const key of keys) {
+    assert.ok(
+      typeof result.finishingLayer.shoes === "string" && result.finishingLayer.shoes.length > 0,
+      "shoes must always be non-empty",
+    );
+    for (const key of ["bag", "accessories", "hair", "colourDirection"] as (keyof StyleMeFinishingLayer)[]) {
+      const v = result.finishingLayer[key];
       assert.ok(
-        typeof result.finishingLayer[key] === "string" && result.finishingLayer[key].length > 0,
-        `finishingLayer.${key} is empty`,
+        v === null || (typeof v === "string" && v.length > 0),
+        `finishingLayer.${key} must be non-empty string or null, got: ${JSON.stringify(v)}`,
       );
     }
   });
@@ -1018,8 +1020,8 @@ describe("§14 Full pipeline — naia-piece source", () => {
     });
     const result = await computeStyleMeResult(engineInput);
     assert.ok(result.finishingLayer.shoes.length > 0, "shoes must be non-empty");
-    assert.ok(result.finishingLayer.bag.length > 0, "bag must be non-empty");
-    assert.ok(result.finishingLayer.accessories.length > 0, "accessories must be non-empty");
+    assert.ok(result.finishingLayer.bag == null || result.finishingLayer.bag.length > 0, "bag must be non-empty string or null");
+    assert.ok(result.finishingLayer.accessories == null || result.finishingLayer.accessories.length > 0, "accessories must be non-empty string or null");
     assert.ok(result.song.title.length > 0, "song title must be present");
     assert.ok(result.song.artist.length > 0, "song artist must be present");
   });
@@ -1096,13 +1098,14 @@ describe("§14 Full pipeline — my-closet source", () => {
     });
     const result = await computeStyleMeResult(engineInput);
     assert.ok(result.finishingLayer.shoes.length > 0, "shoes must be present");
-    assert.ok(result.finishingLayer.bag.length > 0, "bag must be present");
-    assert.ok(result.finishingLayer.accessories.length > 0, "accessories must be present");
+    assert.ok(result.finishingLayer.bag == null || result.finishingLayer.bag.length > 0, "bag must be non-empty string or null");
+    assert.ok(result.finishingLayer.accessories == null || result.finishingLayer.accessories.length > 0, "accessories must be non-empty string or null");
     assert.ok(result.song.title.length > 0, "song must be present");
     const payload = buildDbPayload(result);
     assert.ok(payload.items.some((i) => i.itemType === "SHOES"), "SHOES item must be in payload");
-    assert.ok(payload.items.some((i) => i.itemType === "BAG"), "BAG item must be in payload");
-    assert.ok(payload.items.some((i) => i.itemType === "ACCESSORY"), "ACCESSORY item must be in payload");
+    // BAG and ACCESSORY items are suppressed for closet-led results (no grounded product prose)
+    // assert.ok(payload.items.some((i) => i.itemType === "BAG"), "BAG item must be in payload");
+    // assert.ok(payload.items.some((i) => i.itemType === "ACCESSORY"), "ACCESSORY item must be in payload");
   });
 
   it("PL.9 — my-closet: rawRecommendation anchor is the closet anchor we passed", async () => {
@@ -1181,8 +1184,8 @@ describe("§14 Full pipeline — both source", () => {
     });
     const result = await computeStyleMeResult(engineInput);
     assert.ok(result.finishingLayer.shoes.length > 0);
-    assert.ok(result.finishingLayer.bag.length > 0);
-    assert.ok(result.finishingLayer.accessories.length > 0);
+    assert.ok(result.finishingLayer.bag == null || result.finishingLayer.bag.length > 0);
+    assert.ok(result.finishingLayer.accessories == null || result.finishingLayer.accessories.length > 0);
     assert.ok(result.song.title.length > 0);
   });
 });
@@ -2632,39 +2635,33 @@ describe("§22 QA regression — completion quality, anchor wording, finishing s
     );
   });
 
-  // QA.4 — BAG and ACCESSORIES cannot render identical text
-  it("QA.4 — buildFinishingLayer: bag and accessories fields must not be identical", () => {
-    // Test with null handle (generic fallback) — they should be distinct by design
+  // QA.4 — BAG and ACCESSORIES suppression for null handle; distinct for product with prose
+  it("QA.4 — buildFinishingLayer: null handle suppresses bag + accessories; product prose keeps them distinct", () => {
+    // For null handle (closet-led): both are suppressed (null)
     const generic = buildFinishingLayer(null);
-    assert.notEqual(
-      generic.bag,
-      generic.accessories,
-      `generic finishing layer: bag and accessories must not be identical strings — bag: "${generic.bag}", accessories: "${generic.accessories}"`,
-    );
+    assert.strictEqual(generic.bag, null, "closet-led bag must be null (suppressed)");
+    assert.strictEqual(generic.accessories, null, "closet-led accessories must be null (suppressed)");
 
-    // Also confirm with a catalog product handle
-    const catalog = buildFinishingLayer("collar-shirt");
-    assert.notEqual(
-      catalog.bag,
-      catalog.accessories,
-      `catalog finishing layer for collar-shirt: bag must not duplicate accessories — bag: "${catalog.bag}", accessories: "${catalog.accessories}"`,
-    );
+    // For a catalog product with accessories prose, bag and accessories must differ
+    // (double-top has a period-terminated bag sentence so bag is extracted separately)
+    const catalog = buildFinishingLayer("double-top");
+    if (catalog.bag != null && catalog.accessories != null) {
+      assert.notEqual(
+        catalog.bag,
+        catalog.accessories,
+        `catalog finishing layer: bag must not duplicate accessories — bag: "${catalog.bag}", accessories: "${catalog.accessories}"`,
+      );
+    }
   });
 
-  // QA.5 — BAG copy contains bag guidance and does not primarily describe jewellery
-  it("QA.5 — generic finishing layer bag copy is bag-specific and does not lead with jewellery", () => {
-    const layer = buildFinishingLayer(null);
-    const bagLower = layer.bag.toLowerCase();
-    // Bag copy should mention bag-related terms
+  // QA.5 — BAG copy from product prose is non-null and contains bag-related terms
+  it("QA.5 — product with bag sentence: bag copy is non-null and bag-specific", () => {
+    // double-top has accessoriesDirection with a period-terminated bag sentence
+    const layer = buildFinishingLayer("double-top");
+    assert.ok(layer.bag != null, "double-top must have a non-null bag field (has bag sentence in prose)");
     assert.ok(
-      /bag|tote|clutch|structured|handbag|carry/.test(bagLower),
-      `generic bag copy must reference bag guidance — got: "${layer.bag}"`,
-    );
-    // Bag copy must not primarily be about jewellery (earring/cuff/bracelet as lead content)
-    const firstTenWords = bagLower.split(" ").slice(0, 10).join(" ");
-    assert.ok(
-      !/earring|bracelet|cuff|necklace|ring/.test(firstTenWords),
-      `bag copy must not lead with jewellery terms — got: "${layer.bag}"`,
+      /bag|tote|clutch|structured|handbag|carry/.test(layer.bag!.toLowerCase()),
+      `bag copy must reference bag guidance — got: "${layer.bag}"`,
     );
   });
 
@@ -2757,12 +2754,14 @@ describe("§22 QA regression — completion quality, anchor wording, finishing s
     );
   });
 
-  // QA.9 — ACCESSORIES must not contain handbag/structured bag language
+  // QA.9 — ACCESSORIES must not contain handbag/structured bag language (when non-null)
   it("QA.9 — buildFinishingLayer accessories field contains no handbag or structured bag language", () => {
     // All catalog handles have structured bag / handbag in accessoriesDirection; verify stripping works.
     const handles = ["collar-shirt", "asymmetrical-pants", "draped-leather-pants", "oversized-blazer", "kimono-jacket", null];
     for (const handle of handles) {
       const layer = buildFinishingLayer(handle);
+      // Null accessories means suppressed (closet-led or no product) — skip bag-language check
+      if (layer.accessories == null) continue;
       const hasBagLanguage = /\bhandbag\b|\bstructured\s+bag\b/i.test(layer.accessories);
       assert.ok(
         !hasBagLanguage,
@@ -9621,6 +9620,117 @@ describe("§VOICE.MICRO — language micro-polish invariants", () => {
     assert.ok(
       !w.whyThisWorks.includes("without asking for more effort"),
       `whyThisWorks must not say 'without asking for more effort'; got: "${w.whyThisWorks}"`,
+    );
+  });
+});
+
+// ── §SUPP — finishing layer suppression ──────────────────────────────────────
+
+describe("§SUPP — finishing layer suppression", () => {
+  // ── buildFinishingLayer null cases ──
+
+  it("SUPP.1 — bag is null for closet-led (no handle)", () => {
+    const layer = buildFinishingLayer(null);
+    assert.strictEqual(layer.bag, null, "generic bag must be suppressed for closet-led");
+  });
+
+  it("SUPP.2 — accessories is null for closet-led (no handle)", () => {
+    const layer = buildFinishingLayer(null);
+    assert.strictEqual(layer.accessories, null, "generic accessories must be suppressed for closet-led");
+  });
+
+  it("SUPP.3 — hair is null for closet-led (no hairDirectionTokens from product)", () => {
+    const layer = buildFinishingLayer(null, { occasion: "everyday", formalityConditional: null });
+    assert.strictEqual(layer.hair, null, "hair must be suppressed when no product hair tokens");
+  });
+
+  it("SUPP.4 — colourDirection is null for closet-led (no handle)", () => {
+    const layer = buildFinishingLayer(null);
+    assert.strictEqual(layer.colourDirection, null, "generic colourDirection must be suppressed for closet-led");
+  });
+
+  it("SUPP.5 — shoes always non-empty even for closet-led", () => {
+    const layer = buildFinishingLayer(null);
+    assert.ok(typeof layer.shoes === "string" && layer.shoes.length > 0, "shoes must always be provided");
+  });
+
+  it("SUPP.6 — hair non-null when product has hairStylingDirection tokens", () => {
+    // collar-shirt has hairStylingDirection tokens (e.g. "Sleek ponytail or bun")
+    const layer = buildFinishingLayer("collar-shirt", { occasion: "everyday", formalityConditional: null });
+    assert.ok(layer.hair != null && layer.hair.length > 0, "hair must be set when product provides hair tokens");
+  });
+
+  // ── buildDbPayload suppression ──
+
+  it("SUPP.7 — no BAG item when finishingLayer.bag is null", () => {
+    const result = makeMinimalResult({
+      finishingLayer: { shoes: "White sneakers.", bag: null, accessories: null, hair: null, colourDirection: null },
+    });
+    const payload = buildDbPayload(result);
+    const hasBag = payload.items.some((i) => i.itemType === "BAG");
+    assert.ok(!hasBag, "BAG item must not be added when finishingLayer.bag is null");
+  });
+
+  it("SUPP.8 — no ACCESSORY item when finishingLayer.accessories is null", () => {
+    const result = makeMinimalResult({
+      finishingLayer: { shoes: "White sneakers.", bag: null, accessories: null, hair: null, colourDirection: null },
+    });
+    const payload = buildDbPayload(result);
+    const hasAccessory = payload.items.some((i) => i.itemType === "ACCESSORY");
+    assert.ok(!hasAccessory, "ACCESSORY item must not be added when finishingLayer.accessories is null");
+  });
+
+  it("SUPP.9 — hairstyleRec null when finishingLayer.hair is null", () => {
+    const result = makeMinimalResult({
+      finishingLayer: { shoes: "White sneakers.", bag: null, accessories: null, hair: null, colourDirection: null },
+    });
+    const payload = buildDbPayload(result);
+    assert.strictEqual(payload.hairstyleRec, null, "hairstyleRec must be null when hair suppressed");
+  });
+
+  it("SUPP.10 — BAG item present when finishingLayer.bag is non-null and slot not in closet", () => {
+    const result = makeMinimalResult({
+      finishingLayer: { shoes: "White sneakers.", bag: "A compact leather tote.", accessories: null, hair: null, colourDirection: null },
+    });
+    const payload = buildDbPayload(result);
+    const bagItem = payload.items.find((i) => i.itemType === "BAG");
+    assert.ok(bagItem != null, "BAG item must appear when finishingLayer.bag is non-null");
+    assert.strictEqual(bagItem.stylingNotes, "A compact leather tote.");
+  });
+
+  it("SUPP.11 — moodDescriptionJson colourDirection is null when suppressed", () => {
+    const result = makeMinimalResult({
+      finishingLayer: { shoes: "White sneakers.", bag: null, accessories: null, hair: null, colourDirection: null },
+    });
+    const payload = buildDbPayload(result);
+    const meta = JSON.parse(payload.moodDescriptionJson);
+    assert.strictEqual(meta.colourDirection, null, "colourDirection in metadata must be null when suppressed");
+  });
+
+  it("SUPP.12 — architecture: closet-led with ctx.hairDirectionTokens produces hair guidance (no permanent prohibition)", () => {
+    // Proves the architecture is evidence-based, not identity-based.
+    // If future signals (selfie, closet AI) populate ctx.hairDirectionTokens, closet-led results CAN show hair.
+    const layer = buildFinishingLayer(null, {
+      occasion: "everyday",
+      formalityConditional: null,
+      hairDirectionTokens: ["hair-up-recommended"],
+    });
+    assert.notStrictEqual(layer.hair, null, "closet-led with ctx.hairDirectionTokens must produce non-null hair guidance");
+  });
+
+  it("SUPP.13 — 'keeps the register' does NOT trigger containsBlockedTerms (style term, not safety)", () => {
+    assert.strictEqual(
+      containsBlockedTerms("The blazer keeps the register clean."),
+      false,
+      "styling language must not be treated as a safety block",
+    );
+  });
+
+  it("SUPP.14 — genuine safety terms remain blocked by containsBlockedTerms", () => {
+    assert.strictEqual(
+      containsBlockedTerms("This is therapeutic and will diagnose your style."),
+      true,
+      "safety/wellness terms must still be caught by containsBlockedTerms",
     );
   });
 });

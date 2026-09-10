@@ -40,10 +40,10 @@ export interface StyleMeCompletionPiece {
 
 export interface StyleMeFinishingLayer {
   shoes: string;
-  bag: string;
-  accessories: string;
-  hair: string;
-  colourDirection: string;
+  bag: string | null;
+  accessories: string | null;
+  hair: string | null;
+  colourDirection: string | null;
 }
 
 // ── Wording (Claude output or deterministic fallback) ───────────────────────
@@ -120,7 +120,7 @@ export interface StyleMeMetadata {
   anchorImageUrl?: string | null;
   anchorSlot?: string | null;
   pairingNote: string | null;
-  colourDirection: string;
+  colourDirection: string | null;
   songReason: string;
   evidenceCodes: string[];
   completionLayer?: StyleMeCompletionPiece[];
