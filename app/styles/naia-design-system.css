@@ -1117,6 +1117,14 @@ a.mn-action:focus-visible,
 .sm-confidence-block { padding: 28px 0; border-top: 1px solid var(--naia-border); border-bottom: 1px solid var(--naia-border); margin-bottom: 36px; }
 .sm-confidence-label { font-family: var(--naia-ff-mono); font-size: 9px; letter-spacing: 3px; text-transform: uppercase; color: var(--naia-muted); margin-bottom: 12px; }
 .sm-confidence-quote { font-family: var(--naia-ff-display); font-size: 22px; font-weight: 400; font-style: italic; line-height: 1.5; color: var(--naia-ink); }
+/* ── Virtual Try-On section ──────────────────────────── */
+.sm-vto-section { border-top: 1px solid var(--naia-border); padding: 28px 0; margin-bottom: 36px; display: flex; flex-direction: column; gap: 12px; }
+.sm-vto-eyebrow { font-family: var(--naia-ff-mono); font-size: 9px; letter-spacing: 3px; text-transform: uppercase; color: var(--naia-muted); margin: 0; }
+.sm-vto-heading { font-family: var(--naia-ff-display); font-size: 26px; font-weight: 400; font-style: italic; line-height: 1.3; color: var(--naia-ink); margin: 0; }
+.sm-vto-body { font-family: var(--naia-ff-body); font-size: 15px; color: var(--naia-muted); margin: 0; }
+.sm-vto-body-note { font-family: var(--naia-ff-body); font-size: 13px; font-style: italic; color: var(--naia-muted); margin: 0; }
+.sm-vto-cta { align-self: flex-start; }
+.sm-vto-image { width: 100%; max-width: 480px; height: auto; display: block; }
 .sm-result-actions {
   display: flex; gap: 12px; justify-content: center;
   margin-top: 40px; padding-top: 28px; border-top: 1px solid var(--naia-border); flex-wrap: wrap;
@@ -1317,6 +1325,8 @@ a.mn-action:focus-visible,
   .sm-result-context-grid { grid-template-columns: repeat(2, 1fr); }
   .sm-sensory-grid { grid-template-columns: 1fr 1fr; }
   .sm-result-actions { justify-content: flex-start; }
+  .sm-vto-cta { align-self: stretch; text-align: center; }
+  .sm-vto-image { max-width: 100%; }
 }
 
 /* ── Reduced motion ───────────────────────────────────────────────── */

@@ -1647,6 +1647,103 @@ export default function StyleMeResult() {
           </div>
         )}
 
+        {/* ── Virtual Try-On ── */}
+        {loaderData.isStagingProject && suggestion?.id && (
+          <div className="sm-vto-section" aria-live="polite">
+            <p className="sm-vto-eyebrow">VIRTUAL TRY-ON</p>
+
+            {fullLookQA.status === "idle" && !loaderData.naiaModelIsReady && (
+              <>
+                <h2 className="sm-vto-heading">See this look on you.</h2>
+                <p className="sm-vto-body">Create your nAia Model to try this look on.</p>
+                <Link to="/my-naia-model" className="sm-result-action-btn sm-result-action-btn--primary sm-vto-cta">
+                  Create Your nAia Model
+                </Link>
+              </>
+            )}
+
+            {fullLookQA.status === "idle" && loaderData.naiaModelIsReady && (
+              <>
+                <h2 className="sm-vto-heading">See this look on you.</h2>
+                <p className="sm-vto-body">Preview the complete outfit on your nAia Model.</p>
+                <button
+                  type="button"
+                  className="sm-result-action-btn sm-result-action-btn--primary sm-vto-cta"
+                  onClick={async () => {
+                    setFullLookQA({ status: "loading" });
+                    try {
+                      const res = await fetch("/api/staging-full-look-vto", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          suggestionId: suggestion!.id,
+                          virtualTryOnConsentAt: new Date().toISOString(),
+                        }),
+                      });
+                      const json = await res.json();
+                      if (json.ok) {
+                        setFullLookQA({
+                          status: "done",
+                          outputDataUrl: json.outputDataUrl,
+                          items: json.items ?? [],
+                          skipped: json.skipped ?? [],
+                          prompt: json.prompt ?? "",
+                        });
+                      } else {
+                        setFullLookQA({ status: "error", message: json.code ?? "unknown" });
+                      }
+                    } catch {
+                      setFullLookQA({ status: "error", message: "network" });
+                    }
+                  }}
+                >
+                  TRY THIS LOOK ON
+                </button>
+              </>
+            )}
+
+            {fullLookQA.status === "loading" && (
+              <>
+                <h2 className="sm-vto-heading">Creating your try-on…</h2>
+                <p className="sm-vto-body">This can take a moment.</p>
+              </>
+            )}
+
+            {fullLookQA.status === "done" && (
+              <>
+                <h2 className="sm-vto-heading">Your look, on you.</h2>
+                <img
+                  src={fullLookQA.outputDataUrl}
+                  alt="Your StyleMe outfit on your nAia Model"
+                  className="sm-vto-image"
+                />
+                <button
+                  type="button"
+                  className="sm-result-action-btn sm-vto-cta"
+                  onClick={() => setFullLookQA({ status: "idle" })}
+                >
+                  Try Again
+                </button>
+              </>
+            )}
+
+            {fullLookQA.status === "error" && (
+              <>
+                <h2 className="sm-vto-heading">See this look on you.</h2>
+                <p className="sm-vto-body">We couldn't create your try-on this time.</p>
+                <p className="sm-vto-body-note">Your StyleMe look is still saved here.</p>
+                <button
+                  type="button"
+                  className="sm-result-action-btn sm-vto-cta"
+                  onClick={() => setFullLookQA({ status: "idle" })}
+                >
+                  Try Again
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
         {/* ── Style Memory V1 — After you wear this ────────────────────────── */}
         {/* Only shown for authenticated customers with a saved suggestion. No modal, no popup. */}
         {loaderData.isAuthenticated && suggestion.id && (() => {
@@ -2099,119 +2196,6 @@ export default function StyleMeResult() {
           )}
         </div>
 
-      {/* ── Staging QA: Full-Look VTO trigger ── */}
-      {loaderData.isStagingProject && suggestion?.id && (
-        <div style={{
-          margin: "2rem auto",
-          maxWidth: 640,
-          padding: "1.25rem 1.5rem",
-          background: "#1a1a2e",
-          border: "2px dashed #e040fb",
-          borderRadius: 10,
-          color: "#fff",
-          fontFamily: "monospace",
-          fontSize: 13,
-        }}>
-          <div style={{ marginBottom: "0.75rem", fontWeight: 700, color: "#e040fb", letterSpacing: 1 }}>
-            ⚗ STAGING QA — FULL-LOOK VTO TEST
-          </div>
-          <div style={{ marginBottom: "0.75rem", opacity: 0.7, fontSize: 12 }}>
-            suggestionId: {suggestion.id}
-          </div>
-          {fullLookQA.status === "idle" && (
-            <button
-              type="button"
-              onClick={async () => {
-                setFullLookQA({ status: "loading" });
-                try {
-                  const res = await fetch("/api/staging-full-look-vto", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      suggestionId: suggestion!.id,
-                      virtualTryOnConsentAt: new Date().toISOString(),
-                    }),
-                  });
-                  const json = await res.json();
-                  if (json.ok) {
-                    setFullLookQA({
-                      status: "done",
-                      outputDataUrl: json.outputDataUrl,
-                      items: json.items ?? [],
-                      skipped: json.skipped ?? [],
-                      prompt: json.prompt ?? "",
-                    });
-                  } else {
-                    setFullLookQA({ status: "error", message: json.message ?? json.code ?? "Unknown error" });
-                  }
-                } catch (e: unknown) {
-                  setFullLookQA({ status: "error", message: e instanceof Error ? e.message : String(e) });
-                }
-              }}
-              style={{
-                background: "#e040fb",
-                color: "#fff",
-                border: "none",
-                borderRadius: 6,
-                padding: "0.5rem 1.25rem",
-                fontFamily: "monospace",
-                fontWeight: 700,
-                fontSize: 13,
-                cursor: "pointer",
-              }}
-            >
-              TEST FULL-LOOK VTO
-            </button>
-          )}
-          {fullLookQA.status === "loading" && (
-            <div style={{ opacity: 0.75 }}>Sending to FASHN tryon-max… (may take up to 90 s)</div>
-          )}
-          {fullLookQA.status === "error" && (
-            <div>
-              <div style={{ color: "#ff5252", marginBottom: "0.5rem" }}>Error: {fullLookQA.message}</div>
-              <button
-                type="button"
-                onClick={() => setFullLookQA({ status: "idle" })}
-                style={{ background: "transparent", color: "#e040fb", border: "1px solid #e040fb", borderRadius: 4, padding: "0.25rem 0.75rem", fontFamily: "monospace", cursor: "pointer" }}
-              >
-                Retry
-              </button>
-            </div>
-          )}
-          {fullLookQA.status === "done" && (
-            <div>
-              <img
-                src={fullLookQA.outputDataUrl}
-                alt="Full-look VTO result"
-                style={{ width: "100%", borderRadius: 8, marginBottom: "0.75rem", display: "block" }}
-              />
-              <div style={{ marginBottom: "0.5rem", color: "#b9f6ca" }}>
-                Items ({fullLookQA.items.length}):
-                {fullLookQA.items.map((it, i) => (
-                  <span key={i} style={{ display: "inline-block", margin: "2px 4px", background: "#263238", borderRadius: 4, padding: "1px 6px" }}>
-                    {it.itemType}: {it.label}
-                  </span>
-                ))}
-              </div>
-              {fullLookQA.skipped.length > 0 && (
-                <div style={{ color: "#ffcc02", marginBottom: "0.5rem" }}>
-                  Skipped: {fullLookQA.skipped.join(", ")}
-                </div>
-              )}
-              <div style={{ opacity: 0.6, fontSize: 11, wordBreak: "break-word" }}>
-                Prompt: {fullLookQA.prompt}
-              </div>
-              <button
-                type="button"
-                onClick={() => setFullLookQA({ status: "idle" })}
-                style={{ marginTop: "0.75rem", background: "transparent", color: "#e040fb", border: "1px solid #e040fb", borderRadius: 4, padding: "0.25rem 0.75rem", fontFamily: "monospace", cursor: "pointer" }}
-              >
-                Reset
-              </button>
-            </div>
-          )}
-        </div>
-      )}
 
       </main>
 

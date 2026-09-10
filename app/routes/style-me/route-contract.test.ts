@@ -1189,3 +1189,115 @@ describe("StyleMe Rev 3 Pre-QA cleanup — regression tests", () => {
     assert.ok(text.includes('"styleMeIntentions"'), "clearStyleMeSession must unset styleMeIntentions");
   });
 });
+
+// ── §VTO — Virtual Try-On customer UI ─────────────────────────────────────────
+
+describe("StyleMe Result — Virtual Try-On customer UI", () => {
+  const css = () => readFileSync(
+    join(import.meta.dirname ?? new URL(".", import.meta.url).pathname, "../../styles/naia-design-system.css"),
+    "utf8",
+  );
+
+  it("VTO.1 — 'STAGING QA' is not rendered in customer-facing JSX", () => {
+    const text = src("result.tsx");
+    assert.ok(!text.includes("STAGING QA"), "STAGING QA must not appear in customer UI");
+  });
+
+  it("VTO.2 — suggestionId is not rendered as visible text to the customer", () => {
+    const text = src("result.tsx");
+    assert.ok(!text.includes("suggestionId: {suggestion"), "raw suggestionId value must not be rendered as text");
+  });
+
+  it("VTO.3 — 'TEST FULL-LOOK VTO' button is gone", () => {
+    const text = src("result.tsx");
+    assert.ok(!text.includes("TEST FULL-LOOK VTO"), "developer VTO button must be removed");
+  });
+
+  it("VTO.4 — 'TRY THIS LOOK ON' CTA is present", () => {
+    const text = src("result.tsx");
+    assert.ok(text.includes("TRY THIS LOOK ON"), "customer CTA must render");
+  });
+
+  it("VTO.5 — CTA invokes /api/staging-full-look-vto with the persisted suggestionId", () => {
+    const text = src("result.tsx");
+    assert.ok(text.includes('"/api/staging-full-look-vto"'), "must call existing VTO route");
+    assert.ok(text.includes("suggestionId: suggestion!.id"), "must pass persisted suggestionId");
+    assert.ok(text.includes("virtualTryOnConsentAt: new Date().toISOString()"), "must include consent timestamp");
+  });
+
+  it("VTO.6 — loading state prevents repeat submissions (status: loading replaces the CTA)", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes(`fullLookQA.status === "idle" && loaderData.naiaModelIsReady`),
+      "CTA only renders when idle + model ready — replaces itself with loading state",
+    );
+    assert.ok(
+      text.includes(`fullLookQA.status === "loading"`),
+      "loading state branch must exist",
+    );
+  });
+
+  it("VTO.7 — success state renders the returned image with descriptive alt text", () => {
+    const text = src("result.tsx");
+    assert.ok(text.includes(`fullLookQA.status === "done"`), "done state branch must exist");
+    assert.ok(text.includes("sm-vto-image"), "image must use sm-vto-image class");
+    assert.ok(
+      text.includes("Your StyleMe outfit on your nAia Model"),
+      "image alt text must be descriptive and customer-safe",
+    );
+  });
+
+  it("VTO.8 — error state shows customer-safe copy and no provider/API details", () => {
+    const text = src("result.tsx");
+    assert.ok(text.includes(`fullLookQA.status === "error"`), "error state branch must exist");
+    assert.ok(
+      text.includes("We couldn't create your try-on this time."),
+      "error copy must be customer-safe",
+    );
+    assert.ok(!text.includes("Error: {fullLookQA.message}"), "raw error message must not be rendered");
+    assert.ok(!text.includes("FASHN"), "FASHN must not appear in customer-facing JSX");
+  });
+
+  it("VTO.9 — staging guard (isStagingProject) is preserved on the customer VTO section", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("loaderData.isStagingProject && suggestion?.id"),
+      "staging guard must wrap the customer VTO section",
+    );
+  });
+
+  it("VTO.10 — backend route file is unchanged (action signature and staging guard intact)", () => {
+    const routeText = readFileSync(
+      join(import.meta.dirname ?? new URL(".", import.meta.url).pathname, "../api.staging-full-look-vto.tsx"),
+      "utf8",
+    );
+    assert.ok(
+      routeText.includes('process.env.NAIA_PROJECT_VARIANT !== "staging"'),
+      "staging guard must remain in backend route",
+    );
+    assert.ok(
+      routeText.includes("export async function action("),
+      "action export must remain unchanged",
+    );
+    assert.ok(
+      routeText.includes("model_name: \"tryon-max\""),
+      "FASHN model must remain tryon-max",
+    );
+  });
+
+  it("VTO.11 — Save Look and existing bottom actions are present and unchanged", () => {
+    const text = src("result.tsx");
+    assert.ok(text.includes("Save Look"), "Save Look must remain");
+    assert.ok(text.includes("New Look, Same Vibe"), "New Look Same Vibe must remain");
+    assert.ok(text.includes("Adjust Vibe"), "Adjust Vibe must remain");
+    assert.ok(text.includes("Start Over"), "Start Over must remain");
+  });
+
+  it("VTO.12 — responsive CSS tokens are present for sm-vto-section and sm-vto-cta", () => {
+    const c = css();
+    assert.ok(c.includes(".sm-vto-section"), "sm-vto-section must be defined");
+    assert.ok(c.includes(".sm-vto-cta"), "sm-vto-cta must be defined");
+    assert.ok(c.includes(".sm-vto-image"), "sm-vto-image must be defined");
+    assert.ok(c.includes("align-self: stretch"), "mobile: sm-vto-cta must stretch full-width");
+  });
+});
