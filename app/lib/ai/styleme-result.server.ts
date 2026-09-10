@@ -413,8 +413,10 @@ export function buildFinishingLayer(
     hair = deriveHairDirection(effectiveCtx);
     beauty = deriveBeautyDirection(effectiveCtx);
   } else if (gender === "man") {
-    // man: hair only when product prose provides explicit grounded direction; never beauty
-    hair = hairDirectionTokens.length > 0 ? deriveHairDirection(effectiveCtx) : null;
+    // man: deriveHairDirection uses female-coded templates (buns, ponytails, waves, half-up)
+    // that are inappropriate regardless of product hair tokens.
+    // Return null — a gender-appropriate grooming layer is not in scope for this task.
+    hair = null;
     beauty = null;
   } else {
     // another-gender / prefer-not-to-say / null/undefined:

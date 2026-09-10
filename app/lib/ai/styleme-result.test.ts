@@ -9869,5 +9869,19 @@ describe("§GENDER Gender-aware finishing layer", () => {
     const payload = buildDbPayload(result);
     assert.strictEqual(payload.makeupVibeRec, null, "makeupVibeRec must be null when beauty is null");
   });
+
+  // ── GENDER.15 — man + product with hair tokens → hair is null (female templates blocked) ──
+  it("GENDER.15 — man + product with hairStylingDirection tokens → hair is null (female-coded templates never applied)", () => {
+    // collar-shirt has hairStylingDirection tokens that would otherwise produce female-coded output
+    // (e.g. "A sleek ponytail or low bun" / "Hair away from the neckline").
+    // deriveHairDirection contains bun, ponytail, waves, half-up templates — not appropriate for man.
+    const layer = buildFinishingLayer("collar-shirt", { occasion: "work", formalityConditional: "formality-smart", gender: "man" });
+    assert.strictEqual(layer.hair, null, "man must not receive female-coded hair direction even when product provides hair tokens");
+    // Defensive: if the guard is ever relaxed, verify output contains no female-coded terms
+    if (layer.hair !== null) {
+      const femaleCoded = /\bbun\b|\bponytail\b|\bhalf-up\b|\bwaves?\b|\bwavy\b|\bcentre.part\b/i.test(layer.hair);
+      assert.ok(!femaleCoded, `man hair output must not contain female-coded styling: "${layer.hair}"`);
+    }
+  });
 });
 
