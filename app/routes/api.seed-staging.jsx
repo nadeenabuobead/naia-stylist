@@ -485,5 +485,24 @@ export async function action({ request }) {
     return Response.json({ ok: true, shopifyCustomerId: customer.shopifyCustomerId, before, after });
   }
 
+  // ── tableCheck ─────────────────────────────────────────────────────────────
+  // Phase 1 verification: confirms the three nAia Admin tables exist on staging.
+  // Returns row counts only — safe, no customer data exposed.
+  if (act === "tableCheck") {
+    const [snapshots, closetReviews, sessionReviews] = await Promise.all([
+      prisma.closetItemAnalysisSnapshot.count(),
+      prisma.closetItemAdminReview.count(),
+      prisma.stylingSessionAdminReview.count(),
+    ]);
+    return Response.json({
+      ok: true,
+      tables: {
+        ClosetItemAnalysisSnapshot: { exists: true, count: snapshots },
+        ClosetItemAdminReview: { exists: true, count: closetReviews },
+        StylingSessionAdminReview: { exists: true, count: sessionReviews },
+      },
+    });
+  }
+
   return Response.json({ error: "Unknown _action" }, { status: 400 });
 }
