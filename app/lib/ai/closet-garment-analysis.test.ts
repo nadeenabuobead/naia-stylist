@@ -20,13 +20,34 @@ const closetRoute = readFileSync(join(__dirname, "../../routes/closet._index.tsx
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function makePrismaUpdate() {
+import type { ClosetItemSnapshotData } from "./closet-garment-analysis.server";
+
+// Records calls to the atomic success path (ClosetItem update + snapshot create).
+// calls[n] = [closetItemId, itemData, snapshotData]
+function makePersistSuccess() {
+  const calls: [string, Record<string, unknown>, ClosetItemSnapshotData][] = [];
+  const fn = async (id: string, data: Record<string, unknown>, snapshot: ClosetItemSnapshotData) => {
+    calls.push([id, data, snapshot]);
+  };
+  return { fn, calls };
+}
+
+// Records calls to the failure path (status-only write, no snapshot).
+// calls[n] = [closetItemId, data]
+function makePersistFailure() {
   const calls: [string, Record<string, unknown>][] = [];
   const fn = async (id: string, data: Record<string, unknown>) => {
     calls.push([id, data]);
   };
-  (fn as any).calls = calls;
   return { fn, calls };
+}
+
+function makeNoopSuccess() {
+  return { fn: async () => {}, calls: [] as never[] };
+}
+
+function makeNoopFailure() {
+  return { fn: async () => {}, calls: [] as never[] };
 }
 
 function makeImageAnalyzer(returnValue: string) {
@@ -237,11 +258,12 @@ describe("GI-03 invalid vocabulary rejection", () => {
 
 describe("GI-04 analysis failure preserves user-supplied fields", () => {
   it("on Claude error, only lifecycle fields are written", async () => {
-    const { fn, calls } = makePrismaUpdate();
+    const success = makeNoopSuccess();
+    const { fn, calls } = makePersistFailure();
 
     await runClosetGarmentAnalysis(
       { closetItemId: "item-1", imagePublicId: "img/abc", category: "TOPS" },
-      { imageAnalyzer: makeRejectingAnalyzer("Claude timeout"), prismaUpdate: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeRejectingAnalyzer("Claude timeout"), persistSuccess: success.fn, persistFailure: fn, getSignedUrl: makeGetSignedUrl() },
     );
 
     assert.equal(calls.length, 1);
@@ -254,11 +276,12 @@ describe("GI-04 analysis failure preserves user-supplied fields", () => {
   });
 
   it("on JSON parse error, status becomes 'failed'", async () => {
-    const { fn, calls } = makePrismaUpdate();
+    const success = makeNoopSuccess();
+    const { fn, calls } = makePersistFailure();
 
     await runClosetGarmentAnalysis(
       { closetItemId: "item-2", imagePublicId: "img/def", category: "DRESSES" },
-      { imageAnalyzer: makeImageAnalyzer("not json at all"), prismaUpdate: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeImageAnalyzer("not json at all"), persistSuccess: success.fn, persistFailure: fn, getSignedUrl: makeGetSignedUrl() },
     );
 
     assert.equal(calls.length, 1);
@@ -266,11 +289,12 @@ describe("GI-04 analysis failure preserves user-supplied fields", () => {
   });
 
   it("on signedUrl error, persistFailure is called", async () => {
-    const { fn, calls } = makePrismaUpdate();
+    const success = makeNoopSuccess();
+    const { fn, calls } = makePersistFailure();
 
     await runClosetGarmentAnalysis(
       { closetItemId: "item-3", imagePublicId: "img/ghi", category: "TOPS" },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), prismaUpdate: fn, getSignedUrl: makeThrowingGetSignedUrl("Cloudinary config missing") },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: success.fn, persistFailure: fn, getSignedUrl: makeThrowingGetSignedUrl("Cloudinary config missing") },
     );
 
     assert.equal(calls.length, 1);
@@ -282,11 +306,11 @@ describe("GI-04 analysis failure preserves user-supplied fields", () => {
 
 describe("GI-05 user-supplied values never overwritten", () => {
   it("persistExtraction never writes 'category' or 'name'", async () => {
-    const { fn, calls } = makePrismaUpdate();
+    const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
       { closetItemId: "item-4", imagePublicId: "img/jkl", category: "DRESSES" },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), prismaUpdate: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
     );
 
     const [, written] = calls[0];
@@ -301,11 +325,11 @@ describe("GI-05 user-supplied values never overwritten", () => {
       shoulderCoverage: null, midriffExposed: null, material: null, pattern: null,
       primaryColor: null, secondaryColors: [],
     });
-    const { fn, calls } = makePrismaUpdate();
+    const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
       { closetItemId: "item-5", imagePublicId: "img/mno", category: "DRESSES" },
-      { imageAnalyzer: makeImageAnalyzer(json), prismaUpdate: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeImageAnalyzer(json), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
     );
 
     const [, written] = calls[0];
@@ -314,11 +338,11 @@ describe("GI-05 user-supplied values never overwritten", () => {
   });
 
   it("does not overwrite user-supplied primaryColor even when AI returns a different value", async () => {
-    const { fn, calls } = makePrismaUpdate();
+    const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
       { closetItemId: "item-5b", imagePublicId: "img/pq", category: "DRESSES", userPrimaryColor: "navy" },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), prismaUpdate: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
     );
 
     const [, written] = calls[0];
@@ -327,11 +351,11 @@ describe("GI-05 user-supplied values never overwritten", () => {
   });
 
   it("writes AI primaryColor when user has not supplied one", async () => {
-    const { fn, calls } = makePrismaUpdate();
+    const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
       { closetItemId: "item-5c", imagePublicId: "img/rs", category: "DRESSES", userPrimaryColor: null },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), prismaUpdate: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
     );
 
     const [, written] = calls[0];
@@ -341,11 +365,11 @@ describe("GI-05 user-supplied values never overwritten", () => {
   // ── Pattern precedence ─────────────────────────────────────────────────────
 
   it("does not overwrite user-supplied pattern even when AI returns a different value", async () => {
-    const { fn, calls } = makePrismaUpdate();
+    const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
       { closetItemId: "item-5d", imagePublicId: "img/tu", category: "DRESSES", userPattern: "stripes" },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), prismaUpdate: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
     );
 
     const [, written] = calls[0];
@@ -354,11 +378,11 @@ describe("GI-05 user-supplied values never overwritten", () => {
   });
 
   it("writes AI pattern when user has not supplied one", async () => {
-    const { fn, calls } = makePrismaUpdate();
+    const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
       { closetItemId: "item-5e", imagePublicId: "img/vw", category: "DRESSES", userPattern: null },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), prismaUpdate: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
     );
 
     const [, written] = calls[0];
@@ -366,11 +390,11 @@ describe("GI-05 user-supplied values never overwritten", () => {
   });
 
   it("preserves user pattern on analysis failure", async () => {
-    const { fn, calls } = makePrismaUpdate();
+    const { fn, calls } = makePersistFailure();
 
     await runClosetGarmentAnalysis(
       { closetItemId: "item-5f", imagePublicId: "img/xy", category: "TOPS", userPattern: "check" },
-      { imageAnalyzer: makeRejectingAnalyzer("timeout"), prismaUpdate: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeRejectingAnalyzer("timeout"), persistSuccess: makeNoopSuccess().fn, persistFailure: fn, getSignedUrl: makeGetSignedUrl() },
     );
 
     const [, written] = calls[0];
@@ -381,11 +405,11 @@ describe("GI-05 user-supplied values never overwritten", () => {
   // ── Occasions precedence ───────────────────────────────────────────────────
 
   it("does not overwrite user-supplied occasions even when AI returns different values", async () => {
-    const { fn, calls } = makePrismaUpdate();
+    const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
       { closetItemId: "item-5g", imagePublicId: "img/a1", category: "DRESSES", userOccasions: ["work", "evening"] },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), prismaUpdate: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
     );
 
     const [, written] = calls[0];
@@ -393,11 +417,11 @@ describe("GI-05 user-supplied values never overwritten", () => {
   });
 
   it("writes AI occasions when user has supplied none", async () => {
-    const { fn, calls } = makePrismaUpdate();
+    const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
       { closetItemId: "item-5h", imagePublicId: "img/b2", category: "DRESSES", userOccasions: [] },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), prismaUpdate: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
     );
 
     const [, written] = calls[0];
@@ -407,11 +431,11 @@ describe("GI-05 user-supplied values never overwritten", () => {
   // ── Seasons precedence ─────────────────────────────────────────────────────
 
   it("does not overwrite user-supplied seasons even when AI returns different values", async () => {
-    const { fn, calls } = makePrismaUpdate();
+    const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
       { closetItemId: "item-5i", imagePublicId: "img/c3", category: "DRESSES", userSeasons: ["fall", "winter"] },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), prismaUpdate: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
     );
 
     const [, written] = calls[0];
@@ -419,11 +443,11 @@ describe("GI-05 user-supplied values never overwritten", () => {
   });
 
   it("writes AI seasons when user has supplied none", async () => {
-    const { fn, calls } = makePrismaUpdate();
+    const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
       { closetItemId: "item-5j", imagePublicId: "img/d4", category: "DRESSES", userSeasons: [] },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), prismaUpdate: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
     );
 
     const [, written] = calls[0];
@@ -435,11 +459,11 @@ describe("GI-05 user-supplied values never overwritten", () => {
 
 describe("GI-06 analysis status transitions", () => {
   it("successful extraction writes analysisStatus: 'ready' with timestamps", async () => {
-    const { fn, calls } = makePrismaUpdate();
+    const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
       { closetItemId: "item-6", imagePublicId: "img/pqr", category: "DRESSES" },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), prismaUpdate: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
     );
 
     const [, written] = calls[0];
@@ -449,11 +473,11 @@ describe("GI-06 analysis status transitions", () => {
   });
 
   it("failed extraction writes analysisStatus: 'failed' with timestamps", async () => {
-    const { fn, calls } = makePrismaUpdate();
+    const { fn, calls } = makePersistFailure();
 
     await runClosetGarmentAnalysis(
       { closetItemId: "item-7", imagePublicId: "img/stu", category: "TOPS" },
-      { imageAnalyzer: makeRejectingAnalyzer("network"), prismaUpdate: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeRejectingAnalyzer("network"), persistSuccess: makeNoopSuccess().fn, persistFailure: fn, getSignedUrl: makeGetSignedUrl() },
     );
 
     const [, written] = calls[0];
@@ -756,7 +780,7 @@ describe("GI-EDIT-7 reanalysis for edit preserves existing user-entered values",
     const capturedParams: Array<{ occasions?: string[]; pattern?: string | null }> = [];
 
     const imageAnalyzer = async (_params: unknown) => validExtractionJson();
-    const prismaUpdate = async (_id: string, data: Record<string, unknown>) => {
+    const persistSuccess = async (_id: string, data: Record<string, unknown>) => {
       capturedParams.push({ occasions: data.occasions as string[], pattern: data.pattern as string });
     };
     const getSignedUrl = makeGetSignedUrl();
@@ -769,7 +793,7 @@ describe("GI-EDIT-7 reanalysis for edit preserves existing user-entered values",
         userOccasions: ["work"],      // existing user value
         userPattern: "stripes",       // existing user value
       },
-      { imageAnalyzer, prismaUpdate, getSignedUrl },
+      { imageAnalyzer, persistSuccess, persistFailure: makeNoopFailure().fn, getSignedUrl },
     );
 
     // AI from validExtractionJson would write ["casual","weekend"] and "floral" —
@@ -782,7 +806,7 @@ describe("GI-EDIT-7 reanalysis for edit preserves existing user-entered values",
 
 describe("GI-EDIT-8 reanalysis failure leaves item saved with status failed", () => {
   it("analysis error during edit reanalysis writes failed status without touching user fields", async () => {
-    const { fn, calls } = makePrismaUpdate();
+    const { fn, calls } = makePersistFailure();
 
     await runClosetGarmentAnalysis(
       {
@@ -794,7 +818,7 @@ describe("GI-EDIT-8 reanalysis failure leaves item saved with status failed", ()
         userOccasions: ["evening"],
         userSeasons: ["summer"],
       },
-      { imageAnalyzer: makeRejectingAnalyzer("timeout"), prismaUpdate: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeRejectingAnalyzer("timeout"), persistSuccess: makeNoopSuccess().fn, persistFailure: fn, getSignedUrl: makeGetSignedUrl() },
     );
 
     assert.equal(calls.length, 1, "exactly one DB write on failure");
@@ -807,6 +831,99 @@ describe("GI-EDIT-8 reanalysis failure leaves item saved with status failed", ()
     assert.equal(written.pattern,       undefined);
     assert.equal(written.occasions,     undefined);
     assert.equal(written.seasons,       undefined);
+  });
+});
+
+// ── GI-SNAP: snapshot capture ─────────────────────────────────────────────────
+
+describe("GI-SNAP-1 snapshot is created on successful analysis", () => {
+  it("persistSuccess receives the full normalized AI output as snapshot", async () => {
+    const { fn, calls } = makePersistSuccess();
+
+    await runClosetGarmentAnalysis(
+      { closetItemId: "snap-1", imagePublicId: "img/snap", category: "DRESSES" },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+    );
+
+    assert.equal(calls.length, 1);
+    const [id, , snapshot] = calls[0];
+    assert.equal(id, "snap-1");
+    assert.ok(snapshot, "snapshot must be provided");
+    assert.ok(snapshot.normalizedAnalysis, "snapshot must include normalizedAnalysis");
+    assert.ok(snapshot.normalizedAnalysis.observables, "snapshot must include observables");
+    assert.ok(snapshot.normalizedAnalysis.matchingSignals, "snapshot must include matchingSignals");
+    assert.ok(snapshot.normalizedAnalysis.fieldConfidence !== undefined, "snapshot must include fieldConfidence");
+    assert.equal(snapshot.analysisModel, "claude-haiku-4-5");
+    assert.equal(snapshot.analysisSchemaVersion, GARMENT_INTELLIGENCE_SCHEMA_VERSION);
+    assert.ok(snapshot.analyzedAt instanceof Date, "snapshot analyzedAt must be a Date");
+  });
+});
+
+describe("GI-SNAP-2 snapshot preserves AI output even when customer value takes precedence in ClosetItem", () => {
+  it("snapshot observables include AI primaryColor even when ClosetItem does not receive it", async () => {
+    const { fn, calls } = makePersistSuccess();
+
+    await runClosetGarmentAnalysis(
+      {
+        closetItemId: "snap-2",
+        imagePublicId: "img/snap2",
+        category: "DRESSES",
+        userPrimaryColor: "navy",  // customer supplied — AI value must not go to item
+      },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+    );
+
+    const [, itemData, snapshot] = calls[0];
+    // ClosetItem must NOT receive the AI color (customer value wins)
+    assert.equal(itemData.primaryColor, undefined, "AI primaryColor must not overwrite customer value in item");
+    // Snapshot MUST record what AI said regardless of customer precedence
+    assert.equal(snapshot.normalizedAnalysis.observables.primaryColor, "sage green", "snapshot must preserve AI primaryColor");
+  });
+
+  it("snapshot matchingSignals include AI occasions even when user occasions take precedence", async () => {
+    const { fn, calls } = makePersistSuccess();
+
+    await runClosetGarmentAnalysis(
+      {
+        closetItemId: "snap-3",
+        imagePublicId: "img/snap3",
+        category: "DRESSES",
+        userOccasions: ["work", "evening"],  // customer supplied
+      },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+    );
+
+    const [, itemData, snapshot] = calls[0];
+    assert.equal(itemData.occasions, undefined, "AI occasions must not overwrite customer occasions in item");
+    assert.deepEqual(snapshot.normalizedAnalysis.matchingSignals.occasions, ["casual", "weekend"], "snapshot must preserve AI occasions");
+  });
+});
+
+describe("GI-SNAP-3 no snapshot on analysis failure", () => {
+  it("persistSuccess is never called when analysis fails", async () => {
+    const success = makePersistSuccess();
+    const { fn: failFn } = makePersistFailure();
+
+    await runClosetGarmentAnalysis(
+      { closetItemId: "snap-fail", imagePublicId: "img/snap-fail", category: "TOPS" },
+      { imageAnalyzer: makeRejectingAnalyzer("timeout"), persistSuccess: success.fn, persistFailure: failFn, getSignedUrl: makeGetSignedUrl() },
+    );
+
+    assert.equal(success.calls.length, 0, "persistSuccess must not be called on failure — no snapshot created");
+  });
+});
+
+describe("GI-SNAP-4 item timestamp and snapshot timestamp are identical", () => {
+  it("analyzedAt in itemData matches analyzedAt in snapshot", async () => {
+    const { fn, calls } = makePersistSuccess();
+
+    await runClosetGarmentAnalysis(
+      { closetItemId: "snap-ts", imagePublicId: "img/snap-ts", category: "TOPS" },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+    );
+
+    const [, itemData, snapshot] = calls[0];
+    assert.strictEqual(itemData.analyzedAt, snapshot.analyzedAt, "item and snapshot must share the same analyzedAt Date instance");
   });
 });
 

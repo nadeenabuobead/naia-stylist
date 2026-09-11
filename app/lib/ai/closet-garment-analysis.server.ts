@@ -215,7 +215,30 @@ export async function extractGarmentIntelligence(
 
 // ── Persistence helpers ───────────────────────────────────────────────────────
 
-type PrismaUpdateFn = (closetItemId: string, data: Record<string, unknown>) => Promise<void>;
+// The normalized AI extraction result BEFORE customer-precedence merge.
+// Written atomically alongside the ClosetItem update so provenance is never lost.
+export interface ClosetItemSnapshotData {
+  normalizedAnalysis: {
+    observables: GarmentObservables;
+    matchingSignals: GarmentMatchingSignals;
+    fieldConfidence: GarmentFieldConfidence;
+  };
+  analysisModel: string;
+  analysisSchemaVersion: string;
+  analyzedAt: Date;
+}
+
+// Writes the ClosetItem update AND the analysis snapshot in a single atomic operation.
+// Failure of either must roll back both — the snapshot must not exist without the item write.
+export type PersistSuccessFn = (
+  closetItemId: string,
+  itemData: Record<string, unknown>,
+  snapshot: ClosetItemSnapshotData,
+) => Promise<void>;
+
+// Writes only the failure-status fields to ClosetItem. No snapshot is created on failure
+// (there is no AI output to preserve).
+export type PersistFailureFn = (closetItemId: string, data: Record<string, unknown>) => Promise<void>;
 
 interface UserSupplied {
   primaryColor: string | null;
@@ -227,15 +250,15 @@ interface UserSupplied {
 async function persistExtraction(
   closetItemId: string,
   result: GarmentExtractionResult,
-  prismaUpdate: PrismaUpdateFn,
+  persistSuccess: PersistSuccessFn,
   user: UserSupplied,
 ): Promise<void> {
   const { observables: obs, matchingSignals: sig, fieldConfidence } = result;
 
   // User-verified fields are never overwritten by AI inference.
   // Rule: USER-VERIFIED > TRUSTED CANONICAL > AI OBSERVATION > UNKNOWN
-  const shouldWriteColors  = !user.primaryColor && obs.primaryColor !== null;
-  const shouldWritePattern = !user.pattern;
+  const shouldWriteColors    = !user.primaryColor && obs.primaryColor !== null;
+  const shouldWritePattern   = !user.pattern;
   const shouldWriteOccasions = user.occasions.length === 0;
   const shouldWriteSeasons   = user.seasons.length === 0;
 
@@ -243,9 +266,12 @@ async function persistExtraction(
   if (obs.primaryColor) aiColors.push(obs.primaryColor);
   aiColors.push(...obs.secondaryColors);
 
-  await prismaUpdate(closetItemId, {
+  // Shared timestamp — item row and snapshot row record the same analysis instant.
+  const analyzedAt = new Date();
+
+  const itemData: Record<string, unknown> = {
     analysisStatus: "ready",
-    analyzedAt: new Date(),
+    analyzedAt,
     analysisSchemaVersion: GARMENT_INTELLIGENCE_SCHEMA_VERSION,
 
     // Tier 2 — observable attributes
@@ -270,15 +296,25 @@ async function persistExtraction(
     formality:         sig.formality,
     stylePersonality:  sig.stylePersonality,
 
-    fieldConfidence:   fieldConfidence,
-  });
+    fieldConfidence,
+  };
+
+  const snapshot: ClosetItemSnapshotData = {
+    normalizedAnalysis: { observables: obs, matchingSignals: sig, fieldConfidence },
+    analysisModel: GARMENT_ANALYSIS_MODEL,
+    analysisSchemaVersion: GARMENT_INTELLIGENCE_SCHEMA_VERSION,
+    analyzedAt,
+  };
+
+  // Atomic: both writes succeed or both are rolled back.
+  await persistSuccess(closetItemId, itemData, snapshot);
 }
 
-async function persistFailure(
+async function writePersistFailure(
   closetItemId: string,
-  prismaUpdate: PrismaUpdateFn,
+  persistFailure: PersistFailureFn,
 ): Promise<void> {
-  await prismaUpdate(closetItemId, {
+  await persistFailure(closetItemId, {
     analysisStatus: "failed",
     analyzedAt: new Date(),
     analysisSchemaVersion: GARMENT_INTELLIGENCE_SCHEMA_VERSION,
@@ -304,16 +340,19 @@ export interface AnalyzeClosetGarmentParams {
 }
 
 // Exported for testing only — accepts injected dependencies.
+// persistSuccess and persistFailure are separate so tests can spy on each independently.
+// In production, persistSuccess wraps both writes in a Prisma transaction.
 export async function runClosetGarmentAnalysis(
   params: AnalyzeClosetGarmentParams,
   deps: {
     imageAnalyzer: ImageAnalyzerFn;
-    prismaUpdate: PrismaUpdateFn;
+    persistSuccess: PersistSuccessFn;
+    persistFailure: PersistFailureFn;
     getSignedUrl: (publicId: string) => string;
   },
 ): Promise<void> {
   const { closetItemId, imagePublicId, category } = params;
-  const { imageAnalyzer, prismaUpdate, getSignedUrl } = deps;
+  const { imageAnalyzer, persistSuccess, persistFailure, getSignedUrl } = deps;
 
   const user: UserSupplied = {
     primaryColor: params.userPrimaryColor ?? null,
@@ -326,20 +365,22 @@ export async function runClosetGarmentAnalysis(
   try {
     imageUrl = getSignedUrl(imagePublicId);
   } catch {
-    await persistFailure(closetItemId, prismaUpdate).catch(() => {});
+    await writePersistFailure(closetItemId, persistFailure).catch(() => {});
     return;
   }
 
   try {
     const result = await extractGarmentIntelligence(imageUrl, category, imageAnalyzer);
-    await persistExtraction(closetItemId, result, prismaUpdate, user);
+    await persistExtraction(closetItemId, result, persistSuccess, user);
   } catch {
-    await persistFailure(closetItemId, prismaUpdate).catch(() => {});
+    await writePersistFailure(closetItemId, persistFailure).catch(() => {});
   }
 }
 
 // Main export — called from the upload action (awaited inline, not fire-and-forget).
 // The internal AbortController timeout bounds execution to GARMENT_ANALYSIS_TIMEOUT_MS.
+// Both the ClosetItem update and the ClosetItemAnalysisSnapshot create are wrapped in a
+// Prisma interactive transaction — either both succeed or neither is committed.
 export async function analyzeClosetGarment(
   params: AnalyzeClosetGarmentParams,
 ): Promise<void> {
@@ -349,12 +390,29 @@ export async function analyzeClosetGarment(
     apiSecret: process.env.CLOUDINARY_API_SECRET ?? "",
   };
 
-  const defaultPrismaUpdate: PrismaUpdateFn = (id, data) =>
+  const defaultPersistSuccess: PersistSuccessFn = async (id, itemData, snapshot) => {
+    await prisma.$transaction(async (tx) => {
+      await tx.closetItem.update({ where: { id }, data: itemData });
+      await tx.closetItemAnalysisSnapshot.create({
+        data: {
+          closetItemId: id,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          normalizedAnalysis: snapshot.normalizedAnalysis as any,
+          analysisModel: snapshot.analysisModel,
+          analysisSchemaVersion: snapshot.analysisSchemaVersion,
+          analyzedAt: snapshot.analyzedAt,
+        },
+      });
+    });
+  };
+
+  const defaultPersistFailure: PersistFailureFn = (id, data) =>
     prisma.closetItem.update({ where: { id }, data }).then(() => {});
 
   return runClosetGarmentAnalysis(params, {
     imageAnalyzer: analyzeImage,
-    prismaUpdate: defaultPrismaUpdate,
+    persistSuccess: defaultPersistSuccess,
+    persistFailure: defaultPersistFailure,
     getSignedUrl: (publicId) => buildSignedDeliveryUrl(cloudinaryConfig, publicId, null),
   });
 }

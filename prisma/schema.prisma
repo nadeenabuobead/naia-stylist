@@ -249,6 +249,8 @@ model ClosetItem {
   outfitItems   OutfitItem[]
   savedLookItems         SavedLookItem[]
   recommendationFeedback RecommendationFeedback[]
+  analysisSnapshots      ClosetItemAnalysisSnapshot[]
+  adminReview            ClosetItemAdminReview?
 }
 
 enum ClosetCategory {
@@ -318,6 +320,7 @@ model StylingSession {
   review          PostOutfitReview?
   events                 StylingEvent[]
   recommendationFeedback RecommendationFeedback[]
+  adminReview            StylingSessionAdminReview?
 }
 
 enum StyleSource {
@@ -1098,4 +1101,82 @@ model StyleTendency {
   @@index([customerId, state])
   @@index([customerId, observationFamily])
   @@index([customerId, observationKey])
+}
+
+// ============================================
+// nAia ADMIN — PHASE 1 FOUNDATION
+// ============================================
+
+// Preserves the full normalized AI garment-extraction result BEFORE the
+// customer-precedence merge that writes to ClosetItem. One row per analysis
+// run; re-analyses append a new row rather than overwriting history.
+// Added: migration 20260911000000_naia_admin_foundation
+model ClosetItemAnalysisSnapshot {
+  id           String     @id @default(cuid())
+  closetItemId String
+  closetItem   ClosetItem @relation(fields: [closetItemId], references: [id], onDelete: Cascade)
+
+  // Full GarmentExtractionResult as returned by extractGarmentIntelligence()
+  // BEFORE customer-precedence logic runs. Shape:
+  //   { observables: GarmentObservables, matchingSignals: GarmentMatchingSignals,
+  //     fieldConfidence: GarmentFieldConfidence }
+  normalizedAnalysis    Json
+
+  analysisModel         String   // e.g. "claude-haiku-4-5"
+  analysisSchemaVersion String   // e.g. "1.0"
+  analyzedAt            DateTime // matches ClosetItem.analyzedAt for this run
+
+  createdAt DateTime @default(now())
+
+  @@index([closetItemId])
+}
+
+// Stores the admin reviewer's decision for a single ClosetItem.
+// The AI analysis history lives in ClosetItemAnalysisSnapshot — not here.
+// overrides is a sparse JSON object: key present → admin override wins at runtime;
+// key absent → fall through to current ClosetItem value.
+// Added: migration 20260911000000_naia_admin_foundation
+model ClosetItemAdminReview {
+  id           String     @id @default(cuid())
+  closetItemId String     @unique
+  closetItem   ClosetItem @relation(fields: [closetItemId], references: [id], onDelete: Cascade)
+
+  // Derived by server from overrides — never set by client.
+  // "unreviewed" only on record creation (default); after first save:
+  //   "reviewed"   → overrides is null or {}
+  //   "overridden" → overrides has ≥1 key
+  reviewStatus String @default("unreviewed")
+
+  adminNotes String? @db.Text
+
+  // Sparse override object. Key presence (not value truthiness) determines override.
+  // [] is a valid intentional override. null is valid for scalar fields.
+  // Validated server-side against canonical garment vocabularies.
+  overrides Json?
+
+  reviewedAt DateTime?
+  reviewedBy String?   // admin email / identifier
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Records the admin QA decision for a complete StyleMe session.
+// The unit of review is the full decision: TODAY inputs → Passport → Closet →
+// anchor → candidate ranking → model/fallback → outfit → wording → outcome.
+// Added: migration 20260911000000_naia_admin_foundation
+model StylingSessionAdminReview {
+  id               String         @id @default(cuid())
+  stylingSessionId String         @unique
+  stylingSession   StylingSession @relation(fields: [stylingSessionId], references: [id], onDelete: Cascade)
+
+  // "unreviewed" | "pass" | "questionable" | "fail"
+  qaStatus String @default("unreviewed")
+
+  adminNotes String? @db.Text
+  reviewedAt DateTime?
+  reviewedBy String?  // admin email / identifier
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
