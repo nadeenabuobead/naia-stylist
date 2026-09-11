@@ -222,9 +222,11 @@ export async function action({ request }) {
     return Response.json({ ok: true, customerId: cid, evidenceWritten: report, evidenceBySource: Object.fromEntries(evidenceCounts.map(r => [r.source, r._count.id])), tendencies });
   }
 
-  // All other actions require x-seed-secret
+  // All other actions require x-seed-secret (STAGING_SEED_SECRET or STAGING_FIX_SECRET)
   const secret = request.headers.get("x-seed-secret");
-  if (!process.env.STAGING_SEED_SECRET || secret !== process.env.STAGING_SEED_SECRET) {
+  const validSeedSecret = process.env.STAGING_SEED_SECRET && secret === process.env.STAGING_SEED_SECRET;
+  const validFixSecret  = process.env.STAGING_FIX_SECRET  && secret === process.env.STAGING_FIX_SECRET;
+  if (!validSeedSecret && !validFixSecret) {
     return new Response("Forbidden", { status: 403 });
   }
 
