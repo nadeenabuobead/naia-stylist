@@ -8,10 +8,12 @@ import { describe, it } from "node:test";
 import {
   assessClosetEligibility,
   isVtoCategoryAllowed,
+  resolveActivewearVtoType,
   PRISMA_CATEGORY_MAP,
   CLOSET_ELIGIBILITY_DISPLAY,
   STAGE_A_CUSTOMER_HINTS,
   type AssessClosetEligibilityInput,
+  type VtoWearableType,
 } from "./closet-eligibility.ts";
 import {
   assessClosetEligibilityStageB,
@@ -81,12 +83,14 @@ describe("Stage A — shoes and bags with good image → pending-assessment", ()
 // ── Stage A: unsupported categories ──────────────────────────────────────────
 
 describe("Stage A — unsupported categories → not-supported", () => {
+  // ACTIVEWEAR without a subcategory remains blocked (no subcategory → cannot resolve type).
+  // ACTIVEWEAR with a supported subcategory is tested separately below.
   const unsupportedCats = [
     "ACCESSORIES", "JEWELRY", "ACTIVEWEAR", "SWIMWEAR", "LOUNGEWEAR", "OTHER",
   ] as const;
 
   for (const cat of unsupportedCats) {
-    it(`${cat} → not-supported, null customerHint`, () => {
+    it(`${cat} (no subcategory) → not-supported, null customerHint`, () => {
       const result = assessClosetEligibility({ prismaCategory: cat, ...GOOD });
       assert.equal(result.eligible, "not-supported");
       assert.equal(result.category, "unsupported");
@@ -299,8 +303,22 @@ describe("isVtoCategoryAllowed — rejected cases (FASHN must never be reached)"
   it("JEWELRY + null subcategory → rejected", () => {
     assert.equal(isVtoCategoryAllowed("JEWELRY", null), false);
   });
-  it("ACTIVEWEAR → rejected", () => {
+  it("ACTIVEWEAR with no subcategory → rejected (cannot resolve garment type)", () => {
     assert.equal(isVtoCategoryAllowed("ACTIVEWEAR"), false);
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", null), false);
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", ""), false);
+  });
+  it("ACTIVEWEAR with non-wearable subcategory (gloves) → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "gloves"), false);
+  });
+  it("ACTIVEWEAR with non-wearable subcategory (socks) → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "socks"), false);
+  });
+  it("ACTIVEWEAR with non-wearable subcategory (wrist guards) → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "wrist guards"), false);
+  });
+  it("ACTIVEWEAR with non-wearable subcategory (compression sleeves) → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "compression sleeves"), false);
   });
   it("SWIMWEAR → rejected", () => {
     assert.equal(isVtoCategoryAllowed("SWIMWEAR"), false);
@@ -988,5 +1006,376 @@ describe("runStageBAssessment — database update failure", () => {
     );
 
     assert.equal(outcome, "db-failure");
+  });
+});
+
+// ── resolveActivewearVtoType ──────────────────────────────────────────────────
+
+describe("resolveActivewearVtoType — null / empty / unknown → unsupported", () => {
+  it("null → unsupported", () => {
+    assert.equal(resolveActivewearVtoType(null), "unsupported");
+  });
+  it("undefined → unsupported", () => {
+    assert.equal(resolveActivewearVtoType(undefined), "unsupported");
+  });
+  it("empty string → unsupported", () => {
+    assert.equal(resolveActivewearVtoType(""), "unsupported");
+  });
+  it("whitespace only → unsupported", () => {
+    assert.equal(resolveActivewearVtoType("   "), "unsupported");
+  });
+  it("unknown subcategory → unsupported", () => {
+    assert.equal(resolveActivewearVtoType("unknown gear"), "unsupported");
+  });
+});
+
+describe("resolveActivewearVtoType — unsupported accessories", () => {
+  it("socks → unsupported", () => {
+    assert.equal(resolveActivewearVtoType("socks"), "unsupported");
+  });
+  it("gloves → unsupported", () => {
+    assert.equal(resolveActivewearVtoType("gloves"), "unsupported");
+  });
+  it("wrist guards → unsupported", () => {
+    assert.equal(resolveActivewearVtoType("wrist guards"), "unsupported");
+  });
+  it("compression sleeves → unsupported", () => {
+    assert.equal(resolveActivewearVtoType("compression sleeves"), "unsupported");
+  });
+});
+
+describe("resolveActivewearVtoType — bottoms (staging examples + variants)", () => {
+  // Staging fixture: Charcoal Flare Leggings
+  it("'flare leggings' → bottom", () => {
+    assert.equal(resolveActivewearVtoType("flare leggings"), "bottom");
+  });
+  // Staging fixture: Black High-Waist Leggings
+  it("'high-waist leggings' → bottom", () => {
+    assert.equal(resolveActivewearVtoType("high-waist leggings"), "bottom");
+  });
+  it("'leggings' → bottom", () => {
+    assert.equal(resolveActivewearVtoType("leggings"), "bottom");
+  });
+  // Staging fixture: Black Nike Athletic Shorts
+  it("'athletic shorts' → bottom", () => {
+    assert.equal(resolveActivewearVtoType("athletic shorts"), "bottom");
+  });
+  it("'shorts' → bottom", () => {
+    assert.equal(resolveActivewearVtoType("shorts"), "bottom");
+  });
+  it("'bike shorts' → bottom", () => {
+    assert.equal(resolveActivewearVtoType("bike shorts"), "bottom");
+  });
+  it("'joggers' → bottom", () => {
+    assert.equal(resolveActivewearVtoType("joggers"), "bottom");
+  });
+  it("'track pants' → bottom", () => {
+    assert.equal(resolveActivewearVtoType("track pants"), "bottom");
+  });
+});
+
+describe("resolveActivewearVtoType — tops (staging examples + variants)", () => {
+  // Staging fixture: Ivory Racerback Tank Top
+  it("'racerback tank' → top", () => {
+    assert.equal(resolveActivewearVtoType("racerback tank"), "top");
+  });
+  it("'tank top' → top", () => {
+    assert.equal(resolveActivewearVtoType("tank top"), "top");
+  });
+  // Staging fixture: Black Nike Dri-FIT T-Shirt
+  it("'Dri-FIT T-shirt' → top (case-insensitive)", () => {
+    assert.equal(resolveActivewearVtoType("Dri-FIT T-shirt"), "top");
+  });
+  it("'athletic T-shirt' → top", () => {
+    assert.equal(resolveActivewearVtoType("athletic T-shirt"), "top");
+  });
+  it("'T-shirt' → top", () => {
+    assert.equal(resolveActivewearVtoType("T-shirt"), "top");
+  });
+  // Staging fixture: Black Nike Zip-Up Hoodie
+  it("'zip-up hoodie' → top", () => {
+    assert.equal(resolveActivewearVtoType("zip-up hoodie"), "top");
+  });
+  it("'hoodie' → top", () => {
+    assert.equal(resolveActivewearVtoType("hoodie"), "top");
+  });
+  it("'pullover hoodie' → top", () => {
+    assert.equal(resolveActivewearVtoType("pullover hoodie"), "top");
+  });
+  it("'sweatshirt' → top", () => {
+    assert.equal(resolveActivewearVtoType("sweatshirt"), "top");
+  });
+  it("'sports bra' → top", () => {
+    assert.equal(resolveActivewearVtoType("sports bra"), "top");
+  });
+  it("'crop top' → top", () => {
+    assert.equal(resolveActivewearVtoType("crop top"), "top");
+  });
+});
+
+describe("resolveActivewearVtoType — outerwear (staging examples + variants)", () => {
+  // Staging fixture: Gray Zip-Up Athletic Jacket
+  it("'athletic jacket' → outerwear", () => {
+    assert.equal(resolveActivewearVtoType("athletic jacket"), "outerwear");
+  });
+  it("'track jacket' → outerwear", () => {
+    assert.equal(resolveActivewearVtoType("track jacket"), "outerwear");
+  });
+  it("'windbreaker' → outerwear", () => {
+    assert.equal(resolveActivewearVtoType("windbreaker"), "outerwear");
+  });
+});
+
+describe("resolveActivewearVtoType — one-piece", () => {
+  it("'bodysuit' → one-piece", () => {
+    assert.equal(resolveActivewearVtoType("bodysuit"), "one-piece");
+  });
+  it("'unitard' → one-piece", () => {
+    assert.equal(resolveActivewearVtoType("unitard"), "one-piece");
+  });
+  it("'active one-piece' → one-piece", () => {
+    assert.equal(resolveActivewearVtoType("active one-piece"), "one-piece");
+  });
+});
+
+describe("resolveActivewearVtoType — shoes", () => {
+  it("'sneakers' → shoes", () => {
+    assert.equal(resolveActivewearVtoType("sneakers"), "shoes");
+  });
+  it("'running shoes' → shoes", () => {
+    assert.equal(resolveActivewearVtoType("running shoes"), "shoes");
+  });
+  it("'training shoes' → shoes", () => {
+    assert.equal(resolveActivewearVtoType("training shoes"), "shoes");
+  });
+});
+
+// ── isVtoCategoryAllowed — ACTIVEWEAR ────────────────────────────────────────
+
+describe("isVtoCategoryAllowed — ACTIVEWEAR supported subcategories → allowed", () => {
+  // Seven staging fixtures
+  it("ACTIVEWEAR + 'zip-up hoodie' → allowed (staging: Black Nike Zip-Up Hoodie)", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "zip-up hoodie"), true);
+  });
+  it("ACTIVEWEAR + 'flare leggings' → allowed (staging: Charcoal Flare Leggings)", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "flare leggings"), true);
+  });
+  it("ACTIVEWEAR + 'racerback tank' → allowed (staging: Ivory Racerback Tank Top)", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "racerback tank"), true);
+  });
+  it("ACTIVEWEAR + 'athletic jacket' → allowed (staging: Gray Zip-Up Athletic Jacket)", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "athletic jacket"), true);
+  });
+  it("ACTIVEWEAR + 'athletic shorts' → allowed (staging: Black Nike Athletic Shorts)", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "athletic shorts"), true);
+  });
+  it("ACTIVEWEAR + 'high-waist leggings' → allowed (staging: Black High-Waist Leggings)", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "high-waist leggings"), true);
+  });
+  it("ACTIVEWEAR + 'Dri-FIT T-shirt' → allowed (staging: Black Nike Dri-FIT T-Shirt)", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "Dri-FIT T-shirt"), true);
+  });
+  // Additional supported variants
+  it("ACTIVEWEAR + 'hoodie' → allowed", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "hoodie"), true);
+  });
+  it("ACTIVEWEAR + 'sweatshirt' → allowed", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "sweatshirt"), true);
+  });
+  it("ACTIVEWEAR + 'joggers' → allowed", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "joggers"), true);
+  });
+  it("ACTIVEWEAR + 'sports bra' → allowed", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "sports bra"), true);
+  });
+  it("ACTIVEWEAR + 'sneakers' → allowed", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "sneakers"), true);
+  });
+  it("ACTIVEWEAR + 'bodysuit' → allowed", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "bodysuit"), true);
+  });
+});
+
+describe("isVtoCategoryAllowed — ACTIVEWEAR unsupported subcategories → rejected", () => {
+  it("ACTIVEWEAR + null → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", null), false);
+  });
+  it("ACTIVEWEAR + undefined → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", undefined), false);
+  });
+  it("ACTIVEWEAR + '' → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", ""), false);
+  });
+  it("ACTIVEWEAR + 'gloves' → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "gloves"), false);
+  });
+  it("ACTIVEWEAR + 'socks' → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "socks"), false);
+  });
+  it("ACTIVEWEAR + 'wrist guards' → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "wrist guards"), false);
+  });
+  it("ACTIVEWEAR + 'compression sleeves' → rejected", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "compression sleeves"), false);
+  });
+});
+
+describe("isVtoCategoryAllowed — beanie/accessory regression (unchanged)", () => {
+  it("ACCESSORIES + 'beanie' → allowed (unchanged)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "beanie"), true);
+  });
+  it("ACCESSORIES + 'knit beanie' → allowed (unchanged)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "knit beanie"), true);
+  });
+  it("ACCESSORIES + 'scarf' → allowed (unchanged)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "scarf"), true);
+  });
+  it("ACCESSORIES + 'belt' → allowed (unchanged)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "belt"), true);
+  });
+  it("JEWELRY + 'earrings' → allowed (unchanged)", () => {
+    assert.equal(isVtoCategoryAllowed("JEWELRY", "earrings"), true);
+  });
+  it("ACCESSORIES + 'handbag' → rejected (unchanged)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "handbag"), false);
+  });
+  it("SWIMWEAR → rejected (unchanged)", () => {
+    assert.equal(isVtoCategoryAllowed("SWIMWEAR"), false);
+  });
+  it("LOUNGEWEAR → rejected (unchanged)", () => {
+    assert.equal(isVtoCategoryAllowed("LOUNGEWEAR"), false);
+  });
+});
+
+// ── Stage A: ACTIVEWEAR with supported subcategory → normal assessment path ──
+
+describe("Stage A — ACTIVEWEAR with supported subcategory → proceeds through photo checks", () => {
+  // Staging fixtures — good image → pending-assessment
+  it("ACTIVEWEAR + 'zip-up hoodie' + good image → pending-assessment (staging fixture)", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACTIVEWEAR", subcategory: "zip-up hoodie", ...GOOD });
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "tops");
+    assert.equal(result.customerHint, null);
+  });
+  it("ACTIVEWEAR + 'flare leggings' + good image → pending-assessment (staging fixture)", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACTIVEWEAR", subcategory: "flare leggings", ...GOOD });
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "bottoms");
+    assert.equal(result.customerHint, null);
+  });
+  it("ACTIVEWEAR + 'racerback tank' + good image → pending-assessment (staging fixture)", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACTIVEWEAR", subcategory: "racerback tank", ...GOOD });
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "tops");
+  });
+  it("ACTIVEWEAR + 'athletic jacket' + good image → pending-assessment (staging fixture)", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACTIVEWEAR", subcategory: "athletic jacket", ...GOOD });
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "outerwear");
+  });
+  it("ACTIVEWEAR + 'athletic shorts' + good image → pending-assessment (staging fixture)", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACTIVEWEAR", subcategory: "athletic shorts", ...GOOD });
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "bottoms");
+  });
+  it("ACTIVEWEAR + 'high-waist leggings' + good image → pending-assessment (staging fixture)", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACTIVEWEAR", subcategory: "high-waist leggings", ...GOOD });
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "bottoms");
+  });
+  it("ACTIVEWEAR + 'Dri-FIT T-shirt' + good image → pending-assessment (staging fixture)", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACTIVEWEAR", subcategory: "Dri-FIT T-shirt", ...GOOD });
+    assert.equal(result.eligible, "pending-assessment");
+    assert.equal(result.category, "tops");
+  });
+
+  // Photo quality still applies
+  it("ACTIVEWEAR + 'leggings' + low-resolution image → needs-clearer-photo", () => {
+    const result = assessClosetEligibility({
+      prismaCategory: "ACTIVEWEAR", subcategory: "leggings",
+      width: 200, height: 300, format: "jpg", bytes: 50_000,
+    });
+    assert.equal(result.eligible, "needs-clearer-photo");
+    assert.ok(result.photoIssues.includes("low-resolution"));
+    assert.ok(result.customerHint !== null);
+  });
+  it("ACTIVEWEAR + 'tank top' + tiny file → needs-clearer-photo", () => {
+    const result = assessClosetEligibility({
+      prismaCategory: "ACTIVEWEAR", subcategory: "tank top",
+      width: 1024, height: 1536, format: "jpg", bytes: 5_000,
+    });
+    assert.equal(result.eligible, "needs-clearer-photo");
+    assert.ok(result.photoIssues.includes("tiny-file"));
+  });
+  it("ACTIVEWEAR + 'hoodie' + unsupported format → not-supported", () => {
+    const result = assessClosetEligibility({
+      prismaCategory: "ACTIVEWEAR", subcategory: "hoodie",
+      ...GOOD, format: "bmp",
+    });
+    assert.equal(result.eligible, "not-supported");
+    assert.ok(result.photoIssues.includes("unsupported-format"));
+  });
+});
+
+describe("Stage A — ACTIVEWEAR with unsupported subcategory → not-supported", () => {
+  it("ACTIVEWEAR + 'gloves' → not-supported regardless of image quality", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACTIVEWEAR", subcategory: "gloves", ...GOOD });
+    assert.equal(result.eligible, "not-supported");
+    assert.equal(result.category, "unsupported");
+  });
+  it("ACTIVEWEAR + 'socks' → not-supported", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACTIVEWEAR", subcategory: "socks", ...GOOD });
+    assert.equal(result.eligible, "not-supported");
+    assert.equal(result.category, "unsupported");
+  });
+  it("ACTIVEWEAR + 'compression sleeves' → not-supported", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACTIVEWEAR", subcategory: "compression sleeves", ...GOOD });
+    assert.equal(result.eligible, "not-supported");
+    assert.equal(result.category, "unsupported");
+  });
+  it("ACTIVEWEAR + null subcategory → not-supported (cannot resolve without subcategory)", () => {
+    const result = assessClosetEligibility({ prismaCategory: "ACTIVEWEAR", subcategory: null, ...GOOD });
+    assert.equal(result.eligible, "not-supported");
+    assert.equal(result.category, "unsupported");
+  });
+});
+
+// ── Stale-item reconciliation (unit simulation) ───────────────────────────────
+// These tests verify the reconciliation logic's preconditions — that
+// isVtoCategoryAllowed correctly identifies which stale items should be promoted
+// and which should not, mirroring the loader filter.
+
+describe("stale-item reconciliation preconditions via isVtoCategoryAllowed", () => {
+  it("ACTIVEWEAR + supported subcategory + not-supported → isVtoCategoryAllowed=true → would be promoted", () => {
+    // An item with category=ACTIVEWEAR, subcategory='leggings', tryOnEligibility='not-supported'
+    // would be included in staleIds because isVtoCategoryAllowed returns true.
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "leggings"), true);
+  });
+  it("ACTIVEWEAR + gloves + not-supported → isVtoCategoryAllowed=false → NOT promoted (wrong)", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "gloves"), false);
+  });
+  it("ACTIVEWEAR + null subcategory + not-supported → isVtoCategoryAllowed=false → NOT promoted", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", null), false);
+  });
+  it("ACCESSORIES + beanie + not-supported → isVtoCategoryAllowed=true → still promoted (unchanged)", () => {
+    assert.equal(isVtoCategoryAllowed("ACCESSORIES", "beanie"), true);
+  });
+  it("ACTIVEWEAR + 'athletic jacket' → would be promoted (outerwear garment)", () => {
+    assert.equal(isVtoCategoryAllowed("ACTIVEWEAR", "athletic jacket"), true);
+  });
+  it("existing ready-for-try-on item: reconciliation filter requires not-supported → ready-for-try-on not in staleIds", () => {
+    // The loader filter checks tryOnEligibility === 'not-supported'. A ready-for-try-on
+    // item is never touched even if category is ACTIVEWEAR.
+    // (This test confirms the guard logic by checking what the filter would produce.)
+    const fakeItem = { tryOnEligibility: "ready-for-try-on", category: "ACTIVEWEAR", subcategory: "leggings" };
+    const wouldBeStale = fakeItem.tryOnEligibility === "not-supported"
+      && isVtoCategoryAllowed(fakeItem.category, fakeItem.subcategory);
+    assert.equal(wouldBeStale, false);
+  });
+  it("existing needs-clearer-photo item: not promoted (only not-supported is reconciled)", () => {
+    const fakeItem = { tryOnEligibility: "needs-clearer-photo", category: "ACTIVEWEAR", subcategory: "leggings" };
+    const wouldBeStale = fakeItem.tryOnEligibility === "not-supported"
+      && isVtoCategoryAllowed(fakeItem.category, fakeItem.subcategory);
+    assert.equal(wouldBeStale, false);
   });
 });

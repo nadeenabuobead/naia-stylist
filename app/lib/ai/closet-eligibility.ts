@@ -21,7 +21,20 @@ export type ClosetItemCategory =
   | "shoes"
   | "bags"
   | "accessories" // scarf, belt, earrings subcategories only (VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST)
-  | "unsupported"; // jewelry, hats, underwear, swimwear, activewear, other, unknown
+  | "unsupported"; // swimwear, loungewear, other, and activewear/accessories without a resolvable subcategory
+
+// Internal wearable type resolved from activewear subcategory.
+// NOT a required FASHN parameter — Try-On Max auto-detects the garment from the product image.
+// Used purely to decide whether a specific activewear piece can enter VTO.
+export type VtoWearableType =
+  | "top"
+  | "bottom"
+  | "one-piece"
+  | "outerwear"
+  | "shoes"
+  | "bag"
+  | "accessory"
+  | "unsupported";
 
 // Staging allowlist: subcategory values that are eligible for VTO under ACCESSORIES/JEWELRY.
 // Stored values are lowercased by garment analysis (closet-garment-analysis.server.ts line 133).
@@ -39,6 +52,71 @@ export const VTO_ACCESSORY_SUBCATEGORY_ALLOWLIST: ReadonlySet<string> = new Set(
   "beanie",
   "beret",
 ]);
+
+// ── Activewear subcategory resolver ──────────────────────────────────────────
+// Ordered [term, VtoWearableType] pairs for ACTIVEWEAR subcategory resolution.
+// Terms are matched case-insensitively via substring. More-specific terms appear
+// before more-general ones within the same type bucket to make intent explicit
+// (none currently conflict, but ordering guards against future additions).
+const ACTIVEWEAR_SUBCATEGORY_TERMS: ReadonlyArray<[string, VtoWearableType]> = [
+  // Bottoms
+  ["leggings",    "bottom"],  // "leggings", "high-waist leggings", "flare leggings"
+  ["joggers",     "bottom"],
+  ["track pant",  "bottom"],  // "track pants", "track pant"
+  ["shorts",      "bottom"],  // "shorts", "athletic shorts", "bike shorts"
+  // Tops — more specific terms before general
+  ["sports bra",  "top"],     // before bare "bra"
+  ["t-shirt",     "top"],     // "T-shirt", "Dri-FIT T-shirt", "athletic T-shirt"
+  ["tank",        "top"],     // "tank top", "racerback tank"
+  ["bra",         "top"],     // remaining bra variants
+  ["crop top",    "top"],
+  ["hoodie",      "top"],     // "hoodie", "zip-up hoodie", "pullover hoodie"
+  ["sweatshirt",  "top"],
+  ["pullover",    "top"],
+  // Outerwear
+  ["jacket",      "outerwear"], // "athletic jacket", "track jacket"
+  ["windbreaker", "outerwear"],
+  // One-piece
+  ["bodysuit",    "one-piece"],
+  ["unitard",     "one-piece"],
+  ["one-piece",   "one-piece"],
+  // Shoes
+  ["sneakers",    "shoes"],
+  ["shoe",        "shoes"],   // "shoes", "running shoes", "training shoes"
+  ["trainer",     "shoes"],
+  // Explicit unsupported accessories — listed to document intent; they fall through to "unsupported"
+  // socks, gloves, wrist guards, compression sleeves → no term defined → unsupported
+];
+
+/**
+ * Resolves an ACTIVEWEAR subcategory to a VTO wearable type.
+ * Returns "unsupported" when subcategory is null/empty or no term matches.
+ * This is the single source of truth for ACTIVEWEAR VTO eligibility.
+ */
+export function resolveActivewearVtoType(
+  subcategory: string | null | undefined,
+): VtoWearableType {
+  if (!subcategory || !subcategory.trim()) return "unsupported";
+  const lower = subcategory.trim().toLowerCase();
+  for (const [term, type] of ACTIVEWEAR_SUBCATEGORY_TERMS) {
+    if (lower.includes(term)) return type;
+  }
+  return "unsupported";
+}
+
+// Maps a resolved VtoWearableType to the internal ClosetItemCategory used for photo checks.
+function vtoWearableTypeToInternalCategory(type: VtoWearableType): ClosetItemCategory {
+  switch (type) {
+    case "top":       return "tops";
+    case "bottom":    return "bottoms";
+    case "one-piece": return "dresses";
+    case "outerwear": return "outerwear";
+    case "shoes":     return "shoes";
+    case "bag":       return "bags";
+    case "accessory": return "accessories";
+    default:          return "unsupported";
+  }
+}
 
 // Main Prisma ClosetCategory values that are VTO-eligible without a subcategory check.
 const VTO_SUPPORTED_MAIN_CATEGORIES: ReadonlySet<string> = new Set([
@@ -61,8 +139,10 @@ function isAllowlistedSubcategory(sub: string): boolean {
  *
  * Returns true when:
  *   A. category is a main supported category (TOPS/BOTTOMS/DRESSES/OUTERWEAR/SHOES/BAGS), OR
- *   B. category is ACCESSORIES/JEWELRY AND subcategory contains an allowlisted term.
- * Returns false for everything else (ACTIVEWEAR, SWIMWEAR, LOUNGEWEAR, OTHER, unknown).
+ *   B. category is ACCESSORIES/JEWELRY AND subcategory contains an allowlisted term, OR
+ *   C. category is ACTIVEWEAR AND resolveActivewearVtoType(subcategory) !== "unsupported".
+ * Returns false for everything else (SWIMWEAR, LOUNGEWEAR, OTHER, unknown; and ACTIVEWEAR/
+ * ACCESSORIES/JEWELRY with no resolvable subcategory).
  */
 export function isVtoCategoryAllowed(
   category: string,
@@ -72,6 +152,9 @@ export function isVtoCategoryAllowed(
   if (category === "ACCESSORIES" || category === "JEWELRY") {
     if (typeof subcategory !== "string") return false;
     return isAllowlistedSubcategory(subcategory.trim().toLowerCase());
+  }
+  if (category === "ACTIVEWEAR") {
+    return resolveActivewearVtoType(subcategory) !== "unsupported";
   }
   return false;
 }
@@ -232,6 +315,18 @@ export function assessClosetEligibility(
     isAllowlistedSubcategory(input.subcategory.trim().toLowerCase())
   ) {
     category = "accessories";
+  }
+
+  // ── 0b. Subcategory gate for ACTIVEWEAR ────────────────────────────────────
+  // Activewear items are blocked at the category level until the garment analysis
+  // provides a subcategory. If the subcategory resolves to a supported wearable
+  // type (top, bottom, outerwear, etc.), promote the internal category so the item
+  // proceeds through the normal photo-quality checks.
+  if (category === "unsupported" && input.prismaCategory === "ACTIVEWEAR") {
+    const wearableType = resolveActivewearVtoType(input.subcategory);
+    if (wearableType !== "unsupported") {
+      category = vtoWearableTypeToInternalCategory(wearableType);
+    }
   }
 
   // ── 1. Category check ─────────────────────────────────────────────────────

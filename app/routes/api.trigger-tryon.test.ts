@@ -1083,11 +1083,14 @@ describe("A — Closet item reaches VTO without Stage-B ready-for-try-on state",
     );
   });
 
-  it("closet UI gate uses category check + imagePublicId, NOT tryOnEligibility", () => {
+  it("closet UI gate uses isVtoCategoryAllowed + imagePublicId, NOT tryOnEligibility", () => {
     const closetRoute = readFileSync(join(__dirname, "closet._index.tsx"), "utf8");
+    // The shared isVtoCategoryAllowed function (closet-eligibility.ts) is the single
+    // source of truth for both the UI gate and the trigger route — there is no longer
+    // a separate VTO_CATEGORY_GATE constant.
     assert.ok(
-      closetRoute.includes("VTO_CATEGORY_GATE"),
-      "closet UI must use a VTO_CATEGORY_GATE for coarse category filtering",
+      closetRoute.includes("isVtoCategoryAllowed"),
+      "closet UI must call isVtoCategoryAllowed for category filtering",
     );
     assert.ok(
       closetRoute.includes("item.imagePublicId"),
@@ -1104,20 +1107,23 @@ describe("A — Closet item reaches VTO without Stage-B ready-for-try-on state",
     );
   });
 
-  it("VTO_CATEGORY_GATE includes clothing + shoes + bags but excludes accessories and jewelry", () => {
-    const closetRoute = readFileSync(join(__dirname, "closet._index.tsx"), "utf8");
-    const gateBlock = closetRoute.slice(
-      closetRoute.indexOf("VTO_CATEGORY_GATE"),
-      closetRoute.indexOf("VTO_CATEGORY_GATE") + 200,
+  it("VTO_SUPPORTED_MAIN_CATEGORIES covers clothing + shoes + bags (shared eligibility source)", () => {
+    // VTO_CATEGORY_GATE was a dead local constant — it has been replaced by
+    // VTO_SUPPORTED_MAIN_CATEGORIES in closet-eligibility.ts, which is the single
+    // authoritative list used by isVtoCategoryAllowed (shared by UI + trigger route).
+    const eligibility = readLib("ai/closet-eligibility.ts");
+    const block = eligibility.slice(
+      eligibility.indexOf("VTO_SUPPORTED_MAIN_CATEGORIES"),
+      eligibility.indexOf("VTO_SUPPORTED_MAIN_CATEGORIES") + 200,
     );
-    assert.ok(gateBlock.includes("TOPS"),      "VTO_CATEGORY_GATE must include TOPS");
-    assert.ok(gateBlock.includes("BOTTOMS"),   "VTO_CATEGORY_GATE must include BOTTOMS");
-    assert.ok(gateBlock.includes("DRESSES"),   "VTO_CATEGORY_GATE must include DRESSES");
-    assert.ok(gateBlock.includes("OUTERWEAR"), "VTO_CATEGORY_GATE must include OUTERWEAR");
-    assert.ok(gateBlock.includes("SHOES"),     "VTO_CATEGORY_GATE must include SHOES (Phase 4A5-ext staging)");
-    assert.ok(gateBlock.includes("BAGS"),      "VTO_CATEGORY_GATE must include BAGS (Phase 4A5-ext staging)");
-    assert.ok(!gateBlock.includes("ACCESSORIES"), "VTO_CATEGORY_GATE must exclude ACCESSORIES");
-    assert.ok(!gateBlock.includes("JEWELRY"),     "VTO_CATEGORY_GATE must exclude JEWELRY");
+    assert.ok(block.includes("TOPS"),      "VTO_SUPPORTED_MAIN_CATEGORIES must include TOPS");
+    assert.ok(block.includes("BOTTOMS"),   "VTO_SUPPORTED_MAIN_CATEGORIES must include BOTTOMS");
+    assert.ok(block.includes("DRESSES"),   "VTO_SUPPORTED_MAIN_CATEGORIES must include DRESSES");
+    assert.ok(block.includes("OUTERWEAR"), "VTO_SUPPORTED_MAIN_CATEGORIES must include OUTERWEAR");
+    assert.ok(block.includes("SHOES"),     "VTO_SUPPORTED_MAIN_CATEGORIES must include SHOES");
+    assert.ok(block.includes("BAGS"),      "VTO_SUPPORTED_MAIN_CATEGORIES must include BAGS");
+    // ACTIVEWEAR is intentionally absent — it is handled via subcategory resolution
+    assert.ok(!block.includes("ACTIVEWEAR"), "VTO_SUPPORTED_MAIN_CATEGORIES must not include ACTIVEWEAR (it is subcategory-gated)");
   });
 });
 

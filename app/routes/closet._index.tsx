@@ -29,7 +29,6 @@ const CATEGORIES = ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "ACTIVEWEAR", "SW
 // Categories where VTO makes visual sense — coarse UI gate only.
 // Server-side suitability check (screenGarmentSuitability) is the real gate at trigger time.
 // SHOES and BAGS added 2026-09-07 for staging QA (Phase 4A5-ext). ACCESSORIES and JEWELRY remain excluded.
-const VTO_CATEGORY_GATE = new Set(["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS"]);
 const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver", "Multicolor"];
 const OCCASIONS = ["Casual", "Work", "Dinner", "Party", "Formal", "Date", "Weekend", "Travel"];
 const SEASONS = ["Spring", "Summer", "Fall", "Winter", "All Season"];
@@ -105,12 +104,12 @@ function detectImageFormatFromBytes(header: Uint8Array): string | null {
 
 // Re-evaluate Stage A eligibility for ACCESSORIES/JEWELRY items after garment analysis.
 // Stage A runs at upload time when subcategory is unknown; this updates it once analysis sets it.
-async function refreshAccessoryEligibility(
+async function refreshVtoEligibility(
   itemId: string,
   category: string,
   metadata: { width?: number; height?: number; format?: string; bytes?: number },
 ): Promise<void> {
-  if (!["ACCESSORIES", "JEWELRY"].includes(category)) return;
+  if (!["ACCESSORIES", "JEWELRY", "ACTIVEWEAR"].includes(category)) return;
   const refreshed = await prisma.closetItem.findUnique({
     where: { id: itemId },
     select: { subcategory: true },
@@ -146,15 +145,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
   if (!customer) return redirect("/auth/shopify/login");
 
-  // Reconcile stale tryOnEligibility for ACCESSORIES/JEWELRY items whose subcategory is
-  // now allowlisted. These were assessed before the accessory subcategory gate existed and
-  // may have tryOnEligibility="not-supported" even though isVtoCategoryAllowed now returns true.
+  // Reconcile stale tryOnEligibility for subcategory-gated items (ACCESSORIES, JEWELRY,
+  // ACTIVEWEAR) that have tryOnEligibility="not-supported" but whose subcategory now
+  // resolves to a supported type via isVtoCategoryAllowed. This covers:
+  //   - accessories assessed before the subcategory allowlist existed
+  //   - activewear items reassigned from TOPS/OUTERWEAR by prior migrations
+  // isVtoCategoryAllowed is the sole resolver — only items it approves are promoted.
   // After the first load post-deploy this produces no rows and no DB writes.
   const staleIds = customer.closetItems
     .filter(
       (item) =>
         item.tryOnEligibility === "not-supported" &&
-        (item.category === "ACCESSORIES" || item.category === "JEWELRY") &&
+        (item.category === "ACCESSORIES" ||
+          item.category === "JEWELRY" ||
+          item.category === "ACTIVEWEAR") &&
         isVtoCategoryAllowed(item.category, item.subcategory),
     )
     .map((item) => item.id);
@@ -471,8 +475,8 @@ export async function action({ request }: ActionFunctionArgs) {
       userSeasons:      seasons.length > 0 ? seasons : [],
     }).catch(() => {});
 
-    // Re-evaluate eligibility now that subcategory is set (ACCESSORIES/JEWELRY only).
-    await refreshAccessoryEligibility(newItem.id, category, {
+    // Re-evaluate eligibility now that subcategory is set (subcategory-gated categories).
+    await refreshVtoEligibility(newItem.id, category, {
       width: serverWidth ?? undefined,
       height: serverHeight ?? undefined,
       format: serverFormat,
@@ -543,7 +547,7 @@ export async function action({ request }: ActionFunctionArgs) {
         }).catch(() => {});
         // Re-evaluate eligibility now that subcategory is set (ACCESSORIES/JEWELRY only).
         // No pixel metadata available here — skip photo quality re-check.
-        await refreshAccessoryEligibility(itemId, category, {}).catch(() => {});
+        await refreshVtoEligibility(itemId, category, {}).catch(() => {});
       } else {
         await prisma.closetItem.update({
           where: { id: itemId },
@@ -763,7 +767,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }).catch(() => {});
 
     // Re-evaluate eligibility now that subcategory is set (ACCESSORIES/JEWELRY only).
-    await refreshAccessoryEligibility(itemId, category, {
+    await refreshVtoEligibility(itemId, category, {
       width:  editWidth  ?? undefined,
       height: editHeight ?? undefined,
       format: editFormat,
@@ -1945,13 +1949,11 @@ export default function Closet() {
         ) : (
           <div className="cl-grid">
             {filtered.map((item: any) => {
-              const accessoryNowAllowed =
-                (item.category === "ACCESSORIES" || item.category === "JEWELRY") &&
+              const itemNowSupported =
+                item.tryOnEligibility === "not-supported" &&
                 isVtoCategoryAllowed(item.category, item.subcategory);
               const elig = eligibilityStatus(
-                accessoryNowAllowed && item.tryOnEligibility === "not-supported"
-                  ? "pending-assessment"
-                  : item.tryOnEligibility,
+                itemNowSupported ? "pending-assessment" : item.tryOnEligibility,
                 item.tryOnCustomerHint,
               );
               return (
