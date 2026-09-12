@@ -10,6 +10,10 @@
 //   NAIA_ADMIN_REQUIRE_ACCOUNT_OWNER    — "true" | "false" (optional)
 //
 // All three layers must pass. Fails closed: empty shop allowlist → always 403.
+//
+// Session type note: accountOwner and email live on
+//   session.onlineAccessInfo?.associated_user
+// (online sessions only). Offline sessions never satisfy the email/owner checks.
 
 import { authenticate } from "../shopify.server";
 
@@ -27,8 +31,10 @@ export async function requireNaiaAdminAccess(request: Request) {
   }
 
   // ── Layer 2: optional account-owner restriction ──────────────────────────
+  // account_owner lives on session.onlineAccessInfo.associated_user (online sessions).
+  const isAccountOwner = session.onlineAccessInfo?.associated_user?.account_owner === true;
   if (process.env.NAIA_ADMIN_REQUIRE_ACCOUNT_OWNER === "true") {
-    if (!session.accountOwner) {
+    if (!isAccountOwner) {
       throw new Response("Forbidden — account owner access required", { status: 403 });
     }
   }
@@ -39,8 +45,9 @@ export async function requireNaiaAdminAccess(request: Request) {
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean);
 
-  if (allowedEmails.length > 0 && session.email) {
-    if (!allowedEmails.includes(session.email.toLowerCase())) {
+  const userEmail = session.onlineAccessInfo?.associated_user?.email ?? null;
+  if (allowedEmails.length > 0 && userEmail) {
+    if (!allowedEmails.includes(userEmail.toLowerCase())) {
       throw new Response("Forbidden — your account is not on the nAia admin allowlist", { status: 403 });
     }
   }

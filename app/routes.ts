@@ -52,6 +52,12 @@ export default [
     route("designer-intelligence", "routes/app.designer-intelligence.jsx"),
     route("trend-reports", "routes/app.trend-reports._index.tsx"),
     route("trend-reports/:id", "routes/app.trend-reports.$id.tsx"),
+    // nAia Admin — Phase 2: Closet Intelligence (read-only)
+    route("naia-admin", "routes/app.naia-admin.tsx", [
+      index("routes/app.naia-admin._index.tsx"),
+      route("closet", "routes/app.naia-admin.closet._index.tsx"),
+      route("closet/:itemId", "routes/app.naia-admin.closet.$itemId.tsx"),
+    ]),
   ]),
   route("my-naia", "routes/my-naia._index.tsx"),
   route("my-naia/what-naia-notices", "routes/my-naia.what-naia-notices.tsx"),
