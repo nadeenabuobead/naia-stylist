@@ -14,12 +14,13 @@ import type { LoaderFunctionArgs } from "react-router";
 import { requireNaiaAdminAccess } from "~/lib/naia-admin-auth.server";
 import {
   listClosetItems,
-  PAGE_SIZE,
   type ClosetItemListFilters,
   type ClosetItemListResult,
   type ClosetAnalysisStatus,
   type ClosetAdminReviewFilter,
 } from "~/lib/admin/closet-intelligence.server";
+
+const PAGE_SIZE = 25;
 import type { ClosetCategory } from "@prisma/client";
 
 const CATEGORIES: ClosetCategory[] = [
