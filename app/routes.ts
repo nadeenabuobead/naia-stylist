@@ -98,6 +98,24 @@ export default [
   route("api/seed-staging", "routes/api.seed-staging.jsx"),
   route("api/staging-saved-looks-audit", "routes/api.staging-saved-looks-audit.jsx"),
   route("staging/designer-preview", "routes/staging.designer-preview.jsx"),
+
+  // ── Standalone Internal Admin Portal ─────────────────────────────────────
+  // login and logout are flat (PUBLIC) — they must NOT be children of the
+  // protected admin.tsx layout, or an unauthenticated request creates a loop:
+  //   /admin → requireAdminSession → redirect /admin/login
+  //   → admin.tsx loader runs AGAIN → redirect /admin/login → …
+  route("admin/login",  "routes/admin.login.tsx"),
+  route("admin/logout", "routes/admin.logout.tsx"),
+  // Protected shell — all children inherit the requireAdminSession check.
+  route("admin", "routes/admin.tsx", [
+    index("routes/admin._index.tsx"),
+    route("naia", "routes/admin.naia.tsx", [
+      index("routes/admin.naia._index.tsx"),
+    ]),
+    route("nadine", "routes/admin.nadine.tsx", [
+      index("routes/admin.nadine._index.tsx"),
+    ]),
+  ]),
   route("api/track_event", "routes/api.track_event.jsx"),
   // VTO M1 — customer-facing virtual try-on trigger
   route("api/trigger-tryon", "routes/api.trigger-tryon.tsx"),
