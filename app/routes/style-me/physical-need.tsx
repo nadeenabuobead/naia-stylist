@@ -1,16 +1,14 @@
 // app/routes/style-me/physical-need.tsx
 // Rev 3 Screen 3 — "Any physical comfort needs right now?"
 // Max 2 selections. "nothing-specific" is exclusive (clears other selections).
-// Normalizes Rev 3 IDs via BODY_NEED_NORMALIZATION_MAP before storing in styleMeBodyNeeds.
-// Context-only IDs (softer-easier-fabrics, still-want-shape) pass through unchanged.
-// Canonical pass-through IDs (more-coverage, waist-definition) pass through as engine IDs.
+// Canonical Rev3 IDs are stored verbatim in styleMeBodyNeeds (no normalization).
+// Legacy normalization happens only in comfort.tsx and quick-style for backward compat.
 
 import { Form, Link, redirect, useLoaderData } from "react-router";
 import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";
 import { useState } from "react";
 import { getSession, commitSession } from "~/lib/session.server.js";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
-import { BODY_NEED_NORMALIZATION_MAP } from "~/lib/ai/signal-contract.js";
 import { SmPage } from "~/components/style-me/SmPage";
 import { SmContinue } from "~/components/style-me/SmContinue";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -74,13 +72,11 @@ export async function action({ request }: ActionFunctionArgs) {
     return { error: `Please choose up to ${MAX_SELECTIONS} physical needs.` };
   }
 
-  // Store raw Rev 3 UI IDs for back-navigation hydration (before normalization).
+  // Store raw canonical IDs for back-navigation hydration.
   const session = await getSession(request.headers.get("Cookie"));
   session.set("styleMeBodyNeedsRaw", JSON.stringify(selected));
-
-  // Normalize Rev 3 IDs to canonical engine signals (what the engine reads).
-  const normalized = selected.map((id) => BODY_NEED_NORMALIZATION_MAP[id] ?? id);
-  session.set("styleMeBodyNeeds", JSON.stringify(normalized));
+  // Store canonical Rev3 IDs verbatim — engine reads them directly.
+  session.set("styleMeBodyNeeds", JSON.stringify(selected));
 
   return redirect("/style-me/occasion", {
     headers: { "Set-Cookie": await commitSession(session) },

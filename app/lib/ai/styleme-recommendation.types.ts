@@ -122,6 +122,16 @@ export interface ClosetAnchorInput {
   imageUrl: string;
   garmentRelationships?: string[];
   formality?: string | null; // GarmentFormality token — null when item not yet analyzed
+  // Garment Intelligence fields (Group 3B — optional; null when item not yet analyzed)
+  fitProfile?: string | null;
+  waistShape?: string | null;
+  sleeveLength?: string | null;
+  necklineCoverage?: string | null;
+  hemLength?: string | null;
+  shoulderCoverage?: boolean | null;
+  midriffExposed?: boolean | null;
+  silhouette?: string | null;
+  stylePersonality?: string | null;
 }
 
 export type AnchorInput = NadineAnchorInput | ClosetAnchorInput;

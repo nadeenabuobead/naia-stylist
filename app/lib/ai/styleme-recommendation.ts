@@ -18,6 +18,7 @@ import {
   PROFILE_LIFESTYLE_OCCASION_MAP,
   PROFILE_DESIRED_IMPRESSION_DFM_MAP,
   PROFILE_BECOMING_DFM_MAP,
+  REV3_BODY_NEED_TO_LEGACY_ENGINE,
 } from "./signal-contract.js";
 import {
   getAllCatalogProducts,
@@ -949,7 +950,12 @@ function scoreProduct(
   const activeBodyNeeds = session.bodyNeeds.filter((n) => n !== "nothing-specific");
 
   for (const need of activeBodyNeeds) {
-    if (rankings.styleMeComfortMatch.includes(need)) {
+    // For canonical Rev3 IDs, also check the legacy NADINE catalog token.
+    const legacyToken = REV3_BODY_NEED_TO_LEGACY_ENGINE[need];
+    const matched =
+      rankings.styleMeComfortMatch.includes(need) ||
+      (legacyToken !== undefined && rankings.styleMeComfortMatch.includes(legacyToken));
+    if (matched) {
       addEntry(acc, makeEntry(
         PRODUCT_TEMPLATE_FIELDS.STYLE_ME_COMFORT_MATCH,
         need,
@@ -1112,8 +1118,9 @@ function scoreProduct(
       const mappedToken = PROFILE_DESIRED_FEELING_TRANSLATION[feelingId];
       if (!mappedToken) continue;
       if (feelingId === "comfortable") {
-        // Routes to SMCM, not DFM — skip if session already has "relaxed" in bodyNeeds
-        if (!activeBodyNeeds.includes("relaxed") && rankings.styleMeComfortMatch.includes("relaxed")) {
+        // Routes to SMCM, not DFM — skip if session already has "relaxed" or a canonical Rev3 alias in bodyNeeds
+        const hasRelaxedSignal = activeBodyNeeds.includes("relaxed") || activeBodyNeeds.includes("loose-comfortable");
+        if (!hasRelaxedSignal && rankings.styleMeComfortMatch.includes("relaxed")) {
           addEntry(acc, makeEntry(
             PRODUCT_TEMPLATE_FIELDS.STYLE_ME_COMFORT_MATCH,
             "relaxed",

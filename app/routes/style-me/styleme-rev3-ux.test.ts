@@ -150,15 +150,15 @@ describe("SM-REV3-B3 — 'other' option label is 'Other'", () => {
 
 // ── C: Occasion — 8 options, "other" removed ─────────────────────────────────
 
-describe("SM-REV3-C1 — occasions array has exactly 8 items", () => {
-  it("occasions array contains exactly 8 { id: ... } entries", () => {
+describe("SM-REV3-C1 — occasions array has exactly 9 items", () => {
+  it("occasions array contains exactly 9 { id: ... } entries", () => {
     const matches = [...occasion.matchAll(/\{ id: "/g)];
     // Subtract formality options (they are also { id: "formality-... })
     const occasionMatches = [...occasion.matchAll(/\{ id: "(?!formality)/g)];
     assert.strictEqual(
       occasionMatches.length,
-      8,
-      `Expected 8 occasion entries, got ${occasionMatches.length}`,
+      9,
+      `Expected 9 occasion entries, got ${occasionMatches.length}`,
     );
   });
 });
@@ -416,14 +416,14 @@ describe("SM-REV3-G1 — REV3_OCCASION_MAP retains 'other' → 'not-sure' for le
   });
 });
 
-describe("SM-REV3-G2 — fresh Rev 3 UI still has exactly 8 visible options", () => {
-  it("occasions array has 8 entries (other not visible)", () => {
+describe("SM-REV3-G2 — fresh Rev 3 UI still has exactly 9 visible options", () => {
+  it("occasions array has 9 entries (other not visible)", () => {
     const occasionsBlock = occasion.slice(
       occasion.indexOf("const occasions = ["),
       occasion.indexOf("const REV3_OCCASION_MAP"),
     );
     const ids = [...occasionsBlock.matchAll(/\{ id: "/g)];
-    assert.strictEqual(ids.length, 8, `UI occasions must be 8, got ${ids.length}`);
+    assert.strictEqual(ids.length, 9, `UI occasions must be 9, got ${ids.length}`);
     // Check id: "other" specifically — not just the word "other" in comments
     assert.ok(!occasionsBlock.includes('id: "other"'), "other id not in UI occasions");
   });
@@ -668,9 +668,9 @@ describe("SM-REV3-L5 — Physical Need raw IDs stored for hydration", () => {
     assert.ok(loaderBlock.includes('"styleMeBodyNeedsRaw"'), "loader reads styleMeBodyNeedsRaw");
     assert.ok(!loaderBlock.includes('"styleMeBodyNeeds"') || loaderBlock.indexOf('"styleMeBodyNeeds"') === -1, "loader does NOT read normalized styleMeBodyNeeds for hydration");
   });
-  it("action still writes normalized styleMeBodyNeeds for the engine", () => {
+  it("action writes canonical Rev3 IDs verbatim to styleMeBodyNeeds (no normalization)", () => {
     assert.ok(physNeedFresh.includes('"styleMeBodyNeeds"'), "styleMeBodyNeeds still written for engine");
-    assert.ok(physNeedFresh.includes("BODY_NEED_NORMALIZATION_MAP"), "normalization map still applied");
+    assert.ok(!physNeedFresh.includes("BODY_NEED_NORMALIZATION_MAP"), "normalization map NOT applied in Rev3 physical-need");
   });
 });
 
@@ -691,16 +691,15 @@ describe("SM-REV3-L6 — Physical Need 8 UI IDs all round-trip via styleMeBodyNe
       assert.ok(physNeedFresh.includes(`"${id}"`), `${id} is in PHYSICAL_NEED_OPTIONS`);
     }
   });
-  it("styleMeBodyNeedsRaw stores raw IDs so all 8 survive Back navigation", () => {
+  it("styleMeBodyNeedsRaw stored in action for back-navigation hydration", () => {
     const physNeedFresh = readFileSync(join(__dirname, "physical-need.tsx"), "utf8");
-    // Raw IDs are stored before normalization in the action
     const actionBlock = physNeedFresh.slice(
       physNeedFresh.indexOf("export async function action"),
       physNeedFresh.indexOf("export default function"),
     );
     assert.ok(
-      actionBlock.indexOf("styleMeBodyNeedsRaw") < actionBlock.indexOf("BODY_NEED_NORMALIZATION_MAP"),
-      "styleMeBodyNeedsRaw stored BEFORE normalization (raw IDs preserved)",
+      actionBlock.includes('"styleMeBodyNeedsRaw"'),
+      "styleMeBodyNeedsRaw stored in action for back-navigation",
     );
   });
   it("nothing-specific exclusive logic works regardless of normalization", () => {
@@ -1282,14 +1281,19 @@ describe("BUG4-AA — two bodyNeeds are parsed as string[] (not nested JSON)", (
 });
 
 describe("BUG4-AB — nothing-specific reaches Prisma as ['nothing-specific']", () => {
-  it("EXCLUSIVE_ID 'nothing-specific' passes through normalization unchanged", () => {
+  it("EXCLUSIVE_ID 'nothing-specific' stored verbatim in styleMeBodyNeeds (no normalization)", () => {
     const actionBlock = physNeed.slice(
       physNeed.indexOf("export async function action"),
       physNeed.indexOf("export default function"),
     );
+    // No normalization map in Rev3 physical-need — selected IDs stored verbatim
     assert.ok(
-      actionBlock.includes("BODY_NEED_NORMALIZATION_MAP[id] ?? id"),
-      "normalization uses ?? id fallback, so nothing-specific passes through unchanged",
+      !actionBlock.includes("BODY_NEED_NORMALIZATION_MAP"),
+      "normalization map must NOT be used in Rev3 physical-need action",
+    );
+    assert.ok(
+      actionBlock.includes('"styleMeBodyNeeds"'),
+      "styleMeBodyNeeds written verbatim",
     );
   });
   it("result.tsx bodyNeeds guard checks array length (not string truthiness)", () => {

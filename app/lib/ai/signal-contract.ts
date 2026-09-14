@@ -376,6 +376,27 @@ export const BODY_NEED_NORMALIZATION_MAP: Record<string, string> = {
   "loose-comfortable": "relaxed",
 };
 
+// Canonical Rev3 Physical Need IDs (from /style-me/physical-need).
+// Stored verbatim in StylingSession.bodyNeeds for new Rev3 sessions.
+export const CANONICAL_REV3_BODY_NEED_IDS: ReadonlySet<string> = new Set([
+  "nothing-tight-waist",
+  "less-body-conscious",
+  "more-coverage",
+  "softer-easier-fabrics",
+  "loose-comfortable",
+  "still-want-shape",
+  "waist-definition",
+  "structured-shape",
+]);
+
+// Maps canonical Rev3 body-need IDs to legacy engine tokens for NADINE catalog
+// SMCM matching only. Closet deterministic scoring uses canonical IDs directly.
+export const REV3_BODY_NEED_TO_LEGACY_ENGINE: Readonly<Record<string, string>> = {
+  "nothing-tight-waist": "soft-and-forgiving-around-waist",
+  "less-body-conscious": "relaxed",
+  "loose-comfortable": "relaxed",
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Style Personality V2→V3 translation
 // Maps stored V2 Passport profile IDs to the V3 catalogue archetype tokens

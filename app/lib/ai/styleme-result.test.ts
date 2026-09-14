@@ -37,6 +37,25 @@ import {
   FORMALITY_RANK,
   SESSION_OCCASION_TO_CLOSET_TOKENS,
   NAIA_STATE_LABELS,
+  scoreBodyNeedFit,
+  scoreBodyNeedFitForRanking,
+  computeIntentionItemBonus,
+  computeEnergyScore,
+  computeEnergyFit,
+  computeIntentionFit,
+  computePassportAlignment,
+  computeOccasionTier,
+  outfitIdentityScore,
+  outfitStructureScore,
+  outfitFlowScore,
+  outfitCoverageScore,
+  outfitCoherenceScore,
+  outfitSimplicityScore,
+  outfitExpressionScore,
+  compareCandidateRankKeys,
+  isTiedAtT1T4,
+  BODY_NEED_SMCM,
+  INTENTION_BONUS_SMCM,
   NAIA_INTENTION_LABELS,
   NAIA_BODY_NEED_LABELS,
   NAIA_CURRENT_GOAL_LABELS,
@@ -61,7 +80,7 @@ import { SONG_CATALOG } from "./get-ready-song-catalog.ts";
 import { runRecommendation } from "./styleme-recommendation.ts";
 import type { ClosetAnchorInput, StyleMeEngineInput, StyleMeRecommendationResult, ProductEvaluation, EvidenceEntry } from "./styleme-recommendation.types.ts";
 import { resolveActionAnchor } from "./styleme-anchor.server.ts";
-import type { NormalizedClosetAnchor, NormalizedStyleAnchor } from "./styleme-recommendation.types.ts";
+import type { NormalizedStyleAnchor } from "./styleme-recommendation.types.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -5352,6 +5371,20 @@ describe("§CC.1 — computeStyleMeResult: exactly one AI call in nAia closet mo
       occasions: ["everyday"], imageUrl: "https://cdn.example.com/cc-top.jpg",
     };
 
+    // Two bottom alternatives ensure ≥2 candidates so model eligibility guard lets the model run.
+    const altBottom1: ClosetAnchorInput = {
+      type: "closet", id: "cc-bottom-1", name: "Black Jeans",
+      category: "BOTTOMS", colors: ["black"], primaryColor: "black",
+      pattern: null, material: "denim", styleTags: ["casual"],
+      occasions: ["everyday"], imageUrl: "https://cdn.example.com/cc-b1.jpg",
+    };
+    const altBottom2: ClosetAnchorInput = {
+      type: "closet", id: "cc-bottom-2", name: "White Trousers",
+      category: "BOTTOMS", colors: ["white"], primaryColor: "white",
+      pattern: null, material: "cotton", styleTags: ["minimal"],
+      occasions: ["everyday"], imageUrl: "https://cdn.example.com/cc-b2.jpg",
+    };
+
     const session = {
       moods: ["calm"], desiredFeelings: ["minimal"],
       bodyNeeds: ["nothing-specific"], coverageConditional: null,
@@ -5362,7 +5395,7 @@ describe("§CC.1 — computeStyleMeResult: exactly one AI call in nAia closet mo
 
     const engineInput = {
       session,
-      anchor: closetAnchor,   // full ClosetAnchorInput, not just { type, id }
+      anchor: closetAnchor,
       mode: "naia" as const,
       recentlyShownClosetIds: [],
     };
@@ -5372,7 +5405,7 @@ describe("§CC.1 — computeStyleMeResult: exactly one AI call in nAia closet mo
       undefined,
       undefined,
       false,
-      async () => [closetAnchor],
+      async () => [closetAnchor, altBottom1, altBottom2],
       mockSelection,
     );
 
@@ -5397,6 +5430,20 @@ describe("§CC.2 — computeStyleMeResult: no second AI call when nAia selection
       occasions: ["everyday"], imageUrl: "https://cdn.example.com/cc2-top.jpg",
     };
 
+    // Two bottom alternatives to ensure ≥2 candidates so model eligibility guard lets the mock run.
+    const altBottom1: ClosetAnchorInput = {
+      type: "closet", id: "cc2-bottom-1", name: "Charcoal Trousers",
+      category: "BOTTOMS", colors: ["grey"], primaryColor: "grey",
+      pattern: null, material: "wool", styleTags: ["minimal"],
+      occasions: ["everyday"], imageUrl: "https://cdn.example.com/cc2-b1.jpg",
+    };
+    const altBottom2: ClosetAnchorInput = {
+      type: "closet", id: "cc2-bottom-2", name: "Black Skirt",
+      category: "BOTTOMS", colors: ["black"], primaryColor: "black",
+      pattern: null, material: "cotton", styleTags: ["minimal"],
+      occasions: ["everyday"], imageUrl: "https://cdn.example.com/cc2-b2.jpg",
+    };
+
     const session = {
       moods: ["calm"], desiredFeelings: ["minimal"],
       bodyNeeds: ["nothing-specific"], coverageConditional: null,
@@ -5407,7 +5454,7 @@ describe("§CC.2 — computeStyleMeResult: no second AI call when nAia selection
 
     const engineInput = {
       session,
-      anchor: closetAnchor,  // full ClosetAnchorInput
+      anchor: closetAnchor,
       mode: "naia" as const,
       recentlyShownClosetIds: [],
     };
@@ -5417,7 +5464,7 @@ describe("§CC.2 — computeStyleMeResult: no second AI call when nAia selection
       undefined,
       undefined,
       false,
-      async () => [closetAnchor],
+      async () => [closetAnchor, altBottom1, altBottom2],
       mockFailSelection,
     );
 
@@ -6642,7 +6689,6 @@ describe("§FA.8 — Fix B: occasion evidence is passed into the model selection
     occasions: ["work", "smart-casual"], // NOT everyday → "not-listed" in evidence
     imageUrl: "",
   };
-
   it("FEMALE FIXTURE: work-only blazer → model receives 'not-listed' occasion status for the blazer piece", async () => {
     let capturedEvidence: Map<string, CandidateOccasionEvidence> | undefined;
 
@@ -6651,6 +6697,7 @@ describe("§FA.8 — Fix B: occasion evidence is passed into the model selection
       return null; // not testing model success here
     };
 
+    // Three-item closet: model is always called for wording, evidence map covers all candidates including A (with blazer).
     const fa8Closet = [FEMALE_CLOSET_ITEMS[0], FA8_WORK_ONLY_BLAZER, FEMALE_CLOSET_ITEMS[2]];
 
     const engineInput = {
@@ -6737,22 +6784,17 @@ describe("§FA.8 — Fix B: occasion evidence is passed into the model selection
 // When C has an explicit non-matching optional piece and A compensates with a matched one,
 // A's coverage ratio improves relative to C → A wins on step 2.
 
-describe("§FA.NEW.1 — A legitimately wins: extra matching optional improves coverage ratio over C", () => {
-  it("FEMALE FIXTURE: C has non-matching bag; A replaces nothing but includes occasion-matched blazer → A wins", async () => {
+describe("§FA.NEW.1 — occasionTier: bag (OPTIONAL) has no T1 effect; both A and C are tier 2; C wins at T6c", () => {
+  it("FEMALE FIXTURE: optional bag is non-listed; OPTIONAL slot has no T1 effect → both tier 2; C wins (fewer discretionary)", async () => {
     // Scenario:
     //   base closet for both A and C: top(everyday→match), loafers(everyday→match), bag(not-listed)
-    //   A additionally has: blazer(everyday→match, optional)
+    //   A additionally has: blazer(everyday→match, outerwear=IMPORTANT)
     //
-    // A: top(base,m), loafers(shoe,m), bag(opt,not-listed), blazer(opt,m)
-    //    known=4, matching=3, nonMatch=1, ratio=3/4=0.75, baseShoe=2, opt=2
-    // C: top(base,m), loafers(shoe,m), bag(opt,not-listed)
-    //    known=3, matching=2, nonMatch=1, ratio=2/3≈0.67, baseShoe=2, opt=1
-    //
-    // Step 1: tie (1 non-match each — the bag)
-    // Step 2: A ratio 0.75 > C ratio 0.67 → A wins legitimately
-    //
-    // "Real additional session evidence": blazer's match genuinely offsets the bag's non-match
-    // in A's ratio, giving A an evidence advantage over C.
+    // Under new occasionTier:
+    //   bag = OPTIONAL slot → no T1 effect regardless of occasion status
+    //   blazer = IMPORTANT slot, occasions=[everyday] → matches → no downgrade
+    // Both A (with blazer) and C are tier 2.
+    // A has more discretionary pieces (bag + blazer = 2); C has fewer (bag = 1) → C wins at T6c.
 
     // Bag: styleTags:["confident"] → +3 mood score → enters candidate (score > 0)
     // BUT occasions:["work","smart-casual"] → NOT everyday → explicit non-match in both A and C
@@ -6796,10 +6838,11 @@ describe("§FA.NEW.1 — A legitimately wins: extra matching optional improves c
 
     const persistedIds = (result.rawRecommendation.selectedClosetGarments ?? []).map((g) => g.id);
 
-    // A should win: blazer's match compensates for the bag's non-match, improving coverage ratio
+    // Under occasionTier, OPTIONAL bag has no T1 effect; both A and C are tier 2.
+    // C has fewer discretionary pieces (bag only) vs A (bag + blazer), so C wins at T6c.
     assert.ok(
-      persistedIds.includes("f-ow-blazer-fn1"),
-      `Blazer must appear when it genuinely improves coverage ratio over C (bag is non-match in both); got: ${persistedIds.join(", ")}`,
+      !persistedIds.includes("f-ow-blazer-fn1"),
+      `Blazer must NOT appear: OPTIONAL bag has no T1 effect; C wins at T6c (fewer discretionary pieces); got: ${persistedIds.join(", ")}`,
     );
   });
 });
@@ -7813,7 +7856,7 @@ describe("§SP — Session × Passport integration", () => {
 
   it("SP.3.1 — NAIA_INTENTION_LABELS covers all live intention options with human-readable labels", () => {
     const liveIntentionIds = [
-      "feel-like-myself", "give-confidence", "ground-me", "make-it-easy",
+      "feel-like-myself", "confidence", "ground-me", "give-structure", "make-it-easy",
       "feel-put-together", "feel-attractive", "give-energy", "feel-softer",
       "feel-sharper", "feel-less-exposed", "express-myself",
     ];
@@ -9882,6 +9925,927 @@ describe("§GENDER Gender-aware finishing layer", () => {
       const femaleCoded = /\bbun\b|\bponytail\b|\bhalf-up\b|\bwaves?\b|\bwavy\b|\bcentre.part\b/i.test(layer.hair);
       assert.ok(!femaleCoded, `man hair output must not contain female-coded styling: "${layer.hair}"`);
     }
+  });
+});
+
+// ── Helpers for Step 3 tests (named distinctly to avoid collision with makeClosetItem above) ──
+function makeSmcmItem(overrides: Partial<{
+  id: string; name: string; category: string; occasions: string[]; styleTags: string[];
+  colors: string[]; primaryColor: string | null; pattern: string | null;
+  material: string | null; garmentRelationships: string[]; formality: string | null;
+  type: "closet"; imageUrl: string;
+  // Garment-intelligence fields (for scoreBodyNeedForClosetItem / scoreBodyNeedFitForRanking)
+  fitProfile: string | null; waistShape: string | null; sleeveLength: string | null;
+  necklineCoverage: string | null; hemLength: string | null;
+  shoulderCoverage: boolean | null; midriffExposed: boolean | null;
+  silhouette: string | null; stylePersonality: string | null;
+}> = {}) {
+  return {
+    type: "closet" as const,
+    id: overrides.id ?? "item-1",
+    name: overrides.name ?? "Test Item",
+    category: overrides.category ?? "TOPS",
+    occasions: overrides.occasions ?? [],
+    styleTags: overrides.styleTags ?? [],
+    colors: overrides.colors ?? ["black"],
+    primaryColor: overrides.primaryColor ?? null,
+    pattern: overrides.pattern ?? null,
+    material: overrides.material ?? null,
+    garmentRelationships: overrides.garmentRelationships ?? [],
+    formality: overrides.formality ?? null,
+    imageUrl: overrides.imageUrl ?? "https://example.com/img.jpg",
+    fitProfile: overrides.fitProfile ?? null,
+    waistShape: overrides.waistShape ?? null,
+    sleeveLength: overrides.sleeveLength ?? null,
+    necklineCoverage: overrides.necklineCoverage ?? null,
+    hemLength: overrides.hemLength ?? null,
+    shoulderCoverage: overrides.shoulderCoverage ?? null,
+    midriffExposed: overrides.midriffExposed ?? null,
+    silhouette: overrides.silhouette ?? null,
+    stylePersonality: overrides.stylePersonality ?? null,
+  };
+}
+
+function makeSmcmCandidate(ids: string[], slots?: string[]): import("./styleme-result.server.ts").OutfitCandidate {
+  return {
+    id: "A",
+    pieces: ids.map((id, i) => ({
+      closetId: id,
+      slot: slots?.[i] ?? (i === 0 ? "top" : i === 1 ? "bottom" : "shoe"),
+      label: `Item ${id}`,
+      colors: [],
+    })),
+  };
+}
+
+// ── §BNF: scoreBodyNeedFit ────────────────────────────────────────────────────
+
+describe("§BNF scoreBodyNeedFit", () => {
+  it("BNF.1 — empty bodyNeeds returns zero violations and zero score", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", garmentRelationships: ["relaxed"] })];
+    const result = scoreBodyNeedFit([], candidate, allItems);
+    assert.strictEqual(result.knownViolationCount, 0);
+    assert.strictEqual(result.bodyNeedFitScore, 0);
+    assert.strictEqual(result.scorableNeedCount, 0);
+  });
+
+  it("BNF.2 — nothing-specific sentinel is excluded from scoring", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", garmentRelationships: [] })];
+    const result = scoreBodyNeedFit(["nothing-specific"], candidate, allItems);
+    assert.strictEqual(result.knownViolationCount, 0);
+    assert.strictEqual(result.scorableNeedCount, 0);
+  });
+
+  it("BNF.3 — avoidance need satisfied: no violation when garment has SMCM token", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", garmentRelationships: ["soft-and-forgiving-around-waist"] })];
+    const result = scoreBodyNeedFit(["soft-and-forgiving-around-waist"], candidate, allItems);
+    assert.strictEqual(result.knownViolationCount, 0);
+  });
+
+  it("BNF.4 — avoidance need violated: +1 violation when no piece satisfies SMCM token", () => {
+    const candidate = makeSmcmCandidate(["i1", "i2"]);
+    const allItems = [
+      makeSmcmItem({ id: "i1", garmentRelationships: ["structured"] }),
+      makeSmcmItem({ id: "i2", garmentRelationships: ["structured"], category: "BOTTOMS" }),
+    ];
+    const result = scoreBodyNeedFit(["soft-and-forgiving-around-waist"], candidate, allItems);
+    assert.strictEqual(result.knownViolationCount, 1);
+  });
+
+  it("BNF.5 — legacy 'relaxed' is preference not avoidance: no violation when absent", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", garmentRelationships: ["structured"] })];
+    // 'relaxed' is legacy preference — even when absent it must NOT generate a violation
+    const result = scoreBodyNeedFit(["relaxed"], candidate, allItems);
+    assert.strictEqual(result.knownViolationCount, 0, "legacy 'relaxed' must not generate violations");
+  });
+
+  it("BNF.6 — preference need generates graded score when SMCM present", () => {
+    const candidate = makeSmcmCandidate(["i1", "i2"]);
+    const allItems = [
+      makeSmcmItem({ id: "i1", garmentRelationships: ["structured"] }),
+      makeSmcmItem({ id: "i2", garmentRelationships: ["structured"], category: "BOTTOMS" }),
+    ];
+    const result = scoreBodyNeedFit(["structured"], candidate, allItems);
+    assert.ok(result.bodyNeedFitScore > 0, "preference match must produce positive score");
+  });
+
+  it("BNF.7 — all-unknown garment relationships (empty) → neutral (scorableNeedCount=0)", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", garmentRelationships: [] })];
+    const result = scoreBodyNeedFit(["soft-and-forgiving-around-waist"], candidate, allItems);
+    assert.strictEqual(result.scorableNeedCount, 0, "empty garmentRelationships must produce zero scorable needs");
+    assert.strictEqual(result.knownViolationCount, 0, "unknown metadata must not generate violations");
+  });
+
+  it("BNF.8 — bag/accessory/jewelry slots excluded from scoring", () => {
+    const candidate: import("./styleme-result.server.ts").OutfitCandidate = {
+      id: "A",
+      pieces: [
+        { closetId: "b1", slot: "bag", label: null, colors: [] },
+      ],
+    };
+    const allItems = [makeSmcmItem({ id: "b1", garmentRelationships: [] })];
+    const result = scoreBodyNeedFit(["soft-and-forgiving-around-waist"], candidate, allItems);
+    assert.strictEqual(result.scorableNeedCount, 0, "structural slots only — bag excluded");
+  });
+
+  it("BNF.9 — new canonical avoidance ID 'less-body-conscious' creates violation when absent", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", garmentRelationships: ["structured"] })];
+    const result = scoreBodyNeedFit(["less-body-conscious"], candidate, allItems);
+    assert.strictEqual(result.knownViolationCount, 1, "less-body-conscious is avoidance: violation when no 'relaxed' SMCM present");
+  });
+
+  it("BNF.10 — multiple avoidance needs: each counts independently", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", garmentRelationships: ["structured"] })];
+    const result = scoreBodyNeedFit(["soft-and-forgiving-around-waist", "more-coverage"], candidate, allItems);
+    assert.strictEqual(result.knownViolationCount, 2, "each unsatisfied avoidance need = one violation");
+  });
+});
+
+// ── §IIB: computeIntentionItemBonus ──────────────────────────────────────────
+
+describe("§IIB computeIntentionItemBonus", () => {
+  it("IIB.1 — no intentions returns 0", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", garmentRelationships: ["structured"] })];
+    assert.strictEqual(computeIntentionItemBonus([], candidate, allItems), 0);
+  });
+
+  it("IIB.2 — give-structure satisfied by structured SMCM → +1 bonus", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", garmentRelationships: ["structured"] })];
+    assert.strictEqual(computeIntentionItemBonus(["give-structure"], candidate, allItems), 1);
+  });
+
+  it("IIB.3 — intention without matching SMCM (feel-like-myself) → 0", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", garmentRelationships: ["structured"] })];
+    assert.strictEqual(computeIntentionItemBonus(["feel-like-myself"], candidate, allItems), 0);
+  });
+
+  it("IIB.4 — capped at +3 even with many matching intentions", () => {
+    // Inject enough mapped intentions (only 2 currently mapped, so build a scenario with duplicates)
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", garmentRelationships: ["structured", "more-coverage"] })];
+    // give-structure + feel-less-exposed → both map to SMCM tokens
+    const bonus = computeIntentionItemBonus(
+      ["give-structure", "feel-less-exposed", "give-structure", "feel-less-exposed"],
+      candidate,
+      allItems,
+    );
+    assert.ok(bonus <= 3, "bonus must not exceed 3");
+  });
+
+  it("IIB.5 — no double-count: same intention satisfied multiple times still = 1", () => {
+    const candidate = makeSmcmCandidate(["i1", "i2"]);
+    const allItems = [
+      makeSmcmItem({ id: "i1", garmentRelationships: ["structured"] }),
+      makeSmcmItem({ id: "i2", garmentRelationships: ["structured"], category: "BOTTOMS" }),
+    ];
+    // give-structure appears once — max contribution is +1 regardless of how many pieces satisfy it
+    const bonus = computeIntentionItemBonus(["give-structure"], candidate, allItems);
+    assert.strictEqual(bonus, 1, "one intention = max +1 even when multiple pieces satisfy it");
+  });
+});
+
+// ── §SBNI: scoreBodyNeedFitForRanking ────────────────────────────────────────
+// Tests the garment-intelligence scorer that drives live T3a/T3b ranking.
+// This correctly distinguishes less-body-conscious from loose-comfortable.
+
+describe("§SBNI scoreBodyNeedFitForRanking", () => {
+  it("SBNI.1 — less-body-conscious + fitted fitProfile → violation", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", fitProfile: "fitted" })];
+    const result = scoreBodyNeedFitForRanking(["less-body-conscious"], candidate, allItems);
+    assert.strictEqual(result.knownViolationCount, 1, "fitted item violates less-body-conscious");
+  });
+
+  it("SBNI.2 — loose-comfortable + fitted fitProfile → NO violation (graded score only)", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", fitProfile: "fitted" })];
+    const result = scoreBodyNeedFitForRanking(["loose-comfortable"], candidate, allItems);
+    assert.strictEqual(result.knownViolationCount, 0, "fitted item must NOT violate loose-comfortable");
+    assert.ok(result.bodyNeedFitScore !== null && result.bodyNeedFitScore < 0.5, "fitted item scores low for loose-comfortable");
+  });
+
+  it("SBNI.3 — less-body-conscious and loose-comfortable produce different outcomes for same fitted item", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", fitProfile: "fitted" })];
+    const lbc = scoreBodyNeedFitForRanking(["less-body-conscious"], candidate, allItems);
+    const lc = scoreBodyNeedFitForRanking(["loose-comfortable"], candidate, allItems);
+    assert.notStrictEqual(lbc.knownViolationCount, lc.knownViolationCount, "less-body-conscious must produce violation; loose-comfortable must not");
+  });
+
+  it("SBNI.4 — still-want-shape with body-skimming fitProfile → fitScore 1.0 (beyond SMCM)", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", fitProfile: "body-skimming" })];
+    const result = scoreBodyNeedFitForRanking(["still-want-shape"], candidate, allItems);
+    assert.strictEqual(result.knownViolationCount, 0, "body-skimming must not violate still-want-shape");
+    assert.ok(result.bodyNeedFitScore !== null && result.bodyNeedFitScore >= 1.0, "body-skimming must score 1.0 for still-want-shape");
+  });
+
+  it("SBNI.5 — still-want-shape with relaxed fitProfile → lower fitScore", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", fitProfile: "relaxed" })];
+    const result = scoreBodyNeedFitForRanking(["still-want-shape"], candidate, allItems);
+    assert.ok(result.bodyNeedFitScore !== null && result.bodyNeedFitScore < 0.5, "relaxed must score low for still-want-shape");
+  });
+
+  it("SBNI.6 — softer-easier-fabrics only → bodyNeedFitScore null, zero violations", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", fitProfile: "fitted" })];
+    const result = scoreBodyNeedFitForRanking(["softer-easier-fabrics"], candidate, allItems);
+    assert.strictEqual(result.knownViolationCount, 0, "softer-easier-fabrics must not create violations");
+    assert.strictEqual(result.bodyNeedFitScore, null, "softer-easier-fabrics only → bodyNeedFitScore null");
+  });
+
+  it("SBNI.7 — unknown metadata (fitProfile null) → no violation, null contributes nothing to score", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", fitProfile: null })];
+    const result = scoreBodyNeedFitForRanking(["less-body-conscious"], candidate, allItems);
+    assert.strictEqual(result.knownViolationCount, 0, "unknown metadata must not generate violations");
+    assert.strictEqual(result.bodyNeedFitScore, null, "all-unknown metadata → bodyNeedFitScore null");
+  });
+
+  it("SBNI.8 — bag/accessory/jewelry excluded from structural scoring", () => {
+    const candidate: import("./styleme-result.server.ts").OutfitCandidate = {
+      id: "A",
+      pieces: [{ closetId: "b1", slot: "bag", label: null, colors: [] }],
+    };
+    const allItems = [makeSmcmItem({ id: "b1", fitProfile: "fitted" })];
+    const result = scoreBodyNeedFitForRanking(["less-body-conscious"], candidate, allItems);
+    assert.strictEqual(result.knownViolationCount, 0, "bag excluded — no violations even with fitted fitProfile");
+    assert.strictEqual(result.bodyNeedFitScore, null, "bag excluded — no fitScore");
+  });
+
+  it("SBNI.9 — nothing-specific excluded → returns null bodyNeedFitScore", () => {
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", fitProfile: "fitted" })];
+    const result = scoreBodyNeedFitForRanking(["nothing-specific"], candidate, allItems);
+    assert.strictEqual(result.knownViolationCount, 0);
+    assert.strictEqual(result.bodyNeedFitScore, null);
+  });
+});
+
+// ── §ENG: computeEnergyFit + computeIntentionFit ─────────────────────────────
+// Tests that give-energy uses computeEnergyPotential (garment-intelligence),
+// not the legacy scoreClosetItemForSession session-fit delta.
+
+describe("§ENG computeEnergyFit + computeIntentionFit", () => {
+  it("ENG.1 — computeEnergyFit: candidateA vs itself → 0", () => {
+    const a = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", styleTags: ["bold"], pattern: "floral" })];
+    const score = computeEnergyFit(a, a, allItems, undefined);
+    assert.strictEqual(score, 0, "candidateA vs itself must be zero (no uplift)");
+  });
+
+  it("ENG.2 — computeEnergyFit: expressive candidate vs plain A → positive uplift", () => {
+    const a = makeSmcmCandidate(["plain"]);
+    const e = makeSmcmCandidate(["expr"]);
+    const allItems = [
+      makeSmcmItem({ id: "plain", styleTags: [], pattern: "solid", fitProfile: "relaxed" }),
+      makeSmcmItem({ id: "expr", styleTags: ["bold"], pattern: "floral", fitProfile: "flowy" }),
+    ];
+    const score = computeEnergyFit(e, a, allItems, undefined);
+    assert.ok(score > 0, "expressive candidate with known metadata must produce positive uplift vs plain A");
+  });
+
+  it("ENG.3 — computeEnergyFit: unknown-only metadata (no tags/pattern/fitProfile/silhouette) → 0", () => {
+    const a = makeSmcmCandidate(["i1"]);
+    const e = makeSmcmCandidate(["i2"]);
+    const allItems = [
+      makeSmcmItem({ id: "i1", styleTags: [], pattern: null, fitProfile: null, silhouette: null }),
+      makeSmcmItem({ id: "i2", styleTags: [], pattern: null, fitProfile: null, silhouette: null }),
+    ];
+    const score = computeEnergyFit(e, a, allItems, undefined);
+    assert.strictEqual(score, 0, "all-unknown metadata must not generate positive uplift");
+  });
+
+  it("ENG.4 — computeEnergyFit: off-identity uplift modulated when Passport personalities set", () => {
+    const a = makeSmcmCandidate(["plain"]);
+    const e = makeSmcmCandidate(["expr"]);
+    const allItems = [
+      makeSmcmItem({ id: "plain", styleTags: [], pattern: "solid" }),
+      makeSmcmItem({ id: "expr", styleTags: ["bold"], pattern: "floral" }),
+    ];
+    const unmodulated = computeEnergyFit(e, a, allItems, undefined);
+    const modulated = computeEnergyFit(e, a, allItems, { stylePersonalities: ["minimalist"] });
+    assert.ok(modulated <= unmodulated, "off-identity uplift must receive same or less credit than full");
+  });
+
+  it("ENG.5 — computeIntentionFit: no intentions → 0", () => {
+    const a = makeSmcmCandidate(["i1"]);
+    const c = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", styleTags: ["bold"] })];
+    assert.strictEqual(computeIntentionFit([], c, a, allItems, undefined), 0);
+  });
+
+  it("ENG.6 — computeIntentionFit: give-energy uses energy potential not session-fit delta", () => {
+    // Expressive item (bold + floral) → high energy potential → positive intentionFit
+    const a = makeSmcmCandidate(["plain"]);
+    const e = makeSmcmCandidate(["expr"]);
+    const allItems = [
+      makeSmcmItem({ id: "plain", styleTags: [], pattern: "solid" }),
+      makeSmcmItem({ id: "expr", styleTags: ["bold"], pattern: "floral" }),
+    ];
+    const fit = computeIntentionFit(["give-energy"], e, a, allItems, undefined);
+    assert.ok(fit > 0, "give-energy + expressive candidate must produce positive intentionFit");
+  });
+
+  it("ENG.7 — computeIntentionFit: give-structure uses outfit structure score", () => {
+    const a = makeSmcmCandidate(["i1"]);
+    const c = makeSmcmCandidate(["i2"]);
+    const allItems = [
+      makeSmcmItem({ id: "i1", styleTags: [] }),
+      makeSmcmItem({ id: "i2", styleTags: ["structured"] }),
+    ];
+    const fit = computeIntentionFit(["give-structure"], c, a, allItems, undefined);
+    assert.ok(fit > 0, "give-structure with structured-tagged piece must produce positive intentionFit");
+  });
+
+  it("ENG.8 — computeIntentionFit: bounded at 3 even with large combined inputs", () => {
+    const a = makeSmcmCandidate(["plain"]);
+    const e = makeSmcmCandidate(["expr"]);
+    const allItems = [
+      makeSmcmItem({ id: "plain", styleTags: [], pattern: "solid" }),
+      makeSmcmItem({ id: "expr", styleTags: ["bold"], pattern: "floral", fitProfile: "flowy", garmentRelationships: ["structured", "more-coverage"] }),
+    ];
+    const fit = computeIntentionFit(["give-energy", "give-structure", "feel-less-exposed"], e, a, allItems, undefined);
+    assert.ok(fit <= 3, "intentionFit must be bounded at 3");
+  });
+});
+
+// ── §ENR: computeEnergyScore ──────────────────────────────────────────────────
+
+describe("§ENR computeEnergyScore", () => {
+  const session = { occasion: "everyday" as const, moods: [], desiredFeelings: [] };
+
+  it("ENR.1 — candidateA vs itself = 0 energy score", () => {
+    const a = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", occasions: ["everyday"], styleTags: ["casual"] })];
+    const score = computeEnergyScore(a, a, allItems, session, undefined);
+    assert.strictEqual(score, 0, "A vs A must produce rawUplift=0");
+  });
+
+  it("ENR.2 — unknown-only metadata (no occasions, no styleTags) → 0", () => {
+    const a = makeSmcmCandidate(["i1"]);
+    const e = makeSmcmCandidate(["i2"]);
+    const allItems = [
+      makeSmcmItem({ id: "i1", occasions: [], styleTags: [] }),
+      makeSmcmItem({ id: "i2", occasions: [], styleTags: [] }),
+    ];
+    const score = computeEnergyScore(e, a, allItems, session, undefined);
+    assert.strictEqual(score, 0, "unknown-only metadata must not generate positive uplift");
+  });
+
+  it("ENR.3 — candidate with matching session occasion produces non-negative energy score", () => {
+    const a = makeSmcmCandidate(["i1"]);
+    const e = makeSmcmCandidate(["i2"]);
+    const allItems = [
+      makeSmcmItem({ id: "i1", occasions: [], styleTags: [] }),
+      makeSmcmItem({ id: "i2", occasions: ["everyday"], styleTags: ["casual"] }),
+    ];
+    const score = computeEnergyScore(e, a, allItems, session, undefined);
+    assert.ok(score >= 0, "energy score is non-negative");
+  });
+});
+
+// ── §RNK: compareCandidateRankKeys + isTiedAtT1T4 (correct T1-T6d order) ─────
+// T1=occasion, T2=formality, T3a=violations, T3b=bodyNeedFit,
+// T4=intentionFit, T5=passport, T6a=overshoot, T6b=nonMatch, T6c=discretionary
+
+describe("§RNK compareCandidateRankKeys", () => {
+  function makeKey(overrides: Partial<import("./styleme-result.server.ts").CandidateRankKey> = {}): import("./styleme-result.server.ts").CandidateRankKey {
+    return {
+      occasionTier: 2,
+      formalityFitPriority: 1,
+      knownViolationCount: 0,
+      bodyNeedFitScore: null,
+      intentionFit: 0,
+      passportAlignment: 0,
+      formalityOvershootAbs: 0,
+      optionalNonMatchCount: 0,
+      discretionaryPieceCount: 0,
+      ...overrides,
+    };
+  }
+
+  it("RNK.1 — T1 (occasionTier) dominates: higher tier wins", () => {
+    const better = makeKey({ occasionTier: 2 });
+    const worse = makeKey({ occasionTier: 1 });
+    assert.ok(compareCandidateRankKeys(better, worse) < 0, "higher occasionTier wins at T1");
+  });
+
+  it("RNK.2 — T2 (formality) used when T1 equal: within-target > unknown", () => {
+    const better = makeKey({ formalityFitPriority: 1 });
+    const worse = makeKey({ formalityFitPriority: 0 });
+    assert.ok(compareCandidateRankKeys(better, worse) < 0, "within-target(1) beats unknown(0) at T2");
+  });
+
+  it("RNK.3 — T2 (formality): within-target > known outside-target", () => {
+    const better = makeKey({ formalityFitPriority: 1 });
+    const worse = makeKey({ formalityFitPriority: -1 });
+    assert.ok(compareCandidateRankKeys(better, worse) < 0, "within-target(1) beats outside-target(-1) at T2");
+  });
+
+  it("RNK.4 — T2 (formality): unknown > known outside-target", () => {
+    const better = makeKey({ formalityFitPriority: 0 });
+    const worse = makeKey({ formalityFitPriority: -1 });
+    assert.ok(compareCandidateRankKeys(better, worse) < 0, "unknown(0) beats outside-target(-1) at T2");
+  });
+
+  it("RNK.5 — T3a (violations) used when T1+T2 equal: fewer violations wins", () => {
+    const better = makeKey({ knownViolationCount: 0 });
+    const worse = makeKey({ knownViolationCount: 2 });
+    assert.ok(compareCandidateRankKeys(better, worse) < 0, "fewer violations wins at T3a");
+  });
+
+  it("RNK.6 — T3b (bodyNeedFitScore) used when T1+T2+T3a equal: higher wins", () => {
+    const better = makeKey({ bodyNeedFitScore: 0.8 });
+    const worse = makeKey({ bodyNeedFitScore: 0.3 });
+    assert.ok(compareCandidateRankKeys(better, worse) < 0, "higher bodyNeedFitScore wins at T3b");
+  });
+
+  it("RNK.7 — T3b null vs null = tied (null = neutral)", () => {
+    const a = makeKey({ bodyNeedFitScore: null });
+    const b = makeKey({ bodyNeedFitScore: null });
+    assert.strictEqual(compareCandidateRankKeys(a, b), 0, "both null bodyNeedFitScore must be tied");
+  });
+
+  it("RNK.8 — T4 (intentionFit) used when T1+T2+T3 equal: higher wins", () => {
+    const better = makeKey({ intentionFit: 2.5 });
+    const worse = makeKey({ intentionFit: 0 });
+    assert.ok(compareCandidateRankKeys(better, worse) < 0, "higher intentionFit wins at T4");
+  });
+
+  it("RNK.9 — T5 (passportAlignment) used when T1-T4 equal: higher wins", () => {
+    const better = makeKey({ passportAlignment: 0.8 });
+    const worse = makeKey({ passportAlignment: 0 });
+    assert.ok(compareCandidateRankKeys(better, worse) < 0, "higher passportAlignment wins at T5");
+  });
+
+  it("RNK.10 — T1 occasion outranks T3a violations: occasion difference resolves before violations", () => {
+    const higherOccasionWithViolation = makeKey({ occasionTier: 2, knownViolationCount: 1 });
+    const lowerOccasionNoViolation = makeKey({ occasionTier: 1, knownViolationCount: 0 });
+    assert.ok(
+      compareCandidateRankKeys(higherOccasionWithViolation, lowerOccasionNoViolation) < 0,
+      "T1 occasion outranks T3a violations",
+    );
+  });
+
+  it("RNK.11 — T2 formality outranks T3a violations: formality resolves before violations", () => {
+    const withinTargetWithViolation = makeKey({ formalityFitPriority: 1, knownViolationCount: 2 });
+    const outsideTargetNoViolation = makeKey({ formalityFitPriority: -1, knownViolationCount: 0 });
+    assert.ok(
+      compareCandidateRankKeys(withinTargetWithViolation, outsideTargetNoViolation) < 0,
+      "T2 formality outranks T3a violations",
+    );
+  });
+
+  it("RNK.12 — T3a violations outrank T3b bodyNeedFit: fewer violations always wins", () => {
+    const fewerViolationsLowFit = makeKey({ knownViolationCount: 0, bodyNeedFitScore: 0.1 });
+    const moreViolationsHighFit = makeKey({ knownViolationCount: 1, bodyNeedFitScore: 0.9 });
+    assert.ok(
+      compareCandidateRankKeys(fewerViolationsLowFit, moreViolationsHighFit) < 0,
+      "T3a violations outrank T3b bodyNeedFit",
+    );
+  });
+
+  it("RNK.13 — T3b bodyNeedFit outranks T4 intentionFit: better fit wins over intention", () => {
+    const highFitLowIntent = makeKey({ bodyNeedFitScore: 0.9, intentionFit: 0 });
+    const lowFitHighIntent = makeKey({ bodyNeedFitScore: 0.1, intentionFit: 3 });
+    assert.ok(
+      compareCandidateRankKeys(highFitLowIntent, lowFitHighIntent) < 0,
+      "T3b bodyNeedFit outranks T4 intentionFit",
+    );
+  });
+
+  it("RNK.14 — T4 intentionFit outranks T5 passport: intention wins over passport alone", () => {
+    const highIntentLowPassport = makeKey({ intentionFit: 2, passportAlignment: 0 });
+    const lowIntentHighPassport = makeKey({ intentionFit: 0, passportAlignment: 1 });
+    assert.ok(
+      compareCandidateRankKeys(highIntentLowPassport, lowIntentHighPassport) < 0,
+      "T4 intentionFit outranks T5 passport",
+    );
+  });
+
+  it("RNK.15 — compositeScore is NOT a field in CandidateRankKey", () => {
+    const k = makeKey();
+    assert.ok(!Object.prototype.hasOwnProperty.call(k, "compositeScore"), "compositeScore must not be in rank key");
+    assert.ok(!Object.prototype.hasOwnProperty.call(k, "intentionItemBonus"), "intentionItemBonus must not be in rank key");
+    assert.ok(!Object.prototype.hasOwnProperty.call(k, "energyScore"), "energyScore must not be in rank key");
+  });
+
+  it("RNK.16 — equal keys return 0", () => {
+    const k = makeKey();
+    assert.strictEqual(compareCandidateRankKeys(k, k), 0);
+  });
+
+  it("RNK.17 — isTiedAtT1T4: same T1+T2+T3a+T3b+T4 → true despite different T5 passport", () => {
+    const a = makeKey({ occasionTier: 2, formalityFitPriority: 1, knownViolationCount: 0, bodyNeedFitScore: 0.5, intentionFit: 1, passportAlignment: 0.8 });
+    const b = makeKey({ occasionTier: 2, formalityFitPriority: 1, knownViolationCount: 0, bodyNeedFitScore: 0.5, intentionFit: 1, passportAlignment: 0.2 });
+    assert.ok(isTiedAtT1T4(a, b), "T5 passport difference alone must not break T1-T4 tie");
+  });
+
+  it("RNK.18 — isTiedAtT1T4: different T1 (occasion) → false", () => {
+    const a = makeKey({ occasionTier: 2 });
+    const b = makeKey({ occasionTier: 1 });
+    assert.ok(!isTiedAtT1T4(a, b), "different T1 occasion must break tie");
+  });
+
+  it("RNK.19 — isTiedAtT1T4: different T2 (formality tier) → false", () => {
+    const a = makeKey({ formalityFitPriority: 1 });
+    const b = makeKey({ formalityFitPriority: 0 });
+    assert.ok(!isTiedAtT1T4(a, b), "different T2 formality must break tie");
+  });
+
+  it("RNK.20 — isTiedAtT1T4: different T3a violations → false", () => {
+    const a = makeKey({ knownViolationCount: 0 });
+    const b = makeKey({ knownViolationCount: 1 });
+    assert.ok(!isTiedAtT1T4(a, b), "different T3a violations must break tie");
+  });
+
+  it("RNK.21 — isTiedAtT1T4: both bodyNeedFitScore null → tied (null = neutral)", () => {
+    const a = makeKey({ bodyNeedFitScore: null });
+    const b = makeKey({ bodyNeedFitScore: null });
+    assert.ok(isTiedAtT1T4(a, b), "both null bodyNeedFitScore must be tied at T3b");
+  });
+
+  it("RNK.22 — isTiedAtT1T4: different T4 intentionFit → false", () => {
+    const a = makeKey({ intentionFit: 2 });
+    const b = makeKey({ intentionFit: 0 });
+    assert.ok(!isTiedAtT1T4(a, b), "different T4 intentionFit must break tie");
+  });
+});
+
+// ── §OT: computeOccasionTier ──────────────────────────────────────────────────
+
+describe("§OT computeOccasionTier", () => {
+  function makeCandidate(pieces: Array<{ id: string; slot: string }>): import("./styleme-result.server.ts").OutfitCandidate {
+    return { id: "test", pieces: pieces.map((p) => ({ closetId: p.id, slot: p.slot, label: null, colors: [] })) };
+  }
+  function makeItem(id: string, slot: string, occasions: string[]): ClosetAnchorInput {
+    return { type: "closet", id, name: null, category: "TOPS", colors: [], primaryColor: null, pattern: null, material: null, styleTags: [], occasions, imageUrl: "" };
+  }
+
+  it("OT.1 — CORE mismatch (top) → tier 0", () => {
+    const c = makeCandidate([{ id: "t1", slot: "top" }]);
+    const items = [makeItem("t1", "top", ["work"])];
+    assert.strictEqual(computeOccasionTier(c, items, "everyday"), 0);
+  });
+
+  it("OT.2 — IMPORTANT mismatch (shoe) → tier 1, not 0", () => {
+    const c = makeCandidate([{ id: "s1", slot: "shoe" }]);
+    const items = [makeItem("s1", "shoe", ["work"])];
+    assert.strictEqual(computeOccasionTier(c, items, "everyday"), 1);
+  });
+
+  it("OT.3 — OPTIONAL mismatch (bag) → no T1 effect → tier 2", () => {
+    const c = makeCandidate([{ id: "b1", slot: "bag" }]);
+    const items = [makeItem("b1", "bag", ["work"])];
+    assert.strictEqual(computeOccasionTier(c, items, "everyday"), 2);
+  });
+
+  it("OT.4 — unknown core metadata (no occasions) → tier 1", () => {
+    const c = makeCandidate([{ id: "t1", slot: "top" }]);
+    const items = [makeItem("t1", "top", [])];
+    assert.strictEqual(computeOccasionTier(c, items, "everyday"), 1);
+  });
+
+  it("OT.5 — all CORE pieces matching → tier 2", () => {
+    const c = makeCandidate([{ id: "t1", slot: "top" }, { id: "b1", slot: "bottom" }]);
+    const items = [
+      makeItem("t1", "top", ["everyday", "work"]),
+      makeItem("b1", "bottom", ["everyday"]),
+    ];
+    assert.strictEqual(computeOccasionTier(c, items, "everyday"), 2);
+  });
+});
+
+// ── §T4: singleIntentionUnitScore pathways via computeIntentionFit ────────────
+
+describe("§T4 computeIntentionFit — complete-outfit pathways", () => {
+  function makePiece(id: string, slot = "top"): { closetId: string; slot: string; label: null; colors: string[] } {
+    return { closetId: id, slot, label: null, colors: [] };
+  }
+  function makeC(ids: string[], slot = "top"): import("./styleme-result.server.ts").OutfitCandidate {
+    return { id: "c", pieces: ids.map((id) => makePiece(id, slot)) };
+  }
+  const baseA = makeC(["plain"]);
+
+  function items(...defs: Array<{ id: string; [k: string]: unknown }>): ClosetAnchorInput[] {
+    return defs.map((d) => ({
+      type: "closet" as const, id: d.id, name: null, category: "TOPS",
+      colors: [], primaryColor: null, pattern: null, material: null,
+      styleTags: (d.styleTags as string[]) ?? [],
+      occasions: [],
+      imageUrl: "",
+      ...(d.fitProfile !== undefined ? { fitProfile: d.fitProfile as string } : {}),
+      ...(d.silhouette !== undefined ? { silhouette: d.silhouette as string } : {}),
+      ...(d.garmentRelationships !== undefined ? { garmentRelationships: d.garmentRelationships as string[] } : {}),
+      ...(d.sleeveLength !== undefined ? { sleeveLength: d.sleeveLength as string } : {}),
+      ...(d.necklineCoverage !== undefined ? { necklineCoverage: d.necklineCoverage as string } : {}),
+      ...(d.shoulderCoverage !== undefined ? { shoulderCoverage: d.shoulderCoverage as boolean } : {}),
+    }));
+  }
+
+  it("T4.1 — feel-like-myself: identity tag match → positive", () => {
+    const c = makeC(["expr"]);
+    const allItems = items({ id: "plain", styleTags: [] }, { id: "expr", styleTags: ["minimalist"] });
+    const profile = { stylePersonalities: ["minimalist"] };
+    assert.ok(computeIntentionFit(["feel-like-myself"], c, baseA, allItems, profile) > 0);
+  });
+
+  it("T4.2 — confidence: identity + coherence → positive when matched", () => {
+    const c = makeC(["expr"]);
+    const allItems = items({ id: "plain", styleTags: [] }, { id: "expr", styleTags: ["minimalist"] });
+    const profile = { stylePersonalities: ["minimalist"] };
+    assert.ok(computeIntentionFit(["confidence"], c, baseA, allItems, profile) > 0);
+  });
+
+  it("T4.3 — ground-me: identity + coherence + simplicity → single-piece simplicity=1.0", () => {
+    const c = makeC(["expr"]);
+    const allItems = items({ id: "plain", styleTags: [] }, { id: "expr", styleTags: ["minimalist"] });
+    const profile = { stylePersonalities: ["minimalist"] };
+    assert.ok(computeIntentionFit(["ground-me"], c, baseA, allItems, profile) > 0);
+  });
+
+  it("T4.4 — give-structure: structured tag → positive", () => {
+    const c = makeC(["struct"]);
+    const allItems = items({ id: "plain", styleTags: [] }, { id: "struct", styleTags: ["structured"] });
+    assert.ok(computeIntentionFit(["give-structure"], c, baseA, allItems, undefined) > 0);
+  });
+
+  it("T4.5 — make-it-easy: simplicity + flow → positive for single-piece relaxed", () => {
+    const c = makeC(["relax"]);
+    const allItems = items({ id: "plain", styleTags: [] }, { id: "relax", fitProfile: "relaxed" });
+    assert.ok(computeIntentionFit(["make-it-easy"], c, baseA, allItems, undefined) > 0);
+  });
+
+  it("T4.6 — feel-put-together: coherence → 1.0 for single piece", () => {
+    const c = makeC(["x"]);
+    const allItems = items({ id: "plain", styleTags: [] }, { id: "x", styleTags: ["classic"] });
+    const fit = computeIntentionFit(["feel-put-together"], c, baseA, allItems, undefined);
+    assert.strictEqual(fit, 3, "single structural piece → coherence=1.0 → intentionFit=3");
+  });
+
+  it("T4.7 — feel-attractive: identity + structure + flow blend", () => {
+    const c = makeC(["expr"]);
+    const allItems = items({ id: "plain", styleTags: [] }, { id: "expr", styleTags: ["minimalist", "flowing"] });
+    const profile = { stylePersonalities: ["minimalist"] };
+    assert.ok(computeIntentionFit(["feel-attractive"], c, baseA, allItems, profile) > 0);
+  });
+
+  it("T4.8 — give-energy: expressive piece → positive (normalized energy)", () => {
+    const a = makeC(["plain"]);
+    const c = makeC(["expr"]);
+    const allItems = items({ id: "plain", styleTags: [], pattern: "solid" }, { id: "expr", styleTags: ["bold"], pattern: "floral" });
+    assert.ok(computeIntentionFit(["give-energy"], c, a, allItems, undefined) > 0);
+  });
+
+  it("T4.9 — feel-softer: flow → positive for flowy piece", () => {
+    const c = makeC(["flow"]);
+    const allItems = items({ id: "plain", styleTags: [] }, { id: "flow", fitProfile: "flowy" });
+    assert.ok(computeIntentionFit(["feel-softer"], c, baseA, allItems, undefined) > 0);
+  });
+
+  it("T4.10 — feel-sharper: structure → positive for structured tag", () => {
+    const c = makeC(["sharp"]);
+    const allItems = items({ id: "plain", styleTags: [] }, { id: "sharp", styleTags: ["tailored"] });
+    assert.ok(computeIntentionFit(["feel-sharper"], c, baseA, allItems, undefined) > 0);
+  });
+
+  it("T4.11 — feel-less-exposed: coverage → positive for sleeved piece", () => {
+    const c = makeC(["covered"]);
+    const allItems = items({ id: "plain", styleTags: [] }, { id: "covered", sleeveLength: "long" });
+    assert.ok(computeIntentionFit(["feel-less-exposed"], c, baseA, allItems, undefined) > 0);
+  });
+
+  it("T4.12 — express-myself: identity + expression → positive for expressive matched piece", () => {
+    const c = makeC(["expr"]);
+    const allItems = items({ id: "plain", styleTags: [] }, { id: "expr", styleTags: ["minimalist"], pattern: "floral" });
+    const profile = { stylePersonalities: ["minimalist"] };
+    assert.ok(computeIntentionFit(["express-myself"], c, baseA, allItems, profile) > 0);
+  });
+
+  it("T4.13 — bounded at 3: multiple intentions never exceed 3", () => {
+    const c = makeC(["struct"]);
+    const allItems = items({ id: "plain", styleTags: [] }, { id: "struct", styleTags: ["structured", "minimalist"], sleeveLength: "long", fitProfile: "tailored" });
+    const profile = { stylePersonalities: ["minimalist"] };
+    const fit = computeIntentionFit(["give-structure", "feel-sharper", "feel-less-exposed", "feel-put-together"], c, baseA, allItems, profile);
+    assert.ok(fit <= 3, `intentionFit must be bounded at 3, got ${fit}`);
+  });
+});
+
+// ── §CE: Candidate E in buildNaiaOutfitCandidates ────────────────────────────
+
+describe("§CE Candidate E", () => {
+  function makeAnchor(id: string, slot: string): import("./styleme-recommendation.types.ts").NormalizedClosetAnchor {
+    return {
+      type: "closet",
+      id,
+      slot: slot as import("./styleme-recommendation.types.ts").OutfitSlot,
+      label: `Anchor ${id}`,
+      colors: [],
+      material: null,
+      styleTags: [],
+      imageUrl: "https://example.com/img.jpg",
+    };
+  }
+
+  it("CE.1 — E is null when no bodyNeeds or intentions signal present", () => {
+    const anchor = makeAnchor("a1", "top");
+    const session = buildEngineInput({
+      moods: [],
+      desiredFeelings: [],
+      bodyNeeds: ["nothing-specific"],
+      coverageConditional: null,
+      occasion: "everyday",
+      formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "my-closet",
+    }).session;
+
+    const allItems = [
+      makeSmcmItem({ id: "a1", category: "TOPS" }),
+      makeSmcmItem({ id: "b1", category: "BOTTOMS" }),
+    ];
+
+    const [, , , , candidateE] = buildNaiaOutfitCandidates(anchor, session, allItems, undefined, undefined);
+    assert.strictEqual(candidateE, null, "E must be null when no scorable Step 3 signal or intention objective");
+  });
+
+  it("CE.2 — E is null when B is null", () => {
+    const anchor = makeAnchor("a1", "top");
+    const session = buildEngineInput({
+      moods: [],
+      desiredFeelings: [],
+      bodyNeeds: ["soft-and-forgiving-around-waist"],
+      coverageConditional: null,
+      occasion: "everyday",
+      formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "my-closet",
+    }).session;
+
+    // Only one item in closet (the anchor itself) — B cannot be built
+    const allItems = [makeSmcmItem({ id: "a1", category: "TOPS" })];
+    const [, candidateB, , , candidateE] = buildNaiaOutfitCandidates(anchor, session, allItems, undefined, undefined);
+    assert.strictEqual(candidateB, null, "B must be null with only anchor in closet");
+    assert.strictEqual(candidateE, null, "E must be null when B is null");
+  });
+
+  it("CE.3 — E has id 'E' when generated", () => {
+    const anchor = makeAnchor("a1", "top");
+    const session = buildEngineInput({
+      moods: [],
+      desiredFeelings: [],
+      bodyNeeds: ["soft-and-forgiving-around-waist"],
+      coverageConditional: null,
+      occasion: "everyday",
+      formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "my-closet",
+      intentions: ["give-structure"],
+    }).session;
+
+    const allItems = [
+      makeSmcmItem({ id: "a1", category: "TOPS", occasions: ["everyday"], garmentRelationships: ["soft-and-forgiving-around-waist"] }),
+      makeSmcmItem({ id: "b1", category: "BOTTOMS", occasions: ["everyday"], garmentRelationships: ["soft-and-forgiving-around-waist"] }),
+      makeSmcmItem({ id: "b2", category: "BOTTOMS", occasions: ["everyday"], garmentRelationships: ["structured"] }),
+      makeSmcmItem({ id: "s1", category: "SHOES", occasions: ["everyday"] }),
+    ];
+
+    const [, , , , candidateE] = buildNaiaOutfitCandidates(anchor, session, allItems, undefined, undefined);
+    if (candidateE !== null) {
+      assert.strictEqual(candidateE.id, "E", "candidate E must have id 'E'");
+      assert.ok(candidateE.pieces.length > 0, "candidate E must have pieces");
+    }
+    // E may be null if the swap doesn't improve score — that's acceptable
+  });
+
+  it("CE.4 — E is distinct from A and B when generated", () => {
+    const anchor = makeAnchor("a1", "top");
+    const session = buildEngineInput({
+      moods: [],
+      desiredFeelings: [],
+      bodyNeeds: ["soft-and-forgiving-around-waist"],
+      coverageConditional: null,
+      occasion: "everyday",
+      formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "my-closet",
+    }).session;
+
+    const allItems = [
+      makeSmcmItem({ id: "a1", category: "TOPS", garmentRelationships: [] }),
+      makeSmcmItem({ id: "b1", category: "BOTTOMS", garmentRelationships: [] }),
+      makeSmcmItem({ id: "b2", category: "BOTTOMS", garmentRelationships: ["soft-and-forgiving-around-waist"] }),
+    ];
+
+    const [candidateA, candidateB, , , candidateE] = buildNaiaOutfitCandidates(anchor, session, allItems, undefined, undefined);
+    if (candidateE !== null) {
+      const eSig = computeOutfitSignature(candidateE.pieces.map((p) => p.closetId));
+      const aSig = computeOutfitSignature(candidateA.pieces.map((p) => p.closetId));
+      assert.notStrictEqual(eSig, aSig, "E must differ from A");
+      if (candidateB !== null) {
+        const bSig = computeOutfitSignature(candidateB.pieces.map((p) => p.closetId));
+        assert.notStrictEqual(eSig, bSig, "E must differ from B");
+      }
+    }
+  });
+});
+
+// ── §REG: Regression — /style-me/comfort and Quick Style unchanged ────────────
+
+describe("§REG Regression — comfort and Quick Style paths", () => {
+  it("REG.1 — scoreBodyNeedFit ignores state (state = ZERO scoring)", () => {
+    // State tokens should never appear in bodyNeeds or score any SMCM; this test
+    // verifies that a state-like token not in BODY_NEED_SMCM is neutral.
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", garmentRelationships: ["structured"] })];
+    const resultWithState = scoreBodyNeedFit(["stressed-overloaded"], candidate, allItems);
+    assert.strictEqual(resultWithState.scorableNeedCount, 0, "state token is not scorable");
+    assert.strictEqual(resultWithState.knownViolationCount, 0, "state token must not generate violations");
+  });
+
+  it("REG.2 — legacy 'relaxed' token from comfort flow scores as preference, not avoidance", () => {
+    // The comfort route stores 'relaxed' after normalization.
+    // Spec Section 3: legacy relaxed → preference, NOT avoidance violation.
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", garmentRelationships: ["structured"] })];
+    const result = scoreBodyNeedFit(["relaxed"], candidate, allItems);
+    assert.strictEqual(result.knownViolationCount, 0, "legacy relaxed must not create violations (Section 3)");
+    const entry = BODY_NEED_SMCM["relaxed"];
+    assert.strictEqual(entry?.kind, "preference", "BODY_NEED_SMCM must classify 'relaxed' as preference");
+  });
+
+  it("REG.3 — BODY_NEED_SMCM covers all scorable NAIA_BODY_NEED_LABELS tokens", () => {
+    // Every token in NAIA_BODY_NEED_LABELS should either be in BODY_NEED_SMCM or
+    // be explicitly prompt-guided-only (softer-easier-fabrics: no deterministic SMCM score).
+    // This is a compatibility check — if any standard body need label is missing from
+    // the scoring map, future sessions may silently miss body-need scoring.
+    const PROMPT_GUIDED_ONLY = new Set(["softer-easier-fabrics"]);
+    const labelKeys = Object.keys(NAIA_BODY_NEED_LABELS);
+    for (const key of labelKeys) {
+      if (key === "nothing-specific") continue;
+      if (PROMPT_GUIDED_ONLY.has(key)) continue; // intentionally no SMCM token
+      const inSmcm = BODY_NEED_SMCM[key] !== undefined;
+      assert.ok(inSmcm, `NAIA_BODY_NEED_LABELS key '${key}' has no entry in BODY_NEED_SMCM`);
+    }
+  });
+
+  it("REG.4 — computeIntentionItemBonus does not affect non-SMCM intentions", () => {
+    // ground-me and give-energy have zero engine signal and must not generate intention bonus
+    const candidate = makeSmcmCandidate(["i1"]);
+    const allItems = [makeSmcmItem({ id: "i1", garmentRelationships: ["structured"] })];
+    const bonus = computeIntentionItemBonus(["ground-me", "give-energy", "feel-like-myself"], candidate, allItems);
+    assert.strictEqual(bonus, 0, "intentions without SMCM mapping must not generate bonus");
+  });
+
+  it("REG.5 — CandidateRankKey: correct fields (occasion T1, formality T2, violations T3a, etc.)", () => {
+    // Verifies that CandidateRankKey contains the approved fields in the approved order.
+    const key: import("./styleme-result.server.ts").CandidateRankKey = {
+      occasionTier: 2,
+      formalityFitPriority: 1,
+      knownViolationCount: 0,
+      bodyNeedFitScore: null,
+      intentionFit: 0,
+      passportAlignment: 0,
+      formalityOvershootAbs: 0,
+      optionalNonMatchCount: 0,
+      discretionaryPieceCount: 0,
+    };
+    assert.ok(!Object.prototype.hasOwnProperty.call(key, "compositeScore"), "compositeScore must not be in rank key");
+    assert.ok(!Object.prototype.hasOwnProperty.call(key, "intentionItemBonus"), "intentionItemBonus must not be in rank key (absorbed into intentionFit)");
+    assert.ok(!Object.prototype.hasOwnProperty.call(key, "energyScore"), "energyScore must not be in rank key (absorbed into intentionFit)");
+    assert.ok(!Object.prototype.hasOwnProperty.call(key, "occasionCoverageRatio"), "T1: occasionCoverageRatio must NOT be present (replaced by occasionTier)");
+    assert.ok(Object.prototype.hasOwnProperty.call(key, "occasionTier"), "T1: occasionTier must be present");
+    assert.ok(Object.prototype.hasOwnProperty.call(key, "intentionFit"), "T4: intentionFit must be present");
+    assert.ok(Object.prototype.hasOwnProperty.call(key, "passportAlignment"), "T5: passportAlignment must be present");
+  });
+
+  it("REG.6 — isTiedAtT1T4 uses correct guard fields (T1=occasion, T2=formality, T3a=violations, T3b=bodyFit, T4=intentionFit)", () => {
+    // Passport difference alone must NOT make a candidate ineligible for model selection.
+    const best: import("./styleme-result.server.ts").CandidateRankKey = {
+      occasionTier: 2, formalityFitPriority: 1, knownViolationCount: 0,
+      bodyNeedFitScore: null, intentionFit: 0, passportAlignment: 1,
+      formalityOvershootAbs: 0, optionalNonMatchCount: 0, discretionaryPieceCount: 0,
+    };
+    const challenger: import("./styleme-result.server.ts").CandidateRankKey = {
+      ...best, passportAlignment: 0,
+    };
+    assert.ok(isTiedAtT1T4(best, challenger), "passport difference alone must not break model eligibility");
   });
 });
 

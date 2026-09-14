@@ -1041,16 +1041,17 @@ const REV3_STATE_LABELS: Record<string, string> = {
 };
 const REV3_INTENTION_LABELS: Record<string, string> = {
   "feel-like-myself": "Help me feel like myself",
-  "confidence": "Give me confidence",
-  "ground-me": "Ground me",
-  "give-structure": "Give me structure",
-  "make-it-easy": "Make things feel easy",
+  "confidence":       "Give me confidence",
+  "ground-me":        "Ground me",
+  "give-structure":   "Give me structure",
+  "make-it-easy":     "Make things feel easy",
   "feel-put-together": "Help me feel put together",
-  "feel-attractive": "Make me feel attractive",
-  "give-energy": "Give me energy",
-  "feel-softer": "Help me feel softer",
+  "feel-attractive":  "Make me feel attractive",
+  "give-energy":      "Give me energy",
+  "feel-softer":      "Help me feel softer",
+  "feel-sharper":     "Help me feel sharper",
   "feel-less-exposed": "Help me feel less exposed",
-  "express-myself": "Let me express myself",
+  "express-myself":   "Let me express myself",
 };
 const MOOD_LABELS: Record<string, string> = {
   "confident": "Confident", "tired": "Low-energy", "overwhelmed": "Overwhelmed",

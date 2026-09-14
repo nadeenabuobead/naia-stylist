@@ -253,6 +253,16 @@ export async function loadAllClosetItemsForEngine(
       imageUrl,
       garmentRelationships: item.garmentRelationships,
       formality: item.formality ?? null,
+      // Garment Intelligence fields
+      fitProfile: item.fitProfile ?? null,
+      waistShape: item.waistShape ?? null,
+      sleeveLength: item.sleeveLength ?? null,
+      necklineCoverage: item.necklineCoverage ?? null,
+      hemLength: item.hemLength ?? null,
+      shoulderCoverage: item.shoulderCoverage ?? null,
+      midriffExposed: item.midriffExposed ?? null,
+      silhouette: item.silhouette ?? null,
+      stylePersonality: item.stylePersonality ?? null,
     };
   });
 }
@@ -350,4 +360,145 @@ export async function autoSelectClosetAnchor(
     },
     id: winner.id,
   };
+}
+
+// ── TODAY body-need deterministic scoring ─────────────────────────────────────
+
+type GarmentForBodyNeed = Pick<
+  ClosetAnchorInput,
+  | "fitProfile"
+  | "waistShape"
+  | "sleeveLength"
+  | "necklineCoverage"
+  | "hemLength"
+  | "shoulderCoverage"
+  | "midriffExposed"
+  | "styleTags"
+  | "silhouette"
+>;
+
+/**
+ * Scores a single Closet item against one canonical Rev3 body-need ID.
+ * Returns { violation: boolean; fitScore: number | null }.
+ * violation=true only when metadata EXPLICITLY demonstrates the avoided condition.
+ * Unknown metadata NEVER creates a violation.
+ * softer-easier-fabrics has no deterministic score (prompt-guided only).
+ */
+export function scoreBodyNeedForClosetItem(
+  need: string,
+  item: GarmentForBodyNeed,
+): { violation: boolean; fitScore: number | null } {
+  const fp = item.fitProfile ?? null;
+  const ws = item.waistShape ?? null;
+
+  const RELAXED_FITS = new Set(["relaxed", "loose", "oversized", "flowy"]);
+  const SHAPED_FITS = new Set(["tailored", "structured", "body-skimming"]);
+  const STRUCTURED_FITS = new Set(["structured", "tailored"]);
+  const TIGHT_FITS = new Set(["fitted", "body-skimming"]);
+
+  switch (need) {
+    case "nothing-tight-waist": {
+      if (fp !== null && TIGHT_FITS.has(fp)) return { violation: true, fitScore: 0 };
+      if (ws === "elasticated" || ws === "drawstring") return { violation: false, fitScore: 1 };
+      if (fp !== null && RELAXED_FITS.has(fp)) return { violation: false, fitScore: 0.8 };
+      return { violation: false, fitScore: fp === null && ws === null ? null : 0.5 };
+    }
+
+    case "less-body-conscious": {
+      if (fp !== null && TIGHT_FITS.has(fp)) return { violation: true, fitScore: 0 };
+      if (fp !== null && RELAXED_FITS.has(fp)) return { violation: false, fitScore: 1 };
+      if (fp !== null && (fp === "tailored" || fp === "structured")) return { violation: false, fitScore: 0.5 };
+      return { violation: false, fitScore: fp === null ? null : 0.5 };
+    }
+
+    case "loose-comfortable": {
+      if (fp !== null && RELAXED_FITS.has(fp)) return { violation: false, fitScore: 1 };
+      if (fp !== null && (fp === "tailored" || fp === "structured")) return { violation: false, fitScore: 0.3 };
+      if (fp !== null && TIGHT_FITS.has(fp)) return { violation: false, fitScore: 0 };
+      return { violation: false, fitScore: fp === null ? null : 0.3 };
+    }
+
+    case "more-coverage": {
+      let violationSignals = 0;
+      let positiveSignals = 0;
+      const sl = item.sleeveLength ?? null;
+      const nc = item.necklineCoverage ?? null;
+      const hl = item.hemLength ?? null;
+      const sc = item.shoulderCoverage ?? null;
+      const me = item.midriffExposed ?? null;
+
+      if (sl === "sleeveless") violationSignals++;
+      else if (sl === "full" || sl === "three-quarter") positiveSignals++;
+      if (nc === "low" || nc === "off-shoulder" || nc === "wrap-variable") violationSignals++;
+      else if (nc === "high" || nc === "crew" || nc === "mock" || nc === "cowl-high") positiveSignals++;
+      if (hl === "mini") violationSignals++;
+      else if (hl === "maxi" || hl === "full") positiveSignals++;
+      if (sc === false) violationSignals++;
+      else if (sc === true) positiveSignals++;
+      if (me === true) violationSignals++;
+      else if (me === false) positiveSignals++;
+
+      const totalSignals =
+        (sl !== null && sl !== "n/a" ? 1 : 0) +
+        (nc !== null && nc !== "n/a" ? 1 : 0) +
+        (hl !== null && hl !== "n/a" ? 1 : 0) +
+        (sc !== null ? 1 : 0) +
+        (me !== null ? 1 : 0);
+
+      if (totalSignals === 0) return { violation: false, fitScore: null };
+      if (violationSignals > 0) return { violation: true, fitScore: Math.max(0, (positiveSignals - violationSignals) / totalSignals) };
+      return { violation: false, fitScore: positiveSignals / totalSignals };
+    }
+
+    case "softer-easier-fabrics":
+      return { violation: false, fitScore: null };
+
+    case "still-want-shape": {
+      if (fp !== null && SHAPED_FITS.has(fp)) return { violation: false, fitScore: 1 };
+      if (fp !== null && (fp === "loose" || fp === "oversized")) return { violation: false, fitScore: 0.2 };
+      if (fp !== null && (fp === "relaxed" || fp === "flowy")) return { violation: false, fitScore: 0.4 };
+      return { violation: false, fitScore: fp === null ? null : 0.5 };
+    }
+
+    case "waist-definition": {
+      if (ws === "belted") return { violation: false, fitScore: 1 };
+      if (fp === "body-skimming") return { violation: false, fitScore: 0.7 };
+      if (ws === null && fp === null) return { violation: false, fitScore: null };
+      return { violation: false, fitScore: 0.3 };
+    }
+
+    case "structured-shape": {
+      if (fp !== null && STRUCTURED_FITS.has(fp)) return { violation: false, fitScore: 1 };
+      if ((item.styleTags ?? []).includes("structured") || (item.styleTags ?? []).includes("tailored")) {
+        return { violation: false, fitScore: 0.8 };
+      }
+      return { violation: false, fitScore: fp === null ? null : 0.2 };
+    }
+
+    default:
+      return { violation: false, fitScore: null };
+  }
+}
+
+/**
+ * Computes raw energy potential for a Closet item (0–3 scale).
+ * Evidence: A. expressive style tags (+1), B. non-solid pattern (+1),
+ * C. flowy fitProfile or movement silhouette (+1).
+ * No colour count, no gender logic.
+ */
+export function computeEnergyPotential(
+  item: Pick<ClosetAnchorInput, "styleTags" | "pattern" | "fitProfile" | "silhouette">,
+): number {
+  const EXPRESSIVE_TAGS = new Set([
+    "bold", "statement", "artsy", "creative", "eclectic", "playful", "trendy", "contemporary",
+  ]);
+  const MOVEMENT_SILHOUETTES = new Set(["flared", "balloon", "asymmetric"]);
+  let e = 0;
+  if ((item.styleTags ?? []).some((t) => EXPRESSIVE_TAGS.has(t))) e++;
+  if (item.pattern !== null && item.pattern !== "solid") e++;
+  if (
+    item.fitProfile === "flowy" ||
+    (item.silhouette !== null && item.silhouette !== undefined && MOVEMENT_SILHOUETTES.has(item.silhouette))
+  ) e++;
+  return e;
 }
