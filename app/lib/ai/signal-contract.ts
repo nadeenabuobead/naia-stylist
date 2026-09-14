@@ -1979,7 +1979,7 @@ export type SleeveLength = "full" | "three-quarter" | "short" | "sleeveless" | "
 // Neckline coverage. "n/a" = not applicable (BOTTOM) or exempt (OUTERWEAR that is not
 // wrap-variable). "wrap-variable" = wrap front that does not guarantee coverage without a base.
 export type NecklineCoverage =
-  | "high" | "crew" | "mock" | "cowl-high"
+  | "high" | "crew" | "scoop" | "mock" | "cowl-high"
   | "v-neck" | "low" | "off-shoulder" | "wrap-variable"
   | "n/a";
 

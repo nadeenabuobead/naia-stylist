@@ -30,7 +30,7 @@ export const SLEEVE_LENGTH_VALUES: ReadonlySet<SleeveLength> = new Set([
 ] as SleeveLength[]);
 
 export const NECKLINE_COVERAGE_VALUES: ReadonlySet<NecklineCoverage> = new Set([
-  "high", "crew", "mock", "cowl-high", "v-neck", "low", "off-shoulder", "wrap-variable", "n/a",
+  "high", "crew", "scoop", "mock", "cowl-high", "v-neck", "low", "off-shoulder", "wrap-variable", "n/a",
 ] as NecklineCoverage[]);
 
 export const HEM_LENGTH_VALUES: ReadonlySet<HemLength> = new Set([

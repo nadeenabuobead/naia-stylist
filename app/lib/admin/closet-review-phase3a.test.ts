@@ -936,3 +936,63 @@ describe("§CR-L — UX Cleanup contract", () => {
     );
   });
 });
+
+// ── §CR-M — Scoop neckline vocabulary ────────────────────────────────────────
+
+import { NECKLINE_COVERAGE_VALUES } from "../ai/garment-intelligence.types";
+
+describe("§CR-M — Scoop neckline canonical vocabulary", () => {
+  const routeSrc = readFileSync(
+    resolve(import.meta.dirname, "../../routes/admin.naia.closet.$itemId.tsx"),
+    "utf8",
+  );
+  const signalSrc = readFileSync(
+    resolve(import.meta.dirname, "../ai/signal-contract.ts"),
+    "utf8",
+  );
+
+  it("M.1 'scoop' is in NECKLINE_COVERAGE_VALUES", () => {
+    assert.ok(NECKLINE_COVERAGE_VALUES.has("scoop"), "NECKLINE_COVERAGE_VALUES must contain 'scoop'");
+  });
+
+  it("M.2 all existing neckline values still present", () => {
+    for (const v of ["high", "crew", "mock", "cowl-high", "v-neck", "low", "off-shoulder", "wrap-variable", "n/a"]) {
+      assert.ok(NECKLINE_COVERAGE_VALUES.has(v as any), `NECKLINE_COVERAGE_VALUES missing pre-existing value: ${v}`);
+    }
+  });
+
+  it("M.3 NecklineCoverage type in signal-contract includes 'scoop'", () => {
+    assert.ok(
+      signalSrc.includes('"scoop"'),
+      "signal-contract.ts NecklineCoverage type must include 'scoop'",
+    );
+  });
+
+  it("M.4 validateOverrides accepts 'scoop' as necklineCoverage", () => {
+    const result = validateOverrides({ necklineCoverage: "scoop" });
+    assert.equal(result.necklineCoverage, "scoop");
+  });
+
+  it("M.5 validateOverrides rejects unknown neckline value (vocabulary guard still active)", () => {
+    assert.throws(
+      () => validateOverrides({ necklineCoverage: "racerback" }),
+      /not a valid vocabulary token/,
+    );
+  });
+
+  it("M.6 Teach nAia EDIT_OPTS.necklineCoverage includes 'scoop'", () => {
+    assert.ok(
+      routeSrc.includes('"scoop"'),
+      "admin.naia.closet.$itemId.tsx EDIT_OPTS.necklineCoverage must include 'scoop'",
+    );
+  });
+
+  it("M.7 Teach nAia EDIT_OPTS.necklineCoverage still includes all pre-existing values", () => {
+    for (const v of ["high", "crew", "mock", "cowl-high", "v-neck", "low", "off-shoulder", "wrap-variable", "n/a"]) {
+      assert.ok(
+        routeSrc.includes(`"${v}"`),
+        `EDIT_OPTS.necklineCoverage must still include pre-existing value: ${v}`,
+      );
+    }
+  });
+});
