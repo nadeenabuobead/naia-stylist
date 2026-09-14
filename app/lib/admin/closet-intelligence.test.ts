@@ -223,8 +223,8 @@ describe("§CI.3 REVIEW_STATUS_LABELS", () => {
     expect(REVIEW_STATUS_LABELS.reviewed).toBe("REVIEWED");
   });
 
-  it("maps 'overridden' to 'OVERRIDDEN'", () => {
-    expect(REVIEW_STATUS_LABELS.overridden).toBe("OVERRIDDEN");
+  it("maps 'overridden' to 'CORRECTED BY YOU'", () => {
+    expect(REVIEW_STATUS_LABELS.overridden).toBe("CORRECTED BY YOU");
   });
 });
 
@@ -239,7 +239,7 @@ describe("§CI.22 REVIEW_STATUS_LABELS completeness", () => {
     const labels = Object.values(REVIEW_STATUS_LABELS);
     expect(labels).toContain("AI ONLY");
     expect(labels).toContain("REVIEWED");
-    expect(labels).toContain("OVERRIDDEN");
+    expect(labels).toContain("CORRECTED BY YOU");
   });
 });
 
@@ -254,8 +254,8 @@ describe("§CI.4 computeDisplayReviewStatus", () => {
     expect(computeDisplayReviewStatus("reviewed")).toBe("REVIEWED");
   });
 
-  it("'overridden' → 'OVERRIDDEN'", () => {
-    expect(computeDisplayReviewStatus("overridden")).toBe("OVERRIDDEN");
+  it("'overridden' → 'CORRECTED BY YOU'", () => {
+    expect(computeDisplayReviewStatus("overridden")).toBe("CORRECTED BY YOU");
   });
 
   it("null → 'AI ONLY' (no review record)", () => {
@@ -282,8 +282,8 @@ describe("§CI.24 computeDisplayReviewStatus default", () => {
 // ── §CI.28 overridden maps correctly ─────────────────────────────────────────
 
 describe("§CI.28 computeDisplayReviewStatus — overridden", () => {
-  it("maps 'overridden' to 'OVERRIDDEN'", () => {
-    expect(computeDisplayReviewStatus("overridden")).toBe("OVERRIDDEN");
+  it("maps 'overridden' to 'CORRECTED BY YOU'", () => {
+    expect(computeDisplayReviewStatus("overridden")).toBe("CORRECTED BY YOU");
   });
 });
 
@@ -364,14 +364,14 @@ describe("§CI.15 displayReviewStatus in rows", () => {
     expect(result.items[0].reviewStatus).toBe("reviewed");
   });
 
-  it("item with adminReview.reviewStatus='overridden' gets displayReviewStatus='OVERRIDDEN'", async () => {
+  it("item with adminReview.reviewStatus='overridden' gets displayReviewStatus='CORRECTED BY YOU'", async () => {
     vi.mocked(prisma.closetItem.findMany).mockResolvedValue([
       makeItemRow({ adminReview: { reviewStatus: "overridden" } }),
     ] as any);
     vi.mocked(prisma.closetItem.count).mockResolvedValue(1);
 
     const result = await listClosetItems({}, 1);
-    expect(result.items[0].displayReviewStatus).toBe("OVERRIDDEN");
+    expect(result.items[0].displayReviewStatus).toBe("CORRECTED BY YOU");
   });
 
   it("item with no adminReview gets displayReviewStatus='AI ONLY'", async () => {

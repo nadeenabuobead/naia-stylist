@@ -17,7 +17,7 @@ import type { ClosetCategory, Prisma } from "@prisma/client";
 export const REVIEW_STATUS_LABELS = {
   unreviewed: "AI ONLY",
   reviewed:   "REVIEWED",
-  overridden: "OVERRIDDEN",
+  overridden: "CORRECTED BY YOU",
 } as const;
 
 export type DisplayReviewStatus = (typeof REVIEW_STATUS_LABELS)[keyof typeof REVIEW_STATUS_LABELS];
@@ -26,7 +26,7 @@ export function computeDisplayReviewStatus(
   reviewStatus: string | null | undefined,
 ): DisplayReviewStatus {
   if (reviewStatus === "reviewed")   return "REVIEWED";
-  if (reviewStatus === "overridden") return "OVERRIDDEN";
+  if (reviewStatus === "overridden") return "CORRECTED BY YOU";
   return "AI ONLY";
 }
 
@@ -70,7 +70,7 @@ export interface ClosetItemRow {
   analysisStatus: string;
   /** Stored review status: "unreviewed" | "reviewed" | "overridden" */
   reviewStatus: string;
-  /** Human-readable display label: "AI ONLY" | "REVIEWED" | "OVERRIDDEN" */
+  /** Human-readable display label: "AI ONLY" | "REVIEWED" | "CORRECTED BY YOU" */
   displayReviewStatus: DisplayReviewStatus;
   formality: string | null;
   occasions: string[];

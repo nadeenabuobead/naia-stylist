@@ -224,7 +224,7 @@ function filterSameAsStored(
 const REVIEW_BADGE: Record<string, string> = {
   "AI ONLY":  "na-badge--ai-only",
   REVIEWED:   "na-badge--reviewed",
-  OVERRIDDEN: "na-badge--overridden",
+  "CORRECTED BY YOU": "na-badge--overridden",
 };
 
 const ANALYSIS_BADGE: Record<string, string> = {
@@ -236,9 +236,9 @@ const ANALYSIS_BADGE: Record<string, string> = {
 
 // ── Display helpers ────────────────────────────────────────────────────────────
 
-/** Maps DB status "OVERRIDDEN" → "CORRECTED BY YOU · N correction(s)" in the UI only. */
+/** Maps display status "CORRECTED BY YOU" → "CORRECTED BY YOU · N correction(s)" in the UI only. */
 function reviewBadgeLabel(displayStatus: string, overrideCount: number): string {
-  if (displayStatus === "OVERRIDDEN") {
+  if (displayStatus === "CORRECTED BY YOU") {
     const noun = overrideCount === 1 ? "correction" : "corrections";
     return `CORRECTED BY YOU · ${overrideCount} ${noun}`;
   }

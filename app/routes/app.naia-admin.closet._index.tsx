@@ -36,7 +36,7 @@ const ANALYSIS_STATUSES: ClosetAnalysisStatus[] = [
 const REVIEW_STATUS_OPTS: Array<{ value: ClosetAdminReviewFilter; label: string }> = [
   { value: "unreviewed", label: "AI ONLY (unreviewed)" },
   { value: "reviewed",   label: "REVIEWED" },
-  { value: "overridden", label: "OVERRIDDEN" },
+  { value: "overridden", label: "CORRECTED BY YOU" },
 ];
 
 const FORMALITY_OPTS = [
@@ -46,7 +46,7 @@ const FORMALITY_OPTS = [
 const REVIEW_BADGE_CLASS: Record<string, string> = {
   "AI ONLY":   "na-badge--ai-only",
   REVIEWED:    "na-badge--reviewed",
-  OVERRIDDEN:  "na-badge--overridden",
+  "CORRECTED BY YOU": "na-badge--overridden",
 };
 
 const ANALYSIS_BADGE_CLASS: Record<string, string> = {

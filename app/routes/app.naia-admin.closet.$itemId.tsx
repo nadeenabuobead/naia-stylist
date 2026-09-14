@@ -7,7 +7,7 @@
 //   hasSnapshot=true  → show "AI SNAPSHOT" section with model/schema/timestamp
 //   hasSnapshot=false → show "AI provenance unavailable — Current stored classification shown below"
 //
-// Review status labels: "AI ONLY" | "REVIEWED" | "OVERRIDDEN"
+// Review status labels: "AI ONLY" | "REVIEWED" | "CORRECTED BY YOU"
 // Phase 3 note: "EFFECTIVE VALUE USED BY nAia" (with override wiring) is NOT shown here.
 
 import { useLoaderData, Link } from "react-router";
@@ -91,7 +91,7 @@ const CLASSIFICATION_FIELDS: ClassificationField[] = [
 const REVIEW_BADGE_CLASS: Record<string, string> = {
   "AI ONLY":  "na-badge--ai-only",
   REVIEWED:   "na-badge--reviewed",
-  OVERRIDDEN: "na-badge--overridden",
+  "CORRECTED BY YOU": "na-badge--overridden",
 };
 
 const ANALYSIS_BADGE_CLASS: Record<string, string> = {
