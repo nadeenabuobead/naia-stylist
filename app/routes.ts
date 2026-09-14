@@ -111,6 +111,8 @@ export default [
     index("routes/admin._index.tsx"),
     route("naia", "routes/admin.naia.tsx", [
       index("routes/admin.naia._index.tsx"),
+      route("closet", "routes/admin.naia.closet._index.tsx"),
+      route("closet/:itemId", "routes/admin.naia.closet.$itemId.tsx"),
     ]),
     route("nadine", "routes/admin.nadine.tsx", [
       index("routes/admin.nadine._index.tsx"),

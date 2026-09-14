@@ -12,7 +12,7 @@ const NAV_ITEMS: Array<{
   active: boolean;
   phase?: string;
 }> = [
-  { label: "Closet Intelligence", to: "/admin/naia/closet", active: false, phase: "Phase 2A" },
+  { label: "Closet Intelligence", to: "/admin/naia/closet", active: true },
   { label: "StyleMe QA",          to: "/admin/naia/styleme", active: false, phase: "Phase 4" },
   { label: "Customers",           active: false, phase: "Phase 3" },
   { label: "Feedback",            active: false, phase: "Phase 5" },
