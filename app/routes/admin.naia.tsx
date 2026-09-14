@@ -341,4 +341,93 @@ const NAIA_ADMIN_CSS = `
 
   .na-warn-icon { color: #f59e0b; }
   .na-ok-icon   { color: #16a34a; }
+
+  /* ── Section 1: HOW nAia READS THIS PIECE ── */
+  .na-interp-labels { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.25rem; }
+  .na-interp-label  { background: #16213e; color: #fff; padding: 0.45rem 1rem; border-radius: 20px; font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
+  .na-interp-empty  { margin: 0; font-size: 13px; color: #9ca3af; font-style: italic; }
+  .na-interp-why-group { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.25rem; }
+  .na-interp-why-row  { display: flex; align-items: baseline; gap: 0.5rem; font-size: 12px; line-height: 1.5; }
+  .na-interp-why-lbl  { font-weight: 600; color: #111; min-width: 120px; flex-shrink: 0; }
+  .na-interp-why-arr  { color: #9ca3af; flex-shrink: 0; }
+  .na-interp-why-evid { color: #6b7280; }
+
+  /* ── Section 2: WHAT AI SEES ── */
+  .na-what-grid { display: grid; grid-template-columns: 140px 1fr; gap: 0; align-items: start; }
+  .na-what-key  { font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.5rem 1rem; background: #fafbfc; border-bottom: 1px solid #f0f1f3; }
+  .na-what-val  { font-size: 12px; color: #111; padding: 0.5rem 1rem; border-bottom: 1px solid #f0f1f3; word-break: break-word; }
+
+  /* ── Section 3: TECHNICAL ── */
+  .na-tech-section  { border-top: 1px solid #f0f1f3; }
+  .na-tech-section:first-child { border-top: none; }
+  .na-tech-summary  { list-style: none; display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.25rem; font-size: 12px; font-weight: 600; color: #374151; cursor: pointer; user-select: none; }
+  .na-tech-summary::-webkit-details-marker { display: none; }
+  .na-tech-summary::before { content: "▶"; font-size: 10px; color: #9ca3af; transition: transform 0.15s; }
+  details[open] > .na-tech-summary::before { transform: rotate(90deg); }
+  .na-tech-body     { padding: 0.75rem 1.25rem 1rem; background: #fafbfc; border-top: 1px solid #f0f1f3; }
+
+  /* ── Card subtitle ── */
+  .na-card__subtitle { font-size: 11px; color: #9ca3af; font-weight: 400; }
+
+  /* ── Phase 3A: Teach nAia ── */
+  .na-teach-card { border-left: 3px solid #6366f1; }
+  .na-teach-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+  .na-teach-note { margin: 1rem 0 0; font-size: 12px; color: #6366f1; }
+  .na-teach-error { margin: 0.5rem 0 0; font-size: 12px; color: #dc2626; background: #fef2f2; padding: 0.4rem 0.75rem; border-radius: 4px; }
+  .na-teach-ok { margin: 0.5rem 0 0; font-size: 12px; color: #16a34a; }
+
+  /* Buttons */
+  .na-btn { cursor: pointer; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; padding: 0.45rem 1rem; transition: opacity 0.15s; }
+  .na-btn:hover { opacity: 0.85; }
+  .na-btn--primary { background: #16213e; color: #fff; }
+  .na-btn--secondary { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+  .na-btn--outline { background: #fff; color: #374151; border: 1px solid #d1d5db; }
+  .na-btn-revert { cursor: pointer; background: none; border: 1px solid #e9d5ff; color: #7c3aed; border-radius: 4px; font-size: 11px; padding: 0.15rem 0.5rem; }
+  .na-btn-revert:hover { background: #f5f3ff; }
+
+  /* Override indicator in Section 2 */
+  .na-ov-badge { background: #ede9fe; color: #4c1d95; border-radius: 3px; font-size: 10px; font-weight: 600; padding: 0.1rem 0.35rem; margin-right: 0.35rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .na-ov-stored { font-size: 11px; color: #9ca3af; margin-left: 0.35rem; }
+
+  /* Edit classification form */
+  .na-edit-form { margin-top: 1.25rem; border-top: 1px solid #f0f1f3; padding-top: 1.25rem; }
+  .na-edit-group-title { font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.6rem; }
+  .na-edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+
+  .na-edit-row { background: #fafbfc; border: 1px solid #f0f1f3; border-radius: 6px; padding: 0.6rem 0.75rem; display: flex; flex-direction: column; gap: 0.3rem; }
+  .na-edit-row--overridden { border-color: #e9d5ff; background: #faf5ff; }
+  .na-edit-row__check { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none; }
+  .na-edit-row__label { font-size: 12px; font-weight: 500; color: #374151; }
+  .na-edit-row__input { margin-top: 0.2rem; }
+  .na-edit-row__revert { margin-top: 0.2rem; }
+
+  .na-edit-input { width: 100%; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; padding: 0.3rem 0.5rem; background: #fff; }
+  .na-edit-input:disabled { background: #f9fafb; color: #9ca3af; }
+  .na-edit-select { width: 100%; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; padding: 0.3rem 0.4rem; background: #fff; }
+  .na-edit-select:disabled { background: #f9fafb; color: #9ca3af; }
+
+  /* Three-value display */
+  .na-three-val { display: flex; align-items: center; gap: 0.4rem; font-size: 11px; margin-top: 0.2rem; flex-wrap: wrap; }
+  .na-three-val__stored { color: #9ca3af; }
+  .na-three-val__arr { color: #c4b5fd; }
+  .na-three-val__corr { color: #7c3aed; font-weight: 500; }
+
+  /* Checkbox sections for arrays */
+  .na-edit-check-section { margin-top: 0.75rem; background: #fafbfc; border: 1px solid #f0f1f3; border-radius: 6px; padding: 0.6rem 0.75rem; }
+  .na-edit-check-section:has(input[name^="override_"]:checked) { border-color: #e9d5ff; background: #faf5ff; }
+  .na-edit-check-label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 12px; font-weight: 500; color: #374151; user-select: none; }
+  .na-edit-checkgroup { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.5rem; }
+  .na-edit-checkgroup--wrap { flex-direction: row; flex-wrap: wrap; gap: 0.4rem 1rem; }
+  .na-edit-check-item { display: flex; align-items: center; gap: 0.35rem; font-size: 12px; color: #374151; cursor: pointer; user-select: none; }
+
+  .na-edit-footer { margin-top: 1rem; display: flex; align-items: center; gap: 1rem; padding-top: 0.75rem; border-top: 1px solid #f0f1f3; }
+  .na-edit-hint { font-size: 11px; color: #9ca3af; }
+
+  /* Corrections view — read-only summary of active corrections */
+  .na-corrections-view { margin-top: 0.75rem; border-top: 1px solid #f0f1f3; padding-top: 0.75rem; }
+  .na-corrections-view__title { font-size: 11px; font-weight: 700; color: #7c3aed; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem; }
+  .na-correction-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.3rem 0; border-bottom: 1px solid #f5f3ff; font-size: 12px; }
+  .na-correction-row:last-child { border-bottom: none; }
+  .na-correction-row__key { font-weight: 500; color: #374151; min-width: 130px; flex-shrink: 0; }
+  .na-correction-row__val { color: #7c3aed; flex: 1; }
 `;

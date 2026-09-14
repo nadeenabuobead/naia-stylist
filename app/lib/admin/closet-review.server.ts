@@ -4,6 +4,8 @@
 //   validateOverrides(raw)      — strict server-side validation of admin override JSON
 //   computeReviewStatus(ov)     — derive "reviewed" | "overridden" from override key count
 //   getEffectiveClosetItem(...) — runtime value resolver (admin > current item value)
+//   saveAdminReview(...)        — upsert ClosetItemAdminReview with validated overrides
+//   revertOverrideField(...)    — remove one key from stored overrides
 //
 // Key design decisions:
 //   - Override key PRESENCE (not value truthiness) determines whether override is active.
@@ -11,6 +13,8 @@
 //   - null is a valid intentional override for nullable scalar fields.
 //   - Vocabulary validation reuses the exact canonical sets from garment-intelligence.types.ts.
 //   - No ClosetItem fields are mutated — the original record is never destructively overwritten.
+
+import prisma from "~/db.server";
 
 import {
   GARMENT_SILHOUETTE_VALUES,
@@ -229,6 +233,139 @@ export function validateOverrides(raw: unknown): ClosetItemOverrides {
   }
 
   return result;
+}
+
+// ── DB mutations ──────────────────────────────────────────────────────────────
+
+/** Stamps a review acknowledgment without touching existing overrides.
+ *  Use for "mark as correct": records who looked at it and when.
+ *  If the item has existing overrides → they are preserved; status stays OVERRIDDEN.
+ *  If no review record yet → creates one with empty overrides and REVIEWED status. */
+export async function markItemReviewed(
+  closetItemId: string,
+  reviewedBy: string,
+): Promise<void> {
+  await prisma.closetItemAdminReview.upsert({
+    where: { closetItemId },
+    create: {
+      closetItemId,
+      reviewStatus: "reviewed",
+      overrides: null,
+      reviewedBy,
+      reviewedAt: new Date(),
+      adminNotes: null,
+    },
+    update: {
+      // Never touch overrides or reviewStatus — only stamp reviewer and timestamp.
+      // Existing overrides must survive a mark-correct action.
+      reviewedBy,
+      reviewedAt: new Date(),
+    },
+  });
+}
+
+/** Creates or updates the ClosetItemAdminReview for a given closet item.
+ *  reviewStatus is derived from overrides — never passed by the caller.
+ *  reviewedBy must come from the session identity, never from form input. */
+export async function saveAdminReview(
+  closetItemId: string,
+  overrides: ClosetItemOverrides,
+  reviewedBy: string,
+  adminNotes: string | null,
+): Promise<void> {
+  const reviewStatus = computeReviewStatus(overrides);
+  const overridesData: object | null =
+    Object.keys(overrides).length > 0 ? (overrides as object) : null;
+
+  await prisma.closetItemAdminReview.upsert({
+    where: { closetItemId },
+    create: {
+      closetItemId,
+      reviewStatus,
+      overrides: overridesData,
+      reviewedBy,
+      reviewedAt: new Date(),
+      adminNotes,
+    },
+    update: {
+      reviewStatus,
+      overrides: overridesData,
+      reviewedBy,
+      reviewedAt: new Date(),
+      adminNotes,
+    },
+  });
+}
+
+/** Removes a single key from the stored overrides for a closet item.
+ *  Recomputes reviewStatus after removal.
+ *  If the item has no review record or no overrides, this is a no-op. */
+export async function revertOverrideField(
+  closetItemId: string,
+  fieldKey: string,
+  reviewedBy: string,
+): Promise<void> {
+  if (BLOCKED_KEYS.has(fieldKey) || !ALLOWED_OVERRIDE_KEYS.has(fieldKey)) {
+    throw new Error(`Invalid override key: "${fieldKey}"`);
+  }
+
+  const existing = await prisma.closetItemAdminReview.findUnique({
+    where: { closetItemId },
+  });
+  if (!existing?.overrides) return;
+
+  const current = existing.overrides as Record<string, unknown>;
+  const remaining: Record<string, unknown> = {};
+  for (const k of Object.keys(current)) {
+    if (k !== fieldKey) remaining[k] = current[k];
+  }
+  const updatedOverrides = remaining as ClosetItemOverrides;
+  const reviewStatus = computeReviewStatus(updatedOverrides);
+  const overridesData: object | null =
+    Object.keys(updatedOverrides).length > 0 ? (updatedOverrides as object) : null;
+
+  await prisma.closetItemAdminReview.update({
+    where: { closetItemId },
+    data: {
+      overrides: overridesData,
+      reviewStatus,
+      reviewedBy,
+      reviewedAt: new Date(),
+    },
+  });
+}
+
+// ── Stored classification fetcher ────────────────────────────────────────────
+
+/** Returns just the stored classification fields for a closet item.
+ *  Used by the save-overrides action to strip same-as-stored values. */
+export async function getItemClassification(
+  closetItemId: string,
+): Promise<ClosetItemFields | null> {
+  return prisma.closetItem.findUnique({
+    where: { id: closetItemId },
+    select: {
+      subcategory: true,
+      silhouette: true,
+      fitProfile: true,
+      hemLength: true,
+      topLength: true,
+      waistShape: true,
+      sleeveLength: true,
+      necklineCoverage: true,
+      shoulderCoverage: true,
+      midriffExposed: true,
+      material: true,
+      pattern: true,
+      primaryColor: true,
+      colors: true,
+      occasions: true,
+      seasons: true,
+      formality: true,
+      styleTags: true,
+      stylePersonality: true,
+    },
+  });
 }
 
 // ── Effective value resolver ──────────────────────────────────────────────────
