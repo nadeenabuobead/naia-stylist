@@ -971,37 +971,28 @@ describe("§CI.34 existing Designer Intelligence routes remain unchanged", () =>
   });
 });
 
-// ── §CI.35 /app layout now has AppProvider and authenticate.admin ─────────────
+// ── §CI.35 /app layout is a bare Outlet; auth lives in leaf loaders ──────────
 //
-// Fix: app.jsx was a bare <Outlet /> with no loader and no AppProvider.
-// Without App Bridge (AppProvider), the Shopify adapter could not use the
-// "bounce" mechanism; auth failures redirected the Shopify Admin iframe to
-// shopify.com — which has X-Frame-Options: DENY → "refused to connect".
+// app.jsx must NOT have a loader that calls authenticate.admin().
+// Adding authenticate.admin() to the parent layout forces a token-exchange
+// bounce on every initial /app load; when the bounce redirect re-enters the
+// parent loader the cycle repeats → "too many redirects".
+//
+// The correct architecture (token-exchange strategy):
+//   app.jsx          — bare <Outlet />, no loader
+//   app._index.jsx   — try/catch suppresses bounce on the home page
+//   leaf routes      — each calls requireNaiaAdminAccess independently
+//   app.naia-admin.tsx — no parent loader (double authenticate.admin() = loop)
 
-describe("§CI.35 /app layout exports loader and default component (AppProvider fix)", () => {
-  it("app.jsx exports a loader function", async () => {
+describe("§CI.35 /app layout is bare Outlet with no server loader", () => {
+  it("app.jsx does not export a server loader", async () => {
     const mod = await import("~/routes/app");
-    expect(typeof mod.loader).toBe("function");
+    expect(mod.loader).toBeUndefined();
   });
 
-  it("app.jsx loader returns apiKey from env", async () => {
-    vi.stubEnv("SHOPIFY_API_KEY", "test-api-key-xyz");
-    const { loader } = await import("~/routes/app");
-    const request = new Request("https://example.vercel.app/app?embedded=1&shop=test.myshopify.com");
-    const response = await loader({ request, params: {}, context: {} as any });
-    const body = await (response as Response).json();
-    expect(body.apiKey).toBe("test-api-key-xyz");
-    vi.unstubAllEnvs();
-  });
-
-  it("app.jsx exports headers (boundary.headers) for CSP propagation", async () => {
+  it("app.jsx default export is the layout component", async () => {
     const mod = await import("~/routes/app");
-    expect(typeof mod.headers).toBe("function");
-  });
-
-  it("app.jsx exports an ErrorBoundary for auth error handling", async () => {
-    const mod = await import("~/routes/app");
-    expect(typeof mod.ErrorBoundary).toBe("function");
+    expect(typeof mod.default).toBe("function");
   });
 
   it("requireNaiaAdminAccess returns { session, redirect } so the caller can use the Shopify helper", async () => {
