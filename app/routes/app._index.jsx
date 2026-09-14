@@ -813,10 +813,19 @@ const imageFromStore = params?.get("image");
   return (
     <div style={pageStyle}>
       <div style={containerStyle}>
-        {/* Internal admin link — separate from NADINE Designer Intelligence */}
+        {/* Internal admin link — preserve embedded context so Shopify auth params
+            (embedded, host, shop) travel with the navigation and don't trigger
+            a shopify.com redirect inside the iframe. */}
         <div style={{ textAlign: "right", paddingBottom: "8px" }}>
           <Link
-            to="/app/naia-admin"
+            to={(() => {
+              const qs = new URLSearchParams();
+              for (const k of ["embedded", "host", "shop"]) {
+                const v = params?.get(k);
+                if (v) qs.set(k, v);
+              }
+              return `/app/naia-admin${qs.size > 0 ? `?${qs}` : ""}`;
+            })()}
             style={{ fontSize: "11px", color: "#9ca3af", textDecoration: "none", letterSpacing: "0.05em" }}
           >
             nAia Admin →

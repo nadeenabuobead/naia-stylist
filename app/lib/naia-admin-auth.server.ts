@@ -18,7 +18,7 @@
 import { authenticate } from "../shopify.server";
 
 export async function requireNaiaAdminAccess(request: Request) {
-  const { session } = await authenticate.admin(request);
+  const { session, redirect } = await authenticate.admin(request);
 
   // ── Layer 1: dedicated shop allowlist ────────────────────────────────────
   const allowedShops = (process.env.NAIA_ADMIN_ALLOWED_SHOPS ?? "")
@@ -52,5 +52,5 @@ export async function requireNaiaAdminAccess(request: Request) {
     }
   }
 
-  return session;
+  return { session, redirect };
 }

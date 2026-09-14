@@ -67,6 +67,11 @@ vi.mock("~/shopify.server", () => ({
           associated_user: { account_owner: true, email: "admin@test.myshopify.com" },
         },
       },
+      // Shopify's embedded-safe redirect helper — copies request params in prod;
+      // mock returns a plain 302 so tests can verify the helper is called.
+      redirect: vi.fn().mockImplementation((url: string) =>
+        new Response(null, { status: 302, headers: { Location: url } }),
+      ),
     }),
   },
 }));
@@ -895,14 +900,15 @@ describe("§CI.31 parent layout has no auth loader (redirect-loop fix)", () => {
   });
 });
 
-// ── §CI.32 index redirect preserves embedded context params ───────────────────
+// ── §CI.32 index redirect uses the Shopify embedded-safe redirect helper ──────
 //
-// Root cause of the loop's second factor:
-//   redirect("/app/naia-admin/closet") dropped ?host=...&shop=... — the Shopify
-//   adapter needs these to validate embedded context; without them it triggered
-//   a new auth redirect on every load of /app/naia-admin/closet.
+// Fix: replaced plain React Router redirect() with the helper returned by
+// authenticate.admin(request).  The real helper copies ALL embedded params
+// (embedded, host, shop, id_token) from the original request; without it the
+// iframe received a bare /app/naia-admin/closet URL that failed auth checks and
+// caused "shopify.com refused to connect".
 
-describe("§CI.32 index redirect preserves host/shop embedded params", () => {
+describe("§CI.32 index redirect uses Shopify embedded-safe redirect helper", () => {
   beforeEach(() => {
     vi.stubEnv("NAIA_ADMIN_ALLOWED_SHOPS", "test.myshopify.com");
   });
@@ -910,26 +916,30 @@ describe("§CI.32 index redirect preserves host/shop embedded params", () => {
     vi.unstubAllEnvs();
   });
 
-  it("redirect includes host and shop when present in request URL", async () => {
+  it("loader returns a 302 redirect to /app/naia-admin/closet", async () => {
     const { loader } = await import("~/routes/app.naia-admin._index");
     const request = new Request(
-      "https://example.vercel.app/app/naia-admin?host=abc123&shop=test.myshopify.com",
+      "https://example.vercel.app/app/naia-admin?embedded=1&host=abc123&shop=test.myshopify.com",
     );
     const response = await loader({ request, params: {}, context: {} as any });
     expect((response as Response).status).toBe(302);
     const location = (response as Response).headers.get("Location") ?? "";
     expect(location).toContain("/app/naia-admin/closet");
-    expect(location).toContain("host=abc123");
-    expect(location).toContain("shop=test.myshopify.com");
   });
 
-  it("redirect omits query string when host/shop absent from request URL", async () => {
+  it("loader calls the Shopify redirect helper (not plain React Router redirect)", async () => {
+    // The _index loader must use the redirect from authenticate.admin(), not
+    // the plain React Router redirect(), so Shopify can copy embedded params.
     const { loader } = await import("~/routes/app.naia-admin._index");
-    const request = new Request("https://example.vercel.app/app/naia-admin");
-    const response = await loader({ request, params: {}, context: {} as any });
-    expect((response as Response).status).toBe(302);
-    const location = (response as Response).headers.get("Location") ?? "";
-    expect(location).toBe("/app/naia-admin/closet");
+    const { authenticate } = await import("~/shopify.server");
+    const request = new Request(
+      "https://example.vercel.app/app/naia-admin?embedded=1&host=abc123&shop=test.myshopify.com",
+    );
+    await loader({ request, params: {}, context: {} as any });
+    // authenticate.admin() returns { redirect } — the loader must call it.
+    const mockResult = await vi.mocked(authenticate.admin).mock.results.at(-1)?.value;
+    expect(vi.isMockFunction(mockResult?.redirect)).toBe(true);
+    expect(mockResult?.redirect).toHaveBeenCalledWith("/app/naia-admin/closet");
   });
 });
 
@@ -958,5 +968,49 @@ describe("§CI.34 existing Designer Intelligence routes remain unchanged", () =>
   it("designer-intelligence route still has its own loader (separate auth)", async () => {
     const mod = await import("~/routes/app.designer-intelligence");
     expect(typeof mod.loader).toBe("function");
+  });
+});
+
+// ── §CI.35 /app layout now has AppProvider and authenticate.admin ─────────────
+//
+// Fix: app.jsx was a bare <Outlet /> with no loader and no AppProvider.
+// Without App Bridge (AppProvider), the Shopify adapter could not use the
+// "bounce" mechanism; auth failures redirected the Shopify Admin iframe to
+// shopify.com — which has X-Frame-Options: DENY → "refused to connect".
+
+describe("§CI.35 /app layout exports loader and default component (AppProvider fix)", () => {
+  it("app.jsx exports a loader function", async () => {
+    const mod = await import("~/routes/app");
+    expect(typeof mod.loader).toBe("function");
+  });
+
+  it("app.jsx loader returns apiKey from env", async () => {
+    vi.stubEnv("SHOPIFY_API_KEY", "test-api-key-xyz");
+    const { loader } = await import("~/routes/app");
+    const request = new Request("https://example.vercel.app/app?embedded=1&shop=test.myshopify.com");
+    const response = await loader({ request, params: {}, context: {} as any });
+    const body = await (response as Response).json();
+    expect(body.apiKey).toBe("test-api-key-xyz");
+    vi.unstubAllEnvs();
+  });
+
+  it("app.jsx exports headers (boundary.headers) for CSP propagation", async () => {
+    const mod = await import("~/routes/app");
+    expect(typeof mod.headers).toBe("function");
+  });
+
+  it("app.jsx exports an ErrorBoundary for auth error handling", async () => {
+    const mod = await import("~/routes/app");
+    expect(typeof mod.ErrorBoundary).toBe("function");
+  });
+
+  it("requireNaiaAdminAccess returns { session, redirect } so the caller can use the Shopify helper", async () => {
+    vi.stubEnv("NAIA_ADMIN_ALLOWED_SHOPS", "test.myshopify.com");
+    const { requireNaiaAdminAccess } = await import("~/lib/naia-admin-auth.server");
+    const request = new Request("https://example.vercel.app/app/naia-admin?embedded=1&shop=test.myshopify.com");
+    const result = await requireNaiaAdminAccess(request);
+    expect(result).toHaveProperty("session");
+    expect(typeof result.redirect).toBe("function");
+    vi.unstubAllEnvs();
   });
 });
