@@ -32,7 +32,7 @@
 //   §CI.29 PAGE_SIZE is 25
 //   §CI.30 ClosetItemRow.occasions defaults to [] when empty
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   extractOverallConfidence,
   computeDisplayReviewStatus,
@@ -839,9 +839,11 @@ describe("§CI.19 route paths are registered under /app/naia-admin/*", () => {
     expect(typeof mod.default).toBe("function");
   });
 
-  it("layout shell exists at routes/app.naia-admin.tsx", async () => {
+  it("layout shell exists at routes/app.naia-admin.tsx and renders default component", async () => {
     const mod = await import("~/routes/app.naia-admin");
-    expect(typeof mod.loader).toBe("function");
+    // No loader on the parent layout — each child handles its own auth.
+    // A parent loader caused double authenticate.admin() calls → redirect loop.
+    expect(mod.loader).toBeUndefined();
     expect(typeof mod.default).toBe("function");
   });
 
@@ -867,6 +869,94 @@ describe("§CI.20 list loader — requireNaiaAdminAccess called independently", 
 describe("§CI.21 detail loader — requireNaiaAdminAccess called independently", () => {
   it("detail loader exports its own loader function (independent auth)", async () => {
     const mod = await import("~/routes/app.naia-admin.closet.$itemId");
+    expect(typeof mod.loader).toBe("function");
+  });
+});
+
+// ── §CI.31 parent layout has no auth loader ────────────────────────────────────
+//
+// Root cause of the embedded redirect loop:
+//   app.naia-admin.tsx had a loader calling authenticate.admin() AND each child
+//   also called authenticate.admin(). React Router v7 runs parent + child loaders
+//   in parallel — two concurrent authenticate.admin() calls on the same request
+//   caused the Shopify adapter to emit conflicting redirects → "too many redirects".
+//
+// Fix: parent layout has no loader; each leaf route handles its own auth.
+
+describe("§CI.31 parent layout has no auth loader (redirect-loop fix)", () => {
+  it("app.naia-admin shell exports no loader", async () => {
+    const mod = await import("~/routes/app.naia-admin");
+    expect(mod.loader).toBeUndefined();
+  });
+
+  it("app.naia-admin shell still exports a default component", async () => {
+    const mod = await import("~/routes/app.naia-admin");
+    expect(typeof mod.default).toBe("function");
+  });
+});
+
+// ── §CI.32 index redirect preserves embedded context params ───────────────────
+//
+// Root cause of the loop's second factor:
+//   redirect("/app/naia-admin/closet") dropped ?host=...&shop=... — the Shopify
+//   adapter needs these to validate embedded context; without them it triggered
+//   a new auth redirect on every load of /app/naia-admin/closet.
+
+describe("§CI.32 index redirect preserves host/shop embedded params", () => {
+  beforeEach(() => {
+    vi.stubEnv("NAIA_ADMIN_ALLOWED_SHOPS", "test.myshopify.com");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("redirect includes host and shop when present in request URL", async () => {
+    const { loader } = await import("~/routes/app.naia-admin._index");
+    const request = new Request(
+      "https://example.vercel.app/app/naia-admin?host=abc123&shop=test.myshopify.com",
+    );
+    const response = await loader({ request, params: {}, context: {} as any });
+    expect((response as Response).status).toBe(302);
+    const location = (response as Response).headers.get("Location") ?? "";
+    expect(location).toContain("/app/naia-admin/closet");
+    expect(location).toContain("host=abc123");
+    expect(location).toContain("shop=test.myshopify.com");
+  });
+
+  it("redirect omits query string when host/shop absent from request URL", async () => {
+    const { loader } = await import("~/routes/app.naia-admin._index");
+    const request = new Request("https://example.vercel.app/app/naia-admin");
+    const response = await loader({ request, params: {}, context: {} as any });
+    expect((response as Response).status).toBe(302);
+    const location = (response as Response).headers.get("Location") ?? "";
+    expect(location).toBe("/app/naia-admin/closet");
+  });
+});
+
+// ── §CI.33 blocked shop is rejected by index redirect loader ─────────────────
+
+describe("§CI.33 index redirect loader — blocked shop returns 403", () => {
+  beforeEach(() => {
+    vi.stubEnv("NAIA_ADMIN_ALLOWED_SHOPS", "other-shop.myshopify.com");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("returns 403 when shop is not on the allowlist", async () => {
+    const { loader } = await import("~/routes/app.naia-admin._index");
+    const request = new Request("https://example.vercel.app/app/naia-admin");
+    await expect(
+      loader({ request, params: {}, context: {} as any }),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+// ── §CI.34 designer intelligence routes unaffected ───────────────────────────
+
+describe("§CI.34 existing Designer Intelligence routes remain unchanged", () => {
+  it("designer-intelligence route still has its own loader (separate auth)", async () => {
+    const mod = await import("~/routes/app.designer-intelligence");
     expect(typeof mod.loader).toBe("function");
   });
 });

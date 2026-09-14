@@ -7,14 +7,13 @@
 // Phase 2: Closet Intelligence is active.
 //          Other nav sections are present but disabled ("coming soon").
 
-import { Outlet, NavLink, useNavigation } from "react-router";
-import type { LoaderFunctionArgs } from "react-router";
-import { requireNaiaAdminAccess } from "~/lib/naia-admin-auth.server";
+// Parent layout intentionally has NO loader.
+// Each child route calls requireNaiaAdminAccess independently.
+// Having auth in both the parent and child loaders causes two concurrent
+// authenticate.admin() calls on the same request — which the Shopify adapter
+// was not designed to handle — creating a redirect loop in embedded mode.
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  await requireNaiaAdminAccess(request);
-  return null;
-}
+import { Outlet, NavLink, useNavigation } from "react-router";
 
 // ── Nav structure ─────────────────────────────────────────────────────────────
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useLoaderData } from "react-router";
+import { useLoaderData, Link } from "react-router";
 import { authenticate } from "../shopify.server";
 
 export async function loader({ request }) {
@@ -813,6 +813,16 @@ const imageFromStore = params?.get("image");
   return (
     <div style={pageStyle}>
       <div style={containerStyle}>
+        {/* Internal admin link — separate from NADINE Designer Intelligence */}
+        <div style={{ textAlign: "right", paddingBottom: "8px" }}>
+          <Link
+            to="/app/naia-admin"
+            style={{ fontSize: "11px", color: "#9ca3af", textDecoration: "none", letterSpacing: "0.05em" }}
+          >
+            nAia Admin →
+          </Link>
+        </div>
+
         <div style={heroStyle}>
           <div style={heroCardStyle}>
             <div style={eyebrowStyle}>nAia Stylist</div>
