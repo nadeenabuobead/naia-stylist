@@ -10,11 +10,13 @@ import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { requireAdminSession } from "~/lib/internal-auth.server";
 import {
   listClosetItems,
+  getClosetReviewSummary,
   type ClosetItemListFilters,
   type ClosetItemListResult,
   type ClosetAnalysisStatus,
   type ClosetAdminReviewFilter,
   type ClosetItemRow,
+  type ClosetReviewSummary,
 } from "~/lib/admin/closet-intelligence.server";
 import { markItemReviewed } from "~/lib/admin/closet-review.server";
 
@@ -90,24 +92,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10));
 
-  const result = await listClosetItems(filters, page);
-  return Response.json({ result, filters, page });
+  const [result, summary] = await Promise.all([
+    listClosetItems(filters, page),
+    getClosetReviewSummary(),
+  ]);
+  return Response.json({ result, filters, page, summary });
 }
 
 export default function ClosetIntelligenceList() {
-  const { result, filters, page } = useLoaderData() as {
+  const { result, filters, page, summary } = useLoaderData() as {
     result: ClosetItemListResult;
     filters: ClosetItemListFilters;
     page: number;
+    summary: ClosetReviewSummary;
   };
   const [searchParams] = useSearchParams();
 
   const { items, total, pageCount } = result;
 
-  // Encode current filter state for Back button round-trip on detail page
-  const fromParam = searchParams.toString()
-    ? `?from=${encodeURIComponent(searchParams.toString())}`
-    : "";
+  // Encode current filter+page state for Back button round-trip on detail page.
+  // Always include page so the back link returns to the correct page even when
+  // no other filters are active (bare URL has no ?page= param on page 1).
+  const fromSearchParams = new URLSearchParams(searchParams);
+  if (!fromSearchParams.has("page")) fromSearchParams.set("page", "1");
+  const fromParam = `?from=${encodeURIComponent(fromSearchParams.toString())}`;
 
   function buildPageUrl(p: number) {
     const sp = new URLSearchParams(searchParams);
@@ -130,6 +138,25 @@ export default function ClosetIntelligenceList() {
           </span>
         )}
       </h1>
+
+      {/* Review progress summary */}
+      <div className="na-review-progress">
+        <span className="na-review-progress__label">
+          Reviewed: <strong>{(summary.reviewed + summary.corrected).toLocaleString()}</strong> / {summary.total.toLocaleString()}
+        </span>
+        <span className="na-review-progress__sep" aria-hidden="true">·</span>
+        <span className="na-review-progress__chip na-review-progress__chip--ai">
+          AI ONLY: {summary.aiOnly.toLocaleString()}
+        </span>
+        <span className="na-review-progress__sep" aria-hidden="true">·</span>
+        <span className="na-review-progress__chip na-review-progress__chip--reviewed">
+          REVIEWED: {summary.reviewed.toLocaleString()}
+        </span>
+        <span className="na-review-progress__sep" aria-hidden="true">·</span>
+        <span className="na-review-progress__chip na-review-progress__chip--corrected">
+          CORRECTED BY YOU: {summary.corrected.toLocaleString()}
+        </span>
+      </div>
 
       <div className="na-card">
         {/* ── Filters ── */}
@@ -391,7 +418,10 @@ function ItemRow({ item, fromParam }: { item: ClosetItemRow; fromParam: string }
           {item.missingMetadata && (
             <span className="na-badge na-badge--warn" title="Analyzed but missing subcategory, silhouette, or formality">MISSING META</span>
           )}
-          {!item.lowConfidence && !item.missingMetadata && (
+          {item.needsVocabUpdate && (
+            <span className="na-badge na-badge--vocab-gap" title="Vocabulary gap flagged">VOCAB GAP</span>
+          )}
+          {!item.lowConfidence && !item.missingMetadata && !item.needsVocabUpdate && (
             <span className="na-null">—</span>
           )}
         </span>
