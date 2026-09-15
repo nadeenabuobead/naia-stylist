@@ -478,6 +478,54 @@ describe("§CI.17 missingMetadata flag on rows", () => {
     const result = await listClosetItems({}, 1);
     expect(result.items[0].missingMetadata).toBe(false);
   });
+
+  it("SHOES ready item with null silhouette has missingMetadata=false (silhouette not required for shoes)", async () => {
+    vi.mocked(prisma.closetItem.findMany).mockResolvedValue([
+      makeItemRow({
+        category: "SHOES",
+        analysisStatus: "ready",
+        subcategory: "running shoes",
+        silhouette: null,
+        formality: "casual",
+      }),
+    ] as any);
+    vi.mocked(prisma.closetItem.count).mockResolvedValue(1);
+
+    const result = await listClosetItems({}, 1);
+    expect(result.items[0].missingMetadata).toBe(false);
+  });
+
+  it("BAGS ready item with null silhouette has missingMetadata=false", async () => {
+    vi.mocked(prisma.closetItem.findMany).mockResolvedValue([
+      makeItemRow({
+        category: "BAGS",
+        analysisStatus: "ready",
+        subcategory: "tote",
+        silhouette: null,
+        formality: "casual",
+      }),
+    ] as any);
+    vi.mocked(prisma.closetItem.count).mockResolvedValue(1);
+
+    const result = await listClosetItems({}, 1);
+    expect(result.items[0].missingMetadata).toBe(false);
+  });
+
+  it("SHOES ready item still gets missingMetadata=true when subcategory is null", async () => {
+    vi.mocked(prisma.closetItem.findMany).mockResolvedValue([
+      makeItemRow({
+        category: "SHOES",
+        analysisStatus: "ready",
+        subcategory: null,
+        silhouette: null,
+        formality: "casual",
+      }),
+    ] as any);
+    vi.mocked(prisma.closetItem.count).mockResolvedValue(1);
+
+    const result = await listClosetItems({}, 1);
+    expect(result.items[0].missingMetadata).toBe(true);
+  });
 });
 
 // ── §CI.6 reviewStatus WHERE clause ──────────────────────────────────────────
@@ -560,16 +608,24 @@ describe("§CI.8 missingMetadata WHERE clause", () => {
     vi.mocked(prisma.closetItem.count).mockResolvedValue(0);
   });
 
-  it("passes analysisStatus='ready' AND OR of missing fields", async () => {
+  it("passes analysisStatus='ready' AND category-aware OR of missing fields", async () => {
     await listClosetItems({ missingMetadata: true }, 1);
     const where = vi.mocked(prisma.closetItem.findMany).mock.calls[0][0]?.where;
     const and = (where as any)?.AND as unknown[];
     const missMeta = and?.find((c: any) => c?.analysisStatus === "ready" && c?.OR);
     expect(missMeta).toBeDefined();
-    const or = (missMeta as any).OR;
+    const or = (missMeta as any).OR as unknown[];
+    // subcategory and formality are simple null checks
     expect(or).toContainEqual({ subcategory: null });
-    expect(or).toContainEqual({ silhouette: null });
     expect(or).toContainEqual({ formality: null });
+    // silhouette is gated by category — must carry a notIn clause for non-clothing categories
+    const silhouetteClause = or.find((c: any) => c?.silhouette === null && c?.category?.notIn);
+    expect(silhouetteClause).toBeDefined();
+    const excluded = (silhouetteClause as any).category.notIn as string[];
+    expect(excluded).toContain("SHOES");
+    expect(excluded).toContain("BAGS");
+    expect(excluded).toContain("ACCESSORIES");
+    expect(excluded).toContain("JEWELRY");
   });
 });
 

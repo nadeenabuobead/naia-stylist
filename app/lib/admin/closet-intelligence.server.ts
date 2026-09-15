@@ -54,11 +54,9 @@ export const PAGE_SIZE = 25;
 
 // ── Important metadata fields used for "missing metadata" check ───────────────
 
-const REQUIRED_CLASSIFIED_FIELDS: Array<keyof Prisma.ClosetItemWhereInput> = [
-  "subcategory",
-  "silhouette",
-  "formality",
-];
+// Categories where silhouette is not a meaningful classification field.
+// For these categories a null silhouette is expected, not a data gap.
+const NON_SILHOUETTE_CATEGORIES = new Set(["SHOES", "BAGS", "ACCESSORIES", "JEWELRY"]);
 
 // ── List ──────────────────────────────────────────────────────────────────────
 
@@ -152,11 +150,19 @@ export async function listClosetItems(
     });
   }
 
-  // missingMetadata: analysis complete but missing critical classification fields
+  // missingMetadata: analysis complete but missing critical classification fields.
+  // Silhouette is only required for clothing categories — not SHOES/BAGS/ACCESSORIES/JEWELRY.
   if (filters.missingMetadata) {
     andClauses.push({
       analysisStatus: "ready",
-      OR: REQUIRED_CLASSIFIED_FIELDS.map((field) => ({ [field]: null })),
+      OR: [
+        { subcategory: null },
+        { formality: null },
+        {
+          silhouette: null,
+          category: { notIn: [...NON_SILHOUETTE_CATEGORIES] as string[] },
+        },
+      ],
     });
   }
 
@@ -201,8 +207,11 @@ export async function listClosetItems(
     const reviewStatus = item.adminReview?.reviewStatus ?? "unreviewed";
     const overallConf = extractOverallConfidence(item.fieldConfidence);
     const isAnalyzed = item.analysisStatus === "ready";
+    const silhouetteRequired = !NON_SILHOUETTE_CATEGORIES.has(item.category);
     const missMeta = isAnalyzed && (
-      item.subcategory == null || item.silhouette == null || item.formality == null
+      item.subcategory == null ||
+      (silhouetteRequired && item.silhouette == null) ||
+      item.formality == null
     );
 
     return {
