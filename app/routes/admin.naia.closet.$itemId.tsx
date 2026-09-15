@@ -18,8 +18,10 @@ import {
   getClosetItemDetail,
   getNextUnreviewedItemId,
   getAdjacentItemIds,
+  getCustomerStylingPassport,
   type ClosetItemDetail,
   type ClosetClassification,
+  type CustomerStylingPassportContext,
 } from "~/lib/admin/closet-intelligence.server";
 import {
   interpretGarment,
@@ -41,6 +43,10 @@ import {
   buildPrivateDownloadUrl,
   getCloudinaryConfig,
 } from "~/lib/cloudinary-admin.server";
+import {
+  deriveGarmentStylingIntelligence,
+  type GarmentStylingIntelligence,
+} from "~/lib/admin/garment-intelligence-v1.server";
 
 // ── Vocabulary options for edit dropdowns (mirrors garment-intelligence.types.ts) ──
 
@@ -109,7 +115,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     garmentImageUrl = item.thumbnailUrl;
   }
 
-  return Response.json({ item, effectiveClassification, garmentImageUrl, interpretation, returnTo, nextUnreviewedId, prevItemId, nextItemId });
+  const passportContext = await getCustomerStylingPassport(item.customerId);
+  const stylingIntelligence = deriveGarmentStylingIntelligence(effectiveClassification, passportContext);
+
+  return Response.json({ item, effectiveClassification, garmentImageUrl, interpretation, stylingIntelligence, passportContext, returnTo, nextUnreviewedId, prevItemId, nextItemId });
 }
 
 // ── Action ─────────────────────────────────────────────────────────────────────
@@ -313,15 +322,215 @@ function formatFieldValue(fieldKey: string, val: unknown): string {
   return String(val);
 }
 
+// ── Phase 3C V1: Deeper Styling Intelligence (shadow / read-only) ──────────────
+
+const VISUAL_WEIGHT_COLOUR: Record<string, string> = {
+  light:       "#6b7280",
+  medium:      "#0369a1",
+  substantial: "#7c3aed",
+};
+
+const ENERGY_TIER_COLOUR: Record<string, string> = {
+  "high-energy":         "#dc2626",
+  "deep-authoritative":  "#1e3a5f",
+  "mid-range":           "#059669",
+  "neutral-versatile":   "#6b7280",
+};
+
+function DeeperStylingIntelligence({
+  intel,
+  passportContext,
+}: {
+  intel: GarmentStylingIntelligence;
+  passportContext: CustomerStylingPassportContext | null;
+}) {
+  const [showIntentions, setShowIntentions] = useState(false);
+
+  const vw = intel.visualWeight;
+  const cp = intel.colourProfile;
+  const passportBadge = intel.passportUsed ? "SHADOW · V1 · PASSPORT-AWARE" : "SHADOW · V1 · NO PASSPORT";
+
+  return (
+    <div className="na-card">
+      <div className="na-card__header">
+        <h2 className="na-card__title">Deeper Styling Intelligence</h2>
+        <span className="na-badge na-badge--ai-only" style={{ fontSize: "0.65rem" }}>
+          {passportBadge}
+        </span>
+      </div>
+      <div className="na-card__body" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+
+        {/* ─── A. DEEPER GARMENT INTELLIGENCE (intrinsic / generic) ─── */}
+        <div>
+          <p className="na-provenance-label" style={{ marginBottom: "0.75rem" }}>
+            A — DEEPER GARMENT INTELLIGENCE
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+
+            {/* Visual Weight */}
+            <div>
+              <p style={{ fontSize: "0.65rem", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.35rem" }}>Visual Weight</p>
+              {vw.value ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                  <span
+                    className="na-interp-label"
+                    style={{ backgroundColor: VISUAL_WEIGHT_COLOUR[vw.value] + "20", color: VISUAL_WEIGHT_COLOUR[vw.value], borderColor: VISUAL_WEIGHT_COLOUR[vw.value] + "40" }}
+                  >
+                    {vw.value}
+                  </span>
+                  {vw.evidence.length > 0 && (
+                    <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap", marginTop: "0.15rem" }}>
+                      {vw.evidence.map((e) => (
+                        <span key={e} style={{ fontSize: "0.7rem", color: "#9ca3af", background: "#1f2937", padding: "0.1rem 0.4rem", borderRadius: "4px" }}>
+                          {e}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <span style={{ color: "#6b7280", fontSize: "0.8rem" }}>— insufficient data</span>
+              )}
+            </div>
+
+            {/* Colour Profile */}
+            <div>
+              <p style={{ fontSize: "0.65rem", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.35rem" }}>Colour Profile</p>
+              {cp.neutralChromaticity ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+                    <span className="na-interp-label">{cp.neutralChromaticity}</span>
+                    {cp.broadFamily && <span className="na-interp-label">{cp.broadFamily}</span>}
+                    {cp.lightDark && <span className="na-interp-label">{cp.lightDark}</span>}
+                    {cp.energyTier && (
+                      <span
+                        className="na-interp-label"
+                        style={{ backgroundColor: ENERGY_TIER_COLOUR[cp.energyTier] + "20", color: ENERGY_TIER_COLOUR[cp.energyTier], borderColor: ENERGY_TIER_COLOUR[cp.energyTier] + "40" }}
+                      >
+                        {cp.energyTier}
+                      </span>
+                    )}
+                  </div>
+                  {cp.evidence.length > 0 && (
+                    <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                      {cp.evidence.map((e) => (
+                        <span key={e} style={{ fontSize: "0.7rem", color: "#9ca3af", background: "#1f2937", padding: "0.1rem 0.4rem", borderRadius: "4px" }}>
+                          {e}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <span style={{ color: "#6b7280", fontSize: "0.8rem" }}>— no colour data</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ borderTop: "1px solid #1f2937" }} />
+
+        {/* ─── B. PASSPORT-AWARE STYLING POTENTIAL ─── */}
+        <div>
+          <p className="na-provenance-label" style={{ marginBottom: "0.75rem" }}>
+            B — PASSPORT-AWARE STYLING POTENTIAL
+          </p>
+
+          {/* Passport context header */}
+          {intel.passportUsed && passportContext ? (
+            <div style={{ marginBottom: "0.75rem", padding: "0.5rem 0.75rem", background: "#0c1a2e", borderRadius: "6px", border: "1px solid #1e3a5f" }}>
+              <p style={{ fontSize: "0.7rem", color: "#6b7280", marginBottom: "0.25rem" }}>PROFILE CONTEXT</p>
+              {passportContext.stylePersonalities.length > 0 && (
+                <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap", marginBottom: "0.2rem" }}>
+                  {passportContext.stylePersonalities.map(p => (
+                    <span key={p} style={{ fontSize: "0.7rem", color: "#93c5fd", background: "#1e3a5f", padding: "0.1rem 0.4rem", borderRadius: "4px" }}>{p}</span>
+                  ))}
+                </div>
+              )}
+              {passportContext.favoriteColors.length > 0 && (
+                <p style={{ fontSize: "0.7rem", color: "#6b7280" }}>
+                  Favourite colours: {passportContext.favoriteColors.slice(0, 5).join(", ")}
+                  {passportContext.favoriteColors.length > 5 ? ` +${passportContext.favoriteColors.length - 5}` : ""}
+                </p>
+              )}
+              <p style={{ fontSize: "0.65rem", color: "#4b5563", marginTop: "0.25rem" }}>No TODAY session applied.</p>
+            </div>
+          ) : (
+            <div style={{ marginBottom: "0.75rem", padding: "0.5rem 0.75rem", background: "#111827", borderRadius: "6px", border: "1px solid #374151" }}>
+              <p style={{ fontSize: "0.75rem", color: "#6b7280" }}>
+                Passport context unavailable — showing garment-only baseline
+              </p>
+            </div>
+          )}
+
+          {/* Styling signals summary (non-empty) */}
+          {intel.intentionPotentials.filter(ip => ip.signals.length > 0).length === 0 ? (
+            <p style={{ fontSize: "0.8rem", color: "#6b7280" }}>No signals computed for this garment/profile combination</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "0.75rem" }}>
+              {intel.intentionPotentials
+                .filter(ip => ip.signals.length > 0)
+                .map(ip => (
+                  <div key={ip.intention} style={{ display: "flex", gap: "0.5rem", alignItems: "flex-start" }}>
+                    <span style={{ fontSize: "0.7rem", fontWeight: 600, color: "#d1d5db", minWidth: "150px", paddingTop: "0.1rem", fontFamily: "monospace" }}>
+                      {ip.intention}
+                    </span>
+                    <span style={{ fontSize: "0.75rem", color: "#9ca3af" }}>
+                      {ip.signals.join(" · ")}
+                    </span>
+                  </div>
+                ))
+              }
+            </div>
+          )}
+
+          {/* Collapsed debug: all 12 */}
+          <details
+            onToggle={(e) => setShowIntentions((e.currentTarget as HTMLDetailsElement).open)}
+          >
+            <summary style={{ cursor: "pointer", fontSize: "0.7rem", color: "#6b7280", userSelect: "none", listStyle: "none" }}>
+              {showIntentions ? "▾" : "▸"} Debug: all {intel.intentionPotentials.length} intention potentials
+            </summary>
+            <div style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+              {intel.intentionPotentials.map(ip => (
+                <div key={ip.intention} style={{ borderLeft: "2px solid #374151", paddingLeft: "0.75rem" }}>
+                  <p style={{ fontSize: "0.7rem", fontWeight: 600, color: "#d1d5db", fontFamily: "monospace", marginBottom: "0.2rem" }}>
+                    {ip.intention}
+                  </p>
+                  {ip.signals.length === 0 ? (
+                    <span style={{ fontSize: "0.7rem", color: "#4b5563" }}>no signals</span>
+                  ) : (
+                    <ul style={{ margin: 0, padding: "0 0 0 1rem" }}>
+                      {ip.signals.map((s, i) => (
+                        <li key={i} style={{ fontSize: "0.7rem", color: "#9ca3af" }}>{s}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          </details>
+        </div>
+
+        <p style={{ fontSize: "0.65rem", color: "#4b5563", borderTop: "1px solid #1f2937", paddingTop: "0.75rem" }}>
+          Shadow-only · V1 · Not wired to StyleMe · Not final StyleMe reasoning
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function ClosetItemDetailPage() {
-  const { item, effectiveClassification, garmentImageUrl, interpretation, returnTo, nextUnreviewedId, prevItemId, nextItemId } =
+  const { item, effectiveClassification, garmentImageUrl, interpretation, stylingIntelligence, passportContext, returnTo, nextUnreviewedId, prevItemId, nextItemId } =
     useLoaderData() as {
       item: ClosetItemDetail;
       effectiveClassification: ClosetClassification;
       garmentImageUrl: string | null;
       interpretation: GarmentInterpretation;
+      stylingIntelligence: GarmentStylingIntelligence;
+      passportContext: CustomerStylingPassportContext | null;
       returnTo: string | null;
       nextUnreviewedId: string | null;
       prevItemId: string | null;
@@ -400,8 +609,33 @@ export default function ClosetItemDetailPage() {
 
   return (
     <>
+      <style>{`
+        @media print {
+          @page { margin: 1.5cm; }
+          /* Suppress admin chrome */
+          .naia-admin-nav { display: none !important; }
+          .naia-admin-main { margin-left: 0 !important; padding: 1rem !important; }
+          /* Suppress item navigation strip (Back / Prev / Next / Queue-next / Print button) */
+          .na-item-nav-strip { display: none !important; }
+          /* Suppress interactive teaching controls */
+          .na-teach-actions { display: none !important; }
+          .na-vocab-gap { display: none !important; }
+          /* Suppress edit panel when open */
+          .na-teach-card form,
+          .na-teach-card [data-edit-panel] { display: none !important; }
+          /* Stack sidebar above main for print */
+          .na-detail-grid { display: block !important; }
+          .na-detail-sidebar { max-width: 320px !important; margin-bottom: 1.5rem !important; }
+          /* Force-expand the Phase 3C debug intentions section */
+          details > :not(summary) { display: block !important; }
+          details > summary { display: none !important; }
+          /* Preserve dark-mode colours in PDF */
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        }
+      `}</style>
+
       {/* Phase 3B: navigation strip — Back preserves filters, Next advances queue */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.875rem" }}>
+      <div className="na-item-nav-strip" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.875rem" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
           <Link
             to={returnTo ? `/admin/naia/closet?${returnTo}` : "/admin/naia/closet"}
@@ -429,14 +663,34 @@ export default function ClosetItemDetailPage() {
             </Link>
           )}
         </div>
-        {nextUnreviewedId && (
-          <Link
-            to={`/admin/naia/closet/${nextUnreviewedId}${returnTo ? `?from=${encodeURIComponent(returnTo)}` : ""}`}
-            className="na-btn-queue-next"
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          {nextUnreviewedId && (
+            <Link
+              to={`/admin/naia/closet/${nextUnreviewedId}${returnTo ? `?from=${encodeURIComponent(returnTo)}` : ""}`}
+              className="na-btn-queue-next"
+            >
+              Next unreviewed →
+            </Link>
+          )}
+          <button
+            type="button"
+            onClick={() => window.print()}
+            style={{
+              padding: "0.3rem 0.75rem",
+              fontSize: "0.75rem",
+              fontWeight: 600,
+              background: "transparent",
+              color: "#8b949e",
+              border: "1px solid #30363d",
+              borderRadius: "5px",
+              cursor: "pointer",
+              letterSpacing: "0.03em",
+              whiteSpace: "nowrap",
+            }}
           >
-            Next unreviewed →
-          </Link>
-        )}
+            PRINT / SAVE PAGE
+          </button>
+        </div>
       </div>
 
       <h1 className="na-page-heading" style={{ marginBottom: "0.5rem" }}>
@@ -712,6 +966,11 @@ export default function ClosetItemDetailPage() {
               )}
             </div>
           </div>
+
+          {/* ════════════════════════════════════════════
+              SECTION 4 — DEEPER STYLING INTELLIGENCE (shadow / read-only)
+          ════════════════════════════════════════════ */}
+          <DeeperStylingIntelligence intel={stylingIntelligence} passportContext={passportContext} />
 
           {/* ════════════════════════════════════════════
               SECTION 2 — WHAT AI SEES (effective values)
