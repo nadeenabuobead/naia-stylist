@@ -82,12 +82,14 @@ export const GARMENT_PATTERN_VALUES: ReadonlySet<GarmentPattern> = new Set([
 export type GarmentMaterial =
   | "cotton" | "linen" | "silk" | "satin" | "wool" | "cashmere"
   | "denim" | "leather" | "suede" | "velvet" | "polyester" | "nylon"
-  | "knit" | "jersey" | "chiffon" | "georgette" | "lace" | "tweed" | "corduroy";
+  | "knit" | "jersey" | "chiffon" | "georgette" | "lace" | "tweed" | "corduroy"
+  | "mesh" | "tulle";
 
 export const GARMENT_MATERIAL_VALUES: ReadonlySet<GarmentMaterial> = new Set([
   "cotton", "linen", "silk", "satin", "wool", "cashmere", "denim",
   "leather", "suede", "velvet", "polyester", "nylon", "knit", "jersey",
   "chiffon", "georgette", "lace", "tweed", "corduroy",
+  "mesh", "tulle",
 ] as GarmentMaterial[]);
 
 export type GarmentFormality =

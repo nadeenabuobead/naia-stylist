@@ -996,3 +996,64 @@ describe("§CR-M — Scoop neckline canonical vocabulary", () => {
     }
   });
 });
+
+// ── §CR-N — Mesh + Tulle material vocabulary ──────────────────────────────────
+
+import { GARMENT_MATERIAL_VALUES } from "../ai/garment-intelligence.types";
+
+describe("§CR-N — Mesh + Tulle canonical material vocabulary", () => {
+  const routeSrc = readFileSync(
+    resolve(import.meta.dirname, "../../routes/admin.naia.closet.$itemId.tsx"),
+    "utf8",
+  );
+
+  it("N.1 'mesh' is in GARMENT_MATERIAL_VALUES", () => {
+    assert.ok(GARMENT_MATERIAL_VALUES.has("mesh"), "GARMENT_MATERIAL_VALUES must contain 'mesh'");
+  });
+
+  it("N.2 'tulle' is in GARMENT_MATERIAL_VALUES", () => {
+    assert.ok(GARMENT_MATERIAL_VALUES.has("tulle"), "GARMENT_MATERIAL_VALUES must contain 'tulle'");
+  });
+
+  it("N.3 all pre-existing material values still present", () => {
+    const existing = [
+      "cotton", "linen", "silk", "satin", "wool", "cashmere",
+      "denim", "leather", "suede", "velvet", "polyester", "nylon",
+      "knit", "jersey", "chiffon", "georgette", "lace", "tweed", "corduroy",
+    ];
+    for (const v of existing) {
+      assert.ok(GARMENT_MATERIAL_VALUES.has(v as any), `GARMENT_MATERIAL_VALUES missing pre-existing material: ${v}`);
+    }
+  });
+
+  it("N.4 validateOverrides accepts 'mesh' as material", () => {
+    const result = validateOverrides({ material: "mesh" });
+    assert.equal(result.material, "mesh");
+  });
+
+  it("N.5 validateOverrides accepts 'tulle' as material", () => {
+    const result = validateOverrides({ material: "tulle" });
+    assert.equal(result.material, "tulle");
+  });
+
+  it("N.6 validateOverrides still rejects unknown material (vocabulary guard active)", () => {
+    assert.throws(
+      () => validateOverrides({ material: "spandex" }),
+      /not a valid vocabulary token/,
+    );
+  });
+
+  it("N.7 Teach nAia EDIT_OPTS.material includes 'mesh'", () => {
+    assert.ok(routeSrc.includes('"mesh"'), "EDIT_OPTS.material must include 'mesh'");
+  });
+
+  it("N.8 Teach nAia EDIT_OPTS.material includes 'tulle'", () => {
+    assert.ok(routeSrc.includes('"tulle"'), "EDIT_OPTS.material must include 'tulle'");
+  });
+
+  it("N.9 'mesh' and 'tulle' are distinct entries in GARMENT_MATERIAL_VALUES", () => {
+    assert.notEqual("mesh", "tulle");
+    assert.ok(GARMENT_MATERIAL_VALUES.has("mesh") && GARMENT_MATERIAL_VALUES.has("tulle"));
+    assert.ok(GARMENT_MATERIAL_VALUES.has("lace"), "lace must remain distinct from mesh/tulle");
+  });
+});

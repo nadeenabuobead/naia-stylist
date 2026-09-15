@@ -48,7 +48,7 @@ const EDIT_OPTS = {
   waistShape:       ["high-rise", "mid-rise", "low-rise", "empire", "drop-waist", "belted", "elasticated", "drawstring"],
   sleeveLength:     ["full", "three-quarter", "short", "sleeveless", "n/a"],
   necklineCoverage: ["high", "crew", "scoop", "mock", "cowl-high", "v-neck", "low", "off-shoulder", "wrap-variable", "n/a"],
-  material:         ["cotton", "linen", "silk", "satin", "wool", "cashmere", "denim", "leather", "suede", "velvet", "polyester", "nylon", "knit", "jersey", "chiffon", "georgette", "lace", "tweed", "corduroy"],
+  material:         ["cotton", "linen", "silk", "satin", "wool", "cashmere", "denim", "leather", "suede", "velvet", "polyester", "nylon", "knit", "jersey", "chiffon", "georgette", "lace", "tweed", "corduroy", "mesh", "tulle"],
   pattern:          ["solid", "stripes", "floral", "geometric", "animal-print", "check", "plaid", "abstract", "polka-dot", "houndstooth", "paisley", "graphic"],
   formality:        ["casual", "smart-casual", "business-casual", "business-formal", "occasion", "evening"],
   occasions:        ["work", "casual", "weekend", "evening", "date-night", "special-occasion", "travel", "gym", "beach", "loungewear"],
