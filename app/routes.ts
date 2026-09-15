@@ -96,6 +96,7 @@ export default [
   route("api/customer-account-identity", "routes/api.customer-account-identity.jsx"),
   route("api/designer-dashboard", "routes/api.designer-dashboard.jsx"),
   route("api/seed-staging", "routes/api.seed-staging.jsx"),
+  route("api/staging-omar-fix", "routes/api.staging-omar-fix.ts"),
   route("api/staging-saved-looks-audit", "routes/api.staging-saved-looks-audit.jsx"),
   route("staging/designer-preview", "routes/staging.designer-preview.jsx"),
 
