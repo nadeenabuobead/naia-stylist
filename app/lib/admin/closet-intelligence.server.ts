@@ -613,6 +613,43 @@ export async function getAdjacentItemIds(
   return { prevId: prev?.id ?? null, nextId: next?.id ?? null };
 }
 
+// ── Customer styling passport ─────────────────────────────────────────────────
+
+export interface CustomerStylingPassportContext {
+  stylePersonalities: string[];
+  favoriteColors: string[];
+  coveragePreferences: string[];
+  dressingPreferences: string[];
+}
+
+export async function getCustomerStylingPassport(
+  customerId: string,
+): Promise<CustomerStylingPassportContext | null> {
+  const profile = await prisma.onboardingProfile.findUnique({
+    where: { customerId },
+    select: {
+      stylePersonalities: true,
+      favoriteColors: true,
+      coveragePreferences: true,
+      dressingPreferences: true,
+    },
+  });
+  if (!profile) return null;
+  const hasData =
+    profile.stylePersonalities.length > 0 ||
+    profile.favoriteColors.length > 0 ||
+    profile.coveragePreferences.length > 0 ||
+    profile.dressingPreferences.length > 0;
+  return hasData
+    ? {
+        stylePersonalities: profile.stylePersonalities,
+        favoriteColors: profile.favoriteColors,
+        coveragePreferences: profile.coveragePreferences,
+        dressingPreferences: profile.dressingPreferences,
+      }
+    : null;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 export function extractOverallConfidence(fieldConfidence: unknown): string | null {

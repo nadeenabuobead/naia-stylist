@@ -6,7 +6,7 @@
 // Data: all queries via closet-intelligence.server.ts — unchanged.
 
 import { useState, useEffect } from "react";
-import { useLoaderData, Form, Link, useSearchParams, useFetcher } from "react-router";
+import { useLoaderData, Form, Link, NavLink, useSearchParams, useFetcher } from "react-router";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { requireAdminSession } from "~/lib/internal-auth.server";
 import {
@@ -186,14 +186,37 @@ export default function ClosetIntelligenceList() {
 
   return (
     <>
-      <h1 className="na-page-heading">
-        Closet Intelligence
-        {total > 0 && (
-          <span style={{ fontSize: "14px", fontWeight: 400, color: "#6b7280", marginLeft: "0.75rem" }}>
-            {total.toLocaleString()} items
-          </span>
-        )}
-      </h1>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem", marginBottom: "1.25rem" }}>
+        <h1 className="na-page-heading" style={{ marginBottom: 0 }}>
+          Closet Intelligence
+          {total > 0 && (
+            <span style={{ fontSize: "14px", fontWeight: 400, color: "#6b7280", marginLeft: "0.75rem" }}>
+              {total.toLocaleString()} items
+            </span>
+          )}
+        </h1>
+        <NavLink
+          to="/admin/naia/phase3c-export"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.35rem",
+            padding: "0.35rem 0.75rem",
+            background: "#fff",
+            border: "1px solid #d1d5db",
+            borderRadius: 5,
+            fontSize: "11px",
+            fontWeight: 600,
+            color: "#374151",
+            textDecoration: "none",
+            whiteSpace: "nowrap",
+            flexShrink: 0,
+          }}
+        >
+          <span style={{ fontSize: "9px", background: "#ede9fe", color: "#7c3aed", padding: "0.1rem 0.3rem", borderRadius: 2, letterSpacing: "0.05em", textTransform: "uppercase" }}>diagnostic</span>
+          Phase 3C QA Export
+        </NavLink>
+      </div>
 
       {/* Review progress summary */}
       <div className="na-review-progress">

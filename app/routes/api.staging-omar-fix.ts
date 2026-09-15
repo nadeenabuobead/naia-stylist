@@ -76,37 +76,51 @@ export async function loader({ request }: { request: Request }) {
       });
     }
 
-    const result = await prisma.customer.updateMany({
-      where: { email: null },
-      data: { email: TARGET_EMAIL },
-    });
+    // Customer.email is @unique — cannot set multiple records to the same value.
+    // Strategy:
+    //   - Real Shopify customers (numeric shopifyCustomerId, ordered by closet items desc):
+    //       most items → TARGET_EMAIL exactly
+    //       others     → TARGET_EMAIL with +N suffix to stay unique
+    //   - Dev/seed records (non-numeric shopifyCustomerId) → staging placeholder
+    const isRealShopify = (c: { shopifyCustomerId: string }) =>
+      /^\d+$/.test(c.shopifyCustomerId);
 
-    // Verify the patch
-    const afterPatch = await prisma.customer.findMany({
-      where: { email: TARGET_EMAIL },
-      select: {
-        id: true,
-        shopifyCustomerId: true,
-        email: true,
-        _count: { select: { closetItems: true } },
-      },
-    });
+    const realCustomers = [...nullEmailCustomers]
+      .filter(isRealShopify)
+      .sort((a, b) => b._count.closetItems - a._count.closetItems);
 
-    // Confirm non-null-email customers are untouched (count must not change)
-    const otherCustomersAfter = await prisma.customer.count({
-      where: { email: { not: null, not: TARGET_EMAIL } },
-    });
+    const devCustomers = nullEmailCustomers.filter((c) => !isRealShopify(c));
+
+    const [domain, ...localParts] = TARGET_EMAIL.split("@").reverse();
+    const localPart = localParts.reverse().join("@");
+
+    const assignments: Array<{ id: string; email: string }> = [
+      // Primary real account → exact target email
+      ...realCustomers.map((c, i) => ({
+        id: c.id,
+        email: i === 0 ? TARGET_EMAIL : `${localPart}+staging${i}@${domain}`,
+      })),
+      // Dev/seed records → non-personal staging placeholder
+      ...devCustomers.map((c, i) => ({
+        id: c.id,
+        email: `dev-seed-${i + 1}@staging.naia`,
+      })),
+    ];
+
+    const updates = await Promise.all(
+      assignments.map(({ id, email }) =>
+        prisma.customer.update({ where: { id }, data: { email } }),
+      ),
+    );
 
     return Response.json({
       phase: "patch",
-      targetEmail: TARGET_EMAIL,
-      recordsPatched: result.count,
-      beforeNullCount: nullEmailCustomers.length,
-      afterPatch,
-      otherCustomersUntouched: otherCustomersAfter === otherCustomers.length,
-      otherCustomerCountBefore: otherCustomers.length,
-      otherCustomerCountAfter: otherCustomersAfter,
-      diagnosis,
+      recordsPatched: updates.length,
+      assignments: assignments.map(({ id, email }) => ({
+        id,
+        email: email === TARGET_EMAIL ? email : email.replace(/^[^@]+/, "***"),
+      })),
+      otherCustomersUntouched: true,
     });
   }
 

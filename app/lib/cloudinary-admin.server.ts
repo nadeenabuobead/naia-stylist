@@ -52,22 +52,32 @@ export function buildPrivateDownloadUrl(
   deliveryType: string = "private",
   nowFn: () => number = Date.now,
   expirySeconds: number = 600, // 10 minutes — within the required 5–15 min range
+  transformation?: string, // optional Cloudinary transformation string, e.g. "w_300,h_400,c_fill,q_60"
 ): string {
   const timestamp = Math.floor(nowFn() / 1000);
   const expiresAt = timestamp + expirySeconds;
 
-  // Parameters sorted alphabetically (e < f < p < t twice — expires_at, format, public_id, timestamp, type).
-  const sigString =
-    `expires_at=${expiresAt}` +
-    `&format=${format}` +
-    `&public_id=${publicId}` +
-    `&timestamp=${timestamp}` +
-    `&type=${deliveryType}` +
-    config.apiSecret;
+  // Parameters sorted alphabetically.
+  // Without transformation: expires_at, format, public_id, timestamp, type.
+  // With transformation: expires_at, format, public_id, timestamp, transformation, type.
+  const sigString = transformation
+    ? `expires_at=${expiresAt}` +
+      `&format=${format}` +
+      `&public_id=${publicId}` +
+      `&timestamp=${timestamp}` +
+      `&transformation=${transformation}` +
+      `&type=${deliveryType}` +
+      config.apiSecret
+    : `expires_at=${expiresAt}` +
+      `&format=${format}` +
+      `&public_id=${publicId}` +
+      `&timestamp=${timestamp}` +
+      `&type=${deliveryType}` +
+      config.apiSecret;
 
   const signature = crypto.createHash("sha1").update(sigString).digest("hex");
 
-  const params = new URLSearchParams({
+  const urlParams: Record<string, string> = {
     api_key: config.apiKey,
     expires_at: String(expiresAt),
     format,
@@ -75,9 +85,10 @@ export function buildPrivateDownloadUrl(
     signature,
     timestamp: String(timestamp),
     type: deliveryType,
-  });
+  };
+  if (transformation) urlParams.transformation = transformation;
 
-  return `https://api.cloudinary.com/v1_1/${config.cloudName}/image/download?${params.toString()}`;
+  return `https://api.cloudinary.com/v1_1/${config.cloudName}/image/download?${new URLSearchParams(urlParams).toString()}`;
 }
 
 // ── Browser upload endpoint URL ──────────────────────────────────────────────
