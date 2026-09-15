@@ -1,13 +1,20 @@
-// Staging-only: diagnose + patch Omar's Customer record (email = null → correct value).
-// Hard-blocked on non-staging. No persistent attack surface: narrow action, staging only.
-// GET ?phase=diagnose  — show all customers, their email states, closet item counts
-// GET ?phase=patch     — apply fix (null email → TARGET_EMAIL) and verify
+// Staging-only admin-authenticated diagnostic + one-off Customer email patch.
+// Requires a valid admin session (requireAdminSession) — redirects to /admin/login otherwise.
+// Hard-blocked on non-staging as a secondary guard.
+//
+// GET ?phase=diagnose  — identify null-email Customer records + closet item counts
+// GET ?phase=patch     — apply fix: email IS NULL → TARGET_EMAIL; verify before/after
 
+import { requireAdminSession } from "~/lib/internal-auth.server";
 import prisma from "~/db.server";
 
 const TARGET_EMAIL = "nadine.abuobeid@hotmail.co.uk";
 
 export async function loader({ request }: { request: Request }) {
+  // Primary auth guard — redirects to /admin/login if no valid session
+  await requireAdminSession(request);
+
+  // Secondary environment guard — belt-and-braces
   if (process.env.NAIA_PROJECT_VARIANT !== "staging") {
     return new Response("Not Found", { status: 404 });
   }
@@ -15,7 +22,7 @@ export async function loader({ request }: { request: Request }) {
   const url = new URL(request.url);
   const phase = url.searchParams.get("phase") ?? "diagnose";
 
-  // Always collect diagnosis data
+  // Always run diagnosis so both phases return the same shape
   const allCustomers = await prisma.customer.findMany({
     select: {
       id: true,
@@ -42,7 +49,8 @@ export async function loader({ request }: { request: Request }) {
     otherCustomers: otherCustomers.map((c) => ({
       id: c.id,
       shopifyCustomerId: c.shopifyCustomerId,
-      email: c.email,
+      // Mask most of the email for log safety — show domain only
+      email: c.email ? c.email.replace(/^[^@]+/, "***") : null,
       closetItemCount: c._count.closetItems,
       createdAt: c.createdAt,
     })),
@@ -59,12 +67,11 @@ export async function loader({ request }: { request: Request }) {
   }
 
   if (phase === "patch") {
-    const before = nullEmailCustomers.length;
-    if (before === 0) {
+    if (nullEmailCustomers.length === 0) {
       return Response.json({
         phase: "patch",
         skipped: true,
-        reason: "No customers with null email — nothing to change",
+        reason: "No customers with null email — already fixed or nothing to change",
         diagnosis,
       });
     }
@@ -74,7 +81,7 @@ export async function loader({ request }: { request: Request }) {
       data: { email: TARGET_EMAIL },
     });
 
-    // Verify: find the now-patched record(s)
+    // Verify the patch
     const afterPatch = await prisma.customer.findMany({
       where: { email: TARGET_EMAIL },
       select: {
@@ -85,21 +92,20 @@ export async function loader({ request }: { request: Request }) {
       },
     });
 
-    // Confirm other customers are untouched
-    const saraRecord = await prisma.customer.findFirst({
+    // Confirm non-null-email customers are untouched (count must not change)
+    const otherCustomersAfter = await prisma.customer.count({
       where: { email: { not: null, not: TARGET_EMAIL } },
-      select: { id: true, email: true },
     });
 
     return Response.json({
       phase: "patch",
       targetEmail: TARGET_EMAIL,
       recordsPatched: result.count,
-      beforeNullCount: before,
+      beforeNullCount: nullEmailCustomers.length,
       afterPatch,
-      otherCustomersUntouched:
-        otherCustomers.length === (saraRecord ? 1 : 0) ||
-        otherCustomers.every((c) => c.email !== null),
+      otherCustomersUntouched: otherCustomersAfter === otherCustomers.length,
+      otherCustomerCountBefore: otherCustomers.length,
+      otherCustomerCountAfter: otherCustomersAfter,
       diagnosis,
     });
   }
