@@ -69,7 +69,7 @@ SUPPRESSION RULES — return null (not a guess) when:
     "topLength": "cropped" | "hip-length" | "longline" | "tunic" | "n/a" | null,
     "waistShape": ${[...GARMENT_WAIST_SHAPE_VALUES].join(" | ")} | null,
     "sleeveLength": "full" | "three-quarter" | "short" | "sleeveless" | "n/a" | null,
-    "necklineCoverage": "high" | "crew" | "scoop" | "mock" | "cowl-high" | "v-neck" | "low" | "off-shoulder" | "wrap-variable" | "n/a" | null,
+    "necklineCoverage": "high" | "crew" | "scoop" | "shirt-collar" | "mock" | "cowl-high" | "v-neck" | "low" | "off-shoulder" | "wrap-variable" | "n/a" | null,
     "shoulderCoverage": boolean | null,
     "midriffExposed": boolean | null,
     "material": ${[...GARMENT_MATERIAL_VALUES].join(" | ")} | null,
@@ -91,7 +91,7 @@ STYLING SIGNAL NOTES:
 - styleTags: max 3; choose only from: ${[...GARMENT_STYLE_TAG_VOCAB].join(", ")}. Return empty array rather than forcing weak matches.
 - stylePersonality: one of the 5 V3 archetypes above. Return null rather than guessing between two equally plausible archetypes.
 - occasions: only include occasions clearly supported by the garment's design and formality. Omit if too versatile to assign specifically.
-- necklineCoverage values: "high" = polo/funnel/mock-high; "crew" = crew/round neck; "scoop" = U-shaped scoop neckline (depth varies — neutral coverage); "mock" = mock turtleneck; "cowl-high" = draped cowl at collarbone+; "v-neck" = V neckline any depth; "low" = deep V/plunge; "off-shoulder" = off or cold shoulder; "wrap-variable" = wrap front without guaranteed coverage; "n/a" = bottom/outerwear where neckline is not a coverage factor.
+- necklineCoverage values: "high" = polo/funnel/mock-high; "crew" = crew/round neck; "scoop" = U-shaped scoop neckline (depth varies — neutral coverage); "shirt-collar" = structured collar with spread/point/button-stand (button-down shirts, dress shirts, Oxford shirts — neutral coverage); "mock" = mock turtleneck; "cowl-high" = draped cowl at collarbone+; "v-neck" = V neckline any depth; "low" = deep V/plunge; "off-shoulder" = off or cold shoulder; "wrap-variable" = wrap front without guaranteed coverage; "n/a" = bottom/outerwear where neckline is not a coverage factor.
 - fieldConfidence: for each field you extracted, rate confidence as "high" (clear, unambiguous), "medium" (probable), or "low" (inferred).
 
 Return only valid JSON. No markdown. No explanation.`;

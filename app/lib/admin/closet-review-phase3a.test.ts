@@ -997,6 +997,64 @@ describe("§CR-M — Scoop neckline canonical vocabulary", () => {
   });
 });
 
+// ── §CR-O — Shirt-collar neckline vocabulary ─────────────────────────────────
+
+describe("§CR-O — Shirt-collar canonical neckline vocabulary", () => {
+  const routeSrc = readFileSync(
+    resolve(import.meta.dirname, "../../routes/admin.naia.closet.$itemId.tsx"),
+    "utf8",
+  );
+  const signalSrc = readFileSync(
+    resolve(import.meta.dirname, "../ai/signal-contract.ts"),
+    "utf8",
+  );
+
+  it("O.1 'shirt-collar' is in NECKLINE_COVERAGE_VALUES", () => {
+    assert.ok(NECKLINE_COVERAGE_VALUES.has("shirt-collar" as any), "NECKLINE_COVERAGE_VALUES must contain 'shirt-collar'");
+  });
+
+  it("O.2 pre-existing neckline values still present after shirt-collar addition", () => {
+    for (const v of ["high", "crew", "scoop", "mock", "cowl-high", "v-neck", "low", "off-shoulder", "wrap-variable", "n/a"]) {
+      assert.ok(NECKLINE_COVERAGE_VALUES.has(v as any), `NECKLINE_COVERAGE_VALUES missing pre-existing value: ${v}`);
+    }
+  });
+
+  it("O.3 NecklineCoverage type in signal-contract includes 'shirt-collar'", () => {
+    assert.ok(
+      signalSrc.includes('"shirt-collar"'),
+      "signal-contract.ts NecklineCoverage type must include 'shirt-collar'",
+    );
+  });
+
+  it("O.4 validateOverrides accepts 'shirt-collar' as necklineCoverage", () => {
+    const result = validateOverrides({ necklineCoverage: "shirt-collar" });
+    assert.equal(result.necklineCoverage, "shirt-collar");
+  });
+
+  it("O.5 validateOverrides still rejects unknown neckline value", () => {
+    assert.throws(
+      () => validateOverrides({ necklineCoverage: "polo" }),
+      /not a valid vocabulary token/,
+    );
+  });
+
+  it("O.6 Teach nAia EDIT_OPTS.necklineCoverage includes 'shirt-collar'", () => {
+    assert.ok(
+      routeSrc.includes('"shirt-collar"'),
+      "admin.naia.closet.$itemId.tsx EDIT_OPTS.necklineCoverage must include 'shirt-collar'",
+    );
+  });
+
+  it("O.7 Teach nAia EDIT_OPTS.necklineCoverage still includes all pre-existing neckline values", () => {
+    for (const v of ["high", "crew", "scoop", "mock", "cowl-high", "v-neck", "low", "off-shoulder", "wrap-variable", "n/a"]) {
+      assert.ok(
+        routeSrc.includes(`"${v}"`),
+        `EDIT_OPTS.necklineCoverage must still include pre-existing value: ${v}`,
+      );
+    }
+  });
+});
+
 // ── §CR-N — Mesh + Tulle material vocabulary ──────────────────────────────────
 
 import { GARMENT_MATERIAL_VALUES } from "../ai/garment-intelligence.types";

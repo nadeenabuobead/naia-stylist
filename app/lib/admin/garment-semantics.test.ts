@@ -324,6 +324,23 @@ describe("§GS-04 Coverage dimension", () => {
     const c = { ...blank(), necklineCoverage: "scoop", sleeveLength: "full", shoulderCoverage: true };
     assert.ok(labels(interpretGarment(c, "TOPS")).includes("Higher coverage"));
   });
+
+  it("shirt-collar alone → NOT Higher coverage (neutral — collar alone is insufficient)", () => {
+    const c = { ...blank(), necklineCoverage: "shirt-collar" };
+    const l = labels(interpretGarment(c, "TOPS"));
+    assert.ok(!l.includes("Higher coverage"), "shirt-collar alone must not produce Higher coverage");
+  });
+
+  it("shirt-collar alone → NOT Lower coverage (neutral)", () => {
+    const c = { ...blank(), necklineCoverage: "shirt-collar" };
+    const l = labels(interpretGarment(c, "TOPS"));
+    assert.ok(!l.includes("Lower coverage"), "shirt-collar alone must not produce Lower coverage");
+  });
+
+  it("shirt-collar + full sleeves + shoulder coverage → Higher coverage (other signals fire)", () => {
+    const c = { ...blank(), necklineCoverage: "shirt-collar", sleeveLength: "full", shoulderCoverage: true };
+    assert.ok(labels(interpretGarment(c, "TOPS")).includes("Higher coverage"));
+  });
 });
 
 // ── §GS-05 Style identity ─────────────────────────────────────────────────────
