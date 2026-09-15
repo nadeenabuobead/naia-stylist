@@ -5,8 +5,8 @@
 // Auth: requireAdminSession (internal cookie session, no Shopify).
 // Data: all queries via closet-intelligence.server.ts — unchanged.
 
-import { useLoaderData, Form, Link, useSearchParams } from "react-router";
-import type { LoaderFunctionArgs } from "react-router";
+import { useLoaderData, Form, Link, useSearchParams, useFetcher } from "react-router";
+import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { requireAdminSession } from "~/lib/internal-auth.server";
 import {
   listClosetItems,
@@ -14,7 +14,9 @@ import {
   type ClosetItemListResult,
   type ClosetAnalysisStatus,
   type ClosetAdminReviewFilter,
+  type ClosetItemRow,
 } from "~/lib/admin/closet-intelligence.server";
+import { markItemReviewed } from "~/lib/admin/closet-review.server";
 
 const PAGE_SIZE = 25;
 import type { ClosetCategory } from "@prisma/client";
@@ -52,6 +54,25 @@ const ANALYSIS_BADGE_CLASS: Record<string, string> = {
   not_analyzed: "na-badge--not-analyzed",
 };
 
+export async function action({ request }: ActionFunctionArgs) {
+  const session = await requireAdminSession(request);
+  const reviewedBy = session.identity.email;
+
+  const formData = await request.formData();
+  const intent = formData.get("intent");
+
+  if (intent === "quick-approve") {
+    const itemId = formData.get("itemId");
+    if (typeof itemId !== "string" || !itemId.trim()) {
+      return Response.json({ error: "Missing itemId" }, { status: 400 });
+    }
+    await markItemReviewed(itemId, reviewedBy);
+    return Response.json({ ok: true, itemId });
+  }
+
+  throw new Response("Bad request", { status: 400 });
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAdminSession(request);
   const url = new URL(request.url);
@@ -82,6 +103,11 @@ export default function ClosetIntelligenceList() {
   const [searchParams] = useSearchParams();
 
   const { items, total, pageCount } = result;
+
+  // Encode current filter state for Back button round-trip on detail page
+  const fromParam = searchParams.toString()
+    ? `?from=${encodeURIComponent(searchParams.toString())}`
+    : "";
 
   function buildPageUrl(p: number) {
     const sp = new URLSearchParams(searchParams);
@@ -229,105 +255,7 @@ export default function ClosetIntelligenceList() {
               </thead>
               <tbody>
                 {items.map((item) => (
-                  <tr key={item.id}>
-                    <td style={{ padding: "0.5rem 0.875rem" }}>
-                      {item.thumbnailUrl ? (
-                        <img
-                          src={item.thumbnailUrl}
-                          alt=""
-                          className="na-thumb"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <div className="na-thumb--placeholder" title="No thumbnail">
-                          ☐
-                        </div>
-                      )}
-                    </td>
-
-                    <td>
-                      <Link to={`/admin/naia/closet/${item.id}`}>
-                        {item.name ?? <span className="na-null">Unnamed</span>}
-                      </Link>
-                    </td>
-
-                    <td>{item.category}</td>
-
-                    <td>
-                      {item.subcategory
-                        ? <span>{item.subcategory}</span>
-                        : <span className="na-null">—</span>}
-                    </td>
-
-                    <td>
-                      <span className={`na-badge ${ANALYSIS_BADGE_CLASS[item.analysisStatus] ?? "na-badge--not-analyzed"}`}>
-                        {item.analysisStatus.replace(/_/g, " ")}
-                      </span>
-                    </td>
-
-                    <td>
-                      {item.overallConfidence
-                        ? <ConfidenceDot level={item.overallConfidence} />
-                        : <span className="na-null">—</span>}
-                    </td>
-
-                    <td>
-                      <span className={`na-badge ${REVIEW_BADGE_CLASS[item.displayReviewStatus] ?? "na-badge--ai-only"}`}>
-                        {item.displayReviewStatus}
-                      </span>
-                    </td>
-
-                    <td>
-                      {item.formality
-                        ? item.formality
-                        : <span className="na-null">—</span>}
-                    </td>
-
-                    <td>
-                      {item.occasions.length > 0
-                        ? (
-                          <span title={item.occasions.join(", ")}>
-                            {item.occasions.slice(0, 2).join(", ")}
-                            {item.occasions.length > 2 && (
-                              <span className="na-null"> +{item.occasions.length - 2}</span>
-                            )}
-                          </span>
-                        )
-                        : <span className="na-null">—</span>}
-                    </td>
-
-                    <td>
-                      <span style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                        {item.lowConfidence && (
-                          <span className="na-badge na-badge--low" title="Overall confidence is low">
-                            LOW CONF
-                          </span>
-                        )}
-                        {item.missingMetadata && (
-                          <span className="na-badge na-badge--warn" title="Analyzed but missing subcategory, silhouette, or formality">
-                            MISSING META
-                          </span>
-                        )}
-                        {!item.lowConfidence && !item.missingMetadata && (
-                          <span className="na-null">—</span>
-                        )}
-                      </span>
-                    </td>
-
-                    <td>
-                      {item.customerEmail
-                        ? <span title={item.customerId}>{item.customerEmail}</span>
-                        : <span className="na-null" title={item.customerId}>unknown</span>}
-                    </td>
-
-                    <td>
-                      {item.analyzedAt
-                        ? new Date(item.analyzedAt).toLocaleDateString("en-GB", {
-                            day: "2-digit", month: "short", year: "numeric",
-                          })
-                        : <span className="na-null">—</span>}
-                    </td>
-                  </tr>
+                  <ItemRow key={item.id} item={item} fromParam={fromParam} />
                 ))}
               </tbody>
             </table>
@@ -369,8 +297,119 @@ export default function ClosetIntelligenceList() {
 function ConfidenceDot({ level }: { level: string }) {
   return (
     <span className="na-conf">
-      <span className={`na-conf__dot na-conf__dot--${level}`} />
+      <span className={`na-conf__dot na-conf__dot--${level.toLowerCase()}`} />
       {level}
     </span>
+  );
+}
+
+function ItemRow({ item, fromParam }: { item: ClosetItemRow; fromParam: string }) {
+  const approveFetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const approved = approveFetcher.data?.ok === true;
+  const displayStatus = approved ? "REVIEWED" : item.displayReviewStatus;
+
+  return (
+    <tr>
+      <td style={{ padding: "0.5rem 0.875rem" }}>
+        {item.thumbnailUrl ? (
+          <img src={item.thumbnailUrl} alt="" className="na-thumb" loading="lazy" />
+        ) : (
+          <div className="na-thumb--placeholder" title="No thumbnail">☐</div>
+        )}
+      </td>
+
+      <td>
+        <Link to={`/admin/naia/closet/${item.id}${fromParam}`}>
+          {item.name ?? <span className="na-null">Unnamed</span>}
+        </Link>
+      </td>
+
+      <td>{item.category}</td>
+
+      <td>
+        {item.subcategory
+          ? <span>{item.subcategory}</span>
+          : <span className="na-null">—</span>}
+      </td>
+
+      <td>
+        <span className={`na-badge ${ANALYSIS_BADGE_CLASS[item.analysisStatus] ?? "na-badge--not-analyzed"}`}>
+          {item.analysisStatus.replace(/_/g, " ")}
+        </span>
+      </td>
+
+      <td>
+        {item.overallConfidence
+          ? <ConfidenceDot level={item.overallConfidence} />
+          : <span className="na-null">—</span>}
+      </td>
+
+      <td>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+          <span className={`na-badge ${REVIEW_BADGE_CLASS[displayStatus] ?? "na-badge--ai-only"}`}>
+            {displayStatus}
+          </span>
+          {displayStatus === "AI ONLY" && (
+            <approveFetcher.Form method="post" style={{ display: "inline-flex" }}>
+              <input type="hidden" name="intent" value="quick-approve" />
+              <input type="hidden" name="itemId" value={item.id} />
+              <button
+                type="submit"
+                className="na-btn-quick-approve"
+                disabled={approveFetcher.state !== "idle"}
+                title="Mark as correct — AI classification looks right"
+              >
+                {approveFetcher.state !== "idle" ? "…" : "✓"}
+              </button>
+            </approveFetcher.Form>
+          )}
+        </div>
+      </td>
+
+      <td>
+        {item.formality ? item.formality : <span className="na-null">—</span>}
+      </td>
+
+      <td>
+        {item.occasions.length > 0
+          ? (
+            <span title={item.occasions.join(", ")}>
+              {item.occasions.slice(0, 2).join(", ")}
+              {item.occasions.length > 2 && (
+                <span className="na-null"> +{item.occasions.length - 2}</span>
+              )}
+            </span>
+          )
+          : <span className="na-null">—</span>}
+      </td>
+
+      <td>
+        <span style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+          {item.lowConfidence && (
+            <span className="na-badge na-badge--low" title="Overall confidence is low">LOW CONF</span>
+          )}
+          {item.missingMetadata && (
+            <span className="na-badge na-badge--warn" title="Analyzed but missing subcategory, silhouette, or formality">MISSING META</span>
+          )}
+          {!item.lowConfidence && !item.missingMetadata && (
+            <span className="na-null">—</span>
+          )}
+        </span>
+      </td>
+
+      <td>
+        {item.customerEmail
+          ? <span title={item.customerId}>{item.customerEmail}</span>
+          : <span className="na-null" title={item.customerId}>unknown</span>}
+      </td>
+
+      <td>
+        {item.analyzedAt
+          ? new Date(item.analyzedAt).toLocaleDateString("en-GB", {
+              day: "2-digit", month: "short", year: "numeric",
+            })
+          : <span className="na-null">—</span>}
+      </td>
+    </tr>
   );
 }

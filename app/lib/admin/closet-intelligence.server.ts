@@ -52,6 +52,68 @@ export interface ClosetItemListFilters {
 
 export const PAGE_SIZE = 25;
 
+// ── Overall confidence computation ────────────────────────────────────────────
+
+// Fields that carry confidence data per category.
+// Only the fields that are meaningful for that category are considered.
+// Apparel fit/coverage fields are excluded for SHOES/BAGS/ACCESSORIES/JEWELRY.
+const CATEGORY_CONFIDENCE_FIELDS: Record<string, readonly string[]> = {
+  TOPS:        ["subcategory", "silhouette", "fitProfile", "topLength", "sleeveLength", "necklineCoverage", "material", "pattern", "primaryColor"],
+  BOTTOMS:     ["subcategory", "silhouette", "fitProfile", "hemLength", "waistShape", "material", "pattern", "primaryColor"],
+  DRESSES:     ["subcategory", "silhouette", "fitProfile", "hemLength", "sleeveLength", "necklineCoverage", "material", "pattern", "primaryColor"],
+  OUTERWEAR:   ["subcategory", "silhouette", "fitProfile", "sleeveLength", "material", "pattern", "primaryColor"],
+  ACTIVEWEAR:  ["subcategory", "silhouette", "fitProfile", "sleeveLength", "material", "pattern", "primaryColor"],
+  SHOES:       ["subcategory", "material", "primaryColor", "pattern"],
+  BAGS:        ["subcategory", "material", "primaryColor", "pattern"],
+  ACCESSORIES: ["subcategory", "material", "primaryColor"],
+  JEWELRY:     ["subcategory", "primaryColor"],
+};
+
+// Minimum number of relevant fields that must have confidence data to produce a summary.
+const MIN_CONFIDENCE_FIELDS = 2;
+
+// All keys that can appear in fieldConfidence — used for the lowConfidence DB pre-filter.
+const ALL_CONFIDENCE_FIELD_KEYS = [
+  "subcategory", "silhouette", "fitProfile", "hemLength", "topLength",
+  "sleeveLength", "necklineCoverage", "waistShape", "material", "pattern", "primaryColor",
+] as const;
+
+/**
+ * Compute a single overall confidence rating from stored per-field confidence data.
+ *
+ * Rule (simple and auditable):
+ *   null   — fewer than MIN_CONFIDENCE_FIELDS relevant fields have data
+ *   "LOW"  — any relevant field rated "low"
+ *   "MEDIUM" — no "low" fields, but at least one relevant field rated "medium"
+ *   "HIGH" — all available relevant fields rated "high" (and ≥ MIN_CONFIDENCE_FIELDS present)
+ *
+ * Category-aware: only fields relevant to the garment category are considered.
+ * This prevents shoes from being penalised for absent silhouette/neckline confidence.
+ */
+export function computeOverallStoredConfidence(
+  fieldConfidence: unknown,
+  category: string,
+): "HIGH" | "MEDIUM" | "LOW" | null {
+  if (!fieldConfidence || typeof fieldConfidence !== "object") return null;
+
+  const fc = fieldConfidence as Record<string, unknown>;
+  const relevantKeys = CATEGORY_CONFIDENCE_FIELDS[category] ?? CATEGORY_CONFIDENCE_FIELDS["TOPS"];
+
+  // Collect confidence values only for relevant fields that actually have data
+  const values: string[] = [];
+  for (const key of relevantKeys) {
+    const val = fc[key];
+    if (val === "high" || val === "medium" || val === "low") {
+      values.push(val);
+    }
+  }
+
+  if (values.length < MIN_CONFIDENCE_FIELDS) return null;
+  if (values.includes("low"))    return "LOW";
+  if (values.includes("medium")) return "MEDIUM";
+  return "HIGH";
+}
+
 // ── Important metadata fields used for "missing metadata" check ───────────────
 
 // Categories where silhouette is not a meaningful classification field.
@@ -75,8 +137,8 @@ export interface ClosetItemRow {
   analyzedAt: Date | null;
   thumbnailUrl: string | null;
   imagePublicId: string | null;
-  /** "high" | "medium" | "low" | null */
-  overallConfidence: string | null;
+  /** "HIGH" | "MEDIUM" | "LOW" | null — computed from field-level stored confidence */
+  overallConfidence: "HIGH" | "MEDIUM" | "LOW" | null;
   lowConfidence: boolean;
   missingMetadata: boolean;
   customerId: string;
@@ -140,13 +202,15 @@ export async function listClosetItems(
     }
   }
 
-  // lowConfidence: fieldConfidence.overall = "low"
+  // lowConfidence: any relevant field in fieldConfidence = "low".
+  // This is a broad DB pre-filter across all known confidence keys; the per-row
+  // computeOverallStoredConfidence call is the authoritative category-aware check.
   if (filters.lowConfidence) {
     andClauses.push({
-      fieldConfidence: {
-        path: ["overall"],
-        equals: "low",
-      },
+      analysisStatus: "ready",
+      OR: ALL_CONFIDENCE_FIELD_KEYS.map((key) => ({
+        fieldConfidence: { path: [key], equals: "low" },
+      })),
     });
   }
 
@@ -205,7 +269,7 @@ export async function listClosetItems(
   type ItemRow = (typeof items)[number];
   const rows: ClosetItemRow[] = items.map((item: ItemRow) => {
     const reviewStatus = item.adminReview?.reviewStatus ?? "unreviewed";
-    const overallConf = extractOverallConfidence(item.fieldConfidence);
+    const overallConf = computeOverallStoredConfidence(item.fieldConfidence, item.category);
     const isAnalyzed = item.analysisStatus === "ready";
     const silhouetteRequired = !NON_SILHOUETTE_CATEGORIES.has(item.category);
     const missMeta = isAnalyzed && (
@@ -228,7 +292,7 @@ export async function listClosetItems(
       thumbnailUrl: item.thumbnailUrl,
       imagePublicId: item.imagePublicId,
       overallConfidence: overallConf,
-      lowConfidence: overallConf === "low",
+      lowConfidence: overallConf === "LOW",
       missingMetadata: missMeta,
       customerId: item.customerId,
       customerEmail: item.customer?.email ?? null,
@@ -421,6 +485,35 @@ export async function getClosetItemDetail(itemId: string): Promise<ClosetItemDet
         }
       : null,
   };
+}
+
+// ── Queue navigation (Phase 3B) ───────────────────────────────────────────────
+
+/** Returns the ID of the next unreviewed closet item, ordered by createdAt DESC.
+ *  "Next" means older than the current item in the sorted list.
+ *  Returns null if there are no more unreviewed items after this one. */
+export async function getNextUnreviewedItemId(
+  currentItemId: string,
+): Promise<string | null> {
+  const current = await prisma.closetItem.findUnique({
+    where: { id: currentItemId },
+    select: { createdAt: true },
+  });
+  if (!current) return null;
+
+  const next = await prisma.closetItem.findFirst({
+    where: {
+      createdAt: { lt: current.createdAt },
+      OR: [
+        { adminReview: null },
+        { adminReview: { reviewStatus: "unreviewed" } },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+
+  return next?.id ?? null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

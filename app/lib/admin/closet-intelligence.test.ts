@@ -35,6 +35,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   extractOverallConfidence,
+  computeOverallStoredConfidence,
   computeDisplayReviewStatus,
   REVIEW_STATUS_LABELS,
   PAGE_SIZE,
@@ -388,25 +389,33 @@ describe("§CI.15 displayReviewStatus in rows", () => {
 // ── §CI.16 lowConfidence flag on rows ────────────────────────────────────────
 
 describe("§CI.16 lowConfidence flag on rows", () => {
-  it("item with fieldConfidence.overall='low' has lowConfidence=true", async () => {
+  it("item with a low-confidence relevant field has lowConfidence=true and overallConfidence=LOW", async () => {
+    // category=TOPS; silhouette is a relevant field — low → overall LOW
     vi.mocked(prisma.closetItem.findMany).mockResolvedValue([
-      makeItemRow({ fieldConfidence: { overall: "low" } }),
+      makeItemRow({
+        category: "TOPS",
+        fieldConfidence: { subcategory: "high", silhouette: "low", material: "high", primaryColor: "high" },
+      }),
     ] as any);
     vi.mocked(prisma.closetItem.count).mockResolvedValue(1);
 
     const result = await listClosetItems({}, 1);
     expect(result.items[0].lowConfidence).toBe(true);
-    expect(result.items[0].overallConfidence).toBe("low");
+    expect(result.items[0].overallConfidence).toBe("LOW");
   });
 
-  it("item with fieldConfidence.overall='high' has lowConfidence=false", async () => {
+  it("item with all-high relevant fields has lowConfidence=false and overallConfidence=HIGH", async () => {
     vi.mocked(prisma.closetItem.findMany).mockResolvedValue([
-      makeItemRow({ fieldConfidence: { overall: "high" } }),
+      makeItemRow({
+        category: "TOPS",
+        fieldConfidence: { subcategory: "high", silhouette: "high", material: "high", primaryColor: "high" },
+      }),
     ] as any);
     vi.mocked(prisma.closetItem.count).mockResolvedValue(1);
 
     const result = await listClosetItems({}, 1);
     expect(result.items[0].lowConfidence).toBe(false);
+    expect(result.items[0].overallConfidence).toBe("HIGH");
   });
 
   it("item with null fieldConfidence has lowConfidence=false", async () => {
@@ -570,31 +579,39 @@ describe("§CI.7 lowConfidence WHERE clause", () => {
     vi.mocked(prisma.closetItem.count).mockResolvedValue(0);
   });
 
-  it("passes JSON path filter { fieldConfidence: { path: ['overall'], equals: 'low' } }", async () => {
+  it("passes OR filter across all known confidence field keys when lowConfidence=true", async () => {
     await listClosetItems({ lowConfidence: true }, 1);
     const where = vi.mocked(prisma.closetItem.findMany).mock.calls[0][0]?.where;
     const and = (where as any)?.AND as unknown[];
-    expect(and).toContainEqual({
-      fieldConfidence: { path: ["overall"], equals: "low" },
-    });
+    // The clause should include analysisStatus: 'ready' and an OR across field keys
+    const lowConfClause = (and ?? []).find((c: any) => c?.OR != null && c?.analysisStatus === "ready");
+    expect(lowConfClause).toBeDefined();
+    // OR must check at least subcategory, silhouette, and material
+    const orPaths = (lowConfClause as any).OR.map((o: any) => o?.fieldConfidence?.path?.[0]);
+    expect(orPaths).toContain("subcategory");
+    expect(orPaths).toContain("silhouette");
+    expect(orPaths).toContain("material");
+    // Every OR entry checks for equals: "low"
+    const allCheckLow = (lowConfClause as any).OR.every((o: any) => o?.fieldConfidence?.equals === "low");
+    expect(allCheckLow).toBe(true);
   });
 
-  it("omits JSON path filter when lowConfidence is false", async () => {
+  it("omits low-confidence OR filter when lowConfidence is false", async () => {
     await listClosetItems({ lowConfidence: false }, 1);
     const where = vi.mocked(prisma.closetItem.findMany).mock.calls[0][0]?.where;
     const and = (where as any)?.AND as unknown[] ?? [];
     const hasLowConf = and.some(
-      (c: any) => c?.fieldConfidence?.path?.[0] === "overall",
+      (c: any) => c?.OR != null && c?.analysisStatus === "ready",
     );
     expect(hasLowConf).toBe(false);
   });
 
-  it("omits JSON path filter when lowConfidence is undefined", async () => {
+  it("omits low-confidence OR filter when lowConfidence is undefined", async () => {
     await listClosetItems({}, 1);
     const where = vi.mocked(prisma.closetItem.findMany).mock.calls[0][0]?.where;
     const and = (where as any)?.AND as unknown[] ?? [];
     const hasLowConf = and.some(
-      (c: any) => c?.fieldConfidence?.path?.[0] === "overall",
+      (c: any) => c?.OR != null && c?.analysisStatus === "ready",
     );
     expect(hasLowConf).toBe(false);
   });
@@ -1059,5 +1076,276 @@ describe("§CI.35 /app layout is bare Outlet with no server loader", () => {
     expect(result).toHaveProperty("session");
     expect(typeof result.redirect).toBe("function");
     vi.unstubAllEnvs();
+  });
+});
+
+// ── §CI.36 computeOverallStoredConfidence — core rules ────────────────────────
+
+describe("§CI.36 computeOverallStoredConfidence — null when insufficient data", () => {
+  it("returns null for null input", () => {
+    expect(computeOverallStoredConfidence(null, "TOPS")).toBeNull();
+  });
+
+  it("returns null for empty object", () => {
+    expect(computeOverallStoredConfidence({}, "TOPS")).toBeNull();
+  });
+
+  it("returns null when only 1 relevant field has data (below MIN_CONFIDENCE_FIELDS)", () => {
+    expect(computeOverallStoredConfidence({ subcategory: "high" }, "TOPS")).toBeNull();
+  });
+
+  it("returns null for non-object input", () => {
+    expect(computeOverallStoredConfidence("high", "TOPS")).toBeNull();
+    expect(computeOverallStoredConfidence(42, "TOPS")).toBeNull();
+  });
+});
+
+describe("§CI.37 computeOverallStoredConfidence — HIGH", () => {
+  it("returns HIGH when all available relevant TOPS fields are high", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high", fitProfile: "high",
+      material: "high", pattern: "high", primaryColor: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "TOPS")).toBe("HIGH");
+  });
+
+  it("returns HIGH when all available relevant BOTTOMS fields are high", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high", fitProfile: "high",
+      hemLength: "high", waistShape: "high", material: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "BOTTOMS")).toBe("HIGH");
+  });
+
+  it("returns HIGH when all available relevant OUTERWEAR fields are high", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high", sleeveLength: "high",
+      material: "high", primaryColor: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "OUTERWEAR")).toBe("HIGH");
+  });
+
+  it("returns HIGH for ACTIVEWEAR with all high relevant fields", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high", fitProfile: "high",
+      sleeveLength: "high", material: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "ACTIVEWEAR")).toBe("HIGH");
+  });
+});
+
+describe("§CI.38 computeOverallStoredConfidence — MEDIUM", () => {
+  it("returns MEDIUM when one relevant TOPS field is medium, rest high", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high", fitProfile: "high",
+      material: "medium", pattern: "high", primaryColor: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "TOPS")).toBe("MEDIUM");
+  });
+
+  it("returns MEDIUM when waistShape is medium on BOTTOMS", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high", hemLength: "high",
+      waistShape: "medium", material: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "BOTTOMS")).toBe("MEDIUM");
+  });
+
+  it("returns MEDIUM when material is medium on SHOES", () => {
+    const fc = { subcategory: "high", material: "medium" };
+    expect(computeOverallStoredConfidence(fc, "SHOES")).toBe("MEDIUM");
+  });
+});
+
+describe("§CI.39 computeOverallStoredConfidence — LOW", () => {
+  it("returns LOW when any relevant field is low (TOPS)", () => {
+    const fc = {
+      subcategory: "high", silhouette: "low", fitProfile: "high",
+      material: "high", primaryColor: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "TOPS")).toBe("LOW");
+  });
+
+  it("returns LOW when material is low on DRESSES", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high", hemLength: "high",
+      material: "low", primaryColor: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "DRESSES")).toBe("LOW");
+  });
+
+  it("LOW takes precedence over MEDIUM (both present)", () => {
+    const fc = {
+      subcategory: "high", silhouette: "low", fitProfile: "medium",
+      material: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "TOPS")).toBe("LOW");
+  });
+});
+
+describe("§CI.40 computeOverallStoredConfidence — category-aware (non-apparel)", () => {
+  it("SHOES: null silhouette/neckline/sleeveLength confidence does NOT penalise result", () => {
+    // silhouette, sleeveLength, necklineCoverage are not in SHOES relevant fields
+    const fc = {
+      silhouette: "low",         // irrelevant for SHOES — must not cause LOW
+      necklineCoverage: "low",   // irrelevant for SHOES
+      subcategory: "high",
+      material: "high",
+      primaryColor: "high",
+      pattern: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "SHOES")).toBe("HIGH");
+  });
+
+  it("BAGS: apparel fit fields are ignored", () => {
+    const fc = {
+      fitProfile: "low",   // irrelevant for BAGS
+      hemLength: "low",    // irrelevant for BAGS
+      subcategory: "high",
+      material: "high",
+      primaryColor: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "BAGS")).toBe("HIGH");
+  });
+
+  it("ACCESSORIES: only subcategory/material/primaryColor relevant", () => {
+    const fc = { subcategory: "high", material: "high", primaryColor: "high" };
+    expect(computeOverallStoredConfidence(fc, "ACCESSORIES")).toBe("HIGH");
+  });
+
+  it("JEWELRY: only subcategory/primaryColor relevant", () => {
+    const fc = { subcategory: "high", primaryColor: "high" };
+    expect(computeOverallStoredConfidence(fc, "JEWELRY")).toBe("HIGH");
+  });
+
+  it("JEWELRY: low on irrelevant apparel field still returns HIGH on relevant fields", () => {
+    const fc = {
+      silhouette: "low", material: "low", // material not in JEWELRY relevant fields
+      subcategory: "high", primaryColor: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "JEWELRY")).toBe("HIGH");
+  });
+});
+
+describe("§CI.41 computeOverallStoredConfidence — legacy items (no snapshot, stored confidence)", () => {
+  it("returns a summary from stored field confidence even without snapshot data", () => {
+    // Legacy item: has fieldConfidence stored but may have no ClosetItemAnalysisSnapshot
+    // The function only looks at the JSON object — snapshot presence is irrelevant
+    const legacyFc = {
+      subcategory: "high", silhouette: "high", fitProfile: "high",
+      waistShape: "medium", material: "medium", pattern: "high", primaryColor: "high",
+    };
+    // Should return MEDIUM (material + waistShape are medium)
+    expect(computeOverallStoredConfidence(legacyFc, "BOTTOMS")).toBe("MEDIUM");
+  });
+
+  it("returns HIGH for a legacy item with only high-confidence fields", () => {
+    const legacyFc = {
+      subcategory: "high", silhouette: "high", material: "high", primaryColor: "high",
+    };
+    expect(computeOverallStoredConfidence(legacyFc, "TOPS")).toBe("HIGH");
+  });
+});
+
+describe("§CI.42 lowConfidence flag — uses computeOverallStoredConfidence", () => {
+  it("lowConfidence is true when overallConfidence is LOW", () => {
+    // We test via listClosetItems row output. Mock a TOPS item with a low-confidence field.
+    const mockFindMany = vi.fn().mockResolvedValue([
+      {
+        id: "item-low",
+        name: "Low Conf Top",
+        category: "TOPS",
+        subcategory: "blouse",
+        analysisStatus: "ready",
+        analyzedAt: new Date(),
+        thumbnailUrl: null,
+        imagePublicId: null,
+        fieldConfidence: {
+          subcategory: "high", silhouette: "low", fitProfile: "high",
+          material: "high", primaryColor: "high",
+        },
+        formality: "casual",
+        occasions: [],
+        silhouette: "a-line",
+        customerId: "c1",
+        createdAt: new Date(),
+        adminReview: null,
+        customer: { email: "test@example.com" },
+      },
+    ]);
+    const mockCount = vi.fn().mockResolvedValue(1);
+    vi.mocked(prisma.closetItem.findMany).mockImplementation(mockFindMany);
+    vi.mocked(prisma.closetItem.count).mockImplementation(mockCount);
+
+    return listClosetItems({}, 1).then((result) => {
+      expect(result.items[0].overallConfidence).toBe("LOW");
+      expect(result.items[0].lowConfidence).toBe(true);
+    });
+  });
+
+  it("lowConfidence is false when overallConfidence is MEDIUM", () => {
+    const mockFindMany = vi.fn().mockResolvedValue([
+      {
+        id: "item-med",
+        name: "Medium Conf Top",
+        category: "TOPS",
+        subcategory: "blouse",
+        analysisStatus: "ready",
+        analyzedAt: new Date(),
+        thumbnailUrl: null,
+        imagePublicId: null,
+        fieldConfidence: {
+          subcategory: "high", silhouette: "medium", fitProfile: "high",
+          material: "high", primaryColor: "high",
+        },
+        formality: "casual",
+        occasions: [],
+        silhouette: "a-line",
+        customerId: "c1",
+        createdAt: new Date(),
+        adminReview: null,
+        customer: { email: "test@example.com" },
+      },
+    ]);
+    vi.mocked(prisma.closetItem.findMany).mockImplementation(mockFindMany);
+    vi.mocked(prisma.closetItem.count).mockImplementation(vi.fn().mockResolvedValue(1));
+
+    return listClosetItems({}, 1).then((result) => {
+      expect(result.items[0].overallConfidence).toBe("MEDIUM");
+      expect(result.items[0].lowConfidence).toBe(false);
+    });
+  });
+
+  it("lowConfidence is false when overallConfidence is HIGH", () => {
+    const mockFindMany = vi.fn().mockResolvedValue([
+      {
+        id: "item-high",
+        name: "High Conf Shoe",
+        category: "SHOES",
+        subcategory: "sneaker",
+        analysisStatus: "ready",
+        analyzedAt: new Date(),
+        thumbnailUrl: null,
+        imagePublicId: null,
+        fieldConfidence: {
+          subcategory: "high", material: "high", primaryColor: "high", pattern: "high",
+          silhouette: "low",  // irrelevant for SHOES — should not flip to LOW
+        },
+        formality: "casual",
+        occasions: [],
+        silhouette: null,
+        customerId: "c1",
+        createdAt: new Date(),
+        adminReview: null,
+        customer: { email: "test@example.com" },
+      },
+    ]);
+    vi.mocked(prisma.closetItem.findMany).mockImplementation(mockFindMany);
+    vi.mocked(prisma.closetItem.count).mockImplementation(vi.fn().mockResolvedValue(1));
+
+    return listClosetItems({}, 1).then((result) => {
+      expect(result.items[0].overallConfidence).toBe("HIGH");
+      expect(result.items[0].lowConfidence).toBe(false);
+    });
   });
 });
