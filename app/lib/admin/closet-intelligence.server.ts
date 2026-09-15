@@ -62,6 +62,7 @@ const CATEGORY_CONFIDENCE_FIELDS: Record<string, readonly string[]> = {
   BOTTOMS:     ["subcategory", "silhouette", "fitProfile", "hemLength", "waistShape", "material", "pattern", "primaryColor"],
   DRESSES:     ["subcategory", "silhouette", "fitProfile", "hemLength", "sleeveLength", "necklineCoverage", "material", "pattern", "primaryColor"],
   OUTERWEAR:   ["subcategory", "silhouette", "fitProfile", "sleeveLength", "material", "pattern", "primaryColor"],
+  // ACTIVEWEAR fallback (unrecognised subcategory) — also used for §CI.37 backwards-compat
   ACTIVEWEAR:  ["subcategory", "silhouette", "fitProfile", "sleeveLength", "material", "pattern", "primaryColor"],
   SHOES:       ["subcategory", "material", "primaryColor", "pattern"],
   BAGS:        ["subcategory", "material", "primaryColor", "pattern"],
@@ -69,10 +70,37 @@ const CATEGORY_CONFIDENCE_FIELDS: Record<string, readonly string[]> = {
   JEWELRY:     ["subcategory", "primaryColor"],
 };
 
+// ACTIVEWEAR subcategory routing — determines which field list is used.
+// Checked case-insensitively against the stored subcategory string.
+const ACTIVEWEAR_TOP_SUBCATEGORIES = new Set([
+  "sports bra", "sports-bra", "bra top", "crop top", "athletic top", "sports top",
+  "active top", "tank", "sports tank", "athletic tank", "t-shirt", "tshirt",
+  "hoodie", "sweatshirt", "track jacket", "zip-up", "pullover",
+]);
+const ACTIVEWEAR_BOTTOM_SUBCATEGORIES = new Set([
+  "leggings", "flare leggings", "capri leggings", "shorts", "athletic shorts",
+  "bike shorts", "joggers", "track pants", "sweatpants", "training pants",
+]);
+const ACTIVEWEAR_ONE_PIECE_SUBCATEGORIES = new Set([
+  "bodysuit", "unitard", "jumpsuit", "active dress", "romper",
+]);
+
+/** Returns the relevant confidence field keys for a given category + optional subcategory. */
+function getRelevantKeys(category: string, subcategory?: string | null): readonly string[] {
+  if (category === "ACTIVEWEAR" && subcategory) {
+    const sub = subcategory.toLowerCase();
+    if (ACTIVEWEAR_TOP_SUBCATEGORIES.has(sub))       return CATEGORY_CONFIDENCE_FIELDS["TOPS"];
+    if (ACTIVEWEAR_BOTTOM_SUBCATEGORIES.has(sub))    return CATEGORY_CONFIDENCE_FIELDS["BOTTOMS"];
+    if (ACTIVEWEAR_ONE_PIECE_SUBCATEGORIES.has(sub)) return CATEGORY_CONFIDENCE_FIELDS["DRESSES"];
+  }
+  return CATEGORY_CONFIDENCE_FIELDS[category] ?? CATEGORY_CONFIDENCE_FIELDS["TOPS"];
+}
+
 // Minimum number of relevant fields that must have confidence data to produce a summary.
 const MIN_CONFIDENCE_FIELDS = 2;
 
 // All keys that can appear in fieldConfidence — used for the lowConfidence DB pre-filter.
+// Intentionally broad: the shared helper is the authoritative category-aware check.
 const ALL_CONFIDENCE_FIELD_KEYS = [
   "subcategory", "silhouette", "fitProfile", "hemLength", "topLength",
   "sleeveLength", "necklineCoverage", "waistShape", "material", "pattern", "primaryColor",
@@ -82,22 +110,25 @@ const ALL_CONFIDENCE_FIELD_KEYS = [
  * Compute a single overall confidence rating from stored per-field confidence data.
  *
  * Rule (simple and auditable):
- *   null   — fewer than MIN_CONFIDENCE_FIELDS relevant fields have data
- *   "LOW"  — any relevant field rated "low"
+ *   null     — fewer than MIN_CONFIDENCE_FIELDS relevant fields have data
+ *   "LOW"    — any relevant field rated "low"
  *   "MEDIUM" — no "low" fields, but at least one relevant field rated "medium"
- *   "HIGH" — all available relevant fields rated "high" (and ≥ MIN_CONFIDENCE_FIELDS present)
+ *   "HIGH"   — all available relevant fields rated "high" (and ≥ MIN_CONFIDENCE_FIELDS present)
  *
- * Category-aware: only fields relevant to the garment category are considered.
- * This prevents shoes from being penalised for absent silhouette/neckline confidence.
+ * Category- and subcategory-aware: only fields relevant to the specific garment type are
+ * considered. ACTIVEWEAR routes to top/bottom/one-piece field lists based on subcategory.
+ * This prevents shoes from being penalised for absent silhouette/neckline confidence, and
+ * leggings from being penalised for absent necklineCoverage.
  */
 export function computeOverallStoredConfidence(
   fieldConfidence: unknown,
   category: string,
+  subcategory?: string | null,
 ): "HIGH" | "MEDIUM" | "LOW" | null {
   if (!fieldConfidence || typeof fieldConfidence !== "object") return null;
 
   const fc = fieldConfidence as Record<string, unknown>;
-  const relevantKeys = CATEGORY_CONFIDENCE_FIELDS[category] ?? CATEGORY_CONFIDENCE_FIELDS["TOPS"];
+  const relevantKeys = getRelevantKeys(category, subcategory);
 
   // Collect confidence values only for relevant fields that actually have data
   const values: string[] = [];
@@ -219,16 +250,29 @@ export async function listClosetItems(
     }
   }
 
-  // lowConfidence: any relevant field in fieldConfidence = "low".
-  // This is a broad DB pre-filter across all known confidence keys; the per-row
-  // computeOverallStoredConfidence call is the authoritative category-aware check.
+  // lowConfidence: fetch candidates (broad any-"low" pre-filter) then post-filter with the
+  // same category-aware helper used for the displayed badge, so filter and display always agree.
   if (filters.lowConfidence) {
-    andClauses.push({
+    const candidatesWhere: Prisma.ClosetItemWhereInput = {
       analysisStatus: "ready",
       OR: ALL_CONFIDENCE_FIELD_KEYS.map((key) => ({
         fieldConfidence: { path: [key], equals: "low" },
       })),
+    };
+    if (andClauses.length > 0) candidatesWhere.AND = [...andClauses];
+
+    const candidates = await prisma.closetItem.findMany({
+      where: candidatesWhere,
+      select: { id: true, fieldConfidence: true, category: true, subcategory: true },
     });
+
+    const lowIds = candidates
+      .filter((c) =>
+        computeOverallStoredConfidence(c.fieldConfidence, c.category, c.subcategory) === "LOW"
+      )
+      .map((c) => c.id);
+
+    andClauses.push({ id: { in: lowIds } });
   }
 
   // missingMetadata: analysis complete but missing critical classification fields.
@@ -286,7 +330,7 @@ export async function listClosetItems(
   type ItemRow = (typeof items)[number];
   const rows: ClosetItemRow[] = items.map((item: ItemRow) => {
     const reviewStatus = item.adminReview?.reviewStatus ?? "unreviewed";
-    const overallConf = computeOverallStoredConfidence(item.fieldConfidence, item.category);
+    const overallConf = computeOverallStoredConfidence(item.fieldConfidence, item.category, item.subcategory);
     const isAnalyzed = item.analysisStatus === "ready";
     const silhouetteRequired = !NON_SILHOUETTE_CATEGORIES.has(item.category);
     const missMeta = isAnalyzed && (

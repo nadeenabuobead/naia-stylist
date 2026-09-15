@@ -572,6 +572,9 @@ describe("§CI.6 reviewStatus WHERE clause", () => {
 });
 
 // ── §CI.7 lowConfidence WHERE clause ─────────────────────────────────────────
+// The filter now works in two steps:
+//   1. Candidates query: broad OR across all known confidence field keys (any "low")
+//   2. Main query: id: { in: lowIds } where lowIds passed computeOverallStoredConfidence
 
 describe("§CI.7 lowConfidence WHERE clause", () => {
   beforeEach(() => {
@@ -579,41 +582,42 @@ describe("§CI.7 lowConfidence WHERE clause", () => {
     vi.mocked(prisma.closetItem.count).mockResolvedValue(0);
   });
 
-  it("passes OR filter across all known confidence field keys when lowConfidence=true", async () => {
+  it("candidates query has analysisStatus:ready + OR across all known confidence keys", async () => {
     await listClosetItems({ lowConfidence: true }, 1);
-    const where = vi.mocked(prisma.closetItem.findMany).mock.calls[0][0]?.where;
-    const and = (where as any)?.AND as unknown[];
-    // The clause should include analysisStatus: 'ready' and an OR across field keys
-    const lowConfClause = (and ?? []).find((c: any) => c?.OR != null && c?.analysisStatus === "ready");
-    expect(lowConfClause).toBeDefined();
-    // OR must check at least subcategory, silhouette, and material
-    const orPaths = (lowConfClause as any).OR.map((o: any) => o?.fieldConfidence?.path?.[0]);
+    // First findMany call = candidates pre-filter
+    const candidatesWhere = vi.mocked(prisma.closetItem.findMany).mock.calls[0][0]?.where;
+    expect((candidatesWhere as any)?.analysisStatus).toBe("ready");
+    const orEntries = (candidatesWhere as any)?.OR as unknown[];
+    expect(Array.isArray(orEntries)).toBe(true);
+    const orPaths = orEntries.map((o: any) => o?.fieldConfidence?.path?.[0]);
     expect(orPaths).toContain("subcategory");
     expect(orPaths).toContain("silhouette");
     expect(orPaths).toContain("material");
-    // Every OR entry checks for equals: "low"
-    const allCheckLow = (lowConfClause as any).OR.every((o: any) => o?.fieldConfidence?.equals === "low");
+    // Every OR entry must check for equals: "low"
+    const allCheckLow = orEntries.every((o: any) => o?.fieldConfidence?.equals === "low");
     expect(allCheckLow).toBe(true);
   });
 
-  it("omits low-confidence OR filter when lowConfidence is false", async () => {
-    await listClosetItems({ lowConfidence: false }, 1);
-    const where = vi.mocked(prisma.closetItem.findMany).mock.calls[0][0]?.where;
-    const and = (where as any)?.AND as unknown[] ?? [];
-    const hasLowConf = and.some(
-      (c: any) => c?.OR != null && c?.analysisStatus === "ready",
-    );
-    expect(hasLowConf).toBe(false);
+  it("main query uses id:in constraint derived from candidates post-filter", async () => {
+    await listClosetItems({ lowConfidence: true }, 1);
+    // Second findMany call = main page query
+    const mainWhere = vi.mocked(prisma.closetItem.findMany).mock.calls[1][0]?.where;
+    const and = (mainWhere as any)?.AND as unknown[] ?? [];
+    // Must have an id: { in: [...] } clause (lowIds from post-filter)
+    const idClause = and.find((c: any) => c?.id?.in != null);
+    expect(idClause).toBeDefined();
+    expect(Array.isArray((idClause as any).id.in)).toBe(true);
   });
 
-  it("omits low-confidence OR filter when lowConfidence is undefined", async () => {
+  it("no extra findMany call when lowConfidence is false", async () => {
+    await listClosetItems({ lowConfidence: false }, 1);
+    // Only 1 findMany call (main query, no candidates query)
+    expect(vi.mocked(prisma.closetItem.findMany).mock.calls).toHaveLength(1);
+  });
+
+  it("no extra findMany call when lowConfidence is undefined", async () => {
     await listClosetItems({}, 1);
-    const where = vi.mocked(prisma.closetItem.findMany).mock.calls[0][0]?.where;
-    const and = (where as any)?.AND as unknown[] ?? [];
-    const hasLowConf = and.some(
-      (c: any) => c?.OR != null && c?.analysisStatus === "ready",
-    );
-    expect(hasLowConf).toBe(false);
+    expect(vi.mocked(prisma.closetItem.findMany).mock.calls).toHaveLength(1);
   });
 });
 
@@ -1347,5 +1351,139 @@ describe("§CI.42 lowConfidence flag — uses computeOverallStoredConfidence", (
       expect(result.items[0].overallConfidence).toBe("HIGH");
       expect(result.items[0].lowConfidence).toBe(false);
     });
+  });
+});
+
+// ── §CI.43 computeOverallStoredConfidence — ACTIVEWEAR subcategory-aware ──────
+
+describe("§CI.43 computeOverallStoredConfidence — ACTIVEWEAR subcategory routing", () => {
+  it("sports bra routes to TOP fields — high relevant fields → HIGH", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high", fitProfile: "high",
+      necklineCoverage: "high", material: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "ACTIVEWEAR", "sports bra")).toBe("HIGH");
+  });
+
+  it("sports bra routes to TOP fields — low necklineCoverage → LOW", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high", fitProfile: "high",
+      necklineCoverage: "low", material: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "ACTIVEWEAR", "sports bra")).toBe("LOW");
+  });
+
+  it("t-shirt routes to TOP fields — topLength present → HIGH", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high", fitProfile: "high",
+      topLength: "high", material: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "ACTIVEWEAR", "t-shirt")).toBe("HIGH");
+  });
+
+  it("leggings routes to BOTTOM fields — all bottom fields high → HIGH", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high", fitProfile: "high",
+      hemLength: "high", waistShape: "high", material: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "ACTIVEWEAR", "leggings")).toBe("HIGH");
+  });
+
+  it("leggings routes to BOTTOM fields — low waistShape → LOW", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high",
+      hemLength: "high", waistShape: "low", material: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "ACTIVEWEAR", "leggings")).toBe("LOW");
+  });
+
+  it("athletic shorts routes to BOTTOM fields → HIGH", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high", fitProfile: "high",
+      hemLength: "high", material: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "ACTIVEWEAR", "athletic shorts")).toBe("HIGH");
+  });
+
+  it("track jacket routes to TOP fields — sleeveLength relevant → HIGH", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high", fitProfile: "high",
+      sleeveLength: "high", material: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "ACTIVEWEAR", "track jacket")).toBe("HIGH");
+  });
+
+  it("unrecognised subcategory falls back to generic ACTIVEWEAR fields", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high", fitProfile: "high",
+      sleeveLength: "high", material: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "ACTIVEWEAR", "unknown sport thing")).toBe("HIGH");
+  });
+
+  it("null subcategory falls back to generic ACTIVEWEAR fields", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high", fitProfile: "high",
+      sleeveLength: "high", material: "high",
+    };
+    expect(computeOverallStoredConfidence(fc, "ACTIVEWEAR", null)).toBe("HIGH");
+    expect(computeOverallStoredConfidence(fc, "ACTIVEWEAR")).toBe("HIGH");
+  });
+
+  it("leggings: necklineCoverage low does NOT cause LOW (not in bottom fields)", () => {
+    const fc = {
+      subcategory: "high", silhouette: "high", fitProfile: "high",
+      hemLength: "high", material: "high",
+      necklineCoverage: "low", // irrelevant for bottoms
+    };
+    expect(computeOverallStoredConfidence(fc, "ACTIVEWEAR", "leggings")).toBe("HIGH");
+  });
+});
+
+// ── §CI.44 lowConfidence filter — category-aware, no false positives ──────────
+
+describe("§CI.44 lowConfidence filter — category-aware: SHOES with irrelevant low field", () => {
+  const shoeItem = {
+    id: "shoe-filter-test",
+    name: "Sneaker",
+    category: "SHOES",
+    subcategory: "sneaker",
+    analysisStatus: "ready",
+    analyzedAt: new Date(),
+    thumbnailUrl: null,
+    imagePublicId: null,
+    fieldConfidence: {
+      subcategory: "high", material: "high", primaryColor: "high", pattern: "high",
+      silhouette: "low", // irrelevant for SHOES — must not cause LOW
+    },
+    formality: null,
+    occasions: [],
+    silhouette: null,
+    customerId: "c1",
+    createdAt: new Date(),
+    adminReview: null,
+    customer: { email: "test@example.com" },
+  };
+
+  it("displayed overallConfidence is HIGH and lowConfidence flag is false", () => {
+    vi.mocked(prisma.closetItem.findMany).mockResolvedValueOnce([shoeItem]);
+    vi.mocked(prisma.closetItem.count).mockResolvedValue(1);
+    return listClosetItems({}, 1).then((result) => {
+      expect(result.items[0].overallConfidence).toBe("HIGH");
+      expect(result.items[0].lowConfidence).toBe(false);
+    });
+  });
+
+  it("NOT returned by lowConfidence filter — silhouette:low is irrelevant for SHOES", async () => {
+    // First findMany: candidates pre-filter (shoe matches broad OR via silhouette:low)
+    // Second findMany: main query — ID filter will be empty since helper returns HIGH
+    vi.mocked(prisma.closetItem.findMany)
+      .mockResolvedValueOnce([shoeItem])  // candidates
+      .mockResolvedValueOnce([]);         // main query (lowIds = [])
+    vi.mocked(prisma.closetItem.count).mockResolvedValue(0);
+
+    const result = await listClosetItems({ lowConfidence: true }, 1);
+    expect(result.items).toHaveLength(0);
+    expect(result.total).toBe(0);
   });
 });
