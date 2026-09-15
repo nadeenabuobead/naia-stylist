@@ -674,7 +674,23 @@ export default function ClosetItemDetailPage() {
           )}
           <button
             type="button"
-            onClick={() => window.print()}
+            onClick={() => {
+              const main = document.querySelector(".naia-admin-main");
+              if (!main) return;
+              const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+                .map((el) => el.outerHTML)
+                .join("\n");
+              const title = document.title || item.name || "garment";
+              const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>${styles}</head><body style="background:#0d1117;color:#e6edf3;padding:2rem;font-family:-apple-system,sans-serif">${main.innerHTML}</body></html>`;
+              const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+              const url = URL.createObjectURL(blob);
+              const a = Object.assign(document.createElement("a"), {
+                href: url,
+                download: `${(item.name ?? "garment").replace(/\s+/g, "-").toLowerCase()}.html`,
+              });
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
             style={{
               padding: "0.3rem 0.75rem",
               fontSize: "0.75rem",
@@ -688,7 +704,7 @@ export default function ClosetItemDetailPage() {
               whiteSpace: "nowrap",
             }}
           >
-            PRINT / SAVE PAGE
+            SAVE PAGE
           </button>
         </div>
       </div>
