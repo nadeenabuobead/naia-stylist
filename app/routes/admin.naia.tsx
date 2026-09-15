@@ -423,6 +423,40 @@ const NAIA_ADMIN_CSS = `
   .na-edit-footer { margin-top: 1rem; display: flex; align-items: center; gap: 1rem; padding-top: 0.75rem; border-top: 1px solid #f0f1f3; }
   .na-edit-hint { font-size: 11px; color: #9ca3af; }
 
+  /* ── Phase 3B: Review queue speed ── */
+
+  /* Inline quick-approve button on list rows */
+  .na-btn-quick-approve {
+    cursor: pointer;
+    background: #f0fdf4;
+    color: #15803d;
+    border: 1px solid #bbf7d0;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 0.1rem 0.45rem;
+    line-height: 1.4;
+    flex-shrink: 0;
+    transition: background 0.1s;
+  }
+  .na-btn-quick-approve:hover:not(:disabled) { background: #dcfce7; }
+  .na-btn-quick-approve:disabled { opacity: 0.5; cursor: default; }
+
+  /* Queue next-item link (detail page header) */
+  .na-btn-queue-next {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.3rem 0.875rem;
+    background: #16213e;
+    color: #fff;
+    text-decoration: none;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    transition: background 0.12s;
+  }
+  .na-btn-queue-next:hover { background: #1e2f5c; color: #fff; }
+
   /* Corrections view — read-only summary of active corrections */
   .na-corrections-view { margin-top: 0.75rem; border-top: 1px solid #f0f1f3; padding-top: 0.75rem; }
   .na-corrections-view__title { font-size: 11px; font-weight: 700; color: #7c3aed; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem; }
@@ -430,4 +464,46 @@ const NAIA_ADMIN_CSS = `
   .na-correction-row:last-child { border-bottom: none; }
   .na-correction-row__key { font-weight: 500; color: #374151; min-width: 130px; flex-shrink: 0; }
   .na-correction-row__val { color: #7c3aed; flex: 1; }
+
+  /* ── Phase 3B gaps ── */
+
+  /* Review progress summary bar */
+  .na-review-progress {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.6rem 0;
+    margin-bottom: 0.875rem;
+    font-size: 12px;
+    color: #374151;
+  }
+  .na-review-progress__label { font-weight: 500; }
+  .na-review-progress__sep { color: #d1d5db; }
+  .na-review-progress__chip { font-size: 11px; font-weight: 600; padding: 0.15rem 0.45rem; border-radius: 3px; }
+  .na-review-progress__chip--ai       { background: #f3f4f6; color: #4b5563; }
+  .na-review-progress__chip--reviewed  { background: #dbeafe; color: #1e3a8a; }
+  .na-review-progress__chip--corrected { background: #ede9fe; color: #4c1d95; }
+
+  /* Adjacent prev/next navigation (read-only browsing) */
+  .na-nav-adj {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.2rem 0.55rem;
+    border: 1px solid #e5e7ea;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #6b7280;
+    text-decoration: none;
+    background: #fff;
+    transition: background 0.1s, color 0.1s;
+  }
+  .na-nav-adj:hover { background: #f3f4f6; color: #374151; }
+
+  /* Vocabulary gap flag badge */
+  .na-badge--vocab-gap { background: #fff3cd; color: #7d5f00; }
+
+  /* Vocabulary gap toggle container */
+  .na-vocab-gap { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #f0f1f3; }
 `;

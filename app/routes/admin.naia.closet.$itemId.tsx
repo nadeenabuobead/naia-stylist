@@ -11,11 +11,13 @@
 //   - No StyleMe wiring; overrides are stored only
 
 import { useState, useRef, useEffect } from "react";
-import { useLoaderData, Link, useFetcher } from "react-router";
+import { useLoaderData, Link, useFetcher, useNavigate } from "react-router";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { requireAdminSession } from "~/lib/internal-auth.server";
 import {
   getClosetItemDetail,
+  getNextUnreviewedItemId,
+  getAdjacentItemIds,
   type ClosetItemDetail,
   type ClosetClassification,
 } from "~/lib/admin/closet-intelligence.server";
@@ -30,6 +32,8 @@ import {
   markItemReviewed,
   revertOverrideField,
   getItemClassification,
+  setVocabGapFlag,
+  clearVocabGapFlag,
   type ClosetItemOverrides,
   type ClosetItemFields,
 } from "~/lib/admin/closet-review.server";
@@ -62,6 +66,7 @@ const EDIT_OPTS = {
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requireAdminSession(request);
 
+  const url = new URL(request.url);
   const itemId = params.itemId;
   if (!itemId) throw new Response("Not found", { status: 404 });
 
@@ -74,6 +79,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     item.adminReview,
   );
   const interpretation = interpretGarment(effectiveClassification, item.category);
+
+  // Phase 3B: queue navigation
+  const returnTo = url.searchParams.get("from") ?? null;
+  const [nextUnreviewedId, adjacent] = await Promise.all([
+    getNextUnreviewedItemId(itemId),
+    getAdjacentItemIds(itemId),
+  ]);
+  const { prevId: prevItemId, nextId: nextItemId } = adjacent;
 
   let garmentImageUrl: string | null = null;
   if (item.imagePublicId) {
@@ -96,7 +109,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     garmentImageUrl = item.thumbnailUrl;
   }
 
-  return Response.json({ item, effectiveClassification, garmentImageUrl, interpretation });
+  return Response.json({ item, effectiveClassification, garmentImageUrl, interpretation, returnTo, nextUnreviewedId, prevItemId, nextItemId });
 }
 
 // ── Action ─────────────────────────────────────────────────────────────────────
@@ -122,7 +135,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       const validated = validateOverrides(raw);
       const storedCls = await getItemClassification(itemId);
       const meaningful = filterSameAsStored(validated, storedCls);
-      await saveAdminReview(itemId, meaningful, reviewedBy, null);
+      await saveAdminReview(itemId, meaningful, reviewedBy);
       return Response.json({ ok: true });
     } catch (err) {
       return Response.json(
@@ -146,6 +159,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
         { status: 400 },
       );
     }
+  }
+
+  if (intent === "flag-vocab-gap") {
+    const note = formData.get("vocabNote");
+    const noteText = typeof note === "string" ? note.trim() : null;
+    await setVocabGapFlag(itemId, noteText, reviewedBy);
+    return Response.json({ ok: true });
+  }
+
+  if (intent === "clear-vocab-gap") {
+    await clearVocabGapFlag(itemId, reviewedBy);
+    return Response.json({ ok: true });
   }
 
   throw new Response("Bad request", { status: 400 });
@@ -291,15 +316,30 @@ function formatFieldValue(fieldKey: string, val: unknown): string {
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function ClosetItemDetailPage() {
-  const { item, effectiveClassification, garmentImageUrl, interpretation } = useLoaderData() as {
-    item: ClosetItemDetail;
-    effectiveClassification: ClosetClassification;
-    garmentImageUrl: string | null;
-    interpretation: GarmentInterpretation;
-  };
+  const { item, effectiveClassification, garmentImageUrl, interpretation, returnTo, nextUnreviewedId, prevItemId, nextItemId } =
+    useLoaderData() as {
+      item: ClosetItemDetail;
+      effectiveClassification: ClosetClassification;
+      garmentImageUrl: string | null;
+      interpretation: GarmentInterpretation;
+      returnTo: string | null;
+      nextUnreviewedId: string | null;
+      prevItemId: string | null;
+      nextItemId: string | null;
+    };
   const markCorrectFetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const navigate = useNavigate();
 
   const [showEdit, setShowEdit] = useState(false);
+
+  // Phase 3B: auto-advance to next unreviewed item after mark-correct
+  useEffect(() => {
+    if (markCorrectFetcher.data?.ok && nextUnreviewedId) {
+      const nextUrl = `/admin/naia/closet/${nextUnreviewedId}${returnTo ? `?from=${encodeURIComponent(returnTo)}` : ""}`;
+      navigate(nextUrl);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markCorrectFetcher.data]);
 
   const existingOverrides = (item.adminReview?.overrides ?? {}) as Record<string, unknown>;
   const overrideCount = Object.keys(existingOverrides).length;
@@ -360,7 +400,44 @@ export default function ClosetItemDetailPage() {
 
   return (
     <>
-      <Link to="/admin/naia/closet" className="na-back">← Closet Intelligence</Link>
+      {/* Phase 3B: navigation strip — Back preserves filters, Next advances queue */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.875rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <Link
+            to={returnTo ? `/admin/naia/closet?${returnTo}` : "/admin/naia/closet"}
+            className="na-back"
+            style={{ margin: 0 }}
+          >
+            ← Closet Intelligence
+          </Link>
+          {prevItemId && (
+            <Link
+              to={`/admin/naia/closet/${prevItemId}${returnTo ? `?from=${encodeURIComponent(returnTo)}` : ""}`}
+              className="na-nav-adj"
+              title="Previous item in list"
+            >
+              ← Prev
+            </Link>
+          )}
+          {nextItemId && (
+            <Link
+              to={`/admin/naia/closet/${nextItemId}${returnTo ? `?from=${encodeURIComponent(returnTo)}` : ""}`}
+              className="na-nav-adj"
+              title="Next item in list"
+            >
+              Next →
+            </Link>
+          )}
+        </div>
+        {nextUnreviewedId && (
+          <Link
+            to={`/admin/naia/closet/${nextUnreviewedId}${returnTo ? `?from=${encodeURIComponent(returnTo)}` : ""}`}
+            className="na-btn-queue-next"
+          >
+            Next unreviewed →
+          </Link>
+        )}
+      </div>
 
       <h1 className="na-page-heading" style={{ marginBottom: "0.5rem" }}>
         {item.name ?? "Unnamed item"}
@@ -567,6 +644,9 @@ export default function ClosetItemDetailPage() {
                 <p className="na-teach-ok">Marked as correct.</p>
               )}
 
+              {/* Vocabulary gap flag */}
+              <VocabGapToggle itemId={item.id} adminNotes={item.adminReview?.adminNotes ?? null} />
+
               {/* Read-only corrections summary — visible when editor is closed */}
               {!showEdit && hasOverrides && (
                 <CorrectionsView overrides={existingOverrides} />
@@ -579,6 +659,8 @@ export default function ClosetItemDetailPage() {
                   existingOverrides={existingOverrides}
                   itemId={item.id}
                   onSaveSuccess={() => setShowEdit(false)}
+                  nextUnreviewedId={nextUnreviewedId}
+                  returnTo={returnTo}
                 />
               )}
             </div>
@@ -880,9 +962,11 @@ interface EditPanelProps {
   existingOverrides: Record<string, unknown>;
   itemId: string;
   onSaveSuccess: () => void;
+  nextUnreviewedId: string | null;
+  returnTo: string | null;
 }
 
-function EditClassificationPanel({ stored, existingOverrides, itemId, onSaveSuccess }: EditPanelProps) {
+function EditClassificationPanel({ stored, existingOverrides, itemId, onSaveSuccess, nextUnreviewedId, returnTo }: EditPanelProps) {
   // Track which fields have their "override" checkbox checked
   const [checked, setChecked] = useState<Record<string, boolean>>(() => {
     const init: Record<string, boolean> = {};
@@ -901,14 +985,23 @@ function EditClassificationPanel({ stored, existingOverrides, itemId, onSaveSucc
   const formRef = useRef<HTMLFormElement>(null);
   const saveFetcher = useFetcher<{ ok?: boolean; error?: string }>();
   const hasSubmitted = useRef(false);
+  const advanceNextRef = useRef(false);
+  const navigate = useNavigate();
 
-  // Auto-close edit mode after a successful save.
+  // Auto-close edit mode (or advance to next unreviewed) after a successful save.
   useEffect(() => {
     if (hasSubmitted.current && saveFetcher.state === "idle" && saveFetcher.data?.ok) {
       hasSubmitted.current = false;
-      onSaveSuccess();
+      if (advanceNextRef.current && nextUnreviewedId) {
+        advanceNextRef.current = false;
+        const nextUrl = `/admin/naia/closet/${nextUnreviewedId}${returnTo ? `?from=${encodeURIComponent(returnTo)}` : ""}`;
+        navigate(nextUrl);
+      } else {
+        advanceNextRef.current = false;
+        onSaveSuccess();
+      }
     }
-  }, [saveFetcher.state, saveFetcher.data, onSaveSuccess]);
+  }, [saveFetcher.state, saveFetcher.data, onSaveSuccess, nextUnreviewedId, returnTo, navigate]);
 
   function toggle(field: string) {
     setChecked((prev) => ({ ...prev, [field]: !prev[field] }));
@@ -917,6 +1010,15 @@ function EditClassificationPanel({ stored, existingOverrides, itemId, onSaveSucc
   function handleSave() {
     if (!formRef.current) return;
     hasSubmitted.current = true;
+    advanceNextRef.current = false;
+    const formData = new FormData(formRef.current);
+    saveFetcher.submit(formData, { method: "post", action: `/admin/naia/closet/${itemId}` });
+  }
+
+  function handleSaveAndNext() {
+    if (!formRef.current) return;
+    hasSubmitted.current = true;
+    advanceNextRef.current = true;
     const formData = new FormData(formRef.current);
     saveFetcher.submit(formData, { method: "post", action: `/admin/naia/closet/${itemId}` });
   }
@@ -1495,6 +1597,16 @@ function EditClassificationPanel({ stored, existingOverrides, itemId, onSaveSucc
         >
           {saveFetcher.state !== "idle" ? "Saving…" : "Save corrections"}
         </button>
+        {nextUnreviewedId && (
+          <button
+            type="button"
+            className="na-btn na-btn--secondary"
+            disabled={saveFetcher.state !== "idle"}
+            onClick={handleSaveAndNext}
+          >
+            {saveFetcher.state !== "idle" ? "Saving…" : "Save & Next"}
+          </button>
+        )}
         <span className="na-edit-hint">
           Checked fields will be saved as overrides. Unchecked fields revert to stored values.
         </span>
@@ -1596,6 +1708,73 @@ function BoolSelect({
       <option value="true">Yes</option>
       <option value="false">No</option>
     </select>
+  );
+}
+
+// VocabGapToggle is defined at module level (not nested) because it calls useFetcher.
+function VocabGapToggle({ itemId, adminNotes }: { itemId: string; adminNotes: string | null }) {
+  const isSet = (adminNotes ?? "").startsWith("[VOCAB_GAP]");
+  const existingNote = isSet ? (adminNotes ?? "").replace("[VOCAB_GAP]", "").trim() : "";
+  const [showInput, setShowInput] = useState(false);
+  const flagFetcher = useFetcher<{ ok?: boolean; error?: string }>();
+
+  return (
+    <div className="na-vocab-gap">
+      {isSet ? (
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+          <span className="na-badge na-badge--vocab-gap">Needs vocabulary update</span>
+          {existingNote && (
+            <span style={{ fontSize: "12px", color: "#6b7280" }}>{existingNote}</span>
+          )}
+          <button
+            type="button"
+            className="na-btn-revert"
+            disabled={flagFetcher.state !== "idle"}
+            onClick={() =>
+              flagFetcher.submit(
+                { intent: "clear-vocab-gap" },
+                { method: "post", action: `/admin/naia/closet/${itemId}` },
+              )
+            }
+          >
+            Clear flag
+          </button>
+        </div>
+      ) : (
+        <>
+          <button
+            type="button"
+            className="na-btn na-btn--outline"
+            style={{ fontSize: "12px", padding: "0.3rem 0.75rem" }}
+            onClick={() => setShowInput((v) => !v)}
+          >
+            {showInput ? "Cancel" : "⚑ Needs vocabulary update"}
+          </button>
+          {showInput && (
+            <flagFetcher.Form
+              method="post"
+              action={`/admin/naia/closet/${itemId}`}
+              style={{ marginTop: "0.5rem", display: "flex", gap: "0.5rem", alignItems: "flex-start" }}
+            >
+              <input type="hidden" name="intent" value="flag-vocab-gap" />
+              <textarea
+                name="vocabNote"
+                className="na-edit-input"
+                placeholder="e.g. scoop neckline not in vocabulary (optional)"
+                rows={2}
+                style={{ flex: 1, resize: "vertical" }}
+              />
+              <button type="submit" className="na-btn na-btn--primary" style={{ fontSize: "12px" }}>
+                Flag it
+              </button>
+            </flagFetcher.Form>
+          )}
+        </>
+      )}
+      {flagFetcher.data?.error && (
+        <p className="na-teach-error">{flagFetcher.data.error}</p>
+      )}
+    </div>
   );
 }
 

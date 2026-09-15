@@ -122,6 +122,22 @@ const NON_SILHOUETTE_CATEGORIES = new Set(["SHOES", "BAGS", "ACCESSORIES", "JEWE
 
 // ── List ──────────────────────────────────────────────────────────────────────
 
+export interface ClosetReviewSummary {
+  total: number;
+  aiOnly: number;
+  reviewed: number;
+  corrected: number;
+}
+
+export async function getClosetReviewSummary(): Promise<ClosetReviewSummary> {
+  const [total, reviewed, corrected] = await Promise.all([
+    prisma.closetItem.count(),
+    prisma.closetItem.count({ where: { adminReview: { reviewStatus: "reviewed" } } }),
+    prisma.closetItem.count({ where: { adminReview: { reviewStatus: "overridden" } } }),
+  ]);
+  return { total, aiOnly: total - reviewed - corrected, reviewed, corrected };
+}
+
 export interface ClosetItemRow {
   id: string;
   name: string | null;
@@ -141,6 +157,7 @@ export interface ClosetItemRow {
   overallConfidence: "HIGH" | "MEDIUM" | "LOW" | null;
   lowConfidence: boolean;
   missingMetadata: boolean;
+  needsVocabUpdate: boolean;
   customerId: string;
   customerEmail: string | null;
   createdAt: Date;
@@ -256,7 +273,7 @@ export async function listClosetItems(
         customerId: true,
         createdAt: true,
         adminReview: {
-          select: { reviewStatus: true },
+          select: { reviewStatus: true, adminNotes: true },
         },
         customer: {
           select: { email: true },
@@ -294,6 +311,7 @@ export async function listClosetItems(
       overallConfidence: overallConf,
       lowConfidence: overallConf === "LOW",
       missingMetadata: missMeta,
+      needsVocabUpdate: (item.adminReview?.adminNotes ?? "").startsWith("[VOCAB_GAP]"),
       customerId: item.customerId,
       customerEmail: item.customer?.email ?? null,
       createdAt: item.createdAt,
@@ -514,6 +532,36 @@ export async function getNextUnreviewedItemId(
   });
 
   return next?.id ?? null;
+}
+
+// ── Adjacent item navigation (Phase 3B gaps) ─────────────────────────────────
+
+/** Returns the IDs of the previous and next items in the list (ordered createdAt DESC).
+ *  "prev" in the list means a newer item (createdAt > current); "next" means older. */
+export async function getAdjacentItemIds(
+  currentItemId: string,
+): Promise<{ prevId: string | null; nextId: string | null }> {
+  const current = await prisma.closetItem.findUnique({
+    where: { id: currentItemId },
+    select: { createdAt: true },
+  });
+  if (!current) return { prevId: null, nextId: null };
+
+  const [prev, next] = await Promise.all([
+    // Previous in list = newer item (createdAt > current, ordered asc = closest)
+    prisma.closetItem.findFirst({
+      where: { createdAt: { gt: current.createdAt } },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    }),
+    // Next in list = older item (createdAt < current, ordered desc = closest)
+    prisma.closetItem.findFirst({
+      where: { createdAt: { lt: current.createdAt } },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    }),
+  ]);
+  return { prevId: prev?.id ?? null, nextId: next?.id ?? null };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

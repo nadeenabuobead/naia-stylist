@@ -266,16 +266,29 @@ export async function markItemReviewed(
 
 /** Creates or updates the ClosetItemAdminReview for a given closet item.
  *  reviewStatus is derived from overrides — never passed by the caller.
- *  reviewedBy must come from the session identity, never from form input. */
+ *  reviewedBy must come from the session identity, never from form input.
+ *  adminNotes: pass a string/null to set explicitly; omit (undefined) to preserve existing. */
 export async function saveAdminReview(
   closetItemId: string,
   overrides: ClosetItemOverrides,
   reviewedBy: string,
-  adminNotes: string | null,
+  adminNotes: string | null | undefined = undefined,
 ): Promise<void> {
   const reviewStatus = computeReviewStatus(overrides);
   const overridesData: object | null =
     Object.keys(overrides).length > 0 ? (overrides as object) : null;
+
+  // If adminNotes is undefined, preserve whatever is currently stored.
+  let resolvedNotes: string | null = null;
+  if (adminNotes === undefined) {
+    const existing = await prisma.closetItemAdminReview.findUnique({
+      where: { closetItemId },
+      select: { adminNotes: true },
+    });
+    resolvedNotes = existing?.adminNotes ?? null;
+  } else {
+    resolvedNotes = adminNotes;
+  }
 
   await prisma.closetItemAdminReview.upsert({
     where: { closetItemId },
@@ -285,16 +298,54 @@ export async function saveAdminReview(
       overrides: overridesData,
       reviewedBy,
       reviewedAt: new Date(),
-      adminNotes,
+      adminNotes: resolvedNotes,
     },
     update: {
       reviewStatus,
       overrides: overridesData,
       reviewedBy,
       reviewedAt: new Date(),
-      adminNotes,
+      adminNotes: resolvedNotes,
     },
   });
+}
+
+export async function setVocabGapFlag(
+  closetItemId: string,
+  note: string | null,
+  reviewedBy: string,
+): Promise<void> {
+  const adminNotes = note && note.trim() ? `[VOCAB_GAP] ${note.trim()}` : "[VOCAB_GAP]";
+  await prisma.closetItemAdminReview.upsert({
+    where: { closetItemId },
+    create: {
+      closetItemId,
+      reviewStatus: "unreviewed",
+      overrides: null,
+      adminNotes,
+      reviewedBy,
+      reviewedAt: new Date(),
+    },
+    update: {
+      adminNotes,
+      reviewedBy,
+      reviewedAt: new Date(),
+    },
+  });
+}
+
+export async function clearVocabGapFlag(
+  closetItemId: string,
+  reviewedBy: string,
+): Promise<void> {
+  try {
+    await prisma.closetItemAdminReview.update({
+      where: { closetItemId },
+      data: { adminNotes: null, reviewedBy, reviewedAt: new Date() },
+    });
+  } catch {
+    // No record exists — no-op
+  }
 }
 
 /** Removes a single key from the stored overrides for a closet item.
