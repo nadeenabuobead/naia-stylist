@@ -180,6 +180,8 @@ export interface ClosetItemRow {
   /** Human-readable display label: "AI ONLY" | "REVIEWED" | "CORRECTED BY YOU" */
   displayReviewStatus: DisplayReviewStatus;
   formality: string | null;
+  /** Effective style personality: human override takes precedence over stored value */
+  stylePersonality: string | null;
   occasions: string[];
   analyzedAt: Date | null;
   thumbnailUrl: string | null;
@@ -312,12 +314,13 @@ export async function listClosetItems(
         imagePublicId: true,
         fieldConfidence: true,
         formality: true,
+        stylePersonality: true,
         occasions: true,
         silhouette: true,
         customerId: true,
         createdAt: true,
         adminReview: {
-          select: { reviewStatus: true, adminNotes: true },
+          select: { reviewStatus: true, adminNotes: true, overrides: true },
         },
         customer: {
           select: { email: true },
@@ -330,6 +333,7 @@ export async function listClosetItems(
   type ItemRow = (typeof items)[number];
   const rows: ClosetItemRow[] = items.map((item: ItemRow) => {
     const reviewStatus = item.adminReview?.reviewStatus ?? "unreviewed";
+    const overrides = item.adminReview?.overrides as Record<string, unknown> | null | undefined;
     const overallConf = computeOverallStoredConfidence(item.fieldConfidence, item.category, item.subcategory);
     const isAnalyzed = item.analysisStatus === "ready";
     const silhouetteRequired = !NON_SILHOUETTE_CATEGORIES.has(item.category);
@@ -348,6 +352,7 @@ export async function listClosetItems(
       reviewStatus,
       displayReviewStatus: computeDisplayReviewStatus(reviewStatus),
       formality: item.formality,
+      stylePersonality: (overrides?.stylePersonality as string | null | undefined) ?? item.stylePersonality ?? null,
       occasions: item.occasions,
       analyzedAt: item.analyzedAt,
       thumbnailUrl: item.thumbnailUrl,

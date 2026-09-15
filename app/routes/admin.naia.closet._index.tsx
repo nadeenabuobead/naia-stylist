@@ -274,6 +274,7 @@ export default function ClosetIntelligenceList() {
                   <th>Confidence</th>
                   <th>Review</th>
                   <th>Formality</th>
+                  <th>Style Personality</th>
                   <th>Occasions</th>
                   <th>Flags</th>
                   <th>Customer</th>
@@ -395,6 +396,10 @@ function ItemRow({ item, fromParam }: { item: ClosetItemRow; fromParam: string }
 
       <td>
         {item.formality ? item.formality : <span className="na-null">—</span>}
+      </td>
+
+      <td>
+        {item.stylePersonality ? item.stylePersonality : <span className="na-null">—</span>}
       </td>
 
       <td>

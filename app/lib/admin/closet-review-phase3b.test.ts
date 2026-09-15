@@ -350,3 +350,48 @@ describe("§3B-K vocabulary gap flag", () => {
     assert.ok(detailSrc.includes("VocabGapToggle") || detailSrc.includes("na-vocab-gap"), "detail must render vocab gap toggle");
   });
 });
+
+// ── §3B-L Style Personality column ───────────────────────────────────────────
+
+describe("§3B-L Style Personality column", () => {
+  it("ClosetItemRow interface includes stylePersonality field", () => {
+    assert.ok(ciSrc.includes("stylePersonality: string | null"), "ClosetItemRow must include stylePersonality");
+  });
+  it("list query selects stylePersonality from DB", () => {
+    assert.ok(ciSrc.includes("stylePersonality: true"), "listClosetItems must select stylePersonality from DB");
+  });
+  it("adminReview overrides are selected (for human-override precedence)", () => {
+    assert.ok(ciSrc.includes("overrides: true"), "adminReview select must include overrides");
+  });
+  it("effective value prefers human override over stored value", () => {
+    // The mapper must check overrides.stylePersonality before item.stylePersonality
+    const mapperIdx = ciSrc.indexOf("stylePersonality: (overrides");
+    assert.ok(mapperIdx !== -1, "mapper must apply override precedence for stylePersonality");
+    const mapperLine = ciSrc.slice(mapperIdx, mapperIdx + 120);
+    assert.ok(
+      mapperLine.includes("overrides?.stylePersonality") && mapperLine.includes("item.stylePersonality"),
+      "must fall back to item.stylePersonality when no override",
+    );
+  });
+  it("Style Personality column header is rendered in the list table", () => {
+    assert.ok(listSrc.includes("Style Personality"), "list table must have Style Personality column header");
+  });
+  it("column is placed between Formality and Occasions", () => {
+    const formalityIdx     = listSrc.indexOf("Formality");
+    const stylePersonIdx   = listSrc.indexOf("Style Personality");
+    const occasionsIdx     = listSrc.indexOf("Occasions");
+    assert.ok(
+      formalityIdx < stylePersonIdx && stylePersonIdx < occasionsIdx,
+      "Style Personality must appear between Formality and Occasions",
+    );
+  });
+  it("cell renders item.stylePersonality when present", () => {
+    assert.ok(listSrc.includes("item.stylePersonality"), "cell must render item.stylePersonality");
+  });
+  it("cell renders — when stylePersonality is absent", () => {
+    // The na-null span with — is used for missing values
+    const spIdx = listSrc.indexOf("item.stylePersonality");
+    const cellBlock = listSrc.slice(spIdx, spIdx + 200);
+    assert.ok(cellBlock.includes("na-null"), "missing stylePersonality must render na-null dash");
+  });
+});
