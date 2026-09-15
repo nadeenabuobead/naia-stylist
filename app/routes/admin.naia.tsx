@@ -506,4 +506,67 @@ const NAIA_ADMIN_CSS = `
 
   /* Vocabulary gap toggle container */
   .na-vocab-gap { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #f0f1f3; }
+
+  /* ── Delete / bulk delete ── */
+
+  /* Selected row highlight */
+  .na-row--selected { background: #fef9f0; }
+
+  /* Bulk action bar */
+  .na-bulk-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 1.25rem;
+    background: #fff8ed;
+    border-bottom: 1px solid #f5d99e;
+    font-size: 13px;
+  }
+  .na-bulk-bar__count { font-weight: 600; color: #7d5f00; }
+  .na-bulk-bar__clear {
+    background: none;
+    border: none;
+    color: #6b7280;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 0;
+    text-decoration: underline;
+  }
+  .na-bulk-bar__clear:hover { color: #374151; }
+
+  /* Bulk delete button */
+  .na-btn-delete {
+    padding: 0.3rem 0.8rem;
+    border: 1px solid #dc2626;
+    border-radius: 4px;
+    background: #fff;
+    color: #dc2626;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s;
+  }
+  .na-btn-delete:hover:not(:disabled) { background: #dc2626; color: #fff; }
+  .na-btn-delete:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Per-row delete button */
+  .na-btn-row-delete {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    background: #fff;
+    color: #9ca3af;
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+    line-height: 1;
+  }
+  .na-btn-row-delete:hover:not(:disabled) {
+    background: #fee2e2;
+    border-color: #dc2626;
+    color: #dc2626;
+  }
+  .na-btn-row-delete:disabled { opacity: 0.4; cursor: not-allowed; }
 `;

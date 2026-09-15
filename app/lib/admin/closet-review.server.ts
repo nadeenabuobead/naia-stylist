@@ -386,6 +386,20 @@ export async function revertOverrideField(
   });
 }
 
+// ── Deletion ──────────────────────────────────────────────────────────────────
+
+/** Permanently deletes a single ClosetItem and its cascade children
+ *  (ClosetItemAdminReview, ClosetAnalysisSnapshot). OutfitItem refs are set to null. */
+export async function deleteClosetItem(itemId: string): Promise<void> {
+  await prisma.closetItem.delete({ where: { id: itemId } });
+}
+
+/** Permanently deletes multiple ClosetItems. Returns the count actually deleted. */
+export async function deleteClosetItems(itemIds: string[]): Promise<number> {
+  const result = await prisma.closetItem.deleteMany({ where: { id: { in: itemIds } } });
+  return result.count;
+}
+
 // ── Stored classification fetcher ────────────────────────────────────────────
 
 /** Returns just the stored classification fields for a closet item.

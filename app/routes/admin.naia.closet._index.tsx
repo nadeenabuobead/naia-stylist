@@ -5,6 +5,7 @@
 // Auth: requireAdminSession (internal cookie session, no Shopify).
 // Data: all queries via closet-intelligence.server.ts — unchanged.
 
+import { useState, useEffect } from "react";
 import { useLoaderData, Form, Link, useSearchParams, useFetcher } from "react-router";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { requireAdminSession } from "~/lib/internal-auth.server";
@@ -18,7 +19,7 @@ import {
   type ClosetItemRow,
   type ClosetReviewSummary,
 } from "~/lib/admin/closet-intelligence.server";
-import { markItemReviewed } from "~/lib/admin/closet-review.server";
+import { markItemReviewed, deleteClosetItem, deleteClosetItems } from "~/lib/admin/closet-review.server";
 
 const PAGE_SIZE = 25;
 import type { ClosetCategory } from "@prisma/client";
@@ -72,6 +73,25 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ ok: true, itemId });
   }
 
+  if (intent === "delete-item") {
+    const itemId = formData.get("itemId");
+    if (typeof itemId !== "string" || !itemId.trim()) {
+      return Response.json({ error: "Missing itemId" }, { status: 400 });
+    }
+    await deleteClosetItem(itemId);
+    return Response.json({ ok: true, deleted: 1 });
+  }
+
+  if (intent === "delete-items") {
+    const rawIds = formData.getAll("itemIds");
+    const ids = rawIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0);
+    if (ids.length === 0) {
+      return Response.json({ error: "No items selected" }, { status: 400 });
+    }
+    const deleted = await deleteClosetItems(ids);
+    return Response.json({ ok: true, deleted });
+  }
+
   throw new Response("Bad request", { status: 400 });
 }
 
@@ -109,6 +129,42 @@ export default function ClosetIntelligenceList() {
   const [searchParams] = useSearchParams();
 
   const { items, total, pageCount } = result;
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const bulkFetcher = useFetcher<{ ok?: boolean; deleted?: number; error?: string }>();
+
+  useEffect(() => {
+    if (bulkFetcher.data?.ok) setSelectedIds(new Set());
+  }, [bulkFetcher.data]);
+
+  const allOnPageSelected = items.length > 0 && items.every((item) => selectedIds.has(item.id));
+
+  function toggleSelectAll() {
+    if (allOnPageSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(items.map((item) => item.id)));
+    }
+  }
+
+  function toggleItem(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function handleBulkDelete() {
+    if (!window.confirm(
+      `Permanently delete ${selectedIds.size} item${selectedIds.size !== 1 ? "s" : ""}? This cannot be undone.`
+    )) return;
+    const fd = new FormData();
+    fd.append("intent", "delete-items");
+    for (const id of selectedIds) fd.append("itemIds", id);
+    bulkFetcher.submit(fd, { method: "post" });
+  }
 
   // Encode current filter+page state for Back button round-trip on detail page.
   // Always include page so the back link returns to the correct page even when
@@ -258,6 +314,28 @@ export default function ClosetIntelligenceList() {
           </div>
         </Form>
 
+        {/* ── Bulk action bar ── */}
+        {selectedIds.size > 0 && (
+          <div className="na-bulk-bar">
+            <span className="na-bulk-bar__count">{selectedIds.size} selected</span>
+            <button
+              type="button"
+              className="na-btn-delete"
+              disabled={bulkFetcher.state !== "idle"}
+              onClick={handleBulkDelete}
+            >
+              {bulkFetcher.state !== "idle" ? "Deleting…" : `Delete ${selectedIds.size} selected`}
+            </button>
+            <button
+              type="button"
+              className="na-bulk-bar__clear"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              Clear selection
+            </button>
+          </div>
+        )}
+
         {/* ── Table ── */}
         <div className="na-table-wrap">
           {items.length === 0 ? (
@@ -266,6 +344,14 @@ export default function ClosetIntelligenceList() {
             <table className="na-table">
               <thead>
                 <tr>
+                  <th style={{ width: "32px", padding: "0 0.5rem" }}>
+                    <input
+                      type="checkbox"
+                      aria-label="Select all on this page"
+                      checked={allOnPageSelected}
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
                   <th style={{ width: "44px" }} aria-label="Thumbnail" />
                   <th>Item</th>
                   <th>Category</th>
@@ -279,11 +365,18 @@ export default function ClosetIntelligenceList() {
                   <th>Flags</th>
                   <th>Customer</th>
                   <th>Analyzed</th>
+                  <th style={{ width: "36px" }} aria-label="Delete" />
                 </tr>
               </thead>
               <tbody>
                 {items.map((item) => (
-                  <ItemRow key={item.id} item={item} fromParam={fromParam} />
+                  <ItemRow
+                    key={item.id}
+                    item={item}
+                    fromParam={fromParam}
+                    isSelected={selectedIds.has(item.id)}
+                    onToggle={() => toggleItem(item.id)}
+                  />
                 ))}
               </tbody>
             </table>
@@ -331,13 +424,34 @@ function ConfidenceDot({ level }: { level: string }) {
   );
 }
 
-function ItemRow({ item, fromParam }: { item: ClosetItemRow; fromParam: string }) {
+function ItemRow({
+  item,
+  fromParam,
+  isSelected,
+  onToggle,
+}: {
+  item: ClosetItemRow;
+  fromParam: string;
+  isSelected: boolean;
+  onToggle: () => void;
+}) {
   const approveFetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const deleteFetcher = useFetcher<{ ok?: boolean; error?: string }>();
   const approved = approveFetcher.data?.ok === true;
   const displayStatus = approved ? "REVIEWED" : item.displayReviewStatus;
 
+  if (deleteFetcher.data?.ok) return null;
+
   return (
-    <tr>
+    <tr className={isSelected ? "na-row--selected" : undefined}>
+      <td style={{ padding: "0 0.5rem", width: "32px" }}>
+        <input
+          type="checkbox"
+          aria-label={`Select ${item.name ?? item.id}`}
+          checked={isSelected}
+          onChange={onToggle}
+        />
+      </td>
       <td style={{ padding: "0.5rem 0.875rem" }}>
         {item.thumbnailUrl ? (
           <img src={item.thumbnailUrl} alt="" className="na-thumb" loading="lazy" />
@@ -444,6 +558,24 @@ function ItemRow({ item, fromParam }: { item: ClosetItemRow; fromParam: string }
               day: "2-digit", month: "short", year: "numeric",
             })
           : <span className="na-null">—</span>}
+      </td>
+
+      <td style={{ width: "36px", padding: "0.25rem 0.5rem", textAlign: "center" }}>
+        <button
+          type="button"
+          className="na-btn-row-delete"
+          title="Permanently delete this item"
+          disabled={deleteFetcher.state !== "idle"}
+          onClick={() => {
+            if (!window.confirm("Permanently delete this item? This cannot be undone.")) return;
+            deleteFetcher.submit(
+              { intent: "delete-item", itemId: item.id },
+              { method: "post" },
+            );
+          }}
+        >
+          {deleteFetcher.state !== "idle" ? "…" : "✕"}
+        </button>
       </td>
     </tr>
   );

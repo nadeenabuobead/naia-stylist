@@ -395,3 +395,52 @@ describe("§3B-L Style Personality column", () => {
     assert.ok(cellBlock.includes("na-null"), "missing stylePersonality must render na-null dash");
   });
 });
+
+// ── §3B-M Delete items ────────────────────────────────────────────────────────
+
+describe("§3B-M delete items", () => {
+  it("deleteClosetItem is exported from closet-review.server", () => {
+    assert.ok(reviewSrc.includes("export async function deleteClosetItem"), "must export deleteClosetItem");
+  });
+  it("deleteClosetItems is exported from closet-review.server", () => {
+    assert.ok(reviewSrc.includes("export async function deleteClosetItems"), "must export deleteClosetItems");
+  });
+  it("deleteClosetItems uses deleteMany (bulk)", () => {
+    assert.ok(reviewSrc.includes("deleteMany"), "deleteClosetItems must use deleteMany");
+  });
+  it("list action handles delete-item intent", () => {
+    assert.ok(listSrc.includes('"delete-item"'), "action must handle delete-item");
+  });
+  it("list action handles delete-items intent", () => {
+    assert.ok(listSrc.includes('"delete-items"'), "action must handle delete-items");
+  });
+  it("list action imports deleteClosetItem and deleteClosetItems", () => {
+    assert.ok(
+      listSrc.includes("deleteClosetItem") && listSrc.includes("deleteClosetItems"),
+      "list route must import both delete functions",
+    );
+  });
+  it("list renders per-row delete button", () => {
+    assert.ok(listSrc.includes("na-btn-row-delete"), "list must render per-row delete button");
+  });
+  it("list renders bulk action bar with delete button", () => {
+    assert.ok(listSrc.includes("na-bulk-bar") && listSrc.includes("na-btn-delete"), "list must render bulk delete bar");
+  });
+  it("list renders checkbox column for selection", () => {
+    assert.ok(listSrc.includes("Select all on this page"), "list must have select-all checkbox");
+  });
+  it("delete-item action requires itemId (rejects missing)", () => {
+    const deleteBlock = listSrc.slice(listSrc.indexOf('"delete-item"'), listSrc.indexOf('"delete-item"') + 300);
+    assert.ok(deleteBlock.includes("Missing itemId"), "delete-item must reject missing itemId");
+  });
+  it("delete-items action requires non-empty itemIds (rejects empty selection)", () => {
+    const deleteBlock = listSrc.slice(listSrc.indexOf('"delete-items"'), listSrc.indexOf('"delete-items"') + 400);
+    assert.ok(deleteBlock.includes("No items selected"), "delete-items must reject empty selection");
+  });
+  it("per-row delete uses fetcher (non-navigating) and confirms before deleting", () => {
+    assert.ok(listSrc.includes("deleteFetcher") && listSrc.includes("window.confirm"), "delete must use fetcher and confirm dialog");
+  });
+  it("list route uses useState and useEffect for selection state", () => {
+    assert.ok(listSrc.includes("useState") && listSrc.includes("useEffect"), "must use useState/useEffect for selection");
+  });
+});
