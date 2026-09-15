@@ -222,6 +222,36 @@ export async function action({ request }) {
     return Response.json({ ok: true, customerId: cid, evidenceWritten: report, evidenceBySource: Object.fromEntries(evidenceCounts.map(r => [r.source, r._count.id])), tendencies });
   }
 
+  // ── fixCustomerEmail — accepts STAGING_FIX_SECRET ────────────────────────
+  // Update the email on a Customer record that has email = null (or a known wrong value).
+  // Body: { _action: "fixCustomerEmail", fixSecret, email, customerId? }
+  // If customerId is omitted, targets the first Customer with email IS NULL.
+  if (act === "fixCustomerEmail") {
+    const { fixSecret, email: newEmail, customerId } = body ?? {};
+    const validFix =
+      (process.env.STAGING_FIX_SECRET && fixSecret === process.env.STAGING_FIX_SECRET) ||
+      (process.env.STAGING_SEED_SECRET && fixSecret === process.env.STAGING_SEED_SECRET);
+    if (!validFix) return new Response("Forbidden", { status: 403 });
+    if (!newEmail) return Response.json({ error: "email required" }, { status: 400 });
+
+    let result;
+    if (customerId) {
+      result = await prisma.customer.update({
+        where: { id: String(customerId) },
+        data: { email: String(newEmail) },
+        select: { id: true, shopifyCustomerId: true, email: true },
+      });
+      return Response.json({ ok: true, updated: 1, customer: result });
+    }
+
+    // No customerId — update all customers with null email
+    const updated = await prisma.customer.updateMany({
+      where: { email: null },
+      data: { email: String(newEmail) },
+    });
+    return Response.json({ ok: true, updated: updated.count });
+  }
+
   // All other actions require x-seed-secret
   const secret = request.headers.get("x-seed-secret");
   if (!process.env.STAGING_SEED_SECRET || secret !== process.env.STAGING_SEED_SECRET) {
