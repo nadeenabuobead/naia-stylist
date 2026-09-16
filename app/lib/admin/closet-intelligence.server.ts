@@ -48,6 +48,8 @@ export interface ClosetItemListFilters {
   lowConfidence?: boolean;
   /** Only analyzed items missing subcategory, silhouette, or formality */
   missingMetadata?: boolean;
+  /** Restrict list to a single customer by their DB id */
+  customerId?: string;
 }
 
 export const PAGE_SIZE = 25;
@@ -291,6 +293,10 @@ export async function listClosetItems(
         },
       ],
     });
+  }
+
+  if (filters.customerId) {
+    andClauses.push({ customerId: filters.customerId });
   }
 
   if (andClauses.length > 0) {

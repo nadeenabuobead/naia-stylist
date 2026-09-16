@@ -108,6 +108,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     occasion: url.searchParams.get("occasion") || undefined,
     lowConfidence: url.searchParams.get("lowConfidence") === "1" ? true : undefined,
     missingMetadata: url.searchParams.get("missingMetadata") === "1" ? true : undefined,
+    customerId: url.searchParams.get("customerId") || undefined,
   };
 
   const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10));
@@ -182,6 +183,7 @@ export default function ClosetIntelligenceList() {
   const activeFilterCount = [
     filters.search, filters.category, filters.analysisStatus, filters.reviewStatus,
     filters.formality, filters.occasion, filters.lowConfidence, filters.missingMetadata,
+    filters.customerId,
   ].filter(Boolean).length;
 
   return (
@@ -217,6 +219,15 @@ export default function ClosetIntelligenceList() {
           Phase 3C QA Export
         </NavLink>
       </div>
+
+      {/* Customer scope banner */}
+      {filters.customerId && (
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem", padding: "0.45rem 0.75rem", background: "#0c1a2e", border: "1px solid #1e3a5f", borderRadius: 6, fontSize: "12px", color: "#93c5fd" }}>
+          <span style={{ fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", fontSize: "10px", background: "#1e3a5f", padding: "0.15rem 0.4rem", borderRadius: 3 }}>Customer view</span>
+          <span>Showing items for customer <code style={{ fontFamily: "monospace", fontSize: "11px" }}>{filters.customerId}</code></span>
+          <a href="/admin/naia/closet" style={{ marginLeft: "auto", color: "#93c5fd", textDecoration: "none", fontWeight: 600, fontSize: "11px" }}>✕ Clear customer filter</a>
+        </div>
+      )}
 
       {/* Review progress summary */}
       <div className="na-review-progress">
@@ -323,6 +334,7 @@ export default function ClosetIntelligenceList() {
             Missing metadata
           </label>
 
+          {filters.customerId && <input type="hidden" name="customerId" value={filters.customerId} />}
           <input type="hidden" name="page" value="1" />
 
           <div className="na-filter-actions">
