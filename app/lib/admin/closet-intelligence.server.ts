@@ -464,6 +464,7 @@ export interface ClosetAdminReviewRecord {
   reviewStatus: string;
   adminNotes: string | null;
   overrides: Record<string, unknown> | null;
+  intelligenceOverrides: Record<string, unknown> | null;
   reviewedAt: Date | null;
   reviewedBy: string | null;
   updatedAt: Date;
@@ -554,6 +555,7 @@ export async function getClosetItemDetail(itemId: string): Promise<ClosetItemDet
           reviewStatus: item.adminReview.reviewStatus,
           adminNotes: item.adminReview.adminNotes,
           overrides: item.adminReview.overrides as Record<string, unknown> | null,
+          intelligenceOverrides: (item.adminReview as Record<string, unknown>).intelligenceOverrides as Record<string, unknown> | null ?? null,
           reviewedAt: item.adminReview.reviewedAt,
           reviewedBy: item.adminReview.reviewedBy,
           updatedAt: item.adminReview.updatedAt,

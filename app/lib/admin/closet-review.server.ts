@@ -505,3 +505,106 @@ export function getEffectiveClosetItem<T extends ClosetItemFields>(
 
   return result;
 }
+
+// ── Phase 3C intelligence overrides ──────────────────────────────────────────
+
+export type IntelligenceOverrides = {
+  visualWeight?: "light" | "medium" | "substantial" | null;
+  colourProfile?: {
+    hueFamily?: string | null;
+    wardrobeNeutral?: boolean | null;
+    lightDark?: "light" | "dark" | null;
+    energyTier?: "high-energy" | "deep-authoritative" | "mid-range" | "neutral-versatile" | null;
+  };
+  intentions?: Record<string, "strong" | "supporting" | "none" | null>;
+};
+
+/** Deep-merges a partial IntelligenceOverrides into the stored intelligenceOverrides JSON.
+ *  Key absence = use nAia-derived. Key presence (including null) = admin override. */
+export async function saveIntelligenceOverrides(
+  closetItemId: string,
+  partial: Partial<IntelligenceOverrides>,
+  reviewedBy: string,
+): Promise<void> {
+  const existing = await prisma.closetItemAdminReview.findUnique({
+    where: { closetItemId },
+    select: { intelligenceOverrides: true },
+  });
+
+  const current = (existing?.intelligenceOverrides ?? {}) as IntelligenceOverrides;
+  const merged: IntelligenceOverrides = { ...current };
+
+  if ("visualWeight" in partial) merged.visualWeight = partial.visualWeight;
+  if (partial.colourProfile) {
+    merged.colourProfile = { ...(current.colourProfile ?? {}), ...partial.colourProfile };
+  }
+  if (partial.intentions) {
+    merged.intentions = { ...(current.intentions ?? {}), ...partial.intentions };
+  }
+
+  await prisma.closetItemAdminReview.upsert({
+    where: { closetItemId },
+    create: {
+      closetItemId,
+      reviewStatus: "reviewed",
+      overrides: null,
+      intelligenceOverrides: merged as object,
+      reviewedBy,
+      reviewedAt: new Date(),
+      adminNotes: null,
+    },
+    update: {
+      intelligenceOverrides: merged as object,
+      reviewedBy,
+      reviewedAt: new Date(),
+    },
+  });
+}
+
+/** Removes one key from intelligenceOverrides.
+ *  Supported fieldPath values:
+ *   "visualWeight"
+ *   "colourProfile.hueFamily" | "colourProfile.wardrobeNeutral" | "colourProfile.lightDark" | "colourProfile.energyTier"
+ *   "intentions.{intentionId}"
+ */
+export async function revertIntelligenceField(
+  closetItemId: string,
+  fieldPath: string,
+  reviewedBy: string,
+): Promise<void> {
+  const existing = await prisma.closetItemAdminReview.findUnique({
+    where: { closetItemId },
+    select: { intelligenceOverrides: true },
+  });
+  if (!existing?.intelligenceOverrides) return;
+
+  const current = { ...((existing.intelligenceOverrides ?? {}) as IntelligenceOverrides) };
+  const [top, sub] = fieldPath.split(".");
+
+  if (top === "visualWeight") {
+    delete current.visualWeight;
+  } else if (top === "colourProfile" && sub) {
+    if (current.colourProfile) {
+      const cp = { ...current.colourProfile } as Record<string, unknown>;
+      delete cp[sub];
+      current.colourProfile = Object.keys(cp).length > 0
+        ? (cp as IntelligenceOverrides["colourProfile"])
+        : undefined;
+    }
+  } else if (top === "intentions" && sub) {
+    if (current.intentions) {
+      const intents = { ...current.intentions };
+      delete intents[sub];
+      current.intentions = Object.keys(intents).length > 0 ? intents : undefined;
+    }
+  }
+
+  await prisma.closetItemAdminReview.update({
+    where: { closetItemId },
+    data: {
+      intelligenceOverrides: current as object,
+      reviewedBy,
+      reviewedAt: new Date(),
+    },
+  });
+}

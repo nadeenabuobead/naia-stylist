@@ -10,7 +10,7 @@
 //   - Reviewer identity always from session, never from form body
 //   - No StyleMe wiring; overrides are stored only
 
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useLoaderData, Link, useFetcher, useNavigate } from "react-router";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { requireAdminSession } from "~/lib/internal-auth.server";
@@ -36,8 +36,11 @@ import {
   getItemClassification,
   setVocabGapFlag,
   clearVocabGapFlag,
+  saveIntelligenceOverrides,
+  revertIntelligenceField,
   type ClosetItemOverrides,
   type ClosetItemFields,
+  type IntelligenceOverrides,
 } from "~/lib/admin/closet-review.server";
 import {
   buildPrivateDownloadUrl,
@@ -45,6 +48,7 @@ import {
 } from "~/lib/cloudinary-admin.server";
 import {
   deriveGarmentStylingIntelligence,
+  ALL_INTENTIONS,
   type GarmentStylingIntelligence,
   type SignalSource,
   type SignalPolarity,
@@ -121,7 +125,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const passportContext = await getCustomerStylingPassport(item.customerId);
   const stylingIntelligence = deriveGarmentStylingIntelligence(effectiveClassification, passportContext);
 
-  return Response.json({ item, effectiveClassification, garmentImageUrl, interpretation, stylingIntelligence, passportContext, returnTo, nextUnreviewedId, prevItemId, nextItemId });
+  const intelligenceOverrides = (item.adminReview?.intelligenceOverrides ?? null) as IntelligenceOverrides | null;
+
+  return Response.json({ item, effectiveClassification, garmentImageUrl, interpretation, stylingIntelligence, intelligenceOverrides, passportContext, returnTo, nextUnreviewedId, prevItemId, nextItemId });
 }
 
 // ── Action ─────────────────────────────────────────────────────────────────────
@@ -182,6 +188,22 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (intent === "clear-vocab-gap") {
     await clearVocabGapFlag(itemId, reviewedBy);
+    return Response.json({ ok: true });
+  }
+
+  if (intent === "save-intelligence-overrides") {
+    const raw = formData.get("overrides");
+    if (typeof raw !== "string") return Response.json({ error: "Missing overrides" }, { status: 400 });
+    let partial: Partial<IntelligenceOverrides>;
+    try { partial = JSON.parse(raw); } catch { return Response.json({ error: "Invalid JSON" }, { status: 400 }); }
+    await saveIntelligenceOverrides(itemId, partial, reviewedBy);
+    return Response.json({ ok: true });
+  }
+
+  if (intent === "revert-intelligence-field") {
+    const fieldPath = formData.get("fieldPath");
+    if (typeof fieldPath !== "string") return Response.json({ error: "Missing fieldPath" }, { status: 400 });
+    await revertIntelligenceField(itemId, fieldPath, reviewedBy);
     return Response.json({ ok: true });
   }
 
@@ -561,26 +583,266 @@ function StrengthBadge({ strength }: { strength: IntentionStrength }) {
   );
 }
 
+// ── Intelligence Edit Panel ───────────────────────────────────────────────────
+
+const HUE_FAMILY_OPTIONS = ["red","pink","orange","yellow","green","blue","purple","grey","brown"] as const;
+const ENERGY_TIER_OPTIONS = ["high-energy","deep-authoritative","mid-range","neutral-versatile"] as const;
+const VISUAL_WEIGHT_OPTIONS = ["light","medium","substantial"] as const;
+const STRENGTH_OPTIONS: IntentionStrength[] = ["strong","supporting","none"];
+
+function IntelligenceEditPanel({
+  intel,
+  existing,
+  itemId,
+  onClose,
+}: {
+  intel: GarmentStylingIntelligence;
+  existing: IntelligenceOverrides | null;
+  itemId: string;
+  onClose: () => void;
+}) {
+  // Local state mirrors the overrides — null means "use nAia"
+  const [vw, setVw] = useState<string>(existing?.visualWeight ?? "__naia__");
+
+  const cp = existing?.colourProfile ?? {};
+  const [hue, setHue] = useState<string>(
+    "hueFamily" in cp ? (cp.hueFamily ?? "__null__") : "__naia__",
+  );
+  const [wn, setWn] = useState<string>(
+    "wardrobeNeutral" in cp ? String(cp.wardrobeNeutral) : "__naia__",
+  );
+  const [ld, setLd] = useState<string>(
+    "lightDark" in cp ? (cp.lightDark ?? "__null__") : "__naia__",
+  );
+  const [et, setEt] = useState<string>(
+    "energyTier" in cp ? (cp.energyTier ?? "__null__") : "__naia__",
+  );
+
+  const intOv = existing?.intentions ?? {};
+  const [intentStrengths, setIntentStrengths] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    for (const id of ALL_INTENTIONS) {
+      init[id] = id in intOv ? (intOv[id] ?? "__null__") as string : "__naia__";
+    }
+    return init;
+  });
+
+  const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const hasSubmitted = useRef(false);
+
+  useEffect(() => {
+    if (hasSubmitted.current && fetcher.state === "idle" && fetcher.data?.ok) {
+      hasSubmitted.current = false;
+      onClose();
+    }
+  }, [fetcher.state, fetcher.data, onClose]);
+
+  function handleSave() {
+    // Build partial overrides — only include keys that are NOT "__naia__"
+    const partial: Partial<IntelligenceOverrides> = {};
+
+    if (vw !== "__naia__") partial.visualWeight = vw as IntelligenceOverrides["visualWeight"];
+
+    const cpPartial: IntelligenceOverrides["colourProfile"] = {};
+    let hasCp = false;
+    if (hue !== "__naia__") { cpPartial.hueFamily = hue === "__null__" ? null : hue as "red"; hasCp = true; }
+    if (wn !== "__naia__") { cpPartial.wardrobeNeutral = wn === "true"; hasCp = true; }
+    if (ld !== "__naia__") { cpPartial.lightDark = ld === "__null__" ? null : ld as "light" | "dark"; hasCp = true; }
+    if (et !== "__naia__") { cpPartial.energyTier = et === "__null__" ? null : et as "high-energy" | "deep-authoritative" | "mid-range" | "neutral-versatile"; hasCp = true; }
+    if (hasCp) partial.colourProfile = cpPartial;
+
+    const intentPartial: IntelligenceOverrides["intentions"] = {};
+    let hasIntent = false;
+    for (const id of ALL_INTENTIONS) {
+      if (intentStrengths[id] !== "__naia__") {
+        intentPartial[id] = intentStrengths[id] as IntentionStrength;
+        hasIntent = true;
+      }
+    }
+    if (hasIntent) partial.intentions = intentPartial;
+
+    hasSubmitted.current = true;
+    fetcher.submit(
+      { intent: "save-intelligence-overrides", overrides: JSON.stringify(partial) },
+      { method: "post", action: `/admin/naia/closet/${itemId}` },
+    );
+  }
+
+  const selStyle: React.CSSProperties = {
+    fontSize: "0.75rem",
+    background: "#111827",
+    border: "1px solid #374151",
+    borderRadius: "4px",
+    color: "#e5e7eb",
+    padding: "0.2rem 0.4rem",
+    minWidth: "160px",
+  };
+
+  return (
+    <div style={{ background: "#0d1117", border: "1px solid #374151", borderRadius: "6px", padding: "1rem", marginTop: "0.75rem" }}>
+
+      <p className="na-edit-group-title" style={{ marginBottom: "0.75rem" }}>Visual Weight</p>
+      <div style={{ marginBottom: "1rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <select value={vw} onChange={e => setVw(e.target.value)} style={selStyle}>
+          <option value="__naia__">USE NAIA (derived: {intel.visualWeight.value ?? "—"})</option>
+          {VISUAL_WEIGHT_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+      </div>
+
+      <p className="na-edit-group-title" style={{ marginBottom: "0.5rem" }}>Colour Profile</p>
+      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "0.4rem 0.75rem", alignItems: "center", marginBottom: "1rem" }}>
+        <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>hueFamily</span>
+        <select value={hue} onChange={e => setHue(e.target.value)} style={selStyle}>
+          <option value="__naia__">USE NAIA (derived: {intel.colourProfile.hueFamily ?? "—"})</option>
+          <option value="__null__">CLEAR (no hue family)</option>
+          {HUE_FAMILY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>wardrobeNeutral</span>
+        <select value={wn} onChange={e => setWn(e.target.value)} style={selStyle}>
+          <option value="__naia__">USE NAIA (derived: {String(intel.colourProfile.wardrobeNeutral)})</option>
+          <option value="true">true</option>
+          <option value="false">false</option>
+        </select>
+        <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>lightDark</span>
+        <select value={ld} onChange={e => setLd(e.target.value)} style={selStyle}>
+          <option value="__naia__">USE NAIA (derived: {intel.colourProfile.lightDark ?? "—"})</option>
+          <option value="__null__">CLEAR</option>
+          <option value="light">light</option>
+          <option value="dark">dark</option>
+        </select>
+        <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>energyTier</span>
+        <select value={et} onChange={e => setEt(e.target.value)} style={selStyle}>
+          <option value="__naia__">USE NAIA (derived: {intel.colourProfile.energyTier ?? "—"})</option>
+          <option value="__null__">CLEAR</option>
+          {ENERGY_TIER_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+      </div>
+
+      <p className="na-edit-group-title" style={{ marginBottom: "0.5rem" }}>Intention Strengths</p>
+      <div style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: "0.3rem 0.75rem", alignItems: "center", marginBottom: "1rem" }}>
+        {ALL_INTENTIONS.map(id => {
+          const derived = intel.intentionPotentials.find(ip => ip.intention === id)?.strength ?? "none";
+          return (
+            <React.Fragment key={id}>
+              <span style={{ fontSize: "0.7rem", color: "#9ca3af", fontFamily: "monospace" }}>{id}</span>
+              <select
+                value={intentStrengths[id]}
+                onChange={e => setIntentStrengths(prev => ({ ...prev, [id]: e.target.value }))}
+                style={selStyle}
+              >
+                <option value="__naia__">USE NAIA ({derived})</option>
+                {STRENGTH_OPTIONS.map(s => <option key={s} value={s}>{s.toUpperCase()}</option>)}
+              </select>
+            </React.Fragment>
+          );
+        })}
+      </div>
+
+      {fetcher.data?.error && (
+        <p style={{ fontSize: "0.75rem", color: "#f87171", marginBottom: "0.5rem" }}>{fetcher.data.error}</p>
+      )}
+
+      <div style={{ display: "flex", gap: "0.5rem" }}>
+        <button
+          type="button"
+          onClick={handleSave}
+          className="na-btn na-btn--primary"
+          disabled={fetcher.state !== "idle"}
+        >
+          {fetcher.state !== "idle" ? "Saving…" : "Save"}
+        </button>
+        <button type="button" onClick={onClose} className="na-btn na-btn--outline">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Deeper Styling Intelligence ───────────────────────────────────────────────
 
 function DeeperStylingIntelligence({
   intel,
+  intelligenceOverrides,
+  itemId,
 }: {
   intel: GarmentStylingIntelligence;
+  intelligenceOverrides: IntelligenceOverrides | null;
+  itemId: string;
 }) {
+  const [showEdit, setShowEdit] = useState(false);
+  const revertFetcher = useFetcher<{ ok?: boolean }>();
 
+  const ov = intelligenceOverrides;
+  const passportBadge = intel.passportUsed ? "SHADOW · V2 · PASSPORT-AWARE" : "SHADOW · V2 · NO PASSPORT";
+
+  // Compute effective values (override wins over derived)
   const vw = intel.visualWeight;
   const cp = intel.colourProfile;
-  const passportBadge = intel.passportUsed ? "SHADOW · V1 · PASSPORT-AWARE" : "SHADOW · V1 · NO PASSPORT";
+  const cpOv = ov?.colourProfile ?? {};
+
+  const effVW: string | null = ov && "visualWeight" in ov ? ov.visualWeight ?? null : vw.value;
+  const effHue: string | null = "hueFamily" in cpOv ? (cpOv.hueFamily ?? null) : cp.hueFamily;
+  const effWN: boolean = "wardrobeNeutral" in cpOv ? Boolean(cpOv.wardrobeNeutral) : cp.wardrobeNeutral;
+  const effLD: string | null = "lightDark" in cpOv ? (cpOv.lightDark ?? null) : cp.lightDark;
+  const effET: string | null = "energyTier" in cpOv ? (cpOv.energyTier ?? null) : cp.energyTier;
+
+  const intOv = ov?.intentions ?? {};
+
+  function revertField(fieldPath: string) {
+    revertFetcher.submit(
+      { intent: "revert-intelligence-field", fieldPath },
+      { method: "post", action: `/admin/naia/closet/${itemId}` },
+    );
+  }
+
+  function EditedBadge({ fieldPath }: { fieldPath: string }) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
+        <span style={{ fontSize: "0.6rem", background: "#2d1a5e", color: "#a78bfa", border: "1px solid #4c1d95", borderRadius: "3px", padding: "0.05rem 0.3rem", fontFamily: "monospace" }}>
+          EDITED
+        </span>
+        <button
+          type="button"
+          onClick={() => revertField(fieldPath)}
+          style={{ fontSize: "0.6rem", color: "#6b7280", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0 }}
+        >
+          Reset to nAia
+        </button>
+      </span>
+    );
+  }
 
   return (
     <div className="na-card">
       <div className="na-card__header">
         <h2 className="na-card__title">Garment Intelligence</h2>
-        <span className="na-badge na-badge--ai-only" style={{ fontSize: "0.65rem" }}>
-          {passportBadge}
-        </span>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <span className="na-badge na-badge--ai-only" style={{ fontSize: "0.65rem" }}>
+            {passportBadge}
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowEdit(v => !v)}
+            className="na-btn na-btn--outline"
+            style={{ fontSize: "0.7rem", padding: "0.2rem 0.6rem" }}
+          >
+            {showEdit ? "Close" : "Edit intelligence"}
+          </button>
+        </div>
       </div>
+
+      {showEdit && (
+        <div className="na-card__body" style={{ paddingTop: 0, paddingBottom: 0 }}>
+          <IntelligenceEditPanel
+            intel={intel}
+            existing={ov}
+            itemId={itemId}
+            onClose={() => setShowEdit(false)}
+          />
+        </div>
+      )}
+
       <div className="na-card__body" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
 
         {/* ─── B. GARMENT INTELLIGENCE (intrinsic / generic) ─── */}
@@ -593,14 +855,17 @@ function DeeperStylingIntelligence({
             {/* Visual Weight */}
             <div>
               <p style={{ fontSize: "0.65rem", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.35rem" }}>Visual Weight</p>
-              {vw.value ? (
+              {effVW ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-                  <span
-                    className="na-interp-label"
-                    style={{ backgroundColor: VISUAL_WEIGHT_COLOUR[vw.value] + "20", color: VISUAL_WEIGHT_COLOUR[vw.value], borderColor: VISUAL_WEIGHT_COLOUR[vw.value] + "40" }}
-                  >
-                    {vw.value}
-                  </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <span
+                      className="na-interp-label"
+                      style={{ backgroundColor: (VISUAL_WEIGHT_COLOUR[effVW] ?? "#374151") + "20", color: VISUAL_WEIGHT_COLOUR[effVW] ?? "#9ca3af", borderColor: (VISUAL_WEIGHT_COLOUR[effVW] ?? "#374151") + "40" }}
+                    >
+                      {effVW}
+                    </span>
+                    {ov && "visualWeight" in ov && <EditedBadge fieldPath="visualWeight" />}
+                  </div>
                   {vw.evidence.length > 0 && (
                     <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap", marginTop: "0.15rem" }}>
                       {vw.evidence.map((e) => (
@@ -619,26 +884,30 @@ function DeeperStylingIntelligence({
             {/* Colour Profile */}
             <div>
               <p style={{ fontSize: "0.65rem", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.35rem" }}>Colour Profile</p>
-              {cp.evidence.length > 0 ? (
+              {cp.evidence.length > 0 || ov?.colourProfile ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
                   <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-                    {/* V2: single combined colour label (no "neutral · neutral" duplicate) */}
-                    {cp.wardrobeNeutral && cp.hueFamily ? (
-                      <span className="na-interp-label">{cp.hueFamily} neutral</span>
-                    ) : cp.wardrobeNeutral ? (
+                    {effWN && effHue ? (
+                      <span className="na-interp-label">{effHue} neutral</span>
+                    ) : effWN ? (
                       <span className="na-interp-label">neutral</span>
-                    ) : cp.hueFamily ? (
-                      <span className="na-interp-label">{cp.hueFamily}</span>
+                    ) : effHue ? (
+                      <span className="na-interp-label">{effHue}</span>
                     ) : null}
-                    {cp.lightDark && <span className="na-interp-label">{cp.lightDark}</span>}
-                    {cp.energyTier && (
+                    {effLD && <span className="na-interp-label">{effLD}</span>}
+                    {effET && (
                       <span
                         className="na-interp-label"
-                        style={{ backgroundColor: ENERGY_TIER_COLOUR[cp.energyTier] + "20", color: ENERGY_TIER_COLOUR[cp.energyTier], borderColor: ENERGY_TIER_COLOUR[cp.energyTier] + "40" }}
+                        style={{ backgroundColor: ENERGY_TIER_COLOUR[effET] + "20", color: ENERGY_TIER_COLOUR[effET], borderColor: ENERGY_TIER_COLOUR[effET] + "40" }}
                       >
-                        {cp.energyTier}
+                        {effET}
                       </span>
                     )}
+                    {/* Edited badges for colour profile fields */}
+                    {"hueFamily" in cpOv && <EditedBadge fieldPath="colourProfile.hueFamily" />}
+                    {"lightDark" in cpOv && <EditedBadge fieldPath="colourProfile.lightDark" />}
+                    {"energyTier" in cpOv && <EditedBadge fieldPath="colourProfile.energyTier" />}
+                    {"wardrobeNeutral" in cpOv && <EditedBadge fieldPath="colourProfile.wardrobeNeutral" />}
                   </div>
                   {cp.evidence.length > 0 && (
                     <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
@@ -677,37 +946,45 @@ function DeeperStylingIntelligence({
             </div>
           )}
 
-          {/* All 12 intentions — always shown (V2: strength badge per intention) */}
+          {/* All 12 intentions */}
           <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", marginBottom: "0.75rem" }}>
-            {intel.intentionPotentials.map(ip => (
-              <div key={ip.intention} style={{ borderLeft: `2px solid ${ip.strength === "strong" ? "#3f6212" : ip.strength === "supporting" ? "#78350f" : "#374151"}`, paddingLeft: "0.75rem" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.2rem" }}>
-                  <span style={{ fontSize: "0.7rem", fontWeight: 600, color: "#d1d5db", fontFamily: "monospace" }}>
-                    {ip.intention}
-                  </span>
-                  <StrengthBadge strength={ip.strength} />
-                </div>
-                {ip.signalDetails.length === 0 ? (
-                  <span style={{ fontSize: "0.7rem", color: "#4b5563" }}>none</span>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
-                    {ip.signalDetails.map((sd, i) => (
-                      <div key={i} style={{ display: "flex", alignItems: "baseline", gap: "0.4rem" }}>
-                        <span style={{ fontSize: "0.7rem", color: sd.polarity === "conflict" ? "#fca5a5" : "#9ca3af" }}>
-                          {sd.text}
-                        </span>
-                        <SignalBadge source={sd.source} polarity={sd.polarity} />
-                      </div>
-                    ))}
+            {intel.intentionPotentials.map(ip => {
+              const isOverridden = ip.intention in intOv;
+              const effStrength: IntentionStrength = isOverridden
+                ? ((intOv[ip.intention] as IntentionStrength) ?? "none")
+                : ip.strength;
+              const borderColour = effStrength === "strong" ? "#3f6212" : effStrength === "supporting" ? "#78350f" : "#374151";
+              return (
+                <div key={ip.intention} style={{ borderLeft: `2px solid ${borderColour}`, paddingLeft: "0.75rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.2rem", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: "0.7rem", fontWeight: 600, color: "#d1d5db", fontFamily: "monospace" }}>
+                      {ip.intention}
+                    </span>
+                    <StrengthBadge strength={effStrength} />
+                    {isOverridden && <EditedBadge fieldPath={`intentions.${ip.intention}`} />}
                   </div>
-                )}
-              </div>
-            ))}
+                  {ip.signalDetails.length === 0 ? (
+                    <span style={{ fontSize: "0.7rem", color: "#4b5563" }}>none</span>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
+                      {ip.signalDetails.map((sd, i) => (
+                        <div key={i} style={{ display: "flex", alignItems: "baseline", gap: "0.4rem" }}>
+                          <span style={{ fontSize: "0.7rem", color: sd.polarity === "conflict" ? "#fca5a5" : "#9ca3af" }}>
+                            {sd.text}
+                          </span>
+                          <SignalBadge source={sd.source} polarity={sd.polarity} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 
         <p style={{ fontSize: "0.65rem", color: "#4b5563", borderTop: "1px solid #1f2937", paddingTop: "0.75rem" }}>
-          Shadow-only · V1 · Not wired to StyleMe · Not final StyleMe reasoning
+          Shadow-only · V2 · Not wired to StyleMe · Not final StyleMe reasoning
         </p>
       </div>
     </div>
@@ -717,13 +994,14 @@ function DeeperStylingIntelligence({
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function ClosetItemDetailPage() {
-  const { item, effectiveClassification, garmentImageUrl, interpretation, stylingIntelligence, passportContext, returnTo, nextUnreviewedId, prevItemId, nextItemId } =
+  const { item, effectiveClassification, garmentImageUrl, interpretation, stylingIntelligence, intelligenceOverrides, passportContext, returnTo, nextUnreviewedId, prevItemId, nextItemId } =
     useLoaderData() as {
       item: ClosetItemDetail;
       effectiveClassification: ClosetClassification;
       garmentImageUrl: string | null;
       interpretation: GarmentInterpretation;
       stylingIntelligence: GarmentStylingIntelligence;
+      intelligenceOverrides: IntelligenceOverrides | null;
       passportContext: CustomerStylingPassportContext | null;
       returnTo: string | null;
       nextUnreviewedId: string | null;
@@ -1185,7 +1463,7 @@ export default function ClosetItemDetailPage() {
           {/* ════════════════════════════════════════════
               SECTION B+C — GARMENT INTELLIGENCE + PASSPORT-AWARE STYLING POTENTIAL
           ════════════════════════════════════════════ */}
-          <DeeperStylingIntelligence intel={stylingIntelligence} />
+          <DeeperStylingIntelligence intel={stylingIntelligence} intelligenceOverrides={intelligenceOverrides} itemId={item.id} />
 
           {/* ════════════════════════════════════════════
               SECTION 2 — WHAT AI SEES (effective values)

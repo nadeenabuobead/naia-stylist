@@ -1154,6 +1154,10 @@ model ClosetItemAdminReview {
   // Validated server-side against canonical garment vocabularies.
   overrides Json?
 
+  // Sparse Phase 3C admin overrides: { visualWeight?, colourProfile?, intentions? }
+  // Key absence = use nAia-derived value. Key presence = admin override is active.
+  intelligenceOverrides Json?
+
   reviewedAt DateTime?
   reviewedBy String?   // admin email / identifier
 
