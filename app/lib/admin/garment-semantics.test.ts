@@ -32,7 +32,7 @@ import type { ClosetClassification } from "~/lib/admin/closet-intelligence.serve
 
 function blank(): ClosetClassification {
   return {
-    subcategory: null, silhouette: null, fitProfile: null,
+    category: null, subcategory: null, silhouette: null, fitProfile: null,
     hemLength: null, topLength: null, waistShape: null,
     sleeveLength: null, necklineCoverage: null,
     shoulderCoverage: null, midriffExposed: null,
@@ -426,7 +426,7 @@ describe("§GS-06 Beige trench acceptance test", () => {
   // Uses ACTUAL stored values visible in Closet Intelligence for the live beige trench.
   // All labels must emerge from generic rules — nothing hardcoded for this garment.
   const beigeTrench: ClosetClassification = {
-    subcategory: "trench coat",
+    category: null, subcategory: "trench coat",
     silhouette: "straight",
     fitProfile: "tailored",
     hemLength: "midi",

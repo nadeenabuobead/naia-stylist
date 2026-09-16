@@ -415,6 +415,7 @@ export interface ClosetItemDetail {
 }
 
 export interface ClosetClassification {
+  category: string | null;
   subcategory: string | null;
   silhouette: string | null;
   fitProfile: string | null;
@@ -494,6 +495,7 @@ export async function getClosetItemDetail(itemId: string): Promise<ClosetItemDet
     createdAt: item.createdAt,
 
     classification: {
+      category: item.category,
       subcategory: item.subcategory,
       silhouette: item.silhouette,
       fitProfile: item.fitProfile,
@@ -618,8 +620,15 @@ export async function getAdjacentItemIds(
 export interface CustomerStylingPassportContext {
   stylePersonalities: string[];
   favoriteColors: string[];
+  avoidColors: string[];
   coveragePreferences: string[];
   dressingPreferences: string[];
+  fitPreferences: string[];
+  silhouette: string[];
+  desiredFeelings: string[];
+  lifestyle: string[];
+  styleSupport: string[];
+  successfulOutfitGives: string[];
 }
 
 export async function getCustomerStylingPassport(
@@ -630,24 +639,190 @@ export async function getCustomerStylingPassport(
     select: {
       stylePersonalities: true,
       favoriteColors: true,
+      avoidColors: true,
       coveragePreferences: true,
       dressingPreferences: true,
+      fitPreferences: true,
+      silhouette: true,
+      desiredFeelings: true,
+      lifestyle: true,
+      styleSupport: true,
+      successfulOutfitGives: true,
     },
   });
   if (!profile) return null;
   const hasData =
     profile.stylePersonalities.length > 0 ||
     profile.favoriteColors.length > 0 ||
+    profile.avoidColors.length > 0 ||
     profile.coveragePreferences.length > 0 ||
-    profile.dressingPreferences.length > 0;
+    profile.dressingPreferences.length > 0 ||
+    profile.fitPreferences.length > 0 ||
+    profile.silhouette.length > 0 ||
+    profile.desiredFeelings.length > 0 ||
+    profile.lifestyle.length > 0 ||
+    profile.styleSupport.length > 0 ||
+    profile.successfulOutfitGives.length > 0;
   return hasData
     ? {
         stylePersonalities: profile.stylePersonalities,
         favoriteColors: profile.favoriteColors,
+        avoidColors: profile.avoidColors,
         coveragePreferences: profile.coveragePreferences,
         dressingPreferences: profile.dressingPreferences,
+        fitPreferences: profile.fitPreferences,
+        silhouette: profile.silhouette,
+        desiredFeelings: profile.desiredFeelings,
+        lifestyle: profile.lifestyle,
+        styleSupport: profile.styleSupport,
+        successfulOutfitGives: profile.successfulOutfitGives,
       }
     : null;
+}
+
+// ── Admin customer list / detail ──────────────────────────────────────────────
+
+export interface AdminCustomerSummary {
+  id: string;
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  membershipStatus: string;
+  passportComplete: boolean;
+  profileVersion: number | null;
+  closetItemCount: number;
+  createdAt: Date;
+}
+
+export async function getAdminCustomerList(): Promise<AdminCustomerSummary[]> {
+  const customers = await prisma.customer.findMany({
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+      membershipStatus: true,
+      createdAt: true,
+      onboardingProfile: { select: { completed: true, profileVersion: true } },
+      _count: { select: { closetItems: true } },
+    },
+  });
+  return customers.map((c: (typeof customers)[number]) => ({
+    id: c.id,
+    email: c.email,
+    firstName: c.firstName,
+    lastName: c.lastName,
+    membershipStatus: c.membershipStatus,
+    passportComplete: c.onboardingProfile?.completed ?? false,
+    profileVersion: c.onboardingProfile?.profileVersion ?? null,
+    closetItemCount: c._count.closetItems,
+    createdAt: c.createdAt,
+  }));
+}
+
+export interface AdminCustomerDetail {
+  id: string;
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  membershipStatus: string;
+  createdAt: Date;
+  passport: CustomerStylingPassportContext | null;
+  passportComplete: boolean;
+  profileVersion: number | null;
+  closetItemCount: number;
+  reviewedItemCount: number;
+  categoryBreakdown: Record<string, number>;
+}
+
+export async function getAdminCustomerDetail(
+  customerId: string,
+): Promise<AdminCustomerDetail | null> {
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: {
+      id: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+      membershipStatus: true,
+      createdAt: true,
+      onboardingProfile: {
+        select: {
+          completed: true,
+          profileVersion: true,
+          stylePersonalities: true,
+          favoriteColors: true,
+          avoidColors: true,
+          coveragePreferences: true,
+          dressingPreferences: true,
+          fitPreferences: true,
+          silhouette: true,
+          desiredFeelings: true,
+          lifestyle: true,
+          styleSupport: true,
+          successfulOutfitGives: true,
+        },
+      },
+      closetItems: {
+        select: {
+          category: true,
+          adminReview: { select: { id: true } },
+        },
+      },
+    },
+  });
+  if (!customer) return null;
+
+  const profile = customer.onboardingProfile;
+  const hasPassportData = profile != null && (
+    profile.stylePersonalities.length > 0 ||
+    profile.favoriteColors.length > 0 ||
+    profile.coveragePreferences.length > 0 ||
+    profile.dressingPreferences.length > 0 ||
+    profile.fitPreferences.length > 0 ||
+    profile.silhouette.length > 0 ||
+    profile.desiredFeelings.length > 0 ||
+    profile.lifestyle.length > 0 ||
+    profile.styleSupport.length > 0
+  );
+
+  const categoryBreakdown: Record<string, number> = {};
+  let reviewedItemCount = 0;
+  for (const item of customer.closetItems) {
+    categoryBreakdown[item.category] = (categoryBreakdown[item.category] ?? 0) + 1;
+    if (item.adminReview) reviewedItemCount++;
+  }
+
+  return {
+    id: customer.id,
+    email: customer.email,
+    firstName: customer.firstName,
+    lastName: customer.lastName,
+    membershipStatus: customer.membershipStatus,
+    createdAt: customer.createdAt,
+    passport: hasPassportData && profile
+      ? {
+          stylePersonalities: profile.stylePersonalities,
+          favoriteColors: profile.favoriteColors,
+          avoidColors: profile.avoidColors,
+          coveragePreferences: profile.coveragePreferences,
+          dressingPreferences: profile.dressingPreferences,
+          fitPreferences: profile.fitPreferences,
+          silhouette: profile.silhouette,
+          desiredFeelings: profile.desiredFeelings,
+          lifestyle: profile.lifestyle,
+          styleSupport: profile.styleSupport,
+          successfulOutfitGives: profile.successfulOutfitGives,
+        }
+      : null,
+    passportComplete: profile?.completed ?? false,
+    profileVersion: profile?.profileVersion ?? null,
+    closetItemCount: customer.closetItems.length,
+    reviewedItemCount,
+    categoryBreakdown,
+  };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

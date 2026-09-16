@@ -1,0 +1,378 @@
+// app/routes/admin.naia.customers.$customerId.tsx
+//
+// nAia Admin — Customer detail.
+// Read-only. "What does nAia think it knows about this person?"
+//
+// Sections:
+//   A. Identity (name, email, plan, joined)
+//   B. Customer Passport (customer-supplied preferences)
+//   C. Closet Summary (garment counts, category breakdown, link to closet)
+//
+// Auth: requireAdminSession.
+
+import { Link, useLoaderData } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
+import { requireAdminSession } from "~/lib/internal-auth.server";
+import {
+  getAdminCustomerDetail,
+  type AdminCustomerDetail,
+  type CustomerStylingPassportContext,
+} from "~/lib/admin/closet-intelligence.server";
+
+export async function loader({ request, params }: LoaderFunctionArgs) {
+  await requireAdminSession(request);
+  const { customerId } = params;
+  if (!customerId) throw new Response("Not found", { status: 404 });
+  const customer = await getAdminCustomerDetail(customerId);
+  if (!customer) throw new Response("Customer not found", { status: 404 });
+  return Response.json({ customer });
+}
+
+// ── Label maps (same as closet detail page) ────────────────────────────────
+
+const PASSPORT_LABELS: Record<string, Record<string, string>> = {
+  stylePersonalities: {
+    "classic-polished": "Classic & Polished",
+    "feminine-romantic": "Feminine & Romantic",
+    "minimal-relaxed": "Minimal & Relaxed",
+    "bold-edgy": "Bold & Edgy",
+    "creative-expressive": "Creative & Expressive",
+    "effortlessly-chic": "Effortlessly Chic",
+    "sporty-active": "Sporty & Active",
+    "bohemian": "Bohemian",
+    "preppy": "Preppy",
+    "streetwear": "Streetwear",
+  },
+  lifestyle: {
+    "work-office": "Work / Office",
+    "casual-everyday": "Casual / Everyday",
+    "events-occasions": "Events / Occasions",
+    "active-sporty": "Active / Sporty",
+    "travel": "Travel",
+    "home-relaxed": "Home / Relaxed",
+  },
+  desiredFeelings: {
+    "feel-like-myself": "Feel like myself",
+    "feel-put-together": "Feel put-together",
+    "feel-confident": "Feel confident",
+    "feel-attractive": "Feel attractive",
+    "feel-comfortable": "Feel comfortable",
+    "feel-energised": "Feel energised",
+    "feel-less-exposed": "Feel less exposed",
+    "feel-sharper": "Feel sharper",
+    "feel-softer": "Feel softer",
+    "express-myself": "Express myself",
+    "give-energy": "Give me energy",
+    "give-structure": "Give me structure",
+    "ground-me": "Ground me",
+    "make-it-easy": "Make it easy",
+  },
+  dressingPreferences: {
+    "dresses-modestly": "I dress modestly",
+    "usually-wears-abayas": "I wear abayas",
+    "wears-hijab": "I wear hijab",
+    "arms-covered": "Arms covered",
+    "chest-neckline-covered": "Chest / neckline covered",
+    "legs-covered": "Legs covered",
+    "longer-tops": "Longer tops",
+    "no-cropped-tops": "No cropped tops",
+    "looser-fitting": "Looser fitting",
+  },
+  fitPreferences: {
+    "fitted": "Fitted",
+    "relaxed": "Relaxed",
+    "oversized": "Oversized",
+    "tailored": "Tailored",
+    "flowy": "Flowy",
+    "structured": "Structured",
+  },
+  coveragePreferences: {
+    "more-coverage": "More coverage",
+    "shoulder-coverage": "Shoulder coverage",
+    "modest-neckline": "Modest neckline",
+    "longer-hemline": "Longer hemline",
+    "sleeve-coverage": "Sleeve coverage",
+  },
+  silhouette: {
+    "fitted": "Fitted",
+    "a-line": "A-line",
+    "straight": "Straight",
+    "oversized": "Oversized",
+    "flared": "Flared",
+    "wrap": "Wrap",
+    "column": "Column",
+  },
+  styleSupport: {
+    "build-a-wardrobe": "Build a wardrobe",
+    "find-my-style": "Find my style",
+    "shop-smarter": "Shop smarter",
+    "feel-more-confident": "Feel more confident",
+    "dress-for-occasion": "Dress for occasions",
+    "sustainable-choices": "Make sustainable choices",
+  },
+};
+
+function passportLabel(field: string, id: string): string {
+  return PASSPORT_LABELS[field]?.[id] ?? id.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function displayDate(d: Date | string | null): string {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+  });
+}
+
+function customerDisplayName(c: AdminCustomerDetail): string {
+  if (c.firstName || c.lastName) return [c.firstName, c.lastName].filter(Boolean).join(" ");
+  if (c.email) return c.email;
+  return c.id.slice(0, 8);
+}
+
+// ── Components ─────────────────────────────────────────────────────────────
+
+function PassportSection({ ctx }: { ctx: CustomerStylingPassportContext | null }) {
+  if (!ctx) {
+    return (
+      <div className="na-card">
+        <div className="na-card__header">
+          <h2 className="na-card__title">Passport</h2>
+          <span className="na-badge na-badge--not-analyzed">A — CUSTOMER-SUPPLIED</span>
+        </div>
+        <div className="na-card__body">
+          <p style={{ fontSize: "0.85rem", color: "#6b7280" }}>No Passport on file for this customer.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const rows: Array<{ label: string; field: string; values: string[] }> = [
+    { label: "Style Personalities", field: "stylePersonalities", values: ctx.stylePersonalities },
+    { label: "Lifestyle", field: "lifestyle", values: ctx.lifestyle },
+    { label: "Favourite Colours", field: "favoriteColors", values: ctx.favoriteColors },
+    { label: "Avoid Colours", field: "avoidColors", values: ctx.avoidColors },
+    { label: "Coverage preferences", field: "coveragePreferences", values: ctx.coveragePreferences },
+    { label: "Dressing preferences", field: "dressingPreferences", values: ctx.dressingPreferences },
+    { label: "Fit preferences", field: "fitPreferences", values: ctx.fitPreferences },
+    { label: "Silhouette", field: "silhouette", values: ctx.silhouette },
+    { label: "Desired feelings", field: "desiredFeelings", values: ctx.desiredFeelings },
+    { label: "Style support goal", field: "styleSupport", values: ctx.styleSupport },
+  ].filter(r => r.values.length > 0);
+
+  return (
+    <div className="na-card">
+      <div className="na-card__header">
+        <h2 className="na-card__title">Passport</h2>
+        <span className="na-badge" style={{ fontSize: "0.65rem", background: "#0c1a2e", color: "#93c5fd", border: "1px solid #1e3a5f" }}>
+          A — CUSTOMER-SUPPLIED
+        </span>
+      </div>
+      <div className="na-card__body">
+        <p style={{ fontSize: "0.65rem", color: "#4b5563", marginBottom: "1rem" }}>
+          Facts and preferences this customer supplied. Not inferred by nAia.
+        </p>
+        {rows.length === 0 ? (
+          <p style={{ fontSize: "0.85rem", color: "#6b7280" }}>Passport exists but no styling fields are filled in.</p>
+        ) : (
+          <table className="na-field-table">
+            <tbody>
+              {rows.map(row => (
+                <tr key={row.label}>
+                  <th style={{ whiteSpace: "nowrap", verticalAlign: "top", paddingTop: "0.4rem" }}>{row.label}</th>
+                  <td>
+                    <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                      {row.values.map(v => (
+                        <span
+                          key={v}
+                          style={{
+                            fontSize: "0.72rem",
+                            color: "#93c5fd",
+                            background: "#0c1a2e",
+                            border: "1px solid #1e3a5f",
+                            padding: "0.15rem 0.55rem",
+                            borderRadius: "4px",
+                          }}
+                        >
+                          {passportLabel(row.field, v)}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ClosetSummarySection({
+  customerId,
+  totalItems,
+  reviewedItems,
+  categoryBreakdown,
+}: {
+  customerId: string;
+  totalItems: number;
+  reviewedItems: number;
+  categoryBreakdown: Record<string, number>;
+}) {
+  const categories = Object.entries(categoryBreakdown).sort((a, b) => b[1] - a[1]);
+
+  return (
+    <div className="na-card">
+      <div className="na-card__header">
+        <h2 className="na-card__title">Closet</h2>
+        <Link
+          to={`/admin/naia/closet?customerId=${customerId}`}
+          style={{ fontSize: "0.75rem", color: "#6b7280", textDecoration: "none" }}
+        >
+          View all →
+        </Link>
+      </div>
+      <div className="na-card__body">
+        <div style={{ display: "flex", gap: "2rem", marginBottom: "1rem" }}>
+          <div>
+            <p style={{ fontSize: "0.65rem", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.2rem" }}>Total</p>
+            <p style={{ fontSize: "1.5rem", fontWeight: 700, color: "#e5e7eb" }}>{totalItems}</p>
+          </div>
+          <div>
+            <p style={{ fontSize: "0.65rem", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.2rem" }}>Reviewed</p>
+            <p style={{ fontSize: "1.5rem", fontWeight: 700, color: reviewedItems > 0 ? "#34d399" : "#6b7280" }}>
+              {reviewedItems}
+              <span style={{ fontSize: "0.8rem", color: "#6b7280", fontWeight: 400, marginLeft: "0.3rem" }}>
+                / {totalItems}
+              </span>
+            </p>
+          </div>
+        </div>
+        {categories.length > 0 && (
+          <>
+            <p style={{ fontSize: "0.65rem", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.5rem" }}>By Category</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+              {categories.map(([cat, count]) => (
+                <div key={cat} style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                  <span style={{ fontSize: "0.78rem", color: "#d1d5db", minWidth: "120px" }}>{cat}</span>
+                  <div style={{ flex: 1, height: "6px", background: "#1f2937", borderRadius: "3px", overflow: "hidden" }}>
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${Math.round((count / totalItems) * 100)}%`,
+                        background: "#3b82f6",
+                        borderRadius: "3px",
+                      }}
+                    />
+                  </div>
+                  <span style={{ fontSize: "0.75rem", color: "#6b7280", minWidth: "28px", textAlign: "right" }}>{count}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+        {totalItems === 0 && (
+          <p style={{ fontSize: "0.85rem", color: "#6b7280" }}>No closet items.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Page ───────────────────────────────────────────────────────────────────
+
+export default function AdminCustomerDetailPage() {
+  const { customer } = useLoaderData() as { customer: AdminCustomerDetail };
+
+  return (
+    <div className="na-page">
+      {/* Breadcrumb */}
+      <div style={{ marginBottom: "0.75rem" }}>
+        <Link to="/admin/naia/customers" style={{ fontSize: "0.78rem", color: "#6b7280", textDecoration: "none" }}>
+          ← Customers
+        </Link>
+      </div>
+
+      <h1 className="na-page-heading" style={{ marginBottom: "0.25rem" }}>
+        {customerDisplayName(customer)}
+      </h1>
+      <p style={{ fontSize: "0.8rem", color: "#6b7280", marginBottom: "1.5rem" }}>
+        What does nAia think it knows about this person?
+      </p>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "1.25rem", alignItems: "start" }}>
+
+        {/* Main column */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+          <PassportSection ctx={customer.passport} />
+          <ClosetSummarySection
+            customerId={customer.id}
+            totalItems={customer.closetItemCount}
+            reviewedItems={customer.reviewedItemCount}
+            categoryBreakdown={customer.categoryBreakdown}
+          />
+        </div>
+
+        {/* Sidebar — identity */}
+        <div className="na-card">
+          <div className="na-card__header">
+            <h2 className="na-card__title">Identity</h2>
+          </div>
+          <div className="na-card__body">
+            <table className="na-field-table">
+              <tbody>
+                <tr>
+                  <th>Name</th>
+                  <td>{[customer.firstName, customer.lastName].filter(Boolean).join(" ") || "—"}</td>
+                </tr>
+                <tr>
+                  <th>Email</th>
+                  <td style={{ wordBreak: "break-all" }}>{customer.email ?? "—"}</td>
+                </tr>
+                <tr>
+                  <th>Plan</th>
+                  <td>{customer.membershipStatus.toLowerCase().replace(/_/g, " ")}</td>
+                </tr>
+                <tr>
+                  <th>Passport</th>
+                  <td>
+                    {customer.passportComplete
+                      ? `Complete${customer.profileVersion ? ` · V${customer.profileVersion}` : ""}`
+                      : customer.profileVersion != null
+                        ? "Partial"
+                        : "None"}
+                  </td>
+                </tr>
+                <tr>
+                  <th>Joined</th>
+                  <td>{displayDate(customer.createdAt)}</td>
+                </tr>
+                <tr>
+                  <th>ID</th>
+                  <td><code style={{ fontSize: "10px", wordBreak: "break-all" }}>{customer.id}</code></td>
+                </tr>
+              </tbody>
+            </table>
+            <div style={{ marginTop: "1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              <Link
+                to={`/admin/naia/closet?customerId=${customer.id}`}
+                style={{
+                  display: "block",
+                  textAlign: "center",
+                  padding: "0.5rem",
+                  fontSize: "0.78rem",
+                  color: "#9ca3af",
+                  border: "1px solid #374151",
+                  borderRadius: "5px",
+                  textDecoration: "none",
+                }}
+              >
+                View closet →
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

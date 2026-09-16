@@ -48,13 +48,15 @@ export interface Phase3CResult {
     evidence: string[];
   };
   colourProfile: {
+    hueFamily: string | null;
+    wardrobeNeutral: boolean;
     neutralChromaticity: string | null;
     broadFamily: string | null;
     lightDark: string | null;
     energyTier: string | null;
     evidence: string[];
   };
-  intentionPotentials: { intention: string; signals: string[] }[];
+  intentionPotentials: { intention: string; strength: string; signals: string[] }[];
   passportUsed: boolean;
 }
 
@@ -188,6 +190,8 @@ function toPhase3C(
   return {
     visualWeight: { value: vw.value, evidence: vw.evidence },
     colourProfile: {
+      hueFamily: cp.hueFamily,
+      wardrobeNeutral: cp.wardrobeNeutral,
       neutralChromaticity: cp.neutralChromaticity,
       broadFamily: cp.broadFamily,
       lightDark: cp.lightDark,
@@ -196,6 +200,7 @@ function toPhase3C(
     },
     intentionPotentials: intentionPotentials.map(ip => ({
       intention: ip.intention,
+      strength: ip.strength,
       signals: ip.signals,
     })),
     passportUsed: passport !== null,
@@ -297,8 +302,9 @@ function renderItem(item: ExportItem): string {
   const cp = item.phase3c.colourProfile;
   const etColor = cp.energyTier ? (ET_COLOR[cp.energyTier] ?? "#6b7280") : "#6b7280";
   const cpBadges = [
-    cp.neutralChromaticity ? `<span class="badge">${esc(cp.neutralChromaticity)}</span>` : "",
-    cp.broadFamily ? `<span class="badge">${esc(cp.broadFamily)}</span>` : "",
+    cp.wardrobeNeutral && cp.hueFamily ? `<span class="badge">${esc(cp.hueFamily)} neutral</span>` :
+      cp.wardrobeNeutral ? `<span class="badge">neutral</span>` :
+      cp.hueFamily ? `<span class="badge">${esc(cp.hueFamily)}</span>` : "",
     cp.lightDark ? `<span class="badge">${esc(cp.lightDark)}</span>` : "",
     cp.energyTier
       ? `<span class="badge" style="background:${etColor}20;border-color:${etColor}40;color:${etColor}">${esc(cp.energyTier)}</span>`
@@ -331,12 +337,19 @@ function renderItem(item: ExportItem): string {
     .map(([k, v]) => `<tr><td class="ck">${esc(k)}</td><td>${esc(String(v))}</td></tr>`)
     .join("");
 
+  const STRENGTH_COLOR: Record<string, string> = {
+    strong: "#a3e635", supporting: "#fbbf24", none: "#4b5563",
+  };
   const intentRows = item.phase3c.intentionPotentials
     .map(ip => {
+      const sc = STRENGTH_COLOR[ip.strength] ?? "#4b5563";
+      const strengthBadge = ip.strength !== "none"
+        ? `<span style="font-size:.65rem;color:${sc};background:${sc}18;border:1px solid ${sc}40;padding:.02rem .3rem;border-radius:3px;margin-right:.4rem">${esc(ip.strength)}</span>`
+        : "";
       const signals = ip.signals.length
         ? ip.signals.map(s => `<span class="sig">${esc(s)}</span>`).join("")
-        : `<span class="nosig">NO SIGNALS</span>`;
-      return `<tr><td class="iname"><code>${esc(ip.intention)}</code></td><td>${signals}</td></tr>`;
+        : `<span class="nosig">none</span>`;
+      return `<tr><td class="iname"><code>${esc(ip.intention)}</code>${strengthBadge}</td><td>${signals}</td></tr>`;
     })
     .join("");
 
@@ -674,6 +687,7 @@ export async function generatePhase3CQAExport(
     const effective = getEffectiveClosetItem(baseFields, review);
 
     const classification: ClosetClassification = {
+      category: item.category,
       ...effective,
       garmentRelationships: item.garmentRelationships,
     };
@@ -688,7 +702,7 @@ export async function generatePhase3CQAExport(
       subcategory: item.subcategory,
       customerLabel: labelMap.get(item.customerId) ?? "Customer ?",
       passport,
-      effectiveClassification: classification as Record<string, unknown>,
+      effectiveClassification: classification as unknown as Record<string, unknown>,
       phase3c,
     };
   });

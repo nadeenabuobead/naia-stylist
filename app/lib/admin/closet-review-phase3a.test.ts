@@ -392,6 +392,7 @@ describe("§CR-F — Effective classification", () => {
 describe("§CR-G — Semantic integration (interpretGarment with effective classification)", () => {
   it("G.1 overriding formality changes Polish dimension", () => {
     const c: ClosetClassification = {
+      category: null,
       ...BASE_CLASSIFICATION,
       formality: "casual",
       garmentRelationships: [],
@@ -411,6 +412,7 @@ describe("§CR-G — Semantic integration (interpretGarment with effective class
 
   it("G.2 overriding shoulderCoverage false → changes Coverage dimension (live acceptance: mauve sports bra)", () => {
     const c: ClosetClassification = {
+      category: null,
       ...BASE_CLASSIFICATION,
       garmentRelationships: [],
     };
@@ -431,6 +433,7 @@ describe("§CR-G — Semantic integration (interpretGarment with effective class
 
   it("G.3 no overrides → interpretation identical to stored", () => {
     const c: ClosetClassification = {
+      category: null,
       ...BASE_CLASSIFICATION,
       garmentRelationships: [],
     };
@@ -442,6 +445,7 @@ describe("§CR-G — Semantic integration (interpretGarment with effective class
 
   it("G.4 overriding occasions does not change dimensions not driven by occasions", () => {
     const c: ClosetClassification = {
+      category: null,
       ...BASE_CLASSIFICATION,
       formality: "business-casual",
       garmentRelationships: [],

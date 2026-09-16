@@ -114,6 +114,8 @@ export default [
       index("routes/admin.naia._index.tsx"),
       route("closet", "routes/admin.naia.closet._index.tsx"),
       route("closet/:itemId", "routes/admin.naia.closet.$itemId.tsx"),
+      route("customers", "routes/admin.naia.customers._index.tsx"),
+      route("customers/:customerId", "routes/admin.naia.customers.$customerId.tsx"),
       route("phase3c-export", "routes/admin.naia.phase3c-export.tsx"),
     ]),
     route("nadine", "routes/admin.nadine.tsx", [

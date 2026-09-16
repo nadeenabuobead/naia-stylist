@@ -12,9 +12,9 @@ const NAV_ITEMS: Array<{
   active: boolean;
   phase?: string;
 }> = [
-  { label: "Closet Intelligence", to: "/admin/naia/closet", active: true },
-  { label: "StyleMe QA",          to: "/admin/naia/styleme", active: false, phase: "Phase 4" },
-  { label: "Customers",           active: false, phase: "Phase 3" },
+  { label: "Closet Intelligence", to: "/admin/naia/closet",     active: true },
+  { label: "Customers",           to: "/admin/naia/customers",   active: true },
+  { label: "StyleMe QA",          to: "/admin/naia/styleme",     active: false, phase: "Phase 4" },
   { label: "Feedback",            active: false, phase: "Phase 5" },
   { label: "Usage",               active: false, phase: "Phase 5" },
 ];

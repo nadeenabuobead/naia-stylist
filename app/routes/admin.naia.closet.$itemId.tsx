@@ -46,6 +46,9 @@ import {
 import {
   deriveGarmentStylingIntelligence,
   type GarmentStylingIntelligence,
+  type SignalSource,
+  type SignalPolarity,
+  type IntentionStrength,
 } from "~/lib/admin/garment-intelligence-v1.server";
 
 // ── Vocabulary options for edit dropdowns (mirrors garment-intelligence.types.ts) ──
@@ -238,7 +241,7 @@ function filterSameAsStored(
 ): ClosetItemOverrides {
   if (!stored) return validated;
   const result: ClosetItemOverrides = {};
-  const storedRec = stored as Record<string, unknown>;
+  const storedRec = stored as unknown as Record<string, unknown>;
   for (const key of Object.keys(validated) as (keyof ClosetItemOverrides)[]) {
     const val = (validated as Record<string, unknown>)[key as string];
     const storedVal = storedRec[key as string];
@@ -337,14 +340,234 @@ const ENERGY_TIER_COLOUR: Record<string, string> = {
   "neutral-versatile":   "#6b7280",
 };
 
+// ── Passport label helpers ────────────────────────────────────────────────────
+
+const PASSPORT_LABELS: Record<string, Record<string, string>> = {
+  stylePersonalities: {
+    "classic-polished": "Classic & Polished",
+    "feminine-romantic": "Feminine & Romantic",
+    "minimal-relaxed": "Minimal & Relaxed",
+    "bold-edgy": "Bold & Edgy",
+    "creative-expressive": "Creative & Expressive",
+    "effortlessly-chic": "Effortlessly Chic",
+    "sporty-active": "Sporty & Active",
+    "bohemian": "Bohemian",
+    "preppy": "Preppy",
+    "streetwear": "Streetwear",
+  },
+  lifestyle: {
+    "work-office": "Work / Office",
+    "casual-everyday": "Casual / Everyday",
+    "events-occasions": "Events / Occasions",
+    "active-sporty": "Active / Sporty",
+    "travel": "Travel",
+    "home-relaxed": "Home / Relaxed",
+  },
+  desiredFeelings: {
+    "feel-like-myself": "Feel like myself",
+    "feel-put-together": "Feel put-together",
+    "feel-confident": "Feel confident",
+    "feel-attractive": "Feel attractive",
+    "feel-comfortable": "Feel comfortable",
+    "feel-energised": "Feel energised",
+    "feel-less-exposed": "Feel less exposed",
+    "feel-sharper": "Feel sharper",
+    "feel-softer": "Feel softer",
+    "express-myself": "Express myself",
+    "give-energy": "Give me energy",
+    "give-structure": "Give me structure",
+    "ground-me": "Ground me",
+    "make-it-easy": "Make it easy",
+  },
+  dressingPreferences: {
+    "dresses-modestly": "I dress modestly",
+    "usually-wears-abayas": "I wear abayas",
+    "wears-hijab": "I wear hijab",
+    "arms-covered": "Arms covered",
+    "chest-neckline-covered": "Chest / neckline covered",
+    "legs-covered": "Legs covered",
+    "longer-tops": "Longer tops",
+    "no-cropped-tops": "No cropped tops",
+    "looser-fitting": "Looser fitting",
+  },
+  fitPreferences: {
+    "fitted": "Fitted",
+    "relaxed": "Relaxed",
+    "oversized": "Oversized",
+    "tailored": "Tailored",
+    "flowy": "Flowy",
+    "structured": "Structured",
+  },
+  coveragePreferences: {
+    "more-coverage": "More coverage",
+    "shoulder-coverage": "Shoulder coverage",
+    "modest-neckline": "Modest neckline",
+    "longer-hemline": "Longer hemline",
+    "sleeve-coverage": "Sleeve coverage",
+  },
+  silhouette: {
+    "fitted": "Fitted",
+    "a-line": "A-line",
+    "straight": "Straight",
+    "oversized": "Oversized",
+    "flared": "Flared",
+    "wrap": "Wrap",
+    "column": "Column",
+  },
+  styleSupport: {
+    "build-a-wardrobe": "Build a wardrobe",
+    "find-my-style": "Find my style",
+    "shop-smarter": "Shop smarter",
+    "feel-more-confident": "Feel more confident",
+    "dress-for-occasion": "Dress for occasions",
+    "sustainable-choices": "Make sustainable choices",
+  },
+};
+
+function passportLabel(field: string, id: string): string {
+  return PASSPORT_LABELS[field]?.[id] ?? id.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// ── Customer Passport Card ────────────────────────────────────────────────────
+
+function CustomerPassportCard({ ctx }: { ctx: CustomerStylingPassportContext | null }) {
+  if (!ctx) {
+    return (
+      <div className="na-card">
+        <div className="na-card__header">
+          <h2 className="na-card__title">Customer Passport Context</h2>
+          <span className="na-badge na-badge--not-analyzed">A — CUSTOMER-SUPPLIED</span>
+        </div>
+        <div className="na-card__body">
+          <p style={{ fontSize: "0.8rem", color: "#6b7280" }}>No Passport on file for this customer.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const rows: Array<{ label: string; values: string[]; field: string }> = [
+    { label: "Style Personalities", field: "stylePersonalities", values: ctx.stylePersonalities },
+    { label: "Lifestyle", field: "lifestyle", values: ctx.lifestyle },
+    { label: "Favourite Colours", field: "favoriteColors", values: ctx.favoriteColors },
+    { label: "Avoid Colours", field: "avoidColors", values: ctx.avoidColors },
+    { label: "Coverage preferences", field: "coveragePreferences", values: ctx.coveragePreferences },
+    { label: "Dressing preferences", field: "dressingPreferences", values: ctx.dressingPreferences },
+    { label: "Fit preferences", field: "fitPreferences", values: ctx.fitPreferences },
+    { label: "Silhouette", field: "silhouette", values: ctx.silhouette },
+    { label: "Desired feelings", field: "desiredFeelings", values: ctx.desiredFeelings },
+    { label: "Style support goal", field: "styleSupport", values: ctx.styleSupport },
+  ].filter(r => r.values.length > 0);
+
+  return (
+    <div className="na-card">
+      <div className="na-card__header">
+        <h2 className="na-card__title">Customer Passport Context</h2>
+        <span className="na-badge na-badge--not-analyzed" style={{ background: "#0c1a2e", color: "#93c5fd", borderColor: "#1e3a5f" }}>
+          A — CUSTOMER-SUPPLIED
+        </span>
+      </div>
+      <div className="na-card__body">
+        <p style={{ fontSize: "0.65rem", color: "#4b5563", marginBottom: "1rem" }}>
+          Facts and preferences this customer supplied. Not inferred by nAia.
+        </p>
+        {rows.length === 0 ? (
+          <p style={{ fontSize: "0.8rem", color: "#6b7280" }}>Passport exists but no styling fields are filled in yet.</p>
+        ) : (
+          <table className="na-field-table">
+            <tbody>
+              {rows.map(row => (
+                <tr key={row.label}>
+                  <th style={{ whiteSpace: "nowrap", verticalAlign: "top", paddingTop: "0.4rem" }}>{row.label}</th>
+                  <td>
+                    <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                      {row.values.map(v => (
+                        <span
+                          key={v}
+                          style={{
+                            fontSize: "0.7rem",
+                            color: "#93c5fd",
+                            background: "#0c1a2e",
+                            border: "1px solid #1e3a5f",
+                            padding: "0.1rem 0.5rem",
+                            borderRadius: "4px",
+                          }}
+                        >
+                          {passportLabel(row.field, v)}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Signal source badge ───────────────────────────────────────────────────────
+
+const SOURCE_STYLE: Record<SignalSource, { color: string; bg: string; border: string; label: string }> = {
+  passport: { color: "#93c5fd", bg: "#0c1a2e", border: "#1e3a5f", label: "passport" },
+  garment:  { color: "#9ca3af", bg: "#1f2937", border: "#374151", label: "garment" },
+};
+
+const CONFLICT_STYLE = { color: "#fca5a5", bg: "#1f0707", border: "#7f1d1d", label: "conflict" };
+
+const STRENGTH_STYLE: Record<IntentionStrength, { color: string; bg: string; border: string } | null> = {
+  strong:     { color: "#a3e635", bg: "#0d1f00", border: "#3f6212" },
+  supporting: { color: "#fbbf24", bg: "#1c1200", border: "#78350f" },
+  none:       null,
+};
+
+function SignalBadge({ source, polarity }: { source: SignalSource; polarity: SignalPolarity }) {
+  const s = polarity === "conflict" ? CONFLICT_STYLE : SOURCE_STYLE[source];
+  return (
+    <span style={{
+      fontSize: "0.58rem",
+      color: s.color,
+      background: s.bg,
+      border: `1px solid ${s.border}`,
+      padding: "0.05rem 0.35rem",
+      borderRadius: "3px",
+      fontFamily: "monospace",
+      letterSpacing: "0.04em",
+      flexShrink: 0,
+    }}>
+      {s.label}
+    </span>
+  );
+}
+
+function StrengthBadge({ strength }: { strength: IntentionStrength }) {
+  const s = STRENGTH_STYLE[strength];
+  if (!s) return null;
+  return (
+    <span style={{
+      fontSize: "0.58rem",
+      color: s.color,
+      background: s.bg,
+      border: `1px solid ${s.border}`,
+      padding: "0.05rem 0.35rem",
+      borderRadius: "3px",
+      fontFamily: "monospace",
+      letterSpacing: "0.04em",
+      flexShrink: 0,
+    }}>
+      {strength}
+    </span>
+  );
+}
+
+// ── Deeper Styling Intelligence ───────────────────────────────────────────────
+
 function DeeperStylingIntelligence({
   intel,
-  passportContext,
 }: {
   intel: GarmentStylingIntelligence;
-  passportContext: CustomerStylingPassportContext | null;
 }) {
-  const [showIntentions, setShowIntentions] = useState(false);
 
   const vw = intel.visualWeight;
   const cp = intel.colourProfile;
@@ -353,17 +576,17 @@ function DeeperStylingIntelligence({
   return (
     <div className="na-card">
       <div className="na-card__header">
-        <h2 className="na-card__title">Deeper Styling Intelligence</h2>
+        <h2 className="na-card__title">Garment Intelligence</h2>
         <span className="na-badge na-badge--ai-only" style={{ fontSize: "0.65rem" }}>
           {passportBadge}
         </span>
       </div>
       <div className="na-card__body" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
 
-        {/* ─── A. DEEPER GARMENT INTELLIGENCE (intrinsic / generic) ─── */}
+        {/* ─── B. GARMENT INTELLIGENCE (intrinsic / generic) ─── */}
         <div>
           <p className="na-provenance-label" style={{ marginBottom: "0.75rem" }}>
-            A — DEEPER GARMENT INTELLIGENCE
+            B — GARMENT INTELLIGENCE
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
 
@@ -396,11 +619,17 @@ function DeeperStylingIntelligence({
             {/* Colour Profile */}
             <div>
               <p style={{ fontSize: "0.65rem", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.35rem" }}>Colour Profile</p>
-              {cp.neutralChromaticity ? (
+              {cp.evidence.length > 0 ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
                   <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-                    <span className="na-interp-label">{cp.neutralChromaticity}</span>
-                    {cp.broadFamily && <span className="na-interp-label">{cp.broadFamily}</span>}
+                    {/* V2: single combined colour label (no "neutral · neutral" duplicate) */}
+                    {cp.wardrobeNeutral && cp.hueFamily ? (
+                      <span className="na-interp-label">{cp.hueFamily} neutral</span>
+                    ) : cp.wardrobeNeutral ? (
+                      <span className="na-interp-label">neutral</span>
+                    ) : cp.hueFamily ? (
+                      <span className="na-interp-label">{cp.hueFamily}</span>
+                    ) : null}
                     {cp.lightDark && <span className="na-interp-label">{cp.lightDark}</span>}
                     {cp.energyTier && (
                       <span
@@ -430,86 +659,51 @@ function DeeperStylingIntelligence({
 
         <div style={{ borderTop: "1px solid #1f2937" }} />
 
-        {/* ─── B. PASSPORT-AWARE STYLING POTENTIAL ─── */}
+        {/* ─── C. PASSPORT-AWARE STYLING POTENTIAL ─── */}
         <div>
           <p className="na-provenance-label" style={{ marginBottom: "0.75rem" }}>
-            B — PASSPORT-AWARE STYLING POTENTIAL
+            C — PASSPORT-AWARE STYLING POTENTIAL
+          </p>
+          <p style={{ fontSize: "0.65rem", color: "#4b5563", marginBottom: "0.75rem" }}>
+            What this garment could do for this customer specifically. Shadow-only — not final StyleMe reasoning.
           </p>
 
-          {/* Passport context header */}
-          {intel.passportUsed && passportContext ? (
-            <div style={{ marginBottom: "0.75rem", padding: "0.5rem 0.75rem", background: "#0c1a2e", borderRadius: "6px", border: "1px solid #1e3a5f" }}>
-              <p style={{ fontSize: "0.7rem", color: "#6b7280", marginBottom: "0.25rem" }}>PROFILE CONTEXT</p>
-              {passportContext.stylePersonalities.length > 0 && (
-                <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap", marginBottom: "0.2rem" }}>
-                  {passportContext.stylePersonalities.map(p => (
-                    <span key={p} style={{ fontSize: "0.7rem", color: "#93c5fd", background: "#1e3a5f", padding: "0.1rem 0.4rem", borderRadius: "4px" }}>{p}</span>
-                  ))}
-                </div>
-              )}
-              {passportContext.favoriteColors.length > 0 && (
-                <p style={{ fontSize: "0.7rem", color: "#6b7280" }}>
-                  Favourite colours: {passportContext.favoriteColors.slice(0, 5).join(", ")}
-                  {passportContext.favoriteColors.length > 5 ? ` +${passportContext.favoriteColors.length - 5}` : ""}
-                </p>
-              )}
-              <p style={{ fontSize: "0.65rem", color: "#4b5563", marginTop: "0.25rem" }}>No TODAY session applied.</p>
-            </div>
-          ) : (
+          {/* No passport state */}
+          {!intel.passportUsed && (
             <div style={{ marginBottom: "0.75rem", padding: "0.5rem 0.75rem", background: "#111827", borderRadius: "6px", border: "1px solid #374151" }}>
               <p style={{ fontSize: "0.75rem", color: "#6b7280" }}>
-                Passport context unavailable — showing garment-only baseline
+                No passport — showing garment-only baseline
               </p>
             </div>
           )}
 
-          {/* Styling signals summary (non-empty) */}
-          {intel.intentionPotentials.filter(ip => ip.signals.length > 0).length === 0 ? (
-            <p style={{ fontSize: "0.8rem", color: "#6b7280" }}>No signals computed for this garment/profile combination</p>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "0.75rem" }}>
-              {intel.intentionPotentials
-                .filter(ip => ip.signals.length > 0)
-                .map(ip => (
-                  <div key={ip.intention} style={{ display: "flex", gap: "0.5rem", alignItems: "flex-start" }}>
-                    <span style={{ fontSize: "0.7rem", fontWeight: 600, color: "#d1d5db", minWidth: "150px", paddingTop: "0.1rem", fontFamily: "monospace" }}>
-                      {ip.intention}
-                    </span>
-                    <span style={{ fontSize: "0.75rem", color: "#9ca3af" }}>
-                      {ip.signals.join(" · ")}
-                    </span>
-                  </div>
-                ))
-              }
-            </div>
-          )}
-
-          {/* Collapsed debug: all 12 */}
-          <details
-            onToggle={(e) => setShowIntentions((e.currentTarget as HTMLDetailsElement).open)}
-          >
-            <summary style={{ cursor: "pointer", fontSize: "0.7rem", color: "#6b7280", userSelect: "none", listStyle: "none" }}>
-              {showIntentions ? "▾" : "▸"} Debug: all {intel.intentionPotentials.length} intention potentials
-            </summary>
-            <div style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
-              {intel.intentionPotentials.map(ip => (
-                <div key={ip.intention} style={{ borderLeft: "2px solid #374151", paddingLeft: "0.75rem" }}>
-                  <p style={{ fontSize: "0.7rem", fontWeight: 600, color: "#d1d5db", fontFamily: "monospace", marginBottom: "0.2rem" }}>
+          {/* All 12 intentions — always shown (V2: strength badge per intention) */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", marginBottom: "0.75rem" }}>
+            {intel.intentionPotentials.map(ip => (
+              <div key={ip.intention} style={{ borderLeft: `2px solid ${ip.strength === "strong" ? "#3f6212" : ip.strength === "supporting" ? "#78350f" : "#374151"}`, paddingLeft: "0.75rem" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.2rem" }}>
+                  <span style={{ fontSize: "0.7rem", fontWeight: 600, color: "#d1d5db", fontFamily: "monospace" }}>
                     {ip.intention}
-                  </p>
-                  {ip.signals.length === 0 ? (
-                    <span style={{ fontSize: "0.7rem", color: "#4b5563" }}>no signals</span>
-                  ) : (
-                    <ul style={{ margin: 0, padding: "0 0 0 1rem" }}>
-                      {ip.signals.map((s, i) => (
-                        <li key={i} style={{ fontSize: "0.7rem", color: "#9ca3af" }}>{s}</li>
-                      ))}
-                    </ul>
-                  )}
+                  </span>
+                  <StrengthBadge strength={ip.strength} />
                 </div>
-              ))}
-            </div>
-          </details>
+                {ip.signalDetails.length === 0 ? (
+                  <span style={{ fontSize: "0.7rem", color: "#4b5563" }}>none</span>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
+                    {ip.signalDetails.map((sd, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "baseline", gap: "0.4rem" }}>
+                        <span style={{ fontSize: "0.7rem", color: sd.polarity === "conflict" ? "#fca5a5" : "#9ca3af" }}>
+                          {sd.text}
+                        </span>
+                        <SignalBadge source={sd.source} polarity={sd.polarity} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
 
         <p style={{ fontSize: "0.65rem", color: "#4b5563", borderTop: "1px solid #1f2937", paddingTop: "0.75rem" }}>
@@ -984,9 +1178,14 @@ export default function ClosetItemDetailPage() {
           </div>
 
           {/* ════════════════════════════════════════════
-              SECTION 4 — DEEPER STYLING INTELLIGENCE (shadow / read-only)
+              SECTION A — CUSTOMER PASSPORT CONTEXT
           ════════════════════════════════════════════ */}
-          <DeeperStylingIntelligence intel={stylingIntelligence} passportContext={passportContext} />
+          <CustomerPassportCard ctx={passportContext} />
+
+          {/* ════════════════════════════════════════════
+              SECTION B+C — GARMENT INTELLIGENCE + PASSPORT-AWARE STYLING POTENTIAL
+          ════════════════════════════════════════════ */}
+          <DeeperStylingIntelligence intel={stylingIntelligence} />
 
           {/* ════════════════════════════════════════════
               SECTION 2 — WHAT AI SEES (effective values)
