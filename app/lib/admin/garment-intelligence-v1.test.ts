@@ -43,6 +43,7 @@ import {
   ALL_INTENTIONS,
   V1_SHADOW_ONLY,
   type GarmentStylingIntelligence,
+  type IntentionStrength,
 } from "~/lib/admin/garment-intelligence-v1.server";
 
 import type { ClosetClassification } from "~/lib/admin/closet-intelligence.server";
@@ -51,7 +52,7 @@ import type { ClosetClassification } from "~/lib/admin/closet-intelligence.serve
 
 function blank(): ClosetClassification {
   return {
-    subcategory: null, silhouette: null, fitProfile: null,
+    category: null, subcategory: null, silhouette: null, fitProfile: null,
     hemLength: null, topLength: null, waistShape: null,
     sleeveLength: null, necklineCoverage: null,
     shoulderCoverage: null, midriffExposed: null,
@@ -220,78 +221,87 @@ describe("§GI-V1-08 deriveVisualWeight — partial nulls score from available f
 
 // ── §GI-V1-09 — neutral colours ───────────────────────────────────────────────
 
-describe("§GI-V1-09 deriveColourProfile — neutral colours", () => {
-  it("white → neutral", () => {
+describe("§GI-V1-09 deriveColourProfile — neutral colours (V2 two-axis model)", () => {
+  it("white → wardrobeNeutral=true, hueFamily=null", () => {
     const r = deriveColourProfile({ primaryColor: "white", colors: [] });
-    assert.equal(r.neutralChromaticity, "neutral");
-    assert.equal(r.broadFamily, "neutral");
+    assert.equal(r.wardrobeNeutral, true);
+    assert.equal(r.hueFamily, null);
   });
 
-  it("black → neutral + deep-authoritative energy", () => {
+  it("black → wardrobeNeutral=true + deep-authoritative energy", () => {
     const r = deriveColourProfile({ primaryColor: "black", colors: [] });
-    assert.equal(r.neutralChromaticity, "neutral");
+    assert.equal(r.wardrobeNeutral, true);
     assert.equal(r.energyTier, "deep-authoritative");
   });
 
-  it("beige → neutral + neutral-versatile", () => {
+  it("beige → wardrobeNeutral=true + neutral-versatile", () => {
     const r = deriveColourProfile({ primaryColor: "beige", colors: [] });
-    assert.equal(r.neutralChromaticity, "neutral");
+    assert.equal(r.wardrobeNeutral, true);
     assert.equal(r.energyTier, "neutral-versatile");
   });
 
-  it("navy → neutral + deep-authoritative", () => {
+  it("navy → wardrobeNeutral=true + hueFamily='blue' + deep-authoritative (V2 two-axis)", () => {
     const r = deriveColourProfile({ primaryColor: "navy", colors: [] });
-    assert.equal(r.neutralChromaticity, "neutral");
+    assert.equal(r.wardrobeNeutral, true);
+    assert.equal(r.hueFamily, "blue");
     assert.equal(r.energyTier, "deep-authoritative");
   });
 
-  it("grey → neutral + neutral-versatile", () => {
+  it("grey → wardrobeNeutral=true + hueFamily='grey' + neutral-versatile", () => {
     const r = deriveColourProfile({ primaryColor: "grey", colors: [] });
-    assert.equal(r.neutralChromaticity, "neutral");
+    assert.equal(r.wardrobeNeutral, true);
+    assert.equal(r.hueFamily, "grey");
     assert.equal(r.energyTier, "neutral-versatile");
   });
 });
 
 // ── §GI-V1-10 — chromatic colours ─────────────────────────────────────────────
 
-describe("§GI-V1-10 deriveColourProfile — chromatic colours", () => {
-  it("red → chromatic + high-energy", () => {
+describe("§GI-V1-10 deriveColourProfile — chromatic colours (V2)", () => {
+  it("red → wardrobeNeutral=false + high-energy", () => {
     const r = deriveColourProfile({ primaryColor: "red", colors: [] });
-    assert.equal(r.neutralChromaticity, "chromatic");
+    assert.equal(r.wardrobeNeutral, false);
+    assert.equal(r.hueFamily, "red");
     assert.equal(r.energyTier, "high-energy");
   });
 
-  it("green → chromatic + mid-range", () => {
+  it("green → wardrobeNeutral=false + mid-range", () => {
     const r = deriveColourProfile({ primaryColor: "green", colors: [] });
-    assert.equal(r.neutralChromaticity, "chromatic");
+    assert.equal(r.wardrobeNeutral, false);
+    assert.equal(r.hueFamily, "green");
     assert.equal(r.energyTier, "mid-range");
   });
 
-  it("burgundy → chromatic (not in neutral set)", () => {
+  it("burgundy → wardrobeNeutral=false (not in neutral set)", () => {
     const r = deriveColourProfile({ primaryColor: "burgundy", colors: [] });
-    assert.equal(r.neutralChromaticity, "chromatic");
+    assert.equal(r.wardrobeNeutral, false);
+    assert.equal(r.hueFamily, "red");
   });
 
-  it("yellow → chromatic + high-energy", () => {
+  it("yellow → wardrobeNeutral=false + high-energy", () => {
     const r = deriveColourProfile({ primaryColor: "yellow", colors: [] });
-    assert.equal(r.neutralChromaticity, "chromatic");
+    assert.equal(r.wardrobeNeutral, false);
+    assert.equal(r.hueFamily, "yellow");
     assert.equal(r.energyTier, "high-energy");
   });
 });
 
 // ── §GI-V1-11 — broad colour family mapping ───────────────────────────────────
 
-describe("§GI-V1-11 deriveColourProfile — broad colour family", () => {
-  it("red → red family", () => assert.equal(deriveColourProfile({ primaryColor: "red", colors: [] }).broadFamily, "red"));
-  it("burgundy → red family", () => assert.equal(deriveColourProfile({ primaryColor: "burgundy", colors: [] }).broadFamily, "red"));
-  it("coral → pink family", () => assert.equal(deriveColourProfile({ primaryColor: "coral", colors: [] }).broadFamily, "pink"));
-  it("rust → orange family", () => assert.equal(deriveColourProfile({ primaryColor: "rust", colors: [] }).broadFamily, "orange"));
-  it("mustard → yellow family", () => assert.equal(deriveColourProfile({ primaryColor: "mustard", colors: [] }).broadFamily, "yellow"));
-  it("olive → green family", () => assert.equal(deriveColourProfile({ primaryColor: "olive", colors: [] }).broadFamily, "green"));
-  it("cobalt → blue family", () => assert.equal(deriveColourProfile({ primaryColor: "cobalt", colors: [] }).broadFamily, "blue"));
-  it("lilac → purple family", () => assert.equal(deriveColourProfile({ primaryColor: "lilac", colors: [] }).broadFamily, "purple"));
-  it("beige → neutral family", () => assert.equal(deriveColourProfile({ primaryColor: "beige", colors: [] }).broadFamily, "neutral"));
-  it("unknown token → family null", () => assert.equal(deriveColourProfile({ primaryColor: "something-unknown", colors: [] }).broadFamily, null));
+describe("§GI-V1-11 deriveColourProfile — hue family mapping (V2)", () => {
+  it("red → hueFamily red", () => assert.equal(deriveColourProfile({ primaryColor: "red", colors: [] }).hueFamily, "red"));
+  it("burgundy → hueFamily red", () => assert.equal(deriveColourProfile({ primaryColor: "burgundy", colors: [] }).hueFamily, "red"));
+  it("coral → hueFamily pink", () => assert.equal(deriveColourProfile({ primaryColor: "coral", colors: [] }).hueFamily, "pink"));
+  it("rust → hueFamily orange", () => assert.equal(deriveColourProfile({ primaryColor: "rust", colors: [] }).hueFamily, "orange"));
+  it("mustard → hueFamily yellow", () => assert.equal(deriveColourProfile({ primaryColor: "mustard", colors: [] }).hueFamily, "yellow"));
+  it("olive → hueFamily green", () => assert.equal(deriveColourProfile({ primaryColor: "olive", colors: [] }).hueFamily, "green"));
+  it("cobalt → hueFamily blue", () => assert.equal(deriveColourProfile({ primaryColor: "cobalt", colors: [] }).hueFamily, "blue"));
+  it("navy → hueFamily blue (wardrobe-neutral but clear blue lean)", () => assert.equal(deriveColourProfile({ primaryColor: "navy", colors: [] }).hueFamily, "blue"));
+  it("lilac → hueFamily purple", () => assert.equal(deriveColourProfile({ primaryColor: "lilac", colors: [] }).hueFamily, "purple"));
+  it("charcoal → hueFamily grey", () => assert.equal(deriveColourProfile({ primaryColor: "charcoal", colors: [] }).hueFamily, "grey"));
+  it("brown → hueFamily brown", () => assert.equal(deriveColourProfile({ primaryColor: "brown", colors: [] }).hueFamily, "brown"));
+  it("beige → hueFamily null (true neutral, no strong hue lean)", () => assert.equal(deriveColourProfile({ primaryColor: "beige", colors: [] }).hueFamily, null));
+  it("unknown token → hueFamily null", () => assert.equal(deriveColourProfile({ primaryColor: "something-unknown", colors: [] }).hueFamily, null));
 });
 
 // ── §GI-V1-12 — unambiguous dark ──────────────────────────────────────────────
@@ -328,11 +338,11 @@ describe("§GI-V1-14 deriveColourProfile — ambiguous → lightDark null", () =
 
 // ── §GI-V1-15 — null primaryColor → null result ───────────────────────────────
 
-describe("§GI-V1-15 deriveColourProfile — null primaryColor", () => {
-  it("null primaryColor → all fields null", () => {
+describe("§GI-V1-15 deriveColourProfile — null primaryColor (V2)", () => {
+  it("null primaryColor → hueFamily null, wardrobeNeutral false, all other fields null", () => {
     const r = deriveColourProfile({ primaryColor: null, colors: [] });
-    assert.equal(r.neutralChromaticity, null);
-    assert.equal(r.broadFamily, null);
+    assert.equal(r.hueFamily, null);
+    assert.equal(r.wardrobeNeutral, false);
     assert.equal(r.lightDark, null);
     assert.equal(r.energyTier, null);
     assert.deepEqual(r.evidence, []);
@@ -410,10 +420,11 @@ describe("§GI-V1-18 computeGarmentIntentionPotential — passport conditioning"
     assert.ok(r.signals.some(s => s.includes("aligns with your personality")));
   });
 
-  it("feel-like-myself: no passport → garment-only baseline signal", () => {
+  it("feel-like-myself: no passport → NONE (no fb() fallback in V2)", () => {
     const g = { ...blank(), occasions: ["work", "casual"] };
     const r = computeGarmentIntentionPotential(g, "feel-like-myself", {}, {});
-    assert.ok(r.signals.some(s => s.includes("lifestyle occasions")));
+    assert.equal(r.strength, "none");
+    assert.equal(r.signals.length, 0);
   });
 
   it("feel-like-myself: favourite colour match → colour signal", () => {
@@ -467,14 +478,14 @@ describe("§GI-V1-19 computeGarmentIntentionPotential — intention changes whic
 // ── §GI-V1-20 — no universal emotional rules ──────────────────────────────────
 
 describe("§GI-V1-20 no universal emotional rules (no 'red = confidence' etc.)", () => {
-  it("red garment + no passport → confidence signals don't claim red = confidence", () => {
+  it("red garment + no passport → confidence NONE (no universal red=confidence rule)", () => {
     const g = { ...blank(), primaryColor: "red" };
     const r = computeGarmentIntentionPotential(g, "confidence", {}, {});
     // Should not have a signal that claims red = confidence
     assert.ok(!r.signals.some(s => s.toLowerCase().includes("red") && s.toLowerCase().includes("confidence")));
-    // The fallback signal should mention context-dependence, not a universal claim
-    assert.ok(r.signals.some(s => s.includes("personal") || s.includes("context")),
-      `expected context-dependent fallback signal, got: ${r.signals.join(", ")}`);
+    // V2: no fallback signal — NONE with no signals when passport absent
+    assert.equal(r.strength, "none");
+    assert.equal(r.signals.length, 0);
   });
 
   it("black garment → confidence doesn't claim black = power", () => {
@@ -508,19 +519,20 @@ describe("§GI-V1-20 no universal emotional rules (no 'red = confidence' etc.)",
 
 // ── §GI-V1-21 — confidence signals require context ────────────────────────────
 
-describe("§GI-V1-21 confidence signal requires context or passport", () => {
-  it("confidence with no passport, no context → fallback signal about personal nature", () => {
+describe("§GI-V1-21 confidence signal requires context or passport (V2)", () => {
+  it("confidence with no passport, no context → NONE and no signals (V2: no fb() fallback)", () => {
     const g = { ...blank(), fitProfile: "tailored" };
     const r = computeGarmentIntentionPotential(g, "confidence", {}, {});
-    assert.ok(r.signals.some(s => s.includes("personal") || s.includes("context")));
-    assert.equal(r.signals.length, 1, "should not fabricate signals without context");
+    assert.equal(r.strength, "none");
+    assert.equal(r.signals.length, 0);
   });
 
-  it("confidence with coverage-preference passport + covered garment → coverage signal", () => {
-    const g = { ...blank(), shoulderCoverage: true, necklineCoverage: "crew" };
+  it("confidence with coverage-preference passport + covered garment → coverage signal + supporting", () => {
+    const g = { ...blank(), sleeveLength: "full" };
     const r = computeGarmentIntentionPotential(g, "confidence",
-      { coveragePreferences: ["more-coverage"] }, {});
+      { coveragePreferences: ["sleeves-preferred"] }, {});
     assert.ok(r.signals.some(s => s.includes("coverage")));
+    assert.equal(r.strength, "supporting");
   });
 });
 
@@ -563,7 +575,7 @@ describe("§GI-V1-24 no mutation exports", () => {
 
 describe("§GI-V1-25 representative garment QA samples", () => {
   // Basic white / black tee
-  it("white cotton tee: light visual weight, neutral chromatic, light colour", () => {
+  it("white cotton tee: light visual weight, wardrobeNeutral, light colour (V2)", () => {
     const g: ClosetClassification = {
       ...blank(),
       pattern: "solid",
@@ -573,13 +585,14 @@ describe("§GI-V1-25 representative garment QA samples", () => {
     };
     const intel = deriveGarmentStylingIntelligence(g);
     assert.equal(intel.visualWeight.value, "light");
-    assert.equal(intel.colourProfile.neutralChromaticity, "neutral");
+    assert.equal(intel.colourProfile.wardrobeNeutral, true);
+    assert.equal(intel.colourProfile.hueFamily, null);
     assert.equal(intel.colourProfile.lightDark, "light");
     assert.equal(intel.colourProfile.energyTier, "neutral-versatile");
   });
 
   // Beige trench coat
-  it("beige trench: light visual weight, neutral, indeterminate light/dark", () => {
+  it("beige trench: light visual weight, wardrobeNeutral, indeterminate light/dark (V2)", () => {
     const g: ClosetClassification = {
       ...blank(),
       pattern: "solid",
@@ -589,13 +602,13 @@ describe("§GI-V1-25 representative garment QA samples", () => {
     };
     const intel = deriveGarmentStylingIntelligence(g);
     assert.equal(intel.visualWeight.value, "light");
-    assert.equal(intel.colourProfile.neutralChromaticity, "neutral");
+    assert.equal(intel.colourProfile.wardrobeNeutral, true);
     assert.equal(intel.colourProfile.lightDark, null); // beige is not unambiguously light
     assert.equal(intel.colourProfile.energyTier, "neutral-versatile");
   });
 
   // Burgundy satin column gown
-  it("burgundy satin gown: medium weight (satin), chromatic, red family, dark", () => {
+  it("burgundy satin gown: medium weight (satin), chromatic, red hueFamily, dark (V2)", () => {
     const g: ClosetClassification = {
       ...blank(),
       pattern: "solid",
@@ -608,8 +621,8 @@ describe("§GI-V1-25 representative garment QA samples", () => {
     const intel = deriveGarmentStylingIntelligence(g);
     assert.equal(intel.visualWeight.value, "medium");
     assert.ok(intel.visualWeight.evidence.some(e => e.includes("satin")));
-    assert.equal(intel.colourProfile.neutralChromaticity, "chromatic");
-    assert.equal(intel.colourProfile.broadFamily, "red");
+    assert.equal(intel.colourProfile.wardrobeNeutral, false);
+    assert.equal(intel.colourProfile.hueFamily, "red");
     assert.equal(intel.colourProfile.lightDark, "dark");
   });
 
@@ -640,9 +653,10 @@ describe("§GI-V1-25 representative garment QA samples", () => {
     const intel = deriveGarmentStylingIntelligence(g);
     // wrap is a MOVEMENT silhouette but not a VOLUME silhouette → no visual weight contribution
     assert.equal(intel.visualWeight.value, "light");
-    // feel-softer should fire for wrap silhouette
-    const softerSignals = intentionSignals(intel, "feel-softer");
-    assert.ok(softerSignals.some(s => s.includes("silhouette") || s.includes("gentle")));
+    // V2: feel-softer requires soft fitProfile gate — wrap silhouette + material alone = NONE
+    const softerIp = intel.intentionPotentials.find(ip => ip.intention === "feel-softer");
+    assert.ok(softerIp);
+    assert.equal(softerIp.strength, "none", "silhouette + material without soft fitProfile → NONE");
   });
 
   // Patterned statement piece (animal-print, oversized, velvet)
@@ -660,15 +674,16 @@ describe("§GI-V1-25 representative garment QA samples", () => {
   });
 
   // Sneakers (no pattern/silhouette/material typical fields)
-  it("sneakers with no analysed fields: null visual weight", () => {
+  it("sneakers with no analysed fields: null visual weight (V2)", () => {
     const g: ClosetClassification = { ...blank() };
     const intel = deriveGarmentStylingIntelligence(g);
     assert.equal(intel.visualWeight.value, null);
-    assert.equal(intel.colourProfile.neutralChromaticity, null);
+    assert.equal(intel.colourProfile.hueFamily, null);
+    assert.equal(intel.colourProfile.wardrobeNeutral, false);
   });
 
   // Floral silk scarf (accessory)
-  it("floral silk scarf: medium visual weight (floral pattern)", () => {
+  it("floral silk scarf: medium visual weight (floral pattern) (V2)", () => {
     const g: ClosetClassification = {
       ...blank(),
       pattern: "floral",
@@ -680,7 +695,7 @@ describe("§GI-V1-25 representative garment QA samples", () => {
     // Only 1 contribution: floral pattern
     assert.equal(intel.visualWeight.value, "medium");
     assert.ok(intel.visualWeight.evidence.some(e => e.includes("floral")));
-    assert.equal(intel.colourProfile.broadFamily, "pink");
+    assert.equal(intel.colourProfile.hueFamily, "pink");
     assert.equal(intel.colourProfile.energyTier, "high-energy");
   });
 });
@@ -693,19 +708,19 @@ describe("§GI-V1-26 StyleMe isolation — V1 not wired into live ranking", () =
   });
 
   it("styleme-recommendation.ts does not export deriveVisualWeight", async () => {
-    const styleme = await import("~/lib/ai/styleme-recommendation.ts");
+    const styleme = await import("~/lib/ai/styleme-recommendation");
     assert.ok(!("deriveVisualWeight" in styleme),
       "deriveVisualWeight must not exist in styleme-recommendation (boundary violation)");
   });
 
   it("styleme-recommendation.ts does not export V1_SHADOW_ONLY", async () => {
-    const styleme = await import("~/lib/ai/styleme-recommendation.ts");
+    const styleme = await import("~/lib/ai/styleme-recommendation");
     assert.ok(!("V1_SHADOW_ONLY" in styleme),
       "V1_SHADOW_ONLY in styleme-recommendation would indicate a Phase 3C boundary violation");
   });
 
   it("styleme-recommendation.ts does not export deriveGarmentStylingIntelligence", async () => {
-    const styleme = await import("~/lib/ai/styleme-recommendation.ts");
+    const styleme = await import("~/lib/ai/styleme-recommendation");
     assert.ok(!("deriveGarmentStylingIntelligence" in styleme));
   });
 
@@ -810,7 +825,7 @@ describe("§GI-V1-27 passport-aware deriveGarmentStylingIntelligence", () => {
       sleeveLength: "full",
     };
     const withCoveragePassport = deriveGarmentStylingIntelligence(coveredGarment, {
-      coveragePreferences: ["more-coverage"],
+      coveragePreferences: ["sleeves-preferred"],
     });
     const withoutPassport = deriveGarmentStylingIntelligence(coveredGarment, null);
 
@@ -830,5 +845,521 @@ describe("§GI-V1-27 passport-aware deriveGarmentStylingIntelligence", () => {
     assert.ok(!("candidateRank" in withP));
     assert.ok(!("styleMeScore" in withP));
     assert.ok(!("resultText" in withP));
+  });
+});
+
+// ── §GI-V1-28 — V2 visual weight: construction dimension ─────────────────────
+
+describe("§GI-V1-28 deriveVisualWeight V2 — construction dimension (tailored blazer fix)", () => {
+  it("solid + straight + wool + tailored → medium (construction adds 1)", () => {
+    const r = deriveVisualWeight({
+      pattern: "solid", silhouette: "straight", material: "wool", fitProfile: "tailored",
+    });
+    assert.equal(r.value, "medium");
+    assert.ok(r.evidence.some(e => e.includes("tailored") || e.includes("construction")));
+  });
+
+  it("solid + straight + cotton + tailored → medium (V1 was 'light' — bug fixed)", () => {
+    const r = deriveVisualWeight({
+      pattern: "solid", silhouette: "straight", material: "cotton", fitProfile: "tailored",
+    });
+    assert.equal(r.value, "medium");
+  });
+
+  it("solid + straight + wool + structured → medium", () => {
+    const r = deriveVisualWeight({
+      pattern: "solid", silhouette: "straight", material: "wool", fitProfile: "structured",
+    });
+    assert.equal(r.value, "medium");
+  });
+
+  it("solid + straight + cotton + fitted → light (fitted does NOT contribute)", () => {
+    const r = deriveVisualWeight({
+      pattern: "solid", silhouette: "straight", material: "cotton", fitProfile: "fitted",
+    });
+    assert.equal(r.value, "light");
+    assert.ok(!r.evidence.some(e => e.includes("fitted")));
+  });
+
+  it("floral + oversized + cotton + tailored → substantial (3 contributions)", () => {
+    const r = deriveVisualWeight({
+      pattern: "floral", silhouette: "oversized", material: "cotton", fitProfile: "tailored",
+    });
+    assert.equal(r.value, "substantial");
+    assert.ok(r.evidence.length >= 2);
+  });
+
+  it("all null + category=SHOES → null (no metadata → no visual weight evidence)", () => {
+    const r = deriveVisualWeight({
+      pattern: null, silhouette: null, material: null, fitProfile: null, category: "SHOES",
+    });
+    assert.equal(r.value, null);
+  });
+});
+
+// ── §GI-V1-29 — V2 colour model: two-axis ────────────────────────────────────
+
+describe("§GI-V1-29 deriveColourProfile V2 — two-axis (hueFamily + wardrobeNeutral)", () => {
+  it("navy: wardrobeNeutral=true AND hueFamily='blue' (not neutral·neutral)", () => {
+    const r = deriveColourProfile({ primaryColor: "navy", colors: [] });
+    assert.equal(r.wardrobeNeutral, true);
+    assert.equal(r.hueFamily, "blue");
+  });
+
+  it("charcoal: wardrobeNeutral=true AND hueFamily='grey'", () => {
+    const r = deriveColourProfile({ primaryColor: "charcoal", colors: [] });
+    assert.equal(r.wardrobeNeutral, true);
+    assert.equal(r.hueFamily, "grey");
+  });
+
+  it("brown: wardrobeNeutral=true AND hueFamily='brown'", () => {
+    const r = deriveColourProfile({ primaryColor: "brown", colors: [] });
+    assert.equal(r.wardrobeNeutral, true);
+    assert.equal(r.hueFamily, "brown");
+  });
+
+  it("red: wardrobeNeutral=false AND hueFamily='red'", () => {
+    const r = deriveColourProfile({ primaryColor: "red", colors: [] });
+    assert.equal(r.wardrobeNeutral, false);
+    assert.equal(r.hueFamily, "red");
+  });
+
+  it("khaki V2: wardrobeNeutral=true (moved from green family, V1 bug fixed)", () => {
+    const r = deriveColourProfile({ primaryColor: "khaki", colors: [] });
+    assert.equal(r.wardrobeNeutral, true);
+    assert.equal(r.hueFamily, null); // khaki has no strong hue family
+    assert.equal(r.energyTier, "neutral-versatile");
+  });
+
+  it("neutralChromaticity and broadFamily are backward-compat derived fields", () => {
+    const r = deriveColourProfile({ primaryColor: "red", colors: [] });
+    assert.equal(r.neutralChromaticity, "chromatic");
+    assert.equal(r.broadFamily, "red");
+    const n = deriveColourProfile({ primaryColor: "black", colors: [] });
+    assert.equal(n.neutralChromaticity, "neutral");
+    assert.equal(n.broadFamily, "neutral");
+    const navy = deriveColourProfile({ primaryColor: "navy", colors: [] });
+    assert.equal(navy.neutralChromaticity, "neutral");
+    assert.equal(navy.broadFamily, "blue"); // navy has hue bias → broadFamily is "blue"
+  });
+});
+
+// ── §GI-V1-30 — V2 strength field ────────────────────────────────────────────
+
+describe("§GI-V1-30 IntentionPotential — strength field always present", () => {
+  const validStrengths = new Set<IntentionStrength>(["strong", "supporting", "none"]);
+
+  it("all 12 intentions always have a valid strength value", () => {
+    const intel = deriveGarmentStylingIntelligence({ ...blank() });
+    for (const ip of intel.intentionPotentials) {
+      assert.ok(validStrengths.has(ip.strength as IntentionStrength),
+        `invalid strength '${ip.strength}' for ${ip.intention}`);
+    }
+  });
+
+  it("blank garment → all intentions strength='none'", () => {
+    const intel = deriveGarmentStylingIntelligence({ ...blank() });
+    for (const ip of intel.intentionPotentials) {
+      assert.equal(ip.strength, "none", `${ip.intention} should be none for blank garment`);
+    }
+  });
+
+  it("strength 'none' means signals empty for most intentions (feel-less-exposed is Layer A exception)", () => {
+    // feel-less-exposed records objective coverage signals regardless of passport gate (Layer A).
+    // All other intentions must have zero signals when strength=none.
+    const g: ClosetClassification = {
+      ...blank(),
+      pattern: "solid",
+      silhouette: "straight",
+      material: "cotton",
+      primaryColor: "beige",
+    };
+    const intel = deriveGarmentStylingIntelligence(g);
+    for (const ip of intel.intentionPotentials) {
+      if (ip.intention === "feel-less-exposed") continue; // Layer A: coverage signals recorded regardless
+      if (ip.strength === "none") {
+        assert.equal(ip.signals.length, 0,
+          `${ip.intention}: strength=none but has signals: ${ip.signals.join(", ")}`);
+      }
+    }
+  });
+});
+
+// ── §GI-V1-31 — V2: no fallback source ───────────────────────────────────────
+
+describe("§GI-V1-31 V2 — no 'fallback' signal source", () => {
+  it("no signalDetail has source='fallback' for any intention on any garment", () => {
+    const garments: ClosetClassification[] = [
+      { ...blank() },
+      { ...blank(), primaryColor: "red", fitProfile: "fitted", styleTags: ["bold"] },
+      { ...blank(), primaryColor: "black", formality: "casual", occasions: ["casual"] },
+      { ...blank(), fitProfile: "tailored", material: "wool", pattern: "stripes" },
+    ];
+    for (const g of garments) {
+      const intel = deriveGarmentStylingIntelligence(g);
+      for (const ip of intel.intentionPotentials) {
+        for (const sd of ip.signalDetails) {
+          assert.ok(
+            sd.source !== ("fallback" as string),
+            `fallback source found: ${ip.intention} — "${sd.text}"`,
+          );
+        }
+      }
+    }
+  });
+
+  it("all signalDetails have polarity 'support' or 'conflict'", () => {
+    const g: ClosetClassification = {
+      ...blank(),
+      primaryColor: "red",
+      fitProfile: "tailored",
+      styleTags: ["bold", "statement"],
+    };
+    const intel = deriveGarmentStylingIntelligence(g, { avoidColors: ["red"] });
+    for (const ip of intel.intentionPotentials) {
+      for (const sd of ip.signalDetails) {
+        assert.ok(
+          sd.polarity === "support" || sd.polarity === "conflict",
+          `unexpected polarity '${sd.polarity}' in ${ip.intention}`,
+        );
+      }
+    }
+  });
+});
+
+// ── §GI-V1-32 — V2 ground-me rules ───────────────────────────────────────────
+
+describe("§GI-V1-32 V2 ground-me — requires personality tag alignment + positive Layer A", () => {
+  it("tailored blazer — no styleTags → NONE (no tag alignment, no ease)", () => {
+    const g: ClosetClassification = {
+      ...blank(), fitProfile: "tailored", material: "wool",
+    };
+    const r = computeGarmentIntentionPotential(g, "ground-me",
+      { stylePersonalities: ["classic-polished"] }, {});
+    assert.equal(r.strength, "none",
+      "tailored+wool has no ease/softness and no aligned tags — NONE");
+  });
+
+  it("relaxed fit + classic-polished passport + aligned tags → SUPPORTING", () => {
+    const g: ClosetClassification = { ...blank(), fitProfile: "relaxed", styleTags: ["classic", "polished"] };
+    const r = computeGarmentIntentionPotential(g, "ground-me",
+      { stylePersonalities: ["classic-polished"] }, {});
+    assert.equal(r.strength, "supporting");
+    assert.ok(r.signals.some(s => s.includes("ease") || s.includes("fit")));
+  });
+
+  it("relaxed + silk + minimal-relaxed + aligned tags → SUPPORTING (fit + material = positive)", () => {
+    const g: ClosetClassification = {
+      ...blank(), fitProfile: "relaxed", material: "silk", styleTags: ["minimal", "relaxed"],
+    };
+    const r = computeGarmentIntentionPotential(g, "ground-me",
+      { stylePersonalities: ["minimal-relaxed"] }, {});
+    assert.equal(r.strength, "supporting");
+  });
+
+  it("relaxed fit + bold-edgy passport — no styleTags → NONE (no tag alignment)", () => {
+    const g: ClosetClassification = { ...blank(), fitProfile: "relaxed" };
+    const r = computeGarmentIntentionPotential(g, "ground-me",
+      { stylePersonalities: ["bold-edgy"] }, {});
+    assert.equal(r.strength, "none");
+  });
+
+  it("relaxed fit + no passport → NONE", () => {
+    const g: ClosetClassification = { ...blank(), fitProfile: "relaxed" };
+    const r = computeGarmentIntentionPotential(g, "ground-me", {}, {});
+    assert.equal(r.strength, "none");
+  });
+});
+
+// ── §GI-V1-33 — V2 avoidColors conflict signal ───────────────────────────────
+
+describe("§GI-V1-33 V2 avoidColors — conflict signal in feel-like-myself and confidence", () => {
+  it("garment primaryColor in avoidColors → conflict signal in feel-like-myself", () => {
+    const g: ClosetClassification = { ...blank(), primaryColor: "red" };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself",
+      { favoriteColors: ["blue"], avoidColors: ["red"] }, {});
+    const conflictSig = r.signalDetails.find(sd => sd.polarity === "conflict");
+    assert.ok(conflictSig, "expected a conflict signal for avoided colour");
+    assert.equal(conflictSig!.source, "passport");
+  });
+
+  it("garment primaryColor in avoidColors → conflict signal in confidence", () => {
+    const g: ClosetClassification = { ...blank(), primaryColor: "orange" };
+    const r = computeGarmentIntentionPotential(g, "confidence",
+      { avoidColors: ["orange"] }, {});
+    const conflictSig = r.signalDetails.find(sd => sd.polarity === "conflict");
+    assert.ok(conflictSig, "expected a conflict signal for avoided colour");
+  });
+
+  it("garment primaryColor NOT in avoidColors → no conflict signal", () => {
+    const g: ClosetClassification = { ...blank(), primaryColor: "blue" };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself",
+      { avoidColors: ["red", "orange"] }, {});
+    const conflictSig = r.signalDetails.find(sd => sd.polarity === "conflict");
+    assert.ok(!conflictSig, "no conflict signal expected when colour is not avoided");
+  });
+
+  it("signals[] (backward-compat) contains only support signals, not conflict", () => {
+    const g: ClosetClassification = { ...blank(), primaryColor: "red", styleTags: ["classic"] };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself",
+      { stylePersonalities: ["classic-polished"], avoidColors: ["red"] }, {});
+    const conflictText = r.signalDetails.filter(sd => sd.polarity === "conflict").map(sd => sd.text);
+    for (const ct of conflictText) {
+      assert.ok(!r.signals.includes(ct),
+        `conflict signal '${ct}' must not appear in backward-compat signals[]`);
+    }
+  });
+});
+
+// ── §GI-V1-34 — V2 give-energy channel rules ─────────────────────────────────
+
+describe("§GI-V1-34 V2 give-energy — three channels, visual weight is amplifier only", () => {
+  it("ENERGY_TAGS alone → SUPPORTING", () => {
+    const g: ClosetClassification = { ...blank(), styleTags: ["bold", "statement"] };
+    const r = computeGarmentIntentionPotential(g, "give-energy", {}, {});
+    assert.equal(r.strength, "supporting");
+    assert.ok(r.signals.some(s => s.includes("bold") || s.includes("energy character")));
+  });
+
+  it("movement silhouette alone → SUPPORTING", () => {
+    const g: ClosetClassification = { ...blank(), silhouette: "flared" };
+    const r = computeGarmentIntentionPotential(g, "give-energy", {}, {});
+    assert.equal(r.strength, "supporting");
+    assert.ok(r.signals.some(s => s.includes("movement")));
+  });
+
+  it("high-energy colour alone → SUPPORTING", () => {
+    const g: ClosetClassification = { ...blank(), primaryColor: "red" };
+    const r = computeGarmentIntentionPotential(g, "give-energy", {}, {});
+    assert.equal(r.strength, "supporting");
+    assert.ok(r.signals.some(s => s.includes("chromatic colour")));
+  });
+
+  it("two channels → STRONG", () => {
+    const g: ClosetClassification = {
+      ...blank(), primaryColor: "red", silhouette: "flared",
+    };
+    const r = computeGarmentIntentionPotential(g, "give-energy", {}, {});
+    assert.equal(r.strength, "strong");
+  });
+
+  it("one channel + substantial visual weight → STRONG (amplifier rule)", () => {
+    const g: ClosetClassification = {
+      ...blank(), primaryColor: "red", pattern: "floral", silhouette: "oversized",
+    };
+    const r = computeGarmentIntentionPotential(g, "give-energy", {}, {});
+    // pattern+silhouette = substantial visual weight → amplifies high-energy colour
+    assert.equal(r.strength, "strong");
+  });
+
+  it("substantial visual weight alone (no energy channels) → NONE", () => {
+    const g: ClosetClassification = {
+      ...blank(), pattern: "floral", silhouette: "oversized", primaryColor: "beige",
+    };
+    const r = computeGarmentIntentionPotential(g, "give-energy", {}, {});
+    assert.equal(r.strength, "none",
+      "visual weight cannot independently establish give-energy (no energy channels)");
+  });
+
+  it("eclectic/romantic tags (not in ENERGY_TAGS) alone → NONE", () => {
+    const g: ClosetClassification = { ...blank(), styleTags: ["eclectic", "romantic"] };
+    const r = computeGarmentIntentionPotential(g, "give-energy", {}, {});
+    assert.equal(r.strength, "none",
+      "eclectic/romantic are NOT in ENERGY_TAGS and should not establish give-energy");
+  });
+});
+
+// ── §GI-V1-35 — V2 feel-softer rules ─────────────────────────────────────────
+
+describe("§GI-V1-35 V2 feel-softer — soft fitProfile required; silhouette/material alone = NONE", () => {
+  it("silk material alone → NONE (material alone = NONE in V2)", () => {
+    const g: ClosetClassification = { ...blank(), material: "silk" };
+    const r = computeGarmentIntentionPotential(g, "feel-softer", {}, {});
+    assert.equal(r.strength, "none");
+    assert.equal(r.signals.length, 0);
+  });
+
+  it("wrap silhouette alone (no fitProfile) → NONE (silhouette alone = NONE in V2)", () => {
+    const g: ClosetClassification = { ...blank(), silhouette: "wrap" };
+    const r = computeGarmentIntentionPotential(g, "feel-softer", {}, {});
+    assert.equal(r.strength, "none");
+    assert.equal(r.signals.length, 0);
+  });
+
+  it("relaxed fit alone → NONE (fit alone insufficient in V2; needs material or silhouette too)", () => {
+    const g: ClosetClassification = { ...blank(), fitProfile: "relaxed" };
+    const r = computeGarmentIntentionPotential(g, "feel-softer", {}, {});
+    assert.equal(r.strength, "none");
+    assert.equal(r.signals.length, 0);
+  });
+
+  it("relaxed fit + silk material → SUPPORTING (not STRONG; STRONG needs all 3 dimensions)", () => {
+    const g: ClosetClassification = { ...blank(), fitProfile: "relaxed", material: "silk" };
+    const r = computeGarmentIntentionPotential(g, "feel-softer", {}, {});
+    assert.equal(r.strength, "supporting");
+  });
+
+  it("relaxed fit + silk + wrap silhouette → STRONG (all 3 dimensions)", () => {
+    const g: ClosetClassification = {
+      ...blank(), fitProfile: "relaxed", material: "silk", silhouette: "wrap",
+    };
+    const r = computeGarmentIntentionPotential(g, "feel-softer", {}, {});
+    assert.equal(r.strength, "strong");
+  });
+
+  it("tailored fit → NONE (not a soft fitProfile)", () => {
+    const g: ClosetClassification = { ...blank(), fitProfile: "tailored" };
+    const r = computeGarmentIntentionPotential(g, "feel-softer", {}, {});
+    assert.equal(r.strength, "none");
+  });
+});
+
+// ── §GI-V1-36 — V2 feel-attractive: successfulOutfitGives gate ───────────────
+
+describe("§GI-V1-36 V2 feel-attractive — NONE by default; requires successfulOutfitGives gate + Passport alignment", () => {
+  it("fitted garment alone (no passport) → NONE", () => {
+    const g: ClosetClassification = { ...blank(), fitProfile: "fitted" };
+    const r = computeGarmentIntentionPotential(g, "feel-attractive", {}, {});
+    assert.equal(r.strength, "none");
+  });
+
+  it("feminine-romantic passport + fitted, no successfulOutfitGives → NONE", () => {
+    const g: ClosetClassification = { ...blank(), fitProfile: "fitted" };
+    const r = computeGarmentIntentionPotential(g, "feel-attractive",
+      { stylePersonalities: ["feminine-romantic"] }, {});
+    assert.equal(r.strength, "none");
+  });
+
+  it("successfulOutfitGives contains feel-attractive but no Passport personality → NONE", () => {
+    const g: ClosetClassification = { ...blank(), fitProfile: "fitted" };
+    const r = computeGarmentIntentionPotential(g, "feel-attractive",
+      { successfulOutfitGives: ["feel-attractive"] }, {});
+    assert.equal(r.strength, "none");
+  });
+
+  it("successfulOutfitGives + Passport alignment + garment personality tags → SUPPORTING", () => {
+    const g: ClosetClassification = {
+      ...blank(), styleTags: ["feminine", "romantic"],
+    };
+    const r = computeGarmentIntentionPotential(g, "feel-attractive",
+      { stylePersonalities: ["feminine-romantic"], successfulOutfitGives: ["feel-attractive"] }, {});
+    assert.equal(r.strength, "supporting");
+  });
+
+  it("successfulOutfitGives + Passport alignment but no garment tags → NONE", () => {
+    const g: ClosetClassification = { ...blank() };
+    const r = computeGarmentIntentionPotential(g, "feel-attractive",
+      { stylePersonalities: ["feminine-romantic"], successfulOutfitGives: ["feel-attractive"] }, {});
+    assert.equal(r.strength, "none");
+  });
+
+  it("STRONG is never returned at item level (V2)", () => {
+    const g: ClosetClassification = {
+      ...blank(), fitProfile: "fitted", occasions: ["evening"], styleTags: ["feminine", "romantic", "elevated"],
+    };
+    const r = computeGarmentIntentionPotential(g, "feel-attractive",
+      { stylePersonalities: ["feminine-romantic"], successfulOutfitGives: ["feel-attractive"] }, {});
+    assert.ok(r.strength !== "strong", "STRONG must never fire at item level in V2");
+  });
+});
+
+// ── §GI-V1-37 — V2 give-structure: fitProfile required ───────────────────────
+
+describe("§GI-V1-37 V2 give-structure — fitProfile required; silhouette/material alone NONE", () => {
+  it("straight silhouette alone → NONE", () => {
+    const g: ClosetClassification = { ...blank(), silhouette: "straight" };
+    const r = computeGarmentIntentionPotential(g, "give-structure", {}, {});
+    assert.equal(r.strength, "none");
+  });
+
+  it("wool material alone → NONE", () => {
+    const g: ClosetClassification = { ...blank(), material: "wool" };
+    const r = computeGarmentIntentionPotential(g, "give-structure", {}, {});
+    assert.equal(r.strength, "none");
+  });
+
+  it("tailored fitProfile → SUPPORTING", () => {
+    const g: ClosetClassification = { ...blank(), fitProfile: "tailored" };
+    const r = computeGarmentIntentionPotential(g, "give-structure", {}, {});
+    assert.equal(r.strength, "supporting");
+  });
+
+  it("tailored + wool → STRONG", () => {
+    const g: ClosetClassification = {
+      ...blank(), fitProfile: "tailored", material: "wool",
+    };
+    const r = computeGarmentIntentionPotential(g, "give-structure", {}, {});
+    assert.equal(r.strength, "strong");
+  });
+});
+
+// ── §GI-V1-38 — V2 feel-sharper: fitted alone = NONE ────────────────────────
+
+describe("§GI-V1-38 V2 feel-sharper — fitted alone = NONE; tailored/structured required", () => {
+  it("fitted alone → NONE and no signals", () => {
+    const g: ClosetClassification = { ...blank(), fitProfile: "fitted" };
+    const r = computeGarmentIntentionPotential(g, "feel-sharper", {}, {});
+    assert.equal(r.strength, "none");
+    assert.equal(r.signals.length, 0);
+  });
+
+  it("tailored → SUPPORTING", () => {
+    const g: ClosetClassification = { ...blank(), fitProfile: "tailored" };
+    const r = computeGarmentIntentionPotential(g, "feel-sharper", {}, {});
+    assert.equal(r.strength, "supporting");
+  });
+
+  it("tailored + wool → STRONG", () => {
+    const g: ClosetClassification = {
+      ...blank(), fitProfile: "tailored", material: "wool",
+    };
+    const r = computeGarmentIntentionPotential(g, "feel-sharper", {}, {});
+    assert.equal(r.strength, "strong");
+  });
+});
+
+// ── §GI-V1-39 — V2 feel-less-exposed: Passport coverage need gate ────────────
+
+describe("§GI-V1-39 V2 feel-less-exposed — Passport dressingPreferences gate required for strength", () => {
+  it("one zone covered, no Passport → signals present but strength NONE", () => {
+    const g: ClosetClassification = { ...blank(), shoulderCoverage: true };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed", {}, {});
+    assert.equal(r.strength, "none", "objective coverage alone must not produce strength without Passport need");
+    assert.ok(r.signals.some(s => s.includes("shoulders covered")), "Layer A signals still recorded");
+  });
+
+  it("two zones covered, no Passport → signals present but strength NONE", () => {
+    const g: ClosetClassification = {
+      ...blank(), shoulderCoverage: true, necklineCoverage: "crew",
+    };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed", {}, {});
+    assert.equal(r.strength, "none");
+    assert.ok(r.signals.length >= 2, "Layer A signals still recorded");
+  });
+
+  it("two requirements stated, one zone satisfied → SUPPORTING", () => {
+    const g: ClosetClassification = { ...blank(), shoulderCoverage: true };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed",
+      { dressingPreferences: ["arms-covered", "chest-neckline-covered"] }, {});
+    assert.equal(r.strength, "supporting");
+  });
+
+  it("two requirements stated, both zones satisfied → STRONG", () => {
+    const g: ClosetClassification = {
+      ...blank(), shoulderCoverage: true, necklineCoverage: "crew",
+    };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed",
+      { dressingPreferences: ["arms-covered", "chest-neckline-covered"] }, {});
+    assert.equal(r.strength, "strong");
+  });
+
+  it("one requirement stated, not satisfied → NONE (no coverage zones met)", () => {
+    const g: ClosetClassification = {
+      ...blank(), shoulderCoverage: false, midriffExposed: true, necklineCoverage: "low",
+    };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed",
+      { dressingPreferences: ["arms-covered"] }, {});
+    assert.equal(r.strength, "none");
+    assert.equal(r.signals.length, 0);
   });
 });
