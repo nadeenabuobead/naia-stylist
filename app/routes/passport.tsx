@@ -1186,10 +1186,17 @@ export default function PassportPage() {
       if (kind === "text" || kind === "single") {
         (edits as Record<string, unknown>)[draftKey] = typeof v === "string" ? v : "";
       } else {
-        // Strip legacy colour IDs from the initial draft so they're invisible in the UI
+        // Strip legacy IDs that no longer exist in the current quiz so they don't
+        // silently consume a slot and make the picker appear full.
         const arr = (Array.isArray(v) ? [...v] : []) as string[];
-        (edits as Record<string, unknown>)[draftKey] =
-          draftKey === "favorite-colors" ? arr.filter(id => !LEGACY_COLOUR_IDS.has(id)) : arr;
+        let filtered = arr;
+        if (draftKey === "favorite-colors") {
+          filtered = arr.filter(id => !LEGACY_COLOUR_IDS.has(id));
+        } else if (draftKey === "lifestyle") {
+          const validIds = new Set((QUESTION_BY_ID["lifestyle"]?.options ?? []).map(o => o.id));
+          filtered = arr.filter(id => validIds.has(id));
+        }
+        (edits as Record<string, unknown>)[draftKey] = filtered;
       }
     }
     setFlowEdits(edits);
@@ -1908,16 +1915,13 @@ export default function PassportPage() {
             </div>
           </div>
 
-          <div className="sp-actions">
-            {!isLegacyCustomer && !isComplete && (
+          {!isLegacyCustomer && !isComplete && (
+            <div className="sp-actions">
               <button type="button" className="sp-btn-primary" onClick={startContinue}>
                 Continue Passport
               </button>
-            )}
-            <button type="button" className="sp-btn-outline" onClick={startUpdate}>
-              Update Answers
-            </button>
-          </div>
+            </div>
+          )}
 
           {!isLegacyCustomer && !isComplete && missingSections[0] && (
             <div className="sp-state-note">
@@ -1978,11 +1982,6 @@ export default function PassportPage() {
           <VisualAnalysisChapter selfieChapter={selfieChapter ?? null} />
         </div>
 
-        <div className="sp-actions">
-          <button type="button" className="sp-btn-outline" onClick={startUpdate}>
-            Update Answers
-          </button>
-        </div>
       </MyNaiaLayout>
     );
   }
