@@ -266,8 +266,13 @@ describe("§3B-I adjacent prev/next navigation", () => {
     // getAdjacentItemIds uses lt for the next direction
     // (getNextUnreviewedItemId also uses lt — both are correct and distinct)
     const adjIdx = ciSrc.indexOf("export async function getAdjacentItemIds");
-    const adjSection = ciSrc.slice(adjIdx, adjIdx + 800);
+    const adjSection = ciSrc.slice(adjIdx, adjIdx + 1100);
     assert.ok(adjSection.includes("createdAt: { lt: current.createdAt }"), "next-in-list must query older items");
+  });
+  it("adjacent queries are scoped to the same customer", () => {
+    const adjIdx = ciSrc.indexOf("export async function getAdjacentItemIds");
+    const adjSection = ciSrc.slice(adjIdx, adjIdx + 1100);
+    assert.ok(adjSection.includes("customerId"), "getAdjacentItemIds must filter by customerId to avoid crossing customer boundaries");
   });
   it("detail route renders na-nav-adj links", () => {
     assert.ok(detailSrc.includes("na-nav-adj"), "detail must render .na-nav-adj adjacent nav links");

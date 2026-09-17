@@ -103,7 +103,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const returnTo = url.searchParams.get("from") ?? null;
   const [nextUnreviewedId, adjacent] = await Promise.all([
     getNextUnreviewedItemId(itemId),
-    getAdjacentItemIds(itemId),
+    getAdjacentItemIds(itemId, item.customerId),
   ]);
   const { prevId: prevItemId, nextId: nextItemId } = adjacent;
 

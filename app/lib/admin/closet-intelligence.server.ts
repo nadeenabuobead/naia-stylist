@@ -595,10 +595,11 @@ export async function getNextUnreviewedItemId(
 
 // ── Adjacent item navigation (Phase 3B gaps) ─────────────────────────────────
 
-/** Returns the IDs of the previous and next items in the list (ordered createdAt DESC).
- *  "prev" in the list means a newer item (createdAt > current); "next" means older. */
+/** Returns the IDs of the previous and next items in the list (ordered createdAt DESC),
+ *  scoped to the same customer so Prev/Next never crosses into another customer's closet. */
 export async function getAdjacentItemIds(
   currentItemId: string,
+  customerId: string,
 ): Promise<{ prevId: string | null; nextId: string | null }> {
   const current = await prisma.closetItem.findUnique({
     where: { id: currentItemId },
@@ -609,13 +610,13 @@ export async function getAdjacentItemIds(
   const [prev, next] = await Promise.all([
     // Previous in list = newer item (createdAt > current, ordered asc = closest)
     prisma.closetItem.findFirst({
-      where: { createdAt: { gt: current.createdAt } },
+      where: { customerId, createdAt: { gt: current.createdAt } },
       orderBy: { createdAt: "asc" },
       select: { id: true },
     }),
     // Next in list = older item (createdAt < current, ordered desc = closest)
     prisma.closetItem.findFirst({
-      where: { createdAt: { lt: current.createdAt } },
+      where: { customerId, createdAt: { lt: current.createdAt } },
       orderBy: { createdAt: "desc" },
       select: { id: true },
     }),
