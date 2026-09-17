@@ -110,6 +110,17 @@ const PASSPORT_LABELS: Record<string, Record<string, string>> = {
     "dress-for-occasion": "Dress for occasions",
     "sustainable-choices": "Make sustainable choices",
   },
+  successfulOutfitGives: {
+    "feel-like-myself": "Feel like myself",
+    "confidence": "Confidence",
+    "feel-put-together": "Feel put-together",
+    "comfort-ease": "Comfort & ease",
+    "sense-of-expression": "Sense of expression",
+    "feel-attractive": "Feel attractive",
+    "sense-of-power": "Sense of power",
+    "effortlessness": "Effortlessness",
+    "not-sure": "Not sure",
+  },
 };
 
 function passportLabel(field: string, id: string): string {
@@ -146,55 +157,112 @@ function PassportSection({ ctx }: { ctx: CustomerStylingPassportContext | null }
     );
   }
 
-  const rows: Array<{ label: string; field: string; values: string[] }> = [
-    { label: "Style Personalities", field: "stylePersonalities", values: ctx.stylePersonalities },
+  const isV6 = ctx.profileVersion != null && ctx.profileVersion >= 6;
+
+  const v6Rows: Array<{ label: string; field: string; values: string[] }> = [
+    { label: "Current Focus", field: "currentGoal", values: ctx.currentGoal },
+    { label: "What Makes an Outfit Work", field: "successfulOutfitGives", values: ctx.successfulOutfitGives },
+    { label: "Style", field: "stylePersonalities", values: ctx.stylePersonalities },
     { label: "Lifestyle", field: "lifestyle", values: ctx.lifestyle },
     { label: "Favourite Colours", field: "favoriteColors", values: ctx.favoriteColors },
     { label: "Avoid Colours", field: "avoidColors", values: ctx.avoidColors },
-    { label: "Coverage preferences", field: "coveragePreferences", values: ctx.coveragePreferences },
-    { label: "Dressing preferences", field: "dressingPreferences", values: ctx.dressingPreferences },
-    { label: "Fit preferences", field: "fitPreferences", values: ctx.fitPreferences },
     { label: "Silhouette", field: "silhouette", values: ctx.silhouette },
+    { label: "Fit Concerns", field: "fitConcerns", values: ctx.fitConcerns },
+    { label: "Dressing Requirements", field: "dressingPreferences", values: ctx.dressingPreferences },
+  ].filter(r => r.values.length > 0);
+
+  const textFields = isV6 ? (
+    [
+      ctx.fitConcernsNote ? { label: "Fit Note", value: ctx.fitConcernsNote } : null,
+      ctx.finalNotes ? { label: "Notes to nAia", value: ctx.finalNotes } : null,
+    ].filter(Boolean) as Array<{ label: string; value: string }>
+  ) : [];
+
+  const legacyRows: Array<{ label: string; field: string; values: string[] }> = isV6 ? [] : [
     { label: "Desired feelings", field: "desiredFeelings", values: ctx.desiredFeelings },
+    { label: "Coverage preferences", field: "coveragePreferences", values: ctx.coveragePreferences },
+    { label: "Fit preferences", field: "fitPreferences", values: ctx.fitPreferences },
     { label: "Style support goal", field: "styleSupport", values: ctx.styleSupport },
   ].filter(r => r.values.length > 0);
+
+  const chipStyle = {
+    fontSize: "0.72rem",
+    color: "#93c5fd",
+    background: "#0c1a2e",
+    border: "1px solid #1e3a5f",
+    padding: "0.15rem 0.55rem",
+    borderRadius: "4px",
+  };
+
+  const legacyChipStyle = {
+    fontSize: "0.72rem",
+    color: "#6b7280",
+    background: "#111827",
+    border: "1px solid #374151",
+    padding: "0.15rem 0.55rem",
+    borderRadius: "4px",
+  };
+
+  const hasAnyData = v6Rows.length > 0 || textFields.length > 0 || legacyRows.length > 0;
 
   return (
     <div className="na-card">
       <div className="na-card__header">
         <h2 className="na-card__title">Passport</h2>
-        <span className="na-badge" style={{ fontSize: "0.65rem", background: "#0c1a2e", color: "#93c5fd", border: "1px solid #1e3a5f" }}>
-          A — CUSTOMER-SUPPLIED
-        </span>
+        <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+          {isV6 && (
+            <span style={{ fontSize: "0.6rem", background: "#052e16", color: "#86efac", border: "1px solid #166534", borderRadius: "3px", padding: "0.05rem 0.35rem", fontFamily: "monospace" }}>
+              V6
+            </span>
+          )}
+          <span style={{ fontSize: "0.65rem", background: "#0c1a2e", color: "#93c5fd", border: "1px solid #1e3a5f", borderRadius: "3px", padding: "0.05rem 0.35rem" }}>
+            A — CUSTOMER-SUPPLIED
+          </span>
+        </div>
       </div>
       <div className="na-card__body">
         <p style={{ fontSize: "0.65rem", color: "#4b5563", marginBottom: "1rem" }}>
           Facts and preferences this customer supplied. Not inferred by nAia.
         </p>
-        {rows.length === 0 ? (
+        {!hasAnyData ? (
           <p style={{ fontSize: "0.85rem", color: "#6b7280" }}>Passport exists but no styling fields are filled in.</p>
         ) : (
           <table className="na-field-table">
             <tbody>
-              {rows.map(row => (
+              {v6Rows.map(row => (
                 <tr key={row.label}>
                   <th style={{ whiteSpace: "nowrap", verticalAlign: "top", paddingTop: "0.4rem" }}>{row.label}</th>
                   <td>
                     <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
                       {row.values.map(v => (
-                        <span
-                          key={v}
-                          style={{
-                            fontSize: "0.72rem",
-                            color: "#93c5fd",
-                            background: "#0c1a2e",
-                            border: "1px solid #1e3a5f",
-                            padding: "0.15rem 0.55rem",
-                            borderRadius: "4px",
-                          }}
-                        >
-                          {passportLabel(row.field, v)}
-                        </span>
+                        <span key={v} style={chipStyle}>{passportLabel(row.field, v)}</span>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {textFields.map(f => (
+                <tr key={f.label}>
+                  <th style={{ whiteSpace: "nowrap", verticalAlign: "top", paddingTop: "0.4rem" }}>{f.label}</th>
+                  <td style={{ fontSize: "0.78rem", color: "#d1d5db" }}>{f.value}</td>
+                </tr>
+              ))}
+              {legacyRows.length > 0 && (
+                <tr>
+                  <td colSpan={2} style={{ paddingTop: "0.75rem", paddingBottom: "0.25rem" }}>
+                    <span style={{ fontSize: "0.6rem", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", background: "#1f2937", border: "1px solid #374151", padding: "0.1rem 0.4rem", borderRadius: "3px" }}>
+                      LEGACY
+                    </span>
+                  </td>
+                </tr>
+              )}
+              {legacyRows.map(row => (
+                <tr key={row.label}>
+                  <th style={{ whiteSpace: "nowrap", verticalAlign: "top", paddingTop: "0.4rem", color: "#6b7280" }}>{row.label}</th>
+                  <td>
+                    <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                      {row.values.map(v => (
+                        <span key={v} style={legacyChipStyle}>{passportLabel(row.field, v)}</span>
                       ))}
                     </div>
                   </td>

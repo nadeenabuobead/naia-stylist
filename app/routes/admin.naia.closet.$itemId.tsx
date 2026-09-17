@@ -129,7 +129,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   const passportContext = await getCustomerStylingPassport(item.customerId);
-  const stylingIntelligence = deriveGarmentStylingIntelligence(effectiveClassification, passportContext);
+  // V6 safety: coveragePreferences is legacy/hidden for Rev6; do not feed it to Phase 3C for V6 customers
+  const passportForIntelligence = passportContext && passportContext.profileVersion != null && passportContext.profileVersion >= 6
+    ? { ...passportContext, coveragePreferences: [] }
+    : passportContext;
+  const stylingIntelligence = deriveGarmentStylingIntelligence(effectiveClassification, passportForIntelligence);
 
   const intelligenceOverrides = (item.adminReview?.intelligenceOverrides ?? null) as IntelligenceOverrides | null;
 
@@ -450,6 +454,17 @@ const PASSPORT_LABELS: Record<string, Record<string, string>> = {
     "dress-for-occasion": "Dress for occasions",
     "sustainable-choices": "Make sustainable choices",
   },
+  successfulOutfitGives: {
+    "feel-like-myself": "Feel like myself",
+    "confidence": "Confidence",
+    "feel-put-together": "Feel put-together",
+    "comfort-ease": "Comfort & ease",
+    "sense-of-expression": "Sense of expression",
+    "feel-attractive": "Feel attractive",
+    "sense-of-power": "Sense of power",
+    "effortlessness": "Effortlessness",
+    "not-sure": "Not sure",
+  },
 };
 
 function passportLabel(field: string, id: string): string {
@@ -473,55 +488,112 @@ function CustomerPassportCard({ ctx }: { ctx: CustomerStylingPassportContext | n
     );
   }
 
-  const rows: Array<{ label: string; values: string[]; field: string }> = [
-    { label: "Style Personalities", field: "stylePersonalities", values: ctx.stylePersonalities },
+  const isV6 = ctx.profileVersion != null && ctx.profileVersion >= 6;
+
+  const v6Rows: Array<{ label: string; values: string[]; field: string }> = [
+    { label: "Current Focus", field: "currentGoal", values: ctx.currentGoal },
+    { label: "What Makes an Outfit Work", field: "successfulOutfitGives", values: ctx.successfulOutfitGives },
+    { label: "Style", field: "stylePersonalities", values: ctx.stylePersonalities },
     { label: "Lifestyle", field: "lifestyle", values: ctx.lifestyle },
     { label: "Favourite Colours", field: "favoriteColors", values: ctx.favoriteColors },
     { label: "Avoid Colours", field: "avoidColors", values: ctx.avoidColors },
-    { label: "Coverage preferences", field: "coveragePreferences", values: ctx.coveragePreferences },
-    { label: "Dressing preferences", field: "dressingPreferences", values: ctx.dressingPreferences },
-    { label: "Fit preferences", field: "fitPreferences", values: ctx.fitPreferences },
     { label: "Silhouette", field: "silhouette", values: ctx.silhouette },
+    { label: "Fit Concerns", field: "fitConcerns", values: ctx.fitConcerns },
+    { label: "Dressing Requirements", field: "dressingPreferences", values: ctx.dressingPreferences },
+  ].filter(r => r.values.length > 0);
+
+  const textFields = isV6 ? (
+    [
+      ctx.fitConcernsNote ? { label: "Fit Note", value: ctx.fitConcernsNote } : null,
+      ctx.finalNotes ? { label: "Notes to nAia", value: ctx.finalNotes } : null,
+    ].filter(Boolean) as Array<{ label: string; value: string }>
+  ) : [];
+
+  const legacyRows: Array<{ label: string; values: string[]; field: string }> = isV6 ? [] : [
     { label: "Desired feelings", field: "desiredFeelings", values: ctx.desiredFeelings },
+    { label: "Coverage preferences", field: "coveragePreferences", values: ctx.coveragePreferences },
+    { label: "Fit preferences", field: "fitPreferences", values: ctx.fitPreferences },
     { label: "Style support goal", field: "styleSupport", values: ctx.styleSupport },
   ].filter(r => r.values.length > 0);
+
+  const chipStyle: React.CSSProperties = {
+    fontSize: "0.7rem",
+    color: "#93c5fd",
+    background: "#0c1a2e",
+    border: "1px solid #1e3a5f",
+    padding: "0.1rem 0.5rem",
+    borderRadius: "4px",
+  };
+
+  const legacyChipStyle: React.CSSProperties = {
+    fontSize: "0.7rem",
+    color: "#6b7280",
+    background: "#111827",
+    border: "1px solid #374151",
+    padding: "0.1rem 0.5rem",
+    borderRadius: "4px",
+  };
+
+  const hasAnyData = v6Rows.length > 0 || textFields.length > 0 || legacyRows.length > 0;
 
   return (
     <div className="na-card">
       <div className="na-card__header">
         <h2 className="na-card__title">Customer Passport Context</h2>
-        <span className="na-badge na-badge--not-analyzed" style={{ background: "#0c1a2e", color: "#93c5fd", borderColor: "#1e3a5f" }}>
-          A — CUSTOMER-SUPPLIED
-        </span>
+        <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+          {isV6 && (
+            <span style={{ fontSize: "0.6rem", background: "#052e16", color: "#86efac", border: "1px solid #166534", borderRadius: "3px", padding: "0.05rem 0.35rem", fontFamily: "monospace" }}>
+              V6
+            </span>
+          )}
+          <span className="na-badge na-badge--not-analyzed" style={{ background: "#0c1a2e", color: "#93c5fd", borderColor: "#1e3a5f" }}>
+            A — CUSTOMER-SUPPLIED
+          </span>
+        </div>
       </div>
       <div className="na-card__body">
         <p style={{ fontSize: "0.65rem", color: "#4b5563", marginBottom: "1rem" }}>
           Facts and preferences this customer supplied. Not inferred by nAia.
         </p>
-        {rows.length === 0 ? (
+        {!hasAnyData ? (
           <p style={{ fontSize: "0.8rem", color: "#6b7280" }}>Passport exists but no styling fields are filled in yet.</p>
         ) : (
           <table className="na-field-table">
             <tbody>
-              {rows.map(row => (
+              {v6Rows.map(row => (
                 <tr key={row.label}>
                   <th style={{ whiteSpace: "nowrap", verticalAlign: "top", paddingTop: "0.4rem" }}>{row.label}</th>
                   <td>
                     <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
                       {row.values.map(v => (
-                        <span
-                          key={v}
-                          style={{
-                            fontSize: "0.7rem",
-                            color: "#93c5fd",
-                            background: "#0c1a2e",
-                            border: "1px solid #1e3a5f",
-                            padding: "0.1rem 0.5rem",
-                            borderRadius: "4px",
-                          }}
-                        >
-                          {passportLabel(row.field, v)}
-                        </span>
+                        <span key={v} style={chipStyle}>{passportLabel(row.field, v)}</span>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {textFields.map(f => (
+                <tr key={f.label}>
+                  <th style={{ whiteSpace: "nowrap", verticalAlign: "top", paddingTop: "0.4rem" }}>{f.label}</th>
+                  <td style={{ fontSize: "0.78rem", color: "#d1d5db" }}>{f.value}</td>
+                </tr>
+              ))}
+              {legacyRows.length > 0 && (
+                <tr>
+                  <td colSpan={2} style={{ paddingTop: "0.75rem", paddingBottom: "0.25rem" }}>
+                    <span style={{ fontSize: "0.6rem", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", background: "#1f2937", border: "1px solid #374151", padding: "0.1rem 0.4rem", borderRadius: "3px" }}>
+                      LEGACY
+                    </span>
+                  </td>
+                </tr>
+              )}
+              {legacyRows.map(row => (
+                <tr key={row.label}>
+                  <th style={{ whiteSpace: "nowrap", verticalAlign: "top", paddingTop: "0.4rem", color: "#6b7280" }}>{row.label}</th>
+                  <td>
+                    <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                      {row.values.map(v => (
+                        <span key={v} style={legacyChipStyle}>{passportLabel(row.field, v)}</span>
                       ))}
                     </div>
                   </td>
@@ -690,41 +762,50 @@ function IntelligenceEditPanel({
       <p className="na-edit-group-title" style={{ marginBottom: "0.75rem" }}>Visual Weight</p>
       <div style={{ marginBottom: "1rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
         <select value={vw} onChange={e => setVw(e.target.value)} style={selStyle}>
-          <option value="__naia__">USE NAIA (derived: {intel.visualWeight.value ?? "—"})</option>
+          <option value="__naia__">Use nAia's answer (derived: {intel.visualWeight.value ?? "—"})</option>
           {VISUAL_WEIGHT_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
       </div>
 
       <p className="na-edit-group-title" style={{ marginBottom: "0.5rem" }}>Colour Profile</p>
       <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "0.4rem 0.75rem", alignItems: "center", marginBottom: "1rem" }}>
-        <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>hueFamily</span>
+        <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>Colour family</span>
         <select value={hue} onChange={e => setHue(e.target.value)} style={selStyle}>
-          <option value="__naia__">USE NAIA (derived: {intel.colourProfile.hueFamily ?? "—"})</option>
+          <option value="__naia__">Use nAia's answer (derived: {intel.colourProfile.hueFamily ?? "—"})</option>
           <option value="__null__">CLEAR (no hue family)</option>
           {HUE_FAMILY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
-        <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>wardrobeNeutral</span>
+        <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>Works as a neutral?</span>
         <select value={wn} onChange={e => setWn(e.target.value)} style={selStyle}>
-          <option value="__naia__">USE NAIA (derived: {String(intel.colourProfile.wardrobeNeutral)})</option>
-          <option value="true">true</option>
-          <option value="false">false</option>
+          <option value="__naia__">Use nAia's answer (derived: {intel.colourProfile.wardrobeNeutral ? "Yes" : "No"})</option>
+          <option value="true">Yes</option>
+          <option value="false">No</option>
         </select>
-        <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>lightDark</span>
+        <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>Colour depth</span>
         <select value={ld} onChange={e => setLd(e.target.value)} style={selStyle}>
-          <option value="__naia__">USE NAIA (derived: {intel.colourProfile.lightDark ?? "—"})</option>
+          <option value="__naia__">Use nAia's answer (derived: {intel.colourProfile.lightDark ?? "—"})</option>
           <option value="__null__">CLEAR</option>
           <option value="light">light</option>
           <option value="dark">dark</option>
         </select>
-        <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>energyTier</span>
+        <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>Colour impact</span>
         <select value={et} onChange={e => setEt(e.target.value)} style={selStyle}>
-          <option value="__naia__">USE NAIA (derived: {intel.colourProfile.energyTier ?? "—"})</option>
+          <option value="__naia__">Use nAia's answer (derived: {intel.colourProfile.energyTier ?? "—"})</option>
           <option value="__null__">CLEAR</option>
-          {ENERGY_TIER_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+          <option value="neutral-versatile">Quiet / versatile</option>
+          <option value="mid-range">Moderate</option>
+          <option value="deep-authoritative">Deep / strong</option>
+          <option value="high-energy">Bright / energetic</option>
         </select>
       </div>
 
-      <p className="na-edit-group-title" style={{ marginBottom: "0.5rem" }}>Intention Strengths</p>
+      <p className="na-edit-group-title" style={{ marginBottom: "0.35rem" }}>Intention Strengths</p>
+      <div style={{ fontSize: "0.65rem", color: "#6b7280", marginBottom: "0.75rem", lineHeight: 1.6 }}>
+        <span style={{ color: "#a3e635" }}>Strong match</span> = this piece meaningfully supports this goal{" · "}
+        <span style={{ color: "#fbbf24" }}>Helps</span> = contributes, but outfit/context still matters{" · "}
+        <span style={{ color: "#6b7280" }}>Doesn't help</span> = not meaningful for this goal{" · "}
+        <span style={{ color: "#9ca3af" }}>Use nAia's answer</span> = keep nAia's derived result
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: "0.3rem 0.75rem", alignItems: "center", marginBottom: "1rem" }}>
         {ALL_INTENTIONS.map(id => {
           const derived = intel.intentionPotentials.find(ip => ip.intention === id)?.strength ?? "none";
@@ -736,8 +817,10 @@ function IntelligenceEditPanel({
                 onChange={e => setIntentStrengths(prev => ({ ...prev, [id]: e.target.value }))}
                 style={selStyle}
               >
-                <option value="__naia__">USE NAIA ({derived})</option>
-                {STRENGTH_OPTIONS.map(s => <option key={s} value={s}>{s.toUpperCase()}</option>)}
+                <option value="__naia__">Use nAia's answer ({derived})</option>
+                <option value="strong">Strong match</option>
+                <option value="supporting">Helps</option>
+                <option value="none">Doesn't help</option>
               </select>
             </React.Fragment>
           );

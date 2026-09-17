@@ -626,17 +626,24 @@ export async function getAdjacentItemIds(
 // ── Customer styling passport ─────────────────────────────────────────────────
 
 export interface CustomerStylingPassportContext {
+  profileVersion: number | null;
+  // V6 active fields
+  currentGoal: string[];
   stylePersonalities: string[];
+  successfulOutfitGives: string[];
   favoriteColors: string[];
   avoidColors: string[];
-  coveragePreferences: string[];
-  dressingPreferences: string[];
-  fitPreferences: string[];
   silhouette: string[];
-  desiredFeelings: string[];
+  fitConcerns: string[];
+  fitConcernsNote: string | null;
+  dressingPreferences: string[];
   lifestyle: string[];
+  finalNotes: string | null;
+  // Legacy fields (hiddenForRev6 / rev6Hidden) — kept for Phase 3C; not shown for V6 customers
+  coveragePreferences: string[];
+  fitPreferences: string[];
+  desiredFeelings: string[];
   styleSupport: string[];
-  successfulOutfitGives: string[];
 }
 
 export async function getCustomerStylingPassport(
@@ -645,45 +652,59 @@ export async function getCustomerStylingPassport(
   const profile = await prisma.onboardingProfile.findUnique({
     where: { customerId },
     select: {
+      profileVersion: true,
+      currentGoal: true,
       stylePersonalities: true,
+      successfulOutfitGives: true,
       favoriteColors: true,
       avoidColors: true,
-      coveragePreferences: true,
-      dressingPreferences: true,
-      fitPreferences: true,
       silhouette: true,
-      desiredFeelings: true,
+      fitConcerns: true,
+      fitConcernsNote: true,
+      dressingPreferences: true,
       lifestyle: true,
+      finalNotes: true,
+      coveragePreferences: true,
+      fitPreferences: true,
+      desiredFeelings: true,
       styleSupport: true,
-      successfulOutfitGives: true,
     },
   });
   if (!profile) return null;
   const hasData =
     profile.stylePersonalities.length > 0 ||
+    profile.currentGoal.length > 0 ||
+    profile.successfulOutfitGives.length > 0 ||
     profile.favoriteColors.length > 0 ||
     profile.avoidColors.length > 0 ||
-    profile.coveragePreferences.length > 0 ||
-    profile.dressingPreferences.length > 0 ||
-    profile.fitPreferences.length > 0 ||
     profile.silhouette.length > 0 ||
-    profile.desiredFeelings.length > 0 ||
+    profile.fitConcerns.length > 0 ||
+    !!profile.fitConcernsNote ||
+    profile.dressingPreferences.length > 0 ||
     profile.lifestyle.length > 0 ||
-    profile.styleSupport.length > 0 ||
-    profile.successfulOutfitGives.length > 0;
+    !!profile.finalNotes ||
+    profile.coveragePreferences.length > 0 ||
+    profile.fitPreferences.length > 0 ||
+    profile.desiredFeelings.length > 0 ||
+    profile.styleSupport.length > 0;
   return hasData
     ? {
+        profileVersion: profile.profileVersion,
+        currentGoal: profile.currentGoal,
         stylePersonalities: profile.stylePersonalities,
+        successfulOutfitGives: profile.successfulOutfitGives,
         favoriteColors: profile.favoriteColors,
         avoidColors: profile.avoidColors,
-        coveragePreferences: profile.coveragePreferences,
-        dressingPreferences: profile.dressingPreferences,
-        fitPreferences: profile.fitPreferences,
         silhouette: profile.silhouette,
-        desiredFeelings: profile.desiredFeelings,
+        fitConcerns: profile.fitConcerns,
+        fitConcernsNote: profile.fitConcernsNote,
+        dressingPreferences: profile.dressingPreferences,
         lifestyle: profile.lifestyle,
+        finalNotes: profile.finalNotes,
+        coveragePreferences: profile.coveragePreferences,
+        fitPreferences: profile.fitPreferences,
+        desiredFeelings: profile.desiredFeelings,
         styleSupport: profile.styleSupport,
-        successfulOutfitGives: profile.successfulOutfitGives,
       }
     : null;
 }
@@ -760,17 +781,21 @@ export async function getAdminCustomerDetail(
         select: {
           completed: true,
           profileVersion: true,
+          currentGoal: true,
           stylePersonalities: true,
+          successfulOutfitGives: true,
           favoriteColors: true,
           avoidColors: true,
-          coveragePreferences: true,
-          dressingPreferences: true,
-          fitPreferences: true,
           silhouette: true,
-          desiredFeelings: true,
+          fitConcerns: true,
+          fitConcernsNote: true,
+          dressingPreferences: true,
           lifestyle: true,
+          finalNotes: true,
+          coveragePreferences: true,
+          fitPreferences: true,
+          desiredFeelings: true,
           styleSupport: true,
-          successfulOutfitGives: true,
         },
       },
       closetItems: {
@@ -786,13 +811,19 @@ export async function getAdminCustomerDetail(
   const profile = customer.onboardingProfile;
   const hasPassportData = profile != null && (
     profile.stylePersonalities.length > 0 ||
+    profile.currentGoal.length > 0 ||
+    profile.successfulOutfitGives.length > 0 ||
     profile.favoriteColors.length > 0 ||
-    profile.coveragePreferences.length > 0 ||
-    profile.dressingPreferences.length > 0 ||
-    profile.fitPreferences.length > 0 ||
+    profile.avoidColors.length > 0 ||
     profile.silhouette.length > 0 ||
-    profile.desiredFeelings.length > 0 ||
+    profile.fitConcerns.length > 0 ||
+    !!profile.fitConcernsNote ||
+    profile.dressingPreferences.length > 0 ||
     profile.lifestyle.length > 0 ||
+    !!profile.finalNotes ||
+    profile.coveragePreferences.length > 0 ||
+    profile.fitPreferences.length > 0 ||
+    profile.desiredFeelings.length > 0 ||
     profile.styleSupport.length > 0
   );
 
@@ -812,17 +843,22 @@ export async function getAdminCustomerDetail(
     createdAt: customer.createdAt,
     passport: hasPassportData && profile
       ? {
+          profileVersion: profile.profileVersion,
+          currentGoal: profile.currentGoal,
           stylePersonalities: profile.stylePersonalities,
+          successfulOutfitGives: profile.successfulOutfitGives,
           favoriteColors: profile.favoriteColors,
           avoidColors: profile.avoidColors,
-          coveragePreferences: profile.coveragePreferences,
-          dressingPreferences: profile.dressingPreferences,
-          fitPreferences: profile.fitPreferences,
           silhouette: profile.silhouette,
-          desiredFeelings: profile.desiredFeelings,
+          fitConcerns: profile.fitConcerns,
+          fitConcernsNote: profile.fitConcernsNote,
+          dressingPreferences: profile.dressingPreferences,
           lifestyle: profile.lifestyle,
+          finalNotes: profile.finalNotes,
+          coveragePreferences: profile.coveragePreferences,
+          fitPreferences: profile.fitPreferences,
+          desiredFeelings: profile.desiredFeelings,
           styleSupport: profile.styleSupport,
-          successfulOutfitGives: profile.successfulOutfitGives,
         }
       : null,
     passportComplete: profile?.completed ?? false,
