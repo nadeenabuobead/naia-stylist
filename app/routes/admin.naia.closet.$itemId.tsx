@@ -669,6 +669,19 @@ const ENERGY_TIER_OPTIONS = ["high-energy","deep-authoritative","mid-range","neu
 const VISUAL_WEIGHT_OPTIONS = ["light","medium","substantial"] as const;
 const STRENGTH_OPTIONS: IntentionStrength[] = ["strong","supporting","none"];
 
+const ENERGY_TIER_LABELS: Record<string, string> = {
+  "neutral-versatile": "Quiet / versatile",
+  "mid-range": "Moderate",
+  "deep-authoritative": "Deep / strong",
+  "high-energy": "Bright / energetic",
+};
+
+const STRENGTH_DISPLAY_LABELS: Record<string, string> = {
+  "strong": "Strong match",
+  "supporting": "Helps",
+  "none": "Doesn't help",
+};
+
 function IntelligenceEditPanel({
   intel,
   existing,
@@ -763,7 +776,7 @@ function IntelligenceEditPanel({
       <p className="na-edit-group-title" style={{ marginBottom: "0.75rem" }}>Visual Weight</p>
       <div style={{ marginBottom: "1rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
         <select value={vw} onChange={e => setVw(e.target.value)} style={selStyle}>
-          <option value="__naia__">Use nAia's answer (derived: {intel.visualWeight.value ?? "—"})</option>
+          <option value="__naia__">Use nAia's answer (currently: {intel.visualWeight.value ?? "—"})</option>
           {VISUAL_WEIGHT_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
       </div>
@@ -772,27 +785,27 @@ function IntelligenceEditPanel({
       <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "0.4rem 0.75rem", alignItems: "center", marginBottom: "1rem" }}>
         <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>Colour family</span>
         <select value={hue} onChange={e => setHue(e.target.value)} style={selStyle}>
-          <option value="__naia__">Use nAia's answer (derived: {intel.colourProfile.hueFamily ?? "—"})</option>
-          <option value="__null__">CLEAR (no hue family)</option>
+          <option value="__naia__">Use nAia's answer (currently: {intel.colourProfile.hueFamily ?? "—"})</option>
+          <option value="__null__">No result / Unknown</option>
           {HUE_FAMILY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
         <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>Works as a neutral?</span>
         <select value={wn} onChange={e => setWn(e.target.value)} style={selStyle}>
-          <option value="__naia__">Use nAia's answer (derived: {intel.colourProfile.wardrobeNeutral ? "Yes" : "No"})</option>
+          <option value="__naia__">Use nAia's answer (currently: {intel.colourProfile.wardrobeNeutral ? "Yes" : "No"})</option>
           <option value="true">Yes</option>
           <option value="false">No</option>
         </select>
         <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>Colour depth</span>
         <select value={ld} onChange={e => setLd(e.target.value)} style={selStyle}>
-          <option value="__naia__">Use nAia's answer (derived: {intel.colourProfile.lightDark ?? "—"})</option>
-          <option value="__null__">CLEAR</option>
+          <option value="__naia__">Use nAia's answer (currently: {intel.colourProfile.lightDark ?? "—"})</option>
+          <option value="__null__">No result / Unknown</option>
           <option value="light">light</option>
           <option value="dark">dark</option>
         </select>
         <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>Colour impact</span>
         <select value={et} onChange={e => setEt(e.target.value)} style={selStyle}>
-          <option value="__naia__">Use nAia's answer (derived: {intel.colourProfile.energyTier ?? "—"})</option>
-          <option value="__null__">CLEAR</option>
+          <option value="__naia__">Use nAia's answer (currently: {ENERGY_TIER_LABELS[intel.colourProfile.energyTier ?? ""] ?? intel.colourProfile.energyTier ?? "—"})</option>
+          <option value="__null__">No result / Unknown</option>
           <option value="neutral-versatile">Quiet / versatile</option>
           <option value="mid-range">Moderate</option>
           <option value="deep-authoritative">Deep / strong</option>
@@ -818,7 +831,7 @@ function IntelligenceEditPanel({
                 onChange={e => setIntentStrengths(prev => ({ ...prev, [id]: e.target.value }))}
                 style={selStyle}
               >
-                <option value="__naia__">Use nAia's answer ({derived})</option>
+                <option value="__naia__">Use nAia's answer (currently: {STRENGTH_DISPLAY_LABELS[derived] ?? derived})</option>
                 <option value="strong">Strong match</option>
                 <option value="supporting">Helps</option>
                 <option value="none">Doesn't help</option>
