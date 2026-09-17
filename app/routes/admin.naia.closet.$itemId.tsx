@@ -488,7 +488,8 @@ function CustomerPassportCard({ ctx }: { ctx: CustomerStylingPassportContext | n
     );
   }
 
-  const isV6 = ctx.profileVersion != null && ctx.profileVersion >= 6;
+  // V6 = explicit version flag OR V6-only fields present (guards against null profileVersion for pre-tracking completions)
+  const isV6 = (ctx.profileVersion != null && ctx.profileVersion >= 6) || ctx.successfulOutfitGives.length > 0 || ctx.currentGoal.length > 0;
 
   const v6Rows: Array<{ label: string; values: string[]; field: string }> = [
     { label: "Current Focus", field: "currentGoal", values: ctx.currentGoal },
