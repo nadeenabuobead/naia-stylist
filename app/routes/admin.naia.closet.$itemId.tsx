@@ -48,12 +48,18 @@ import {
 } from "~/lib/cloudinary-admin.server";
 import {
   deriveGarmentStylingIntelligence,
-  ALL_INTENTIONS,
   type GarmentStylingIntelligence,
   type SignalSource,
   type SignalPolarity,
   type IntentionStrength,
 } from "~/lib/admin/garment-intelligence-v1.server";
+
+// Inline — cannot import ALL_INTENTIONS from .server module into client components
+const ALL_INTENTIONS = [
+  "feel-like-myself", "confidence", "ground-me", "give-structure",
+  "make-it-easy", "feel-put-together", "feel-attractive", "give-energy",
+  "feel-softer", "feel-sharper", "feel-less-exposed", "express-myself",
+] as const;
 
 // ── Vocabulary options for edit dropdowns (mirrors garment-intelligence.types.ts) ──
 
