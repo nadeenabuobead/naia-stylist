@@ -1613,12 +1613,18 @@ export default function StyleMeResult() {
           </div>
         )}
 
-        {/* Sensory layer: hair / perfume / song / makeup */}
+        {/* Sensory layer: hair / makeup / perfume / song */}
         <div className="sm-sensory-grid">
           {suggestion.hairstyleRec && (
             <div className="sm-sensory-card">
               <p className="sm-sensory-label">Hair</p>
               <p className="sm-sensory-value">{suggestion.hairstyleRec}</p>
+            </div>
+          )}
+          {suggestion.makeupVibeRec && (
+            <div className="sm-sensory-card">
+              <p className="sm-sensory-label">Makeup</p>
+              <p className="sm-sensory-value">{suggestion.makeupVibeRec}</p>
             </div>
           )}
           {suggestion.perfumeRec && (
@@ -1634,12 +1640,6 @@ export default function StyleMeResult() {
               {suggestionMeta?.songReason && (
                 <p className="sm-sensory-note">{suggestionMeta.songReason}</p>
               )}
-            </div>
-          )}
-          {suggestion.makeupVibeRec && (
-            <div className="sm-sensory-card">
-              <p className="sm-sensory-label">Makeup</p>
-              <p className="sm-sensory-value">{suggestion.makeupVibeRec}</p>
             </div>
           )}
         </div>
