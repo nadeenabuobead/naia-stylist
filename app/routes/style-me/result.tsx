@@ -1563,12 +1563,6 @@ export default function StyleMeResult() {
               <p className={item.closetItemId ? "sm-item-notes" : "sm-item-notes--secondary"}>{item.stylingNotes}</p>
             </div>
           ))}
-          {suggestion.hairstyleRec && (
-            <div className="sm-item-card sm-item-card--secondary">
-              <p className="sm-item-type-label">Hair</p>
-              <p className="sm-item-notes--secondary">{suggestion.hairstyleRec}</p>
-            </div>
-          )}
           {suggestionMeta?.colourDirection && (
             <div className="sm-item-card sm-item-card--secondary">
               <p className="sm-item-type-label">Colour Direction</p>
@@ -1619,8 +1613,14 @@ export default function StyleMeResult() {
           </div>
         )}
 
-        {/* Sensory layer: perfume / song / makeup */}
+        {/* Sensory layer: hair / perfume / song / makeup */}
         <div className="sm-sensory-grid">
+          {suggestion.hairstyleRec && (
+            <div className="sm-sensory-card">
+              <p className="sm-sensory-label">Hair</p>
+              <p className="sm-sensory-value">{suggestion.hairstyleRec}</p>
+            </div>
+          )}
           {suggestion.perfumeRec && (
             <div className="sm-sensory-card">
               <p className="sm-sensory-label">Perfume</p>

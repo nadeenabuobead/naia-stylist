@@ -1114,7 +1114,7 @@ a.mn-action:focus-visible,
 .sm-sensory-label { font-family: var(--naia-ff-mono); font-size: 7px; letter-spacing: 2px; text-transform: uppercase; color: var(--naia-accent); margin-bottom: 8px; }
 .sm-sensory-value { font-family: var(--naia-ff-body); font-size: 16px; color: var(--naia-ink); }
 .sm-sensory-note { font-family: var(--naia-ff-body); font-size: 13px; font-style: italic; color: var(--naia-muted); margin-top: 6px; }
-.sm-confidence-block { padding: 28px 0; border-top: 1px solid var(--naia-border); border-bottom: 1px solid var(--naia-border); margin-bottom: 36px; }
+.sm-confidence-block { padding: 28px 0; border-top: 1px solid var(--naia-border); margin-bottom: 36px; }
 .sm-confidence-label { font-family: var(--naia-ff-mono); font-size: 9px; letter-spacing: 3px; text-transform: uppercase; color: var(--naia-muted); margin-bottom: 12px; }
 .sm-confidence-quote { font-family: var(--naia-ff-display); font-size: 22px; font-weight: 400; font-style: italic; line-height: 1.5; color: var(--naia-ink); }
 /* ── Virtual Try-On section ──────────────────────────── */
