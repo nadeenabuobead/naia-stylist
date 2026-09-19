@@ -79,6 +79,9 @@ const COLOUR_FAMILY_MAP: Readonly<Record<string, HueFamily>> = {
   "charcoal grey": "grey",
   "light blue": "blue", "light pink": "pink",
   "light grey": "grey", "light gray": "grey", "light green": "green",
+  // Medium/sky-blue compound tokens (e.g. chambray, medium-wash denim family).
+  "medium blue": "blue", "sky blue": "blue", "chambray": "blue",
+  "cornflower blue": "blue", "powder blue": "blue",
 };
 
 // Unambiguously dark tokens — reliable from coarse stored token alone.
@@ -161,9 +164,9 @@ const COMFORTABLE_MATERIALS: ReadonlySet<string> = new Set([
   "jersey", "cotton", "knit", "linen",
 ]);
 
-// V2.1: Knitwear materials — used for visual-weight category floor (tops + knitwear → min medium).
+// V2.1: Knitwear/fleece materials — used for visual-weight category floor (tops/activewear + knitwear → min medium).
 const KNITWEAR_MATERIALS: ReadonlySet<string> = new Set([
-  "knit", "knitwear", "cashmere", "merino", "wool", "angora",
+  "knit", "knitwear", "cashmere", "merino", "wool", "angora", "fleece",
 ]);
 
 // V2: Distinctive patterns — support express-myself.
@@ -218,6 +221,29 @@ const FORMALITY_ORDINAL: Readonly<Record<string, number>> = {
 const ACCESSORY_CATEGORIES: ReadonlySet<string> = new Set([
   "shoes", "bags", "accessories", "jewelry",
 ]);
+
+// Small accessories — watches/belts/simple jewellery — where feel-put-together is capped.
+// Shoes and bags are NOT small accessories for this cap (they can reach STRONG put-together).
+const SMALL_ACCESSORY_CATEGORIES: ReadonlySet<string> = new Set([
+  "accessories", "jewelry",
+]);
+
+// V6 Passport colour-family labels → canonical member garment colour tokens.
+// Used for family-aware favourite/avoid colour matching so that, e.g.,
+// cream matches "White/Cream" and burgundy matches "Red/Burgundy" in the Passport.
+// Maps garment colour tokens → V6 Passport family labels (lowercased, matching normArr output).
+const PASSPORT_COLOUR_FAMILY_MAP: Readonly<Record<string, string>> = {
+  "off-black": "black",
+  "white": "white/cream", "cream": "white/cream", "ivory": "white/cream", "off-white": "white/cream",
+  "beige": "beige/brown", "camel": "beige/brown", "tan": "beige/brown",
+  "brown": "beige/brown", "dark brown": "beige/brown",
+  "stone": "beige/brown", "taupe": "beige/brown", "nude": "beige/brown",
+  "grey": "grey", "gray": "grey", "charcoal": "grey", "charcoal grey": "grey",
+  "silver": "grey", "dark grey": "grey", "dark gray": "grey",
+  "navy": "navy", "dark navy": "navy",
+  "red": "red/burgundy", "burgundy": "red/burgundy", "wine": "red/burgundy",
+  "maroon": "red/burgundy", "dark red": "red/burgundy",
+};
 
 // All 12 TODAY intention IDs (canonical — app/routes/style-me/intention.tsx).
 export const ALL_INTENTIONS = [
@@ -325,6 +351,14 @@ function normArr(arr: string[] | null | undefined): string[] {
   return (arr ?? []).map(s => s.trim().toLowerCase()).filter(s => s !== "" && s !== "n/a");
 }
 
+// Family-aware colour match: exact token OR V6 Passport family label (e.g. "White/Cream").
+function isPassportColourMatch(colour: string | null, passportColours: string[]): boolean {
+  if (colour === null || passportColours.length === 0) return false;
+  if (passportColours.includes(colour)) return true;
+  const family = PASSPORT_COLOUR_FAMILY_MAP[colour];
+  return family !== undefined && passportColours.includes(family);
+}
+
 // ── 1. deriveVisualWeight ──────────────────────────────────────────────────────
 
 /**
@@ -347,13 +381,14 @@ function normArr(arr: string[] | null | undefined): string[] {
  */
 export function deriveVisualWeight(
   item: Pick<ClosetClassification, "pattern" | "silhouette" | "material"> &
-    Partial<Pick<ClosetClassification, "fitProfile" | "category">>,
+    Partial<Pick<ClosetClassification, "fitProfile" | "category" | "hemLength">>,
 ): VisualWeightResult {
   const pattern    = norm(item.pattern);
   const silhouette = norm(item.silhouette);
   const material   = norm(item.material);
   const fitProfile = norm(item.fitProfile);
   const category   = norm(item.category);
+  const hemLength  = norm(item.hemLength);
 
   const isAccessory = category !== null && ACCESSORY_CATEGORIES.has(category);
   const allAbsent   = pattern === null && silhouette === null && material === null && fitProfile === null;
@@ -378,9 +413,11 @@ export function deriveVisualWeight(
   }
 
   // Material: high-presence materials contribute.
-  // Exception: leather/suede on accessories (small leather bag ≠ heavy leather jacket).
+  // Exception: leather/suede on small accessories (shoes/accessories/jewelry) — a watch strap ≠ a leather jacket.
+  // Bags are NOT exempted — a large leather tote has real visual presence.
+  const isSmallAccessory = isAccessory && category !== "bags";
   const materialIsHighPresence = material !== null && HIGH_PRESENCE_MATERIALS.has(material) &&
-    !(isAccessory && (material === "leather" || material === "suede"));
+    !(isSmallAccessory && (material === "leather" || material === "suede"));
   if (materialIsHighPresence) {
     score += 1;
     evidence.push(`${material} material`);
@@ -392,7 +429,7 @@ export function deriveVisualWeight(
     evidence.push(`${fitProfile} construction`);
   }
 
-  // Category floor (V2.1): certain garment categories have a minimum visual presence.
+  // Category floor (V2.3): certain garment categories have a minimum visual presence.
   // Only applies when score=0 — avoids double-counting with signal dimensions.
   if (score === 0) {
     if (category === "outerwear") {
@@ -401,10 +438,23 @@ export function deriveVisualWeight(
     } else if (material === "denim" && !isAccessory) {
       score += 1;
       evidence.push("denim construction");
-    } else if (category === "tops" && material !== null && KNITWEAR_MATERIALS.has(material)) {
+    } else if (
+      (category === "tops" || category === "activewear") &&
+      material !== null && KNITWEAR_MATERIALS.has(material)
+    ) {
+      // Knitwear/fleece tops + activewear (hoodies, sweatshirts) — baseline presence.
       score += 1;
-      evidence.push(`knitwear texture — ${material}`);
+      evidence.push(`knitwear/fleece texture — ${material}`);
+    } else if (
+      category === "activewear" &&
+      hemLength !== null && ["full", "maxi"].includes(hemLength) &&
+      fitProfile !== "fitted"
+    ) {
+      // Full-length non-fitted activewear (joggers, track pants) — not lightweight shorts.
+      score += 1;
+      evidence.push("full-length activewear — baseline presence");
     }
+    // NOTE: blanket "bottoms" floor removed in V2.2
   }
 
   const value: VisualWeight =
@@ -467,10 +517,12 @@ export function deriveColourProfile(
         ? "deep-authoritative"
         : "neutral-versatile";
   } else if (hueFamily !== null) {
-    if (HIGH_ENERGY_FAMILIES.has(hueFamily)) {
-      energyTier = "high-energy";
-    } else if (UNAMBIGUOUS_DARK.has(primaryColor)) {
+    // Dark chromatic colours (burgundy, wine, dark red, dark blue, etc.) are deep-authoritative.
+    // Check darkness BEFORE hue energy so that e.g. burgundy (red family but dark) is not high-energy.
+    if (UNAMBIGUOUS_DARK.has(primaryColor)) {
       energyTier = "deep-authoritative";
+    } else if (HIGH_ENERGY_FAMILIES.has(hueFamily)) {
+      energyTier = "high-energy";
     } else {
       energyTier = "mid-range";
     }
@@ -558,35 +610,42 @@ export function computeGarmentIntentionPotential(
 
     // ── feel-like-myself ────────────────────────────────────────────────────
     case "feel-like-myself": {
-      // V2.2 hierarchy:
-      //   Negative suppression → NONE + conflict signals, no support signals (invariant safe).
-      //   Strong positive (favourite/wear-often), personality alignment, or favourite colour → SUPPORTING.
-      //   Weak positive (like) contributes a signal but does NOT independently gate strength.
-      //   NONE by default.
+      // V2.3 hierarchy:
+      //   Negative suppression → NONE + conflict signals only (invariant safe).
+      //   `like` alone → NONE. `like` + favourite colour only (no personality/strong rel) → NONE.
+      //   Personality alignment, strong relationship, or favourite colour (alone) → SUPPORTING.
+      //   Strong relationship + at least one corroborating signal → STRONG.
 
-      // Negative suppression: checked before any positive evidence to preserve invariant.
       if (hasNegativeRel) {
         conflict("you've noted hesitation or disconnect with this piece");
         if (primaryColorAvoided) conflict("primary colour matches your avoid list");
-        break; // strength stays "none", no support signals
+        break;
       }
 
-      // Determine positive evidence first (no signals yet — preserves invariant).
+      // Compute positive evidence first (no signals pushed — preserves invariant).
       const alignedTags: string[] = [];
       if (passPersonalities.length > 0 && tags.length > 0) {
         const relevantTags = passPersonalities.flatMap(pp => PERSONALITY_TAG_MAP[pp] ?? []);
         alignedTags.push(...tags.filter(t => relevantTags.includes(t)));
       }
-      const hasFavColour = primaryColor !== null && favColors.includes(primaryColor);
-      const hasPositive  = alignedTags.length > 0 || hasStrongPositiveRel || hasFavColour;
+      const hasPersonalityAlignment = alignedTags.length > 0;
+      const hasFavColour = isPassportColourMatch(primaryColor, favColors);
 
+      // Suppress: `like` + favourite colour without any identity signal → NONE.
+      // (like alone is already NONE because hasPositive is false; this handles like+colour.)
+      if (hasWeakPositiveRel && hasFavColour && !hasPersonalityAlignment && !hasStrongPositiveRel) {
+        if (primaryColorAvoided) conflict("primary colour matches your avoid list");
+        break; // NONE
+      }
+
+      const hasPositive = hasPersonalityAlignment || hasStrongPositiveRel || hasFavColour;
       if (!hasPositive) {
         if (primaryColorAvoided) conflict("primary colour matches your avoid list");
         break; // NONE
       }
 
-      // Add signals only when strength confirmed (invariant: signals[] empty when strength=none).
-      if (alignedTags.length > 0) p(`style aligns with your personality (${alignedTags.join(", ")})`);
+      // Add signals only when strength is confirmed.
+      if (hasPersonalityAlignment) p(`style aligns with your personality (${alignedTags.join(", ")})`);
       if (hasStrongPositiveRel) {
         const rel = relationships.find(r => ["favourite", "wear-often"].includes(r))!;
         p(`you have a strong connection to this piece (${rel})`);
@@ -595,7 +654,9 @@ export function computeGarmentIntentionPotential(
       if (hasFavColour) p("includes a colour you love");
       if (primaryColorAvoided) conflict("primary colour matches your avoid list");
 
-      strength = "supporting";
+      // STRONG: strong relationship + at least one corroborating personal signal.
+      strength = (hasStrongPositiveRel && (hasPersonalityAlignment || hasFavColour))
+        ? "strong" : "supporting";
       break;
     }
 
@@ -617,18 +678,19 @@ export function computeGarmentIntentionPotential(
         break; // strength stays "none"
       }
 
+      // V2.4 CONVERGENCE RULE: identity OR shape signal is the PRIMARY gate.
+      //   Without personality alignment AND without preferred silhouette alignment → NONE.
+      //   Convergence ≥ 2 total signals (personality, relationship, colour, silhouette) → SUPPORTING.
+      //   Single signal of any kind → NONE.
+
       // Determine convergence signals first (no signals pushed yet — preserves invariant).
       const hasPersonalityAlignment = passPersonalities.length > 0 && tags.length > 0 &&
         passPersonalities.some(pp => {
           const relevant = PERSONALITY_TAG_MAP[pp] ?? [];
           return tags.some(t => relevant.includes(t));
         });
-      const hasFavouriteColour = primaryColor !== null && favColors.includes(primaryColor);
+      const hasFavouriteColour = isPassportColourMatch(primaryColor, favColors);
       // (D) Preferred silhouette alignment — V6 passport.silhouette × garment construction/silhouette.
-      // Two sub-cases (must not be mixed):
-      //   structural (structured/tailored/structured-tailored) → checks garment fitProfile
-      //   tapered → checks garment.silhouette directly (fitProfile is not the right axis)
-      // "fitted" / "body-skimming" intentionally excluded. Activewear / shoes / accessories excluded.
       const silhouettePrefs = normArr(passport.silhouette);
       const prefersStructural = silhouettePrefs.some(sp => PREFERRED_STRUCTURAL_SILHOUETTES.has(sp));
       const prefersTapered    = silhouettePrefs.includes("tapered");
@@ -640,15 +702,17 @@ export function computeGarmentIntentionPotential(
         (prefersTapered && garmentHasTaperedSilhouette)
       );
 
-      const convergenceCount = (hasPersonalityAlignment ? 1 : 0) +
-        (hasStrongPositiveRel ? 1 : 0) + (hasFavouriteColour ? 1 : 0) +
-        (hasPreferredSilhouetteAlignment ? 1 : 0);
-
       if (primaryColorAvoided) conflict("primary colour matches your avoid list");
+
+      // Primary gate: identity OR shape signal required.
+      if (!hasPersonalityAlignment && !hasPreferredSilhouetteAlignment) break; // NONE — no anchor
+
+      const convergenceCount = (hasPersonalityAlignment ? 1 : 0) + (hasStrongPositiveRel ? 1 : 0) +
+        (hasFavouriteColour ? 1 : 0) + (hasPreferredSilhouetteAlignment ? 1 : 0);
       if (convergenceCount < 2) break; // NONE — single signal insufficient
 
       // Add signals only when convergence confirmed.
-      if (hasPersonalityAlignment) p("authentic to your style personality");
+      p("authentic to your style personality");
       if (hasStrongPositiveRel) {
         const rel = relationships.find(r => ["favourite", "wear-often"].includes(r))!;
         p(`a piece you genuinely reach for (${rel})`);
@@ -708,26 +772,33 @@ export function computeGarmentIntentionPotential(
 
     // ── make-it-easy ────────────────────────────────────────────────────────
     case "make-it-easy": {
-      // V2.1 RULE:
-      //   STRONG:     3 ease dimensions (material + fit + context/shoe)
-      //   SUPPORTING: 2 ease dimensions
+      // V2.4 RULE:
+      //   STRONG:     ≥3 ease dimensions; OR active/shoe context and ≥2 ease dimensions.
+      //   SUPPORTING: ≥2 ease dimensions (general)
       //   NONE:       ≤1 dimension; or negative garment relationship (suppression)
       // Dimensions:
-      //   1. comfortable material (jersey/cotton/knit/linen/denim)
+      //   1. comfortable material (jersey/cotton/knit/linen)
       //   2. soft/relaxed fitProfile
       //   3. casual context (formality ≤ smart-casual OR casual/weekend/loungewear occasions)
-      //   4. shoe ease (shoes category + casual context — counts as an independent ease dimension)
+      //   4. shoe ease (shoes + casual or active context)
+      //   5. activewear item (category = activewear)
+      //   6. active occasion (gym/sport/athletic/workout)
       const isShoes = categoryNorm === "shoes";
       const hasComfortableMaterial = material !== null && COMFORTABLE_MATERIALS.has(material);
       const hasSoftFitEasy = fitProfile !== null && SOFT_FIT_PROFILES.has(fitProfile);
       // V2.1: expand casual context to include smart-casual (formalityOrdinal ≤ 2).
       const hasCasualContext = (formalityOrdinal > 0 && formalityOrdinal <= 2) ||
         occasions.some(o => ["casual", "weekend", "loungewear"].includes(o));
-      // V2.1: shoe ease — casual shoes are inherently easy to wear.
-      const hasShoesEase = isShoes && hasCasualContext;
+      // V2.4: split active context into two independent ease dimensions.
+      const isActivewearItem  = categoryNorm === "activewear";
+      const hasActiveOccasion = occasions.some(o => ["gym", "sport", "athletic", "workout"].includes(o));
+      const hasActiveContext  = isActivewearItem || hasActiveOccasion; // kept for signal labelling
+      // V2.4: shoe ease extends to active context (running sneakers, gym footwear).
+      const hasShoesEase = isShoes && (hasCasualContext || hasActiveContext);
 
       const easyCount = (hasComfortableMaterial ? 1 : 0) + (hasSoftFitEasy ? 1 : 0) +
-        (hasCasualContext ? 1 : 0) + (hasShoesEase ? 1 : 0);
+        (hasCasualContext ? 1 : 0) + (hasShoesEase ? 1 : 0) +
+        (isActivewearItem ? 1 : 0) + (hasActiveOccasion ? 1 : 0);
 
       if (easyCount < 2) break; // NONE — single dimension does not qualify
 
@@ -739,12 +810,15 @@ export function computeGarmentIntentionPotential(
 
       if (hasComfortableMaterial) g(`comfortable material — ${material}`);
       if (hasSoftFitEasy) g("comfortable, non-restrictive fit");
+      if (hasActiveContext && !isShoes) g("designed for active wear");
       if (hasShoesEase) g("easy, everyday footwear");
       else if (formality === "casual") g("casual, low-effort register");
       else if (formality === "smart-casual") g("smart-casual, easy to wear");
       else if (hasCasualContext) g("suited to easy-going contexts");
 
-      strength = easyCount >= 3 ? "strong" : "supporting";
+      // V2.4: active/shoe context lowers STRONG threshold to 2.
+      const isFunctionalContext = isShoes || isActivewearItem || hasActiveOccasion;
+      strength = (easyCount >= 3 || (isFunctionalContext && easyCount >= 2)) ? "strong" : "supporting";
       break;
     }
 
@@ -794,35 +868,36 @@ export function computeGarmentIntentionPotential(
 
     // ── give-energy ──────────────────────────────────────────────────────────
     case "give-energy": {
-      // Three energy channels; visual weight is an amplifier only (cannot independently establish energy).
-      let activeChannels = 0;
+      // V2.3 CHANNELS:
+      //   Independent channels: energy tags, high-energy colour.
+      //   Amplifiers (boost but cannot establish energy alone): movement silhouette, substantial visual weight.
+      //   Without an independent channel → NONE.
+      //   1 channel → SUPPORTING; 1 channel + amplifier, or ≥2 channels → STRONG.
+      let independentChannels = 0;
 
-      // Channel 1: ENERGY_TAGS (bold, statement, edgy, playful, artsy, creative)
-      // Does NOT include romantic or eclectic.
+      // Channel 1: ENERGY_TAGS (bold, statement, edgy, playful, artsy, creative).
       const energyTagsHit = tags.filter(t => ENERGY_TAGS.has(t));
       if (energyTagsHit.length > 0) {
         g(`expressive energy character (${energyTagsHit.join(", ")})`);
-        activeChannels++;
+        independentChannels++;
       }
 
-      // Channel 2: movement silhouette
-      if (silhouette !== null && MOVEMENT_SILHOUETTES.has(silhouette)) {
-        g("movement in the silhouette");
-        activeChannels++;
-      }
-
-      // Channel 3: high-energy colour family
+      // Channel 2: high-energy colour family.
       if (colourProfile.energyTier === "high-energy" && primaryColor !== null) {
         g(`chromatic colour — ${primaryColor}`);
-        activeChannels++;
+        independentChannels++;
       }
 
-      // Visual weight amplifier: upgrades SUPPORTING → STRONG when already active.
-      const isSubstantial = visualWeight.value === "substantial";
+      // Amplifiers: movement silhouette + substantial visual weight.
+      const hasMovementAmplifier = silhouette !== null && MOVEMENT_SILHOUETTES.has(silhouette);
+      const hasWeightAmplifier   = visualWeight.value === "substantial";
+      const hasAmplifier = hasMovementAmplifier || hasWeightAmplifier;
+      if (hasMovementAmplifier) g("movement in the silhouette");
 
-      if (activeChannels === 0) {
+      if (independentChannels === 0) {
+        // No independent energy source — amplifiers cannot carry energy on their own.
         strength = "none";
-      } else if (activeChannels >= 2 || (activeChannels === 1 && isSubstantial)) {
+      } else if (independentChannels >= 2 || hasAmplifier) {
         strength = "strong";
       } else {
         strength = "supporting";
@@ -962,14 +1037,23 @@ export function computeGarmentIntentionPotential(
         if (hasLooserFit) satisfied++;
       }
       if (wantsModest) {
-        applicable++;
-        const modestyZones = [
-          isTopsLike    && (hasSleeveCoverage || hasShoulderCoverage),
-          isTopsLike    && hasCoveredNeckline,
-          isTorsoLike   && hasMidriffCovered,
-          isBottomsLike && hasLongHem,
-        ].filter(Boolean).length;
-        if (modestyZones >= 2) satisfied++;
+        // V2.4: per-zone decomposition — each applicable zone evaluated independently.
+        if (isTopsLike) {
+          applicable++;
+          if (hasSleeveCoverage || hasShoulderCoverage) satisfied++;
+        }
+        if (isTopsLike) {
+          applicable++;
+          if (hasCoveredNeckline) satisfied++;
+        }
+        if (isTorsoLike) {
+          applicable++;
+          if (hasMidriffCovered) satisfied++;
+        }
+        if (isBottomsLike) {
+          applicable++;
+          if (hasLongHem) satisfied++;
+        }
       }
 
       if (applicable === 0 || satisfied === 0) break;
@@ -1021,11 +1105,16 @@ export function computeGarmentIntentionPotential(
     }
   }
 
-  // V2.1: Accessory strength cap — accessories/jewelry cannot exceed SUPPORTING
-  // for structural/coverage intentions where full-body context is required.
+  // V2.3: Accessory strength cap — structural/coverage intentions always capped at SUPPORTING
+  // for all accessories. feel-put-together is capped only for small accessories (watches/jewelry),
+  // not shoes or bags which carry genuine polished presence.
   if (categoryNorm !== null && ACCESSORY_CATEGORIES.has(categoryNorm)) {
-    const capsAt = ["give-structure", "feel-less-exposed", "ground-me", "feel-put-together"];
-    if (capsAt.includes(intention) && strength === "strong") {
+    const alwaysCapped = ["give-structure", "feel-less-exposed", "ground-me"];
+    const smallAccCapped = ["feel-put-together"];
+    const isSmallAcc = SMALL_ACCESSORY_CATEGORIES.has(categoryNorm);
+    if ((alwaysCapped.includes(intention) ||
+        (smallAccCapped.includes(intention) && isSmallAcc)) &&
+        strength === "strong") {
       strength = "supporting";
     }
   }

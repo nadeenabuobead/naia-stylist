@@ -1114,7 +1114,7 @@ describe("§GI-V1-33 V2 avoidColors — conflict signal in feel-like-myself and 
 
 // ── §GI-V1-34 — V2 give-energy channel rules ─────────────────────────────────
 
-describe("§GI-V1-34 V2 give-energy — three channels, visual weight is amplifier only", () => {
+describe("§GI-V1-34 V2 give-energy — two independent channels, movement+weight are amplifiers only", () => {
   it("ENERGY_TAGS alone → SUPPORTING", () => {
     const g: ClosetClassification = { ...blank(), styleTags: ["bold", "statement"] };
     const r = computeGarmentIntentionPotential(g, "give-energy", {}, {});
@@ -1122,11 +1122,11 @@ describe("§GI-V1-34 V2 give-energy — three channels, visual weight is amplifi
     assert.ok(r.signals.some(s => s.includes("bold") || s.includes("energy character")));
   });
 
-  it("movement silhouette alone → SUPPORTING", () => {
+  it("movement silhouette alone → NONE (amplifier only, not independent channel)", () => {
     const g: ClosetClassification = { ...blank(), silhouette: "flared" };
     const r = computeGarmentIntentionPotential(g, "give-energy", {}, {});
-    assert.equal(r.strength, "supporting");
-    assert.ok(r.signals.some(s => s.includes("movement")));
+    assert.equal(r.strength, "none",
+      "movement silhouette cannot independently establish give-energy");
   });
 
   it("high-energy colour alone → SUPPORTING", () => {
@@ -1440,12 +1440,12 @@ describe("§GI-V1-40 V2.1 deriveVisualWeight — category floors", () => {
     assert.ok(!r.evidence.some(e => e.includes("outerwear")));
   });
 
-  it("leather bag (accessories) → leather does NOT contribute to visual weight", () => {
+  it("leather bag (bags category) → leather DOES contribute to visual weight (bags are not small accessories)", () => {
     const r = deriveVisualWeight({
       pattern: "solid", silhouette: null, material: "leather", category: "bags",
     });
-    assert.equal(r.value, "light");
-    assert.ok(!r.evidence.some(e => e.includes("leather")), "leather exempt on accessories");
+    assert.equal(r.value, "medium");
+    assert.ok(r.evidence.some(e => e.includes("leather")), "leather contributes on bags");
   });
 
   it("leather jacket (outerwear) → leather DOES contribute + outerwear floor irrelevant", () => {
@@ -1875,13 +1875,13 @@ describe("§GI-V1-48 V2.1 accessory strength cap", () => {
     assert.ok(r.strength !== "strong");
   });
 
-  it("polished bag (accessories) → feel-put-together capped at SUPPORTING", () => {
+  it("polished bag (bags category) → feel-put-together NOT capped — bags have genuine polished presence", () => {
     const g: ClosetClassification = {
       ...blank(), formality: "business-casual", styleTags: ["polished", "elevated"],
       occasions: ["work"], category: "bags",
     };
     const r = computeGarmentIntentionPotential(g, "feel-put-together", {}, {});
-    assert.ok(r.strength !== "strong", "accessories capped for feel-put-together");
+    assert.equal(r.strength, "strong", "bags are not capped for feel-put-together (only accessories/jewelry are)");
   });
 
   it("non-accessory garment: STRONG is not capped", () => {
@@ -1891,5 +1891,443 @@ describe("§GI-V1-48 V2.1 accessory strength cap", () => {
     };
     const r = computeGarmentIntentionPotential(g, "give-structure", {}, {});
     assert.equal(r.strength, "strong", "non-accessories are NOT capped");
+  });
+});
+
+// ── §GI-V1-49 — V2.3 activewear visual weight floors ─────────────────────────
+
+describe("§GI-V1-49 V2.3 deriveVisualWeight — activewear category floors", () => {
+  it("activewear + fleece (knitwear material) → at least medium (floor)", () => {
+    const r = deriveVisualWeight({
+      pattern: "solid", silhouette: null, material: "fleece", category: "activewear",
+    });
+    assert.ok(r.value === "medium" || r.value === "substantial");
+    assert.ok(r.evidence.some(e => e.includes("knitwear") || e.includes("fleece")));
+  });
+
+  it("activewear + nylon + full hemLength + relaxed fitProfile → at least medium (full-length floor)", () => {
+    const r = deriveVisualWeight({
+      pattern: "solid", silhouette: null, material: "nylon",
+      category: "activewear", hemLength: "full", fitProfile: "relaxed",
+    });
+    assert.ok(r.value === "medium" || r.value === "substantial");
+    assert.ok(r.evidence.some(e => e.includes("full-length activewear")));
+  });
+
+  it("activewear + nylon + full hemLength + fitted → LIGHT (fitted activewear floor excluded)", () => {
+    const r = deriveVisualWeight({
+      pattern: "solid", silhouette: null, material: "nylon",
+      category: "activewear", hemLength: "full", fitProfile: "fitted",
+    });
+    assert.equal(r.value, "light",
+      "fitted full-length activewear (leggings) should NOT trigger the full-length floor");
+  });
+});
+
+// ── §GI-V1-50 — V2.3 Passport colour family matching ─────────────────────────
+
+describe("§GI-V1-50 V2.3 isPassportColourMatch — family-aware favourite colour", () => {
+  it("feel-like-myself: garment=cream, Passport favColors=['White/Cream'] → SUPPORTING (family match)", () => {
+    const g: ClosetClassification = { ...blank(), primaryColor: "cream" };
+    const passport = { favoriteColors: ["white/cream"] };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
+    assert.ok(r.strength === "supporting" || r.strength === "strong",
+      "cream maps to White/Cream family — should match");
+  });
+
+  it("feel-like-myself: garment=burgundy, Passport favColors=['Red/Burgundy'] → SUPPORTING (family match)", () => {
+    const g: ClosetClassification = { ...blank(), primaryColor: "burgundy" };
+    const passport = { favoriteColors: ["red/burgundy"] };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
+    assert.ok(r.strength === "supporting" || r.strength === "strong",
+      "burgundy maps to Red/Burgundy family — should match");
+  });
+
+  it("confidence: garment=ivory, Passport favColors=['White/Cream'], classic-polished personality → SUPPORTING", () => {
+    const g: ClosetClassification = {
+      ...blank(), primaryColor: "ivory", styleTags: ["classic", "refined"],
+    };
+    const passport = {
+      favoriteColors: ["white/cream"],
+      stylePersonalities: ["classic-polished"],
+    };
+    const r = computeGarmentIntentionPotential(g, "confidence", passport, {});
+    assert.ok(r.strength === "supporting" || r.strength === "strong",
+      "ivory→White/Cream + classic-polished personality alignment → confidence SUPPORTING");
+  });
+});
+
+// ── §GI-V1-51 — V2.3 energy tier (dark chromatic priority) ───────────────────
+
+describe("§GI-V1-51 V2.3 deriveColourProfile — UNAMBIGUOUS_DARK before HIGH_ENERGY_FAMILIES", () => {
+  it("burgundy → energyTier=deep-authoritative (NOT high-energy)", () => {
+    const r = deriveColourProfile({ primaryColor: "burgundy", colors: [] });
+    assert.equal(r.energyTier, "deep-authoritative",
+      "burgundy is in UNAMBIGUOUS_DARK — check must precede HIGH_ENERGY_FAMILIES");
+  });
+
+  it("wine → energyTier=deep-authoritative", () => {
+    const r = deriveColourProfile({ primaryColor: "wine", colors: [] });
+    assert.equal(r.energyTier, "deep-authoritative");
+  });
+
+  it("dark red → energyTier=deep-authoritative", () => {
+    const r = deriveColourProfile({ primaryColor: "dark red", colors: [] });
+    assert.equal(r.energyTier, "deep-authoritative");
+  });
+
+  it("red (bright) → energyTier=high-energy (NOT in UNAMBIGUOUS_DARK)", () => {
+    const r = deriveColourProfile({ primaryColor: "red", colors: [] });
+    assert.equal(r.energyTier, "high-energy",
+      "plain red is not in UNAMBIGUOUS_DARK — should remain high-energy");
+  });
+});
+
+// ── §GI-V1-52 — V2.3 feel-like-myself hierarchy ──────────────────────────────
+
+describe("§GI-V1-52 V2.3 feel-like-myself — relationship+colour hierarchy", () => {
+  it("like + favourite colour only (no personality, no strong rel) → NONE", () => {
+    const g: ClosetClassification = {
+      ...blank(), primaryColor: "red", garmentRelationships: ["like"],
+    };
+    const passport = { favoriteColors: ["red"] };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
+    assert.equal(r.strength, "none",
+      "like + fav colour without identity signal should be NONE");
+  });
+
+  it("favourite + personality alignment → STRONG", () => {
+    const g: ClosetClassification = {
+      ...blank(), styleTags: ["minimal", "clean"], garmentRelationships: ["favourite"],
+    };
+    const passport = { stylePersonalities: ["minimal-relaxed"] };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
+    assert.equal(r.strength, "strong",
+      "strong relationship + personality alignment → STRONG");
+  });
+
+  it("favourite + favourite colour → STRONG", () => {
+    const g: ClosetClassification = {
+      ...blank(), primaryColor: "navy", garmentRelationships: ["favourite"],
+    };
+    const passport = { favoriteColors: ["navy"] };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
+    assert.equal(r.strength, "strong",
+      "strong relationship + favourite colour → STRONG");
+  });
+
+  it("personality alignment alone (no relationship) → SUPPORTING", () => {
+    const g: ClosetClassification = { ...blank(), styleTags: ["classic"] };
+    const passport = { stylePersonalities: ["classic-polished"] };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
+    assert.equal(r.strength, "supporting");
+  });
+});
+
+// ── §GI-V1-53 — V2.4 confidence: identity OR shape primary gate ───────────────
+
+describe("§GI-V1-53 V2.4 confidence — identity OR shape signal as primary gate", () => {
+  it("favourite colour + strong rel, NO personality, NO silhouette → NONE", () => {
+    const g: ClosetClassification = {
+      ...blank(), primaryColor: "navy", garmentRelationships: ["favourite"],
+    };
+    const passport = { favoriteColors: ["navy"] };
+    const r = computeGarmentIntentionPotential(g, "confidence", passport, {});
+    assert.equal(r.strength, "none",
+      "no identity/shape anchor — colour+rel alone do not qualify");
+  });
+
+  it("personality alignment alone → NONE (single signal insufficient)", () => {
+    const g: ClosetClassification = {
+      ...blank(), styleTags: ["classic", "timeless"],
+    };
+    const passport = { stylePersonalities: ["classic"] };
+    const r = computeGarmentIntentionPotential(g, "confidence", passport, {});
+    assert.equal(r.strength, "none",
+      "personality alone is insufficient — convergence of ≥2 signals required");
+  });
+
+  it("personality + strong relationship → SUPPORTING", () => {
+    const g: ClosetClassification = {
+      ...blank(), styleTags: ["classic", "refined"], garmentRelationships: ["favourite"],
+    };
+    const passport = { stylePersonalities: ["classic-polished"] };
+    const r = computeGarmentIntentionPotential(g, "confidence", passport, {});
+    assert.equal(r.strength, "supporting");
+  });
+
+  it("preferred silhouette + strong relationship, NO personality → SUPPORTING (V2.4: silhouette is valid anchor)", () => {
+    const g: ClosetClassification = {
+      ...blank(), fitProfile: "tailored", category: "tops", garmentRelationships: ["favourite"],
+    };
+    const passport = { silhouette: ["structured-tailored"] };
+    const r = computeGarmentIntentionPotential(g, "confidence", passport, {});
+    assert.equal(r.strength, "supporting",
+      "silhouette alignment alone is a valid anchor — paired with strong rel → convergence=2 → SUPPORTING");
+    assert.ok(r.signals.some(s => s.includes("silhouette")));
+  });
+
+  it("preferred silhouette alone, NO personality, NO relationship → NONE (single signal)", () => {
+    const g: ClosetClassification = {
+      ...blank(), fitProfile: "tailored", category: "tops",
+    };
+    const passport = { silhouette: ["structured-tailored"] };
+    const r = computeGarmentIntentionPotential(g, "confidence", passport, {});
+    assert.equal(r.strength, "none",
+      "silhouette alone is a valid anchor but convergence=1 — still NONE");
+  });
+});
+
+// ── §GI-V1-54 — V2.4 make-it-easy activewear/shoe ease dimensions ─────────────
+
+describe("§GI-V1-54 V2.4 make-it-easy — activewear/shoe ease dimensions", () => {
+  it("activewear + comfortable material → at least SUPPORTING (2 dimensions)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "activewear", material: "jersey",
+    };
+    const r = computeGarmentIntentionPotential(g, "make-it-easy", {}, {});
+    assert.ok(r.strength === "supporting" || r.strength === "strong");
+    assert.ok(r.signals.some(s => s.includes("active") || s.includes("comfortable material")));
+  });
+
+  it("activewear + material + relaxed fit → STRONG (3 dimensions)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "activewear", material: "jersey", fitProfile: "relaxed",
+    };
+    const r = computeGarmentIntentionPotential(g, "make-it-easy", {}, {});
+    assert.equal(r.strength, "strong");
+  });
+
+  it("gym occasion + cotton → at least SUPPORTING", () => {
+    const g: ClosetClassification = {
+      ...blank(), occasions: ["gym"], material: "cotton",
+    };
+    const r = computeGarmentIntentionPotential(g, "make-it-easy", {}, {});
+    assert.ok(r.strength === "supporting" || r.strength === "strong");
+  });
+
+  it("nylon joggers (activewear + relaxed fit + gym occasions) → STRONG (V2.4: 3 independent dimensions)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "activewear", material: "nylon", fitProfile: "relaxed",
+      occasions: ["gym"],
+    };
+    const r = computeGarmentIntentionPotential(g, "make-it-easy", {}, {});
+    assert.equal(r.strength, "strong",
+      "activewear item(1) + soft fit(1) + active occasion(1) = 3 dimensions → STRONG");
+  });
+
+  it("running sneaker (shoes + gym occasion) → STRONG (V2.4: shoe ease + active occasion, functional context)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "shoes", occasions: ["gym"],
+    };
+    const r = computeGarmentIntentionPotential(g, "make-it-easy", {}, {});
+    assert.equal(r.strength, "strong",
+      "shoe ease(1) + active occasion(1) = 2, isFunctionalContext=true → STRONG");
+  });
+
+  it("athletic shorts (activewear + relaxed fit, no stated occasions) → STRONG (functional context + 2 dims)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "activewear", fitProfile: "relaxed",
+    };
+    const r = computeGarmentIntentionPotential(g, "make-it-easy", {}, {});
+    assert.equal(r.strength, "strong",
+      "activewear item(1) + soft fit(1) = 2, isFunctionalContext=true → STRONG");
+  });
+
+  it("ordinary casual basic (cotton + smart-casual) → SUPPORTING (non-functional context, 2 dims < 3)", () => {
+    const g: ClosetClassification = {
+      ...blank(), material: "cotton", formality: "smart-casual",
+    };
+    const r = computeGarmentIntentionPotential(g, "make-it-easy", {}, {});
+    assert.equal(r.strength, "supporting",
+      "material(1) + casual context(1) = 2, no functional context → SUPPORTING not STRONG");
+  });
+});
+
+// ── §GI-V1-55 — V2.3 give-energy amplifier (movement) ───────────────────────
+
+describe("§GI-V1-55 V2.3 give-energy — movement as amplifier only", () => {
+  it("neutral flared skirt (no energy tags, no high-energy colour) → NONE", () => {
+    const g: ClosetClassification = {
+      ...blank(), silhouette: "flared", primaryColor: "beige",
+    };
+    const r = computeGarmentIntentionPotential(g, "give-energy", {}, {});
+    assert.equal(r.strength, "none",
+      "movement silhouette without any independent energy channel → NONE");
+  });
+
+  it("bold tag + flared silhouette → STRONG (channel + movement amplifier)", () => {
+    const g: ClosetClassification = {
+      ...blank(), styleTags: ["bold"], silhouette: "flared",
+    };
+    const r = computeGarmentIntentionPotential(g, "give-energy", {}, {});
+    assert.equal(r.strength, "strong",
+      "1 independent channel (energy tags) + movement amplifier → STRONG");
+  });
+
+  it("high-energy colour + flared silhouette → STRONG (channel + movement amplifier)", () => {
+    const g: ClosetClassification = {
+      ...blank(), primaryColor: "red", silhouette: "flared",
+    };
+    const r = computeGarmentIntentionPotential(g, "give-energy", {}, {});
+    assert.equal(r.strength, "strong");
+  });
+});
+
+// ── §GI-V1-56 — V2.4 feel-less-exposed body zones + per-zone modesty ─────────
+
+describe("§GI-V1-56 V2.4 feel-less-exposed — body zone applicability + per-zone modesty decomposition", () => {
+  it("legs-covered + full-length trousers (bottoms) → STRONG", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "bottoms", hemLength: "full",
+    };
+    const passport = { dressingPreferences: ["legs-covered"] };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed", passport, {});
+    assert.equal(r.strength, "strong",
+      "bottoms satisfying legs-covered: 1 applicable, 1 satisfied → STRONG");
+  });
+
+  it("legs-covered + tops item → NONE (tops are not bottoms-like)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "tops", sleeveLength: "full", necklineCoverage: "crew",
+    };
+    const passport = { dressingPreferences: ["legs-covered"] };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed", passport, {});
+    assert.equal(r.strength, "none",
+      "legs-covered requirement is not applicable to tops — 0 applicable zones");
+  });
+
+  it("no-cropped-tops + bottoms → NONE (midriff requirement not applicable to bottoms)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "bottoms", hemLength: "full",
+    };
+    const passport = { dressingPreferences: ["no-cropped-tops"] };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed", passport, {});
+    assert.equal(r.strength, "none",
+      "no-cropped-tops (isTorsoLike) is not applicable to bottoms");
+  });
+
+  it("dresses-modestly + sleeveless top (covered neckline + midriff) → NOT STRONG (V2.4: sleeve zone unsatisfied)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "tops", sleeveLength: null, shoulderCoverage: false,
+      necklineCoverage: "crew", midriffExposed: false,
+    };
+    const passport = { dressingPreferences: ["dresses-modestly"] };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed", passport, {});
+    assert.ok(r.strength !== "strong",
+      "3 zones applicable, sleeve unsatisfied → applicable > satisfied → not STRONG");
+  });
+
+  it("dresses-modestly + full-sleeve high-neck covered-midriff top → STRONG (all zones satisfied)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "tops", sleeveLength: "full",
+      necklineCoverage: "crew", midriffExposed: false, shoulderCoverage: true,
+    };
+    const passport = { dressingPreferences: ["dresses-modestly"] };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed", passport, {});
+    assert.equal(r.strength, "strong",
+      "all 3 applicable zones satisfied (sleeve + neckline + midriff) → STRONG");
+  });
+
+  it("dresses-modestly + full-length trousers (bottoms) → STRONG (1 applicable zone: hem)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "bottoms", hemLength: "full",
+    };
+    const passport = { dressingPreferences: ["dresses-modestly"] };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed", passport, {});
+    assert.equal(r.strength, "strong",
+      "only hem zone applicable for bottoms — satisfied → STRONG");
+  });
+
+  it("dresses-modestly + maxi skirt → STRONG (hem zone satisfied)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "bottoms", hemLength: "maxi",
+    };
+    const passport = { dressingPreferences: ["dresses-modestly"] };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed", passport, {});
+    assert.equal(r.strength, "strong");
+  });
+});
+
+// ── §GI-V1-57 — V2.3 footwear uncapped for feel-put-together ─────────────────
+
+describe("§GI-V1-57 V2.3 accessory cap — shoes uncapped for feel-put-together", () => {
+  it("polished shoes → feel-put-together STRONG (shoes not capped)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "shoes", formality: "business-casual",
+      styleTags: ["polished", "elevated", "refined"], occasions: ["work"],
+    };
+    const r = computeGarmentIntentionPotential(g, "feel-put-together", {}, {});
+    assert.equal(r.strength, "strong",
+      "shoes category is not in SMALL_ACCESSORY_CATEGORIES — feel-put-together should not be capped");
+  });
+
+  it("jewelry item → feel-put-together capped at SUPPORTING (small accessory)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "jewelry", formality: "business-casual",
+      styleTags: ["polished", "elevated", "refined"], occasions: ["work"],
+    };
+    const r = computeGarmentIntentionPotential(g, "feel-put-together", {}, {});
+    assert.ok(r.strength !== "strong",
+      "jewelry is in SMALL_ACCESSORY_CATEGORIES — feel-put-together capped at SUPPORTING");
+  });
+
+  it("accessories item → feel-put-together capped at SUPPORTING (small accessory)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "accessories", formality: "business-casual",
+      styleTags: ["polished", "elevated", "refined"], occasions: ["work"],
+    };
+    const r = computeGarmentIntentionPotential(g, "feel-put-together", {}, {});
+    assert.ok(r.strength !== "strong",
+      "accessories is in SMALL_ACCESSORY_CATEGORIES — feel-put-together capped at SUPPORTING");
+  });
+});
+
+// ── §GI-V1-58 — V2.4 visual weight: leather exemption + bag/outerwear SUBSTANTIAL ──
+
+describe("§GI-V1-58 V2.4 deriveVisualWeight — leather exemption on small accessories vs bags/outerwear", () => {
+  it("accessories category with leather material → LIGHT (leather exempted on small accessories)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "accessories", material: "leather",
+    };
+    const vw = deriveVisualWeight(g);
+    assert.equal(vw.value, "light",
+      "isSmallAccessory=true for accessories — leather does not contribute to score → score=0 → LIGHT");
+  });
+
+  it("accessories category with null material (watch) → LIGHT (score=0, no floor)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "accessories", pattern: "solid",
+    };
+    const vw = deriveVisualWeight(g);
+    assert.equal(vw.value, "light",
+      "solid pattern does not score; accessories has no category floor → score=0 → LIGHT");
+  });
+
+  it("shoes category with leather material → LIGHT (leather exempted on shoes as small accessory)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "shoes", material: "leather",
+    };
+    const vw = deriveVisualWeight(g);
+    assert.equal(vw.value, "light",
+      "isSmallAccessory=true for shoes (isAccessory && category !== bags) — leather exempted → LIGHT");
+  });
+
+  it("bags category with leather + structured construction → SUBSTANTIAL (bags NOT exempted)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "bags", material: "leather", fitProfile: "structured",
+    };
+    const vw = deriveVisualWeight(g);
+    assert.equal(vw.value, "substantial",
+      "isSmallAccessory=false for bags — leather(1) + structured(1) = score 2 → SUBSTANTIAL");
+  });
+
+  it("outerwear with leather + structured construction → SUBSTANTIAL", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "outerwear", material: "leather", fitProfile: "structured",
+    };
+    const vw = deriveVisualWeight(g);
+    assert.equal(vw.value, "substantial",
+      "leather(1) + structured construction(1) = score 2 → SUBSTANTIAL");
   });
 });
