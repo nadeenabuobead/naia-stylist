@@ -37,7 +37,7 @@ const NEUTRAL_COLORS: ReadonlySet<string> = new Set([
   "black", "white", "grey", "gray", "beige", "cream", "ivory", "off-white",
   "navy", "stone", "charcoal", "taupe", "tan", "camel", "brown", "nude", "silver", "khaki",
   "dark grey", "dark gray", "off-black",
-  "dark brown", "charcoal grey",
+  "dark brown", "charcoal grey", "charcoal gray",
   // Note: "dark blue" excluded — only wardrobeNeutral when material is denim (navy-context).
   // Generic dark blue chromatic garments are NOT neutrals.
 ]);
@@ -76,7 +76,7 @@ const COLOUR_FAMILY_MAP: Readonly<Record<string, HueFamily>> = {
   "dark grey": "grey", "dark gray": "grey", "dark red": "red",
   "dark purple": "purple", "dark orange": "orange", "dark navy": "blue",
   "off-black": "grey",
-  "charcoal grey": "grey",
+  "charcoal grey": "grey", "charcoal gray": "grey",
   "light blue": "blue", "light pink": "pink",
   "light grey": "grey", "light gray": "grey", "light green": "green",
   // Medium/sky-blue compound tokens (e.g. chambray, medium-wash denim family).
@@ -91,7 +91,7 @@ const UNAMBIGUOUS_DARK: ReadonlySet<string> = new Set([
   "forest", "hunter", "indigo", "plum", "mulberry", "brown",
   "dark blue", "dark brown", "dark green", "dark grey", "dark gray",
   "dark red", "dark purple", "dark navy", "off-black",
-  "charcoal grey",
+  "charcoal grey", "charcoal gray",
 ]);
 
 // Unambiguously light tokens — reliable from coarse stored token alone.
@@ -169,6 +169,12 @@ const KNITWEAR_MATERIALS: ReadonlySet<string> = new Set([
   "knit", "knitwear", "cashmere", "merino", "wool", "angora", "fleece",
 ]);
 
+// V2.5: Activewear outer-layer subcategories — hoodies, sweatshirts, track jackets carry more
+// visual presence than base-layer items (t-shirts, shorts) regardless of material.
+const ACTIVEWEAR_OUTER_SUBCATEGORIES: ReadonlySet<string> = new Set([
+  "hoodie", "zip-up hoodie", "zip-up", "sweatshirt", "track jacket", "fleece",
+]);
+
 // V2: Distinctive patterns — support express-myself.
 // Ordinary stripes, check, plaid, plain are excluded.
 const DISTINCTIVE_PATTERNS: ReadonlySet<string> = new Set([
@@ -232,17 +238,21 @@ const SMALL_ACCESSORY_CATEGORIES: ReadonlySet<string> = new Set([
 // Used for family-aware favourite/avoid colour matching so that, e.g.,
 // cream matches "White/Cream" and burgundy matches "Red/Burgundy" in the Passport.
 // Maps garment colour tokens → V6 Passport family labels (lowercased, matching normArr output).
+// V2.5: Values use hyphens to match the COLOUR_FAMILIES quiz IDs stored in the DB
+// (e.g. "white-cream" not "white/cream"). Family IDs for single-word families are
+// unchanged (black, grey, navy). Compound families use the ID separator "-".
 const PASSPORT_COLOUR_FAMILY_MAP: Readonly<Record<string, string>> = {
   "off-black": "black",
-  "white": "white/cream", "cream": "white/cream", "ivory": "white/cream", "off-white": "white/cream",
-  "beige": "beige/brown", "camel": "beige/brown", "tan": "beige/brown",
-  "brown": "beige/brown", "dark brown": "beige/brown",
-  "stone": "beige/brown", "taupe": "beige/brown", "nude": "beige/brown",
-  "grey": "grey", "gray": "grey", "charcoal": "grey", "charcoal grey": "grey",
+  "white": "white-cream", "cream": "white-cream", "ivory": "white-cream", "off-white": "white-cream",
+  "beige": "beige-brown", "camel": "beige-brown", "tan": "beige-brown",
+  "brown": "beige-brown", "dark brown": "beige-brown",
+  "stone": "beige-brown", "taupe": "beige-brown", "nude": "beige-brown",
+  "grey": "grey", "gray": "grey", "charcoal": "grey",
+  "charcoal grey": "grey", "charcoal gray": "grey",
   "silver": "grey", "dark grey": "grey", "dark gray": "grey",
   "navy": "navy", "dark navy": "navy",
-  "red": "red/burgundy", "burgundy": "red/burgundy", "wine": "red/burgundy",
-  "maroon": "red/burgundy", "dark red": "red/burgundy",
+  "red": "red-burgundy", "burgundy": "red-burgundy", "wine": "red-burgundy",
+  "maroon": "red-burgundy", "dark red": "red-burgundy",
 };
 
 // All 12 TODAY intention IDs (canonical — app/routes/style-me/intention.tsx).
@@ -381,7 +391,7 @@ function isPassportColourMatch(colour: string | null, passportColours: string[])
  */
 export function deriveVisualWeight(
   item: Pick<ClosetClassification, "pattern" | "silhouette" | "material"> &
-    Partial<Pick<ClosetClassification, "fitProfile" | "category" | "hemLength">>,
+    Partial<Pick<ClosetClassification, "fitProfile" | "category" | "hemLength" | "subcategory">>,
 ): VisualWeightResult {
   const pattern    = norm(item.pattern);
   const silhouette = norm(item.silhouette);
@@ -389,6 +399,7 @@ export function deriveVisualWeight(
   const fitProfile = norm(item.fitProfile);
   const category   = norm(item.category);
   const hemLength  = norm(item.hemLength);
+  const subcategory = norm(item.subcategory);
 
   const isAccessory = category !== null && ACCESSORY_CATEGORIES.has(category);
   const allAbsent   = pattern === null && silhouette === null && material === null && fitProfile === null;
@@ -453,6 +464,14 @@ export function deriveVisualWeight(
       // Full-length non-fitted activewear (joggers, track pants) — not lightweight shorts.
       score += 1;
       evidence.push("full-length activewear — baseline presence");
+    } else if (
+      category === "activewear" &&
+      subcategory !== null && ACTIVEWEAR_OUTER_SUBCATEGORIES.has(subcategory)
+    ) {
+      // V2.5: Outer-layer activewear (hoodies, sweatshirts, track jackets) command more
+      // visual presence than base-layer items (t-shirts, shorts) regardless of material.
+      score += 1;
+      evidence.push(`activewear outer layer — ${subcategory}`);
     }
     // NOTE: blanket "bottoms" floor removed in V2.2
   }
@@ -602,7 +621,9 @@ export function computeGarmentIntentionPotential(
   const hasNegativeRel       = relationships.some(r => ["regret", "rarely-wear"].includes(r));
 
   // Shared: avoidColors conflict check (used by feel-like-myself and confidence).
-  const primaryColorAvoided = primaryColor !== null && avoidColors.includes(primaryColor);
+  // Uses the same canonical-family semantics as isPassportColourMatch so that
+  // e.g. garment "charcoal gray" conflicts with avoid-list family "grey".
+  const primaryColorAvoided = isPassportColourMatch(primaryColor, avoidColors);
 
   let strength: IntentionStrength = "none";
 
@@ -712,13 +733,16 @@ export function computeGarmentIntentionPotential(
       if (convergenceCount < 2) break; // NONE — single signal insufficient
 
       // Add signals only when convergence confirmed.
-      p("authentic to your style personality");
+      // V2.5: personality signal is conditional — only emit when personality alignment is the
+      // actual contributor. When the primary gate was cleared by silhouette alignment alone,
+      // emitting "authentic to your style personality" is a false claim.
+      if (hasPersonalityAlignment) p("authentic to your style personality");
+      if (hasPreferredSilhouetteAlignment) p("aligns with your preferred silhouette");
       if (hasStrongPositiveRel) {
         const rel = relationships.find(r => ["favourite", "wear-often"].includes(r))!;
         p(`a piece you genuinely reach for (${rel})`);
       }
       if (hasFavouriteColour) p("your preferred colour");
-      if (hasPreferredSilhouetteAlignment) p("aligns with your preferred silhouette");
 
       strength = "supporting";
       break;
@@ -969,6 +993,9 @@ export function computeGarmentIntentionPotential(
       const hasCoveredNeckline    = necklineCoverage !== null &&
         ["high", "crew", "mock", "cowl-high", "shirt-collar"].includes(necklineCoverage);
       const hasLongHem            = hemLength !== null && ["midi", "maxi", "full"].includes(hemLength);
+      // V2.5: for explicit legs-covered satisfaction, only maxi/full qualify — midi does not reach
+      // the ankle and must not credit a "Legs covered" or "Prefer Full Length Trousers" requirement.
+      const hasFullLengthHem      = hemLength !== null && ["maxi", "full"].includes(hemLength);
       const hasMidriffCovered     = garment.midriffExposed === false;
       const hasLooserFit          = fitProfile !== null && SOFT_FIT_PROFILES.has(fitProfile);
       const hasShoulderCoverage   = garment.shoulderCoverage === true;
@@ -1026,7 +1053,7 @@ export function computeGarmentIntentionPotential(
       }
       if (wantsLegsCovered && isBottomsLike) {
         applicable++;
-        if (hasLongHem) satisfied++;
+        if (hasFullLengthHem) satisfied++;
       }
       if (wantsMidriffCovered && isTorsoLike) {
         applicable++;
@@ -1052,7 +1079,7 @@ export function computeGarmentIntentionPotential(
         }
         if (isBottomsLike) {
           applicable++;
-          if (hasLongHem) satisfied++;
+          if (hasFullLengthHem) satisfied++;
         }
       }
 

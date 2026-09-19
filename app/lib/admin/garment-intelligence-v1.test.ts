@@ -1922,38 +1922,120 @@ describe("§GI-V1-49 V2.3 deriveVisualWeight — activewear category floors", ()
     assert.equal(r.value, "light",
       "fitted full-length activewear (leggings) should NOT trigger the full-length floor");
   });
+
+  it("activewear + hoodie subcategory + cotton + relaxed → MEDIUM (outer-layer floor)", () => {
+    // Real: Black Nike Zip-Up Hoodie — cotton, relaxed, no knitwear material → outer-layer floor applies.
+    const r = deriveVisualWeight({
+      pattern: "solid", silhouette: null, material: "cotton",
+      category: "activewear", fitProfile: "relaxed", subcategory: "hoodie",
+    });
+    assert.ok(r.value === "medium" || r.value === "substantial",
+      "hoodie is an outer-layer activewear item — should be at least MEDIUM");
+    assert.ok(r.evidence.some(e => e.includes("outer layer") || e.includes("hoodie")),
+      "evidence should reference the outer-layer category");
+  });
+
+  it("activewear + track jacket subcategory + polyester + fitted → MEDIUM (outer-layer floor)", () => {
+    // Real: Gray Nike Dri-FIT Track Jacket — polyester, fitted, no knitwear material.
+    const r = deriveVisualWeight({
+      pattern: "solid", silhouette: null, material: "polyester",
+      category: "activewear", fitProfile: "fitted", subcategory: "track jacket",
+    });
+    assert.ok(r.value === "medium" || r.value === "substantial",
+      "track jacket is an outer-layer activewear item — should be at least MEDIUM");
+    assert.ok(r.evidence.some(e => e.includes("outer layer") || e.includes("track jacket")));
+  });
+
+  it("activewear + performance t-shirt subcategory + polyester + fitted → LIGHT (base layer, no floor)", () => {
+    // Performance T-shirts are base layers — outer-layer floor must not apply.
+    const r = deriveVisualWeight({
+      pattern: "solid", silhouette: null, material: "polyester",
+      category: "activewear", fitProfile: "fitted", subcategory: "performance t-shirt",
+    });
+    assert.equal(r.value, "light",
+      "performance t-shirt is NOT an outer-layer activewear item");
+  });
+
+  it("activewear + shorts subcategory + nylon → LIGHT (shorts stay light)", () => {
+    const r = deriveVisualWeight({
+      pattern: "solid", silhouette: null, material: "nylon",
+      category: "activewear", subcategory: "shorts",
+    });
+    assert.equal(r.value, "light", "athletic shorts stay LIGHT");
+  });
 });
 
-// ── §GI-V1-50 — V2.3 Passport colour family matching ─────────────────────────
+// ── §GI-V1-50 — V2.5 Passport colour family matching (hyphen IDs match DB storage) ─────────────
 
-describe("§GI-V1-50 V2.3 isPassportColourMatch — family-aware favourite colour", () => {
-  it("feel-like-myself: garment=cream, Passport favColors=['White/Cream'] → SUPPORTING (family match)", () => {
+describe("§GI-V1-50 V2.5 isPassportColourMatch — family-aware favourite colour (real stored IDs)", () => {
+  // Passport colours are stored with hyphen separators matching COLOUR_FAMILIES ids (e.g. "white-cream").
+  it("feel-like-myself: garment=cream, Passport favColors=['white-cream'] → SUPPORTING (family match)", () => {
     const g: ClosetClassification = { ...blank(), primaryColor: "cream" };
-    const passport = { favoriteColors: ["white/cream"] };
+    const passport = { favoriteColors: ["white-cream"] };
     const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
     assert.ok(r.strength === "supporting" || r.strength === "strong",
-      "cream maps to White/Cream family — should match");
+      "cream maps to white-cream family — should match using stored hyphen ID");
   });
 
-  it("feel-like-myself: garment=burgundy, Passport favColors=['Red/Burgundy'] → SUPPORTING (family match)", () => {
+  it("feel-like-myself: garment=white, Passport favColors=['white-cream'] → SUPPORTING (family match)", () => {
+    const g: ClosetClassification = { ...blank(), primaryColor: "white" };
+    const passport = { favoriteColors: ["white-cream"] };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
+    assert.ok(r.strength === "supporting" || r.strength === "strong",
+      "white maps to white-cream family");
+  });
+
+  it("feel-like-myself: garment=burgundy, Passport favColors=['red-burgundy'] → SUPPORTING (family match)", () => {
     const g: ClosetClassification = { ...blank(), primaryColor: "burgundy" };
-    const passport = { favoriteColors: ["red/burgundy"] };
+    const passport = { favoriteColors: ["red-burgundy"] };
     const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
     assert.ok(r.strength === "supporting" || r.strength === "strong",
-      "burgundy maps to Red/Burgundy family — should match");
+      "burgundy maps to red-burgundy family — should match using stored hyphen ID");
   });
 
-  it("confidence: garment=ivory, Passport favColors=['White/Cream'], classic-polished personality → SUPPORTING", () => {
+  it("feel-like-myself: garment=camel, Passport favColors=['beige-brown'] → SUPPORTING (family match)", () => {
+    const g: ClosetClassification = { ...blank(), primaryColor: "camel" };
+    const passport = { favoriteColors: ["beige-brown"] };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
+    assert.ok(r.strength === "supporting" || r.strength === "strong",
+      "camel maps to beige-brown family");
+  });
+
+  it("feel-like-myself: garment=dark brown, Passport favColors=['beige-brown'] → SUPPORTING (family match)", () => {
+    const g: ClosetClassification = { ...blank(), primaryColor: "dark brown" };
+    const passport = { favoriteColors: ["beige-brown"] };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
+    assert.ok(r.strength === "supporting" || r.strength === "strong",
+      "dark brown maps to beige-brown family");
+  });
+
+  it("feel-like-myself: garment=navy, Passport favColors=['navy'] → SUPPORTING (exact single-word match)", () => {
+    const g: ClosetClassification = { ...blank(), primaryColor: "navy" };
+    const passport = { favoriteColors: ["navy"] };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
+    assert.ok(r.strength === "supporting" || r.strength === "strong",
+      "navy matches navy directly");
+  });
+
+  it("feel-like-myself: garment=grey, Passport avoidColors=['grey'] → NONE (avoid conflict)", () => {
+    const g: ClosetClassification = { ...blank(), primaryColor: "grey" };
+    const passport = { avoidColors: ["grey"] };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
+    assert.ok(r.signalDetails.some(s => s.polarity === "conflict" && s.text.includes("avoid")),
+      "avoided colour produces a conflict signal");
+  });
+
+  it("confidence: garment=ivory, Passport favColors=['white-cream'], classic-polished personality → SUPPORTING", () => {
     const g: ClosetClassification = {
       ...blank(), primaryColor: "ivory", styleTags: ["classic", "refined"],
     };
     const passport = {
-      favoriteColors: ["white/cream"],
+      favoriteColors: ["white-cream"],
       stylePersonalities: ["classic-polished"],
     };
     const r = computeGarmentIntentionPotential(g, "confidence", passport, {});
     assert.ok(r.strength === "supporting" || r.strength === "strong",
-      "ivory→White/Cream + classic-polished personality alignment → confidence SUPPORTING");
+      "ivory→white-cream + classic-polished personality alignment → confidence SUPPORTING");
   });
 });
 
@@ -2329,5 +2411,345 @@ describe("§GI-V1-58 V2.4 deriveVisualWeight — leather exemption on small acce
     const vw = deriveVisualWeight(g);
     assert.equal(vw.value, "substantial",
       "leather(1) + structured construction(1) = score 2 → SUBSTANTIAL");
+  });
+});
+
+// ── §GI-V1-59 — V2.5 confidence: personality signal correctness ───────────────
+
+describe("§GI-V1-59 V2.5 confidence — false personality signal must not fire", () => {
+  // When the primary gate passes via silhouette alignment (not personality alignment),
+  // the signal "authentic to your style personality" must NOT be emitted.
+
+  it("bold-edgy garment + classic-polished profile: no personality alignment → no 'authentic to your style personality' signal", () => {
+    // Case A: Black Leather Bomber — bold-edgy garment vs Classic & Polished profile.
+    const g: ClosetClassification = {
+      ...blank(),
+      category: "outerwear", material: "leather", fitProfile: "structured",
+      stylePersonality: "bold-edgy", styleTags: ["edgy", "bold", "contemporary"],
+    };
+    const passport = {
+      stylePersonalities: ["classic-polished"],
+      // Silhouette pref to trigger the primary gate via shape signal
+      silhouette: ["structured-tailored"],
+      // Favourite colour to ensure convergence ≥ 2
+      favoriteColors: ["black"],
+    };
+    const r = computeGarmentIntentionPotential(g, "confidence", passport, {});
+    // Confidence may still be SUPPORTING via silhouette + colour convergence — that is correct.
+    // What must NOT happen: "authentic to your style personality" appearing when no personality
+    // alignment exists between bold-edgy and classic-polished.
+    const hasWrongSignal = r.signals.some(s => s.includes("authentic to your style personality"));
+    assert.ok(!hasWrongSignal,
+      "bold-edgy garment does NOT align with classic-polished passport — 'authentic to your style personality' must not fire");
+  });
+
+  it("feminine-romantic garment + classic-polished profile: no personality alignment → no 'authentic to your style personality' signal", () => {
+    // Case B: feminine-romantic garment vs Classic & Polished only profile.
+    const g: ClosetClassification = {
+      ...blank(),
+      stylePersonality: "feminine-romantic", styleTags: ["feminine", "statement", "artsy"],
+      hemLength: "maxi", silhouette: "flared",
+    };
+    const passport = {
+      stylePersonalities: ["classic-polished"],
+      silhouette: ["structured-tailored"],
+      favoriteColors: ["black"],
+    };
+    const r = computeGarmentIntentionPotential(g, "confidence", passport, {});
+    const hasWrongSignal = r.signals.some(s => s.includes("authentic to your style personality"));
+    assert.ok(!hasWrongSignal,
+      "feminine-romantic garment does NOT align with classic-polished passport — personality signal must not fire");
+  });
+
+  it("classic-polished garment + classic-polished profile → personality signal DOES fire", () => {
+    // Preserve legitimate personality alignment.
+    const g: ClosetClassification = {
+      ...blank(),
+      stylePersonality: "classic-polished",
+      styleTags: ["classic", "polished", "refined"],
+      fitProfile: "tailored",
+    };
+    const passport = {
+      stylePersonalities: ["classic-polished"],
+      favoriteColors: ["navy"],
+      silhouette: ["structured-tailored"],
+    };
+    const r = computeGarmentIntentionPotential(g, "confidence", passport, {});
+    assert.ok(r.strength === "supporting" || r.strength === "strong");
+    const hasPersonalitySignal = r.signals.some(s => s.includes("authentic to your style personality"));
+    assert.ok(hasPersonalitySignal,
+      "genuine classic-polished alignment must still emit the personality signal");
+  });
+});
+
+// ── §GI-V1-60 — V2.5 feel-less-exposed: midi does not satisfy full leg coverage ──
+
+describe("§GI-V1-60 V2.5 feel-less-exposed — midi hem does not satisfy explicit legs-covered requirement", () => {
+  // Profile 1 has legs-covered + prefer-full-length-trousers.
+  // A midi skirt (hemLength=midi) must NOT produce STRONG feel-less-exposed
+  // for a profile with an explicit full leg-coverage requirement.
+
+  const profile1LegsCovered = {
+    dressingPreferences: ["legs-covered", "prefer-full-length-trousers", "dresses-modestly"],
+  };
+
+  it("BOTTOMS + midi hemLength + legs-covered dressing pref → NOT STRONG", () => {
+    const g: ClosetClassification = {
+      ...blank(),
+      category: "bottoms", subcategory: "skirt",
+      hemLength: "midi", fitProfile: "fitted", silhouette: "column",
+    };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed", profile1LegsCovered, {});
+    assert.ok(r.strength !== "strong",
+      "midi skirt must not be STRONG for a profile requiring full leg coverage");
+  });
+
+  it("BOTTOMS + maxi hemLength + legs-covered dressing pref → capable of STRONG (control)", () => {
+    // Black Draped Maxi Skirt control: maxi must remain capable of STRONG.
+    const g: ClosetClassification = {
+      ...blank(),
+      category: "bottoms", hemLength: "maxi",
+    };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed", profile1LegsCovered, {});
+    assert.ok(r.strength === "strong" || r.strength === "supporting",
+      "maxi skirt remains capable of STRONG for a legs-covered profile");
+  });
+
+  it("BOTTOMS + maxi hemLength + legs-covered → STRONG when only applicable zone", () => {
+    // When only one applicable zone (legs) is satisfied by maxi, result is STRONG.
+    const g: ClosetClassification = {
+      ...blank(),
+      category: "bottoms", hemLength: "maxi",
+    };
+    const minimalLegsPref = { dressingPreferences: ["legs-covered"] };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed", minimalLegsPref, {});
+    assert.equal(r.strength, "strong",
+      "maxi satisfies the only applicable legs-covered zone → STRONG");
+  });
+
+  it("Layer A: midi garment still records 'longer hem' as a coverage fact (display only)", () => {
+    // Layer A records objective facts regardless of Passport gate.
+    const g: ClosetClassification = {
+      ...blank(), category: "bottoms", hemLength: "midi",
+    };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed", {}, {});
+    assert.ok(r.signals.some(s => s.includes("midi")),
+      "Layer A should still surface 'longer hem — midi' as a factual coverage note");
+  });
+
+  it("Profile with no dressing preferences: midi bottoms → NONE (no applicable zone)", () => {
+    const g: ClosetClassification = {
+      ...blank(), category: "bottoms", hemLength: "midi",
+    };
+    const r = computeGarmentIntentionPotential(g, "feel-less-exposed", {}, {});
+    assert.equal(r.strength, "none",
+      "no dressing preferences → no coverage need → NONE strength");
+  });
+});
+
+// ── §GI-V1-61 — V2.5 charcoal gray colour normalization ────────────────────────
+
+describe("§GI-V1-61 V2.5 deriveColourProfile — charcoal gray (American spelling) Grey family", () => {
+  it("charcoal gray → wardrobeNeutral=true", () => {
+    const r = deriveColourProfile({ primaryColor: "charcoal gray", colors: [] });
+    assert.equal(r.wardrobeNeutral, true,
+      "charcoal gray must be a wardrobe neutral like charcoal grey");
+  });
+
+  it("charcoal gray → hueFamily=grey", () => {
+    const r = deriveColourProfile({ primaryColor: "charcoal gray", colors: [] });
+    assert.equal(r.hueFamily, "grey",
+      "charcoal gray must derive to the grey hue family");
+  });
+
+  it("charcoal gray → lightDark=dark (unambiguous dark)", () => {
+    const r = deriveColourProfile({ primaryColor: "charcoal gray", colors: [] });
+    assert.equal(r.lightDark, "dark",
+      "charcoal gray is unambiguously dark");
+  });
+
+  it("charcoal gray: Passport avoidColors=['grey'] → conflict (family-level match)", () => {
+    // avoidColors now uses the same isPassportColourMatch semantics as favoriteColors.
+    // "charcoal gray" → family "grey" → matches avoid list ["grey"].
+    const g: ClosetClassification = { ...blank(), primaryColor: "charcoal gray" };
+    const passport = { avoidColors: ["grey"] };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
+    assert.ok(r.signalDetails.some(s => s.polarity === "conflict"),
+      "charcoal gray maps to grey family — avoidColors=['grey'] must produce a conflict signal");
+  });
+
+  it("charcoal gray: Passport favoriteColors=['grey'] → colour support signal (family-level match)", () => {
+    // isPassportColourMatch: "charcoal gray" → "grey" → matches favoriteColors: ["grey"]
+    const g: ClosetClassification = {
+      ...blank(), primaryColor: "charcoal gray",
+      stylePersonality: "classic-polished", fitProfile: "tailored",
+    };
+    const passport = {
+      stylePersonalities: ["classic-polished"],
+      favoriteColors: ["grey"],
+      silhouette: ["structured-tailored"],
+    };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
+    const hasColourSignal = r.signalDetails.some(
+      s => s.polarity === "support" && s.text.includes("colour"),
+    );
+    assert.ok(hasColourSignal,
+      "charcoal gray maps to grey family → favouriteColors=['grey'] must surface a colour support signal");
+  });
+
+  it("charcoal grey (British) → same behaviour as charcoal gray (American)", () => {
+    const british = deriveColourProfile({ primaryColor: "charcoal grey", colors: [] });
+    const american = deriveColourProfile({ primaryColor: "charcoal gray", colors: [] });
+    assert.equal(british.wardrobeNeutral, american.wardrobeNeutral);
+    assert.equal(british.hueFamily, american.hueFamily);
+    assert.equal(british.lightDark, american.lightDark);
+  });
+});
+
+// ── §GI-V1-62 — V2.5 canonical colour-family matching: avoid AND favourite ────
+// Proves that isPassportColourMatch semantics are shared for both colour directions.
+
+describe("§GI-V1-62 V2.5 colour-family matching — avoid conflicts and favourite supports", () => {
+
+  // ── Helper: fire computeGarmentIntentionPotential in feel-like-myself with
+  //    enough base signals so we can inspect signalDetails reliably. ──────────
+  function conflictsFor(primaryColor: string, avoidColors: string[]) {
+    const g: ClosetClassification = {
+      ...blank(), primaryColor,
+      stylePersonality: "classic-polished", fitProfile: "tailored",
+    };
+    const passport = { avoidColors };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
+    return r.signalDetails.filter(s => s.polarity === "conflict");
+  }
+
+  function hasColourSupport(primaryColor: string, favoriteColors: string[]) {
+    const g: ClosetClassification = {
+      ...blank(), primaryColor,
+      stylePersonality: "classic-polished", fitProfile: "tailored",
+    };
+    const passport = {
+      stylePersonalities: ["classic-polished"],
+      favoriteColors,
+      silhouette: ["structured-tailored"],
+    };
+    const r = computeGarmentIntentionPotential(g, "feel-like-myself", passport, {});
+    return r.signalDetails.some(s => s.polarity === "support" && s.text.includes("colour"));
+  }
+
+  // ── Avoid-colour family conflicts ─────────────────────────────────────────
+
+  it("garment white + avoid white-cream → conflict", () => {
+    assert.ok(conflictsFor("white", ["white-cream"]).length > 0,
+      "white maps to white-cream family — must conflict");
+  });
+
+  it("garment cream + avoid white-cream → conflict", () => {
+    assert.ok(conflictsFor("cream", ["white-cream"]).length > 0,
+      "cream maps to white-cream family — must conflict");
+  });
+
+  it("garment ivory + avoid white-cream → conflict", () => {
+    assert.ok(conflictsFor("ivory", ["white-cream"]).length > 0,
+      "ivory maps to white-cream family — must conflict");
+  });
+
+  it("garment camel + avoid beige-brown → conflict", () => {
+    assert.ok(conflictsFor("camel", ["beige-brown"]).length > 0,
+      "camel maps to beige-brown family — must conflict");
+  });
+
+  it("garment dark brown + avoid beige-brown → conflict", () => {
+    assert.ok(conflictsFor("dark brown", ["beige-brown"]).length > 0,
+      "dark brown maps to beige-brown family — must conflict");
+  });
+
+  it("garment burgundy + avoid red-burgundy → conflict", () => {
+    assert.ok(conflictsFor("burgundy", ["red-burgundy"]).length > 0,
+      "burgundy maps to red-burgundy family — must conflict");
+  });
+
+  it("garment wine + avoid red-burgundy → conflict", () => {
+    assert.ok(conflictsFor("wine", ["red-burgundy"]).length > 0,
+      "wine maps to red-burgundy family — must conflict");
+  });
+
+  it("garment grey + avoid grey → conflict", () => {
+    assert.ok(conflictsFor("grey", ["grey"]).length > 0,
+      "grey direct match — must conflict");
+  });
+
+  it("garment gray + avoid grey → conflict (American spelling)", () => {
+    assert.ok(conflictsFor("gray", ["grey"]).length > 0,
+      "gray maps to grey family — must conflict");
+  });
+
+  it("garment charcoal + avoid grey → conflict", () => {
+    assert.ok(conflictsFor("charcoal", ["grey"]).length > 0,
+      "charcoal maps to grey family — must conflict");
+  });
+
+  it("garment charcoal gray + avoid grey → conflict", () => {
+    assert.ok(conflictsFor("charcoal gray", ["grey"]).length > 0,
+      "charcoal gray maps to grey family — must conflict");
+  });
+
+  it("garment charcoal grey + avoid grey → conflict", () => {
+    assert.ok(conflictsFor("charcoal grey", ["grey"]).length > 0,
+      "charcoal grey maps to grey family — must conflict");
+  });
+
+  // ── Negative control: nearby-but-different family must NOT conflict ────────
+
+  it("garment medium blue + avoid navy → NO conflict (medium blue is not in PASSPORT_COLOUR_FAMILY_MAP)", () => {
+    // "medium blue" is not mapped to "navy" in PASSPORT_COLOUR_FAMILY_MAP.
+    // This is the key guard: blues that don't resolve to navy must not conflict.
+    assert.equal(conflictsFor("medium blue", ["navy"]).length, 0,
+      "medium blue is not mapped to any Passport colour family — must NOT conflict with navy");
+  });
+
+  it("garment red + avoid red-burgundy → conflict (but pink + avoid red-burgundy → no conflict)", () => {
+    assert.ok(conflictsFor("red", ["red-burgundy"]).length > 0,
+      "red maps to red-burgundy family — must conflict");
+    assert.equal(conflictsFor("pink", ["red-burgundy"]).length, 0,
+      "pink is not in the red-burgundy family — must NOT conflict");
+  });
+
+  it("garment beige + avoid grey → NO conflict (different families)", () => {
+    assert.equal(conflictsFor("beige", ["grey"]).length, 0,
+      "beige is in beige-brown family, not grey — must NOT conflict with grey avoid");
+  });
+
+  // ── Favourite-colour family supports ─────────────────────────────────────
+
+  it("garment cream + favouriteColors white-cream → colour support", () => {
+    assert.ok(hasColourSupport("cream", ["white-cream"]),
+      "cream maps to white-cream family — must surface colour support signal");
+  });
+
+  it("garment camel + favouriteColors beige-brown → colour support", () => {
+    assert.ok(hasColourSupport("camel", ["beige-brown"]),
+      "camel maps to beige-brown family — must surface colour support signal");
+  });
+
+  it("garment dark brown + favouriteColors beige-brown → colour support", () => {
+    assert.ok(hasColourSupport("dark brown", ["beige-brown"]),
+      "dark brown maps to beige-brown family — must surface colour support signal");
+  });
+
+  it("garment burgundy + favouriteColors red-burgundy → colour support", () => {
+    assert.ok(hasColourSupport("burgundy", ["red-burgundy"]),
+      "burgundy maps to red-burgundy family — must surface colour support signal");
+  });
+
+  it("garment navy + favouriteColors navy → colour support (direct)", () => {
+    assert.ok(hasColourSupport("navy", ["navy"]),
+      "navy direct match — must surface colour support signal");
+  });
+
+  it("garment medium blue + favouriteColors navy → NO colour support", () => {
+    // medium blue is not mapped to navy — must not produce a false positive.
+    assert.ok(!hasColourSupport("medium blue", ["navy"]),
+      "medium blue is not in navy family — must NOT produce a colour support signal for favoriteColors=['navy']");
   });
 });
