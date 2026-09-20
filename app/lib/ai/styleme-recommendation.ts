@@ -20,6 +20,7 @@ import {
   PROFILE_BECOMING_DFM_MAP,
   REV3_BODY_NEED_TO_LEGACY_ENGINE,
 } from "./signal-contract.js";
+import { closetItemToSlot } from "./closet-slot.js";
 import {
   getAllCatalogProducts,
   getProductByHandle,
@@ -280,21 +281,7 @@ function itemTypeToSlot(itemType: ProductItemType): OutfitSlot {
   }
 }
 
-const CLOSET_CATEGORY_TO_SLOT: Record<string, OutfitSlot> = {
-  TOPS: "top",
-  BOTTOMS: "bottom",
-  DRESSES: "dress",
-  SETS: "set",
-  OUTERWEAR: "outerwear",
-  SHOES: "shoe",
-  BAGS: "bag",
-  ACCESSORIES: "accessory",
-  JEWELRY: "jewelry",
-};
-
-function closetCategoryToSlot(category: string): OutfitSlot {
-  return CLOSET_CATEGORY_TO_SLOT[category] ?? "unknown";
-}
+// closetItemToSlot is imported from closet-slot.ts (canonical single source of truth).
 
 // ─── Closet general-pairing vocabulary ───────────────────────────────────────
 // Maps a Closet anchor slot to the bounded garment-category tokens we look for
@@ -528,7 +515,7 @@ export function resolveNadineAnchor(
 export function resolveClosetAnchor(
   input: ClosetAnchorInput,
 ): NormalizedClosetAnchor {
-  const slot = closetCategoryToSlot(input.category);
+  const slot = closetItemToSlot(input.category, input.subcategory);
   const evidenceFields: string[] = [];
 
   if (input.colors.length > 0) evidenceFields.push("colors");
@@ -655,13 +642,13 @@ function checkHardExclusions(
       // necklineCoverage "n/a" → exempt
     }
 
-    // legs-covered → hemLength must be full/maxi/midi
+    // legs-covered → hemLength must be full or maxi (midi is NOT safe — covers to mid-calf only)
     // n/a (TOP or OUTERWEAR) = exempt; absent = fail closed
     if (!dressingFailed && dressingPreferenceIds.has("legs-covered")) {
       if (!dressing) {
         dressingFailed = true;
       } else if (dressing.hemLength !== "n/a") {
-        const safe = dressing.hemLength === "full" || dressing.hemLength === "maxi" || dressing.hemLength === "midi";
+        const safe = dressing.hemLength === "full" || dressing.hemLength === "maxi";
         dressingFailed = !safe;
       }
       // hemLength "n/a" (TOP/OUTERWEAR) → exempt

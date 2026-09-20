@@ -7,6 +7,7 @@
 // Finishing layer: catalog prose fields (shoeDirection, accessoriesDirection, etc.).
 
 import { quizQuestions } from "../onboarding/quiz-data.js";
+import { closetItemToSlot } from "./closet-slot.js";
 import { runRecommendation, buildSessionFingerprint } from "./styleme-recommendation.js";
 import type {
   StyleMeEngineInput,
@@ -125,6 +126,7 @@ export function buildEngineInput(params: {
   bodyNeeds: string[];
   coverageConditional: string | null;
   occasion: string;
+  occasionDisplayLabel?: string | null;
   formalityConditional: string | null;
   todayColours: { preferred: string[]; avoid: string[] };
   practicalIds: string[];
@@ -148,6 +150,7 @@ export function buildEngineInput(params: {
       bodyNeeds: params.bodyNeeds,
       coverageConditional: params.coverageConditional,
       occasion: params.occasion,
+      ...(params.occasionDisplayLabel !== undefined && { occasionDisplayLabel: params.occasionDisplayLabel }),
       formalityConditional: params.formalityConditional,
       todayColours: params.todayColours,
       practicalIds: params.practicalIds,
@@ -166,20 +169,7 @@ export function buildEngineInput(params: {
 }
 
 // ── Closet category → outfit slot mapping ─────────────────────────────────────
-
-const CLOSET_CATEGORY_TO_SLOT: Record<string, OutfitSlot> = {
-  TOPS: "top",
-  BOTTOMS: "bottom",
-  DRESSES: "dress",
-  SETS: "set",
-  OUTERWEAR: "outerwear",
-  SHOES: "shoe",
-  BAGS: "bag",
-  ACCESSORIES: "accessory",
-  JEWELRY: "jewelry",
-  ACTIVEWEAR: "top",
-  LOUNGEWEAR: "top",
-};
+// Use closetItemToSlot(item.category, item.subcategory) — imported from closet-slot.ts.
 
 // Maximum total pieces in a styled outfit (anchor + primary NADINE product + additional closet garments).
 // Optional slots are selected by relevance score until this cap is reached.
@@ -1037,28 +1027,26 @@ export function computeEnergyScore(
 
 // ── Energy fit — give-energy T4 objective ────────────────────────────────────
 // Uses computeEnergyPotential() (expressive tags + non-solid pattern + flowy).
-// rawUplift = max(0, avg per-piece potential(candidate) − avg(candidateA)).
+// absolutePotential = avg per-piece energy potential for candidate (0–3 scale).
+// candidateA is retained for API compatibility but is not used in scoring.
 // Modulated by Passport style-personality alignment; factor=1 when no profile.
-// Returns 0 when rawUplift=0 or all structural-piece metadata is unknown.
+// Returns 0 when potential=0 or all structural-piece metadata is unknown.
 
 export function computeEnergyFit(
   candidate: OutfitCandidate,
-  candidateA: OutfitCandidate,
+  _candidateA: OutfitCandidate,
   allItems: ClosetAnchorInput[],
   profile: ClosetScoringProfile | undefined,
 ): number {
   const itemMap = new Map(allItems.map((i) => [i.id, i]));
-  const avgPotential = (c: OutfitCandidate): number => {
-    const pieces = c.pieces.filter((p) => !BODY_NEED_STRUCTURAL_SLOTS.has(p.slot));
-    if (pieces.length === 0) return 0;
-    return pieces.reduce((sum, p) => {
+  const structuralPieces = candidate.pieces.filter((p) => !BODY_NEED_STRUCTURAL_SLOTS.has(p.slot));
+  if (structuralPieces.length === 0) return 0;
+  const absolutePotential =
+    structuralPieces.reduce((sum, p) => {
       const item = itemMap.get(p.closetId);
       return sum + (item ? computeEnergyPotential(item) : 0);
-    }, 0) / pieces.length;
-  };
-  const rawUplift = Math.max(0, avgPotential(candidate) - avgPotential(candidateA));
-  if (rawUplift === 0) return 0;
-  const structuralPieces = candidate.pieces.filter((p) => !BODY_NEED_STRUCTURAL_SLOTS.has(p.slot));
+    }, 0) / structuralPieces.length;
+  if (absolutePotential === 0) return 0;
   const hasKnownMetadata = structuralPieces.some((p) => {
     const item = itemMap.get(p.closetId);
     return item && (
@@ -1079,13 +1067,13 @@ export function computeEnergyFit(
     }).length;
     compatibilityFactor = structuralPieces.length > 0 ? matching / structuralPieces.length : 1;
   }
-  return rawUplift * Math.max(0, Math.min(1, compatibilityFactor));
+  return absolutePotential * Math.max(0, Math.min(1, compatibilityFactor));
 }
 
 // ── Shared outfit feature functions (all return [0,1]; used by singleIntentionUnitScore) ──
 
 const STRUCTURE_TAGS = new Set(["structured", "tailored", "sharp", "polished", "fitted", "minimalist"]);
-const FLOW_TAGS = new Set(["flowing", "relaxed", "soft", "loose", "draped", "flowy", "oversized"]);
+const FLOW_TAGS = new Set(["flowing", "relaxed", "soft", "loose", "flowy", "oversized"]);
 
 export function outfitIdentityScore(
   candidate: OutfitCandidate,
@@ -1112,13 +1100,20 @@ export function outfitStructureScore(
   const itemMap = new Map(allItems.map((i) => [i.id, i]));
   const structural = candidate.pieces.filter((p) => !BODY_NEED_STRUCTURAL_SLOTS.has(p.slot));
   if (structural.length === 0) return 0;
-  const matching = structural.filter((p) => {
-    const item = itemMap.get(p.closetId);
-    if (!item) return false;
-    return (item.styleTags ?? []).some((t) => STRUCTURE_TAGS.has(t.toLowerCase())) ||
-      (item.fitProfile != null && STRUCTURE_TAGS.has(item.fitProfile.toLowerCase()));
-  }).length;
-  return matching / structural.length;
+  // Max-piece structure density: score = bestPieceScore / totalPieces.
+  // A uniform-structure closet can still differentiate candidates: fewer pieces
+  // with the same peak structure score produces a higher density (sharper focus).
+  let maxPieceScore = 0;
+  for (const piece of structural) {
+    const item = itemMap.get(piece.closetId);
+    if (!item) continue;
+    const hasTag = (item.styleTags ?? []).some((t) => STRUCTURE_TAGS.has(t.toLowerCase()));
+    const hasFit = item.fitProfile != null && STRUCTURE_TAGS.has(item.fitProfile.toLowerCase());
+    const pieceScore = (hasTag ? 0.5 : 0) + (hasFit ? 0.5 : 0);
+    if (pieceScore > maxPieceScore) maxPieceScore = pieceScore;
+  }
+  if (maxPieceScore === 0) return 0;
+  return maxPieceScore / structural.length;
 }
 
 export function outfitFlowScore(
@@ -1241,9 +1236,15 @@ export function computeIntentionFit(
   profile: ClosetScoringProfile | undefined,
 ): number {
   if (!intentions.length) return 0;
-  let total = 0;
-  for (const id of intentions) {
-    total += singleIntentionUnitScore(id, candidate, candidateA, allItems, profile) * 3;
+  const unitScores = intentions.map((id) =>
+    singleIntentionUnitScore(id, candidate, candidateA, allItems, profile),
+  );
+  const total = unitScores.reduce((s, u) => s + u * 3, 0);
+  if (intentions.length >= 2) {
+    const avg = unitScores.reduce((s, u) => s + u, 0) / unitScores.length;
+    const max = Math.max(...unitScores);
+    const balanceFactor = max > 0 ? avg / max : 1;
+    return Math.min(3, total * balanceFactor);
   }
   return Math.min(3, total);
 }
@@ -1331,10 +1332,12 @@ export function compareCandidateRankKeys(a: CandidateRankKey, b: CandidateRankKe
   // T3a: fewer violations = better
   if (a.knownViolationCount !== b.knownViolationCount)
     return a.knownViolationCount - b.knownViolationCount;
-  // T3b: higher bodyNeedFitScore = better; null = neutral (skip comparison)
-  if (a.bodyNeedFitScore !== null && b.bodyNeedFitScore !== null &&
-      Math.abs(a.bodyNeedFitScore - b.bodyNeedFitScore) > 0.0001)
-    return b.bodyNeedFitScore - a.bodyNeedFitScore;
+  // T3b: higher bodyNeedFitScore = better; null = intermediate (0.35) — unknown < known-safe, unknown > known-violating
+  {
+    const aN = a.bodyNeedFitScore ?? 0.35;
+    const bN = b.bodyNeedFitScore ?? 0.35;
+    if (Math.abs(aN - bN) > 0.0001) return bN - aN;
+  }
   // T4: higher intentionFit = better
   if (Math.abs(a.intentionFit - b.intentionFit) > 0.0001)
     return b.intentionFit - a.intentionFit;
@@ -1363,9 +1366,8 @@ export function isTiedAtT1T4(a: CandidateRankKey, b: CandidateRankKey): boolean 
   if (a.formalityFitPriority !== b.formalityFitPriority) return false;
   // T3a: violation count must match exactly
   if (a.knownViolationCount !== b.knownViolationCount) return false;
-  // T3b: null = neutral = tied; numbers within threshold
-  if (a.bodyNeedFitScore !== null && b.bodyNeedFitScore !== null &&
-      Math.abs(a.bodyNeedFitScore - b.bodyNeedFitScore) > 0.0001) return false;
+  // T3b: null = intermediate (0.35); candidates are tied when effective values are within threshold
+  if (Math.abs((a.bodyNeedFitScore ?? 0.35) - (b.bodyNeedFitScore ?? 0.35)) > 0.0001) return false;
   // T4: intentionFit within threshold
   if (Math.abs(a.intentionFit - b.intentionFit) > 0.0001) return false;
   return true;
@@ -1395,6 +1397,13 @@ export function buildNaiaOutfitCandidates(
 ): [OutfitCandidate, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null] {
   const profile_ = profile as ClosetScoringProfile | undefined;
   const signals = { occasion: session.occasion, moods: session.moods, desiredFeelings: session.desiredFeelings };
+
+  // Pre-filter allItems by dressing requirements for the Candidate E exploration.
+  // selectAdditionalClosetGarments has its own gate; this ensures Candidate E's
+  // slot-swap exploration also respects persistent dressing constraints.
+  const dressingEligibleItems = profile_?.dressingPreferences?.length
+    ? allItems.filter((item) => item.id === anchor.id || passesDressingRequirements(item, profile_.dressingPreferences))
+    : allItems;
 
   const fullSelection = selectAdditionalClosetGarments(
     anchor,
@@ -1463,7 +1472,7 @@ export function buildNaiaOutfitCandidates(
     const scoredAlts: Array<{ item: ClosetAnchorInput; score: number; formalityRank: number | null }> = [];
     for (const item of allItems) {
       if (item.id === anchor.id) continue;
-      if (CLOSET_CATEGORY_TO_SLOT[item.category as string] !== slot) continue;
+      if (closetItemToSlot(item.category, item.subcategory) !== slot) continue;
       const score = scoreClosetItemForSession(
         { occasions: item.occasions, styleTags: item.styleTags, category: item.category, colors: item.colors, primaryColor: item.primaryColor },
         signals,
@@ -1511,7 +1520,7 @@ export function buildNaiaOutfitCandidates(
         .filter((item) =>
           item.id !== anchor.id &&
           item.id !== selected.id &&
-          CLOSET_CATEGORY_TO_SLOT[item.category as string] === selected.slot &&
+          closetItemToSlot(item.category, item.subcategory) === selected.slot &&
           scoreClosetItemForSession(
             { occasions: item.occasions, styleTags: item.styleTags, category: item.category, colors: item.colors, primaryColor: item.primaryColor },
             signals, profile_, item.garmentRelationships,
@@ -1580,20 +1589,17 @@ export function buildNaiaOutfitCandidates(
   if (hasStep3Signal || hasIntentionObjective) {
     const bodyNeeds_ = session.bodyNeeds ?? [];
     const intentions_ = session.intentions ?? [];
-    // Reverse map: slot → eligible closet categories
-    const slotToCategories = new Map<string, string[]>();
-    for (const [cat, slot] of Object.entries(CLOSET_CATEGORY_TO_SLOT)) {
-      const cats = slotToCategories.get(slot) ?? [];
-      cats.push(cat);
-      slotToCategories.set(slot, cats);
-    }
+    // slotToCategories is not used directly — per-item slot resolution uses closetItemToSlot.
+    // We keep a Set of all structural slots seen in candidateA so the exploration loop
+    // knows which slots to iterate over.
+    const slotToCategories = new Map<string, string[]>(); // kept for eligible filter below
     // Structural slots: exclude bag/accessory/jewelry from exploration
     const OPTIONAL_SLOT_SET = new Set(["bag", "accessory", "jewelry"]);
 
     type TodayTuple = { violations: number; bodyFit: number; intentFit: number };
     const computeTodayTuple = (c: OutfitCandidate): TodayTuple => {
-      const bn = scoreBodyNeedFitForRanking(bodyNeeds_, c, allItems);
-      const inFit = computeIntentionFit(intentions_, c, candidateA, allItems, profile_);
+      const bn = scoreBodyNeedFitForRanking(bodyNeeds_, c, dressingEligibleItems);
+      const inFit = computeIntentionFit(intentions_, c, candidateA, dressingEligibleItems, profile_);
       return { violations: bn.knownViolationCount, bodyFit: bn.bodyNeedFitScore ?? 0, intentFit: inFit };
     };
     const todayBetter = (trial: TodayTuple, seed: TodayTuple): boolean => {
@@ -1616,9 +1622,8 @@ export function buildNaiaOutfitCandidates(
       let bestTuple = seedTuple;
 
       for (const slot of structuralSlots) {
-        const eligibleCats = slotToCategories.get(slot) ?? [];
-        const eligible = allItems.filter(
-          (item) => !seedItemIds.has(item.id) && eligibleCats.includes(item.category),
+        const eligible = dressingEligibleItems.filter(
+          (item) => !seedItemIds.has(item.id) && closetItemToSlot(item.category, item.subcategory) === slot,
         );
         for (const alt of eligible) {
           const trial1Pieces = seed.pieces.map((p) =>
@@ -1637,9 +1642,8 @@ export function buildNaiaOutfitCandidates(
           const trial1Ids = new Set(trial1Pieces.map((p) => p.closetId));
           for (const slot2 of structuralSlots) {
             if (slot2 === slot) continue;
-            const eligible2Cats = slotToCategories.get(slot2) ?? [];
-            const eligible2 = allItems.filter(
-              (item) => !trial1Ids.has(item.id) && eligible2Cats.includes(item.category),
+              const eligible2 = dressingEligibleItems.filter(
+              (item) => !trial1Ids.has(item.id) && closetItemToSlot(item.category, item.subcategory) === slot2,
             );
             for (const alt2 of eligible2) {
               const trial2Pieces = trial1Pieces.map((p) =>
@@ -2308,7 +2312,7 @@ export async function callClaudeForNaiaSelection(
   wording: StyleMeWording;
   perPieceNotes: Map<string, string>;
 } | null> {
-  const occasionLabel = session.occasion.replace(/-/g, " ");
+  const occasionLabel = (session.occasionDisplayLabel ?? session.occasion).replace(/-/g, " ");
   const moodStr = session.moods.join(", ");
   const feelingStr = session.desiredFeelings.join(", ");
 
@@ -2421,10 +2425,23 @@ export async function callClaudeForNaiaSelection(
     safeFinalNotes ? `Customer's own note: "${safeFinalNotes}".` : null,
   ].filter(Boolean).join("\n");
 
+  // Pre-compute T3b and T4 scores for each candidate so they can appear in the prompt.
+  const profileForScoring = profile as ClosetScoringProfile | undefined;
+  const candidateA = candidates[0];
+  const activeIntentions = session.intentions ?? [];
+
   const candidateDescs = candidates
     .map((c) => {
       const evidence = occasionEvidence?.get(c.id);
       const suit = outfitScores?.get(c.id);
+
+      // Inline T3b and T4 scores for selection-reason context
+      const t3bResult = allItems && activeBodyNeeds.length > 0
+        ? scoreBodyNeedFitForRanking(activeBodyNeeds, c, allItems)
+        : null;
+      const t4Score = allItems && activeIntentions.length > 0
+        ? computeIntentionFit(activeIntentions, c, candidateA, allItems, profileForScoring)
+        : null;
       const lines = c.pieces.map((p) => {
         const pe = evidence?.pieces.find((e) => e.closetId === p.closetId);
         const roleTag = pe ? `, ${pe.pieceRole}` : "";
@@ -2456,6 +2473,20 @@ export async function callClaudeForNaiaSelection(
         );
       } else if (suit) {
         lines.push(`  Outfit register: insufficient formality metadata — occasion coverage used only.`);
+      }
+      // T3b body-need fit score
+      if (t3bResult !== null) {
+        if (t3bResult.knownViolationCount > 0) {
+          lines.push(`  Body-need fit: ${t3bResult.knownViolationCount} known violation(s) — avoid if an alternative has none.`);
+        } else if (t3bResult.bodyNeedFitScore !== null) {
+          lines.push(`  Body-need fit: score ${t3bResult.bodyNeedFitScore.toFixed(2)} (1.0=fully matches fit/comfort needs, 0=does not).`);
+        } else {
+          lines.push(`  Body-need fit: no metadata — unknown.`);
+        }
+      }
+      // T4 intention fit score
+      if (t4Score !== null) {
+        lines.push(`  Intention fit: ${t4Score.toFixed(2)}/3 for [${activeIntentions.join(", ")}].`);
       }
       return `Candidate ${c.id}:\n${lines.join("\n")}`;
     })
@@ -2504,7 +2535,12 @@ export async function callClaudeForNaiaSelection(
     "\n9. This look is built entirely from the customer's own Closet — no brand products. Do not reference product brand names, shopping links, or purchasing. Treat the Closet pieces as the primary styling elements." +
     "\n10. When writing perPieceNotes, use the correct grammatical number for each garment name. Known plural garments include: trousers, jeans, shorts, leggings, chinos, joggers, loafers, sneakers, trainers, boots, heels, flats, slides, earrings, sunglasses, cufflinks. When the number is uncertain, use a participial phrase ('Adding a contrast note…', 'Grounding the look…') to avoid subject-verb mismatch. Do not use generic phrases like 'completes the look', 'forms the upper half', or 'brings the outfit into appropriate territory'." +
     "\n11. You will receive two structured sections: TODAY'S BRIEF and STYLE PASSPORT. Use both together. Priority order: (1) hard constraints — dressing boundaries, persistent coverage preferences, firm colour avoidances; (2) today's occasion and any explicit formality signal; (3) today's stated intention; (4) today's state (context only — do not convert state into garment rules); (5) Passport identity, silhouette, and aspirations. The Passport should differentiate between equally occasion-appropriate candidates — it must not override today's occasion or make an inappropriate outfit acceptable. An everyday brief with a Classic & Polished Passport should produce an everyday outfit that feels classic and polished — not workwear." +
-    "\n12. GROUNDING RULE: Every claim in whyThisWorks, confidenceBoost, and perPieceNotes must be traceable to today's answers, the Passport, or actual garment metadata. If Fit / Comfort says 'None selected', do not mention waistbands, coverage needs, ease, softness, body-hugging, structure, or any physical comfort claim. If a Passport preference influenced the choice, you may name it explicitly: e.g. 'Jeans and sneakers keep this everyday, while the tailored blazer honours your Classic & Polished Passport.'";
+    "\n12. GROUNDING RULE: Every claim in whyThisWorks, confidenceBoost, and perPieceNotes must be traceable to today's answers, the Passport, or actual garment metadata. If Fit / Comfort says 'None selected', do not mention waistbands, coverage needs, ease, softness, body-hugging, structure, or any physical comfort claim. If a Passport preference influenced the choice, you may name it explicitly: e.g. 'Jeans and sneakers keep this everyday, while the tailored blazer honours your Classic & Polished Passport.'" +
+    "\n13. Do not invent Passport preferences — only reference preferences explicitly provided in STYLE PASSPORT above." +
+    "\n14. Do not use 'gravitates toward', 'has a tendency to', or similar generalisations about the customer's habitual style choices." +
+    "\n15. Do not infer body-zone concerns from a garment name alone — only from explicit Fit/Comfort selections or Passport body-avoid areas listed above." +
+    "\n16. Do not rename the occasion — use the exact occasion label as given in TODAY'S BRIEF." +
+    "\n17. Do not invent goals, outcomes, or aspirations for the customer unless they appear in Becoming/aspiration or Current style focus in STYLE PASSPORT above.";
 
   const userMessage =
     `Select the best complete outfit for this customer and write all wording for it.\n\n` +
@@ -3166,6 +3202,117 @@ export function buildProfileHint(profile?: StyleMeProfileSignals): string {
 // ── Rev 3 result directions (Group 5) ─────────────────────────────────────────
 // Partitions evaluatedProducts into MOST YOU / FRESH / PUSH ME.
 // Profile alignment score = points from signals whose question is a Profile question
+// ── Dressing-requirement gate for Closet items (item-level, non-compensable only) ─────
+// Only applies checks that cannot be satisfied through layering on top of this item.
+// Compensable requirements (arms-covered, chest-neckline-covered, looser-fitting)
+// must be evaluated at the complete-outfit level, not rejected at item selection time.
+//
+// Non-compensable: legs-covered on bottom/dress items.
+//   A midi or mini bottom CANNOT become legs-covered regardless of what is added on top.
+//   "n/a" hemLength → item is a top or outerwear → exempt (does not cover legs at all).
+//   null hemLength → unknown metadata → fail-open (keep the item in the pool).
+//   Corrects the NADINE engine bug: midi is NOT maxi/full, so it is excluded.
+//
+// Manual-anchor bypass: not applied — the conflicting-anchor product policy is undefined.
+// The anchor is committed before this function runs; only additional-garment candidates
+// and Candidate E alternatives pass through this gate.
+export function passesDressingRequirements(
+  item: ClosetAnchorInput,
+  dressingPreferences: readonly string[] | null | undefined,
+): boolean {
+  if (!dressingPreferences || dressingPreferences.length === 0) return true;
+  const prefs = new Set(dressingPreferences);
+
+  // legs-covered — non-compensable for garments that cover the leg zone (hemLength not "n/a")
+  if (prefs.has("legs-covered")) {
+    const hl = item.hemLength;
+    if (hl !== null && hl !== undefined && hl !== "n/a") {
+      if (hl !== "full" && hl !== "maxi") return false;
+    }
+    // hl === null/undefined → unknown metadata → fail-open
+    // hl === "n/a"          → top/outerwear → not applicable
+  }
+
+  // no-cropped-tops — non-compensable: a garment explicitly cropped (topLength === "cropped")
+  // cannot become non-cropped through layering. Only applicable where topLength is known.
+  if (prefs.has("no-cropped-tops")) {
+    const tl = item.topLength;
+    if (tl !== null && tl !== undefined && tl !== "n/a") {
+      if (tl === "cropped") return false;
+    }
+    // tl === null/undefined → unknown metadata → fail-open
+    // tl === "n/a"          → bottom/dress → not applicable
+  }
+
+  // Compensable requirements (arms-covered, chest-neckline-covered, dresses-modestly) are
+  // evaluated at the complete-candidate level in passesCandidateDressingRequirements.
+  return true;
+}
+
+// Candidate-level dressing gate for compensable upper-body requirements.
+// Runs AFTER candidates are assembled so that legitimate layering (outerwear covering
+// a sleeveless base) is correctly allowed, while uncompensated exposure is rejected.
+//
+// Checked requirements:
+//   dresses-modestly / arms-covered — sleeveless base + no covering outerwear → fail
+//   dresses-modestly — exposed shoulder (shoulderCoverage=false) + no covering outerwear → fail
+//
+// Fail-open rules:
+//   - Unknown metadata (null) on a piece → that piece does not contribute to failure
+//   - No outerwear present → only explicit base-piece evidence can cause failure
+//   - Outerwear with known full/three-quarter sleeve → covers arms AND shoulders
+export function passesCandidateDressingRequirements(
+  candidate: OutfitCandidate,
+  allItems: ClosetAnchorInput[],
+  dressingPreferences: readonly string[] | null | undefined,
+): boolean {
+  if (!dressingPreferences || dressingPreferences.length === 0) return true;
+  const prefs = new Set(dressingPreferences);
+
+  const needsArmsCovered = prefs.has("arms-covered") || prefs.has("dresses-modestly");
+  const needsShoulderCovered = prefs.has("dresses-modestly");
+  const needsNecklineCovered = prefs.has("chest-neckline-covered") || prefs.has("dresses-modestly");
+  if (!needsArmsCovered && !needsShoulderCovered && !needsNecklineCovered) return true;
+
+  const itemMap = new Map(allItems.map((i) => [i.id, i]));
+
+  // Base pieces: top/bottom/dress/set — determine primary exposure
+  const basePieces = candidate.pieces.filter(
+    (p) => p.slot === "top" || p.slot === "bottom" || p.slot === "dress" || p.slot === "set",
+  );
+  // Covering pieces: outerwear can compensate for arm/shoulder exposure
+  const outerPieces = candidate.pieces.filter((p) => p.slot === "outerwear");
+
+  const outerCoversArms = outerPieces.some((p) => {
+    const item = itemMap.get(p.closetId);
+    return item && (item.sleeveLength === "full" || item.sleeveLength === "three-quarter");
+  });
+  // Outerwear covers shoulders when it also covers arms (jacket/blazer with sleeves)
+  const outerCoversShoulders = outerCoversArms || outerPieces.some((p) => {
+    const item = itemMap.get(p.closetId);
+    return item && item.shoulderCoverage === true;
+  });
+  // Neckline: any piece in the outfit with a high/crew/mock neckline compensates the zone
+  // (includes a turtleneck worn as a layer, not just outerwear — outerwear with open lapels does not)
+  const EXPOSING_NECKLINES = new Set(["low", "off-shoulder", "wrap-variable"]);
+  const COVERING_NECKLINES = new Set(["high", "crew", "mock", "cowl-high"]);
+  const anyCoveringNeckline = needsNecklineCovered && candidate.pieces.some((p) => {
+    const item = itemMap.get(p.closetId);
+    return item?.necklineCoverage != null && COVERING_NECKLINES.has(item.necklineCoverage);
+  });
+
+  for (const piece of basePieces) {
+    const item = itemMap.get(piece.closetId);
+    if (!item) continue; // unknown item → fail-open
+
+    if (needsArmsCovered && item.sleeveLength === "sleeveless" && !outerCoversArms) return false;
+    if (needsShoulderCovered && item.shoulderCoverage === false && !outerCoversShoulders) return false;
+    if (needsNecklineCovered && item.necklineCoverage != null && EXPOSING_NECKLINES.has(item.necklineCoverage) && !anyCoveringNeckline) return false;
+  }
+
+  return true;
+}
+
 // ── Multi-Closet garment scan ─────────────────────────────────────────────────
 // Finds the best Closet item for each outfit slot not already covered by the
 // anchor or primary NADINE product. Runs in both nAia and NADINE modes.
@@ -3215,9 +3362,10 @@ export function selectAdditionalClosetGarments(
 
   for (const item of closetItems) {
     if (item.id === anchorId) continue;
+    if (!passesDressingRequirements(item, profile?.dressingPreferences)) continue;
 
-    const slot = CLOSET_CATEGORY_TO_SLOT[item.category as string];
-    if (!slot) continue;
+    const slot = closetItemToSlot(item.category, item.subcategory);
+    if (slot === "unknown") continue;
     if (coveredSlots.has(slot)) continue;
 
     const score = scoreClosetItemForSession(
@@ -3358,8 +3506,8 @@ export function computeNaiaResultDirections(
   const bySlot = new Map<OutfitSlot, ScoredItem[]>();
   for (const item of closetItems) {
     if (item.id === anchorId) continue;
-    const slot = CLOSET_CATEGORY_TO_SLOT[item.category as string] as OutfitSlot | undefined;
-    if (!slot) continue;
+    const slot = closetItemToSlot(item.category, item.subcategory);
+    if (slot === "unknown") continue;
     const score = scoreClosetItemForSession(
       { occasions: item.occasions, styleTags: item.styleTags, category: item.category, colors: item.colors, primaryColor: item.primaryColor },
       signals,
@@ -3380,7 +3528,7 @@ export function computeNaiaResultDirections(
   // Without this, a bottom-anchor direction can accidentally include a dress candidate.
   const anchorItem = anchorId ? closetItems.find((i) => i.id === anchorId) : null;
   const anchorSlotForArch = anchorItem
-    ? (CLOSET_CATEGORY_TO_SLOT[anchorItem.category as string] as OutfitSlot | undefined) ?? null
+    ? closetItemToSlot(anchorItem.category, anchorItem.subcategory)
     : null;
 
   const hasSepInMap = bySlot.has("top") || bySlot.has("bottom");
@@ -3907,9 +4055,19 @@ export async function computeStyleMeResult(
     const prevIds = engineInput.prevOutfitClosetIds;
     const allCandidates = [candidateA, candidateB, candidateC, candidateD, candidateE].filter((c): c is OutfitCandidate => c !== null);
     const prevSig = prevIds?.length ? computeOutfitSignature(prevIds) : null;
-    const filteredCandidates = prevSig
+    const dedupedCandidates = prevSig
       ? allCandidates.filter((c) => computeOutfitSignature(c.pieces.map((p) => p.closetId)) !== prevSig)
       : allCandidates;
+
+    // Candidate-level dressing gate: reject candidates that fail compensable coverage
+    // requirements (arms-covered, chest-neckline-covered, dresses-modestly) after checking
+    // whether outerwear/layering in the candidate compensates the zone. No fail-open:
+    // if all candidates are rejected, filteredCandidates is empty → sameCombination = true.
+    const dressingPrefs_ = (engineInput.profile as ClosetScoringProfile | undefined)?.dressingPreferences;
+    const modesty = dedupedCandidates.filter(
+      (c) => passesCandidateDressingRequirements(c, allItems, dressingPrefs_),
+    );
+    const filteredCandidates = modesty;
 
     if (filteredCandidates.length === 0) {
       // No new combination available — keep previous outfit visible; no model call.

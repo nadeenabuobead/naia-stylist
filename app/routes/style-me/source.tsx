@@ -201,6 +201,7 @@ export async function action({ request }: ActionFunctionArgs) {
       const mood = session.get("styleMeMood") as string | undefined;
       const feelings = session.get("styleMeFeelings") as string[] | undefined;
       const occasion = session.get("styleMeOccasion") as string | undefined;
+      const formalityConditional = session.get("styleMeFormalityConditional") as string | null | undefined;
 
       const naiaCustomer = await getCurrentNaiaCustomer(request);
       if (!naiaCustomer) {
@@ -213,6 +214,7 @@ export async function action({ request }: ActionFunctionArgs) {
         occasion: occasion ?? "everyday",
         moods: mood ? [mood] : [],
         desiredFeelings: feelings ?? [],
+        formalityConditional: formalityConditional ?? null,
       });
 
       if (!selected) {

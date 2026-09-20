@@ -3215,9 +3215,11 @@ describe("§G2 Dressing-preference hard exclusions — per-constraint pass/fail"
     assert.ok(isDressingExcluded(result, "dress-set"), "dress-set (knee-high slit) must be excluded");
   });
 
-  it("G2.16 legs-covered: suede-skirt NOT excluded (midi-length, back slit below knee)", () => {
+  it("G2.16 legs-covered: suede-skirt excluded (midi-length does not satisfy legs-covered; Rev2 fix)", () => {
+    // Rev2 correction: legs-covered requires hemLength === 'full' || 'maxi' only.
+    // Midi-length does not cover legs sufficiently; suede-skirt must now be excluded.
     const result = run(makeSession({ occasion: "everyday" }), { dressingPreferences: ["legs-covered"] });
-    assert.ok(isNotExcluded(result, "suede-skirt"), "suede-skirt (midi, no knee exposure) must NOT be excluded");
+    assert.ok(isDressingExcluded(result, "suede-skirt"), "suede-skirt (midi) must be excluded for legs-covered (Rev2)");
   });
 
   it("G2.17 legs-covered: draped-leather-pants NOT excluded (full-length, opaque)", () => {

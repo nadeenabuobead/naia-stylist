@@ -55,6 +55,7 @@ export interface StyleMeSessionInput {
   bodyNeeds: string[];
   coverageConditional: string | null;
   occasion: string;
+  occasionDisplayLabel?: string | null; // original UI label before REV3_OCCASION_MAP; used for wording display only
   formalityConditional: string | null;
   todayColours: { preferred: string[]; avoid: string[] };
   practicalIds: string[];
@@ -120,6 +121,7 @@ export interface ClosetAnchorInput {
   styleTags: string[];
   occasions: string[];
   imageUrl: string;
+  subcategory?: string | null;
   garmentRelationships?: string[];
   formality?: string | null; // GarmentFormality token — null when item not yet analyzed
   // Garment Intelligence fields (Group 3B — optional; null when item not yet analyzed)
@@ -128,6 +130,7 @@ export interface ClosetAnchorInput {
   sleeveLength?: string | null;
   necklineCoverage?: string | null;
   hemLength?: string | null;
+  topLength?: string | null;
   shoulderCoverage?: boolean | null;
   midriffExposed?: boolean | null;
   silhouette?: string | null;

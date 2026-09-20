@@ -108,6 +108,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const session = await getSession(request.headers.get("Cookie"));
   session.set("styleMeOccasion", occasion);
+  // Store the original UI label before REV3_OCCASION_MAP; used for wording display only.
+  session.set("styleMeOccasionDisplayLabel", rawOccasion);
   if (formalityConditional) {
     session.set("styleMeFormalityConditional", formalityConditional);
   } else {

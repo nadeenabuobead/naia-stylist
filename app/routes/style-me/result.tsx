@@ -564,6 +564,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
       const cookieSession = await getSession(request.headers.get("Cookie"));
       const styleMeMode = (cookieSession.get("styleMeMode") as "naia" | "nadine" | undefined) ?? "naia";
+      const occasionDisplayLabel = (cookieSession.get("styleMeOccasionDisplayLabel") as string | undefined) ?? null;
 
       const engineInput = buildEngineInput({
         moods,
@@ -571,6 +572,7 @@ export async function action({ request }: ActionFunctionArgs) {
         bodyNeeds: effectiveBodyNeeds,
         coverageConditional: null,
         occasion: session.occasion ?? "everyday",
+        occasionDisplayLabel,
         formalityConditional,
         todayColours: { preferred: [], avoid: [] },
         practicalIds: isRev3Generate ? effectivePracticalIds : practicalIds,
@@ -670,6 +672,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
       const regenCookieSession = await getSession(request.headers.get("Cookie"));
       const regenMode = (regenCookieSession.get("styleMeMode") as "naia" | "nadine" | undefined) ?? "naia";
+      const regenOccasionDisplayLabel = (regenCookieSession.get("styleMeOccasionDisplayLabel") as string | undefined) ?? null;
 
       // Collect handles from the most-recent suggestion so the engine applies a
       // diversity penalty and avoids returning the exact same outfit.
@@ -714,6 +717,7 @@ export async function action({ request }: ActionFunctionArgs) {
         bodyNeeds: session.bodyNeeds ?? [],
         coverageConditional: null,
         occasion: session.occasion ?? "everyday",
+        occasionDisplayLabel: regenOccasionDisplayLabel,
         formalityConditional: session.formalityConditional,
         todayColours: { preferred: [], avoid: [] },
         practicalIds: session.practicalIds ?? [],

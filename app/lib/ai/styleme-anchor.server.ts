@@ -53,6 +53,7 @@ export async function resolveClosetAnchor(
     id: item.id,
     name: item.name ?? null,
     category: item.category,
+    subcategory: item.subcategory ?? null,
     colors: item.colors,
     primaryColor: item.primaryColor ?? null,
     pattern: item.pattern ?? null,
@@ -141,6 +142,7 @@ export type ClosetScoringProfile = {
   favoriteColors?: string[] | null;
   avoidColors?: string[] | null;
   stylePersonalities?: string[] | null;
+  dressingPreferences?: readonly string[] | null;
 };
 
 /**
@@ -244,6 +246,7 @@ export async function loadAllClosetItemsForEngine(
       id: item.id,
       name: item.name ?? null,
       category: item.category,
+      subcategory: item.subcategory ?? null,
       colors: item.colors,
       primaryColor: item.primaryColor ?? null,
       pattern: item.pattern ?? null,
@@ -259,6 +262,7 @@ export async function loadAllClosetItemsForEngine(
       sleeveLength: item.sleeveLength ?? null,
       necklineCoverage: item.necklineCoverage ?? null,
       hemLength: item.hemLength ?? null,
+      topLength: item.topLength ?? null,
       shoulderCoverage: item.shoulderCoverage ?? null,
       midriffExposed: item.midriffExposed ?? null,
       silhouette: item.silhouette ?? null,
@@ -283,6 +287,7 @@ export type AutoSelectItem = {
   id: string;
   name: string | null;
   category: string;
+  subcategory: string | null;
   colors: string[];
   primaryColor: string | null;
   pattern: string | null;
@@ -291,11 +296,26 @@ export type AutoSelectItem = {
   occasions: string[];
   imageUrl: string | null;
   garmentRelationships: string[];
+  formality: string | null;
+};
+
+// Inline formality rank — mirrors FORMALITY_RANK in result.server.ts.
+// Kept here to avoid a circular dependency (anchor → result → anchor).
+const _FORMALITY_RANK: Record<string, number> = {
+  casual: 1, "smart-casual": 2, "business-casual": 3,
+  "business-formal": 4, occasion: 5, evening: 6,
+};
+
+// Maximum formality rank appropriate for an occasion when a formalityConditional is given.
+// Used to soft-penalise over-dressed anchors at auto-select time.
+const _OCCASION_MAX_RANK: Record<string, number> = {
+  everyday: 2, "work-office": 3, "casual-social": 2, "dinner-out": 4,
+  "going-out": 4, "formal-event": 6, "active-busy-day": 2,
 };
 
 export async function autoSelectClosetAnchor(
   customerId: string,
-  signals: { occasion: string; moods: string[]; desiredFeelings: string[] },
+  signals: { occasion: string; moods: string[]; desiredFeelings: string[]; formalityConditional?: string | null },
   _fetchItems?: (customerId: string) => Promise<AutoSelectItem[]>,
 ): Promise<{ anchor: ClosetAnchorInput; id: string } | null> {
   const items: AutoSelectItem[] = _fetchItems
@@ -304,11 +324,30 @@ export async function autoSelectClosetAnchor(
         where: { customerId },
         orderBy: { createdAt: "desc" },
         take: 50,
-      });
+        select: {
+          id: true, name: true, category: true, subcategory: true,
+          colors: true, primaryColor: true, pattern: true, material: true,
+          styleTags: true, occasions: true, imageUrl: true,
+          garmentRelationships: true, formality: true,
+        },
+      }) as AutoSelectItem[];
 
   if (items.length === 0) return null;
 
-  type ScoredItem = { item: AutoSelectItem; score: number; isAnchorCapable: boolean };
+  // Formality tier sort: items whose formality is within the occasion ceiling (tier 0)
+  // always sort before items known to be out of range (tier 1), regardless of signal scores.
+  // Unknown formality (null) is treated as in-range (tier 0) — fail-open.
+  // formalityConditional "formality-dressy" raises the ceiling by 2 ranks.
+  const targetMaxRank = _OCCASION_MAX_RANK[signals.occasion] ?? 3;
+  const formalityBoost = signals.formalityConditional === "formality-dressy" ? 2 : 0;
+  const effectiveMaxRank = Math.min(6, targetMaxRank + formalityBoost);
+  const isFormallyInRange = (item: AutoSelectItem): boolean => {
+    if (!item.formality) return true; // unknown → in-range (fail-open)
+    const rank = _FORMALITY_RANK[item.formality] ?? 0;
+    return rank <= effectiveMaxRank;
+  };
+
+  type ScoredItem = { item: AutoSelectItem; score: number; isAnchorCapable: boolean; inRange: boolean };
 
   const mapped: ScoredItem[] = items.map((item) => ({
     item,
@@ -319,13 +358,16 @@ export async function autoSelectClosetAnchor(
       item.garmentRelationships,
     ),
     isAnchorCapable: ANCHOR_CAPABLE_CATEGORIES.has(item.category),
+    inRange: isFormallyInRange(item),
   }));
 
   const scored = mapped.sort((a, b) => {
+    // Tier 0 (in-range formality) always beats Tier 1 (known out-of-range)
+    if (a.inRange !== b.inRange) return a.inRange ? -1 : 1;
     if (b.score !== a.score) return b.score - a.score;
-    // Tiebreaker 1: prefer garments that can anchor an outfit
+    // Tiebreaker: prefer garments that can anchor an outfit
     if (a.isAnchorCapable !== b.isAnchorCapable) return a.isAnchorCapable ? -1 : 1;
-    // Tiebreaker 2: recency — preserved by stable sort over createdAt DESC fetch order
+    // Final tiebreaker: recency — preserved by stable sort over createdAt DESC fetch order
     return 0;
   });
 
@@ -350,6 +392,7 @@ export async function autoSelectClosetAnchor(
       id: winner.id,
       name: winner.name ?? null,
       category: winner.category,
+      subcategory: winner.subcategory ?? null,
       colors: winner.colors,
       primaryColor: winner.primaryColor ?? null,
       pattern: winner.pattern ?? null,

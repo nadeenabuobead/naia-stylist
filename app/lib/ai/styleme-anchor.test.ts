@@ -6,7 +6,8 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveNadineAnchor, resolveActionAnchor, scoreClosetItemForSession } from "./styleme-anchor.server.ts";
+import { resolveNadineAnchor, resolveActionAnchor, scoreClosetItemForSession, autoSelectClosetAnchor } from "./styleme-anchor.server.ts";
+import type { AutoSelectItem } from "./styleme-anchor.server.ts";
 import type { ClosetAnchorInput } from "./styleme-recommendation.types.ts";
 
 const V8_HANDLES = [
@@ -315,5 +316,115 @@ describe("scoreClosetItemForSession", () => {
     const signals = { occasion: "work", moods: [], desiredFeelings: [] };
     const score = scoreClosetItemForSession(item, signals);
     assert.equal(score, 0); // no occasion match, no tag match
+  });
+});
+
+describe("§REV2 autoSelectClosetAnchor formality tier-sort", () => {
+  function makeAutoItem(overrides: Partial<AutoSelectItem> & { id: string }): AutoSelectItem {
+    return {
+      id: overrides.id,
+      name: null,
+      category: "TOPS",
+      subcategory: null,
+      colors: [],
+      primaryColor: null,
+      pattern: null,
+      material: null,
+      styleTags: [],
+      occasions: [],
+      imageUrl: null,
+      garmentRelationships: [],
+      formality: null,
+      ...overrides,
+    };
+  }
+
+  it("FT.1 — known in-range anchor beats higher-signal out-of-range evening anchor for everyday occasion", async () => {
+    // Evening gown: lots of style-tag signals but way overdressed for "everyday"
+    const eveningGown = makeAutoItem({
+      id: "gown",
+      formality: "evening",                     // rank 6; everyday ceiling = rank 2
+      occasions: ["everyday"],
+      styleTags: ["elegant", "bold", "polished"], // moods match → +9 signal
+    });
+    // Simple blouse: casual, no extra signals, but in-range for everyday
+    const casualBlouse = makeAutoItem({
+      id: "blouse",
+      formality: "casual",                      // rank 1; within ceiling
+      occasions: ["everyday"],
+      styleTags: [],                            // no mood/feeling match → 0 extra
+    });
+
+    const signals = {
+      occasion: "everyday",
+      moods: ["elegant", "bold", "polished"],   // 3 moods × +3 = +9 for gown
+      desiredFeelings: [],
+    };
+
+    let selected: { anchor: { id: string }; id: string } | null = null;
+    // DI to avoid DB
+    const fetchItems = async () => [eveningGown, casualBlouse];
+    selected = await autoSelectClosetAnchor("any", signals, fetchItems);
+
+    assert.ok(selected !== null, "should select an anchor");
+    assert.equal(
+      selected!.id, "blouse",
+      "casual blouse (in-range tier 0) must beat evening gown (out-of-range tier 1) despite higher signal score",
+    );
+  });
+
+  it("FT.2 — when only out-of-range items exist, best out-of-range item is still selected", async () => {
+    const eveningGown = makeAutoItem({
+      id: "gown",
+      formality: "evening",
+      occasions: ["everyday"],
+      styleTags: ["elegant"],
+    });
+    const selected = await autoSelectClosetAnchor(
+      "any",
+      { occasion: "everyday", moods: ["elegant"], desiredFeelings: [] },
+      async () => [eveningGown],
+    );
+    assert.ok(selected !== null, "should still select something");
+    assert.equal(selected!.id, "gown");
+  });
+
+  it("FT.3 — unknown formality (null) is treated as in-range and wins over known out-of-range", async () => {
+    const unknownFormality = makeAutoItem({ id: "unknown", formality: null, occasions: ["everyday"], styleTags: [] });
+    const eveningGown = makeAutoItem({ id: "gown", formality: "evening", occasions: ["everyday"], styleTags: ["elegant", "bold"] });
+    const selected = await autoSelectClosetAnchor(
+      "any",
+      { occasion: "everyday", moods: ["elegant", "bold"], desiredFeelings: [] },
+      async () => [unknownFormality, eveningGown],
+    );
+    assert.ok(selected !== null, "should select an anchor");
+    assert.equal(selected!.id, "unknown", "null formality (in-range tier 0) should beat known out-of-range");
+  });
+
+  it("FT.4 — formality-dressy conditional raises ceiling; in-range item at raised ceiling beats lower-signal blouse", async () => {
+    const businessFormal = makeAutoItem({
+      id: "suit",
+      formality: "business-formal",  // rank 4; everyday ceiling=2+2=4 with dressy boost
+      occasions: ["dinner-out"],
+      styleTags: ["polished"],
+    });
+    const casual = makeAutoItem({
+      id: "blouse",
+      formality: "casual",
+      occasions: ["dinner-out"],
+      styleTags: [],
+    });
+    const signals = {
+      occasion: "dinner-out",
+      moods: ["polished"],
+      desiredFeelings: [],
+      formalityConditional: "formality-dressy",
+    };
+    const selected = await autoSelectClosetAnchor("any", signals, async () => [businessFormal, casual]);
+    // Both are in-range with dressy boost (dinner-out ceiling 4+2=6, capped at 6)
+    // business-formal (rank 4) and casual (rank 1) both ≤ 6 → both tier 0
+    // signal score: business-formal has +10 (occasion) + 3 (mood) = 13; casual = 10
+    assert.ok(selected !== null, "should select an anchor");
+    assert.equal(selected!.id, "suit", "business-formal at raised ceiling beats plain casual on score");
   });
 });
