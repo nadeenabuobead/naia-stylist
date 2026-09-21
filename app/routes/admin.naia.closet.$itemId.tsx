@@ -50,6 +50,9 @@ import {
   getStyleMeProfile,
   saveStyleMeProfile,
   StyleMeProfileValidationError,
+  type StyleMeProfileRecord,
+} from "~/lib/admin/styleme-garment-profile.server";
+import {
   EXACT_SLOT_VALUES,
   OUTFIT_FUNCTION_VALUES,
   STYLE_FAMILY_VALUES,
@@ -67,12 +70,11 @@ import {
   INTENTION_IDS,
   INTENTION_RATINGS,
   PROFILE_STATUS_VALUES,
-  type StyleMeProfileRecord,
   type OccasionId,
   type IntentionId,
   type OccasionFitRating,
   type IntentionRating,
-} from "~/lib/admin/styleme-garment-profile.server";
+} from "~/lib/admin/styleme-garment-profile.vocab";
 import {
   deriveGarmentStylingIntelligence,
   type GarmentStylingIntelligence,
