@@ -7,8 +7,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 // ============================================
 // SHOPIFY SESSION (Required for Shopify App)
@@ -251,6 +252,7 @@ model ClosetItem {
   recommendationFeedback RecommendationFeedback[]
   analysisSnapshots      ClosetItemAnalysisSnapshot[]
   adminReview            ClosetItemAdminReview?
+  styleMeProfile         GarmentStyleMeProfile?
 }
 
 enum ClosetCategory {
@@ -1160,6 +1162,83 @@ model ClosetItemAdminReview {
 
   reviewedAt DateTime?
   reviewedBy String?   // admin email / identifier
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================
+// STYLEME GARMENT PROFILE — MANUAL AUDIT TAXONOMY
+// ============================================
+// Stores the hand-curated StyleMe garment audit taxonomy.
+// Completely separate from Closet Intelligence V2 — do not modify
+// Closet Intelligence fields here. Not wired to live StyleMe yet.
+// Added: migration 20260921000000_styleme_garment_profile
+model GarmentStyleMeProfile {
+  id           String     @id @default(cuid())
+  closetItemId String     @unique
+  closetItem   ClosetItem @relation(fields: [closetItemId], references: [id], onDelete: Cascade)
+
+  // Admin review status: unreviewed | in-review | approved
+  profileStatus String @default("unreviewed")
+
+  // 1. Exact Slot
+  exactSlot String?  // top|bottom|dress|set|outerwear|shoe|bag|accessory|jewelry
+
+  // 2. Outfit Function
+  outfitFunction String?  // base|supporting|statement|anchor|layering|finishing
+
+  // 3. Style Family
+  styleFamilyPrimary   String?  // classic|minimal|sporty|architectural|romantic|edgy|feminine|expressive
+  styleFamilySecondary String?  // same values + none (optional)
+
+  // 4. Dress Register
+  dressRegister String?  // athletic|casual|elevated-casual|smart-casual|polished|dressy|evening
+
+  // 5. Construction
+  construction String?  // soft|neutral|structured|tailored|sculptural|N/A
+
+  // 6. Fabric Behaviour (multi-select)
+  fabricBehaviour String[] @default([])  // soft|fluid|crisp|rigid|stretch|sculptural|N/A
+
+  // 7. Silhouette Character (multi-select)
+  silhouetteCharacter String[] @default([])
+
+  // 8. Visual Weight
+  visualWeight String?  // light|medium|heavy
+
+  // 9. Styling Effort
+  stylingEffort String?  // easy|neutral|deliberate|high-maintenance
+
+  // 10. Layering Behaviour
+  layeringBehaviour String?  // standalone|base-under-layer|outer-layer|either|N/A
+
+  // 11. Waist Comfort
+  waistComfort String?  // elastic|drawstring|stretch|fixed|restrictive|unknown|N/A
+
+  // 12. Statement Level
+  statementLevel String?  // quiet|moderate|statement
+
+  // Occasion fit ratings — JSON object keyed by occasion ID
+  // Keys: everyday|work|dinner|date|event|night-out|family|travel|active
+  // Values: "Strong"|"Acceptable"|"No"
+  occasionFit Json?
+
+  // Intention potential ratings — JSON object keyed by intention ID
+  // Keys: feel-like-myself|confidence|ground-me|give-structure|make-it-easy|
+  //       feel-put-together|feel-attractive|give-energy|feel-softer|feel-sharper|
+  //       feel-less-exposed|express-myself
+  // Values: "Strong"|"Supporting"|"None"
+  intentionPotentials Json?
+
+  // Pairing guidance (free text)
+  naturalPairings String? @db.Text
+  intentionalMix  String? @db.Text
+  avoidInStyleMe  String? @db.Text
+  specialNotes    String? @db.Text
+
+  reviewedAt DateTime?
+  reviewedBy String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

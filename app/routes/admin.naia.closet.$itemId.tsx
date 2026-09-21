@@ -47,6 +47,33 @@ import {
   getCloudinaryConfig,
 } from "~/lib/cloudinary-admin.server";
 import {
+  getStyleMeProfile,
+  saveStyleMeProfile,
+  StyleMeProfileValidationError,
+  EXACT_SLOT_VALUES,
+  OUTFIT_FUNCTION_VALUES,
+  STYLE_FAMILY_VALUES,
+  DRESS_REGISTER_VALUES,
+  CONSTRUCTION_VALUES,
+  FABRIC_BEHAVIOUR_VALUES,
+  SILHOUETTE_CHARACTER_VALUES,
+  VISUAL_WEIGHT_VALUES,
+  STYLING_EFFORT_VALUES,
+  LAYERING_BEHAVIOUR_VALUES,
+  WAIST_COMFORT_VALUES,
+  STATEMENT_LEVEL_VALUES,
+  OCCASION_IDS,
+  OCCASION_FIT_RATINGS,
+  INTENTION_IDS,
+  INTENTION_RATINGS,
+  PROFILE_STATUS_VALUES,
+  type StyleMeProfileRecord,
+  type OccasionId,
+  type IntentionId,
+  type OccasionFitRating,
+  type IntentionRating,
+} from "~/lib/admin/styleme-garment-profile.server";
+import {
   deriveGarmentStylingIntelligence,
   type GarmentStylingIntelligence,
   type SignalSource,
@@ -128,7 +155,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     garmentImageUrl = item.thumbnailUrl;
   }
 
-  const passportContext = await getCustomerStylingPassport(item.customerId);
+  const [passportContext, styleMeProfile] = await Promise.all([
+    getCustomerStylingPassport(item.customerId),
+    getStyleMeProfile(itemId),
+  ]);
   // V6 safety: coveragePreferences is legacy/hidden for Rev6; do not feed it to Phase 3C for V6 customers
   const passportForIntelligence = passportContext && passportContext.profileVersion != null && passportContext.profileVersion >= 6
     ? { ...passportContext, coveragePreferences: [] }
@@ -137,7 +167,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const intelligenceOverrides = (item.adminReview?.intelligenceOverrides ?? null) as IntelligenceOverrides | null;
 
-  return Response.json({ item, effectiveClassification, garmentImageUrl, interpretation, stylingIntelligence, intelligenceOverrides, passportContext, returnTo, nextUnreviewedId, prevItemId, nextItemId });
+  return Response.json({ item, effectiveClassification, garmentImageUrl, interpretation, stylingIntelligence, intelligenceOverrides, passportContext, styleMeProfile, returnTo, nextUnreviewedId, prevItemId, nextItemId });
 }
 
 // ── Action ─────────────────────────────────────────────────────────────────────
@@ -215,6 +245,22 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (typeof fieldPath !== "string") return Response.json({ error: "Missing fieldPath" }, { status: 400 });
     await revertIntelligenceField(itemId, fieldPath, reviewedBy);
     return Response.json({ ok: true });
+  }
+
+  if (intent === "save-styleme-profile") {
+    const raw = formData.get("profileData");
+    if (typeof raw !== "string") return Response.json({ error: "Missing profileData" }, { status: 400 });
+    let data: Record<string, unknown>;
+    try { data = JSON.parse(raw); } catch { return Response.json({ error: "Invalid JSON" }, { status: 400 }); }
+    try {
+      await saveStyleMeProfile(itemId, data as Parameters<typeof saveStyleMeProfile>[1], reviewedBy);
+      return Response.json({ ok: true });
+    } catch (err) {
+      if (err instanceof StyleMeProfileValidationError) {
+        return Response.json({ error: err.message }, { status: 400 });
+      }
+      throw err;
+    }
   }
 
   throw new Response("Bad request", { status: 400 });
@@ -1097,7 +1143,7 @@ function DeeperStylingIntelligence({
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function ClosetItemDetailPage() {
-  const { item, effectiveClassification, garmentImageUrl, interpretation, stylingIntelligence, intelligenceOverrides, passportContext, returnTo, nextUnreviewedId, prevItemId, nextItemId } =
+  const { item, effectiveClassification, garmentImageUrl, interpretation, stylingIntelligence, intelligenceOverrides, passportContext, styleMeProfile, returnTo, nextUnreviewedId, prevItemId, nextItemId } =
     useLoaderData() as {
       item: ClosetItemDetail;
       effectiveClassification: ClosetClassification;
@@ -1106,6 +1152,7 @@ export default function ClosetItemDetailPage() {
       stylingIntelligence: GarmentStylingIntelligence;
       intelligenceOverrides: IntelligenceOverrides | null;
       passportContext: CustomerStylingPassportContext | null;
+      styleMeProfile: StyleMeProfileRecord | null;
       returnTo: string | null;
       nextUnreviewedId: string | null;
       prevItemId: string | null;
@@ -1567,6 +1614,11 @@ export default function ClosetItemDetailPage() {
               SECTION B+C — GARMENT INTELLIGENCE + PASSPORT-AWARE STYLING POTENTIAL
           ════════════════════════════════════════════ */}
           <DeeperStylingIntelligence intel={stylingIntelligence} intelligenceOverrides={intelligenceOverrides} itemId={item.id} />
+
+          {/* ════════════════════════════════════════════
+              SECTION D — STYLEME GARMENT PROFILE
+          ════════════════════════════════════════════ */}
+          <StyleMeGarmentProfileCard profile={styleMeProfile} itemId={item.id} />
 
           {/* ════════════════════════════════════════════
               SECTION 2 — WHAT AI SEES (effective values)
@@ -2652,5 +2704,439 @@ function RevertBtn({ ov, fieldKey }: { ov: Record<string, unknown>; fieldKey: st
     >
       Revert
     </button>
+  );
+}
+
+// ── StyleMeGarmentProfileCard ──────────────────────────────────────────────────
+//
+// Separate editable card for the manual StyleMe Garment Profile audit taxonomy.
+// Completely isolated from Closet Intelligence — reads/writes only GarmentStyleMeProfile.
+// Not wired to live StyleMe recommendation logic.
+
+const PROFILE_STATUS_LABELS: Record<string, string> = {
+  unreviewed: "UNREVIEWED",
+  "in-review": "IN REVIEW",
+  approved: "APPROVED",
+};
+const PROFILE_STATUS_BADGE: Record<string, string> = {
+  unreviewed: "na-badge--not-analyzed",
+  "in-review": "na-badge--pending",
+  approved:   "na-badge--ready",
+};
+
+function SingleSelect({
+  label,
+  field,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  field: string;
+  value: string | null;
+  options: readonly string[];
+  onChange: (field: string, value: string | null) => void;
+}) {
+  return (
+    <div style={{ marginBottom: "0.75rem" }}>
+      <div style={{ fontSize: "11px", fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "4px" }}>
+        {label}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+        {options.map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => onChange(field, value === opt ? null : opt)}
+            style={{
+              fontSize: "11px",
+              padding: "3px 10px",
+              borderRadius: "4px",
+              border: value === opt ? "1px solid #2563eb" : "1px solid #d1d5db",
+              background: value === opt ? "#dbeafe" : "transparent",
+              color: value === opt ? "#1d4ed8" : "#374151",
+              cursor: "pointer",
+              fontWeight: value === opt ? 600 : 400,
+            }}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MultiSelect({
+  label,
+  field,
+  values,
+  options,
+  onChange,
+}: {
+  label: string;
+  field: string;
+  values: string[];
+  options: readonly string[];
+  onChange: (field: string, values: string[]) => void;
+}) {
+  const toggle = (opt: string) => {
+    const next = values.includes(opt) ? values.filter((v) => v !== opt) : [...values, opt];
+    onChange(field, next);
+  };
+  return (
+    <div style={{ marginBottom: "0.75rem" }}>
+      <div style={{ fontSize: "11px", fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "4px" }}>
+        {label} <span style={{ fontWeight: 400, fontSize: "10px", color: "#9ca3af" }}>(multi)</span>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+        {options.map((opt) => {
+          const active = values.includes(opt);
+          return (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => toggle(opt)}
+              style={{
+                fontSize: "11px",
+                padding: "3px 10px",
+                borderRadius: "4px",
+                border: active ? "1px solid #059669" : "1px solid #d1d5db",
+                background: active ? "#d1fae5" : "transparent",
+                color: active ? "#065f46" : "#374151",
+                cursor: "pointer",
+                fontWeight: active ? 600 : 400,
+              }}
+            >
+              {opt}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function OccasionFitTable({
+  values,
+  onChange,
+}: {
+  values: Record<string, string>;
+  onChange: (v: Record<string, string>) => void;
+}) {
+  const ratings = OCCASION_FIT_RATINGS;
+  return (
+    <table className="na-field-table" style={{ marginBottom: "0.75rem" }}>
+      <thead>
+        <tr>
+          <th>Occasion</th>
+          {ratings.map((r) => <th key={r}>{r}</th>)}
+        </tr>
+      </thead>
+      <tbody>
+        {OCCASION_IDS.map((occ) => (
+          <tr key={occ}>
+            <th style={{ fontWeight: 500 }}>{occ}</th>
+            {ratings.map((r) => {
+              const active = values[occ] === r;
+              return (
+                <td key={r} style={{ textAlign: "center" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = { ...values };
+                      if (active) { delete next[occ]; } else { next[occ] = r; }
+                      onChange(next);
+                    }}
+                    style={{
+                      fontSize: "11px", padding: "2px 8px", borderRadius: "3px",
+                      border: active ? "1px solid #2563eb" : "1px solid #e5e7eb",
+                      background: active ? "#dbeafe" : "transparent",
+                      color: active ? "#1d4ed8" : "#9ca3af",
+                      cursor: "pointer", fontWeight: active ? 600 : 400,
+                    }}
+                  >
+                    {active ? "●" : "○"}
+                  </button>
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function IntentionTable({
+  values,
+  onChange,
+}: {
+  values: Record<string, string>;
+  onChange: (v: Record<string, string>) => void;
+}) {
+  const ratings = INTENTION_RATINGS;
+  return (
+    <table className="na-field-table" style={{ marginBottom: "0.75rem" }}>
+      <thead>
+        <tr>
+          <th>Intention</th>
+          {ratings.map((r) => <th key={r}>{r}</th>)}
+        </tr>
+      </thead>
+      <tbody>
+        {INTENTION_IDS.map((int) => (
+          <tr key={int}>
+            <th style={{ fontWeight: 500 }}>{int}</th>
+            {ratings.map((r) => {
+              const active = values[int] === r;
+              return (
+                <td key={r} style={{ textAlign: "center" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = { ...values };
+                      if (active) { delete next[int]; } else { next[int] = r; }
+                      onChange(next);
+                    }}
+                    style={{
+                      fontSize: "11px", padding: "2px 8px", borderRadius: "3px",
+                      border: active ? "1px solid #2563eb" : "1px solid #e5e7eb",
+                      background: active ? "#dbeafe" : "transparent",
+                      color: active ? "#1d4ed8" : "#9ca3af",
+                      cursor: "pointer", fontWeight: active ? 600 : 400,
+                    }}
+                  >
+                    {active ? "●" : "○"}
+                  </button>
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function StyleMeGarmentProfileCard({
+  profile,
+  itemId,
+}: {
+  profile: StyleMeProfileRecord | null;
+  itemId: string;
+}) {
+  const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const isSaving = fetcher.state !== "idle";
+  const saveOk = fetcher.data?.ok === true;
+  const saveError = fetcher.data?.error;
+
+  // Local draft state — initialised from DB on mount, editable without touching DB
+  const [draft, setDraft] = React.useState<Record<string, unknown>>(() => ({
+    profileStatus: profile?.profileStatus ?? "unreviewed",
+    exactSlot: profile?.exactSlot ?? null,
+    outfitFunction: profile?.outfitFunction ?? null,
+    styleFamilyPrimary: profile?.styleFamilyPrimary ?? null,
+    styleFamilySecondary: profile?.styleFamilySecondary ?? null,
+    dressRegister: profile?.dressRegister ?? null,
+    construction: profile?.construction ?? null,
+    fabricBehaviour: profile?.fabricBehaviour ?? [],
+    silhouetteCharacter: profile?.silhouetteCharacter ?? [],
+    visualWeight: profile?.visualWeight ?? null,
+    stylingEffort: profile?.stylingEffort ?? null,
+    layeringBehaviour: profile?.layeringBehaviour ?? null,
+    waistComfort: profile?.waistComfort ?? null,
+    statementLevel: profile?.statementLevel ?? null,
+    occasionFit: profile?.occasionFit ?? {},
+    intentionPotentials: profile?.intentionPotentials ?? {},
+    naturalPairings: profile?.naturalPairings ?? "",
+    intentionalMix: profile?.intentionalMix ?? "",
+    avoidInStyleMe: profile?.avoidInStyleMe ?? "",
+    specialNotes: profile?.specialNotes ?? "",
+  }));
+
+  const set = (field: string, value: unknown) =>
+    setDraft((prev) => ({ ...prev, [field]: value }));
+
+  const profileStatus = draft.profileStatus as string;
+
+  // Completeness check — mirrors server-side checkApprovalCompleteness
+  const missingForApproval = React.useMemo(() => {
+    const missing: string[] = [];
+    const d = draft;
+    if (!d.exactSlot)                              missing.push("Exact Slot");
+    if (!d.outfitFunction)                         missing.push("Outfit Function");
+    if (!d.styleFamilyPrimary)                     missing.push("Style Family Primary");
+    if (!d.dressRegister)                          missing.push("Dress Register");
+    if (!d.construction)                           missing.push("Construction");
+    if (!(d.fabricBehaviour as string[]).length)   missing.push("Fabric Behaviour");
+    if (!(d.silhouetteCharacter as string[]).length) missing.push("Silhouette Character");
+    if (!d.visualWeight)                           missing.push("Visual Weight");
+    if (!d.stylingEffort)                          missing.push("Styling Effort");
+    if (!d.layeringBehaviour)                      missing.push("Layering Behaviour");
+    if (!d.waistComfort)                           missing.push("Waist Comfort");
+    if (!d.statementLevel)                         missing.push("Statement Level");
+    const occ = (d.occasionFit as Record<string, string>) ?? {};
+    const missingOcc = OCCASION_IDS.filter((id) => !occ[id]);
+    if (missingOcc.length > 0) missing.push(`Occasion Fit (${missingOcc.length} unrated)`);
+    const int = (d.intentionPotentials as Record<string, string>) ?? {};
+    const missingInt = INTENTION_IDS.filter((id) => !int[id]);
+    if (missingInt.length > 0) missing.push(`Intention Potentials (${missingInt.length} unrated)`);
+    return missing;
+  }, [draft]);
+
+  const canApprove = missingForApproval.length === 0;
+
+  const handleSave = (status: "in-review" | "approved") => {
+    fetcher.submit(
+      { intent: "save-styleme-profile", profileData: JSON.stringify({ ...draft, profileStatus: status }) },
+      { method: "post" },
+    );
+    setDraft((prev) => ({ ...prev, profileStatus: status }));
+  };
+
+  return (
+    <div className="na-card">
+      <div className="na-card__header">
+        <h2 className="na-card__title">StyleMe Garment Profile</h2>
+        <span className={`na-badge ${PROFILE_STATUS_BADGE[profileStatus] ?? "na-badge--not-analyzed"}`}>
+          {PROFILE_STATUS_LABELS[profileStatus] ?? profileStatus.toUpperCase()}
+        </span>
+        {profile?.reviewedBy && (
+          <span className="na-card__subtitle" style={{ marginLeft: "auto" }}>
+            Saved by {profile.reviewedBy}
+            {profile.reviewedAt && ` · ${new Date(profile.reviewedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}`}
+          </span>
+        )}
+      </div>
+      <div className="na-card__body">
+        <p style={{ fontSize: "12px", color: "#6b7280", marginBottom: "1rem" }}>
+          Manual audit taxonomy — not wired to live StyleMe yet. Changes here do not affect current recommendations.
+        </p>
+
+        {/* ─ Garment Role ─ */}
+        <div style={{ marginBottom: "1.25rem" }}>
+          <div style={{ fontWeight: 700, fontSize: "12px", marginBottom: "0.5rem", color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em" }}>Garment Role</div>
+          <SingleSelect label="Exact Slot" field="exactSlot" value={draft.exactSlot as string | null} options={EXACT_SLOT_VALUES} onChange={set} />
+          <SingleSelect label="Outfit Function" field="outfitFunction" value={draft.outfitFunction as string | null} options={OUTFIT_FUNCTION_VALUES} onChange={set} />
+        </div>
+
+        {/* ─ Style Identity ─ */}
+        <div style={{ marginBottom: "1.25rem" }}>
+          <div style={{ fontWeight: 700, fontSize: "12px", marginBottom: "0.5rem", color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em" }}>Style Identity</div>
+          <SingleSelect label="Style Family — Primary" field="styleFamilyPrimary" value={draft.styleFamilyPrimary as string | null} options={STYLE_FAMILY_VALUES} onChange={set} />
+          <SingleSelect label="Style Family — Secondary (optional)" field="styleFamilySecondary" value={draft.styleFamilySecondary as string | null} options={[...STYLE_FAMILY_VALUES, "none"]} onChange={set} />
+          <SingleSelect label="Dress Register" field="dressRegister" value={draft.dressRegister as string | null} options={DRESS_REGISTER_VALUES} onChange={set} />
+        </div>
+
+        {/* ─ Form & Character ─ */}
+        <div style={{ marginBottom: "1.25rem" }}>
+          <div style={{ fontWeight: 700, fontSize: "12px", marginBottom: "0.5rem", color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em" }}>Form &amp; Character</div>
+          <SingleSelect label="Construction" field="construction" value={draft.construction as string | null} options={CONSTRUCTION_VALUES} onChange={set} />
+          <MultiSelect label="Fabric Behaviour" field="fabricBehaviour" values={draft.fabricBehaviour as string[]} options={FABRIC_BEHAVIOUR_VALUES} onChange={set} />
+          <MultiSelect label="Silhouette Character" field="silhouetteCharacter" values={draft.silhouetteCharacter as string[]} options={SILHOUETTE_CHARACTER_VALUES} onChange={set} />
+          <SingleSelect label="Visual Weight" field="visualWeight" value={draft.visualWeight as string | null} options={VISUAL_WEIGHT_VALUES} onChange={set} />
+        </div>
+
+        {/* ─ Wearability ─ */}
+        <div style={{ marginBottom: "1.25rem" }}>
+          <div style={{ fontWeight: 700, fontSize: "12px", marginBottom: "0.5rem", color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em" }}>Wearability</div>
+          <SingleSelect label="Styling Effort" field="stylingEffort" value={draft.stylingEffort as string | null} options={STYLING_EFFORT_VALUES} onChange={set} />
+          <SingleSelect label="Layering Behaviour" field="layeringBehaviour" value={draft.layeringBehaviour as string | null} options={LAYERING_BEHAVIOUR_VALUES} onChange={set} />
+          <SingleSelect label="Waist Comfort" field="waistComfort" value={draft.waistComfort as string | null} options={WAIST_COMFORT_VALUES} onChange={set} />
+        </div>
+
+        {/* ─ Statement Level ─ */}
+        <div style={{ marginBottom: "1.25rem" }}>
+          <div style={{ fontWeight: 700, fontSize: "12px", marginBottom: "0.5rem", color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em" }}>Statement Level</div>
+          <SingleSelect label="" field="statementLevel" value={draft.statementLevel as string | null} options={STATEMENT_LEVEL_VALUES} onChange={set} />
+        </div>
+
+        {/* ─ Occasion Fit ─ */}
+        <div style={{ marginBottom: "1.25rem" }}>
+          <div style={{ fontWeight: 700, fontSize: "12px", marginBottom: "0.5rem", color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em" }}>Occasion Fit</div>
+          <OccasionFitTable
+            values={draft.occasionFit as Record<string, string>}
+            onChange={(v) => set("occasionFit", v)}
+          />
+        </div>
+
+        {/* ─ Intention Potentials ─ */}
+        <div style={{ marginBottom: "1.25rem" }}>
+          <div style={{ fontWeight: 700, fontSize: "12px", marginBottom: "0.5rem", color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em" }}>Intention Potentials</div>
+          <IntentionTable
+            values={draft.intentionPotentials as Record<string, string>}
+            onChange={(v) => set("intentionPotentials", v)}
+          />
+        </div>
+
+        {/* ─ Pairing Guidance ─ */}
+        <div style={{ marginBottom: "1.25rem" }}>
+          <div style={{ fontWeight: 700, fontSize: "12px", marginBottom: "0.5rem", color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em" }}>Pairing Guidance</div>
+          {(["naturalPairings", "intentionalMix", "avoidInStyleMe"] as const).map((field) => {
+            const labels: Record<string, string> = {
+              naturalPairings: "Natural pairings",
+              intentionalMix: "Intentional fashion mix",
+              avoidInStyleMe: "Avoid in normal StyleMe",
+            };
+            return (
+              <div key={field} style={{ marginBottom: "0.5rem" }}>
+                <div style={{ fontSize: "11px", fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "3px" }}>
+                  {labels[field]}
+                </div>
+                <textarea
+                  className="na-edit-input"
+                  rows={2}
+                  value={(draft[field] as string) ?? ""}
+                  onChange={(e) => set(field, e.target.value)}
+                  style={{ width: "100%", resize: "vertical" }}
+                />
+              </div>
+            );
+          })}
+        </div>
+
+        {/* ─ Special Notes ─ */}
+        <div style={{ marginBottom: "1.25rem" }}>
+          <div style={{ fontSize: "11px", fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "3px" }}>Special Garment Notes</div>
+          <textarea
+            className="na-edit-input"
+            rows={3}
+            value={(draft.specialNotes as string) ?? ""}
+            onChange={(e) => set("specialNotes", e.target.value)}
+            style={{ width: "100%", resize: "vertical" }}
+          />
+        </div>
+
+        {/* ─ Save actions ─ */}
+        {!canApprove && (
+          <div style={{ marginBottom: "0.75rem", fontSize: "11px", color: "#f59e0b", lineHeight: "1.5" }}>
+            <strong>Cannot approve — missing:</strong>{" "}
+            {missingForApproval.join(" · ")}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="na-btn na-btn--outline"
+            disabled={isSaving}
+            onClick={() => handleSave("in-review")}
+          >
+            {isSaving && profileStatus === "in-review" ? "Saving…" : "Save as In Review"}
+          </button>
+          <button
+            type="button"
+            className="na-btn na-btn--primary"
+            disabled={isSaving || !canApprove}
+            title={!canApprove ? `Missing: ${missingForApproval.join(", ")}` : undefined}
+            onClick={() => handleSave("approved")}
+          >
+            {isSaving && profileStatus === "approved" ? "Saving…" : "Approve"}
+          </button>
+          {saveOk && <span style={{ fontSize: "12px", color: "#059669" }}>✓ Saved</span>}
+          {saveError && <span style={{ fontSize: "12px", color: "#dc2626" }}>{saveError}</span>}
+        </div>
+      </div>
+    </div>
   );
 }
