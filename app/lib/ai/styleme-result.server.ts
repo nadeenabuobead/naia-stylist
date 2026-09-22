@@ -59,6 +59,7 @@ import {
   getProfileOccasionTier,
   computeProfileIntentionFit,
   computeHybridIntentionFit,
+  computeItemIntentionWeight,
   hasStatementConflict,
   passesLayeringRequirement,
   resolveProfileSlot,
@@ -2548,7 +2549,18 @@ export async function callClaudeForNaiaSelection(
       const lines = c.pieces.map((p) => {
         const pe = evidence?.pieces.find((e) => e.closetId === p.closetId);
         const roleTag = pe ? `, ${pe.pieceRole}` : "";
-        const base = `  - ${p.label ?? p.slot} (${p.slot}${roleTag})${p.colors[0] ? `, ${p.colors[0]}` : ""} [id:${p.closetId}]`;
+        const profileFields = (() => {
+          const ap = allItems?.find((i) => i.id === p.closetId)?.approvedProfile;
+          if (!ap) return "";
+          const wantsConstruction = activeIntentions.some((i) => i === "feel-sharper" || i === "give-structure")
+            || activeBodyNeeds.some((id) => id === "structured-shape" || id === "still-want-shape");
+          const wantsEase = activeIntentions.some((i) => i === "make-it-easy");
+          const parts: string[] = [];
+          if (wantsConstruction && ap.construction) parts.push(`construction: ${ap.construction}`);
+          if (wantsEase && ap.stylingEffort) parts.push(`styling effort: ${ap.stylingEffort}`);
+          return parts.length > 0 ? ` | ${parts.join(", ")}` : "";
+        })();
+        const base = `  - ${p.label ?? p.slot} (${p.slot}${roleTag})${p.colors[0] ? `, ${p.colors[0]}` : ""}${profileFields} [id:${p.closetId}]`;
         if (!pe) return base;
         const occNote =
           pe.occasionStatus === "match"
@@ -2643,7 +2655,8 @@ export async function callClaudeForNaiaSelection(
     "\n14. Do not use 'gravitates toward', 'has a tendency to', or similar generalisations about the customer's habitual style choices." +
     "\n15. Do not infer body-zone concerns from a garment name alone — only from explicit Fit/Comfort selections or Passport body-avoid areas listed above." +
     "\n16. Do not rename the occasion — use the exact occasion label as given in TODAY'S BRIEF." +
-    "\n17. Do not invent goals, outcomes, or aspirations for the customer unless they appear in Becoming/aspiration or Current style focus in STYLE PASSPORT above.";
+    "\n17. Do not invent goals, outcomes, or aspirations for the customer unless they appear in Becoming/aspiration or Current style focus in STYLE PASSPORT above." +
+    "\n18. INTENTION GROUNDING: Structural language (sharp, structured, tailored, crisp, polished) in copy requires the garment's 'construction: structured' or 'construction: semi-structured' to be listed in its metadata above. Colour, darkness, or a fitted silhouette alone are never structural signals and must not be described as making an outfit feel sharper or more structured. If Intention includes 'make-it-easy', ease claims (effortless, easy to wear, throw-on, low-maintenance) require the garment to have 'styling effort: easy' in its metadata above. When the metadata does not support the claimed quality, describe the outfit through its occasion appropriateness, mood, and Passport alignment instead.";
 
   const userMessage =
     `Select the best complete outfit for this customer and write all wording for it.\n\n` +
@@ -3458,6 +3471,7 @@ export function selectAdditionalClosetGarments(
     moods: session.moods,
     desiredFeelings: session.desiredFeelings,
   };
+  const activeIntentions = session.intentions ?? [];
 
   // Collect all candidates per slot, scored and sorted best-first.
   const candidatesBySlot = new Map<OutfitSlot, Array<{ item: ClosetAnchorInput; score: number }>>();
@@ -3496,8 +3510,13 @@ export function selectAdditionalClosetGarments(
       item.garmentRelationships,
     );
     if (baseScore <= 0) continue;
+    // Intention bonus: minor additive signal so intention-aligned items win ties.
+    // Scaled to ~10% of a typical base score — never overrides occasion/mood/feeling.
+    const intentionBonus = activeIntentions.length > 0
+      ? activeIntentions.reduce((sum, id) => sum + computeItemIntentionWeight(item, id), 0) * 1.5
+      : 0;
     // Apply outfitFunction priority: anchor pieces boosted, supporting pieces penalised.
-    const score = baseScore * outfitFunctionPriority(item);
+    const score = (baseScore + intentionBonus) * outfitFunctionPriority(item);
 
     const list = candidatesBySlot.get(slot) ?? [];
     list.push({ item, score });

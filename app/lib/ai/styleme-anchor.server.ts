@@ -573,6 +573,12 @@ export function scoreBodyNeedForClosetItem(
     }
 
     case "structured-shape": {
+      // construction from approved profile is authoritative (same as still-want-shape).
+      const construction = item.approvedProfile?.construction ?? null;
+      if (construction === "structured") return { violation: false, fitScore: 1 };
+      if (construction === "semi-structured") return { violation: false, fitScore: 0.75 };
+      if (construction === "soft") return { violation: false, fitScore: 0.2 };
+      // Fallback to fitProfile/styleTags when no approved construction.
       if (fp !== null && STRUCTURED_FITS.has(fp)) return { violation: false, fitScore: 1 };
       if ((item.styleTags ?? []).includes("structured") || (item.styleTags ?? []).includes("tailored")) {
         return { violation: false, fitScore: 0.8 };

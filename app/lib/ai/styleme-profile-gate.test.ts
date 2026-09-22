@@ -12,6 +12,7 @@ import {
   getProfileIntentionScore,
   computeProfileIntentionFit,
   computeHybridIntentionFit,
+  computeItemIntentionWeight,
   hasStatementConflict,
   passesLayeringRequirement,
   passesOutfitFunctionGate,
@@ -1932,5 +1933,103 @@ describe("Base-under-layer anchor — end-to-end assembly through selectAddition
     assert.equal(cC, null, "E2E-F: candidateC must also be null");
     assert.equal(cD, null, "E2E-F: candidateD must also be null");
     assert.equal(cE, null, "E2E-F: candidateE must also be null");
+  });
+});
+
+// ── §SI: Signal-ranking regression suite (Tests 2–4 fix) ─────────────────────
+// Guards: computeItemIntentionWeight authority, GATE_STRUCTURE_TAGS correctness,
+// structured-shape construction authority, and intention-bonus differentiation.
+
+describe("§SI.1 computeItemIntentionWeight — approved intentionPotentials take priority", () => {
+  it("SI.1.1 Strong > Supporting > None when approved intentionPotentials present", () => {
+    const strong = makeItem({ id: "s", approvedProfile: makeApprovedProfile({ intentionPotentials: { "feel-sharper": "Strong" } }) });
+    const supporting = makeItem({ id: "sp", approvedProfile: makeApprovedProfile({ intentionPotentials: { "feel-sharper": "Supporting" } }) });
+    const none = makeItem({ id: "n", approvedProfile: makeApprovedProfile({ intentionPotentials: { "feel-sharper": "None" } }) });
+    const wStrong = computeItemIntentionWeight(strong, "feel-sharper");
+    const wSupporting = computeItemIntentionWeight(supporting, "feel-sharper");
+    const wNone = computeItemIntentionWeight(none, "feel-sharper");
+    assert.equal(wStrong, 1.0, "Strong = 1.0");
+    assert.equal(wSupporting, 0.5, "Supporting = 0.5");
+    assert.equal(wNone, 0.0, "None = 0.0 (hard zero)");
+    assert.ok(wStrong > wSupporting && wSupporting > wNone, "ordering preserved");
+  });
+
+  it("SI.1.2 approved profile without rating falls back to form/character fields", () => {
+    const structuredItem = makeItem({
+      id: "struct",
+      approvedProfile: makeApprovedProfile({ construction: "structured", intentionPotentials: {} }),
+    });
+    const softItem = makeItem({
+      id: "soft",
+      approvedProfile: makeApprovedProfile({ construction: "soft", intentionPotentials: {} }),
+    });
+    const wStructured = computeItemIntentionWeight(structuredItem, "feel-sharper");
+    const wSoft = computeItemIntentionWeight(softItem, "feel-sharper");
+    assert.ok(wStructured > wSoft, `structured construction (${wStructured}) must beat soft (${wSoft})`);
+  });
+});
+
+describe("§SI.2 fitted ≠ structured — GATE_STRUCTURE_TAGS no longer includes 'fitted'", () => {
+  it("SI.2.1 un-profiled item with fitProfile=fitted scores LESS than fitProfile=structured for feel-sharper", () => {
+    const fittedItem = makeItem({ id: "fitted", fitProfile: "fitted" });
+    const structuredItem = makeItem({ id: "structured", fitProfile: "structured" });
+    const wFitted = computeItemIntentionWeight(fittedItem, "feel-sharper");
+    const wStructured = computeItemIntentionWeight(structuredItem, "feel-sharper");
+    assert.ok(wFitted < wStructured,
+      `fitted fitProfile (${wFitted}) must not beat structured fitProfile (${wStructured})`);
+  });
+
+  it("SI.2.2 un-profiled item with fitProfile=fitted alone gives zero structure score", () => {
+    const fittedItem = makeItem({ id: "fitted-only", fitProfile: "fitted", styleTags: [] });
+    const w = computeItemIntentionWeight(fittedItem, "feel-sharper");
+    assert.equal(w, 0, "fitted with no structure tags must score 0 for feel-sharper");
+  });
+});
+
+describe("§SI.3 structured-shape body need uses approvedProfile.construction", () => {
+  it("SI.3.1 structured construction scores 1.0 for structured-shape", () => {
+    const item = makeItem({ id: "s", approvedProfile: makeApprovedProfile({ construction: "structured" }) });
+    const { fitScore } = scoreBodyNeedForClosetItem("structured-shape", item);
+    assert.equal(fitScore, 1, "structured construction = fitScore 1");
+  });
+
+  it("SI.3.2 semi-structured construction scores 0.75", () => {
+    const item = makeItem({ id: "ss", approvedProfile: makeApprovedProfile({ construction: "semi-structured" }) });
+    const { fitScore } = scoreBodyNeedForClosetItem("structured-shape", item);
+    assert.equal(fitScore, 0.75, "semi-structured construction = fitScore 0.75");
+  });
+
+  it("SI.3.3 soft construction scores 0.2 — a soft garment is not structured", () => {
+    const item = makeItem({ id: "soft", approvedProfile: makeApprovedProfile({ construction: "soft" }) });
+    const { fitScore } = scoreBodyNeedForClosetItem("structured-shape", item);
+    assert.equal(fitScore, 0.2, "soft construction = fitScore 0.2");
+  });
+
+  it("SI.3.4 approved soft construction beats fitProfile=structured (profile is authoritative)", () => {
+    const profileSoftFitStructured = makeItem({
+      id: "conflict",
+      fitProfile: "structured",
+      approvedProfile: makeApprovedProfile({ construction: "soft" }),
+    });
+    const { fitScore } = scoreBodyNeedForClosetItem("structured-shape", profileSoftFitStructured);
+    assert.equal(fitScore, 0.2, "approved soft construction must win over legacy fitProfile=structured");
+  });
+});
+
+describe("§SI.4 make-it-easy — stylingEffort is authoritative in computeItemIntentionWeight", () => {
+  it("SI.4.1 stylingEffort=easy scores higher than stylingEffort=involved", () => {
+    const easyItem = makeItem({ id: "easy", approvedProfile: makeApprovedProfile({ stylingEffort: "easy", intentionPotentials: {} }) });
+    const hardItem = makeItem({ id: "hard", approvedProfile: makeApprovedProfile({ stylingEffort: "involved", intentionPotentials: {} }) });
+    const wEasy = computeItemIntentionWeight(easyItem, "make-it-easy");
+    const wHard = computeItemIntentionWeight(hardItem, "make-it-easy");
+    assert.ok(wEasy > wHard, `easy (${wEasy}) must beat involved (${wHard})`);
+    assert.equal(wEasy, 0.8, "stylingEffort=easy → 0.8");
+    assert.equal(wHard, 0.1, "stylingEffort=involved → 0.1");
+  });
+
+  it("SI.4.2 relaxed fitProfile alone does not imply make-it-easy", () => {
+    const relaxedItem = makeItem({ id: "relaxed", fitProfile: "relaxed" });
+    const w = computeItemIntentionWeight(relaxedItem, "make-it-easy");
+    assert.ok(w <= 0.6, `relaxed fitProfile alone must not imply make-it-easy; got ${w}`);
   });
 });

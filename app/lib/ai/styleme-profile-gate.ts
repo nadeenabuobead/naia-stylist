@@ -181,6 +181,19 @@ export function getProfileIntentionScore(
   return null;
 }
 
+// Per-item intention weight for a single garment (0–1).
+// Used in Candidate A slot-filling to give intention-aligned items a scoring advantage.
+// Priority: approved intentionPotentials → form/character fields → legacy heuristic.
+export function computeItemIntentionWeight(
+  item: ClosetAnchorInput,
+  intentionId: string,
+): number {
+  const profileScore = getProfileIntentionScore(item, intentionId);
+  if (profileScore !== null) return profileScore;
+  if (item.approvedProfile) return formCharacterScore(item, intentionId);
+  return legacyPieceIntentionScore(item, intentionId);
+}
+
 // ── Profile-aware outfit-level intention score ─────────────────────────────────
 
 // Aggregates per-piece profile intention scores across the candidate's structural pieces.
@@ -255,7 +268,8 @@ export function passesLayeringRequirement(
 // ── Per-piece intention scoring ───────────────────────────────────────────────
 // Tag sets duplicated here to keep this file standalone (no .server imports).
 // Kept in sync with STRUCTURE_TAGS / FLOW_TAGS in styleme-result.server.ts.
-const GATE_STRUCTURE_TAGS = new Set(["structured", "tailored", "sharp", "polished", "fitted", "minimalist"]);
+// "fitted" is intentionally excluded — a fitted silhouette is not a structured garment.
+const GATE_STRUCTURE_TAGS = new Set(["structured", "tailored", "sharp", "polished", "minimalist"]);
 const GATE_FLOW_TAGS = new Set(["flowing", "relaxed", "soft", "loose", "flowy", "oversized"]);
 
 // Per-piece legacy intention score for UN-PROFILED garments.
