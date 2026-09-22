@@ -135,6 +135,27 @@ export interface ClosetAnchorInput {
   midriffExposed?: boolean | null;
   silhouette?: string | null;
   stylePersonality?: string | null;
+  // Approved GarmentStyleMeProfile — attached by loadAllClosetItemsForEngine when profileStatus === "approved".
+  // Read-only truth from StyleMe's perspective. Never inferred or mutated at runtime.
+  // null = no approved profile exists; legacy heuristics apply as fallback.
+  approvedProfile?: {
+    exactSlot: string | null;
+    outfitFunction: string | null;
+    dressRegister: string | null;
+    fabricBehaviour: string[];
+    silhouetteCharacter: string[];
+    visualWeight: string | null;
+    construction: string | null;
+    stylingEffort: string | null;
+    layeringBehaviour: string | null;
+    waistComfort: string | null;
+    statementLevel: string | null;
+    occasionFit: Record<string, string> | null;
+    intentionPotentials: Record<string, string> | null;
+    naturalPairings: string | null;
+    intentionalMix: string | null;
+    avoidInStyleMe: string | null;
+  } | null;
 }
 
 export type AnchorInput = NadineAnchorInput | ClosetAnchorInput;
@@ -197,6 +218,15 @@ export interface NormalizedClosetAnchor {
 }
 
 export type NormalizedStyleAnchor = NormalizedNadineAnchor | NormalizedClosetAnchor;
+
+// ─── Outfit candidate ─────────────────────────────────────────────────────────
+// A scored candidate outfit composed of closet pieces.
+// Shared between styleme-result.server and styleme-profile-gate.
+
+export type OutfitCandidate = {
+  id: "A" | "B" | "C" | "D" | "E";
+  pieces: Array<{ closetId: string; slot: string; label: string | null; colors: string[] }>;
+};
 
 // ─── Closet compatibility evidence ───────────────────────────────────────────
 

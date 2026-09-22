@@ -21,7 +21,9 @@ import type {
   StyleMeSessionInput,
   StyleMeMode,
   OutfitSlot,
+  OutfitCandidate,
 } from "./styleme-recommendation.types.js";
+export type { OutfitCandidate } from "./styleme-recommendation.types.js";
 import {
   loadAllClosetItemsForEngine,
   ANCHOR_CAPABLE_CATEGORIES,
@@ -50,6 +52,20 @@ import type {
 } from "./styleme-result.types.js";
 import { getMappingById, PRODUCT_TEMPLATE_FIELDS } from "./signal-contract.js";
 import type { ProductEvaluation } from "./styleme-recommendation.types.js";
+import {
+  passesProfileOccasionGate,
+  passesProfileRegisterGate,
+  passesRegisterCoherenceWithAnchor,
+  getProfileOccasionTier,
+  computeProfileIntentionFit,
+  computeHybridIntentionFit,
+  hasStatementConflict,
+  passesLayeringRequirement,
+  resolveProfileSlot,
+  STRUCTURAL_EXCLUDES,
+  passesOutfitFunctionGate,
+  outfitFunctionPriority,
+} from "./styleme-profile-gate.js";
 
 // ── Passport option label resolver ───────────────────────────────────────────
 
@@ -795,11 +811,6 @@ export function garmentNameIsPlural(name: string): boolean {
 
 // ── nAia outfit candidate types ──────────────────────────────────────────────
 
-export type OutfitCandidate = {
-  id: "A" | "B" | "C" | "D" | "E";
-  pieces: Array<{ closetId: string; slot: string; label: string | null; colors: string[] }>;
-};
-
 // ── Body-need scoring (TODAY + Intention Step 3) ──────────────────────────────
 //
 // "Avoidance" needs: the garment MUST have the matching SMCM token; absence = violation.
@@ -1204,6 +1215,34 @@ function singleIntentionUnitScore(
   allItems: ClosetAnchorInput[],
   profile: ClosetScoringProfile | undefined,
 ): number {
+  // APPROVED profile truth takes precedence over all legacy heuristics.
+  // computeHybridIntentionFit returns:
+  //   number [0,1] when at least one structural piece has an approved profile.
+  //     - approved piece: intentionPotentials[id] (None=0.0 is a hard zero, no override)
+  //     - approved piece without rating: form/character fields consulted
+  //     - un-profiled piece in mixed outfit: per-piece legacy heuristic
+  //   null when ALL structural pieces are un-profiled → fall through to outfit-level legacy.
+  //
+  // Critical guarantees:
+  //   - Approved None = 0.0 even when paired with an un-profiled piece
+  //   - Approved garment is never reinterpreted by outfit-level legacy heuristics
+  //   - All-unprofiled outfit: full outfit-level legacy path runs unchanged
+  //   - fitted ≠ structured, relaxed ≠ easy, fabricBehaviour ≠ feel-softer
+  if (id !== "give-energy") {
+    const hybridScore = computeHybridIntentionFit(id, candidate, allItems);
+    if (hybridScore !== null) return hybridScore;
+  } else {
+    // give-energy: hybrid gates whether energy potential applies at all,
+    // then the energy heuristic (computeEnergyFit) measures expressive vitality.
+    const hybridScore = computeHybridIntentionFit(id, candidate, allItems);
+    if (hybridScore !== null) {
+      if (hybridScore === 0) return 0; // all None → no energy potential
+      // Profile confirms energy potential exists; measure it with energy heuristic.
+      return Math.min(1, computeEnergyFit(candidate, candidateA, allItems, profile) / 3);
+    }
+  }
+
+  // Legacy heuristic fallback — only reached when no structural piece has an approved profile.
   const identity = () => outfitIdentityScore(candidate, allItems, profile);
   const structure = () => outfitStructureScore(candidate, allItems);
   const flow = () => outfitFlowScore(candidate, allItems);
@@ -1265,20 +1304,40 @@ export function computeOccasionTier(
   const itemMap = new Map(allItems.map((i) => [i.id, i]));
   let hasImportantMismatch = false;
   let hasCoreUnknown = false;
+  // Acceptable-rated core piece caps the outfit at tier 1 (Strong outranks Acceptable).
+  let hasCoreAcceptableOnly = false;
   for (const piece of candidate.pieces) {
-    const occasions = itemMap.get(piece.closetId)?.occasions ?? [];
+    const item = itemMap.get(piece.closetId);
+    const occasions = item?.occasions ?? [];
+
     if (OCCASION_CORE_SLOTS.has(piece.slot)) {
+      if (item) {
+        // APPROVED profile takes precedence over legacy occasions[].
+        // Strong(2) → tier 2 candidate; Acceptable(1) → tier 1 cap; No(0) → hard exclude.
+        const profileTier = getProfileOccasionTier(item, sessionOccasion);
+        if (profileTier === 0) return 0;
+        if (profileTier === 2) continue;                    // Strong → no penalty; next piece
+        if (profileTier === 1) { hasCoreAcceptableOnly = true; continue; } // Acceptable → tier 1
+      }
+      // Legacy fallback: no approved profile or no rating for this occasion
       if (occasions.length === 0) {
         hasCoreUnknown = true;
       } else if (!matchesSessionOccasion(occasions, sessionOccasion)) {
         return 0;
       }
     } else if (OCCASION_IMPORTANT_SLOTS.has(piece.slot)) {
+      if (item) {
+        const profileTier = getProfileOccasionTier(item, sessionOccasion);
+        if (profileTier === 0) { hasImportantMismatch = true; continue; }
+        if (profileTier !== null) continue; // Strong or Acceptable → valid for important slot
+      }
+      // Legacy fallback
       if (occasions.length > 0 && !matchesSessionOccasion(occasions, sessionOccasion))
         hasImportantMismatch = true;
     }
   }
   if (hasImportantMismatch || hasCoreUnknown) return 1;
+  if (hasCoreAcceptableOnly) return 1; // Acceptable-rated core: Strong outranks Acceptable (spec §9)
   return 2;
 }
 
@@ -1429,6 +1488,22 @@ export function buildNaiaOutfitCandidates(
     id: "A",
     pieces: [anchorPiece, ...fullSelection.map(toPiece)],
   };
+
+  // ── Anchor base-under-layer candidate-level enforcement ──────────────────────
+  // If the anchor has an APPROVED profile with layeringBehaviour === "base-under-layer"
+  // and candidateA provides no valid covering layer, all candidates are invalid.
+  // Return all-nulls so filteredCandidates at the call site is empty →
+  // sameCombination = true (no outfit surfaced for this anchor).
+  // This is the result-level enforcement; selectAdditionalClosetGarments also
+  // returns [] in this case, but that alone does not prevent candidateA from being
+  // returned with the naked anchor.
+  const anchorInputItem = allItems.find((i) => i.id === anchor.id);
+  if (
+    anchorInputItem?.approvedProfile?.layeringBehaviour === "base-under-layer" &&
+    !passesLayeringRequirement(anchorInputItem, candidateA, allItems)
+  ) {
+    return [null, null, null, null, null] as unknown as [OutfitCandidate, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null];
+  }
 
   // ── Candidate B: session-formality-aligned complete alternative ─────────────
   // Rather than swapping one slot at a time (which can't produce a materially
@@ -3360,21 +3435,40 @@ export function selectAdditionalClosetGarments(
   // Collect all candidates per slot, scored and sorted best-first.
   const candidatesBySlot = new Map<OutfitSlot, Array<{ item: ClosetAnchorInput; score: number }>>();
 
+  // Resolve the anchor item for register-coherence check (closet anchors only).
+  const anchorClosetItem = anchorId ? closetItems.find((i) => i.id === anchorId) ?? null : null;
+
   for (const item of closetItems) {
     if (item.id === anchorId) continue;
     if (!passesDressingRequirements(item, profile?.dressingPreferences)) continue;
 
-    const slot = closetItemToSlot(item.category, item.subcategory);
+    // APPROVED profile truth gates — take precedence over all legacy classification.
+    // Gate 1: occasion "No" is a hard exclusion from this garment for this occasion.
+    if (!passesProfileOccasionGate(item, session.occasion)) continue;
+    // Gate 2: register incompatibility blocks cross-register outfit construction.
+    //         Approved occasionFit Strong/Acceptable overrides blanket register rules.
+    if (!passesProfileRegisterGate(item, session.occasion)) continue;
+    // Gate 3: outfit-level register coherence — candidate must be compatible with anchor.
+    if (!passesRegisterCoherenceWithAnchor(item, anchorClosetItem)) continue;
+
+    // Use profile exactSlot when available (authoritative slot override).
+    const categorySlot = closetItemToSlot(item.category, item.subcategory);
+    const slot = resolveProfileSlot(item, categorySlot);
     if (slot === "unknown") continue;
     if (coveredSlots.has(slot)) continue;
 
-    const score = scoreClosetItemForSession(
+    // Gate 4: outfitFunction gate — "finishing" function pieces must not fill structural clothing slots.
+    if (!passesOutfitFunctionGate(item, slot)) continue;
+
+    const baseScore = scoreClosetItemForSession(
       { occasions: item.occasions, styleTags: item.styleTags, category: item.category, colors: item.colors, primaryColor: item.primaryColor },
       signals,
       profile,
       item.garmentRelationships,
     );
-    if (score <= 0) continue;
+    if (baseScore <= 0) continue;
+    // Apply outfitFunction priority: anchor pieces boosted, supporting pieces penalised.
+    const score = baseScore * outfitFunctionPriority(item);
 
     const list = candidatesBySlot.get(slot) ?? [];
     list.push({ item, score });
@@ -3464,6 +3558,22 @@ export function selectAdditionalClosetGarments(
     .sort((a, b) => b.score - a.score || (OPTIONAL_SLOT_ORDER[a.slot] ?? 9) - (OPTIONAL_SLOT_ORDER[b.slot] ?? 9));
   const orderedOptionals = [...optShoes, ...optRest];
 
+  // Count statement pieces already committed from anchor + Phase 1 base selections.
+  // Both statementLevel === "statement" AND outfitFunction === "statement" count
+  // as statement pieces (they are independent fields that both denote a statement role).
+  const closetItemById = new Map(closetItems.map((i) => [i.id, i]));
+  const isStatementPiece = (item: ClosetAnchorInput | null | undefined, slot: string): boolean => {
+    if (!item || STRUCTURAL_EXCLUDES.has(slot)) return false;
+    const p = item.approvedProfile;
+    return p?.statementLevel === "statement" || p?.outfitFunction === "statement";
+  };
+  let statementPieceCount =
+    isStatementPiece(anchorClosetItem, (anchor as { slot: string } | null)?.slot ?? "") ? 1 : 0;
+  for (const r of result) {
+    const ri = closetItemById.get(r.id);
+    if (isStatementPiece(ri, r.slot)) statementPieceCount++;
+  }
+
   let finishingSlotUsed = false;
   for (const opt of orderedOptionals) {
     if (result.length >= maxAdditional) break;
@@ -3471,7 +3581,97 @@ export function selectAdditionalClosetGarments(
       if (finishingSlotUsed) continue; // at most one combined finishing piece
       finishingSlotUsed = true;
     }
+    // Statement conflict gate (Phase 2 optional pieces):
+    // Skip optional statement pieces when a structural statement piece is already committed.
+    if (statementPieceCount > 0 && isStatementPiece(opt.item, opt.slot)) continue;
+    if (isStatementPiece(opt.item, opt.slot)) statementPieceCount++;
     result.push({ slot: opt.slot, id: opt.item.id, label: opt.item.name, imageUrl: opt.item.imageUrl, colors: opt.item.colors ?? [] });
+  }
+
+  // ── Post-assembly: layering constraint validation ─────────────────────────────
+  // Remove any base-under-layer piece that does not have a covering outer layer in the outfit.
+  // This handles cases where a base-under-layer item was selected but no covering outerwear
+  // ended up in the final outfit (e.g., outerwear slot was filled by a non-covering piece).
+  {
+    const anchorPieces = anchorClosetItem
+      ? [{ closetId: anchorClosetItem.id, slot: (anchor as { slot: string }).slot ?? "unknown", label: null, colors: [] }]
+      : [];
+    const assembledCandidate: OutfitCandidate = {
+      id: "A",
+      pieces: [
+        ...result.map((r) => ({ closetId: r.id, slot: r.slot as string, label: r.label, colors: r.colors })),
+        ...anchorPieces,
+      ],
+    };
+    const allAssembledItems = [
+      ...result.map((r) => closetItemById.get(r.id)).filter((i): i is ClosetAnchorInput => i !== undefined),
+      ...(anchorClosetItem ? [anchorClosetItem] : []),
+    ];
+    for (let i = result.length - 1; i >= 0; i--) {
+      const ri = closetItemById.get(result[i].id);
+      if (!ri) continue;
+      if (!passesLayeringRequirement(ri, assembledCandidate, allAssembledItems)) {
+        // Rebuild candidate without this piece before continuing.
+        assembledCandidate.pieces.splice(
+          assembledCandidate.pieces.findIndex((p) => p.closetId === result[i].id),
+          1,
+        );
+        result.splice(i, 1);
+      }
+    }
+  }
+
+  // ── Post-assembly: final statement coherence validation ───────────────────────
+  // Validates the COMPLETE assembled outfit (anchor + Phase 1 + Phase 2) for statement
+  // conflicts. This catches conflicts that enter through any phase — not just Phase 2.
+  // Priority: anchor is never removed; result pieces are removed last-in-first-out.
+  {
+    let finalStatementCount = 0;
+    if (anchorClosetItem && !STRUCTURAL_EXCLUDES.has((anchor as { slot: string }).slot ?? "")) {
+      const p = anchorClosetItem.approvedProfile;
+      if (p?.statementLevel === "statement" || p?.outfitFunction === "statement") finalStatementCount++;
+    }
+    for (const r of result) {
+      if (STRUCTURAL_EXCLUDES.has(r.slot)) continue;
+      const ri = closetItemById.get(r.id);
+      const p = ri?.approvedProfile;
+      if (p?.statementLevel === "statement" || p?.outfitFunction === "statement") finalStatementCount++;
+    }
+    // Remove result pieces in reverse order until at most one statement piece remains.
+    for (let i = result.length - 1; i >= 0 && finalStatementCount > 1; i--) {
+      const r = result[i];
+      if (STRUCTURAL_EXCLUDES.has(r.slot)) continue;
+      const ri = closetItemById.get(r.id);
+      const p = ri?.approvedProfile;
+      if (p?.statementLevel === "statement" || p?.outfitFunction === "statement") {
+        result.splice(i, 1);
+        finalStatementCount--;
+      }
+    }
+  }
+
+  // ── Post-assembly: anchor layering requirement enforcement ───────────────────
+  // When the anchor has an APPROVED profile with layeringBehaviour === "base-under-layer",
+  // the completed outfit MUST include a genuinely valid covering layer (full/three-quarter
+  // sleeve outerwear, or shoulderCoverage=true outerwear). If no valid covering layer is
+  // present in the assembled outfit, the result is invalid and an empty array is returned.
+  // The anchor cannot be removed; invalid outcomes are surfaced by emptying the result.
+  if (anchorClosetItem) {
+    const anchorProfile = anchorClosetItem.approvedProfile;
+    if (anchorProfile?.layeringBehaviour === "base-under-layer") {
+      const finalPieces = [
+        ...result.map((r) => ({ closetId: r.id, slot: r.slot as string, label: r.label, colors: r.colors })),
+        { closetId: anchorClosetItem.id, slot: (anchor as { slot: string }).slot ?? "unknown", label: null, colors: [] },
+      ];
+      const finalCandidate: OutfitCandidate = { id: "A", pieces: finalPieces };
+      const allFinalItems: ClosetAnchorInput[] = [
+        ...result.map((r) => closetItemById.get(r.id)).filter((i): i is ClosetAnchorInput => i !== undefined),
+        anchorClosetItem,
+      ];
+      if (!passesLayeringRequirement(anchorClosetItem, finalCandidate, allFinalItems)) {
+        return [];
+      }
+    }
   }
 
   return result;

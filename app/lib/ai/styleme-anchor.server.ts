@@ -232,6 +232,7 @@ export async function loadAllClosetItemsForEngine(
     where: { customerId },
     orderBy: { createdAt: "desc" },
     take: 50,
+    include: { styleMeProfile: true },
   });
 
   type ClosetDbItem = (typeof items)[number];
@@ -241,6 +242,28 @@ export async function loadAllClosetItemsForEngine(
     if (cfg && item.imagePublicId && item.imageFormat) {
       imageUrl = buildPrivateDownloadUrl(cfg, item.imagePublicId, item.imageFormat, "private");
     }
+    const p = item.styleMeProfile;
+    const approvedProfile =
+      p?.profileStatus === "approved"
+        ? {
+            exactSlot: p.exactSlot,
+            outfitFunction: p.outfitFunction,
+            dressRegister: p.dressRegister,
+            fabricBehaviour: p.fabricBehaviour,
+            silhouetteCharacter: p.silhouetteCharacter,
+            visualWeight: p.visualWeight,
+            construction: p.construction,
+            stylingEffort: p.stylingEffort,
+            layeringBehaviour: p.layeringBehaviour,
+            waistComfort: p.waistComfort,
+            statementLevel: p.statementLevel,
+            occasionFit: (p.occasionFit as Record<string, string> | null) ?? null,
+            intentionPotentials: (p.intentionPotentials as Record<string, string> | null) ?? null,
+            naturalPairings: p.naturalPairings,
+            intentionalMix: p.intentionalMix,
+            avoidInStyleMe: p.avoidInStyleMe,
+          }
+        : null;
     return {
       type: "closet" as const,
       id: item.id,
@@ -267,6 +290,8 @@ export async function loadAllClosetItemsForEngine(
       midriffExposed: item.midriffExposed ?? null,
       silhouette: item.silhouette ?? null,
       stylePersonality: item.stylePersonality ?? null,
+      // Approved StyleMe profile (null = no profile; legacy heuristics apply)
+      approvedProfile,
     };
   });
 }
@@ -418,6 +443,7 @@ type GarmentForBodyNeed = Pick<
   | "midriffExposed"
   | "styleTags"
   | "silhouette"
+  | "approvedProfile"
 >;
 
 /**
@@ -441,6 +467,30 @@ export function scoreBodyNeedForClosetItem(
 
   switch (need) {
     case "nothing-tight-waist": {
+      // waistComfort from approved profile is the authoritative waistband signal.
+      // fabric stretch (fabricBehaviour) must NOT imply waistband stretch.
+      const wc = item.approvedProfile?.waistComfort ?? null;
+      if (wc === "N/A") {
+        // Not applicable (top, shoe, etc.) — piece has no waistband, neutral
+        return { violation: false, fitScore: null };
+      }
+      if (wc === "elastic" || wc === "stretch" || wc === "drawstring") {
+        return { violation: false, fitScore: 1 };
+      }
+      if (wc === "fixed") {
+        // Structured waistband — not tight by default but not elasticated comfort
+        return { violation: false, fitScore: 0.3 };
+      }
+      if (wc === "restrictive") {
+        // Tight/constricting waistband — negative signal for this body need
+        return { violation: false, fitScore: 0.1 };
+      }
+      if (wc === "unknown") {
+        // No information — treat as unknown, neutral
+        return { violation: false, fitScore: null };
+      }
+      // wc is null (profile present but waistComfort not set) — fall through to legacy signals
+      // No approved waistComfort — fall through to legacy fitProfile/waistShape signals
       if (fp !== null && TIGHT_FITS.has(fp)) return { violation: true, fitScore: 0 };
       if (ws === "elasticated" || ws === "drawstring") return { violation: false, fitScore: 1 };
       if (fp !== null && RELAXED_FITS.has(fp)) return { violation: false, fitScore: 0.8 };
@@ -493,10 +543,22 @@ export function scoreBodyNeedForClosetItem(
       return { violation: false, fitScore: positiveSignals / totalSignals };
     }
 
-    case "softer-easier-fabrics":
-      return { violation: false, fitScore: null };
+    case "softer-easier-fabrics": {
+      // fabricBehaviour from approved profile uses the locked taxonomy: soft|fluid|crisp|rigid|stretch|sculptural|N/A
+      const fb = item.approvedProfile?.fabricBehaviour ?? [];
+      if (fb.some((f) => ["soft", "fluid", "stretch"].includes(f))) return { violation: false, fitScore: 0.8 };
+      if (fb.some((f) => ["rigid", "crisp", "sculptural"].includes(f))) return { violation: false, fitScore: 0.2 };
+      return { violation: false, fitScore: fb.length > 0 ? 0.5 : null };
+    }
 
     case "still-want-shape": {
+      // construction from approved profile is authoritative for shape — fitProfile="fitted" must NOT substitute.
+      // The existing SHAPED_FITS check already excludes "fitted" (correct); construction adds precision.
+      const construction = item.approvedProfile?.construction ?? null;
+      if (construction === "structured") return { violation: false, fitScore: 1 };
+      if (construction === "semi-structured") return { violation: false, fitScore: 0.75 };
+      if (construction === "soft") return { violation: false, fitScore: 0.2 };
+      // Fallback to existing fitProfile-based scoring when no approved construction
       if (fp !== null && SHAPED_FITS.has(fp)) return { violation: false, fitScore: 1 };
       if (fp !== null && (fp === "loose" || fp === "oversized")) return { violation: false, fitScore: 0.2 };
       if (fp !== null && (fp === "relaxed" || fp === "flowy")) return { violation: false, fitScore: 0.4 };
