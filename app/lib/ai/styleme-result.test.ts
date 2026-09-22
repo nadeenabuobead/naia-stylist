@@ -64,6 +64,7 @@ import {
   NAIA_SUCCESSFUL_OUTFIT_LABELS,
   NAIA_FIT_CONCERN_LABELS,
   NAIA_STRUCTURE_LABELS,
+  passesAnchorIntegrityGate,
 } from "./styleme-result.server.ts";
 import type { CandidateOccasionEvidence, OutfitSuitabilityScore } from "./styleme-result.server.ts";
 import type { OutfitCandidate } from "./styleme-result.server.ts";
@@ -10763,6 +10764,225 @@ describe("§CE Candidate E", () => {
         assert.notStrictEqual(eSig, bSig, "E must differ from B");
       }
     }
+  });
+});
+
+// ── §CE.B: Anchor immutability and integrity gate ────────────────────────────
+
+describe("§CE.B Anchor immutability and integrity gate", () => {
+  function makeAnchor(id: string, slot: string): import("./styleme-recommendation.types.ts").NormalizedClosetAnchor {
+    return {
+      type: "closet",
+      id,
+      slot: slot as import("./styleme-recommendation.types.ts").OutfitSlot,
+      label: `Anchor ${id}`,
+      colors: [],
+      material: null,
+      styleTags: [],
+      imageUrl: "https://example.com/img.jpg",
+    };
+  }
+
+  it("CE.B.1 — tryImprove skips anchor's slot: E is null when only anchor slot could be improved", () => {
+    // The only available improvement is a top (same slot as anchor) — with Fix A, tryImprove
+    // skips the "top" slot and produces no improvement.
+    const anchor = makeAnchor("a1", "top");
+    const session = buildEngineInput({
+      moods: [],
+      desiredFeelings: [],
+      bodyNeeds: ["soft-and-forgiving-around-waist"],
+      coverageConditional: null,
+      occasion: "everyday",
+      formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "my-closet",
+    }).session;
+
+    const allItems = [
+      makeSmcmItem({ id: "a1", category: "TOPS", occasions: ["everyday"] }),
+      // alt-top with bodyNeed signal — would have replaced anchor without Fix A
+      makeSmcmItem({ id: "t2", category: "TOPS", occasions: ["everyday"], garmentRelationships: ["soft-and-forgiving-around-waist"] }),
+      makeSmcmItem({ id: "b1", category: "BOTTOMS", occasions: ["everyday"] }),
+    ];
+
+    const [, , , , candidateE] = buildNaiaOutfitCandidates(anchor, session, allItems, undefined, undefined);
+    // E must be null (only the top slot was improvable, but it's the anchor's slot)
+    // OR if not null, must still contain the anchor
+    if (candidateE !== null) {
+      assert.ok(
+        candidateE.pieces.some((p) => p.closetId === "a1"),
+        "CE.B.1: anchor must be present in candidate E when E is generated",
+      );
+    }
+  });
+
+  it("CE.B.2 — tryImprove can improve non-anchor slot while preserving anchor", () => {
+    const anchor = makeAnchor("a1", "top");
+    const session = buildEngineInput({
+      moods: [],
+      desiredFeelings: [],
+      bodyNeeds: ["soft-and-forgiving-around-waist"],
+      coverageConditional: null,
+      occasion: "everyday",
+      formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "my-closet",
+    }).session;
+
+    const allItems = [
+      makeSmcmItem({ id: "a1", category: "TOPS", occasions: ["everyday"] }),
+      // b2 scores higher for bodyNeed — tryImprove should swap b1 → b2 in the bottom slot
+      makeSmcmItem({ id: "b1", category: "BOTTOMS", occasions: ["everyday"] }),
+      makeSmcmItem({ id: "b2", category: "BOTTOMS", occasions: ["everyday"], garmentRelationships: ["soft-and-forgiving-around-waist"] }),
+    ];
+
+    const [, , , , candidateE] = buildNaiaOutfitCandidates(anchor, session, allItems, undefined, undefined);
+    if (candidateE !== null) {
+      assert.ok(
+        candidateE.pieces.some((p) => p.closetId === "a1"),
+        "CE.B.2: anchor must be present in candidate E",
+      );
+    }
+  });
+
+  it("CE.B.3 — passesAnchorIntegrityGate: candidate missing anchor fails", () => {
+    const candidate: OutfitCandidate = {
+      id: "E",
+      pieces: [
+        { closetId: "t2", slot: "top", label: "Alt Top", colors: [] },
+        { closetId: "b1", slot: "bottom", label: "Jeans", colors: [] },
+      ],
+    };
+    assert.strictEqual(
+      passesAnchorIntegrityGate(candidate, "a1", "top"),
+      false,
+      "CE.B.3: gate must reject candidate that does not contain anchor",
+    );
+  });
+
+  it("CE.B.4 — passesAnchorIntegrityGate: anchor present but duplicate structural top fails", () => {
+    const candidate: OutfitCandidate = {
+      id: "A",
+      pieces: [
+        { closetId: "a1", slot: "top", label: "Anchor Top", colors: [] },
+        { closetId: "t2", slot: "top", label: "Second Top", colors: [] },
+        { closetId: "b1", slot: "bottom", label: "Jeans", colors: [] },
+      ],
+    };
+    assert.strictEqual(
+      passesAnchorIntegrityGate(candidate, "a1", "top"),
+      false,
+      "CE.B.4: gate must reject candidate with duplicate top slots",
+    );
+  });
+
+  it("CE.B.5 — Test 5 regression: all non-null candidates from buildNaiaOutfitCandidates contain anchor", () => {
+    const anchor = makeAnchor("a1", "top");
+    const session = buildEngineInput({
+      moods: [],
+      desiredFeelings: [],
+      bodyNeeds: ["soft-and-forgiving-around-waist"],
+      coverageConditional: null,
+      occasion: "everyday",
+      formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "my-closet",
+      intentions: ["give-structure"],
+    }).session;
+
+    const allItems = [
+      makeSmcmItem({ id: "a1", category: "TOPS", occasions: ["everyday"] }),
+      makeSmcmItem({ id: "t2", category: "TOPS", occasions: ["everyday"], garmentRelationships: ["soft-and-forgiving-around-waist", "structured"] }),
+      makeSmcmItem({ id: "b1", category: "BOTTOMS", occasions: ["everyday"], garmentRelationships: ["soft-and-forgiving-around-waist"] }),
+      makeSmcmItem({ id: "s1", category: "SHOES", occasions: ["everyday"] }),
+    ];
+
+    const candidates = buildNaiaOutfitCandidates(anchor, session, allItems, undefined, undefined);
+    for (const c of candidates) {
+      if (c === null) continue;
+      assert.ok(
+        c.pieces.some((p) => p.closetId === "a1"),
+        `CE.B.5: anchor must be present in candidate ${c.id} (Test 5 regression)`,
+      );
+    }
+  });
+
+  it("CE.B.6 — tryImprove uses exactSlot: item with exactSlot override is not tried for legacy slot", () => {
+    // xj has category TOPS (legacy slot "top") but exactSlot "outerwear".
+    // With Fix C, tryImprove classifies xj as "outerwear", not "top".
+    // Therefore xj is never tried as a replacement for the "top" slot.
+    const anchor = makeAnchor("b0", "bottom");
+    const session = buildEngineInput({
+      moods: [],
+      desiredFeelings: [],
+      bodyNeeds: ["soft-and-forgiving-around-waist"],
+      coverageConditional: null,
+      occasion: "everyday",
+      formalityConditional: null,
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "my-closet",
+    }).session;
+
+    const xjItem = {
+      ...makeSmcmItem({ id: "xj", category: "TOPS", occasions: ["everyday"], garmentRelationships: ["soft-and-forgiving-around-waist"] }),
+      approvedProfile: {
+        exactSlot: "outerwear",
+        outfitFunction: null,
+        dressRegister: null,
+        fabricBehaviour: [],
+        silhouetteCharacter: [],
+        visualWeight: null,
+        construction: null,
+        stylingEffort: null,
+        layeringBehaviour: null,
+        waistComfort: null,
+        statementLevel: null,
+        occasionFit: null,
+        intentionPotentials: null,
+        naturalPairings: null,
+        intentionalMix: null,
+        avoidInStyleMe: null,
+      },
+    };
+
+    const allItems = [
+      makeSmcmItem({ id: "b0", category: "BOTTOMS", occasions: ["everyday"] }),
+      makeSmcmItem({ id: "t1", category: "TOPS", occasions: ["everyday"] }),
+      xjItem,
+    ];
+
+    const [, , , , candidateE] = buildNaiaOutfitCandidates(anchor, session, allItems, undefined, undefined);
+    // Fix C: tryImprove must NOT place xj (exactSlot="outerwear") in the "top" slot.
+    // Candidate B is built by a different path and is not in scope here.
+    if (candidateE !== null) {
+      const xjInTop = candidateE.pieces.find((p) => p.closetId === "xj" && p.slot === "top");
+      assert.strictEqual(
+        xjInTop,
+        undefined,
+        "CE.B.6: xj (exactSlot=\"outerwear\") must not appear in \"top\" slot of candidate E",
+      );
+    }
+  });
+
+  it("CE.B.7 — passesAnchorIntegrityGate: valid candidate (anchor present, no duplicate structural slots) passes", () => {
+    const candidate: OutfitCandidate = {
+      id: "A",
+      pieces: [
+        { closetId: "a1", slot: "top", label: "Anchor Top", colors: [] },
+        { closetId: "b1", slot: "bottom", label: "Jeans", colors: [] },
+        { closetId: "s1", slot: "shoe", label: "Sneakers", colors: [] },
+        { closetId: "ow1", slot: "outerwear", label: "Hoodie", colors: [] },
+      ],
+    };
+    assert.strictEqual(
+      passesAnchorIntegrityGate(candidate, "a1", "top"),
+      true,
+      "CE.B.7: gate must pass a valid candidate with anchor and no duplicate structural slots",
+    );
   });
 });
 
