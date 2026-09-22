@@ -1498,6 +1498,22 @@ export function buildNaiaOutfitCandidates(
   // returns [] in this case, but that alone does not prevent candidateA from being
   // returned with the naked anchor.
   const anchorInputItem = allItems.find((i) => i.id === anchor.id);
+  // [SLOT-DIAG] Log anchor profile data and Candidate A pieces.
+  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+    console.log("[SLOT-DIAG][Anchor]", JSON.stringify({
+      id: anchor.id,
+      name: anchor.label,
+      legacySlot: anchor.slot,
+      exactSlot: anchorInputItem?.approvedProfile?.exactSlot ?? null,
+      layeringBehaviour: anchorInputItem?.approvedProfile?.layeringBehaviour ?? null,
+    }));
+    console.log("[SLOT-DIAG][CandidateA]", JSON.stringify({
+      pieces: candidateA.pieces.map((p) => {
+        const item = allItems.find((i) => i.id === p.closetId);
+        return { closetId: p.closetId, name: p.label, assignedSlot: p.slot, legacySlot: item ? closetItemToSlot(item.category, item.subcategory) : null, exactSlot: item?.approvedProfile?.exactSlot ?? null, layeringBehaviour: item?.approvedProfile?.layeringBehaviour ?? null, source: p.closetId === anchor.id ? "anchor" : "selectAdditional" };
+      }),
+    }));
+  }
   if (
     anchorInputItem?.approvedProfile?.layeringBehaviour === "base-under-layer" &&
     !passesLayeringRequirement(anchorInputItem, candidateA, allItems)
@@ -1588,6 +1604,18 @@ export function buildNaiaOutfitCandidates(
       (p) => p.closetId !== anchor.id || p.slot === (anchor.slot as string),
     );
     candidateB = { id: "B", pieces: [...bSlotPieces, ...nonBSlotPieces] };
+    // [SLOT-DIAG] Log Candidate B reconstruction details.
+    if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+      console.log("[SLOT-DIAG][CandidateB-bSlotPieces]", JSON.stringify(bSlotPieces.map((p) => {
+        const item = allItems.find((i) => i.id === p.closetId);
+        return { closetId: p.closetId, name: p.label, assignedSlot: p.slot, legacySlot: item ? closetItemToSlot(item.category, item.subcategory) : null, exactSlot: item?.approvedProfile?.exactSlot ?? null };
+      })));
+      console.log("[SLOT-DIAG][CandidateB-nonBSlotPieces]", JSON.stringify(nonBSlotPieces.map((p) => {
+        const item = allItems.find((i) => i.id === p.closetId);
+        return { closetId: p.closetId, name: p.label, assignedSlot: p.slot, legacySlot: item ? closetItemToSlot(item.category, item.subcategory) : null, exactSlot: item?.approvedProfile?.exactSlot ?? null };
+      })));
+      console.log("[SLOT-DIAG][CandidateB]", JSON.stringify({ pieces: candidateB.pieces.map((p) => ({ closetId: p.closetId, name: p.label, assignedSlot: p.slot })) }));
+    }
   } else {
     // No slot had a different best-fit item — fall back to the first slot with any alternative.
     for (const selected of fullSelection.filter((g) => B_SLOTS.has(g.slot))) {
@@ -3425,6 +3453,10 @@ export function selectAdditionalClosetGarments(
     coveredSlots.add("dress");
     coveredSlots.add("set");
   }
+  // [SLOT-DIAG] Log initial coveredSlots after full construction.
+  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+    console.log("[SLOT-DIAG][coveredSlots-init]", JSON.stringify([...coveredSlots]));
+  }
 
   const signals = {
     occasion: session.occasion,
@@ -3455,7 +3487,13 @@ export function selectAdditionalClosetGarments(
     const categorySlot = closetItemToSlot(item.category, item.subcategory);
     const slot = resolveProfileSlot(item, categorySlot);
     if (slot === "unknown") continue;
-    if (coveredSlots.has(slot)) continue;
+    if (coveredSlots.has(slot)) {
+      // [SLOT-DIAG] Log any structural-slot item that was blocked by coveredSlots.
+      if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true" && ["top", "bottom", "dress", "set"].includes(slot)) {
+        console.log("[SLOT-DIAG][Blocked]", JSON.stringify({ id: item.id, name: item.name, legacySlot: categorySlot, exactSlot: item.approvedProfile?.exactSlot ?? null, resolvedSlot: slot }));
+      }
+      continue;
+    }
 
     // Gate 4: outfitFunction gate — "finishing" function pieces must not fill structural clothing slots.
     if (!passesOutfitFunctionGate(item, slot)) continue;
@@ -3538,6 +3576,10 @@ export function selectAdditionalClosetGarments(
     const fresh = recentlyShownIds ? candidates.find((c) => !recentlyShownIds.has(c.item.id)) : null;
     const chosen = fresh ?? candidates[0];
     result.push({ slot, id: chosen.item.id, label: chosen.item.name, imageUrl: chosen.item.imageUrl, colors: chosen.item.colors ?? [] });
+    // [SLOT-DIAG] Phase 1 addition.
+    if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+      console.log("[SLOT-DIAG][Phase1-added]", JSON.stringify({ id: chosen.item.id, name: chosen.item.name, legacySlot: closetItemToSlot(chosen.item.category, chosen.item.subcategory), exactSlot: chosen.item.approvedProfile?.exactSlot ?? null, layeringBehaviour: chosen.item.approvedProfile?.layeringBehaviour ?? null, assignedSlot: slot }));
+    }
   }
 
   // Phase 2: optional finishing pieces — shoes first (never crowded by accessories/bags),
@@ -3586,6 +3628,10 @@ export function selectAdditionalClosetGarments(
     if (statementPieceCount > 0 && isStatementPiece(opt.item, opt.slot)) continue;
     if (isStatementPiece(opt.item, opt.slot)) statementPieceCount++;
     result.push({ slot: opt.slot, id: opt.item.id, label: opt.item.name, imageUrl: opt.item.imageUrl, colors: opt.item.colors ?? [] });
+    // [SLOT-DIAG] Phase 2 addition.
+    if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+      console.log("[SLOT-DIAG][Phase2-added]", JSON.stringify({ id: opt.item.id, name: opt.item.name, legacySlot: closetItemToSlot(opt.item.category, opt.item.subcategory), exactSlot: opt.item.approvedProfile?.exactSlot ?? null, layeringBehaviour: opt.item.approvedProfile?.layeringBehaviour ?? null, assignedSlot: opt.slot }));
+    }
   }
 
   // ── Post-assembly: layering constraint validation ─────────────────────────────
@@ -3616,6 +3662,10 @@ export function selectAdditionalClosetGarments(
           assembledCandidate.pieces.findIndex((p) => p.closetId === result[i].id),
           1,
         );
+        // [SLOT-DIAG] Layering removal.
+        if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+          console.log("[SLOT-DIAG][LayeringRemoved]", JSON.stringify({ id: result[i].id, name: result[i].label, slot: result[i].slot }));
+        }
         result.splice(i, 1);
       }
     }
@@ -4371,6 +4421,28 @@ export async function computeStyleMeResult(
         fallbackReason = "model-call-failed-or-invalid";
         finalCandidate = deterministicBest;
         setPieces(finalCandidate, undefined);
+      }
+
+      // [SLOT-DIAG] Log final candidate pieces with structural slot counts.
+      if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+        const STRUCTURAL_SLOTS = ["top", "bottom", "dress", "set", "outerwear"] as const;
+        const slotCounts = STRUCTURAL_SLOTS.map((s) => ({
+          slot: s,
+          count: finalCandidate.pieces.filter((p) => p.slot === s).length,
+          items: finalCandidate.pieces.filter((p) => p.slot === s).map((p) => ({ id: p.closetId, name: p.label })),
+        }));
+        const naiaModelSelected = naiaResult && !fallbackUsed ? naiaResult.candidate.id : null;
+        console.log("[SLOT-DIAG][FinalCandidate]", JSON.stringify({
+          candidateId: finalCandidate.id,
+          naiaModelSelected,
+          fallbackUsed,
+          fallbackReason: fallbackReason ?? null,
+          pieces: finalCandidate.pieces.map((p) => {
+            const item = allItems.find((i) => i.id === p.closetId);
+            return { id: p.closetId, name: p.label, slot: p.slot, legacySlot: item ? closetItemToSlot(item.category, item.subcategory) : null, exactSlot: item?.approvedProfile?.exactSlot ?? null, layeringBehaviour: item?.approvedProfile?.layeringBehaviour ?? null };
+          }),
+          structuralSlotCounts: slotCounts,
+        }));
       }
 
       logNaiaSelectionDiag({
