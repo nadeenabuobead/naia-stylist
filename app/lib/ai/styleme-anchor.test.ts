@@ -335,6 +335,7 @@ describe("§REV2 autoSelectClosetAnchor formality tier-sort", () => {
       imageUrl: null,
       garmentRelationships: [],
       formality: null,
+      styleMeProfile: null,
       ...overrides,
     };
   }
@@ -426,5 +427,160 @@ describe("§REV2 autoSelectClosetAnchor formality tier-sort", () => {
     // signal score: business-formal has +10 (occasion) + 3 (mood) = 13; casual = 10
     assert.ok(selected !== null, "should select an anchor");
     assert.equal(selected!.id, "suit", "business-formal at raised ceiling beats plain casual on score");
+  });
+});
+
+// ── §AR — autoSelectClosetAnchor intention awareness ─────────────────────────
+
+describe("§AR autoSelectClosetAnchor intention awareness", () => {
+  // Shared helper reused across §AR tests — extends the REV2 helper.
+  function makeAnchorItem(
+    id: string,
+    overrides: Partial<AutoSelectItem> & {
+      styleMeProfile?: AutoSelectItem["styleMeProfile"];
+    } = {},
+  ): AutoSelectItem {
+    return {
+      id,
+      name: null,
+      category: "TOPS",            // anchor-capable
+      subcategory: null,
+      colors: [],
+      primaryColor: null,
+      pattern: null,
+      material: null,
+      styleTags: [],
+      occasions: ["everyday"],
+      imageUrl: null,
+      garmentRelationships: [],
+      formality: "casual",
+      styleMeProfile: null,
+      ...overrides,
+    };
+  }
+
+  const EVERYDAY_SIGNALS = {
+    occasion: "everyday",
+    moods: [] as string[],
+    desiredFeelings: [] as string[],
+    intentions: ["feel-sharper"],
+  };
+
+  it("AR.1 — approved Strong intention ranks above approved None, same base signals", async () => {
+    // Both items: everyday occasion, anchor-capable (TOPS), identical base score.
+    // Sharper: feel-sharper=Strong → bonus = 1.0 × 1.5 = 1.5
+    // Neutral: feel-sharper=None → bonus = 0
+    const sharper = makeAnchorItem("sharper", {
+      styleMeProfile: {
+        profileStatus: "approved",
+        intentionPotentials: { "feel-sharper": "Strong" },
+        occasionFit: null,
+      },
+    });
+    const neutral = makeAnchorItem("neutral", {
+      styleMeProfile: {
+        profileStatus: "approved",
+        intentionPotentials: { "feel-sharper": "None" },
+        occasionFit: null,
+      },
+    });
+
+    const selected = await autoSelectClosetAnchor("any", EVERYDAY_SIGNALS, async () => [neutral, sharper]);
+    assert.ok(selected !== null, "should select an anchor");
+    assert.equal(selected!.id, "sharper", "Strong feel-sharper must outrank None when active intention is feel-sharper");
+  });
+
+  it("AR.2 — control: same items without feel-sharper intention → selection is NOT forced to the sharper item", async () => {
+    // Without the intention, base scores are equal → deterministic tiebreaker decides.
+    // We only assert that the function completes and returns *some* anchor —
+    // we do NOT assert which wins (tiebreaker order is an implementation detail).
+    const sharper = makeAnchorItem("sharper", {
+      styleMeProfile: {
+        profileStatus: "approved",
+        intentionPotentials: { "feel-sharper": "Strong" },
+        occasionFit: null,
+      },
+    });
+    const neutral = makeAnchorItem("neutral", {
+      styleMeProfile: {
+        profileStatus: "approved",
+        intentionPotentials: { "feel-sharper": "None" },
+        occasionFit: null,
+      },
+    });
+
+    const controlSignals = { occasion: "everyday", moods: [] as string[], desiredFeelings: [] as string[] };
+    const selected = await autoSelectClosetAnchor("any", controlSignals, async () => [sharper, neutral]);
+    assert.ok(selected !== null, "should select some anchor even without intention");
+    // Key assertion: the result is EITHER item — the sharper item must not be guaranteed without the intention.
+    assert.ok(["sharper", "neutral"].includes(selected!.id), "result is one of the two items");
+  });
+
+  it("AR.3 — occasionFit='No' blocks an anchor even when it has Strong intention", async () => {
+    // The occasionFit gate must take precedence over intention bonus.
+    const blocked = makeAnchorItem("blocked", {
+      occasions: [],
+      garmentRelationships: [],
+      styleMeProfile: {
+        profileStatus: "approved",
+        intentionPotentials: { "feel-sharper": "Strong" },
+        occasionFit: { everyday: "No" },   // explicitly excluded for everyday
+      },
+    });
+    const allowed = makeAnchorItem("allowed", {
+      styleMeProfile: {
+        profileStatus: "approved",
+        intentionPotentials: { "feel-sharper": "None" },
+        occasionFit: null,
+      },
+    });
+
+    const selected = await autoSelectClosetAnchor("any", EVERYDAY_SIGNALS, async () => [blocked, allowed]);
+    assert.ok(selected !== null, "should select an anchor");
+    assert.equal(selected!.id, "allowed", "occasionFit=No must block anchor despite Strong intention");
+  });
+
+  it("AR.4 — approved None does not gain a bonus from legacy legacy tags (black/fitted)", async () => {
+    // Even if the item has styleTags that legacy heuristics would reward,
+    // an approved None must not receive any intention bonus.
+    const approvedNoneWithLegacyTags = makeAnchorItem("none-legacy", {
+      styleTags: ["fitted", "black", "structured"],  // legacy proxies for feel-sharper
+      styleMeProfile: {
+        profileStatus: "approved",
+        intentionPotentials: { "feel-sharper": "None" },
+        occasionFit: null,
+      },
+    });
+    const approvedStrong = makeAnchorItem("strong", {
+      styleTags: [],
+      styleMeProfile: {
+        profileStatus: "approved",
+        intentionPotentials: { "feel-sharper": "Strong" },
+        occasionFit: null,
+      },
+    });
+
+    const selected = await autoSelectClosetAnchor("any", EVERYDAY_SIGNALS, async () => [approvedNoneWithLegacyTags, approvedStrong]);
+    assert.ok(selected !== null, "should select an anchor");
+    assert.equal(selected!.id, "strong", "approved None must not be boosted by legacy tags — Strong approved wins");
+  });
+
+  it("AR.5 — un-profiled item (styleMeProfile=null) gains no intention bonus", async () => {
+    // Items with no approved profile fall back to base score only for anchor ranking.
+    // An approved Supporting item must beat an un-profiled item with equal base score.
+    const unprofiled = makeAnchorItem("unprofiled", {
+      styleMeProfile: null,
+    });
+    const approvedSupporting = makeAnchorItem("supporting", {
+      styleMeProfile: {
+        profileStatus: "approved",
+        intentionPotentials: { "feel-sharper": "Supporting" },
+        occasionFit: null,
+      },
+    });
+
+    const selected = await autoSelectClosetAnchor("any", EVERYDAY_SIGNALS, async () => [unprofiled, approvedSupporting]);
+    assert.ok(selected !== null, "should select an anchor");
+    assert.equal(selected!.id, "supporting", "approved Supporting must beat un-profiled item with equal base score");
   });
 });

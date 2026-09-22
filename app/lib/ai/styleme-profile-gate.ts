@@ -44,8 +44,10 @@ export const OCCASION_REGISTER_RANGE: Record<string, { min: number; max: number 
   "night-out": { min: 2, max: 6 },
 };
 
-// Structural slots excluded from intention scoring (accessories, bags, jewelry).
-// Exported for use in selectAdditionalClosetGarments post-assembly checks.
+// Non-structural slots excluded from register/statement checks (bags, accessories, jewelry).
+// NOTE: STRUCTURAL_EXCLUDES is NOT used in computeProfileIntentionFit or
+// computeHybridIntentionFit — all pieces (including bag/accessory) contribute to
+// candidate-level intention scoring via their approved intentionPotentials.
 export const STRUCTURAL_EXCLUDES = new Set(["bag", "accessory", "jewelry"]);
 
 // Valid OutfitSlot values — used to validate profile exactSlot before casting.
@@ -212,13 +214,16 @@ export function computeProfileIntentionFit(
   candidate: OutfitCandidate,
   allItems: ClosetAnchorInput[],
 ): number | null {
-  const structuralPieces = candidate.pieces.filter((p) => !STRUCTURAL_EXCLUDES.has(p.slot));
-  if (structuralPieces.length === 0) return null;
+  // All pieces contribute to intention fit — bag/accessory/jewelry are included because
+  // a structured bag or defining belt directly affects whether an outfit feels sharp/easy/etc.
+  // STRUCTURAL_EXCLUDES is intentionally NOT applied here.
+  const pieces = candidate.pieces;
+  if (pieces.length === 0) return null;
 
   const itemMap = new Map(allItems.map((i) => [i.id, i]));
   let sum = 0;
 
-  for (const piece of structuralPieces) {
+  for (const piece of pieces) {
     const item = itemMap.get(piece.closetId);
     if (!item) return null; // Unknown item → can't score → full legacy for whole candidate
     const profileScore = getProfileIntentionScore(item, intentionId);
@@ -231,7 +236,7 @@ export function computeProfileIntentionFit(
     sum += profileScore;
   }
 
-  return sum / structuralPieces.length;
+  return sum / pieces.length;
 }
 
 // ── Layering behaviour gate ────────────────────────────────────────────────────
@@ -408,13 +413,15 @@ export function computeHybridIntentionFit(
   candidate: OutfitCandidate,
   allItems: ClosetAnchorInput[],
 ): number | null {
-  const structuralPieces = candidate.pieces.filter((p) => !STRUCTURAL_EXCLUDES.has(p.slot));
-  if (structuralPieces.length === 0) return null;
+  // All pieces contribute to intention fit — STRUCTURAL_EXCLUDES is intentionally NOT applied
+  // here so that bags, accessories, and jewelry with approved intentionPotentials are counted.
+  const pieces = candidate.pieces;
+  if (pieces.length === 0) return null;
 
   const itemMap = new Map(allItems.map((i) => [i.id, i]));
 
   // All-unprofiled: signal the caller to use the full outfit-level legacy heuristic.
-  const hasAnyApprovedProfile = structuralPieces.some((p) => {
+  const hasAnyApprovedProfile = pieces.some((p) => {
     const item = itemMap.get(p.closetId);
     return item?.approvedProfile != null;
   });
@@ -422,7 +429,7 @@ export function computeHybridIntentionFit(
 
   // Hybrid: at least one piece has an approved profile.
   let sum = 0;
-  for (const piece of structuralPieces) {
+  for (const piece of pieces) {
     const item = itemMap.get(piece.closetId);
     if (!item) return null; // Unknown item → cannot score hybrid → fall back to legacy
     if (item.approvedProfile) {
@@ -435,7 +442,7 @@ export function computeHybridIntentionFit(
       sum += legacyPieceIntentionScore(item, intentionId);
     }
   }
-  return sum / structuralPieces.length;
+  return sum / pieces.length;
 }
 
 // ── outfitFunction enforcement ────────────────────────────────────────────────

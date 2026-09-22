@@ -2163,3 +2163,175 @@ describe("§SP Signal-ranking precedence — intention bonus cannot override hig
       "athletic register must be excluded from everyday session regardless of Strong intention");
   });
 });
+
+// Module-level fixture: all intention potentials set to None.
+// Used in §T4 and Rule 18 tests.
+const ALL_NONE_PROFILE = makeApprovedProfile({
+  intentionPotentials: {
+    "feel-sharper": "None", "feel-like-myself": "None", confidence: "None", "ground-me": "None",
+    "give-structure": "None", "make-it-easy": "None", "feel-put-together": "None",
+    "feel-attractive": "None", "give-energy": "None", "feel-softer": "None",
+    "feel-less-exposed": "None", "express-myself": "None",
+  },
+});
+
+// ── §T4: Candidate-level intention scoring includes bag/accessory pieces ───────
+// Root cause of RC-6: STRUCTURAL_EXCLUDES previously filtered bag/accessory/jewelry
+// out of computeProfileIntentionFit and computeHybridIntentionFit, leaving T4=0
+// even when those pieces had approved Supporting/Strong intentionPotentials.
+
+describe("§T4 Candidate-level intention scoring — all pieces contribute", () => {
+  const allNoneProfile = ALL_NONE_PROFILE;
+
+  it("T4.1 — candidate with bag+accessory both feel-sharper=Supporting produces T4 > 0", () => {
+    // Reproduces the exact RC-6 scenario: belt (accessory) + bag both Supporting,
+    // top/bottom/shoe all None. STRUCTURAL_EXCLUDES previously zeroed this out.
+    const top = makeItem({ id: "top", category: "TOPS", approvedProfile: makeApprovedProfile({ intentionPotentials: { ...allNoneProfile.intentionPotentials, "feel-sharper": "None" } }) });
+    const bottom = makeItem({ id: "btm", category: "BOTTOMS", approvedProfile: makeApprovedProfile({ intentionPotentials: { ...allNoneProfile.intentionPotentials, "feel-sharper": "None" }, exactSlot: "bottom" }) });
+    const shoe = makeItem({ id: "shoe", category: "SHOES", approvedProfile: makeApprovedProfile({ intentionPotentials: { ...allNoneProfile.intentionPotentials, "feel-sharper": "None" }, exactSlot: "shoe" }) });
+    const belt = makeItem({
+      id: "belt", category: "ACCESSORIES",
+      approvedProfile: makeApprovedProfile({
+        exactSlot: "accessory",
+        intentionPotentials: { ...allNoneProfile.intentionPotentials, "feel-sharper": "Supporting" },
+      }),
+    });
+    const bag = makeItem({
+      id: "bag", category: "BAGS",
+      approvedProfile: makeApprovedProfile({
+        exactSlot: "bag",
+        intentionPotentials: { ...allNoneProfile.intentionPotentials, "feel-sharper": "Supporting" },
+      }),
+    });
+
+    const candidate = makeCandidate([
+      { closetId: "top", slot: "top" },
+      { closetId: "btm", slot: "bottom" },
+      { closetId: "shoe", slot: "shoe" },
+      { closetId: "belt", slot: "accessory" },
+      { closetId: "bag", slot: "bag" },
+    ]);
+    const allItems = [top, bottom, shoe, belt, bag];
+    const profileScore = computeProfileIntentionFit("feel-sharper", candidate, allItems);
+    // Average over 5 pieces: (0+0+0+0.5+0.5)/5 = 0.2 > 0
+    assert.ok(profileScore !== null, "computeProfileIntentionFit must return a value (not null) when all pieces are profiled");
+    assert.ok(profileScore > 0, `bag+accessory both Supporting must produce positive score, got ${profileScore}`);
+  });
+
+  it("T4.2 — strong piece beats supporting-only candidate in T4", () => {
+    const strongItem = makeItem({
+      id: "strong", category: "TOPS",
+      approvedProfile: makeApprovedProfile({ intentionPotentials: { ...allNoneProfile.intentionPotentials, "feel-sharper": "Strong" } }),
+    });
+    const supportingItem = makeItem({
+      id: "supporting", category: "TOPS",
+      approvedProfile: makeApprovedProfile({ intentionPotentials: { ...allNoneProfile.intentionPotentials, "feel-sharper": "Supporting" } }),
+    });
+    const strongCandidate = makeCandidate([{ closetId: "strong", slot: "top" }]);
+    const supCandidate = makeCandidate([{ closetId: "supporting", slot: "top" }]);
+    const strongT4 = computeIntentionFit(["feel-sharper"], strongCandidate, strongCandidate, [strongItem], undefined);
+    const supT4 = computeIntentionFit(["feel-sharper"], supCandidate, supCandidate, [supportingItem], undefined);
+    assert.ok(strongT4 > supT4, `Strong T4 (${strongT4}) must exceed Supporting T4 (${supT4})`);
+  });
+
+  it("T4.3 — all-None candidate produces T4 = 0", () => {
+    const noneTop = makeItem({ id: "none-top", category: "TOPS", approvedProfile: allNoneProfile });
+    const noneBtm = makeItem({ id: "none-btm", category: "BOTTOMS", approvedProfile: makeApprovedProfile({ intentionPotentials: { ...allNoneProfile.intentionPotentials }, exactSlot: "bottom" }) });
+    const candidate = makeCandidate([
+      { closetId: "none-top", slot: "top" },
+      { closetId: "none-btm", slot: "bottom" },
+    ]);
+    const score = computeIntentionFit(["feel-sharper"], candidate, candidate, [noneTop, noneBtm], undefined);
+    assert.equal(score, 0, "all-None approved pieces must produce T4=0");
+  });
+
+  it("T4.4 — approved None does not gain from black/fitted/legacy tags", () => {
+    const approvedNoneWithTags = makeItem({
+      id: "none-tag", category: "TOPS",
+      colors: ["black"], primaryColor: "black",
+      fitProfile: "fitted",
+      styleTags: ["sharp", "structured", "tailored", "polished"],
+      approvedProfile: makeApprovedProfile({
+        intentionPotentials: { ...allNoneProfile.intentionPotentials, "feel-sharper": "None" },
+        construction: "tailored",
+      }),
+    });
+    const candidate = makeCandidate([{ closetId: "none-tag", slot: "top" }]);
+    const score = computeIntentionFit(["feel-sharper"], candidate, candidate, [approvedNoneWithTags], undefined);
+    assert.equal(score, 0, "approved None must not be boosted by black/fitted/legacy tags — hard 0");
+  });
+
+  it("T4.5 — mixed candidate: approved Supporting bag + un-profiled top preserves Supporting contribution", () => {
+    // The bag has an approved profile with Supporting. The top has no profile → legacy path.
+    // computeHybridIntentionFit: since at least one piece has an approved profile,
+    // the bag's Supporting rating must contribute positively.
+    const unprofiled = makeItem({ id: "unprof", category: "TOPS" }); // no approvedProfile
+    const supportingBag = makeItem({
+      id: "sup-bag", category: "BAGS",
+      approvedProfile: makeApprovedProfile({
+        exactSlot: "bag",
+        intentionPotentials: { ...allNoneProfile.intentionPotentials, "feel-sharper": "Supporting" },
+      }),
+    });
+    const candidate = makeCandidate([
+      { closetId: "unprof", slot: "top" },
+      { closetId: "sup-bag", slot: "bag" },
+    ]);
+    const hybridScore = computeHybridIntentionFit("feel-sharper", candidate, [unprofiled, supportingBag]);
+    assert.ok(hybridScore !== null, "hybrid must not be null when at least one piece is approved");
+    assert.ok(hybridScore > 0, `bag Supporting must push hybrid score positive, got ${hybridScore}`);
+  });
+
+  it("T4.6 — T3b (bodyNeedFitScore) precedes T4 (intentionFit) in compareCandidateRankKeys", () => {
+    // Candidate A: weak bodyNeedFitScore but strong intentionFit
+    // Candidate B: strong bodyNeedFitScore but zero intentionFit
+    // B must win because T3b sorts before T4.
+    const keyA: CandidateRankKey = {
+      occasionTier: 2, formalityFitPriority: 1, knownViolationCount: 0,
+      bodyNeedFitScore: 0.1,   // low body-need fit
+      intentionFit: 3.0,       // max intention
+      passportAlignment: 0, formalityOvershootAbs: 0,
+      optionalNonMatchCount: 0, discretionaryCount: 0, profiledCount: 0,
+    };
+    const keyB: CandidateRankKey = {
+      occasionTier: 2, formalityFitPriority: 1, knownViolationCount: 0,
+      bodyNeedFitScore: 0.9,   // high body-need fit
+      intentionFit: 0.0,       // no intention score
+      passportAlignment: 0, formalityOvershootAbs: 0,
+      optionalNonMatchCount: 0, discretionaryCount: 0, profiledCount: 0,
+    };
+    const result = compareCandidateRankKeys(keyA, keyB);
+    assert.ok(result > 0, `T3b-better candidate B must rank higher than T4-better candidate A — compareCandidateRankKeys returned ${result} (expected > 0)`);
+  });
+});
+
+// ── Rule 18 copy regression ────────────────────────────────────────────────────
+// Rule 18 prevents structural/sharpness language for garments whose construction
+// is not "structured" or "semi-structured". A soft-construction top with
+// feel-sharper=None must never be described as a source of structural sharpness.
+
+describe("Rule 18 copy regression — construction=soft + feel-sharper=None", () => {
+  it("R18.1 — approved soft construction + feel-sharper=None is NOT described as structurally sharp because it is black", () => {
+    // This is a logic gate test, not a full Claude call.
+    // We assert that the intention score is hard 0, which is the precondition
+    // that prevents copy from attributing sharpness to this piece.
+    const softBlackTop = makeItem({
+      id: "soft-black-top",
+      category: "TOPS",
+      colors: ["black"],
+      primaryColor: "black",
+      approvedProfile: makeApprovedProfile({
+        construction: "soft",
+        intentionPotentials: {
+          ...ALL_NONE_PROFILE.intentionPotentials,
+          "feel-sharper": "None",
+        },
+      }),
+    });
+    const candidate = makeCandidate([{ closetId: "soft-black-top", slot: "top" }]);
+    const score = computeIntentionFit(["feel-sharper"], candidate, candidate, [softBlackTop], undefined);
+    assert.equal(score, 0,
+      "soft construction + feel-sharper=None must produce T4=0 regardless of black color — " +
+      "this is the gate that prevents Rule 18 from being violated in copy generation");
+  });
+});

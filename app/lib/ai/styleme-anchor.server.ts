@@ -322,6 +322,13 @@ export type AutoSelectItem = {
   imageUrl: string | null;
   garmentRelationships: string[];
   formality: string | null;
+  // Approved GarmentStyleMeProfile — for intention-aware anchor ranking.
+  // null when no approved profile exists.
+  styleMeProfile: {
+    profileStatus: string;
+    intentionPotentials: Record<string, string> | null;
+    occasionFit: Record<string, string> | null;
+  } | null;
 };
 
 // Inline formality rank — mirrors FORMALITY_RANK in result.server.ts.
@@ -340,7 +347,15 @@ const _OCCASION_MAX_RANK: Record<string, number> = {
 
 export async function autoSelectClosetAnchor(
   customerId: string,
-  signals: { occasion: string; moods: string[]; desiredFeelings: string[]; formalityConditional?: string | null },
+  signals: {
+    occasion: string;
+    moods: string[];
+    desiredFeelings: string[];
+    formalityConditional?: string | null;
+    // TODAY intentions — used to rank equally-scored eligible anchors.
+    // Only approved intentionPotentials are consulted; no legacy tag fallback.
+    intentions?: string[];
+  },
   _fetchItems?: (customerId: string) => Promise<AutoSelectItem[]>,
 ): Promise<{ anchor: ClosetAnchorInput; id: string } | null> {
   const items: AutoSelectItem[] = _fetchItems
@@ -354,6 +369,9 @@ export async function autoSelectClosetAnchor(
           colors: true, primaryColor: true, pattern: true, material: true,
           styleTags: true, occasions: true, imageUrl: true,
           garmentRelationships: true, formality: true,
+          styleMeProfile: {
+            select: { profileStatus: true, intentionPotentials: true, occasionFit: true },
+          },
         },
       }) as AutoSelectItem[];
 
@@ -374,17 +392,36 @@ export async function autoSelectClosetAnchor(
 
   type ScoredItem = { item: AutoSelectItem; score: number; isAnchorCapable: boolean; inRange: boolean };
 
-  const mapped: ScoredItem[] = items.map((item) => ({
-    item,
-    score: scoreClosetItemForSession(
+  const activeIntentions = signals.intentions ?? [];
+
+  const mapped: ScoredItem[] = items.map((item) => {
+    const baseScore = scoreClosetItemForSession(
       { occasions: item.occasions, styleTags: item.styleTags, category: item.category },
       signals,
       undefined,
       item.garmentRelationships,
-    ),
-    isAnchorCapable: ANCHOR_CAPABLE_CATEGORIES.has(item.category),
-    inRange: isFormallyInRange(item),
-  }));
+    );
+    // Intention bonus: approved intentionPotentials only — no legacy tag fallback.
+    // Scales identically to slot-filling (max 1.5 per Strong intention) so it can
+    // break ties but cannot overcome an occasion-match or mood-match advantage.
+    const approvedProfile = item.styleMeProfile?.profileStatus === "approved"
+      ? item.styleMeProfile
+      : null;
+    const intentionBonus = approvedProfile?.intentionPotentials && activeIntentions.length > 0
+      ? activeIntentions.reduce((sum, id) => {
+          const rating = (approvedProfile.intentionPotentials as Record<string, string>)[id];
+          if (rating === "Strong") return sum + 1.0;
+          if (rating === "Supporting") return sum + 0.5;
+          return sum; // None = 0, unrated = 0 — no legacy fallback
+        }, 0) * 1.5
+      : 0;
+    return {
+      item,
+      score: baseScore + intentionBonus,
+      isAnchorCapable: ANCHOR_CAPABLE_CATEGORIES.has(item.category),
+      inRange: isFormallyInRange(item),
+    };
+  });
 
   const scored = mapped.sort((a, b) => {
     // Tier 0 (in-range formality) always beats Tier 1 (known out-of-range)
@@ -402,22 +439,37 @@ export async function autoSelectClosetAnchor(
   // Items with no occasion tags at all are treated as versatile (incomplete metadata,
   // not a block). A higher-scoring incompatible item must not prevent a lower-scoring
   // compatible item from being selected.
-  const isOccasionCompatible = (item: AutoSelectItem): boolean =>
-    matchesSessionOccasion(item.occasions, signals.occasion)  // normalized match
-    || item.occasions.length === 0                            // no tags → versatile
-    || !item.garmentRelationships.includes("occasion-only");  // other-occasion tags, no restriction
+  const isOccasionCompatible = (item: AutoSelectItem): boolean => {
+    // Approved occasionFit "No" is a hard exclusion — intention cannot rescue it.
+    const ap = item.styleMeProfile?.profileStatus === "approved" ? item.styleMeProfile : null;
+    if (ap?.occasionFit) {
+      const fit = (ap.occasionFit as Record<string, string>)[signals.occasion];
+      if (fit === "No") return false;
+    }
+    return matchesSessionOccasion(item.occasions, signals.occasion)  // normalized match
+      || item.occasions.length === 0                                  // no tags → versatile
+      || !item.garmentRelationships.includes("occasion-only");        // other-occasion tags, no restriction
+  };
 
   const winnerEntry = scored.find(s => s.score > 0 && isOccasionCompatible(s.item));
   if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
     console.log("[nAia-anchor-rank]", JSON.stringify({
       occasion: signals.occasion,
-      intentions: (signals as Record<string, unknown>)["intentions"] ?? [],
-      note: "approvedProfile/intentionPotentials NOT fetched — anchor selection is intention-blind",
-      top10: scored.slice(0, 10).map((s) => ({
-        id: s.item.id, name: s.item.name, score: s.score,
-        isAnchorCapable: s.isAnchorCapable, inRange: s.inRange,
-        occasions: s.item.occasions,
-      })),
+      intentions: activeIntentions,
+      top10: scored.slice(0, 10).map((s) => {
+        const ap2 = s.item.styleMeProfile?.profileStatus === "approved" ? s.item.styleMeProfile : null;
+        return {
+          id: s.item.id, name: s.item.name, score: s.score,
+          isAnchorCapable: s.isAnchorCapable, inRange: s.inRange,
+          occasions: s.item.occasions,
+          intentionPotentials: activeIntentions.length > 0 && ap2?.intentionPotentials
+            ? Object.fromEntries(activeIntentions.map((id) => [
+                id,
+                (ap2.intentionPotentials as Record<string, string>)[id] ?? "(missing)",
+              ]))
+            : ap2 ? "(approved but no intentions active)" : "(no approved profile)",
+        };
+      }),
       winner: winnerEntry ? { id: winnerEntry.item.id, name: winnerEntry.item.name, score: winnerEntry.score } : null,
     }));
   }
