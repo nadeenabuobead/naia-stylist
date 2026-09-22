@@ -2205,6 +2205,31 @@ export default function StyleMeResult() {
           )}
         </div>
 
+        {loaderData.isStagingProject && (
+          <div style={{ marginTop: "1.5rem", textAlign: "center" }}>
+            <button
+              type="button"
+              onClick={() => {
+                const now = new Date();
+                const pad = (n: number) => String(n).padStart(2, "0");
+                const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+                const html = document.documentElement.outerHTML;
+                const blob = new Blob([html], { type: "text/html" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `styleme-qa-${stamp}.html`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+              }}
+              style={{ fontSize: "0.7rem", opacity: 0.45, padding: "0.25rem 0.75rem", border: "1px dashed currentColor", background: "transparent", cursor: "pointer", letterSpacing: "0.08em", borderRadius: "3px" }}
+            >
+              SAVE QA PAGE
+            </button>
+          </div>
+        )}
 
       </main>
 
