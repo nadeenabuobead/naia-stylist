@@ -1763,6 +1763,16 @@ export function buildNaiaOutfitCandidates(
     }
   }
 
+  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+    const out = ([candidateA, candidateB, candidateC, candidateD, candidateE] as (OutfitCandidate | null)[])
+      .filter(Boolean)
+      .map((c) => ({
+        id: c!.id,
+        pieces: c!.pieces.map((p) => ({ slot: p.slot, id: p.closetId, label: p.label })),
+      }));
+    console.log("[nAia-candidates]", JSON.stringify({ anchor: anchor.id, candidates: out }));
+  }
+
   return [candidateA, candidateB, candidateC, candidateD, candidateE];
 }
 
@@ -2606,6 +2616,32 @@ export async function callClaudeForNaiaSelection(
       return `Candidate ${c.id}:\n${lines.join("\n")}`;
     })
     .join("\n\n");
+
+  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+    console.log("[nAia-t4-and-profile]", JSON.stringify({
+      intentions: activeIntentions,
+      candidates: candidates.map((c) => ({
+        candidateId: c.id,
+        t4Score: allItems && activeIntentions.length > 0
+          ? computeIntentionFit(activeIntentions, c, candidateA, allItems, profileForScoring)
+          : null,
+        pieces: c.pieces.map((p) => {
+          const ap = allItems?.find((i) => i.id === p.closetId)?.approvedProfile;
+          const wantsConstruction = activeIntentions.some((i) => i === "feel-sharper" || i === "give-structure");
+          return {
+            slot: p.slot,
+            label: p.label,
+            hasProfile: !!ap,
+            construction: ap?.construction ?? null,
+            feelSharper: ap?.intentionPotentials
+              ? ((ap.intentionPotentials as Record<string, string>)["feel-sharper"] ?? "(missing)")
+              : "(no profile)",
+            constructionInPrompt: wantsConstruction && ap?.construction ? `construction: ${ap.construction}` : "(absent)",
+          };
+        }),
+      })),
+    }));
+  }
 
   const selectionHint = (() => {
     if (candidates.length === 1) {
@@ -3517,6 +3553,26 @@ export function selectAdditionalClosetGarments(
       : 0;
     // Apply outfitFunction priority: anchor pieces boosted, supporting pieces penalised.
     const score = (baseScore + intentionBonus) * outfitFunctionPriority(item);
+
+    if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+      console.log("[nAia-slot-score]", JSON.stringify({
+        slot, id: item.id, name: item.name ?? null,
+        baseScore,
+        intentionBonus: Math.round(intentionBonus * 1000) / 1000,
+        intentionPotentials: activeIntentions.length > 0
+          ? Object.fromEntries(activeIntentions.map((iid) => [
+              iid,
+              item.approvedProfile?.intentionPotentials
+                ? ((item.approvedProfile.intentionPotentials as Record<string, string>)[iid] ?? "(missing)")
+                : "(no profile)",
+            ]))
+          : {},
+        construction: item.approvedProfile?.construction ?? null,
+        hasApprovedProfile: !!item.approvedProfile,
+        outfitFunctionPri: outfitFunctionPriority(item),
+        finalScore: Math.round(score * 1000) / 1000,
+      }));
+    }
 
     const list = candidatesBySlot.get(slot) ?? [];
     list.push({ item, score });

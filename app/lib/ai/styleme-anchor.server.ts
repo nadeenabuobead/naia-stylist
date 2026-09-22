@@ -408,6 +408,19 @@ export async function autoSelectClosetAnchor(
     || !item.garmentRelationships.includes("occasion-only");  // other-occasion tags, no restriction
 
   const winnerEntry = scored.find(s => s.score > 0 && isOccasionCompatible(s.item));
+  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+    console.log("[nAia-anchor-rank]", JSON.stringify({
+      occasion: signals.occasion,
+      intentions: (signals as Record<string, unknown>)["intentions"] ?? [],
+      note: "approvedProfile/intentionPotentials NOT fetched — anchor selection is intention-blind",
+      top10: scored.slice(0, 10).map((s) => ({
+        id: s.item.id, name: s.item.name, score: s.score,
+        isAnchorCapable: s.isAnchorCapable, inRange: s.inRange,
+        occasions: s.item.occasions,
+      })),
+      winner: winnerEntry ? { id: winnerEntry.item.id, name: winnerEntry.item.name, score: winnerEntry.score } : null,
+    }));
+  }
   if (!winnerEntry) return null;
 
   const winner = winnerEntry.item;

@@ -26,7 +26,9 @@ import {
   buildNaiaOutfitCandidates,
   passesDressingRequirements,
   passesCandidateDressingRequirements,
+  compareCandidateRankKeys,
 } from "./styleme-result.server.ts";
+import type { CandidateRankKey } from "./styleme-result.server.ts";
 import { scoreBodyNeedForClosetItem } from "./styleme-anchor.server.js";
 import type { ClosetAnchorInput, OutfitCandidate } from "./styleme-recommendation.types.ts";
 import type { NormalizedClosetAnchor } from "./styleme-recommendation.types.ts";
@@ -2031,5 +2033,133 @@ describe("§SI.4 make-it-easy — stylingEffort is authoritative in computeItemI
     const relaxedItem = makeItem({ id: "relaxed", fitProfile: "relaxed" });
     const w = computeItemIntentionWeight(relaxedItem, "make-it-easy");
     assert.ok(w <= 0.6, `relaxed fitProfile alone must not imply make-it-easy; got ${w}`);
+  });
+});
+
+// ── §SP: Signal-ranking precedence invariants ─────────────────────────────────
+// Proves the intention bonus cannot override occasion gates, fit-comfort ranking,
+// occasionFit=No exclusions, or dress-register incompatibility.
+
+describe("§SP Signal-ranking precedence — intention bonus cannot override higher-priority signals", () => {
+  const anchorBtm: NormalizedClosetAnchor = {
+    type: "closet",
+    id: "anchor-btm",
+    label: "Jeans",
+    slot: "bottom",
+    colors: ["blue"],
+    normalizedColorIds: ["blue"],
+    styleTags: [],
+    occasions: ["everyday"],
+    material: null,
+    hasStrongEvidence: true,
+    evidenceFields: [],
+    imageUrl: null,
+  };
+  const anchorItem = makeItem({ id: "anchor-btm", category: "BOTTOMS", occasions: ["everyday"] });
+
+  const mkSession = (intentions: string[] = ["feel-sharper"]) => ({
+    moods: ["polished"] as string[],
+    desiredFeelings: [] as string[],
+    bodyNeeds: [] as string[],
+    coverageConditional: null as null,
+    occasion: "everyday" as const,
+    formalityConditional: null as null,
+    todayColours: { preferred: [] as string[], avoid: [] as string[] },
+    practicalIds: [] as string[],
+    source: "my-closet" as const,
+    intentions,
+  });
+
+  it("SP.1 occasion match (+10) beats no-occasion + intention Strong (max bonus 1.5)", () => {
+    // Item A: occasion listed → base 10, intention None → bonus 0, total 10
+    // Item B: no everyday match, mood tag → base 3, intention Strong → bonus 1.5, total 4.5
+    // Item A must win (10 > 4.5)
+    const occasionTop = makeItem({
+      id: "occasion-top",
+      category: "TOPS",
+      occasions: ["everyday"],
+      styleTags: [],
+      approvedProfile: makeApprovedProfile({ intentionPotentials: { "feel-sharper": "None" } }),
+    });
+    const noOccasionTop = makeItem({
+      id: "noocc-top",
+      category: "TOPS",
+      occasions: ["work"],         // no everyday match
+      styleTags: ["polished"],     // matches session mood → baseScore=3
+      approvedProfile: makeApprovedProfile({ intentionPotentials: { "feel-sharper": "Strong" } }),
+    });
+    const selected = selectAdditionalClosetGarments(
+      anchorBtm, null, mkSession(), [anchorItem, occasionTop, noOccasionTop],
+    );
+    const topPick = selected.find((g) => g.slot === "top");
+    assert.equal(topPick?.id, "occasion-top",
+      "occasion-matched item (base 10, intention None) must beat no-occasion item (base 3, intention Strong)");
+  });
+
+  it("SP.2 T3b (fit-comfort) ranks before T4 (intention) in CandidateRankKey: bodyNeedFitScore=0.9 beats intentionFit=3", () => {
+    const fitComfortWinner: CandidateRankKey = {
+      occasionTier: 2,
+      formalityFitPriority: 0,
+      knownViolationCount: 0,
+      bodyNeedFitScore: 0.9,
+      intentionFit: 0,
+      passportAlignment: 0,
+      formalityOvershootAbs: 0,
+      optionalNonMatchCount: 0,
+      discretionaryPieceCount: 0,
+    };
+    const intentionWinner: CandidateRankKey = {
+      occasionTier: 2,
+      formalityFitPriority: 0,
+      knownViolationCount: 0,
+      bodyNeedFitScore: 0.1,
+      intentionFit: 3,
+      passportAlignment: 0,
+      formalityOvershootAbs: 0,
+      optionalNonMatchCount: 0,
+      discretionaryPieceCount: 0,
+    };
+    const result = compareCandidateRankKeys(fitComfortWinner, intentionWinner);
+    assert.ok(result < 0,
+      "T3b=0.9 (fit-comfort winner) must rank before T3b=0.1 even when opposing T4=3 (max intention)");
+  });
+
+  it("SP.3 occasionFit=No in approved profile excludes item regardless of intention Strong", () => {
+    const blockedTop = makeItem({
+      id: "blocked-top",
+      category: "TOPS",
+      occasions: ["everyday"],
+      styleTags: ["polished"],    // mood match → would give base 3 if not blocked
+      approvedProfile: makeApprovedProfile({
+        intentionPotentials: { "feel-sharper": "Strong" },
+        occasionFit: { everyday: "No", work: "No", dinner: "No", date: "No", event: "No", "night-out": "No", family: "No", travel: "No", active: "No" },
+      }),
+    });
+    const selected = selectAdditionalClosetGarments(
+      anchorBtm, null, mkSession(), [anchorItem, blockedTop],
+    );
+    const topPick = selected.find((g) => g.slot === "top");
+    assert.equal(topPick, undefined,
+      "occasionFit=No must exclude item even with Strong intention and mood-matching tag");
+  });
+
+  it("SP.4 athletic dress-register excludes item from everyday session regardless of intention Strong", () => {
+    const athleticTop = makeItem({
+      id: "athletic-top",
+      category: "TOPS",
+      occasions: ["active"],
+      styleTags: ["polished"],    // mood match → baseScore=3 if it reached scoring
+      approvedProfile: makeApprovedProfile({
+        dressRegister: "athletic",
+        intentionPotentials: { "feel-sharper": "Strong" },
+        occasionFit: {},           // no everyday approval → register gate fires
+      }),
+    });
+    const selected = selectAdditionalClosetGarments(
+      anchorBtm, null, mkSession(), [anchorItem, athleticTop],
+    );
+    const topPick = selected.find((g) => g.slot === "top");
+    assert.equal(topPick, undefined,
+      "athletic register must be excluded from everyday session regardless of Strong intention");
   });
 });
