@@ -61,6 +61,7 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
       onboardingProfile: {
         select: {
           stylePersonalities: true,
+          styleDirections: true,
           favoriteColors: true,
           lifestyle: true,
           desiredFeeling: true,
@@ -136,7 +137,11 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
   return {
     hasProfile,
     profile: hasProfile && profile ? {
-      stylePersonalities: profile.stylePersonalities ?? [],
+      // Rev 7 customers answer styleDirections; the register resolver accepts both
+      // vocabularies, so the answer the customer actually gave is what is passed.
+      stylePersonalities: profile.styleDirections?.length
+        ? profile.styleDirections
+        : (profile.stylePersonalities ?? []),
       favoriteColors: profile.favoriteColors ?? [],
       avoidColors: profile.avoidColors ?? [],
       lifestyle: profile.lifestyle?.length ? profile.lifestyle : null,
@@ -238,12 +243,39 @@ const GENERIC_NAME_TERMS = new Set([
 
 type StyleRegister = "clean-polished" | "fluid-ease" | "expressive" | "neutral";
 
+// Covers every style vocabulary the app has shipped. Before this fix only the V2
+// IDs were listed, so every Rev 6 and Rev 7 customer resolved to "neutral" and the
+// style register silently stopped working for them.
 const REGISTER_CLUSTER_IDS: Record<Exclude<StyleRegister, "neutral">, string[]> = {
-  "clean-polished": ["old-money", "corporate-chic", "minimal", "effortlessly-chic"],
-  "fluid-ease":     ["romantic", "casual-cool", "feminine"],
-  "expressive":     ["artsy", "edgy", "trendy"],
+  "clean-polished": [
+    // V2
+    "old-money", "corporate-chic", "minimal", "effortlessly-chic",
+    // V3 archetypes (Rev 6)
+    "classic-polished", "minimal-relaxed",
+    // Rev 7 directions
+    "polished-refined", "clean-minimal",
+  ],
+  "fluid-ease": [
+    // V2
+    "romantic", "casual-cool", "feminine",
+    // V3 archetypes (Rev 6)
+    "feminine-romantic",
+    // Rev 7 directions
+    "soft-romantic", "relaxed-easy",
+  ],
+  "expressive": [
+    // V2
+    "artsy", "edgy", "trendy",
+    // V3 archetypes (Rev 6)
+    "bold-edgy", "creative-expressive",
+    // Rev 7 directions
+    "bold-statement", "creative-individual", "street-contemporary",
+  ],
 };
 
+// sporty-functional is intentionally absent from every cluster: it is a
+// functional register, not one of the three aesthetic ones. It contributes no
+// vote rather than being forced into the nearest cluster.
 function resolveStyleRegister(stylePersonalities: string[]): StyleRegister {
   const counts: Record<string, number> = {
     "clean-polished": 0,
@@ -268,9 +300,27 @@ function resolveStyleRegister(stylePersonalities: string[]): StyleRegister {
 
 type WorkContextLabel = "work-meetings" | "events" | "work-meetings-events" | "none";
 
+// Covers every lifestyle vocabulary the app has shipped. Before this fix only the
+// V2 IDs were checked, so this returned "none" for every Rev 6 and Rev 7 customer.
+const WORK_LIFESTYLE_IDS = new Set([
+  // V2
+  "office", "hybrid",
+  // V3 (Rev 6) + Rev 7
+  "work-office", "creative-flexible-work",
+]);
+// "events" in V2 mapped to dinner / date-night / girls-night occasions, which is
+// exactly what dinners-going-out covers; events-special-occasions is the direct
+// V3 analogue of the V2 "events" ID.
+const EVENT_LIFESTYLE_IDS = new Set([
+  // V2
+  "events",
+  // V3 (Rev 6) + Rev 7
+  "events-special-occasions", "dinners-going-out",
+]);
+
 function resolveWorkContext(lifestyleIds: string[]): WorkContextLabel {
-  const hasOffice = lifestyleIds.some((l) => l === "office" || l === "hybrid");
-  const hasEvents = lifestyleIds.includes("events");
+  const hasOffice = lifestyleIds.some((l) => WORK_LIFESTYLE_IDS.has(l));
+  const hasEvents = lifestyleIds.some((l) => EVENT_LIFESTYLE_IDS.has(l));
   if (hasOffice && hasEvents) return "work-meetings-events";
   if (hasOffice) return "work-meetings";
   if (hasEvents) return "events";
