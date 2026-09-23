@@ -35,16 +35,23 @@ export const PERSONALISED_EDIT_ENGINE_VERSION = "1.0.0";
  * snapshot row on every refresh — precisely the duplicate history this design
  * forbids.
  *
- * What survives is the stable reference — closetItemId — plus the name,
- * category and role note the customer actually read. Replay uses the id to
- * re-sign a fresh URL for the SAME piece without regenerating a word of the
- * edit; if the piece is gone, the historical edit still reads from its labels.
+ * What survives is the stable ASSET reference — closetItemId plus the Cloudinary
+ * public id and format — and the labels she read. Those are identifiers, not
+ * credentials: signing requires the API secret, which never leaves the server.
+ *
+ * Pinning the public id is what makes replay historically faithful. Replacing a
+ * photo mints a new public id and hard-deletes the old asset, so re-resolving
+ * from the closet row would show TODAY's photo under a September edit. Storing
+ * the asset she actually saw means the image either comes back as it was, or
+ * not at all.
  */
 export function sanitiseEditForSnapshot(edit: ShopperEdit): ShopperEdit {
   return {
     ...edit,
     evidenceClosetItems: (edit.evidenceClosetItems ?? []).map((item) => ({
       closetItemId: item.closetItemId,
+      imagePublicId: item.imagePublicId,
+      imageFormat: item.imageFormat,
       name: item.name,
       category: item.category,
       roleNote: item.roleNote,

@@ -24,7 +24,7 @@ vi.mock("./cloudinary-admin.server", () => ({
   buildPrivateDownloadUrl: (_c: unknown, publicId: string) => `https://signed.test/${publicId}?ts=${Date.now()}`,
 }));
 
-interface ClosetRow { id: string; customerId: string; imageUrl: string | null; imagePublicId: string | null; imageFormat: string | null }
+interface ClosetRow { id: string; customerId: string; imagePublicId: string | null; imageFormat: string | null }
 
 // vi.mock factories are hoisted above every top-level const, so the store and
 // the fake client are created inside vi.hoisted() where the factory can see them.
@@ -420,44 +420,75 @@ describe("§PS-6 atomic first receipt", () => {
   });
 });
 
-// ── §PS-7 historical media ───────────────────────────────────────────────────
+// ── §PS-7 HISTORICAL MEDIA FIDELITY ─────────────────────────────────────────
+//
+// The snapshot pins the exact Cloudinary asset the edit displayed. Replacing a
+// photo mints a new public id AND hard-deletes the old asset, so replay must
+// never fall back to whatever photo the closet row carries today.
 
 describe("§PS-7 historical images", () => {
-  const withItem = (closetItemId: string) => edit({
-    evidenceClosetItems: [{ closetItemId, name: "Navy Blazer", imageUrl: null, category: "OUTERWEAR", roleNote: "Anchor." }],
-  } as Partial<ShopperEdit>);
+  const ASSET = "naia-wardrobe/cust-1/blazer-v1";
 
-  it("re-signs a FRESH url for the same piece", async () => {
-    db.closetItems.push({ id: "ci_1", customerId: "cust-1", imageUrl: null, imagePublicId: "naia/cust-1/blazer", imageFormat: "jpg" });
-    const resolved = await resolveSnapshotImages("cust-1", withItem("ci_1"));
-    expect(resolved.evidenceClosetItems[0].imageUrl).toContain("signed.test");
+  const withItem = (over: Partial<{ closetItemId: string; imagePublicId: string | null; imageFormat: string | null }> = {}) =>
+    edit({
+      evidenceClosetItems: [{
+        closetItemId: "ci_1", imagePublicId: ASSET, imageFormat: "jpg",
+        name: "Navy Blazer", imageUrl: null, category: "OUTERWEAR", roleNote: "Anchor.",
+        ...over,
+      }],
+    } as Partial<ShopperEdit>);
+
+  it("re-signs the HISTORICAL asset when the piece still carries it", async () => {
+    db.closetItems.push({ id: "ci_1", customerId: "cust-1", imagePublicId: ASSET, imageFormat: "jpg" });
+    const resolved = await resolveSnapshotImages("cust-1", withItem());
+    expect(resolved.evidenceClosetItems[0].imageUrl).toContain(ASSET);
   });
 
-  it("leaves the personalised copy untouched", async () => {
-    db.closetItems.push({ id: "ci_1", customerId: "cust-1", imageUrl: null, imagePublicId: "naia/cust-1/blazer", imageFormat: "jpg" });
-    const original = withItem("ci_1");
-    const resolved = await resolveSnapshotImages("cust-1", original);
-    expect(resolved.aLookToTry).toBe(original.aLookToTry);
+  it("PHOTO REPLACED → no image, never today's different photo", async () => {
+    // The row moved on; the asset she saw was deleted with the replacement.
+    db.closetItems.push({ id: "ci_1", customerId: "cust-1", imagePublicId: "naia-wardrobe/cust-1/blazer-v2", imageFormat: "jpg" });
+    const resolved = await resolveSnapshotImages("cust-1", withItem());
+    expect(resolved.evidenceClosetItems[0].imageUrl).toBeNull();
     expect(resolved.evidenceClosetItems[0].name).toBe("Navy Blazer");
-    expect(resolved.evidenceClosetItems[0].roleNote).toBe("Anchor.");
+  });
+
+  it("never signs an asset the snapshot did not pin", async () => {
+    db.closetItems.push({ id: "ci_1", customerId: "cust-1", imagePublicId: "naia-wardrobe/cust-1/blazer-v2", imageFormat: "jpg" });
+    const resolved = await resolveSnapshotImages("cust-1", withItem());
+    expect(JSON.stringify(resolved)).not.toContain("blazer-v2");
   });
 
   it("a DELETED piece keeps its label and loses only the image", async () => {
-    const resolved = await resolveSnapshotImages("cust-1", withItem("ci_gone"));
+    const resolved = await resolveSnapshotImages("cust-1", withItem({ closetItemId: "ci_gone" }));
     expect(resolved.evidenceClosetItems[0].imageUrl).toBeNull();
     expect(resolved.evidenceClosetItems[0].name).toBe("Navy Blazer");
   });
 
-  it("cannot surface another customer's photograph", async () => {
-    db.closetItems.push({ id: "ci_1", customerId: "cust-2", imageUrl: null, imagePublicId: "naia/cust-2/blazer", imageFormat: "jpg" });
-    const resolved = await resolveSnapshotImages("cust-1", withItem("ci_1"));
+  it("an older snapshot with no pinned asset renders without an image", async () => {
+    db.closetItems.push({ id: "ci_1", customerId: "cust-1", imagePublicId: ASSET, imageFormat: "jpg" });
+    const resolved = await resolveSnapshotImages("cust-1", withItem({ imagePublicId: null }));
     expect(resolved.evidenceClosetItems[0].imageUrl).toBeNull();
   });
 
-  it("refuses to sign a public id that fails the ownership check", async () => {
-    db.closetItems.push({ id: "ci_1", customerId: "cust-1", imageUrl: null, imagePublicId: "naia/someone-else/blazer", imageFormat: "jpg" });
-    const resolved = await resolveSnapshotImages("cust-1", withItem("ci_1"));
+  it("cannot surface another customer's photograph", async () => {
+    db.closetItems.push({ id: "ci_1", customerId: "cust-2", imagePublicId: ASSET, imageFormat: "jpg" });
+    const resolved = await resolveSnapshotImages("cust-1", withItem());
     expect(resolved.evidenceClosetItems[0].imageUrl).toBeNull();
+  });
+
+  it("refuses an asset that fails the ownership check", async () => {
+    const foreign = "naia-wardrobe/someone-else/blazer";
+    db.closetItems.push({ id: "ci_1", customerId: "cust-1", imagePublicId: foreign, imageFormat: "jpg" });
+    const resolved = await resolveSnapshotImages("cust-1", withItem({ imagePublicId: foreign }));
+    expect(resolved.evidenceClosetItems[0].imageUrl).toBeNull();
+  });
+
+  it("leaves the personalised copy untouched", async () => {
+    db.closetItems.push({ id: "ci_1", customerId: "cust-1", imagePublicId: ASSET, imageFormat: "jpg" });
+    const original = withItem();
+    const resolved = await resolveSnapshotImages("cust-1", original);
+    expect(resolved.aLookToTry).toBe(original.aLookToTry);
+    expect(resolved.evidenceClosetItems[0].roleNote).toBe("Anchor.");
   });
 
   it("does no work when the edit names no pieces", async () => {

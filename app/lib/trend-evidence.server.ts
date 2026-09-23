@@ -24,6 +24,10 @@ export type ShopperProfileEvidence = {
 export type ShopperClosetItemEvidence = {
   /** ClosetItem.id — carried so a stored historical edit can re-resolve its image. */
   id: string;
+  /** Cloudinary public id + format: the stable, non-expiring asset reference.
+   *  A signed URL is a credential; these two are identifiers. */
+  imagePublicId: string | null;
+  imageFormat: string | null;
   name: string | null;
   imageUrl: string | null;
   category: string;
@@ -145,6 +149,8 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
     } : null,
     closetItems: customer.closetItems.map((item) => ({
       id: item.id,
+      imagePublicId: item.imagePublicId ?? null,
+      imageFormat: item.imageFormat ?? null,
       name: item.name,
       imageUrl: item.imageUrl
         ?? (item.imagePublicId && item.imageFormat && cloudinaryCfg
@@ -1820,6 +1826,11 @@ export type EvidenceClosetItem = {
   /** ClosetItem.id — the stable reference a historical snapshot stores instead
    *  of an expiring signed URL, so replay can re-resolve a fresh image. */
   closetItemId: string;
+  /** The exact asset this edit displayed. Replacing a photo mints a new
+   *  Cloudinary public id and deletes the old asset, so pinning it here is what
+   *  separates "what she saw then" from "whatever photo that row has now". */
+  imagePublicId: string | null;
+  imageFormat: string | null;
   name: string;
   imageUrl: string | null;
   category: string;
@@ -1996,6 +2007,8 @@ export function buildShopperEdit(
 
   const evidenceClosetItems: EvidenceClosetItem[] = namedMatches.map(({ item }) => ({
     closetItemId: item.id,
+    imagePublicId: item.imagePublicId,
+    imageFormat: item.imageFormat,
     name: item.name!,
     imageUrl: item.imageUrl,
     category: item.category,

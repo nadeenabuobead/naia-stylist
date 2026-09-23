@@ -29,7 +29,7 @@ function edit(overrides: Partial<ShopperEdit> = {}): ShopperEdit {
     evidenceStyleDna: "Your style DNA says…",
     evidencePassportSays: "Your Passport says…",
     evidenceClosetItems: [
-      { closetItemId: "ci_1", name: "Navy Blazer", imageUrl: null, category: "OUTERWEAR", roleNote: "Your tailored anchor." },
+      { closetItemId: "ci_1", imagePublicId: "naia-wardrobe/c/blazer", imageFormat: "jpg", name: "Navy Blazer", imageUrl: null, category: "OUTERWEAR", roleNote: "Your tailored anchor." },
     ],
     evidenceReviews: null,
     lowDataNotice: null,
@@ -105,17 +105,17 @@ describe("§PH-2 snapshot hash", () => {
     // Signed Cloudinary URLs embed timestamp + expires_at and differ on every
     // request. If they entered the hash, every refresh would mint a new row.
     const first = edit({
-      evidenceClosetItems: [{ closetItemId: "ci_1", name: "Navy Blazer", imageUrl: "https://res.cloudinary.test/x?timestamp=111&expires_at=711", category: "OUTERWEAR", roleNote: "Your tailored anchor." }],
+      evidenceClosetItems: [{ closetItemId: "ci_1", imagePublicId: "naia-wardrobe/c/blazer", imageFormat: "jpg", name: "Navy Blazer", imageUrl: "https://res.cloudinary.test/x?timestamp=111&expires_at=711", category: "OUTERWEAR", roleNote: "Your tailored anchor." }],
     } as Partial<ShopperEdit>);
     const second = edit({
-      evidenceClosetItems: [{ closetItemId: "ci_1", name: "Navy Blazer", imageUrl: "https://res.cloudinary.test/x?timestamp=222&expires_at=822", category: "OUTERWEAR", roleNote: "Your tailored anchor." }],
+      evidenceClosetItems: [{ closetItemId: "ci_1", imagePublicId: "naia-wardrobe/c/blazer", imageFormat: "jpg", name: "Navy Blazer", imageUrl: "https://res.cloudinary.test/x?timestamp=222&expires_at=822", category: "OUTERWEAR", roleNote: "Your tailored anchor." }],
     } as Partial<ShopperEdit>);
     assert.equal(hash(first), hash(second));
   });
 
   it("still notices a genuinely different closet piece", () => {
     const other = edit({
-      evidenceClosetItems: [{ closetItemId: "ci_2", name: "Camel Coat", imageUrl: null, category: "OUTERWEAR", roleNote: "Your tailored anchor." }],
+      evidenceClosetItems: [{ closetItemId: "ci_2", imagePublicId: "naia-wardrobe/c/coat", imageFormat: "jpg", name: "Camel Coat", imageUrl: null, category: "OUTERWEAR", roleNote: "Your tailored anchor." }],
     } as Partial<ShopperEdit>);
     assert.notEqual(hash(edit()), hash(other));
   });
@@ -159,14 +159,23 @@ describe("§PH-2 snapshot hash", () => {
 describe("§PH-3 sanitisation", () => {
   it("strips signed image URLs — never store a credential that dies in ten minutes", () => {
     const sanitised = sanitiseEditForSnapshot(edit({
-      evidenceClosetItems: [{ closetItemId: "ci_1", name: "Navy Blazer", imageUrl: "https://res.cloudinary.test/signed?x=1", category: "OUTERWEAR", roleNote: "Anchor." }],
+      evidenceClosetItems: [{ closetItemId: "ci_1", imagePublicId: "naia-wardrobe/c/blazer", imageFormat: "jpg", name: "Navy Blazer", imageUrl: "https://res.cloudinary.test/signed?x=1", category: "OUTERWEAR", roleNote: "Anchor." }],
     } as Partial<ShopperEdit>));
     assert.equal(sanitised.evidenceClosetItems[0].imageUrl, null);
   });
 
-  it("KEEPS the stable closet reference so replay can re-sign the image", () => {
+  it("KEEPS the stable asset reference so replay can re-sign the SAME photo", () => {
     const sanitised = sanitiseEditForSnapshot(edit());
     assert.equal(sanitised.evidenceClosetItems[0].closetItemId, "ci_1");
+    assert.equal(sanitised.evidenceClosetItems[0].imagePublicId, "naia-wardrobe/c/blazer");
+    assert.equal(sanitised.evidenceClosetItems[0].imageFormat, "jpg");
+  });
+
+  it("a replaced photo is a NEW version — the image she saw is part of what she saw", () => {
+    const withNewAsset = edit({
+      evidenceClosetItems: [{ closetItemId: "ci_1", imagePublicId: "naia-wardrobe/c/blazer-v2", imageFormat: "jpg", name: "Navy Blazer", imageUrl: null, category: "OUTERWEAR", roleNote: "Your tailored anchor." }],
+    } as Partial<ShopperEdit>);
+    assert.notEqual(hash(edit()), hash(withNewAsset));
   });
 
   it("keeps the labels the customer actually read", () => {

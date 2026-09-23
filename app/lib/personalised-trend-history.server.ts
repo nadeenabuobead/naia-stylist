@@ -264,14 +264,22 @@ export async function countUnlocksThisWindow(customerId: string): Promise<number
 /**
  * Re-sign images for a stored snapshot's closet pieces.
  *
- * A snapshot never stores a signed URL — those expire in ten minutes. It stores
- * the closetItemId instead, so replay can mint a FRESH url for the SAME piece.
- * Not a word of the personalised edit is regenerated: this only fills in
+ * Signs the HISTORICAL asset the snapshot pinned — not whatever photo that
+ * closet row carries today. Replacing a photo mints a new Cloudinary public id
+ * and hard-deletes the old asset, so "re-resolve from the row" would silently
+ * show a different garment under an old edit.
+ *
+ * An asset is only signed when the closet row STILL points at that same public
+ * id. That check is exact precisely because replacement deletes the old asset:
+ * if the ids differ, the historical image no longer exists and signing it would
+ * produce a dead URL. In that case the piece keeps its stored label and loses
+ * only its thumbnail — which is the honest rendering of "that photo is gone".
+ *
+ * Not a word of the personalised edit is regenerated; this only fills in
  * `imageUrl` on items the snapshot already named.
  *
- * Scoped by customerId, and the Cloudinary public id is ownership-checked before
- * signing, so a snapshot can never surface another customer's photograph. A
- * piece she has since deleted simply keeps its label and loses its thumbnail.
+ * Scoped by customerId, and the public id is ownership-checked before signing,
+ * so a snapshot can never surface another customer's photograph.
  */
 export async function resolveSnapshotImages(
   customerId: string,
@@ -281,32 +289,41 @@ export async function resolveSnapshotImages(
   const ids = items.map((i) => i.closetItemId).filter(Boolean);
   if (ids.length === 0) return edit;
 
-  const rows: Array<{ id: string; imageUrl: string | null; imagePublicId: string | null; imageFormat: string | null }> =
+  const rows: Array<{ id: string; imagePublicId: string | null; imageFormat: string | null }> =
     await prisma.closetItem.findMany({
       where: { id: { in: ids }, customerId },
-      select: { id: true, imageUrl: true, imagePublicId: true, imageFormat: true },
+      select: { id: true, imagePublicId: true, imageFormat: true },
     });
 
+  const currentAssetById = new Map<string, string | null>();
+  for (const row of rows) currentAssetById.set(row.id, row.imagePublicId ?? null);
+
   const cfg = getCloudinaryConfig();
-  const urlById = new Map<string, string | null>();
-  for (const row of rows) {
-    let url: string | null = null;
-    if (row.imagePublicId && row.imageFormat && cfg) {
-      const ownership = validatePublicIdOwnership(row.imagePublicId, customerId);
-      if (ownership.ok) {
-        url = buildPrivateDownloadUrl(cfg, row.imagePublicId, row.imageFormat, "private");
-      }
-    }
-    urlById.set(row.id, url ?? row.imageUrl ?? null);
-  }
 
   return {
     ...edit,
-    evidenceClosetItems: items.map((item) => ({
-      ...item,
-      // Deleted piece or unavailable asset → stays null, and the historical
-      // edit renders from its stored label.
-      imageUrl: urlById.get(item.closetItemId) ?? null,
-    })),
+    evidenceClosetItems: items.map((item) => {
+      const historicalId = item.imagePublicId;
+      const historicalFormat = item.imageFormat;
+
+      // Piece deleted, or the snapshot pinned no asset.
+      if (!historicalId || !historicalFormat || !currentAssetById.has(item.closetItemId)) {
+        return { ...item, imageUrl: null };
+      }
+
+      // Photo replaced since — the historical asset was deleted with it.
+      if (currentAssetById.get(item.closetItemId) !== historicalId) {
+        return { ...item, imageUrl: null };
+      }
+
+      if (!cfg || !validatePublicIdOwnership(historicalId, customerId).ok) {
+        return { ...item, imageUrl: null };
+      }
+
+      return {
+        ...item,
+        imageUrl: buildPrivateDownloadUrl(cfg, historicalId, historicalFormat, "private"),
+      };
+    }),
   };
 }
