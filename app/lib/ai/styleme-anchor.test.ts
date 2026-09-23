@@ -402,27 +402,27 @@ describe("§REV2 autoSelectClosetAnchor formality tier-sort", () => {
     assert.equal(selected!.id, "unknown", "null formality (in-range tier 0) should beat known out-of-range");
   });
 
-  it("FT.4 — formality-dressy conditional raises ceiling; in-range item at raised ceiling beats lower-signal blouse", async () => {
+  it("FT.4 — formality-occasion conditional raises ceiling; in-range item at raised ceiling beats lower-signal blouse", async () => {
     const businessFormal = makeAutoItem({
       id: "suit",
-      formality: "business-formal",  // rank 4; everyday ceiling=2+2=4 with dressy boost
-      occasions: ["dinner-out"],
+      formality: "business-formal",  // rank 4; dinner ceiling=4+2=6 with formality-occasion boost
+      occasions: ["evening"],
       styleTags: ["polished"],
     });
     const casual = makeAutoItem({
       id: "blouse",
       formality: "casual",
-      occasions: ["dinner-out"],
+      occasions: ["evening"],
       styleTags: [],
     });
     const signals = {
-      occasion: "dinner-out",
+      occasion: "dinner",
       moods: ["polished"],
       desiredFeelings: [],
-      formalityConditional: "formality-dressy",
+      formalityConditional: "formality-occasion",
     };
     const selected = await autoSelectClosetAnchor("any", signals, async () => [businessFormal, casual]);
-    // Both are in-range with dressy boost (dinner-out ceiling 4+2=6, capped at 6)
+    // Both are in-range with formality-occasion boost (dinner ceiling 4+2=6, capped at 6)
     // business-formal (rank 4) and casual (rank 1) both ≤ 6 → both tier 0
     // signal score: business-formal has +10 (occasion) + 3 (mood) = 13; casual = 10
     assert.ok(selected !== null, "should select an anchor");

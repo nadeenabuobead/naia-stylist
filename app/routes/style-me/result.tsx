@@ -1071,7 +1071,7 @@ const FEELING_LABELS: Record<string, string> = {
 const OCCASION_LABELS: Record<string, string> = {
   "everyday": "Everyday", "work": "Work", "dinner": "Dinner", "date-night": "Date night",
   "girls-night": "Evening out", "family": "Family gathering", "special-event": "Special event",
-  "travel": "Travel", "not-sure": "Not sure yet",
+  "travel": "Travel", "not-sure": "Not sure yet", "active": "Active / busy day",
 };
 
 // The loader has several return branches (direct sessionId load, pending-save,

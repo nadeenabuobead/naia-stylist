@@ -624,10 +624,10 @@ describe("R3.12 — occasion.tsx: Rev 3 occasion IDs and normalization", () => {
     );
   });
 
-  it('"active-busy-day" maps to "everyday" in normalization', () => {
+  it('"active-busy-day" maps to "active" in normalization', () => {
     assert.ok(
-      occasionSrc.includes('"active-busy-day": "everyday"') || occasionSrc.includes("'active-busy-day': 'everyday'"),
-      'REV3_OCCASION_MAP must map active-busy-day → everyday',
+      occasionSrc.includes('"active-busy-day": "active"') || occasionSrc.includes("'active-busy-day': 'active'"),
+      'REV3_OCCASION_MAP must map active-busy-day → active (not everyday)',
     );
   });
 

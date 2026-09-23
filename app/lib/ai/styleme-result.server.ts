@@ -2650,14 +2650,38 @@ export async function callClaudeForNaiaSelection(
         const pe = evidence?.pieces.find((e) => e.closetId === p.closetId);
         const roleTag = pe ? `, ${pe.pieceRole}` : "";
         const profileFields = (() => {
-          const ap = allItems?.find((i) => i.id === p.closetId)?.approvedProfile;
-          if (!ap) return "";
+          const garmentItem = allItems?.find((i) => i.id === p.closetId) ?? null;
+          const ap = garmentItem?.approvedProfile;
+          if (!ap || !garmentItem) return "";
           const wantsConstruction = activeIntentions.some((i) => i === "feel-sharper" || i === "give-structure")
             || activeBodyNeeds.some((id) => id === "structured-shape" || id === "still-want-shape");
           const wantsEase = activeIntentions.some((i) => i === "make-it-easy");
           const parts: string[] = [];
           if (wantsConstruction && ap.construction) parts.push(`construction: ${ap.construction}`);
           if (wantsEase && ap.stylingEffort) parts.push(`styling effort: ${ap.stylingEffort}`);
+          // ── Wording evidence guards ─────────────────────────────────────────
+          // Always surface statement-level so Claude never fabricates a statement claim.
+          const sl = ap.statementLevel ?? null;
+          const of_ = ap.outfitFunction ?? null;
+          if (sl) parts.push(`statement-level: ${sl}`);
+          if (of_) parts.push(`outfit-function: ${of_}`);
+          // Coverage precision: hemLength guards against "full coverage" claims for midi
+          const hl = garmentItem.hemLength ?? null;
+          if (hl && hl !== "n/a") parts.push(`hem-length: ${hl}`);
+          // Waist definition: only explicit waistShape evidence is valid
+          const wsGarment = garmentItem.waistShape ?? null;
+          if (wsGarment) parts.push(`waistShape: ${wsGarment}`);
+          // Physical fabric vs emotional feel-softer distinction
+          const fb = ap.fabricBehaviour ?? [];
+          if (fb.length > 0) parts.push(`fabricBehaviour: ${fb.join(", ")}`);
+          // Key intention potentials for feel-softer and feel-less-exposed claim guards
+          const ip = ap.intentionPotentials as Record<string, string> | null | undefined;
+          if (ip) {
+            const fs = ip["feel-softer"];
+            const fle = ip["feel-less-exposed"];
+            if (fs) parts.push(`feel-softer: ${fs}`);
+            if (fle) parts.push(`feel-less-exposed: ${fle}`);
+          }
           return parts.length > 0 ? ` | ${parts.join(", ")}` : "";
         })();
         const base = `  - ${p.label ?? p.slot} (${p.slot}${roleTag})${p.colors[0] ? `, ${p.colors[0]}` : ""}${profileFields} [id:${p.closetId}]`;
@@ -2782,7 +2806,13 @@ export async function callClaudeForNaiaSelection(
     "\n15. Do not infer body-zone concerns from a garment name alone — only from explicit Fit/Comfort selections or Passport body-avoid areas listed above." +
     "\n16. Do not rename the occasion — use the exact occasion label as given in TODAY'S BRIEF." +
     "\n17. Do not invent goals, outcomes, or aspirations for the customer unless they appear in Becoming/aspiration or Current style focus in STYLE PASSPORT above." +
-    "\n18. CONSTRUCTION GROUNDING: Structural language (sharp, structured, tailored, crisp, polished) in copy requires a CLOTHING piece's 'construction: structured' or 'construction: tailored' to appear in its metadata above. Bags, accessories, and jewellery with 'construction: structured' may be described as structured accessories — they cannot justify that the outfit satisfies a 'More structure / a more defined shape' Fit/Comfort need; that claim requires a clothing piece (top, bottom, dress, set, or outerwear) with construction: structured or construction: tailored. Colour, darkness, or a fitted silhouette alone are never structural signals and must not be described as making an outfit feel sharper or more structured. If Intention includes 'make-it-easy', ease claims (effortless, easy to wear, throw-on, low-maintenance) require the garment to have 'styling effort: easy' in its metadata above. When the metadata does not support the claimed quality, describe the outfit through its occasion appropriateness, mood, and Passport alignment instead.";
+    "\n18. CONSTRUCTION GROUNDING: Structural language (sharp, structured, tailored, crisp, polished) in copy requires a CLOTHING piece's 'construction: structured' or 'construction: tailored' to appear in its metadata above. Bags, accessories, and jewellery with 'construction: structured' may be described as structured accessories — they cannot justify that the outfit satisfies a 'More structure / a more defined shape' Fit/Comfort need; that claim requires a clothing piece (top, bottom, dress, set, or outerwear) with construction: structured or construction: tailored. Colour, darkness, or a fitted silhouette alone are never structural signals and must not be described as making an outfit feel sharper or more structured. If Intention includes 'make-it-easy', ease claims (effortless, easy to wear, throw-on, low-maintenance) require the garment to have 'styling effort: easy' in its metadata above. When the metadata does not support the claimed quality, describe the outfit through its occasion appropriateness, mood, and Passport alignment instead." +
+    "\n19. STATEMENT PIECE: Only call a garment 'the statement piece', 'the hero', or 'the focal point' when its metadata shows 'statement-level: statement' or 'outfit-function: statement'. A garment with statement-level: quiet or statement-level: moderate is a refined accent, supporting layer, or visual interest — never the statement. Do not promote quiet or moderate pieces." +
+    "\n20. COVERAGE PRECISION: Use exact coverage language. 'hem-length: midi' means below-knee/mid-calf coverage — never write 'full leg coverage', 'covers fully', or 'covers everything'. 'hem-length: maxi' or 'hem-length: full' may be described as full-length coverage. Do not infer lower-body coverage from upper-body garments or vice versa." +
+    "\n21. WAIST DEFINITION: Only claim a garment 'defines the waist', 'shapes the waist', or 'creates waist definition' when its metadata shows 'waistShape: belted', 'waistShape: tied', or 'waistShape: wrap'. A tailored or structured construction does NOT automatically define the waist — those are different properties. When waistShape is absent or does not show explicit definition evidence, describe the garment through its silhouette, proportion, or occasion fit instead." +
+    "\n22. PHYSICAL SOFTNESS vs EMOTIONAL FEEL-SOFTER: These are distinct. 'fabricBehaviour: soft' or 'fabricBehaviour: fluid' means the fabric is physically soft/fluid — you may describe the fabric as soft, fluid, or lightweight. 'feel-softer' is an intention potential. Only say the garment makes the look feel softer when 'feel-softer: Strong' or 'feel-softer: Supporting' appears in its metadata. If 'feel-softer: None' — do not claim the garment makes the look feel softer, even if the fabric is physically soft. Describe the fabric quality and the garment's physical role instead." +
+    "\n23. REGISTER CLAIMS: Do not describe an outfit or garment as polished, elevated, refined, or smart solely because it is black, dark, clean, white, or structured in colour. Polished and smart-casual claims require register evidence from the actual occasion and formality signal in TODAY'S BRIEF, combined with approved dressRegister or known formality rank in the metadata. A white sneaker is not polished; a black top is not automatically elevated. Describe what the garment actually contributes — colour harmony, proportion, ease — not a register you are inferring from colour alone." +
+    "\n24. WAIST COMFORT vs LOOSENESS: 'nothing-tight-waist' and 'loose-comfortable' are different body needs. An elastic waistband satisfies nothing-tight-waist. A relaxed/oversized/wide-leg silhouette satisfies loose-comfortable. A garment with a relaxed silhouette but a fixed waistband satisfies looseness but not waist comfort. Do not conflate them in the wording.";
 
   const userMessage =
     `Select the best complete outfit for this customer and write all wording for it.\n\n` +
@@ -3576,6 +3606,7 @@ function computeBodyNeedSlotBonus(
   // Bags, accessories, and jewellery cannot satisfy a clothing body need.
   if (BODY_NEED_STRUCTURAL_SLOTS.has(slot)) return 0;
   let bonus = 0;
+
   // Construction-based needs (structured-shape / still-want-shape)
   const constructionNeeds = bodyNeeds.filter((n) => n !== "nothing-specific" && _SLOT_CONSTRUCTION_NEEDS.has(n));
   if (constructionNeeds.length > 0) {
@@ -3584,11 +3615,37 @@ function computeBodyNeedSlotBonus(
       bonus += _SLOT_CONSTRUCTION_BONUS[construction] ?? 0;
     }
   }
-  // Loose-comfortable: silhouette/waist signal via canonical scorer
-  if (bodyNeeds.includes("loose-comfortable")) {
-    const { fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", item);
-    if (fitScore !== null && fitScore > 0) bonus += fitScore * 2.0;
+
+  // Silhouette-based needs — use canonical scorer with violation penalty
+  for (const need of ["loose-comfortable", "less-body-conscious"] as const) {
+    if (bodyNeeds.includes(need)) {
+      const { violation, fitScore } = scoreBodyNeedForClosetItem(need, item);
+      if (violation) bonus -= 2.0;
+      else if (fitScore !== null && fitScore > 0) bonus += fitScore * 2.0;
+    }
   }
+
+  // Fabric-based: softer/easier fabrics
+  if (bodyNeeds.includes("softer-easier-fabrics")) {
+    const { fitScore } = scoreBodyNeedForClosetItem("softer-easier-fabrics", item);
+    if (fitScore !== null) bonus += (fitScore - 0.5) * 1.0; // soft→+0.5, rigid→-0.3, neutral→0
+  }
+
+  // Waist-definition: explicit evidence only
+  if (bodyNeeds.includes("waist-definition")) {
+    const { fitScore } = scoreBodyNeedForClosetItem("waist-definition", item);
+    if (fitScore !== null && fitScore > 0) bonus += fitScore * 1.5;
+  }
+
+  // Nothing tight around waist: comfort bonus/penalty
+  if (bodyNeeds.includes("nothing-tight-waist")) {
+    const { fitScore } = scoreBodyNeedForClosetItem("nothing-tight-waist", item);
+    if (fitScore !== null) {
+      if (fitScore >= 0.8) bonus += 1.0;
+      else if (fitScore < 0.2) bonus -= 1.0;
+    }
+  }
+
   return bonus;
 }
 
@@ -3607,19 +3664,25 @@ export function coreClothingMeetsBodyNeed(
 }
 
 // Returns true when at least one clothing piece in the core outfit has a clearly loose
-// silhouetteCharacter (relaxed/oversized/voluminous/wide-leg). Used for the capacity
-// reservation gate so a loose garment is not crowded out by accessories.
-// Always returns true when loose-comfortable is not an active body need.
+// or non-cling silhouetteCharacter. Used for the capacity reservation gate.
+// Covers both loose-comfortable and less-body-conscious body needs.
+// Always returns true when neither need is active.
 const _LOOSE_SILHOUETTES_CORE = new Set(["relaxed", "oversized", "voluminous", "wide-leg"]);
 export function coreClothingMeetsLooseNeed(
   coreItems: (ClosetAnchorInput | null | undefined)[],
   bodyNeeds: string[],
 ): boolean {
-  if (!bodyNeeds.includes("loose-comfortable")) return true;
+  const needsLoose = bodyNeeds.includes("loose-comfortable");
+  const needsNonCling = bodyNeeds.includes("less-body-conscious");
+  if (!needsLoose && !needsNonCling) return true;
   return coreItems.some((item) => {
     if (!item?.approvedProfile) return false;
     const sils = (item.approvedProfile.silhouetteCharacter ?? []) as string[];
-    return sils.some((s) => _LOOSE_SILHOUETTES_CORE.has(s));
+    // For less-body-conscious a non-fitted silhouette satisfies; for loose-comfortable
+    // we require the stronger positive evidence (relaxed/oversized/voluminous/wide-leg).
+    if (needsLoose && sils.some((s) => _LOOSE_SILHOUETTES_CORE.has(s))) return true;
+    if (needsNonCling && sils.length > 0 && !sils.includes("fitted")) return true;
+    return false;
   });
 }
 
@@ -3834,7 +3897,14 @@ export function selectAdditionalClosetGarments(
   // the clothing core (anchor + Phase 1) doesn't satisfy it, promote the best matching
   // clothing optional to the front of optRest so finishing accessories don't exhaust the
   // outfit size cap before it's considered. Only fires when there is room left in the outfit.
-  const _SLOT_PHYSICAL_NEEDS = new Set([..._SLOT_CONSTRUCTION_NEEDS, "loose-comfortable"]);
+  const _SLOT_PHYSICAL_NEEDS = new Set([
+    ..._SLOT_CONSTRUCTION_NEEDS,
+    "loose-comfortable",
+    "less-body-conscious",
+    "softer-easier-fabrics",
+    "waist-definition",
+    "nothing-tight-waist",
+  ]);
   if (
     activeBodyNeedsForSlot.some((n) => _SLOT_PHYSICAL_NEEDS.has(n)) &&
     result.length < maxAdditional

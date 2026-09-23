@@ -37,15 +37,16 @@ const REV3_OCCASION_MAP: Record<string, string> = {
   "date": "date-night",
   "event": "special-event",
   "night-out": "girls-night",
-  "active-busy-day": "everyday",
+  "active-busy-day": "active",
   "other": "not-sure",
 };
 
 // Reverse map: canonical engine ID → Rev 3 UI ID (for session hydration on Back navigation).
-// "everyday" is intentionally omitted — it maps to itself AND to active-busy-day, so ambiguous.
+// "everyday" is intentionally omitted — it maps to itself, no ambiguity needed.
 const OCCASION_REVERSE_MAP: Record<string, string> = {
   "date-night": "date",
   "special-event": "event",
+  "active": "active-busy-day",
 };
 
 const formalityOptions = [
@@ -108,8 +109,9 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const session = await getSession(request.headers.get("Cookie"));
   session.set("styleMeOccasion", occasion);
-  // Store the original UI label before REV3_OCCASION_MAP; used for wording display only.
-  session.set("styleMeOccasionDisplayLabel", rawOccasion);
+  // Store human-readable label (not the raw option ID) for Claude wording and result display.
+  const displayLabel = occasions.find((o) => o.id === rawOccasion)?.label ?? rawOccasion;
+  session.set("styleMeOccasionDisplayLabel", displayLabel);
   if (formalityConditional) {
     session.set("styleMeFormalityConditional", formalityConditional);
   } else {

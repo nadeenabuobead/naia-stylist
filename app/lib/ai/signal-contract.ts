@@ -259,7 +259,7 @@ export const SESSION_QUESTIONS: SessionQuestion[] = [
       "special-event",
       "not-sure",
     ],
-    skipForOccasions: ["everyday", "travel"],
+    skipForOccasions: ["everyday", "travel", "active"],
   },
   {
     id: SQ.TODAY_COLOURS,

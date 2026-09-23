@@ -367,6 +367,7 @@ export type AutoSelectItem = {
   imageUrl: string | null;
   garmentRelationships: string[];
   formality: string | null;
+  waistShape: string | null;
   // Approved GarmentStyleMeProfile — for intention- and body-need-aware anchor ranking.
   // null when no approved profile exists.
   styleMeProfile: {
@@ -376,6 +377,7 @@ export type AutoSelectItem = {
     construction?: string | null;
     silhouetteCharacter?: string[] | null;
     waistComfort?: string | null;
+    fabricBehaviour?: string[] | null;
   } | null;
 };
 
@@ -386,11 +388,18 @@ const _FORMALITY_RANK: Record<string, number> = {
   "business-formal": 4, occasion: 5, evening: 6,
 };
 
-// Maximum formality rank appropriate for an occasion when a formalityConditional is given.
-// Used to soft-penalise over-dressed anchors at auto-select time.
+// Maximum formality rank appropriate for an occasion.
+// Keys must match canonical session occasion IDs (post REV3_OCCASION_MAP normalisation).
 const _OCCASION_MAX_RANK: Record<string, number> = {
-  everyday: 2, "work-office": 3, "casual-social": 2, "dinner-out": 4,
-  "going-out": 4, "formal-event": 6, "active-busy-day": 2,
+  everyday: 2,
+  work: 3,
+  dinner: 4,
+  "date-night": 4,
+  "girls-night": 4,
+  "special-event": 5,
+  travel: 2,
+  family: 2,
+  active: 1,   // athletic/active day — casual only, no structured formalwear
 };
 
 // Construction bonus values for structured-shape / still-want-shape at anchor level.
@@ -431,9 +440,9 @@ export async function autoSelectClosetAnchor(
           id: true, name: true, category: true, subcategory: true,
           colors: true, primaryColor: true, pattern: true, material: true,
           styleTags: true, occasions: true, imageUrl: true,
-          garmentRelationships: true, formality: true,
+          garmentRelationships: true, formality: true, waistShape: true,
           styleMeProfile: {
-            select: { profileStatus: true, intentionPotentials: true, occasionFit: true, construction: true, silhouetteCharacter: true, waistComfort: true },
+            select: { profileStatus: true, intentionPotentials: true, occasionFit: true, construction: true, silhouetteCharacter: true, waistComfort: true, fabricBehaviour: true },
           },
         },
       }) as AutoSelectItem[];
@@ -445,7 +454,9 @@ export async function autoSelectClosetAnchor(
   // Unknown formality (null) is treated as in-range (tier 0) — fail-open.
   // formalityConditional "formality-dressy" raises the ceiling by 2 ranks.
   const targetMaxRank = _OCCASION_MAX_RANK[signals.occasion] ?? 3;
-  const formalityBoost = signals.formalityConditional === "formality-dressy" ? 2 : 0;
+  // "formality-occasion" (Dressy) raises the ceiling by 2 so evening/occasion-wear anchors
+  // can be selected for dressy dinner, date-night, etc.
+  const formalityBoost = signals.formalityConditional === "formality-occasion" ? 2 : 0;
   const effectiveMaxRank = Math.min(6, targetMaxRank + formalityBoost);
   const isFormallyInRange = (item: AutoSelectItem): boolean => {
     if (!item.formality) return true; // unknown → in-range (fail-open)
@@ -459,6 +470,19 @@ export async function autoSelectClosetAnchor(
   const activeBodyNeeds = signals.bodyNeeds ?? [];
   const needsConstructionBonus = activeBodyNeeds.some((n) => _CONSTRUCTION_BODY_NEEDS.has(n));
   const needsLooseBonus = activeBodyNeeds.includes("loose-comfortable");
+  const needsLessBodyConscious = activeBodyNeeds.includes("less-body-conscious");
+  const needsSofterFabrics = activeBodyNeeds.includes("softer-easier-fabrics");
+  const needsWaistDef = activeBodyNeeds.includes("waist-definition");
+  const needsNothingTightWaist = activeBodyNeeds.includes("nothing-tight-waist");
+
+  // Preferred formality range for register bonus — mirrors FORMALITY_CONDITIONAL_ADJUSTMENTS
+  // in styleme-result.server.ts. Items within this range receive a modest register bonus.
+  const _FORMALITY_CONDITIONAL_TARGET: Record<string, { min: number; max: number }> = {
+    "formality-relaxed": { min: 1, max: 2 },
+    "formality-smart":   { min: 2, max: 3 },
+    "formality-polished":{ min: 3, max: 4 },
+    "formality-occasion":{ min: 4, max: 6 },
+  };
 
   const mapped: ScoredItem[] = items.map((item) => {
     const baseScore = scoreClosetItemForSession(
@@ -471,12 +495,26 @@ export async function autoSelectClosetAnchor(
       ? item.styleMeProfile
       : null;
 
-    // Body-need bonus: construction + silhouette signals for anchor-capable needs.
-    // Tier order: occasion → register → body-need → intention.
-    // Applied only to anchor-capable categories (TOPS/BOTTOMS/DRESSES/OUTERWEAR).
+    // Register bonus: items within the preferred formality range get +0.5.
+    // Only fires when a formalityConditional is set and the item has known formality.
+    // Keeps register as a tiebreaker within the occasion pool without overriding occasion.
+    const registerBonus = (() => {
+      if (!signals.formalityConditional || !item.formality) return 0;
+      const rank = _FORMALITY_RANK[item.formality] ?? null;
+      if (rank === null) return 0;
+      const range = _FORMALITY_CONDITIONAL_TARGET[signals.formalityConditional];
+      if (!range) return 0;
+      return rank >= range.min && rank <= range.max ? 0.5 : 0;
+    })();
+
+    // Body-need bonus/penalty: applied to anchor-capable categories only.
+    // Precedence: occasion eligibility > register > body-need > intention.
+    // A violation penalty (-2.0) ensures a fitted anchor loses to an occasion-valid
+    // relaxed alternative WITHIN the eligible pool, without rescuing occasion-invalid items.
     const bodyNeedBonus = (() => {
       if (!ANCHOR_CAPABLE_CATEGORIES.has(item.category)) return 0;
       let bonus = 0;
+
       // Construction-based needs (structured-shape / still-want-shape)
       if (needsConstructionBonus && approvedProfile) {
         const construction = approvedProfile.construction;
@@ -484,23 +522,63 @@ export async function autoSelectClosetAnchor(
           bonus += _ANCHOR_CONSTRUCTION_BONUS[construction] ?? 0;
         }
       }
+
       // Loose-comfortable: silhouetteCharacter + waistComfort from approved profile
-      if (needsLooseBonus && approvedProfile) {
-        const sils: string[] = approvedProfile.silhouetteCharacter ?? [];
-        const wc: string | null = approvedProfile.waistComfort ?? null;
-        const LOOSE_SILS = new Set(["relaxed", "oversized", "voluminous", "wide-leg"]);
-        const WAIST_SUPPORT = new Set(["elastic", "drawstring", "stretch"]);
-        const hasLoose = sils.some((s) => LOOSE_SILS.has(s));
-        const hasFitted = sils.includes("fitted");
-        const hasRestrict = wc === "restrictive";
-        const hasWaistSupport = wc !== null && WAIST_SUPPORT.has(wc);
-        // Violation cases receive no positive anchor bonus (ranking handles penalty via fitScore)
-        if (!hasFitted && !hasRestrict) {
-          if (hasLoose && hasWaistSupport) bonus += 2.0;   // fitScore 1.0 × 2.0
-          else if (hasLoose) bonus += 1.7;                 // fitScore 0.85 × 2.0
-          else if (hasWaistSupport) bonus += 1.2;          // fitScore 0.6 × 2.0
+      if (needsLooseBonus) {
+        const { violation, fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", {
+          fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
+          approvedProfile: approvedProfile ?? undefined,
+        });
+        if (violation) {
+          bonus -= 2.0; // fitted/restrictive anchor loses to occasion-valid relaxed alternative
+        } else if (fitScore !== null && fitScore > 0) {
+          bonus += fitScore * 2.0; // max +2.0 for loose + waist support
         }
       }
+
+      // Nothing too body-hugging: uses same silhouette evidence as loose-comfortable
+      if (needsLessBodyConscious) {
+        const { violation, fitScore } = scoreBodyNeedForClosetItem("less-body-conscious", {
+          fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
+          approvedProfile: approvedProfile ?? undefined,
+        });
+        if (violation) {
+          bonus -= 2.0; // fitted anchor loses to non-cling alternative within eligible pool
+        } else if (fitScore !== null && fitScore > 0) {
+          bonus += fitScore * 1.7; // max +1.7 for clearly relaxed silhouette
+        }
+      }
+
+      // Softer / easier fabrics: fabricBehaviour from approved profile
+      if (needsSofterFabrics && approvedProfile) {
+        const { fitScore } = scoreBodyNeedForClosetItem("softer-easier-fabrics", {
+          fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
+          approvedProfile: approvedProfile ?? undefined,
+        });
+        if (fitScore !== null) bonus += (fitScore - 0.5) * 1.0; // soft→+0.5, rigid→-0.3, neutral→0
+      }
+
+      // Waist definition: explicit waist evidence only
+      if (needsWaistDef) {
+        const { fitScore } = scoreBodyNeedForClosetItem("waist-definition", {
+          fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
+          approvedProfile: approvedProfile ?? undefined,
+        });
+        if (fitScore !== null && fitScore > 0) bonus += fitScore * 1.5;
+      }
+
+      // Nothing tight around waist: waistComfort from approved profile
+      if (needsNothingTightWaist) {
+        const { fitScore } = scoreBodyNeedForClosetItem("nothing-tight-waist", {
+          fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
+          approvedProfile: approvedProfile ?? undefined,
+        });
+        if (fitScore !== null) {
+          if (fitScore >= 0.8) bonus += 1.0;       // elastic/stretch/drawstring
+          else if (fitScore < 0.2) bonus -= 1.0;   // restrictive waistband
+        }
+      }
+
       return bonus;
     })();
 
@@ -515,7 +593,7 @@ export async function autoSelectClosetAnchor(
       : 0;
     return {
       item,
-      score: baseScore + bodyNeedBonus + intentionBonus,
+      score: baseScore + registerBonus + bodyNeedBonus + intentionBonus,
       isAnchorCapable: ANCHOR_CAPABLE_CATEGORIES.has(item.category),
       inRange: isFormallyInRange(item),
     };
@@ -553,26 +631,48 @@ export async function autoSelectClosetAnchor(
   if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
     console.log("[nAia-anchor-rank]", JSON.stringify({
       occasion: signals.occasion,
+      formalityConditional: signals.formalityConditional ?? null,
       intentions: activeIntentions,
       bodyNeeds: activeBodyNeeds,
       top10: scored.slice(0, 10).map((s) => {
         const ap2 = s.item.styleMeProfile?.profileStatus === "approved" ? s.item.styleMeProfile : null;
-        const construction2 = ap2?.construction ?? null;
-        const bnBonus = needsConstructionBonus && ap2 && ANCHOR_CAPABLE_CATEGORIES.has(s.item.category) && construction2 && construction2 !== "N/A"
-          ? (_ANCHOR_CONSTRUCTION_BONUS[construction2] ?? 0)
-          : 0;
+        const gfbn = (need: string) => scoreBodyNeedForClosetItem(need, {
+          fitProfile: null, waistShape: s.item.waistShape,
+          styleTags: s.item.styleTags, approvedProfile: ap2 ?? undefined,
+        });
+        const bnDetail: Record<string, unknown> = {};
+        if (needsConstructionBonus && ap2 && ANCHOR_CAPABLE_CATEGORIES.has(s.item.category)) {
+          const c = ap2.construction;
+          bnDetail.construction = c ? (_ANCHOR_CONSTRUCTION_BONUS[c] ?? 0) : 0;
+        }
+        if (needsLooseBonus && ANCHOR_CAPABLE_CATEGORIES.has(s.item.category)) {
+          const r = gfbn("loose-comfortable");
+          bnDetail["loose-comfortable"] = { violation: r.violation, fitScore: r.fitScore, bonus: r.violation ? -2.0 : (r.fitScore ?? 0) * 2.0 };
+        }
+        if (needsLessBodyConscious && ANCHOR_CAPABLE_CATEGORIES.has(s.item.category)) {
+          const r = gfbn("less-body-conscious");
+          bnDetail["less-body-conscious"] = { violation: r.violation, fitScore: r.fitScore, bonus: r.violation ? -2.0 : (r.fitScore ?? 0) * 1.7 };
+        }
+        if (needsSofterFabrics && ANCHOR_CAPABLE_CATEGORIES.has(s.item.category)) {
+          const r = gfbn("softer-easier-fabrics");
+          bnDetail["softer-easier-fabrics"] = { fitScore: r.fitScore };
+        }
         return {
           id: s.item.id, name: s.item.name, score: s.score,
-          construction: construction2,
-          bodyNeedBonus: bnBonus,
+          construction: ap2?.construction ?? null,
+          silhouetteCharacter: ap2?.silhouetteCharacter ?? null,
+          fabricBehaviour: ap2?.fabricBehaviour ?? null,
+          waistComfort: ap2?.waistComfort ?? null,
+          bodyNeedDetail: bnDetail,
           isAnchorCapable: s.isAnchorCapable, inRange: s.inRange,
           occasions: s.item.occasions,
+          occasionFit: ap2?.occasionFit ?? null,
           intentionPotentials: activeIntentions.length > 0 && ap2?.intentionPotentials
             ? Object.fromEntries(activeIntentions.map((id) => [
                 id,
                 (ap2.intentionPotentials as Record<string, string>)[id] ?? "(missing)",
               ]))
-            : ap2 ? "(approved but no intentions active)" : "(no approved profile)",
+            : ap2 ? "(approved, no intentions active)" : "(no approved profile)",
         };
       }),
       winner: winnerEntry ? { id: winnerEntry.item.id, name: winnerEntry.item.name, score: winnerEntry.score } : null,
@@ -668,6 +768,19 @@ export function scoreBodyNeedForClosetItem(
     }
 
     case "less-body-conscious": {
+      // PRIMARY: approved silhouetteCharacter — same evidence source as loose-comfortable.
+      const profile = item.approvedProfile;
+      if (profile) {
+        const sils = (profile.silhouetteCharacter ?? []) as string[];
+        const LOOSE_SILS = new Set(["relaxed", "oversized", "voluminous", "wide-leg"]);
+        // fitted is the clear contradiction: body-skimming/cling
+        if (sils.includes("fitted")) return { violation: true, fitScore: 0 };
+        if (sils.some((s) => LOOSE_SILS.has(s))) return { violation: false, fitScore: 1 };
+        // Neutral silhouettes (straight, A-line, column, draped) — not cling, not loose
+        if (sils.length > 0) return { violation: false, fitScore: 0.5 };
+        // No silhouette data on approved profile — fall through to legacy
+      }
+      // LEGACY FALLBACK: fitProfile only
       if (fp !== null && TIGHT_FITS.has(fp)) return { violation: true, fitScore: 0 };
       if (fp !== null && RELAXED_FITS.has(fp)) return { violation: false, fitScore: 1 };
       if (fp !== null && (fp === "tailored" || fp === "structured")) return { violation: false, fitScore: 0.5 };
@@ -765,10 +878,13 @@ export function scoreBodyNeedForClosetItem(
     }
 
     case "waist-definition": {
-      if (ws === "belted") return { violation: false, fitScore: 1 };
-      if (fp === "body-skimming") return { violation: false, fitScore: 0.7 };
-      if (ws === null && fp === null) return { violation: false, fitScore: null };
-      return { violation: false, fitScore: 0.3 };
+      // Explicit waist-definition evidence only. DO NOT infer from:
+      //   fitted / tailored / structured / body-skimming / high-waist alone.
+      // Schema gap: GarmentStyleMeProfile has no dedicated waist-definition field.
+      // Using legacy waistShape as the strongest available reviewed source.
+      if (ws === "belted" || ws === "tied" || ws === "wrap") return { violation: false, fitScore: 1 };
+      // Any other waistShape value = insufficient evidence
+      return { violation: false, fitScore: null };
     }
 
     case "structured-shape": {
