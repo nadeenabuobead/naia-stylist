@@ -88,6 +88,10 @@ vi.mock("~/lib/saved-items.server", () => ({
   loadReportSaveState: vi.fn(async () => ({ refKeys: {}, saved: [], canSave: true })),
 }));
 
+vi.mock("~/lib/trend-closet-connections.server", () => ({
+  loadTrendClosetConnections: vi.fn(async () => []),
+}));
+
 vi.mock("~/lib/personalised-trend-history.server", () => ({
   recordEditSnapshot: vi.fn(async () => ({
     snapshotCreated: true, unlockCreated: true,
@@ -658,5 +662,93 @@ describe("Historical replay (?edit=<snapshotId>)", () => {
     } as never);
 
     expect(recordEditSnapshot).not.toHaveBeenCalled();
+  });
+});
+
+// ── Step 5 — history compatibility ───────────────────────────────────────────
+//
+// A stored edit is what she received. The closet connection inside it must
+// behave like the rest of that snapshot: frozen.
+
+import { loadTrendClosetConnections } from "~/lib/trend-closet-connections.server";
+
+describe("Closet connections and history", () => {
+  const HISTORICAL_CONNECTIONS = [{
+    contentId: "tc_aaaaaaaaaaaa",
+    label: "Softened tailoring",
+    matchCount: 6,
+    pieces: [
+      { garmentId: "ci_1", name: "Navy Blazer", category: "OUTERWEAR",
+        reason: "Already connects through its tailored line.",
+        imageUrl: null, imagePublicId: "naia-wardrobe/cust-1/blazer", imageFormat: "jpg" },
+    ],
+  }];
+
+  const STORED = {
+    id: "snap_sept", reportId: "rep_1", reportSlug: "spring-2026-soft-structure",
+    reportTitle: "Spring 2026 Soft Structure", reportSeason: "Spring 2026",
+    engineVersion: "1.0.0",
+    edit: { ...MOCK_EDIT, closetConnections: HISTORICAL_CONNECTIONS },
+    createdAt: "2026-09-01T00:00:00.000Z",
+  };
+
+  const call = (url: string) => loader({
+    request: new Request(url),
+    params: { slug: "spring-2026-soft-structure" }, context: {},
+  } as never);
+
+  beforeEach(() => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue({ id: "cust-1" } as never);
+  });
+
+  it("historical replay does NOT run the matcher", async () => {
+    vi.mocked(loadSnapshot).mockResolvedValueOnce(STORED as never);
+    vi.mocked(loadTrendClosetConnections).mockClear();
+
+    await call("https://naia.test/trends/my-edits/spring-2026-soft-structure?edit=snap_sept");
+
+    expect(loadTrendClosetConnections).not.toHaveBeenCalled();
+    expect(buildShopperEdit).not.toHaveBeenCalled();
+  });
+
+  it("replay returns the HISTORICAL count, not today's closet", async () => {
+    vi.mocked(loadSnapshot).mockResolvedValueOnce(STORED as never);
+    // Today the closet would yield a different answer entirely.
+    vi.mocked(loadTrendClosetConnections).mockResolvedValue([
+      { contentId: "tc_aaaaaaaaaaaa", label: "Softened tailoring", matchCount: 99, pieces: [] },
+    ] as never);
+
+    const result = await call("https://naia.test/trends/my-edits/spring-2026-soft-structure?edit=snap_sept") as never as
+      { edit: { closetConnections: Array<{ matchCount: number; pieces: unknown[] }> } };
+
+    expect(result.edit.closetConnections[0].matchCount).toBe(6);
+    expect(result.edit.closetConnections[0].pieces).toHaveLength(1);
+  });
+
+  it("a deleted piece does not rewrite the historical count", async () => {
+    // resolveSnapshotImages is stubbed to identity here; the count lives in the
+    // snapshot and nothing in the replay path recomputes it.
+    vi.mocked(loadSnapshot).mockResolvedValueOnce(STORED as never);
+    const result = await call("https://naia.test/trends/my-edits/spring-2026-soft-structure?edit=snap_sept") as never as
+      { edit: { closetConnections: Array<{ matchCount: number; pieces: Array<{ name: string; reason: string }> }> } };
+
+    expect(result.edit.closetConnections[0].matchCount).toBe(6);
+    expect(result.edit.closetConnections[0].pieces[0].name).toBe("Navy Blazer");
+    expect(result.edit.closetConnections[0].pieces[0].reason).toContain("tailored line");
+  });
+
+  it("a CURRENT edit does run the matcher and persists what it rendered", async () => {
+    vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: true } as never);
+    vi.mocked(buildShopperEdit).mockReturnValueOnce(MOCK_EDIT as never);
+    vi.mocked(loadTrendClosetConnections).mockResolvedValueOnce(HISTORICAL_CONNECTIONS as never);
+    vi.mocked(recordEditSnapshot).mockClear();
+
+    const result = await call("https://naia.test/trends/my-edits/spring-2026-soft-structure") as never as
+      { edit: { closetConnections: unknown } };
+
+    expect(loadTrendClosetConnections).toHaveBeenCalledTimes(1);
+    expect(result.edit.closetConnections).toEqual(HISTORICAL_CONNECTIONS);
+    // Display and storage are one payload — connections included.
+    expect(vi.mocked(recordEditSnapshot).mock.calls[0][0].edit).toBe(result.edit);
   });
 });

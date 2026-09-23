@@ -21,6 +21,7 @@ import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import SaveControl, { saveControlCss } from "~/components/SaveControl";
 import { loadReportSaveState, type ReportSaveState } from "~/lib/saved-items.server";
 import { recordEditSnapshot, loadSnapshot, resolveSnapshotImages } from "~/lib/personalised-trend-history.server";
+import { loadTrendClosetConnections, type ClosetConnection } from "~/lib/trend-closet-connections.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 type LoaderData = {
@@ -35,6 +36,9 @@ type LoaderData = {
   /** Set when viewing a stored historical snapshot rather than today's edit. */
   historical: { snapshotId: string; receivedAt: string } | null;
 };
+
+/** The edit plus its structured closet connections, as rendered and as stored. */
+type EditPayload = ShopperEdit & { closetConnections?: ClosetConnection[] };
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
@@ -136,24 +140,34 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       takeawaySections: ["yourBestRouteIn", "aLookToTry"],
     });
 
+    // Structured Trend ↔ Closet matching, per trend, against the FULL resolved
+    // closet. Replaces the old text-coincidence matcher as the customer-facing
+    // "Already in Your Closet" claim. Never merged into the narrative sections,
+    // which have no trend association to infer from.
+    let editPayload: EditPayload | null = edit;
+    if (edit && report.id) {
+      const connections = await loadTrendClosetConnections(customer.id, report);
+      if (connections.length > 0) editPayload = { ...edit, closetConnections: connections };
+    }
+
     // Persist EXACTLY what is about to render — the same object, not a second
     // independently generated one. Idempotent: an identical render stores
     // nothing. A write failure is logged and the page still renders; nothing
     // claims history was saved when it was not.
-    if (edit && report.id) {
+    if (editPayload && report.id) {
       await recordEditSnapshot({
         customerId: customer.id,
         reportId: report.id,
         reportSlug: report.slug,
         reportTitle: report.title,
         reportSeason: report.season,
-        edit,
+        edit: editPayload,
       });
     }
 
     return {
       report,
-      edit,
+      edit: editPayload,
       hasProfile: evidence.hasProfile,
       generationFailed: false,
       nadineRecommendation,
@@ -181,6 +195,36 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 const TINTS = ["#efeae0", "#e6dccb", "#d9c9b5", "#efe6d7", "#e2d3bf", "#ede2cf"];
 
 const css = `
+  /* ── Already in your closet ── */
+  .tmd-conn { padding: 14px 0; border-top: 1px solid rgba(26,17,9,0.08); }
+  .tmd-conn:first-of-type { border-top: none; padding-top: 4px; }
+  .tmd-conn-claim { margin: 0 0 8px; font-size: 15px; line-height: 1.6; color: rgba(26,17,9,0.82); }
+  .tmd-conn-claim b { font-weight: 500; color: #1a1109; }
+  .tmd-conn-trend { font-style: italic; }
+  .tmd-conn-toggle {
+    background: none; border: none; padding: 0; cursor: pointer;
+    font-family: 'Space Mono', monospace; font-size: 9px; letter-spacing: 0.22em;
+    text-transform: uppercase; color: #7a1e28;
+    text-decoration: underline; text-underline-offset: 4px;
+  }
+  .tmd-conn-toggle:focus-visible { outline: 2px solid #7a1e28; outline-offset: 3px; }
+  .tmd-conn-list { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 12px; }
+  .tmd-conn-piece { display: flex; gap: 12px; align-items: flex-start; }
+  .tmd-conn-thumb {
+    flex: 0 0 52px; width: 52px; height: 68px; overflow: hidden;
+    background: rgba(26,17,9,0.06);
+  }
+  .tmd-conn-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .tmd-conn-thumb-empty { display: block; width: 100%; height: 100%; }
+  .tmd-conn-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .tmd-conn-name { font-size: 14px; color: #1a1109; }
+  .tmd-conn-reason { font-size: 13px; line-height: 1.5; color: rgba(26,17,9,0.6); }
+  .tmd-conn-more {
+    font-family: 'Space Mono', monospace; font-size: 9px; letter-spacing: 0.2em;
+    text-transform: uppercase; padding-left: 64px;
+  }
+  .tmd-conn-more a { color: rgba(26,17,9,0.55); text-decoration: underline; text-underline-offset: 3px; }
+
   /* ── Historical snapshot banner ── */
   .tmd-historical {
     border: 1px solid rgba(26,17,9,0.16);
@@ -625,10 +669,58 @@ export function ErrorBoundary() {
   );
 }
 
+/** One trend's closet connection: the claim, then the pieces on request. */
+function ClosetConnectionBlock({ connection }: { connection: ClosetConnection }) {
+  const [open, setOpen] = useState(false);
+  const n = connection.matchCount;
+
+  return (
+    <div className="tmd-conn">
+      <p className="tmd-conn-claim">
+        <b>{n}</b> of your pieces {n === 1 ? "connects" : "connect"} to{" "}
+        <span className="tmd-conn-trend">{connection.label}</span>.
+      </p>
+
+      <button
+        type="button"
+        className="tmd-conn-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {open ? "Hide my pieces" : "See my pieces"}
+      </button>
+
+      {open && (
+        <ul className="tmd-conn-list">
+          {connection.pieces.map((piece) => (
+            <li key={piece.garmentId} className="tmd-conn-piece">
+              <div className="tmd-conn-thumb">
+                {piece.imageUrl
+                  ? <img src={piece.imageUrl} alt="" loading="lazy" />
+                  : <span className="tmd-conn-thumb-empty" aria-hidden="true" />}
+              </div>
+              <div className="tmd-conn-copy">
+                <span className="tmd-conn-name">{piece.name || "Your piece"}</span>
+                <span className="tmd-conn-reason">{piece.reason}</span>
+              </div>
+            </li>
+          ))}
+          {n > connection.pieces.length && (
+            <li className="tmd-conn-more">
+              <Link to="/closet">{n - connection.pieces.length} more in My Closet →</Link>
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function MyTrendEditDetail() {
   const loaderData = useLoaderData() as LoaderData;
   const { report, edit, hasProfile, generationFailed, nadineRecommendation, reportIndex } = loaderData;
   const historical = loaderData.historical ?? null;
+  const connections = (edit as (typeof edit) & { closetConnections?: ClosetConnection[] })?.closetConnections ?? [];
 
   // The editorial read is the primary experience. If save state is absent for
   // any reason, the page renders without ♡ controls rather than failing — a
@@ -864,21 +956,6 @@ export default function MyTrendEditDetail() {
                 <span className="tmd-save">{saveTakeaway("yourBestRouteIn", "Your route in", edit.yourBestRouteIn)}</span>
               </div>
               <p className="tmd-body">{edit.yourBestRouteIn}</p>
-              {edit.evidenceClosetItems.length > 0 && (
-                <div className="tmd-already-yours">
-                  <span className="tmd-already-yours-label">Already yours</span>
-                  <div className="tmd-already-yours-items">
-                    {edit.evidenceClosetItems.map((item: EvidenceClosetItem, i: number) => (
-                      <div key={i} className="tmd-already-yours-item">
-                        {item.imageUrl && (
-                          <img src={item.imageUrl} alt={item.name} className="tmd-already-yours-img" />
-                        )}
-                        <span className="tmd-already-yours-name">{item.name}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* 04 / A LOOK TO TRY */}
@@ -888,22 +965,17 @@ export default function MyTrendEditDetail() {
                 <span className="tmd-save">{saveTakeaway("aLookToTry", "A look to try", edit.aLookToTry)}</span>
               </div>
               <p className="tmd-body">{edit.aLookToTry}</p>
-              {edit.evidenceClosetItems.length > 0 && (
-                <div className="tmd-already-yours">
-                  <span className="tmd-already-yours-label">Already yours</span>
-                  <div className="tmd-already-yours-items">
-                    {edit.evidenceClosetItems.map((item: EvidenceClosetItem, i: number) => (
-                      <div key={i} className="tmd-already-yours-item">
-                        {item.imageUrl && (
-                          <img src={item.imageUrl} alt={item.name} className="tmd-already-yours-img" />
-                        )}
-                        <span className="tmd-already-yours-name">{item.name}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
+
+            {/* ALREADY IN YOUR CLOSET — structured, per trend */}
+            {connections.length > 0 && (
+              <div className="tmd-section">
+                <div className="tmd-section-label">Already in your closet</div>
+                {connections.map((c) => (
+                  <ClosetConnectionBlock key={c.contentId} connection={c} />
+                ))}
+              </div>
+            )}
 
             <div className="tmd-divider" />
 

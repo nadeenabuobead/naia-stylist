@@ -286,7 +286,11 @@ export async function resolveSnapshotImages(
   edit: ShopperEdit,
 ): Promise<ShopperEdit> {
   const items = edit.evidenceClosetItems ?? [];
-  const ids = items.map((i) => i.closetItemId).filter(Boolean);
+  const connectionPieceIds = ((edit as ShopperEdit & {
+    closetConnections?: Array<{ pieces: Array<{ garmentId: string }> }>;
+  }).closetConnections ?? []).flatMap((c) => c.pieces.map((p) => p.garmentId));
+
+  const ids = [...new Set([...items.map((i) => i.closetItemId), ...connectionPieceIds])].filter(Boolean);
   if (ids.length === 0) return edit;
 
   const rows: Array<{ id: string; imagePublicId: string | null; imageFormat: string | null }> =
@@ -300,8 +304,31 @@ export async function resolveSnapshotImages(
 
   const cfg = getCloudinaryConfig();
 
+  // Step 5 connections: re-sign the same pinned assets, on the same rules.
+  // A deleted piece keeps its label and reason and loses only its thumbnail —
+  // the historical COUNT is never rewritten.
+  const withConnections = edit as ShopperEdit & {
+    closetConnections?: Array<{ pieces: Array<Record<string, unknown>> }>;
+  };
+  const closetConnections = withConnections.closetConnections?.map((c) => ({
+    ...c,
+    pieces: c.pieces.map((piece) => {
+      const pinned = piece.imagePublicId as string | null;
+      const format = piece.imageFormat as string | null;
+      const garmentId = piece.garmentId as string;
+      if (!pinned || !format || currentAssetById.get(garmentId) !== pinned) {
+        return { ...piece, imageUrl: null };
+      }
+      if (!cfg || !validatePublicIdOwnership(pinned, customerId).ok) {
+        return { ...piece, imageUrl: null };
+      }
+      return { ...piece, imageUrl: buildPrivateDownloadUrl(cfg, pinned, format, "private") };
+    }),
+  }));
+
   return {
     ...edit,
+    ...(closetConnections ? { closetConnections } : {}),
     evidenceClosetItems: items.map((item) => {
       const historicalId = item.imagePublicId;
       const historicalFormat = item.imageFormat;

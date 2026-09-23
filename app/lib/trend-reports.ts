@@ -104,11 +104,13 @@ export const trendReports: TrendReportData[] = [
       "Soft Structure is nAia's Spring 2026 edit: tailoring that holds a silhouette line through cut and proportion rather than through stiffness, paired with one considered gesture — a softened shoulder, a wrapped front, a curved hem — and enough ease for real occasions. The working components are the longline blazer, the clean wide-leg trouser, and fabrics that either hold their shape without pressing or move freely without going limp. It is not about becoming plain. It is about letting cut, proportion, and fabric carry the impression without embellishment or body-conscious cuts.",
     keyTrends: [
       {
+        facets: { category: ["OUTERWEAR", "BOTTOMS", "DRESSES"], silhouette: ["tailored", "straight"], formalityBand: ["smart-casual", "business-casual"] },
         name: "Softened tailoring",
         description:
           "A jacket, trouser, or dress that holds its silhouette through cut and fabric weight — a longline blazer with a clean shoulder, wide-leg trousers with enough length to break at the foot, a draped midi dress in a fabric that keeps its line. The structure comes from proportion, not from stiff interfacing.",
       },
       {
+        facets: { silhouette: ["wrap", "asymmetric"] },
         name: "One sculptural gesture",
         description:
           "One defined element per outfit: a softened-but-present shoulder, a wrapped or tie-front neckline, a curved or asymmetric hemline, a controlled drape across one seam. The gesture reads because everything around it stays composed. Two gestures cancel each other out.",
@@ -126,6 +128,7 @@ export const trendReports: TrendReportData[] = [
         source: "nAia inference from Givenchy SS26",
       },
       {
+        facets: { category: ["BOTTOMS"], silhouette: ["straight"] },
         signal: "Long clean trouser lines",
         why: "A trouser with enough length to break cleanly at the foot creates the proportioned base the silhouette reads from. nAia identifies this as the working component that makes soft structure legible without accessories or styling intervention.",
         source: "nAia editorial judgment",
@@ -136,6 +139,7 @@ export const trendReports: TrendReportData[] = [
         source: "nAia editorial judgment",
       },
       {
+        facets: { silhouette: ["asymmetric"] },
         signal: "Asymmetry used with restraint",
         why: "Victoria Beckham Spring Summer 2026 frames experimental gestures, naïve compositions, and happy accidents as a core direction. The wearable translation: one asymmetric element — a hem, a seam, a wrapped neckline — against an otherwise composed base.",
         source: "nAia inference from Victoria Beckham SS26",
@@ -252,16 +256,19 @@ export const trendReports: TrendReportData[] = [
     ],
     rising: [
       {
+        facets: { category: ["OUTERWEAR"], subcategory: ["blazer"], silhouette: ["straight"] },
         signal: "Longline blazers",
         why: "The longline proportion is the styling decision that makes modern tailoring work without matching the trouser — a longer line anchors an outfit across more counterparts, from narrow skirts to wide-leg denim.",
         source: "nAia editorial judgment",
       },
       {
+        facets: { category: ["OUTERWEAR"], subcategory: ["waistcoat"] },
         signal: "Waistcoats as a top layer",
         why: "Victoria Beckham Pre SS26 brings together the formal with the fluid. The working translation: a waistcoat worn as a standalone top layer over a draped skirt or wide-leg denim, rather than as part of a matching three-piece.",
         source: "nAia inference from Victoria Beckham Pre SS26",
       },
       {
+        facets: { category: ["BOTTOMS"], subcategory: ["trouser"], silhouette: ["flowy", "loose"] },
         signal: "Fluid trousers",
         why: "Victoria Beckham Pre SS26 establishes the formal-meets-fluid direction. Fluid-leg trousers are the specific counterpart nAia identifies as the working garment — the proportion contrast between the structured anchor and the fluid leg is the styling decision, not the formality of the setting.",
         source: "nAia inference from Victoria Beckham Pre SS26",
@@ -358,6 +365,7 @@ export const trendReports: TrendReportData[] = [
       "This is not a claim that every Spring 2026 wardrobe should use the same colours. It is the nAia method for making colour purposeful rather than reactive: build from a quiet base — soft white, cream, stone, espresso, washed denim, or black — then add one clear accent that changes the mood of the whole look. The accent can be a knit, a bag, a flat, a scarf, or an evening piece. One strong accent note lands more powerfully than two competing ones; the quiet base is what gives the accent room to read. Deep espresso is the most underused anchor in this palette — it functions as a warm neutral where black feels too hard and beige feels too safe.",
     keyTrends: [
       {
+        facets: { colourFamily: ["white-cream", "beige-brown", "black"] },
         name: "Build from a repeatable quiet base",
         description:
           "Soft white, cream, stone, espresso, washed denim, or black. These are the pieces that earn their place by working with everything in the wardrobe, not just with each other. The base is not the interesting part — it is the condition for the interesting part.",
@@ -375,11 +383,13 @@ export const trendReports: TrendReportData[] = [
     ],
     rising: [
       {
+        facets: { colourFamily: ["white-cream"] },
         signal: "Soft white foundations",
         why: "Pantone's Spring / Summer 2026 NYFW Fashion Color Trend Report documents the season's colour palette direction including soft white and off-white tones. nAia's method frames these as the repeatable foundation — the quiet base the clear accent needs to read against.",
         source: "nAia inference from Pantone NYFW SS26",
       },
       {
+        facets: { colourFamily: ["beige-brown"] },
         signal: "Deep brown as an anchor",
         why: "Espresso and warm deep brown anchor a look with the visual weight of black while reading warmer and less expected than beige. The broader palette direction comes from Pantone's SS26 NYFW report; the espresso read is nAia's editorial translation.",
         source: "nAia editorial judgment",

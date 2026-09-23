@@ -46,8 +46,19 @@ export const PERSONALISED_EDIT_ENGINE_VERSION = "1.0.0";
  * not at all.
  */
 export function sanitiseEditForSnapshot(edit: ShopperEdit): ShopperEdit {
+  // Step 5 closet connections carry signed URLs too — same expiry, same churn,
+  // same rule. The pinned asset reference survives; the URL does not.
+  const withConnections = edit as ShopperEdit & {
+    closetConnections?: Array<{ pieces: Array<Record<string, unknown>> }>;
+  };
+  const closetConnections = withConnections.closetConnections?.map((c) => ({
+    ...c,
+    pieces: c.pieces.map((piece) => ({ ...piece, imageUrl: null })),
+  }));
+
   return {
     ...edit,
+    ...(closetConnections ? { closetConnections } : {}),
     evidenceClosetItems: (edit.evidenceClosetItems ?? []).map((item) => ({
       closetItemId: item.closetItemId,
       imagePublicId: item.imagePublicId,
