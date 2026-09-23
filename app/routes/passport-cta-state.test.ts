@@ -12,7 +12,7 @@
 //   G. profileVersion=6 + dressingPreferences empty   → view (optional field)
 //
 // Static contract checks:
-//   H. source uses profileVersion===6, not completed alone
+//   H. source uses a stamped profileVersion (>=6), not completed alone
 //   I. legacy isLegacyCustomer pattern is consistent with passport.tsx canonical
 
 import { describe, it } from "node:test";
@@ -29,7 +29,8 @@ const passportSrc = readFileSync(join(__dirname, "passport.tsx"), "utf8");
 
 function derivePassportState(p: { completed?: boolean; profileVersion?: number | null } | null): "start" | "continue" | "view" {
   if (!p) return "start";
-  if ((p as any).profileVersion === 6) return "view";
+  const v = (p as any).profileVersion;
+  if (v !== null && v !== undefined && v >= 6) return "view";
   return "continue";
 }
 
@@ -105,7 +106,7 @@ describe("PCTA-F — profileVersion=6 + empty Sizes → view (optional field)", 
   });
 });
 
-describe("PCTA-G — profileVersion=6 + empty dressingPreferences → view (optional under canonical contract)", () => {
+describe("PCTA-G — a stamped profileVersion + empty dressingPreferences → view (optional under canonical contract)", () => {
   it("dressingPreferences not required; missing does not change VIEW state", () => {
     assert.equal(
       derivePassportState({ completed: true, profileVersion: 6 }),
@@ -115,13 +116,32 @@ describe("PCTA-G — profileVersion=6 + empty dressingPreferences → view (opti
   });
 });
 
+describe("PCTA-G7 — Rev 7 (profileVersion=7) is a stamped generation → view", () => {
+  it("profileVersion=7 returns 'view'", () => {
+    assert.equal(derivePassportState({ completed: true, profileVersion: 7 }), "view");
+  });
+  it("a future stamped generation also returns 'view'", () => {
+    assert.equal(derivePassportState({ completed: true, profileVersion: 8 }), "view",
+      "the contract is a stamped generation, not one specific version number");
+  });
+  it("profileVersion=null is still CONTINUE, not view", () => {
+    assert.equal(derivePassportState({ completed: true, profileVersion: null }), "continue");
+  });
+  it("the dashboard offers Rev 6 customers the new questions without calling them incomplete", () => {
+    assert.ok(indexSrc.includes("missingRev7Answers"),
+      "my-naia._index.tsx must detect a pre-Rev 7 Passport");
+    assert.ok(indexSrc.includes("New Style Passport questions"),
+      "the prompt must not be phrased as an incomplete Passport");
+  });
+});
+
 // ── Static source contract checks (H–I) ──────────────────────────────────────
 
-describe("PCTA-H — source uses profileVersion===6, not completed alone", () => {
-  it("loader derives passportState using profileVersion === 6", () => {
+describe("PCTA-H — source uses profileVersion>=6, not completed alone", () => {
+  it("loader derives passportState using profileVersion >= 6", () => {
     assert.ok(
-      indexSrc.includes("profileVersion === 6"),
-      "my-naia._index.tsx must check profileVersion === 6 for VIEW state",
+      indexSrc.includes("profileVersion >= 6"),
+      "my-naia._index.tsx must check profileVersion >= 6 for VIEW state",
     );
   });
   it("source does not derive VIEW state from completed alone", () => {
@@ -132,12 +152,12 @@ describe("PCTA-H — source uses profileVersion===6, not completed alone", () =>
     assert.ok(declStart !== -1 && assignStart !== -1 && endIdx !== -1, "passportState ternary must be locatable");
     const ternaryBlock = indexSrc.slice(assignStart, endIdx + 12);
     const viewIdx          = ternaryBlock.indexOf('"view"');
-    const profileVersionIdx = ternaryBlock.indexOf("profileVersion === 6");
+    const profileVersionIdx = ternaryBlock.indexOf("profileVersion >= 6");
     assert.ok(viewIdx !== -1, '"view" must appear in passportState ternary');
-    assert.ok(profileVersionIdx !== -1, "profileVersion === 6 must appear in passportState ternary");
+    assert.ok(profileVersionIdx !== -1, "profileVersion >= 6 must appear in passportState ternary");
     assert.ok(
       profileVersionIdx < viewIdx,
-      "profileVersion === 6 check must precede the view assignment in the ternary",
+      "profileVersion >= 6 check must precede the view assignment in the ternary",
     );
   });
   it("legacy pattern is guarded: VIEW never assigned when profileVersion is not 6", () => {
@@ -146,7 +166,7 @@ describe("PCTA-H — source uses profileVersion===6, not completed alone", () =>
     const endIdx     = indexSrc.indexOf('"continue";', declStart);
     const ternaryBlock = indexSrc.slice(assignStart, endIdx + 12);
     const firstViewIdx  = ternaryBlock.indexOf('"view"');
-    const profileChk    = ternaryBlock.indexOf("profileVersion === 6");
+    const profileChk    = ternaryBlock.indexOf("profileVersion >= 6");
     assert.ok(profileChk !== -1 && profileChk < firstViewIdx, "profileVersion check must guard the view assignment in the ternary");
   });
 });
@@ -258,10 +278,10 @@ describe("PCTA-G — profileVersion=6: /passport shows full Rev 6 overview (no r
       "passport.tsx must use profileVersion for display decisions (not redirect)",
     );
   });
-  it("my-naia loader assigns VIEW only when profileVersion===6, confirming the route contract", () => {
+  it("my-naia loader assigns VIEW only when profileVersion>=6, confirming the route contract", () => {
     assert.ok(
-      indexSrc.includes("profileVersion === 6"),
-      "my-naia loader VIEW state requires profileVersion===6 which also passes the /passport redirect guard",
+      indexSrc.includes("profileVersion >= 6"),
+      "my-naia loader VIEW state requires profileVersion>=6 which also passes the /passport redirect guard",
     );
   });
 });
@@ -279,14 +299,14 @@ describe("PCTA-I — passportState legacy rule is consistent with canonical pass
     const endIdx     = indexSrc.indexOf('"continue";', declStart);
     assert.ok(declStart !== -1 && assignStart !== -1 && endIdx !== -1, "passportState ternary must be locatable");
     const ternaryBlock = indexSrc.slice(assignStart, endIdx + 12);
-    // VIEW is only assigned when profileVersion===6
+    // VIEW is only assigned when profileVersion>=6
     assert.ok(
       ternaryBlock.includes('"view"'),
       '"view" must appear in passportState ternary',
     );
     assert.ok(
-      ternaryBlock.includes("profileVersion === 6"),
-      "profileVersion === 6 must appear in passportState ternary",
+      ternaryBlock.includes("profileVersion >= 6"),
+      "profileVersion >= 6 must appear in passportState ternary",
     );
     // "continue" is the else/fallback — null/undefined profileVersion falls here
     assert.ok(

@@ -1046,7 +1046,14 @@ function scoreProduct(
   // collapse to the same V3 archetype (e.g. "feminine"+"romantic" → one
   // "feminine-romantic" match, not two).
   let spMatchType: "direct" | "style-tags-fallback" | "none" = "none";
-  const profileSPs = profile?.stylePersonalities ?? [];
+  // Rev 7: styleDirections is the canonical style field. Its projection onto the
+  // V3 archetype tokens the catalogue carries supersedes stylePersonalities, which
+  // the Rev 7 flow never rewrites. Directions with no honest archetype analogue
+  // (unmappedStyleDirections) are carried to the prompt layer instead — they are
+  // valid signals this numeric scorer simply cannot consume yet.
+  const profileSPs = profile?.styleDirectionArchetypes?.length
+    ? profile.styleDirectionArchetypes
+    : (profile?.stylePersonalities ?? []);
   const scoredEffectiveSps = new Set<string>();
 
   for (const sp of profileSPs) {

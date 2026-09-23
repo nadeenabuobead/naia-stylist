@@ -3,13 +3,15 @@ import { useLoaderData, Link, redirect } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { requireCurrentNaiaCustomer } from "../lib/naia-session.server";
 import prisma from "../db.server";
-import { quizQuestions } from "../lib/onboarding/quiz-data";
+import { ALL_QUESTIONS } from "../lib/onboarding/quiz-data";
 import { dailyStyleNotes } from "../lib/daily-style-notes";
 
 // Option label and colour-hex lookups for the Passport Lite summary
 const PASSPORT_LABELS: Record<string, Record<string, string>> = {};
 const PASSPORT_COLOR_HEX: Record<string, string> = {};
-for (const q of quizQuestions) {
+// Retired questions first, so a live Rev 7 question always wins on ID collision and
+// a legacy stored answer still resolves to real copy instead of a title-cased slug.
+for (const q of ALL_QUESTIONS) {
   if (q.options) {
     PASSPORT_LABELS[q.id] = Object.fromEntries(q.options.map(o => [o.id, o.label]));
   }
@@ -91,10 +93,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Style DNA - Show what they actually chose in onboarding
   let styleDNA = [];
-  if (profile && profile.stylePersonalities && profile.stylePersonalities.length > 0) {
-    // Their actual style choices - format properly (handle hyphens)
-    styleDNA = profile.stylePersonalities.slice(0, 5).map((trait) => ({
-      trait: trait.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+  // Rev 7 styleDirections supersedes the legacy stylePersonalities row.
+  const styleTraitIds: string[] = (profile?.styleDirections?.length
+    ? profile.styleDirections
+    : profile?.stylePersonalities) ?? [];
+  const styleTraitQuestion = profile?.styleDirections?.length ? "style-directions" : "style-personalities";
+  if (styleTraitIds.length > 0) {
+    styleDNA = styleTraitIds.slice(0, 5).map((trait) => ({
+      trait: passportLabel(styleTraitQuestion, trait)
     }));
   } else {
     // Fallback if no onboarding
@@ -105,13 +111,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Styling Identity - summary of their choices
   let stylingIdentity = "Complete your style profile";
-  if (profile?.stylePersonalities && profile.stylePersonalities.length >= 2) {
-    const top = profile.stylePersonalities.slice(0, 2).map((s: string) => 
-      s.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
-    );
+  if (styleTraitIds.length >= 2) {
+    const top = styleTraitIds.slice(0, 2).map((s: string) => passportLabel(styleTraitQuestion, s));
     stylingIdentity = `${top[0]} ${top[1]}`;
-  } else if (profile?.stylePersonalities && profile.stylePersonalities.length === 1) {
-    stylingIdentity = profile.stylePersonalities[0].split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+  } else if (styleTraitIds.length === 1) {
+    stylingIdentity = passportLabel(styleTraitQuestion, styleTraitIds[0]);
   } else if (profile?.desiredFeelings?.[0]) {
     stylingIdentity = profile.desiredFeelings[0];
   }
@@ -827,9 +831,24 @@ export default function Index() {
             const lifestyleArr: string[] = p.lifestyle ?? [];
 
             const sections: Array<{ label: string; content: React.ReactNode } | null> = [
-              p.stylePersonalities?.length ? {
+              p.styleDirections?.length ? {
+                label: "Style direction",
+                content: <div>{p.styleDirections.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("style-directions", id)}</span>)}</div>
+              } : p.stylePersonalities?.length ? {
                 label: "Style energies",
                 content: <div>{p.stylePersonalities.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("style-personalities", id)}</span>)}</div>
+              } : null,
+              p.styleExpression?.length ? {
+                label: "What your style says",
+                content: <div>{p.styleExpression.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("style-expression", id)}</span>)}</div>
+              } : null,
+              p.explorationLevel ? {
+                label: "How far nAia should push",
+                content: <div><span style={pillStyle}>{passportLabel("exploration-level", p.explorationLevel)}</span></div>
+              } : null,
+              p.dressingHabits?.length ? {
+                label: "Getting dressed",
+                content: <div>{p.dressingHabits.map((id: string) => <span key={id} style={pillStyle}>{passportLabel("dressing-habits", id)}</span>)}</div>
               } : null,
               p.desiredImpression?.length ? {
                 label: "The impression you make",

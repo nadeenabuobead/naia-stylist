@@ -162,19 +162,25 @@ function PassportSection({ ctx }: { ctx: CustomerStylingPassportContext | null }
 
   const v6Rows: Array<{ label: string; field: string; values: string[] }> = [
     { label: "Current Focus", field: "currentGoal", values: ctx.currentGoal },
-    { label: "What Makes an Outfit Work", field: "successfulOutfitGives", values: ctx.successfulOutfitGives },
-    { label: "Style", field: "stylePersonalities", values: ctx.stylePersonalities },
+    { label: "Outfit Priorities", field: "successfulOutfitGives", values: ctx.successfulOutfitGives },
+    { label: "Style Expression", field: "styleExpression", values: ctx.styleExpression },
+    { label: "Style Exploration", field: "explorationLevel", values: ctx.explorationLevel ? [ctx.explorationLevel] : [] },
+    { label: "Style Direction", field: "styleDirections", values: ctx.styleDirections },
+    // Legacy style field — only shown when the customer has no Rev 7 answer.
+    { label: "Style (legacy)", field: "stylePersonalities", values: ctx.styleDirections.length > 0 ? [] : ctx.stylePersonalities },
     { label: "Lifestyle", field: "lifestyle", values: ctx.lifestyle },
     { label: "Favourite Colours", field: "favoriteColors", values: ctx.favoriteColors },
     { label: "Avoid Colours", field: "avoidColors", values: ctx.avoidColors },
     { label: "Silhouette", field: "silhouette", values: ctx.silhouette },
     { label: "Fit Concerns", field: "fitConcerns", values: ctx.fitConcerns },
     { label: "Dressing Requirements", field: "dressingPreferences", values: ctx.dressingPreferences },
+    { label: "Dressing Habits", field: "dressingHabits", values: ctx.dressingHabits },
   ].filter(r => r.values.length > 0);
 
   const textFields = isV6 ? (
     [
       ctx.fitConcernsNote ? { label: "Fit Note", value: ctx.fitConcernsNote } : null,
+      ctx.dressingRequirementsNote ? { label: "Cultural / Religious Requirement", value: ctx.dressingRequirementsNote } : null,
       ctx.finalNotes ? { label: "Notes to nAia", value: ctx.finalNotes } : null,
     ].filter(Boolean) as Array<{ label: string; value: string }>
   ) : [];
