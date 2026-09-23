@@ -14,6 +14,20 @@
 // The run is idempotent. Ids are derived deterministically and existing ids are
 // always preserved, so running it twice assigns nothing the second time —
 // verified explicitly by the --verify pass below.
+//
+// ── WHY A REJECTED FACET IS FATAL ────────────────────────────────────────────
+// This script is named for identity, but applyContentIdentity() also validates
+// and REWRITES facets, and --apply writes the whole rewritten entry back. A
+// value that fails validation is stripped from the stored row; if every value
+// on an entry fails, the entire `facets` key is deleted from it. That is silent
+// data loss in a row we were only supposed to be adding ids to.
+//
+// The facet backfill cannot undo it either: its manifest is built from the
+// static source, so anything authored directly into the database is not in it
+// and would never be restored.
+//
+// So a rejection is a hard refusal, not a warning. The dry run still lists
+// every rejected value so it can be reconciled before anything is written.
 
 import { trendReports } from "../app/lib/trend-reports.ts";
 import {
@@ -103,7 +117,92 @@ function summarise(report: ReportRow) {
     );
   console.log(`  re-run         ${stable ? "idempotent ✓" : "⚠ NOT IDEMPOTENT"}`);
 
-  return { applied, total, duplicates, malformed, stable };
+  return { applied, total, duplicates, malformed, stable, rejected: applied.rejectedFacets };
+}
+
+/**
+ * The decision, separated from the I/O so it can be asserted directly.
+ *
+ * Returns a refusal reason when the reports are in any state that makes writing
+ * unsafe: colliding or malformed ids, non-idempotent output, or — see the note
+ * at the top of this file — any rejected facet value.
+ */
+export function planBackfill(rows: ReportRow[]) {
+  const results = rows.map(summarise);
+  const objects    = results.reduce((n, r) => n + r.total, 0);
+  const assigned   = results.reduce((n, r) => n + r.applied.assigned.length, 0);
+  const collisions = results.reduce((n, r) => n + r.duplicates.length + r.malformed.length, 0);
+  const rejected   = results.flatMap((r) => r.rejected);
+  const allStable  = results.every((r) => r.stable);
+
+  let refusal: string | null = null;
+  if (collisions > 0)      refusal = "colliding or malformed content ids";
+  else if (!allStable)     refusal = "non-idempotent output";
+  else if (rejected.length > 0) {
+    refusal =
+      `${rejected.length} rejected facet value${rejected.length === 1 ? "" : "s"} — ` +
+      `applying would strip ${rejected.length === 1 ? "it" : "them"} from the stored report`;
+  }
+
+  return { results, objects, assigned, collisions, rejected, allStable, refusal };
+}
+
+/**
+ * Writes only when planBackfill raises no refusal. `write` is injected so a
+ * test can prove that a refusal reaches the writer zero times.
+ */
+export async function runBackfill(
+  rows: ReportRow[],
+  opts: { apply: boolean; write: (id: string, data: Record<string, unknown>) => Promise<unknown> },
+) {
+  const plan = planBackfill(rows);
+
+  console.log("");
+  rule();
+  console.log(
+    `${BOLD}${rows.length} reports · ${plan.objects} content objects · ${plan.assigned} newly identified · ` +
+      `${plan.collisions} collisions · ${plan.rejected.length} rejected facet values · ` +
+      `${plan.allStable ? "idempotent ✓" : "NOT IDEMPOTENT ⚠"}${RESET}`,
+  );
+  rule();
+
+  if (plan.rejected.length > 0) {
+    console.error(`\n${BOLD}Rejected facet values${RESET} — these would be stripped by an apply:`);
+    for (const r of plan.rejected) {
+      console.error(`  ⚠ ${r.field}[${r.index}] ${r.kind} = ${JSON.stringify(r.value)}`);
+    }
+  }
+
+  if (!opts.apply) {
+    console.log(
+      `\n${DIM}Dry run — nothing written.` +
+        `${useDb ? " Re-run with --db --apply to write these ids." : " Add --db to preview live rows."}${RESET}`,
+    );
+    return { written: 0, refusal: plan.refusal, plan };
+  }
+
+  // Refuse BEFORE any write. Nothing below this point runs on a refusal.
+  if (plan.refusal) {
+    console.error(`\nRefusing to apply: ${plan.refusal}. Nothing written.`);
+    process.exitCode = 1;
+    return { written: 0, refusal: plan.refusal, plan };
+  }
+
+  let written = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row.id) continue;
+    const { applied } = plan.results[i];
+    await opts.write(row.id, {
+      keyTrends: applied.keyTrends as object[],
+      rising: applied.rising as object[],
+      fading: applied.fading as object[],
+      referencesBehindThisEdit: applied.referencesBehindThisEdit as object[],
+    });
+    written += 1;
+  }
+  console.log(`\nWrote ${written} report${written === 1 ? "" : "s"}.`);
+  return { written, refusal: null, plan };
 }
 
 async function main() {
@@ -129,55 +228,20 @@ async function main() {
     rows = trendReports as unknown as ReportRow[];
   }
 
-  const results = rows.map(summarise);
-
-  console.log("");
-  rule();
-  const objects = results.reduce((n, r) => n + r.total, 0);
-  const assigned = results.reduce((n, r) => n + r.applied.assigned.length, 0);
-  const collisions = results.reduce((n, r) => n + r.duplicates.length + r.malformed.length, 0);
-  const allStable = results.every((r) => r.stable);
-  console.log(
-    `${BOLD}${rows.length} reports · ${objects} content objects · ${assigned} newly identified · ` +
-      `${collisions} collisions · ${allStable ? "idempotent ✓" : "NOT IDEMPOTENT ⚠"}${RESET}`,
-  );
-  rule();
-
-  if (!apply) {
-    console.log(
-      `\n${DIM}Dry run — nothing written.` +
-        `${useDb ? " Re-run with --db --apply to write these ids." : " Add --db to preview live rows."}${RESET}`,
-    );
-    return;
-  }
-
-  if (collisions > 0 || !allStable) {
-    console.error("\nRefusing to apply: collisions or non-idempotent output. Nothing written.");
-    process.exitCode = 1;
-    return;
-  }
-
-  const { default: prisma } = await import("../app/db.server.js");
-  let written = 0;
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    if (!row.id) continue;
-    const { applied } = results[i];
-    await prisma.editorialTrendReport.update({
-      where: { id: row.id },
-      data: {
-        keyTrends: applied.keyTrends as object[],
-        rising: applied.rising as object[],
-        fading: applied.fading as object[],
-        referencesBehindThisEdit: applied.referencesBehindThisEdit as object[],
-      },
-    });
-    written += 1;
-  }
-  console.log(`\nWrote ${written} report${written === 1 ? "" : "s"}.`);
+  // The writer is only constructed when we are actually going to write.
+  await runBackfill(rows, {
+    apply,
+    write: async (id, data) => {
+      const { default: prisma } = await import("../app/db.server.js");
+      return prisma.editorialTrendReport.update({ where: { id }, data: data as never });
+    },
+  });
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+const invokedDirectly = process.argv[1]?.includes("backfill-trend-content-ids");
+if (invokedDirectly) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

@@ -237,6 +237,18 @@ export async function seedEditorialReportsFromStatic() {
         referencesBehindThisEdit: (r.referencesBehindThisEdit ?? []) as unknown,
       },
       null,
+      // DETERMINISTIC, and it must match withStaticIdentity() above.
+      //
+      // These are the legacy built-in reports. The same report unit has to get
+      // the same id whether it is read from the static fallback or from a row
+      // seeded on a freshly provisioned database — the facet backfill's
+      // manifest resolves by that derived id, and an opaque id here would make
+      // it match nothing and refuse to write every authored facet set.
+      //
+      // This is the seed path for legacy static reports ONLY. Content authored
+      // through the editor still mints opaque permanent ids, which is correct:
+      // new content has no deterministic seed to derive from.
+      mintLegacyContentId,
     );
     await prisma.editorialTrendReport.upsert({
       where: { slug: r.slug },
