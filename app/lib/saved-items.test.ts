@@ -295,3 +295,25 @@ describe("§SI-5 lanes", () => {
     assert.deepEqual(activeLanes([]), []);
   });
 });
+
+// ── §SI-6 the static pre-seed fallback ───────────────────────────────────────
+//
+// loadReportSaveState is the gate the UI reads. On a report with no canonical
+// row it must hand back nothing at all, so no ♡ is ever rendered — including
+// for a globally identified product, whose provenance would otherwise reference
+// throwaway content ids from the fallback.
+
+describe("§SI-6 no saveable controls on a non-canonical report", () => {
+  // Re-implements the guard's contract rather than importing the server module,
+  // which would pull in Prisma. The assertion below pins the source of truth.
+  it("the server helper returns early with nothing saveable when there is no row id", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./saved-items.server.ts", import.meta.url), "utf8"));
+    assert.match(src, /if \(!reportId\) return \{ refKeys: \{\}, saved: \[\], canSave: false \}/);
+    // The early return must sit BEFORE product handles are turned into refKeys,
+    // or a fallback report would still offer a ♡ on its NADINE piece.
+    const guardAt = src.indexOf("if (!reportId) return { refKeys: {}");
+    const productAt = src.indexOf("options.productHandles");
+    assert.ok(guardAt > 0 && productAt > guardAt, "the guard must precede product refKeys");
+  });
+});

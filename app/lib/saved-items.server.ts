@@ -256,6 +256,12 @@ export async function loadReportSaveState(
   const refKeys: Record<string, string> = {};
   const reportId = report.id ?? null;
 
+  // The static pre-seed fallback renders a readable report with no persisted
+  // row behind it. Nothing on such a page is saveable — not even a globally
+  // identified product, whose provenance would otherwise point at throwaway
+  // content ids. The report stays readable; the ♡ simply does not appear.
+  if (!reportId) return { refKeys: {}, saved: [], canSave: false };
+
   const addEntries = (field: unknown, contentType: TrendContentType) => {
     if (!Array.isArray(field) || !reportId) return;
     for (const raw of field) {

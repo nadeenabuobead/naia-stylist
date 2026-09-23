@@ -97,6 +97,15 @@ export function resolveSaveTargetFromReport(
     const product = getProductByHandle(contentId);
     if (!product) return { ok: false, reason: "content_not_found" };
 
+    // A product's IDENTITY is global and needs no report. Its PROVENANCE does.
+    // If the caller names a report, that report must be canonically persisted:
+    // the static pre-seed fallback mints throwaway content ids, and recording
+    // one as "the trend this was found under" would store a reference to
+    // something that has never existed in the database.
+    if (ref.reportSlug && (!report || !reportRowId(report))) {
+      return { ok: false, reason: "report_not_found" };
+    }
+
     const nested = report && ref.sourceContentId
       ? findEntry(report, ref.sourceContentId)
       : null;

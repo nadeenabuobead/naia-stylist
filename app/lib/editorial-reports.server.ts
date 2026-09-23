@@ -13,7 +13,7 @@ import {
   referenceHasContent,
   sourceHasContent,
 } from "./editorial-reports.normalise";
-import { applyContentIdentity, isContentId } from "./trend-content-identity";
+import { applyContentIdentity, mintLegacyContentId, isContentId, type ContentIdMinter } from "./trend-content-identity";
 import { validateFacets, isEmptyFacets } from "./trend-facets";
 
 type DbRow = Awaited<
@@ -86,6 +86,9 @@ function withStaticIdentity(report: TrendReportData): TrendReportData {
       referencesBehindThisEdit: (report.referencesBehindThisEdit ?? []) as unknown,
     },
     null,
+    // Deterministic on this path. Nothing here is saveable, but ids that change
+    // on every render are a trap waiting for the next person to trust them.
+    mintLegacyContentId,
   );
   return {
     ...report,
@@ -117,8 +120,9 @@ type IdentityInput = {
 function ensureContentIdentity<T extends IdentityInput>(
   data: T,
   previous: Record<string, unknown> | null,
+  minter?: ContentIdMinter,
 ): T {
-  const applied = applyContentIdentity(data, previous);
+  const applied = applyContentIdentity(data, previous, minter);
   return {
     ...data,
     keyTrends: applied.keyTrends,

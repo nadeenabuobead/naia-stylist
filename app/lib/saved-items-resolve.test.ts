@@ -157,3 +157,77 @@ describe("§SR-4 scope", () => {
     }
   });
 });
+
+// ── §SR-5 the static pre-seed fallback ───────────────────────────────────────
+//
+// /trends/:slug renders from the static array when no EditorialTrendReport row
+// exists. That report has content ids but NO canonical row id, so a refKey built
+// against it would name an identity that ceases to exist the moment the table is
+// seeded. Nothing on such a page may be saved.
+
+const FALLBACK = { ...REPORT, id: undefined } as unknown as TrendReportData;
+
+describe("§SR-5 no save against a non-canonical report", () => {
+  it("refuses a TREND", () => {
+    const r = resolveSaveTargetFromReport({ contentType: "TREND", contentId: TREND_ID, reportSlug: REPORT.slug }, FALLBACK);
+    assert.equal(r.ok, false);
+    assert.equal((r as { reason: string }).reason, "report_not_found");
+  });
+
+  it("refuses a SIGNAL", () => {
+    const r = resolveSaveTargetFromReport({ contentType: "SIGNAL", contentId: RISING_ID, reportSlug: REPORT.slug }, FALLBACK);
+    assert.equal(r.ok, false);
+  });
+
+  it("refuses a REFERENCE", () => {
+    const r = resolveSaveTargetFromReport({ contentType: "REFERENCE", contentId: REF_ID, reportSlug: REPORT.slug }, FALLBACK);
+    assert.equal(r.ok, false);
+  });
+
+  it("refuses a TAKEAWAY", () => {
+    const r = resolveSaveTargetFromReport(
+      { contentType: "TAKEAWAY", contentId: "aLookToTry", reportSlug: REPORT.slug }, FALLBACK, { takeawayText: "x" });
+    assert.equal(r.ok, false);
+  });
+
+  it("refuses a PRODUCT discovered under a non-canonical report", () => {
+    // The product's own identity is global and would be fine. Its PROVENANCE is
+    // the problem: sourceContentId would name a throwaway id from the fallback.
+    const r = resolveSaveTargetFromReport(
+      { contentType: "PRODUCT", contentId: "oversized-blazer", reportSlug: REPORT.slug, sourceContentId: TREND_ID },
+      FALLBACK,
+    );
+    assert.equal(r.ok, false);
+    assert.equal((r as { reason: string }).reason, "report_not_found");
+  });
+
+  it("never yields a request carrying a slug-derived reportId", () => {
+    for (const contentType of ["TREND", "SIGNAL", "REFERENCE", "TAKEAWAY", "PRODUCT"] as const) {
+      const r = resolveSaveTargetFromReport(
+        { contentType, contentId: contentType === "PRODUCT" ? "oversized-blazer" : TREND_ID, reportSlug: REPORT.slug },
+        FALLBACK,
+      );
+      if (r.ok) {
+        assert.notEqual(r.request.reportId, REPORT.slug, `${contentType} used the slug as identity`);
+        assert.notEqual(r.request.reportId, "autumn-edit-2026");
+      }
+    }
+  });
+
+  it("still allows a product saved with NO report context — identity is global", () => {
+    const r = resolveSaveTargetFromReport({ contentType: "PRODUCT", contentId: "oversized-blazer" }, null);
+    // Either accepted with null provenance, or declined because the handle is
+    // not in the locked catalogue — never accepted with synthetic provenance.
+    if (r.ok) {
+      assert.equal(r.request.reportId, null);
+      assert.equal(r.request.sourceReportTitle, null);
+      assert.equal(r.request.sourceContentId, null);
+    }
+  });
+
+  it("a canonical report still saves normally — the guard is not over-broad", () => {
+    const r = resolveSaveTargetFromReport({ contentType: "TREND", contentId: TREND_ID, reportSlug: REPORT.slug }, REPORT);
+    assert.ok(r.ok);
+    assert.equal(r.request.reportId, REPORT.id);
+  });
+});
