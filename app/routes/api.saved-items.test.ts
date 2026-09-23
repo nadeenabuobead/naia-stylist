@@ -12,8 +12,13 @@ vi.mock("~/lib/naia-session.server", () => ({
   getCurrentNaiaCustomer: vi.fn(),
 }));
 vi.mock("~/lib/saved-items.server", () => ({
-  saveItem: vi.fn(async () => ({ created: true, refKey: "r:rep_1|TREND|tc_aaaaaaaaaaaa" })),
-  unsaveItem: vi.fn(async () => ({ removed: true })),
+  saveItem: vi.fn(async () => ({ created: true, refKey: "r:rep_1|TREND|tc_aaaaaaaaaaaa", itemId: "si_1" })),
+  unsaveItem: vi.fn(async () => "si_1"),
+  savedItemFacets: vi.fn(async () => null),
+}));
+vi.mock("~/lib/trend-feedback.server", () => ({
+  emitTrendEvidence: vi.fn(async () => {}),
+  withdrawTrendEvidence: vi.fn(async () => {}),
 }));
 vi.mock("~/lib/saved-items-resolve.server", () => ({
   resolveSaveTarget: vi.fn(async () => ({

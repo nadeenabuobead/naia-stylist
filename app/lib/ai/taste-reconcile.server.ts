@@ -21,6 +21,7 @@ import {
   SUPPRESS_RATIO,
   CONTEST_RATIO,
   CROSS_SOURCE_BONUS,
+  CROSS_SOURCE_ELIGIBLE_SOURCES,
   REEMERGENCE_SUPPORT_MULTIPLIER,
   REEMERGENCE_DISTINCT_RECORDS,
   REEMERGENCE_WNET_MINIMUM,
@@ -282,14 +283,18 @@ function aggregateEvidence(evidenceRows: Array<{
     allSources.add(ev.source);
     if (!latestOccurredAt || ev.occurredAt > latestOccurredAt) latestOccurredAt = ev.occurredAt;
     const compositeId = `${ev.source}|${ev.sourceRecordId}`;
+    // Records always count. SOURCES only count toward the cross-source bonus
+    // when they are bonus-eligible — TREND_ENGAGEMENT contributes weight but
+    // must never be the second voice that multiplies a tendency into being.
+    const bonusEligible = CROSS_SOURCE_ELIGIBLE_SOURCES.has(ev.source as never);
     if (ev.polarity === "positive") {
       wPositive += ev.strength;
       posRecords.add(compositeId);
-      posSources.add(ev.source);
+      if (bonusEligible) posSources.add(ev.source);
     } else {
       wNegative += ev.strength;
       negRecords.add(compositeId);
-      negSources.add(ev.source);
+      if (bonusEligible) negSources.add(ev.source);
     }
   }
 

@@ -65,6 +65,7 @@ export default [
   route("my-naia/saved", "routes/my-naia.saved.tsx"),
   route("api/saved-items", "routes/api.saved-items.tsx"),
   route("api/styleme-handoff", "routes/api.styleme-handoff.tsx"),
+  route("api/trend-feedback", "routes/api.trend-feedback.tsx"),
   route("my-naia/buying-decisions", "routes/my-naia.buying-decisions.tsx"),
   route("my-naia-model", "routes/my-naia-model.tsx"),
   route("settings", "routes/settings.tsx"),

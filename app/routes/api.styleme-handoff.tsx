@@ -18,6 +18,8 @@ import { getSession, commitSession } from "~/lib/session.server";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
 import { LOCKED_CATALOGUE_HANDLES } from "~/lib/ai/naia-product-media";
+import { setTrendFeedback } from "~/lib/trend-feedback.server";
+import { savedItemFacets } from "~/lib/saved-items.server";
 
 const VALID_HANDLES = new Set<string>(LOCKED_CATALOGUE_HANDLES);
 const STOREFRONT_ORIGIN = "https://naiabynadine.com";
@@ -83,6 +85,27 @@ export async function action({ request }: ActionFunctionArgs) {
     if (reportTitle) session.set("styleMeTrendReportTitle", reportTitle);
     if (contentId) session.set("styleMeTrendContentId", contentId);
     if (trendLabel) session.set("styleMeTrendLabel", trendLabel);
+
+    // A deliberate signal: interest in WEARING this. Never proof she wore it.
+    // The durable row is unique per (customer, content, STYLED), so styling the
+    // same trend ten times is one signal, not ten. Failure here must not block
+    // the handoff — the styling session matters more than the evidence.
+    if (reportId && contentId) {
+      try {
+        await setTrendFeedback(
+          customer.id,
+          {
+            reportId, contentType: "TREND", contentId,
+            contentLabel: trendLabel,
+            facets: await savedItemFacets(str("reportSlug", 120), "TREND", contentId),
+          },
+          "STYLED",
+          true,
+        );
+      } catch (error) {
+        console.error("[trend-handoff] STYLED signal not recorded", error);
+      }
+    }
 
     return redirect("/style-me/state", {
       headers: { "Set-Cookie": await commitSession(session) },

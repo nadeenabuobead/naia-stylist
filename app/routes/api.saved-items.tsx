@@ -16,6 +16,8 @@ import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { saveItem, unsaveItem } from "~/lib/saved-items.server";
 import { resolveSaveTarget, type SaveTargetRef } from "~/lib/saved-items-resolve.server";
 import { isTrendContentType } from "~/lib/trend-content-identity";
+import { emitTrendEvidence, withdrawTrendEvidence } from "~/lib/trend-feedback.server";
+import { savedItemFacets } from "~/lib/saved-items.server";
 
 export type SavedItemActionResult =
   | { ok: true; saved: boolean; refKey: string }
@@ -63,8 +65,10 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!refKey) {
       return data({ ok: false, error: "bad_request" } as SavedItemActionResult, { status: 400 });
     }
-    // deleteMany scoped by customerId — another customer's refKey matches nothing.
-    await unsaveItem(customer.id, refKey);
+    // The row id is the evidence source record, so it must be read before the
+    // row is deleted. Unsaving withdraws the positive signal it created.
+    const removedId = await unsaveItem(customer.id, refKey);
+    if (removedId) await withdrawTrendEvidence(customer.id, removedId);
     return data({ ok: true, saved: false, refKey } as SavedItemActionResult);
   }
 
@@ -99,6 +103,16 @@ export async function action({ request }: ActionFunctionArgs) {
     // Idempotent: a repeat save is a no-op that still reports saved:true, so the
     // control settles into the same state either way.
     const result = await saveItem(customer.id, resolved.request);
+
+    // Positive evidence only on a NEW save — re-saving something already saved
+    // is the same signal, not another one.
+    if (result.created && result.itemId) {
+      await emitTrendEvidence(
+        customer.id, result.itemId, "SAVE",
+        await savedItemFacets(ref.reportSlug, ref.contentType, ref.contentId),
+        new Date(),
+      );
+    }
     return data({ ok: true, saved: true, refKey: result.refKey } as SavedItemActionResult);
   }
 

@@ -136,6 +136,7 @@ export const saveControlCss = `
   .svc--signin:hover { color: #7a1e28; }
   .svc-glyph { font-size: 12px; line-height: 1; }
   .svc:focus-visible { outline: 2px solid #7a1e28; outline-offset: 3px; }
+  .svc--nfm { margin-left: 18px; }
   .svc-sr {
     position: absolute;
     width: 1px; height: 1px;
@@ -146,3 +147,78 @@ export const saveControlCss = `
     border: 0;
   }
 `;
+
+
+// ── Not for me ────────────────────────────────────────────────────────────────
+
+export interface NotForMeControlProps {
+  contentType: "TREND" | "SIGNAL" | "REFERENCE" | "PRODUCT" | "TAKEAWAY";
+  contentId: string;
+  reportSlug: string;
+  /** True when the loader found a persisted dismissal for this content. */
+  initiallyDismissed: boolean;
+  returnTo: string;
+  label: string;
+}
+
+/**
+ * The quiet counterpart to Save. Reversible, and the state comes from the
+ * loader reading real rows — a refresh shows what was actually persisted.
+ *
+ * Posts the intended STATE rather than a toggle, so a double-click settles
+ * rather than flipping back and forth.
+ */
+export function NotForMeControl({
+  contentType, contentId, reportSlug, initiallyDismissed, returnTo, label,
+}: NotForMeControlProps) {
+  const fetcher = useFetcher<{ ok: boolean; notForMe?: boolean; signInPath?: string }>();
+  const [dismissed, setDismissed] = useState(initiallyDismissed);
+  const [signInPath, setSignInPath] = useState<string | null>(null);
+
+  useEffect(() => { setDismissed(initiallyDismissed); }, [initiallyDismissed]);
+
+  useEffect(() => {
+    const result = fetcher.data;
+    if (!result) return;
+    if (result.ok && typeof result.notForMe === "boolean") {
+      setDismissed(result.notForMe);
+      setSignInPath(null);
+    } else if (result.signInPath) {
+      setSignInPath(result.signInPath);
+    }
+  }, [fetcher.data]);
+
+  const pending = fetcher.state !== "idle";
+  const showDismissed = pending ? !dismissed : dismissed;
+
+  if (signInPath) {
+    return <a href={signInPath} className="svc svc--signin">Sign in to give feedback</a>;
+  }
+
+  return (
+    <fetcher.Form method="post" action="/api/trend-feedback" className="svc-form">
+      <input type="hidden" name="contentType" value={contentType} />
+      <input type="hidden" name="contentId" value={contentId} />
+      <input type="hidden" name="reportSlug" value={reportSlug} />
+      <input type="hidden" name="returnTo" value={returnTo} />
+      <input type="hidden" name="active" value={dismissed ? "false" : "true"} />
+      <button
+        type="submit"
+        className={`svc svc--nfm${showDismissed ? " svc--on" : ""}`}
+        aria-pressed={showDismissed}
+        aria-label={showDismissed
+          ? `Marked not for you: ${label}. Select to undo.`
+          : `Mark ${label} as not for you`}
+        disabled={pending}
+      >
+        <span className="svc-glyph" aria-hidden="true">{showDismissed ? "✓" : ""}</span>
+        <span className="svc-text">{showDismissed ? "Not for me" : "Not for me"}</span>
+      </button>
+      <span className="svc-sr" role="status" aria-live="polite">
+        {fetcher.state === "idle" && fetcher.data?.ok
+          ? `${label} ${fetcher.data.notForMe ? "marked not for you" : "restored"}`
+          : ""}
+      </span>
+    </fetcher.Form>
+  );
+}

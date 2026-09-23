@@ -5,7 +5,8 @@ import type { TrendReportData } from "../lib/trend-reports";
 import { getEditorialReportBySlug, getPublishedEditorialReports } from "../lib/editorial-reports.server";
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import { loadReportSaveState } from "../lib/saved-items.server";
-import SaveControl, { saveControlCss } from "../components/SaveControl";
+import { loadTrendFeedback } from "../lib/trend-feedback.server";
+import SaveControl, { NotForMeControl, saveControlCss } from "../components/SaveControl";
 import { reportVisual } from "../lib/report-visual";
 
 const FONTS =
@@ -35,8 +36,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // whether a ♡ can already be filled in, never whether the page renders.
   const customer = await getCurrentNaiaCustomer(request);
   const saveState = await loadReportSaveState(customer?.id ?? null, report);
+  const feedback = customer?.id && report.id
+    ? await loadTrendFeedback(customer.id, report.id)
+    : { notForMe: [], styled: [] };
 
-  return { report, allPublished, saveState, returnTo: `/trends/${report.slug}` };
+  return {
+    report, allPublished, saveState,
+    returnTo: `/trends/${report.slug}`,
+    notForMe: feedback.notForMe,
+  };
 }
 
 export function meta({ data }: { data?: { report: TrendReportData } }) {
@@ -831,6 +839,7 @@ export default function TrendReportDetail() {
     allPublished: TrendReportData[];
     saveState?: import("../lib/saved-items.server").ReportSaveState;
     returnTo?: string;
+    notForMe?: string[];
   };
   const { report, allPublished } = loaderData;
 
@@ -842,6 +851,9 @@ export default function TrendReportDetail() {
 
   // One helper so each call site stays a single quiet line in the markup.
   const savedSet = new Set(saveState.saved);
+  // Current explicit feedback. Separate from Saved: a dismissal is not an
+  // un-save, and the two can honestly coexist on the same content.
+  const dismissed = new Set(loaderData.notForMe ?? []);
   const save = (
     contentType: "TREND" | "SIGNAL" | "REFERENCE",
     contentId: string | undefined,
@@ -1049,7 +1061,19 @@ export default function TrendReportDetail() {
                   {String(i + 1).padStart(2, "0")} / {t.name}
                 </div>
                 <p className="psl-body-text">{t.description}</p>
-                <div className="psl-save-row">{save("TREND", t.id, t.name)}</div>
+                <div className="psl-save-row">
+                  {save("TREND", t.id, t.name)}
+                  {t.id && saveState.canSave && (
+                    <NotForMeControl
+                      contentType="TREND"
+                      contentId={t.id}
+                      reportSlug={report.slug}
+                      initiallyDismissed={dismissed.has(t.id)}
+                      returnTo={returnTo}
+                      label={t.name}
+                    />
+                  )}
+                </div>
               </div>
             ))}
           </div>

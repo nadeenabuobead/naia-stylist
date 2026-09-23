@@ -18,7 +18,7 @@ import {
   type SaveItemRequest,
   type SavedCard,
 } from "./saved-items";
-import { buildRefKey, isContentId, type TrendContentType } from "./trend-content-identity";
+import { buildRefKey, isContentId, IDENTITY_BEARING_FIELD_NAMES, type TrendContentType } from "./trend-content-identity";
 import {
   getCloudinaryConfig,
   validatePublicIdOwnership,
@@ -29,6 +29,8 @@ export interface SaveResult {
   /** false when the item was already saved — the request was a no-op. */
   created: boolean;
   refKey: string;
+  /** The durable row id — used as the Taste Evidence source record. */
+  itemId: string | null;
 }
 
 /**
@@ -50,16 +52,18 @@ export async function saveItem(
     where: { customerId_refKey: { customerId, refKey: row.refKey } },
     select: { id: true },
   });
-  if (existing) return { created: false, refKey: row.refKey };
+  if (existing) return { created: false, refKey: row.refKey, itemId: existing.id };
 
   try {
-    await prisma.savedItem.create({ data: { customerId, ...row } });
-    return { created: true, refKey: row.refKey };
+    const created: { id: string } = await prisma.savedItem.create({
+      data: { customerId, ...row }, select: { id: true },
+    });
+    return { created: true, refKey: row.refKey, itemId: created.id };
   } catch (error) {
     // Unique violation — two concurrent saves of the same object. The other one
     // won, which is the correct outcome; report it as already-saved.
     if ((error as { code?: string })?.code === "P2002") {
-      return { created: false, refKey: row.refKey };
+      return { created: false, refKey: row.refKey, itemId: null };
     }
     throw error;
   }
@@ -69,9 +73,44 @@ export async function saveItem(
  * Remove a save. Idempotent — unsaving something not saved is a no-op.
  * Scoped by customerId, so a refKey from another customer matches nothing.
  */
-export async function unsaveItem(customerId: string, refKey: string): Promise<{ removed: boolean }> {
-  const result = await prisma.savedItem.deleteMany({ where: { customerId, refKey } });
-  return { removed: result.count > 0 };
+export async function unsaveItem(customerId: string, refKey: string): Promise<string | null> {
+  // The id is read first: it is the evidence source record, and it is gone
+  // after the delete.
+  const row: { id: string } | null = await prisma.savedItem.findUnique({
+    where: { customerId_refKey: { customerId, refKey } },
+    select: { id: true },
+  });
+  if (!row) return null;
+  // Scoped by customerId as well as id. The id already came from a
+  // customer-scoped lookup, so this is defence in depth — and it keeps the
+  // invariant "every SavedItem query names customerId" literally true.
+  await prisma.savedItem.deleteMany({ where: { id: row.id, customerId } });
+  return row.id;
+}
+
+/** The authored facets of a saved object, for evidence extraction. */
+export async function savedItemFacets(
+  reportSlug: string | null | undefined,
+  contentType: string,
+  contentId: string,
+): Promise<import("./trend-facets").TrendFacets | null> {
+  if (!reportSlug) return null;
+  const { getEditorialReportBySlug } = await import("./editorial-reports.server");
+  const report = await getEditorialReportBySlug(reportSlug);
+  if (!report) return null;
+
+  for (const field of IDENTITY_BEARING_FIELD_NAMES) {
+    const entries = (report as unknown as Record<string, unknown>)[field];
+    if (!Array.isArray(entries)) continue;
+    for (const raw of entries) {
+      const entry = raw as Record<string, unknown>;
+      if (entry.id === contentId) {
+        const { validateFacets } = await import("./trend-facets");
+        return validateFacets(entry.facets).facets;
+      }
+    }
+  }
+  return null;
 }
 
 /** Which of these refKeys the customer has saved — for rendering ♡ state in Step 3. */

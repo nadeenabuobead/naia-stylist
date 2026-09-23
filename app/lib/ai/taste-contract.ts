@@ -24,6 +24,10 @@ export const TASTE_SOURCES = [
   "POST_OUTFIT_REVIEW",
   "CLOSET_RELATIONSHIP",
   "BUYSKIP_OUTCOME",
+  // Step 7 — deliberate Trend Report actions. The weakest source in the system,
+  // and deliberately excluded from the cross-source bonus: see
+  // CROSS_SOURCE_ELIGIBLE_SOURCES.
+  "TREND_ENGAGEMENT",
 ] as const;
 export type TasteSource = (typeof TASTE_SOURCES)[number];
 
@@ -69,7 +73,35 @@ export const SOURCE_BASE_STRENGTH: Record<TasteSource, number> = {
   POST_OUTFIT_REVIEW: 0.7,
   CLOSET_RELATIONSHIP: 0.5,
   BUYSKIP_OUTCOME:    0.6,
+  // Weaker than every other source, including CLOSET_RELATIONSHIP. Saying "not
+  // for me" about a trend direction is a real signal, but a far lighter one than
+  // anything she has said about a garment she actually owns.
+  //
+  // The arithmetic matters: against a CANDIDATE threshold of 2.0 effective
+  // support, 0.35 per record means SIX distinct deliberate actions before an
+  // observation is even a candidate. One save, or one dismissal, cannot produce
+  // a tendency — that is a property of the number, not a promise in a comment.
+  TREND_ENGAGEMENT:   0.35,
 };
+
+/**
+ * Sources that may count toward the 1.25x CROSS_SOURCE_BONUS.
+ *
+ * TREND_ENGAGEMENT is excluded. The bonus exists to reward agreement between
+ * INDEPENDENT kinds of evidence — what she did in a session, what she said
+ * about her wardrobe, what she decided at the till. Letting the weakest source
+ * in the system act as the deciding second voice would make every existing
+ * threshold easier to cross simply because Trend Reports now exist, which is a
+ * change to what nAia claims about people, not a new feature.
+ *
+ * Trend evidence still contributes its weight. It just cannot multiply anyone.
+ */
+export const CROSS_SOURCE_ELIGIBLE_SOURCES: ReadonlySet<TasteSource> = new Set<TasteSource>([
+  "STYLEME_OUTCOME",
+  "POST_OUTFIT_REVIEW",
+  "CLOSET_RELATIONSHIP",
+  "BUYSKIP_OUTCOME",
+]);
 
 // ── Key helpers ────────────────────────────────────────────────────────────────
 
@@ -113,11 +145,13 @@ function sourceLabel(distinctSources: number, sourcesUsed: string[]): string {
   const hasReview   = sourcesUsed.includes("POST_OUTFIT_REVIEW");
   const hasCloset   = sourcesUsed.includes("CLOSET_RELATIONSHIP");
   const hasBuySkip  = sourcesUsed.includes("BUYSKIP_OUTCOME");
+  const hasTrend    = sourcesUsed.includes("TREND_ENGAGEMENT");
   if (distinctSources < 2) {
     if (hasStyleMe)  return "in your post-session reviews";
     if (hasReview)   return "in your post-wear feedback";
     if (hasCloset)   return "in how you've described your wardrobe";
     if (hasBuySkip)  return "in your buy or skip decisions";
+    if (hasTrend)    return "in the trend directions you've responded to";
     return "across your activity";
   }
   if (hasCloset && hasBuySkip && !hasStyleMe && !hasReview) {
@@ -139,6 +173,31 @@ export function generateTendencyText(
 ): TextResult {
   const src = sourceLabel(distinctSources, sourcesUsed);
   const n = distinctRecords;
+
+  // ── Trend-only evidence gets its own language ──────────────────────────
+  //
+  // The templates below are written for wardrobe evidence and say things like
+  // "a few have gone unworn or ended up returned". If a Trend Report dismissal
+  // produced the observation, every one of those statements is FALSE: she never
+  // owned the piece, never wore it, never returned it, and there was no look.
+  // Telling a customer something untrue about her own behaviour is a trust
+  // failure, not a copy nit — so trend-only evidence never reaches them.
+  const trendOnly = sourcesUsed.length > 0 && sourcesUsed.every((s) => s === "TREND_ENGAGEMENT");
+  if (trendOnly) {
+    const noun = dimension === "garment-category"
+      ? `${value.charAt(0).toUpperCase()}${value.slice(1).toLowerCase()}`
+      : dimension;
+    if (family === "WORKS_WELL") {
+      return {
+        claimText: `${noun} keeps drawing you in when you read a trend direction — you have saved or styled it more than once.`,
+        rationaleText: `Based on ${n} ${n === 1 ? "trend direction" : "trend directions"} you responded to${distinctSources >= 2 ? ` — ${src}` : ""}.`,
+      };
+    }
+    return {
+      claimText: `You have passed on several trend directions around ${noun.toLowerCase()} — nAia is noticing the pattern.`,
+      rationaleText: `Based on ${n} ${n === 1 ? "trend direction" : "trend directions"} you marked as not for you${distinctSources >= 2 ? ` — ${src}` : ""}.`,
+    };
+  }
 
   if (dimension === "self-expression") {
     if (family === "WORKS_WELL") {

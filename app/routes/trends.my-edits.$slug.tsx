@@ -712,10 +712,11 @@ export function ErrorBoundary() {
 
 /** One trend's closet connection: the claim, then the pieces on request. */
 function ClosetConnectionBlock({
-  connection, reportId, reportTitle, available,
+  connection, reportId, reportSlug, reportTitle, available,
 }: {
   connection: ClosetConnection;
   reportId: string | null;
+  reportSlug: string;
   reportTitle: string;
   /** Pieces that still exist in the closet — only these can be styled. */
   available: ReadonlySet<string>;
@@ -756,6 +757,7 @@ function ClosetConnectionBlock({
                     <input type="hidden" name="source" value="trend" />
                     <input type="hidden" name="closetItemId" value={piece.garmentId} />
                     <input type="hidden" name="reportId" value={reportId ?? ""} />
+                    <input type="hidden" name="reportSlug" value={reportSlug} />
                     <input type="hidden" name="reportTitle" value={reportTitle} />
                     <input type="hidden" name="contentId" value={connection.contentId} />
                     <input type="hidden" name="trendLabel" value={connection.label} />
@@ -1044,6 +1046,7 @@ export default function MyTrendEditDetail() {
                     key={c.contentId}
                     connection={c}
                     reportId={report.id ?? null}
+                    reportSlug={report.slug}
                     reportTitle={report.title}
                     available={availablePieces}
                   />

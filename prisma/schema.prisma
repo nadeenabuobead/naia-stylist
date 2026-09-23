@@ -62,6 +62,7 @@ model Customer {
   wardrobeInsights             WardrobeInsight[]
   savedLooks                   SavedLook[]
   savedItems                   SavedItem[]
+  trendContentFeedback         TrendContentFeedback[]
   postOutfitReviews            PostOutfitReview[]
   confidenceScores             ConfidenceScore[]
   trendReportViews             TrendReportView[]
@@ -673,6 +674,50 @@ model PersonalisedTrendEditUnlock {
 // accumulating duplicate cards for one canonical object.
 //
 // Added: migration 20260923100000_saved_item
+// ── TREND CONTENT FEEDBACK ──────────────────────────────────────────────────
+//
+// Deliberate interactions with a Trend Report that are NOT saves.
+//
+//   NOT_FOR_ME  an explicit negative preference, reversible
+//   STYLED      took this piece into StyleMe — interest in WEARING, never proof
+//               that anything was worn
+//
+// Kept apart from SavedItem on purpose. A save means "I want this"; a dismissal
+// means the opposite, and storing them together would make the Saved archive
+// answer two different questions. If a customer both saves and dismisses the
+// same content, both records stand and the evidence layer represents the
+// conflict honestly rather than inventing a preference.
+//
+// One row per (customer, report, contentType, contentId, action), so clicking
+// ten times is one signal, not ten. Reversing NOT_FOR_ME deletes the row and
+// its evidence reconciles away.
+//
+// Added: migration 20260923400000_trend_content_feedback
+model TrendContentFeedback {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Canonical report id. Not a foreign key, for the same reason as SavedItem:
+  // feedback must survive a report being unpublished or deleted.
+  reportId    String
+  contentType String // TREND | SIGNAL | REFERENCE | PRODUCT | FACET | TAKEAWAY
+  contentId   String // stable content id from Step 1 — never display text
+
+  // NOT_FOR_ME | STYLED
+  action String
+
+  // Snapshot for admin legibility only; never identity, never evidence.
+  contentLabel String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([customerId, reportId, contentType, contentId, action])
+  @@index([customerId, action])
+  @@index([customerId, reportId])
+}
+
 model SavedItem {
   id         String   @id @default(cuid())
   customerId String
