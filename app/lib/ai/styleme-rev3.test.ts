@@ -1364,7 +1364,7 @@ describe("R3.23 — Physical Need UI: exact 9 approved IDs, correct labels", () 
     "loose-comfortable":     "Loose and comfortable",
     "still-want-shape":      "I still want shape",
     "waist-definition":      "I want waist definition",
-    "structured-shape":      "I want a sharper / more structured shape",
+    "structured-shape":      "More structure / a more defined shape",
     "nothing-specific":      "Nothing specific",
   };
 

@@ -27,7 +27,7 @@ const PHYSICAL_NEED_OPTIONS: Array<{ id: string; label: string }> = [
   { id: "loose-comfortable",     label: "Loose and comfortable" },
   { id: "still-want-shape",      label: "I still want shape" },
   { id: "waist-definition",      label: "I want waist definition" },
-  { id: "structured-shape",      label: "I want a sharper / more structured shape" },
+  { id: "structured-shape",      label: "More structure / a more defined shape" },
   { id: "nothing-specific",      label: "Nothing specific" },
 ];
 
