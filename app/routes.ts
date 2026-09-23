@@ -47,7 +47,6 @@ export default [
   route("trends/:slug/lens/:lens", "routes/trends.$slug.lens.$lens.tsx"),
   route("stylist", "routes/stylist.jsx"),
   route("stylist-popup", "routes/stylist-popup.jsx"),
-  route("api/wardrobe-insights", "routes/api.wardrobe-insights.jsx"),
   route("app", "routes/app.jsx", [
     index("routes/app._index.jsx"),
     route("designer-intelligence", "routes/app.designer-intelligence.jsx"),

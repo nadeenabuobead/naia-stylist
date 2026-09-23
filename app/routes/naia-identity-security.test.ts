@@ -327,33 +327,23 @@ describe("§D wardrobe-insights and stylist cleanup", () => {
 
   const ROUTES = path.resolve("app/routes");
 
-  it("D01 — api.wardrobe-insights.jsx no longer reads naia_token from URL", () => {
-    const src = fs.readFileSync(path.join(ROUTES, "api.wardrobe-insights.jsx"), "utf8");
-    expect(src, "must not read naia_token URL param").not.toContain("naia_token");
-    expect(src, "must not call url.searchParams.get").not.toContain('searchParams.get("naia_token")');
+  // api.wardrobe-insights.jsx was retired on 2026-09-23. It was an unused
+  // GPT-4o-mini endpoint returning invented "missingPieces" / "buyNext" advice,
+  // which conflicts with Wardrobe Intelligence — the canonical wardrobe-level
+  // system. D01–D04 previously hardened its identity handling; the route no
+  // longer exists, so the guarantee is now simply that it stays gone.
+  it("D01 — the retired api.wardrobe-insights route is absent from the codebase", () => {
+    expect(
+      fs.existsSync(path.join(ROUTES, "api.wardrobe-insights.jsx")),
+      "retired route file must not be reintroduced",
+    ).toBe(false);
   });
 
-  it("D02 — api.wardrobe-insights.jsx no longer decodes unsigned base64 identity", () => {
-    const src = fs.readFileSync(path.join(ROUTES, "api.wardrobe-insights.jsx"), "utf8");
-    expect(src, "must not decode base64 identity").not.toContain("atob(decodeURIComponent");
-    expect(src, "must not decode base64 identity").not.toContain("JSON.parse(atob(");
-  });
-
-  it("D03 — api.wardrobe-insights.jsx uses only authenticateCustomer (JWT Bearer)", () => {
-    const src = fs.readFileSync(path.join(ROUTES, "api.wardrobe-insights.jsx"), "utf8");
-    expect(src, "must import authenticateCustomer").toContain("authenticateCustomer");
-    expect(src, "must call authenticateCustomer(request)").toContain("authenticateCustomer(request)");
-    // Only one authentication call — no fallback.
-    const count = (src.match(/authenticateCustomer\(request\)/g) ?? []).length;
-    expect(count, "must call authenticateCustomer exactly once").toBe(1);
-  });
-
-  it("D04 — api.wardrobe-insights.jsx does not import naia-session.server (JWT is the right path here)", () => {
-    const src = fs.readFileSync(path.join(ROUTES, "api.wardrobe-insights.jsx"), "utf8");
-    // This route is cross-origin (called from Shopify theme), not an app route.
-    // __naia_tok is SameSite=Lax and would not arrive in a cross-origin request.
-    expect(src).not.toContain("naia-session.server");
-    expect(src).not.toContain("getCurrentNaiaCustomer");
+  it("D02 — the retired api.wardrobe-insights route is not registered", () => {
+    const routes = fs.readFileSync(path.resolve("app/routes.ts"), "utf8");
+    expect(routes, "route registry must not reference the retired endpoint").not.toContain(
+      "api.wardrobe-insights",
+    );
   });
 
   it("D05 — stylist.jsx does not contain getTokenFromUrl function", () => {
@@ -418,7 +408,6 @@ describe("§E repository-wide legacy token scan", () => {
 
   const SERVER_ROUTES = [
     "app/routes/api.analyze-item.jsx",
-    "app/routes/api.wardrobe-insights.jsx",
     "app/routes/style-me/_index.tsx",
     "app/routes/my-naia._index.tsx",
     "app/routes/api.closet.jsx",

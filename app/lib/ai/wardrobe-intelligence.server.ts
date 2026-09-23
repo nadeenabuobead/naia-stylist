@@ -20,12 +20,15 @@ import { closetItemToSlot } from "~/lib/ai/closet-slot";
 import { getEffectiveClosetItem, type IntelligenceOverrides, type ClosetItemFields } from "~/lib/admin/closet-review.server";
 import {
   deriveGarmentStylingIntelligence,
+  deriveVisualWeight,
+  deriveColourProfile,
   ALL_INTENTIONS,
   type StylingPassportInput,
 } from "~/lib/admin/garment-intelligence-v1.server";
 import type { ClosetClassification } from "~/lib/admin/closet-intelligence.server";
 import {
   computeWardrobeIntelligence,
+  wardrobeCharacterLine,
   combinationKey,
   type WardrobeGarment,
   type WardrobePassport,
@@ -324,4 +327,69 @@ function toStylingPassportInput(passport: WardrobePassport | null): StylingPassp
     dressingPreferences: passport.fitPreferences,
     silhouette: passport.silhouette,
   };
+}
+
+
+// ── Closet page preview ───────────────────────────────────────────────────────
+
+/**
+ * One-sentence character line for the Closet page's Wardrobe Intelligence block.
+ *
+ * Deliberately computed from the SAME trait logic the full page uses, with the
+ * same admin-override precedence, so the doorway and the destination cannot
+ * disagree. No database access and no extra queries — the caller already has the
+ * rows. Returns null when there is not enough to say.
+ */
+export function computeClosetCharacterLine(
+  rows: Array<ClosetItemFields & {
+    id: string;
+    name: string | null;
+    category: string;
+    analysisStatus: string;
+    garmentRelationships: string[];
+    adminReview: { reviewStatus: string; overrides: unknown } | null;
+  }>,
+): string | null {
+  const garments: WardrobeGarment[] = rows.map((item) => {
+    const effective = getEffectiveClosetItem(item, item.adminReview);
+    const classification = toClassification({ ...effective, category: item.category, garmentRelationships: item.garmentRelationships });
+    const ready = item.analysisStatus === "ready";
+    return {
+      id: item.id,
+      name: item.name,
+      category: item.category,
+      subcategory: effective.subcategory,
+      imageUrl: null,
+      slot: closetItemToSlot(item.category, effective.subcategory),
+      primaryColor: effective.primaryColor,
+      colors: effective.colors ?? [],
+      pattern: effective.pattern,
+      material: effective.material,
+      silhouette: effective.silhouette,
+      fitProfile: effective.fitProfile,
+      formality: effective.formality,
+      stylePersonality: effective.stylePersonality,
+      occasions: effective.occasions ?? [],
+      seasons: effective.seasons ?? [],
+      analysisStatus: item.analysisStatus,
+      visualWeight: ready ? deriveVisualWeight(classification).value : null,
+      colourProfile: ready
+        ? {
+            hueFamily: deriveColourProfile(classification).hueFamily,
+            wardrobeNeutral: deriveColourProfile(classification).wardrobeNeutral,
+            lightDark: deriveColourProfile(classification).lightDark,
+            energyTier: deriveColourProfile(classification).energyTier,
+          }
+        : null,
+      garmentRelationships: item.garmentRelationships ?? [],
+      intentions: null,
+      intentionsSource: null,
+      intelligenceSource: ready ? "derived" : "none",
+      outfitAppearances: 0,
+      savedLookAppearances: 0,
+      observedWear: null,
+    };
+  });
+
+  return wardrobeCharacterLine(garments);
 }

@@ -222,6 +222,10 @@ export const HERO_LABEL_TEXT: Readonly<Record<HeroLabel, string>> = {
 
 export interface WardrobeHero {
   garmentId: string;
+  /** "finishing" = shoe/bag/accessory/jewellery. Used by the display cap. */
+  tier: HeroTier;
+  /** Count of exceptional signals behind this piece — decides which survives the cap. */
+  evidenceScore: number;
   name: string;
   category: string;
   imageUrl: string | null;
@@ -247,20 +251,38 @@ export interface WardrobePairing {
   evidence: Evidence[];
 }
 
+/**
+ * How the "nAia hasn't built this yet" signal should be SHOWN.
+ *
+ * The detection never changes — every pairing still carries `untried`. What
+ * changes is the presentation, because a badge on every row says nothing:
+ *   "per-item" — some displayed relationships are novel and some are not, so the
+ *                tag marks the novel ones. This is what the tag is for.
+ *   "section"  — every displayed relationship is novel (common for a customer
+ *                with little nAia history). Said once, quietly, at section level.
+ *   "none"     — nothing displayed is novel. No novelty messaging at all.
+ */
+export type UntriedPresentation = "per-item" | "section" | "none";
+
 export interface WardrobePairings {
   state: BlockState;
   learningNote?: string;
-  /** The strongest relationships nAia can see — what the section displays. */
+  /**
+   * Everything the section displays: the strongest relationships first, then any
+   * combination nAia has never built, flagged with `untried`. One list — a
+   * separate "try together" section printed the same outfits twice.
+   */
   pairings: WardrobePairing[];
   totalFound: number;
-  /**
-   * Untried combinations NOT shown above. Try Together draws only from here, so
-   * the two sections never print the same three outfits twice.
-   */
-  untriedOverflow: WardrobePairing[];
+  untriedPresentation: UntriedPresentation;
+  /** Section-level wording. Non-null only when presentation is "section". */
+  untriedNote: string | null;
 }
 
 export type ObservationKind =
+  | "contradiction-potential-struggle"
+  | "contradiction-alignment-unused"
+  | "contradiction-favourite-isolated"
   | "repetition"
   | "untapped-potential"
   | "struggle-pattern"
@@ -271,9 +293,17 @@ export type ObservationKind =
   | "connection-density"
   | "intention-concentration";
 
+/**
+ * "discovery" = two signals disagreeing about the same garment — the things a
+ * customer cannot see by looking at her own wardrobe. "pattern" = a true but
+ * descriptive reading. The page gives them different weight.
+ */
+export type ObservationTier = "discovery" | "pattern";
+
 export interface WardrobeObservation {
   id: string;
   kind: ObservationKind;
+  tier: ObservationTier;
   headline: string;
   observation: string;
   explanation: string | null;
@@ -296,13 +326,6 @@ export interface RediscoverPiece {
   strength: EvidenceStrength;
 }
 
-export interface TryTogetherItem {
-  id: string;
-  garmentIds: string[];
-  body: string;
-  evidence: Evidence[];
-}
-
 export interface WardrobeGap {
   id: string;
   title: string;
@@ -316,7 +339,6 @@ export interface WardrobeOpportunities {
   state: BlockState;
   learningNote?: string;
   rediscover: RediscoverPiece[];
-  tryTogether: TryTogetherItem[];
   worthConsidering: WardrobeGap[];
   /** Set when no gap is evidenced — an answer in its own right, not an empty state. */
   noGapNote: string | null;
@@ -338,10 +360,19 @@ export interface WardrobePassportView {
 }
 
 export interface SignalAvailability {
+  // ── internal provenance (kept for QA, debugging and future tooling) ──
   signal: SignalType;
   label: string;
   state: "active" | "partial" | "unavailable";
+  /** Precise, technical account of what nAia holds. Not customer-facing. */
   detail: string;
+  // ── customer-facing expression ──
+  /** Short name the customer recognises: "Closet", "Your feedback", ... */
+  title: string;
+  /** One quiet line describing what that is, in her language. */
+  body: string;
+  /** "Reading" | "Partly known" | "Still learning" */
+  statusText: string;
 }
 
 export interface WearIntelligence {
@@ -367,6 +398,8 @@ export interface WardrobeCoverage {
 export interface WardrobeIntelligence {
   ready: boolean;
   readyNote: string | null;
+  /** One sentence on what this wardrobe IS. The opening line of the page. */
+  snapshotReading: string | null;
   flags: WardrobeIntelligenceFlags;
   coverage: WardrobeCoverage;
   signalAvailability: SignalAvailability[];
@@ -469,6 +502,16 @@ const LIFESTYLE_REGISTERS: Readonly<Record<string, ReadonlyArray<"everyday" | "w
   "events":                   ["occasion"],
   "dinners-going-out":        ["occasion"],
   "events-special-occasions": ["occasion"],
+  // Rev 7 additions. Without these the register comparison reads a customer's
+  // stated life as "not the part of your life you described", which is wrong.
+  "study-university":         ["everyday"],
+  "fitness-gym":              ["everyday"],
+  "creative-flexible-work":   ["work", "everyday"],
+  "mostly-at-home":           ["everyday"],
+  "always-on-the-go":         ["everyday"],
+  // "Other" carries a free-text note. Mapped explicitly so the exhaustiveness
+  // test passes, but it names no register — guessing one would be inventing.
+  "other-lifestyle":          [],
 };
 
 const LIFESTYLE_LABELS: Readonly<Record<string, string>> = {
@@ -486,6 +529,13 @@ const LIFESTYLE_LABELS: Readonly<Record<string, string>> = {
   "events":                   "events",
   "dinners-going-out":        "dinners and going out",
   "events-special-occasions": "special occasions",
+  "study-university":         "study",
+  "fitness-gym":              "training",
+  "creative-flexible-work":   "creative, flexible work",
+  "mostly-at-home":           "being mostly at home",
+  "always-on-the-go":         "being on the go",
+  // "other-lifestyle" is deliberately unlabelled — its meaning lives in a
+  // free-text note nAia cannot read into a register.
 };
 
 function lifestyleRegisters(lifestyle: string[]): Set<string> {
@@ -501,11 +551,120 @@ function describeLifestyle(lifestyle: string[]): string {
   return labels.length > 0 ? joinList(labels) : "";
 }
 
-// Passport colour option IDs → Closet primaryColor display strings.
-const PASSPORT_COLOUR_TO_CLOSET: Readonly<Record<string, string>> = {
-  "black": "Black", "grey": "Grey", "navy": "Navy", "green": "Green",
-  "pink": "Pink", "yellow": "Yellow", "orange": "Orange",
+// ── Colour vocabulary bridge ──────────────────────────────────────────────────
+//
+// The Style Passport and the Closet speak different colour vocabularies. The
+// Passport asks for FAMILIES ("Red / Burgundy"); the Closet records the colour
+// the garment actually is ("Burgundy", "Charcoal Gray", "Ivory"). Without a
+// bridge, every compound Passport token silently fails to match and a stated
+// preference disappears from the comparison.
+//
+// Source of truth for the left-hand side: COLOUR_FAMILIES in
+// app/lib/onboarding/quiz-data.ts. The test suite asserts this map covers every
+// id in that list, so adding a Passport colour without a mapping fails the build.
+
+/** Passport colour token → the Closet colour families it covers. */
+const PASSPORT_COLOUR_FAMILIES: Readonly<Record<string, readonly string[]>> = {
+  "black":        ["black"],
+  "white-cream":  ["white", "cream"],
+  "beige-brown":  ["beige", "brown"],
+  "grey":         ["grey"],
+  "navy":         ["navy"],
+  "blue":         ["blue"],
+  "red-burgundy": ["red", "burgundy"],
+  "green":        ["green"],
+  "pink":         ["pink"],
+  "purple":       ["purple"],
+  "yellow":       ["yellow"],
+  "orange":       ["orange"],
+  "metallics":    ["metallic"],
 };
+
+/** How each Passport token reads in a sentence. */
+const PASSPORT_COLOUR_LABEL: Readonly<Record<string, string>> = {
+  "black":        "black",
+  "white-cream":  "white and cream",
+  "beige-brown":  "beige and brown",
+  "grey":         "grey",
+  "navy":         "navy",
+  "blue":         "blue",
+  "purple":       "purple",
+  "metallics":    "metallics",
+  "red-burgundy": "red and burgundy",
+  "green":        "green",
+  "pink":         "pink",
+  "yellow":       "yellow",
+  "orange":       "orange",
+};
+
+/**
+ * Closet primaryColor → colour family.
+ * Families that no Passport token claims (blue, purple) are still resolved, so a
+ * garment is never mis-filed into a family the customer did ask for.
+ */
+const CLOSET_COLOUR_FAMILY: Readonly<Record<string, string>> = {
+  // black
+  "black": "black", "off-black": "black", "jet black": "black",
+  // white / cream
+  "white": "white", "off-white": "white", "optic white": "white",
+  "cream": "cream", "ivory": "cream", "eggshell": "cream", "bone": "cream",
+  // beige / brown
+  "beige": "beige", "sand": "beige", "stone": "beige", "nude": "beige",
+  "taupe": "beige", "oatmeal": "beige", "khaki": "beige",
+  "brown": "brown", "dark brown": "brown", "chocolate": "brown", "espresso": "brown",
+  "camel": "brown", "tan": "brown", "chestnut": "brown", "cognac": "brown", "mocha": "brown",
+  // grey
+  "grey": "grey", "gray": "grey", "light grey": "grey", "light gray": "grey",
+  "dark grey": "grey", "dark gray": "grey", "charcoal": "grey",
+  "charcoal grey": "grey", "charcoal gray": "grey", "slate": "grey",
+  // navy — kept distinct from blue; the Passport asks for navy, not blue
+  "navy": "navy", "dark navy": "navy", "midnight": "navy", "midnight blue": "navy",
+  // blue (no Passport family)
+  "blue": "blue", "light blue": "blue", "medium blue": "blue", "dark blue": "blue",
+  "sky blue": "blue", "powder blue": "blue", "periwinkle blue": "blue", "periwinkle": "blue",
+  "denim": "blue", "chambray": "blue", "cobalt": "blue", "teal": "blue", "turquoise": "blue",
+  "cornflower blue": "blue", "indigo": "blue",
+  // red / burgundy
+  "red": "red", "crimson": "red", "cherry": "red", "scarlet": "red", "dark red": "red",
+  "burgundy": "burgundy", "wine": "burgundy", "maroon": "burgundy", "oxblood": "burgundy",
+  "bordeaux": "burgundy",
+  // green
+  "green": "green", "dark green": "green", "olive": "green", "sage": "green",
+  "emerald": "green", "forest": "green", "hunter": "green", "mint": "green", "jade": "green",
+  // pink
+  "pink": "pink", "light pink": "pink", "blush": "pink", "rose": "pink",
+  "fuchsia": "pink", "magenta": "pink", "coral": "pink", "salmon": "pink",
+  // purple (no Passport family)
+  "purple": "purple", "dark purple": "purple", "violet": "purple", "lilac": "purple",
+  "lavender": "purple", "plum": "purple", "mauve": "purple", "mulberry": "purple",
+  // yellow
+  "yellow": "yellow", "mustard": "yellow", "lemon": "yellow", "butter": "yellow",
+  // metallic
+  "gold": "metallic", "silver": "metallic", "bronze": "metallic", "pewter": "metallic",
+  "gunmetal": "metallic", "rose gold": "metallic", "champagne": "metallic",
+  // orange
+  "orange": "orange", "dark orange": "orange", "rust": "orange", "terracotta": "orange",
+  "copper": "orange", "amber": "orange", "peach": "orange", "apricot": "orange",
+};
+
+/** The colour family a garment belongs to, or null when nAia can't tell. */
+function closetColourFamily(colour: string | null): string | null {
+  const key = norm(colour);
+  return key ? (CLOSET_COLOUR_FAMILY[key] ?? null) : null;
+}
+
+/** Families covered by a set of Passport colour tokens, de-duplicated. */
+function passportColourFamilies(tokens: string[]): Set<string> {
+  const families = new Set<string>();
+  for (const token of tokens) {
+    for (const family of PASSPORT_COLOUR_FAMILIES[norm(token) ?? ""] ?? []) families.add(family);
+  }
+  return families;
+}
+
+export const PASSPORT_COLOUR_TOKENS = Object.keys(PASSPORT_COLOUR_FAMILIES);
+export { LIFESTYLE_REGISTERS as PASSPORT_LIFESTYLE_REGISTERS };
+export { PASSPORT_COLOUR_FAMILIES, CLOSET_COLOUR_FAMILY, closetColourFamily };
 
 // Customer-facing wording for the relationship IDs. Raw ids must never reach copy.
 const RELATIONSHIP_PHRASES: Readonly<Record<string, string>> = {
@@ -572,13 +731,23 @@ const FINISHING_SLOTS: ReadonlySet<string> = new Set(["shoe", "bag", "accessory"
 // Passport lifestyle IDs where an athletic or on-the-move wardrobe is genuinely
 // part of the life described.
 const ACTIVE_LIFESTYLE_IDS: ReadonlySet<string> = new Set([
-  "active-busy-days", "on-the-go", "busy-mom", "family-parenting",
+  "active-busy-days", "on-the-go", "always-on-the-go", "busy-mom",
+  "family-parenting", "fitness-gym",
 ]);
 
 /** Share of the Closet above which activewear is self-evidently part of her life. */
 const ACTIVE_WARDROBE_SHARE = 0.25;
 
 type HeroTier = "core" | "functional" | "finishing";
+
+/** Is an athletic wardrobe genuinely part of this customer's life? */
+function isActiveRelevant(items: WardrobeGarment[], passport: WardrobePassport | null): boolean {
+  const share = ratio(items.filter((g) => FUNCTIONAL_CATEGORIES.has(g.category)).length, items.length);
+  return (
+    share >= ACTIVE_WARDROBE_SHARE ||
+    (passport?.lifestyle ?? []).some((id) => ACTIVE_LIFESTYLE_IDS.has(id))
+  );
+}
 
 function heroTier(g: WardrobeGarment): HeroTier {
   if (FINISHING_SLOTS.has(g.slot)) return "finishing";
@@ -634,6 +803,11 @@ function ratio(part: number, whole: number): number {
 
 function statedAs(g: WardrobeGarment, set: ReadonlySet<string>): boolean {
   return (g.garmentRelationships ?? []).some((r) => set.has(r));
+}
+
+/** "a" or "an", by sound rather than by spelling rule alone. */
+function indefinite(word: string): string {
+  return /^[aeiou]/i.test(word) ? `an ${word}` : `a ${word}`;
 }
 
 function capitalise(s: string): string {
@@ -733,12 +907,20 @@ function buildSignalAvailability(
         .filter((f) => f.length > 0).length + (passport.structure ? 1 : 0)
     : 0;
 
-  return [
+  const statusText: Record<SignalAvailability["state"], string> = {
+    active: "Reading",
+    partial: "Partly known",
+    unavailable: "Still learning",
+  };
+
+  const rows: Array<Omit<SignalAvailability, "statusText">> = [
     {
       signal: "garment-fact",
       label: SIGNAL_LABELS["garment-fact"],
       state: garmentState,
       detail: `${coverage.analysedItems} of ${coverage.totalItems} pieces read in detail.`,
+      title: "Closet",
+      body: "Your garments and their characteristics.",
     },
     {
       signal: "passport-signal",
@@ -746,30 +928,37 @@ function buildSignalAvailability(
       state: passportFilled >= 3 ? "active" : passportFilled > 0 ? "partial" : "unavailable",
       detail: passport
         ? `${passportFilled} of 5 Passport areas nAia uses here are filled in.`
-        : "Your Style Passport isn't complete yet.",
+        : "No Style Passport on file.",
+      title: "Style Passport",
+      body: "Your preferences and priorities.",
     },
     {
       signal: "self-reported-wardrobe",
       label: SIGNAL_LABELS["self-reported-wardrobe"],
       state: coverage.relationshipCoverage >= 0.5 ? "active" : relationshipCount > 0 ? "partial" : "unavailable",
-      detail: `${relationshipCount} of ${coverage.totalItems} pieces carry your own read on them.`,
+      detail: `${relationshipCount} of ${coverage.totalItems} pieces carry a customer relationship tag.`,
+      title: "Your feedback",
+      body: "Pieces you’ve marked as favourites, difficult to style, or rarely reached for.",
     },
     {
       signal: "naia-interaction",
       label: SIGNAL_LABELS["naia-interaction"],
       state: interactions >= 3 ? "active" : interactions > 0 ? "partial" : "unavailable",
-      detail:
-        interactions > 0
-          ? `${interactions} pieces have appeared in a generated or saved look.`
-          : "No pieces have been through StyleMe or a saved look yet.",
+      detail: `${interactions} pieces appear in a generated outfit or saved look.`,
+      title: "nAia activity",
+      body: "Looks you’ve generated or saved.",
     },
     {
       signal: "observed-wear",
       label: SIGNAL_LABELS["observed-wear"],
       state: "unavailable",
-      detail: "nAia doesn't track real-world wear yet, so nothing here is based on it.",
+      detail: "No wear-recording path exists; ClosetItem.timesWorn / lastWorn are never written.",
+      title: "Wear behaviour",
+      body: "What you actually reach for, day to day.",
     },
   ];
+
+  return rows.map((row) => ({ ...row, statusText: statusText[row.state] }));
 }
 
 // ── Compatibility graph ───────────────────────────────────────────────────────
@@ -800,33 +989,112 @@ function weightBalanced(a: WardrobeGarment, b: WardrobeGarment): boolean {
   return !(a.visualWeight === "substantial" && b.visualWeight === "substantial");
 }
 
-interface PairScore {
-  compatible: boolean;
-  reasons: string[];
+/** A reason two pieces work, with how specific to THESE two it is. */
+interface PairReason {
+  text: string;
+  /** Higher = more specific to this pair. Generic register agreement is lowest. */
+  weight: number;
 }
 
-function scorePair(a: WardrobeGarment, b: WardrobeGarment): PairScore {
-  const reasons: string[] = [];
+interface PairScore {
+  compatible: boolean;
+  reasons: PairReason[];
+}
 
+const STRUCTURED_FITS = new Set(["tailored", "structured"]);
+const SOFT_FITS = new Set(["relaxed", "loose", "oversized", "flowy"]);
+const FULL_SILHOUETTES = new Set(["oversized", "balloon", "flared", "a-line"]);
+const CLOSE_SILHOUETTES = new Set(["fitted", "column", "straight", "tapered"]);
+
+/**
+ * Why THESE two, not why two garments could generally work.
+ *
+ * Every reason is read off a field the garment actually carries. The list is
+ * ranked by specificity so the section can lead with the most particular true
+ * thing it can say about each pair, rather than repeating the same sentence.
+ */
+function scorePair(a: WardrobeGarment, b: WardrobeGarment): PairScore {
   if (!weightBalanced(a, b)) return { compatible: false, reasons: [] };
 
   const fd = formalityDistance(norm(a.formality), norm(b.formality));
-  if (fd !== null) {
-    if (fd > 1) return { compatible: false, reasons: [] };
-    reasons.push(fd === 0 ? "they sit at the same level of dress" : "their levels of dress sit next to each other");
-  }
+  if (fd !== null && fd > 1) return { compatible: false, reasons: [] };
 
   const cc = colourCompatible(a, b);
   if (cc === false) return { compatible: false, reasons: [] };
-  if (cc === true) {
-    const neutral = a.colourProfile?.wardrobeNeutral || b.colourProfile?.wardrobeNeutral;
-    reasons.push(neutral ? "one of them is a wardrobe neutral, so the pairing stays easy" : "they share a colour family");
+
+  const reasons: PairReason[] = [];
+
+  // Occasion overlap — she tagged both for the same moment.
+  const sharedOccasions = (a.occasions ?? []).filter((o) => (b.occasions ?? []).includes(o));
+  if (sharedOccasions.length > 0) {
+    reasons.push({
+      // "these", not "both": a pairing may carry a third piece.
+      text: `You've tagged these for ${sharedOccasions[0].toLowerCase()}.`,
+      weight: 8,
+    });
   }
 
+  // Structure contrast — the most useful thing to say about a pair.
+  const fitA = norm(a.fitProfile);
+  const fitB = norm(b.fitProfile);
+  if (fitA && fitB) {
+    const structured = STRUCTURED_FITS.has(fitA) ? a : STRUCTURED_FITS.has(fitB) ? b : null;
+    const soft = SOFT_FITS.has(fitA) ? a : SOFT_FITS.has(fitB) ? b : null;
+    if (structured && soft && structured.id !== soft.id) {
+      reasons.push({
+        text: "One is tailored and the other relaxed — the structure is what makes it read deliberate.",
+        weight: 7,
+      });
+    }
+  }
+
+  // Colour, said precisely.
+  const ca = a.colourProfile;
+  const cb = b.colourProfile;
+  if (ca && cb) {
+    if (!ca.wardrobeNeutral && !cb.wardrobeNeutral && ca.hueFamily && ca.hueFamily === cb.hueFamily) {
+      reasons.push({ text: `Both sit in the same ${ca.hueFamily} family.`, weight: 6 });
+    } else if (ca.wardrobeNeutral !== cb.wardrobeNeutral) {
+      const neutral = ca.wardrobeNeutral ? a : b;
+      const colourful = ca.wardrobeNeutral ? b : a;
+      const neutralName = norm(neutral.primaryColor);
+      const colourName = norm(colourful.primaryColor);
+      if (neutralName && colourName) {
+        reasons.push({ text: `The ${neutralName} anchors the ${colourName}.`, weight: 6 });
+      } else {
+        reasons.push({ text: "One of them is a wardrobe neutral, so the pairing stays easy.", weight: 4 });
+      }
+    } else if (ca.wardrobeNeutral && cb.wardrobeNeutral) {
+      reasons.push({ text: "Both are wardrobe neutrals, so nothing competes.", weight: 3 });
+    }
+  }
+
+  // Silhouette contrast.
+  const silA = norm(a.silhouette);
+  const silB = norm(b.silhouette);
+  if (silA && silB) {
+    const full = FULL_SILHOUETTES.has(silA) ? silA : FULL_SILHOUETTES.has(silB) ? silB : null;
+    const close = CLOSE_SILHOUETTES.has(silA) ? silA : CLOSE_SILHOUETTES.has(silB) ? silB : null;
+    if (full && close) {
+      reasons.push({ text: `A ${close} shape against ${indefinite(full)} one keeps the proportions clear.`, weight: 5 });
+    }
+  }
+
+  // Visual weight.
   if (a.visualWeight && b.visualWeight && a.visualWeight !== b.visualWeight) {
-    reasons.push("one carries more visual weight than the other, which keeps the pairing from flattening");
+    reasons.push({ text: "One carries more visual weight than the other, which stops the pairing flattening.", weight: 4 });
   }
 
+  // Register — true, but the least particular thing that can be said.
+  if (fd !== null) {
+    reasons.push(
+      fd === 0
+        ? { text: "They sit at the same level of dress.", weight: 2 }
+        : { text: "Their levels of dress sit next to each other.", weight: 1 },
+    );
+  }
+
+  reasons.sort((x, y) => y.weight - x.weight);
   // A pairing needs at least one positive, evidenced reason — never "compatible by default".
   return { compatible: reasons.length > 0, reasons };
 }
@@ -846,73 +1114,83 @@ function partnersOf(garment: WardrobeGarment, items: WardrobeGarment[]): Wardrob
 
 // ── Snapshot ──────────────────────────────────────────────────────────────────
 
+/**
+ * The opening.
+ *
+ * A reading first — what nAia understands about this wardrobe — then at most
+ * three facts that support it. Deliberately NOT a metrics grid: combination
+ * counts, compatibility ratios and "pieces nAia has read" are engine internals
+ * and say nothing a customer wants said first.
+ */
+function buildSnapshotReading(dna: WardrobeDna): string | null {
+  if (dna.traits.length === 0) return null;
+  // Trait labels are adjectives in their own right ("Neutral-led", "Polished"),
+  // so "leans neutral-led" reads twice. Strip the suffix and let the verb do it.
+  const words = dna.traits
+    .slice(0, 3)
+    .map((t) => t.label.toLowerCase().replace(/^mostly /, "").replace(/-led$/, ""));
+  return `Your wardrobe leans ${joinList(words)}.`;
+}
+
 function buildSnapshot(
   items: WardrobeGarment[],
   coverage: WardrobeCoverage,
-  pairings: WardrobePairings,
+  rediscoverCount: number,
 ): WardrobeMetric[] {
   const metrics: WardrobeMetric[] = [];
 
   metrics.push({
     id: "pieces",
-    label: "Pieces",
+    label: items.length === 1 ? "piece" : "pieces",
     value: items.length,
     caption: "in your Closet",
     state: "available",
     signal: "garment-fact",
   });
 
-  metrics.push({
-    id: "read",
-    label: "Read by nAia",
-    value: coverage.analysedItems,
-    caption: "pieces nAia has looked at in detail",
-    state: "available",
-    signal: "garment-fact",
-  });
+  // What the customer has told nAia is hard. STATED_STRUGGLE only — "unsure"
+  // is a different feeling, and folding it in would make the number disagree
+  // with the observation that names the same pieces.
+  const difficult = items.filter((g) => statedAs(g, STATED_STRUGGLE)).length;
+  if (difficult > 0) {
+    metrics.push({
+      id: "difficult",
+      label: "marked difficult to style",
+      value: difficult,
+      caption: "by you",
+      state: "available",
+      signal: "self-reported-wardrobe",
+    });
+  }
 
-  // SELF-REPORTED, not wear. The caption says so, and the tests enforce it.
-  const statedRegulars = items.filter((g) => statedAs(g, STATED_REGULAR)).length;
-  const statedLowUse = items.filter((g) => statedAs(g, STATED_LOW_USE)).length;
-  const relationshipsKnown = coverage.relationshipCoverage >= 0.3;
+  if (rediscoverCount > 0) {
+    metrics.push({
+      id: "rediscover",
+      label: "worth rediscovering",
+      value: rediscoverCount,
+      caption: "pieces nAia would look at again",
+      state: "available",
+      signal: "naia-interaction",
+    });
+  }
 
-  metrics.push({
-    id: "regulars",
-    label: "Wardrobe regulars",
-    value: relationshipsKnown ? statedRegulars : null,
-    caption: "pieces you've marked as favourites or ones you wear often",
-    state: relationshipsKnown ? "available" : "learning",
-    signal: "self-reported-wardrobe",
-    ...(relationshipsKnown
-      ? {}
-      : { learningNote: "Tell nAia how you feel about more of your pieces and this fills in." }),
-  });
+  // Fall back to the self-reported regulars only when nothing sharper exists,
+  // so the opening never drops to a single lonely number.
+  if (metrics.length < 3 && coverage.relationshipCoverage >= 0.3) {
+    const regulars = items.filter((g) => statedAs(g, STATED_REGULAR)).length;
+    if (regulars > 0) {
+      metrics.push({
+        id: "regulars",
+        label: "wardrobe regulars",
+        value: regulars,
+        caption: "pieces you've marked as favourites or ones you wear often",
+        state: "available",
+        signal: "self-reported-wardrobe",
+      });
+    }
+  }
 
-  metrics.push({
-    id: "underused",
-    label: "Underused",
-    value: relationshipsKnown ? statedLowUse : null,
-    caption: "pieces you've marked as ones you rarely reach for",
-    state: relationshipsKnown ? "available" : "learning",
-    signal: "self-reported-wardrobe",
-    ...(relationshipsKnown
-      ? {}
-      : { learningNote: "nAia needs your read on more pieces before it can see this." }),
-  });
-
-  metrics.push({
-    id: "combinations",
-    label: "Combinations",
-    value: pairings.state === "available" ? pairings.totalFound : null,
-    caption: "pairings nAia can already build from what you own",
-    state: pairings.state,
-    signal: "garment-fact",
-    ...(pairings.state === "available"
-      ? {}
-      : { learningNote: pairings.learningNote ?? "nAia needs more detail on your pieces first." }),
-  });
-
-  return metrics;
+  return metrics.slice(0, 3);
 }
 
 // ── Wardrobe DNA ──────────────────────────────────────────────────────────────
@@ -947,26 +1225,32 @@ function buildDna(items: WardrobeGarment[], coverage: WardrobeCoverage): Wardrob
   let shapesReading = "";
 
   if (coverage.shapeCoverage >= COVERAGE_THRESHOLD) {
+    // A shape is only a wardrobe characteristic if it genuinely recurs. Appearing
+    // twice in a 46-piece Closet is not a characteristic, it is a coincidence —
+    // so the bar scales with the number of garments that can carry a shape.
+    const coreCount = items.filter((i) => CORE_SLOTS.has(i.slot)).length;
+    const minRecurrence = Math.max(3, Math.ceil(coreCount * 0.15));
+
     const silCounts = countBy(items, (i) => norm(i.silhouette));
     for (const [token, count] of topEntries(silCounts, MAX_SHAPES)) {
-      if (count < 2) continue;
+      if (count < minRecurrence) continue;
       shapes.push({ label: SILHOUETTE_LABELS[token] ?? titleCase(token), count, field: "silhouette" });
     }
     if (shapes.length < MAX_SHAPES) {
       const fitCounts = countBy(items, (i) => norm(i.fitProfile));
       for (const [token, count] of topEntries(fitCounts, MAX_SHAPES)) {
-        if (count < 2) continue;
+        if (count < minRecurrence) continue;
         const label = FIT_LABELS[token] ?? titleCase(token);
-        if (shapes.some((s) => s.label === label)) continue;
+        if (shapes.some((sh) => sh.label === label)) continue;
         shapes.push({ label, count, field: "fitProfile" });
         if (shapes.length >= MAX_SHAPES) break;
       }
     }
-    if (shapes.length > 0) {
-      const lead = shapes[0];
-      shapesReading = capitalise(
-        `${lead.label.toLowerCase()} shapes recur most across your wardrobe — ${lead.count} of your pieces read that way.`,
-      );
+    // Counts stay in the data as evidence; the customer reads the shape, not the tally.
+    if (shapes.length > 1) {
+      shapesReading = `${capitalise(shapes[0].label.toLowerCase())} shapes recur most, with ${joinList(shapes.slice(1, 3).map((sh) => sh.label.toLowerCase()))} close behind.`;
+    } else if (shapes.length === 1) {
+      shapesReading = `${capitalise(shapes[0].label.toLowerCase())} shapes recur across your wardrobe more than any other.`;
     }
   }
 
@@ -1132,11 +1416,12 @@ function buildPairings(
       learningNote: "Add pieces from more than one part of your wardrobe and nAia can start showing how they connect.",
       pairings: [],
       totalFound: 0,
-      untriedOverflow: [],
+      untriedPresentation: "none",
+      untriedNote: null,
     };
   }
 
-  const candidates: Array<{ ids: string[]; reasons: string[]; score: number }> = [];
+  const candidates: Array<{ ids: string[]; reasons: PairReason[]; score: number }> = [];
 
   for (const top of tops) {
     for (const bottom of bottoms) {
@@ -1144,7 +1429,6 @@ function buildPairings(
       if (!pair.compatible) continue;
       let ids = [top.id, bottom.id];
       const reasons = [...pair.reasons];
-      let score = pair.reasons.length;
 
       const layer = outer.find((o) => {
         if (o.id === top.id || o.id === bottom.id) return false;
@@ -1152,10 +1436,10 @@ function buildPairings(
       });
       if (layer) {
         ids = [layer.id, top.id, bottom.id];
-        reasons.push("the layer works over both halves");
-        score += 1;
+        reasons.push({ text: "The layer works over both halves, so it holds as one outfit.", weight: 6 });
       }
-      candidates.push({ ids, reasons, score });
+      reasons.sort((x, y) => y.weight - x.weight);
+      candidates.push({ ids, reasons, score: reasons.reduce((sum, r) => sum + r.weight, 0) });
     }
   }
 
@@ -1163,11 +1447,12 @@ function buildPairings(
     const layer = outer.find((o) => scorePair(o, piece).compatible);
     if (layer) {
       const pair = scorePair(layer, piece);
-      candidates.push({
-        ids: [layer.id, piece.id],
-        reasons: [...pair.reasons, "a layer over a one-piece gives you a second version of the same garment"],
-        score: pair.reasons.length + 1,
-      });
+      const reasons = [
+        { text: "A layer over a one-piece gives you a second version of the same garment.", weight: 7 },
+        ...pair.reasons,
+      ];
+      reasons.sort((x, y) => y.weight - x.weight);
+      candidates.push({ ids: [layer.id, piece.id], reasons, score: reasons.reduce((sum, r) => sum + r.weight, 0) });
     }
   }
 
@@ -1177,56 +1462,73 @@ function buildPairings(
       learningNote: "nAia hasn't found a confident combination yet — colour, fit and level-of-dress detail on more pieces is what unlocks this.",
       pairings: [],
       totalFound: 0,
-      untriedOverflow: [],
+      untriedPresentation: "none",
+      untriedNote: null,
     };
   }
 
-  // Ranked on evidence strength, NOT on untried-first. This section is "the
-  // strongest relationships in your wardrobe"; Try Together is the separate
-  // "things you haven't tried" idea and draws from what is left over.
   const ranked = candidates
     .map((c) => ({ ...c, untried: !seenCombinations.has(combinationKey(c.ids)) }))
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      if (a.untried !== b.untried) return a.untried ? -1 : 1;
-      return combinationKey(a.ids).localeCompare(combinationKey(b.ids));
-    });
+    .sort((a, b) => b.score - a.score || combinationKey(a.ids).localeCompare(combinationKey(b.ids)));
 
-  const toPairing = (candidate: (typeof ranked)[number]): WardrobePairing => ({
-    id: combinationKey(candidate.ids),
-    garmentIds: candidate.ids,
-    reason: capitalise(joinList(candidate.reasons.slice(0, 2))) + ".",
-    untried: candidate.untried,
-    evidence: [
-      ev("garment-fact", "formality/colourProfile/visualWeight", joinList(candidate.reasons), candidate.ids),
-      ...(candidate.untried
-        ? [ev("naia-interaction", "OutfitItem", "This combination has not appeared in a look nAia generated.", candidate.ids)]
-        : []),
-    ],
-  });
-
+  // Lead each relationship with the most specific TRUE thing not already said in
+  // this section. Nothing is invented — a reason is only skipped, never made up.
+  const usedReasons = new Set<string>();
   const used = new Set<string>();
-  const pairings: WardrobePairing[] = [];
-  for (const candidate of ranked) {
-    if (pairings.length >= MAX_PAIRINGS) break;
-    if (candidate.ids.some((id) => used.has(id))) continue;
-    candidate.ids.forEach((id) => used.add(id));
-    pairings.push(toPairing(candidate));
-  }
 
-  // Overflow: untried combinations that share no garment with anything displayed
-  // above, so Try Together shows different clothes as well as a different idea.
-  const overflowUsed = new Set(used);
-  const untriedOverflow: WardrobePairing[] = [];
-  for (const candidate of ranked) {
-    if (untriedOverflow.length >= MAX_PAIRINGS) break;
-    if (!candidate.untried) continue;
-    if (candidate.ids.some((id) => overflowUsed.has(id))) continue;
-    candidate.ids.forEach((id) => overflowUsed.add(id));
-    untriedOverflow.push(toPairing(candidate));
-  }
+  const toPairing = (candidate: (typeof ranked)[number]): WardrobePairing => {
+    const lead = candidate.reasons.find((r) => !usedReasons.has(r.text)) ?? candidate.reasons[0];
+    usedReasons.add(lead.text);
+    const second = candidate.reasons.find((r) => r.text !== lead.text && !usedReasons.has(r.text));
+    if (second) usedReasons.add(second.text);
+    return {
+      id: combinationKey(candidate.ids),
+      garmentIds: candidate.ids,
+      reason: second ? `${lead.text} ${second.text}` : lead.text,
+      untried: candidate.untried,
+      evidence: [
+        ev("garment-fact", "formality/colourProfile/visualWeight/silhouette/occasions",
+           candidate.reasons.map((r) => r.text).join(" "), candidate.ids),
+        ...(candidate.untried
+          ? [ev("naia-interaction", "OutfitItem", "This combination has not appeared in a look nAia generated.", candidate.ids)]
+          : []),
+      ],
+    };
+  };
 
-  return { state: "available", pairings, totalFound: candidates.length, untriedOverflow };
+  const take = (pool: typeof ranked, limit: number) => {
+    const out: WardrobePairing[] = [];
+    for (const candidate of pool) {
+      if (out.length >= limit) break;
+      if (candidate.ids.some((id) => used.has(id))) continue;
+      candidate.ids.forEach((id) => used.add(id));
+      out.push(toPairing(candidate));
+    }
+    return out;
+  };
+
+  // The strongest relationships first, then combinations nAia has never built —
+  // one section, not two. An untried pairing is simply labelled as such.
+  const strongest = take(ranked, MAX_PAIRINGS - 2);
+  const untried = take(ranked.filter((c) => c.untried), 2);
+  const pairings = [...strongest, ...untried];
+
+  // "Not yet styled together by nAia" is never "never worn together" — the note
+  // below says nAia, deliberately, because that is the only thing nAia knows.
+  const novel = pairings.filter((p) => p.untried).length;
+  const presentation: UntriedPresentation =
+    novel === 0 ? "none" : novel === pairings.length ? "section" : "per-item";
+
+  return {
+    state: "available",
+    pairings,
+    totalFound: candidates.length,
+    untriedPresentation: presentation,
+    untriedNote:
+      presentation === "section"
+        ? "These are strong connections nAia hasn't put together in one of your looks yet."
+        : null,
+  };
 }
 
 // ── Heroes ────────────────────────────────────────────────────────────────────
@@ -1243,7 +1545,7 @@ interface HeroCandidate {
    *  finishing piece finishes. */
   partners: WardrobeGarment[];
   partnerSlots: Set<string>;
-  passportMatches: string[];
+  alignment: PassportAlignment;
   /** Count of unusually strong signals. Finishing pieces need these to qualify. */
   exceptional: number;
 }
@@ -1276,15 +1578,7 @@ function buildHeroes(
   items: WardrobeGarment[],
   passport: WardrobePassport | null,
 ): WardrobeHeroes {
-  // Is an athletic wardrobe genuinely part of this customer's life? Either she
-  // said so, or a quarter of what she owns says so.
-  const activeShare = ratio(
-    items.filter((g) => FUNCTIONAL_CATEGORIES.has(g.category)).length,
-    items.length,
-  );
-  const activeRelevant =
-    activeShare >= ACTIVE_WARDROBE_SHARE ||
-    (passport?.lifestyle ?? []).some((id) => ACTIVE_LIFESTYLE_IDS.has(id));
+  const activeRelevant = isActiveRelevant(items, passport);
 
   const hasInteractionHistory = items.some((g) => g.outfitAppearances > 0 || g.savedLookAppearances > 0);
 
@@ -1292,19 +1586,23 @@ function buildHeroes(
     .filter((g) => g.slot !== "unknown")
     .map((garment) => {
       const partners = contextPartners(garment, items);
-      const passportMatches = passportMatchesFor(garment, passport);
+      const alignment = passportAlignmentFor(garment, passport);
+      const tier = heroTier(garment);
+      // Breadth is only evidence when it is earned. A finishing piece is
+      // compatible with everything by construction, so its partner count says
+      // nothing about it and is excluded from the exceptional-signal count.
       const exceptional =
         (statedAs(garment, STATED_REGULAR) ? 1 : 0) +
         (registerSpan(partners).length >= 2 ? 1 : 0) +
-        (passportMatches.length >= 2 ? 1 : 0) +
+        (alignment.score >= PASSPORT_HERO_SCORE ? 1 : 0) +
         (garment.outfitAppearances + garment.savedLookAppearances >= 2 ? 1 : 0) +
-        (partners.length >= 8 ? 1 : 0);
+        (tier !== "finishing" && partners.length >= 8 ? 1 : 0);
       return {
         garment,
-        tier: heroTier(garment),
+        tier,
         partners,
         partnerSlots: new Set(partners.map((p) => p.slot)),
-        passportMatches,
+        alignment,
         exceptional,
       };
     });
@@ -1313,6 +1611,7 @@ function buildHeroes(
   const usedSlots = new Set<string>();
   const heroes: WardrobeHero[] = [];
   let finishingHeroes = 0;
+  let functionalHeroes = 0;
 
   /**
    * Whether a candidate may compete for a label.
@@ -1325,7 +1624,11 @@ function buildHeroes(
   const eligible = (c: HeroCandidate, kind: "connectivity" | "evidence"): boolean => {
     if (c.tier === "core") return true;
     if (c.tier === "functional") {
-      return kind === "evidence" ? activeRelevant || c.exceptional >= 2 : activeRelevant;
+      if (kind === "connectivity") return activeRelevant;
+      if (activeRelevant) return true;
+      if (c.exceptional < 2) return false;
+      // Incidental activewear may earn a place, but not the whole section.
+      return functionalHeroes === 0 || c.exceptional >= 4;
     }
     // finishing
     if (kind === "connectivity") return false;
@@ -1338,8 +1641,11 @@ function buildHeroes(
   /** Core garments outrank finishing pieces unless the evidence is overwhelming. */
   const tierRank = (c: HeroCandidate): number => {
     if (c.tier === "core") return 2;
+    // Activewear in a wardrobe that genuinely revolves around it is not a
+    // second-class garment — relevance decides, then evidence.
+    if (c.tier === "functional" && activeRelevant) return 2;
     if (c.exceptional >= 3) return 2;
-    return c.tier === "functional" && activeRelevant ? 1 : 0;
+    return c.tier === "functional" ? 1 : 0;
   };
 
   const pick = (
@@ -1365,8 +1671,11 @@ function buildHeroes(
     used.add(best.garment.id);
     usedSlots.add(best.garment.slot);
     if (best.tier === "finishing") finishingHeroes += 1;
+    if (best.tier === "functional" && !activeRelevant) functionalHeroes += 1;
     heroes.push({
       garmentId: best.garment.id,
+      tier: best.tier,
+      evidenceScore: best.exceptional,
       name: displayName(best.garment),
       category: CATEGORY_PLURAL[best.garment.category] ?? best.garment.category.toLowerCase(),
       imageUrl: best.garment.imageUrl,
@@ -1424,23 +1733,45 @@ function buildHeroes(
   );
 
   // 3. PASSPORT MATCH — stable Passport attributes only, never intention scoring.
+  //    A hero has to be more than a coincidence. Alignment on colour and shape
+  //    alone scores 2 and is not enough on its own — it needs either a third,
+  //    more distinctive dimension, or a second kind of signal entirely: the
+  //    customer's own marking, or a real history inside nAia.
+  const passportSupported = (c: HeroCandidate): boolean =>
+    statedAs(c.garment, STATED_REGULAR) ||
+    c.garment.outfitAppearances + c.garment.savedLookAppearances >= 2;
   pick(
     "passport-match",
     "evidence",
-    (c) => c.passportMatches.length >= 2 && c.partners.length >= 2,
-    (c) => c.passportMatches.length * 10 + c.partners.length,
-    (c) => ({
-      headline: "This is the piece closest to what you told nAia you want.",
-      reasons: [
-        `Matches your Passport on ${joinList(c.passportMatches)}.`,
+    (c) =>
+      c.partners.length >= 2 &&
+      (c.alignment.score >= PASSPORT_HERO_SCORE ||
+        (c.alignment.score >= PASSPORT_HERO_SCORE_WITH_SUPPORT && passportSupported(c))),
+    (c) => c.alignment.score * 10 + Math.min(c.partners.length, 6),
+    (c) => {
+      const reasons = [
+        `Matches your Passport on ${joinList(c.alignment.dimensions)}.`,
         `And it still works with ${c.partners.length} other pieces you own.`,
-      ],
-      evidence: [
-        ev("passport-signal", "OnboardingProfile", `Aligns on ${joinList(c.passportMatches)}.`, [c.garment.id]),
+      ];
+      const evidence: Evidence[] = [
+        ev("passport-signal", "OnboardingProfile", `Aligns on ${joinList(c.alignment.dimensions)} (weighted score ${c.alignment.score}).`, [c.garment.id]),
         ev("garment-fact", "compatibility graph", `Compatible with ${c.partners.length} pieces.`, c.partners.map((p) => p.id)),
-      ],
-      supporting: c.passportMatches.length + c.partners.length,
-    }),
+      ];
+      if (c.alignment.score < PASSPORT_HERO_SCORE) {
+        // It cleared the bar on a second kind of signal — say which.
+        if (statedAs(c.garment, STATED_REGULAR)) {
+          evidence.push(ev("self-reported-wardrobe", "garmentRelationships", `Marked as ${describeRelationships(c.garment.garmentRelationships)}.`, [c.garment.id]));
+        } else {
+          evidence.push(ev("naia-interaction", "OutfitItem/SavedLookItem", `Appears in ${c.garment.outfitAppearances + c.garment.savedLookAppearances} generated or saved looks.`, [c.garment.id]));
+        }
+      }
+      return {
+        headline: "This is the piece closest to what you told nAia you want.",
+        reasons,
+        evidence,
+        supporting: c.alignment.score + c.partners.length,
+      };
+    },
   );
 
   // 4. YOUR FAVOURITE — self-reported, and it earns its place structurally too.
@@ -1509,6 +1840,22 @@ function buildHeroes(
     },
   );
 
+  // ── Display cap ────────────────────────────────────────────────────────────
+  // The eligibility engine may legitimately conclude that several finishing
+  // pieces qualify. The SECTION should still read as a wardrobe, not a shelf of
+  // accessories, so at most one survives — whichever the evidence ranks highest.
+  // Nothing is promoted to backfill the freed slot: three heroes is a fine answer.
+  const finishing = heroes.filter((h) => h.tier === "finishing");
+  if (finishing.length > 1) {
+    const keep = [...finishing].sort(
+      (a, b) => b.evidenceScore - a.evidenceScore || a.garmentId.localeCompare(b.garmentId),
+    )[0];
+    for (const hero of finishing) {
+      if (hero.garmentId === keep.garmentId) continue;
+      heroes.splice(heroes.indexOf(hero), 1);
+    }
+  }
+
   if (heroes.length === 0) {
     return {
       state: "learning",
@@ -1522,42 +1869,84 @@ function buildHeroes(
 }
 
 /** Stable Passport attributes a garment matches. Never uses intention scoring. */
-function passportMatchesFor(g: WardrobeGarment, passport: WardrobePassport | null): string[] {
-  if (!passport) return [];
-  const matches: string[] = [];
+/**
+ * How strongly a garment aligns with the Style Passport, as a weighted reading
+ * rather than a count of matches.
+ *
+ * Dimensions are not equal. Style personality and silhouette preference are
+ * distinctive — a garment matching one of those says something. Colour and shape
+ * are common enough that a black, fitted anything will hit both by coincidence,
+ * which is why colour + fit alone is worth 2 and cannot on its own make a
+ * Wardrobe Hero. Structure and fit describe the same underlying fact, so they
+ * share a single point rather than double-counting.
+ *
+ * Register/lifestyle relevance is deliberately NOT scored: on real wardrobes
+ * almost every piece sits in the customer's dominant register, so it separates
+ * nothing.
+ */
+interface PassportAlignment {
+  /** Display names of the dimensions that matched, strongest first. */
+  dimensions: string[];
+  score: number;
+}
 
-  const colour = norm(g.primaryColor);
-  if (colour) {
-    for (const favId of passport.favoriteColors) {
-      const mapped = PASSPORT_COLOUR_TO_CLOSET[favId];
-      if (mapped && mapped.toLowerCase() === colour) {
-        matches.push("colour");
-        break;
-      }
-    }
+const PASSPORT_ALIGNMENT_NONE: PassportAlignment = { dimensions: [], score: 0 };
+
+function passportAlignmentFor(g: WardrobeGarment, passport: WardrobePassport | null): PassportAlignment {
+  if (!passport) return PASSPORT_ALIGNMENT_NONE;
+
+  const strong: string[] = [];
+  const supporting: string[] = [];
+  let score = 0;
+
+  // Style personality — same V3 archetype vocabulary on both sides, no mapping.
+  const personality = norm(g.stylePersonality);
+  if (personality && passport.stylePersonalities.some((p) => norm(p) === personality)) {
+    strong.push("style personality");
+    score += 2;
   }
 
+  // Silhouette preference.
+  const silhouette = norm(g.silhouette);
+  if (silhouette && passport.silhouette.some((sp) => norm(sp)?.includes(silhouette))) {
+    strong.push("silhouette");
+    score += 2;
+  }
+
+  // Shape: structure and fit are one fact, worth one point between them.
   const structure = norm(passport.structure);
   const fit = norm(g.fitProfile);
+  let shapeMatched = false;
   if (structure && fit) {
     const wantsDefined = /structur|tailor|defin|sharp/.test(structure);
     const wantsSoft = /soft|relax|fluid|ease|drap/.test(structure);
     const isDefined = fit === "tailored" || fit === "structured";
     const isSoft = fit === "relaxed" || fit === "loose" || fit === "oversized" || fit === "flowy";
-    if ((wantsDefined && isDefined) || (wantsSoft && isSoft)) matches.push("structure");
+    if ((wantsDefined && isDefined) || (wantsSoft && isSoft)) {
+      supporting.push("structure");
+      shapeMatched = true;
+    }
+  }
+  if (fit && passport.fitPreferences.some((pref) => norm(pref)?.includes(fit))) {
+    supporting.push("fit");
+    shapeMatched = true;
+  }
+  if (shapeMatched) score += 1;
+
+  // Colour — family match, so "Burgundy" answers a stated "Red / Burgundy".
+  const family = closetColourFamily(g.primaryColor);
+  if (family && passportColourFamilies(passport.favoriteColors).has(family)) {
+    supporting.push("colour");
+    score += 1;
   }
 
-  const silhouette = norm(g.silhouette);
-  if (silhouette && passport.silhouette.some((s) => norm(s)?.includes(silhouette))) {
-    matches.push("silhouette");
-  }
-
-  if (fit && passport.fitPreferences.some((p) => norm(p)?.includes(fit))) {
-    matches.push("fit");
-  }
-
-  return Array.from(new Set(matches));
+  return { dimensions: [...strong, ...supporting], score };
 }
+
+/** Score at or above which Passport alignment is strong enough to stand alone. */
+const PASSPORT_HERO_SCORE = 3;
+/** Score that qualifies only when a second kind of signal supports it. */
+const PASSPORT_HERO_SCORE_WITH_SUPPORT = 2;
 
 // ── What nAia is noticing ─────────────────────────────────────────────────────
 //
@@ -1570,14 +1959,21 @@ interface ObservationDraft extends WardrobeObservation {
 }
 
 /** Pieces that connect well but have no place in how the wardrobe is actually used. */
-function untappedPieces(items: WardrobeGarment[]): {
+function untappedPieces(
+  items: WardrobeGarment[],
+  activeRelevant: boolean,
+): {
   pieces: WardrobeGarment[];
   basis: "naia-interaction" | "self-reported-wardrobe" | null;
 } {
   const hasInteractionHistory = items.some((g) => g.outfitAppearances > 0 || g.savedLookAppearances > 0);
 
+  // Same relevance test heroes use: activewear belongs in an editorial claim
+  // when it is genuinely part of how this customer dresses, not otherwise.
   const wellConnected = (g: WardrobeGarment) =>
-    CORE_SLOTS.has(g.slot) && partnersOf(g, items).length >= 3;
+    CORE_SLOTS.has(g.slot) &&
+    (activeRelevant || !FUNCTIONAL_CATEGORIES.has(g.category)) &&
+    partnersOf(g, items).length >= 3;
 
   if (hasInteractionHistory) {
     const pieces = items.filter(
@@ -1611,16 +2007,124 @@ function buildObservations(
   const drafts: ObservationDraft[] = [];
 
   const add = (
-    draft: Omit<WardrobeObservation, "strength"> & { supporting: number; priority: number },
+    draft: Omit<WardrobeObservation, "strength" | "tier"> & { supporting: number; priority: number },
   ) => {
     const { supporting, priority, ...rest } = draft;
-    drafts.push({ ...rest, strength: gradeStrength(rest.evidence, supporting), priority });
+    drafts.push({
+      ...rest,
+      tier: rest.kind.startsWith("contradiction-") ? "discovery" : "pattern",
+      strength: gradeStrength(rest.evidence, supporting),
+      priority,
+    });
   };
+
+  // ── CONTRADICTIONS ────────────────────────────────────────────────────────
+  //
+  // Where two signals disagree about the same garment. These are the most
+  // interesting things nAia can say, because they are the things a customer
+  // cannot see by looking at her own wardrobe — so they rank above any
+  // descriptive observation such as "you own a lot of black".
+
+  const coreGarments = items.filter((g) => CORE_SLOTS.has(g.slot));
+  const partnerCounts = new Map<string, number>(
+    coreGarments.map((g) => [g.id, partnersOf(g, items).length]),
+  );
+  const sortedCounts = Array.from(partnerCounts.values()).sort((a, b) => a - b);
+  const medianPartners =
+    sortedCounts.length > 0 ? sortedCounts[Math.floor(sortedCounts.length / 2)] : 0;
+  const hasInteractions = items.some((g) => g.outfitAppearances > 0 || g.savedLookAppearances > 0);
+
+  // 1. HIGH POTENTIAL + STRUGGLE.
+  const contradictionStruggle = coreGarments
+    .filter((g) => statedAs(g, STATED_FRICTION))
+    .filter((g) => (partnerCounts.get(g.id) ?? 0) >= Math.max(4, medianPartners))
+    .sort((a, b) => (partnerCounts.get(b.id) ?? 0) - (partnerCounts.get(a.id) ?? 0) || a.id.localeCompare(b.id))[0];
+  if (contradictionStruggle) {
+    const partners = partnersOf(contradictionStruggle, items);
+    add({
+      id: "contradiction-potential-struggle",
+      kind: "contradiction-potential-struggle",
+      headline: "Hard to style, but unusually well connected",
+      observation: `You’ve marked ${displayName(contradictionStruggle)} as difficult to style, yet it connects with more of your Closet than most of what you own.`,
+      explanation: "A piece like this is rarely the problem. It’s usually waiting for the right partner, and your Closet already holds several.",
+      garmentIds: [contradictionStruggle.id, ...partners.slice(0, 5).map((p) => p.id)],
+      evidence: [
+        ev("self-reported-wardrobe", "garmentRelationships", `Marked as ${describeRelationships(contradictionStruggle.garmentRelationships)}.`, [contradictionStruggle.id]),
+        ev("garment-fact", "compatibility graph", `${partners.length} compatible ${partners.length === 1 ? "partner" : "partners"} against a wardrobe median of ${medianPartners}.`, partners.map((p) => p.id)),
+      ],
+      action: { label: "See what it works with", kind: "see-pieces" },
+      gated: false,
+      supporting: partners.length,
+      priority: 120,
+    });
+  }
+
+  // 2. HIGH ALIGNMENT + LOW USE.
+  if (hasInteractions) {
+    const alignedUnused = coreGarments
+      .filter((g) => g.id !== contradictionStruggle?.id)
+      .filter((g) => g.outfitAppearances === 0 && g.savedLookAppearances === 0)
+      .map((g) => ({ garment: g, alignment: passportAlignmentFor(g, passport), partners: partnerCounts.get(g.id) ?? 0 }))
+      .filter((entry) => entry.alignment.score >= PASSPORT_HERO_SCORE && entry.partners >= 3)
+      .sort((a, b) => b.alignment.score - a.alignment.score || b.partners - a.partners || a.garment.id.localeCompare(b.garment.id))[0];
+    if (alignedUnused) {
+      add({
+        id: "contradiction-alignment-unused",
+        kind: "contradiction-alignment-unused",
+        // Never "worn": nAia has no wear data. The gap is in its own styling history.
+        headline: "Strongly yours, but not yet in a look",
+        observation: `${displayName(alignedUnused.garment)} matches what you told nAia you want and works with ${alignedUnused.partners} pieces you own — but it hasn’t appeared in one of your nAia looks yet.`,
+        explanation: null,
+        garmentIds: [alignedUnused.garment.id],
+        evidence: [
+          ev("passport-signal", "OnboardingProfile", `Matches your Passport on ${joinList(alignedUnused.alignment.dimensions)} (weighted score ${alignedUnused.alignment.score}).`, [alignedUnused.garment.id]),
+          ev("garment-fact", "compatibility graph", `${alignedUnused.partners} compatible partners.`, [alignedUnused.garment.id]),
+          ev("naia-interaction", "OutfitItem/SavedLookItem", "No appearance in a generated or saved look.", [alignedUnused.garment.id]),
+        ],
+        action: { label: "See pieces", kind: "see-pieces" },
+        gated: false,
+        supporting: alignedUnused.partners,
+        priority: 115,
+      });
+    }
+  }
+
+  // 3. FAVOURITE + ISOLATED.
+  const favourites = coreGarments
+    .filter((g) => g.id !== contradictionStruggle?.id)
+    .filter((g) => statedAs(g, STATED_REGULAR));
+  if (favourites.length >= 3 && medianPartners >= 3) {
+    const isolated = favourites
+      .filter((g) => (partnerCounts.get(g.id) ?? 0) <= Math.max(1, Math.floor(medianPartners / 3)))
+      .sort((a, b) => (partnerCounts.get(a.id) ?? 0) - (partnerCounts.get(b.id) ?? 0) || a.id.localeCompare(b.id))[0];
+    if (isolated) {
+      const count = partnerCounts.get(isolated.id) ?? 0;
+      add({
+        id: "contradiction-favourite-isolated",
+        kind: "contradiction-favourite-isolated",
+        headline: "A favourite with fewer ways to wear it",
+        observation: `You’ve marked ${displayName(isolated)} as one you reach for, but it has fewer natural partners in your Closet than most of your favourites.`,
+        explanation: "That usually means you’re wearing it the same way each time — not that it’s the wrong piece.",
+        garmentIds: [isolated.id],
+        evidence: [
+          ev("self-reported-wardrobe", "garmentRelationships", `Marked as ${describeRelationships(isolated.garmentRelationships)}.`, [isolated.id]),
+          ev("garment-fact", "compatibility graph", `${count} compatible ${count === 1 ? "partner" : "partners"} against a wardrobe median of ${medianPartners}.`, [isolated.id]),
+        ],
+        action: { label: "See pieces", kind: "see-pieces" },
+        gated: false,
+        supporting: favourites.length,
+        priority: 110,
+      });
+    }
+  }
 
   // ── STRUGGLE PATTERN — the most actionable thing a customer can tell nAia ──
   const struggling = items.filter((g) => statedAs(g, STATED_STRUGGLE));
-  if (struggling.length >= 2) {
-    const shared = sharedAttribute(struggling);
+  const shared = struggling.length >= 2 ? sharedAttribute(struggling) : null;
+  // When the contradiction above already named a specific struggling piece and
+  // this group has no shared attribute to add, the generic version says less
+  // about the same pieces — so it is dropped rather than stacked.
+  if (struggling.length >= 2 && (shared !== null || !contradictionStruggle)) {
     const evidence: Evidence[] = [
       ev(
         "self-reported-wardrobe",
@@ -1651,7 +2155,7 @@ function buildObservations(
   }
 
   // ── UNTAPPED POTENTIAL ────────────────────────────────────────────────────
-  const untapped = untappedPieces(items);
+  const untapped = untappedPieces(items, isActiveRelevant(items, passport));
   if (untapped.pieces.length >= 2 && untapped.basis) {
     const ids = untapped.pieces.map((g) => g.id);
     const naiaBased = untapped.basis === "naia-interaction";
@@ -1746,8 +2250,8 @@ function buildObservations(
         id: "wardrobe-imbalance",
         kind: "wardrobe-imbalance",
         headline: "Your wardrobe is stronger in one register",
-        observation: `Your Closet has considerably more ${FORMALITY_BUCKET_SHORT[leadKey]} options than ${FORMALITY_BUCKET_SHORT[thinKey]} ones — ${leadCount} against ${thinCount}.`,
-        explanation: "Neither is wrong. It tells you which side of your life your wardrobe is currently built for.",
+        observation: `Your wardrobe leans heavily ${FORMALITY_BUCKET_SHORT[leadKey]}.`,
+        explanation: `${leadCount} of the ${leadCount + thinCount} pieces in that comparison sit on the ${FORMALITY_BUCKET_SHORT[leadKey]} side. Neither is wrong — it tells you which side of your life your wardrobe is currently built for.`,
         garmentIds: leadIds,
         evidence: [
           ev("garment-fact", "formality", `${leadCount} pieces read ${FORMALITY_BUCKET_LABEL[leadKey]}, ${thinCount} read ${FORMALITY_BUCKET_LABEL[thinKey]}.`, leadIds),
@@ -1853,8 +2357,8 @@ function buildObservations(
         id: "intention-concentration",
         kind: "intention-concentration",
         headline: "Your strongest pieces pull the same way",
-        observation: `${group.length} of your strongest pieces are built to help you ${INTENTION_LABELS[intention] ?? intention}.`,
-        explanation: "That's a clear strength. It also means other moods have fewer pieces behind them.",
+        observation: `Your wardrobe is built, above all, to help you ${INTENTION_LABELS[intention] ?? intention}.`,
+        explanation: `${group.length} of your pieces read strongest for that. It’s a clear strength — and it means other moods have fewer pieces behind them.`,
         garmentIds: group.map((g) => g.id),
         evidence: [
           ev("garment-fact", "intentionPotentials", `${group.length} pieces rated "strong" for ${intention} (${usedDerived ? "includes derived V2 output" : "human-reviewed"}).`, group.map((g) => g.id)),
@@ -1884,16 +2388,18 @@ function buildObservations(
     if (possible >= 4) {
       const density = ratio(pairings.totalFound, possible);
       const coreIds = [...tops, ...bottoms, ...onePieces, ...outer].map((g) => g.id);
+      // The ratio is an internal measure. What the customer reads is the meaning
+      // of it — the count follows as supporting evidence, never as the headline.
       if (density >= 0.75) {
         add({
           id: "connection-density",
           kind: "connection-density",
-          headline: "Almost everything you own goes with everything else",
-          observation: `Of the ${possible} core combinations your pieces could form, ${pairings.totalFound} actually work — ${Math.round(density * 100)}%.`,
-          explanation: "That's what a consistent palette and a steady level of dress buy you: a small wardrobe that behaves like a much larger one.",
+          headline: "You have a strong base wardrobe",
+          observation: "Most of your core pieces already have several ways to work together.",
+          explanation: `That’s what a consistent palette and a steady level of dress buy you — nAia can build ${pairings.totalFound} combinations from what you own without you adding anything.`,
           garmentIds: coreIds,
           evidence: [
-            ev("garment-fact", "compatibility graph", `${pairings.totalFound} of ${possible} possible core combinations pass on colour, level of dress and visual weight.`, coreIds),
+            ev("garment-fact", "compatibility graph", `${pairings.totalFound} of ${possible} possible core combinations pass on colour, level of dress and visual weight (${Math.round(density * 100)}%).`, coreIds),
           ],
           action: null,
           gated: false,
@@ -1905,11 +2411,11 @@ function buildObservations(
           id: "connection-density",
           kind: "connection-density",
           headline: "Your pieces connect less often than their number suggests",
-          observation: `Of the ${possible} core combinations your pieces could form, only ${pairings.totalFound} work together — ${Math.round(density * 100)}%.`,
-          explanation: "Usually this is a level-of-dress or colour split rather than a shortage of clothes.",
+          observation: "Most of your core pieces have only one or two natural partners in your Closet.",
+          explanation: "Usually this is a split in colour or level of dress rather than a shortage of clothes — a wardrobe living in two halves that don’t meet.",
           garmentIds: coreIds,
           evidence: [
-            ev("garment-fact", "compatibility graph", `${pairings.totalFound} of ${possible} possible core combinations pass.`, coreIds),
+            ev("garment-fact", "compatibility graph", `${pairings.totalFound} of ${possible} possible core combinations pass (${Math.round(density * 100)}%).`, coreIds),
           ],
           action: null,
           gated: false,
@@ -1995,7 +2501,7 @@ function sharedAttribute(
 function buildColourObservation(
   items: WardrobeGarment[],
   dnaStatesPalette: boolean,
-): (Omit<WardrobeObservation, "strength"> & { supporting: number }) | null {
+): (Omit<WardrobeObservation, "strength" | "tier"> & { supporting: number }) | null {
   const withProfile = items.filter((g) => g.colourProfile !== null);
   if (withProfile.length < 5) return null;
 
@@ -2069,21 +2575,12 @@ function slotPlural(slot: string): string {
 
 function buildOpportunities(
   items: WardrobeGarment[],
-  pairings: WardrobePairings,
   passport: WardrobePassport | null,
 ): WardrobeOpportunities {
   const rediscover = buildRediscover(items, passport);
 
-  const tryTogether: TryTogetherItem[] = pairings.untriedOverflow.slice(0, 3).map((p) => ({
-    id: `try-${p.id}`,
-    garmentIds: p.garmentIds,
-    body: p.reason,
-    evidence: p.evidence,
-  }));
-
   const worthConsidering = findGaps(items, passport);
-
-  const anything = rediscover.length > 0 || tryTogether.length > 0 || worthConsidering.length > 0;
+  const anything = rediscover.length > 0 || worthConsidering.length > 0;
 
   return {
     state: anything ? "available" : "learning",
@@ -2091,12 +2588,11 @@ function buildOpportunities(
       ? undefined
       : "Opportunities appear once nAia can see enough of your wardrobe to tell a real gap from a piece you simply haven't styled yet.",
     rediscover,
-    tryTogether,
     worthConsidering,
     // A wardrobe with no evidenced gap is a finding, not an empty state.
     noGapNote:
       worthConsidering.length === 0 && items.length >= MIN_WARDROBE_SIZE
-        ? "Nothing obvious is missing right now. nAia only raises this when the same need keeps coming up and nothing you own solves it well."
+        ? "Nothing obvious is missing right now. Based on what nAia can currently see, the wardrobe roles you need are already represented."
         : null,
   };
 }
@@ -2110,6 +2606,34 @@ function buildOpportunities(
  */
 function buildRediscover(items: WardrobeGarment[], passport: WardrobePassport | null): RediscoverPiece[] {
   const hasInteractionHistory = items.some((g) => g.outfitAppearances > 0 || g.savedLookAppearances > 0);
+  const activeRelevant = isActiveRelevant(items, passport);
+
+  // When several pieces qualify on the same signal, only the first states it in
+  // full. Repeating the preamble three times makes one finding look like three.
+  const signalUses = new Map<string, number>();
+  const REDISCOVER_COPY: Readonly<Record<string, ReadonlyArray<(count: string) => string>>> = {
+    rarely: [
+      (c) => `You've said you rarely reach for this piece. nAia can see ${c} in your Closet it sits with comfortably.`,
+      (c) => `Another you've said you rarely reach for — ${c} you own work with it.`,
+      (c) => `Also rarely reached for, and also better connected than it looks: ${c} sit with it.`,
+    ],
+    struggle: [
+      (c) => `You've marked this as one you love but struggle to style. The connections are already there — ${c} you own work with it.`,
+      (c) => `Also marked difficult to style, though ${c} in your Closet meet it comfortably.`,
+      (c) => `A third you've marked as hard to style. ${capitalise(c)} work with it.`,
+    ],
+    unstyled: [
+      (c) => `This hasn't appeared in one of your nAia looks yet, though it works with ${c} you already own.`,
+      (c) => `Another that hasn't reached one of your nAia looks — ${c} you own work with it.`,
+      (c) => `Also absent from your nAia looks so far, despite ${c} that work with it.`,
+    ],
+  };
+  const rediscoverBody = (lead: string, count: string, passportClause: string): string => {
+    const seen = signalUses.get(lead) ?? 0;
+    signalUses.set(lead, seen + 1);
+    const variants = REDISCOVER_COPY[lead] ?? REDISCOVER_COPY.unstyled;
+    return `${variants[Math.min(seen, variants.length - 1)](count)}${passportClause}`;
+  };
 
   const scored = items
     .map((garment) => {
@@ -2147,43 +2671,56 @@ function buildRediscover(items: WardrobeGarment[], passport: WardrobePassport | 
         ev("garment-fact", "compatibility graph", `Works with ${partners.length} pieces you already own.`, partners.map((p) => p.id)),
       );
 
-      if (FUNCTIONAL_CATEGORIES.has(garment.category)) score -= 6;
+      // Ranked down only when activewear is incidental to this customer's life.
+      if (!activeRelevant && FUNCTIONAL_CATEGORIES.has(garment.category)) score -= 6;
 
-      const matches = passportMatchesFor(garment, passport);
-      if (matches.length > 0) {
-        score += matches.length * 2;
-        evidence.push(ev("passport-signal", "OnboardingProfile", `Matches your Passport on ${joinList(matches)}.`, [garment.id]));
+      const alignment = passportAlignmentFor(garment, passport);
+      const matches = alignment.dimensions;
+      if (alignment.score > 0) {
+        score += alignment.score * 2;
+        evidence.push(ev("passport-signal", "OnboardingProfile", `Matches your Passport on ${joinList(matches)} (weighted score ${alignment.score}).`, [garment.id]));
       }
 
-      const opener =
-        lead === "rarely"
-          ? "You've said you rarely reach for this piece, but"
-          : lead === "struggle"
-            ? "You've marked this one as hard to style, but"
-            : "This piece hasn't been part of a look yet, but";
-
+      // The sentence follows the signal that actually surfaced the piece, so three
+      // rediscoveries do not read as three copies of one template. The provenance
+      // wording is load-bearing: a self-report says "you've said", nAia history
+      // says "hasn't appeared in one of your nAia looks" — never "not worn".
+      const count = `${partners.length} ${partners.length === 1 ? "piece" : "pieces"}`;
+      const passportClause = matches.length > 0
+        ? ` It also matches your Passport on ${joinList(matches)}.`
+        : "";
+      // `lead` is always set by the time a piece qualifies; the fallback keeps
+      // the types honest rather than asserting.
       return {
         garmentId: garment.id,
         name: displayName(garment),
         imageUrl: garment.imageUrl,
-        body: `${opener} it works with ${partners.length} ${
-          partners.length === 1 ? "piece" : "pieces"
-        } you already own${
-          matches.length > 0 ? `, and it matches your Passport on ${joinList(matches)}` : ""
-        }.`,
+        lead: lead ?? "unstyled",
+        count,
+        passportClause,
+        body: "",
         worksWithIds: partners.slice(0, 6).map((p) => p.id),
         evidence,
         strength: gradeStrength(evidence, partners.length),
         score,
       };
     })
-    .filter((x): x is RediscoverPiece & { score: number } => x !== null)
+    .filter((x): x is NonNullable<typeof x> => x !== null)
     .sort((a, b) => b.score - a.score || a.garmentId.localeCompare(b.garmentId))
     .slice(0, MAX_REDISCOVER);
 
+  // Copy is written here, in display order, so the "also" and "a third" wording
+  // matches what the customer actually reads.
   return scored.map((entry) => {
-    const piece: RediscoverPiece = { ...entry };
-    delete (piece as Partial<RediscoverPiece & { score: number }>).score;
+    const piece: RediscoverPiece = {
+      garmentId: entry.garmentId,
+      name: entry.name,
+      imageUrl: entry.imageUrl,
+      body: rediscoverBody(entry.lead, entry.count, entry.passportClause),
+      worksWithIds: entry.worksWithIds,
+      evidence: entry.evidence,
+      strength: entry.strength,
+    };
     return piece;
   });
 }
@@ -2319,33 +2856,44 @@ function buildPassportView(
 
   const comparisons: PassportComparison[] = [];
 
-  // Colour.
+  // Colour — compared by family. A garment counts once, whichever stated token
+  // covers it, so overlapping selections never double-count a piece.
   if (coverage.colourCoverage >= COVERAGE_THRESHOLD && passport.favoriteColors.length > 0) {
-    const colourCounts = countBy(items, (i) => norm(i.primaryColor));
+    const stated = passport.favoriteColors.filter((id) => PASSPORT_COLOUR_FAMILIES[norm(id) ?? ""]);
     const colourTotal = items.filter((i) => norm(i.primaryColor) !== null).length;
-    const mapped = passport.favoriteColors
-      .map((id) => PASSPORT_COLOUR_TO_CLOSET[id])
-      .filter((c): c is string => Boolean(c));
-    if (mapped.length > 0) {
-      const represented = mapped.filter((c) => (colourCounts.get(c.toLowerCase()) ?? 0) > 0);
-      const owned = mapped.reduce((sum, c) => sum + (colourCounts.get(c.toLowerCase()) ?? 0), 0);
-      const ids = items.filter((i) => mapped.some((c) => c.toLowerCase() === norm(i.primaryColor))).map((i) => i.id);
+    if (stated.length > 0 && colourTotal > 0) {
+      const matchedIds = new Set<string>();
+      const representedTokens = new Set<string>();
+      for (const item of items) {
+        const family = closetColourFamily(item.primaryColor);
+        if (!family) continue;
+        for (const token of stated) {
+          if ((PASSPORT_COLOUR_FAMILIES[norm(token) ?? ""] ?? []).includes(family)) {
+            matchedIds.add(item.id);
+            representedTokens.add(token);
+          }
+        }
+      }
+      const owned = matchedIds.size;
+      const missing = stated.filter((token) => !representedTokens.has(token));
+      const label = (token: string) => PASSPORT_COLOUR_LABEL[norm(token) ?? ""] ?? token;
+
       comparisons.push({
         id: "colour",
-        stated: `You told nAia you're drawn to ${joinList(mapped.map((c) => c.toLowerCase()))}.`,
+        stated: `You told nAia you're drawn to ${joinList(stated.map(label))}.`,
         observed:
           owned === 0
             ? `None of the ${colourTotal} colour-tagged pieces in your Closet are in that range.`
             : `${owned} of the ${colourTotal} colour-tagged pieces in your Closet are in that range.`,
         reading:
-          represented.length === mapped.length
+          missing.length === 0
             ? "Your Closet reflects what you said."
-            : represented.length === 0
+            : missing.length === stated.length
               ? "That's a preference your wardrobe hasn't caught up with yet."
-              : `${capitalise(joinList(mapped.filter((c) => !represented.includes(c)).map((c) => c.toLowerCase())))} is the part your wardrobe hasn't caught up with yet.`,
+              : `${capitalise(joinList(missing.map(label)))} ${missing.length === 1 ? "is" : "are"} the part your wardrobe hasn't caught up with yet.`,
         evidence: [
-          ev("passport-signal", "OnboardingProfile.favoriteColors", `Stated: ${mapped.join(", ")}.`, []),
-          ev("garment-fact", "primaryColor", `${owned} of ${colourTotal} colour-tagged pieces match.`, ids),
+          ev("passport-signal", "OnboardingProfile.favoriteColors", `Stated tokens: ${stated.join(", ")}.`, []),
+          ev("garment-fact", "primaryColor", `${owned} of ${colourTotal} colour-tagged pieces fall in the stated families.`, [...matchedIds]),
         ],
         strength: gradeStrength(
           [ev("passport-signal", "", "", []), ev("garment-fact", "", "", [])],
@@ -2395,6 +2943,9 @@ function buildPassportView(
     if (lead && total > 0) {
       const registers = lifestyleRegisters(passport.lifestyle);
       const lifestyleText = describeLifestyle(passport.lifestyle);
+      // If nothing she said maps to a register, nAia has no basis for saying her
+      // Closet sits somewhere else. Report the observation and stop there.
+      const registersKnown = registers.size > 0;
       const ids = items.filter((g) => FORMALITY_BUCKET[norm(g.formality) ?? ""] === lead[0]).map((g) => g.id);
       // Which parts of the stated life the Closet is thin on — the useful half.
       const uncovered = Array.from(registers).filter(
@@ -2406,8 +2957,9 @@ function buildPassportView(
           ? `You described a life of ${lifestyleText}.`
           : "This is the life you described to nAia.",
         observed: `${lead[1]} of the ${total} pieces nAia has assessed read ${FORMALITY_BUCKET_LABEL[lead[0]]}.`,
-        reading:
-          registers.has(lead[0])
+        reading: !registersKnown
+          ? `Your Closet is strongest in ${FORMALITY_BUCKET_SHORT[lead[0]]} dressing.`
+          : registers.has(lead[0])
             ? uncovered.length > 0
               ? `Your Closet is built for the ${FORMALITY_BUCKET_SHORT[lead[0]]} side of that. The ${joinList(uncovered.map((r) => FORMALITY_BUCKET_SHORT[r]))} side has much less behind it.`
               : "Your Closet covers that."
@@ -2510,6 +3062,7 @@ export function computeWardrobeIntelligence(input: WardrobeIntelligenceInput): W
     const remaining = MIN_WARDROBE_SIZE - items.length;
     return {
       ready: false,
+      snapshotReading: null,
       readyNote:
         items.length === 0
           ? "Add your first pieces and nAia will start reading your wardrobe as a whole."
@@ -2518,7 +3071,7 @@ export function computeWardrobeIntelligence(input: WardrobeIntelligenceInput): W
       coverage,
       signalAvailability,
       snapshot: [
-        { id: "pieces", label: "Pieces", value: items.length, caption: "in your Closet", state: "available", signal: "garment-fact" },
+        { id: "pieces", label: items.length === 1 ? "piece" : "pieces", value: items.length, caption: "in your Closet", state: "available", signal: "garment-fact" },
       ],
       dna: {
         state: "learning",
@@ -2526,12 +3079,12 @@ export function computeWardrobeIntelligence(input: WardrobeIntelligenceInput): W
         palette: [], paletteReading: "", shapes: [], shapesReading: "", traits: [],
       },
       heroes: { state: "learning", learningNote: "Heroes appear once nAia can see how your pieces connect.", heroes: [] },
-      pairings: { state: "learning", learningNote: "Add a few more pieces and nAia can start showing how they connect.", pairings: [], totalFound: 0, untriedOverflow: [] },
+      pairings: { state: "learning", learningNote: "Add a few more pieces and nAia can start showing how they connect.", pairings: [], totalFound: 0, untriedPresentation: "none", untriedNote: null },
       observations: [],
       opportunities: {
         state: "learning",
         learningNote: "Opportunities appear once nAia can see enough of your wardrobe to tell a real gap from an unstyled piece.",
-        rediscover: [], tryTogether: [], worthConsidering: [], noGapNote: null,
+        rediscover: [], worthConsidering: [], noGapNote: null,
       },
       passportView: {
         state: "learning",
@@ -2546,14 +3099,16 @@ export function computeWardrobeIntelligence(input: WardrobeIntelligenceInput): W
   const dna = buildDna(items, coverage);
   const passportView = buildPassportView(items, coverage, passport);
   const passportDimensionsShown = new Set(passportView.comparisons.map((c) => c.id));
+  const opportunities = buildOpportunities(items, passport);
 
   return {
     ready: true,
     readyNote: null,
+    snapshotReading: buildSnapshotReading(dna),
     flags,
     coverage,
     signalAvailability,
-    snapshot: buildSnapshot(items, coverage, pairings),
+    snapshot: buildSnapshot(items, coverage, opportunities.rediscover.length),
     dna,
     heroes: buildHeroes(items, passport),
     pairings,
@@ -2566,11 +3121,26 @@ export function computeWardrobeIntelligence(input: WardrobeIntelligenceInput): W
       passportDimensionsShown,
       pairings,
     ),
-    opportunities: buildOpportunities(items, pairings, passport),
+    opportunities,
     passportView,
     wear: buildWearIntelligence(items),
   };
 }
 
-export const WARDROBE_INTELLIGENCE_VERSION = "2.0.0";
+/**
+ * One sentence describing what this wardrobe is made of, drawn from the same
+ * trait logic the Wardrobe DNA section uses. The Closet page's preview block
+ * calls this so the two surfaces never sound like two different systems.
+ * Returns null when nAia has not read enough to say anything.
+ */
+export function wardrobeCharacterLine(items: WardrobeGarment[]): string | null {
+  if (items.length < MIN_WARDROBE_SIZE) return null;
+  const coverage = computeCoverage(items, DEFAULT_FLAGS);
+  const dna = buildDna(items, coverage);
+  if (dna.traits.length === 0) return null;
+  const labels = dna.traits.slice(0, 2).map((t) => t.label.toLowerCase());
+  return `Your Closet is ${joinList(labels)}.`;
+}
+
+export const WARDROBE_INTELLIGENCE_VERSION = "2.1.0";
 export { INTENTION_LABELS, CATEGORY_PLURAL };

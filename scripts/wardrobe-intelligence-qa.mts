@@ -103,6 +103,7 @@ for (const customer of customers as any[]) {
   }
 
   head("wardrobe snapshot");
+  console.log(`  reading: "${intelligence.snapshotReading ?? "(none)"}"`);
   for (const m of intelligence.snapshot) {
     console.log(`  ${m.value === null ? "—" : m.value}  ${m.label} · ${m.caption} [${m.signal} · ${m.state}]`);
     if (m.learningNote) console.log(`      learning: ${m.learningNote}`);
@@ -122,17 +123,18 @@ for (const customer of customers as any[]) {
 
   head("wardrobe heroes");
   console.log(`  state: ${intelligence.heroes.state}${intelligence.heroes.learningNote ? ` — ${intelligence.heroes.learningNote}` : ""}`);
-  for (const h of intelligence.heroes.heroes) {
-    console.log(`  [${h.labelText}] ${h.name} (${h.category}) · strength=${h.strength}`);
+  intelligence.heroes.heroes.forEach((h, index) => {
+    console.log(`  ${index === 0 ? "FEATURED " : ""}[${h.labelText}] ${h.name} (${h.category}) · tier=${h.tier} · evidence=${h.evidenceScore} · strength=${h.strength}`);
     console.log(`      "${h.headline}"`);
     for (const r of h.reasons) console.log(`      – ${r}`);
     fmtEvidence(h.evidence, names);
-  }
+  });
 
   head("what works well together");
-  console.log(`  state: ${intelligence.pairings.state} · ${intelligence.pairings.totalFound} combinations found`);
+  console.log(`  state: ${intelligence.pairings.state} · ${intelligence.pairings.totalFound} combinations found · untried presentation = ${intelligence.pairings.untriedPresentation}`);
+  if (intelligence.pairings.untriedNote) console.log(`  section note: "${intelligence.pairings.untriedNote}"`);
   for (const p of intelligence.pairings.pairings) {
-    console.log(`  ${p.garmentIds.map((id) => names.get(id) ?? id).join("  +  ")}${p.untried ? "   (untried)" : ""}`);
+    console.log(`  ${p.garmentIds.map((id) => names.get(id) ?? id).join("  +  ")}${p.untried && intelligence.pairings.untriedPresentation === "per-item" ? "   [WORTH TRYING]" : ""}`);
     console.log(`      "${p.reason}"`);
     fmtEvidence(p.evidence, names);
   }
@@ -140,7 +142,7 @@ for (const customer of customers as any[]) {
   head("what nAia is noticing");
   if (!intelligence.observations.length) console.log("  (none)");
   for (const o of intelligence.observations) {
-    console.log(`  [${o.kind}${o.gated ? " · GATED" : ""}] strength=${o.strength}`);
+    console.log(`  [${o.tier.toUpperCase()}] ${o.kind}${o.gated ? " · GATED" : ""} · strength=${o.strength}`);
     console.log(`      ${o.headline.toUpperCase()}`);
     console.log(`      "${o.observation}"`);
     if (o.explanation) console.log(`      ↳ ${o.explanation}`);
@@ -159,13 +161,6 @@ for (const customer of customers as any[]) {
     fmtEvidence(r.evidence, names);
   }
 
-  head("try together");
-  if (!intelligence.opportunities.tryTogether.length) console.log("  (none)");
-  for (const t of intelligence.opportunities.tryTogether) {
-    console.log(`  ${t.garmentIds.map((id) => names.get(id) ?? id).join("  +  ")}`);
-    console.log(`      "${t.body}"`);
-  }
-
   head("worth considering");
   if (!intelligence.opportunities.worthConsidering.length) {
     console.log(`  (no evidenced gap) "${intelligence.opportunities.noGapNote}"`);
@@ -178,6 +173,11 @@ for (const customer of customers as any[]) {
     }
     fmtEvidence(g.evidence, names);
   }
+
+  head("what nAia knows so far");
+  console.log(`  Reading: ${intelligence.signalAvailability.filter((x) => x.state !== "unavailable").map((x) => x.title).join(" · ")}`);
+  console.log(`  Still learning: ${intelligence.signalAvailability.filter((x) => x.state === "unavailable").map((x) => x.title).join(" · ")}`);
+  console.log(`  note: "${intelligence.wear.learningNote}"`);
 
   head("passport vs closet");
   console.log(`  state: ${intelligence.passportView.state}${intelligence.passportView.learningNote ? ` — ${intelligence.passportView.learningNote}` : ""}`);

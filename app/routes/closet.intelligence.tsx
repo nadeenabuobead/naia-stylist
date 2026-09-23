@@ -17,7 +17,6 @@ import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import { getCloudinaryConfig, buildPrivateDownloadUrl } from "~/lib/cloudinary-admin.server";
 import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server";
-import type { WardrobeMetric } from "~/lib/ai/wardrobe-intelligence";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
 
@@ -128,6 +127,9 @@ function cardLabel(card: GarmentCard): string {
   return parts.join(" ");
 }
 
+/** Never render a wall of thumbnails; the point is a glance, not an inventory. */
+const MAX_STRIP = 8;
+
 function Thumb({ card, size = 72 }: { card: GarmentCard | undefined; size?: number }) {
   if (!card) return null;
   return (
@@ -138,18 +140,6 @@ function Thumb({ card, size = 72 }: { card: GarmentCard | undefined; size?: numb
         <span className="wi-thumb-fallback">{card.category.slice(0, 2)}</span>
       )}
     </figure>
-  );
-}
-
-function Metric({ metric }: { metric: WardrobeMetric }) {
-  return (
-    <div className="wi-metric">
-      <span className="wi-metric-value">{metric.value === null ? "—" : metric.value}</span>
-      <span className="wi-metric-label">{metric.label}</span>
-      <span className="wi-metric-caption">
-        {metric.state === "learning" ? metric.learningNote : metric.caption}
-      </span>
-    </div>
   );
 }
 
@@ -193,11 +183,21 @@ export default function WardrobeIntelligencePage() {
           </section>
         )}
 
-        {/* ── Snapshot ledger ────────────────────────────────────────────── */}
-        <section className="wi-ledger" aria-label="Wardrobe snapshot">
-          {intelligence.snapshot.map((metric) => (
-            <Metric key={metric.id} metric={metric} />
-          ))}
+        {/* ── Opening: what nAia understands, then a little support ────────
+            Deliberately not a metrics grid. The reading is the headline; the
+            facts sit under it on one line and wrap naturally on mobile. */}
+        <section className="wi-opening" aria-label="Wardrobe snapshot">
+          {intelligence.snapshotReading && (
+            <p className="wi-opening-reading">{intelligence.snapshotReading}</p>
+          )}
+          <p className="wi-opening-facts">
+            {intelligence.snapshot.map((metric, index) => (
+              <span key={metric.id} className="wi-fact">
+                {index > 0 && <span className="wi-fact-sep" aria-hidden="true">·</span>}
+                <span className="wi-fact-value">{metric.value}</span> {metric.label}
+              </span>
+            ))}
+          </p>
         </section>
 
         {intelligence.ready && (
@@ -223,17 +223,19 @@ export default function WardrobeIntelligencePage() {
                 </div>
               )}
 
+              {/* Shapes as words, not a tally. The counts stay in the data as
+                  evidence; a customer wants the shape, not the arithmetic. */}
               {dna.shapes.length > 0 && (
-                <div className="wi-dna-block wi-dna-block--shapes">
-                  <p className="wi-microhead">Shapes that recur</p>
-                  <ul className="wi-shapes">
-                    {dna.shapes.map((shape) => (
-                      <li key={shape.label} className="wi-shape">
-                        <span>{shape.label}</span>
-                        <span className="wi-shape-count">{shape.count}</span>
-                      </li>
+                <div className="wi-dna-block">
+                  <p className="wi-microhead">Shapes you come back to</p>
+                  <p className="wi-shapes-line">
+                    {dna.shapes.map((shape, index) => (
+                      <span key={shape.label}>
+                        {index > 0 && <span className="wi-shapes-sep" aria-hidden="true">·</span>}
+                        {shape.label}
+                      </span>
                     ))}
-                  </ul>
+                  </p>
                   {dna.shapesReading && <p className="wi-reading wi-reading--sm">{dna.shapesReading}</p>}
                 </div>
               )}
@@ -258,33 +260,56 @@ export default function WardrobeIntelligencePage() {
               <h2 id="wi-heroes-h" className="wi-section-title">Wardrobe heroes</h2>
               <p className="wi-section-sub">The pieces doing the most work in your Closet.</p>
 
+              {/* One featured hero carries the section; the rest support it.
+                  Four identical cards in a three-column grid left an orphan and
+                  made every hero feel the same. */}
               {heroes.state === "learning" ? (
                 <LearningNote>{heroes.learningNote}</LearningNote>
               ) : (
-                <div className="wi-heroes">
-                  {heroes.heroes.map((hero) => {
+                <>
+                  {heroes.heroes.slice(0, 1).map((hero) => {
                     const card = byId.get(hero.garmentId);
                     return (
-                      <article key={hero.garmentId} className="wi-hero">
-                        <div className="wi-hero-img">
+                      <article key={hero.garmentId} className="wi-hero-featured">
+                        <div className="wi-hero-featured-img">
                           {card?.imageUrl ? (
                             <img src={card.imageUrl} alt={hero.name} loading="lazy" />
                           ) : (
                             <span className="wi-thumb-fallback">{hero.category}</span>
                           )}
                         </div>
-                        <p className="wi-hero-label">{hero.labelText}</p>
-                        <h3 className="wi-hero-name">{hero.name}</h3>
-                        <p className="wi-hero-headline">{hero.headline}</p>
-                        <ul className="wi-hero-reasons">
-                          {hero.reasons.map((reason) => (
-                            <li key={reason}>{reason}</li>
-                          ))}
-                        </ul>
+                        <div className="wi-hero-featured-text">
+                          <p className="wi-hero-label">{hero.labelText}</p>
+                          <h3 className="wi-hero-featured-name">{hero.name}</h3>
+                          <p className="wi-hero-featured-headline">{hero.headline}</p>
+                          {hero.reasons[0] && <p className="wi-hero-featured-reason">{hero.reasons[0]}</p>}
+                        </div>
                       </article>
                     );
                   })}
-                </div>
+
+                  {heroes.heroes.length > 1 && (
+                    <div className="wi-heroes">
+                      {heroes.heroes.slice(1).map((hero) => {
+                        const card = byId.get(hero.garmentId);
+                        return (
+                          <article key={hero.garmentId} className="wi-hero">
+                            <div className="wi-hero-img">
+                              {card?.imageUrl ? (
+                                <img src={card.imageUrl} alt={hero.name} loading="lazy" />
+                              ) : (
+                                <span className="wi-thumb-fallback">{hero.category}</span>
+                              )}
+                            </div>
+                            <p className="wi-hero-label">{hero.labelText}</p>
+                            <h3 className="wi-hero-name">{hero.name}</h3>
+                            {hero.reasons[0] && <p className="wi-hero-reason">{hero.reasons[0]}</p>}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
               )}
             </section>
 
@@ -295,6 +320,12 @@ export default function WardrobeIntelligencePage() {
                 Relationships nAia can already see between your pieces. For a full outfit for a
                 specific moment, StyleMe is still the place to go.
               </p>
+
+              {/* A badge on every row says nothing. When every displayed
+                  relationship is novel, the state is stated once, quietly. */}
+              {pairings.untriedPresentation === "section" && pairings.untriedNote && (
+                <p className="wi-pairs-note">{pairings.untriedNote}</p>
+              )}
 
               {pairings.state === "learning" ? (
                 <LearningNote>{pairings.learningNote}</LearningNote>
@@ -312,8 +343,8 @@ export default function WardrobeIntelligencePage() {
                       </div>
                       <div className="wi-pair-text">
                         <p className="wi-pair-reason">{pair.reason}</p>
-                        {pair.untried && (
-                          <p className="wi-pair-tag">nAia hasn&rsquo;t styled these together yet</p>
+                        {pair.untried && pairings.untriedPresentation === "per-item" && (
+                          <p className="wi-pair-tag">Worth trying</p>
                         )}
                       </div>
                     </li>
@@ -328,37 +359,54 @@ export default function WardrobeIntelligencePage() {
                 <h2 id="wi-notice-h" className="wi-section-title">What nAia is noticing</h2>
 
                 <ol className="wi-notes">
-                  {observations.map((obs, index) => (
-                    <li key={obs.id} className="wi-note">
-                      <span className="wi-note-num" aria-hidden="true">
-                        {String(index + 1).padStart(2, "0")}
-                      </span>
-                      <div className="wi-note-body">
-                        <p className="wi-note-head">{obs.headline}</p>
-                        <p className="wi-note-claim">{obs.observation}</p>
-                        {obs.explanation && <p className="wi-note-why">{obs.explanation}</p>}
+                  {observations.map((obs, index) => {
+                    // A discovery gets the weight of a discovery. Descriptive
+                    // patterns stay quieter so the difference is legible.
+                    const isDiscovery = obs.tier === "discovery";
+                    // Small evidence sets are shown outright — making someone
+                    // click to find a single garment is a bad trade.
+                    const inlinePieces = obs.garmentIds.length > 0 && obs.garmentIds.length <= 3;
+                    const expanded = openObservation === obs.id;
+                    const shown = inlinePieces
+                      ? obs.garmentIds
+                      : expanded
+                        ? obs.garmentIds.slice(0, MAX_STRIP)
+                        : [];
+                    const overflow = expanded ? Math.max(0, obs.garmentIds.length - MAX_STRIP) : 0;
 
-                        {obs.action && obs.garmentIds.length > 0 && (
-                          <button
-                            type="button"
-                            className="wi-note-action"
-                            aria-expanded={openObservation === obs.id}
-                            onClick={() => setOpenObservation(openObservation === obs.id ? null : obs.id)}
-                          >
-                            {openObservation === obs.id ? "Hide pieces" : obs.action.label}
-                          </button>
-                        )}
+                    return (
+                      <li key={obs.id} className={`wi-note wi-note--${obs.tier}`}>
+                        <span className="wi-note-num" aria-hidden="true">
+                          {String(index + 1).padStart(2, "0")}
+                        </span>
+                        <div className="wi-note-body">
+                          <p className="wi-note-head">{obs.headline}</p>
+                          <p className="wi-note-claim">{obs.observation}</p>
+                          {obs.explanation && <p className="wi-note-why">{obs.explanation}</p>}
 
-                        {openObservation === obs.id && (
-                          <div className="wi-strip">
-                            {obs.garmentIds.map((id) => (
-                              <Thumb key={id} card={byId.get(id)} size={64} />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </li>
-                  ))}
+                          {!inlinePieces && obs.action && obs.garmentIds.length > 0 && (
+                            <button
+                              type="button"
+                              className="wi-note-action"
+                              aria-expanded={expanded}
+                              onClick={() => setOpenObservation(expanded ? null : obs.id)}
+                            >
+                              {expanded ? "Hide pieces" : obs.action.label}
+                            </button>
+                          )}
+
+                          {shown.length > 0 && (
+                            <div className="wi-strip">
+                              {shown.map((id) => (
+                                <Thumb key={id} card={byId.get(id)} size={isDiscovery ? 78 : 64} />
+                              ))}
+                              {overflow > 0 && <span className="wi-strip-more">+{overflow} more</span>}
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ol>
               </section>
             )}
@@ -414,54 +462,37 @@ export default function WardrobeIntelligencePage() {
                     </div>
                   )}
 
-                  {opportunities.tryTogether.length > 0 && (
-                    <div className="wi-opp">
-                      <p className="wi-opp-tier">Try together</p>
-                      <p className="wi-opp-lead">
-                        Your Closet already contains combinations you may not have tried.
-                      </p>
-                      {opportunities.tryTogether.map((item) => (
-                        <div key={item.id} className="wi-opp-try">
-                          <div className="wi-pair-pieces">
-                            {item.garmentIds.map((id, index) => (
-                              <span key={id} className="wi-pair-piece">
-                                {index > 0 && <span className="wi-plus" aria-hidden="true">+</span>}
-                                <Thumb card={byId.get(id)} size={68} />
-                              </span>
-                            ))}
-                          </div>
-                          <p className="wi-opp-body">{item.body}</p>
+                  {/* Worth considering. When nAia found no evidenced gap that
+                      is a conclusion, not an empty state — so it reads as one. */}
+                  {opportunities.worthConsidering.length > 0 ? (
+                    <div className="wi-opp wi-opp--quiet">
+                      <p className="wi-opp-tier">Worth considering</p>
+                      {opportunities.worthConsidering.map((gap) => (
+                        <div key={gap.id}>
+                          <h3 className="wi-opp-title">{gap.title}</h3>
+                          <p className="wi-opp-body">{gap.body}</p>
+                          {gap.garmentIds.length > 0 && (
+                            <div className="wi-strip">
+                              {gap.garmentIds.slice(0, MAX_STRIP).map((id) => (
+                                <Thumb key={id} card={byId.get(id)} size={56} />
+                              ))}
+                            </div>
+                          )}
                         </div>
                       ))}
+                      <p className="wi-opp-foot">
+                        nAia only raises this where the same need keeps coming up and nothing you
+                        own solves it well.
+                      </p>
                     </div>
+                  ) : (
+                    opportunities.noGapNote && (
+                      <div className="wi-opp wi-nogap">
+                        <p className="wi-opp-tier">Worth considering</p>
+                        <p className="wi-nogap-line">{opportunities.noGapNote}</p>
+                      </div>
+                    )
                   )}
-
-                  <div className="wi-opp wi-opp--quiet">
-                    <p className="wi-opp-tier">Worth considering</p>
-                    {opportunities.worthConsidering.length > 0 ? (
-                      <>
-                        {opportunities.worthConsidering.map((gap) => (
-                          <div key={gap.id}>
-                            <h3 className="wi-opp-title">{gap.title}</h3>
-                            <p className="wi-opp-body">{gap.body}</p>
-                            {gap.garmentIds.length > 0 && (
-                              <div className="wi-strip">
-                                {gap.garmentIds.map((id) => (
-                                  <Thumb key={id} card={byId.get(id)} size={56} />
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                        <p className="wi-opp-foot">
-                          nAia only raises this where the same need keeps coming up and nothing you
-                          own solves it well.
-                        </p>
-                      </>
-                    ) : (
-                      <p className="wi-opp-title wi-opp-title--calm">{opportunities.noGapNote}</p>
-                    )}
-                  </div>
                 </div>
               )}
             </section>
@@ -497,36 +528,35 @@ export default function WardrobeIntelligencePage() {
           </>
         )}
 
-        {/* ── Wear intelligence — learning state ─────────────────────────── */}
-        <section className="wi-section wi-wear" aria-labelledby="wi-wear-h">
-          <h2 id="wi-wear-h" className="wi-section-title">What nAia can&rsquo;t see yet</h2>
-          <p className="wi-wear-note">{wear.learningNote}</p>
+        {/* ── What nAia knows so far ────────────────────────────────────
+            Transparency, not a provenance panel. All five signal types are kept
+            in the payload for QA and future tooling; the customer gets two lines
+            and a sentence. It should reassure, not compete. */}
+        <section className="wi-section wi-knows-section" aria-labelledby="wi-wear-h">
+          <h2 id="wi-wear-h" className="wi-knows-title">What nAia knows so far</h2>
 
-          <div className="wi-wear-metrics">
-            {wear.observedToday.map((metric) => (
-              <Metric key={metric.id} metric={metric} />
-            ))}
-          </div>
+          <dl className="wi-knows">
+            <div className="wi-knows-row">
+              <dt className="wi-knows-key">Reading</dt>
+              <dd className="wi-knows-val">
+                {intelligence.signalAvailability
+                  .filter((signal) => signal.state !== "unavailable")
+                  .map((signal) => signal.title)
+                  .join(" · ") || "Your Closet"}
+              </dd>
+            </div>
+            <div className="wi-knows-row">
+              <dt className="wi-knows-key">Still learning</dt>
+              <dd className="wi-knows-val wi-knows-val--muted">
+                {intelligence.signalAvailability
+                  .filter((signal) => signal.state === "unavailable")
+                  .map((signal) => signal.title)
+                  .join(" · ")}
+              </dd>
+            </div>
+          </dl>
 
-          {/* What each kind of evidence is currently contributing. This is the
-              feedback loop made visible: as signals move from unavailable to
-              active, the insights above get sharper. */}
-          <p className="wi-microhead">What nAia is reading from</p>
-          <ul className="wi-signals">
-            {intelligence.signalAvailability.map((signal) => (
-              <li key={signal.signal} className={`wi-signal wi-signal--${signal.state}`}>
-                <span className="wi-signal-name">{signal.label}</span>
-                <span className="wi-signal-detail">{signal.detail}</span>
-              </li>
-            ))}
-          </ul>
-
-          <p className="wi-microhead">Coming as nAia learns</p>
-          <ul className="wi-pending">
-            {wear.pending.map((label) => (
-              <li key={label}>{label}</li>
-            ))}
-          </ul>
+          <p className="wi-knows-note">{wear.learningNote}</p>
         </section>
 
         <div className="wi-foot">
@@ -565,13 +595,14 @@ const css = `
   .wi-notready{border-top:1px solid var(--naia-border);padding-top:28px;margin-bottom:44px}
   .wi-notready-text{font-family:var(--naia-ff-body);font-size:1.15rem;font-style:italic;line-height:1.7;color:var(--naia-ink);margin:0 0 20px;max-width:32em}
 
-  /* ── Snapshot ledger — numbers on hairlines, never cards ──────────────── */
-  .wi-ledger{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0 32px;border-top:1px solid var(--naia-ink);border-bottom:1px solid var(--naia-border);margin-bottom:64px}
-  .wi-metric{display:flex;flex-direction:column;padding:22px 0;border-right:1px solid var(--naia-border)}
-  .wi-metric:last-child{border-right:none}
-  .wi-metric-value{font-family:var(--naia-ff-display);font-size:42px;font-weight:200;line-height:1;color:var(--naia-ink)}
-  .wi-metric-label{font-family:var(--naia-ff-ui);font-size:8px;letter-spacing:2.5px;text-transform:uppercase;color:var(--naia-ink);margin-top:10px}
-  .wi-metric-caption{font-family:var(--naia-ff-body);font-size:13px;font-style:italic;line-height:1.5;color:rgba(40,21,12,0.55);margin-top:6px;padding-right:18px}
+  /* ── Opening: a reading, then a little support ────────────────────────── */
+  .wi-opening{border-top:1px solid var(--naia-ink);padding-top:26px;margin-bottom:64px;max-width:34em}
+  .wi-opening-reading{font-family:var(--naia-ff-body);font-size:1.6rem;font-style:italic;line-height:1.45;color:var(--naia-ink);margin:0 0 18px}
+  @media(min-width:768px){.wi-opening-reading{font-size:1.9rem}}
+  .wi-opening-facts{display:flex;flex-wrap:wrap;gap:6px 0;margin:0;font-family:var(--naia-ff-ui);font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:rgba(40,21,12,0.55)}
+  .wi-fact{display:inline-flex;align-items:baseline}
+  .wi-fact-sep{padding:0 12px;color:rgba(40,21,12,0.3)}
+  .wi-fact-value{font-family:var(--naia-ff-display);font-size:18px;font-weight:300;letter-spacing:0;color:var(--naia-ink);margin-right:7px}
 
   /* ── Sections ─────────────────────────────────────────────────────────── */
   .wi-section{margin-bottom:72px}
@@ -592,26 +623,30 @@ const css = `
   .wi-palette-count{font-family:var(--naia-ff-ui);font-size:10px;letter-spacing:1.5px;color:rgba(40,21,12,0.45)}
   .wi-reading{font-family:var(--naia-ff-body);font-size:1.25rem;font-style:italic;line-height:1.65;color:var(--naia-ink);margin:24px 0 0;max-width:30em}
   .wi-reading--sm{font-size:1.05rem;color:rgba(40,21,12,0.7)}
-  .wi-shapes{list-style:none;margin:0;padding:0;columns:2;column-gap:40px}
-  @media(max-width:640px){.wi-shapes{columns:1}}
-  .wi-shape{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:8px 0;border-bottom:1px solid rgba(206,193,184,0.5);break-inside:avoid;font-family:var(--naia-ff-display);font-size:15px;font-weight:300;letter-spacing:0.06em;text-transform:uppercase;color:var(--naia-ink)}
-  .wi-shape-count{font-family:var(--naia-ff-ui);font-size:10px;letter-spacing:1.5px;color:rgba(40,21,12,0.45)}
+  /* flex-wrap, or the shape words push the page sideways on a narrow screen. */
+  .wi-shapes-line{display:flex;flex-wrap:wrap;align-items:baseline;font-family:var(--naia-ff-display);font-size:19px;font-weight:300;letter-spacing:0.07em;text-transform:uppercase;color:var(--naia-ink);margin:0;line-height:1.7}
+  .wi-shapes-sep{padding:0 10px;color:rgba(40,21,12,0.3)}
   .wi-traits{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:24px 36px}
   .wi-trait{display:flex;flex-direction:column;gap:7px}
   .wi-trait-label{font-family:var(--naia-ff-display);font-size:20px;font-weight:300;letter-spacing:0.03em;text-transform:uppercase;color:var(--naia-ink);line-height:1.1}
   .wi-trait-evidence{font-family:var(--naia-ff-body);font-size:13.5px;font-style:italic;line-height:1.55;color:rgba(40,21,12,0.6)}
 
-  /* ── Heroes — imagery leads ───────────────────────────────────────────── */
+  /* ── Heroes: one featured piece, then a supporting row ────────────────── */
+  .wi-hero-featured{display:grid;grid-template-columns:minmax(0,300px) 1fr;gap:40px;align-items:center;padding:8px 0 36px;margin-bottom:36px;border-bottom:1px solid var(--naia-border)}
+  .wi-hero-featured-img{aspect-ratio:3/4;background:var(--naia-muted-bg);display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .wi-hero-featured-img img{width:100%;height:100%;object-fit:contain}
+  .wi-hero-featured-text{min-width:0}
+  .wi-hero-featured-name{font-family:var(--naia-ff-display);font-size:1.7rem;font-weight:200;letter-spacing:0.04em;text-transform:uppercase;color:var(--naia-ink);margin:0 0 14px;line-height:1.1}
+  .wi-hero-featured-headline{font-family:var(--naia-ff-body);font-size:1.4rem;font-style:italic;line-height:1.5;color:var(--naia-ink);margin:0 0 14px;max-width:22em}
+  .wi-hero-featured-reason{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.7;color:rgba(40,21,12,0.6);margin:0;max-width:34em}
   .wi-heroes{display:grid;grid-template-columns:repeat(3,1fr);gap:28px}
-  .wi-hero-img{aspect-ratio:3/4;background:var(--naia-muted-bg);display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:16px}
+  .wi-hero-img{aspect-ratio:3/4;background:var(--naia-muted-bg);display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:14px}
   .wi-hero-img img{width:100%;height:100%;object-fit:contain}
-  .wi-hero-name{font-family:var(--naia-ff-display);font-size:16px;font-weight:300;letter-spacing:0.08em;text-transform:uppercase;color:var(--naia-ink);margin:0 0 8px;line-height:1.2}
-  .wi-hero-headline{font-family:var(--naia-ff-body);font-size:1.05rem;font-style:italic;line-height:1.5;color:var(--naia-ink);margin:0 0 12px}
-  .wi-hero-reasons{list-style:none;margin:0;padding:0}
-  .wi-hero-reasons li{font-family:var(--naia-ff-ui);font-size:11.5px;line-height:1.65;color:rgba(40,21,12,0.6);padding:4px 0 4px 12px;position:relative}
-  .wi-hero-reasons li::before{content:"—";position:absolute;left:0;color:rgba(40,21,12,0.3)}
+  .wi-hero-name{font-family:var(--naia-ff-display);font-size:14px;font-weight:300;letter-spacing:0.08em;text-transform:uppercase;color:var(--naia-ink);margin:0 0 8px;line-height:1.25}
+  .wi-hero-reason{font-family:var(--naia-ff-ui);font-size:11.5px;line-height:1.65;color:rgba(40,21,12,0.6);margin:0}
 
   /* ── Pairings ─────────────────────────────────────────────────────────── */
+  .wi-pairs-note{font-family:var(--naia-ff-body);font-size:15px;font-style:italic;line-height:1.7;color:rgba(40,21,12,0.6);margin:-14px 0 26px;max-width:36em}
   .wi-pairs{list-style:none;margin:0;padding:0}
   .wi-pair{display:flex;align-items:center;gap:32px;padding:24px 0;border-top:1px solid var(--naia-border)}
   .wi-pair:first-child{border-top-color:var(--naia-ink)}
@@ -623,7 +658,7 @@ const css = `
   .wi-thumb-fallback{font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:rgba(40,21,12,0.4)}
   .wi-pair-text{flex:1;min-width:0}
   .wi-pair-reason{font-family:var(--naia-ff-body);font-size:1.05rem;font-style:italic;line-height:1.6;color:var(--naia-ink);margin:0}
-  .wi-pair-tag{font-family:var(--naia-ff-ui);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--naia-accent);margin:10px 0 0}
+  .wi-pair-tag{display:inline-block;font-family:var(--naia-ff-ui);font-size:8px;letter-spacing:2.2px;text-transform:uppercase;color:var(--naia-accent);margin:10px 0 0;padding:4px 9px;border:1px solid var(--naia-tint-mid)}
 
   /* ── What nAia is noticing ────────────────────────────────────────────── */
   .wi-notes{list-style:none;margin:0;padding:0;counter-reset:wi}
@@ -636,7 +671,18 @@ const css = `
   .wi-note-why{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.7;color:rgba(40,21,12,0.6);margin:12px 0 0;max-width:38em}
   .wi-note-action{background:none;border:none;padding:0;margin-top:14px;cursor:pointer;font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:var(--naia-ink);text-decoration:underline;text-underline-offset:4px}
   .wi-note-action:hover{color:var(--naia-accent)}
-  .wi-strip{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+  .wi-strip{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px}
+  .wi-strip-more{font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:1.6px;text-transform:uppercase;color:rgba(40,21,12,0.5)}
+  /* A discovery is something the customer could not see for herself. It gets the
+     weight of one; a descriptive pattern stays quiet underneath. */
+  .wi-note--discovery{padding:34px 0 30px}
+  .wi-note--discovery .wi-note-num{color:var(--naia-accent)}
+  .wi-note--discovery .wi-note-head{font-size:9px;letter-spacing:2.8px}
+  .wi-note--discovery .wi-note-claim{font-size:1.5rem;line-height:1.5;max-width:26em}
+  .wi-note--discovery .wi-note-body{border-left:1px solid var(--naia-accent);padding-left:22px;margin-left:-1px}
+  .wi-note--pattern .wi-note-claim{font-size:1.08rem;color:rgba(40,21,12,0.82)}
+  .wi-note--pattern .wi-note-head{color:rgba(40,21,12,0.45)}
+  @media(min-width:768px){.wi-note--discovery .wi-note-claim{font-size:1.75rem}}
 
   /* ── Opportunities — three distinct treatments ────────────────────────── */
   .wi-opps{display:flex;flex-direction:column;gap:48px}
@@ -644,10 +690,10 @@ const css = `
   .wi-opp-title{font-family:var(--naia-ff-body);font-size:1.3rem;font-style:italic;font-weight:400;line-height:1.5;color:var(--naia-ink);margin:0 0 10px;max-width:30em}
   .wi-opp-body{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.75;color:rgba(40,21,12,0.65);margin:0;max-width:38em}
   .wi-opp-lead{font-family:var(--naia-ff-body);font-size:1.05rem;font-style:italic;line-height:1.6;color:var(--naia-ink);margin:0 0 20px}
-  .wi-opp-try{display:flex;align-items:center;gap:24px;padding:16px 0;border-bottom:1px solid rgba(206,193,184,0.5)}
-  .wi-opp-try:last-child{border-bottom:none}
   .wi-opp--quiet{background:rgba(227,212,201,0.32);padding:28px;margin:0 -28px}
   .wi-opp--quiet .wi-opp-tier{border-bottom-color:rgba(40,21,12,0.25)}
+  .wi-nogap{border-top:1px solid var(--naia-ink);padding-top:16px}
+  .wi-nogap-line{font-family:var(--naia-ff-body);font-size:1.3rem;font-style:italic;line-height:1.6;color:var(--naia-ink);margin:0;max-width:30em}
   .wi-opp-foot{font-family:var(--naia-ff-body);font-size:13px;font-style:italic;line-height:1.6;color:rgba(40,21,12,0.55);margin:20px 0 0;max-width:34em}
 
   /* ── Passport vs Closet ───────────────────────────────────────────────── */
@@ -659,12 +705,6 @@ const css = `
   .wi-compare-reading{grid-column:1/-1;font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.7;color:rgba(40,21,12,0.6);margin:6px 0 0}
 
   /* ── Wear intelligence — quiet, honest ────────────────────────────────── */
-  .wi-wear{border-top:1px solid var(--naia-ink);padding-top:36px}
-  .wi-wear-note{font-family:var(--naia-ff-body);font-size:1.05rem;font-style:italic;line-height:1.7;color:rgba(40,21,12,0.7);margin:0 0 32px;max-width:36em}
-  .wi-wear-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0 32px;border-top:1px solid var(--naia-border);border-bottom:1px solid var(--naia-border);margin-bottom:32px}
-  .wi-wear-metrics .wi-metric-value{font-size:30px}
-  .wi-pending{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px 10px}
-  .wi-pending li{font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:1.8px;text-transform:uppercase;color:rgba(40,21,12,0.5);border:1px solid var(--naia-border);padding:7px 12px}
 
   /* ── Hero label chip ──────────────────────────────────────────────────── */
   .wi-hero-label{font-family:var(--naia-ff-ui);font-size:8px;letter-spacing:2.5px;text-transform:uppercase;color:var(--naia-accent);margin:0 0 8px}
@@ -678,16 +718,15 @@ const css = `
   .wi-rediscover-name{font-family:var(--naia-ff-display);font-size:15px;font-weight:300;letter-spacing:0.08em;text-transform:uppercase;color:var(--naia-ink);margin:0 0 10px;line-height:1.2}
   .wi-opp-title--calm{font-style:italic;color:rgba(40,21,12,0.75);margin:0}
 
-  /* ── Signal ledger ────────────────────────────────────────────────────── */
-  .wi-signals{list-style:none;margin:0 0 32px;padding:0}
-  .wi-signal{display:flex;flex-wrap:wrap;gap:4px 16px;align-items:baseline;padding:10px 0 10px 16px;border-bottom:1px solid rgba(206,193,184,0.5);position:relative}
-  .wi-signal:last-child{border-bottom:none}
-  .wi-signal::before{content:"";position:absolute;left:0;top:16px;width:7px;height:7px;border-radius:50%;border:1px solid var(--naia-border-mid)}
-  .wi-signal--active::before{background:var(--naia-ink);border-color:var(--naia-ink)}
-  .wi-signal--partial::before{background:var(--naia-border-mid)}
-  .wi-signal--unavailable::before{background:transparent}
-  .wi-signal-name{font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--naia-ink);flex:0 0 auto}
-  .wi-signal-detail{font-family:var(--naia-ff-body);font-size:13.5px;font-style:italic;color:rgba(40,21,12,0.6);flex:1;min-width:180px}
+  /* ── What nAia knows so far: reassurance, not a provenance panel ──────── */
+  .wi-knows-section{border-top:1px solid var(--naia-border);padding-top:28px;margin-bottom:40px}
+  .wi-knows-title{font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:rgba(40,21,12,0.5);margin:0 0 18px;font-weight:400}
+  .wi-knows{margin:0 0 16px;padding:0}
+  .wi-knows-row{display:flex;flex-wrap:wrap;gap:4px 16px;align-items:baseline;padding:7px 0}
+  .wi-knows-key{font-family:var(--naia-ff-ui);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:rgba(40,21,12,0.45);flex:0 0 96px}
+  .wi-knows-val{font-family:var(--naia-ff-display);font-size:13px;font-weight:300;letter-spacing:0.08em;text-transform:uppercase;color:var(--naia-ink);margin:0}
+  .wi-knows-val--muted{color:rgba(40,21,12,0.45)}
+  .wi-knows-note{font-family:var(--naia-ff-body);font-size:14px;font-style:italic;line-height:1.65;color:rgba(40,21,12,0.55);margin:0;max-width:40em}
 
   /* ── Footer CTA ───────────────────────────────────────────────────────── */
   .wi-foot{margin:8px 0 24px}
@@ -697,31 +736,33 @@ const css = `
 
   /* ── Mobile: rework, don't just stack ─────────────────────────────────── */
   @media(max-width:860px){
-    .wi-heroes{display:flex;gap:16px;overflow-x:auto;scroll-snap-type:x mandatory;margin:0 -20px;padding:0 20px 8px;-webkit-overflow-scrolling:touch}
-    .wi-hero{flex:0 0 66%;scroll-snap-align:start}
+    .wi-hero-featured{grid-template-columns:1fr;gap:20px}
+    .wi-hero-featured-img{max-height:380px}
+    .wi-heroes{display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x mandatory;margin:0 -20px;padding:0 20px 8px;-webkit-overflow-scrolling:touch}
+    .wi-hero{flex:0 0 46%;scroll-snap-align:start}
     .wi-compare-row{grid-template-columns:1fr;gap:18px}
   }
   @media(max-width:640px){
     .wi-switch{gap:20px}
     .wi-switch-item{font-size:9px;letter-spacing:1.6px}
-    /* Ledger becomes two columns so the numbers stay scannable, not a tall stack. */
-    .wi-ledger{grid-template-columns:1fr 1fr;gap:0}
-    .wi-metric{padding:16px 0;border-right:none;border-bottom:1px solid rgba(206,193,184,0.5)}
-    .wi-metric:nth-child(odd){padding-right:16px;border-right:1px solid rgba(206,193,184,0.5)}
-    .wi-metric:nth-child(odd){padding-left:0}
-    .wi-metric:nth-child(even){padding-left:16px}
-    .wi-metric-value{font-size:32px}
-    .wi-metric-caption{padding-right:0}
+    .wi-opening-reading{font-size:1.35rem}
+    .wi-opening-facts{flex-direction:column;gap:8px}
+    .wi-fact-sep{display:none}
     .wi-section{margin-bottom:56px}
+    /* Supporting hero cards stay small: image, label, name, one reason. */
+    .wi-hero{flex:0 0 58%}
+    .wi-hero-featured-headline{font-size:1.2rem}
+    .wi-hero-featured-name{font-size:1.35rem}
     /* Pairings go vertical: imagery on top, reading underneath. */
     .wi-pair{flex-direction:column;align-items:flex-start;gap:14px}
-    .wi-opp-try{flex-direction:column;align-items:flex-start;gap:12px}
-    .wi-rediscover{gap:14px}
-    .wi-rediscover-img{flex-basis:88px}
-    .wi-signal{flex-direction:column;gap:4px}
     .wi-opp--quiet{margin:0 -20px;padding:24px 20px}
     .wi-note{gap:14px}
-    .wi-note-claim{font-size:1.08rem}
+    .wi-note--discovery .wi-note-claim{font-size:1.22rem}
+    .wi-note--discovery .wi-note-body{padding-left:16px}
+    .wi-note--pattern .wi-note-claim{font-size:1.02rem}
     .wi-reading{font-size:1.1rem}
+    .wi-rediscover{gap:14px}
+    .wi-rediscover-img{flex-basis:88px}
+    .wi-knows-key{flex-basis:100%}
   }
 `;
