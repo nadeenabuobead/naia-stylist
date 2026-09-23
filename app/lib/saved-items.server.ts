@@ -18,6 +18,7 @@ import {
   type SaveItemRequest,
   type SavedCard,
 } from "./saved-items";
+import { buildRefKey, isContentId, type TrendContentType } from "./trend-content-identity";
 import {
   getCloudinaryConfig,
   validatePublicIdOwnership,
@@ -220,4 +221,70 @@ export async function loadMySaved(customerId: string): Promise<SavedCard[]> {
 /** Ownership-checked delete for a saved look. */
 export async function deleteSavedLook(customerId: string, lookId: string): Promise<void> {
   await prisma.savedLook.deleteMany({ where: { id: lookId, customerId } });
+}
+
+// ── Save state for a report page ─────────────────────────────────────────────
+
+export interface ReportSaveState {
+  /** "TREND:tc_abc" → refKey. Built server-side so the client never derives identity. */
+  refKeys: Record<string, string>;
+  /** refKeys this customer has actually saved. Empty when signed out. */
+  saved: string[];
+  /** True when a ♡ can do anything — drives the sign-in affordance. */
+  canSave: boolean;
+}
+
+/**
+ * Every saveable object on a report, with its refKey, plus which of them this
+ * customer has saved. State comes from the database on every load, so a refresh
+ * shows the real persisted truth rather than remembered client state.
+ *
+ * customerId is null for an anonymous visitor: the controls still render (the
+ * editorial page is public) but nothing is marked saved.
+ */
+export async function loadReportSaveState(
+  customerId: string | null,
+  report: {
+    id?: string;
+    keyTrends?: unknown;
+    rising?: unknown;
+    fading?: unknown;
+    referencesBehindThisEdit?: unknown;
+  },
+  options: { productHandles?: string[]; takeawaySections?: string[] } = {},
+): Promise<ReportSaveState> {
+  const refKeys: Record<string, string> = {};
+  const reportId = report.id ?? null;
+
+  const addEntries = (field: unknown, contentType: TrendContentType) => {
+    if (!Array.isArray(field) || !reportId) return;
+    for (const raw of field) {
+      const id = (raw as Record<string, unknown>)?.id;
+      if (!isContentId(id)) continue;
+      refKeys[`${contentType}:${id}`] = buildRefKey({ contentType, contentId: id as string, reportId });
+    }
+  };
+
+  addEntries(report.keyTrends, "TREND");
+  addEntries(report.rising, "SIGNAL");
+  addEntries(report.fading, "SIGNAL");
+  addEntries(report.referencesBehindThisEdit, "REFERENCE");
+
+  // Global — identity does not include the report it was found in.
+  for (const handle of options.productHandles ?? []) {
+    refKeys[`PRODUCT:${handle}`] = buildRefKey({ contentType: "PRODUCT", contentId: handle });
+  }
+
+  if (reportId) {
+    for (const section of options.takeawaySections ?? []) {
+      refKeys[`TAKEAWAY:${section}`] = buildRefKey({
+        contentType: "TAKEAWAY", contentId: section, reportId,
+      });
+    }
+  }
+
+  if (!customerId) return { refKeys, saved: [], canSave: false };
+
+  const saved = await savedRefKeys(customerId, Object.values(refKeys));
+  return { refKeys, saved: [...saved], canSave: true };
 }

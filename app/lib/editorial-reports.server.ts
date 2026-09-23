@@ -22,6 +22,7 @@ type DbRow = Awaited<
 
 function dbToTrendReportData(r: NonNullable<DbRow>): TrendReportData {
   return {
+    id: r.id,
     slug: r.slug,
     title: r.title,
     season: r.season,

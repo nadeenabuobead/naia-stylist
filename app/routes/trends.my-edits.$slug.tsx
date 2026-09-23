@@ -18,6 +18,8 @@ import {
   type NadineProductRecommendation,
 } from "~/lib/trend-product-recommendation.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
+import SaveControl, { saveControlCss } from "~/components/SaveControl";
+import { loadReportSaveState, type ReportSaveState } from "~/lib/saved-items.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 type LoaderData = {
@@ -27,6 +29,8 @@ type LoaderData = {
   generationFailed: boolean;
   nadineRecommendation: NadineProductRecommendation | null;
   reportIndex: number;
+  saveState: ReportSaveState;
+  returnTo: string;
 };
 
 export const links: LinksFunction = () => [
@@ -78,6 +82,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       };
     }
 
+    const saveState = await loadReportSaveState(customer.id, report, {
+      productHandles: nadineRecommendation ? [nadineRecommendation.handle] : [],
+      // Only the two concrete, actionable takeaways carry a ♡. The rest of the
+      // edit is prose, and manufacturing a save button for every paragraph
+      // would turn an editorial read into a dashboard.
+      takeawaySections: ["yourBestRouteIn", "aLookToTry"],
+    });
+
     return {
       report,
       edit,
@@ -85,6 +97,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       generationFailed: false,
       nadineRecommendation,
       reportIndex,
+      saveState,
+      returnTo: `/trends/my-edits/${report.slug}`,
     } satisfies LoaderData;
   } catch (error) {
     console.error("Shopper trend edit generation failed:", error);
@@ -95,6 +109,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       generationFailed: true,
       nadineRecommendation: null,
       reportIndex,
+      saveState: { refKeys: {}, saved: [], canSave: true },
+      returnTo: `/trends/my-edits/${report.slug}`,
     } satisfies LoaderData;
   }
 }
@@ -102,6 +118,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 const TINTS = ["#efeae0", "#e6dccb", "#d9c9b5", "#efe6d7", "#e2d3bf", "#ede2cf"];
 
 const css = `
+  /* ── Save affordance ── */
+  .tmd-save { margin-left: auto; }
+  .tmd-section-label { display: flex; align-items: center; gap: 12px; }
+  .tmd-nadine-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin-top: 10px; }
+${saveControlCss}
+
   .tmd-page { padding: 48px 0 96px; }
 
   /* ── Back link ───────────────────────────────────────────────── */
@@ -514,7 +536,32 @@ export function ErrorBoundary() {
 }
 
 export default function MyTrendEditDetail() {
-  const { report, edit, hasProfile, generationFailed, nadineRecommendation, reportIndex } = useLoaderData() as LoaderData;
+  const loaderData = useLoaderData() as LoaderData;
+  const { report, edit, hasProfile, generationFailed, nadineRecommendation, reportIndex } = loaderData;
+
+  // The editorial read is the primary experience. If save state is absent for
+  // any reason, the page renders without ♡ controls rather than failing — a
+  // personalisation layer must never be able to take the report down with it.
+  const saveState = loaderData.saveState ?? { refKeys: {}, saved: [], canSave: false };
+  const returnTo = loaderData.returnTo ?? `/trends/my-edits/${report.slug}`;
+
+  const savedSet = new Set(saveState.saved);
+  const saveTakeaway = (section: "yourBestRouteIn" | "aLookToTry", label: string, text: string) => {
+    const refKey = saveState.refKeys[`TAKEAWAY:${section}`];
+    if (!refKey) return null;
+    return (
+      <SaveControl
+        contentType="TAKEAWAY"
+        contentId={section}
+        reportSlug={report.slug}
+        takeawayText={text}
+        refKey={refKey}
+        initiallySaved={savedSet.has(refKey)}
+        returnTo={returnTo}
+        label={label}
+      />
+    );
+  };
   const tint = TINTS[Math.max(0, reportIndex) % TINTS.length];
   const num = String(Math.max(0, reportIndex)).padStart(2, "0");
 
@@ -705,7 +752,10 @@ export default function MyTrendEditDetail() {
 
             {/* 03 / YOUR ROUTE IN */}
             <div className="tmd-section">
-              <div className="tmd-section-label">03 / Your route in</div>
+              <div className="tmd-section-label">
+                03 / Your route in
+                <span className="tmd-save">{saveTakeaway("yourBestRouteIn", "Your route in", edit.yourBestRouteIn)}</span>
+              </div>
               <p className="tmd-body">{edit.yourBestRouteIn}</p>
               {edit.evidenceClosetItems.length > 0 && (
                 <div className="tmd-already-yours">
@@ -726,7 +776,10 @@ export default function MyTrendEditDetail() {
 
             {/* 04 / A LOOK TO TRY */}
             <div className="tmd-section">
-              <div className="tmd-section-label">04 / A look to try</div>
+              <div className="tmd-section-label">
+                04 / A look to try
+                <span className="tmd-save">{saveTakeaway("aLookToTry", "A look to try", edit.aLookToTry)}</span>
+              </div>
               <p className="tmd-body">{edit.aLookToTry}</p>
               {edit.evidenceClosetItems.length > 0 && (
                 <div className="tmd-already-yours">
@@ -777,16 +830,29 @@ export default function MyTrendEditDetail() {
                           <p className="tmd-nadine-card-explanation">
                             {nadineRecommendation.personalExplanation}
                           </p>
-                          {nadineRecommendation.url && (
-                            <a
-                              href={nadineRecommendation.url}
-                              className="tmd-nadine-card-link"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
-                              VIEW PIECE →
-                            </a>
-                          )}
+                          <div className="tmd-nadine-card-actions">
+                            {nadineRecommendation.url && (
+                              <a
+                                href={nadineRecommendation.url}
+                                className="tmd-nadine-card-link"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                VIEW PIECE →
+                              </a>
+                            )}
+                            {saveState.refKeys[`PRODUCT:${nadineRecommendation.handle}`] && (
+                              <SaveControl
+                                contentType="PRODUCT"
+                                contentId={nadineRecommendation.handle}
+                                reportSlug={report.slug}
+                                refKey={saveState.refKeys[`PRODUCT:${nadineRecommendation.handle}`]}
+                                initiallySaved={savedSet.has(saveState.refKeys[`PRODUCT:${nadineRecommendation.handle}`])}
+                                returnTo={returnTo}
+                                label={nadineRecommendation.title}
+                              />
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>

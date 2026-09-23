@@ -3,6 +3,9 @@ import { Link, useLoaderData, useRouteError, type LoaderFunctionArgs } from "rea
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "../lib/storefront-config";
 import type { TrendReportData } from "../lib/trend-reports";
 import { getEditorialReportBySlug, getPublishedEditorialReports } from "../lib/editorial-reports.server";
+import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
+import { loadReportSaveState } from "../lib/saved-items.server";
+import SaveControl, { saveControlCss } from "../components/SaveControl";
 import { reportVisual } from "../lib/report-visual";
 
 const FONTS =
@@ -21,13 +24,19 @@ function formatSourceDate(isoDate: string): string {
   return `${day} ${SOURCE_DATE_MONTHS[month - 1]} ${year}`;
 }
 
-export async function loader({ params }: LoaderFunctionArgs) {
+export async function loader({ request, params }: LoaderFunctionArgs) {
   const [report, allPublished] = await Promise.all([
     getEditorialReportBySlug(params.slug ?? ""),
     getPublishedEditorialReports(),
   ]);
   if (!report) throw new Response("Not Found", { status: 404 });
-  return { report, allPublished };
+
+  // The public report stays public. Auth is OPTIONAL here — it only decides
+  // whether a ♡ can already be filled in, never whether the page renders.
+  const customer = await getCurrentNaiaCustomer(request);
+  const saveState = await loadReportSaveState(customer?.id ?? null, report);
+
+  return { report, allPublished, saveState, returnTo: `/trends/${report.slug}` };
 }
 
 export function meta({ data }: { data?: { report: TrendReportData } }) {
@@ -39,6 +48,11 @@ export function meta({ data }: { data?: { report: TrendReportData } }) {
 }
 
 const css = `
+  /* ── Save affordance — quiet, at the edge of a block ── */
+  .psl-save-row { margin-top: 10px; }
+  .psl-save-inline { display: block; margin-top: 6px; }
+${saveControlCss}
+
   .psl-page {
     min-height: 100vh;
     background-color: #f0ebe2;
@@ -812,7 +826,42 @@ export function ErrorBoundary() {
 }
 
 export default function TrendReportDetail() {
-  const { report, allPublished } = useLoaderData() as { report: TrendReportData; allPublished: TrendReportData[] };
+  const loaderData = useLoaderData() as {
+    report: TrendReportData;
+    allPublished: TrendReportData[];
+    saveState?: import("../lib/saved-items.server").ReportSaveState;
+    returnTo?: string;
+  };
+  const { report, allPublished } = loaderData;
+
+  // The editorial read is the primary experience. If save state is absent for
+  // any reason, the page renders without ♡ controls rather than failing — a
+  // personalisation layer must never be able to take the report down with it.
+  const saveState = loaderData.saveState ?? { refKeys: {}, saved: [], canSave: false };
+  const returnTo = loaderData.returnTo ?? `/trends/${report.slug}`;
+
+  // One helper so each call site stays a single quiet line in the markup.
+  const savedSet = new Set(saveState.saved);
+  const save = (
+    contentType: "TREND" | "SIGNAL" | "REFERENCE",
+    contentId: string | undefined,
+    label: string,
+  ) => {
+    if (!contentId) return null;               // pre-backfill entry — no identity yet
+    const refKey = saveState.refKeys[`${contentType}:${contentId}`];
+    if (!refKey) return null;
+    return (
+      <SaveControl
+        contentType={contentType}
+        contentId={contentId}
+        reportSlug={report.slug}
+        refKey={refKey}
+        initiallySaved={savedSet.has(refKey)}
+        returnTo={returnTo}
+        label={label}
+      />
+    );
+  };
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
 
   const reportIndex = allPublished.findIndex((r) => r.slug === report.slug);
@@ -1000,6 +1049,7 @@ export default function TrendReportDetail() {
                   {String(i + 1).padStart(2, "0")} / {t.name}
                 </div>
                 <p className="psl-body-text">{t.description}</p>
+                <div className="psl-save-row">{save("TREND", t.id, t.name)}</div>
               </div>
             ))}
           </div>
@@ -1027,6 +1077,7 @@ export default function TrendReportDetail() {
                         {r.signal}
                         <span className="psl-signal-why">{r.why}</span>
                         {r.source && <span className="psl-signal-source">{r.source}</span>}
+                        <span className="psl-save-inline">{save("SIGNAL", r.id, r.signal)}</span>
                       </li>
                     ))}
                   </ul>
@@ -1041,6 +1092,7 @@ export default function TrendReportDetail() {
                         {f.signal}
                         <span className="psl-signal-why">{f.why}</span>
                         {f.source && <span className="psl-signal-source">{f.source}</span>}
+                        <span className="psl-save-inline">{save("SIGNAL", f.id, f.signal)}</span>
                       </li>
                     ))}
                   </ul>
@@ -1063,6 +1115,9 @@ export default function TrendReportDetail() {
                     <p className="psl-ref-signal">{ref.signal}</p>
                     <div className="psl-ref-naia-label">nAia</div>
                     <p className="psl-ref-naia">{ref.naiaRead}</p>
+                    <div className="psl-save-row">
+                      {save("REFERENCE", ref.id, ref.collection ? `${ref.brand} — ${ref.collection}` : ref.brand)}
+                    </div>
                   </div>
                 ))
               : report.brandsToWatch?.map((b, i) => (

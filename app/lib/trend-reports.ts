@@ -63,6 +63,8 @@ export type TrendReportVisual = {
 };
 
 export type TrendReportData = {
+  /** Immutable DB row id. Absent only on the pre-seed static fallback. */
+  id?: string;
   slug: string;
   title: string;
   season: string;

@@ -33,8 +33,18 @@ vi.mock("react-router", async (importOriginal) => {
       edit: null,
       hasProfile: false,
       generationFailed: false,
+      // Step 3 — the loader now also reports which objects this customer saved.
+      saveState: { refKeys: {}, saved: [], canSave: true },
+      returnTo: "/trends/my-edits/spring-2026-soft-structure",
     })),
     useLocation: vi.fn(() => ({ pathname: "/trends/my-edits/spring-2026-soft-structure" })),
+    useFetcher: () => ({
+      Form: ({ children, ...props }: Record<string, unknown> & { children?: unknown }) =>
+        require("react").createElement("form", props, children),
+      state: "idle",
+      data: undefined,
+      submit: vi.fn(),
+    }),
     UNSAFE_withComponentProps: (c: unknown) => c,
   };
 });
@@ -71,6 +81,10 @@ vi.mock("~/lib/trend-evidence.server", () => ({
 
 vi.mock("~/lib/trend-product-recommendation.server", () => ({
   matchNadineProduct: vi.fn(() => null),
+}));
+
+vi.mock("~/lib/saved-items.server", () => ({
+  loadReportSaveState: vi.fn(async () => ({ refKeys: {}, saved: [], canSave: true })),
 }));
 
 vi.mock("~/styles/naia-design-system.css?url", () => ({ default: "/styles.css" }));
@@ -484,5 +498,52 @@ describe("MyTrendEditDetail component", () => {
     });
     const html = renderToString(React.createElement(MyTrendEditDetail));
     expect(html).not.toContain("A NADINE piece for this gap");
+  });
+});
+
+// ── Step 3 — save controls in the real rendered page ─────────────────────────
+
+describe("Save controls on the personalised edit", () => {
+  const SAVE_STATE = {
+    refKeys: {
+      "TAKEAWAY:yourBestRouteIn": "r:rep_1|TAKEAWAY|yourBestRouteIn",
+      "TAKEAWAY:aLookToTry": "r:rep_1|TAKEAWAY|aLookToTry",
+    },
+    saved: ["r:rep_1|TAKEAWAY|aLookToTry"],
+    canSave: true,
+  };
+
+  function renderWith(saveState: unknown) {
+    vi.mocked(useLoaderData).mockReturnValue({
+      report: {
+        slug: "spring-2026-soft-structure",
+        title: "Spring 2026 Soft Structure",
+        season: "Spring 2026",
+        summary: "s", published: true, publishedAt: "2026-06-30",
+      },
+      edit: MOCK_EDIT,
+      hasProfile: true,
+      generationFailed: false,
+      nadineRecommendation: null,
+      reportIndex: 0,
+      saveState,
+      returnTo: "/trends/my-edits/spring-2026-soft-structure",
+    } as never);
+    return renderToString(React.createElement(MyTrendEditDetail));
+  }
+
+  it("offers Save on an unsaved takeaway and shows Saved on a saved one", () => {
+    const html = renderWith(SAVE_STATE);
+    expect(html).toContain("♡");   // Your route in — not saved
+    expect(html).toContain("♥");   // A look to try — saved
+    expect(html).toContain('aria-label="Save Your route in to My Saved"');
+    expect(html).toContain("Saved: A look to try");
+  });
+
+  it("renders no controls at all when save state is empty — the edit still reads", () => {
+    const html = renderWith({ refKeys: {}, saved: [], canSave: false });
+    expect(html).not.toContain("♡");
+    expect(html).not.toContain("♥");
+    expect(html).toContain("Your route in");   // the editorial content survives
   });
 });
