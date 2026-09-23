@@ -2370,7 +2370,7 @@ export const NAIA_BODY_NEED_LABELS: Record<string, string> = {
   "loose-comfortable":               "Loose and comfortable",
   "softer-easier-fabrics":           "Softer / easier fabrics",
   "still-want-shape":                "I still want shape",
-  "structured-shape":                "A sharper / more structured shape",
+  "structured-shape":                "More structure / a more defined shape",
 };
 
 export const NAIA_CURRENT_GOAL_LABELS: Record<string, string> = {
