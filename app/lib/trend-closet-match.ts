@@ -12,17 +12,25 @@
 // trend words, or touches report prose. loadWardrobeIntelligence() is the only
 // source of garment truth.
 //
-// ── SCOPE vs DIRECTION ───────────────────────────────────────────────────────
-// The distinction the whole design turns on:
+// ── QUALIFICATION ────────────────────────────────────────────────────────────
 //
-//   SCOPE      category        constrains WHICH garments are eligible
-//   DIRECTION  everything else  is the evidence that a garment belongs
+//   within one facet kind   OR    silhouette: [tailored, straight] → either
+//   across facet kinds      AND   every authored kind must match
 //
-// "category: BAGS" must not mean "every bag you own connects to The New Bag
-// Shapes" — owning a bag is not evidence of a direction. So a category
-// constraint can only ever DISQUALIFY; it can never qualify on its own. A
-// garment needs at least one directional facet to match, and a trend with no
-// directional facets is simply not matchable.
+// AND across kinds is what stops a straight trench qualifying for "Longline
+// blazers" on OUTERWEAR + straight alone, or casual straight jeans qualifying
+// for "Softened tailoring" because one facet happened to line up. A trend that
+// names three things is asking for all three.
+//
+// Two rules sit alongside it:
+//
+//   SCOPE       category must match when declared, but can never qualify on its
+//               own — owning a bag is not evidence of a bag DIRECTION. A trend
+//               needs at least one directional facet to be matchable at all.
+//
+//   IGNORED     construction is authored but unavailable, and is removed BEFORE
+//               the AND is evaluated — an unavailable facet must not make an
+//               otherwise matchable trend impossible to satisfy.
 //
 // No claim is better than a weak claim.
 
@@ -49,11 +57,15 @@ export const DIRECTIONAL_FACETS: readonly FacetKind[] = FACET_KINDS.filter(
 );
 
 /**
- * How specific a matched facet is, used only for ranking.
+ * How specific a matched facet is.
  *
- * A named shape ("east-west") says far more about belonging than a formality
- * band, which a third of a wardrobe might share. These are ordering weights,
- * never a score shown to anyone.
+ * Primarily this orders the EVIDENCE inside a reason, so the sentence leads with
+ * the strongest thing that matched. It also feeds the ranking score — though
+ * under AND-across-kinds every qualifying garment has cleared the same bar, so
+ * they legitimately tie and fall through to a deterministic id order. Ranking
+ * them further would invent a distinction the evidence does not support.
+ *
+ * Never a number shown to anyone.
  */
 const SPECIFICITY: Readonly<Record<string, number>> = {
   subcategory:   5,
@@ -227,19 +239,24 @@ export function matchTrendToCloset(input: MatchTrendInput): TrendClosetMatch {
       if (!inScope) continue;
     }
 
+    // AND across kinds: every authored directional kind must be satisfied.
     const evidence: MatchEvidence[] = [];
+    let satisfiedAll = true;
     for (const kind of directional) {
+      let hit: MatchEvidence | null = null;
       for (const facetValue of facets[kind] ?? []) {
         const garmentValue = satisfies(kind, facetValue, garment);
         if (garmentValue !== null) {
           // Within one facet kind values are OR — one hit is enough.
-          evidence.push({ kind, facetValue, garmentValue });
+          hit = { kind, facetValue, garmentValue };
           break;
         }
       }
+      if (!hit) { satisfiedAll = false; break; }
+      evidence.push(hit);
     }
 
-    if (evidence.length === 0) continue;        // in scope, but no direction — not a match
+    if (!satisfiedAll || evidence.length === 0) continue;
 
     const specificity = evidence.reduce((n, e) => n + (SPECIFICITY[e.kind] ?? 0), 0);
     const categoryBonus = scopeCategories.length > 0 ? 1 : 0;
@@ -252,8 +269,9 @@ export function matchTrendToCloset(input: MatchTrendInput): TrendClosetMatch {
       imageUrl: garment.imageUrl,
       reason: buildReason(evidence),
       evidence,
-      // Facet COUNT dominates, so two facets always outrank one; specificity
-      // orders within a count; the category bonus only separates equals.
+      // Every qualifying garment satisfies the same kinds, so specificity and
+      // the category bonus do the ordering. The count term is retained for
+      // trends whose garments can differ in how many OR-values they hit.
       score: evidence.length * 100 + specificity + categoryBonus,
     });
   }

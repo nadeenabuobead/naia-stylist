@@ -198,24 +198,25 @@ describe("§TM-4 ranking", () => {
     assert.equal(r.matches[0].garmentId, "both");
   });
 
-  it("facet count dominates specificity", () => {
-    // subcategory is the most specific single facet; two weaker ones still win.
-    const r = match(
-      { subcategory: ["blazer"], formalityBand: ["smart-casual"], visualWeight: ["light"] },
-      [
-        garment({ id: "specific", subcategory: "blazer" }),
-        garment({ id: "two-weak", formality: "smart-casual", visualWeight: "light" }),
-      ],
-    );
-    assert.equal(r.matches[0].garmentId, "two-weak");
+  it("under AND, qualifying garments satisfy the SAME kinds and therefore tie", () => {
+    // This is a property of the rule, not a shortcoming: every match cleared
+    // exactly the same bar, so ranking them against each other would invent a
+    // distinction the evidence does not support. Order is deterministic.
+    const r = match({ material: ["suede"], formalityBand: ["evening"] }, [
+      garment({ id: "b", material: "suede", formality: "evening" }),
+      garment({ id: "a", material: "suede", formality: "evening" }),
+    ]);
+    assert.equal(r.matchCount, 2);
+    assert.equal(r.matches[0].score, r.matches[1].score);
+    assert.deepEqual(r.matches.map((m) => m.garmentId), ["a", "b"]);
   });
 
-  it("specificity orders within an equal count", () => {
+  it("a garment satisfying only one of two authored kinds does not rank — it does not qualify", () => {
     const r = match({ material: ["suede"], formalityBand: ["evening"] }, [
-      garment({ id: "formal", formality: "evening" }),
-      garment({ id: "material", material: "suede" }),
+      garment({ id: "formal-only", formality: "evening" }),
+      garment({ id: "material-only", material: "suede" }),
     ]);
-    assert.equal(r.matches[0].garmentId, "material");
+    assert.equal(r.matchCount, 0);
   });
 
   it("ties break deterministically, and NOT on name or image", () => {
@@ -271,13 +272,14 @@ describe("§TM-5 counting the full closet", () => {
 // ── §TM-6 reasons ─────────────────────────────────────────────────────────────
 
 describe("§TM-6 reason copy", () => {
-  it("names only evidence that actually matched", () => {
-    const r = match({ material: ["suede"], colourFamily: ["navy"] },
+  it("names only the OR-value that actually matched", () => {
+    // Authored colours are navy OR burgundy; this garment is burgundy.
+    const r = match({ material: ["suede"], colourFamily: ["navy", "red-burgundy"] },
       [garment({ material: "suede", primaryColor: "Burgundy" })]);
     const reason = r.matches[0].reason;
     assert.ok(reason.includes("suede"));
-    assert.equal(reason.includes("navy"), false, "must not name a facet that did not match");
-    assert.equal(reason.includes("burgundy"), false, "must not name an unmatched colour");
+    assert.ok(reason.includes("burgundy"));
+    assert.equal(reason.includes("navy"), false, "must not name a value that did not match");
   });
 
   it("reads as a sentence", () => {
@@ -334,5 +336,117 @@ describe("§TM-7 explicit trend association", () => {
     const r = match({ material: ["suede"] }, []);
     assert.equal(r.available, true);
     assert.equal(r.matchCount, 0);
+  });
+});
+
+// ── §TM-8 AND across facet kinds — the false positives ───────────────────────
+//
+// A trend that names three things is asking for all three. These are the cases
+// the earlier "any one directional facet" rule got wrong.
+
+describe("§TM-8 AND across kinds", () => {
+  // Longline blazers, as authored: OUTERWEAR + blazer.
+  const LONGLINE_BLAZERS = { category: ["OUTERWEAR"], subcategory: ["blazer"] };
+
+  it("a straight TRENCH does not match Longline blazers", () => {
+    const r = match(LONGLINE_BLAZERS, [
+      garment({ id: "trench", category: "OUTERWEAR", subcategory: "trench", silhouette: "straight" }),
+    ]);
+    assert.equal(r.matchCount, 0, "OUTERWEAR alone is not a blazer");
+  });
+
+  it("a blazer does match it", () => {
+    const r = match(LONGLINE_BLAZERS, [
+      garment({ id: "blazer", category: "OUTERWEAR", subcategory: "blazer" }),
+    ]);
+    assert.equal(r.matchCount, 1);
+  });
+
+  it("a blazer in the WRONG CATEGORY does not match", () => {
+    const r = match(LONGLINE_BLAZERS, [
+      garment({ id: "odd", category: "TOPS", subcategory: "blazer" }),
+    ]);
+    assert.equal(r.matchCount, 0);
+  });
+
+  it("a blazer with the wrong silhouette fails a trend that DOES name silhouette", () => {
+    const strict = { category: ["OUTERWEAR"], subcategory: ["blazer"], silhouette: ["straight"] };
+    assert.equal(match(strict, [garment({ category: "OUTERWEAR", subcategory: "blazer", silhouette: "fitted" })]).matchCount, 0);
+    assert.equal(match(strict, [garment({ category: "OUTERWEAR", subcategory: "blazer", silhouette: "straight" })]).matchCount, 1);
+  });
+
+  // Softened tailoring, as authored.
+  const SOFTENED_TAILORING = {
+    category: ["OUTERWEAR", "BOTTOMS", "DRESSES"],
+    silhouette: ["tailored", "straight"],
+    formalityBand: ["smart-casual", "business-casual"],
+  };
+
+  it("casual straight JEANS do not match Softened tailoring", () => {
+    const r = match(SOFTENED_TAILORING, [
+      garment({ id: "jeans", category: "BOTTOMS", subcategory: "jeans",
+                silhouette: "straight", formality: "casual" }),
+    ]);
+    assert.equal(r.matchCount, 0, "a matching silhouette is not enough on its own");
+  });
+
+  it("the same straight trouser in a smart register DOES match", () => {
+    const r = match(SOFTENED_TAILORING, [
+      garment({ id: "trouser", category: "BOTTOMS", subcategory: "trouser",
+                silhouette: "straight", formality: "smart-casual" }),
+    ]);
+    assert.equal(r.matchCount, 1);
+    assert.equal(r.matches[0].evidence.length, 2, "silhouette and formality both recorded");
+  });
+
+  it("a garment missing one authored kind entirely does not match", () => {
+    const r = match(SOFTENED_TAILORING, [
+      garment({ category: "DRESSES", silhouette: "straight", formality: null }),
+    ]);
+    assert.equal(r.matchCount, 0, "null is not agreement");
+  });
+
+  it("within a kind it is still OR — either formality band qualifies", () => {
+    const a = match(SOFTENED_TAILORING, [garment({ category: "DRESSES", silhouette: "tailored", formality: "smart-casual" })]);
+    const b = match(SOFTENED_TAILORING, [garment({ category: "DRESSES", silhouette: "tailored", formality: "business-casual" })]);
+    assert.equal(a.matchCount, 1);
+    assert.equal(b.matchCount, 1);
+  });
+
+  it("a one-facet trend stays simple — colour alone qualifies", () => {
+    assert.equal(match({ colourFamily: ["white-cream"] }, [garment({ primaryColor: "Ivory" })]).matchCount, 1);
+  });
+
+  it("a one-facet trend stays simple — silhouette alone qualifies", () => {
+    assert.equal(match({ silhouette: ["asymmetric"] }, [garment({ silhouette: "asymmetric" })]).matchCount, 1);
+  });
+
+  it("UNAVAILABLE construction must not make a trend impossible to satisfy", () => {
+    // The New Bag Shapes: construction is stripped BEFORE the AND, so the claim
+    // rests on category + shape and the east-west bag still qualifies.
+    const r = match(
+      { category: ["BAGS"], subcategory: ["east-west"], construction: ["soft"] },
+      [
+        garment({ id: "eastwest", category: "BAGS", subcategory: "east-west" }),
+        garment({ id: "tote", category: "BAGS", subcategory: "tote" }),
+      ],
+    );
+    assert.equal(r.available, true);
+    assert.equal(r.matchCount, 1);
+    assert.equal(r.matches[0].garmentId, "eastwest");
+  });
+
+  it("category-only still produces no claim at all", () => {
+    const r = match({ category: ["OUTERWEAR"] }, [garment({ category: "OUTERWEAR" })]);
+    assert.equal(r.available, false);
+    assert.equal(r.matchCount, 0);
+  });
+
+  it("every qualifying garment carries evidence for every authored kind", () => {
+    const r = match(SOFTENED_TAILORING, [
+      garment({ category: "DRESSES", silhouette: "tailored", formality: "smart-casual" }),
+    ]);
+    const kinds = r.matches[0].evidence.map((e) => e.kind).sort();
+    assert.deepEqual(kinds, ["formalityBand", "silhouette"]);
   });
 });

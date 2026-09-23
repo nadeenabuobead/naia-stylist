@@ -128,7 +128,7 @@ export const trendReports: TrendReportData[] = [
         source: "nAia inference from Givenchy SS26",
       },
       {
-        facets: { category: ["BOTTOMS"], silhouette: ["straight"] },
+        facets: { category: ["BOTTOMS"], subcategory: ["trouser"], silhouette: ["straight"] },
         signal: "Long clean trouser lines",
         why: "A trouser with enough length to break cleanly at the foot creates the proportioned base the silhouette reads from. nAia identifies this as the working component that makes soft structure legible without accessories or styling intervention.",
         source: "nAia editorial judgment",
@@ -256,7 +256,7 @@ export const trendReports: TrendReportData[] = [
     ],
     rising: [
       {
-        facets: { category: ["OUTERWEAR"], subcategory: ["blazer"], silhouette: ["straight"] },
+        facets: { category: ["OUTERWEAR"], subcategory: ["blazer"] },
         signal: "Longline blazers",
         why: "The longline proportion is the styling decision that makes modern tailoring work without matching the trouser — a longer line anchors an outfit across more counterparts, from narrow skirts to wide-leg denim.",
         source: "nAia editorial judgment",

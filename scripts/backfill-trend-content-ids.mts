@@ -117,7 +117,7 @@ async function main() {
   let rows: ReportRow[];
 
   if (useDb) {
-    const { default: prisma } = await import("../app/db.server.ts");
+    const { default: prisma } = await import("../app/db.server.js");
     rows = (await prisma.editorialTrendReport.findMany({
       orderBy: [{ order: "asc" }, { createdAt: "desc" }],
     })) as unknown as ReportRow[];
@@ -157,7 +157,7 @@ async function main() {
     return;
   }
 
-  const { default: prisma } = await import("../app/db.server.ts");
+  const { default: prisma } = await import("../app/db.server.js");
   let written = 0;
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
