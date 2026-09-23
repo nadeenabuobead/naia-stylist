@@ -6,9 +6,8 @@
 // Song: deterministic from curated catalog via selectSong().
 // Finishing layer: catalog prose fields (shoeDirection, accessoriesDirection, etc.).
 
-import { ALL_QUESTIONS, ALL_OPTION_LABELS } from "../onboarding/quiz-data.js";
+import { quizQuestions } from "../onboarding/quiz-data.js";
 import { closetItemToSlot } from "./closet-slot.js";
-import { projectStyleDirectionsToArchetypes } from "../passport/rev7-vocabulary.js";
 import { runRecommendation, buildSessionFingerprint } from "./styleme-recommendation.js";
 import type {
   StyleMeEngineInput,
@@ -32,7 +31,6 @@ import {
   scoreBodyNeedForClosetItem,
   computeEnergyPotential,
   type ClosetScoringProfile,
-  scoringArchetypesFor,
 } from "./styleme-anchor.server.js";
 import { getProductByHandle } from "./naia-catalog.js";
 import { resolveVerifiedMedia, VIRTUAL_TRY_ON_ENABLED } from "./naia-product-media.js";
@@ -73,15 +71,9 @@ import {
 // ── Passport option label resolver ───────────────────────────────────────────
 
 function optionLabel(questionId: string, optionId: string): string {
-  // ALL_QUESTIONS covers the live Rev 7 flow plus retired questions, so a stored
-  // answer from an older Passport still resolves to real copy instead of a slug.
-  const q = ALL_QUESTIONS.find((q) => q.id === questionId);
+  const q = quizQuestions.find((q) => q.id === questionId);
   const opt = q?.options?.find((o) => o.id === optionId);
-  if (opt) return opt.label;
-  const colour = q?.colors?.find((c) => c.id === optionId);
-  if (colour) return colour.name;
-  return ALL_OPTION_LABELS[optionId]
-    ?? optionId.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return opt?.label ?? optionId.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 // ── Profile signal builder ────────────────────────────────────────────────────
@@ -110,12 +102,6 @@ export function buildProfileSignals(
     successfulOutfitGives?: string[] | null;
     fitConcerns?: string[] | null;
     fitConcernsNote?: string | null;
-    // Rev 7
-    styleExpression?: string[] | null;
-    explorationLevel?: string | null;
-    styleDirections?: string[] | null;
-    dressingHabits?: string[] | null;
-    dressingRequirementsNote?: string | null;
   } | null | undefined,
 ): StyleMeProfileSignals | undefined {
   if (!profile) return undefined;
@@ -146,25 +132,6 @@ export function buildProfileSignals(
   const activeFitConcerns = (profile.fitConcerns ?? []).filter((id) => id !== "no-fit-problems");
   if (activeFitConcerns.length) signals.fitConcerns = activeFitConcerns;
   if (profile.fitConcernsNote?.trim()) signals.fitConcernsNote = profile.fitConcernsNote.trim();
-
-  // ── Rev 7 ───────────────────────────────────────────────────────────────────
-  // Context only. No numeric weight is assigned to any of these in this revision.
-  if (profile.styleExpression?.length) signals.styleExpression = profile.styleExpression;
-  if (profile.explorationLevel) signals.explorationLevel = profile.explorationLevel;
-  if (profile.styleDirections?.length) {
-    signals.styleDirections = profile.styleDirections;
-    // Project onto legacy V3 archetype tokens so the existing numeric archetype
-    // scorer keeps working for Rev 7 customers. Directions without an honest
-    // analogue stay visible as unmappedStyleDirections rather than disappearing.
-    const { archetypes, unmapped } = projectStyleDirectionsToArchetypes(profile.styleDirections);
-    if (archetypes.length) signals.styleDirectionArchetypes = archetypes;
-    if (unmapped.length) signals.unmappedStyleDirections = unmapped;
-  }
-  if (profile.dressingHabits?.length) signals.dressingHabits = profile.dressingHabits;
-  if (profile.dressingRequirementsNote?.trim()) {
-    signals.dressingRequirementsNote = profile.dressingRequirementsNote.trim();
-  }
-
   return Object.keys(signals).length > 0 ? signals : undefined;
 }
 
@@ -1107,8 +1074,8 @@ export function computeEnergyFit(
   });
   if (!hasKnownMetadata) return 0;
   let compatibilityFactor = 1;
-  const personalities = scoringArchetypesFor(profile);
-  if (personalities.length > 0) {
+  const personalities = profile?.stylePersonalities;
+  if (personalities && personalities.length > 0) {
     const personalitySet = new Set(personalities.map((p) => p.toLowerCase()));
     const matching = structuralPieces.filter((p) => {
       const item = itemMap.get(p.closetId);
@@ -1129,8 +1096,8 @@ export function outfitIdentityScore(
   allItems: ClosetAnchorInput[],
   profile: ClosetScoringProfile | undefined,
 ): number {
-  const personalities = scoringArchetypesFor(profile);
-  if (personalities.length === 0) return 0;
+  const personalities = profile?.stylePersonalities;
+  if (!personalities || personalities.length === 0) return 0;
   const itemMap = new Map(allItems.map((i) => [i.id, i]));
   const personalitySet = new Set(personalities.map((p) => p.toLowerCase()));
   const structural = candidate.pieces.filter((p) => !BODY_NEED_STRUCTURAL_SLOTS.has(p.slot));
@@ -1388,8 +1355,8 @@ export function computePassportAlignment(
   allItems: ClosetAnchorInput[],
   profile: ClosetScoringProfile | undefined,
 ): number {
-  const personalities = scoringArchetypesFor(profile);
-  if (personalities.length === 0) return 0;
+  const personalities = profile?.stylePersonalities;
+  if (!personalities || personalities.length === 0) return 0;
   const itemMap = new Map(allItems.map((i) => [i.id, i]));
   const personalitySet = new Set(personalities.map((p) => p.toLowerCase()));
   const structuralPieces = candidate.pieces.filter((p) => !BODY_NEED_STRUCTURAL_SLOTS.has(p.slot));
@@ -2506,7 +2473,7 @@ export async function callClaudeForNaiaSelection(
   // ── STYLE PASSPORT ────────────────────────────────────────────────────────
   const personalitiesStr = (profile?.stylePersonalities ?? [])
     .map((id) => optionLabel("style-personalities", id)).join(", ");
-  const silhouetteStr = (profile?.silhouette ?? []).slice(0, 4)
+  const silhouetteStr = (profile?.silhouette ?? []).slice(0, 3)
     .map((id) => optionLabel("silhouette", id)).join(", ");
   const structureStr = profile?.structure
     ? (NAIA_STRUCTURE_LABELS[profile.structure] ?? profile.structure.replace(/-/g, " "))
@@ -2550,44 +2517,13 @@ export async function callClaudeForNaiaSelection(
   ].filter(Boolean).join("; ");
   const dressingStr = (profile?.dressingPreferences ?? [])
     .map((id) => optionLabel("dressing-preferences", id)).join(", ");
-
-  // ── Rev 7 signals (context only; no numeric weight) ─────────────────────────
-  const styleDirectionsStr = (profile?.styleDirections ?? [])
-    .filter((id) => id !== "not-sure")
-    .map((id) => optionLabel("style-directions", id)).join(", ");
-  const unmappedDirectionsStr = (profile?.unmappedStyleDirections ?? [])
-    .map((id) => optionLabel("style-directions", id)).join(", ");
-  const styleExpressionStr = (profile?.styleExpression ?? [])
-    .filter((id) => id !== "not-sure")
-    .map((id) => optionLabel("style-expression", id)).join(", ");
-  const explorationLevelStr = profile?.explorationLevel && profile.explorationLevel !== "not-sure"
-    ? optionLabel("exploration-level", profile.explorationLevel)
-    : null;
-  const dressingHabitsStr = (profile?.dressingHabits ?? [])
-    .filter((id) => id !== "none-of-these")
-    .map((id) => optionLabel("dressing-habits", id)).join("; ");
-  const safeDressingRequirementsNote = profile?.dressingRequirementsNote
-    ? profile.dressingRequirementsNote.replace(/"/g, "'").replace(/\n/g, " ").trim()
-    : null;
   const safeFinalNotes = profile?.finalNotes
     ? profile.finalNotes.replace(/"/g, "'").replace(/\n/g, " ").trim()
     : null;
 
   const passportBlock = [
     `STYLE PASSPORT`,
-    // Rev 7 customers answer Style Directions; legacy customers have style identity.
-    styleDirectionsStr
-      ? `Style Directions (the visual aesthetics this customer is drawn to): ${styleDirectionsStr}.`
-      : `Style identity: ${personalitiesStr || "not specified"}.`,
-    unmappedDirectionsStr
-      ? `Note: ${unmappedDirectionsStr} — treat as a first-class style signal. It is part of this customer's stated direction even though the NADINE catalogue carries no matching archetype tag.`
-      : null,
-    styleExpressionStr
-      ? `Style Expression (what this customer wants their clothes to communicate about them): ${styleExpressionStr}.`
-      : null,
-    explorationLevelStr
-      ? `Exploration Level (how far nAia should move beyond this customer's familiar choices): ${explorationLevelStr}.`
-      : null,
+    `Style identity: ${personalitiesStr || "not specified"}.`,
     silhouetteStr ? `Silhouette preference: ${silhouetteStr}.` : null,
     structureStr ? `Structure preference: ${structureStr}.` : null,
     favColorStr ? `Colours loved: ${favColorStr}.` : null,
@@ -2604,12 +2540,6 @@ export async function callClaudeForNaiaSelection(
     fitConcernsStr ? `Persistent fit considerations (active even when today's Fit/Comfort is "None selected"): ${fitConcernsStr}.${safeFitConcernsNote ? ` Customer note: "${safeFitConcernsNote}".` : ""}` : null,
     coverageStr ? `Persistent coverage preference: ${coverageStr} — this is a hard boundary, stronger than today's fit/comfort selection.` : null,
     dressingStr ? `Dressing constraint: ${dressingStr} — hard exclusion; never violate.` : null,
-    safeDressingRequirementsNote
-      ? `Cultural or religious dressing requirement, in the customer's own words: "${safeDressingRequirementsNote}". Treat this as a requirement of the same standing as the dressing constraints above, not as a preference. If a piece may conflict with it, do not recommend that piece.`
-      : null,
-    dressingHabitsStr
-      ? `Dressing Habits (behavioural context — how this customer approaches getting dressed, not an aesthetic preference): ${dressingHabitsStr}.`
-      : null,
     safeFinalNotes ? `Customer's own note: "${safeFinalNotes}".` : null,
   ].filter(Boolean).join("\n");
 
