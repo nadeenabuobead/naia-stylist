@@ -669,6 +669,13 @@ model EditorialTrendReport {
   season        String
   mood          String?
 
+  // Identifies the report EDITION — derived from the set of stable content ids
+  // plus title and season (see computeEditionKey in trend-content-identity.ts).
+  // Recomputed on every write. Customer-facing report history shows ONE card per
+  // (customer, report, editionKey); internal edit versions sit underneath it.
+  // Migration: 20260923000000_trend_content_identity
+  editionKey    String  @default("")
+
   status        EditorialReportStatus @default(DRAFT)
   publishedAt   String   @default("")
   order         Int      @default(0)

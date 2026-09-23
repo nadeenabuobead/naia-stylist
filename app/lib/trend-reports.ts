@@ -1,3 +1,5 @@
+import type { TrendFacets } from "./trend-facets";
+
 export type TrendReportSource = {
   publisher: string;
   descriptor?: string;
@@ -7,17 +9,29 @@ export type TrendReportSource = {
 };
 
 export type TrendReportKeyTrend = {
+  /** Stable content id — see trend-content-identity.ts. Absent only pre-backfill. */
+  id?: string;
   name: string;
   description: string;
+  /** Per-trend match facets — see trend-facets.ts. */
+  facets?: TrendFacets;
 };
 
 export type TrendSignal = {
+  /** Stable content id — see trend-content-identity.ts. Absent only pre-backfill. */
+  id?: string;
   signal: string;
   why: string;
   source: string;
+  /** Per-signal match facets — see trend-facets.ts. */
+  facets?: TrendFacets;
 };
 
 export type TrendReportReferenceCard = {
+  /** Stable content id — see trend-content-identity.ts. Absent only pre-backfill. */
+  id?: string;
+  /** Per-reference match facets — see trend-facets.ts. */
+  facets?: TrendFacets;
   brand: string;
   collection?: string;
   signal: string;   // only what the cited source explicitly states or clearly shows
@@ -50,6 +64,8 @@ export type TrendReportVisual = {
 
 export type TrendReportData = {
   slug: string;
+  /** Identifies the report EDITION — see computeEditionKey(). */
+  editionKey?: string;
   title: string;
   season: string;
   publishedAt: string;
