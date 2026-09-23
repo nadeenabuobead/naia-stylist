@@ -20,8 +20,8 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("B2.1 COLOUR_FAMILIES", () => {
-  it("has exactly 10 colour families", () => {
-    assert.equal(COLOUR_FAMILIES.length, 10);
+  it("has exactly 13 colour families (Rev 7 adds blue, purple, metallics)", () => {
+    assert.equal(COLOUR_FAMILIES.length, 13);
   });
 
   it("does not contain 'prints'", () => {
@@ -55,25 +55,28 @@ describe("B2.1 COLOUR_FAMILIES", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("B2.2 Rev 6 8-screen quiz", () => {
-  it("getTotalSteps() returns 8", () => {
-    assert.equal(getTotalSteps(), 8);
+  it("getTotalSteps() returns 11", () => {
+    assert.equal(getTotalSteps(), 11);
   });
 
-  it("quizQuestions array has 8 entries", () => {
-    assert.equal(quizQuestions.length, 8);
+  it("quizQuestions array has 11 entries", () => {
+    assert.equal(quizQuestions.length, 11);
   });
 
-  it("screen IDs are in the Rev 6 approved order", () => {
+  it("screen IDs are in the Rev 7 approved order", () => {
     const ids = quizQuestions.map(q => q.id);
     assert.deepEqual(ids, [
       "current-goal",
-      "style-personalities",
       "successful-outfit-gives",
+      "style-expression",
+      "exploration-level",
+      "style-directions",
       "lifestyle",
       "favorite-colors",
       "silhouette",
       "fit-concerns",
       "dressing-preferences",
+      "dressing-habits",
     ]);
   });
 });
@@ -118,12 +121,15 @@ describe("B2.4 Screen 8 (favourite + avoided colours)", () => {
     assert.equal(screen8.secondaryQuestion!.id, "avoid-colors");
   });
 
-  it("avoid-colors secondary question uses the same 10 COLOUR_FAMILIES", () => {
+  // Rev 7: both pickers carry the 13 colour families plus their own opt-out
+  // sentinel — "I don't have strong colour preferences" / "None".
+  it("avoid-colors secondary question carries the same COLOUR_FAMILIES plus its sentinel", () => {
     const avoidColors = screen8.secondaryQuestion!.colors;
-    assert.equal(avoidColors.length, 10);
+    assert.equal(avoidColors.length, COLOUR_FAMILIES.length + 1);
     const mainIds  = COLOUR_FAMILIES.map(c => c.id).sort();
-    const avoidIds = avoidColors.map(c => c.id).sort();
+    const avoidIds = avoidColors.filter(c => !c.sentinel).map(c => c.id).sort();
     assert.deepEqual(mainIds, avoidIds);
+    assert.deepEqual(avoidColors.filter(c => c.sentinel).map(c => c.id), ["none"]);
   });
 
   it("avoid-colors secondary question is not marked required (no required flag)", () => {
@@ -135,8 +141,8 @@ describe("B2.4 Screen 8 (favourite + avoided colours)", () => {
     assert.equal(screen8.maxSelections, 5);
   });
 
-  it("avoid-colors maxSelections is 5", () => {
-    assert.equal(screen8.secondaryQuestion!.maxSelections, 5);
+  it("avoid-colors is uncapped at Rev 7 (\"select any that apply\")", () => {
+    assert.equal(screen8.secondaryQuestion!.maxSelections, undefined);
   });
 });
 
@@ -172,8 +178,8 @@ describe("B2.6 trend-appetite NOT in Rev 6 first onboarding", () => {
 describe("B2.7 lifestyle option IDs (Rev 6 V3)", () => {
   const lifestyleQ = quizQuestions.find(q => q.id === "lifestyle")!;
 
-  it("has exactly 7 options (V3 — removed always-on-the-go / busy-mom)", () => {
-    assert.equal(lifestyleQ.options!.length, 7);
+  it("has exactly 12 options at Rev 7 (V3 seven plus five new contexts)", () => {
+    assert.equal(lifestyleQ.options!.length, 12);
   });
 
   it("uses V3 IDs: work-office, everyday-casual, dinners-going-out", () => {
@@ -339,9 +345,10 @@ describe("B2.11 canProceed — Rev 6 all screens optional", () => {
     return false;
   }
 
-  it("style-personalities: canProceed is true even with empty selection (optional in Rev 6)", () => {
-    const q = quizQuestions.find(q => q.id === "style-personalities")!;
-    assert.ok(canProceed(q, []), "style-personalities is optional in Rev 6 — must allow empty");
+  // style-personalities was retired at Rev 7; style-directions replaces it.
+  it("style-directions: canProceed is true even with empty selection (optional screen)", () => {
+    const q = quizQuestions.find(q => q.id === "style-directions")!;
+    assert.ok(canProceed(q, []), "style-directions must allow an empty selection");
   });
 
   it("lifestyle: canProceed is true even with empty selection (optional in Rev 6)", () => {
@@ -359,7 +366,7 @@ describe("B2.11 canProceed — Rev 6 all screens optional", () => {
     assert.ok(canProceed(q, []), "dressing-preferences is optional");
   });
 
-  it("all 8 Rev 6 screens: canProceed with empty selection", () => {
+  it("all 11 Rev 7 screens: canProceed with empty selection", () => {
     for (const q of quizQuestions) {
       assert.ok(canProceed(q, []), `${q.id} must allow empty (optional screen)`);
     }
