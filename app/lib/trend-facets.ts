@@ -99,10 +99,11 @@ export const FACET_COLOUR_FAMILY_VALUES: ReadonlySet<string> = new Set(
  * Relaxed Tailoring is expressed as a fit ("relaxed"); one like Balloon Shapes
  * is expressed as a silhouette. Both resolve per garment, so both are allowed.
  */
-export const FACET_SILHOUETTE_VALUES: ReadonlySet<string> = new Set([
-  ...GARMENT_SILHOUETTE_VALUES,
-  ...FIT_PROFILE_VALUES,
-]);
+export const FACET_SILHOUETTE_VALUES: ReadonlySet<string> = new Set(
+  // "n/a" is FitProfile's not-applicable placeholder, not a shape. Same reason
+  // construction drops "N/A": an authoring placeholder is never a trend direction.
+  [...GARMENT_SILHOUETTE_VALUES, ...FIT_PROFILE_VALUES].filter((v) => v !== "n/a"),
+);
 
 /**
  * Resolved visual weight, as Wardrobe Intelligence resolves it per garment.

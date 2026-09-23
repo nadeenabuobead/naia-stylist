@@ -70,6 +70,7 @@ describe("§TF-2 vocabulary alignment", () => {
     assert.ok(isFacetValue("silhouette", "column"), "garment silhouette");
     assert.ok(isFacetValue("silhouette", "relaxed"), "fit profile");
     assert.equal(isFacetValue("silhouette", "swooshy"), false);
+    assert.equal(isFacetValue("silhouette", "n/a"), false, "a not-applicable placeholder is not a shape");
   });
 
   it("formality bands are garment formality tokens", () => {
