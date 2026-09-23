@@ -2618,3 +2618,66 @@ describe("Rule 18 copy regression — construction=soft + feel-sharper=None", ()
       "structured bag must score null for structured-shape body need — accessories are excluded from T3b");
   });
 });
+
+// ── §SParse — session bodyNeeds parsing (regression for source.tsx JSON.parse fix) ──
+
+// Mirrors the parsing logic added to source.tsx:207.
+// physical-need.tsx stores bodyNeeds as JSON.stringify(array); source.tsx must parse it.
+// Legacy comfort.tsx path may store bodyNeeds as a real array; both must be handled.
+function parseBodyNeedsSession(raw: unknown): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw as string[];
+  if (typeof raw !== "string") return [];
+  try { return JSON.parse(raw) as string[]; } catch { return []; }
+}
+
+describe("§SParse session bodyNeeds parsing (source.tsx fix regression)", () => {
+  it("SParse.1 JSON string '[\"structured-shape\"]' (Rev3 path) → real array [\"structured-shape\"]", () => {
+    const raw = '["structured-shape"]';
+    const result = parseBodyNeedsSession(raw);
+    assert.deepEqual(result, ["structured-shape"],
+      "physical-need.tsx stores JSON.stringify(selected); source.tsx must parse it back to a real array");
+  });
+
+  it("SParse.2 real array (legacy comfort.tsx path) passes through unchanged", () => {
+    const raw = ["structured-shape", "still-want-shape"];
+    const result = parseBodyNeedsSession(raw);
+    assert.deepEqual(result, ["structured-shape", "still-want-shape"],
+      "comfort.tsx stores bodyNeeds directly as an array; it must not be double-parsed");
+  });
+
+  it("SParse.3 malformed JSON string → safe fallback []", () => {
+    const result = parseBodyNeedsSession("not-valid-json");
+    assert.deepEqual(result, [],
+      "a corrupt session cookie must not crash — returns [] so anchor/slot scoring gets an empty array");
+  });
+
+  it("SParse.4 undefined (key absent from session) → []", () => {
+    const result = parseBodyNeedsSession(undefined);
+    assert.deepEqual(result, [],
+      "missing session key must produce empty bodyNeeds, not crash with .some() on undefined");
+  });
+
+  it("SParse.5 null → []", () => {
+    const result = parseBodyNeedsSession(null);
+    assert.deepEqual(result, []);
+  });
+
+  it("SParse.6 parsed array is a real Array — .some() does not throw", () => {
+    const raw = '["structured-shape"]';
+    const result = parseBodyNeedsSession(raw);
+    // This is the invariant that was broken before the fix.
+    assert.ok(Array.isArray(result), "result must be a real Array, not a string");
+    let thrown = false;
+    try { result.some(() => true); } catch { thrown = true; }
+    assert.equal(thrown, false, ".some() must not throw on the parsed output");
+  });
+
+  it("SParse.7 intentions pattern unchanged — JSON.parse('[]') still yields []", () => {
+    // Verifies that the intentions parsing pattern (intentionsRaw → JSON.parse) is not affected.
+    const raw = "[]";
+    const intentions: string[] = raw ? (JSON.parse(raw) as string[]) : [];
+    assert.deepEqual(intentions, [],
+      "existing intentions parsing (no try/catch, no array guard) must remain unchanged");
+  });
+});

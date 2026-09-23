@@ -676,4 +676,33 @@ describe("§BNA autoSelectClosetAnchor body-need (structured-shape) awareness", 
     assert.equal(selected!.id, "tailored",
       "N/A construction earns no bonus; tailored must win when structured-shape active");
   });
+
+  it("BNA.6 bodyNeeds as parsed string[] does not crash — .some() is callable on real array", async () => {
+    // Regression: before the source.tsx fix, bodyNeeds arrived as the JSON string
+    // '["structured-shape"]', not a real array. .some() on a string throws TypeError.
+    // After the fix, session parsing produces a real string[] and .some() works.
+    const tailored = makeAnchorItemBN("tailored", "tailored");
+    const soft = makeAnchorItemBN("soft", "soft");
+    // Must not throw; real array ["structured-shape"] → tailored wins
+    const selected = await autoSelectClosetAnchor("any", { ...STRUCTURED_SIGNALS, bodyNeeds: ["structured-shape"] }, async () => [soft, tailored]);
+    assert.ok(selected !== null, "anchor must return a result — no TypeError on .some()");
+    assert.equal(selected!.id, "tailored", "tailored must win when bodyNeeds is a real parsed array");
+  });
+
+  it("BNA.7 bodyNeeds empty array (malformed-JSON fallback) → no crash, no body-need bonus", async () => {
+    // Mirrors what happens when JSON.parse fails and source.tsx falls back to [].
+    const tailored = makeAnchorItemBN("tailored", "tailored");
+    const soft = makeAnchorItemBN("soft", "soft");
+    const selected = await autoSelectClosetAnchor("any", { ...NEUTRAL_SIGNALS, bodyNeeds: [] }, async () => [soft, tailored]);
+    assert.ok(selected !== null, "anchor must return a result even with empty bodyNeeds");
+    // No body-need bonus → insertion order decides; soft is first in list
+    assert.equal(selected!.id, "soft", "with no body-need bonus, insertion-order first item wins");
+  });
+
+  it("BNA.8 bodyNeeds undefined → no crash, falls back to [] internally", async () => {
+    const tailored = makeAnchorItemBN("tailored", "tailored");
+    const soft = makeAnchorItemBN("soft", "soft");
+    const selected = await autoSelectClosetAnchor("any", { ...NEUTRAL_SIGNALS, bodyNeeds: undefined }, async () => [soft, tailored]);
+    assert.ok(selected !== null, "anchor must return a result when bodyNeeds is omitted");
+  });
 });

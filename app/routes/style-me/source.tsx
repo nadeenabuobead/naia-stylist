@@ -204,7 +204,12 @@ export async function action({ request }: ActionFunctionArgs) {
       const formalityConditional = session.get("styleMeFormalityConditional") as string | null | undefined;
       const intentionsRaw = session.get("styleMeIntentions") as string | undefined;
       const intentions = intentionsRaw ? (JSON.parse(intentionsRaw) as string[]) : [];
-      const bodyNeeds = (session.get("styleMeBodyNeeds") as string[] | undefined) ?? [];
+      const bodyNeedsRaw = session.get("styleMeBodyNeeds") as string | string[] | undefined;
+      const bodyNeeds: string[] = !bodyNeedsRaw
+        ? []
+        : Array.isArray(bodyNeedsRaw)
+        ? bodyNeedsRaw
+        : (() => { try { return JSON.parse(bodyNeedsRaw) as string[]; } catch { return []; } })();
 
       const naiaCustomer = await getCurrentNaiaCustomer(request);
       if (!naiaCustomer) {
