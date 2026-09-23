@@ -22,6 +22,8 @@ export type ShopperProfileEvidence = {
 };
 
 export type ShopperClosetItemEvidence = {
+  /** ClosetItem.id — carried so a stored historical edit can re-resolve its image. */
+  id: string;
   name: string | null;
   imageUrl: string | null;
   category: string;
@@ -76,6 +78,7 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
         take: 20,
         orderBy: { createdAt: "desc" },
         select: {
+          id: true,
           name: true,
           imageUrl: true,
           imagePublicId: true,
@@ -141,6 +144,7 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
       becoming: profile.becoming ?? [],
     } : null,
     closetItems: customer.closetItems.map((item) => ({
+      id: item.id,
       name: item.name,
       imageUrl: item.imageUrl
         ?? (item.imagePublicId && item.imageFormat && cloudinaryCfg
@@ -1813,6 +1817,9 @@ type CustomerStyleEvidence = {
 // ---------------------------------------------------------------------------
 
 export type EvidenceClosetItem = {
+  /** ClosetItem.id — the stable reference a historical snapshot stores instead
+   *  of an expiring signed URL, so replay can re-resolve a fresh image. */
+  closetItemId: string;
   name: string;
   imageUrl: string | null;
   category: string;
@@ -1988,6 +1995,7 @@ export function buildShopperEdit(
     : null;
 
   const evidenceClosetItems: EvidenceClosetItem[] = namedMatches.map(({ item }) => ({
+    closetItemId: item.id,
     name: item.name!,
     imageUrl: item.imageUrl,
     category: item.category,

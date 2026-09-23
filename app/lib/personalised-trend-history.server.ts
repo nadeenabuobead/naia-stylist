@@ -4,19 +4,23 @@
 // customerId always comes from the authenticated session.
 //
 // ── THE FAILURE BOUNDARY ─────────────────────────────────────────────────────
-// Reading a trend edit must never fail because a background write failed. But
-// nothing may claim to have been saved when it was not. So:
+// Reading a trend edit must never fail because a background write failed, and
+// nothing may claim to have been saved when it was not.
 //
-//   * the unlock and the snapshot are two independent single-row upserts. There
-//     is no multi-row write, so neither can be left half-written, and no
-//     transaction is needed to keep them consistent.
-//   * either one failing is caught, logged and reported honestly in the return
-//     value. The page still renders.
-//   * the two are NOT wrapped together. An unlock without a snapshot is fine —
-//     she did receive the edit, and the snapshot lands on the next load. A
-//     snapshot without an unlock is fine too — the unlock is idempotent and
-//     lands next time. Neither state is corrupt, and binding them in one
-//     transaction would trade a benign gap for a harder failure mode.
+// FIRST RECEIPT IS ATOMIC. The first time a customer receives a report, the
+// snapshot and the unlock are written in ONE interactive transaction. Either
+// both land or neither does. The two bad states are ruled out by construction:
+//
+//   unlock without snapshot  → allowance consumed, nothing stored
+//   snapshot without unlock  → history exists, usage disagrees
+//
+// Afterwards there is nothing to make atomic: the unlock already exists, so a
+// later version is a single-row insert, and an identical refresh writes nothing
+// at all. Replay writes nothing.
+//
+// If the transaction fails the route still renders the freshly generated edit —
+// that is the safest thing for the customer — but reports persisted:false and
+// consumes no unlock. The next successful load writes both.
 
 import prisma from "../db.server";
 import { getUsageWindow } from "./plan/usage-window.server";
@@ -30,6 +34,11 @@ import {
   type SnapshotRecord,
 } from "./personalised-trend-history";
 import type { ShopperEdit } from "./trend-evidence.server";
+import {
+  getCloudinaryConfig,
+  validatePublicIdOwnership,
+  buildPrivateDownloadUrl,
+} from "./cloudinary-admin.server";
 
 export interface RecordEditInput {
   customerId: string;
@@ -53,42 +62,14 @@ export interface RecordEditResult {
 }
 
 /**
- * Grant the unlock for this report if it is not already granted.
- *
- * One row per (customerId, reportId), permanently. Reopening next month,
- * refreshing, an engine bump, a republish and a history open all resolve to the
- * same row and grant nothing.
- */
-async function ensureUnlock(
-  customerId: string,
-  reportId: string,
-  reportSlug: string,
-): Promise<{ created: boolean }> {
-  const existing = await prisma.personalisedTrendEditUnlock.findUnique({
-    where: { customerId_reportId: { customerId, reportId } },
-    select: { id: true },
-  });
-  if (existing) return { created: false };
-
-  try {
-    await prisma.personalisedTrendEditUnlock.create({
-      data: { customerId, reportId, reportSlug, grantedPeriod: getUsageWindow().label },
-    });
-    return { created: true };
-  } catch (error) {
-    // Concurrent first-open of the same report. The other request won; this one
-    // consumed nothing, which is the correct outcome.
-    if ((error as { code?: string })?.code === "P2002") return { created: false };
-    throw error;
-  }
-}
-
-/**
  * Store the edit as history, and grant the unlock.
  *
- * Idempotent on the snapshot hash: an identical render stores nothing. A
- * genuinely different render appends a NEW immutable row — existing snapshots
- * are never updated in place.
+ * Three paths, each doing the least work that is correct:
+ *
+ *   first receipt        snapshot + unlock in ONE transaction
+ *   already unlocked,
+ *     new output         snapshot only, single-row insert
+ *   identical refresh    nothing at all
  */
 export async function recordEditSnapshot(input: RecordEditInput): Promise<RecordEditResult> {
   const result: RecordEditResult = {
@@ -99,69 +80,98 @@ export async function recordEditSnapshot(input: RecordEditInput): Promise<Record
     snapshotId: null,
   };
 
-  // Entitlement first: receiving the edit is what the allowance is for, and it
-  // is the cheaper, smaller write.
-  try {
-    const unlock = await ensureUnlock(input.customerId, input.reportId, input.reportSlug);
-    result.unlockCreated = unlock.created;
-    result.unlockPersisted = true;
-  } catch (error) {
-    console.error("[trend-history] unlock write failed", error);
-  }
+  const snapshotHash = computeSnapshotHash({
+    engineVersion: PERSONALISED_EDIT_ENGINE_VERSION,
+    reportId: input.reportId,
+    reportSlug: input.reportSlug,
+    reportTitle: input.reportTitle,
+    reportSeason: input.reportSeason,
+    edit: input.edit,
+  });
+
+  const snapshotData = {
+    customerId: input.customerId,
+    reportId: input.reportId,
+    reportSlug: input.reportSlug,
+    reportTitle: input.reportTitle,
+    reportSeason: input.reportSeason,
+    engineVersion: PERSONALISED_EDIT_ENGINE_VERSION,
+    snapshotHash,
+    // Sanitised: expiring signed image URLs never enter storage.
+    edit: sanitiseEditForSnapshot(input.edit) as unknown as object,
+    evidenceSummary: summariseEditEvidence(input.edit) as unknown as object,
+  };
 
   try {
-    const snapshotHash = computeSnapshotHash({
-      reportId: input.reportId,
-      engineVersion: PERSONALISED_EDIT_ENGINE_VERSION,
-      edit: input.edit,
-    });
-
-    const existing = await prisma.personalisedTrendEdit.findUnique({
-      where: {
-        customerId_reportId_snapshotHash: {
-          customerId: input.customerId,
-          reportId: input.reportId,
-          snapshotHash,
+    const [existingUnlock, existingSnapshot] = await Promise.all([
+      prisma.personalisedTrendEditUnlock.findUnique({
+        where: { customerId_reportId: { customerId: input.customerId, reportId: input.reportId } },
+        select: { id: true },
+      }),
+      prisma.personalisedTrendEdit.findUnique({
+        where: {
+          customerId_reportId_snapshotHash: {
+            customerId: input.customerId, reportId: input.reportId, snapshotHash,
+          },
         },
-      },
-      select: { id: true },
-    });
+        select: { id: true },
+      }),
+    ]);
 
-    if (existing) {
-      result.snapshotId = existing.id;
+    // ── Identical refresh ────────────────────────────────────────────────
+    if (existingUnlock && existingSnapshot) {
+      result.snapshotId = existingSnapshot.id;
+      result.snapshotPersisted = true;
+      result.unlockPersisted = true;
+      return result;
+    }
+
+    // ── Already unlocked, output changed ─────────────────────────────────
+    if (existingUnlock) {
+      result.unlockPersisted = true;
+      const created = await prisma.personalisedTrendEdit.create({ data: snapshotData, select: { id: true } });
+      result.snapshotId = created.id;
+      result.snapshotCreated = true;
       result.snapshotPersisted = true;
       return result;
     }
 
-    const created = await prisma.personalisedTrendEdit.create({
-      data: {
-        customerId: input.customerId,
-        reportId: input.reportId,
-        reportSlug: input.reportSlug,
-        reportTitle: input.reportTitle,
-        reportSeason: input.reportSeason,
-        engineVersion: PERSONALISED_EDIT_ENGINE_VERSION,
-        snapshotHash,
-        // Sanitised: expiring signed image URLs are never stored.
-        edit: sanitiseEditForSnapshot(input.edit) as unknown as object,
-        evidenceSummary: summariseEditEvidence(input.edit) as unknown as object,
-      },
-      select: { id: true },
+    // ── First receipt — both rows, or neither ────────────────────────────
+    const created = await prisma.$transaction(async (tx: typeof prisma) => {
+      await tx.personalisedTrendEditUnlock.create({
+        data: {
+          customerId: input.customerId,
+          reportId: input.reportId,
+          reportSlug: input.reportSlug,
+          grantedPeriod: getUsageWindow().label,
+        },
+      });
+      // An identical snapshot can already exist without an unlock only if an
+      // earlier first receipt half-failed before this change; reuse it rather
+      // than colliding.
+      return existingSnapshot
+        ? existingSnapshot
+        : tx.personalisedTrendEdit.create({ data: snapshotData, select: { id: true } });
     });
 
     result.snapshotId = created.id;
-    result.snapshotCreated = true;
+    result.snapshotCreated = !existingSnapshot;
     result.snapshotPersisted = true;
+    result.unlockCreated = true;
+    result.unlockPersisted = true;
+    return result;
   } catch (error) {
+    // A concurrent first receipt of the same report: the other request wrote
+    // both rows. Nothing was consumed here and nothing is half-written.
     if ((error as { code?: string })?.code === "P2002") {
-      // Concurrent identical render — the other request stored it.
-      result.snapshotPersisted = true;
+      console.warn("[trend-history] concurrent write absorbed", input.reportId);
       return result;
     }
-    console.error("[trend-history] snapshot write failed", error);
+    // Anything else: the transaction rolled back, so no partial state exists.
+    // Report honestly and let the route render the edit it already generated.
+    console.error("[trend-history] persistence failed — nothing was written", error);
+    return result;
   }
-
-  return result;
 }
 
 // ── Reading history ───────────────────────────────────────────────────────────
@@ -247,4 +257,56 @@ export async function countUnlocksThisWindow(customerId: string): Promise<number
   return prisma.personalisedTrendEditUnlock.count({
     where: { customerId, grantedAt: { gte: window.start, lt: window.end } },
   });
+}
+
+// ── Historical media ──────────────────────────────────────────────────────────
+
+/**
+ * Re-sign images for a stored snapshot's closet pieces.
+ *
+ * A snapshot never stores a signed URL — those expire in ten minutes. It stores
+ * the closetItemId instead, so replay can mint a FRESH url for the SAME piece.
+ * Not a word of the personalised edit is regenerated: this only fills in
+ * `imageUrl` on items the snapshot already named.
+ *
+ * Scoped by customerId, and the Cloudinary public id is ownership-checked before
+ * signing, so a snapshot can never surface another customer's photograph. A
+ * piece she has since deleted simply keeps its label and loses its thumbnail.
+ */
+export async function resolveSnapshotImages(
+  customerId: string,
+  edit: ShopperEdit,
+): Promise<ShopperEdit> {
+  const items = edit.evidenceClosetItems ?? [];
+  const ids = items.map((i) => i.closetItemId).filter(Boolean);
+  if (ids.length === 0) return edit;
+
+  const rows: Array<{ id: string; imageUrl: string | null; imagePublicId: string | null; imageFormat: string | null }> =
+    await prisma.closetItem.findMany({
+      where: { id: { in: ids }, customerId },
+      select: { id: true, imageUrl: true, imagePublicId: true, imageFormat: true },
+    });
+
+  const cfg = getCloudinaryConfig();
+  const urlById = new Map<string, string | null>();
+  for (const row of rows) {
+    let url: string | null = null;
+    if (row.imagePublicId && row.imageFormat && cfg) {
+      const ownership = validatePublicIdOwnership(row.imagePublicId, customerId);
+      if (ownership.ok) {
+        url = buildPrivateDownloadUrl(cfg, row.imagePublicId, row.imageFormat, "private");
+      }
+    }
+    urlById.set(row.id, url ?? row.imageUrl ?? null);
+  }
+
+  return {
+    ...edit,
+    evidenceClosetItems: items.map((item) => ({
+      ...item,
+      // Deleted piece or unavailable asset → stays null, and the historical
+      // edit renders from its stored label.
+      imageUrl: urlById.get(item.closetItemId) ?? null,
+    })),
+  };
 }

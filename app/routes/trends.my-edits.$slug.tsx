@@ -20,7 +20,7 @@ import {
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import SaveControl, { saveControlCss } from "~/components/SaveControl";
 import { loadReportSaveState, type ReportSaveState } from "~/lib/saved-items.server";
-import { recordEditSnapshot, loadSnapshot } from "~/lib/personalised-trend-history.server";
+import { recordEditSnapshot, loadSnapshot, resolveSnapshotImages } from "~/lib/personalised-trend-history.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 type LoaderData = {
@@ -82,7 +82,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         published: false,
         publishedAt: "",
       }) as TrendReportData,
-      edit: snapshot.edit,
+      // Fresh signed URLs for the SAME pieces the snapshot named. The stored
+      // personalised copy is untouched — only imageUrl is filled in.
+      edit: await resolveSnapshotImages(customer.id, snapshot.edit),
       hasProfile: true,
       generationFailed: false,
       nadineRecommendation: null,

@@ -94,6 +94,9 @@ vi.mock("~/lib/personalised-trend-history.server", () => ({
     snapshotPersisted: true, unlockPersisted: true, snapshotId: "snap_1",
   })),
   loadSnapshot: vi.fn(async () => null),
+  // Replay re-signs images for the pieces the snapshot named; it must not alter
+  // the stored personalised copy, so the identity function is the right stub.
+  resolveSnapshotImages: vi.fn(async (_customerId: string, edit: unknown) => edit),
 }));
 
 vi.mock("~/styles/naia-design-system.css?url", () => ({ default: "/styles.css" }));

@@ -18,65 +18,99 @@ interface UnlockRow {
   grantedAt: Date; grantedPeriod: string;
 }
 
-const db = { snapshots: [] as SnapRow[], unlocks: [] as UnlockRow[], failSnapshotWrite: false, failUnlockWrite: false };
-let seq = 0;
+vi.mock("./cloudinary-admin.server", () => ({
+  getCloudinaryConfig: () => ({ cloudName: "test", apiKey: "k", apiSecret: "s" }),
+  validatePublicIdOwnership: (publicId: string, customerId: string) => ({ ok: publicId.includes(customerId) }),
+  buildPrivateDownloadUrl: (_c: unknown, publicId: string) => `https://signed.test/${publicId}?ts=${Date.now()}`,
+}));
 
-function uniqueViolation() {
-  return Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
-}
+interface ClosetRow { id: string; customerId: string; imageUrl: string | null; imagePublicId: string | null; imageFormat: string | null }
 
-vi.mock("../db.server", () => ({
-  default: {
+// vi.mock factories are hoisted above every top-level const, so the store and
+// the fake client are created inside vi.hoisted() where the factory can see them.
+const { db, fakePrisma, resetSeq } = vi.hoisted(() => {
+  const store = {
+    snapshots: [] as SnapRow[], unlocks: [] as UnlockRow[], closetItems: [] as ClosetRow[],
+    failSnapshotWrite: false, failUnlockWrite: false,
+  };
+  let counter = 0;
+  const uniqueViolation = () => Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const client: any = {};
+  Object.assign(client, {
     personalisedTrendEdit: {
       findUnique: vi.fn(async ({ where }: never) => {
         const w = (where as Record<string, never>).customerId_reportId_snapshotHash as unknown as
           { customerId: string; reportId: string; snapshotHash: string };
-        return db.snapshots.find((s) => s.customerId === w.customerId && s.reportId === w.reportId && s.snapshotHash === w.snapshotHash) ?? null;
+        return store.snapshots.find((s) => s.customerId === w.customerId && s.reportId === w.reportId && s.snapshotHash === w.snapshotHash) ?? null;
       }),
       findFirst: vi.fn(async ({ where }: never) => {
         const w = where as unknown as { id: string; customerId: string };
-        return db.snapshots.find((s) => s.id === w.id && s.customerId === w.customerId) ?? null;
+        return store.snapshots.find((s) => s.id === w.id && s.customerId === w.customerId) ?? null;
       }),
       findMany: vi.fn(async ({ where }: never) => {
         const w = where as unknown as { customerId: string };
-        return db.snapshots
+        return store.snapshots
           .filter((s) => s.customerId === w.customerId)
           .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
       }),
       create: vi.fn(async ({ data }: never) => {
-        if (db.failSnapshotWrite) throw new Error("connection lost");
+        if (store.failSnapshotWrite) throw new Error("connection lost");
         const d = data as unknown as Omit<SnapRow, "id" | "createdAt">;
-        if (db.snapshots.some((s) => s.customerId === d.customerId && s.reportId === d.reportId && s.snapshotHash === d.snapshotHash)) {
+        if (store.snapshots.some((s) => s.customerId === d.customerId && s.reportId === d.reportId && s.snapshotHash === d.snapshotHash)) {
           throw uniqueViolation();
         }
-        const row: SnapRow = { ...d, id: `snap_${++seq}`, createdAt: new Date(2026, 8, seq) };
-        db.snapshots.push(row);
+        const row: SnapRow = { ...d, id: `snap_${++counter}`, createdAt: new Date(2026, 8, counter) };
+        store.snapshots.push(row);
         return row;
       }),
     },
+    closetItem: {
+      findMany: vi.fn(async ({ where }: never) => {
+        const w = where as unknown as { id: { in: string[] }; customerId: string };
+        return store.closetItems.filter((c) => w.id.in.includes(c.id) && c.customerId === w.customerId);
+      }),
+    },
+    // Interactive transaction with REAL rollback: the store is snapshotted
+    // before the callback and restored if it throws.
+    $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
+      const before = { snapshots: [...store.snapshots], unlocks: [...store.unlocks] };
+      try {
+        return await fn(client);
+      } catch (error) {
+        store.snapshots = before.snapshots;
+        store.unlocks = before.unlocks;
+        throw error;
+      }
+    }),
     personalisedTrendEditUnlock: {
       findUnique: vi.fn(async ({ where }: never) => {
         const w = (where as Record<string, never>).customerId_reportId as unknown as { customerId: string; reportId: string };
-        return db.unlocks.find((u) => u.customerId === w.customerId && u.reportId === w.reportId) ?? null;
+        return store.unlocks.find((u) => u.customerId === w.customerId && u.reportId === w.reportId) ?? null;
       }),
       create: vi.fn(async ({ data }: never) => {
-        if (db.failUnlockWrite) throw new Error("connection lost");
+        if (store.failUnlockWrite) throw new Error("connection lost");
         const d = data as unknown as Omit<UnlockRow, "id" | "grantedAt">;
-        if (db.unlocks.some((u) => u.customerId === d.customerId && u.reportId === d.reportId)) throw uniqueViolation();
-        const row: UnlockRow = { ...d, id: `unlock_${++seq}`, grantedAt: new Date() };
-        db.unlocks.push(row);
+        if (store.unlocks.some((u) => u.customerId === d.customerId && u.reportId === d.reportId)) throw uniqueViolation();
+        const row: UnlockRow = { ...d, id: `unlock_${++counter}`, grantedAt: new Date() };
+        store.unlocks.push(row);
         return row;
       }),
       count: vi.fn(async ({ where }: never) => {
         const w = where as unknown as { customerId: string; grantedAt: { gte: Date; lt: Date } };
-        return db.unlocks.filter((u) => u.customerId === w.customerId && u.grantedAt >= w.grantedAt.gte && u.grantedAt < w.grantedAt.lt).length;
+        return store.unlocks.filter((u) => u.customerId === w.customerId && u.grantedAt >= w.grantedAt.gte && u.grantedAt < w.grantedAt.lt).length;
       }),
     },
-  },
-}));
+  });
+  return { db: store, fakePrisma: { default: client as Record<string, any> }, resetSeq: () => { counter = 0; } };
+});
+
+vi.mock("../db.server", () => fakePrisma);
 
 import {
   recordEditSnapshot,
+  resolveSnapshotImages,
   loadSnapshot,
   loadHistoryCards,
   countUnlocksThisWindow,
@@ -98,8 +132,9 @@ const record = (customerId: string, report = REPORT_A, e = edit()) =>
   recordEditSnapshot({ customerId, ...report, edit: e });
 
 beforeEach(() => {
-  db.snapshots = []; db.unlocks = []; db.failSnapshotWrite = false; db.failUnlockWrite = false;
-  seq = 0;
+  db.snapshots = []; db.unlocks = []; db.closetItems = [];
+  db.failSnapshotWrite = false; db.failUnlockWrite = false;
+  resetSeq();
   vi.clearAllMocks();
 });
 
@@ -139,14 +174,14 @@ describe("§PS-1 snapshot persistence", () => {
     expect(db.snapshots).toHaveLength(2);
   });
 
-  it("a concurrent identical write is absorbed, not surfaced as an error", async () => {
+  it("a concurrent duplicate insert is absorbed, not surfaced as an error", async () => {
     await record("cust-1");
-    // Simulate the race: the pre-check misses, the insert collides.
-    const prisma = (await import("../db.server")).default as never as { personalisedTrendEdit: { findUnique: ReturnType<typeof vi.fn> } };
-    prisma.personalisedTrendEdit.findUnique.mockResolvedValueOnce(null);
-    const r = await record("cust-1");
-    expect(r.snapshotPersisted).toBe(true);
+    // The race: both requests' pre-checks miss, the second insert collides.
+    fakePrisma.default.personalisedTrendEdit.findUnique.mockResolvedValueOnce(null);
+    fakePrisma.default.personalisedTrendEditUnlock.findUnique.mockResolvedValueOnce(null);
+    await expect(record("cust-1")).resolves.toBeDefined();
     expect(db.snapshots).toHaveLength(1);
+    expect(db.unlocks).toHaveLength(1);
   });
 });
 
@@ -186,8 +221,7 @@ describe("§PS-2 unlock semantics", () => {
 
   it("a concurrent first-open grants exactly one unlock", async () => {
     await record("cust-1");
-    const prisma = (await import("../db.server")).default as never as { personalisedTrendEditUnlock: { findUnique: ReturnType<typeof vi.fn> } };
-    prisma.personalisedTrendEditUnlock.findUnique.mockResolvedValueOnce(null);
+    fakePrisma.default.personalisedTrendEditUnlock.findUnique.mockResolvedValueOnce(null);
     const r = await record("cust-1");
     expect(r.unlockCreated).toBe(false);
     expect(db.unlocks).toHaveLength(1);
@@ -290,44 +324,145 @@ describe("§PS-5 monthlyUsed counts unlocks", () => {
   });
 });
 
-// ── §PS-6 the failure boundary ───────────────────────────────────────────────
+// ── §PS-6 FIRST RECEIPT IS ATOMIC ───────────────────────────────────────────
+//
+// The two states that must be impossible:
+//   unlock without snapshot  → allowance consumed, nothing stored
+//   snapshot without unlock  → history exists, usage disagrees
 
-describe("§PS-6 failure boundary", () => {
-  it("a failed snapshot write does not pretend history was saved", async () => {
-    db.failSnapshotWrite = true;
+describe("§PS-6 atomic first receipt", () => {
+  it("writes both rows in ONE transaction", async () => {
     const r = await record("cust-1");
-    expect(r.snapshotPersisted).toBe(false);
-    expect(r.snapshotCreated).toBe(false);
-    expect(db.snapshots).toHaveLength(0);
-  });
-
-  it("a failed snapshot write does not corrupt or block the unlock", async () => {
-    db.failSnapshotWrite = true;
-    const r = await record("cust-1");
-    expect(r.unlockPersisted).toBe(true);
+    expect(fakePrisma.default.$transaction).toHaveBeenCalledTimes(1);
+    expect(r.snapshotCreated).toBe(true);
+    expect(r.unlockCreated).toBe(true);
+    expect(db.snapshots).toHaveLength(1);
     expect(db.unlocks).toHaveLength(1);
   });
 
-  it("the snapshot lands on the next successful load", async () => {
+  it("SNAPSHOT side throws → NEITHER row survives", async () => {
+    db.failSnapshotWrite = true;
+    const r = await record("cust-1");
+    expect(db.snapshots).toHaveLength(0);
+    expect(db.unlocks).toHaveLength(0);          // the unlock rolled back with it
+    expect(r.snapshotPersisted).toBe(false);
+    expect(r.unlockPersisted).toBe(false);
+    expect(r.unlockCreated).toBe(false);          // no allowance consumed
+  });
+
+  it("UNLOCK side throws → NEITHER row survives", async () => {
+    db.failUnlockWrite = true;
+    const r = await record("cust-1");
+    expect(db.unlocks).toHaveLength(0);
+    expect(db.snapshots).toHaveLength(0);
+    expect(r.snapshotPersisted).toBe(false);
+    expect(r.unlockPersisted).toBe(false);
+  });
+
+  it("never reports persisted when nothing was written", async () => {
+    db.failSnapshotWrite = true;
+    const r = await record("cust-1");
+    expect(r).toEqual({
+      snapshotCreated: false, unlockCreated: false,
+      snapshotPersisted: false, unlockPersisted: false, snapshotId: null,
+    });
+  });
+
+  it("a failed first receipt leaves the NEXT load able to write both", async () => {
     db.failSnapshotWrite = true;
     await record("cust-1");
     db.failSnapshotWrite = false;
+
     const r = await record("cust-1");
     expect(r.snapshotCreated).toBe(true);
-    expect(db.unlocks).toHaveLength(1);   // still exactly one — no double grant
-  });
-
-  it("a failed unlock write does not block history", async () => {
-    db.failUnlockWrite = true;
-    const r = await record("cust-1");
-    expect(r.unlockPersisted).toBe(false);
-    expect(r.snapshotPersisted).toBe(true);
+    expect(r.unlockCreated).toBe(true);
     expect(db.snapshots).toHaveLength(1);
+    expect(db.unlocks).toHaveLength(1);
   });
 
-  it("neither failure throws — the page still renders", async () => {
+  it("a failure never throws — the route still renders the generated edit", async () => {
     db.failSnapshotWrite = true;
     db.failUnlockWrite = true;
     await expect(record("cust-1")).resolves.toBeDefined();
+  });
+
+  it("AFTER first receipt, a new version needs no transaction", async () => {
+    await record("cust-1");
+    vi.mocked(fakePrisma.default.$transaction).mockClear();
+
+    const r = await record("cust-1", REPORT_A, edit({ aLookToTry: "Changed." }));
+    expect(fakePrisma.default.$transaction).not.toHaveBeenCalled();
+    expect(r.snapshotCreated).toBe(true);
+    expect(r.unlockCreated).toBe(false);
+    expect(db.unlocks).toHaveLength(1);
+  });
+
+  it("a later snapshot failure cannot revoke an existing unlock", async () => {
+    await record("cust-1");
+    db.failSnapshotWrite = true;
+
+    const r = await record("cust-1", REPORT_A, edit({ aLookToTry: "Changed." }));
+    expect(r.snapshotPersisted).toBe(false);
+    expect(db.unlocks).toHaveLength(1);        // untouched
+    expect(db.snapshots).toHaveLength(1);      // the original survives
+  });
+
+  it("an identical refresh writes nothing and opens no transaction", async () => {
+    await record("cust-1");
+    vi.mocked(fakePrisma.default.$transaction).mockClear();
+
+    const r = await record("cust-1");
+    expect(fakePrisma.default.$transaction).not.toHaveBeenCalled();
+    expect(r.snapshotCreated).toBe(false);
+    expect(r.unlockCreated).toBe(false);
+    expect(r.snapshotPersisted).toBe(true);
+    expect(r.unlockPersisted).toBe(true);
+  });
+});
+
+// ── §PS-7 historical media ───────────────────────────────────────────────────
+
+describe("§PS-7 historical images", () => {
+  const withItem = (closetItemId: string) => edit({
+    evidenceClosetItems: [{ closetItemId, name: "Navy Blazer", imageUrl: null, category: "OUTERWEAR", roleNote: "Anchor." }],
+  } as Partial<ShopperEdit>);
+
+  it("re-signs a FRESH url for the same piece", async () => {
+    db.closetItems.push({ id: "ci_1", customerId: "cust-1", imageUrl: null, imagePublicId: "naia/cust-1/blazer", imageFormat: "jpg" });
+    const resolved = await resolveSnapshotImages("cust-1", withItem("ci_1"));
+    expect(resolved.evidenceClosetItems[0].imageUrl).toContain("signed.test");
+  });
+
+  it("leaves the personalised copy untouched", async () => {
+    db.closetItems.push({ id: "ci_1", customerId: "cust-1", imageUrl: null, imagePublicId: "naia/cust-1/blazer", imageFormat: "jpg" });
+    const original = withItem("ci_1");
+    const resolved = await resolveSnapshotImages("cust-1", original);
+    expect(resolved.aLookToTry).toBe(original.aLookToTry);
+    expect(resolved.evidenceClosetItems[0].name).toBe("Navy Blazer");
+    expect(resolved.evidenceClosetItems[0].roleNote).toBe("Anchor.");
+  });
+
+  it("a DELETED piece keeps its label and loses only the image", async () => {
+    const resolved = await resolveSnapshotImages("cust-1", withItem("ci_gone"));
+    expect(resolved.evidenceClosetItems[0].imageUrl).toBeNull();
+    expect(resolved.evidenceClosetItems[0].name).toBe("Navy Blazer");
+  });
+
+  it("cannot surface another customer's photograph", async () => {
+    db.closetItems.push({ id: "ci_1", customerId: "cust-2", imageUrl: null, imagePublicId: "naia/cust-2/blazer", imageFormat: "jpg" });
+    const resolved = await resolveSnapshotImages("cust-1", withItem("ci_1"));
+    expect(resolved.evidenceClosetItems[0].imageUrl).toBeNull();
+  });
+
+  it("refuses to sign a public id that fails the ownership check", async () => {
+    db.closetItems.push({ id: "ci_1", customerId: "cust-1", imageUrl: null, imagePublicId: "naia/someone-else/blazer", imageFormat: "jpg" });
+    const resolved = await resolveSnapshotImages("cust-1", withItem("ci_1"));
+    expect(resolved.evidenceClosetItems[0].imageUrl).toBeNull();
+  });
+
+  it("does no work when the edit names no pieces", async () => {
+    const resolved = await resolveSnapshotImages("cust-1", edit());
+    expect(resolved.evidenceClosetItems).toHaveLength(0);
+    expect(fakePrisma.default.closetItem.findMany).not.toHaveBeenCalled();
   });
 });

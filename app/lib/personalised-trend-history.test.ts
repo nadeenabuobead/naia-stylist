@@ -7,8 +7,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
+import { createHash } from "node:crypto";
 import {
   computeSnapshotHash,
+  buildFingerprintPayload,
   canonicalJson,
   sanitiseEditForSnapshot,
   summariseEditEvidence,
@@ -27,7 +29,7 @@ function edit(overrides: Partial<ShopperEdit> = {}): ShopperEdit {
     evidenceStyleDna: "Your style DNA says…",
     evidencePassportSays: "Your Passport says…",
     evidenceClosetItems: [
-      { name: "Navy Blazer", imageUrl: null, category: "OUTERWEAR", roleNote: "Your tailored anchor." },
+      { closetItemId: "ci_1", name: "Navy Blazer", imageUrl: null, category: "OUTERWEAR", roleNote: "Your tailored anchor." },
     ],
     evidenceReviews: null,
     lowDataNotice: null,
@@ -42,8 +44,11 @@ function edit(overrides: Partial<ShopperEdit> = {}): ShopperEdit {
   } as ShopperEdit;
 }
 
-const hash = (e: ShopperEdit, reportId = REPORT_ID) =>
-  computeSnapshotHash({ reportId, engineVersion: PERSONALISED_EDIT_ENGINE_VERSION, edit: e });
+const META = { reportSlug: "autumn-edit", reportTitle: "Autumn Edit", reportSeason: "September 2026" };
+const hash = (e: ShopperEdit, over: Partial<{ reportId: string; reportSlug: string; reportTitle: string; reportSeason: string; engineVersion: string }> = {}) =>
+  computeSnapshotHash({
+    reportId: REPORT_ID, engineVersion: PERSONALISED_EDIT_ENGINE_VERSION, ...META, ...over, edit: e,
+  });
 
 // ── §PH-1 canonical serialisation ────────────────────────────────────────────
 
@@ -75,36 +80,71 @@ describe("§PH-2 snapshot hash", () => {
   });
 
   it("changes when the engine version changes", () => {
-    const a = computeSnapshotHash({ reportId: REPORT_ID, engineVersion: "1.0.0", edit: edit() });
-    const b = computeSnapshotHash({ reportId: REPORT_ID, engineVersion: "2.0.0", edit: edit() });
-    assert.notEqual(a, b);
+    assert.notEqual(hash(edit()), hash(edit(), { engineVersion: "2.0.0" }));
   });
 
   it("separates reports", () => {
-    assert.notEqual(hash(edit()), hash(edit(), "cmq8f2k1a0001zz98yy76xx54"));
+    assert.notEqual(hash(edit()), hash(edit(), { reportId: "cmq8f2k1a0001zz98yy76xx54" }));
+  });
+
+  it("changes when the user-visible report TITLE changes", () => {
+    // The same advice under a different masthead is not the same historical
+    // presentation, so history records it as a new version.
+    assert.notEqual(hash(edit()), hash(edit(), { reportTitle: "Autumn Edit, Revised" }));
+  });
+
+  it("changes when the SEASON label changes", () => {
+    assert.notEqual(hash(edit()), hash(edit(), { reportSeason: "October 2026" }));
+  });
+
+  it("changes when the SLUG changes", () => {
+    assert.notEqual(hash(edit()), hash(edit(), { reportSlug: "autumn-edit-2026" }));
   });
 
   it("IGNORES expiring signed image URLs — the duplicate-per-refresh trap", () => {
     // Signed Cloudinary URLs embed timestamp + expires_at and differ on every
     // request. If they entered the hash, every refresh would mint a new row.
     const first = edit({
-      evidenceClosetItems: [{ name: "Navy Blazer", imageUrl: "https://res.cloudinary.test/x?timestamp=111&expires_at=711", category: "OUTERWEAR", roleNote: "Your tailored anchor." }],
+      evidenceClosetItems: [{ closetItemId: "ci_1", name: "Navy Blazer", imageUrl: "https://res.cloudinary.test/x?timestamp=111&expires_at=711", category: "OUTERWEAR", roleNote: "Your tailored anchor." }],
     } as Partial<ShopperEdit>);
     const second = edit({
-      evidenceClosetItems: [{ name: "Navy Blazer", imageUrl: "https://res.cloudinary.test/x?timestamp=222&expires_at=822", category: "OUTERWEAR", roleNote: "Your tailored anchor." }],
+      evidenceClosetItems: [{ closetItemId: "ci_1", name: "Navy Blazer", imageUrl: "https://res.cloudinary.test/x?timestamp=222&expires_at=822", category: "OUTERWEAR", roleNote: "Your tailored anchor." }],
     } as Partial<ShopperEdit>);
     assert.equal(hash(first), hash(second));
   });
 
   it("still notices a genuinely different closet piece", () => {
     const other = edit({
-      evidenceClosetItems: [{ name: "Camel Coat", imageUrl: null, category: "OUTERWEAR", roleNote: "Your tailored anchor." }],
+      evidenceClosetItems: [{ closetItemId: "ci_2", name: "Camel Coat", imageUrl: null, category: "OUTERWEAR", roleNote: "Your tailored anchor." }],
     } as Partial<ShopperEdit>);
     assert.notEqual(hash(edit()), hash(other));
   });
 
-  it("produces a stable 32-char fingerprint", () => {
-    assert.match(hash(edit()), /^[0-9a-f]{32}$/);
+  it("is SHA-256 — a standard 64-char hex digest, no bespoke hashing", () => {
+    assert.match(hash(edit()), /^[0-9a-f]{64}$/);
+  });
+
+  it("matches an independent SHA-256 of the canonical payload", () => {
+    const expected = createHash("sha256")
+      .update(canonicalJson(buildFingerprintPayload({
+        reportId: REPORT_ID, engineVersion: PERSONALISED_EDIT_ENGINE_VERSION, ...META, edit: edit(),
+      })), "utf8")
+      .digest("hex");
+    assert.equal(hash(edit()), expected);
+  });
+
+  it("the fingerprint payload contains exactly the stable user-visible fields", () => {
+    const payload = buildFingerprintPayload({
+      reportId: REPORT_ID, engineVersion: PERSONALISED_EDIT_ENGINE_VERSION, ...META, edit: edit(),
+    });
+    assert.deepEqual(Object.keys(payload).sort(), [
+      "edit", "engineVersion", "reportId", "reportSeason", "reportSlug", "reportTitle",
+    ]);
+    // No ephemeral values.
+    const serialised = canonicalJson(payload);
+    for (const banned of ["createdAt", "generatedAt", "requestId", "evidenceSummary"]) {
+      assert.equal(serialised.includes(banned), false, `${banned} must not be fingerprinted`);
+    }
   });
 
   it("does not collide across many distinct edits", () => {
@@ -119,9 +159,14 @@ describe("§PH-2 snapshot hash", () => {
 describe("§PH-3 sanitisation", () => {
   it("strips signed image URLs — never store a credential that dies in ten minutes", () => {
     const sanitised = sanitiseEditForSnapshot(edit({
-      evidenceClosetItems: [{ name: "Navy Blazer", imageUrl: "https://res.cloudinary.test/signed?x=1", category: "OUTERWEAR", roleNote: "Anchor." }],
+      evidenceClosetItems: [{ closetItemId: "ci_1", name: "Navy Blazer", imageUrl: "https://res.cloudinary.test/signed?x=1", category: "OUTERWEAR", roleNote: "Anchor." }],
     } as Partial<ShopperEdit>));
     assert.equal(sanitised.evidenceClosetItems[0].imageUrl, null);
+  });
+
+  it("KEEPS the stable closet reference so replay can re-sign the image", () => {
+    const sanitised = sanitiseEditForSnapshot(edit());
+    assert.equal(sanitised.evidenceClosetItems[0].closetItemId, "ci_1");
   });
 
   it("keeps the labels the customer actually read", () => {
