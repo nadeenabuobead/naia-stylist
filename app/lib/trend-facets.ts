@@ -22,7 +22,13 @@
 //   silhouette    → ClosetItem.silhouette + fitProfile
 //   pattern       → ClosetItem.pattern             (GARMENT_PATTERN_VALUES)
 //   formalityBand → ClosetItem.formality           (GARMENT_FORMALITY_VALUES)
-//   visualWeight  → resolved visualWeight + curated construction
+//   visualWeight  → resolved visual weight         (light | medium | substantial)
+//   construction  → curated construction           (CONSTRUCTION_VALUES)
+//
+// visualWeight and construction are DIFFERENT AXES and an earlier draft wrongly
+// merged them. "soft" is a construction value; it is not a visual weight. A bag
+// trend about soft, unstructured shapes is construction:["soft"], and forcing it
+// into visualWeight would have matched against a field that can never hold it.
 //
 // Occasion, lifestyle and season are deliberately ABSENT. They already inform
 // personal relevance through the Passport inside buildShopperEdit, and matching
@@ -39,6 +45,11 @@ import {
   FIT_PROFILE_VALUES,
 } from "./ai/garment-intelligence.types";
 import { COLOUR_FAMILIES } from "./onboarding/quiz-data";
+import { CLOSET_CATEGORY_SET } from "./ai/closet-categories";
+import { CONSTRUCTION_VALUES } from "./admin/styleme-garment-profile.vocab";
+// Type-only — erased at build. Guards the visual-weight list against the
+// authoritative derived-intelligence type so the two cannot drift.
+import type { VisualWeight as ResolvedVisualWeight } from "./admin/garment-intelligence-v1.server";
 
 // ── Facet kinds ───────────────────────────────────────────────────────────────
 
@@ -51,6 +62,7 @@ export const FACET_KINDS = [
   "pattern",
   "formalityBand",
   "visualWeight",
+  "construction",
 ] as const;
 
 export type FacetKind = (typeof FACET_KINDS)[number];
@@ -68,16 +80,14 @@ export const FACET_KIND_LABELS: Readonly<Record<FacetKind, string>> = {
   silhouette:    "Silhouette",
   pattern:       "Pattern",
   formalityBand: "Formality",
-  visualWeight:  "Structure",
+  visualWeight:  "Visual weight",
+  construction:  "Structure",
 };
 
 // ── Vocabularies ──────────────────────────────────────────────────────────────
 
-/** ClosetCategory enum values. Mirrored here so this module stays free of Prisma. */
-export const FACET_CATEGORY_VALUES: ReadonlySet<string> = new Set([
-  "TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS",
-  "ACCESSORIES", "JEWELRY", "ACTIVEWEAR", "SWIMWEAR", "LOUNGEWEAR", "OTHER",
-]);
+/** ClosetCategory values, compile-time guarded against the Prisma enum. */
+export const FACET_CATEGORY_VALUES: ReadonlySet<string> = CLOSET_CATEGORY_SET;
 
 /** Passport colour-family ids — the vocabulary favourite/avoid matching already uses. */
 export const FACET_COLOUR_FAMILY_VALUES: ReadonlySet<string> = new Set(
@@ -95,14 +105,31 @@ export const FACET_SILHOUETTE_VALUES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Structure, in the two forms Garment Intelligence resolves it:
- * derived visual weight, and curated construction from an approved
- * GarmentStyleMeProfile.
+ * Resolved visual weight, as Wardrobe Intelligence resolves it per garment.
+ * Curated profiles store "heavy"; the loader maps it to "substantial", so the
+ * RESOLVED vocabulary is the one a facet must target.
+ *
+ * The satisfies clause below is the drift guard: this list must be exactly the
+ * authoritative ResolvedVisualWeight union, or the build fails.
  */
-export const FACET_VISUAL_WEIGHT_VALUES: ReadonlySet<string> = new Set([
-  "light", "medium", "substantial",                            // resolved visualWeight
-  "soft", "neutral", "structured", "tailored", "sculptural",   // curated construction
-]);
+const VISUAL_WEIGHT_TOKENS = ["light", "medium", "substantial"] as const satisfies readonly ResolvedVisualWeight[];
+
+type _WeightExhaustive = Exclude<ResolvedVisualWeight, (typeof VISUAL_WEIGHT_TOKENS)[number]> extends never
+  ? true
+  : never;
+const _weightGuard: _WeightExhaustive = true;
+void _weightGuard;
+
+export const FACET_VISUAL_WEIGHT_VALUES: ReadonlySet<string> = new Set(VISUAL_WEIGHT_TOKENS);
+
+/**
+ * Curated construction, imported directly from the StyleMe garment-profile
+ * vocabulary — one shared list, no copy. "N/A" is dropped: it is an authoring
+ * placeholder meaning "not applicable to this garment", never a trend direction.
+ */
+export const FACET_CONSTRUCTION_VALUES: ReadonlySet<string> = new Set(
+  CONSTRUCTION_VALUES.filter((v) => v !== "N/A"),
+);
 
 /**
  * Subcategory is intentionally open. ClosetItem.subcategory is free text, so a
@@ -119,6 +146,7 @@ const CLOSED_VOCABULARIES: Readonly<Partial<Record<FacetKind, ReadonlySet<string
   pattern:       GARMENT_PATTERN_VALUES as ReadonlySet<string>,
   formalityBand: GARMENT_FORMALITY_VALUES as ReadonlySet<string>,
   visualWeight:  FACET_VISUAL_WEIGHT_VALUES,
+  construction:  FACET_CONSTRUCTION_VALUES,
 };
 
 export function facetVocabulary(kind: FacetKind): ReadonlySet<string> | null {
@@ -251,6 +279,7 @@ export function deriveFacetsFromProse(text: string): TrendFacets {
   scan("pattern", GARMENT_PATTERN_VALUES as ReadonlySet<string>);
   scan("silhouette", FACET_SILHOUETTE_VALUES);
   scan("formalityBand", GARMENT_FORMALITY_VALUES as ReadonlySet<string>);
+  scan("construction", FACET_CONSTRUCTION_VALUES);
 
   // Colour families are matched through their member colour words, since
   // "burgundy" appears in copy but the family id is "red-burgundy".

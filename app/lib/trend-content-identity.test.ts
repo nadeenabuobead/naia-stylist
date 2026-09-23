@@ -13,9 +13,11 @@ import {
   isContentId,
   isTrendContentType,
   isTakeawaySectionKey,
-  deriveContentId,
+  deriveLegacyContentId,
+  isLegacyContentId,
+  mintOpaqueContentId,
+  mintLegacyContentId,
   recoverOrMintIds,
-  computeEditionKey,
   buildRefKey,
   makeTakeawayContentId,
   applyContentIdentity,
@@ -63,146 +65,160 @@ describe("§TCI-1 vocabulary", () => {
   });
 });
 
-// ── §TCI-2 id format and determinism ──────────────────────────────────────────
+// ── §TCI-2 minting ────────────────────────────────────────────────────────────
 
-describe("§TCI-2 id derivation", () => {
-  it("produces a well-formed id", () => {
-    assert.ok(isContentId(deriveContentId("anything")));
+describe("§TCI-2 id minting", () => {
+  it("runtime ids are OPAQUE and random — never derived from content", () => {
+    const a = mintOpaqueContentId({ slug: "s", field: "keyTrends", index: 0, entry: { name: "Suede" } });
+    const b = mintOpaqueContentId({ slug: "s", field: "keyTrends", index: 0, entry: { name: "Suede" } });
+    assert.ok(isContentId(a));
+    assert.notEqual(a, b, "identical content must not produce identical ids");
+    assert.equal(isLegacyContentId(a), false);
   });
 
-  it("is deterministic — the backfill can be re-run safely", () => {
-    assert.equal(deriveContentId("autumn|keyTrends|0|bags"), deriveContentId("autumn|keyTrends|0|bags"));
+  it("an opaque id leaks nothing about the content it identifies", () => {
+    const id = mintOpaqueContentId({ slug: "autumn", field: "keyTrends", index: 0, entry: { name: "Suede Textures" } });
+    assert.equal(/^tc_[0-9a-f]{32}$/.test(id), true);
+    assert.equal(id.toLowerCase().includes("suede"), false);
+    assert.equal(id.toLowerCase().includes("autumn"), false);
   });
 
-  it("separates different seeds", () => {
-    assert.notEqual(deriveContentId("a"), deriveContentId("b"));
+  it("10k opaque ids collide zero times", () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 10_000; i++) {
+      seen.add(mintOpaqueContentId({ slug: "s", field: "f", index: i, entry: {} }));
+    }
+    assert.equal(seen.size, 10_000);
   });
 
-  it("rejects malformed ids", () => {
-    for (const bad of ["tc_", "tc_XYZ", "abc123", "", null, undefined, 42]) {
+  it("the LEGACY minter is deterministic — the one-time backfill must be re-runnable", () => {
+    const ctx = { slug: "autumn", field: "keyTrends", index: 0, entry: { name: "Suede" } };
+    assert.equal(mintLegacyContentId(ctx), mintLegacyContentId(ctx));
+    assert.ok(isLegacyContentId(mintLegacyContentId(ctx)));
+  });
+
+  it("legacy derivation separates different seeds", () => {
+    assert.notEqual(deriveLegacyContentId("a"), deriveLegacyContentId("b"));
+  });
+
+  it("accepts both id shapes, rejects everything else", () => {
+    assert.ok(isContentId("tc_803039921185"));
+    assert.ok(isContentId(`tc_${"a".repeat(32)}`));
+    for (const bad of ["tc_", "tc_XYZ", "abc123", "tc_80303992118", "", null, undefined, 42]) {
       assert.equal(isContentId(bad), false, `${String(bad)} must not be a valid id`);
     }
   });
-
-  it("derives 36 distinct ids across a realistic report set with no collision", () => {
-    const seen = new Set<string>();
-    for (const slug of ["a", "b", "c"]) {
-      for (const field of IDENTITY_BEARING_FIELD_NAMES) {
-        for (let i = 0; i < 4; i++) seen.add(deriveContentId(`${slug}|${field}|${i}|x`));
-      }
-    }
-    assert.equal(seen.size, 3 * 4 * 4);
-  });
 });
 
-// ── §TCI-3 IDS ARE IMMUTABLE — the core guarantee ────────────────────────────
+// ── §TCI-3 IDENTITY PRESERVATION — the seven scenarios ───────────────────────
+//
+// Post-backfill every entry carries its id, so scenario 1 is the normal path and
+// the rest are the safety net for a hand-edited payload.
 
-describe("§TCI-3 identity survives editing", () => {
-  it("keeps an existing id untouched", () => {
-    const existing = [{ id: "tc_aaaaaaaabbbb", name: "The New Bag Shapes" }];
-    const out = recoverOrMintIds("autumn", "keyTrends", existing);
-    assert.equal(out[0].id, "tc_aaaaaaaabbbb");
+const ID_A = "tc_aaaaaaaaaaaa";
+const ID_B = "tc_bbbbbbbbbbbb";
+const ID_C = "tc_cccccccccccc";
+
+describe("§TCI-3 identity preservation", () => {
+  it("1. RENAME with the id preserved → same id", () => {
+    const previous = [{ id: ID_A, name: "The New Bag Shapes", description: "d" }];
+    const out = recoverOrMintIds("autumn", "keyTrends", [
+      { id: ID_A, name: "Bag Shapes, Reconsidered", description: "d" },
+    ], previous);
+    assert.equal(out[0].id, ID_A);
   });
 
-  it("RENAME: a retitled trend keeps its id", () => {
-    const before = recoverOrMintIds("autumn", "keyTrends", AUTUMN.keyTrends);
-    const originalId = before[0].id;
+  it("2. DESCRIPTION REWRITE with the id preserved → same id", () => {
+    const previous = [{ id: ID_A, name: "Suede Textures", description: "old" }];
+    const out = recoverOrMintIds("autumn", "keyTrends", [
+      { id: ID_A, name: "Suede Textures", description: "completely rewritten" },
+    ], previous);
+    assert.equal(out[0].id, ID_A);
+  });
 
-    // Admin renames the trend and drops the id from the JSON textarea.
-    const renamed = [
-      { name: "Bag Shapes, Reconsidered", description: "East-west shapes, softly built." },
-      ...AUTUMN.keyTrends.slice(1),
+  it("3. REORDER → same ids, following the entries", () => {
+    const previous = [
+      { id: ID_A, name: "Bags" }, { id: ID_B, name: "Suede" }, { id: ID_C, name: "Burgundy" },
     ];
-    const after = recoverOrMintIds("autumn", "keyTrends", renamed, before);
-    assert.equal(after[0].id, originalId, "a rename must not mint a new id");
+    const out = recoverOrMintIds("autumn", "keyTrends", [previous[2], previous[0], previous[1]], previous);
+    assert.deepEqual(out.map((e) => e.id), [ID_C, ID_A, ID_B]);
   });
 
-  it("COPY EDIT: rewriting a description keeps the id", () => {
-    const before = recoverOrMintIds("autumn", "keyTrends", AUTUMN.keyTrends);
-    const edited = AUTUMN.keyTrends.map((t) => ({ ...t, description: "Completely rewritten." }));
-    const after = recoverOrMintIds("autumn", "keyTrends", edited, before);
-    assert.deepEqual(after.map((e) => e.id), before.map((e) => e.id));
+  it("4. INSERTION → existing ids unchanged, the new object gets a new id", () => {
+    const previous = [{ id: ID_A, name: "Bags" }, { id: ID_B, name: "Suede" }];
+    const out = recoverOrMintIds("autumn", "keyTrends", [
+      { id: ID_A, name: "Bags" }, { name: "Polished Knitwear" }, { id: ID_B, name: "Suede" },
+    ], previous);
+    assert.equal(out[0].id, ID_A);
+    assert.equal(out[2].id, ID_B);
+    assert.ok(isContentId(out[1].id));
+    assert.ok(![ID_A, ID_B].includes(out[1].id as string), "new content must not inherit an existing id");
   });
 
-  it("REORDER: moving a trend up the list carries its id with it", () => {
-    const before = recoverOrMintIds("autumn", "keyTrends", AUTUMN.keyTrends);
-    const suedeId = before[1].id;
-    const reordered = [AUTUMN.keyTrends[1], AUTUMN.keyTrends[0], AUTUMN.keyTrends[2]];
-    const after = recoverOrMintIds("autumn", "keyTrends", reordered, before);
-    assert.equal(after[0].id, suedeId, "id follows the entry, not the position");
+  it("5. DELETION + REPLACEMENT AT THE SAME INDEX → the replacement gets a NEW id", () => {
+    // The scenario that made positional recovery unsafe: trend A is deleted, an
+    // unrelated trend D takes its slot, and the payload arrives with no id.
+    const previous = [{ id: ID_A, name: "Trend A" }, { id: ID_B, name: "Trend B" }];
+    const out = recoverOrMintIds("autumn", "keyTrends", [
+      { name: "Trend D" }, { id: ID_B, name: "Trend B" },
+    ], previous);
+    assert.notEqual(out[0].id, ID_A, "Trend D must NOT inherit Trend A's id");
+    assert.ok(isContentId(out[0].id));
+    assert.equal(out[1].id, ID_B, "the untouched entry keeps its id");
   });
 
-  it("INSERT: adding a trend leaves every existing id alone", () => {
-    const before = recoverOrMintIds("autumn", "keyTrends", AUTUMN.keyTrends);
-    const withNew = [{ name: "Polished Knitwear", description: "New." }, ...AUTUMN.keyTrends];
-    const after = recoverOrMintIds("autumn", "keyTrends", withNew, before);
-    for (const original of before) {
-      assert.ok(after.some((e) => e.id === original.id), `${original.name} lost its id`);
+  it("5b. even a full no-id payload never inherits by position", () => {
+    const previous = [{ id: ID_A, name: "Trend A" }, { id: ID_B, name: "Trend B" }];
+    const out = recoverOrMintIds("autumn", "keyTrends", [{ name: "X" }, { name: "Y" }], previous);
+    for (const entry of out) {
+      assert.ok(![ID_A, ID_B].includes(entry.id as string), `${entry.name} inherited a stale id`);
     }
-    assert.equal(new Set(after.map((e) => e.id)).size, 4);
   });
 
-  it("never issues the same id twice within a field, even for duplicate labels", () => {
-    const dupes = [{ name: "Suede" }, { name: "Suede" }, { name: "Suede" }];
-    const out = recoverOrMintIds("autumn", "keyTrends", dupes);
+  it("6. DUPLICATE LABELS → distinct ids", () => {
+    const out = recoverOrMintIds("autumn", "keyTrends", [{ name: "Suede" }, { name: "Suede" }, { name: "Suede" }]);
     assert.equal(new Set(out.map((e) => e.id)).size, 3);
   });
 
-  it("does not let two entries claim one previous id", () => {
-    const before = [{ id: "tc_aaaaaaaabbbb", name: "Suede" }];
-    const after = recoverOrMintIds("autumn", "keyTrends", [{ name: "Suede" }, { name: "Suede" }], before);
-    assert.equal(after[0].id, "tc_aaaaaaaabbbb");
-    assert.notEqual(after[1].id, "tc_aaaaaaaabbbb");
+  it("6b. two entries cannot both claim one previous id", () => {
+    const previous = [{ id: ID_A, name: "Suede" }];
+    const out = recoverOrMintIds("autumn", "keyTrends", [{ name: "Suede" }, { name: "Suede" }], previous);
+    assert.equal(out[0].id, ID_A);
+    assert.notEqual(out[1].id, ID_A);
   });
 
-  it("DISPLAY TEXT IS NOT IDENTITY: same label in two reports yields different ids", () => {
+  it("7. DELETE, then a LATER object reuses the old label → the dead id is NOT resurrected", () => {
+    // Save 1 → A and B exist.
+    const save1 = recoverOrMintIds("autumn", "keyTrends", [{ name: "Suede" }, { name: "Bags" }]);
+    const suedeId = save1[0].id;
+
+    // Save 2 → Suede is deleted. Only Bags survives.
+    const save2 = recoverOrMintIds("autumn", "keyTrends", [save1[1]], save1);
+
+    // Save 3 → a NEW trend reuses the label "Suede", with no id.
+    const save3 = recoverOrMintIds("autumn", "keyTrends", [save2[0], { name: "Suede" }], save2);
+
+    assert.notEqual(save3[1].id, suedeId, "a deleted trend's id must not be resurrected by label");
+    assert.ok(isContentId(save3[1].id));
+  });
+
+  it("label recovery only consults the IMMEDIATELY previous version", () => {
+    const v1 = recoverOrMintIds("autumn", "keyTrends", [{ name: "Suede" }]);
+    const v2 = recoverOrMintIds("autumn", "keyTrends", [], v1);          // deleted
+    const v3 = recoverOrMintIds("autumn", "keyTrends", [{ name: "Suede" }], v2); // re-added
+    assert.notEqual(v3[0].id, v1[0].id);
+  });
+
+  it("an embedded id always beats label evidence", () => {
+    const previous = [{ id: ID_A, name: "Suede" }];
+    const out = recoverOrMintIds("autumn", "keyTrends", [{ id: ID_B, name: "Suede" }], previous);
+    assert.equal(out[0].id, ID_B, "the payload's own id is canonical");
+  });
+
+  it("DISPLAY TEXT IS NOT IDENTITY: the same label in two reports gets different ids", () => {
     const a = recoverOrMintIds("autumn-edit", "keyTrends", [{ name: "Burgundy" }]);
     const b = recoverOrMintIds("winter-edit", "keyTrends", [{ name: "Burgundy" }]);
     assert.notEqual(a[0].id, b[0].id);
-  });
-});
-
-// ── §TCI-4 edition key ────────────────────────────────────────────────────────
-
-describe("§TCI-4 edition key", () => {
-  const identified = applyContentIdentity(AUTUMN);
-
-  it("is stable when copy is edited — history shows one card, not two", () => {
-    const reworded = applyContentIdentity({
-      ...AUTUMN,
-      keyTrends: identified.keyTrends.map((t) => ({ ...t, description: "Reworded entirely." })),
-      rising: identified.rising,
-      fading: identified.fading,
-      referencesBehindThisEdit: identified.referencesBehindThisEdit,
-    });
-    assert.equal(reworded.editionKey, identified.editionKey);
-  });
-
-  it("is stable when entries are reordered", () => {
-    const reordered = applyContentIdentity({
-      ...AUTUMN,
-      keyTrends: [...identified.keyTrends].reverse(),
-      rising: identified.rising,
-      fading: identified.fading,
-      referencesBehindThisEdit: identified.referencesBehindThisEdit,
-    });
-    assert.equal(reordered.editionKey, identified.editionKey);
-  });
-
-  it("changes when a trend is added — the report is materially different", () => {
-    const expanded = applyContentIdentity({
-      ...AUTUMN,
-      keyTrends: [...identified.keyTrends, { id: "tc_ffffffffffff", name: "New" }],
-      rising: identified.rising,
-      fading: identified.fading,
-      referencesBehindThisEdit: identified.referencesBehindThisEdit,
-    });
-    assert.notEqual(expanded.editionKey, identified.editionKey);
-  });
-
-  it("changes when the title changes", () => {
-    const retitled = applyContentIdentity({ ...AUTUMN, title: "Autumn Edit, Revised" });
-    assert.notEqual(retitled.editionKey, identified.editionKey);
   });
 });
 
@@ -218,23 +234,22 @@ describe("§TCI-5 takeaway identity", () => {
 
   it("uses the section key, never the generated sentence", () => {
     assert.equal(makeTakeawayContentId("aLookToTry"), "aLookToTry");
-    assert.equal(makeTakeawayContentId("partToTake", 1), "partToTake:1");
+    assert.equal(makeTakeawayContentId("partToTake"), "partToTake");
   });
 
-  it("rejects a non-integer index", () => {
-    assert.throws(() => makeTakeawayContentId("partToTake", 1.5));
-    assert.throws(() => makeTakeawayContentId("partToTake", -1));
+  it("refuses positional bullet identity — an index identifies a slot, not a thing", () => {
+    // "partToTake:1" would re-point at different advice after a regeneration.
+    assert.throws(() => makeTakeawayContentId("partToTake:1" as never));
+    assert.throws(() => makeTakeawayContentId("notASection" as never));
   });
 
   it("REGENERATION: a rewritten takeaway keeps its identity", () => {
     // Identity is the section, so regenerating the edit cannot orphan the save.
     const before = buildRefKey({
-      contentType: "TAKEAWAY", contentId: makeTakeawayContentId("aLookToTry"),
-      reportId: "rep_1", editionKey: "abc123",
+      contentType: "TAKEAWAY", contentId: makeTakeawayContentId("aLookToTry"), reportId: "rep_1",
     });
     const after = buildRefKey({
-      contentType: "TAKEAWAY", contentId: makeTakeawayContentId("aLookToTry"),
-      reportId: "rep_1", editionKey: "abc123",
+      contentType: "TAKEAWAY", contentId: makeTakeawayContentId("aLookToTry"), reportId: "rep_1",
     });
     assert.equal(before, after);
   });
@@ -250,10 +265,10 @@ describe("§TCI-6 ref keys", () => {
     );
   });
 
-  it("scopes a takeaway to the report EDITION", () => {
+  it("scopes a takeaway to its report", () => {
     assert.equal(
-      buildRefKey({ contentType: "TAKEAWAY", contentId: "aLookToTry", reportId: "rep_1", editionKey: "e1" }),
-      "r:rep_1@e1|TAKEAWAY|aLookToTry",
+      buildRefKey({ contentType: "TAKEAWAY", contentId: "aLookToTry", reportId: "rep_1" }),
+      "r:rep_1|TAKEAWAY|aLookToTry",
     );
   });
 
@@ -266,11 +281,8 @@ describe("§TCI-6 ref keys", () => {
     assert.throws(() => buildRefKey({ contentType: "TREND", contentId: "tc_aaaaaaaabbbb" }), /reportId/);
   });
 
-  it("refuses a takeaway without an edition", () => {
-    assert.throws(
-      () => buildRefKey({ contentType: "TAKEAWAY", contentId: "aLookToTry", reportId: "rep_1" }),
-      /editionKey/,
-    );
+  it("refuses a takeaway without a report", () => {
+    assert.throws(() => buildRefKey({ contentType: "TAKEAWAY", contentId: "aLookToTry" }), /reportId/);
   });
 
   it("refuses an empty content id", () => {
@@ -299,12 +311,23 @@ describe("§TCI-7 applyContentIdentity", () => {
     }
   });
 
-  it("is idempotent — a second run assigns nothing", () => {
-    const first = applyContentIdentity(AUTUMN);
-    const second = applyContentIdentity({ ...AUTUMN, ...first });
+  it("is idempotent — a second run over identified content assigns nothing", () => {
+    const first = applyContentIdentity(AUTUMN, null, mintLegacyContentId);
+    const second = applyContentIdentity({ ...AUTUMN, ...first }, null, mintLegacyContentId);
     assert.equal(second.assigned.length, 0);
-    assert.equal(second.editionKey, first.editionKey);
     assert.deepEqual(second.keyTrends.map((e) => e.id), first.keyTrends.map((e) => e.id));
+  });
+
+  it("the legacy backfill is reproducible — same input, same ids", () => {
+    const a = applyContentIdentity(AUTUMN, null, mintLegacyContentId);
+    const b = applyContentIdentity(AUTUMN, null, mintLegacyContentId);
+    assert.deepEqual(a.keyTrends.map((e) => e.id), b.keyTrends.map((e) => e.id));
+  });
+
+  it("runtime identity is opaque, so two runs over UNIDENTIFIED content differ", () => {
+    const a = applyContentIdentity(AUTUMN);
+    const b = applyContentIdentity(AUTUMN);
+    assert.notDeepEqual(a.keyTrends.map((e) => e.id), b.keyTrends.map((e) => e.id));
   });
 
   it("drops an empty facets key rather than storing a matches-nothing object", () => {
@@ -328,6 +351,5 @@ describe("§TCI-7 applyContentIdentity", () => {
   it("handles a report with empty arrays without throwing", () => {
     const applied = applyContentIdentity({ slug: "empty", title: "E", season: "S" });
     assert.equal(applied.assigned.length, 0);
-    assert.ok(applied.editionKey.length > 0);
   });
 });

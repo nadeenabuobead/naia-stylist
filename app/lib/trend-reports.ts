@@ -64,8 +64,6 @@ export type TrendReportVisual = {
 
 export type TrendReportData = {
   slug: string;
-  /** Identifies the report EDITION — see computeEditionKey(). */
-  editionKey?: string;
   title: string;
   season: string;
   publishedAt: string;

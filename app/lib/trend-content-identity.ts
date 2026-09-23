@@ -7,18 +7,22 @@
 // survives copy edits, renames and reordering — because a SavedItem or a
 // TrendContentFeedback row points at it and must keep pointing at the same thing.
 //
-// ── THE RULE ─────────────────────────────────────────────────────────────────
-// Identity is the STORED id. Display text is never identity.
+// ── THE RULES ────────────────────────────────────────────────────────────────
+// 1. Identity is the STORED id. Display text is NEVER identity.
+// 2. An embedded id is canonical and is always preserved verbatim.
+// 3. An id is recovered from the previous version ONLY on exact label evidence.
+//    There is no positional recovery: array position is not evidence of identity,
+//    and using it would let a brand-new object inherit a deleted object's id.
+// 4. Otherwise a NEW OPAQUE id is minted — random, permanent, uncoupled from
+//    any content that can change.
 //
-// A label only ever SEEDS an id, once, when an entry first acquires one. From
-// that moment the id is stored in the entry and preserved verbatim through every
-// subsequent edit — see recoverOrMintIds(), which reclaims a previous id by name
-// or by position before it will mint a new one. Rename a trend and its id does
-// not move; saves stay attached.
+// Post-backfill, rule 2 does all the work: every entry carries its id, and
+// identity is preserved rather than rediscovered. Rules 3 and 4 are the safety
+// net for a hand-edited JSON payload that arrives without one.
 //
-// Seeding is deterministic (FNV-1a, no randomness, no crypto) so the backfill is
-// idempotent: running it twice produces the same ids, and running it over rows
-// that already have ids changes nothing.
+// Deterministic derivation still exists, but ONLY for the one-time legacy
+// backfill (deriveLegacyContentId), where re-runnability matters and the content
+// is a known fixed set. Runtime minting is opaque.
 //
 // ── SCOPE ────────────────────────────────────────────────────────────────────
 // Not every content type is scoped to a report:
@@ -96,25 +100,41 @@ export function isTakeawaySectionKey(value: unknown): value is TakeawaySectionKe
 }
 
 /**
- * Content id for one takeaway. List-valued sections (partToTake, partToLeave)
- * take a zero-based index; scalar sections must not.
+ * Content id for one takeaway: the SECTION KEY, and nothing else.
+ *
+ * An earlier draft allowed "partToTake:1" for the list-valued sections. That was
+ * wrong — the index is the bullet's position in a per-customer generated array,
+ * and regenerating an edit can reorder or replace bullets, so "1" identifies a
+ * slot rather than a thing. A save would silently re-point at different advice.
+ *
+ * Whole sections only until the edit engine gives bullets a stable identity of
+ * their own (each bullet traces to a named rule in buildShopperEdit, which is
+ * where that identity would come from). Section-level identity is stable across
+ * regeneration today, which is what the approved rule requires.
  */
-export function makeTakeawayContentId(section: TakeawaySectionKey, index?: number): string {
-  if (index === undefined) return section;
-  if (!Number.isInteger(index) || index < 0) {
-    throw new Error(`Takeaway index must be a non-negative integer, received: ${String(index)}`);
+export function makeTakeawayContentId(section: TakeawaySectionKey): string {
+  if (!isTakeawaySectionKey(section)) {
+    throw new Error(`Unknown takeaway section: ${String(section)}`);
   }
-  return `${section}:${index}`;
+  return section;
 }
 
 // ── Id format ─────────────────────────────────────────────────────────────────
 
 const ID_PREFIX = "tc_";
-const ID_HEX_LENGTH = 12;
-const ID_PATTERN = new RegExp(`^${ID_PREFIX}[0-9a-f]{${ID_HEX_LENGTH}}$`);
+
+// Two shapes, both opaque to every consumer:
+//   tc_ + 12 hex   legacy backfill id, deterministically derived, one-time only
+//   tc_ + 32 hex   opaque minted id, random, the only shape issued at runtime
+const ID_PATTERN = new RegExp(`^${ID_PREFIX}(?:[0-9a-f]{12}|[0-9a-f]{32})$`);
 
 export function isContentId(value: unknown): value is string {
   return typeof value === "string" && ID_PATTERN.test(value);
+}
+
+/** True for a one-time legacy backfill id, as opposed to an opaque minted one. */
+export function isLegacyContentId(value: unknown): boolean {
+  return typeof value === "string" && /^tc_[0-9a-f]{12}$/.test(value);
 }
 
 /**
@@ -136,12 +156,41 @@ function hex(value: number, digits: number): string {
   return value.toString(16).padStart(digits, "0").slice(-digits);
 }
 
-/** Deterministic id from a seed string. Same seed in, same id out, always. */
-export function deriveContentId(seed: string): string {
+/**
+ * Deterministic id from a seed string — LEGACY BACKFILL ONLY.
+ *
+ * Permanent identity must not be coupled to mutable content, so this is never
+ * used at runtime. It exists because the one-time backfill over a known, fixed
+ * set of reports has to be re-runnable and produce the same ids every time.
+ */
+export function deriveLegacyContentId(seed: string): string {
   const a = fnv1a(seed, 0x811c9dc5);
   const b = fnv1a(`${seed}#2`, 0x01000193);
   return `${ID_PREFIX}${hex(a, 8)}${hex(b, 4)}`;
 }
+
+/** Context handed to a minter so the legacy variant can build its seed. */
+export interface MintContext {
+  slug: string;
+  field: string;
+  index: number;
+  entry: Record<string, unknown>;
+}
+
+export type ContentIdMinter = (context: MintContext) => string;
+
+/**
+ * The runtime minter. Opaque, random, permanent — carries no information about
+ * the content it identifies, so no content change can ever invalidate it.
+ */
+export const mintOpaqueContentId: ContentIdMinter = () => {
+  const uuid = globalThis.crypto.randomUUID().replace(/-/g, "");
+  return `${ID_PREFIX}${uuid}`;
+};
+
+/** The one-time backfill minter. Passed explicitly by the backfill script only. */
+export const mintLegacyContentId: ContentIdMinter = ({ slug, field, index, entry }) =>
+  deriveLegacyContentId(seedFor(slug, field, index, entry));
 
 /** Normalised label used only as SEED material — never as identity. */
 function seedLabel(entry: Record<string, unknown>): string {
@@ -157,36 +206,39 @@ function seedFor(slug: string, field: string, index: number, entry: Record<strin
 // ── Recover-or-mint ───────────────────────────────────────────────────────────
 
 /**
- * Assign an id to every entry in one report field, preserving existing identity
- * wherever it can be recovered. Resolution order per entry:
+ * Assign an id to every entry in one report field.
  *
- *   1. the entry already carries a valid id            → keep it
- *   2. a previous entry in the same field has the same
- *      normalised label                                 → reclaim that id  (copy was edited)
- *   3. a previous entry sits at the same index          → reclaim that id  (label was renamed)
- *   4. nothing matches                                  → derive a fresh id
+ *   1. the entry carries a valid id          → keep it (canonical, always wins)
+ *   2. a previous entry has the SAME LABEL   → reclaim that id
+ *   3. otherwise                             → mint a new opaque id
  *
- * Steps 2 and 3 are what make a rename safe: the admin edits raw JSON, and if the
- * id is dropped from the textarea we recover it rather than orphaning saves.
+ * There is deliberately NO positional recovery. Position is not evidence of
+ * identity: if trend A is deleted and an unrelated trend D is inserted at the
+ * same index without an id, positional recovery would silently hand D the id
+ * that A's saves point at. Minting a new id is the safe failure — a save is
+ * orphaned rather than misattributed to the wrong content.
  *
- * Pure: returns new entries, mutates nothing.
+ * Step 2 is scoped to the IMMEDIATELY PREVIOUS saved version only, never to
+ * history, so a deleted trend cannot be resurrected by a later trend reusing
+ * its label.
+ *
+ * Pure apart from the minter. Returns new entries; mutates nothing.
  */
 export function recoverOrMintIds(
   slug: string,
   field: string,
   entries: ReadonlyArray<Record<string, unknown>>,
   previousEntries: ReadonlyArray<Record<string, unknown>> = [],
+  minter: ContentIdMinter = mintOpaqueContentId,
 ): Array<Record<string, unknown>> {
   const byLabel = new Map<string, string>();
-  const byIndex = new Map<number, string>();
 
-  previousEntries.forEach((prev, i) => {
-    if (!isContentId(prev.id)) return;
+  for (const prev of previousEntries) {
+    if (!isContentId(prev.id)) continue;
     const label = seedLabel(prev);
     // First writer wins — an earlier duplicate label keeps the claim.
     if (label && !byLabel.has(label)) byLabel.set(label, prev.id as string);
-    byIndex.set(i, prev.id as string);
-  });
+  }
 
   const claimed = new Set<string>();
   const out: Array<Record<string, unknown>> = [];
@@ -194,28 +246,25 @@ export function recoverOrMintIds(
   entries.forEach((entry, index) => {
     let id: string | null = null;
 
+    // 1. Embedded id is canonical.
     if (isContentId(entry.id) && !claimed.has(entry.id as string)) {
       id = entry.id as string;
     }
 
+    // 2. Label evidence from the immediately previous version.
     if (!id) {
       const label = seedLabel(entry);
       const fromLabel = label ? byLabel.get(label) : undefined;
       if (fromLabel && !claimed.has(fromLabel)) id = fromLabel;
     }
 
+    // 3. Mint. Loop guards against the (vanishingly unlikely) duplicate.
     if (!id) {
-      const fromIndex = byIndex.get(index);
-      if (fromIndex && !claimed.has(fromIndex)) id = fromIndex;
-    }
-
-    if (!id) {
-      // Derive, then walk a discriminator until the id is free within this field.
+      let candidate = minter({ slug, field, index, entry });
       let attempt = 0;
-      let candidate = deriveContentId(seedFor(slug, field, index, entry));
       while (claimed.has(candidate)) {
         attempt += 1;
-        candidate = deriveContentId(`${seedFor(slug, field, index, entry)}|${attempt}`);
+        candidate = minter({ slug, field, index: index + attempt * 1000, entry });
       }
       id = candidate;
     }
@@ -227,39 +276,14 @@ export function recoverOrMintIds(
   return out;
 }
 
-// ── Edition key ───────────────────────────────────────────────────────────────
-
-/**
- * Identifies a report EDITION — the thing customer-facing history shows one card
- * for. Derived from the set of content ids plus title and season, so:
- *
- *   editing a trend's copy          → same edition   (same objects, reworded)
- *   adding or removing a trend      → new edition    (the report is materially different)
- *   an engine or schema bump        → same edition   (nothing here changes)
- *
- * Content ids are sorted, so reordering the array alone does not mint a new edition.
- */
-export function computeEditionKey(report: {
-  title?: string | null;
-  season?: string | null;
-  keyTrends?: unknown;
-  rising?: unknown;
-  fading?: unknown;
-  referencesBehindThisEdit?: unknown;
-}): string {
-  const ids: string[] = [];
-  for (const field of IDENTITY_BEARING_FIELD_NAMES) {
-    const entries = report[field];
-    if (!Array.isArray(entries)) continue;
-    for (const entry of entries) {
-      const id = (entry as Record<string, unknown> | null)?.id;
-      if (isContentId(id)) ids.push(id as string);
-    }
-  }
-  ids.sort();
-  const seed = `${report.title ?? ""}|${report.season ?? ""}|${ids.join(",")}`;
-  return deriveContentId(seed).slice(ID_PREFIX.length);
-}
+// ── Report identity ─────────────────────────────────────────────────────────
+//
+// There is no separate "edition key". EditorialTrendReport.id is already an
+// immutable, opaque primary key, and deriving a second identity from report
+// content would do exactly what identity must not do: change when copy changes.
+// Report history therefore groups on reportId, which is precisely the approved
+// rule — one card per report, regardless of engine version, regeneration or
+// republish.
 
 // ── Reference keys ────────────────────────────────────────────────────────────
 
@@ -269,8 +293,23 @@ export interface TrendContentRef {
   contentId: string;
   /** Required for TREND / SIGNAL / REFERENCE / TAKEAWAY. */
   reportId?: string | null;
-  /** Required for TAKEAWAY — pins a takeaway to the report edition it belongs to. */
-  editionKey?: string | null;
+}
+
+/**
+ * Where a save came from. Identity and provenance are separate concerns:
+ * FACET and PRODUCT ids are global — the same material saved from two reports is
+ * ONE object — so the report and trend a customer saved it from lives here, on
+ * the SavedItem row, not in the id. "Source: Trend Report · Autumn Edit · Suede
+ * Textures" is rendered from this, never parsed back out of a refKey.
+ */
+export interface TrendContentProvenance {
+  sourceReportId: string;
+  sourceReportTitle: string;
+  sourceSeason: string;
+  /** The TREND/SIGNAL/REFERENCE this object was saved from, when applicable. */
+  sourceContentId?: string | null;
+  sourceContentLabel?: string | null;
+  savedAt: string;
 }
 
 /**
@@ -291,12 +330,6 @@ export function buildRefKey(ref: TrendContentRef): string {
   if (REPORT_SCOPED.has(contentType)) {
     if (!ref.reportId) {
       throw new Error(`${contentType} is report-scoped and requires a reportId`);
-    }
-    if (contentType === "TAKEAWAY") {
-      if (!ref.editionKey) {
-        throw new Error("TAKEAWAY is edition-scoped and requires an editionKey");
-      }
-      return `r:${ref.reportId}@${ref.editionKey}|TAKEAWAY|${contentId}`;
     }
     return `r:${ref.reportId}|${contentType}|${contentId}`;
   }
@@ -321,7 +354,6 @@ export interface AppliedIdentity {
   rising: Array<Record<string, unknown>>;
   fading: Array<Record<string, unknown>>;
   referencesBehindThisEdit: Array<Record<string, unknown>>;
-  editionKey: string;
   /** Per-field ids that were newly assigned — drives the backfill report. */
   assigned: Array<{ field: IdentityBearingField; index: number; id: string; label: string }>;
   /** Facet values an editor supplied that are not in the vocabulary. */
@@ -336,6 +368,7 @@ export interface AppliedIdentity {
 export function applyContentIdentity(
   report: IdentityBearingReport,
   previous: Record<string, unknown> | null = null,
+  minter: ContentIdMinter = mintOpaqueContentId,
 ): AppliedIdentity {
   const assigned: AppliedIdentity["assigned"] = [];
   const rejectedFacets: AppliedIdentity["rejectedFacets"] = [];
@@ -349,7 +382,7 @@ export function applyContentIdentity(
 
     const hadId = entries.map((entry) => isContentId(entry.id));
 
-    result[field] = recoverOrMintIds(report.slug, field, entries, previousEntries).map((entry, index) => {
+    result[field] = recoverOrMintIds(report.slug, field, entries, previousEntries, minter).map((entry, index) => {
       if (!hadId[index]) {
         assigned.push({
           field,
@@ -368,18 +401,11 @@ export function applyContentIdentity(
     });
   }
 
-  const editionKey = computeEditionKey({
-    title: report.title ?? "",
-    season: report.season ?? "",
-    ...result,
-  });
-
   return {
     keyTrends: result.keyTrends,
     rising: result.rising,
     fading: result.fading,
     referencesBehindThisEdit: result.referencesBehindThisEdit,
-    editionKey,
     assigned,
     rejectedFacets,
   };

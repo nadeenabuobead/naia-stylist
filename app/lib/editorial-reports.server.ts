@@ -13,11 +13,7 @@ import {
   referenceHasContent,
   sourceHasContent,
 } from "./editorial-reports.normalise";
-import {
-  applyContentIdentity,
-  computeEditionKey,
-  isContentId,
-} from "./trend-content-identity";
+import { applyContentIdentity, isContentId } from "./trend-content-identity";
 import { validateFacets, isEmptyFacets } from "./trend-facets";
 
 type DbRow = Awaited<
@@ -27,7 +23,6 @@ type DbRow = Awaited<
 function dbToTrendReportData(r: NonNullable<DbRow>): TrendReportData {
   return {
     slug: r.slug,
-    editionKey: r.editionKey || computeEditionKey(r as Record<string, unknown>),
     title: r.title,
     season: r.season,
     publishedAt: r.publishedAt,
@@ -93,7 +88,6 @@ function withStaticIdentity(report: TrendReportData): TrendReportData {
   );
   return {
     ...report,
-    editionKey: identified.editionKey,
     keyTrends: identified.keyTrends as TrendReportData["keyTrends"],
     rising: identified.rising as TrendReportData["rising"],
     fading: identified.fading as TrendReportData["fading"],
@@ -122,7 +116,7 @@ type IdentityInput = {
 function ensureContentIdentity<T extends IdentityInput>(
   data: T,
   previous: Record<string, unknown> | null,
-): T & { editionKey: string } {
+): T {
   const applied = applyContentIdentity(data, previous);
   return {
     ...data,
@@ -130,8 +124,7 @@ function ensureContentIdentity<T extends IdentityInput>(
     rising: applied.rising,
     fading: applied.fading,
     referencesBehindThisEdit: applied.referencesBehindThisEdit,
-    editionKey: applied.editionKey,
-  } as T & { editionKey: string };
+  } as T;
 }
 
 export async function getPublishedEditorialReports(): Promise<TrendReportData[]> {
@@ -202,7 +195,7 @@ type ReportInput = {
 
 export async function createEditorialReport(data: ReportInput) {
   return prisma.editorialTrendReport.create({
-    data: ensureContentIdentity(data, null) as ReportInput & { editionKey: string },
+    data: ensureContentIdentity(data, null) as ReportInput,
   });
 }
 
@@ -212,7 +205,7 @@ export async function updateEditorialReport(id: string, data: ReportInput) {
   const previous = await prisma.editorialTrendReport.findUnique({ where: { id } });
   return prisma.editorialTrendReport.update({
     where: { id },
-    data: ensureContentIdentity(data, previous as Record<string, unknown> | null) as ReportInput & { editionKey: string },
+    data: ensureContentIdentity(data, previous as Record<string, unknown> | null) as ReportInput,
   });
 }
 
@@ -244,7 +237,6 @@ export async function seedEditorialReportsFromStatic() {
       where: { slug: r.slug },
       create: {
         slug: r.slug,
-        editionKey: identified.editionKey,
         title: r.title,
         season: r.season,
         mood: r.mood ?? null,

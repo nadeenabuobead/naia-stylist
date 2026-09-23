@@ -22,14 +22,20 @@ import {
   deriveFacetsFromProse,
   type TrendFacets,
 } from "./trend-facets.ts";
+import { CONSTRUCTION_VALUES } from "./admin/styleme-garment-profile.vocab.ts";
+import { CLOSET_CATEGORY_VALUES } from "./ai/closet-categories.ts";
 
 // ── §TF-1 the approved vocabulary ─────────────────────────────────────────────
 
 describe("§TF-1 facet kinds", () => {
-  it("is exactly the eight approved kinds", () => {
+  it("is the approved eight, plus construction split out of visualWeight", () => {
+    // The approved list said "visual weight / structure" as one bullet. Those are
+    // two distinct resolved fields — light|medium|substantial versus
+    // soft|structured|tailored — so merging them would have pointed a facet at a
+    // field that can never hold its values. Split, flagged for sign-off.
     assert.deepEqual([...FACET_KINDS], [
       "category", "subcategory", "material", "colourFamily",
-      "silhouette", "pattern", "formalityBand", "visualWeight",
+      "silhouette", "pattern", "formalityBand", "visualWeight", "construction",
     ]);
   });
 
@@ -71,17 +77,42 @@ describe("§TF-2 vocabulary alignment", () => {
     assert.equal(isFacetValue("formalityBand", "very-fancy"), false);
   });
 
-  it("visualWeight covers derived weight and curated construction", () => {
-    for (const token of ["light", "medium", "substantial", "soft", "structured", "tailored", "sculptural"]) {
+  it("visualWeight is ONLY resolved visual weight", () => {
+    for (const token of ["light", "medium", "substantial"]) {
       assert.ok(isFacetValue("visualWeight", token), token);
     }
+    // "soft" is a construction value. Accepting it here would point the facet at
+    // a field that cannot hold it — the bug this split fixes.
+    assert.equal(isFacetValue("visualWeight", "soft"), false);
+    assert.equal(isFacetValue("visualWeight", "structured"), false);
+    assert.equal(isFacetValue("visualWeight", "heavy"), false, "curated 'heavy' resolves to 'substantial'");
     assert.equal(isFacetValue("visualWeight", "chunky"), false);
   });
 
-  it("categories are ClosetCategory values", () => {
-    assert.ok(isFacetValue("category", "BAGS"));
+  it("construction is the curated construction vocabulary, minus the N/A placeholder", () => {
+    for (const token of ["soft", "neutral", "structured", "tailored", "sculptural"]) {
+      assert.ok(isFacetValue("construction", token), token);
+    }
+    assert.equal(isFacetValue("construction", "N/A"), false, "an authoring placeholder is not a trend direction");
+    assert.equal(isFacetValue("construction", "light"), false);
+  });
+
+  it("construction values come from the shared vocabulary, not a copy", () => {
+    // Imported directly from styleme-garment-profile.vocab.ts — if that list
+    // changes, this set changes with it.
+    for (const token of CONSTRUCTION_VALUES) {
+      if (token === "N/A") continue;
+      assert.ok(isFacetValue("construction", token), `${token} must be accepted`);
+    }
+  });
+
+  it("categories are the shared ClosetCategory list — every value accepted", () => {
+    for (const category of CLOSET_CATEGORY_VALUES) {
+      assert.ok(isFacetValue("category", category), category);
+    }
     assert.ok(isFacetValue("category", "bags"), "case-insensitive on input");
     assert.equal(isFacetValue("category", "HANDBAGS"), false);
+    assert.equal(CLOSET_CATEGORY_VALUES.length, 12);
   });
 
   it("subcategory is open but form-checked — fashion invents shapes", () => {
@@ -143,14 +174,20 @@ describe("§TF-3 validation", () => {
 // ── §TF-4 the three worked examples ──────────────────────────────────────────
 
 describe("§TF-4 real trends", () => {
-  it("New Bag Shapes — category, shape and structure", () => {
+  it("New Bag Shapes — category, shape and CONSTRUCTION (not visual weight)", () => {
     const { facets, rejected } = validateFacets({
       category: ["BAGS"],
       subcategory: ["east-west"],
-      visualWeight: ["soft"],
+      construction: ["soft"],
     });
     assert.equal(rejected.length, 0);
-    assert.deepEqual(facets, { category: ["BAGS"], subcategory: ["east-west"], visualWeight: ["soft"] });
+    assert.deepEqual(facets, { category: ["BAGS"], subcategory: ["east-west"], construction: ["soft"] });
+  });
+
+  it("New Bag Shapes written the old way is now REJECTED", () => {
+    const { facets, rejected } = validateFacets({ visualWeight: ["soft"] });
+    assert.ok(isEmptyFacets(facets));
+    assert.equal(rejected[0].kind, "visualWeight");
   });
 
   it("Suede Textures — material alone, deliberately category-free", () => {
@@ -172,7 +209,7 @@ describe("§TF-4 real trends", () => {
     const { facets, rejected } = validateFacets({
       silhouette: ["relaxed"],
       formalityBand: ["smart-casual", "business-casual"],
-      visualWeight: ["tailored"],
+      construction: ["tailored"],
     });
     assert.equal(rejected.length, 0);
     assert.equal(countFacetValues(facets), 4);

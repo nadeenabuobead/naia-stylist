@@ -1,6 +1,6 @@
 // scripts/backfill-trend-content-ids.mts
 //
-// Assigns stable content ids and an edition key to every Trend Report.
+// Assigns stable content ids to every saveable object in every Trend Report.
 //
 //   npx tsx scripts/backfill-trend-content-ids.mts              dry run, static reports
 //   npx tsx scripts/backfill-trend-content-ids.mts --db         dry run, live DB rows
@@ -18,6 +18,7 @@
 import { trendReports } from "../app/lib/trend-reports.ts";
 import {
   applyContentIdentity,
+  mintLegacyContentId,
   IDENTITY_BEARING_FIELD_NAMES,
   isContentId,
   type IdentityBearingReport,
@@ -44,11 +45,11 @@ function rule(char = "─") {
 }
 
 function summarise(report: ReportRow) {
-  const applied = applyContentIdentity(report, null);
+  // Deterministic minter: this one-time pass over a fixed set must be re-runnable.
+  const applied = applyContentIdentity(report, null, mintLegacyContentId);
 
   console.log("");
   console.log(`${BOLD}${report.slug}${RESET}  ${DIM}${report.title} · ${report.season}${RESET}`);
-  console.log(`  editionKey   ${applied.editionKey}`);
 
   let total = 0;
   let facetValues = 0;
@@ -93,10 +94,10 @@ function summarise(report: ReportRow) {
   const second = applyContentIdentity(
     { ...report, ...applied } as IdentityBearingReport,
     null,
+    mintLegacyContentId,
   );
   const stable =
     second.assigned.length === 0 &&
-    second.editionKey === applied.editionKey &&
     IDENTITY_BEARING_FIELD_NAMES.every((f) =>
       second[f].every((e, i) => e.id === applied[f][i].id),
     );
@@ -169,7 +170,6 @@ async function main() {
         rising: applied.rising as object[],
         fading: applied.fading as object[],
         referencesBehindThisEdit: applied.referencesBehindThisEdit as object[],
-        editionKey: applied.editionKey,
       },
     });
     written += 1;
