@@ -3573,13 +3573,23 @@ function computeBodyNeedSlotBonus(
   item: ClosetAnchorInput,
   slot: string,
 ): number {
-  // Accessories cannot satisfy a structural clothing body need.
+  // Bags, accessories, and jewellery cannot satisfy a clothing body need.
   if (BODY_NEED_STRUCTURAL_SLOTS.has(slot)) return 0;
+  let bonus = 0;
+  // Construction-based needs (structured-shape / still-want-shape)
   const constructionNeeds = bodyNeeds.filter((n) => n !== "nothing-specific" && _SLOT_CONSTRUCTION_NEEDS.has(n));
-  if (constructionNeeds.length === 0) return 0;
-  const construction = item.approvedProfile?.construction;
-  if (!construction || construction === "N/A") return 0;
-  return _SLOT_CONSTRUCTION_BONUS[construction] ?? 0;
+  if (constructionNeeds.length > 0) {
+    const construction = item.approvedProfile?.construction;
+    if (construction && construction !== "N/A") {
+      bonus += _SLOT_CONSTRUCTION_BONUS[construction] ?? 0;
+    }
+  }
+  // Loose-comfortable: silhouette/waist signal via canonical scorer
+  if (bodyNeeds.includes("loose-comfortable")) {
+    const { fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", item);
+    if (fitScore !== null && fitScore > 0) bonus += fitScore * 2.0;
+  }
+  return bonus;
 }
 
 // Returns true when at least one clothing piece in the core outfit meaningfully satisfies
@@ -3594,6 +3604,23 @@ export function coreClothingMeetsBodyNeed(
   return coreConstructions.some(
     (c) => c === "structured" || c === "tailored" || c === "sculptural",
   );
+}
+
+// Returns true when at least one clothing piece in the core outfit has a clearly loose
+// silhouetteCharacter (relaxed/oversized/voluminous/wide-leg). Used for the capacity
+// reservation gate so a loose garment is not crowded out by accessories.
+// Always returns true when loose-comfortable is not an active body need.
+const _LOOSE_SILHOUETTES_CORE = new Set(["relaxed", "oversized", "voluminous", "wide-leg"]);
+export function coreClothingMeetsLooseNeed(
+  coreItems: (ClosetAnchorInput | null | undefined)[],
+  bodyNeeds: string[],
+): boolean {
+  if (!bodyNeeds.includes("loose-comfortable")) return true;
+  return coreItems.some((item) => {
+    if (!item?.approvedProfile) return false;
+    const sils = (item.approvedProfile.silhouetteCharacter ?? []) as string[];
+    return sils.some((s) => _LOOSE_SILHOUETTES_CORE.has(s));
+  });
 }
 
 // ── Multi-Closet garment scan ─────────────────────────────────────────────────
@@ -3803,19 +3830,27 @@ export function selectAdditionalClosetGarments(
     .filter((o) => o.slot !== "shoe")
     .sort((a, b) => b.score - a.score || (OPTIONAL_SLOT_ORDER[a.slot] ?? 9) - (OPTIONAL_SLOT_ORDER[b.slot] ?? 9));
 
-  // Body-need capacity reservation: when a structural Fit/Comfort need is active and
-  // the clothing core (anchor + Phase 1) doesn't satisfy it, promote the best structural
+  // Body-need capacity reservation: when a physical Fit/Comfort need is active and
+  // the clothing core (anchor + Phase 1) doesn't satisfy it, promote the best matching
   // clothing optional to the front of optRest so finishing accessories don't exhaust the
   // outfit size cap before it's considered. Only fires when there is room left in the outfit.
+  const _SLOT_PHYSICAL_NEEDS = new Set([..._SLOT_CONSTRUCTION_NEEDS, "loose-comfortable"]);
   if (
-    activeBodyNeedsForSlot.some((n) => _SLOT_CONSTRUCTION_NEEDS.has(n)) &&
+    activeBodyNeedsForSlot.some((n) => _SLOT_PHYSICAL_NEEDS.has(n)) &&
     result.length < maxAdditional
   ) {
     const coreConstructions: (string | null | undefined)[] = [
       anchorClosetItem?.approvedProfile?.construction ?? null,
       ...result.map((r) => closetItemById.get(r.id)?.approvedProfile?.construction ?? null),
     ];
-    if (!coreClothingMeetsBodyNeed(coreConstructions, activeBodyNeedsForSlot)) {
+    const coreItemsForLoose: (ClosetAnchorInput | null | undefined)[] = [
+      anchorClosetItem,
+      ...result.map((r) => closetItemById.get(r.id) ?? null),
+    ];
+    if (
+      !coreClothingMeetsBodyNeed(coreConstructions, activeBodyNeedsForSlot) ||
+      !coreClothingMeetsLooseNeed(coreItemsForLoose, activeBodyNeedsForSlot)
+    ) {
       const idx = optRest.findIndex(
         (o) =>
           _STRUCTURAL_CLOTHING_SLOTS.has(o.slot) &&

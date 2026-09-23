@@ -374,6 +374,8 @@ export type AutoSelectItem = {
     intentionPotentials: Record<string, string> | null;
     occasionFit: Record<string, string> | null;
     construction?: string | null;
+    silhouetteCharacter?: string[] | null;
+    waistComfort?: string | null;
   } | null;
 };
 
@@ -431,7 +433,7 @@ export async function autoSelectClosetAnchor(
           styleTags: true, occasions: true, imageUrl: true,
           garmentRelationships: true, formality: true,
           styleMeProfile: {
-            select: { profileStatus: true, intentionPotentials: true, occasionFit: true, construction: true },
+            select: { profileStatus: true, intentionPotentials: true, occasionFit: true, construction: true, silhouetteCharacter: true, waistComfort: true },
           },
         },
       }) as AutoSelectItem[];
@@ -456,6 +458,7 @@ export async function autoSelectClosetAnchor(
   const activeIntentions = signals.intentions ?? [];
   const activeBodyNeeds = signals.bodyNeeds ?? [];
   const needsConstructionBonus = activeBodyNeeds.some((n) => _CONSTRUCTION_BODY_NEEDS.has(n));
+  const needsLooseBonus = activeBodyNeeds.includes("loose-comfortable");
 
   const mapped: ScoredItem[] = items.map((item) => {
     const baseScore = scoreClosetItemForSession(
@@ -468,15 +471,37 @@ export async function autoSelectClosetAnchor(
       ? item.styleMeProfile
       : null;
 
-    // Body-need bonus: construction signal for anchor-capable structural needs.
+    // Body-need bonus: construction + silhouette signals for anchor-capable needs.
     // Tier order: occasion → register → body-need → intention.
     // Applied only to anchor-capable categories (TOPS/BOTTOMS/DRESSES/OUTERWEAR).
     const bodyNeedBonus = (() => {
-      if (!needsConstructionBonus || !approvedProfile) return 0;
       if (!ANCHOR_CAPABLE_CATEGORIES.has(item.category)) return 0;
-      const construction = approvedProfile.construction;
-      if (!construction || construction === "N/A") return 0;
-      return _ANCHOR_CONSTRUCTION_BONUS[construction] ?? 0;
+      let bonus = 0;
+      // Construction-based needs (structured-shape / still-want-shape)
+      if (needsConstructionBonus && approvedProfile) {
+        const construction = approvedProfile.construction;
+        if (construction && construction !== "N/A") {
+          bonus += _ANCHOR_CONSTRUCTION_BONUS[construction] ?? 0;
+        }
+      }
+      // Loose-comfortable: silhouetteCharacter + waistComfort from approved profile
+      if (needsLooseBonus && approvedProfile) {
+        const sils: string[] = approvedProfile.silhouetteCharacter ?? [];
+        const wc: string | null = approvedProfile.waistComfort ?? null;
+        const LOOSE_SILS = new Set(["relaxed", "oversized", "voluminous", "wide-leg"]);
+        const WAIST_SUPPORT = new Set(["elastic", "drawstring", "stretch"]);
+        const hasLoose = sils.some((s) => LOOSE_SILS.has(s));
+        const hasFitted = sils.includes("fitted");
+        const hasRestrict = wc === "restrictive";
+        const hasWaistSupport = wc !== null && WAIST_SUPPORT.has(wc);
+        // Violation cases receive no positive anchor bonus (ranking handles penalty via fitScore)
+        if (!hasFitted && !hasRestrict) {
+          if (hasLoose && hasWaistSupport) bonus += 2.0;   // fitScore 1.0 × 2.0
+          else if (hasLoose) bonus += 1.7;                 // fitScore 0.85 × 2.0
+          else if (hasWaistSupport) bonus += 1.2;          // fitScore 0.6 × 2.0
+        }
+      }
+      return bonus;
     })();
 
     // Intention bonus: approved intentionPotentials only — no legacy tag fallback.
@@ -650,9 +675,33 @@ export function scoreBodyNeedForClosetItem(
     }
 
     case "loose-comfortable": {
-      if (fp !== null && RELAXED_FITS.has(fp)) return { violation: false, fitScore: 1 };
+      const profile = item.approvedProfile;
+      if (profile) {
+        // PRIMARY: approvedProfile silhouetteCharacter (String[]) + waistComfort
+        const silhouettes = (profile.silhouetteCharacter ?? []) as string[];
+        const wc = (profile.waistComfort ?? null) as string | null;
+        const LOOSE_SILS = new Set(["relaxed", "oversized", "voluminous", "wide-leg"]);
+        const WAIST_SUPPORT = new Set(["elastic", "drawstring", "stretch"]);
+        const hasLoose = silhouettes.some((s) => LOOSE_SILS.has(s));
+        const hasFitted = silhouettes.includes("fitted");
+        const hasRestrict = wc === "restrictive";
+        const hasWaistSupport = wc !== null && WAIST_SUPPORT.has(wc);
+        // Fitted silhouette: violation even with elastic waist — silhouette dominates
+        if (hasFitted) return { violation: true, fitScore: hasWaistSupport ? 0.1 : 0 };
+        // Restrictive waistband: violation — wide-leg silhouette softens penalty slightly
+        if (hasRestrict) return { violation: true, fitScore: hasLoose ? 0.4 : 0 };
+        // No violation below — score positive contribution
+        if (hasLoose && hasWaistSupport) return { violation: false, fitScore: 1.0 };
+        if (hasLoose) return { violation: false, fitScore: 0.85 };
+        if (hasWaistSupport) return { violation: false, fitScore: 0.6 };
+        return { violation: false, fitScore: null }; // neutral/unread silhouette, no waist info
+      }
+      // LEGACY FALLBACK: fitProfile only — when no approved profile exists
+      const RELAXED_LEGACY = new Set(["relaxed", "loose", "oversized", "flowy"]);
+      const FITTED_LEGACY = new Set(["fitted", "body-skimming"]);
+      if (fp !== null && RELAXED_LEGACY.has(fp)) return { violation: false, fitScore: 1 };
+      if (fp !== null && FITTED_LEGACY.has(fp)) return { violation: true, fitScore: 0 };
       if (fp !== null && (fp === "tailored" || fp === "structured")) return { violation: false, fitScore: 0.3 };
-      if (fp !== null && TIGHT_FITS.has(fp)) return { violation: false, fitScore: 0 };
       return { violation: false, fitScore: fp === null ? null : 0.3 };
     }
 

@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveNadineAnchor, resolveActionAnchor, scoreClosetItemForSession, autoSelectClosetAnchor } from "./styleme-anchor.server.ts";
+import { resolveNadineAnchor, resolveActionAnchor, scoreClosetItemForSession, autoSelectClosetAnchor, scoreBodyNeedForClosetItem } from "./styleme-anchor.server.ts";
 import type { AutoSelectItem } from "./styleme-anchor.server.ts";
 import type { ClosetAnchorInput } from "./styleme-recommendation.types.ts";
 
@@ -704,5 +704,251 @@ describe("§BNA autoSelectClosetAnchor body-need (structured-shape) awareness", 
     const soft = makeAnchorItemBN("soft", "soft");
     const selected = await autoSelectClosetAnchor("any", { ...NEUTRAL_SIGNALS, bodyNeeds: undefined }, async () => [soft, tailored]);
     assert.ok(selected !== null, "anchor must return a result when bodyNeeds is omitted");
+  });
+});
+
+// ── §RCT5: RC-T5 loose-comfortable scorer + anchor integration ────────────────
+// Covers scoreBodyNeedForClosetItem("loose-comfortable", …) approved-profile logic,
+// legacy fallback, violation conditions, and anchor bonus integration.
+
+function makeLooseItem(
+  silhouetteCharacter: string[],
+  waistComfort: string | null,
+  fitProfile: string | null = null,
+): ClosetAnchorInput {
+  return {
+    type: "closet",
+    id: "test-item",
+    name: "Test Item",
+    category: "BOTTOMS",
+    subcategory: null,
+    colors: [],
+    primaryColor: null,
+    pattern: null,
+    material: null,
+    styleTags: [],
+    occasions: [],
+    imageUrl: null,
+    fitProfile,
+    waistShape: null,
+    sleeveLength: null,
+    necklineCoverage: null,
+    hemLength: null,
+    shoulderCoverage: null,
+    midriffExposed: null,
+    silhouette: null,
+    stylePersonality: null,
+    approvedProfile: {
+      exactSlot: null,
+      outfitFunction: null,
+      dressRegister: null,
+      fabricBehaviour: [],
+      silhouetteCharacter,
+      visualWeight: null,
+      construction: null,
+      stylingEffort: null,
+      layeringBehaviour: null,
+      waistComfort,
+      statementLevel: null,
+      occasionFit: null,
+      intentionPotentials: null,
+      naturalPairings: null,
+      intentionalMix: null,
+      avoidInStyleMe: null,
+    },
+  };
+}
+
+function makeLooseItemNoProfile(fitProfile: string | null): ClosetAnchorInput {
+  return {
+    type: "closet",
+    id: "test-item",
+    name: "Test Item",
+    category: "BOTTOMS",
+    subcategory: null,
+    colors: [],
+    primaryColor: null,
+    pattern: null,
+    material: null,
+    styleTags: [],
+    occasions: [],
+    imageUrl: null,
+    fitProfile,
+    waistShape: null,
+    sleeveLength: null,
+    necklineCoverage: null,
+    hemLength: null,
+    shoulderCoverage: null,
+    midriffExposed: null,
+    silhouette: null,
+    stylePersonality: null,
+    approvedProfile: null,
+  };
+}
+
+describe("§RCT5 RC-T5 scoreBodyNeedForClosetItem loose-comfortable", () => {
+  // ── Approved profile: strong positive silhouettes ──────────────────────────
+  it("RCT5.1 approved relaxed silhouette → no violation, fitScore 0.85", () => {
+    const { violation, fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", makeLooseItem(["relaxed"], null));
+    assert.equal(violation, false);
+    assert.ok(fitScore !== null && fitScore >= 0.8, `expected fitScore ≥ 0.8, got ${fitScore}`);
+  });
+
+  it("RCT5.2 approved oversized silhouette → no violation, positive fitScore", () => {
+    const { violation, fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", makeLooseItem(["oversized"], null));
+    assert.equal(violation, false);
+    assert.ok(fitScore !== null && fitScore > 0.5, `expected fitScore > 0.5, got ${fitScore}`);
+  });
+
+  it("RCT5.3 approved voluminous silhouette → no violation, positive fitScore", () => {
+    const { violation, fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", makeLooseItem(["voluminous"], null));
+    assert.equal(violation, false);
+    assert.ok(fitScore !== null && fitScore > 0.5);
+  });
+
+  it("RCT5.4 approved wide-leg silhouette → no violation, positive fitScore", () => {
+    const { violation, fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", makeLooseItem(["wide-leg"], null));
+    assert.equal(violation, false);
+    assert.ok(fitScore !== null && fitScore > 0.5);
+  });
+
+  // ── Approved profile: clear negative silhouette ────────────────────────────
+  it("RCT5.5 approved fitted silhouette → violation, low fitScore", () => {
+    const { violation, fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", makeLooseItem(["fitted"], null));
+    assert.equal(violation, true, "fitted silhouetteCharacter must be a violation");
+    assert.ok(fitScore !== null && fitScore < 0.3, `expected fitScore < 0.3 for fitted, got ${fitScore}`);
+  });
+
+  // ── Approved profile: waist comfort combinations ───────────────────────────
+  it("RCT5.6 approved relaxed silhouette + elastic waist → no violation, fitScore 1.0", () => {
+    const { violation, fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", makeLooseItem(["relaxed"], "elastic"));
+    assert.equal(violation, false);
+    assert.equal(fitScore, 1.0, "relaxed + elastic should achieve perfect loose-comfortable score");
+  });
+
+  it("RCT5.7 approved wide-leg silhouette + restrictive waist → violation (restrictive overrides)", () => {
+    const { violation, fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", makeLooseItem(["wide-leg"], "restrictive"));
+    assert.equal(violation, true, "restrictive waistband must produce violation even with wide-leg silhouette");
+    assert.ok(fitScore !== null && fitScore < 0.5, "score must be reduced despite loose silhouette");
+  });
+
+  it("RCT5.8 approved fitted silhouette + elastic waist → violation (fitted overrides elastic)", () => {
+    const { violation } = scoreBodyNeedForClosetItem("loose-comfortable", makeLooseItem(["fitted"], "elastic"));
+    assert.equal(violation, true, "fitted silhouette must remain a violation even with elastic waist");
+  });
+
+  it("RCT5.9 approved neutral silhouette (straight) → no violation, null fitScore (no loose signal)", () => {
+    const { violation, fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", makeLooseItem(["straight"], null));
+    assert.equal(violation, false);
+    assert.equal(fitScore, null, "neutral silhouette with no waist data must produce null fitScore");
+  });
+
+  it("RCT5.9b waist support alone (no silhouette) → no violation, positive fitScore", () => {
+    const { violation, fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", makeLooseItem([], "elastic"));
+    assert.equal(violation, false);
+    assert.ok(fitScore !== null && fitScore > 0.4, "elastic waist alone should provide supporting positive signal");
+  });
+
+  // ── Legacy fallback: no approved profile ─────────────────────────────────
+  it("RCT5.10 no approved profile, relaxed fitProfile → no violation, fitScore 1", () => {
+    const { violation, fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", makeLooseItemNoProfile("relaxed"));
+    assert.equal(violation, false);
+    assert.equal(fitScore, 1);
+  });
+
+  it("RCT5.11 no approved profile, fitted fitProfile → violation, fitScore 0", () => {
+    const { violation, fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", makeLooseItemNoProfile("fitted"));
+    assert.equal(violation, true, "fitted fitProfile (legacy path) must produce violation");
+    assert.equal(fitScore, 0);
+  });
+
+  it("RCT5.12 no approved profile, body-skimming fitProfile → violation", () => {
+    const { violation } = scoreBodyNeedForClosetItem("loose-comfortable", makeLooseItemNoProfile("body-skimming"));
+    assert.equal(violation, true, "body-skimming fitProfile (legacy path) must produce violation");
+  });
+
+  it("RCT5.13 no approved profile, tailored fitProfile → no violation, fitScore 0.3", () => {
+    const { violation, fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", makeLooseItemNoProfile("tailored"));
+    assert.equal(violation, false);
+    assert.equal(fitScore, 0.3);
+  });
+
+  it("RCT5.14 no approved profile, null fitProfile → no violation, null fitScore", () => {
+    const { violation, fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", makeLooseItemNoProfile(null));
+    assert.equal(violation, false);
+    assert.equal(fitScore, null);
+  });
+});
+
+describe("§RCT5-ANC RC-T5 autoSelectClosetAnchor loose-comfortable awareness", () => {
+  function makeLooseAnchorItem(
+    id: string,
+    silhouetteCharacter: string[],
+    waistComfort: string | null,
+    overrides: Partial<AutoSelectItem> = {},
+  ): AutoSelectItem {
+    return {
+      id,
+      name: id,
+      category: "TOPS",
+      subcategory: null,
+      colors: [],
+      primaryColor: null,
+      pattern: null,
+      material: null,
+      styleTags: [],
+      occasions: ["everyday"],
+      imageUrl: null,
+      garmentRelationships: [],
+      formality: "casual",
+      styleMeProfile: {
+        profileStatus: "approved",
+        intentionPotentials: {},
+        occasionFit: null,
+        construction: null,
+        silhouetteCharacter,
+        waistComfort,
+      },
+      ...overrides,
+    };
+  }
+
+  const LC_SIGNALS = {
+    occasion: "everyday",
+    moods: [] as string[],
+    desiredFeelings: [] as string[],
+    bodyNeeds: ["loose-comfortable"],
+  };
+  const NEUTRAL_LC = {
+    occasion: "everyday",
+    moods: [] as string[],
+    desiredFeelings: [] as string[],
+  };
+
+  it("RCT5.15 relaxed-silhouette anchor beats fitted-silhouette anchor when loose-comfortable active", async () => {
+    const relaxed = makeLooseAnchorItem("relaxed", ["relaxed"], null);
+    const fitted = makeLooseAnchorItem("fitted", ["fitted"], null);
+    const selected = await autoSelectClosetAnchor("any", LC_SIGNALS, async () => [fitted, relaxed]);
+    assert.ok(selected !== null);
+    assert.equal(selected!.id, "relaxed", "relaxed anchor must beat fitted when loose-comfortable active");
+  });
+
+  it("RCT5.16 occasion-match still beats loose-comfortable anchor bonus (occasion is tier 1)", async () => {
+    const occasionFitted = makeLooseAnchorItem("occasion-fitted", ["fitted"], null, { occasions: ["everyday"] });
+    const noOccasionRelaxed = makeLooseAnchorItem("no-occ-relaxed", ["relaxed"], null, { occasions: [] });
+    // occasionFitted: +10 base (occasion match), 0 loose bonus = 10
+    // noOccasionRelaxed: 0 base, +1.7 loose bonus = 1.7
+    const selected = await autoSelectClosetAnchor("any", LC_SIGNALS, async () => [noOccasionRelaxed, occasionFitted]);
+    assert.ok(selected !== null);
+    assert.equal(selected!.id, "occasion-fitted", "occasion-matched item (+10) must beat loose-bonus item (+1.7)");
+  });
+
+  it("RCT5.17 no loose-comfortable body need → fitted and relaxed anchors tie (no artificial preference)", async () => {
+    const relaxed = makeLooseAnchorItem("relaxed", ["relaxed"], null);
+    const fitted = makeLooseAnchorItem("fitted", ["fitted"], null);
+    const selected = await autoSelectClosetAnchor("any", NEUTRAL_LC, async () => [fitted, relaxed]);
+    assert.ok(selected !== null);
+    // Both tie — insertion order decides; fitted is first in the list
+    assert.equal(selected!.id, "fitted", "without loose-comfortable need, insertion-order first item wins");
   });
 });

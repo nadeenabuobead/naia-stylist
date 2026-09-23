@@ -30,6 +30,7 @@ import {
   scoreBodyNeedFit,
   scoreBodyNeedFitForRanking,
   coreClothingMeetsBodyNeed,
+  coreClothingMeetsLooseNeed,
 } from "./styleme-result.server.ts";
 import type { CandidateRankKey } from "./styleme-result.server.ts";
 import { scoreBodyNeedForClosetItem } from "./styleme-anchor.server.js";
@@ -3125,5 +3126,139 @@ describe("§SRC shared-occasion register coherence override", () => {
     assert.ok(outerwear !== undefined,
       "polished tailored outerwear with shared everyday approval must pass register coherence and appear in outfit");
     assert.equal(outerwear!.id, "beige-blazer");
+  });
+});
+
+// ── §RCT5-SLOT: RC-T5 slot bonus + coreClothingMeetsLooseNeed ────────────────
+
+function makeProfiledItem(
+  id: string,
+  silhouetteCharacter: string[],
+  waistComfort: string | null,
+  category = "TOPS",
+): ClosetAnchorInput {
+  return {
+    type: "closet",
+    id,
+    name: id,
+    category,
+    subcategory: null,
+    colors: [],
+    primaryColor: null,
+    pattern: null,
+    material: null,
+    styleTags: [],
+    occasions: ["everyday"],
+    imageUrl: null,
+    fitProfile: null,
+    waistShape: null,
+    sleeveLength: null,
+    necklineCoverage: null,
+    hemLength: null,
+    shoulderCoverage: null,
+    midriffExposed: null,
+    silhouette: null,
+    stylePersonality: null,
+    garmentRelationships: [],
+    formality: "casual",
+    approvedProfile: {
+      exactSlot: null,
+      outfitFunction: null,
+      dressRegister: null,
+      fabricBehaviour: [],
+      silhouetteCharacter,
+      visualWeight: null,
+      construction: null,
+      stylingEffort: null,
+      layeringBehaviour: null,
+      waistComfort,
+      statementLevel: null,
+      occasionFit: null,
+      intentionPotentials: null,
+      naturalPairings: null,
+      intentionalMix: null,
+      avoidInStyleMe: null,
+    },
+  };
+}
+
+describe("§RCT5-SLOT RC-T5 slot bonus — loose-comfortable", () => {
+  it("RCT5.18 relaxed-silhouette item → positive fitScore for loose-comfortable", () => {
+    const relaxedItem = makeProfiledItem("r1", ["relaxed"], null);
+    const { fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", relaxedItem);
+    assert.ok(fitScore !== null && fitScore > 0, "relaxed-silhouette item must have positive fitScore for loose-comfortable");
+  });
+
+  it("RCT5.19 fitted-silhouette item → violation, fitScore 0 → slot bonus would be zero", () => {
+    const fittedItem = makeProfiledItem("f1", ["fitted"], null);
+    const { fitScore, violation } = scoreBodyNeedForClosetItem("loose-comfortable", fittedItem);
+    assert.equal(violation, true, "fitted silhouette must produce violation");
+    assert.equal(fitScore, 0, "fitted silhouette → fitScore 0");
+  });
+
+  it("RCT5.20 scorer returns positive for relaxed bag item (slot gate enforced upstream)", () => {
+    // The slot exclusion (bag/accessory/jewelry) is enforced in computeBodyNeedSlotBonus.
+    // The scorer itself is category-agnostic — it scores the garment's looseness directly.
+    const relaxedBag = makeProfiledItem("bag1", ["relaxed"], null, "BAGS");
+    const { fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", relaxedBag);
+    assert.ok(fitScore !== null && fitScore > 0, "scorer returns positive for relaxed bag item; slot gate is upstream in computeBodyNeedSlotBonus");
+  });
+});
+
+describe("§RCT5-CORE RC-T5 coreClothingMeetsLooseNeed", () => {
+  it("RCT5.21 core with relaxed-silhouette item satisfies loose-comfortable need", () => {
+    const relaxedItem = makeProfiledItem("r1", ["relaxed"], null);
+    const result = coreClothingMeetsLooseNeed([relaxedItem], ["loose-comfortable"]);
+    assert.equal(result, true, "core with relaxed silhouette must satisfy loose-comfortable");
+  });
+
+  it("RCT5.22 core with only fitted items does not satisfy loose-comfortable need", () => {
+    const fittedItem = makeProfiledItem("f1", ["fitted"], null);
+    const result = coreClothingMeetsLooseNeed([fittedItem], ["loose-comfortable"]);
+    assert.equal(result, false, "core with only fitted silhouettes must not satisfy loose-comfortable");
+  });
+
+  it("RCT5.22b core with no approved profile items does not satisfy loose-comfortable need", () => {
+    const noProfileItem: ClosetAnchorInput = {
+      type: "closet",
+      id: "np1",
+      name: "No Profile",
+      category: "TOPS",
+      subcategory: null,
+      colors: [],
+      primaryColor: null,
+      pattern: null,
+      material: null,
+      styleTags: [],
+      occasions: [],
+      imageUrl: null,
+      fitProfile: "relaxed",
+      waistShape: null,
+      sleeveLength: null,
+      necklineCoverage: null,
+      hemLength: null,
+      shoulderCoverage: null,
+      midriffExposed: null,
+      silhouette: null,
+      stylePersonality: null,
+      garmentRelationships: [],
+      formality: null,
+      approvedProfile: null,
+    };
+    const result = coreClothingMeetsLooseNeed([noProfileItem], ["loose-comfortable"]);
+    assert.equal(result, false,
+      "no approved profile → silhouetteCharacter unavailable → coreClothingMeetsLooseNeed returns false");
+  });
+
+  it("RCT5.22c when loose-comfortable is not an active body need, always returns true", () => {
+    const fittedItem = makeProfiledItem("f1", ["fitted"], null);
+    const result = coreClothingMeetsLooseNeed([fittedItem], ["structured-shape"]);
+    assert.equal(result, true, "coreClothingMeetsLooseNeed must return true when loose-comfortable is not active");
+  });
+
+  it("RCT5.22d oversized silhouette satisfies loose-comfortable need", () => {
+    const oversizedItem = makeProfiledItem("o1", ["oversized"], null);
+    const result = coreClothingMeetsLooseNeed([oversizedItem], ["loose-comfortable"]);
+    assert.equal(result, true, "oversized silhouette must satisfy loose-comfortable core check");
   });
 });

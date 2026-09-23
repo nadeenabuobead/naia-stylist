@@ -9937,6 +9937,8 @@ function makeSmcmItem(overrides: Partial<{
   necklineCoverage: string | null; hemLength: string | null;
   shoulderCoverage: boolean | null; midriffExposed: boolean | null;
   silhouette: string | null; stylePersonality: string | null;
+  // Approved profile (for RC-T5 loose-comfortable approved-profile-first scoring)
+  approvedProfile: import("./styleme-recommendation.types.ts").ClosetAnchorInput["approvedProfile"];
 }> = {}) {
   return {
     type: "closet" as const,
@@ -9961,6 +9963,7 @@ function makeSmcmItem(overrides: Partial<{
     midriffExposed: overrides.midriffExposed ?? null,
     silhouette: overrides.silhouette ?? null,
     stylePersonality: overrides.stylePersonality ?? null,
+    approvedProfile: overrides.approvedProfile ?? null,
   };
 }
 
@@ -10124,20 +10127,32 @@ describe("§SBNI scoreBodyNeedFitForRanking", () => {
     assert.strictEqual(result.knownViolationCount, 1, "fitted item violates less-body-conscious");
   });
 
-  it("SBNI.2 — loose-comfortable + fitted fitProfile → NO violation (graded score only)", () => {
+  it("SBNI.2 — loose-comfortable + fitted fitProfile (no approved profile) → violation on legacy path", () => {
     const candidate = makeSmcmCandidate(["i1"]);
     const allItems = [makeSmcmItem({ id: "i1", fitProfile: "fitted" })];
     const result = scoreBodyNeedFitForRanking(["loose-comfortable"], candidate, allItems);
-    assert.strictEqual(result.knownViolationCount, 0, "fitted item must NOT violate loose-comfortable");
-    assert.ok(result.bodyNeedFitScore !== null && result.bodyNeedFitScore < 0.5, "fitted item scores low for loose-comfortable");
+    assert.strictEqual(result.knownViolationCount, 1, "fitted fitProfile (legacy path, no approved profile) violates loose-comfortable");
   });
 
-  it("SBNI.3 — less-body-conscious and loose-comfortable produce different outcomes for same fitted item", () => {
+  it("SBNI.3 — loose-comfortable uses approved silhouette; less-body-conscious uses fitProfile only", () => {
     const candidate = makeSmcmCandidate(["i1"]);
-    const allItems = [makeSmcmItem({ id: "i1", fitProfile: "fitted" })];
+    // Item has approved relaxed silhouette but no fitProfile — loose-comfortable reads the profile
+    const allItems = [makeSmcmItem({
+      id: "i1",
+      fitProfile: null,
+      approvedProfile: {
+        exactSlot: null, outfitFunction: null, dressRegister: null,
+        fabricBehaviour: [], silhouetteCharacter: ["relaxed"], visualWeight: null,
+        construction: null, stylingEffort: null, layeringBehaviour: null,
+        waistComfort: null, statementLevel: null, occasionFit: null,
+        intentionPotentials: null, naturalPairings: null, intentionalMix: null,
+        avoidInStyleMe: null,
+      },
+    })];
     const lbc = scoreBodyNeedFitForRanking(["less-body-conscious"], candidate, allItems);
     const lc = scoreBodyNeedFitForRanking(["loose-comfortable"], candidate, allItems);
-    assert.notStrictEqual(lbc.knownViolationCount, lc.knownViolationCount, "less-body-conscious must produce violation; loose-comfortable must not");
+    assert.strictEqual(lbc.bodyNeedFitScore, null, "less-body-conscious uses fitProfile only; null when no fitProfile");
+    assert.ok(lc.bodyNeedFitScore !== null && lc.bodyNeedFitScore > 0.5, "loose-comfortable reads approved relaxed silhouette → positive score");
   });
 
   it("SBNI.4 — still-want-shape with body-skimming fitProfile → fitScore 1.0 (beyond SMCM)", () => {
