@@ -848,6 +848,10 @@ export const BODY_NEED_SMCM: Record<string, { kind: BodyNeedKind; smcm: string[]
 // (they don't meaningfully satisfy fit/coverage body needs).
 const BODY_NEED_STRUCTURAL_SLOTS = new Set(["bag", "accessory", "jewelry"]);
 
+// Clothing slots that can positively satisfy a structural body need (Fit/Comfort tier 4).
+// Shoes, bags, accessories, and jewelry are excluded — they cannot satisfy a clothing body need.
+const _STRUCTURAL_CLOTHING_SLOTS = new Set<string>(["top", "bottom", "dress", "set", "outerwear"]);
+
 export interface BodyNeedFitResult {
   knownViolationCount: number;  // T1: avoidance violations (lower = better)
   bodyNeedFitScore: number;     // T2: preference ratio 0–1 (higher = better); null when no scorable needs
@@ -3492,11 +3496,24 @@ function computeBodyNeedSlotBonus(
   return _SLOT_CONSTRUCTION_BONUS[construction] ?? 0;
 }
 
+// Returns true when at least one clothing piece in the core outfit meaningfully satisfies
+// the active structural body need (construction: sculptural, structured, or tailored).
+// Accessories, bags, jewelry, and shoes are excluded — they cannot satisfy a clothing need.
+// When no structural body need is active this always returns true (nothing to satisfy).
+export function coreClothingMeetsBodyNeed(
+  coreConstructions: (string | null | undefined)[],
+  bodyNeeds: string[],
+): boolean {
+  if (!bodyNeeds.some((n) => _SLOT_CONSTRUCTION_NEEDS.has(n))) return true;
+  return coreConstructions.some(
+    (c) => c === "structured" || c === "tailored" || c === "sculptural",
+  );
+}
+
 // ── Multi-Closet garment scan ─────────────────────────────────────────────────
 // Finds the best Closet item for each outfit slot not already covered by the
 // anchor or primary NADINE product. Runs in both nAia and NADINE modes.
 // At most one item per slot. The anchor is always excluded by ID.
-// Items with zero session signal score are never surfaced.
 
 export function selectAdditionalClosetGarments(
   anchor: NormalizedStyleAnchor | null,
@@ -3573,9 +3590,9 @@ export function selectAdditionalClosetGarments(
       profile,
       item.garmentRelationships,
     );
-    if (baseScore <= 0) continue;
-    // Body-need bonus: construction signal for structural body needs (structured-shape / still-want-shape).
-    // Bags/accessories/jewelry are excluded. Applied before intention (tier order).
+    // Bonuses computed BEFORE the score gate: approved Fit/Comfort or Intention truth can
+    // elevate a zero-legacy-base garment. Hard eligibility gates (occasion=No, register,
+    // dressing requirements) fire above and cannot be rescued by these bonuses.
     const bodyNeedSlotBonus = activeBodyNeedsForSlot.length > 0
       ? computeBodyNeedSlotBonus(activeBodyNeedsForSlot, item, slot)
       : 0;
@@ -3606,6 +3623,10 @@ export function selectAdditionalClosetGarments(
         finalScore: Math.round(score * 1000) / 1000,
       }));
     }
+
+    // Gate: total contribution must be positive. Legacy baseScore is no longer the sole
+    // gate — approved Fit/Comfort and Intention signals can carry a zero-base item through.
+    if (score <= 0) continue;
 
     const list = candidatesBySlot.get(slot) ?? [];
     list.push({ item, score });
@@ -3688,17 +3709,44 @@ export function selectAdditionalClosetGarments(
   }
 
   // Shoes take absolute priority over bags/accessories regardless of score.
+  const closetItemById = new Map(closetItems.map((i) => [i.id, i]));
   const OPTIONAL_SLOT_ORDER: Record<string, number> = { outerwear: 1, bag: 2, accessory: 3, jewelry: 3 };
   const optShoes = optionalWinners.filter((o) => o.slot === "shoe");
   const optRest = optionalWinners
     .filter((o) => o.slot !== "shoe")
     .sort((a, b) => b.score - a.score || (OPTIONAL_SLOT_ORDER[a.slot] ?? 9) - (OPTIONAL_SLOT_ORDER[b.slot] ?? 9));
+
+  // Body-need capacity reservation: when a structural Fit/Comfort need is active and
+  // the clothing core (anchor + Phase 1) doesn't satisfy it, promote the best structural
+  // clothing optional to the front of optRest so finishing accessories don't exhaust the
+  // outfit size cap before it's considered. Only fires when there is room left in the outfit.
+  if (
+    activeBodyNeedsForSlot.some((n) => _SLOT_CONSTRUCTION_NEEDS.has(n)) &&
+    result.length < maxAdditional
+  ) {
+    const coreConstructions: (string | null | undefined)[] = [
+      anchorClosetItem?.approvedProfile?.construction ?? null,
+      ...result.map((r) => closetItemById.get(r.id)?.approvedProfile?.construction ?? null),
+    ];
+    if (!coreClothingMeetsBodyNeed(coreConstructions, activeBodyNeedsForSlot)) {
+      const idx = optRest.findIndex(
+        (o) =>
+          _STRUCTURAL_CLOTHING_SLOTS.has(o.slot) &&
+          computeBodyNeedSlotBonus(activeBodyNeedsForSlot, o.item, o.slot) > 0,
+      );
+      if (idx !== -1) {
+        const [reserved] = optRest.splice(idx, 1);
+        optRest.unshift(reserved);
+      }
+    }
+  }
+
   const orderedOptionals = [...optShoes, ...optRest];
 
   // Count statement pieces already committed from anchor + Phase 1 base selections.
   // Both statementLevel === "statement" AND outfitFunction === "statement" count
   // as statement pieces (they are independent fields that both denote a statement role).
-  const closetItemById = new Map(closetItems.map((i) => [i.id, i]));
+
   const isStatementPiece = (item: ClosetAnchorInput | null | undefined, slot: string): boolean => {
     if (!item || STRUCTURAL_EXCLUDES.has(slot)) return false;
     const p = item.approvedProfile;

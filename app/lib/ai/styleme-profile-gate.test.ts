@@ -29,6 +29,7 @@ import {
   compareCandidateRankKeys,
   scoreBodyNeedFit,
   scoreBodyNeedFitForRanking,
+  coreClothingMeetsBodyNeed,
 } from "./styleme-result.server.ts";
 import type { CandidateRankKey } from "./styleme-result.server.ts";
 import { scoreBodyNeedForClosetItem } from "./styleme-anchor.server.js";
@@ -2679,5 +2680,299 @@ describe("§SParse session bodyNeeds parsing (source.tsx fix regression)", () =>
     const intentions: string[] = raw ? (JSON.parse(raw) as string[]) : [];
     assert.deepEqual(intentions, [],
       "existing intentions parsing (no try/catch, no array guard) must remain unchanged");
+  });
+});
+
+// ── §SGate — score-gate regression (RC-T3-B: gate fix) ──────────────────────
+// Verifies that the gate fires on TOTAL score (base + bodyNeedBonus + intentionBonus),
+// not on baseScore alone. Hard eligibility gates (occasion=No, register) still fire first.
+
+describe("§SGate score gate — total-score gate regression", () => {
+  const BASE_SESSION = {
+    moods: [] as string[],
+    desiredFeelings: [] as string[],
+    coverageConditional: null,
+    occasion: "everyday" as const,
+    formalityConditional: null,
+    todayColours: { preferred: [] as string[], avoid: [] as string[] },
+    practicalIds: [] as string[],
+    source: "my-closet" as const,
+    intentions: [] as string[],
+  };
+
+  const anchor: NormalizedClosetAnchor = {
+    type: "closet",
+    id: "anchor-btm",
+    label: "Jeans",
+    slot: "bottom",
+    colors: ["blue"],
+    normalizedColorIds: ["blue"],
+    styleTags: [],
+    occasions: ["everyday"],
+    material: null,
+    hasStrongEvidence: true,
+    evidenceFields: [],
+    imageUrl: null,
+  };
+  const anchorItem = makeItem({ id: "anchor-btm", category: "BOTTOMS", occasions: ["everyday"] });
+
+  it("SGate.1 zero legacy base + tailored construction + structured-shape → item eligible", () => {
+    // The Beige Oversized Blazer scenario: no occasion overlap (baseScore≈0),
+    // but construction=tailored earns bodyNeedSlotBonus for outerwear+structured-shape.
+    // Before the gate fix, `if (baseScore <= 0) continue` eliminated it before the bonus.
+    const blazer = makeItem({
+      id: "blazer",
+      category: "OUTERWEAR",
+      occasions: [],          // no occasion match → baseScore=0 or near-zero
+      approvedProfile: makeApprovedProfile({
+        exactSlot: "outerwear",
+        outfitFunction: "base",
+        construction: "tailored",
+        occasionFit: {
+          everyday: "Acceptable", work: "Acceptable", dinner: "Acceptable",
+          event: "Strong", "night-out": "Acceptable", family: "Acceptable",
+          travel: "Acceptable", active: "No", date: "Acceptable",
+        },
+      }),
+    });
+    const session = { ...BASE_SESSION, bodyNeeds: ["structured-shape"] };
+    const result = selectAdditionalClosetGarments(anchor, null, session, [anchorItem, blazer]);
+    const outerwear = result.find((r) => r.slot === "outerwear");
+    assert.ok(outerwear !== undefined,
+      "tailored outerwear must appear even when it has no occasion tag match (bodyNeedSlotBonus rescues it)");
+    assert.equal(outerwear!.id, "blazer");
+  });
+
+  it("SGate.2 occasionFit=No hard gate fires before bonus — item remains excluded", () => {
+    const blockedBlazer = makeItem({
+      id: "blocked-blazer",
+      category: "OUTERWEAR",
+      occasions: ["formal-event"],
+      approvedProfile: makeApprovedProfile({
+        exactSlot: "outerwear",
+        outfitFunction: "base",
+        construction: "tailored",
+        occasionFit: {
+          everyday: "No", work: "No", dinner: "Acceptable", date: "Acceptable",
+          event: "Strong", "night-out": "Acceptable", family: "No",
+          travel: "No", active: "No",
+        },
+      }),
+    });
+    const session = { ...BASE_SESSION, bodyNeeds: ["structured-shape"] };
+    const result = selectAdditionalClosetGarments(anchor, null, session, [anchorItem, blockedBlazer]);
+    const outerIds = result.map((r) => r.id);
+    assert.ok(!outerIds.includes("blocked-blazer"),
+      "occasionFit=No is a hard gate — no bonus can rescue a garment blocked for this occasion");
+  });
+
+  it("SGate.3 athletic register blocks item for everyday session — bodyNeedBonus cannot rescue", () => {
+    // dressRegister="athletic" without an explicit occasionFit "Strong"/"Acceptable" override
+    // is blocked for non-active occasions by passesProfileRegisterGate (line 124 of gate file).
+    // passesProfileOccasionGate sees occasionFit.everyday="None" (not "No") and passes;
+    // passesProfileRegisterGate then fires the athletic-register hard block.
+    const athleticTop = makeItem({
+      id: "athletic-top",
+      category: "TOPS",
+      occasions: ["everyday"],
+      approvedProfile: makeApprovedProfile({
+        exactSlot: "top",
+        outfitFunction: "base",
+        construction: "tailored",
+        dressRegister: "athletic",
+        occasionFit: {
+          everyday: "None", work: "None", dinner: "No", date: "No",
+          event: "No", "night-out": "No", family: "None", travel: "None", active: "Strong",
+        },
+      }),
+    });
+    const session = { ...BASE_SESSION, bodyNeeds: ["structured-shape"] };
+    const result = selectAdditionalClosetGarments(anchor, null, session, [anchorItem, athleticTop]);
+    const ids = result.map((r) => r.id);
+    assert.ok(!ids.includes("athletic-top"),
+      "athletic register is a hard gate for everyday sessions — bodyNeedSlotBonus must not rescue it");
+  });
+});
+
+// ── §SRes — cap reservation regression (RC-T3-C: reservation logic) ─────────
+// Verifies that when a structural body need is active and the clothing core does not
+// satisfy it, the best structural clothing optional is promoted before finishing
+// accessories exhaust the outfit cap.
+
+describe("§SRes cap reservation — structural body need promotion", () => {
+  const BASE_SESSION = {
+    moods: [] as string[],
+    desiredFeelings: [] as string[],
+    coverageConditional: null,
+    occasion: "everyday" as const,
+    formalityConditional: null,
+    todayColours: { preferred: [] as string[], avoid: [] as string[] },
+    practicalIds: [] as string[],
+    source: "my-closet" as const,
+    intentions: [] as string[],
+  };
+
+  // Anchor = top (soft construction) — covers top slot, doesn't satisfy structural need.
+  const anchor: NormalizedClosetAnchor = {
+    type: "closet",
+    id: "anchor-top",
+    label: "Soft Top",
+    slot: "top",
+    colors: ["black"],
+    normalizedColorIds: ["black"],
+    styleTags: [],
+    occasions: ["everyday"],
+    material: null,
+    hasStrongEvidence: true,
+    evidenceFields: [],
+    imageUrl: null,
+  };
+  const anchorItem = makeItem({
+    id: "anchor-top",
+    category: "TOPS",
+    occasions: ["everyday"],
+    approvedProfile: makeApprovedProfile({ exactSlot: "top", outfitFunction: "base", construction: "soft" }),
+  });
+  // Phase 1 bottom — neutral construction, doesn't satisfy.
+  const bottomItem = makeItem({
+    id: "btm",
+    category: "BOTTOMS",
+    occasions: ["everyday"],
+    approvedProfile: makeApprovedProfile({ exactSlot: "bottom", outfitFunction: "base", construction: "neutral" }),
+  });
+  // Tailored outerwear — no occasion match (baseScore≈0) but bodyNeedBonus earns it.
+  const tailoredBlazer = makeItem({
+    id: "blazer",
+    category: "OUTERWEAR",
+    occasions: [],
+    approvedProfile: makeApprovedProfile({
+      exactSlot: "outerwear",
+      outfitFunction: "base",
+      construction: "tailored",
+      occasionFit: {
+        everyday: "Acceptable", work: "Acceptable", dinner: "Acceptable",
+        event: "Strong", "night-out": "Acceptable", family: "Acceptable",
+        travel: "Acceptable", active: "No", date: "Acceptable",
+      },
+    }),
+  });
+  // Bag — occasion match (baseScore>0), but can't satisfy structural need.
+  const bagItem = makeItem({
+    id: "bag",
+    category: "ACCESSORIES",
+    occasions: ["everyday"],
+    approvedProfile: makeApprovedProfile({
+      exactSlot: "bag", outfitFunction: "finishing", construction: "structured",
+      occasionFit: {
+        everyday: "Strong", work: "Strong", dinner: "Acceptable", date: "Acceptable",
+        event: "Acceptable", "night-out": "Acceptable", family: "Strong",
+        travel: "Strong", active: "No",
+      },
+    }),
+  });
+  // Belt — occasion match (baseScore>0).
+  const beltItem = makeItem({
+    id: "belt",
+    category: "ACCESSORIES",
+    occasions: ["everyday"],
+    approvedProfile: makeApprovedProfile({
+      exactSlot: "accessory", outfitFunction: "finishing", construction: "neutral",
+      occasionFit: {
+        everyday: "Strong", work: "Strong", dinner: "Acceptable", date: "Acceptable",
+        event: "Acceptable", "night-out": "Acceptable", family: "Strong",
+        travel: "Strong", active: "No",
+      },
+    }),
+  });
+
+  it("SRes.1 cap starvation → tailored outerwear promoted before bag/belt when structural need active", () => {
+    // Outfit budget: anchor(1) + bottom(1) + blazer + bag + belt = 5.
+    // Without reservation, bag+belt outscore blazer (they have session-signal match), filling
+    // the 2 optional slots before blazer is reached. With reservation, blazer is promoted to
+    // the front of optRest and fills slot 4; belt is displaced.
+    const session = { ...BASE_SESSION, bodyNeeds: ["structured-shape"] };
+    const result = selectAdditionalClosetGarments(
+      anchor, null, session,
+      [anchorItem, bottomItem, tailoredBlazer, bagItem, beltItem],
+    );
+    const ids = result.map((r) => r.id);
+    assert.ok(ids.includes("blazer"),
+      `tailored outerwear must appear when structural body need is active and core doesn't satisfy it; got: ${JSON.stringify(ids)}`);
+  });
+
+  it("SRes.2 control — no body need → no reservation, blazer may not appear", () => {
+    // Without the body need, reservation logic does not fire. The outerwear has no session
+    // signal (baseScore=0) so it may not survive the score gate at all.
+    const session = { ...BASE_SESSION, bodyNeeds: [] };
+    const result = selectAdditionalClosetGarments(
+      anchor, null, session,
+      [anchorItem, bottomItem, tailoredBlazer, bagItem, beltItem],
+    );
+    const ids = result.map((r) => r.id);
+    // The core check: bag and belt both have session-signal scores and should appear.
+    assert.ok(ids.includes("bag") || ids.includes("belt"),
+      "bag or belt must appear when there is no body need forcing outerwear promotion");
+  });
+
+  it("SRes.3 core already satisfied → no forced promotion", () => {
+    // When the anchor's construction is tailored, coreClothingMeetsBodyNeed() returns true
+    // and the reservation block is skipped. Natural score order applies.
+    const tailoredAnchorItem = makeItem({
+      id: "anchor-top",
+      category: "TOPS",
+      occasions: ["everyday"],
+      approvedProfile: makeApprovedProfile({ exactSlot: "top", outfitFunction: "base", construction: "tailored" }),
+    });
+    const tailoredAnchor: NormalizedClosetAnchor = { ...anchor, id: "anchor-top" };
+    const session = { ...BASE_SESSION, bodyNeeds: ["structured-shape"] };
+    const result = selectAdditionalClosetGarments(
+      tailoredAnchor, null, session,
+      [tailoredAnchorItem, bottomItem, tailoredBlazer, bagItem, beltItem],
+    );
+    const ids = result.map((r) => r.id);
+    // The core (tailored anchor) satisfies the body need, so reservation is skipped.
+    // Bag has higher score than blazer — bag must appear in the normal ordering.
+    assert.ok(ids.includes("bag"),
+      "bag must appear when the core already satisfies the structural need and no reservation fires");
+  });
+
+  it("SRes.4 soft+neutral core doesn't satisfy → coreClothingMeetsBodyNeed returns false", () => {
+    const soft: (string | null | undefined)[] = ["soft", "neutral"];
+    const result = coreClothingMeetsBodyNeed(soft, ["structured-shape"]);
+    assert.equal(result, false,
+      "soft and neutral constructions alone must not satisfy a structured-shape body need");
+  });
+
+  it("SRes.5 sculptural anchor satisfies → coreClothingMeetsBodyNeed returns true", () => {
+    const sculptural: (string | null | undefined)[] = ["sculptural", "neutral"];
+    const result = coreClothingMeetsBodyNeed(sculptural, ["structured-shape"]);
+    assert.equal(result, true,
+      "sculptural construction satisfies a structured-shape body need (0.75 credit in scoring)");
+  });
+});
+
+// ── §CMB — coreClothingMeetsBodyNeed unit tests ───────────────────────────────
+
+describe("§CMB coreClothingMeetsBodyNeed helper", () => {
+  it("CMB.1 tailored construction satisfies structured-shape", () => {
+    assert.equal(coreClothingMeetsBodyNeed(["tailored"], ["structured-shape"]), true);
+  });
+
+  it("CMB.2 soft + neutral do not satisfy structured-shape", () => {
+    assert.equal(coreClothingMeetsBodyNeed(["soft", "neutral"], ["structured-shape"]), false);
+  });
+
+  it("CMB.3 no structural need in bodyNeeds → always true (early return)", () => {
+    assert.equal(coreClothingMeetsBodyNeed(["soft"], ["nothing-specific"]), true,
+      "when bodyNeeds has no structural need, coreClothingMeetsBodyNeed must return true without checking constructions");
+  });
+
+  it("CMB.4 structured construction satisfies structured-shape", () => {
+    assert.equal(coreClothingMeetsBodyNeed(["structured"], ["structured-shape"]), true);
+  });
+
+  it("CMB.5 null/undefined constructions are safely skipped", () => {
+    assert.equal(coreClothingMeetsBodyNeed([null, undefined, "tailored"], ["structured-shape"]), true);
+    assert.equal(coreClothingMeetsBodyNeed([null, undefined, "soft"], ["structured-shape"]), false);
   });
 });
