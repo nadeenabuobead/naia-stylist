@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { LinksFunction, LoaderFunctionArgs } from "react-router";
-import { Link, useLoaderData } from "react-router";
+import { Form, Link, useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import prisma from "~/db.server";
 import type { TrendReportData } from "~/lib/trend-reports";
 import {
   getEditorialReportBySlug,
@@ -35,6 +36,12 @@ type LoaderData = {
   returnTo: string;
   /** Set when viewing a stored historical snapshot rather than today's edit. */
   historical: { snapshotId: string; receivedAt: string } | null;
+  /**
+   * Connected pieces that still exist in the closet. A historical snapshot may
+   * name a piece since deleted: the claim and reason stay, the Style-this
+   * action goes, and the stored snapshot is never rewritten.
+   */
+  availablePieceIds: string[];
 };
 
 /** The edit plus its structured closet connections, as rendered and as stored. */
@@ -51,6 +58,23 @@ export const links: LinksFunction = () => [
 export function meta({ data }: { data?: LoaderData }) {
   if (!data?.report) return [{ title: "Report Not Found | My nAia" }];
   return [{ title: `My Edit — ${data.report.title} | My nAia` }];
+}
+
+/** Every connected piece id named by an edit payload. */
+function connectionPieceIds(edit: unknown): string[] {
+  const conns = (edit as { closetConnections?: ClosetConnection[] } | null)?.closetConnections ?? [];
+  return [...new Set(conns.flatMap((c) => c.pieces.map((p) => p.garmentId)))];
+}
+
+/** Of the pieces a stored edit names, which the customer still owns. */
+async function surviving(customerId: string, edit: unknown): Promise<string[]> {
+  const ids = connectionPieceIds(edit);
+  if (ids.length === 0) return [];
+  const rows: Array<{ id: string }> = await prisma.closetItem.findMany({
+    where: { id: { in: ids }, customerId },
+    select: { id: true },
+  });
+  return rows.map((r) => r.id);
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
@@ -73,6 +97,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // live report content, such as save controls, simply degrade.
     const liveReport = await getEditorialReportBySlug(snapshot.reportSlug);
     const allPublishedForIndex = await getPublishedEditorialReports();
+    const replayed = await resolveSnapshotImages(customer.id, snapshot.edit);
 
     return {
       report: (liveReport ?? {
@@ -88,7 +113,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }) as TrendReportData,
       // Fresh signed URLs for the SAME pieces the snapshot named. The stored
       // personalised copy is untouched — only imageUrl is filled in.
-      edit: await resolveSnapshotImages(customer.id, snapshot.edit),
+      edit: replayed,
       hasProfile: true,
       generationFailed: false,
       nadineRecommendation: null,
@@ -96,6 +121,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       saveState: { refKeys: {}, saved: [], canSave: false },
       returnTo: `/trends/my-edits/${snapshot.reportSlug}`,
       historical: { snapshotId: snapshot.id, receivedAt: snapshot.createdAt },
+      availablePieceIds: await surviving(customer.id, replayed),
     } satisfies LoaderData;
   }
 
@@ -175,6 +201,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       saveState,
       returnTo: `/trends/my-edits/${report.slug}`,
       historical: null,
+      // Freshly matched, so every piece exists by construction.
+      availablePieceIds: connectionPieceIds(editPayload),
     } satisfies LoaderData;
   } catch (error) {
     console.error("Shopper trend edit generation failed:", error);
@@ -188,6 +216,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       saveState: { refKeys: {}, saved: [], canSave: true },
       returnTo: `/trends/my-edits/${report.slug}`,
       historical: null,
+      availablePieceIds: [],
     } satisfies LoaderData;
   }
 }
@@ -224,6 +253,18 @@ const css = `
     text-transform: uppercase; padding-left: 64px;
   }
   .tmd-conn-more a { color: rgba(26,17,9,0.55); text-decoration: underline; text-underline-offset: 3px; }
+  .tmd-conn-style { margin-top: 4px; }
+  .tmd-conn-style-btn {
+    background: none; border: none; padding: 0; cursor: pointer;
+    font-family: 'Space Mono', monospace; font-size: 8.5px; letter-spacing: 0.2em;
+    text-transform: uppercase; color: #7a1e28;
+    text-decoration: underline; text-underline-offset: 3px;
+  }
+  .tmd-conn-style-btn:focus-visible { outline: 2px solid #7a1e28; outline-offset: 3px; }
+  .tmd-conn-gone {
+    font-family: 'Space Mono', monospace; font-size: 8.5px; letter-spacing: 0.18em;
+    text-transform: uppercase; color: rgba(26,17,9,0.38);
+  }
 
   /* ── Historical snapshot banner ── */
   .tmd-historical {
@@ -670,7 +711,15 @@ export function ErrorBoundary() {
 }
 
 /** One trend's closet connection: the claim, then the pieces on request. */
-function ClosetConnectionBlock({ connection }: { connection: ClosetConnection }) {
+function ClosetConnectionBlock({
+  connection, reportId, reportTitle, available,
+}: {
+  connection: ClosetConnection;
+  reportId: string | null;
+  reportTitle: string;
+  /** Pieces that still exist in the closet — only these can be styled. */
+  available: ReadonlySet<string>;
+}) {
   const [open, setOpen] = useState(false);
   const n = connection.matchCount;
 
@@ -702,6 +751,21 @@ function ClosetConnectionBlock({ connection }: { connection: ClosetConnection })
               <div className="tmd-conn-copy">
                 <span className="tmd-conn-name">{piece.name || "Your piece"}</span>
                 <span className="tmd-conn-reason">{piece.reason}</span>
+                {available.has(piece.garmentId) ? (
+                  <Form method="post" action="/api/styleme-handoff" className="tmd-conn-style">
+                    <input type="hidden" name="source" value="trend" />
+                    <input type="hidden" name="closetItemId" value={piece.garmentId} />
+                    <input type="hidden" name="reportId" value={reportId ?? ""} />
+                    <input type="hidden" name="reportTitle" value={reportTitle} />
+                    <input type="hidden" name="contentId" value={connection.contentId} />
+                    <input type="hidden" name="trendLabel" value={connection.label} />
+                    <button type="submit" className="tmd-conn-style-btn">
+                      Style this with my closet →
+                    </button>
+                  </Form>
+                ) : (
+                  <span className="tmd-conn-gone">No longer in your closet</span>
+                )}
               </div>
             </li>
           ))}
@@ -721,6 +785,10 @@ export default function MyTrendEditDetail() {
   const { report, edit, hasProfile, generationFailed, nadineRecommendation, reportIndex } = loaderData;
   const historical = loaderData.historical ?? null;
   const connections = (edit as (typeof edit) & { closetConnections?: ClosetConnection[] })?.closetConnections ?? [];
+  // A historical snapshot may name a piece she has since deleted. The claim and
+  // its reason stay exactly as recorded; only the action disappears, because
+  // there is no longer a garment to style.
+  const availablePieces = new Set(loaderData.availablePieceIds ?? []);
 
   // The editorial read is the primary experience. If save state is absent for
   // any reason, the page renders without ♡ controls rather than failing — a
@@ -972,7 +1040,13 @@ export default function MyTrendEditDetail() {
               <div className="tmd-section">
                 <div className="tmd-section-label">Already in your closet</div>
                 {connections.map((c) => (
-                  <ClosetConnectionBlock key={c.contentId} connection={c} />
+                  <ClosetConnectionBlock
+                    key={c.contentId}
+                    connection={c}
+                    reportId={report.id ?? null}
+                    reportTitle={report.title}
+                    available={availablePieces}
+                  />
                 ))}
               </div>
             )}

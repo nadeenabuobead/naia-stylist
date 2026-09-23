@@ -88,6 +88,10 @@ vi.mock("~/lib/saved-items.server", () => ({
   loadReportSaveState: vi.fn(async () => ({ refKeys: {}, saved: [], canSave: true })),
 }));
 
+vi.mock("~/db.server", () => ({
+  default: { closetItem: { findMany: vi.fn(async () => []) } },
+}));
+
 vi.mock("~/lib/trend-closet-connections.server", () => ({
   loadTrendClosetConnections: vi.fn(async () => []),
 }));

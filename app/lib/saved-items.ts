@@ -265,6 +265,9 @@ export interface SavedLookRecord {
   originalSessionId: string | null;
   timesWorn: number;
   createdAt: string;
+  /** Set only when this look came from a trend-started StyleMe session. */
+  inspiredByReportTitle?: string | null;
+  inspiredByTrendLabel?: string | null;
 }
 
 export function savedLookToCard(look: SavedLookRecord): SavedCard {
@@ -282,8 +285,12 @@ export function savedLookToCard(look: SavedLookRecord): SavedCard {
     sublabel: [look.occasion, worn].filter(Boolean).join(" · ") || null,
     images: look.images.slice(0, 3),
     href: look.originalSessionId ? `/style-me/result?sessionId=${look.originalSessionId}` : null,
-    provenance: "From: StyleMe",
-    provenanceDetail: null,
+    // A trend-inspired look says where the inspiration came from; an ordinary
+    // StyleMe look reads exactly as it always has.
+    provenance: look.inspiredByReportTitle
+      ? `Inspired by: ${look.inspiredByReportTitle}`
+      : "From: StyleMe",
+    provenanceDetail: look.inspiredByTrendLabel ? `Trend: ${look.inspiredByTrendLabel}` : null,
     createdAt: look.createdAt,
   };
 }

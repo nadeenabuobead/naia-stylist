@@ -37,6 +37,13 @@ const STYLEME_SESSION_KEYS = [
   "styleMeCoverageConditional",
   // Website context — "naia" (Closet-only) or "nadine" (Closet + NADINE catalogue)
   "styleMeMode",
+  // Trend provenance (Step 6). Display only — never an input to ranking.
+  // Listed here so clearStyleMeSession() removes them; a trend context that
+  // outlived its session would attach itself to the next, unrelated one.
+  "styleMeTrendReportId",
+  "styleMeTrendReportTitle",
+  "styleMeTrendContentId",
+  "styleMeTrendLabel",
 ] as const;
 
 export async function clearStyleMeSession(request: Request): Promise<string> {

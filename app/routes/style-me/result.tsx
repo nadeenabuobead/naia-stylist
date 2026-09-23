@@ -177,6 +177,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return data({
         isLoading: false,
         isAuthenticated: !!naiaCustomer,
+        // Provenance only — why she arrived here. Not an input to anything.
+        trendProvenance: readTrendProvenance(await getSession(request.headers.get("Cookie"))),
         naiaModelIsReady,
         devTryOnEnabled,
         vtoEnabled,
@@ -235,6 +237,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return data({
         isLoading: false,
         isAuthenticated: !!naiaCustomer,
+        // Provenance only — why she arrived here. Not an input to anything.
+        trendProvenance: readTrendProvenance(await getSession(request.headers.get("Cookie"))),
         naiaModelIsReady,
         devTryOnEnabled,
         vtoEnabled,
@@ -392,6 +396,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
     console.error("Result loader error:", err);
     return data({ isLoading: false, isAuthenticated: false, naiaModelIsReady: false, devTryOnEnabled, vtoEnabled, isStagingProject, tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null, currentMood: null, desiredFeeling: null, occasion: null, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, existingOutfitFeedback: null, existingOutcome: null, error: err?.message || "Something went wrong" });
   }
+}
+
+
+/**
+ * Trend provenance carried on the StyleMe session, for display and for a saved
+ * look's record of where the inspiration came from.
+ *
+ * Read ONLY for those two purposes. Nothing here reaches computeStyleMeResult():
+ * a trend explains why she arrived, never what she should wear.
+ */
+function readTrendProvenance(session: { get: (k: string) => unknown }) {
+  const str = (k: string) => {
+    const v = session.get(k);
+    return typeof v === "string" && v.trim() ? v.trim() : null;
+  };
+  const reportId = str("styleMeTrendReportId");
+  const trendLabel = str("styleMeTrendLabel");
+  if (!reportId && !trendLabel) return null;
+  return {
+    reportId,
+    reportTitle: str("styleMeTrendReportTitle"),
+    contentId: str("styleMeTrendContentId"),
+    trendLabel,
+  };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -807,11 +835,21 @@ export async function action({ request }: ActionFunctionArgs) {
         if (!suggestion || suggestion.session.customerId !== naiaCustomer.id) {
           return data({ error: "Not found" }, { status: 404 });
         }
+        // Trend provenance, when this session began from a Trend Report.
+        // Null for an ordinary StyleMe save — behaviour is unchanged there.
+        const trendProv = readTrendProvenance(
+          await getSession(request.headers.get("Cookie")),
+        );
+
         const savedLook = await prisma.savedLook.create({
           data: {
             customerId: naiaCustomer.id,
             name: suggestion.outfitName,
             fromSuggestionId: suggestion.id,
+            inspiredByReportId: trendProv?.reportId ?? null,
+            inspiredByReportTitle: trendProv?.reportTitle ?? null,
+            inspiredByContentId: trendProv?.contentId ?? null,
+            inspiredByTrendLabel: trendProv?.trendLabel ?? null,
             items: {
               create: suggestion.items.map((item) => ({
                 itemType: item.itemType,
@@ -1097,6 +1135,10 @@ interface StyleMeGenerationLoaderData {
 
 export default function StyleMeResult() {
   const loaderData = useLoaderData<typeof loader>();
+  // Provenance for a trend-started session. Absent on an ordinary StyleMe run.
+  const trendProvenance = (loaderData as { trendProvenance?: {
+    reportTitle: string | null; trendLabel: string | null;
+  } | null }).trendProvenance ?? null;
   const generateFetcher = useFetcher<{ suggestion?: any; error?: string; sameCombination?: boolean }>();
   const saveFetcher = useFetcher<{ saved?: boolean; error?: string; code?: string; pending?: boolean; next?: string; cleared?: boolean; alreadySaved?: boolean }>();
   const [msgIndex, setMsgIndex] = useState(0);
@@ -1509,6 +1551,17 @@ export default function StyleMeResult() {
             </>
           )}
         </div>
+
+        {/* Why she arrived here — quiet, above the look, changes nothing below it */}
+        {trendProvenance?.trendLabel && (
+          <div className="sm-trend-prov">
+            <span className="sm-trend-prov-label">New looks, same you</span>
+            <p className="sm-trend-prov-text">
+              Inspired by: {trendProvenance.reportTitle ? `${trendProvenance.reportTitle} · ` : ""}
+              {trendProvenance.trendLabel}
+            </p>
+          </div>
+        )}
 
         {/* Anchor summary — suppressed when the anchor is already rendered in The Look */}
         {!isNoMatch && suggestionMeta?.anchorSummary && !anchorAlreadyInItems && (

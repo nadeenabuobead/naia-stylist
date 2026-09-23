@@ -573,6 +573,14 @@ model SavedLook {
   // Source
   fromSuggestionId String? // If saved from a styling session
 
+  // Trend provenance (Step 6) — all nullable. A look saved from an ordinary
+  // StyleMe session leaves these null and behaves exactly as before.
+  // Migration: 20260923300000_saved_look_trend_provenance
+  inspiredByReportId    String?
+  inspiredByReportTitle String?
+  inspiredByContentId   String?
+  inspiredByTrendLabel  String?
+
   // Items
   items SavedLookItem[]
 

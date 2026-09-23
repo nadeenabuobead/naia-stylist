@@ -114,6 +114,7 @@ export async function loadMySaved(customerId: string): Promise<SavedCard[]> {
   type LookRow = {
     id: string; name: string | null; occasion: string | null;
     fromSuggestionId: string | null; timesWorn: number; createdAt: Date;
+    inspiredByReportTitle: string | null; inspiredByTrendLabel: string | null;
     items: LookItemRow[];
   };
 
@@ -194,6 +195,8 @@ export async function loadMySaved(customerId: string): Promise<SavedCard[]> {
       originalSessionId: suggData?.sessionId ?? null,
       timesWorn: look.timesWorn,
       createdAt: look.createdAt.toISOString(),
+      inspiredByReportTitle: look.inspiredByReportTitle,
+      inspiredByTrendLabel: look.inspiredByTrendLabel,
     });
   });
 

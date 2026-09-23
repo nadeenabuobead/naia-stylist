@@ -317,3 +317,36 @@ describe("§SI-6 no saveable controls on a non-canonical report", () => {
     assert.ok(guardAt > 0 && productAt > guardAt, "the guard must precede product refKeys");
   });
 });
+
+// ── §SI-7 trend-inspired looks (Step 6) ──────────────────────────────────────
+
+describe("§SI-7 trend provenance on a saved look", () => {
+  const base = {
+    id: "sl_1", name: "Dinner, softly", occasion: "Dinner", images: [],
+    originalSessionId: "sess_1", timesWorn: 0, createdAt: "2026-09-21T10:00:00.000Z",
+  };
+
+  it("a trend-inspired look says where the inspiration came from", () => {
+    const card = savedLookToCard({
+      ...base,
+      inspiredByReportTitle: "Autumn Edit",
+      inspiredByTrendLabel: "Softened tailoring",
+    });
+    assert.equal(card.provenance, "Inspired by: Autumn Edit");
+    assert.equal(card.provenanceDetail, "Trend: Softened tailoring");
+  });
+
+  it("an ORDINARY StyleMe look is completely unchanged", () => {
+    const card = savedLookToCard(base);
+    assert.equal(card.provenance, "From: StyleMe");
+    assert.equal(card.provenanceDetail, null);
+    assert.equal(card.lane, "looks");
+    assert.equal(card.typeLabel, "Look");
+  });
+
+  it("still a look, not a new kind of saved object", () => {
+    const card = savedLookToCard({ ...base, inspiredByReportTitle: "Autumn Edit" });
+    assert.equal(card.store, "look");
+    assert.equal(card.refKey, null);
+  });
+});
