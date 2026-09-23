@@ -12,6 +12,7 @@ export default [
   route("onboarding/complete", "routes/onboarding/complete.tsx"),
   route("passport", "routes/passport.tsx"),
   route("closet", "routes/closet._index.tsx"),
+  route("closet/intelligence", "routes/closet.intelligence.tsx"),
   route("style-me", "routes/style-me/_index.tsx"),
   // Rev 3 — Psychology-First StyleMe (Group 5)
   route("style-me/state", "routes/style-me/state.tsx"),

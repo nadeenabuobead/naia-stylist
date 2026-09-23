@@ -36,3 +36,8 @@ database.sqlite
 
 # Claude Code project files
 .claude/
+
+# One-off DB query / diagnostic scripts — kept on disk, never committed
+scripts/adhoc/
+# QA harness output — contains live customer wardrobe data
+wardrobe-intelligence-qa-report.txt
