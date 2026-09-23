@@ -270,10 +270,22 @@ function aggregateEvidence(evidenceRows: Array<{
   distinctPositiveSources: number; distinctNegativeSources: number;
   latestOccurredAt: Date | null;
   allSourcesUsed: string[];
+  positiveRecordsBySource: Record<string, number>;
+  negativeRecordsBySource: Record<string, number>;
 } {
   let wPositive = 0, wNegative = 0;
   const posRecords = new Set<string>();
   const negRecords = new Set<string>();
+  // Per-source record sets, so customer-facing copy can say how many records
+  // came from WHERE. A count that lumps sources together lets trend feedback be
+  // described as owned pieces.
+  const posBySource = new Map<string, Set<string>>();
+  const negBySource = new Map<string, Set<string>>();
+  const track = (m: Map<string, Set<string>>, src: string, id: string) => {
+    const set = m.get(src) ?? new Set<string>();
+    set.add(id);
+    m.set(src, set);
+  };
   const posSources = new Set<string>();
   const negSources = new Set<string>();
   const allSources = new Set<string>();
@@ -290,10 +302,12 @@ function aggregateEvidence(evidenceRows: Array<{
     if (ev.polarity === "positive") {
       wPositive += ev.strength;
       posRecords.add(compositeId);
+      track(posBySource, ev.source, compositeId);
       if (bonusEligible) posSources.add(ev.source);
     } else {
       wNegative += ev.strength;
       negRecords.add(compositeId);
+      track(negBySource, ev.source, compositeId);
       if (bonusEligible) negSources.add(ev.source);
     }
   }
@@ -306,6 +320,8 @@ function aggregateEvidence(evidenceRows: Array<{
     distinctNegativeSources: negSources.size,
     latestOccurredAt,
     allSourcesUsed: Array.from(allSources),
+    positiveRecordsBySource: Object.fromEntries([...posBySource].map(([k, v]) => [k, v.size])),
+    negativeRecordsBySource: Object.fromEntries([...negBySource].map(([k, v]) => [k, v.size])),
   };
 }
 
@@ -342,7 +358,15 @@ async function upsertTendency(
   let claimText: string | null = null;
   let rationaleText: string | null = null;
   if (state === "CANDIDATE" || state === "CONFIRMED") {
-    const texts = generateTendencyText(dimension, value, observationFamily, distinctRecords, distinctSources, agg.allSourcesUsed);
+    // The breakdown is for the DOMINANT polarity only: an observation about
+    // friction must not describe records that supported the opposite.
+    const recordsBySource = dominantPolarity === "positive"
+      ? agg.positiveRecordsBySource
+      : agg.negativeRecordsBySource;
+    const texts = generateTendencyText(
+      dimension, value, observationFamily, distinctRecords, distinctSources,
+      Object.keys(recordsBySource), recordsBySource,
+    );
     claimText     = texts.claimText;
     rationaleText = texts.rationaleText;
   }

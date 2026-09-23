@@ -163,6 +163,53 @@ function sourceLabel(distinctSources: number, sourcesUsed: string[]): string {
   return "across your recent activity";
 }
 
+/** "1 piece" / "3 pieces" — a count is only honest if the noun matches it. */
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * Copy for evidence that mixes wardrobe sources with trend feedback.
+ *
+ * The wardrobe templates below describe pieces owned, looks worn, things
+ * returned. Those words are true of wardrobe records and false of trend
+ * records, so a mixed observation cannot use them over a combined total: one
+ * closet note plus five trend dismissals is not "6 pieces you've marked as
+ * rarely worn".
+ *
+ * Each number here is labelled with what it actually counts.
+ */
+function mixedSourceText(
+  dimension: string,
+  value: string,
+  family: ObservationFamily,
+  wardrobeRecords: number,
+  trendRecords: number,
+): TextResult {
+  const subject = dimension === "garment-category"
+    ? `${value.charAt(0).toUpperCase()}${value.slice(1).toLowerCase()}`
+    : dimension === "formality" ? "Formality"
+    : dimension === "self-expression" ? "Feeling like yourself"
+    : dimension === "comfort" ? "Comfort"
+    : dimension === "fit" ? "Fit"
+    : dimension;
+
+  const rationale = wardrobeRecords > 0 && trendRecords > 0
+    ? `Based on ${plural(wardrobeRecords, "piece", "pieces")} in your wardrobe and ${plural(trendRecords, "trend direction", "trend directions")} you responded to.`
+    : "Based on your wardrobe feedback and the trend directions you've responded to.";
+
+  if (family === "WORKS_WELL") {
+    return {
+      claimText: `${subject} keeps coming up as something that works for you — in your wardrobe and in the trend directions you keep.`,
+      rationaleText: rationale,
+    };
+  }
+  return {
+    claimText: `${subject} keeps coming up as something that doesn't quite land — both in your wardrobe and in the trend directions you've passed on.`,
+    rationaleText: rationale,
+  };
+}
+
 export function generateTendencyText(
   dimension: string,
   value: string,
@@ -170,6 +217,12 @@ export function generateTendencyText(
   distinctRecords: number,
   distinctSources: number,
   sourcesUsed: string[],
+  /**
+   * Distinct records per source, for the dominant polarity. Without it a mixed
+   * observation cannot know how many records are genuinely wardrobe records, so
+   * it falls back to copy that makes no numeric claim at all.
+   */
+  recordsBySource?: Record<string, number>,
 ): TextResult {
   const src = sourceLabel(distinctSources, sourcesUsed);
   const n = distinctRecords;
@@ -182,7 +235,24 @@ export function generateTendencyText(
   // owned the piece, never wore it, never returned it, and there was no look.
   // Telling a customer something untrue about her own behaviour is a trust
   // failure, not a copy nit — so trend-only evidence never reaches them.
-  const trendOnly = sourcesUsed.length > 0 && sourcesUsed.every((s) => s === "TREND_ENGAGEMENT");
+  const trendRecords = recordsBySource?.TREND_ENGAGEMENT ?? 0;
+  const wardrobeRecords = recordsBySource
+    ? Object.entries(recordsBySource)
+        .filter(([source]) => source !== "TREND_ENGAGEMENT")
+        .reduce((sum, [, count]) => sum + count, 0)
+    : 0;
+
+  const hasTrend = sourcesUsed.includes("TREND_ENGAGEMENT");
+  const hasWardrobe = sourcesUsed.some((s) => s !== "TREND_ENGAGEMENT");
+
+  // ── Mixed wardrobe + trend ─────────────────────────────────────────────
+  // The wardrobe templates below would describe every record as a piece owned
+  // or a look worn. Some of these are neither.
+  if (hasTrend && hasWardrobe) {
+    return mixedSourceText(dimension, value, family, wardrobeRecords, trendRecords);
+  }
+
+  const trendOnly = sourcesUsed.length > 0 && !hasWardrobe && hasTrend;
   if (trendOnly) {
     const noun = dimension === "garment-category"
       ? `${value.charAt(0).toUpperCase()}${value.slice(1).toLowerCase()}`
@@ -190,12 +260,12 @@ export function generateTendencyText(
     if (family === "WORKS_WELL") {
       return {
         claimText: `${noun} keeps drawing you in when you read a trend direction — you have saved or styled it more than once.`,
-        rationaleText: `Based on ${n} ${n === 1 ? "trend direction" : "trend directions"} you responded to${distinctSources >= 2 ? ` — ${src}` : ""}.`,
+        rationaleText: `Based on ${plural(trendRecords || n, "trend direction", "trend directions")} you responded to.`,
       };
     }
     return {
       claimText: `You have passed on several trend directions around ${noun.toLowerCase()} — nAia is noticing the pattern.`,
-      rationaleText: `Based on ${n} ${n === 1 ? "trend direction" : "trend directions"} you marked as not for you${distinctSources >= 2 ? ` — ${src}` : ""}.`,
+      rationaleText: `Based on ${plural(trendRecords || n, "trend direction", "trend directions")} you marked as not for you.`,
     };
   }
 

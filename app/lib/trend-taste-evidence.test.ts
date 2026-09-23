@@ -193,13 +193,6 @@ describe("§TE-5 trend copy never implies ownership or wear", () => {
     assert.ok(t.claimText.toLowerCase().includes("unworn") || t.rationaleText.toLowerCase().includes("rarely worn"));
   });
 
-  it("MIXED evidence falls back to the existing templates, not the trend one", () => {
-    // Once real wardrobe evidence is present, the wardrobe language is true again.
-    const t = generateTendencyText("garment-category", "BAGS", "FRICTION", 4, 2,
-      ["TREND_ENGAGEMENT", "CLOSET_RELATIONSHIP"]);
-    assert.equal(t.claimText.toLowerCase().includes("passed on"), false);
-  });
-
   it("the trend provenance label reads honestly", () => {
     const t = generateTendencyText("garment-category", "BAGS", "FRICTION", 6, 2,
       ["TREND_ENGAGEMENT", "TREND_ENGAGEMENT"]);
@@ -282,5 +275,101 @@ describe("§TE-7 regression boundaries", () => {
   it("dismissing does not delete a SavedItem", () => {
     const src = readFileSync(new URL("../../app/lib/trend-feedback.server.ts", import.meta.url), "utf8");
     assert.equal(src.includes("savedItem"), false);
+  });
+});
+
+// ── §TE-8 mixed-source honesty ───────────────────────────────────────────────
+//
+// The failure this suite exists for: one wardrobe record plus five trend
+// records used to produce "Based on 6 pieces you've marked as rarely worn".
+// Five of those six were trend directions, not pieces she owns.
+
+const OWNERSHIP_WORDS = ["worn", "unworn", "wore", "returned", "regret", "purchase", "bought"];
+
+function textOf(t: { claimText: string; rationaleText: string }) {
+  return `${t.claimText} ${t.rationaleText}`;
+}
+
+describe("§TE-8 mixed wardrobe + trend evidence", () => {
+  it("THE CASE: 1 wardrobe + 5 trend never claims six owned pieces", () => {
+    const t = generateTendencyText("garment-category", "BAGS", "FRICTION", 6, 2,
+      ["CLOSET_RELATIONSHIP", "TREND_ENGAGEMENT"],
+      { CLOSET_RELATIONSHIP: 1, TREND_ENGAGEMENT: 5 });
+    const text = textOf(t);
+    assert.equal(/6 pieces/.test(text), false, `must not claim 6 pieces: ${text}`);
+    assert.equal(/\b6\b/.test(text), false, `no combined total at all: ${text}`);
+  });
+
+  it("each number is labelled with what it actually counts", () => {
+    const t = generateTendencyText("garment-category", "BAGS", "FRICTION", 6, 2,
+      ["CLOSET_RELATIONSHIP", "TREND_ENGAGEMENT"],
+      { CLOSET_RELATIONSHIP: 1, TREND_ENGAGEMENT: 5 });
+    assert.match(t.rationaleText, /1 piece in your wardrobe/);
+    assert.match(t.rationaleText, /5 trend directions/);
+  });
+
+  it("ownership language is never attributed across the mix", () => {
+    const t = generateTendencyText("garment-category", "BAGS", "FRICTION", 6, 2,
+      ["CLOSET_RELATIONSHIP", "TREND_ENGAGEMENT"],
+      { CLOSET_RELATIONSHIP: 1, TREND_ENGAGEMENT: 5 });
+    const text = textOf(t).toLowerCase();
+    for (const w of OWNERSHIP_WORDS) {
+      assert.equal(text.includes(w), false, `mixed copy must not say "${w}": ${text}`);
+    }
+  });
+
+  it("singular and plural agree with the real counts", () => {
+    const t = generateTendencyText("garment-category", "BAGS", "FRICTION", 3, 2,
+      ["CLOSET_RELATIONSHIP", "TREND_ENGAGEMENT"],
+      { CLOSET_RELATIONSHIP: 2, TREND_ENGAGEMENT: 1 });
+    assert.match(t.rationaleText, /2 pieces in your wardrobe/);
+    assert.match(t.rationaleText, /1 trend direction\b/);
+  });
+
+  it("mixed with StyleMe outcomes is handled the same way", () => {
+    const t = generateTendencyText("comfort", "comfort", "FRICTION", 4, 2,
+      ["STYLEME_OUTCOME", "TREND_ENGAGEMENT"],
+      { STYLEME_OUTCOME: 3, TREND_ENGAGEMENT: 1 });
+    const text = textOf(t).toLowerCase();
+    for (const w of OWNERSHIP_WORDS) assert.equal(text.includes(w), false, w);
+    assert.match(t.rationaleText, /3 pieces in your wardrobe/);
+  });
+
+  it("mixed with Buy or Skip is handled the same way", () => {
+    const t = generateTendencyText("garment-category", "SHOES", "WORKS_WELL", 5, 2,
+      ["BUYSKIP_OUTCOME", "TREND_ENGAGEMENT"],
+      { BUYSKIP_OUTCOME: 2, TREND_ENGAGEMENT: 3 });
+    const text = textOf(t).toLowerCase();
+    for (const w of OWNERSHIP_WORDS) assert.equal(text.includes(w), false, w);
+    assert.match(t.rationaleText, /2 pieces in your wardrobe and 3 trend directions/);
+  });
+
+  it("without a breakdown it makes NO numeric claim — fails safe", () => {
+    const t = generateTendencyText("garment-category", "BAGS", "FRICTION", 6, 2,
+      ["CLOSET_RELATIONSHIP", "TREND_ENGAGEMENT"]);
+    assert.equal(/\d/.test(t.rationaleText), false, `no numbers without a breakdown: ${t.rationaleText}`);
+    for (const w of OWNERSHIP_WORDS) assert.equal(textOf(t).toLowerCase().includes(w), false, w);
+  });
+
+  it("TREND-ONLY counts trend records, not a combined total", () => {
+    const t = generateTendencyText("garment-category", "BAGS", "FRICTION", 6, 1,
+      ["TREND_ENGAGEMENT"], { TREND_ENGAGEMENT: 6 });
+    assert.match(t.rationaleText, /6 trend directions/);
+    for (const w of OWNERSHIP_WORDS) assert.equal(textOf(t).toLowerCase().includes(w), false, w);
+  });
+
+  it("WARDROBE-ONLY is untouched — existing language and counts", () => {
+    const t = generateTendencyText("garment-category", "BAGS", "FRICTION", 3, 1,
+      ["CLOSET_RELATIONSHIP"], { CLOSET_RELATIONSHIP: 3 });
+    assert.match(t.rationaleText, /3 pieces/);
+    assert.ok(textOf(t).toLowerCase().includes("rarely worn") || textOf(t).toLowerCase().includes("unworn"));
+  });
+
+  it("wardrobe-only across two real sources keeps its combined count", () => {
+    // Both are wardrobe sources, so a combined total is true.
+    const t = generateTendencyText("comfort", "comfort", "FRICTION", 4, 2,
+      ["STYLEME_OUTCOME", "POST_OUTFIT_REVIEW"],
+      { STYLEME_OUTCOME: 2, POST_OUTFIT_REVIEW: 2 });
+    assert.match(t.rationaleText, /4 looks/);
   });
 });
