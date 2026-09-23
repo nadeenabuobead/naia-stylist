@@ -64,6 +64,33 @@ const STYLE_PERSONALITY_LABELS: Record<string, string> = {
   "creative-expressive": "Creative & Expressive",
 };
 
+// Rev 7 canonical style field — supersedes stylePersonalities.
+const STYLE_DIRECTION_LABELS: Record<string, string> = {
+  "polished-refined":    "Polished & Refined",
+  "clean-minimal":       "Clean & Minimal",
+  "relaxed-easy":        "Relaxed & Easy",
+  "bold-statement":      "Bold & Statement",
+  "creative-individual": "Creative & Individual",
+  "soft-romantic":       "Soft & Romantic",
+  "street-contemporary": "Street & Contemporary",
+  "sporty-functional":   "Sporty & Functional",
+};
+
+const STYLE_EXPRESSION_LABELS: Record<string, string> = {
+  "quiet-confidence": "Quiet confidence",
+  "polished":         "Polished",
+  "effortless":       "Effortless",
+  "bold":             "Bold",
+  "creative":         "Creative",
+  "sophisticated":    "Sophisticated",
+  "relaxed":          "Relaxed",
+  "powerful":         "Powerful",
+  "playful":          "Playful",
+  "individual":       "Individual",
+  "understated":      "Understated",
+  "unexpected":       "Unexpected",
+};
+
 const CURRENT_GOAL_LABELS: Record<string, string> = {
   "understand-my-style":       "Understand my personal style",
   "feel-more-like-myself":     "Feel more like myself in what I wear",
@@ -73,7 +100,7 @@ const CURRENT_GOAL_LABELS: Record<string, string> = {
   "more-cohesive-wardrobe":    "Build a more cohesive wardrobe",
   "dress-for-my-life":         "Dress better for my actual life",
   "refresh-my-style":          "Refresh my style",
-  "specific-event-trip-change":"Dress for a specific event or change",
+  "specific-event-trip-change":"Dress for a specific event or life change",
 };
 
 const SILHOUETTE_LABELS: Record<string, string> = {
@@ -86,6 +113,10 @@ const SILHOUETTE_LABELS: Record<string, string> = {
   "tapered":              "Tapered",
   "loose-flowing":        "Loose / Wide",
   "structured-tailored":  "Structured / Tailored",
+  // Rev 7 additions
+  "longline":             "Longline",
+  "cropped-fit":          "Cropped",
+  "mixing-fits":          "A mix of fits",
 };
 
 const OUTFIT_GIVES_LABELS: Record<string, string> = {
@@ -97,16 +128,23 @@ const OUTFIT_GIVES_LABELS: Record<string, string> = {
   "feel-attractive":     "I feel attractive",
   "sense-of-power":      "A sense of power",
   "effortlessness":      "Effortlessness",
+  "feel-distinctive":    "I feel distinctive",
 };
 
 const LIFESTYLE_LABELS: Record<string, string> = {
   "work-office":               "Work / Office",
-  "everyday-casual":           "Everyday Casual",
+  "everyday-casual":           "Everyday / Casual",
   "dinners-going-out":         "Dinners & Going Out",
   "events-special-occasions":  "Events & Special Occasions",
-  "family-parenting":          "Family & Parenting",
+  "family-parenting":          "Family / Caregiving",
   "travel":                    "Travel",
-  "active-busy-days":          "Active & Busy Days",
+  "active-busy-days":          "Busy / Errand Days",
+  // Rev 7 additions
+  "study-university":          "Study / University",
+  "fitness-gym":               "Fitness / Gym / Pilates",
+  "creative-flexible-work":    "Creative / Flexible Work",
+  "mostly-at-home":            "Mostly at Home",
+  "other-lifestyle":           "Other",
 };
 
 function humanizeId(id: string): string {
@@ -120,10 +158,23 @@ function labelFrom(map: Record<string, string>, id: string): string {
 function PassportSnapshot({ profile }: { profile: Record<string, unknown> }) {
   const signals: Array<{ label: string; value: string }> = [];
 
-  const personalities = (profile.stylePersonalities as string[] | undefined) ?? [];
-  const validPersonalities = personalities.filter(p => p !== "not-sure");
-  if (validPersonalities.length > 0) {
-    signals.push({ label: "Style direction", value: validPersonalities.map(p => labelFrom(STYLE_PERSONALITY_LABELS, p)).join(" · ") });
+  // Rev 7 styleDirections supersedes the legacy stylePersonalities row.
+  const directions = (profile.styleDirections as string[] | undefined) ?? [];
+  const validDirections = directions.filter(d => d !== "not-sure");
+  if (validDirections.length > 0) {
+    signals.push({ label: "Style direction", value: validDirections.map(d => labelFrom(STYLE_DIRECTION_LABELS, d)).join(" · ") });
+  } else {
+    const personalities = (profile.stylePersonalities as string[] | undefined) ?? [];
+    const validPersonalities = personalities.filter(p => p !== "not-sure");
+    if (validPersonalities.length > 0) {
+      signals.push({ label: "Style direction", value: validPersonalities.map(p => labelFrom(STYLE_PERSONALITY_LABELS, p)).join(" · ") });
+    }
+  }
+
+  const expression = (profile.styleExpression as string[] | undefined) ?? [];
+  const validExpression = expression.filter(e => e !== "not-sure");
+  if (validExpression.length > 0) {
+    signals.push({ label: "Style says", value: validExpression.map(e => labelFrom(STYLE_EXPRESSION_LABELS, e)).join(" · ") });
   }
 
   const goals = (profile.currentGoal as string[] | undefined) ?? [];
@@ -302,11 +353,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 
   const p = customer.onboardingProfile;
-  // VIEW only when profileVersion=6 (atomically set on Rev 6 onboarding/refresh completion).
+  // VIEW when a confirmed Passport generation is stamped (6 = Rev 6, 7 = Rev 7 —
+  // both set atomically on onboarding/refresh completion).
   // Legacy customers (completed=true, profileVersion=null) → CONTINUE (need refresh).
   const passportState: "start" | "continue" | "view" =
     !p ? "start"
-    : (p as any).profileVersion === 6 ? "view"
+    : ((p as any).profileVersion === 6 || (p as any).profileVersion === 7) ? "view"
     : "continue";
 
   return {

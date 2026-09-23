@@ -28,7 +28,10 @@ export interface NaiaFirstReadResult {
 // currentGoal, dressingPreferences, fitConcerns are intentionally EXCLUDED —
 // they are mutable context or practical boundaries, not style hypotheses.
 export interface FirstReadProfile {
+  /** Legacy style field. Used when styleDirections is absent. */
   stylePersonalities?: string[];
+  /** Rev 7 canonical style field. Supersedes stylePersonalities when present. */
+  styleDirections?: string[];
   silhouette?: string[];
   successfulOutfitGives?: string[];
   lifestyle?: string[];
@@ -66,6 +69,18 @@ const PERSONALITY_LABELS: Readonly<Record<string, string>> = {
   "casual-cool":         "relaxed and cool",
 };
 
+// Rev 7 style direction IDs → short phrase
+const STYLE_DIRECTION_LABELS: Readonly<Record<string, string>> = {
+  "polished-refined":    "polished and refined",
+  "clean-minimal":       "clean and minimal",
+  "relaxed-easy":        "relaxed and easy",
+  "bold-statement":      "bold and statement-making",
+  "creative-individual": "creative and individual",
+  "soft-romantic":       "soft and romantic",
+  "street-contemporary": "street and contemporary",
+  "sporty-functional":   "sporty and functional",
+};
+
 // Silhouette IDs → short phrase
 const SILHOUETTE_LABELS: Readonly<Record<string, string>> = {
   "fitted":              "fitted silhouettes",
@@ -75,6 +90,16 @@ const SILHOUETTE_LABELS: Readonly<Record<string, string>> = {
   "oversized":           "oversized proportions",
   "loose-flowing":       "loose, flowing shapes",
   "structured-tailored": "structured, tailored pieces",
+  // Gender-inclusive + Rev 7 additions
+  "boxy":                "boxy shapes",
+  "tapered":             "tapered shapes",
+  "longline":            "longline pieces",
+  "cropped-fit":         "cropped lengths",
+  "mixing-fits":         "a mix of different fits",
+  // V2 legacy IDs
+  "defined-waist":       "waist-defining shapes",
+  "straight":            "straight-cut pieces",
+  "flowing":             "flowing shapes",
 };
 
 // Successful outfit gives IDs → short phrase
@@ -87,6 +112,8 @@ const SOG_LABELS: Readonly<Record<string, string>> = {
   "feel-attractive":     "feeling attractive",
   "sense-of-power":      "a sense of power",
   "effortlessness":      "effortlessness",
+  // Rev 7 addition
+  "feel-distinctive":    "feeling distinctive",
 };
 
 // Lifestyle IDs → descriptive phrase
@@ -97,7 +124,13 @@ const LIFESTYLE_LABELS: Readonly<Record<string, string>> = {
   "events-special-occasions": "special occasions",
   "family-parenting":         "family life",
   "travel":                   "travel",
-  "active-busy-days":         "active, busy days",
+  "active-busy-days":         "busy days and errands",
+  // Rev 7 additions
+  "study-university":         "study and university life",
+  "fitness-gym":              "training and movement",
+  "creative-flexible-work":   "creative and flexible work",
+  "mostly-at-home":           "time spent at home",
+  // "other-lifestyle" is intentionally unmapped — it carries no descriptive signal.
 };
 
 // Colour IDs → natural language name
@@ -112,6 +145,11 @@ const COLOR_LABELS: Readonly<Record<string, string>> = {
   "pink":         "pink",
   "yellow":       "yellow",
   "orange":       "orange",
+  // Rev 7 additions
+  "blue":         "blue",
+  "purple":       "purple",
+  "metallics":    "metallics",
+  // "no-colour-preference" / "none" are sentinels and carry no colour signal.
 };
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
@@ -147,10 +185,18 @@ function makeKey(type: ObservationType, evidence: Record<string, string[]>): str
 // ── Observation builders (one per type) ───────────────────────────────────────
 
 function buildStyleDirection(profile: FirstReadProfile): NaiaFirstReadObservation | null {
-  const personalities = filtered(profile.stylePersonalities);
+  // Rev 7: styleDirections supersedes stylePersonalities. A Rev 7 customer's stored
+  // stylePersonalities is stale legacy data the Rev 7 flow never rewrites, so the
+  // two are never blended. The evidence field name follows whichever was used, which
+  // keeps existing NaiaObservationFeedback keys for legacy customers unchanged.
+  const directions   = filtered(profile.styleDirections);
+  const usingRev7    = directions.length > 0;
+  const styleField   = usingRev7 ? "styleDirections" : "stylePersonalities";
+  const personalities = usingRev7 ? directions : filtered(profile.stylePersonalities);
   const silhouettes   = filtered(profile.silhouette);
 
-  const personalityDescs = personalities.map(id => PERSONALITY_LABELS[id]).filter(Boolean);
+  const styleLabels = usingRev7 ? STYLE_DIRECTION_LABELS : PERSONALITY_LABELS;
+  const personalityDescs = personalities.map(id => styleLabels[id]).filter(Boolean);
   const silhouetteDescs  = silhouettes.map(id => SILHOUETTE_LABELS[id]).filter(Boolean);
 
   if (personalityDescs.length === 0 && silhouetteDescs.length === 0) return null;
@@ -165,13 +211,13 @@ function buildStyleDirection(profile: FirstReadProfile): NaiaFirstReadObservatio
   }
 
   const fieldValueMap: Record<string, string[]> = {};
-  if (personalities.length > 0) fieldValueMap["stylePersonalities"] = personalities;
+  if (personalities.length > 0) fieldValueMap[styleField] = personalities;
   if (silhouettes.length > 0)   fieldValueMap["silhouette"] = silhouettes;
 
   return {
     observationKey: makeKey("style-direction", fieldValueMap),
     type: "style-direction",
-    evidenceFields: ["stylePersonalities", "silhouette"],
+    evidenceFields: [styleField, "silhouette"],
     evidenceValues: [...personalities, ...silhouettes],
     fieldValueMap,
     claim,

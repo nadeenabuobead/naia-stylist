@@ -17,7 +17,15 @@ export const FIT_TO_STRUCTURE: Readonly<Record<string, string>> = {
   "structured": "sharp-tailored",
 };
 
-/** Maximum lifestyle IDs permitted on an explicit Passport save. */
+/**
+ * Maximum lifestyle IDs permitted on an explicit Passport save.
+ *
+ * @deprecated Passport Rev 7 removed the lifestyle selection cap — a customer's
+ * life can legitimately span many contexts, and nAia should know all of them.
+ * api.save-style-profile.jsx no longer calls isLifestyleCountValid; it validates
+ * lifestyle IDs and duplicates only. These exports remain for the V2-B1 contract
+ * tests and must not be reintroduced into the save path.
+ */
 export const LIFESTYLE_MAX = 3;
 
 /** Maximum character length for typicalDay (after trim). */
@@ -25,7 +33,8 @@ export const TYPICAL_DAY_MAX = 500;
 
 /**
  * Returns true when a submitted lifestyle array is within the V2-B1 limit.
- * Apply only to submitted values — never to values already stored in the DB.
+ *
+ * @deprecated Not enforced from Passport Rev 7 onward. See LIFESTYLE_MAX.
  */
 export function isLifestyleCountValid(ids: string[]): boolean {
   return ids.length <= LIFESTYLE_MAX;

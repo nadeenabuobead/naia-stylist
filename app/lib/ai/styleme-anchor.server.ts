@@ -141,9 +141,28 @@ export const ANCHOR_CAPABLE_CATEGORIES = new Set(["TOPS", "BOTTOMS", "DRESSES", 
 export type ClosetScoringProfile = {
   favoriteColors?: string[] | null;
   avoidColors?: string[] | null;
+  /** Legacy style field. Still the source of truth for pre-Rev 7 customers. */
   stylePersonalities?: string[] | null;
+  /**
+   * Rev 7 styleDirections projected onto V3 archetype tokens. When present it
+   * supersedes stylePersonalities — a Rev 7 customer's stored stylePersonalities
+   * is stale legacy data that the Rev 7 flow never rewrites.
+   */
+  styleDirectionArchetypes?: string[] | null;
   dressingPreferences?: readonly string[] | null;
 };
+
+/**
+ * Archetype tokens the legacy numeric style scorer should use for a profile.
+ * Carries no weight of its own — it only decides which stored array is read.
+ */
+export function scoringArchetypesFor(
+  profile: ClosetScoringProfile | null | undefined,
+): string[] {
+  const projected = profile?.styleDirectionArchetypes ?? [];
+  if (projected.length > 0) return [...projected];
+  return [...(profile?.stylePersonalities ?? [])];
+}
 
 /**
  * Scores a single Closet item against the current StyleMe session signals,
@@ -193,8 +212,9 @@ export function scoreClosetItemForSession(
       if (itemColors.some((c) => avoidLower.includes(c))) score -= 4;
     }
 
-    if (profile.stylePersonalities?.length) {
-      const personalityLower = profile.stylePersonalities.map((p) => p.toLowerCase());
+    const scoringArchetypes = scoringArchetypesFor(profile);
+    if (scoringArchetypes.length) {
+      const personalityLower = scoringArchetypes.map((p) => p.toLowerCase());
       for (const tag of item.styleTags) {
         if (personalityLower.some((p) => tag.toLowerCase().includes(p))) {
           score += 1;

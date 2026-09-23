@@ -14,6 +14,7 @@
 import prisma from "~/db.server";
 import type { MeasurementState, EvidenceObject } from "./canonical-vocabulary";
 import { customerEvidenceLabel } from "./canonical-vocabulary";
+import { projectStyleDirectionsToArchetypes } from "../passport/rev7-vocabulary.js";
 
 // ── Isolation filter ──────────────────────────────────────────────────────────
 // Exclude staging test customers from all live queries.
@@ -325,6 +326,7 @@ export async function getLivePassportData(dateRangeDays: number): Promise<LivePa
     where: { completed: true, customer: TEST_CUSTOMER_PREFIX_FILTER },
     select: {
       stylePersonalities: true,
+      styleDirections: true,
       desiredFeelings: true,
       lifestyle: true,
       dressesFor: true,
@@ -339,7 +341,14 @@ export async function getLivePassportData(dateRangeDays: number): Promise<LivePa
   const updatedInPeriod = profiles.filter(p => p.updatedAt >= from).length;
   const uniqueCustomers = profiles.length;
 
-  const allPersonalities = profiles.flatMap(p => p.stylePersonalities);
+  // One ranked list must stay in one vocabulary. Rev 7 customers answer
+  // styleDirections, so their answer is projected onto the same V3 archetype tokens
+  // legacy customers are counted in — never appended raw alongside them.
+  const allPersonalities = profiles.flatMap(p =>
+    p.styleDirections.length > 0
+      ? projectStyleDirectionsToArchetypes(p.styleDirections).archetypes
+      : p.stylePersonalities,
+  );
   const allFeelings      = profiles.flatMap(p => p.desiredFeelings);
   const allLifestyles    = profiles.flatMap(p => p.lifestyle ?? []);
   const allOccasions     = profiles.flatMap(p => p.dressesFor);

@@ -356,10 +356,16 @@ export default function OnboardingStep() {
   const togglePrimary = (id: string) => {
     setMultiValue(prev => {
       if (prev.includes(id)) return prev.filter(v => v !== id);
-      if (!question.maxSelections || prev.length < question.maxSelections) {
+      const exclusives = question.exclusiveIds ?? [];
+      if (exclusives.includes(id)) {
+        // "I don't have strong colour preferences" clears every specific favourite.
+        return [id];
+      }
+      const withoutExclusives = prev.filter(v => !exclusives.includes(v));
+      if (!question.maxSelections || withoutExclusives.length < question.maxSelections) {
         // Mutual exclusion: remove from avoid-colors if present
         setSecondaryMultiValue(sec => sec.filter(s => s !== id));
-        return [...prev, id];
+        return [...withoutExclusives, id];
       }
       return prev;
     });
@@ -367,13 +373,20 @@ export default function OnboardingStep() {
 
   const toggleSecondary = (id: string) => {
     if (!question.secondaryQuestion) return;
-    const max = question.secondaryQuestion.maxSelections;
+    // Rev 7: avoided colours have no selection cap ("select any that apply").
+    const max = question.secondaryQuestion.maxSelections ?? Infinity;
+    const exclusives = question.secondaryQuestion.exclusiveIds ?? [];
     setSecondaryMultiValue(prev => {
       if (prev.includes(id)) return prev.filter(v => v !== id);
-      if (prev.length < max) {
+      if (exclusives.includes(id)) {
+        // "None" clears every specific avoided colour.
+        return [id];
+      }
+      const withoutExclusives = prev.filter(v => !exclusives.includes(v));
+      if (withoutExclusives.length < max) {
         // Mutual exclusion: remove from favorite-colors if present
         setMultiValue(fav => fav.filter(f => f !== id));
-        return [...prev, id];
+        return [...withoutExclusives, id];
       }
       return prev;
     });
@@ -447,7 +460,7 @@ export default function OnboardingStep() {
         {question.type === "multi" && question.options && (
           <>
             <div className="ob-pills">
-              {question.options.map(opt => {
+              {question.options.filter(opt => !opt.reserved).map(opt => {
                 const exclusives = question.exclusiveIds ?? [];
                 const isSelected = multiValue.includes(opt.id);
                 const hasExclusiveActive = exclusives.some(eid => multiValue.includes(eid));
@@ -496,7 +509,7 @@ export default function OnboardingStep() {
         {/* SINGLE */}
         {question.type === "single" && question.options && (
           <div className="ob-pills">
-            {question.options.map(opt => {
+            {question.options.filter(opt => !opt.reserved).map(opt => {
               const isSelected = singleValue === opt.id;
               return (
                 <button
