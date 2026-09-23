@@ -584,3 +584,96 @@ describe("§AR autoSelectClosetAnchor intention awareness", () => {
     assert.equal(selected!.id, "supporting", "approved Supporting must beat un-profiled item with equal base score");
   });
 });
+
+// ── §BNA — autoSelectClosetAnchor body-need awareness ────────────────────────
+
+describe("§BNA autoSelectClosetAnchor body-need (structured-shape) awareness", () => {
+  function makeAnchorItemBN(
+    id: string,
+    construction: string | null,
+    overrides: Partial<AutoSelectItem> = {},
+  ): AutoSelectItem {
+    return {
+      id,
+      name: id,
+      category: "TOPS",
+      subcategory: null,
+      colors: [],
+      primaryColor: null,
+      pattern: null,
+      material: null,
+      styleTags: [],
+      occasions: ["everyday"],
+      imageUrl: null,
+      garmentRelationships: [],
+      formality: "casual",
+      styleMeProfile: construction !== null
+        ? { profileStatus: "approved", intentionPotentials: {}, occasionFit: null, construction }
+        : null,
+      ...overrides,
+    };
+  }
+
+  const STRUCTURED_SIGNALS = {
+    occasion: "everyday",
+    moods: [] as string[],
+    desiredFeelings: [] as string[],
+    bodyNeeds: ["structured-shape"],
+  };
+  const NEUTRAL_SIGNALS = {
+    occasion: "everyday",
+    moods: [] as string[],
+    desiredFeelings: [] as string[],
+  };
+
+  it("BNA.1 tailored anchor beats soft anchor when structured-shape active", async () => {
+    const tailored = makeAnchorItemBN("tailored", "tailored");
+    const soft = makeAnchorItemBN("soft", "soft");
+    // Both identical base scores (same occasion, no moods/feelings).
+    const selected = await autoSelectClosetAnchor("any", STRUCTURED_SIGNALS, async () => [soft, tailored]);
+    assert.ok(selected !== null);
+    assert.equal(selected!.id, "tailored",
+      "tailored construction must win anchor when structured-shape body need is active");
+  });
+
+  it("BNA.2 control: no structured-shape body need → no artificial preference for tailored over soft", async () => {
+    const tailored = makeAnchorItemBN("tailored", "tailored");
+    const soft = makeAnchorItemBN("soft", "soft");
+    const selected = await autoSelectClosetAnchor("any", NEUTRAL_SIGNALS, async () => [soft, tailored]);
+    assert.ok(selected !== null, "some anchor must be selected");
+    // Without the body need both items tie — result depends on insertion order.
+    // We only assert it's one of the two items, not that tailored is forced.
+    assert.ok(["tailored", "soft"].includes(selected!.id), "result must be one of the two items");
+  });
+
+  it("BNA.3 structured construction matches tailored (both score 1.0)", async () => {
+    const structured = makeAnchorItemBN("structured", "structured");
+    const tailored = makeAnchorItemBN("tailored", "tailored");
+    // Both earn the same bodyNeedBonus — insertion order decides.
+    const selected = await autoSelectClosetAnchor("any", STRUCTURED_SIGNALS, async () => [structured, tailored]);
+    assert.ok(selected !== null);
+    assert.ok(["structured", "tailored"].includes(selected!.id),
+      "both structured and tailored earn equal bonus — either may win");
+  });
+
+  it("BNA.4 occasion-match still beats construction bonus (occasion is tier 1)", async () => {
+    // Occasion-matched soft item scores +10 base; tailored with no occasion match scores ≤2.
+    const occasionSoft = makeAnchorItemBN("occasion-soft", "soft", { occasions: ["everyday"] });
+    const noOccasionTailored = makeAnchorItemBN("no-occ-tailored", "tailored", { occasions: [] });
+    // noOccasionTailored has no occasion tag → versatile (not blocked), score = 0 base + 2.0 body-need = 2.0
+    // occasionSoft: score = 10 base + 0.4 body-need = 10.4 — must win
+    const selected = await autoSelectClosetAnchor("any", STRUCTURED_SIGNALS, async () => [noOccasionTailored, occasionSoft]);
+    assert.ok(selected !== null);
+    assert.equal(selected!.id, "occasion-soft",
+      "occasion-matched soft item (10.4) must beat no-occasion tailored (2.0) — occasion is tier 1");
+  });
+
+  it("BNA.5 construction=N/A receives no structural bonus", async () => {
+    const naItem = makeAnchorItemBN("na", "N/A");
+    const tailored = makeAnchorItemBN("tailored", "tailored");
+    const selected = await autoSelectClosetAnchor("any", STRUCTURED_SIGNALS, async () => [naItem, tailored]);
+    assert.ok(selected !== null);
+    assert.equal(selected!.id, "tailored",
+      "N/A construction earns no bonus; tailored must win when structured-shape active");
+  });
+});

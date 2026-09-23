@@ -322,12 +322,13 @@ export type AutoSelectItem = {
   imageUrl: string | null;
   garmentRelationships: string[];
   formality: string | null;
-  // Approved GarmentStyleMeProfile — for intention-aware anchor ranking.
+  // Approved GarmentStyleMeProfile — for intention- and body-need-aware anchor ranking.
   // null when no approved profile exists.
   styleMeProfile: {
     profileStatus: string;
     intentionPotentials: Record<string, string> | null;
     occasionFit: Record<string, string> | null;
+    construction?: string | null;
   } | null;
 };
 
@@ -345,6 +346,18 @@ const _OCCASION_MAX_RANK: Record<string, number> = {
   "going-out": 4, "formal-event": 6, "active-busy-day": 2,
 };
 
+// Construction bonus values for structured-shape / still-want-shape at anchor level.
+// Mirrors the fitScore scale in scoreBodyNeedForClosetItem × 2.0 so a tailored anchor
+// beats a soft anchor by 1.6 points — decisive for ties but never overrides occasion (+10).
+const _ANCHOR_CONSTRUCTION_BONUS: Record<string, number> = {
+  "structured": 2.0, "tailored": 2.0,
+  "sculptural": 1.5,
+  "neutral": 1.0,
+  "soft": 0.4,
+  // "N/A" → omitted → 0 (not applicable, no structural credit)
+};
+const _CONSTRUCTION_BODY_NEEDS = new Set(["structured-shape", "still-want-shape"]);
+
 export async function autoSelectClosetAnchor(
   customerId: string,
   signals: {
@@ -355,6 +368,9 @@ export async function autoSelectClosetAnchor(
     // TODAY intentions — used to rank equally-scored eligible anchors.
     // Only approved intentionPotentials are consulted; no legacy tag fallback.
     intentions?: string[];
+    // Active fit/comfort body needs — used to rank anchor-capable garments by construction.
+    // Ranked after occasion/register and before intention (per scoring tier order).
+    bodyNeeds?: string[];
   },
   _fetchItems?: (customerId: string) => Promise<AutoSelectItem[]>,
 ): Promise<{ anchor: ClosetAnchorInput; id: string } | null> {
@@ -370,7 +386,7 @@ export async function autoSelectClosetAnchor(
           styleTags: true, occasions: true, imageUrl: true,
           garmentRelationships: true, formality: true,
           styleMeProfile: {
-            select: { profileStatus: true, intentionPotentials: true, occasionFit: true },
+            select: { profileStatus: true, intentionPotentials: true, occasionFit: true, construction: true },
           },
         },
       }) as AutoSelectItem[];
@@ -393,6 +409,8 @@ export async function autoSelectClosetAnchor(
   type ScoredItem = { item: AutoSelectItem; score: number; isAnchorCapable: boolean; inRange: boolean };
 
   const activeIntentions = signals.intentions ?? [];
+  const activeBodyNeeds = signals.bodyNeeds ?? [];
+  const needsConstructionBonus = activeBodyNeeds.some((n) => _CONSTRUCTION_BODY_NEEDS.has(n));
 
   const mapped: ScoredItem[] = items.map((item) => {
     const baseScore = scoreClosetItemForSession(
@@ -401,12 +419,22 @@ export async function autoSelectClosetAnchor(
       undefined,
       item.garmentRelationships,
     );
-    // Intention bonus: approved intentionPotentials only — no legacy tag fallback.
-    // Scales identically to slot-filling (max 1.5 per Strong intention) so it can
-    // break ties but cannot overcome an occasion-match or mood-match advantage.
     const approvedProfile = item.styleMeProfile?.profileStatus === "approved"
       ? item.styleMeProfile
       : null;
+
+    // Body-need bonus: construction signal for anchor-capable structural needs.
+    // Tier order: occasion → register → body-need → intention.
+    // Applied only to anchor-capable categories (TOPS/BOTTOMS/DRESSES/OUTERWEAR).
+    const bodyNeedBonus = (() => {
+      if (!needsConstructionBonus || !approvedProfile) return 0;
+      if (!ANCHOR_CAPABLE_CATEGORIES.has(item.category)) return 0;
+      const construction = approvedProfile.construction;
+      if (!construction || construction === "N/A") return 0;
+      return _ANCHOR_CONSTRUCTION_BONUS[construction] ?? 0;
+    })();
+
+    // Intention bonus: approved intentionPotentials only — no legacy tag fallback.
     const intentionBonus = approvedProfile?.intentionPotentials && activeIntentions.length > 0
       ? activeIntentions.reduce((sum, id) => {
           const rating = (approvedProfile.intentionPotentials as Record<string, string>)[id];
@@ -417,7 +445,7 @@ export async function autoSelectClosetAnchor(
       : 0;
     return {
       item,
-      score: baseScore + intentionBonus,
+      score: baseScore + bodyNeedBonus + intentionBonus,
       isAnchorCapable: ANCHOR_CAPABLE_CATEGORIES.has(item.category),
       inRange: isFormallyInRange(item),
     };
@@ -456,10 +484,17 @@ export async function autoSelectClosetAnchor(
     console.log("[nAia-anchor-rank]", JSON.stringify({
       occasion: signals.occasion,
       intentions: activeIntentions,
+      bodyNeeds: activeBodyNeeds,
       top10: scored.slice(0, 10).map((s) => {
         const ap2 = s.item.styleMeProfile?.profileStatus === "approved" ? s.item.styleMeProfile : null;
+        const construction2 = ap2?.construction ?? null;
+        const bnBonus = needsConstructionBonus && ap2 && ANCHOR_CAPABLE_CATEGORIES.has(s.item.category) && construction2 && construction2 !== "N/A"
+          ? (_ANCHOR_CONSTRUCTION_BONUS[construction2] ?? 0)
+          : 0;
         return {
           id: s.item.id, name: s.item.name, score: s.score,
+          construction: construction2,
+          bodyNeedBonus: bnBonus,
           isAnchorCapable: s.isAnchorCapable, inRange: s.inRange,
           occasions: s.item.occasions,
           intentionPotentials: activeIntentions.length > 0 && ap2?.intentionPotentials
@@ -617,13 +652,18 @@ export function scoreBodyNeedForClosetItem(
     }
 
     case "still-want-shape": {
-      // construction from approved profile is authoritative for shape — fitProfile="fitted" must NOT substitute.
-      // The existing SHAPED_FITS check already excludes "fitted" (correct); construction adds precision.
+      // construction from approved profile is authoritative — locked taxonomy only.
+      // fitProfile="fitted" must NOT substitute for construction.
       const construction = item.approvedProfile?.construction ?? null;
-      if (construction === "structured") return { violation: false, fitScore: 1 };
-      if (construction === "semi-structured") return { violation: false, fitScore: 0.75 };
-      if (construction === "soft") return { violation: false, fitScore: 0.2 };
-      // Fallback to existing fitProfile-based scoring when no approved construction
+      if (construction !== null) {
+        if (construction === "N/A") return { violation: false, fitScore: null };
+        if (construction === "structured" || construction === "tailored") return { violation: false, fitScore: 1.0 };
+        if (construction === "sculptural") return { violation: false, fitScore: 0.75 };
+        if (construction === "neutral") return { violation: false, fitScore: 0.4 };
+        if (construction === "soft") return { violation: false, fitScore: 0.2 };
+        return { violation: false, fitScore: null }; // unknown taxonomy value — treat as unknown
+      }
+      // No approved construction — fall through to legacy fitProfile-based scoring.
       if (fp !== null && SHAPED_FITS.has(fp)) return { violation: false, fitScore: 1 };
       if (fp !== null && (fp === "loose" || fp === "oversized")) return { violation: false, fitScore: 0.2 };
       if (fp !== null && (fp === "relaxed" || fp === "flowy")) return { violation: false, fitScore: 0.4 };
@@ -638,12 +678,18 @@ export function scoreBodyNeedForClosetItem(
     }
 
     case "structured-shape": {
-      // construction from approved profile is authoritative (same as still-want-shape).
+      // construction from approved profile is authoritative — locked taxonomy only.
+      // Fitted silhouette and colour are not structural signals and must not substitute.
       const construction = item.approvedProfile?.construction ?? null;
-      if (construction === "structured") return { violation: false, fitScore: 1 };
-      if (construction === "semi-structured") return { violation: false, fitScore: 0.75 };
-      if (construction === "soft") return { violation: false, fitScore: 0.2 };
-      // Fallback to fitProfile/styleTags when no approved construction.
+      if (construction !== null) {
+        if (construction === "N/A") return { violation: false, fitScore: null };
+        if (construction === "structured" || construction === "tailored") return { violation: false, fitScore: 1.0 };
+        if (construction === "sculptural") return { violation: false, fitScore: 0.75 };
+        if (construction === "neutral") return { violation: false, fitScore: 0.4 };
+        if (construction === "soft") return { violation: false, fitScore: 0.2 };
+        return { violation: false, fitScore: null }; // unknown taxonomy value — treat as unknown
+      }
+      // No approved construction — fall through to legacy fitProfile/styleTags signals.
       if (fp !== null && STRUCTURED_FITS.has(fp)) return { violation: false, fitScore: 1 };
       if ((item.styleTags ?? []).includes("structured") || (item.styleTags ?? []).includes("tailored")) {
         return { violation: false, fitScore: 0.8 };

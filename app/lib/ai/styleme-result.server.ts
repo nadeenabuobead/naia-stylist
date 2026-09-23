@@ -2692,7 +2692,7 @@ export async function callClaudeForNaiaSelection(
     "\n15. Do not infer body-zone concerns from a garment name alone — only from explicit Fit/Comfort selections or Passport body-avoid areas listed above." +
     "\n16. Do not rename the occasion — use the exact occasion label as given in TODAY'S BRIEF." +
     "\n17. Do not invent goals, outcomes, or aspirations for the customer unless they appear in Becoming/aspiration or Current style focus in STYLE PASSPORT above." +
-    "\n18. INTENTION GROUNDING: Structural language (sharp, structured, tailored, crisp, polished) in copy requires the garment's 'construction: structured' or 'construction: semi-structured' to be listed in its metadata above. Colour, darkness, or a fitted silhouette alone are never structural signals and must not be described as making an outfit feel sharper or more structured. If Intention includes 'make-it-easy', ease claims (effortless, easy to wear, throw-on, low-maintenance) require the garment to have 'styling effort: easy' in its metadata above. When the metadata does not support the claimed quality, describe the outfit through its occasion appropriateness, mood, and Passport alignment instead.";
+    "\n18. CONSTRUCTION GROUNDING: Structural language (sharp, structured, tailored, crisp, polished) in copy requires a CLOTHING piece's 'construction: structured' or 'construction: tailored' to appear in its metadata above. Bags, accessories, and jewellery with 'construction: structured' may be described as structured accessories — they cannot justify that the outfit satisfies a 'Sharper / more structured shape' Fit/Comfort need; that claim requires a clothing piece (top, bottom, dress, set, or outerwear) with construction: structured or construction: tailored. Colour, darkness, or a fitted silhouette alone are never structural signals and must not be described as making an outfit feel sharper or more structured. If Intention includes 'make-it-easy', ease claims (effortless, easy to wear, throw-on, low-maintenance) require the garment to have 'styling effort: easy' in its metadata above. When the metadata does not support the claimed quality, describe the outfit through its occasion appropriateness, mood, and Passport alignment instead.";
 
   const userMessage =
     `Select the best complete outfit for this customer and write all wording for it.\n\n` +
@@ -3465,6 +3465,33 @@ export function passesCandidateDressingRequirements(
   return true;
 }
 
+// ── Body-need slot bonus ──────────────────────────────────────────────────────
+// Additive bonus for construction-driven body needs (structured-shape / still-want-shape).
+// Bags, accessories, and jewellery are excluded — they cannot satisfy a clothing/silhouette
+// body need. Scale mirrors the anchor-level bonus so behaviour is consistent across tiers.
+const _SLOT_CONSTRUCTION_BONUS: Record<string, number> = {
+  "structured": 2.0, "tailored": 2.0,
+  "sculptural": 1.5,
+  "neutral": 1.0,
+  "soft": 0.4,
+  // "N/A" → omitted → 0 (not applicable, no structural credit)
+};
+const _SLOT_CONSTRUCTION_NEEDS = new Set(["structured-shape", "still-want-shape"]);
+
+function computeBodyNeedSlotBonus(
+  bodyNeeds: string[],
+  item: ClosetAnchorInput,
+  slot: string,
+): number {
+  // Accessories cannot satisfy a structural clothing body need.
+  if (BODY_NEED_STRUCTURAL_SLOTS.has(slot)) return 0;
+  const constructionNeeds = bodyNeeds.filter((n) => n !== "nothing-specific" && _SLOT_CONSTRUCTION_NEEDS.has(n));
+  if (constructionNeeds.length === 0) return 0;
+  const construction = item.approvedProfile?.construction;
+  if (!construction || construction === "N/A") return 0;
+  return _SLOT_CONSTRUCTION_BONUS[construction] ?? 0;
+}
+
 // ── Multi-Closet garment scan ─────────────────────────────────────────────────
 // Finds the best Closet item for each outfit slot not already covered by the
 // anchor or primary NADINE product. Runs in both nAia and NADINE modes.
@@ -3508,6 +3535,7 @@ export function selectAdditionalClosetGarments(
     desiredFeelings: session.desiredFeelings,
   };
   const activeIntentions = session.intentions ?? [];
+  const activeBodyNeedsForSlot = (session.bodyNeeds ?? []).filter((n) => n !== "nothing-specific");
 
   // Collect all candidates per slot, scored and sorted best-first.
   const candidatesBySlot = new Map<OutfitSlot, Array<{ item: ClosetAnchorInput; score: number }>>();
@@ -3546,18 +3574,23 @@ export function selectAdditionalClosetGarments(
       item.garmentRelationships,
     );
     if (baseScore <= 0) continue;
+    // Body-need bonus: construction signal for structural body needs (structured-shape / still-want-shape).
+    // Bags/accessories/jewelry are excluded. Applied before intention (tier order).
+    const bodyNeedSlotBonus = activeBodyNeedsForSlot.length > 0
+      ? computeBodyNeedSlotBonus(activeBodyNeedsForSlot, item, slot)
+      : 0;
     // Intention bonus: minor additive signal so intention-aligned items win ties.
-    // Scaled to ~10% of a typical base score — never overrides occasion/mood/feeling.
     const intentionBonus = activeIntentions.length > 0
       ? activeIntentions.reduce((sum, id) => sum + computeItemIntentionWeight(item, id), 0) * 1.5
       : 0;
     // Apply outfitFunction priority: anchor pieces boosted, supporting pieces penalised.
-    const score = (baseScore + intentionBonus) * outfitFunctionPriority(item);
+    const score = (baseScore + bodyNeedSlotBonus + intentionBonus) * outfitFunctionPriority(item);
 
     if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
       console.log("[nAia-slot-score]", JSON.stringify({
         slot, id: item.id, name: item.name ?? null,
         baseScore,
+        bodyNeedSlotBonus: Math.round(bodyNeedSlotBonus * 1000) / 1000,
         intentionBonus: Math.round(intentionBonus * 1000) / 1000,
         intentionPotentials: activeIntentions.length > 0
           ? Object.fromEntries(activeIntentions.map((iid) => [
