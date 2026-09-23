@@ -55,26 +55,28 @@ model Customer {
   membershipStatus  MembershipStatus @default(NONE)
 
   // Relationships
-  onboardingProfile       OnboardingProfile?
-  closetItems             ClosetItem[]
-  stylingSessions         StylingSession[]
-  buyOrSkipAnalyses       BuyOrSkipAnalysis[]
-  wardrobeInsights        WardrobeInsight[]
-  savedLooks              SavedLook[]
-  savedItems              SavedItem[]
-  postOutfitReviews       PostOutfitReview[]
-  confidenceScores        ConfidenceScore[]
-  trendReportViews        TrendReportView[]
-  stylingEvents           StylingEvent[]
-  sessions                NaiaSession[]
-  naiaModel               NaiaModel?
-  tryOnJobs               VirtualTryOnJob[]
-  recommendationFeedback  RecommendationFeedback[]
-  selfieAnalysis          SelfieAnalysis?
-  naiaObservationFeedback NaiaObservationFeedback[]
-  styleMemoryOutcomes     StyleMeOutcome[]
-  tasteEvidence           TasteEvidence[]
-  styleTendencies         StyleTendency[]
+  onboardingProfile            OnboardingProfile?
+  closetItems                  ClosetItem[]
+  stylingSessions              StylingSession[]
+  buyOrSkipAnalyses            BuyOrSkipAnalysis[]
+  wardrobeInsights             WardrobeInsight[]
+  savedLooks                   SavedLook[]
+  savedItems                   SavedItem[]
+  postOutfitReviews            PostOutfitReview[]
+  confidenceScores             ConfidenceScore[]
+  trendReportViews             TrendReportView[]
+  stylingEvents                StylingEvent[]
+  sessions                     NaiaSession[]
+  naiaModel                    NaiaModel?
+  tryOnJobs                    VirtualTryOnJob[]
+  recommendationFeedback       RecommendationFeedback[]
+  selfieAnalysis               SelfieAnalysis?
+  naiaObservationFeedback      NaiaObservationFeedback[]
+  styleMemoryOutcomes          StyleMeOutcome[]
+  tasteEvidence                TasteEvidence[]
+  styleTendencies              StyleTendency[]
+  personalisedTrendEdits       PersonalisedTrendEdit[]
+  personalisedTrendEditUnlocks PersonalisedTrendEditUnlock[]
 }
 
 // ============================================
@@ -574,6 +576,71 @@ model SavedLook {
   // Usage
   timesWorn Int       @default(0)
   lastWorn  DateTime?
+}
+
+// ── PERSONALISED TREND EDIT HISTORY ─────────────────────────────────────────
+//
+// TWO concepts, deliberately separate tables:
+//
+//   PersonalisedTrendEdit        an immutable snapshot of what nAia SHOWED her
+//   PersonalisedTrendEditUnlock  the entitlement event: she received this report
+//
+// Many snapshots may sit under one unlock. An engine change, a Passport edit or
+// a report revision produces a NEW snapshot and costs NO allowance.
+//
+// Added: migration 20260923200000_personalised_trend_history
+
+model PersonalisedTrendEdit {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Canonical EditorialTrendReport.id. Deliberately NOT a foreign key: a
+  // customer's personal history must survive the report being unpublished or
+  // deleted, replaying entirely from the snapshot below.
+  reportId     String
+  reportSlug   String
+  reportTitle  String
+  reportSeason String
+
+  engineVersion String
+  // Fingerprint of (engineVersion + reportId + sanitised edit). Decides whether
+  // a render is a new version. See computeSnapshotHash().
+  snapshotHash  String
+
+  // The ShopperEdit exactly as rendered, minus expiring signed image URLs.
+  // Never rebuilt: replaying an old edit reads this and nothing else.
+  edit Json
+
+  // Counts only — never closet records or garment analysis.
+  evidenceSummary Json?
+
+  createdAt DateTime @default(now())
+
+  // Idempotency: the same meaningful output cannot be stored twice.
+  @@unique([customerId, reportId, snapshotHash])
+  @@index([customerId, reportId, createdAt])
+  @@index([customerId, createdAt])
+}
+
+model PersonalisedTrendEditUnlock {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Canonical report id. Not an FK, for the same reason as above.
+  reportId   String
+  reportSlug String
+
+  grantedAt     DateTime @default(now())
+  // Entitlement window this unlock was granted in, from getUsageWindow().label.
+  // monthlyUsed counts unlocks whose period matches the CURRENT window; the
+  // unlock itself never expires.
+  grantedPeriod String
+
+  // One unlock per customer per report, permanently.
+  @@unique([customerId, reportId])
+  @@index([customerId, grantedPeriod])
 }
 
 // ── SAVED ITEM — the general saved-object store ──────────────────────────────

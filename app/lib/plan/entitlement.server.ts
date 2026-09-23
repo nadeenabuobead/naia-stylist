@@ -72,7 +72,9 @@ export interface ClosetEntitlement {
 
 export interface PersonalisedTrendEntitlement {
   monthlyLimit: number;  // 1 for MEMBER, 0 for NONE
-  monthlyUsed: null;     // V1: always null — no persisted usage event exists yet
+  // Unlocks granted in the current window — never snapshots, page views,
+  // regenerations or history opens. See PersonalisedTrendEditUnlock.
+  monthlyUsed: number;
 }
 
 export interface EntitlementSummary {
@@ -106,6 +108,7 @@ export async function getEntitlementSummary(
     vtoCompleted,
     vtoInFlight,
     closetCount,
+    personalisedTrendUnlocks,
   ] = await Promise.all([
     // StyleMe: qualifying root sessions in current window
     prisma.stylingSession.count({
@@ -141,6 +144,12 @@ export async function getEntitlementSummary(
 
     // Closet: hard-delete model — every row is an active item
     prisma.closetItem.count({ where: { customerId } }),
+
+    // Personalised trend: UNLOCKS granted in the current window. One unlock per
+    // report, permanently, so reopening an earlier report costs nothing.
+    prisma.personalisedTrendEditUnlock.count({
+      where: { customerId, grantedAt: { gte: window.start, lt: window.end } },
+    }),
   ]);
 
   return {
@@ -174,7 +183,7 @@ export async function getEntitlementSummary(
 
     personalisedTrend: {
       monthlyLimit: limits.personalisedTrendPerMonth,
-      monthlyUsed: null, // V1: enforcement deferred — no persisted usage event exists
+      monthlyUsed: personalisedTrendUnlocks,
     },
   };
 }

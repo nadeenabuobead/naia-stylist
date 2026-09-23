@@ -57,6 +57,7 @@ vi.mock("~/lib/editorial-reports.server", () => ({
   getEditorialReportBySlug: vi.fn().mockImplementation(async (slug: string) => {
     if (slug === "spring-2026-soft-structure") {
       return {
+        id: "rep_1",
         slug: "spring-2026-soft-structure",
         title: "Spring 2026 Soft Structure",
         season: "Spring 2026",
@@ -85,6 +86,14 @@ vi.mock("~/lib/trend-product-recommendation.server", () => ({
 
 vi.mock("~/lib/saved-items.server", () => ({
   loadReportSaveState: vi.fn(async () => ({ refKeys: {}, saved: [], canSave: true })),
+}));
+
+vi.mock("~/lib/personalised-trend-history.server", () => ({
+  recordEditSnapshot: vi.fn(async () => ({
+    snapshotCreated: true, unlockCreated: true,
+    snapshotPersisted: true, unlockPersisted: true, snapshotId: "snap_1",
+  })),
+  loadSnapshot: vi.fn(async () => null),
 }));
 
 vi.mock("~/styles/naia-design-system.css?url", () => ({ default: "/styles.css" }));
@@ -545,5 +554,106 @@ describe("Save controls on the personalised edit", () => {
     expect(html).not.toContain("♡");
     expect(html).not.toContain("♥");
     expect(html).toContain("Your route in");   // the editorial content survives
+  });
+});
+
+// ── Step 4 — historical replay must not recompute ────────────────────────────
+
+import { recordEditSnapshot, loadSnapshot } from "~/lib/personalised-trend-history.server";
+
+describe("Historical replay (?edit=<snapshotId>)", () => {
+  const STORED = {
+    id: "snap_old",
+    reportId: "rep_1",
+    reportSlug: "spring-2026-soft-structure",
+    reportTitle: "Spring 2026 Soft Structure",
+    reportSeason: "Spring 2026",
+    engineVersion: "1.0.0",
+    edit: { ...MOCK_EDIT, aLookToTry: "The wording she received in September." },
+    createdAt: "2026-09-01T00:00:00.000Z",
+  };
+
+  function call(url: string, slug = "spring-2026-soft-structure") {
+    return loader({ request: new Request(url), params: { slug }, context: {} } as never);
+  }
+
+  beforeEach(() => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue({ id: "cust-1" } as never);
+  });
+
+  it("returns the STORED edit and never calls buildShopperEdit", async () => {
+    vi.mocked(loadSnapshot).mockResolvedValueOnce(STORED as never);
+    vi.mocked(buildShopperEdit).mockClear();
+
+    const result = await call("https://naia.test/trends/my-edits/spring-2026-soft-structure?edit=snap_old");
+
+    expect((result as never as { edit: { aLookToTry: string } }).edit.aLookToTry)
+      .toBe("The wording she received in September.");
+    expect(buildShopperEdit).not.toHaveBeenCalled();
+    expect(getShopperEvidence).not.toHaveBeenCalled();
+  });
+
+  it("does not grant an unlock or write another version", async () => {
+    vi.mocked(loadSnapshot).mockResolvedValueOnce(STORED as never);
+    vi.mocked(recordEditSnapshot).mockClear();
+    await call("https://naia.test/trends/my-edits/spring-2026-soft-structure?edit=snap_old");
+    expect(recordEditSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("marks the view as historical and disables save controls", async () => {
+    vi.mocked(loadSnapshot).mockResolvedValueOnce(STORED as never);
+    const result = await call("https://naia.test/trends/my-edits/spring-2026-soft-structure?edit=snap_old") as never as
+      { historical: { snapshotId: string } | null; saveState: { canSave: boolean } };
+    expect(result.historical?.snapshotId).toBe("snap_old");
+    expect(result.saveState.canSave).toBe(false);
+  });
+
+  it("404s a snapshot that is not this customer's", async () => {
+    vi.mocked(loadSnapshot).mockResolvedValueOnce(null as never);
+    await expect(call("https://naia.test/trends/my-edits/spring-2026-soft-structure?edit=someone-elses"))
+      .rejects.toBeInstanceOf(Response);
+  });
+
+  it("404s when the snapshot belongs to a different report than the URL", async () => {
+    vi.mocked(loadSnapshot).mockResolvedValueOnce({ ...STORED, reportSlug: "another-report" } as never);
+    await expect(call("https://naia.test/trends/my-edits/spring-2026-soft-structure?edit=snap_old"))
+      .rejects.toBeInstanceOf(Response);
+  });
+
+  it("persists a snapshot on the NORMAL path — display and storage are one payload", async () => {
+    vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: true } as never);
+    vi.mocked(buildShopperEdit).mockReturnValueOnce(MOCK_EDIT as never);
+    vi.mocked(recordEditSnapshot).mockClear();
+
+    const result = await call("https://naia.test/trends/my-edits/spring-2026-soft-structure") as never as
+      { edit: unknown; historical: unknown };
+
+    expect(recordEditSnapshot).toHaveBeenCalledTimes(1);
+    // The persisted object IS the rendered object, not a regenerated one.
+    expect(vi.mocked(recordEditSnapshot).mock.calls[0][0].edit).toBe(result.edit);
+    expect(result.historical).toBeNull();
+  });
+
+  it("writes NO snapshot when the report has no canonical row id", async () => {
+    // The static pre-seed fallback. Step 3 forbids saves against it; history
+    // follows the same rule — a snapshot keyed to a non-canonical reportId
+    // would orphan the moment the table is seeded.
+    const { getEditorialReportBySlug } = await import("~/lib/editorial-reports.server");
+    vi.mocked(getEditorialReportBySlug).mockResolvedValueOnce({
+      slug: "spring-2026-soft-structure",
+      title: "Spring 2026 Soft Structure",
+      season: "Spring 2026",
+      summary: "s", published: true, publishedAt: "2026-06-30",
+    } as never);
+    vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: true } as never);
+    vi.mocked(buildShopperEdit).mockReturnValueOnce(MOCK_EDIT as never);
+    vi.mocked(recordEditSnapshot).mockClear();
+
+    await loader({
+      request: new Request("https://naia.test/trends/my-edits/spring-2026-soft-structure"),
+      params: { slug: "spring-2026-soft-structure" }, context: {},
+    } as never);
+
+    expect(recordEditSnapshot).not.toHaveBeenCalled();
   });
 });

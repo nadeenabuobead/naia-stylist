@@ -7,6 +7,8 @@ import {
   buildShopperEdit,
 } from "~/lib/trend-evidence.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
+import { loadHistoryCards } from "~/lib/personalised-trend-history.server";
+import type { HistoryCard } from "~/lib/personalised-trend-history";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 export const links: LinksFunction = () => [
@@ -31,6 +33,8 @@ type CardItem = {
 type LoaderData = {
   cards: CardItem[];
   hasProfile: boolean;
+  /** Report History — one entry per canonical report, never per version. */
+  history: HistoryCard[];
 };
 
 export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderData> {
@@ -42,6 +46,10 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
 
   // Single DB round-trip for all personalisation signals.
   const evidence = await getShopperEvidence(customer.id);
+
+  // Report History. Distinct from My Saved: these are edits she RECEIVED, not
+  // things she bookmarked, and they never appear in /my-naia/saved.
+  const history = await loadHistoryCards(customer.id);
 
   const cards: CardItem[] = reports.map((report) => {
     let subTitle: string | null = null;
@@ -56,12 +64,57 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     return { slug: report.slug, title: report.title, season: report.season, subTitle };
   });
 
-  return { cards, hasProfile: evidence.hasProfile };
+  return { cards, hasProfile: evidence.hasProfile, history };
+}
+
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+function fmtReceived(iso: string): string {
+  const d = new Date(iso);
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
 const TINTS = ["#efeae0", "#e6dccb", "#d9c9b5", "#efe6d7", "#e2d3bf", "#ede2cf"];
 
 const css = `
+  /* ── Previously — secondary to the current edits ── */
+  .tme-history { margin-top: 56px; }
+  .tme-history-intro {
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic;
+    font-size: 0.98rem;
+    color: rgba(26,17,9,0.6);
+    margin: 0 0 20px;
+  }
+  .tme-history-list { list-style: none; padding: 0; margin: 0; }
+  .tme-history-item { border-top: 1px solid rgba(26,17,9,0.10); }
+  .tme-history-item:last-child { border-bottom: 1px solid rgba(26,17,9,0.10); }
+  .tme-history-link {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 20px;
+    padding: 16px 0;
+    text-decoration: none;
+    transition: opacity 0.15s;
+  }
+  .tme-history-link:hover { opacity: 0.62; }
+  .tme-history-title {
+    font-family: 'Oswald', sans-serif;
+    font-weight: 300;
+    font-size: 1.02rem;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: #1a1109;
+  }
+  .tme-history-meta {
+    font-family: 'Space Mono', monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(26,17,9,0.5);
+  }
+
   .tme-page { padding: 48px 0 96px; }
 
   /* ── Hero ─────────────────────────────────────────────────────── */
@@ -306,7 +359,11 @@ const css = `
 `;
 
 export default function MyTrendEdits() {
-  const { cards, hasProfile } = useLoaderData() as LoaderData;
+  const loaderData = useLoaderData() as LoaderData;
+  const { cards, hasProfile } = loaderData;
+  // Previously is secondary to the current edits; if history is unavailable the
+  // page still reads, it just does not offer the archive.
+  const history = loaderData.history ?? [];
 
   return (
     <MyNaiaLayout compact>
@@ -383,6 +440,31 @@ export default function MyTrendEdits() {
               })}
             </div>
           </>
+        )}
+
+        {history.length > 0 && (
+          <section className="tme-history" aria-labelledby="tme-history-heading">
+            <div className="tme-divider" />
+            <div className="tme-section-eyebrow" id="tme-history-heading">Previously</div>
+            <p className="tme-history-intro">
+              Edits you&rsquo;ve already received, kept exactly as nAia wrote them.
+            </p>
+            <ul className="tme-history-list">
+              {history.map((entry) => (
+                <li key={entry.reportId} className="tme-history-item">
+                  <Link
+                    to={`/trends/my-edits/${entry.reportSlug}?edit=${entry.snapshotId}`}
+                    className="tme-history-link"
+                  >
+                    <span className="tme-history-title">{entry.reportTitle}</span>
+                    <span className="tme-history-meta">
+                      {entry.reportSeason} · received {fmtReceived(entry.receivedAt)}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
       </div>
     </MyNaiaLayout>

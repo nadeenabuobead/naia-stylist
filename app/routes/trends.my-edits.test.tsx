@@ -21,7 +21,7 @@ vi.mock("react-router", async (importOriginal) => {
   return {
     ...actual,
     Link: mockLink,
-    useLoaderData: vi.fn(() => ({ cards: [], hasProfile: false })),
+    useLoaderData: vi.fn(() => ({ cards: [], hasProfile: false, history: [] })),
     useLocation: vi.fn(() => ({ pathname: "/trends/my-edits" })),
     UNSAFE_withComponentProps: (c: unknown) => c,
   };
@@ -50,6 +50,10 @@ vi.mock("~/lib/editorial-reports.server", () => ({
       published: true,
     },
   ]),
+}));
+
+vi.mock("~/lib/personalised-trend-history.server", () => ({
+  loadHistoryCards: vi.fn(async () => []),
 }));
 
 vi.mock("~/lib/trend-evidence.server", () => ({

@@ -20,6 +20,7 @@ import {
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import SaveControl, { saveControlCss } from "~/components/SaveControl";
 import { loadReportSaveState, type ReportSaveState } from "~/lib/saved-items.server";
+import { recordEditSnapshot, loadSnapshot } from "~/lib/personalised-trend-history.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 type LoaderData = {
@@ -31,6 +32,8 @@ type LoaderData = {
   reportIndex: number;
   saveState: ReportSaveState;
   returnTo: string;
+  /** Set when viewing a stored historical snapshot rather than today's edit. */
+  historical: { snapshotId: string; receivedAt: string } | null;
 };
 
 export const links: LinksFunction = () => [
@@ -48,6 +51,47 @@ export function meta({ data }: { data?: LoaderData }) {
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
+
+  // ── Historical replay ───────────────────────────────────────────────────
+  // ?edit=<snapshotId> renders a stored snapshot verbatim. It does NOT call
+  // buildShopperEdit, does NOT grant an unlock, and does NOT write a new
+  // version. The snapshot is loaded scoped to this customer, so another
+  // customer's id resolves to null rather than to their edit.
+  const snapshotId = new URL(request.url).searchParams.get("edit");
+  if (snapshotId) {
+    const snapshot = await loadSnapshot(customer.id, snapshotId);
+    if (!snapshot || snapshot.reportSlug !== (params.slug ?? "")) {
+      throw new Response("Not Found", { status: 404 });
+    }
+
+    // The canonical report may since have been unpublished or deleted. The
+    // personal edit still reads — from its own stored copy. Features that need
+    // live report content, such as save controls, simply degrade.
+    const liveReport = await getEditorialReportBySlug(snapshot.reportSlug);
+    const allPublishedForIndex = await getPublishedEditorialReports();
+
+    return {
+      report: (liveReport ?? {
+        slug: snapshot.reportSlug,
+        title: snapshot.reportTitle,
+        season: snapshot.reportSeason,
+        summary: "",
+        editorialIntro: "",
+        keyTrends: [],
+        sources: [],
+        published: false,
+        publishedAt: "",
+      }) as TrendReportData,
+      edit: snapshot.edit,
+      hasProfile: true,
+      generationFailed: false,
+      nadineRecommendation: null,
+      reportIndex: allPublishedForIndex.findIndex((r) => r.slug === snapshot.reportSlug),
+      saveState: { refKeys: {}, saved: [], canSave: false },
+      returnTo: `/trends/my-edits/${snapshot.reportSlug}`,
+      historical: { snapshotId: snapshot.id, receivedAt: snapshot.createdAt },
+    } satisfies LoaderData;
+  }
 
   const [report, allPublished] = await Promise.all([
     getEditorialReportBySlug(params.slug ?? ""),
@@ -90,6 +134,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       takeawaySections: ["yourBestRouteIn", "aLookToTry"],
     });
 
+    // Persist EXACTLY what is about to render — the same object, not a second
+    // independently generated one. Idempotent: an identical render stores
+    // nothing. A write failure is logged and the page still renders; nothing
+    // claims history was saved when it was not.
+    if (edit && report.id) {
+      await recordEditSnapshot({
+        customerId: customer.id,
+        reportId: report.id,
+        reportSlug: report.slug,
+        reportTitle: report.title,
+        reportSeason: report.season,
+        edit,
+      });
+    }
+
     return {
       report,
       edit,
@@ -99,6 +158,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       reportIndex,
       saveState,
       returnTo: `/trends/my-edits/${report.slug}`,
+      historical: null,
     } satisfies LoaderData;
   } catch (error) {
     console.error("Shopper trend edit generation failed:", error);
@@ -111,6 +171,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       reportIndex,
       saveState: { refKeys: {}, saved: [], canSave: true },
       returnTo: `/trends/my-edits/${report.slug}`,
+      historical: null,
     } satisfies LoaderData;
   }
 }
@@ -118,6 +179,33 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 const TINTS = ["#efeae0", "#e6dccb", "#d9c9b5", "#efe6d7", "#e2d3bf", "#ede2cf"];
 
 const css = `
+  /* ── Historical snapshot banner ── */
+  .tmd-historical {
+    border: 1px solid rgba(26,17,9,0.16);
+    background: rgba(26,17,9,0.03);
+    padding: 18px 20px;
+    margin-bottom: 28px;
+  }
+  .tmd-historical-label {
+    display: block;
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: #7a1e28;
+    margin-bottom: 8px;
+  }
+  .tmd-historical-note { margin: 0 0 10px; font-size: 14px; line-height: 1.6; color: rgba(26,17,9,0.72); }
+  .tmd-historical-link {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: #1a1109;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
   /* ── Save affordance ── */
   .tmd-save { margin-left: auto; }
   .tmd-section-label { display: flex; align-items: center; gap: 12px; }
@@ -538,6 +626,7 @@ export function ErrorBoundary() {
 export default function MyTrendEditDetail() {
   const loaderData = useLoaderData() as LoaderData;
   const { report, edit, hasProfile, generationFailed, nadineRecommendation, reportIndex } = loaderData;
+  const historical = loaderData.historical ?? null;
 
   // The editorial read is the primary experience. If save state is absent for
   // any reason, the page renders without ♡ controls rather than failing — a
@@ -649,7 +738,23 @@ export default function MyTrendEditDetail() {
       <div className="tmd-page">
         <Link to="/trends/my-edits" className="tmd-back">← My Trend Edits</Link>
 
-        {edit && (
+        {historical && (
+          <div className="tmd-historical">
+            <span className="tmd-historical-label">From your history</span>
+            <p className="tmd-historical-note">
+              This is the edit you received on{" "}
+              {new Date(historical.receivedAt).toLocaleDateString("en-GB", {
+                day: "numeric", month: "long", year: "numeric", timeZone: "UTC",
+              })}
+              , kept exactly as nAia wrote it then.
+            </p>
+            <Link to={`/trends/my-edits/${report.slug}`} className="tmd-historical-link">
+              See your current edit →
+            </Link>
+          </div>
+        )}
+
+        {edit && !historical && (
           <div className="tmd-action-row">
             <button className={`tmd-action-btn${copyStatus === "copied" ? " active" : ""}`} onClick={copyLink}>
               {copyStatus === "copied" ? "Copied ✓" : copyStatus === "error" ? "Failed" : "Copy link"}
