@@ -994,6 +994,9 @@ function getSectionSummary(def: SectionDef, answers: OnboardingAnswers): ReactNo
       }
     }
   }
+  // An optional section that is simply unanswered is not "missing" — it never
+  // blocks completion and must not be presented as a gap.
+  if (def.optional) return <span className="sp-detail-optional">Optional</span>;
   return <span className="sp-detail-missing">Not yet completed</span>;
 }
 
