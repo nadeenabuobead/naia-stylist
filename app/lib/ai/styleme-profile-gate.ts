@@ -136,12 +136,28 @@ export function passesProfileRegisterGate(
 // Checks if a candidate garment's register is compatible with the anchor's register.
 // Prevents outfit-level cross-register mismatches (e.g. athletic shoes + polished jacket).
 // Returns false when both have approved profiles and are more than 2 ranks apart.
+//
+// Shared-occasion override: when BOTH anchor and candidate have explicit occasionFit approval
+// (Strong or Acceptable) for the active session occasion, the generic register-gap heuristic
+// must not overrule that human-authored paired truth. A "No" rating or absent rating on either
+// side does not qualify — the override requires positive approval from both pieces.
 export function passesRegisterCoherenceWithAnchor(
   item: ClosetAnchorInput,
   anchorItem: ClosetAnchorInput | null,
+  sessionOccasion?: string,
 ): boolean {
   if (!anchorItem?.approvedProfile?.dressRegister) return true;
   if (!item.approvedProfile?.dressRegister) return true;
+
+  // Shared-occasion approval: both pieces approved for this occasion → bypass register gap.
+  if (sessionOccasion) {
+    const anchorRating = anchorItem.approvedProfile.occasionFit?.[sessionOccasion];
+    const itemRating = item.approvedProfile.occasionFit?.[sessionOccasion];
+    const anchorApproved = anchorRating === "Strong" || anchorRating === "Acceptable";
+    const itemApproved = itemRating === "Strong" || itemRating === "Acceptable";
+    if (anchorApproved && itemApproved) return true;
+  }
+
   const anchorRank = DRESS_REGISTER_RANK[anchorItem.approvedProfile.dressRegister];
   const itemRank = DRESS_REGISTER_RANK[item.approvedProfile.dressRegister];
   if (anchorRank === undefined || itemRank === undefined) return true;

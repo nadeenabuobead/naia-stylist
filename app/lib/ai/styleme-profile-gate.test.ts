@@ -2976,3 +2976,154 @@ describe("§CMB coreClothingMeetsBodyNeed helper", () => {
     assert.equal(coreClothingMeetsBodyNeed([null, undefined, "soft"], ["structured-shape"]), false);
   });
 });
+
+// ── §SRC — Shared-occasion register coherence override (RC-T3-D) ──────────────
+// passesRegisterCoherenceWithAnchor now accepts a sessionOccasion. When BOTH anchor
+// and candidate have explicit occasionFit approval (Strong or Acceptable) for the
+// session occasion, the register-gap heuristic is bypassed. A "No" or absent rating
+// on either side does not qualify for the override.
+
+describe("§SRC shared-occasion register coherence override", () => {
+  function makeProfileWithRegisterAndOccasion(
+    dressRegister: string,
+    occasionFitOverrides: Record<string, string>,
+  ) {
+    return makeApprovedProfile({ dressRegister: dressRegister as "casual", occasionFit: {
+      everyday: "No", work: "No", dinner: "No", date: "No",
+      event: "No", "night-out": "No", family: "No", travel: "No", active: "No",
+      ...occasionFitOverrides,
+    } as NonNullable<ClosetAnchorInput["approvedProfile"]>["occasionFit"] });
+  }
+
+  it("SRC.1 anchor casual + candidate polished both Everyday-approved → coherence override fires (gap=3 still passes)", () => {
+    const anchorItem = makeItem({ id: "base-top", category: "TOPS",
+      approvedProfile: makeProfileWithRegisterAndOccasion("casual", { everyday: "Strong" }),
+    });
+    const blazer = makeItem({ id: "polished-blazer", category: "OUTERWEAR",
+      approvedProfile: makeProfileWithRegisterAndOccasion("polished", { everyday: "Acceptable" }),
+    });
+    assert.equal(
+      passesRegisterCoherenceWithAnchor(blazer, anchorItem, "everyday"),
+      true,
+      "shared occasion approval (anchor Strong + candidate Acceptable) must override the 3-rank gap",
+    );
+  });
+
+  it("SRC.2 anchor Everyday-approved but candidate occasionFit=No → override does not fire → blocked by gap", () => {
+    const anchorItem = makeItem({ id: "base-top", category: "TOPS",
+      approvedProfile: makeProfileWithRegisterAndOccasion("casual", { everyday: "Strong" }),
+    });
+    const formalPiece = makeItem({ id: "formal-piece", category: "OUTERWEAR",
+      approvedProfile: makeProfileWithRegisterAndOccasion("polished", { everyday: "No" }),
+    });
+    assert.equal(
+      passesRegisterCoherenceWithAnchor(formalPiece, anchorItem, "everyday"),
+      false,
+      "candidate with occasionFit=No does not qualify for the shared-occasion override",
+    );
+  });
+
+  it("SRC.3 candidate Everyday-approved but anchor occasionFit=No → override does not fire → blocked by gap", () => {
+    const anchorItem = makeItem({ id: "base-top", category: "TOPS",
+      approvedProfile: makeProfileWithRegisterAndOccasion("casual", { everyday: "No" }),
+    });
+    const blazer = makeItem({ id: "polished-blazer", category: "OUTERWEAR",
+      approvedProfile: makeProfileWithRegisterAndOccasion("polished", { everyday: "Acceptable" }),
+    });
+    assert.equal(
+      passesRegisterCoherenceWithAnchor(blazer, anchorItem, "everyday"),
+      false,
+      "anchor with occasionFit=No does not qualify for the shared-occasion override",
+    );
+  });
+
+  it("SRC.4 neither has occasionFit data → existing register-gap behavior preserved", () => {
+    const anchorItem = makeItem({ id: "base-top", category: "TOPS",
+      approvedProfile: makeApprovedProfile({ dressRegister: "casual", occasionFit: null }),
+    });
+    const blazer = makeItem({ id: "polished-blazer", category: "OUTERWEAR",
+      approvedProfile: makeApprovedProfile({ dressRegister: "polished", occasionFit: null }),
+    });
+    assert.equal(
+      passesRegisterCoherenceWithAnchor(blazer, anchorItem, "everyday"),
+      false,
+      "absent occasionFit on both sides must not trigger the override — existing gap logic applies",
+    );
+  });
+
+  it("SRC.5 both approved for a different occasion than session → session-occasion check fails → gap applies", () => {
+    // Anchor and candidate are approved for 'everyday' but the session is 'work'.
+    // The shared-occasion check must use the SESSION occasion, not any other occasion.
+    const anchorItem = makeItem({ id: "casual-top", category: "TOPS",
+      approvedProfile: makeProfileWithRegisterAndOccasion("casual", { everyday: "Strong" }),
+    });
+    const blazer = makeItem({ id: "polished-blazer", category: "OUTERWEAR",
+      approvedProfile: makeProfileWithRegisterAndOccasion("polished", { everyday: "Acceptable" }),
+    });
+    assert.equal(
+      passesRegisterCoherenceWithAnchor(blazer, anchorItem, "work"),
+      false,
+      "shared-occasion override only fires for the session's own occasion — approval for 'everyday' must not bypass a 'work' session gap",
+    );
+  });
+
+  it("SRC.6 end-to-end: casual base top + polished tailored outerwear both Everyday-approved, structured-shape active → outerwear selected", () => {
+    const anchor: NormalizedClosetAnchor = {
+      type: "closet",
+      id: "anchor-top",
+      label: "Black Long-Sleeve Top",
+      slot: "top",
+      colors: ["black"],
+      normalizedColorIds: ["black"],
+      styleTags: [],
+      occasions: ["everyday"],
+      material: null,
+      hasStrongEvidence: true,
+      evidenceFields: [],
+      imageUrl: null,
+    };
+    const anchorItem = makeItem({ id: "anchor-top", category: "TOPS",
+      occasions: ["everyday"],
+      approvedProfile: makeApprovedProfile({
+        exactSlot: "top",
+        outfitFunction: "base",
+        construction: "soft",
+        dressRegister: "casual",
+        occasionFit: {
+          everyday: "Strong", work: "Acceptable", dinner: "No", date: "No",
+          event: "No", "night-out": "No", family: "Strong", travel: "Strong", active: "No",
+        },
+      }),
+    });
+    const polishedBlazer = makeItem({ id: "beige-blazer", category: "OUTERWEAR",
+      occasions: [],
+      approvedProfile: makeApprovedProfile({
+        exactSlot: "outerwear",
+        outfitFunction: "layering",
+        construction: "tailored",
+        dressRegister: "polished",
+        occasionFit: {
+          everyday: "Acceptable", work: "Acceptable", dinner: "Acceptable", date: "Acceptable",
+          event: "Strong", "night-out": "Acceptable", family: "Acceptable", travel: "Acceptable", active: "No",
+        },
+      }),
+    });
+    const session = {
+      moods: [] as string[],
+      desiredFeelings: [] as string[],
+      coverageConditional: null,
+      occasion: "everyday" as const,
+      formalityConditional: null,
+      todayColours: { preferred: [] as string[], avoid: [] as string[] },
+      practicalIds: [] as string[],
+      source: "my-closet" as const,
+      intentions: [] as string[],
+      bodyNeeds: ["structured-shape"],
+    };
+    const result = selectAdditionalClosetGarments(anchor, null, session, [anchorItem, polishedBlazer]);
+    const outerwear = result.find((r) => r.slot === "outerwear");
+    assert.ok(outerwear !== undefined,
+      "polished tailored outerwear with shared everyday approval must pass register coherence and appear in outfit");
+    assert.equal(outerwear!.id, "beige-blazer");
+  });
+});
