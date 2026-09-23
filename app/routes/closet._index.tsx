@@ -12,6 +12,7 @@ import { verifyCloudinaryAsset, deleteCloudinaryAsset, buildPrivateDownloadUrl, 
 import { deleteClosetItemWithImage } from "~/lib/closet-item-deletion.server";
 import { analyzeClosetGarment } from "~/lib/ai/closet-garment-analysis.server";
 import { computeClosetInsights, type ClosetInsightProfile } from "~/lib/ai/closet-insights";
+import { computeClosetCharacterLine } from "~/lib/ai/wardrobe-intelligence.server";
 import { normalizeGarmentRelationships, GARMENT_RELATIONSHIP_LABELS, GARMENT_RELATIONSHIP_MAX } from "~/lib/ai/first-naia-read";
 import { moderateImageContent } from "~/lib/image-moderation.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
@@ -139,7 +140,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await prisma.customer.findUnique({
     where: { id: naiaCustomer.id },
     include: {
-      closetItems: { orderBy: { createdAt: "desc" } },
+      closetItems: { orderBy: { createdAt: "desc" }, include: { adminReview: true } },
       onboardingProfile: true,
     },
   });
@@ -217,12 +218,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : null;
   const closetInsights = computeClosetInsights(insightItems, insightProfile);
 
+  // Preview line for the Wardrobe Intelligence doorway block. Uses the canonical
+  // engine's own trait logic so the Closet page and /closet/intelligence read as
+  // one system rather than two.
+  const wardrobeCharacter = computeClosetCharacterLine(customer.closetItems);
+
   const vtoEnabled = process.env.VTO_UI_ENABLED === "true";
   const naiaModel = vtoEnabled ? await loadNaiaModel(naiaCustomer.id) : null;
   const naiaModelIsReady = computeModelReadinessFromRecord(naiaModel).isReadyForTryOn;
 
   const gender = customer.onboardingProfile?.gender ?? null;
-  return data({ items, closetInsights, vtoEnabled, naiaModelIsReady, gender });
+  return data({ items, closetInsights, wardrobeCharacter, vtoEnabled, naiaModelIsReady, gender });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -873,7 +879,16 @@ const css = `
   .cl-empty{text-align:center;padding:60px 32px;background:var(--bg-50, var(--c-surface));border:1px solid var(--fg-10, var(--c-border))}
   .cl-empty-icon{font-family:var(--ff-display);font-size:52px;color:var(--fg, var(--c-ink));opacity:.2;margin-bottom:16px}
   .cl-empty-text{font-family:var(--ff-body);font-size:18px;font-style:italic;color:var(--fg-60, var(--c-muted));margin-bottom:28px}
+  /* Closet / Wardrobe Intelligence switch */
+  .cl-switch{display:flex;gap:28px;border-bottom:1px solid var(--naia-border);padding-bottom:10px;margin-bottom:32px}
+  .cl-switch-item{font-family:var(--naia-ff-ui);font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:rgba(40,21,12,0.45);text-decoration:none;padding-bottom:10px;margin-bottom:-11px;border-bottom:1px solid transparent}
+  a.cl-switch-item:hover{color:var(--naia-ink)}
+  .cl-switch-item.is-on{color:var(--naia-ink);border-bottom-color:var(--naia-accent)}
+  @media(max-width:640px){.cl-switch{gap:20px}.cl-switch-item{font-size:9px;letter-spacing:1.6px}}
   /* Closet Insights section */
+  .cl-insights-lead{font-family:var(--naia-ff-body);font-size:1.15rem;font-style:italic;line-height:1.6;color:var(--naia-ink);margin:0 0 14px;max-width:32em}
+  .cl-insights-link{display:inline-block;margin-top:14px;font-family:var(--ff-ui);font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:var(--naia-ink);text-decoration:underline;text-underline-offset:4px}
+  .cl-insights-link:hover{color:var(--naia-accent)}
   .cl-insights{margin-bottom:28px;border:1px solid var(--fg-10, var(--c-border));padding:20px 24px}
   .cl-insights-header{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted));margin-bottom:14px}
   .cl-insight{padding:10px 0;border-bottom:1px solid var(--fg-06, var(--c-border))}
@@ -942,7 +957,7 @@ const css = `
 //   Logic  → existing staging: Cloudinary, eligibility, journey events, delete, validation
 
 export default function Closet() {
-  const { items, closetInsights, vtoEnabled, naiaModelIsReady, gender } = useLoaderData<typeof loader>();
+  const { items, closetInsights, wardrobeCharacter, vtoEnabled, naiaModelIsReady, gender } = useLoaderData<typeof loader>();
   const isMale = gender?.toLowerCase() === "male" || gender?.toLowerCase() === "man";
   const MALE_HIDDEN = new Set(["DRESSES", "LOUNGEWEAR"]);
   const visibleCategories = isMale ? CATEGORIES.filter(c => !MALE_HIDDEN.has(c)) : CATEGORIES;
@@ -1421,6 +1436,13 @@ export default function Closet() {
           <span aria-hidden="true">←</span> Back to Overview
         </Link>
 
+        {/* Closet / Wardrobe Intelligence switch — My Closet stays where pieces are
+            browsed and managed; Wardrobe Intelligence is where nAia interprets them. */}
+        <nav className="cl-switch" aria-label="Closet views">
+          <span className="cl-switch-item is-on" aria-current="page">My Closet</span>
+          <Link to="/closet/intelligence" className="cl-switch-item">Wardrobe Intelligence</Link>
+        </nav>
+
         {/* Option A page header */}
         <h1 className="cl-headline">DIGITAL <span className="sp-shell-accent">closet.</span></h1>
         <p className="cl-sub">Upload, save, and style your pieces.</p>
@@ -1441,15 +1463,22 @@ export default function Closet() {
           </div>
         </div>
 
-        {/* Closet Insights — deterministic, on-demand, V2-A4 */}
-        {closetInsights.insights.length > 0 && (
-          <section className="cl-insights" aria-label="Closet Insights">
-            <div className="cl-insights-header">Closet Insights</div>
-            {closetInsights.insights.map((insight) => (
+        {/* Wardrobe Intelligence — a doorway, not a second intelligence system.
+            The character line comes from the same engine that powers
+            /closet/intelligence, and at most two claims preview it. Everything
+            is explored properly on the Intelligence page. */}
+        {(wardrobeCharacter || closetInsights.insights.length > 0) && (
+          <section className="cl-insights" aria-label="Wardrobe Intelligence">
+            <div className="cl-insights-header">Wardrobe Intelligence</div>
+            {wardrobeCharacter && <p className="cl-insights-lead">{wardrobeCharacter}</p>}
+            {closetInsights.insights.slice(0, 2).map((insight) => (
               <div key={insight.id} className="cl-insight">
                 <p className="cl-insight-claim">{insight.claim}</p>
               </div>
             ))}
+            <Link to="/closet/intelligence" className="cl-insights-link">
+              View Wardrobe Intelligence <span aria-hidden="true">→</span>
+            </Link>
           </section>
         )}
 

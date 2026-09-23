@@ -640,6 +640,12 @@ export interface CustomerStylingPassportContext {
   dressingPreferences: string[];
   lifestyle: string[];
   finalNotes: string | null;
+  // V7 active fields
+  styleExpression: string[];
+  explorationLevel: string | null;
+  styleDirections: string[];
+  dressingHabits: string[];
+  dressingRequirementsNote: string | null;
   // Legacy fields (hiddenForRev6 / rev6Hidden) — kept for Phase 3C; not shown for V6 customers
   coveragePreferences: string[];
   fitPreferences: string[];
@@ -665,6 +671,11 @@ export async function getCustomerStylingPassport(
       dressingPreferences: true,
       lifestyle: true,
       finalNotes: true,
+      styleExpression: true,
+      explorationLevel: true,
+      styleDirections: true,
+      dressingHabits: true,
+      dressingRequirementsNote: true,
       coveragePreferences: true,
       fitPreferences: true,
       desiredFeelings: true,
@@ -684,6 +695,11 @@ export async function getCustomerStylingPassport(
     profile.dressingPreferences.length > 0 ||
     profile.lifestyle.length > 0 ||
     !!profile.finalNotes ||
+    profile.styleExpression.length > 0 ||
+    !!profile.explorationLevel ||
+    profile.styleDirections.length > 0 ||
+    profile.dressingHabits.length > 0 ||
+    !!profile.dressingRequirementsNote ||
     profile.coveragePreferences.length > 0 ||
     profile.fitPreferences.length > 0 ||
     profile.desiredFeelings.length > 0 ||
@@ -702,6 +718,11 @@ export async function getCustomerStylingPassport(
         dressingPreferences: profile.dressingPreferences,
         lifestyle: profile.lifestyle,
         finalNotes: profile.finalNotes,
+        styleExpression: profile.styleExpression,
+        explorationLevel: profile.explorationLevel,
+        styleDirections: profile.styleDirections,
+        dressingHabits: profile.dressingHabits,
+        dressingRequirementsNote: profile.dressingRequirementsNote,
         coveragePreferences: profile.coveragePreferences,
         fitPreferences: profile.fitPreferences,
         desiredFeelings: profile.desiredFeelings,
@@ -793,6 +814,11 @@ export async function getAdminCustomerDetail(
           dressingPreferences: true,
           lifestyle: true,
           finalNotes: true,
+          styleExpression: true,
+          explorationLevel: true,
+          styleDirections: true,
+          dressingHabits: true,
+          dressingRequirementsNote: true,
           coveragePreferences: true,
           fitPreferences: true,
           desiredFeelings: true,
@@ -822,6 +848,11 @@ export async function getAdminCustomerDetail(
     profile.dressingPreferences.length > 0 ||
     profile.lifestyle.length > 0 ||
     !!profile.finalNotes ||
+    profile.styleExpression.length > 0 ||
+    !!profile.explorationLevel ||
+    profile.styleDirections.length > 0 ||
+    profile.dressingHabits.length > 0 ||
+    !!profile.dressingRequirementsNote ||
     profile.coveragePreferences.length > 0 ||
     profile.fitPreferences.length > 0 ||
     profile.desiredFeelings.length > 0 ||
@@ -856,6 +887,11 @@ export async function getAdminCustomerDetail(
           dressingPreferences: profile.dressingPreferences,
           lifestyle: profile.lifestyle,
           finalNotes: profile.finalNotes,
+          styleExpression: profile.styleExpression,
+          explorationLevel: profile.explorationLevel,
+          styleDirections: profile.styleDirections,
+          dressingHabits: profile.dressingHabits,
+          dressingRequirementsNote: profile.dressingRequirementsNote,
           coveragePreferences: profile.coveragePreferences,
           fitPreferences: profile.fitPreferences,
           desiredFeelings: profile.desiredFeelings,

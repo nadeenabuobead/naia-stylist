@@ -5,18 +5,18 @@
 // Tests verify:
 //   A. Legacy customer detection (completed=true, profileVersion=null)
 //   B. Rev 6 customer passes through without refresh prompt
-//   C. New Rev 6 onboarding completion sets profileVersion=6
-//   D. Arbitrary passport section saves do NOT set profileVersion=6
+//   C. New Rev 6 onboarding completion sets profileVersion=7
+//   D. Arbitrary passport section saves do NOT set profileVersion=7
 //   E. Refresh flow includes all 7 required screens
 //   F. dressingPreferences uses rev6OnlyFill (preserve valid current data; screen shown)
 //   G. favoriteColors/avoidColors are NOT in the refresh flow (colors preserved)
 //   H. Legacy fit sub-fields are not in the customer-facing fit section editor
 //   I. Legacy DB fields are not deleted or mutated by loading the refresh
-//   J. Refresh completion sets profileVersion=6
+//   J. Refresh completion sets profileVersion=7
 //   K. dressingPreferences preservation regression coverage (4 behavioral scenarios)
 //   L. stylePersonalities — valid Rev 6 IDs preserved, old IDs filtered
 //   M. lifestyle — no silent legacy ID mapping
-//   N. Completion marker safety — profileVersion=6 only on final completion
+//   N. Completion marker safety — profileVersion=7 only on final completion
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -54,7 +54,7 @@ describe("A: Legacy customer detection", () => {
 
   it("component destructures isLegacyCustomer from loader data", () => {
     assert.ok(
-      passport.includes("isLegacyCustomer } = useLoaderData"),
+      /isLegacyCustomer[,\s}][^;]*useLoaderData/.test(passport),
       "PassportPage must destructure isLegacyCustomer from useLoaderData",
     );
   });
@@ -83,8 +83,8 @@ describe("B: Rev 6 customer bypasses legacy refresh", () => {
   });
 });
 
-// ── C. Rev 6 onboarding completion sets profileVersion=6 ─────────────────────
-describe("C: Rev 6 onboarding completion marks profileVersion=6", () => {
+// ── C. Rev 6 onboarding completion sets profileVersion=7 ─────────────────────
+describe("C: Rev 6 onboarding completion marks profileVersion=7", () => {
   it("onboarding/complete.tsx sends onboardingComplete: true in patch", () => {
     assert.ok(
       complete.includes("onboardingComplete: true"),
@@ -92,10 +92,10 @@ describe("C: Rev 6 onboarding completion marks profileVersion=6", () => {
     );
   });
 
-  it("api.save-style-profile sets profileVersion=6 when onboardingComplete is true", () => {
+  it("api.save-style-profile sets profileVersion=7 when onboardingComplete is true", () => {
     assert.ok(
-      saveApi.includes("onboardingComplete") && saveApi.includes("profileVersion = 6"),
-      "api.save-style-profile must set profileVersion=6 when onboardingComplete===true",
+      saveApi.includes("onboardingComplete") && saveApi.includes("profileVersion = REV7_PROFILE_VERSION"),
+      "api.save-style-profile must set profileVersion=7 when onboardingComplete===true",
     );
     assert.ok(
       saveApi.includes('body["onboardingComplete"] === true'),
@@ -118,16 +118,16 @@ describe("C: Rev 6 onboarding completion marks profileVersion=6", () => {
   });
 });
 
-// ── D. Arbitrary section saves do NOT set profileVersion=6 ───────────────────
+// ── D. Arbitrary section saves do NOT set profileVersion=7 ───────────────────
 describe("D: Normal passport section saves do not touch profileVersion", () => {
   it("profileVersion is only set inside the onboardingComplete=true guard", () => {
-    const idx = saveApi.indexOf("profileVersion = 6");
-    assert.ok(idx > 0, "profileVersion=6 must exist in api.save-style-profile");
-    // Window enlarged to 1100 to accommodate the Rev 6 completion guard that now precedes the assignment.
-    const block = saveApi.slice(Math.max(0, idx - 1100), idx + 50);
+    const idx = saveApi.indexOf("profileVersion = REV7_PROFILE_VERSION");
+    assert.ok(idx > 0, "profileVersion=7 must exist in api.save-style-profile");
+    // Window sized for the Rev 7 completion guard that precedes the assignment.
+    const block = saveApi.slice(Math.max(0, idx - 2000), idx + 50);
     assert.ok(
       block.includes("onboardingComplete"),
-      "profileVersion=6 must be inside a block guarded by onboardingComplete",
+      "profileVersion=7 must be inside a block guarded by onboardingComplete",
     );
   });
 
@@ -229,8 +229,8 @@ describe("F: dressingPreferences uses rev6OnlyFill (preserve explicit current da
       "saveRefreshStep must assign patch.onboardingComplete = true on the last step",
     );
     assert.ok(
-      block.includes("profileVersion=6") || passport.includes("profileVersion=6"),
-      "saveRefreshStep must document that onboardingComplete triggers profileVersion=6",
+      block.includes("profileVersion=7") || passport.includes("profileVersion=7"),
+      "saveRefreshStep must document that onboardingComplete triggers profileVersion=7",
     );
   });
 });
@@ -319,8 +319,8 @@ describe("I: Legacy DB fields are retained", () => {
   });
 });
 
-// ── J. Refresh completion sets profileVersion=6 ───────────────────────────────
-describe("J: Refresh completion sets profileVersion=6", () => {
+// ── J. Refresh completion sets profileVersion=7 ───────────────────────────────
+describe("J: Refresh completion sets profileVersion=7", () => {
   it("schema declares profileVersion column", () => {
     assert.ok(
       schema.includes("profileVersion") && schema.includes("Int?"),
@@ -364,18 +364,25 @@ describe("J: Refresh completion sets profileVersion=6", () => {
     );
   });
 
-  it("stylePersonalities uses rev6OnlyFill (old IDs filtered; current valid IDs preserved)", () => {
+  // Rev 7 replaces this screen's field: it now collects styleDirections, whose
+  // vocabulary has no overlap with the legacy archetype IDs. Prefilling would put
+  // invalid values in the picker, so the screen is deliberately noAutoFill. The
+  // stored stylePersonalities row is left untouched, not migrated or cleared.
+  it("r-identity collects styleDirections with noAutoFill (different vocabulary)", () => {
     const spIdx = passport.indexOf('"r-identity"');
     assert.ok(spIdx > 0, 'r-identity screen must exist');
-    // 600 chars needed: question/helper text precedes the fields array on this screen
-    const spBlock = passport.slice(spIdx, spIdx + 600);
+    const spBlock = passport.slice(spIdx, spIdx + 800);
     assert.ok(
-      spBlock.includes("rev6OnlyFill: true"),
-      "style-personalities in refresh must have rev6OnlyFill:true (not noAutoFill)",
+      spBlock.includes('apiKey: "styleDirections"'),
+      "r-identity must collect styleDirections at Rev 7",
     );
     assert.ok(
-      !spBlock.includes("noAutoFill: true"),
-      "style-personalities must NOT have noAutoFill (valid current Rev 6 IDs must be preserved)",
+      spBlock.includes("noAutoFill: true"),
+      "legacy archetype IDs must not prefill the Rev 7 direction picker",
+    );
+    assert.ok(
+      !spBlock.includes('apiKey: "stylePersonalities"'),
+      "the refresh flow must not write the retired stylePersonalities field",
     );
   });
 
@@ -496,12 +503,14 @@ describe("L: stylePersonalities Rev 6 ID filtering", () => {
     );
   });
 
-  it("style-personalities uses rev6OnlyFill (not noAutoFill — current valid IDs must survive)", () => {
+  it("r-identity uses noAutoFill at Rev 7 (legacy archetypes are a different vocabulary)", () => {
     const spIdx = passport.indexOf('"r-identity"');
     // 600 chars: helper text on this screen is long; fields array appears ~400 chars in
-    const spBlock = passport.slice(spIdx, spIdx + 600);
-    assert.ok(spBlock.includes("rev6OnlyFill: true"), "style-personalities must use rev6OnlyFill");
-    assert.ok(!spBlock.includes("noAutoFill: true"), "style-personalities must NOT use noAutoFill");
+    const spEnd = passport.indexOf("screenId:", spIdx + 1);
+    const spBlock = passport.slice(spIdx, spEnd > spIdx ? spEnd : spIdx + 800);
+    assert.ok(spBlock.includes("noAutoFill: true"), "r-identity must use noAutoFill at Rev 7");
+    assert.ok(!spBlock.includes("rev6OnlyFill: true"),
+      "prefilling is wrong here — the Rev 7 direction vocabulary does not overlap the legacy archetypes");
   });
 
   it("initRefreshEdits filters saved IDs via REV6_VALID_IDS for rev6OnlyFill fields", () => {
@@ -556,24 +565,24 @@ describe("M: lifestyle — only current Rev 6 IDs prefilled; no legacy mapping",
   });
 });
 
-// ── N. Completion marker safety — profileVersion=6 only on final completion ───
-describe("N: Completion marker safety — profileVersion=6 on final completion only", () => {
-  it("N1: exactly one code assignment of profileData.profileVersion = 6 in api.save-style-profile", () => {
-    // Use a specific pattern that excludes comment lines (profileVersion=6 appears in comments too)
-    const matches = saveApi.match(/profileData\.profileVersion\s*=\s*6/g) ?? [];
-    assert.equal(matches.length, 1, "profileData.profileVersion=6 must appear exactly once (not via comments)");
+// ── N. Completion marker safety — profileVersion=7 only on final completion ───
+describe("N: Completion marker safety — profileVersion=7 on final completion only", () => {
+  it("N1: exactly one code assignment of profileData.profileVersion = REV7_PROFILE_VERSION in api.save-style-profile", () => {
+    // Use a specific pattern that excludes comment lines (profileVersion=7 appears in comments too)
+    const matches = saveApi.match(/profileData\.profileVersion\s*=\s*REV7_PROFILE_VERSION/g) ?? [];
+    assert.equal(matches.length, 1, "profileData.profileVersion=7 must appear exactly once (not via comments)");
   });
 
-  it("N2: profileVersion = 6 is inside the onboardingComplete guard, after Rev 6 completion validation", () => {
+  it("N2: profileVersion = REV7_PROFILE_VERSION is inside the onboardingComplete guard, after Rev 7 completion validation", () => {
     const guardIdx = saveApi.indexOf('body["onboardingComplete"] === true');
     assert.ok(guardIdx > 0, "onboardingComplete guard must exist");
-    const assignIdx = saveApi.indexOf("profileVersion = 6", guardIdx);
-    assert.ok(assignIdx > guardIdx, "profileVersion=6 must appear inside the onboardingComplete=true block");
-    // Rev 6 completion validation (incomplete_rev6_profile guard) must precede the assignment
+    const assignIdx = saveApi.indexOf("profileVersion = REV7_PROFILE_VERSION", guardIdx);
+    assert.ok(assignIdx > guardIdx, "profileVersion=7 must appear inside the onboardingComplete=true block");
+    // Rev 7 completion validation (incomplete_rev7_profile guard) must precede the assignment
     const between = saveApi.slice(guardIdx, assignIdx);
     assert.ok(
-      between.includes("incomplete_rev6_profile"),
-      "Rev 6 completion validation must precede profileVersion=6 inside the onboardingComplete guard",
+      between.includes("incomplete_rev7_profile"),
+      "Rev 7 completion validation must precede profileVersion=7 inside the onboardingComplete guard",
     );
   });
 
@@ -613,8 +622,8 @@ describe("N: Completion marker safety — profileVersion=6 on final completion o
     const loaderIdx = passport.indexOf("export async function loader");
     const loaderBlock = passport.slice(loaderIdx, loaderIdx + 3000);
     assert.ok(
-      !loaderBlock.includes("profileVersion = 6") && !loaderBlock.includes("profileVersion=6"),
-      "loader must not assign profileVersion=6 (loading refresh is not completion)",
+      !loaderBlock.includes("profileVersion = REV7_PROFILE_VERSION") && !loaderBlock.includes("profileVersion=7"),
+      "loader must not assign profileVersion=7 (loading refresh is not completion)",
     );
   });
 
@@ -698,52 +707,58 @@ describe("O: Only dressingPreferences is optional in the refresh flow", () => {
 });
 
 // ── P. Server-side Rev 6 completion guard ─────────────────────────────────────
-describe("P: Server rejects onboardingComplete when required Rev 6 fields are missing", () => {
-  it("P.I: api returns incomplete_rev6_profile when required fields missing", () => {
+describe("P: Server rejects onboardingComplete when required Rev 7 fields are missing", () => {
+  it("P.I: api returns incomplete_rev7_profile when required fields missing", () => {
     assert.ok(
-      saveApi.includes("incomplete_rev6_profile"),
-      "api.save-style-profile must return incomplete_rev6_profile when required Rev 6 fields are empty",
+      saveApi.includes("incomplete_rev7_profile"),
+      "api.save-style-profile must return incomplete_rev7_profile when required Rev 7 fields are empty",
     );
   });
 
-  it("P.I: all 7 required Rev 6 fields are checked before setting profileVersion=6", () => {
+  // stylePersonalities is deliberately NOT required at Rev 7: it is retired, and a
+  // legacy customer's stored archetype must not gate Rev 7 completion.
+  it("P.I: all required Rev 7 fields are checked before setting profileVersion=7", () => {
     const guardIdx = saveApi.indexOf('body["onboardingComplete"] === true');
-    const assignIdx = saveApi.indexOf("profileVersion = 6", guardIdx);
+    const assignIdx = saveApi.indexOf("profileVersion = REV7_PROFILE_VERSION", guardIdx);
     const between = saveApi.slice(guardIdx, assignIdx);
-    for (const field of ["currentGoal", "stylePersonalities", "successfulOutfitGives", "lifestyle", "favoriteColors", "silhouette", "fitConcerns"]) {
+    for (const field of ["currentGoal", "successfulOutfitGives", "styleExpression", "styleDirections",
+                         "lifestyle", "favoriteColors", "silhouette", "fitConcerns", "dressingHabits"]) {
       assert.ok(between.includes(`"${field}"`), `completion guard must check required field "${field}"`);
     }
+    assert.ok(between.includes("explorationLevel"), "explorationLevel must be checked too");
+    assert.ok(!between.includes('"stylePersonalities"'),
+      "the retired stylePersonalities field must not gate Rev 7 completion");
   });
 
-  it("P.I: dressingPreferences is NOT in the required completion check", () => {
+  it("P.I: dressingPreferences is NOT in the required completion check (optional question)", () => {
     const guardIdx = saveApi.indexOf('body["onboardingComplete"] === true');
-    const assignIdx = saveApi.indexOf("profileVersion = 6", guardIdx);
+    const assignIdx = saveApi.indexOf("profileVersion = REV7_PROFILE_VERSION", guardIdx);
     const between = saveApi.slice(guardIdx, assignIdx);
-    assert.ok(!between.includes('"dressingPreferences"'), "dressingPreferences must not be required for Rev 6 completion");
+    assert.ok(!between.includes('"dressingPreferences"'), "dressingPreferences must not be required for Rev 7 completion");
   });
 
-  it("P.J: incomplete_rev6_profile early return precedes profileVersion=6 assignment", () => {
+  it("P.J: incomplete_rev7_profile early return precedes profileVersion=7 assignment", () => {
     const guardIdx = saveApi.indexOf('body["onboardingComplete"] === true');
-    const incompleteIdx = saveApi.indexOf("incomplete_rev6_profile", guardIdx);
-    const assignIdx = saveApi.indexOf("profileVersion = 6", guardIdx);
+    const incompleteIdx = saveApi.indexOf("incomplete_rev7_profile", guardIdx);
+    const assignIdx = saveApi.indexOf("profileVersion = REV7_PROFILE_VERSION", guardIdx);
     assert.ok(incompleteIdx > guardIdx && incompleteIdx < assignIdx,
-      "incomplete_rev6_profile must appear before profileVersion=6 inside the guard",
+      "incomplete_rev7_profile must appear before profileVersion=7 inside the guard",
     );
     // The slice between guard and assignment must contain both the return statement and the error.
-    // (returnIdx via forward search would skip past the line since "return" precedes "incomplete_rev6_profile"
+    // (returnIdx via forward search would skip past the line since "return" precedes "incomplete_rev7_profile"
     //  on the same line; check the slice instead.)
     const guardToAssign = saveApi.slice(guardIdx, assignIdx);
     assert.ok(
-      guardToAssign.includes("return Response.json") && guardToAssign.includes("incomplete_rev6_profile"),
-      "a return Response.json containing incomplete_rev6_profile must appear before profileVersion=6",
+      guardToAssign.includes("return Response.json") && guardToAssign.includes("incomplete_rev7_profile"),
+      "a return Response.json containing incomplete_rev7_profile must appear before profileVersion=7",
     );
   });
 
-  it("P.K: missingRev6.length > 0 guard precedes profileVersion=6 assignment", () => {
+  it("P.K: missingRev7.length > 0 guard precedes profileVersion=7 assignment", () => {
     const guardIdx = saveApi.indexOf('body["onboardingComplete"] === true');
-    const assignIdx = saveApi.indexOf("profileVersion = 6", guardIdx);
+    const assignIdx = saveApi.indexOf("profileVersion = REV7_PROFILE_VERSION", guardIdx);
     const between = saveApi.slice(guardIdx, assignIdx);
-    assert.ok(between.includes("missingRev6.length > 0"), "guard must check missingRev6.length > 0 before early return");
+    assert.ok(between.includes("missingRev7.length > 0"), "guard must check missingRev7.length > 0 before early return");
   });
 });
 
@@ -837,7 +852,7 @@ describe("R: Refresh exclusivity — handleToggle and quiz-data contracts", () =
   it("R.D: renderSubField array branch passes q?.exclusiveIds into handleToggle", () => {
     const rsIdx = passport.indexOf("function renderSubField");
     assert.ok(rsIdx !== -1, "renderSubField must exist");
-    const rsBlock = passport.slice(rsIdx, rsIdx + 3000);
+    const rsBlock = passport.slice(rsIdx, rsIdx + 4000);
     assert.ok(
       rsBlock.includes("q?.exclusiveIds"),
       "renderSubField must pass q?.exclusiveIds to handleToggle in the array-kind branch",
@@ -892,15 +907,18 @@ describe("R: Refresh exclusivity — handleToggle and quiz-data contracts", () =
   });
 
   // ── R.I: dressing-preferences has no exclusiveIds (unaffected) ───────────
-  it("R.I: quiz-data dressing-preferences does NOT declare exclusiveIds (refresh r-dressing unaffected)", () => {
-    const dpIdx = quizData.indexOf('"dressing-preferences"');
+  // The original assertion ("dressing-preferences must NOT declare exclusiveIds")
+  // went stale when Rev 6 introduced the no-dressing-requirements opt-out. Rev 7
+  // requires that exclusivity: selecting "I have no specific dressing requirements"
+  // must clear every other requirement, in the UI and server-side.
+  it("R.I: quiz-data dressing-preferences declares no-dressing-requirements as its only exclusive ID", () => {
+    const dpIdx = quizData.indexOf('id: "dressing-preferences"');
     assert.ok(dpIdx !== -1, "dressing-preferences question must exist in quiz-data");
-    // Find the next question boundary after dressing-preferences
-    const nextQ = quizData.indexOf('\n  {', dpIdx + 1);
-    const dpBlock = quizData.slice(dpIdx, nextQ !== -1 ? nextQ : dpIdx + 1000);
+    const nextQ = quizData.indexOf("\n  {", dpIdx + 1);
+    const dpBlock = quizData.slice(dpIdx, nextQ !== -1 ? nextQ : dpIdx + 4000);
     assert.ok(
-      !dpBlock.includes("exclusiveIds"),
-      "dressing-preferences must NOT have exclusiveIds — r-dressing is unaffected by the exclusivity fix",
+      dpBlock.includes('exclusiveIds: ["no-dressing-requirements"]'),
+      "dressing-preferences must declare no-dressing-requirements as its exclusive ID",
     );
   });
 
@@ -1031,8 +1049,8 @@ describe("T: QA cleanup — simplified copy and Back button", () => {
     assert.ok(rIdx !== -1, "r-lifestyle screen must exist");
     const rBlock = passport.slice(rIdx, rIdx + 300);
     assert.ok(
-      rBlock.includes("What do you dress for most often?"),
-      "r-lifestyle must use simplified question: 'What do you dress for most often?'",
+      rBlock.includes("Which of these are part of your lifestyle?"),
+      "r-lifestyle must use the Rev 7 question: 'Which of these are part of your lifestyle?'",
     );
     assert.ok(
       !rBlock.includes("Where does your wardrobe need to show up most often?"),
@@ -1046,8 +1064,8 @@ describe("T: QA cleanup — simplified copy and Back button", () => {
     assert.ok(rIdx !== -1, "r-fit-concerns screen must exist");
     const rBlock = passport.slice(rIdx, rIdx + 400);
     assert.ok(
-      rBlock.includes("Are there any fit issues nAia should keep in mind?"),
-      "r-fit-concerns must use simplified question copy",
+      rBlock.includes("Are there any fit or comfort issues nAia should keep in mind?"),
+      "r-fit-concerns must use the Rev 7 question copy",
     );
     assert.ok(
       rBlock.includes("Select any that apply."),
@@ -1065,8 +1083,8 @@ describe("T: QA cleanup — simplified copy and Back button", () => {
     assert.ok(rIdx !== -1, "r-dressing screen must exist");
     const rBlock = passport.slice(rIdx, rIdx + 400);
     assert.ok(
-      rBlock.includes("Optional. Select anything nAia should always keep in mind when styling you."),
-      "r-dressing must use simplified helper copy",
+      rBlock.includes("Optional. Select any that apply."),
+      "r-dressing must use the Rev 7 helper copy",
     );
     assert.ok(
       !rBlock.includes("hard requirements"),
@@ -1147,7 +1165,7 @@ describe("T: QA cleanup — simplified copy and Back button", () => {
     );
   });
 
-  // ── T.O: Back cannot set profileVersion=6 ────────────────────────────────
+  // ── T.O: Back cannot set profileVersion=7 ────────────────────────────────
   it("T.O: Back onClick does not send onboardingComplete or call saveRefreshStep", () => {
     const refreshStepIdx = passport.indexOf("// ── REFRESH STEP");
     assert.ok(refreshStepIdx > 0, "REFRESH STEP section comment must exist");
@@ -1409,7 +1427,7 @@ describe("V: Notes to nAia — overview editability", () => {
 
 describe("W: Rev 6 Update Answers cleanup", () => {
   // W.A: Legacy Sizes & Measurements does NOT render old FIT_CONCERN_OPTIONS for Rev 6
-  it("W.A: profileVersion=6 Sizes editor does NOT render FIT_CONCERN_OPTIONS", () => {
+  it("W.A: profileVersion=7 Sizes editor does NOT render FIT_CONCERN_OPTIONS", () => {
     // For Rev 6 customers (isLegacyCustomer === false), the Group 3 proportions block
     // is gated behind {isLegacyCustomer && ...}. This means FIT_CONCERN_OPTIONS
     // is only iterated inside that legacy-gated block.
@@ -1436,7 +1454,7 @@ describe("W: Rev 6 Update Answers cleanup", () => {
     // with canonical Rev 6 IDs (tops-pull-bust, waistbands-gape, etc.)
     const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
     assert.ok(sectionsIdx !== -1, "SECTIONS array must exist");
-    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 20000);
     // A "fit-concerns" section definition with rev6Only: true must exist
     const fitConcernsSectionIdx = sectionsBlock.indexOf('id: "fit-concerns"');
     assert.ok(fitConcernsSectionIdx !== -1, 'A section with id "fit-concerns" must exist in SECTIONS');
@@ -1464,7 +1482,7 @@ describe("W: Rev 6 Update Answers cleanup", () => {
     // which reads options from QUESTION_BY_ID["fit-concerns"] (Rev 6 quiz-data).
     // FIT_CONCERN_OPTIONS (old IDs) are only rendered inside the isLegacyCustomer guard in sizes.
     const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
-    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 20000);
     const fcSectionIdx = sectionsBlock.indexOf('id: "fit-concerns"');
     const fcBlock = sectionsBlock.slice(fcSectionIdx, fcSectionIdx + 500);
     // Must NOT reference FIT_CONCERN_OPTIONS directly in the section def
@@ -1490,7 +1508,7 @@ describe("W: Rev 6 Update Answers cleanup", () => {
   // W.F: fitConcernsNote remains associated with Rev 6 fit-concerns section
   it("W.F: fitConcernsNote sub-field is in the fit-concerns section", () => {
     const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
-    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 20000);
     const fcSectionIdx = sectionsBlock.indexOf('id: "fit-concerns"');
     const fcBlock = sectionsBlock.slice(fcSectionIdx, fcSectionIdx + 500);
     assert.ok(fcBlock.includes('"fit-concerns-note"'), "fit-concerns-note sub-field must be in fit-concerns section");
@@ -1499,7 +1517,7 @@ describe("W: Rev 6 Update Answers cleanup", () => {
   // W.G: Current Focus section contains currentGoal only (successfulOutfitGives is hiddenForRev6)
   it("W.G: goals section has successfulOutfitGives with hiddenForRev6: true", () => {
     const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
-    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 20000);
     const goalsIdx = sectionsBlock.indexOf('id: "goals"');
     assert.ok(goalsIdx !== -1, 'goals section must exist');
     const goalsBlock = sectionsBlock.slice(goalsIdx, goalsIdx + 700);
@@ -1510,7 +1528,7 @@ describe("W: Rev 6 Update Answers cleanup", () => {
   // W.H: successfulOutfitGives has its own dedicated section for Rev 6
   it("W.H: outfit-gives section exists and is rev6Only", () => {
     const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
-    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 20000);
     const ogIdx = sectionsBlock.indexOf('id: "outfit-gives"');
     assert.ok(ogIdx !== -1, 'outfit-gives section must exist in SECTIONS');
     const ogBlock = sectionsBlock.slice(ogIdx, ogIdx + 400);
@@ -1522,7 +1540,7 @@ describe("W: Rev 6 Update Answers cleanup", () => {
   it("W.I: identity section has desired-impression with hiddenForRev6: true", () => {
     // SECTIONS array is ~9700 chars; direction at 8021, wardrobe at 8663 — use 10500
     const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
-    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 20000);
     const identityIdx = sectionsBlock.indexOf('id: "identity"');
     assert.ok(identityIdx !== -1, "identity section must exist");
     const identityBlock = sectionsBlock.slice(identityIdx, identityIdx + 600);
@@ -1536,7 +1554,7 @@ describe("W: Rev 6 Update Answers cleanup", () => {
   // W.J: direction section is hidden for Rev 6 (rev6Hidden)
   it("W.J: direction section has rev6Hidden: true", () => {
     const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
-    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 20000);
     const dirIdx = sectionsBlock.indexOf('id: "direction"');
     assert.ok(dirIdx !== -1, "direction section must still exist in SECTIONS (for legacy customers)");
     const dirBlock = sectionsBlock.slice(dirIdx, dirIdx + 300);
@@ -1546,7 +1564,7 @@ describe("W: Rev 6 Update Answers cleanup", () => {
   // W.K: Lifestyle section does not render typicalDay for Rev 6 (hiddenForRev6)
   it("W.K: life section has typical-day with hiddenForRev6: true", () => {
     const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
-    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 20000);
     const lifeIdx = sectionsBlock.indexOf('id: "life"');
     assert.ok(lifeIdx !== -1, "life section must exist");
     const lifeBlock = sectionsBlock.slice(lifeIdx, lifeIdx + 600);
@@ -1560,7 +1578,7 @@ describe("W: Rev 6 Update Answers cleanup", () => {
   // W.L: Sizes does not render bodyShape for Rev 6 (hiddenForRev6 + bespoke UI guard)
   it("W.L: body-shape sub-field has hiddenForRev6: true in sizes section", () => {
     const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
-    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 20000);
     const sizesIdx = sectionsBlock.indexOf('id: "sizes"');
     assert.ok(sizesIdx !== -1, "sizes section must exist");
     // body-shape is ~2057 chars into the sizes entry — use 3000-char window
@@ -1575,7 +1593,7 @@ describe("W: Rev 6 Update Answers cleanup", () => {
   // W.M: Colour Palette does not render the 3 advanced fields for Rev 6
   it("W.M: colours section has neutral-vs-colour, colour-intensity, print-appetite with hiddenForRev6: true", () => {
     const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
-    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 20000);
     const coloursIdx = sectionsBlock.indexOf('id: "colours"');
     assert.ok(coloursIdx !== -1, "colours section must exist");
     // print-appetite is ~967 chars in; hiddenForRev6 for each is ~154 chars after the key
@@ -1591,7 +1609,7 @@ describe("W: Rev 6 Update Answers cleanup", () => {
   // W.N: Wardrobe / Shopping / Trend section is hidden for Rev 6
   it("W.N: wardrobe section has rev6Hidden: true", () => {
     const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
-    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 20000);
     const wIdx = sectionsBlock.indexOf('id: "wardrobe"');
     assert.ok(wIdx !== -1, "wardrobe section must still exist in SECTIONS (for legacy customers)");
     const wBlock = sectionsBlock.slice(wIdx, wIdx + 300);
@@ -1614,17 +1632,17 @@ describe("W: Rev 6 Update Answers cleanup", () => {
   // W.P: canonical question/helper copy matches approved Rev 6 wording
   it("W.P: key section question/helper copy matches approved canonical wording", () => {
     const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
-    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 20000);
     // Current Focus helper
     assert.ok(sectionsBlock.includes("Choose up to 2. You can change this anytime."), "goals helper must match canonical wording");
     // Style helper
     assert.ok(sectionsBlock.includes("Choose up to 2."), "identity helper must use canonical choose-up-to-2 wording");
     // Lifestyle question
-    assert.ok(sectionsBlock.includes("What do you dress for most often?"), "life question must match canonical wording");
+    assert.ok(sectionsBlock.includes("Which of these are part of your lifestyle?"), "life question must match canonical Rev 7 wording");
     // Silhouette question (canonical Rev 6 from quiz-data)
-    assert.ok(sectionsBlock.includes("Which silhouettes do you usually feel best in?"), "fit question must match quiz-data canonical wording");
+    assert.ok(sectionsBlock.includes("Which shapes or fits do you usually feel best in?"), "fit question must match quiz-data canonical Rev 7 wording");
     // Dressing Requirements helper
-    assert.ok(sectionsBlock.includes("Optional. Select anything nAia should always keep in mind when styling you."), "dressing helper must match canonical wording");
+    assert.ok(sectionsBlock.includes("Optional. Select any that apply."), "dressing helper must match canonical Rev 7 wording");
     // No internal language
     assert.ok(!sectionsBlock.includes("mutable context"), 'SECTIONS must not contain internal language "mutable context"');
     assert.ok(!sectionsBlock.includes("emotional register"), 'SECTIONS must not contain internal language "emotional register"');
@@ -1777,7 +1795,7 @@ describe("X: Fit Concerns behavioral verification", () => {
   it("X.E: fit-concerns-note sub-field is in fit-concerns section (persists on save, reloads from savedAnswers)", () => {
     // fit-concerns-note sub-field is in the fit-concerns section (NOT hiddenForRev6 there)
     const sectionsIdx = passport.indexOf("const SECTIONS: SectionDef[]");
-    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 10500);
+    const sectionsBlock = passport.slice(sectionsIdx, sectionsIdx + 20000);
     const fcSectIdx = sectionsBlock.indexOf('id: "fit-concerns"');
     const fcSectBlock = sectionsBlock.slice(fcSectIdx, fcSectIdx + 500);
     assert.ok(fcSectBlock.includes('"fit-concerns-note"'), "fit-concerns-note sub-field must be in fit-concerns section");

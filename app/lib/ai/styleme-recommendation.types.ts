@@ -100,6 +100,35 @@ export interface StyleMeProfileSignals {
   // Rev 6 — Persistent fit concerns (survive today's "Nothing specific")
   fitConcerns?: string[];
   fitConcernsNote?: string;
+
+  // ── Rev 7 ───────────────────────────────────────────────────────────────────
+  // Carried for prompt/context use. None of these carry a numeric scoring weight
+  // in this revision — see app/lib/passport/rev7-vocabulary.ts.
+
+  /** What the customer wants their clothes to communicate about them. */
+  styleExpression?: string[];
+  /** How far nAia should move beyond the customer's familiar choices. */
+  explorationLevel?: string;
+  /**
+   * Visual aesthetics the customer is drawn to. Canonical Rev 7 style field.
+   * Legacy `stylePersonalities` is preserved separately and never overwritten.
+   */
+  styleDirections?: string[];
+  /**
+   * V3 archetype tokens projected from styleDirections, for the legacy numeric
+   * archetype scorer. Empty when every selected direction is unmapped.
+   */
+  styleDirectionArchetypes?: string[];
+  /**
+   * Rev 7 directions with no legacy archetype analogue (relaxed-easy,
+   * street-contemporary, sporty-functional). Valid signals the numeric scorer
+   * cannot consume yet — surfaced to the prompt layer instead.
+   */
+  unmappedStyleDirections?: string[];
+  /** Behavioural context: how the customer approaches getting dressed. */
+  dressingHabits?: string[];
+  /** Free-text cultural or religious dressing requirement. High priority, not a preference. */
+  dressingRequirementsNote?: string;
 }
 
 // ─── Anchor inputs ────────────────────────────────────────────────────────────

@@ -55,6 +55,7 @@ export async function action({ request }: ActionFunctionArgs) {
     where: { customerId: customer.id },
     select: {
       stylePersonalities:    true,
+      styleDirections:       true,
       silhouette:            true,
       successfulOutfitGives: true,
       lifestyle:             true,

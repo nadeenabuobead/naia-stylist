@@ -61,6 +61,27 @@ describe("loader auth gate — contract assertions", () => {
     }
   });
 
+  it("closet.intelligence.tsx loader: requireCurrentNaiaCustomer called before any DB operation", () => {
+    const code = src("closet.intelligence.tsx");
+    const authIdx = code.indexOf("await requireCurrentNaiaCustomer(request)");
+    const prismaIdx = code.indexOf("prisma.");
+    assert.ok(authIdx !== -1, "requireCurrentNaiaCustomer call must exist");
+    assert.ok(prismaIdx !== -1, "the loader reads the Closet, so prisma must be used");
+    assert.ok(authIdx < prismaIdx, "auth must precede any prisma call");
+  });
+
+  it("closet.intelligence.tsx keeps the shadow V2 intention layer behind a flag", () => {
+    const code = src("closet.intelligence.tsx");
+    assert.ok(
+      code.includes("derivedIntentionIntelligence"),
+      "the route must pass the gate flag explicitly",
+    );
+    assert.ok(
+      code.includes('process.env.WARDROBE_V2_INTENTIONS === "true"'),
+      "the gate must default to OFF unless the env flag is set",
+    );
+  });
+
   it("passport.tsx loader: requireCurrentNaiaCustomer called before any DB operation", () => {
     const code = src("passport.tsx");
     const authIdx = code.indexOf("await requireCurrentNaiaCustomer(request)");

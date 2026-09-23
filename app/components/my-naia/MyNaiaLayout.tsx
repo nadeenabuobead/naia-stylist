@@ -11,7 +11,8 @@ const MY_NAIA_NAV: NavGroup[] = [
     items: [
       { to: "/my-naia", label: "Overview", exact: true },
       { to: "/passport", label: "Style Passport" },
-      { to: "/closet", label: "My Closet" },
+      { to: "/closet", label: "My Closet", exact: true },
+      { to: "/closet/intelligence", label: "Wardrobe Intelligence" },
       { to: "/style-me", label: "StyleMe" },
       { to: "/buyskip", label: "Buy or Skip" },
       { to: "/trends/my-edits", label: "My Trend Edits" },

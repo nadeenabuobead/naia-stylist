@@ -141,9 +141,54 @@ export const ANCHOR_CAPABLE_CATEGORIES = new Set(["TOPS", "BOTTOMS", "DRESSES", 
 export type ClosetScoringProfile = {
   favoriteColors?: string[] | null;
   avoidColors?: string[] | null;
+  /** Legacy style field. Still the source of truth for pre-Rev 7 customers. */
   stylePersonalities?: string[] | null;
+  /**
+   * Rev 7 styleDirections projected onto V3 archetype tokens. When present it
+   * supersedes stylePersonalities — a Rev 7 customer's stored stylePersonalities
+   * is stale legacy data that the Rev 7 flow never rewrites.
+   */
+  styleDirectionArchetypes?: string[] | null;
   dressingPreferences?: readonly string[] | null;
 };
+
+/**
+ * Does a closet item's styleTag correspond to a style archetype?
+ *
+ * The previous check was `tag.includes(archetypeId)` — a raw substring test. It
+ * happened to work for single-word V2 IDs ("minimal" matches the tag "minimalist")
+ * but could never match a hyphenated V3/Rev 7 ID: no closet styleTag is literally
+ * spelled "classic-polished". Every modern customer therefore lost this signal.
+ *
+ * Archetype IDs are compound ("classic-polished", "bold-edgy"), so each component
+ * word is matched against the tag's own words. Word-level matching, not substring:
+ * the tag "boldly" must not match "bold".
+ */
+export function styleTagMatchesArchetype(tag: string, archetypeId: string): boolean {
+  const normalisedTag = tag.toLowerCase().trim();
+  const archetype = archetypeId.toLowerCase().trim();
+  if (!normalisedTag || !archetype) return false;
+  if (normalisedTag === archetype) return true;
+
+  const tagWords = new Set(normalisedTag.split(/[^a-z0-9]+/).filter(Boolean));
+  // Legacy behaviour retained: a single-word archetype still matches a tag that
+  // extends it ("minimal" → "minimalist"), which existing customers rely on.
+  return archetype.split("-").filter(Boolean).some(
+    (word) => tagWords.has(word) || [...tagWords].some((t) => t.startsWith(word)),
+  );
+}
+
+/**
+ * Archetype tokens the legacy numeric style scorer should use for a profile.
+ * Carries no weight of its own — it only decides which stored array is read.
+ */
+export function scoringArchetypesFor(
+  profile: ClosetScoringProfile | null | undefined,
+): string[] {
+  const projected = profile?.styleDirectionArchetypes ?? [];
+  if (projected.length > 0) return [...projected];
+  return [...(profile?.stylePersonalities ?? [])];
+}
 
 /**
  * Scores a single Closet item against the current StyleMe session signals,
@@ -193,10 +238,10 @@ export function scoreClosetItemForSession(
       if (itemColors.some((c) => avoidLower.includes(c))) score -= 4;
     }
 
-    if (profile.stylePersonalities?.length) {
-      const personalityLower = profile.stylePersonalities.map((p) => p.toLowerCase());
+    const scoringArchetypes = scoringArchetypesFor(profile);
+    if (scoringArchetypes.length) {
       for (const tag of item.styleTags) {
-        if (personalityLower.some((p) => tag.toLowerCase().includes(p))) {
+        if (scoringArchetypes.some((p) => styleTagMatchesArchetype(tag, p))) {
           score += 1;
           break;
         }

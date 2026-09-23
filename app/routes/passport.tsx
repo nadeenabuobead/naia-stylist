@@ -10,7 +10,8 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
 ];
 import type { OnboardingAnswers, QuizQuestion } from "~/lib/onboarding/quiz-data";
-import { quizQuestions, COLOUR_FAMILIES, NOTES_HELPER_TEXT } from "~/lib/onboarding/quiz-data";
+import { quizQuestions, LEGACY_QUESTIONS, COLOUR_FAMILIES, NOTES_HELPER_TEXT } from "~/lib/onboarding/quiz-data";
+import { REV7_PROFILE_VERSION } from "~/lib/passport/rev7-vocabulary";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 
@@ -22,6 +23,14 @@ const OPTION_LABELS: Record<string, Record<string, string>> = {};
 const COLOR_HEX: Record<string, string> = {};
 const MAX_SELECTIONS: Record<string, number> = {};
 const QUESTION_BY_ID: Record<string, QuizQuestion> = {};
+
+// Retired questions first, so a live Rev 7 question always wins on ID collision.
+// Without this a legacy stored answer degrades to a title-cased slug in the UI.
+for (const q of LEGACY_QUESTIONS) {
+  QUESTION_BY_ID[q.id] = q;
+  if (q.options) OPTION_LABELS[q.id] = Object.fromEntries(q.options.map(o => [o.id, o.label]));
+  if (q.maxSelections !== undefined) MAX_SELECTIONS[q.id] = q.maxSelections;
+}
 
 for (const q of quizQuestions) {
   QUESTION_BY_ID[q.id] = q;
@@ -110,6 +119,13 @@ const PASSPORT_ONLY_QUESTIONS: Record<string, QuizQuestion> = {
       { id: "pattern-mixing",  label: "Pattern mixing is my thing"           },
     ],
   },
+  "dressing-requirements-note": {
+    id: "dressing-requirements-note",
+    type: "text",
+    title: "Tell nAia about your cultural or religious dressing requirement.",
+    placeholder: "Describe what nAia should always respect when styling you.",
+    maxLength: 500,
+  },
   "fit-concerns-note": {
     id: "fit-concerns-note",
     type: "text",
@@ -172,7 +188,9 @@ function lbl(qId: string, oId: string): string {
 type SectionId =
   | "goals" | "outfit-gives" | "identity" | "direction" | "life" | "fit"
   | "fit-concerns" | "sizes" | "colours" | "wardrobe"
-  | "dressing" | "notes" | "about-you";
+  | "dressing" | "notes" | "about-you"
+  // Rev 7
+  | "style-expression" | "exploration" | "style-directions" | "dressing-habits";
 
 type FieldKind = "array" | "color" | "single" | "text";
 type DraftKey = keyof OnboardingAnswers;
@@ -184,7 +202,8 @@ interface SubField {
   kind:           FieldKind;
   questionId:     string;
   pairKey?:       DraftKey; // for mutual-exclusion between colour pickers
-  hiddenForRev6?: boolean;  // hidden from editor + detail for profileVersion=6 customers
+  hiddenForRev6?: boolean;  // hidden from editor + detail for modern (non-legacy) customers
+  hiddenForRev7?: boolean;  // hidden from editor + detail for profileVersion=7 customers
 }
 
 interface SectionDef {
@@ -195,8 +214,9 @@ interface SectionDef {
   subFields:   SubField[];
   placeholder?: boolean;
   optional?:   boolean;    // never "missing"; excluded from Continue Passport queue
-  rev6Hidden?:  boolean;   // hidden from picker + editor for profileVersion=6 customers
-  rev6Only?:    boolean;   // only shown to profileVersion=6 customers
+  rev6Hidden?:  boolean;   // hidden from picker + editor for modern (non-legacy) customers
+  rev6Only?:    boolean;   // only shown to modern (non-legacy) customers
+  rev7Hidden?:  boolean;   // hidden from picker + editor for profileVersion=7 customers
 }
 
 const SECTIONS: SectionDef[] = [
@@ -225,12 +245,49 @@ const SECTIONS: SectionDef[] = [
       { draftKey: "successful-outfit-gives" as DraftKey, apiKey: "successfulOutfitGives", subLabel: "What great outfits give me", kind: "array" as FieldKind, questionId: "successful-outfit-gives" },
     ],
   },
-  // 3. STYLE — desiredImpression hidden for Rev 6 (blank editor, superseded)
+  // 2b. STYLE EXPRESSION — what the customer wants their clothes to communicate.
+  {
+    id: "style-expression",
+    label: "Style Expression",
+    question: "What would you like your style to communicate about you?",
+    helper: "Choose up to 3.",
+    optional: true,
+    subFields: [
+      { draftKey: "style-expression" as DraftKey, apiKey: "styleExpression", subLabel: "What I want my style to say", kind: "array" as FieldKind, questionId: "style-expression" },
+    ],
+  },
+  // 2c. STYLE EXPLORATION — how far nAia should move beyond familiar choices.
+  {
+    id: "exploration",
+    label: "Style Exploration",
+    question: "How much would you like nAia to push your style?",
+    helper: "Choose 1.",
+    optional: true,
+    subFields: [
+      { draftKey: "exploration-level" as DraftKey, apiKey: "explorationLevel", subLabel: "How far nAia should push me", kind: "single" as FieldKind, questionId: "exploration-level" },
+    ],
+  },
+  // 3. STYLE DIRECTION — canonical Rev 7 style field.
+  // styleDirections replaces stylePersonalities. The legacy value is preserved in
+  // the database and stays editable below for customers who answered it.
+  {
+    id: "style-directions",
+    label: "Style Direction",
+    question: "Which looks are you naturally drawn to?",
+    helper: "Choose up to 3.",
+    optional: true,
+    subFields: [
+      { draftKey: "style-directions" as DraftKey, apiKey: "styleDirections", subLabel: "The looks I'm drawn to", kind: "array" as FieldKind, questionId: "style-directions" },
+    ],
+  },
+  // 3b. STYLE — retired at Rev 7. Still shown to legacy and Rev 6 customers so their
+  // stored answer remains visible and editable; hidden once styleDirections is confirmed.
   {
     id: "identity",
     label: "Style",
     question: "Which styles currently feel most like you?",
     helper: "Choose up to 2.",
+    rev7Hidden: true,
     subFields: [
       { draftKey: "style-personalities" as DraftKey, apiKey: "stylePersonalities", subLabel: "My style", kind: "array" as FieldKind, questionId: "style-personalities" },
       { draftKey: "desired-impression" as DraftKey, apiKey: "desiredImpression", subLabel: "The impression I make", kind: "array" as FieldKind, questionId: "desired-impression", hiddenForRev6: true },
@@ -240,8 +297,8 @@ const SECTIONS: SectionDef[] = [
   {
     id: "life",
     label: "Lifestyle",
-    question: "What do you dress for most often?",
-    helper: "Choose up to 3.",
+    question: "Which of these are part of your lifestyle?",
+    helper: "Choose all that are relevant to your life.",
     subFields: [
       { draftKey: "lifestyle" as DraftKey, apiKey: "lifestyle", subLabel: "My lifestyle", kind: "array" as FieldKind, questionId: "lifestyle" },
       { draftKey: "typical-day" as DraftKey, apiKey: "typicalDay", subLabel: "A typical week", kind: "text" as FieldKind, questionId: "typical-day", hiddenForRev6: true },
@@ -264,9 +321,9 @@ const SECTIONS: SectionDef[] = [
   // 6. SILHOUETTE — canonical Rev 6 copy
   {
     id: "fit",
-    label: "Silhouette",
-    question: "Which silhouettes do you usually feel best in?",
-    helper: "Choose up to 3.",
+    label: "Shape & Fit",
+    question: "Which shapes or fits do you usually feel best in?",
+    helper: "Choose up to 4.",
     subFields: [
       { draftKey: "silhouette" as DraftKey, apiKey: "silhouette", subLabel: "My silhouettes", kind: "array" as FieldKind, questionId: "silhouette" },
     ],
@@ -274,8 +331,8 @@ const SECTIONS: SectionDef[] = [
   // 7. FIT CONCERNS — Rev 6 only; dedicated section with canonical Rev 6 IDs
   {
     id: "fit-concerns",
-    label: "Fit Concerns",
-    question: "Are there any fit issues nAia should keep in mind?",
+    label: "Fit & Comfort",
+    question: "Are there any fit or comfort issues nAia should keep in mind?",
     helper: "Select any that apply.",
     optional: true,
     rev6Only: true,
@@ -288,11 +345,23 @@ const SECTIONS: SectionDef[] = [
   {
     id: "dressing",
     label: "Dressing Requirements",
-    question: "Are there any dressing requirements nAia should always respect?",
-    helper: "Optional. Select anything nAia should always keep in mind when styling you.",
+    question: "Are there any dressing preferences or requirements nAia should always respect?",
+    helper: "Optional. Select any that apply.",
     optional: true,
     subFields: [
       { draftKey: "dressing-preferences" as DraftKey, apiKey: "dressingPreferences", subLabel: "My dressing requirements", kind: "array" as FieldKind, questionId: "dressing-preferences" },
+      { draftKey: "dressing-requirements-note" as DraftKey, apiKey: "dressingRequirementsNote", subLabel: "My cultural or religious requirement", kind: "text" as FieldKind, questionId: "dressing-requirements-note" },
+    ],
+  },
+  // 8b. DRESSING HABITS — behavioural context; never scored.
+  {
+    id: "dressing-habits",
+    label: "Dressing Habits",
+    question: "Which sounds most like you when you're getting dressed?",
+    helper: "Choose up to 2.",
+    optional: true,
+    subFields: [
+      { draftKey: "dressing-habits" as DraftKey, apiKey: "dressingHabits", subLabel: "How I approach getting dressed", kind: "array" as FieldKind, questionId: "dressing-habits" },
     ],
   },
   // 9. SIZES & MEASUREMENTS — renamed; bodyShape + old fitConcerns hidden for Rev 6
@@ -381,18 +450,25 @@ function getSectionDef(id: SectionId): SectionDef {
 }
 
 // Returns sections visible in the picker/overview for this customer type.
-function getVisibleSections(isRev6: boolean): SectionDef[] {
+function getVisibleSections(isRev6: boolean, isRev7 = false): SectionDef[] {
   return SECTIONS.filter(s => {
     if (isRev6 && s.rev6Hidden) return false;
     if (!isRev6 && s.rev6Only)  return false;
+    if (isRev7 && s.rev7Hidden) return false;
     return true;
   });
 }
 
-// Returns a def with hiddenForRev6 sub-fields filtered out for Rev 6 customers.
-function getEffectiveDef(def: SectionDef, isRev6: boolean): SectionDef {
-  if (!isRev6) return def;
-  return { ...def, subFields: def.subFields.filter(sf => !sf.hiddenForRev6) };
+// Returns a def with retired sub-fields filtered out for the customer's Passport
+// generation. A field is only ever hidden — stored values are never deleted.
+function getEffectiveDef(def: SectionDef, isRev6: boolean, isRev7 = false): SectionDef {
+  if (!isRev6 && !isRev7) return def;
+  return {
+    ...def,
+    subFields: def.subFields.filter(sf =>
+      !(isRev6 && sf.hiddenForRev6) && !(isRev7 && sf.hiddenForRev7)
+    ),
+  };
 }
 
 // Legacy colour IDs that are stripped from favoriteColors on explicit Passport save
@@ -504,8 +580,8 @@ OPTION_LABELS["preferred-coverage"]  = Object.fromEntries(PREFERRED_COVERAGE_OPT
 const BODY_SHAPE_LABELS: Record<string, string> = Object.fromEntries(BODY_SHAPE_OPTIONS.map(o => [o.id, o.label]));
 const FIT_CONCERN_LABELS: Record<string, string> = Object.fromEntries(FIT_CONCERN_OPTIONS.map(o => [o.id, o.label]));
 
-// Rev 6 canonical option IDs for fields whose IDs changed between legacy and Rev 6.
-// Used during legacy refresh prefill to preserve only currently-valid IDs.
+// Currently-canonical option IDs (Rev 7) for fields whose IDs changed across
+// revisions. Used during legacy refresh prefill to preserve only valid IDs.
 const REV6_VALID_IDS: Partial<Record<string, Set<string>>> = (() => {
   const m: Partial<Record<string, Set<string>>> = {};
   for (const q of quizQuestions) {
@@ -517,7 +593,8 @@ const REV6_VALID_IDS: Partial<Record<string, Set<string>>> = (() => {
 })();
 
 // ── Legacy refresh flow ───────────────────────────────────────────────────────
-// 7 screens shown to customers with profileVersion=null (completed before Rev 6).
+// Shown to customers with profileVersion=null (completed before versions were tracked).
+// Collects the current canonical (Rev 7) answer set.
 // Each entry is a subset of the full SECTIONS sub-field list.
 // "noAutoFill" fields are never prefilled; "rev6OnlyFill" fields keep only valid Rev 6 IDs.
 
@@ -528,7 +605,9 @@ type RefreshField = {
   kind: FieldKind;
   questionId: string;
   noAutoFill?: true;      // never prefill (old IDs are semantically incompatible)
-  rev6OnlyFill?: true;    // prefill only values that are valid current Rev 6 IDs
+  rev6OnlyFill?: true;    // prefill only values that are valid IDs in the CURRENT
+                          // canonical vocabulary (Rev 7 from this revision onward).
+                          // Name retained for continuity with the legacy-compat suite.
 };
 
 type RefreshScreen = {
@@ -551,15 +630,6 @@ const REFRESH_SCREENS: RefreshScreen[] = [
     ],
   },
   {
-    screenId: "r-identity",
-    label: "Your Style Identity",
-    question: "Which styles currently feel most like you?",
-    helper: "Select up to 2. nAia blends these into the aesthetic of every recommendation.",
-    fields: [
-      { draftKey: "style-personalities" as DraftKey, apiKey: "stylePersonalities", subLabel: "My style", kind: "array" as FieldKind, questionId: "style-personalities", rev6OnlyFill: true },
-    ],
-  },
-  {
     screenId: "r-outfit-gives",
     label: "What Great Outfits Give You",
     question: "What makes an outfit feel right for you?",
@@ -569,18 +639,49 @@ const REFRESH_SCREENS: RefreshScreen[] = [
     ],
   },
   {
+    screenId: "r-expression",
+    label: "Your Style Expression",
+    question: "What would you like your style to communicate about you?",
+    helper: "Choose up to 3.",
+    fields: [
+      { draftKey: "style-expression" as DraftKey, apiKey: "styleExpression", subLabel: "What I want my style to say", kind: "array" as FieldKind, questionId: "style-expression" },
+    ],
+  },
+  {
+    screenId: "r-exploration",
+    label: "Your Style Exploration",
+    question: "How much would you like nAia to push your style?",
+    helper: "Choose 1.",
+    fields: [
+      { draftKey: "exploration-level" as DraftKey, apiKey: "explorationLevel", subLabel: "How far nAia should push me", kind: "single" as FieldKind, questionId: "exploration-level" },
+    ],
+  },
+  {
+    // Rev 7 replaces "Which styles currently feel most like you?" (stylePersonalities).
+    // noAutoFill: legacy archetype IDs are not the same vocabulary as Rev 7 directions,
+    // so nothing is prefilled. The stored stylePersonalities row is left untouched.
+    screenId: "r-identity",
+    label: "Your Style Direction",
+    question: "Which looks are you naturally drawn to?",
+    helper: "Choose up to 3. nAia blends these into the aesthetic of every recommendation.",
+    fields: [
+      { draftKey: "style-directions" as DraftKey, apiKey: "styleDirections", subLabel: "The looks I'm drawn to", kind: "array" as FieldKind, questionId: "style-directions", noAutoFill: true },
+    ],
+  },
+  {
     screenId: "r-lifestyle",
     label: "Your Life & Dress Codes",
-    question: "What do you dress for most often?",
+    question: "Which of these are part of your lifestyle?",
+    helper: "Choose all that are relevant to your life.",
     fields: [
       { draftKey: "lifestyle" as DraftKey, apiKey: "lifestyle", subLabel: "My lifestyle", kind: "array" as FieldKind, questionId: "lifestyle", rev6OnlyFill: true },
     ],
   },
   {
     screenId: "r-silhouette",
-    label: "Your Fit & Silhouette",
-    question: "What silhouettes feel most like you?",
-    helper: "Pick up to 3.",
+    label: "Your Shape & Fit",
+    question: "Which shapes or fits do you usually feel best in?",
+    helper: "Choose up to 4.",
     fields: [
       { draftKey: "silhouette" as DraftKey, apiKey: "silhouette", subLabel: "My silhouettes", kind: "array" as FieldKind, questionId: "silhouette", rev6OnlyFill: true },
     ],
@@ -588,7 +689,7 @@ const REFRESH_SCREENS: RefreshScreen[] = [
   {
     screenId: "r-fit-concerns",
     label: "Fit Considerations",
-    question: "Are there any fit issues nAia should keep in mind?",
+    question: "Are there any fit or comfort issues nAia should keep in mind?",
     helper: "Select any that apply.",
     fields: [
       { draftKey: "fit-concerns" as DraftKey, apiKey: "fitConcerns", subLabel: "Fit considerations", kind: "array" as FieldKind, questionId: "fit-concerns" },
@@ -598,11 +699,21 @@ const REFRESH_SCREENS: RefreshScreen[] = [
   {
     screenId: "r-dressing",
     label: "Your Dressing Requirements",
-    question: "Are there any dressing requirements nAia should always respect?",
-    helper: "Optional. Select anything nAia should always keep in mind when styling you.",
+    question: "Are there any dressing preferences or requirements nAia should always respect?",
+    helper: "Optional. Select any that apply.",
     optional: true,
     fields: [
       { draftKey: "dressing-preferences" as DraftKey, apiKey: "dressingPreferences", subLabel: "My dressing requirements", kind: "array" as FieldKind, questionId: "dressing-preferences", rev6OnlyFill: true },
+      { draftKey: "dressing-requirements-note" as DraftKey, apiKey: "dressingRequirementsNote", subLabel: "My cultural or religious requirement", kind: "text" as FieldKind, questionId: "dressing-requirements-note" },
+    ],
+  },
+  {
+    screenId: "r-habits",
+    label: "Your Dressing Habits",
+    question: "Which sounds most like you when you're getting dressed?",
+    helper: "Choose up to 2.",
+    fields: [
+      { draftKey: "dressing-habits" as DraftKey, apiKey: "dressingHabits", subLabel: "How I approach getting dressed", kind: "array" as FieldKind, questionId: "dressing-habits" },
     ],
   },
 ];
@@ -751,6 +862,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if ((op as any).currentGoal?.length)           savedAnswers["current-goal"]           = (op as any).currentGoal;
   if ((op as any).successfulOutfitGives?.length) savedAnswers["successful-outfit-gives"]= (op as any).successfulOutfitGives;
   if ((op as any).dressingPreferences?.length)   savedAnswers["dressing-preferences"]   = (op as any).dressingPreferences;
+  // Rev 7 fields
+  if ((op as any).styleExpression?.length)       savedAnswers["style-expression"]          = (op as any).styleExpression;
+  if ((op as any).explorationLevel)              savedAnswers["exploration-level"]         = (op as any).explorationLevel;
+  if ((op as any).styleDirections?.length)       savedAnswers["style-directions"]          = (op as any).styleDirections;
+  if ((op as any).dressingHabits?.length)        savedAnswers["dressing-habits"]           = (op as any).dressingHabits;
+  if ((op as any).dressingRequirementsNote)      savedAnswers["dressing-requirements-note"]= (op as any).dressingRequirementsNote;
   // About You
   if ((op as any).ageRange)              savedAnswers["age-range"]              = (op as any).ageRange;
   if ((op as any).gender)                savedAnswers["gender"]                 = (op as any).gender;
@@ -778,6 +895,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     profileUpdatedAt: op.updatedAt.toISOString(),
     selfieChapter,
     isLegacyCustomer,
+    // Rev 7 customers no longer see the retired "Which styles feel most like you?"
+    // question. Rev 6 and legacy customers keep it, so their answer stays editable.
+    isRev7Customer: (op as any).profileVersion === REV7_PROFILE_VERSION,
   };
 }
 
@@ -874,6 +994,9 @@ function getSectionSummary(def: SectionDef, answers: OnboardingAnswers): ReactNo
       }
     }
   }
+  // An optional section that is simply unanswered is not "missing" — it never
+  // blocks completion and must not be presented as a gap.
+  if (def.optional) return <span className="sp-detail-optional">Optional</span>;
   return <span className="sp-detail-missing">Not yet completed</span>;
 }
 
@@ -1070,13 +1193,17 @@ function VisualAnalysisChapter({ selfieChapter }: { selfieChapter: SelfieChapter
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function PassportPage() {
-  const { savedAnswers, profileUpdatedAt, selfieChapter, isLegacyCustomer } = useLoaderData<typeof loader>();
+  const {
+    savedAnswers, profileUpdatedAt, selfieChapter, isLegacyCustomer, isRev7Customer,
+  } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
   const navigate = useNavigate();
 
-  // Rev 6 customers have profileVersion=6; legacy customers have profileVersion=null.
+  // Confirmed Passports carry profileVersion 6 (Rev 6) or 7 (Rev 7);
+  // legacy customers have profileVersion=null.
   const isRev6 = !isLegacyCustomer;
-  const visibleSections      = useMemo(() => getVisibleSections(isRev6), [isRev6]);
+  const isRev7 = isRev7Customer === true;
+  const visibleSections      = useMemo(() => getVisibleSections(isRev6, isRev7), [isRev6, isRev7]);
   const visibleAllSections   = useMemo(() => [...visibleSections, NOTES_SECTION], [visibleSections]);
 
   const [mode,                 setMode]                 = useState<Mode>({ kind: "overview" });
@@ -1104,7 +1231,7 @@ export default function PassportPage() {
   const missingSections = useMemo(() =>
     visibleAllSections.filter(s => {
       if (s.placeholder || s.optional) return false;
-      const effectiveDef = getEffectiveDef(s, isRev6);
+      const effectiveDef = getEffectiveDef(s, isRev6, isRev7);
       const primary = effectiveDef.subFields[0];
       if (!primary) return false;
       const v = (savedAnswers as Record<string, unknown>)[primary.draftKey];
@@ -1118,7 +1245,7 @@ export default function PassportPage() {
         : raw;
       return effective.length === 0;
     }),
-    [savedAnswers, visibleAllSections, isRev6],
+    [savedAnswers, visibleAllSections, isRev6, isRev7],
   );
 
   const isComplete = missingSections.length === 0;
@@ -1281,7 +1408,7 @@ export default function PassportPage() {
       patch[rf.apiKey] = v;
     }
     if (isLast && direction === "next") {
-      patch.onboardingComplete = true; // triggers profileVersion=6 in the API
+      patch.onboardingComplete = true; // triggers profileVersion=7 in the API
     }
 
     setSaveStatus("saving");
@@ -1560,7 +1687,7 @@ export default function PassportPage() {
     if (sf.kind === "single") {
       return (
         <div className="sp-option-grid">
-          {(q?.options ?? []).map(o => {
+          {(q?.options ?? []).filter(o => !o.reserved || sel.includes(o.id) || selStr === o.id).map(o => {
             const isSel = selStr === o.id;
             return (
               <button
@@ -1608,7 +1735,7 @@ export default function PassportPage() {
     // array (multi-select pills) — body area keys use mutual-exclusion handler
     return (
       <div className="sp-option-grid">
-        {(q?.options ?? []).map(o => {
+        {(q?.options ?? []).filter(o => !o.reserved || sel.includes(o.id) || selStr === o.id).map(o => {
           const isSel = sel.includes(o.id);
           const handleClick =
             sf.draftKey === "body-focus-areas" ? () => handleBodyAreaToggle("body-focus-areas", "bodyFocusAreas", o.id) :
@@ -2012,7 +2139,7 @@ export default function PassportPage() {
               onClick={() => editSection(def.id)}
             >
               <span className="sp-picker-label">{def.label}</span>
-              <span className="sp-picker-value">{getSectionSummary(getEffectiveDef(def, isRev6), savedAnswers)}</span>
+              <span className="sp-picker-value">{getSectionSummary(getEffectiveDef(def, isRev6, isRev7), savedAnswers)}</span>
             </button>
           ))}
           {/* Notes — in picker but outside named sections */}
@@ -2478,7 +2605,7 @@ export default function PassportPage() {
 
       {/* All other sections — generic sub-field renderer (uses effective def for Rev 6 filtering) */}
       {currentId !== "sizes" && (() => {
-        const effectiveSubFields = getEffectiveDef(currentDef, isRev6).subFields;
+        const effectiveSubFields = getEffectiveDef(currentDef, isRev6, isRev7).subFields;
         return effectiveSubFields.map(sf => {
           if (sf.draftKey === "gender-self-description" &&
               ((flowEdits as Record<string, unknown>)["gender"] as string | undefined) !== "another-gender") {

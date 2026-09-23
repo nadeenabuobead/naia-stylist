@@ -3,13 +3,30 @@ import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import { quizQuestions } from "../lib/onboarding/quiz-data";
 import { emitPassportSaved, recordJourneyEventAwaited } from "../lib/ai/journey-events.server";
 import {
-  LIFESTYLE_MAX,
   TYPICAL_DAY_MAX,
-  isLifestyleCountValid,
   resolveColourConflict,
   deriveFitMigration,
   normalizeTypicalDay,
 } from "../lib/passport/v2-b1-helpers";
+import {
+  REV7_PROFILE_VERSION,
+  STYLE_EXPRESSION_VALID_IDS,
+  STYLE_EXPRESSION_MAX,
+  STYLE_EXPRESSION_EXCLUSIVE_IDS,
+  EXPLORATION_LEVEL_VALID_IDS,
+  STYLE_DIRECTION_VALID_IDS,
+  STYLE_DIRECTION_MAX,
+  STYLE_DIRECTION_EXCLUSIVE_IDS,
+  DRESSING_HABIT_VALID_IDS,
+  DRESSING_HABIT_MAX,
+  DRESSING_HABIT_EXCLUSIVE_IDS,
+  DRESSING_REQUIREMENTS_NOTE_TRIGGER_ID,
+  DRESSING_REQUIREMENTS_NOTE_MAX,
+  NO_COLOUR_PREFERENCE_ID,
+  NO_AVOID_COLOURS_ID,
+  FAVOURITE_COLOURS_MAX,
+  applyExclusiveRule,
+} from "../lib/passport/rev7-vocabulary";
 
 const RECOGNISED_FIELDS = new Set([
   "stylePersonalities", "desiredImpression", "lifestyle", "desiredFeelings",
@@ -28,6 +45,9 @@ const RECOGNISED_FIELDS = new Set([
   "measurementUnit", "bodyShape", "fitConcerns", "preferredCoverage",
   // Passport Rev 6
   "currentGoal", "successfulOutfitGives", "dressingPreferences", "fitConcernsNote",
+  // Passport Rev 7
+  "styleExpression", "explorationLevel", "styleDirections", "dressingHabits",
+  "dressingRequirementsNote",
   // About You (contextual profile; not used to infer recommendations)
   "ageRange", "gender", "genderSelfDescription",
 ]);
@@ -44,6 +64,8 @@ const ARRAY_FIELDS = [
   "fitConcerns",
   // Rev 6
   "currentGoal", "successfulOutfitGives", "dressingPreferences",
+  // Rev 7
+  "styleExpression", "styleDirections", "dressingHabits",
 ];
 
 // V2-B1 free-text fields (string | null); validated same pattern as finalNotes.
@@ -68,14 +90,20 @@ const AVOID_TO_FOCUS_NORM = {
   "bust": "bust", "upper-arms": "arms-shoulders", "hips-thighs": "hips-curves",
 };
 
-// Lifestyle valid IDs: V2 (backward compat) + V3 (Rev 6 canonical)
+// Lifestyle valid IDs: V2 (backward compat) + V3 (Rev 6) + Rev 7 additions.
+// Rev 7 removes the selection cap entirely — a customer's life can span many
+// contexts and nAia should know all of them. IDs are still validated.
 const LIFESTYLE_VALID_IDS = new Set([
   // V2 — backward compat for existing stored values
   "office", "busy-mom", "creative", "casual-days", "events", "always-on-the-go", "travel", "hybrid",
+  "on-the-go",
   // V3 — Rev 6 canonical
   "work-office", "everyday-casual", "dinners-going-out", "events-special-occasions",
   "family-parenting", "active-busy-days",
   // "travel" is shared V2/V3
+  // Rev 7 additions
+  "study-university", "fitness-gym", "creative-flexible-work", "mostly-at-home",
+  "other-lifestyle",
 ]);
 
 // Rev 6: silhouette valid IDs — V2 (backward compat) + V3 canonical
@@ -87,8 +115,10 @@ const SILHOUETTE_VALID_IDS = new Set([
   // "fitted", "relaxed", "oversized" are shared V2/V3
   // Gender-inclusive additions (Group A)
   "boxy", "tapered",
+  // Rev 7 additions
+  "longline", "cropped-fit", "mixing-fits",
 ]);
-const SILHOUETTE_MAX = 3; // Rev 6 raises max from 2 to 3
+const SILHOUETTE_MAX = 4; // Rev 7 raises max from 3 to 4
 
 // Rev 6: style personality valid IDs — V2 (backward compat) + V3 canonical
 const STYLE_PERSONALITY_VALID_IDS = new Set([
@@ -112,6 +142,8 @@ const CURRENT_GOAL_MAX = 2;
 const SUCCESSFUL_OUTFIT_GIVES_VALID_IDS = new Set([
   "feel-like-myself", "confidence", "feel-put-together", "comfort-ease",
   "sense-of-expression", "feel-attractive", "sense-of-power", "effortlessness", "not-sure",
+  // Rev 7 addition
+  "feel-distinctive",
 ]);
 const SUCCESSFUL_OUTFIT_GIVES_MAX = 3;
 
@@ -123,6 +155,12 @@ const DRESSING_PREF_VALID_IDS = new Set([
   "legs-covered", "prefer-full-length-trousers", "avoid-shorts",
   "longer-tops", "no-cropped-tops", "looser-fitting",
   "no-dressing-requirements",
+  // Rev 7 additions.
+  // avoid-sheer / avoid-open-back are RESERVED: accepted and stored so no answer is
+  // ever lost, but not offered in the production UI — no opacity or back-coverage
+  // metadata exists to enforce them. See RESERVED_DRESSING_PREFERENCE_IDS.
+  "avoid-sheer", "avoid-open-back",
+  DRESSING_REQUIREMENTS_NOTE_TRIGGER_ID,
 ]);
 
 // About You: valid age-range and gender option IDs
@@ -142,8 +180,12 @@ const FIT_CONCERN_VALID = new Set([
   "tops-pull-bust", "waistbands-gape", "tight-hips-thighs", "uncomfortable-rise",
   "shoulder-sleeve-fit", "often-too-short", "often-too-long", "less-cling-midsection",
   "shoe-width-comfort", "size-changes", "no-fit-problems", "other",
+  // Rev 7 addition — sensory / texture comfort
+  "fabric-texture-sensitivity",
 ]);
-const FIT_CONCERN_MAX_NORMAL = 5; // exclusive "no-fit-problems" + "other" not counted in cap
+// Rev 7 removes the numeric cap: "select any that apply". Validation still rejects
+// unknown IDs and duplicates. The cap is the vocabulary itself.
+const FIT_CONCERN_MAX_NORMAL = FIT_CONCERN_VALID.size;
 
 // V2-D: validation constants
 const SIZING_SYSTEM_VALID    = new Set(["uk", "us", "eu", "international", "other"]);
@@ -212,6 +254,14 @@ for (const q of quizQuestions) {
   if (q.options) VALID_OPTION_IDS[q.id] = new Set(q.options.map(o => o.id));
   if (q.colors)  VALID_OPTION_IDS[q.id] = new Set(q.colors.map(c => c.id));
   if (q.maxSelections !== undefined) MAX_SELECTIONS[q.id] = q.maxSelections;
+  // Secondary questions (avoid-colors) live inside their parent screen and must be
+  // registered too, otherwise their option IDs resolve to undefined and every
+  // submitted value is rejected.
+  if (q.secondaryQuestion) {
+    const sq = q.secondaryQuestion;
+    VALID_OPTION_IDS[sq.id] = new Set(sq.colors.map(c => c.id));
+    if (sq.maxSelections !== undefined) MAX_SELECTIONS[sq.id] = sq.maxSelections;
+  }
 }
 
 // Maps API field names to their quiz question IDs for option-ID validation.
@@ -254,7 +304,7 @@ export async function action({ request }) {
   }
 
   // request-only keys (allowed but not in RECOGNISED_FIELDS, never persisted)
-  // onboardingComplete: true → set profileVersion=6 on final Rev 6 onboarding or legacy refresh
+  // onboardingComplete: true → set profileVersion=7 on final Rev 7 onboarding or legacy refresh
   const REQUEST_ONLY_KEYS = new Set(["baseProfileUpdatedAt", "editedField", "confirmSizeSystemChange", "confirmShoeSystemChange", "onboardingComplete"]);
   // Reject unknown top-level keys
   for (const key of Object.keys(body)) {
@@ -332,14 +382,15 @@ export async function action({ request }) {
     }
   }
 
-  // lifestyle: max-3 and approved IDs only; legacy stored values with >3 IDs are untouched
+  // lifestyle: approved IDs only, no duplicates. Rev 7 removed the selection cap —
+  // any number of valid lifestyle contexts may be selected.
   if (Object.hasOwn(body, "lifestyle")) {
     const ls = body["lifestyle"];
-    if (!isLifestyleCountValid(ls)) {
-      return Response.json({ error: "lifestyle_too_many" }, { status: 400 });
-    }
     if (!ls.every(id => LIFESTYLE_VALID_IDS.has(id))) {
       return Response.json({ error: "lifestyle_invalid_id" }, { status: 400 });
+    }
+    if (new Set(ls).size !== ls.length) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
     }
   }
 
@@ -477,6 +528,72 @@ export async function action({ request }) {
     }
   }
 
+  // ── Rev 7 fields ───────────────────────────────────────────────────────────
+
+  // styleExpression — approved IDs, max 3
+  if (Object.hasOwn(body, "styleExpression")) {
+    const v = body["styleExpression"];
+    if (v.length > 0) {
+      if (!v.every(id => STYLE_EXPRESSION_VALID_IDS.has(id)) || new Set(v).size !== v.length) {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
+      if (v.length > STYLE_EXPRESSION_MAX) {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
+    }
+  }
+
+  // explorationLevel — single-select; null / "" clears it
+  if (Object.hasOwn(body, "explorationLevel")) {
+    const v = body["explorationLevel"];
+    if (v !== null && v !== "" && (typeof v !== "string" || !EXPLORATION_LEVEL_VALID_IDS.has(v))) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+
+  // styleDirections — approved IDs, max 3. Canonical Rev 7 style field.
+  if (Object.hasOwn(body, "styleDirections")) {
+    const v = body["styleDirections"];
+    if (v.length > 0) {
+      if (!v.every(id => STYLE_DIRECTION_VALID_IDS.has(id)) || new Set(v).size !== v.length) {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
+      if (v.length > STYLE_DIRECTION_MAX) {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
+    }
+  }
+
+  // dressingHabits — approved IDs, max 2
+  if (Object.hasOwn(body, "dressingHabits")) {
+    const v = body["dressingHabits"];
+    if (v.length > 0) {
+      if (!v.every(id => DRESSING_HABIT_VALID_IDS.has(id)) || new Set(v).size !== v.length) {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
+      if (v.length > DRESSING_HABIT_MAX) {
+        return Response.json({ error: "invalid_body" }, { status: 400 });
+      }
+    }
+  }
+
+  // dressingRequirementsNote — string | null, max 500 chars
+  if (Object.hasOwn(body, "dressingRequirementsNote")) {
+    const v = body["dressingRequirementsNote"];
+    if (v !== null && typeof v !== "string") {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+    if (typeof v === "string" && v.length > DRESSING_REQUIREMENTS_NOTE_MAX) {
+      return Response.json({ error: "invalid_body" }, { status: 400 });
+    }
+  }
+
+  // favoriteColors — cap enforced here as well as through the shared
+  // FIELD_TO_QUESTION_ID loop above. The "no strong preference" sentinel counts as one.
+  if (Object.hasOwn(body, "favoriteColors") && body["favoriteColors"].length > FAVOURITE_COLOURS_MAX) {
+    return Response.json({ error: "invalid_body" }, { status: 400 });
+  }
+
   // V2-D: height
   if (Object.hasOwn(body, "height")) {
     if (!validateHeight(body["height"])) {
@@ -572,6 +689,24 @@ export async function action({ request }) {
   if (Object.hasOwn(body, "dressingPreferences") && body["dressingPreferences"].includes("no-dressing-requirements")) {
     body["dressingPreferences"] = ["no-dressing-requirements"];
   }
+  // Rev 7 exclusive rules
+  if (Object.hasOwn(body, "styleExpression")) {
+    body["styleExpression"] = applyExclusiveRule(body["styleExpression"], STYLE_EXPRESSION_EXCLUSIVE_IDS);
+  }
+  if (Object.hasOwn(body, "styleDirections")) {
+    body["styleDirections"] = applyExclusiveRule(body["styleDirections"], STYLE_DIRECTION_EXCLUSIVE_IDS);
+  }
+  if (Object.hasOwn(body, "dressingHabits")) {
+    body["dressingHabits"] = applyExclusiveRule(body["dressingHabits"], DRESSING_HABIT_EXCLUSIVE_IDS);
+  }
+  // Colour sentinels: "I don't have strong colour preferences" clears specific
+  // favourites; "None" clears specific avoided colours.
+  if (Object.hasOwn(body, "favoriteColors") && body["favoriteColors"].includes(NO_COLOUR_PREFERENCE_ID)) {
+    body["favoriteColors"] = [NO_COLOUR_PREFERENCE_ID];
+  }
+  if (Object.hasOwn(body, "avoidColors") && body["avoidColors"].includes(NO_AVOID_COLOURS_ID)) {
+    body["avoidColors"] = [NO_AVOID_COLOURS_ID];
+  }
 
   // All submitted values are validated and normalized. Absent keys fall back to the saved DB value
   // (partial-patch behaviour: a caller sending only changed fields is supported).
@@ -624,6 +759,19 @@ export async function action({ request }) {
       : null;
   })();
 
+  // Rev 7: dressingRequirementsNote is only meaningful when the cultural/religious
+  // requirement is selected. Mirrors the fitConcerns/"other" rule: if the array is
+  // submitted without the trigger, the note is cleared; if the array is absent from
+  // the payload, the stored note is preserved unchanged.
+  const resolvedDressingRequirementsNote = (() => {
+    if (!Object.hasOwn(body, "dressingPreferences")) {
+      return pickText("dressingRequirementsNote", op?.dressingRequirementsNote);
+    }
+    return pickArr("dressingPreferences", op?.dressingPreferences).includes(DRESSING_REQUIREMENTS_NOTE_TRIGGER_ID)
+      ? pickText("dressingRequirementsNote", op?.dressingRequirementsNote)
+      : null;
+  })();
+
   const profileData = {
     stylePersonalities:  pickArr("stylePersonalities",  op?.stylePersonalities),
     desiredImpression:   pickArr("desiredImpression",   op?.desiredImpression),
@@ -673,6 +821,14 @@ export async function action({ request }) {
     successfulOutfitGives: pickArr("successfulOutfitGives", op?.successfulOutfitGives),
     dressingPreferences:   pickArr("dressingPreferences",   op?.dressingPreferences),
     fitConcernsNote:       resolvedFitConcernsNote,
+    // Passport Rev 7.
+    // stylePersonalities is deliberately absent from this block's Rev 7 handling:
+    // it keeps its pickArr fallback above and is never written by the Rev 7 flow.
+    styleExpression:          pickArr("styleExpression",  op?.styleExpression),
+    explorationLevel:         pickText("explorationLevel", op?.explorationLevel),
+    styleDirections:          pickArr("styleDirections",  op?.styleDirections),
+    dressingHabits:           pickArr("dressingHabits",   op?.dressingHabits),
+    dressingRequirementsNote: resolvedDressingRequirementsNote,
     // About You
     ageRange:             pickText("ageRange",             op?.ageRange),
     gender:               pickText("gender",               op?.gender),
@@ -680,28 +836,39 @@ export async function action({ request }) {
     completed:           true,
   };
 
-  // profileVersion=6 only on final Rev 6 onboarding or legacy refresh completion.
+  // profileVersion=7 only on final Rev 7 onboarding or legacy refresh completion.
   // Normal passport section saves must NOT set this — they preserve the existing value.
   if (body["onboardingComplete"] === true) {
-    // Guard: all required Rev 6 fields must be non-empty in the resulting profile state.
-    // dressingPreferences is intentionally optional and excluded from this check.
-    const requiredRev6 = [
+    // Guard: all required Rev 7 fields must be non-empty in the resulting profile state.
+    //
+    // Excluded by design:
+    //   dressingPreferences — the question is explicitly optional
+    //   stylePersonalities  — retired at Rev 7; styleDirections replaces it and a
+    //                         legacy customer's stored value must not gate completion
+    //
+    // lifestyle has no selection cap at Rev 7; one or more valid IDs satisfies it.
+    const requiredRev7Arrays = [
       ["currentGoal",           profileData.currentGoal],
-      ["stylePersonalities",    profileData.stylePersonalities],
       ["successfulOutfitGives", profileData.successfulOutfitGives],
+      ["styleExpression",       profileData.styleExpression],
+      ["styleDirections",       profileData.styleDirections],
       ["lifestyle",             profileData.lifestyle],
       ["favoriteColors",        profileData.favoriteColors],
       ["silhouette",            profileData.silhouette],
       ["fitConcerns",           profileData.fitConcerns],
+      ["dressingHabits",        profileData.dressingHabits],
     ];
-    const missingRev6 = requiredRev6
+    const missingRev7 = requiredRev7Arrays
       .filter(([, v]) => !Array.isArray(v) || v.length === 0)
       .map(([k]) => k);
-    if (missingRev6.length > 0 && !op?.completed) {
-      return Response.json({ error: "incomplete_rev6_profile", missingFields: missingRev6 }, { status: 400 });
+    // explorationLevel is a single-select, not an array
+    if (!profileData.explorationLevel) missingRev7.push("explorationLevel");
+
+    if (missingRev7.length > 0 && !op?.completed) {
+      return Response.json({ error: "incomplete_rev7_profile", missingFields: missingRev7 }, { status: 400 });
     }
-    if (missingRev6.length === 0) {
-      profileData.profileVersion = 6;
+    if (missingRev7.length === 0) {
+      profileData.profileVersion = REV7_PROFILE_VERSION;
     }
   }
 

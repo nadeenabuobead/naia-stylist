@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useLoaderData, data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import type { OnboardingAnswers } from "~/lib/onboarding/quiz-data";
-import { quizQuestions } from "~/lib/onboarding/quiz-data";
+import { quizQuestions, LEGACY_QUESTIONS } from "~/lib/onboarding/quiz-data";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { prisma } from "~/lib/prisma.server";
 import { readPendingSave, clearPendingSave } from "~/lib/pending-save.server";
@@ -13,7 +13,8 @@ import type { NaiaFirstReadObservation } from "~/lib/ai/first-naia-read";
 const OPTION_LABELS: Record<string, Record<string, string>> = {};
 const COLOR_HEX: Record<string, string> = {};
 const VALID_IDS_BY_DRAFT_KEY: Record<string, Set<string>> = {};
-for (const q of quizQuestions) {
+// Retired questions first, so a live Rev 7 question always wins on ID collision.
+for (const q of [...LEGACY_QUESTIONS, ...quizQuestions]) {
   if (q.options) {
     OPTION_LABELS[q.id] = Object.fromEntries(q.options.map(o => [o.id, o.label]));
     VALID_IDS_BY_DRAFT_KEY[q.id] = new Set(q.options.map(o => o.id));
@@ -22,6 +23,12 @@ for (const q of quizQuestions) {
     OPTION_LABELS[q.id] = Object.fromEntries(q.colors.map(c => [c.id, c.name]));
     for (const c of q.colors) COLOR_HEX[c.id] = c.hex;
     VALID_IDS_BY_DRAFT_KEY[q.id] = new Set(q.colors.map(c => c.id));
+  }
+  if (q.secondaryQuestion) {
+    const sq = q.secondaryQuestion;
+    OPTION_LABELS[sq.id] = Object.fromEntries(sq.colors.map(c => [c.id, c.name]));
+    for (const c of sq.colors) COLOR_HEX[c.id] = c.hex;
+    VALID_IDS_BY_DRAFT_KEY[sq.id] = new Set(sq.colors.map(c => c.id));
   }
 }
 
@@ -74,10 +81,17 @@ function buildNaiaNote(a: OnboardingAnswers): string {
 
 // Maps draft key → API field name. Used for both sanitization and POST body.
 const DRAFT_TO_API = [
-  // Rev 6 onboarding fields
+  // Rev 7 onboarding fields
   ["current-goal",           "currentGoal",          "array"],
-  ["style-personalities",    "stylePersonalities",   "array"],
   ["successful-outfit-gives","successfulOutfitGives","array"],
+  ["style-expression",       "styleExpression",      "array"],
+  ["exploration-level",      "explorationLevel",     "text"],
+  ["style-directions",       "styleDirections",      "array"],
+  ["dressing-habits",        "dressingHabits",       "array"],
+  ["dressing-requirements-note", "dressingRequirementsNote", "text"],
+  // Retired at Rev 7 — kept so an in-flight legacy draft still saves correctly.
+  // The Rev 7 flow never produces this key.
+  ["style-personalities",    "stylePersonalities",   "array"],
   ["lifestyle",              "lifestyle",            "array"],
   ["favorite-colors",        "favoriteColors",       "array"],
   ["avoid-colors",           "avoidColors",          "array"],
@@ -349,6 +363,7 @@ export default function OnboardingComplete() {
     // stale feedback for observations the current profile no longer generates is ignored.
     const currentFirstRead = computeNaiaFirstRead({
       stylePersonalities:    merged["style-personalities"]     as string[] | undefined,
+      styleDirections:       merged["style-directions"]        as string[] | undefined,
       silhouette:            merged["silhouette"]              as string[] | undefined,
       successfulOutfitGives: merged["successful-outfit-gives"] as string[] | undefined,
       lifestyle:             merged["lifestyle"]               as string[] | undefined,
@@ -432,11 +447,14 @@ export default function OnboardingComplete() {
   if (!displayAnswers) return <div style={{ minHeight: "100vh", background: "#f4f4f1" }} />;
 
   const a = displayAnswers;
-  const isRev6 = profileVersion === 6;
+  // Modern Passport (Rev 6 or Rev 7). Legacy profiles (profileVersion null) keep
+  // the original identity-led completion screen.
+  const isRev6 = profileVersion !== null && profileVersion >= 6;
 
   // First Read — deterministic, runs after localStorage draft is merged into displayAnswers
   const firstReadResult = computeNaiaFirstRead({
     stylePersonalities:    a["style-personalities"]     as string[] | undefined,
+    styleDirections:       a["style-directions"]        as string[] | undefined,
     silhouette:            a["silhouette"]              as string[] | undefined,
     successfulOutfitGives: a["successful-outfit-gives"] as string[] | undefined,
     lifestyle:             a["lifestyle"]               as string[] | undefined,

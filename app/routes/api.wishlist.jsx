@@ -12,7 +12,7 @@ import {
   getCloudinaryConfig,
 } from "../lib/cloudinary-admin.server";
 import { emitBuySkipSubmitted, recordJourneyEventAwaited } from "../lib/ai/journey-events.server";
-import { quizQuestions } from "../lib/onboarding/quiz-data";
+import { ALL_QUESTIONS, ALL_OPTION_LABELS } from "../lib/onboarding/quiz-data";
 import { checkEntitlement } from "../lib/plan/entitlement.server";
 import { moderateImageContent } from "../lib/image-moderation.server";
 import { screenGarmentSuitability } from "../lib/image-suitability.server";
@@ -36,8 +36,15 @@ const LIFESTYLE_LABELS = {
   "everyday-casual":          "everyday casual",
   "dinners-going-out":        "dinners out",
   "events-special-occasions": "special occasions and events",
-  "family-parenting":         "family life",
-  "active-busy-days":         "active days",
+  "family-parenting":         "family life and caregiving",
+  "active-busy-days":         "busy / errand days",
+  // Rev 7 additions
+  "study-university":         "study / university",
+  "travel":                   "travel",
+  "fitness-gym":              "fitness, gym or pilates",
+  "creative-flexible-work":   "creative / flexible work",
+  "mostly-at-home":           "time at home",
+  "other-lifestyle":          "other contexts they told us about",
 };
 function labelLifestyle(ids) {
   if (!ids || ids.length === 0) return null;
@@ -57,9 +64,15 @@ const CLOSET_COMPATIBLE_CATEGORIES = {
 };
 
 function optionLabel(questionId, optionId) {
-  const q = quizQuestions.find(q => q.id === questionId);
+  // ALL_QUESTIONS covers the live Rev 7 flow plus retired questions, so a stored
+  // answer from an older Passport still resolves to real copy instead of a slug.
+  const q = ALL_QUESTIONS.find(q => q.id === questionId);
   const opt = q?.options?.find(o => o.id === optionId);
-  return opt?.label ?? optionId.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  if (opt) return opt.label;
+  const colour = q?.colors?.find(c => c.id === optionId);
+  if (colour) return colour.name;
+  return ALL_OPTION_LABELS[optionId]
+    ?? optionId.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
 
 function hashForIndex(str) {
@@ -364,7 +377,12 @@ Price information was not provided — do not assess monetary value or make valu
 ${styleProfile ? `CUSTOMER PASSPORT — use every available field across the entire recommendation:
 
 STYLE IDENTITY
-- Style personalities: ${styleProfile.stylePersonalities?.join(", ")}
+${styleProfile.styleDirections?.length > 0
+  ? `- Style Directions (the visual aesthetics this customer is drawn to): ${styleProfile.styleDirections.filter(id => id !== "not-sure").map(id => optionLabel("style-directions", id)).join(", ")}`
+  : `- Style personalities: ${styleProfile.stylePersonalities?.map(id => optionLabel("style-personalities", id)).join(", ") || "not specified"}`}
+${styleProfile.styleExpression?.length > 0 ? `- Style Expression (what this customer wants their clothes to communicate about them): ${styleProfile.styleExpression.filter(id => id !== "not-sure").map(id => optionLabel("style-expression", id)).join(", ")}` : ""}
+${styleProfile.explorationLevel && styleProfile.explorationLevel !== "not-sure" ? `- Exploration Level (how far nAia should move beyond this customer's familiar choices): ${optionLabel("exploration-level", styleProfile.explorationLevel)}` : ""}
+${styleProfile.dressingHabits?.length > 0 ? `- Dressing Habits (behavioural context — how this customer approaches getting dressed, not an aesthetic preference): ${styleProfile.dressingHabits.filter(id => id !== "none-of-these").map(id => optionLabel("dressing-habits", id)).join("; ")}` : ""}
 - Desired feelings when dressed: ${styleProfile.desiredFeelings?.join(", ") || "not specified"}
 - Desired impression: ${styleProfile.desiredImpression?.length > 0 ? styleProfile.desiredImpression.join(", ") : "not specified"}
 - Fashion risk comfort (1–10): ${styleProfile.comfortLevel ?? "not specified"}
@@ -402,6 +420,7 @@ DRESSING REQUIREMENTS — explicit constraints, not style preferences:
 ${styleProfile.dressingPreferences?.length > 0
   ? styleProfile.dressingPreferences.map(id => optionLabel("dressing-preferences", id)).join(", ")
   : "none specified"}
+${styleProfile.dressingRequirementsNote?.trim() ? `\nCULTURAL OR RELIGIOUS DRESSING REQUIREMENT, IN THE CUSTOMER'S OWN WORDS: "${sanitize(styleProfile.dressingRequirementsNote)}"\n→ Treat this with the same standing as the explicit requirements above — it is a requirement, not a preference. Apply it to the uploaded item AND to every suggested closet pairing. If an item may conflict with it, it must not receive a BUY verdict and the conflict must be named explicitly. Do not reinterpret, narrow, or infer additional rules beyond what the customer wrote.\n` : ""}
 → DRESSING RULE: These are hard requirements. Check the uploaded item AND every suggested closet pairing against them. An item that violates a dressing requirement — exposed arms when arms-covered is required, sleeveless when avoid-sleeveless is specified, cropped when no-cropped-tops is specified, shorts when avoid-shorts is specified — must not receive a BUY verdict and must be flagged explicitly. Apply to the item's visible construction: sleeve length, neckline coverage, hem length, midriff exposure.
 
 → FIT CERTAINTY RULE: Never write "This will fit you" or any equivalent certainty claim based solely on size or measurement data. Exact-fit conclusions require garment measurements AND a verified size chart comparison.

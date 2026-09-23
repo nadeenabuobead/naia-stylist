@@ -14,7 +14,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { quizQuestions } from "../onboarding/quiz-data.js";
+import { quizQuestions, ALL_QUESTIONS } from "../onboarding/quiz-data.js";
 import { buildProfileSignals } from "../ai/styleme-result.server.js";
 
 // ─── Mirror validation constants from api.save-style-profile.jsx ─────────────
@@ -30,20 +30,23 @@ const CURRENT_GOAL_VALID_IDS = new Set([
 
 const STYLE_PERSONALITY_MAX = 2;
 const STYLE_PERSONALITY_VALID_IDS = new Set([
-  // V3 IDs (new onboarding)
+  // V3 IDs (Rev 6 onboarding; retired from the live flow at Rev 7)
   "classic-polished", "feminine-romantic", "minimal-relaxed", "bold-edgy", "creative-expressive",
   // V2 IDs (backward compat for stored values)
   "effortlessly-chic", "artsy", "bohemian", "feminine", "minimal", "edgy", "romantic",
-  "classic", "trendy", "corporate-chic",
+  "classic", "trendy", "corporate-chic", "old-money", "casual-cool",
 ]);
 
 const SUCCESSFUL_OUTFIT_GIVES_MAX = 3;
 const SUCCESSFUL_OUTFIT_GIVES_VALID_IDS = new Set([
   "feel-like-myself", "confidence", "feel-put-together", "comfort-ease",
   "sense-of-expression", "feel-attractive", "sense-of-power", "effortlessness", "not-sure",
+  // Rev 7 addition
+  "feel-distinctive",
 ]);
 
-const LIFESTYLE_MAX = 3;
+// Rev 7 removed the lifestyle cap entirely.
+const LIFESTYLE_MAX = null;
 const LIFESTYLE_VALID_IDS = new Set([
   // V3 IDs
   "work-office", "everyday-casual", "dinners-going-out", "events-special-occasions",
@@ -53,7 +56,7 @@ const LIFESTYLE_VALID_IDS = new Set([
   "busy-mom", "maternity-postpartum",
 ]);
 
-const SILHOUETTE_MAX = 3;
+const SILHOUETTE_MAX = 4; // Rev 7 raises from 3
 const SILHOUETTE_VALID_IDS = new Set([
   // V3 IDs
   "fitted", "waist-defined", "straight-simple", "relaxed", "oversized",
@@ -62,12 +65,16 @@ const SILHOUETTE_VALID_IDS = new Set([
   "structured", "straight-clean", "waist-definition",
   // Gender-inclusive additions (Group A)
   "boxy", "tapered",
+  // Rev 7 additions
+  "longline", "cropped-fit", "mixing-fits",
 ]);
 
 const FAVOURITE_COLORS_MAX = 5;
-const AVOID_COLORS_MAX = 5;
+// Rev 7: avoided colours are uncapped ("select any that apply").
+const AVOID_COLORS_MAX = null;
 
-const FIT_CONCERN_MAX_NORMAL = 5;
+// Rev 7: fit concerns are uncapped ("select any that apply"); IDs are still validated.
+const FIT_CONCERN_MAX_NORMAL = null;
 const FIT_CONCERN_EXCLUSIVE_IDS = new Set(["no-fit-problems"]);
 const FIT_CONCERN_NOTE_TRIGGER = "other";
 
@@ -78,6 +85,9 @@ const DRESSING_PREF_VALID_IDS = new Set([
   "legs-covered", "prefer-full-length-trousers", "avoid-shorts",
   "longer-tops", "no-cropped-tops", "looser-fitting",
   "no-dressing-requirements",
+  // Rev 7 additions. avoid-sheer / avoid-open-back are RESERVED — accepted and
+  // stored, never offered in the UI (no opacity/back-coverage metadata exists).
+  "avoid-sheer", "avoid-open-back", "other-cultural-religious",
 ]);
 
 // ─── SV1: currentGoal validation ─────────────────────────────────────────────
@@ -110,8 +120,10 @@ describe("SV1 — currentGoal server-side validation", () => {
 });
 
 // ─── SV2: stylePersonalities validation ──────────────────────────────────────
+// Retired at Rev 7 (superseded by styleDirections) but still accepted by the save
+// API so legacy stored values round-trip. See rev7.test.ts for the Rev 7 contract.
 
-describe("SV2 — stylePersonalities server-side validation", () => {
+describe("SV2 — stylePersonalities server-side validation (legacy)", () => {
   it("max 2 (Rev 6 lowers from 3)", () => {
     assert.equal(STYLE_PERSONALITY_MAX, 2);
   });
@@ -131,7 +143,7 @@ describe("SV2 — stylePersonalities server-side validation", () => {
   });
 
   it("quiz screen style-personalities V3 IDs match server constants", () => {
-    const q = quizQuestions.find(q => q.id === "style-personalities")!;
+    const q = ALL_QUESTIONS.find(q => q.id === "style-personalities")!;
     for (const opt of q.options ?? []) {
       assert.ok(STYLE_PERSONALITY_VALID_IDS.has(opt.id),
         `Quiz V3 option '${opt.id}' not in server STYLE_PERSONALITY_VALID_IDS`);
@@ -146,8 +158,8 @@ describe("SV3 — successfulOutfitGives server-side validation", () => {
     assert.equal(SUCCESSFUL_OUTFIT_GIVES_MAX, 3);
   });
 
-  it("all 9 approved IDs present", () => {
-    assert.equal(SUCCESSFUL_OUTFIT_GIVES_VALID_IDS.size, 9);
+  it("all 10 approved IDs present (Rev 7 adds feel-distinctive)", () => {
+    assert.equal(SUCCESSFUL_OUTFIT_GIVES_VALID_IDS.size, 10);
   });
 
   it("quiz screen IDs match server constants", () => {
@@ -162,8 +174,8 @@ describe("SV3 — successfulOutfitGives server-side validation", () => {
 // ─── SV4: lifestyle validation ────────────────────────────────────────────────
 
 describe("SV4 — lifestyle server-side validation", () => {
-  it("max 3", () => {
-    assert.equal(LIFESTYLE_MAX, 3);
+  it("Rev 7 removes the selection cap", () => {
+    assert.equal(LIFESTYLE_MAX, null);
   });
 
   it("all 7 V3 IDs accepted", () => {
@@ -185,8 +197,8 @@ describe("SV4 — lifestyle server-side validation", () => {
 // ─── SV5: silhouette validation ───────────────────────────────────────────────
 
 describe("SV5 — silhouette server-side validation", () => {
-  it("max 3 (Rev 6 raises from 2)", () => {
-    assert.equal(SILHOUETTE_MAX, 3);
+  it("max 4 (Rev 7 raises from 3)", () => {
+    assert.equal(SILHOUETTE_MAX, 4);
   });
 
   it("all 8 V3 IDs accepted (including not-sure)", () => {
@@ -213,16 +225,16 @@ describe("SV6 — color field limits", () => {
     assert.equal(FAVOURITE_COLORS_MAX, 5);
   });
 
-  it("avoidColors max 5", () => {
-    assert.equal(AVOID_COLORS_MAX, 5);
+  it("avoidColors is uncapped at Rev 7", () => {
+    assert.equal(AVOID_COLORS_MAX, null);
   });
 });
 
 // ─── SV7: fitConcerns validation ──────────────────────────────────────────────
 
 describe("SV7 — fitConcerns server-side validation", () => {
-  it("max 5 normal selections", () => {
-    assert.equal(FIT_CONCERN_MAX_NORMAL, 5);
+  it("uncapped at Rev 7 — IDs are validated, count is not", () => {
+    assert.equal(FIT_CONCERN_MAX_NORMAL, null);
   });
 
   it("no-fit-problems is the exclusive ID", () => {
@@ -234,17 +246,17 @@ describe("SV7 — fitConcerns server-side validation", () => {
     assert.ok(!FIT_CONCERN_EXCLUSIVE_IDS.has("other"));
   });
 
-  it("quiz fitConcerns max is 5", () => {
+  it("quiz fitConcerns carries no numeric cap", () => {
     const q = quizQuestions.find(q => q.id === "fit-concerns")!;
-    assert.equal(q.maxSelections, 5);
+    assert.equal(q.maxSelections, undefined);
   });
 });
 
 // ─── SV8: dressingPreferences validation ──────────────────────────────────────
 
 describe("SV8 — dressingPreferences server-side validation", () => {
-  it("approved set has exactly 15 IDs", () => {
-    assert.equal(DRESSING_PREF_VALID_IDS.size, 15);
+  it("approved set has exactly 18 IDs at Rev 7", () => {
+    assert.equal(DRESSING_PREF_VALID_IDS.size, 18);
   });
 
   it("quiz screen IDs match server approved set exactly", () => {
@@ -618,8 +630,8 @@ describe("SV14 — New Rev 6 fields present in quiz", () => {
     assert.equal(quizQuestions[0].id, "current-goal");
   });
 
-  it("successful-outfit-gives screen exists at position 3", () => {
-    assert.equal(quizQuestions[2].id, "successful-outfit-gives");
+  it("successful-outfit-gives screen exists at position 2 (Rev 7 order)", () => {
+    assert.equal(quizQuestions[1].id, "successful-outfit-gives");
   });
 
   it("fit-concerns screen has noteField for fitConcernsNote", () => {
@@ -628,8 +640,8 @@ describe("SV14 — New Rev 6 fields present in quiz", () => {
     assert.equal(q.noteField?.maxLength, 500);
   });
 
-  it("dressing-preferences screen exists at position 8", () => {
-    assert.equal(quizQuestions[7].id, "dressing-preferences");
+  it("dressing-preferences screen exists at position 10 (Rev 7 order)", () => {
+    assert.equal(quizQuestions[9].id, "dressing-preferences");
   });
 });
 

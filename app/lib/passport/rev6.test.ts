@@ -4,8 +4,9 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
-import { quizQuestions, getTotalSteps, getGroupLabel, JOURNEY_GROUPS, NOTES_HELPER_TEXT } from "../onboarding/quiz-data.js";
+import { quizQuestions, LEGACY_QUESTIONS, getTotalSteps, getGroupLabel, JOURNEY_GROUPS, NOTES_HELPER_TEXT } from "../onboarding/quiz-data.js";
 import { buildProfileSignals } from "../ai/styleme-result.server.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -23,27 +24,31 @@ function optionIds(id: string): string[] {
 
 // ─── R1: Screen count ─────────────────────────────────────────────────────────
 
-describe("R1 — Rev 6 onboarding has exactly 8 screens", () => {
-  it("getTotalSteps() returns 8", () => {
-    assert.equal(getTotalSteps(), 8);
+// Rev 7 extends the flow to 11 screens (avoid-colors rides on the colour screen).
+describe("R1 — onboarding has exactly 11 screens", () => {
+  it("getTotalSteps() returns 11", () => {
+    assert.equal(getTotalSteps(), 11);
   });
-  it("quizQuestions array has 8 entries", () => {
-    assert.equal(quizQuestions.length, 8);
+  it("quizQuestions array has 11 entries", () => {
+    assert.equal(quizQuestions.length, 11);
   });
 });
 
 // ─── R2: Screen order ─────────────────────────────────────────────────────────
 
-describe("R2 — Screen order matches Rev 6 spec", () => {
+describe("R2 — Screen order matches Rev 7 spec", () => {
   const expectedOrder = [
     "current-goal",
-    "style-personalities",
     "successful-outfit-gives",
+    "style-expression",
+    "exploration-level",
+    "style-directions",
     "lifestyle",
     "favorite-colors",
     "silhouette",
     "fit-concerns",
     "dressing-preferences",
+    "dressing-habits",
   ];
   expectedOrder.forEach((id, idx) => {
     it(`screen ${idx + 1} is ${id}`, () => {
@@ -83,7 +88,9 @@ describe("R4 — finalNotes absent from first onboarding", () => {
 
 // ─── R5: V3 style personality IDs ────────────────────────────────────────────
 
-describe("R5 — Style personalities screen has V3 IDs", () => {
+// Retired at Rev 7 — superseded by style-directions. The question and its V3
+// archetype IDs are preserved in LEGACY_QUESTIONS so stored answers still resolve.
+describe("R5 — Style personalities retired but preserved", () => {
   const v3Ids = [
     "classic-polished",
     "feminine-romantic",
@@ -91,14 +98,18 @@ describe("R5 — Style personalities screen has V3 IDs", () => {
     "bold-edgy",
     "creative-expressive",
   ];
-  it("all 5 V3 archetype IDs present", () => {
-    const ids = optionIds("style-personalities");
+  it("no longer part of the live onboarding flow", () => {
+    assert.ok(!quizQuestions.some(q => q.id === "style-personalities"));
+  });
+  it("all 5 V3 archetype IDs are preserved in LEGACY_QUESTIONS", () => {
+    const legacy = LEGACY_QUESTIONS.find(q => q.id === "style-personalities")!;
+    const ids = (legacy.options ?? []).map(o => o.id);
     for (const id of v3Ids) {
       assert.ok(ids.includes(id), `Missing V3 ID: ${id}`);
     }
   });
-  it("max selections = 2", () => {
-    assert.equal(getScreen("style-personalities").maxSelections, 2);
+  it("style-directions replaces it at max 3", () => {
+    assert.equal(getScreen("style-directions").maxSelections, 3);
   });
 });
 
@@ -120,8 +131,8 @@ describe("R6 — Lifestyle screen has V3 IDs", () => {
       assert.ok(ids.includes(id), `Missing V3 lifestyle ID: ${id}`);
     }
   });
-  it("max selections = 3", () => {
-    assert.equal(getScreen("lifestyle").maxSelections, 3);
+  it("Rev 7 removes the lifestyle selection cap", () => {
+    assert.equal(getScreen("lifestyle").maxSelections, undefined);
   });
 });
 
@@ -144,8 +155,8 @@ describe("R7 — Silhouette screen has V3 IDs", () => {
       assert.ok(ids.includes(id), `Missing V3 silhouette ID: ${id}`);
     }
   });
-  it("max selections = 3", () => {
-    assert.equal(getScreen("silhouette").maxSelections, 3);
+  it("max selections = 4 (Rev 7 raises from 3)", () => {
+    assert.equal(getScreen("silhouette").maxSelections, 4);
   });
 });
 
@@ -207,9 +218,9 @@ describe("R12 — other triggers fit-concerns-note noteField", () => {
 
 // ─── R13: fitConcerns normal cap = 5 ─────────────────────────────────────────
 
-describe("R13 — fit-concerns max normal selections = 5", () => {
+describe("R13 — fit-concerns is uncapped at Rev 7", () => {
   it("maxSelections = 5", () => {
-    assert.equal(getScreen("fit-concerns").maxSelections, 5);
+    assert.equal(getScreen("fit-concerns").maxSelections, undefined);
   });
   it("no-fit-problems and other are in the options", () => {
     const ids = optionIds("fit-concerns");
@@ -327,11 +338,24 @@ describe("R20 — successfulOutfitGives has not-sure as an option", () => {
 
 // ─── R21: No sheer/transparency in dressing-preferences ──────────────────────
 
-describe("R21 — sheer / transparency NOT in dressing-preferences", () => {
-  it("no sheer-related ID present", () => {
-    const ids = optionIds("dressing-preferences");
-    const forbidden = ids.filter(id => id.includes("sheer") || id.includes("transparent"));
-    assert.deepEqual(forbidden, []);
+// Rev 7 introduces avoid-sheer, but as a RESERVED option: it is stored and validated
+// so no answer is lost, and never offered in the UI, because no opacity metadata
+// exists to enforce it. The original guarantee — nAia never claims to respect a
+// sheerness rule it cannot honour — is preserved by the reserved flag.
+describe("R21 — sheer / transparency is never OFFERED in dressing-preferences", () => {
+  it("every sheer-related option is flagged reserved", () => {
+    const opts = (getScreen("dressing-preferences").options ?? [])
+      .filter(o => o.id.includes("sheer") || o.id.includes("transparent"));
+    for (const o of opts) {
+      assert.equal(o.reserved, true, `${o.id} must be reserved until opacity metadata exists`);
+    }
+  });
+  it("no sheer-related option is selectable in the production UI", () => {
+    const offered = (getScreen("dressing-preferences").options ?? [])
+      .filter(o => !o.reserved)
+      .map(o => o.id)
+      .filter(id => id.includes("sheer") || id.includes("transparent"));
+    assert.deepEqual(offered, []);
   });
 });
 
@@ -359,13 +383,12 @@ describe("R23 — straight-simple is a valid quiz option in silhouette", () => {
 // ─── R24: Screen 5 (favorite-colors) has a secondaryQuestion for avoid-colors ─
 
 describe("R24 — favorite-colors screen includes avoid-colors secondary question", () => {
-  it("screen 5 has secondaryQuestion", () => {
-    const q = quizQuestions[4];
-    assert.ok(q.secondaryQuestion, "favorite-colors screen missing secondaryQuestion");
+  it("the colour screen has a secondaryQuestion", () => {
+    assert.ok(getScreen("favorite-colors").secondaryQuestion,
+      "favorite-colors screen missing secondaryQuestion");
   });
   it("secondaryQuestion.id = 'avoid-colors'", () => {
-    const q = quizQuestions[4];
-    assert.equal(q.secondaryQuestion?.id, "avoid-colors");
+    assert.equal(getScreen("favorite-colors").secondaryQuestion?.id, "avoid-colors");
   });
 });
 
@@ -385,8 +408,8 @@ describe("R25 — steps 1–3 group label is WHAT MATTERS TO YOU", () => {
 
 // ─── R26 (check D): questions 4–6 belong to "YOUR STYLE IN REAL LIFE" ─────────
 
-describe("R26 — steps 4–6 group label is YOUR STYLE IN REAL LIFE", () => {
-  [4, 5, 6].forEach(step => {
+describe("R26 — steps 5–8 group label is YOUR STYLE IN REAL LIFE", () => {
+  [5, 6, 7, 8].forEach(step => {
     it(`getGroupLabel(${step}) = "YOUR STYLE IN REAL LIFE"`, () => {
       assert.equal(getGroupLabel(step), "YOUR STYLE IN REAL LIFE");
     });
@@ -395,8 +418,8 @@ describe("R26 — steps 4–6 group label is YOUR STYLE IN REAL LIFE", () => {
 
 // ─── R27 (check E): questions 7–8 belong to "WHAT NAIA SHOULD RESPECT" ────────
 
-describe("R27 — steps 7–8 group label is WHAT NAIA SHOULD RESPECT", () => {
-  [7, 8].forEach(step => {
+describe("R27 — steps 9–11 group label is WHAT NAIA SHOULD RESPECT", () => {
+  [9, 10, 11].forEach(step => {
     it(`getGroupLabel(${step}) = "WHAT NAIA SHOULD RESPECT"`, () => {
       assert.equal(getGroupLabel(step), "WHAT NAIA SHOULD RESPECT");
     });
@@ -405,14 +428,14 @@ describe("R27 — steps 7–8 group label is WHAT NAIA SHOULD RESPECT", () => {
 
 // ─── R28 (checks F + G): groups cover all 8 steps exactly once; no extra screens ─
 
-describe("R28 — JOURNEY_GROUPS covers all 8 steps exactly once, no extras", () => {
-  it("JOURNEY_GROUPS spans exactly 8 total step slots", () => {
+describe("R28 — JOURNEY_GROUPS covers all 11 steps exactly once, no extras", () => {
+  it("JOURNEY_GROUPS spans exactly 11 total step slots", () => {
     const allSteps = JOURNEY_GROUPS.flatMap(g => [...g.steps]);
-    assert.equal(allSteps.length, 8);
+    assert.equal(allSteps.length, 11);
   });
 
-  it("every step 1–8 appears in exactly one group", () => {
-    for (let s = 1; s <= 8; s++) {
+  it("every step 1–11 appears in exactly one group", () => {
+    for (let s = 1; s <= 11; s++) {
       const matches = JOURNEY_GROUPS.filter(g => (g.steps as readonly number[]).includes(s));
       assert.equal(matches.length, 1, `step ${s} belongs to ${matches.length} groups`);
     }
@@ -423,14 +446,14 @@ describe("R28 — JOURNEY_GROUPS covers all 8 steps exactly once, no extras", ()
     assert.equal(getTotalSteps(), allSteps.length);
   });
 
-  it("quizQuestions.length is still 8 (no extra screens injected)", () => {
-    assert.equal(quizQuestions.length, 8);
+  it("quizQuestions.length is still 11 (no extra screens injected)", () => {
+    assert.equal(quizQuestions.length, 11);
   });
 });
 
 // ─── R29 (check H): Rev 6 draft keys present — persistence architecture unchanged
 
-describe("R29 — Rev 6 draft keys still present in quiz data", () => {
+describe("R29 — Rev 6 draft keys still resolvable (live flow or legacy registry)", () => {
   const rev6DraftKeys = [
     "current-goal",
     "style-personalities",
@@ -446,7 +469,10 @@ describe("R29 — Rev 6 draft keys still present in quiz data", () => {
     it(`question id or secondaryQuestion id "${key}" exists`, () => {
       const inPrimary   = quizQuestions.some(q => q.id === key);
       const inSecondary = quizQuestions.some(q => q.secondaryQuestion?.id === key);
-      assert.ok(inPrimary || inSecondary, `Draft key missing: ${key}`);
+      // Retired questions stay resolvable via LEGACY_QUESTIONS so a stored answer
+      // never degrades to a title-cased slug.
+      const inLegacy    = LEGACY_QUESTIONS.some(q => q.id === key);
+      assert.ok(inPrimary || inSecondary || inLegacy, `Draft key missing: ${key}`);
     });
   }
 });
@@ -482,16 +508,31 @@ describe("R31 — NOTES_HELPER_TEXT contains approved direction", () => {
   });
 });
 
-// ─── R32 (check L): buildProfileSignals does not include currentGoal field ──────
+// ─── R32 (check L): currentGoal is context, never a scoring field ─────────────
+// The original assertion ("no currentGoal key at all") went stale when currentGoal
+// was deliberately surfaced to the prompt layer as mutable context. The contract
+// that actually matters — it must never earn an item a score — is asserted here.
 
-describe("R32 — buildProfileSignals does not output a currentGoal scoring field", () => {
-  it("result has no currentGoal key", () => {
+describe("R32 — currentGoal reaches the prompt as context but never scores", () => {
+  it("currentGoal is carried through as context", () => {
     const signals = buildProfileSignals({
       currentGoal: ["understand-my-style", "use-what-i-own"],
       stylePersonalities: ["classic-polished"],
     });
-    assert.ok(signals !== undefined && signals !== null, "signals should be defined");
-    assert.ok(!("currentGoal" in (signals as object)), "currentGoal must not appear in scoring signals");
+    assert.ok(signals, "signals should be defined");
+    assert.deepEqual(signals!.currentGoal, ["understand-my-style", "use-what-i-own"]);
+  });
+
+  it("currentGoal carries no scoring weight in the recommendation engine", () => {
+    const engine = readFileSync("app/lib/ai/styleme-recommendation.ts", "utf8");
+    const scoring = engine.slice(engine.indexOf("function scoreProduct"));
+    assert.ok(!scoring.includes("currentGoal"),
+      "currentGoal must not participate in product scoring");
+  });
+
+  it("the StyleMe prompt labels it explicitly as context only", () => {
+    const result = readFileSync("app/lib/ai/styleme-result.server.ts", "utf8");
+    assert.ok(result.includes("Current style focus (context only)"));
   });
 });
 
@@ -504,9 +545,9 @@ describe("R32 — buildProfileSignals does not output a currentGoal scoring fiel
 describe("R33 — progress area and eyebrow carry distinct information", () => {
   const total = getTotalSteps();
 
-  it("progress label for step 2 is '2 OF 8' (absolute position only)", () => {
+  it("progress label for step 2 is '2 OF 11' (absolute position only)", () => {
     const label = `${2} OF ${total}`;
-    assert.equal(label, "2 OF 8");
+    assert.equal(label, "2 OF 11");
   });
 
   it("progress label for step 2 does NOT contain the journey-group label", () => {

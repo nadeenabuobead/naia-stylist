@@ -1,0 +1,10 @@
+# In-progress features — not yet ready for staging deployment
+app/routes/closet.intelligence.tsx
+app/lib/ai/wardrobe-intelligence.ts
+app/lib/ai/wardrobe-intelligence.server.ts
+app/lib/ai/wardrobe-intelligence.test.ts
+scripts/wardrobe-intelligence-qa.mts
+
+# Local diagnostic / query scripts (now collected under scripts/adhoc/)
+scripts/adhoc/
+wardrobe-intelligence-qa-report.txt

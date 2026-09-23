@@ -12,6 +12,8 @@ import {
   buildPrivateDownloadUrl,
 } from "~/lib/cloudinary-admin.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
+import { ALL_OPTION_LABELS } from "~/lib/onboarding/quiz-data";
+import { REV7_PROFILE_VERSION } from "~/lib/passport/rev7-vocabulary";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 export const links: LinksFunction = () => [
@@ -64,6 +66,56 @@ const STYLE_PERSONALITY_LABELS: Record<string, string> = {
   "creative-expressive": "Creative & Expressive",
 };
 
+// Rev 7 canonical style field — supersedes stylePersonalities.
+const STYLE_DIRECTION_LABELS: Record<string, string> = {
+  "polished-refined":    "Polished & Refined",
+  "clean-minimal":       "Clean & Minimal",
+  "relaxed-easy":        "Relaxed & Easy",
+  "bold-statement":      "Bold & Statement",
+  "creative-individual": "Creative & Individual",
+  "soft-romantic":       "Soft & Romantic",
+  "street-contemporary": "Street & Contemporary",
+  "sporty-functional":   "Sporty & Functional",
+};
+
+const EXPLORATION_LEVEL_LABELS: Record<string, string> = {
+  "stay-familiar":         "close to what I already wear",
+  "familiar-small-twists": "familiar, with small twists",
+  "balanced":              "a balance of familiar and new",
+  "push-beyond":           "beyond my usual choices",
+  "depends-on-occasion":   "depends on the occasion",
+};
+
+const DRESSING_HABIT_LABELS: Record<string, string> = {
+  "repeat-same-outfits":      "repeats the same outfits",
+  "struggle-to-combine":      "struggles to put outfits together",
+  "nothing-to-wear":          "often feels like nothing to wear",
+  "overthink":                "overthinks what to wear",
+  "know-what-i-want":         "usually knows exactly what to wear",
+  "play-it-safe":             "tends to play it safe",
+  "enjoy-experimenting":      "enjoys experimenting",
+  "mood-led":                 "dresses by mood",
+  "comfort-first":            "builds the outfit around comfort",
+  "want-it-easier":           "wants getting dressed to feel easier",
+  "buy-but-cant-style":       "buys pieces that are hard to style",
+  "save-inspo-cant-recreate": "saves inspiration that's hard to recreate",
+};
+
+const STYLE_EXPRESSION_LABELS: Record<string, string> = {
+  "quiet-confidence": "Quiet confidence",
+  "polished":         "Polished",
+  "effortless":       "Effortless",
+  "bold":             "Bold",
+  "creative":         "Creative",
+  "sophisticated":    "Sophisticated",
+  "relaxed":          "Relaxed",
+  "powerful":         "Powerful",
+  "playful":          "Playful",
+  "individual":       "Individual",
+  "understated":      "Understated",
+  "unexpected":       "Unexpected",
+};
+
 const CURRENT_GOAL_LABELS: Record<string, string> = {
   "understand-my-style":       "Understand my personal style",
   "feel-more-like-myself":     "Feel more like myself in what I wear",
@@ -73,7 +125,7 @@ const CURRENT_GOAL_LABELS: Record<string, string> = {
   "more-cohesive-wardrobe":    "Build a more cohesive wardrobe",
   "dress-for-my-life":         "Dress better for my actual life",
   "refresh-my-style":          "Refresh my style",
-  "specific-event-trip-change":"Dress for a specific event or change",
+  "specific-event-trip-change":"Dress for a specific event or life change",
 };
 
 const SILHOUETTE_LABELS: Record<string, string> = {
@@ -86,6 +138,10 @@ const SILHOUETTE_LABELS: Record<string, string> = {
   "tapered":              "Tapered",
   "loose-flowing":        "Loose / Wide",
   "structured-tailored":  "Structured / Tailored",
+  // Rev 7 additions
+  "longline":             "Longline",
+  "cropped-fit":          "Cropped",
+  "mixing-fits":          "A mix of fits",
 };
 
 const OUTFIT_GIVES_LABELS: Record<string, string> = {
@@ -97,70 +153,138 @@ const OUTFIT_GIVES_LABELS: Record<string, string> = {
   "feel-attractive":     "I feel attractive",
   "sense-of-power":      "A sense of power",
   "effortlessness":      "Effortlessness",
+  "feel-distinctive":    "I feel distinctive",
 };
 
 const LIFESTYLE_LABELS: Record<string, string> = {
   "work-office":               "Work / Office",
-  "everyday-casual":           "Everyday Casual",
+  "everyday-casual":           "Everyday / Casual",
   "dinners-going-out":         "Dinners & Going Out",
   "events-special-occasions":  "Events & Special Occasions",
-  "family-parenting":          "Family & Parenting",
+  "family-parenting":          "Family / Caregiving",
   "travel":                    "Travel",
-  "active-busy-days":          "Active & Busy Days",
+  "active-busy-days":          "Busy / Errand Days",
+  // Rev 7 additions
+  "study-university":          "Study / University",
+  "fitness-gym":               "Fitness / Gym / Pilates",
+  "creative-flexible-work":    "Creative / Flexible Work",
+  "mostly-at-home":            "Mostly at Home",
+  "other-lifestyle":           "Other",
 };
 
 function humanizeId(id: string): string {
   return id.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
 
+// Local maps hold the dashboard's short display copy; ALL_OPTION_LABELS is the
+// canonical fallback so a stored ID from ANY Passport revision still resolves to
+// real copy. humanizeId is the last resort and should never be reached in practice.
 function labelFrom(map: Record<string, string>, id: string): string {
-  return map[id] ?? humanizeId(id);
+  return map[id] ?? ALL_OPTION_LABELS[id] ?? humanizeId(id);
 }
 
+/** Joins a list for display, naming the first `shown` and counting the rest. */
+function joinCapped(labels: string[], shown: number): string {
+  if (labels.length <= shown) return labels.join(" · ");
+  return `${labels.slice(0, shown).join(" · ")} +${labels.length - shown} more`;
+}
+
+// Concise Passport snapshot for the dashboard. One card, label/value rows, in a
+// fixed priority order — the full answer set lives on /passport, not here.
+// Rev 7 fields lead; legacy fields fill in for customers who have not answered them.
 function PassportSnapshot({ profile }: { profile: Record<string, unknown> }) {
   const signals: Array<{ label: string; value: string }> = [];
+  const arr = (k: string, drop: string[] = []) =>
+    ((profile[k] as string[] | undefined) ?? []).filter(v => !drop.includes(v));
+  const str = (k: string) => (profile[k] as string | undefined) ?? "";
 
-  const personalities = (profile.stylePersonalities as string[] | undefined) ?? [];
-  const validPersonalities = personalities.filter(p => p !== "not-sure");
-  if (validPersonalities.length > 0) {
-    signals.push({ label: "Style direction", value: validPersonalities.map(p => labelFrom(STYLE_PERSONALITY_LABELS, p)).join(" · ") });
+  // 1. Style direction — Rev 7 styleDirections supersedes the legacy row.
+  const directions = arr("styleDirections", ["not-sure"]);
+  if (directions.length > 0) {
+    signals.push({ label: "Style direction", value: joinCapped(directions.map(d => labelFrom(STYLE_DIRECTION_LABELS, d)), 3) });
+  } else {
+    const personalities = arr("stylePersonalities", ["not-sure"]);
+    if (personalities.length > 0) {
+      signals.push({ label: "Style direction", value: joinCapped(personalities.map(p => labelFrom(STYLE_PERSONALITY_LABELS, p)), 3) });
+    }
   }
 
-  const goals = (profile.currentGoal as string[] | undefined) ?? [];
-  const validGoals = goals.filter(g => g !== "not-sure-yet");
-  if (validGoals.length > 0) {
-    const first = validGoals[0];
-    const label = CURRENT_GOAL_LABELS[first] ?? humanizeId(first);
+  // 2. Style expression — what they want their clothes to communicate.
+  const expression = arr("styleExpression", ["not-sure"]);
+  if (expression.length > 0) {
+    signals.push({ label: "Style says", value: joinCapped(expression.map(e => labelFrom(STYLE_EXPRESSION_LABELS, e)), 3) });
+  }
+
+  // 3. Exploration level — how far nAia should push.
+  const exploration = str("explorationLevel");
+  if (exploration && exploration !== "not-sure") {
+    signals.push({ label: "Push my style", value: labelFrom(EXPLORATION_LEVEL_LABELS, exploration) });
+  }
+
+  // 4. Current focus — mutable context.
+  const goals = arr("currentGoal", ["not-sure-yet"]);
+  if (goals.length > 0) {
+    const label = labelFrom(CURRENT_GOAL_LABELS, goals[0]);
     signals.push({ label: "Right now", value: label.charAt(0).toLowerCase() + label.slice(1) });
   }
 
-  const gives = (profile.successfulOutfitGives as string[] | undefined) ?? [];
-  const validGives = gives.filter(g => g !== "not-sure").slice(0, 2);
-  if (validGives.length > 0) {
-    signals.push({ label: "Great outfit gives", value: validGives.map(g => labelFrom(OUTFIT_GIVES_LABELS, g)).join(" · ") });
+  // 5. Outfit priorities.
+  const gives = arr("successfulOutfitGives", ["not-sure"]);
+  if (gives.length > 0) {
+    signals.push({ label: "Great outfit gives", value: joinCapped(gives.map(g => labelFrom(OUTFIT_GIVES_LABELS, g)), 2) });
   }
 
-  const colours = (profile.favoriteColors as string[] | undefined) ?? [];
+  // 6. Lifestyle — Rev 7 removed the 3-selection cap, so every stored context is
+  // represented; the row names the first few and counts the rest.
+  const lifestyle = arr("lifestyle");
+  if (lifestyle.length > 0) {
+    signals.push({ label: "Dresses for", value: joinCapped(lifestyle.map(l => labelFrom(LIFESTYLE_LABELS, l)), 4) });
+  }
+
+  // 7. Shape & fit.
+  const silhouettes = arr("silhouette", ["not-sure"]);
+  if (silhouettes.length > 0) {
+    signals.push({ label: "Shape & fit", value: joinCapped(silhouettes.map(sl => labelFrom(SILHOUETTE_LABELS, sl)), 3) });
+  }
+
+  // 8. Favourite colours — resolved to names, never raw IDs.
+  const colours = arr("favoriteColors", ["no-colour-preference"]);
   if (colours.length > 0) {
-    signals.push({ label: "Favourite colours", value: colours.slice(0, 4).join(", ") });
+    signals.push({ label: "Favourite colours", value: joinCapped(colours.map(c => labelFrom({}, c)), 4) });
   }
 
-  const silhouettes = (profile.silhouette as string[] | undefined) ?? [];
-  const validSilhouettes = silhouettes.filter(s => s !== "not-sure");
-  if (validSilhouettes.length > 0) {
-    signals.push({ label: "Fit direction", value: validSilhouettes.slice(0, 2).map(s => labelFrom(SILHOUETTE_LABELS, s)).join(" · ") });
+  // 9. Dressing habits — behavioural context.
+  const habits = arr("dressingHabits", ["none-of-these"]);
+  if (habits.length > 0) {
+    signals.push({ label: "Getting dressed", value: joinCapped(habits.map(h => labelFrom(DRESSING_HABIT_LABELS, h)), 2) });
   }
 
-  const lifestyle = (profile.lifestyle as string[] | undefined) ?? [];
-  if (lifestyle.length > 0 && signals.length < 5) {
-    signals.push({ label: "Dresses for", value: lifestyle.slice(0, 3).map(l => labelFrom(LIFESTYLE_LABELS, l)).join(", ") });
+  // 10. Dressing requirements — constraints nAia always respects. Kept last but
+  // never truncated away: it is the only row that is a requirement, not a taste.
+  const requirements = arr("dressingPreferences", ["no-dressing-requirements"]);
+  const hasRequirementNote = !!str("dressingRequirementsNote").trim();
+  if (requirements.length > 0) {
+    const named = requirements
+      .filter(r => r !== "other-cultural-religious")
+      .map(r => labelFrom({}, r));
+    const extra = hasRequirementNote || requirements.includes("other-cultural-religious")
+      ? ["a requirement you described"] : [];
+    signals.push({ label: "Always respects", value: joinCapped([...named, ...extra], 3) });
   }
 
   if (signals.length === 0) return null;
 
+  // The dashboard stays a snapshot, not the full Passport: rows are capped in the
+  // priority order above. "Always respects" is pinned because it is a constraint
+  // nAia must honour, not a taste that can be summarised away.
+  const MAX_ROWS = 7;
+  const requirementRow = signals.find(x => x.label === "Always respects");
+  const shown = signals.filter(x => x !== requirementRow).slice(0, requirementRow ? MAX_ROWS - 1 : MAX_ROWS);
+  const rows = requirementRow ? [...shown, requirementRow] : shown;
+
   return (
     <ul style={{ listStyle: "none", padding: 0, margin: "0 0 1.25rem", borderTop: "1px solid var(--fg-12)" }}>
-      {signals.slice(0, 5).map(s => (
+      {rows.map(s => (
         <li key={s.label} style={{ display: "flex", gap: "1rem", padding: "0.875rem 0", borderBottom: "1px solid var(--fg-12)" }}>
           <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg-55)", width: "8rem", flexShrink: 0, paddingTop: "0.125rem" }}>
             {s.label}
@@ -302,18 +426,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 
   const p = customer.onboardingProfile;
-  // VIEW only when profileVersion=6 (atomically set on Rev 6 onboarding/refresh completion).
+  const profileVersion: number | null = (p as any)?.profileVersion ?? null;
+  // VIEW when a confirmed Passport generation is stamped (6 = Rev 6, 7 = Rev 7 —
+  // both set atomically on onboarding/refresh completion).
   // Legacy customers (completed=true, profileVersion=null) → CONTINUE (need refresh).
   const passportState: "start" | "continue" | "view" =
     !p ? "start"
-    : (p as any).profileVersion === 6 ? "view"
+    : (profileVersion !== null && profileVersion >= 6) ? "view"
     : "continue";
+
+  // A Rev 6 Passport is complete for its own generation but has not answered the
+  // Rev 7 questions. Those fields are optional in the editor, so the Passport is
+  // never marked incomplete — the customer is invited to add them instead.
+  const missingRev7Answers =
+    profileVersion !== null &&
+    profileVersion < REV7_PROFILE_VERSION &&
+    ((p as any)?.styleDirections?.length ?? 0) === 0;
 
   return {
     firstName: customer.firstName ?? null,
     profile: p,
     sessions: sessionsWithThumb, trendReport, buyOrSkipHistory, reviewCount, closetCount,
     passportState,
+    missingRev7Answers,
     strongestTendency: strongestTendency ?? null,
     hasCandidates: candidateCount > 0,
     entitlement,
@@ -337,7 +472,7 @@ function buildOverviewPlanCards(e: EntitlementSummary): { label: string; value: 
 }
 
 export default function MyNaiaOverview() {
-  const { firstName, profile, sessions, trendReport, buyOrSkipHistory, reviewCount, closetCount, passportState, strongestTendency, hasCandidates, entitlement } =
+  const { firstName, profile, sessions, trendReport, buyOrSkipHistory, reviewCount, closetCount, passportState, missingRev7Answers, strongestTendency, hasCandidates, entitlement } =
     useLoaderData<typeof loader>();
 
   const quote = getDailyQuote();
@@ -347,6 +482,14 @@ export default function MyNaiaOverview() {
     attentionItems.push({ title: "Your Style Passport is incomplete", note: "A few details are still missing to refine your styling direction.", cta: "Continue", to: "/passport" });
   } else if (!(profile as any).completed) {
     attentionItems.push({ title: "Your Style Passport is incomplete", note: "A few more answers help nAia refine its recommendations.", cta: "Continue", to: "/passport" });
+  } else if (missingRev7Answers) {
+    // Not "incomplete" — their Passport is complete for the generation they answered.
+    attentionItems.push({
+      title: "New Style Passport questions",
+      note: "There are a few new questions about your style direction, what you want it to say, and how far nAia should push you.",
+      cta: "Add Answers",
+      to: "/passport",
+    });
   }
   if (closetCount === 0) {
     attentionItems.push({ title: "Your closet is empty", note: "Upload pieces so nAia can style you from your own wardrobe.", cta: "Add a Piece", to: "/closet" });
