@@ -301,3 +301,65 @@ export function deriveFacetsFromProse(text: string): TrendFacets {
 
   return facets;
 }
+
+// ── Matchability ──────────────────────────────────────────────────────────────
+//
+// A facet is only matchable if the GARMENT side actually carries a field holding
+// its values. Vocabulary alone is not enough: a facet with no corresponding
+// field would silently match nothing while looking like a working feature.
+//
+// Verified against WardrobeGarment as returned by loadWardrobeIntelligence()
+// (read-only check, 23 Sep 2026 — Wardrobe Intelligence is not modified here).
+
+/** The WardrobeGarment field(s) each matchable facet is compared against. */
+export const FACET_GARMENT_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  category:      ["category", "slot"],
+  subcategory:   ["subcategory"],
+  material:      ["material"],
+  colourFamily:  ["primaryColor", "colors", "colourProfile.hueFamily"],
+  silhouette:    ["silhouette", "fitProfile"],
+  pattern:       ["pattern"],
+  formalityBand: ["formality"],
+  visualWeight:  ["visualWeight"],
+};
+
+/**
+ * NOT matchable in Step 5.
+ *
+ * GarmentStyleMeProfile.construction exists in the database with exactly this
+ * vocabulary, but loadWardrobeIntelligence() does not read it — it takes
+ * visualWeight and intentionPotentials from the curated profile and nothing
+ * else — so WardrobeGarment exposes no construction field for a matcher to
+ * compare against.
+ *
+ * The facet is kept: authoring a trend as construction:["soft"] records what the
+ * trend IS, correctly, and is immediately matchable once Wardrobe Intelligence
+ * surfaces the field. Until then the matcher must skip it rather than infer
+ * construction from visualWeight, silhouette or material — an inferred match
+ * would be a confident claim with nothing behind it.
+ */
+export const NON_MATCHABLE_FACET_KINDS: ReadonlySet<FacetKind> = new Set(["construction"]);
+
+export const NON_MATCHABLE_REASONS: Readonly<Partial<Record<FacetKind, string>>> = {
+  construction:
+    "WardrobeGarment exposes no construction field. GarmentStyleMeProfile.construction " +
+    "is stored but loadWardrobeIntelligence() does not resolve it. Matchable once " +
+    "Wardrobe Intelligence surfaces it; must not be inferred from another field.",
+};
+
+export function isMatchableFacetKind(kind: FacetKind): boolean {
+  return !NON_MATCHABLE_FACET_KINDS.has(kind);
+}
+
+/** The facet kinds the Step 5 matcher may read. */
+export const MATCHABLE_FACET_KINDS: readonly FacetKind[] = FACET_KINDS.filter(isMatchableFacetKind);
+
+/** Strips non-matchable kinds. The matcher must take its input through this. */
+export function matchableFacets(facets: TrendFacets | null | undefined): TrendFacets {
+  if (!facets) return {};
+  const out: TrendFacets = {};
+  for (const kind of MATCHABLE_FACET_KINDS) {
+    if (facets[kind]?.length) out[kind] = facets[kind];
+  }
+  return out;
+}

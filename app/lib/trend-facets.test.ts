@@ -20,6 +20,11 @@ import {
   makeFacetContentId,
   parseFacetContentId,
   deriveFacetsFromProse,
+  isMatchableFacetKind,
+  matchableFacets,
+  MATCHABLE_FACET_KINDS,
+  NON_MATCHABLE_REASONS,
+  FACET_GARMENT_FIELDS,
   type TrendFacets,
 } from "./trend-facets.ts";
 import { CONSTRUCTION_VALUES } from "./admin/styleme-garment-profile.vocab.ts";
@@ -285,5 +290,52 @@ describe("§TF-6 prose fallback", () => {
 
   it("is case-insensitive and punctuation-tolerant", () => {
     assert.deepEqual(deriveFacetsFromProse("SUEDE — again.").material, ["suede"]);
+  });
+});
+
+// ── §TF-7 matchability ───────────────────────────────────────────────────────
+//
+// A facet with no garment-side field would match nothing while looking like a
+// working feature. These tests pin which facets Step 5 is allowed to read.
+
+describe("§TF-7 matchability", () => {
+  it("construction is NOT matchable — WardrobeGarment exposes no such field", () => {
+    assert.equal(isMatchableFacetKind("construction"), false);
+    assert.ok(NON_MATCHABLE_REASONS.construction?.includes("WardrobeGarment"));
+  });
+
+  it("every other facet IS matchable", () => {
+    for (const kind of FACET_KINDS) {
+      if (kind === "construction") continue;
+      assert.ok(isMatchableFacetKind(kind), `${kind} should be matchable`);
+    }
+    assert.equal(MATCHABLE_FACET_KINDS.length, FACET_KINDS.length - 1);
+  });
+
+  it("every matchable facet names the garment field it compares against", () => {
+    for (const kind of MATCHABLE_FACET_KINDS) {
+      assert.ok(FACET_GARMENT_FIELDS[kind]?.length > 0, `${kind} has no garment field`);
+    }
+  });
+
+  it("matchableFacets strips construction but keeps the rest intact", () => {
+    const authored = validateFacets({
+      category: ["BAGS"], subcategory: ["east-west"], construction: ["soft"],
+    }).facets;
+    // Authoring keeps construction — it records what the trend is.
+    assert.deepEqual(authored.construction, ["soft"]);
+    // Matching does not see it.
+    const forMatching = matchableFacets(authored);
+    assert.equal("construction" in forMatching, false);
+    assert.deepEqual(forMatching, { category: ["BAGS"], subcategory: ["east-west"] });
+  });
+
+  it("a construction-only trend yields nothing to match on, rather than a false match", () => {
+    const facets = validateFacets({ construction: ["soft"] }).facets;
+    assert.ok(isEmptyFacets(matchableFacets(facets)), "must produce no match, not an inferred one");
+  });
+
+  it("handles null", () => {
+    assert.deepEqual(matchableFacets(null), {});
   });
 });
