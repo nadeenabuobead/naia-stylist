@@ -212,6 +212,7 @@ const css = `
   .ob-step-label{font-family:var(--ff-mono);font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--accent);margin-bottom:12px}
   .ob-headline{font-family:var(--ff-display);font-size:clamp(26px,4vw,40px);font-weight:900;font-style:italic;color:var(--deep);letter-spacing:-1px;margin-bottom:8px;line-height:1.1}
   .ob-subtitle{font-family:var(--ff-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:32px}
+  .ob-supporting{font-family:var(--ff-body);font-size:17px;font-style:italic;color:var(--muted);line-height:1.5;margin:-20px 0 32px}
   .ob-section-divider{margin:32px 0 24px;border:none;border-top:1px solid rgba(59,5,16,.08)}
   .ob-section-label{font-family:var(--ff-mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:16px}
   .ob-pills{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:32px}
@@ -455,6 +456,7 @@ export default function OnboardingStep() {
         <div className="ob-step-label">{getGroupLabel(step)}</div>
         <h2 className="ob-headline">{question.title}</h2>
         {question.subtitle && <p className="ob-subtitle">{question.subtitle}</p>}
+        {question.supportingText && <p className="ob-supporting">{question.supportingText}</p>}
 
         {/* MULTI */}
         {question.type === "multi" && question.options && (

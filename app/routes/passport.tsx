@@ -298,7 +298,7 @@ const SECTIONS: SectionDef[] = [
     id: "life",
     label: "Lifestyle",
     question: "Which of these are part of your lifestyle?",
-    helper: "Choose all that are relevant to your life.",
+    helper: "Choose all that regularly apply.",
     subFields: [
       { draftKey: "lifestyle" as DraftKey, apiKey: "lifestyle", subLabel: "My lifestyle", kind: "array" as FieldKind, questionId: "lifestyle" },
       { draftKey: "typical-day" as DraftKey, apiKey: "typicalDay", subLabel: "A typical week", kind: "text" as FieldKind, questionId: "typical-day", hiddenForRev6: true },
@@ -672,7 +672,7 @@ const REFRESH_SCREENS: RefreshScreen[] = [
     screenId: "r-lifestyle",
     label: "Your Life & Dress Codes",
     question: "Which of these are part of your lifestyle?",
-    helper: "Choose all that are relevant to your life.",
+    helper: "Choose all that regularly apply.",
     fields: [
       { draftKey: "lifestyle" as DraftKey, apiKey: "lifestyle", subLabel: "My lifestyle", kind: "array" as FieldKind, questionId: "lifestyle", rev6OnlyFill: true },
     ],
@@ -1250,6 +1250,28 @@ export default function PassportPage() {
 
   const isComplete = missingSections.length === 0;
 
+  // Rev 7 sections a customer may not have answered yet. Derived from the stored
+  // answers rather than from profileVersion, so a Rev 6 customer who has already
+  // filled some of them in the editor is not re-prompted for those.
+  const REV7_SECTION_IDS: SectionId[] = ["style-expression", "exploration", "style-directions", "dressing-habits"];
+  const missingRev7Sections = useMemo(
+    () => visibleSections.filter(sec => {
+      if (!(REV7_SECTION_IDS as string[]).includes(sec.id)) return false;
+      const primary = sec.subFields[0];
+      const v = (savedAnswers as Record<string, unknown>)[primary.draftKey];
+      if (primary.kind === "single" || primary.kind === "text") {
+        return !v || (typeof v === "string" && !v.trim());
+      }
+      return !Array.isArray(v) || v.length === 0;
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [savedAnswers, visibleSections],
+  );
+  // A confirmed pre-Rev 7 Passport with new questions still to answer. Their
+  // Passport stays valid and complete for the generation they answered — this is
+  // an invitation, never an "incomplete" state.
+  const needsRev7 = !isLegacyCustomer && !isRev7 && missingRev7Sections.length > 0;
+
   // Colours screen inserted before r-dressing only when the legacy customer has no
   // favoriteColors saved (empty array ⇒ key absent from savedAnswers).
   const activeRefreshScreens = useMemo(() => {
@@ -1334,6 +1356,16 @@ export default function PassportPage() {
     window.history.pushState({ passport: "flow" }, "");
     initEdits(missingSections[0].id);
     setMode({ kind: "flow", queue: missingSections.map(s => s.id), index: 0 });
+  }
+
+  // Walks the customer through only the new/updated Rev 7 questions. Every other
+  // stored answer is untouched; this reuses the normal flow queue, so each section
+  // saves through the same partial-patch path.
+  function startRev7TopUp() {
+    if (!missingRev7Sections.length) return;
+    window.history.pushState({ passport: "flow" }, "");
+    initEdits(missingRev7Sections[0].id);
+    setMode({ kind: "flow", queue: missingRev7Sections.map(sec => sec.id), index: 0 });
   }
 
   function startUpdate() {
@@ -1770,6 +1802,11 @@ export default function PassportPage() {
       const fitConcerns = getArr("fit-concerns");
       const fitNote     = (a["fit-concerns-note"] as string | undefined)?.trim() ?? "";
       const dressingPrefs = getArr("dressing-preferences");
+      // Rev 7
+      const styleDirections  = getArr("style-directions");
+      const styleExpression  = getArr("style-expression");
+      const dressingHabits   = getArr("dressing-habits");
+      const explorationLevel = (a["exploration-level"] as string | undefined) ?? "";
       const noteText    = (a["final-notes"] as string | undefined)?.trim() ?? "";
       const sizesDetail = getSectionDetail(getEffectiveDef(getSectionDef("sizes"), true), savedAnswers);
 
@@ -1785,12 +1822,28 @@ export default function PassportPage() {
             </p>
           </div>
 
+          {needsRev7 && (
+            <div className="sp-refresh-banner">
+              <div className="sp-refresh-banner-title">New Style Passport questions</div>
+              <p className="sp-refresh-banner-desc">
+                nAia now asks about the looks you are drawn to, what you want your style to say,
+                how far it should push you, and how you approach getting dressed.
+                Your existing answers are preserved.
+              </p>
+              <button type="button" className="sp-btn-primary" onClick={startRev7TopUp}>
+                Answer the new questions
+              </button>
+            </div>
+          )}
+
           <div className="sp-status-block">
             <div className="sp-status-label">Status</div>
             <p className="sp-status-text">
-              {isComplete
-                ? "Your Style Passport is up to date."
-                : "A few details are still missing."}
+              {!isComplete
+                ? "A few details are still missing."
+                : needsRev7
+                  ? "Your Style Passport is complete — and there are new questions to answer."
+                  : "Your Style Passport is up to date."}
             </p>
             <div className="sp-status-date" suppressHydrationWarning>Last updated · {formatDate(profileUpdatedAt)}</div>
           </div>
@@ -1836,21 +1889,38 @@ export default function PassportPage() {
 
             {/* Row 2: Style | Lifestyle */}
             <div className="sp-ov-grid">
-              <div className="sp-ov-grid-cell">
-                <div className="sp-ov-section-header-row">
-                  <span className="sp-ov-section-header">Style</span>
-                  <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("identity")}>EDIT</button>
-                </div>
-                {getArr("style-personalities").length > 0 ? (
+              {/* Rev 7 styleDirections supersedes the retired stylePersonalities question.
+                  Until it is answered the stored legacy value stays visible and editable —
+                  it is never destroyed, only superseded. */}
+              {styleDirections.length > 0 ? (
+                <div className="sp-ov-grid-cell">
+                  <div className="sp-ov-section-header-row">
+                    <span className="sp-ov-section-header">Style Direction</span>
+                    <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("style-directions")}>EDIT</button>
+                  </div>
                   <div className="sp-ov-tags">
-                    {getArr("style-personalities").map(id => (
-                      <span key={id} className="sp-ov-tag">{lbl("style-personalities", id).toUpperCase()}</span>
+                    {styleDirections.map(id => (
+                      <span key={id} className="sp-ov-tag">{lbl("style-directions", id).toUpperCase()}</span>
                     ))}
                   </div>
-                ) : (
-                  <span className="sp-ov-dossier-empty sp-detail-missing">Not yet completed</span>
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="sp-ov-grid-cell">
+                  <div className="sp-ov-section-header-row">
+                    <span className="sp-ov-section-header">Style</span>
+                    <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("identity")}>EDIT</button>
+                  </div>
+                  {getArr("style-personalities").length > 0 ? (
+                    <div className="sp-ov-tags">
+                      {getArr("style-personalities").map(id => (
+                        <span key={id} className="sp-ov-tag">{lbl("style-personalities", id).toUpperCase()}</span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="sp-ov-dossier-empty sp-detail-missing">Not yet completed</span>
+                  )}
+                </div>
+              )}
 
               <div className="sp-ov-grid-cell">
                 <div className="sp-ov-section-header-row">
@@ -1865,6 +1935,39 @@ export default function PassportPage() {
                   </div>
                 ) : (
                   <span className="sp-ov-dossier-empty sp-detail-missing">Not yet completed</span>
+                )}
+              </div>
+            </div>
+
+            {/* Row 2b: Style Expression | Style Exploration (Rev 7) */}
+            <div className="sp-ov-grid">
+              <div className="sp-ov-grid-cell">
+                <div className="sp-ov-section-header-row">
+                  <span className="sp-ov-section-header">Style Expression</span>
+                  <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("style-expression")}>EDIT</button>
+                </div>
+                {styleExpression.length > 0 ? (
+                  <div className="sp-ov-tags">
+                    {styleExpression.map(id => (
+                      <span key={id} className="sp-ov-tag">{lbl("style-expression", id).toUpperCase()}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="sp-ov-dossier-empty">Optional — not yet set</span>
+                )}
+              </div>
+
+              <div className="sp-ov-grid-cell">
+                <div className="sp-ov-section-header-row">
+                  <span className="sp-ov-section-header">Style Exploration</span>
+                  <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("exploration")}>EDIT</button>
+                </div>
+                {explorationLevel ? (
+                  <div className="sp-ov-tags">
+                    <span className="sp-ov-tag">{lbl("exploration-level", explorationLevel).toUpperCase()}</span>
+                  </div>
+                ) : (
+                  <span className="sp-ov-dossier-empty">Optional — not yet set</span>
                 )}
               </div>
             </div>
@@ -1945,23 +2048,41 @@ export default function PassportPage() {
               </div>
             </div>
 
-            {/* Row 5: Dressing Requirements (full width) */}
-            <div className="sp-ov-wide">
-              <div className="sp-ov-section-header-row">
-                <span className="sp-ov-section-header">Dressing Requirements</span>
-                <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("dressing")}>EDIT</button>
-              </div>
-              {dressingPrefs.length > 0 ? (
-                <div className="sp-ov-tags">
-                  {dressingPrefs.map(id => (
-                    <span key={id} className="sp-ov-tag sp-ov-tag--boundary">
-                      {lbl("dressing-preferences", id).toUpperCase()}
-                    </span>
-                  ))}
+            {/* Row 5: Dressing Requirements | Dressing Habits */}
+            <div className="sp-ov-grid">
+              <div className="sp-ov-grid-cell">
+                <div className="sp-ov-section-header-row">
+                  <span className="sp-ov-section-header">Dressing Requirements</span>
+                  <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("dressing")}>EDIT</button>
                 </div>
-              ) : (
-                <span className="sp-ov-dossier-empty">Optional — none added</span>
-              )}
+                {dressingPrefs.length > 0 ? (
+                  <div className="sp-ov-tags">
+                    {dressingPrefs.map(id => (
+                      <span key={id} className="sp-ov-tag sp-ov-tag--boundary">
+                        {lbl("dressing-preferences", id).toUpperCase()}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="sp-ov-dossier-empty">Optional — none added</span>
+                )}
+              </div>
+
+              <div className="sp-ov-grid-cell">
+                <div className="sp-ov-section-header-row">
+                  <span className="sp-ov-section-header">Dressing Habits</span>
+                  <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("dressing-habits")}>EDIT</button>
+                </div>
+                {dressingHabits.length > 0 ? (
+                  <div className="sp-ov-tags">
+                    {dressingHabits.map(id => (
+                      <span key={id} className="sp-ov-tag">{lbl("dressing-habits", id).toUpperCase()}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="sp-ov-dossier-empty">Optional — not yet set</span>
+                )}
+              </div>
             </div>
 
             {/* Row 6: Notes to nAia (full width) */}

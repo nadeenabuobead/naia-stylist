@@ -52,6 +52,9 @@ export interface QuizQuestion {
   }>;
   colors?: ColourOption[];
   maxSelections?: number;
+  /** Sentence-case copy shown under the subtitle. The subtitle is uppercase mono
+   *  (the "CHOOSE UP TO 3" hint), so prose belongs here, not there. */
+  supportingText?: string;
   maxLength?: number;
   placeholder?: string;
   required?: boolean;
@@ -189,6 +192,7 @@ export const quizQuestions: QuizQuestion[] = [
     type: "multi",
     title: "Which looks are you naturally drawn to?",
     subtitle: `Choose up to ${STYLE_DIRECTION_MAX}`,
+    supportingText: "You don't need to know your style — just choose what catches your eye.",
     maxSelections: STYLE_DIRECTION_MAX,
     exclusiveIds: ["not-sure"],
     options: [
@@ -211,10 +215,10 @@ export const quizQuestions: QuizQuestion[] = [
     id: "lifestyle",
     type: "multi",
     title: "Which of these are part of your lifestyle?",
-    subtitle: "Choose all that are relevant to your life.",
+    subtitle: "Choose all that regularly apply.",
     options: [
       { id: "work-office",              label: "Work / Office"              },
-      { id: "everyday-casual",          label: "Everyday / Casual"          },
+      { id: "everyday-casual",          label: "Everyday Casual"            },
       { id: "dinners-going-out",        label: "Dinners & Going Out"        },
       { id: "events-special-occasions", label: "Events & Special Occasions" },
       { id: "family-parenting",         label: "Family / Caregiving"        },

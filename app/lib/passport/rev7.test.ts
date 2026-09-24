@@ -221,7 +221,7 @@ describe("R7.2 — Rev 7 question set", () => {
   it("Q6 lifestyle keeps everyday-casual as the stable ID and only changes its label", () => {
     const opt = q("lifestyle")?.options?.find(o => o.id === "everyday-casual");
     assert.ok(opt, "everyday-casual must remain the stable ID");
-    assert.equal(opt!.label, "Everyday / Casual");
+    assert.equal(opt!.label, "Everyday Casual");
   });
 
   it("Q6 lifestyle offers every Rev 7 context", () => {

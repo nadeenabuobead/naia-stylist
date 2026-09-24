@@ -203,6 +203,92 @@ describe("R7D.5 — Passport summary/edit view covers the Rev 7 set", () => {
   });
 });
 
+// ── 5b. The Rev 6+ dossier overview actually RENDERS the Rev 7 sections ──────
+//
+// Regression guard. Rev 7 originally added its four sections to SECTIONS — which
+// drives the editor, the legacy flat overview and the completion logic — but the
+// Rev 6+ overview is a hand-built dossier grid that iterates nothing. The sections
+// were therefore editable and complete-able while being invisible on /passport,
+// and the original §5 checks passed because they only inspected SECTIONS.
+
+describe("R7D.5b — the Rev 6+ dossier overview renders the Rev 7 sections", () => {
+  const dossier = PASSPORT.slice(
+    PASSPORT.indexOf('<div className="sp-ov-dossier">'),
+    PASSPORT.indexOf("{/* Row 6: Notes to nAia"),
+  );
+
+  it("the dossier block is locatable", () => {
+    assert.ok(dossier.length > 500, "the Rev 6+ dossier grid must exist");
+  });
+
+  for (const [label, sectionId] of [
+    ["Style Direction",   "style-directions"],
+    ["Style Expression",  "style-expression"],
+    ["Style Exploration", "exploration"],
+    ["Dressing Habits",   "dressing-habits"],
+  ] as const) {
+    it(`${label} has a cell with an EDIT entry point`, () => {
+      assert.ok(dossier.includes(`>${label}<`), `the dossier must render a ${label} header`);
+      assert.ok(dossier.includes(`editSection("${sectionId}")`),
+        `${label} must be editable from the dossier`);
+    });
+  }
+
+  it("Style Direction supersedes the legacy Style cell rather than sitting beside it", () => {
+    assert.ok(dossier.includes("styleDirections.length > 0 ? ("),
+      "the Style cell must branch on styleDirections");
+    assert.ok(dossier.includes('editSection("identity")'),
+      "the legacy Style cell must remain reachable while styleDirections is unanswered");
+  });
+
+  it("every Rev 7 value is label-resolved, never printed as a raw ID", () => {
+    for (const q of ["style-directions", "style-expression", "exploration-level", "dressing-habits"]) {
+      assert.ok(dossier.includes(`lbl("${q}"`), `${q} values must go through lbl()`);
+    }
+  });
+});
+
+// ── 5c. A pre-Rev 7 customer is invited, not told they are incomplete ────────
+
+describe("R7D.5c — Rev 7 invitation on /passport", () => {
+  it("needsRev7 is derived from the stored answers, not from profileVersion alone", () => {
+    assert.ok(PASSPORT.includes("const missingRev7Sections"),
+      "the unanswered Rev 7 sections must be computed from savedAnswers");
+    assert.ok(PASSPORT.includes("!isLegacyCustomer && !isRev7 && missingRev7Sections.length > 0"),
+      "needsRev7 must combine the generation with the actual unanswered sections");
+  });
+
+  it("the status never claims 'up to date' while new questions are unanswered", () => {
+    assert.ok(PASSPORT.includes('"Your Style Passport is complete — and there are new questions to answer."'),
+      "a pre-Rev 7 Passport must get its own status line");
+    const statusBlock = PASSPORT.slice(
+      PASSPORT.indexOf('<p className="sp-status-text">'),
+      PASSPORT.indexOf('<div className="sp-status-date"'),
+    );
+    assert.ok(statusBlock.indexOf("needsRev7") < statusBlock.indexOf("is up to date"),
+      "the needsRev7 branch must be evaluated before the up-to-date wording");
+  });
+
+  it("an obvious invitation is shown", () => {
+    assert.ok(PASSPORT.includes("New Style Passport questions"));
+    assert.ok(PASSPORT.includes("Your existing answers are preserved."));
+  });
+
+  it("the invitation queues ONLY the unanswered Rev 7 sections", () => {
+    const fn = PASSPORT.slice(PASSPORT.indexOf("function startRev7TopUp"), PASSPORT.indexOf("function startUpdate"));
+    assert.ok(fn.includes("missingRev7Sections.map(sec => sec.id)"),
+      "the queue must contain only the unanswered Rev 7 sections");
+    assert.ok(!fn.includes("missingSections"),
+      "the top-up must not pull in the ordinary missing-section queue");
+  });
+
+  it("nothing in the top-up path clears stylePersonalities", () => {
+    const fn = PASSPORT.slice(PASSPORT.indexOf("function startRev7TopUp"), PASSPORT.indexOf("function startUpdate"));
+    assert.ok(!fn.includes("stylePersonalities"),
+      "the retired legacy answer must never be touched by the Rev 7 top-up");
+  });
+});
+
 // ── 6. Completion and CTA logic ──────────────────────────────────────────────
 
 describe("R7D.6 — completion and CTA logic understands profileVersion 7", () => {
