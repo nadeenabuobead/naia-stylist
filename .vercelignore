@@ -1,7 +1,7 @@
-# In-progress features — not yet ready for staging deployment
-app/routes/closet.intelligence.tsx
-app/lib/ai/wardrobe-intelligence.ts
-app/lib/ai/wardrobe-intelligence.server.ts
+# Wardrobe Intelligence V1 shipped in 0d71898: /closet/intelligence is a
+# registered route and My Closet links to it, so the page and its runtime modules
+# must be uploaded. Only the test and the QA script stay excluded — nothing
+# imports them at runtime.
 app/lib/ai/wardrobe-intelligence.test.ts
 scripts/wardrobe-intelligence-qa.mts
 
