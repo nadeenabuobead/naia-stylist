@@ -1,7 +1,9 @@
-# In-progress features — not yet ready for staging deployment
-app/routes/closet.intelligence.tsx
-app/lib/ai/wardrobe-intelligence.ts
-app/lib/ai/wardrobe-intelligence.server.ts
+# Non-runtime QA/test files only.
+#
+# Wardrobe Intelligence V1 is frozen and SHIPS: its engine, server loader and
+# the /closet/intelligence route are runtime product code. They are imported by
+# Trend Reports (trend-closet-match, trend-closet-connections, saved-items) and
+# by the registered closet routes, so excluding them makes the build impossible.
 app/lib/ai/wardrobe-intelligence.test.ts
 scripts/wardrobe-intelligence-qa.mts
 
