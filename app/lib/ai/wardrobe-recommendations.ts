@@ -175,16 +175,18 @@ const STRUCTURE_LABEL: Readonly<Record<string, string>> = {
  * bottom recommendations, so a customer who had told nAia she prefers
  * full-length trousers was recommended "a work bottom" with no length at all.
  */
-const COVERAGE_RULES: Readonly<Record<string, { label: string; slots: readonly string[] }>> = {
-  "arms-covered":               { label: "sleeves",            slots: ["top", "dress", "outerwear"] },
-  "avoid-sleeveless":           { label: "sleeves",            slots: ["top", "dress", "outerwear"] },
-  "chest-neckline-covered":     { label: "a higher neckline",  slots: ["top", "dress"] },
-  "prefer-higher-necklines":    { label: "a higher neckline",  slots: ["top", "dress"] },
-  "longer-tops":                { label: "a longer cut",       slots: ["top"] },
+const COVERAGE_RULES: Readonly<
+  Record<string, { label: string; slots: readonly string[]; adjective?: string }>
+> = {
+  "arms-covered":               { label: "sleeves",            slots: ["top", "dress", "outerwear"], adjective: "sleeved" },
+  "avoid-sleeveless":           { label: "sleeves",            slots: ["top", "dress", "outerwear"], adjective: "sleeved" },
+  "chest-neckline-covered":     { label: "a higher neckline",  slots: ["top", "dress"], adjective: "higher-necked" },
+  "prefer-higher-necklines":    { label: "a higher neckline",  slots: ["top", "dress"], adjective: "higher-necked" },
+  "longer-tops":                { label: "a longer cut",       slots: ["top"], adjective: "longer" },
   "no-cropped-tops":            { label: "not cropped",        slots: ["top"] },
-  "legs-covered":               { label: "full length",        slots: ["bottom", "dress"] },
-  "prefer-full-length-trousers":{ label: "full length",        slots: ["bottom"] },
-  "looser-fitting":             { label: "an easier fit",      slots: ["top", "bottom", "dress", "outerwear"] },
+  "legs-covered":               { label: "full length",        slots: ["bottom", "dress"], adjective: "full-length" },
+  "prefer-full-length-trousers":{ label: "full length",        slots: ["bottom"], adjective: "full-length" },
+  "looser-fitting":             { label: "an easier fit",      slots: ["top", "bottom", "dress", "outerwear"], adjective: "looser" },
 };
 
 // ── Candidate construction ────────────────────────────────────────────────────
@@ -559,24 +561,42 @@ function buildRecommendation(
 
   // Coverage — a hard requirement she stated, so it is never optional.
   const coverage = statedCoverage(passport, slot);
+  // The lead requirement becomes an adjective in the name — "a full-length work
+  // bottom" rather than "a work bottom" tagged "full length", which read as two
+  // equal pieces of metadata when one of them is the garment itself.
+  let coverageAdjective: string | null = null;
   if (coverage.length > 0) {
-    const labels = coverage.map((c) => COVERAGE_RULES[c].label).slice(0, 2);
-    attributes.push({ kind: "coverage", values: coverage, label: joinList(labels), source: "passport" });
+    coverageAdjective = COVERAGE_RULES[coverage[0]].adjective ?? null;
+    // Anything the name does not already say stays on the attributes line.
+    const remaining = coverageAdjective ? coverage.slice(1) : coverage;
+    const labels = remaining.map((c) => COVERAGE_RULES[c].label).slice(0, 2);
+    if (labels.length > 0) {
+      attributes.push({ kind: "coverage", values: remaining, label: joinList(labels), source: "passport" });
+    }
+    // The structured payload always carries every stated requirement, whether
+    // it ended up in the name or on the line.
     criteria.coverage = coverage;
     evidence.push(
       ev("passport-signal", "dressingPreferences", `You've told nAia how you prefer to be covered.`, []),
     );
   }
 
-  const specificity: Specificity = attributes.length > 0 ? "detailed" : "slot";
+  const specificity: Specificity =
+    attributes.length > 0 || coverageAdjective !== null ? "detailed" : "slot";
   const noun = SLOT_NOUN[slot] ?? slot;
   const structureWord = criteria.structure === "structured" ? "structured " : criteria.structure === "soft" ? "softer " : "";
   // When the gap is that her own coverage rules rule pieces out, say so in the
   // title: "an occasion dress with more coverage" is the actual answer, where
   // "an occasion dress" reads as though she simply owns too few.
+  // "with more coverage" only where the name does not already carry the
+  // requirement — never both, which would read "a full-length dress with more
+  // coverage".
   const coverageSuffix =
-    finding.kind === "effective-depth" && criteria.coverage.length > 0 ? " with more coverage" : "";
-  const phrase = `${structureWord}${REGISTER_WORD[register]} ${noun}${coverageSuffix}`;
+    !coverageAdjective && finding.kind === "effective-depth" && criteria.coverage.length > 0
+      ? " with more coverage"
+      : "";
+  const coveragePrefix = coverageAdjective ? `${coverageAdjective} ` : "";
+  const phrase = `${coveragePrefix}${structureWord}${REGISTER_WORD[register]} ${noun}${coverageSuffix}`;
   const title = `${/^[aeiou]/i.test(phrase) ? "An" : "A"} ${phrase}`;
 
   // The body explains what it would DO, not what it is. The reason to buy is

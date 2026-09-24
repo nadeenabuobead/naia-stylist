@@ -207,10 +207,14 @@ describe("§WR-2 specificity is earned, rung by rung", () => {
     }));
     const occasion = recs.recommendations.find((r) => r.register === "occasion");
     if (occasion && (occasion.criteria.slot === "top" || occasion.criteria.slot === "dress")) {
+      // The requirement is never optional — but it may be stated in the NAME
+      // ("a sleeved occasion dress") rather than beside it. criteria is the
+      // invariant; where it surfaces is presentation.
       assert.ok(occasion.criteria.coverage.includes("arms-covered"));
       const attr = occasion.attributes.find((a) => a.kind === "coverage");
-      assert.ok(attr, "a stated coverage requirement is not optional");
-      assert.equal(attr!.source, "passport");
+      const named = /sleeved|higher-necked|full-length|longer|looser/.test(occasion.title);
+      assert.ok(attr || named, `stated coverage appears nowhere: "${occasion.title}"`);
+      if (attr) assert.equal(attr.source, "passport");
     }
   });
 });
@@ -361,7 +365,8 @@ describe("§WR-2n the ladder uses every signal it already has", () => {
     assert.notEqual(occasion!.specificity, "direction", "the blocked-slot signal identifies the garment type");
     assert.equal(occasion!.criteria.slot, "dress");
     assert.ok(occasion!.criteria.coverage.includes("arms-covered"));
-    assert.match(occasion!.title, /with more coverage/);
+    // Either phrasing states the requirement; "sleeved" is the more specific.
+    assert.match(occasion!.title, /sleeved|with more coverage/);
   });
 
   it("2n-2 — a one-piece is not rejected for failing a cross-slot partner test", () => {
@@ -474,7 +479,11 @@ describe("§WR-2p the partner count and coverage use the right scope", () => {
         "a leg requirement belongs on a bottom",
       );
       assert.ok(!work!.criteria.coverage.includes("arms-covered"), "an arm requirement does not describe a bottom");
-      assert.match(work!.attributes.find((a) => a.kind === "coverage")?.label ?? "", /full length/);
+      const attrLabel = work!.attributes.find((a) => a.kind === "coverage")?.label ?? "";
+      assert.ok(
+        /full length/.test(attrLabel) || /full-length/.test(work!.title),
+        `length requirement stated nowhere: "${work!.title}" / "${attrLabel}"`,
+      );
     }
   });
 });
@@ -530,6 +539,81 @@ describe("§WR-2q colour reads as a choice, not a requirement", () => {
     const work = recs.recommendations.find((r) => r.register === "work");
     assert.ok(work);
     assert.doesNotMatch(work!.body, /would also sit within the palette/);
+  });
+});
+
+// ── §WR-2r The coverage requirement names the garment ────────────────────────
+
+describe("§WR-2r coverage belongs in the name, not beside it", () => {
+  const bottomGap = () => [
+    ...variedLooks("casual", 4),
+    ...Array.from({ length: 3 }, (_, i) =>
+      makeGarment({ slot: "top", formality: "smart-casual", ...TOP_SHAPES[i % TOP_SHAPES.length] })),
+    makeGarment({ slot: "top", formality: "business-casual", silhouette: "fitted", fitProfile: "tailored" }),
+    makeGarment({ slot: "top", formality: "business-casual", silhouette: "boxy", fitProfile: "relaxed" }),
+    ...Array.from({ length: 2 }, () =>
+      makeGarment({ slot: "bottom", category: "BOTTOMS", formality: "business-casual", topLength: "n/a", hemLength: "full", silhouette: "straight", fitProfile: "tailored" })),
+  ];
+
+  it("2r — a length requirement becomes an adjective in the title", () => {
+    const { recs } = run(bottomGap(), makePassport({
+      lifestyle: ["everyday-casual", "work-office"],
+      favoriteColors: ["black", "grey"],
+      dressingPreferences: ["legs-covered", "prefer-full-length-trousers"],
+    }));
+    const work = recs.recommendations.find((r) => r.register === "work");
+    assert.ok(work);
+    assert.match(work!.title, /^A full-length work bottom$/);
+    // The attributes line carries the colour alone — the name already says the
+    // rest, and "grey · full length" read as two equal tags for one garment.
+    assert.ok(!work!.attributes.some((a) => a.kind === "coverage"), "coverage should not be repeated beside the name");
+    assert.deepEqual(work!.attributes.map((a) => a.kind), ["colour"]);
+  });
+
+  it("2r-2 — the structured payload still carries every stated requirement", () => {
+    const { recs } = run(bottomGap(), makePassport({
+      lifestyle: ["everyday-casual", "work-office"],
+      favoriteColors: ["black", "grey"],
+      dressingPreferences: ["legs-covered", "prefer-full-length-trousers"],
+    }));
+    const work = recs.recommendations.find((r) => r.register === "work");
+    assert.ok(work);
+    assert.ok(work!.criteria.coverage.includes("legs-covered"), "moving it into the name must not drop it from criteria");
+    assert.equal(work!.specificity, "detailed", "a named requirement is still specificity");
+  });
+
+  it("2r-3 — a requirement with no adjective form stays on the attributes line", () => {
+    // no-cropped-tops has no natural adjective; it must not become
+    // "a not cropped work top".
+    const items = [
+      ...variedLooks("casual", 4),
+      ...Array.from({ length: 4 }, (_, i) =>
+        makeGarment({ slot: "bottom", category: "BOTTOMS", formality: "business-casual", topLength: "n/a", hemLength: "full", ...BOTTOM_SHAPES[i % BOTTOM_SHAPES.length] })),
+    ];
+    const { recs } = run(items, makePassport({
+      lifestyle: ["everyday-casual", "work-office"],
+      dressingPreferences: ["no-cropped-tops"],
+    }));
+    for (const rec of recs.recommendations) {
+      assert.doesNotMatch(rec.title, /not cropped/, `unnatural adjective in title: "${rec.title}"`);
+    }
+  });
+
+  it("2r-4 — the name never carries the requirement twice", () => {
+    const items = [
+      ...variedLooks("casual", 4),
+      makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", hemLength: "maxi", topLength: "n/a" }),
+      ...Array.from({ length: 6 }, () =>
+        makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", hemLength: "midi", topLength: "n/a" })),
+    ];
+    const { recs } = run(items, makePassport({
+      lifestyle: ["everyday-casual", "dinners-going-out"],
+      dressingPreferences: ["legs-covered"],
+    }));
+    for (const rec of recs.recommendations) {
+      const both = /full-length/.test(rec.title) && /with more coverage/.test(rec.title);
+      assert.ok(!both, `requirement stated twice: "${rec.title}"`);
+    }
   });
 });
 
