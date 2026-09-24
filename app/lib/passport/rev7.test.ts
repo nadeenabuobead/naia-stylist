@@ -46,6 +46,7 @@ import {
   projectStyleDirectionsToArchetypes,
   resolveScoringArchetypes,
   RESERVED_DRESSING_PREFERENCE_IDS,
+  RETIRED_DRESSING_HABIT_IDS,
   DRESSING_REQUIREMENTS_NOTE_TRIGGER_ID,
   DRESSING_REQUIREMENTS_NOTE_MAX,
   NO_COLOUR_PREFERENCE_ID,
@@ -238,6 +239,81 @@ describe("R7.2 — Rev 7 question set", () => {
   it("Q6 lifestyle asks the Rev 7 question and no longer says 'dress for most often'", () => {
     assert.equal(q("lifestyle")?.title, "Which of these are part of your lifestyle?");
     assert.ok(!/most often/i.test(q("lifestyle")?.title ?? ""));
+  });
+});
+
+// ── 2b. Copy refinements and withdrawn options ───────────────────────────────
+
+describe("R7.2b — Q3/Q12 copy and the withdrawn dressing habits", () => {
+  const offeredHabits = (q("dressing-habits")?.options ?? []).filter(o => !o.retired && !o.reserved);
+
+  it("Q3 asks how the style should come across", () => {
+    assert.equal(q("style-expression")?.title, "How would you like your style to come across?");
+  });
+
+  it("Q3 is otherwise untouched — 13 options, cap 3, nothing withdrawn", () => {
+    assert.equal(q("style-expression")?.options?.length, 13);
+    assert.equal(q("style-expression")?.maxSelections, STYLE_EXPRESSION_MAX);
+    assert.equal((q("style-expression")?.options ?? []).filter(o => o.retired || o.reserved).length, 0);
+  });
+
+  it("Q12 asks how the customer usually gets dressed", () => {
+    assert.equal(q("dressing-habits")?.title, "Which of these best describes how you usually get dressed?");
+  });
+
+  it("Q12 offers exactly the eleven approved options, in order", () => {
+    assert.deepEqual(offeredHabits.map(o => o.label), [
+      "I know what I like, but repeat the same outfits",
+      "I have plenty of clothes but struggle to put outfits together",
+      "I often feel like I have nothing to wear",
+      "I overthink what to wear",
+      "I usually know exactly what I want to wear",
+      "I tend to play it safe",
+      "I enjoy experimenting",
+      "What I want to wear changes with my mood",
+      "I choose comfort first and build from there",
+      "I save outfit inspiration but struggle to recreate it with my own clothes",
+      "None of these really describe me",
+    ]);
+  });
+
+  it("comfort-first keeps its stable ID and only changes label", () => {
+    const opt = (q("dressing-habits")?.options ?? []).find(o => o.id === "comfort-first");
+    assert.ok(opt, "comfort-first must remain the stable ID");
+    assert.equal(opt!.label, "I choose comfort first and build from there");
+  });
+
+  // The two withdrawn habits are a compatibility case, not a deletion: a customer
+  // may already have one stored, and re-saving that section submits it back.
+  for (const id of ["want-it-easier", "buy-but-cant-style"]) {
+    it(`${id} is withdrawn from the question but still safe for stored answers`, () => {
+      assert.ok(RETIRED_DRESSING_HABIT_IDS.has(id), "must be marked retired");
+      assert.ok(DRESSING_HABIT_VALID_IDS.has(id),
+        "must stay valid server-side or a customer's next save would be rejected");
+      assert.ok(!offeredHabits.some(o => o.id === id), "must not be offered");
+      const label = ALL_OPTION_LABELS[id];
+      assert.ok(label && label !== id && /[A-Z ]/.test(label),
+        `must still resolve to real copy, got ${JSON.stringify(label)}`);
+    });
+  }
+
+  it("none-of-these remains the exclusive option", () => {
+    assert.ok((q("dressing-habits")?.exclusiveIds ?? []).includes("none-of-these"));
+    assert.deepEqual(
+      applyExclusiveRule(["overthink", "none-of-these"], DRESSING_HABIT_EXCLUSIVE_IDS),
+      ["none-of-these"],
+    );
+  });
+
+  it("both pickers withdraw retired options from the UI", () => {
+    const step = readFileSync("app/routes/onboarding/step.$step.tsx", "utf8");
+    const passport = readFileSync("app/routes/passport.tsx", "utf8");
+    assert.equal((step.match(/!opt\.reserved && !opt\.retired/g) ?? []).length, 2,
+      "both onboarding pickers must filter retired options");
+    assert.equal((passport.match(/!o\.reserved && !o\.retired/g) ?? []).length, 2,
+      "both Passport pickers must filter retired options");
+    assert.ok(passport.includes("|| sel.includes(o.id) || selStr === o.id"),
+      "a value the customer already holds must stay visible so it can be removed");
   });
 });
 

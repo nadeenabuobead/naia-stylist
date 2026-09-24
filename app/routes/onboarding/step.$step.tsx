@@ -462,7 +462,7 @@ export default function OnboardingStep() {
         {question.type === "multi" && question.options && (
           <>
             <div className="ob-pills">
-              {question.options.filter(opt => !opt.reserved).map(opt => {
+              {question.options.filter(opt => !opt.reserved && !opt.retired).map(opt => {
                 const exclusives = question.exclusiveIds ?? [];
                 const isSelected = multiValue.includes(opt.id);
                 const hasExclusiveActive = exclusives.some(eid => multiValue.includes(eid));
@@ -511,7 +511,7 @@ export default function OnboardingStep() {
         {/* SINGLE */}
         {question.type === "single" && question.options && (
           <div className="ob-pills">
-            {question.options.filter(opt => !opt.reserved).map(opt => {
+            {question.options.filter(opt => !opt.reserved && !opt.retired).map(opt => {
               const isSelected = singleValue === opt.id;
               return (
                 <button

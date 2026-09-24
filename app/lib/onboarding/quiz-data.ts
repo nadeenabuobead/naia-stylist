@@ -49,6 +49,12 @@ export interface QuizQuestion {
     description?: string;
     /** Stored and validated, but never offered in the production UI. */
     reserved?: boolean;
+    /**
+     * Withdrawn from the question but kept in the vocabulary so an already-saved
+     * answer still validates and still resolves to its real label. Filtered out
+     * of the pickers; never migrated or deleted.
+     */
+    retired?: boolean;
   }>;
   colors?: ColourOption[];
   maxSelections?: number;
@@ -147,7 +153,7 @@ export const quizQuestions: QuizQuestion[] = [
   {
     id: "style-expression",
     type: "multi",
-    title: "What would you like your style to communicate about you?",
+    title: "How would you like your style to come across?",
     subtitle: `Choose up to ${STYLE_EXPRESSION_MAX}`,
     maxSelections: STYLE_EXPRESSION_MAX,
     exclusiveIds: ["not-sure"],
@@ -347,7 +353,7 @@ export const quizQuestions: QuizQuestion[] = [
   {
     id: "dressing-habits",
     type: "multi",
-    title: "Which sounds most like you when you're getting dressed?",
+    title: "Which of these best describes how you usually get dressed?",
     subtitle: `Choose up to ${DRESSING_HABIT_MAX}`,
     maxSelections: DRESSING_HABIT_MAX,
     exclusiveIds: ["none-of-these"],
@@ -360,9 +366,11 @@ export const quizQuestions: QuizQuestion[] = [
       { id: "play-it-safe",             label: "I tend to play it safe"                                              },
       { id: "enjoy-experimenting",      label: "I enjoy experimenting"                                               },
       { id: "mood-led",                 label: "What I want to wear changes with my mood"                            },
-      { id: "comfort-first",            label: "I prioritise comfort and build the outfit around it"                 },
-      { id: "want-it-easier",           label: "I want getting dressed to feel easier"                               },
-      { id: "buy-but-cant-style",       label: "I buy pieces I like but struggle to style them"                      },
+      { id: "comfort-first",            label: "I choose comfort first and build from there"                         },
+      // Withdrawn from the question. Retained so a stored answer still validates
+      // and still renders with its real label — see RETIRED_DRESSING_HABIT_IDS.
+      { id: "want-it-easier",           label: "I want getting dressed to feel easier",                              retired: true },
+      { id: "buy-but-cant-style",       label: "I buy pieces I like but struggle to style them",                     retired: true },
       { id: "save-inspo-cant-recreate", label: "I save outfit inspiration but struggle to recreate it with my own clothes" },
       { id: "none-of-these",            label: "None of these really describe me"                                    },
     ],

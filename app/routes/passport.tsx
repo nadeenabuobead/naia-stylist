@@ -249,7 +249,7 @@ const SECTIONS: SectionDef[] = [
   {
     id: "style-expression",
     label: "Style Expression",
-    question: "What would you like your style to communicate about you?",
+    question: "How would you like your style to come across?",
     helper: "Choose up to 3.",
     optional: true,
     subFields: [
@@ -357,7 +357,7 @@ const SECTIONS: SectionDef[] = [
   {
     id: "dressing-habits",
     label: "Dressing Habits",
-    question: "Which sounds most like you when you're getting dressed?",
+    question: "Which of these best describes how you usually get dressed?",
     helper: "Choose up to 2.",
     optional: true,
     subFields: [
@@ -641,7 +641,7 @@ const REFRESH_SCREENS: RefreshScreen[] = [
   {
     screenId: "r-expression",
     label: "Your Style Expression",
-    question: "What would you like your style to communicate about you?",
+    question: "How would you like your style to come across?",
     helper: "Choose up to 3.",
     fields: [
       { draftKey: "style-expression" as DraftKey, apiKey: "styleExpression", subLabel: "What I want my style to say", kind: "array" as FieldKind, questionId: "style-expression" },
@@ -710,7 +710,7 @@ const REFRESH_SCREENS: RefreshScreen[] = [
   {
     screenId: "r-habits",
     label: "Your Dressing Habits",
-    question: "Which sounds most like you when you're getting dressed?",
+    question: "Which of these best describes how you usually get dressed?",
     helper: "Choose up to 2.",
     fields: [
       { draftKey: "dressing-habits" as DraftKey, apiKey: "dressingHabits", subLabel: "How I approach getting dressed", kind: "array" as FieldKind, questionId: "dressing-habits" },
@@ -1719,7 +1719,7 @@ export default function PassportPage() {
     if (sf.kind === "single") {
       return (
         <div className="sp-option-grid">
-          {(q?.options ?? []).filter(o => !o.reserved || sel.includes(o.id) || selStr === o.id).map(o => {
+          {(q?.options ?? []).filter(o => (!o.reserved && !o.retired) || sel.includes(o.id) || selStr === o.id).map(o => {
             const isSel = selStr === o.id;
             return (
               <button
@@ -1767,7 +1767,7 @@ export default function PassportPage() {
     // array (multi-select pills) — body area keys use mutual-exclusion handler
     return (
       <div className="sp-option-grid">
-        {(q?.options ?? []).filter(o => !o.reserved || sel.includes(o.id) || selStr === o.id).map(o => {
+        {(q?.options ?? []).filter(o => (!o.reserved && !o.retired) || sel.includes(o.id) || selStr === o.id).map(o => {
           const isSel = sel.includes(o.id);
           const handleClick =
             sf.draftKey === "body-focus-areas" ? () => handleBodyAreaToggle("body-focus-areas", "bodyFocusAreas", o.id) :

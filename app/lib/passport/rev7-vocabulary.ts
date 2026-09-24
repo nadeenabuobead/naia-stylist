@@ -79,6 +79,20 @@ export const DRESSING_HABIT_IDS = [
 ] as const;
 
 export const DRESSING_HABIT_VALID_IDS: ReadonlySet<string> = new Set(DRESSING_HABIT_IDS);
+
+/**
+ * Dressing habits withdrawn from the question but NOT from the vocabulary.
+ *
+ * They stay in DRESSING_HABIT_IDS on purpose: a customer who selected one still
+ * has it stored, and re-saving that section submits it back. Dropping it from the
+ * valid set would make their next save fail validation. They are filtered out of
+ * the pickers instead, and their labels are retained so a stored answer never
+ * renders as a slug. No stored value is migrated or deleted.
+ */
+export const RETIRED_DRESSING_HABIT_IDS: ReadonlySet<string> = new Set([
+  "want-it-easier",
+  "buy-but-cant-style",
+]);
 export const DRESSING_HABIT_MAX = 2;
 export const DRESSING_HABIT_EXCLUSIVE_IDS: ReadonlySet<string> = new Set(["none-of-these"]);
 
